@@ -200,6 +200,63 @@ export const busabaseNodes = pgTable(
 );
 
 /**
+ * Search projection for node CONTENT — one row per content-bearing node
+ * (`doc` / `html` / `whiteboard` / `workflow`).
+ *
+ * Why a table and not a column on `busabase_nodes`: that table is read on the
+ * hot path with a bare `.select()` (the sidebar tree via `listNodes`, and
+ * `listNodeSummaries` — the list that exists specifically to be the cheap one).
+ * A large TEXT column there would be detoasted and shipped on every sidebar
+ * render. See `content/spec/node-content-search.md` D1.
+ *
+ * `contentText` holds the SAME extracted text grep scans (via
+ * `logic/node-content.ts`'s `NODE_CONTENT_ADAPTERS`), truncated to
+ * `VALUE_TEXT_INDEX_LIMIT`. Storing anything else would let search and grep
+ * disagree about what a workspace contains.
+ */
+export const busabaseNodeContentSearch = pgTable(
+  "busabase_node_content_search",
+  {
+    nodeId: text("node_id")
+      .primaryKey()
+      .references((): AnyPgColumn => busabaseNodes.id, { onDelete: "cascade" }),
+    spaceId: spaceIdColumn(),
+    nodeType: text("node_type").$type<BusabaseNodeType>().notNull(),
+    contentText: text("content_text"),
+    /** sha256 of the FULL pre-truncation text — skips no-op reindexes. */
+    contentHash: text("content_hash"),
+    /** True when the source content was longer than the projected prefix. */
+    truncated: boolean("truncated").notNull().default(false),
+    indexedAt: timestamp("indexed_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (base) => [
+    // Mirrors busabase_field_values exactly (domains/base/schema.ts).
+    //
+    // NEVER add a btree index on `contentText`: a multi-byte-heavy value at the
+    // projection limit overflows Postgres's ~2,704-byte btree row-size limit and
+    // ABORTS THE WRITE (the 2026-07-15 news-merge incident recorded on
+    // busabase_field_values). GIN has no such constraint.
+    //
+    // Both GIN indexes are required, and the trigram one especially: Postgres has
+    // no CJK segmenter, so `to_tsvector('simple', …)` turns a whole Chinese run
+    // into ONE lexeme and silently drops words past 2,047 chars. Measured, a CJK
+    // term scores 0 hits through the tsvector branch and every hit through the
+    // ilike/trigram branch — Chinese search rides entirely on this second index.
+    // See spec D2a.
+    index("busabase_node_content_search_fts_idx").using(
+      "gin",
+      sql`to_tsvector('simple', coalesce(${base.contentText}, ''))`,
+    ),
+    index("busabase_node_content_search_trgm_idx").using(
+      "gin",
+      sql`${base.contentText} gin_trgm_ops`,
+    ),
+    index("busabase_node_content_search_space_idx").on(base.spaceId),
+  ],
+);
+export type NodeContentSearchPO = typeof busabaseNodeContentSearch.$inferSelect;
+
+/**
  * Public link sharing — the orthogonal companion to `busabase_node_principals`.
  *
  * One row per node (`nodeId` unique): sharing is an ATTRIBUTE of the resource,

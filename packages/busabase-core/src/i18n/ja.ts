@@ -268,6 +268,17 @@ export const dashboardJa: CoreI18nMessages = {
         "AirApp プレビューの Service Worker がこのページを制御できませんでした。この AirApp をもう一度実行してください。",
     },
   },
+  agents: {
+    addAgent: "エージェントを追加",
+    actionsFor: "{name} の操作",
+    deleteConnection: "接続を削除",
+    mineTab: "自分の",
+    spaceTab: "スペース",
+    mineEmptyTitle: "接続済みエージェントはまだありません",
+    mineEmptyBody: "Claude Code、Codex、または Buda AI Agent を接続してください。",
+    spaceEmptyTitle: "このスペースには共有エージェントがまだありません",
+    spaceEmptyBody: "スペースのメンバーが追加したエージェントをチームで利用できます。",
+  },
   form: {
     alreadyExists:
       "このノードにはフォームが既にあります。新規作成せず、既存のフォームを更新してください。",
@@ -563,6 +574,8 @@ export const dashboardJa: CoreI18nMessages = {
     loadMore: "さらに読み込む",
     noMatchesTitle: "一致する結果はありません",
     noMatchesBody: "タイトル、フィールド名、チャンネル、またはベースを試してください。",
+    partialContentBody:
+      "一部の長いドキュメントは冒頭のみが検索索引に入っているため、これがすべてとは限りません。全文を走査するには grep を使用してください。",
     noRecentTitle: "最近開いたものはまだありません",
     noRecentBody: "開いたベースやドキュメントなどがここに表示され、すぐ戻れるようになります。",
     typeToSearchTitle: "コンテンツ内を検索",
@@ -1371,13 +1384,9 @@ export const dashboardJa: CoreI18nMessages = {
       "すでに使っているエージェント（Claude Code、Codex、Cursor）に「{name}」のマニュアルを渡します。このアプリの使い方を覚えますが、このスペースには何も作成・変更されません。",
     agentPromptLabel: "これをエージェントに貼り付けてください",
     agentPromptBody:
-      "Busabase アプリスキル「{name}」を導入して、後で操作できるようにしてください：\n\n{command}\n\nスキルの導入だけを行い、私の Busabase スペースにはまだ何も作成・変更・削除しないでください。導入できたら、このアプリが何をするものか、セットアップを頒んだら何が作られるかを数行で教えてください。",
+      "Busabase アプリスキル「{name}」を導入して、後で操作できるようにしてください。\n\n導入前に、この環境が Busabase に接続済みで、正しい対象スペース{targetSpace}に接続されていることを確認してください。Busabase の接続が未設定、または別のスペースを参照している場合は、先に次の接続ガイドを読んで従ってください：\n\n{setupUrl}\n\n接続の準備ができたら、次を実行してください：\n\n{command}\n\nスキルの導入だけを行い、私の Busabase スペースにはまだ何も作成・変更・削除しないでください。導入できたら、このアプリが何をするものか、セットアップを頼んだら何が作られるかを数行で教えてください。",
     agentRefHint:
       "リポジトリの既定ブランチを導入します。このカタログ項目は {ref} から読み取られました。",
-    agentConnectTitle: "エージェントにはこのスペースへのアクセスも必要です",
-    agentConnectBody:
-      "スキルは使い方を伝えるもので、実際にデータを読み書きするには Busabase への接続が必要です。設定は一度だけです。",
-    agentConnectAction: "エージェントを接続",
     agentNoSkillTitle: "このパッケージにはエージェント向けマニュアルがありません",
     agentNoSkillBody:
       "SKILL.md がないためエージェントに導入するものがなく、テーブル構造を推測するしかありません。UI に導入し、後からノードの「•••」メニューからプロンプトを渡してください。",

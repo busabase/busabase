@@ -16,7 +16,7 @@ const os = implement(busabaseContract);
 export const dumpRouter = {
   exportTables: os.dump.exportTables.handler(async ({ input }) => exportTableRows(input)),
   exportAssetText: os.dump.exportAssetText.handler(async ({ input }) => exportAssetTextBlob(input)),
-  importBegin: os.dump.importBegin.handler(async () => beginImportSession()),
+  importBegin: os.dump.importBegin.handler(async ({ input }) => beginImportSession(input)),
   importTables: os.dump.importTables.handler(async ({ input }) => importTableRows(input)),
   importCommit: os.dump.importCommit.handler(async ({ input }) =>
     commitImportSession(input.sessionId),

@@ -24,7 +24,12 @@ describe.each([
       expectedTypes.includes(node.type as (typeof expectedTypes)[number]),
     );
 
-    expect(richNodes.map((node) => node.type).sort()).toEqual([...expectedTypes].sort());
+    // Deduped: the point is that every rich-node type is represented (and that
+    // no unexpected type sneaks in), not how many nodes of each the demo ships
+    // — several folders now carry an `html` node.
+    expect([...new Set(richNodes.map((node) => node.type))].sort()).toEqual(
+      [...expectedTypes].sort(),
+    );
     expect(
       parseWhiteboardDocument(
         richNodes.find((node) => node.type === "whiteboard")?.metadata.whiteboardDocument,
@@ -47,8 +52,9 @@ describe.each([
       ]),
     );
     expect(
-      parseHtmlDocument(richNodes.find((node) => node.type === "html")?.metadata.htmlDocument)
-        .source,
+      parseHtmlDocument(
+        richNodes.find((node) => node.id === "nod_html_waitlist_form")?.metadata.htmlDocument,
+      ).source,
     ).toContain("<form");
   });
 });

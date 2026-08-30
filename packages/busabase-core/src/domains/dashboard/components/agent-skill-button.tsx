@@ -1,5 +1,6 @@
 "use client";
 
+import { Button } from "kui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "kui/dialog";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "kui/sidebar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "kui/tabs";
@@ -320,16 +321,12 @@ export function AgentIntegrationContent({
                 value={agentSkillPrompt}
               />
               <div className="flex justify-end">
-                <button
-                  className="inline-flex h-9 items-center gap-2 rounded-md border bg-card px-3 text-sm font-medium hover:bg-muted"
-                  onClick={() => copy(agentSkillPrompt, "prompt")}
-                  type="button"
-                >
+                <Button onClick={() => copy(agentSkillPrompt, "prompt")} size="sm" type="button">
                   {copied === "prompt" ? <Check size={16} /> : <Copy size={16} />}
                   {copied === "prompt"
                     ? messages.integration.copied
                     : messages.integration.copyPrompt}
-                </button>
+                </Button>
               </div>
             </>
           ) : (

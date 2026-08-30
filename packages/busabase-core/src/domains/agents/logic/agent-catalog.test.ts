@@ -39,6 +39,8 @@ import { listCatalog, resolveLaunch } from "./agent-catalog";
 
 describe("agent catalog availability", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.spawnSync.mockReturnValue({ status: 0 });
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => new Response(JSON.stringify({ agents: [] }), { status: 200 })),
@@ -66,6 +68,8 @@ describe("agent catalog availability", () => {
       available: false,
       unavailableReason: expect.stringContaining("was not found on this machine"),
     });
+    expect(mocks.listBudaConnections).toHaveBeenCalledWith("space");
+    expect(mocks.spawnSync).toHaveBeenCalledTimes(2);
   });
 
   it("launches a local agent on a local host", async () => {

@@ -8,4 +8,5 @@ export const driveNodeType = makeFileTreeNodeType({
   routeBase: "drives",
   tag: "Drives",
   entryFile: "README.md",
+  publicAccess: "no",
 });

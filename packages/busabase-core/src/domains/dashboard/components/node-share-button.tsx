@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
+import { publicAccessOf } from "busabase-contract/domains";
 import { nodeWebUrl } from "busabase-contract/node-web-url";
 import { Button } from "kui/button";
 import {
@@ -17,11 +18,10 @@ import { Input } from "kui/input";
 import { Label } from "kui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "kui/select";
 import { Switch } from "kui/switch";
-import { Check, Copy, Globe, X } from "lucide-react";
+import { Check, Copy, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useCoreI18n } from "../../../i18n";
-import { useIsAnonymousVisitor } from "../visitor-context";
 
 type NodeShareCapability = "read" | "submit";
 
@@ -192,6 +192,11 @@ export function NodeShareDialog({
   }, [share?.expiresAt]);
 
   const busy = setShare.isPending || disableShare.isPending;
+
+  // Keep direct call sites fail-closed too. Menus apply the same capability
+  // before opening this dialog, but the dialog is a public component and must
+  // never mint a dead link for an unsupported node type on its own.
+  if (publicAccessOf(nodeType) === "no") return null;
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>

@@ -15,6 +15,16 @@ export interface SeedFolderDef {
   slug: string;
   name: string;
   description: string;
+  /**
+   * Parent folder this one nests under — another `SeedFolderDef`'s `nodeId`.
+   * Omit for a folder that sits directly under the workspace root (the
+   * default, and what every folder was before nesting existed).
+   *
+   * Seeding resolves parents before children regardless of array order, so a
+   * scenario may list a subfolder before its parent — but keeping them in
+   * tree order still reads better.
+   */
+  parentNodeId?: string;
   /** Validated custom icon materialized by `withSeedNodeIcons`. */
   icon?: NodeIcon;
   /** Optional top-level node metadata merged into an existing seeded folder. */

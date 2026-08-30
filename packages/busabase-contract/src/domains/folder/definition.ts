@@ -6,6 +6,11 @@ export const folderNodeType = {
   type: "folder",
   label: "Folder",
   icon: "folder",
-  capabilities: { container: true, creatable: true, hasDetail: true },
+  capabilities: {
+    container: true,
+    creatable: true,
+    hasDetail: true,
+    publicAccess: "detail",
+  },
   operations: [],
 } as const satisfies NodeTypeDefinition;

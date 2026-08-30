@@ -1,5 +1,7 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
+
 import { ORPCError } from "@orpc/server";
 /**
  * The registry of node types whose content lives as ONE object in storage —
@@ -20,7 +22,7 @@ import { ORPCError } from "@orpc/server";
 import { and, eq, isNull, or } from "drizzle-orm";
 import { getContextSpaceId } from "../context";
 import { getDb } from "../db";
-import { busabaseNodes } from "../db/schema";
+import { busabaseNodeContentSearch, busabaseNodes } from "../db/schema";
 import type { MutableTextSource } from "../domains/assets/logic/text-cache";
 import { openMutableTextSource } from "../domains/assets/logic/text-cache";
 import {
@@ -36,6 +38,9 @@ import {
 } from "../domains/rich-node/utils/searchable-text";
 import { buildNodeVisibilityCondition } from "./node-acl";
 import { ensureReady } from "./seed";
+import { VALUE_TEXT_INDEX_LIMIT } from "./vo";
+
+type Db = Awaited<ReturnType<typeof getDb>>;
 
 export interface NodeContentAdapter {
   /** The storage key holding this node's content. */
@@ -60,7 +65,14 @@ export interface NodeContentAdapter {
 }
 
 export const NODE_CONTENT_ADAPTERS = {
-  doc: { storageKey: docBodyKey },
+  // MUST stay a lazy arrow, never a bare `storageKey: docBodyKey` reference.
+  // This module sits in an import cycle (…-> cr-lifecycle -> node-content ->
+  // domains/doc/handlers -> …), so a direct value reference is read while
+  // `doc/handlers` is still initializing and binds `undefined` — which shows up
+  // far away as `storageKey is not a function` at the first read, with every
+  // OTHER node type working (the rich types were already arrows). Calling
+  // through an arrow defers the lookup to call time, when the cycle has settled.
+  doc: { storageKey: (nodeId: string) => docBodyKey(nodeId) },
   html: { storageKey: (nodeId: string) => richNodeDocumentKey(nodeId, "html") },
   whiteboard: {
     storageKey: (nodeId: string) => richNodeDocumentKey(nodeId, "whiteboard"),
@@ -199,4 +211,83 @@ export const readNodeLines = async (
     lines.push(line);
   }
   return sliceDocLinesRange(lines, startLine, endLine);
+};
+
+// ── Search projection ────────────────────────────────────────────────────────
+//
+// `search` cannot scan object storage, so a node's searchable text is
+// materialized into `busabase_node_content_search`. Everything below is the one
+// path that writes it — see `content/spec/node-content-search.md`.
+
+/**
+ * Project `text` for search: the SAME extracted text grep scans, truncated to
+ * `VALUE_TEXT_INDEX_LIMIT`.
+ *
+ * Returns `truncated` so the caller can persist it. The cap makes "no results"
+ * ambiguous ("absent" vs "past the cap"), and the product resolves that by
+ * telling the user rather than hiding it (spec D2b) — a projection that
+ * truncated silently would quietly break the promise that an empty search
+ * result means the workspace does not contain the phrase.
+ */
+export const projectSearchText = (
+  text: string,
+): { contentText: string; contentHash: string; truncated: boolean } => ({
+  contentText: text.length > VALUE_TEXT_INDEX_LIMIT ? text.slice(0, VALUE_TEXT_INDEX_LIMIT) : text,
+  // Hash the FULL text, not the truncated prefix: two documents differing only
+  // past the cap must still count as changed, or an edit beyond it would never
+  // refresh `truncated`/`indexedAt`.
+  contentHash: createHash("sha256").update(text, "utf8").digest("hex"),
+  truncated: text.length > VALUE_TEXT_INDEX_LIMIT,
+});
+
+/**
+ * Write (or refresh) one node's search projection from text already in hand.
+ *
+ * Called from the content write path so an approved edit is searchable the
+ * instant the user sees it land — indexing asynchronously would buy little
+ * (this is a string operation on bytes already in memory) and would cost the
+ * one property people actually notice.
+ */
+export const upsertNodeContentProjection = async (
+  db: Db,
+  params: { nodeId: string; spaceId: string; nodeType: SearchableNodeType; text: string },
+): Promise<void> => {
+  const projected = projectSearchText(params.text);
+  await db
+    .insert(busabaseNodeContentSearch)
+    .values({
+      nodeId: params.nodeId,
+      spaceId: params.spaceId,
+      nodeType: params.nodeType,
+      ...projected,
+      indexedAt: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: busabaseNodeContentSearch.nodeId,
+      set: { nodeType: params.nodeType, ...projected, indexedAt: new Date() },
+    });
+};
+
+/**
+ * Re-read a node's content from storage and refresh its projection.
+ *
+ * Two callers: the lazy self-heal (a node predating this feature has no row
+ * yet) and the operator backfill script. Deliberately fail-soft — a node whose
+ * content object is missing must not break the search request that touched it;
+ * it stays unindexed and is retried next time.
+ */
+export const reindexNodeContent = async (
+  db: Db,
+  params: { nodeId: string; spaceId: string; nodeType: SearchableNodeType },
+): Promise<boolean> => {
+  try {
+    const source = await openNodeContentSource(params.nodeType, params.nodeId);
+    const adapter = NODE_CONTENT_ADAPTERS[params.nodeType] as NodeContentAdapter;
+    const raw = await source.readText();
+    const text = adapter.toSearchableText ? adapter.toSearchableText(raw) : raw;
+    await upsertNodeContentProjection(db, { ...params, text });
+    return true;
+  } catch {
+    return false;
+  }
 };

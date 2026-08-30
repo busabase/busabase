@@ -10,7 +10,7 @@ export const whiteboardNodeType = {
   type: "whiteboard",
   label: "Whiteboard",
   icon: "pen-tool",
-  capabilities: { hasDetail: true, creatable: true },
+  capabilities: { hasDetail: true, creatable: true, publicAccess: "detail" },
   operations: [
     {
       kind: "whiteboard_document_update",

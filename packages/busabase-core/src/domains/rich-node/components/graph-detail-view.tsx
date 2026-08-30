@@ -49,6 +49,7 @@ import { NodeDetailSkeleton } from "../../dashboard/components/skeletons";
 import { asNodeDetail } from "../../dashboard/helpers/node-detail";
 import { useReportLoadedNode } from "../../dashboard/hooks/use-report-loaded-node";
 import type { NodeDetailProps } from "../../dashboard/node-detail-registry";
+import { useIsAnonymousVisitor } from "../../dashboard/visitor-context";
 import {
   RichNodeNotFound,
   RichNodeShell,
@@ -236,6 +237,7 @@ interface GraphEditorProps {
 
 function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProps) {
   const messages = useCoreI18n();
+  const isAnonymous = useIsAnonymousVisitor();
   const initialNodes = useMemo<WorkflowFlowNode[]>(
     () =>
       workflowDocument.nodes.map((workflowNode) => ({
@@ -460,7 +462,13 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
       orpc={orpc}
       status={status}
     >
-      <div className="grid h-full min-h-0 grid-cols-[minmax(0,1fr)_17rem] max-md:grid-cols-1 max-md:grid-rows-[minmax(18rem,1fr)_auto]">
+      <div
+        className={
+          isAnonymous
+            ? "grid h-full min-h-0 grid-cols-1"
+            : "grid h-full min-h-0 grid-cols-[minmax(0,1fr)_17rem] max-md:grid-cols-1 max-md:grid-rows-[minmax(18rem,1fr)_auto]"
+        }
+      >
         <div className="min-h-0 bg-muted/20">
           <ReactFlow
             colorMode="system"
@@ -468,6 +476,8 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
             fitView
             maxZoom={1.8}
             minZoom={0.2}
+            nodesConnectable={!isAnonymous}
+            nodesDraggable={!isAnonymous}
             nodeTypes={nodeTypes}
             nodes={nodes}
             onConnect={(connection) => {
@@ -499,7 +509,13 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
             <Controls showInteractive={false} />
           </ReactFlow>
         </div>
-        <aside className="min-h-0 overflow-y-auto border-border/60 border-l bg-background p-3 max-md:max-h-64 max-md:border-l-0 max-md:border-t">
+        <aside
+          className={
+            isAnonymous
+              ? "hidden"
+              : "min-h-0 overflow-y-auto border-border/60 border-l bg-background p-3 max-md:max-h-64 max-md:border-l-0 max-md:border-t"
+          }
+        >
           <h2 className="mb-3 font-medium text-foreground text-xs">
             {messages.richNodes.configuration}
           </h2>

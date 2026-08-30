@@ -101,12 +101,20 @@ describe("anonymous allowlist (unit)", () => {
    * the boundary moved onto the resolved node type. If this list ever grows a
    * file-tree type, that protection is gone.
    */
-  it("keeps Skills, Drives, and AirApps off the anonymous node-type surface", () => {
-    expect(anonymousAllowlistSnapshot().nodeTypes).toEqual(["base", "doc", "file", "folder"]);
+  it("keeps source nodes private while exposing every public-detail type", () => {
+    expect(anonymousAllowlistSnapshot().nodeTypes).toEqual([
+      "base",
+      "doc",
+      "file",
+      "folder",
+      "form",
+      "whiteboard",
+      "workflow",
+    ]);
     for (const type of ["skill", "drive", "airapp"]) {
       expect(isAnonymousReadableNodeType(type), `${type} must stay non-anonymous`).toBe(false);
     }
-    for (const type of ["folder", "doc", "file", "base"]) {
+    for (const type of ["folder", "doc", "file", "base", "form", "whiteboard", "workflow"]) {
       expect(isAnonymousReadableNodeType(type), `${type} must stay anonymous-readable`).toBe(true);
     }
   });
@@ -114,10 +122,7 @@ describe("anonymous allowlist (unit)", () => {
   it("fails closed on a node type nobody has decided about", () => {
     // A late `registerNodeType()` plugin type must not inherit public access.
     expect(isAnonymousReadableNodeType("brand-new-plugin-type")).toBe(false);
-    // Registered-but-undecided built-ins are refused for the same reason.
-    for (const type of ["form", "whiteboard", "workflow", "html"]) {
-      expect(isAnonymousReadableNodeType(type)).toBe(false);
-    }
+    expect(isAnonymousReadableNodeType("skill")).toBe(false);
   });
 
   it("classifies forms.submit as submit-only, never as read", () => {

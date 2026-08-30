@@ -24,6 +24,8 @@
  */
 import { z } from "zod";
 
+import { SkillFrontmatterSchema as BaseSkillFrontmatterSchema } from "../skill/frontmatter";
+
 // ── Layout constants (all OUTSIDE `content/`) ────────────────────────────────
 
 /**
@@ -167,10 +169,16 @@ export const SkillBusabaseMetadataSchema = z.object({
 });
 export type SkillBusabaseMetadata = z.infer<typeof SkillBusabaseMetadataSchema>;
 
-/** Root `SKILL.md` frontmatter, as far as the template format cares about it. */
-export const SkillFrontmatterSchema = z.object({
-  name: z.string().min(1),
-  description: z.string().default(""),
+/**
+ * Root `SKILL.md` frontmatter, as the template format sees it.
+ *
+ * The generic Skill shape lives in `domains/skill/frontmatter` — a Skill is not a
+ * template component, and most Skills are not templates at all. This narrows the
+ * open `metadata` bag to the one block that decides template-ness, so the
+ * dependency runs the only direction that is true: the template format knows
+ * about Skills, not the other way round.
+ */
+export const SkillFrontmatterSchema = BaseSkillFrontmatterSchema.extend({
   metadata: z
     .object({
       busabase: SkillBusabaseMetadataSchema.optional(),

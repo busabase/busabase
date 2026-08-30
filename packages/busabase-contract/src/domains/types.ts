@@ -4,6 +4,8 @@
  * `NodeTypeDefinition`; the registry composes + registers them.
  */
 
+export type NodePublicAccess = "detail" | "submit" | "runtime" | "no";
+
 export interface NodeCapabilities {
   /** Can hold children / renders as an expandable container (folder, future space/section). */
   container?: boolean;
@@ -11,6 +13,8 @@ export interface NodeCapabilities {
   hasDetail?: boolean;
   /** Can be created via a node change request. */
   creatable?: boolean;
+  /** How an anonymous visitor may open this node type. Omission fails closed as `no`. */
+  publicAccess?: NodePublicAccess;
   /**
    * Hidden from the workbench UI (sidebar node tree + create menu) while the
    * backend stays fully active — the type is still registered, its contract /

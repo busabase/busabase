@@ -193,7 +193,7 @@ async function fetchRegistryDisplayInfo(): Promise<
 export async function listCatalog(): Promise<AgentCatalogEntryVO[]> {
   const cloudHost = isCloudHost();
   const registryInfo = await fetchRegistryDisplayInfo();
-  const budaConnections = await listBudaConnections();
+  const budaConnections = await listBudaConnections("space");
 
   return CATALOG.map((spec) => {
     let available = false;

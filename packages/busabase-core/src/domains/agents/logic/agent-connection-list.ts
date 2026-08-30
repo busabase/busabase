@@ -1,4 +1,7 @@
-import type { AgentConnectionVO } from "busabase-contract/domains/agents/types";
+import type {
+  AgentConnectionScope,
+  AgentConnectionVO,
+} from "busabase-contract/domains/agents/types";
 import { listAgentSessions } from "./agent-session-manager";
 import { listBudaConnections } from "./buda-connection";
 
@@ -24,9 +27,11 @@ import { listBudaConnections } from "./buda-connection";
  * made the difference observable: you could connect Codex, chat with it, and
  * then not find it in the very list that is supposed to show your agents.
  */
-export async function listAgentConnections(): Promise<AgentConnectionVO[]> {
+export async function listAgentConnections(
+  scope: AgentConnectionScope = "mine",
+): Promise<AgentConnectionVO[]> {
   const [budaConnections, sessions] = await Promise.all([
-    listBudaConnections(),
+    listBudaConnections(scope),
     listAgentSessions(),
   ]);
 
@@ -36,6 +41,7 @@ export async function listAgentConnections(): Promise<AgentConnectionVO[]> {
     transport: "remote-websocket" as const,
     sessionCount: 0,
     latest: null,
+    ownedByCurrentUser: connection.ownedByCurrentUser,
   }));
 
   // Grouped by slug so several conversations with one agent read as one entry,
@@ -53,6 +59,7 @@ export async function listAgentConnections(): Promise<AgentConnectionVO[]> {
       transport: "local-subprocess",
       sessionCount: sessions.filter((other) => other.slug === session.slug).length,
       latest: session,
+      ownedByCurrentUser: true,
     });
   }
 

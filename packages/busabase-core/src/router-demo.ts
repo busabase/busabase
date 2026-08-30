@@ -34,6 +34,7 @@ import {
   demoListRecordsByFieldText,
   demoListViews,
   demoMergeChangeRequest,
+  demoNodeAncestorIds,
   demoReadFileTreeFile,
   demoReadNodeLines,
   demoReviewChangeRequest,
@@ -154,6 +155,7 @@ export const busabaseDemoRouter = os.router({
     isDescendant: os.nodes.isDescendant.handler(({ input }) => ({
       isDescendant: demoIsDescendant(input.nodeId, input.potentialAncestorId),
     })),
+    ancestors: os.nodes.ancestors.handler(({ input }) => demoNodeAncestorIds(input.nodeId)),
     createChangeRequest: os.nodes.createChangeRequest.handler(() => {
       throw demoUnsupported("Node tree change request");
     }),

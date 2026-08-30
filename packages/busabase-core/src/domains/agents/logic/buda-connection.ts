@@ -33,7 +33,10 @@ export interface BudaConnectionSummary {
   slug: string;
   agentId: string;
   agentName: string;
+  ownedByCurrentUser: boolean;
 }
+
+export type BudaConnectionScope = "mine" | "space";
 
 const ownerId = () => getContextActorId() ?? "local-user";
 
@@ -50,25 +53,46 @@ const getAgentIdFromBudaSessionSlug = (slug: string): string | null => {
   }
 };
 
-async function readRows() {
+async function readRows(scope: BudaConnectionScope) {
   const database = await getDb();
+  const actorId = ownerId();
+  const spaceId = getContextSpaceId();
   const rows = await database
     .select()
     .from(busabaseVaultItems)
     .where(
       and(
-        eq(busabaseVaultItems.userId, ownerId()),
         eq(busabaseVaultItems.scopeType, "workspace"),
-        eq(busabaseVaultItems.scopeId, getContextSpaceId()),
+        eq(busabaseVaultItems.scopeId, spaceId),
+        ...(scope === "mine" ? [eq(busabaseVaultItems.userId, actorId)] : []),
       ),
     );
   return rows.filter(
-    (row) => row.key === LEGACY_CONNECTION_KEY || row.key.startsWith(CONNECTION_KEY_PREFIX),
+    (row) =>
+      row.scopeType === "workspace" &&
+      row.scopeId === spaceId &&
+      (scope === "space" || row.userId === actorId) &&
+      (row.key === LEGACY_CONNECTION_KEY || row.key.startsWith(CONNECTION_KEY_PREFIX)),
   );
 }
 
-async function readRow(slug: string) {
-  const rows = await readRows();
+async function readUsableRow(slug: string) {
+  const actorId = ownerId();
+  const rows = (await readRows("space")).sort(
+    (a, b) => Number(b.userId === actorId) - Number(a.userId === actorId),
+  );
+  if (slug === "buda") {
+    return (
+      rows.find((row) => row.key === LEGACY_CONNECTION_KEY) ??
+      (rows.length === 1 ? rows[0] : undefined)
+    );
+  }
+  const agentId = getAgentIdFromBudaSessionSlug(slug);
+  return agentId ? rows.find((row) => row.key === connectionKey(agentId)) : undefined;
+}
+
+async function readOwnedRow(slug: string) {
+  const rows = await readRows("mine");
   if (slug === "buda") {
     return (
       rows.find((row) => row.key === LEGACY_CONNECTION_KEY) ??
@@ -95,7 +119,7 @@ function parseStored(value: string): StoredBudaConnection {
 
 export async function saveBudaConnection(connection: StoredBudaConnection): Promise<string> {
   const database = await getDb();
-  const rows = await readRows();
+  const rows = await readRows("mine");
   const existing = rows.find((row) => row.key === connectionKey(connection.agentId));
   const legacy = rows.find((row) => row.key === LEGACY_CONNECTION_KEY);
   const legacyConnection = legacy ? parseStored(decodeVaultValue(legacy.valuePayload)) : null;
@@ -110,6 +134,7 @@ export async function saveBudaConnection(connection: StoredBudaConnection): Prom
       .set({
         valuePayload,
         description: `Buda ACP: ${connection.agentName}`,
+        access: { ...target.access, share: true },
         updatedAt: new Date(),
       })
       .where(eq(busabaseVaultItems.id, target.id));
@@ -125,7 +150,7 @@ export async function saveBudaConnection(connection: StoredBudaConnection): Prom
     scopeId: getContextSpaceId(),
     environment: "production",
     description: `Buda ACP: ${connection.agentName}`,
-    access: { runtime: false, reveal: false, edit: false, share: false },
+    access: { runtime: false, reveal: false, edit: false, share: true },
   });
   return getBudaSessionSlug(connection.agentId);
 }
@@ -177,8 +202,11 @@ async function refresh(
   return next;
 }
 
-export async function listBudaConnections(): Promise<BudaConnectionSummary[]> {
-  const rows = await readRows();
+export async function listBudaConnections(
+  scope: BudaConnectionScope = "mine",
+): Promise<BudaConnectionSummary[]> {
+  const actorId = ownerId();
+  const rows = await readRows(scope);
   const byAgentId = new Map<string, BudaConnectionSummary>();
   for (const row of rows) {
     const connection = parseStored(decodeVaultValue(row.valuePayload));
@@ -186,15 +214,22 @@ export async function listBudaConnections(): Promise<BudaConnectionSummary[]> {
       slug: row.key === LEGACY_CONNECTION_KEY ? "buda" : getBudaSessionSlug(connection.agentId),
       agentId: connection.agentId,
       agentName: connection.agentName,
+      ownedByCurrentUser: row.userId === actorId,
     };
     const current = byAgentId.get(connection.agentId);
-    if (!current || summary.slug === "buda") byAgentId.set(connection.agentId, summary);
+    if (
+      !current ||
+      (summary.ownedByCurrentUser && !current.ownedByCurrentUser) ||
+      (summary.ownedByCurrentUser === current.ownedByCurrentUser && summary.slug === "buda")
+    ) {
+      byAgentId.set(connection.agentId, summary);
+    }
   }
   return [...byAgentId.values()];
 }
 
 export async function getBudaConnection(slug = "buda"): Promise<BudaConnection | null> {
-  const row = await readRow(slug);
+  const row = await readUsableRow(slug);
   if (!row) return null;
   let connection = parseStored(decodeVaultValue(row.valuePayload));
   if (new Date(connection.expiresAt).getTime() <= Date.now() + 60_000) {
@@ -210,7 +245,7 @@ export async function getBudaConnection(slug = "buda"): Promise<BudaConnection |
 
 export async function disconnectBuda(slug = "buda"): Promise<boolean> {
   const database = await getDb();
-  const row = await readRow(slug);
+  const row = await readOwnedRow(slug);
   if (!row) return false;
 
   const connection = parseStored(decodeVaultValue(row.valuePayload));

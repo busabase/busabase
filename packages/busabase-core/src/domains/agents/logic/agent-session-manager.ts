@@ -415,9 +415,27 @@ export async function createAgentSession({
           }
           setStatus(session, "busy");
           try {
+            // Negotiated the same way `mcpCapabilities.http` is above, and for
+            // the same reason: ACP makes `image`, `audio` and `embeddedContext`
+            // opt-in, so an attachment can be valid and still be unsendable to
+            // THIS agent. `buildPromptContent` drops or downgrades what the
+            // agent cannot take and reports each one, and those notes go to the
+            // user rather than leaving them with a reply that silently ignored
+            // the PDF they attached.
+            const { prompt, notes } = buildPromptContent(
+              text,
+              attachments,
+              initialized.agentCapabilities?.promptCapabilities ?? {},
+            );
+            for (const note of notes) {
+              emit(session, {
+                kind: "acpUpdate",
+                acpUpdate: { sessionUpdate: "note", text: note },
+              });
+            }
             await ctx.request(acp.methods.agent.session.prompt, {
               sessionId: created.sessionId,
-              prompt: buildPromptContent(text, attachments),
+              prompt,
             });
             setStatus(session, "idle");
           } catch (error) {
@@ -532,8 +550,8 @@ export async function listAgentSessions(): Promise<AgentSessionVO[]> {
  * ACP's `PromptRequest.prompt` is a `ContentBlock[]`, not a bare string — a
  * text block first (possibly empty, when the user sent only attachments;
  * the contract's refine already guarantees at least one of text/attachments
- * is real), then one image/audio block per attachment, in the order the
- * browser attached them.
+ * is real), then one image/audio/resource block per attachment the agent
+ * advertised it can accept, in the order the browser attached them.
  */
 export async function promptAgentSession(
   sessionId: string,

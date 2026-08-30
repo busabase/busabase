@@ -50,6 +50,7 @@ import {
 import { zhCnScenario } from "../demo/scenarios/zh-cn";
 import { getPrimaryField } from "../domains/base/utils/primary-field";
 import { type DocLinesResult, sliceDocLinesRange, splitDocLines } from "../domains/doc/handlers";
+import { collectAncestorIds } from "./ancestor-chain";
 import { isSearchableNodeType, NODE_CONTENT_ADAPTERS } from "./node-content";
 import { toPublicAuditMetadata, toPublicSourceMetadata } from "./source-attribution";
 
@@ -173,6 +174,32 @@ export const demoIsDescendant = (nodeId: string, potentialAncestorId: string): b
     cursorId = ancestorId;
   }
   return false;
+};
+
+/**
+ * Demo counterpart to `listNodeAncestorIds` — same root-first, self-excluded
+ * contract, resolved against the in-memory seeded tree. `nodeIdOrSlug` accepts
+ * either, mirroring the real one (whose `resolveVisibleNode` does the same).
+ */
+export const demoNodeAncestorIds = async (
+  nodeIdOrSlug: string,
+): Promise<{ ancestorIds: string[] }> => {
+  const parentById = new Map<string, string | null>();
+  const idBySlug = new Map<string, string>();
+  const visit = (nodes: NodeVO[], parentId: string | null) => {
+    for (const node of nodes) {
+      parentById.set(node.id, parentId);
+      if (node.slug && !idBySlug.has(node.slug)) idBySlug.set(node.slug, node.id);
+      if (node.children.length > 0) visit(node.children, node.id);
+    }
+  };
+  visit(dataset().nodes, null);
+
+  // Accepts an id or a slug, mirroring the real one (whose `resolveVisibleNode`
+  // does the same).
+  const nodeId = parentById.has(nodeIdOrSlug) ? nodeIdOrSlug : idBySlug.get(nodeIdOrSlug);
+  if (!nodeId) return { ancestorIds: [] };
+  return { ancestorIds: await collectAncestorIds(nodeId, (id) => parentById.get(id)) };
 };
 
 /**
@@ -753,7 +780,7 @@ export const demoSearch = (input: {
   query: string;
   limit?: number;
   offset?: number;
-  sources?: ("records" | "files" | "names")[];
+  sources?: ("records" | "files" | "names" | "nodes")[];
 }): SearchResponseVO => {
   const query = (input.query ?? "").trim();
   const limit = input.limit ?? 20;
@@ -763,7 +790,9 @@ export const demoSearch = (input: {
   const match = (haystack: string) => needle === "" || haystack.toLowerCase().includes(needle);
   // No `sources` means every caller before this parameter existed — search
   // everything, same default as the real (non-demo) searchBusabase.
-  const wantsSource = (source: "records" | "files" | "names") =>
+  // `nodes` (node content) has no demo projection — the stateless demo
+  // dataset has no object storage to index. Accepted and ignored.
+  const wantsSource = (source: "records" | "files" | "names" | "nodes") =>
     !input.sources || input.sources.includes(source);
   // Demo mode has no separate file-content search — `files` has nothing to
   // additionally include or exclude here (mirrors real search's own "no
@@ -838,6 +867,9 @@ export const demoSearch = (input: {
     offset + limit,
   );
   return {
+    // The stateless demo dataset has no content projection, so it never
+    // reports partial content coverage.
+    contentTruncated: false,
     hasMore:
       recordResults.length + changeRequestResults.length + baseResults.length > offset + limit,
     limit,

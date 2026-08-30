@@ -13,4 +13,8 @@ export const airappNodeType = makeFileTreeNodeType({
   routeBase: "airapps",
   tag: "AirApps",
   entryFile: "package.json",
+  // Public execution needs the isolated runtime from PR #6648. Until that is
+  // merged, offering Share here would create a link that anonymous visitors
+  // cannot open without exposing AirApp source through `nodes.get`.
+  publicAccess: "no",
 });

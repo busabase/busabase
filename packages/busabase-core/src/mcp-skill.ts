@@ -279,6 +279,7 @@ to pass — every tool already acts on it. \`auth_verify\` confirms the current 
 | Skill / Drive / AirApp nodes and their files | \`node_list_files_trees\`, \`node_get_file_tree\`, \`node_files_list\`, \`node_file_read\` — all take \`kind\` (\`skill\`/\`drive\`/\`airapp\`) |
 | Change files inside a Skill / Drive / AirApp | \`node_files_change_request\` (pass \`baseContentHash\` from \`node_file_read\` so a concurrent edit is caught) |
 | The review queue | \`change_request_query\` (\`countsOnly\` for per-tab totals), \`change_requests_get\` |
+| Does anything unfinished already target THIS node | \`change_request_query\` with \`affectsNodeId\` + \`limit: 1\` — matches the node directly, its Base, or any of the request's operations, so an empty result is conclusive. Check this before proposing, or you may overwrite pending work. Counts stay space-wide. |
 | Propose one record | \`bases_create_change_request\` |
 | Propose many records as ONE review | \`bases_create_bulk_change_request\` |
 | Update many existing records as ONE atomic review | \`record_bulk_update_change_request\` (each \`fields\` is a partial patch; omitted keys stay, \`null\` clears) |

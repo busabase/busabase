@@ -6,6 +6,6 @@ export const fileNodeType = {
   type: "file",
   label: "File",
   icon: "file",
-  capabilities: { hasDetail: true, creatable: true },
+  capabilities: { hasDetail: true, creatable: true, publicAccess: "detail" },
   operations: [],
 } as const satisfies NodeTypeDefinition;

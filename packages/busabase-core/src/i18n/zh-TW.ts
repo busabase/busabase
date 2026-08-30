@@ -305,12 +305,8 @@ export const dashboardZhTW: CoreI18nMessages = {
       "把「{name}」的操作手冊交給你已經在用的 Agent（Claude Code、Codex、Cursor）。它會學會這個 App 怎麼用；這個空間裡不會建立或更動任何東西。",
     agentPromptLabel: "把這段貼上給你的 Agent",
     agentPromptBody:
-      "安裝 Busabase 應用技能「{name}」，以便你之後可以操作它：\n\n{command}\n\n只安裝技能——先不要在我的 Busabase 空間裡建立、修改或刪除任何東西。裝好之後，用幾句話告訴我這個 App 是做什麼的，以及如果我讓你去建置它，會建立些什麼。",
+      "安裝 Busabase 應用技能「{name}」，以便你之後可以操作它。\n\n安裝前，先確認目前環境已經連接 Busabase，並且連接的是正確的目標空間{targetSpace}。如果目前環境尚未設定 Busabase 連接，或連接指向其他空間，請先閱讀並遵循下方的連接指引：\n\n{setupUrl}\n\n連接就緒後，執行：\n\n{command}\n\n只安裝技能——先不要在我的 Busabase 空間裡建立、修改或刪除任何東西。裝好之後，用幾句話告訴我這個 App 是做什麼的，以及如果我讓你去建置它，會建立些什麼。",
     agentRefHint: "安裝的是倉庫預設分支。這條目錄讀取自 {ref}。",
-    agentConnectTitle: "還要讓 Agent 能存取這個空間",
-    agentConnectBody:
-      "技能告訴 Agent 這個 App 怎麼用；連接 Busabase 才讓它真的能讀寫你的資料。只需設定一次。",
-    agentConnectAction: "連接你的 Agent",
     agentNoSkillTitle: "這個套件不帶 Agent 手冊",
     agentNoSkillBody:
       "這裡沒有 SKILL.md，Agent 無從安裝，只能靠猜你的表結構。請改用介面安裝；裝完仍可以在節點的「•••」選單裡把該節點的提示詞交給 Agent。",

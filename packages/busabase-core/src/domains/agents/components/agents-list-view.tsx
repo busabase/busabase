@@ -2,7 +2,10 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
-import type { AgentConnectionVO } from "busabase-contract/domains/agents/types";
+import type {
+  AgentConnectionScope,
+  AgentConnectionVO,
+} from "busabase-contract/domains/agents/types";
 import { Button } from "kui/button";
 import {
   DropdownMenu,
@@ -10,9 +13,11 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "kui/dropdown-menu";
+import { Tabs, TabsList, TabsTrigger } from "kui/tabs";
 import { Bot, MoreHorizontal, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import { fmt, useCoreI18n } from "../../../i18n";
 import { ConfirmActionDialog } from "../../dashboard/components/primitives";
 import { AgentLoadingState, AgentQueryErrorState } from "./agent-query-state";
 import { TransportBadge } from "./transport-badge";
@@ -30,10 +35,12 @@ interface AgentsListViewProps {
  * reads as one card, not three.
  */
 export function AgentsListView({ orpc, onSelectAgent, onAddAgent }: AgentsListViewProps) {
+  const messages = useCoreI18n();
   const queryClient = useQueryClient();
+  const [scope, setScope] = useState<AgentConnectionScope>("mine");
   const [disconnecting, setDisconnecting] = useState<AgentConnectionVO | null>(null);
   const connections = useQuery({
-    ...orpc.agents.connections.list.queryOptions(),
+    ...orpc.agents.connections.list.queryOptions({ input: { scope } }),
     refetchInterval: 4000,
   });
 
@@ -41,7 +48,12 @@ export function AgentsListView({ orpc, onSelectAgent, onAddAgent }: AgentsListVi
     ...orpc.agents.disconnect.mutationOptions(),
     onSuccess: async () => {
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: orpc.agents.connections.list.queryKey() }),
+        queryClient.invalidateQueries({
+          queryKey: orpc.agents.connections.list.queryKey({ input: { scope: "mine" } }),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: orpc.agents.connections.list.queryKey({ input: { scope: "space" } }),
+        }),
         queryClient.invalidateQueries({ queryKey: orpc.agents.sessions.list.queryKey() }),
         queryClient.invalidateQueries({ queryKey: orpc.agents.catalog.queryKey() }),
       ]);
@@ -53,19 +65,11 @@ export function AgentsListView({ orpc, onSelectAgent, onAddAgent }: AgentsListVi
     },
   });
 
-  if (connections.isPending) {
-    return <AgentLoadingState />;
-  }
-
-  if (connections.isError) {
-    return (
-      <AgentQueryErrorState
-        error={connections.error}
-        onRetry={() => void connections.refetch()}
-        title="Couldn't load connected agents"
-      />
-    );
-  }
+  const connectionItems = connections.data ?? [];
+  const emptyTitle =
+    scope === "mine" ? messages.agents.mineEmptyTitle : messages.agents.spaceEmptyTitle;
+  const emptyBody =
+    scope === "mine" ? messages.agents.mineEmptyBody : messages.agents.spaceEmptyBody;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -78,28 +82,46 @@ export function AgentsListView({ orpc, onSelectAgent, onAddAgent }: AgentsListVi
         </div>
         <Button size="sm" onClick={onAddAgent}>
           <Plus className="size-4" />
-          Add agent
+          {messages.agents.addAgent}
         </Button>
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto p-6">
-        {(connections.data ?? []).length === 0 ? (
+        <Tabs
+          value={scope}
+          onValueChange={(value) => {
+            if (value === "mine" || value === "space") setScope(value);
+          }}
+        >
+          <TabsList className="mb-6">
+            <TabsTrigger value="mine">{messages.agents.mineTab}</TabsTrigger>
+            <TabsTrigger value="space">{messages.agents.spaceTab}</TabsTrigger>
+          </TabsList>
+        </Tabs>
+
+        {connections.isPending ? (
+          <AgentLoadingState />
+        ) : connections.isError ? (
+          <AgentQueryErrorState
+            error={connections.error}
+            onRetry={() => void connections.refetch()}
+            title="Couldn't load connected agents"
+          />
+        ) : connectionItems.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
             <Bot className="size-8 text-muted-foreground" />
             <div>
-              <h2 className="font-medium">No agents connected yet</h2>
-              <p className="mt-1 text-muted-foreground text-sm">
-                Connect Claude Code, Codex, or a Buda AI Agent to get started.
-              </p>
+              <h2 className="font-medium">{emptyTitle}</h2>
+              <p className="mt-1 text-muted-foreground text-sm">{emptyBody}</p>
             </div>
             <Button onClick={onAddAgent}>
               <Plus className="size-4" />
-              Add agent
+              {messages.agents.addAgent}
             </Button>
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {(connections.data ?? []).map((group) => (
+            {connectionItems.map((group) => (
               <div key={group.slug} className="relative rounded-lg border hover:bg-accent">
                 <button
                   type="button"
@@ -118,28 +140,30 @@ export function AgentsListView({ orpc, onSelectAgent, onAddAgent }: AgentsListVi
                     {group.latest?.status ?? "not started"}
                   </p>
                 </button>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      aria-label={`Actions for ${group.agentName}`}
-                      className="absolute right-2 bottom-2 size-8"
-                      size="icon"
-                      type="button"
-                      variant="ghost"
-                    >
-                      <MoreHorizontal className="size-4" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem
-                      onSelect={() => setDisconnecting(group)}
-                      variant="destructive"
-                    >
-                      <Trash2 className="mr-2 size-4" />
-                      Delete connection
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                {group.ownedByCurrentUser ? (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        aria-label={fmt(messages.agents.actionsFor, { name: group.agentName })}
+                        className="absolute right-2 bottom-2 size-8"
+                        size="icon"
+                        type="button"
+                        variant="ghost"
+                      >
+                        <MoreHorizontal className="size-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem
+                        onSelect={() => setDisconnecting(group)}
+                        variant="destructive"
+                      >
+                        <Trash2 className="mr-2 size-4" />
+                        {messages.agents.deleteConnection}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                ) : null}
               </div>
             ))}
           </div>
@@ -151,7 +175,7 @@ export function AgentsListView({ orpc, onSelectAgent, onAddAgent }: AgentsListVi
             ? `Delete ${disconnecting.agentName} and its ${disconnecting.sessionCount} ${disconnecting.sessionCount === 1 ? "session" : "sessions"}? This removes the saved connection and conversation history. This cannot be undone.`
             : ""
         }
-        confirmLabel="Delete connection"
+        confirmLabel={messages.agents.deleteConnection}
         onCancel={() => setDisconnecting(null)}
         onConfirm={() => {
           if (disconnecting) disconnect.mutate({ slug: disconnecting.slug });

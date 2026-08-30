@@ -8,4 +8,5 @@ export const skillNodeType = makeFileTreeNodeType({
   routeBase: "skills",
   tag: "Skills",
   entryFile: "SKILL.md",
+  publicAccess: "no",
 });

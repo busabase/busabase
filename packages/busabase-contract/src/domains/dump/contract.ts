@@ -5,6 +5,7 @@ import {
   ExportTablesInputSchema,
   ExportTablesVOSchema,
   ImportAbortVOSchema,
+  ImportBeginInputSchema,
   ImportBeginVOSchema,
   ImportCommitVOSchema,
   ImportSessionInputSchema,
@@ -54,6 +55,7 @@ export const dumpContract = {
       successDescription:
         "Created an import session for the current space. Refused unless the space's node tree is empty (full-fidelity import preserves original ids and cannot merge into existing data).",
     })
+    .input(ImportBeginInputSchema)
     .output(ImportBeginVOSchema),
   importTables: oc
     .route({

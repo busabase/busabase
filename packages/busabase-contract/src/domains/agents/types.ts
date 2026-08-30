@@ -93,13 +93,15 @@ export const AgentSessionVOSchema = z.object({
 });
 export type AgentSessionVO = z.infer<typeof AgentSessionVOSchema>;
 
-/** One connected agent backend in the current space and authenticated user's scope. */
+/** One connected agent backend visible in the requested workspace scope. */
 export const AgentConnectionVOSchema = z.object({
   slug: z.string(),
   agentName: z.string(),
   transport: AgentTransportSchema,
   sessionCount: z.number().int().nonnegative(),
   latest: AgentSessionVOSchema.nullable(),
+  /** Controls owner-only actions such as deleting the saved OAuth grant. */
+  ownedByCurrentUser: z.boolean(),
 });
 export type AgentConnectionVO = z.infer<typeof AgentConnectionVOSchema>;
 
@@ -135,6 +137,14 @@ export type AgentSessionEventVO = z.infer<typeof AgentSessionEventVOSchema>;
 
 // ── Inputs (DTO) ─────────────────────────────────────────────────────────────
 
+export const AgentConnectionScopeSchema = z.enum(["mine", "space"]);
+export type AgentConnectionScope = z.infer<typeof AgentConnectionScopeSchema>;
+
+export const ListAgentConnectionsInputSchema = z.object({
+  scope: AgentConnectionScopeSchema.default("mine"),
+});
+export type ListAgentConnectionsInput = z.infer<typeof ListAgentConnectionsInputSchema>;
+
 export const CreateAgentSessionInputSchema = z.object({
   /** Must name a catalog entry. Deliberately NOT a command line — see below. */
   slug: z.string().min(1),
@@ -147,11 +157,26 @@ export const DisconnectAgentInputSchema = z.object({
 });
 export type DisconnectAgentInput = z.infer<typeof DisconnectAgentInputSchema>;
 
-/** Base64 image/audio the browser attached — ACP's `ImageContent`/`AudioContent` shape verbatim. */
+/**
+ * A base64 payload the browser attached.
+ *
+ * `image`/`audio` map to ACP's `ImageContent`/`AudioContent` verbatim; `file`
+ * is everything else (a PDF, a spreadsheet, a Markdown note) and becomes an
+ * ACP embedded `resource` block at send time. `data` is base64 for every kind
+ * — including textual files — so the browser never has to guess an encoding;
+ * whether a file travels to the agent as ACP text or as an ACP blob is decided
+ * server-side from the payload itself.
+ */
 export const PromptAttachmentInputSchema = z.object({
-  kind: z.enum(["image", "audio"]),
-  data: z.string().min(1),
+  kind: z.enum(["image", "audio", "file"]),
+  // ~15 MB of raw bytes once base64 is decoded. A backstop, not the real
+  // limit: the composer caps files at 10 MB where it can tell the user why.
+  // This only stops a hand-rolled request from turning one prompt into an
+  // unbounded request body.
+  data: z.string().min(1).max(20_000_000),
   mimeType: z.string().min(1),
+  /** The original filename, carried for `file` so the agent and the transcript can name it. */
+  filename: z.string().max(255).optional(),
 });
 export type PromptAttachmentInput = z.infer<typeof PromptAttachmentInputSchema>;
 

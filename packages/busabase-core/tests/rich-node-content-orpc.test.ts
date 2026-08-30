@@ -5,7 +5,8 @@ import { createRouterClient } from "@orpc/server";
 import type { WhiteboardDocument } from "busabase-contract/domains/rich-node/types";
 import { storage } from "openlib/storage";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { LOCAL_SPACE_ID, runWithBusabaseContext } from "../src/context";
+import { LOCAL_SPACE_ID, runWithAnonymousContext, runWithBusabaseContext } from "../src/context";
+import { disableNodeShare, setNodeShare } from "../src/logic/node-share";
 import { busabaseRouter } from "../src/router";
 
 /**
@@ -107,6 +108,23 @@ describe("nodes.updateContent — whiteboard (real oRPC + PGLite + storage)", ()
     const detail = await raw.nodes.get({ nodeId: whiteboardNodeId, type: "whiteboard" });
     if (detail.type !== "whiteboard") throw new Error("expected a whiteboard detail");
     expect(detail.document.elements).toEqual([]);
+  });
+
+  it("hydrates a publicly shared whiteboard for an anonymous visitor", async () => {
+    await asManager("alice", () =>
+      setNodeShare(whiteboardNodeId, { scope: "public", capability: "read" }),
+    );
+    try {
+      const detail = await runWithAnonymousContext({ spaceId: LOCAL_SPACE_ID }, () =>
+        raw.nodes.get({ nodeId: whiteboardNodeId, type: "whiteboard" }),
+      );
+      expect(detail.type).toBe("whiteboard");
+      if (detail.type !== "whiteboard") throw new Error("expected a whiteboard detail");
+      expect(detail.node.id).toBe(whiteboardNodeId);
+      expect(detail.document.elements).toEqual([]);
+    } finally {
+      await asManager("alice", () => disableNodeShare(whiteboardNodeId));
+    }
   });
 
   it("a changeRequest-level actor's edit stays pending (in_review), canvas unchanged", async () => {

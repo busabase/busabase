@@ -34,6 +34,7 @@
  */
 
 import { ORPCError } from "@orpc/server";
+import { isPubliclyReadableNodeType, listNodeTypes } from "busabase-contract/domains";
 
 /** A procedure path (`["records", "list"]`) as a stable dotted key. */
 export const toProcedureKey = (path: readonly string[]): string => path.join(".");
@@ -125,36 +126,16 @@ export const isEmbedProcedureAllowed = (path: readonly string[]): boolean =>
 const ANONYMOUS_SUBMIT_ALLOWLIST: ReadonlySet<string> = new Set(["forms.submit"]);
 
 /**
- * Node types an anonymous (public-link) visitor may read through `nodes.get`.
+ * Whether an anonymous (public-link) visitor may read a node through `nodes.get`.
  *
- * An ALLOWLIST, not a denylist of the three file-tree types, for the same
- * reason `ANONYMOUS_READ_ALLOWLIST` is one: a node type registered later —
- * including one a build-time plugin adds via `registerNodeType()` — must fail
- * closed rather than inherit anonymous access because nobody remembered to deny
- * it. Opening a type up has to be a deliberate edit here.
- *
- * What is in and why:
- *   - `folder` / `doc` / `file` — exactly the three that `folders.get`,
- *     `docs.get`, and `files.get` served anonymously before the merge.
- *   - `base`   — already reachable anonymously via `bases.get`; withholding the
- *     strictly smaller node row from `nodes.get` would be arbitrary.
- *
- * What is deliberately out:
- *   - `skill` / `drive` / `airapp` — `fileTrees.get` was never on the anonymous
- *     allowlist. A public share must not become a way to read an agent's source.
- *   - `form` / `whiteboard` / `workflow` / `html` — no anonymous surface exists
- *     for them yet; when one does, it lands as a deliberate addition here.
+ * The node registry is the single source of truth for this decision. New and
+ * plugin-provided types still fail closed because `publicAccess` is opt-in;
+ * setting it is the deliberate review point for public behavior. Only `detail`
+ * and `submit` enter this hydration gate; runtime and source types stay out.
  */
-const ANONYMOUS_READABLE_NODE_TYPES: ReadonlySet<string> = new Set([
-  "folder",
-  "doc",
-  "file",
-  "base",
-]);
-
 /** Whether an anonymous visitor may read this node type's detail at all. */
 export const isAnonymousReadableNodeType = (type: string): boolean =>
-  ANONYMOUS_READABLE_NODE_TYPES.has(type);
+  isPubliclyReadableNodeType(type);
 
 /**
  * Refuse a node type that is off the anonymous surface. Same FORBIDDEN code and
@@ -230,6 +211,9 @@ export const anonymousAllowlistSnapshot = (): {
 } => ({
   read: [...ANONYMOUS_READ_ALLOWLIST].sort(),
   submit: [...ANONYMOUS_SUBMIT_ALLOWLIST].sort(),
-  nodeTypes: [...ANONYMOUS_READABLE_NODE_TYPES].sort(),
+  nodeTypes: listNodeTypes()
+    .filter((definition) => isPubliclyReadableNodeType(definition.type))
+    .map((definition) => definition.type)
+    .sort(),
   embed: [...EMBED_READ_ALLOWLIST].sort(),
 });

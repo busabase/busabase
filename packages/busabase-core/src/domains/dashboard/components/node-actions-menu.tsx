@@ -51,6 +51,7 @@
 // original ask for this button.
 
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
+import { publicAccessOf } from "busabase-contract/domains";
 import { Button } from "kui/button";
 import {
   DropdownMenu,
@@ -138,7 +139,7 @@ export function NodeActionsMenu({
   // NodeShareDialog requires a real slug (it builds the public URL from it);
   // this prop is optional here only because Rename can invalidate its
   // caller's query without one. Every current call site does pass it.
-  const canShare = Boolean(nodeSlug);
+  const canShare = Boolean(nodeSlug) && publicAccessOf(nodeType) !== "no";
   // The routed activity sub-page (`/base/:slug/activity` or
   // `/{type}/:slug/activity`, see routes.tsx + use-dashboard-routes.ts) keys
   // off the same slug-or-id every other detail route uses.

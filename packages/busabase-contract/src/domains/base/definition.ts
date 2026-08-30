@@ -5,7 +5,7 @@ export const baseNodeType = {
   type: "base",
   label: "Base",
   icon: "table",
-  capabilities: { hasDetail: true, creatable: true },
+  capabilities: { hasDetail: true, creatable: true, publicAccess: "detail" },
   operations: [
     {
       kind: "record_create",

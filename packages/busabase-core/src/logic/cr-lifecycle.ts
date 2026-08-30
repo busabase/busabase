@@ -101,6 +101,34 @@ import {
 import { mergeDocUpdate } from "../domains/doc/handlers";
 import { mergeFileTreeFile, mergeFileTreeMetadata } from "../domains/filetree/handlers";
 import { mergeRichNodeDocumentUpdate } from "../domains/rich-node/handlers";
+import { isSearchableNodeType, reindexNodeContent } from "./node-content";
+
+/**
+ * Refresh a node's search projection right after its content merge, inside the
+ * SAME transaction — so a phrase the user just approved is findable the moment
+ * they see the change land, with no indexing lag to explain away.
+ *
+ * Re-reads the merged content from storage rather than taking it from the
+ * commit payload: that guarantees the projection holds exactly what
+ * `openNodeContentSource` (and therefore grep) would read, instead of a second,
+ * possibly-diverging copy of the same text.
+ *
+ * Fail-soft by construction (`reindexNodeContent` swallows): an indexing
+ * problem must never roll back a merge the reviewer already approved. The node
+ * simply stays unindexed and the lazy self-heal in `logic/search.ts` retries.
+ */
+const refreshNodeContentSearch = async (
+  db: MergeCtx["db"],
+  node: { id: string; spaceId: string; type: string },
+): Promise<void> => {
+  if (!isSearchableNodeType(node.type)) return;
+  await reindexNodeContent(db, {
+    nodeId: node.id,
+    spaceId: node.spaceId,
+    nodeType: node.type,
+  });
+};
+
 import { dispatchWebhookEvent, hasWebhookRuleFor } from "../domains/webhook/logic/dispatch";
 import { insertAuditEvent } from "./audit";
 import { parseCommitPayload } from "./commit-payload-schemas";
@@ -1495,6 +1523,8 @@ type InboxCandidateRow = {
   submittedBy: string;
 };
 
+const CHANGE_REQUEST_ACL_BATCH_SIZE = 5_000;
+
 const matchesInboxFilter = (
   row: InboxCandidateRow,
   input: z.output<typeof inboxSnapshotInputSchema>,
@@ -1684,36 +1714,28 @@ export const countChangeRequests = async () => {
     );
   }
 
-  // Non-managers: whether a change request is visible depends on the node scope
-  // its operations resolve to, which cannot be expressed as a SQL aggregate — so
-  // the walk stays. It now reads only the three columns the tally actually uses,
-  // instead of whole rows.
-  const statusCount = new Map<string, number>();
-  let created = 0;
-  let offset = 0;
-  const batchSize = 100;
-  for (;;) {
-    const rows = await db
-      .select({
-        id: busabaseChangeRequests.id,
-        status: busabaseChangeRequests.status,
-        submittedBy: busabaseChangeRequests.submittedBy,
-      })
-      .from(busabaseChangeRequests)
-      .where(eq(busabaseChangeRequests.spaceId, spaceId))
-      .orderBy(desc(busabaseChangeRequests.createdAt), desc(busabaseChangeRequests.id))
-      .limit(batchSize)
-      .offset(offset);
-    const visibleRows = await filterVisibleChangeRequestRows(rows);
-    for (const row of visibleRows) {
-      statusCount.set(row.status, (statusCount.get(row.status) ?? 0) + 1);
-      if (row.submittedBy === mineActorId()) created += 1;
-    }
-    if (rows.length < batchSize) break;
-    offset += rows.length;
+  // Non-managers: visibility depends on the node scope resolved from each
+  // change request's operations. Read the lightweight candidate shape once;
+  // ordering is irrelevant to a tally. Bound each ACL query so unusually large
+  // spaces do not create an unbounded IN list or Operations result set.
+  const rows = await db
+    .select({
+      id: busabaseChangeRequests.id,
+      status: busabaseChangeRequests.status,
+      submittedBy: busabaseChangeRequests.submittedBy,
+    })
+    .from(busabaseChangeRequests)
+    .where(eq(busabaseChangeRequests.spaceId, spaceId));
+  const visibleRows: InboxCandidateRow[] = [];
+  for (let offset = 0; offset < rows.length; offset += CHANGE_REQUEST_ACL_BATCH_SIZE) {
+    visibleRows.push(
+      ...(await filterVisibleChangeRequestRows(
+        rows.slice(offset, offset + CHANGE_REQUEST_ACL_BATCH_SIZE),
+      )),
+    );
   }
 
-  return toInboxCounts(statusCount, created);
+  return countInboxCandidateRows(visibleRows);
 };
 
 export const getChangeRequest = async (changeRequestId: string) => {
@@ -2059,6 +2081,15 @@ const canViewChangeRequest = async (changeRequestId: string): Promise<boolean> =
   return true;
 };
 
+const CHANGE_REQUEST_SCOPE_HINT_BATCH_SIZE = 5_000;
+
+interface ChangeRequestScopeHint {
+  id: string;
+  parentNodeId: string | null;
+  parentNodeRef: string | null;
+  ref: string | null;
+}
+
 // Constrained to `{ id }` rather than the full ChangeRequestPO on purpose: the
 // body only ever reads `row.id`, and callers that are merely tallying should be
 // free to select three columns instead of paying for whole rows.
@@ -2073,28 +2104,11 @@ export const filterVisibleChangeRequestRows = async <T extends { id: string }>(
       changeRequestId: busabaseOperations.changeRequestId,
       nodeId: busabaseOperations.nodeId,
       baseId: busabaseOperations.baseId,
-      // Visibility needs only these three scalar scope hints. Selecting the
-      // complete payload made one ACL pass decode every AirApp source tree.
-      // Keep the previous `typeof value === "string"` semantics. Bare `->>`
-      // would stringify malformed numeric/object values and could accidentally
-      // turn them into permission-scope identifiers.
-      parentNodeId: sql<string | null>`case
-        when jsonb_typeof(${busabaseCommits.payload}->'parentNodeId') = 'string'
-          then ${busabaseCommits.payload}->>'parentNodeId'
-        end`,
-      parentNodeRef: sql<string | null>`case
-        when jsonb_typeof(${busabaseCommits.payload}->'parentNodeRef') = 'string'
-          then ${busabaseCommits.payload}->>'parentNodeRef'
-        end`,
-      ref: sql<string | null>`case
-        when jsonb_typeof(${busabaseCommits.payload}->'ref') = 'string'
-          then ${busabaseCommits.payload}->>'ref'
-        end`,
+      headCommitId: busabaseOperations.headCommitId,
       operation: busabaseOperations.operation,
       position: busabaseOperations.position,
     })
     .from(busabaseOperations)
-    .leftJoin(busabaseCommits, eq(busabaseCommits.id, busabaseOperations.headCommitId))
     .where(
       and(
         eq(busabaseOperations.spaceId, getContextSpaceId()),
@@ -2115,29 +2129,79 @@ export const filterVisibleChangeRequestRows = async <T extends { id: string }>(
           )
       : [];
   const baseNodeById = new Map(baseRows.map((base) => [base.id, base.nodeId]));
+  // Most operations already resolve through nodeId or baseId. Only unresolved
+  // operations (normally pending node creates) need scope hints from the head
+  // commit. Keeping this as a second query prevents record/file payloads from
+  // being joined, detoasted and inspected during every inbox ACL pass.
+  const scopeCommitIds = [
+    ...new Set(
+      operations.flatMap((operation) => {
+        const directNodeId =
+          operation.nodeId ?? (operation.baseId ? baseNodeById.get(operation.baseId) : undefined);
+        return directNodeId ? [] : [operation.headCommitId];
+      }),
+    ),
+  ];
+  const scopeHintRows: ChangeRequestScopeHint[] = [];
+  for (
+    let offset = 0;
+    offset < scopeCommitIds.length;
+    offset += CHANGE_REQUEST_SCOPE_HINT_BATCH_SIZE
+  ) {
+    const commitIds = scopeCommitIds.slice(offset, offset + CHANGE_REQUEST_SCOPE_HINT_BATCH_SIZE);
+    scopeHintRows.push(
+      ...(await db
+        .select({
+          id: busabaseCommits.id,
+          // Keep the previous `typeof value === "string"` semantics. Bare
+          // `->>` would stringify malformed values into scope identifiers.
+          parentNodeId: sql<string | null>`case
+            when jsonb_typeof(${busabaseCommits.payload}->'parentNodeId') = 'string'
+              then ${busabaseCommits.payload}->>'parentNodeId'
+            end`,
+          parentNodeRef: sql<string | null>`case
+            when jsonb_typeof(${busabaseCommits.payload}->'parentNodeRef') = 'string'
+              then ${busabaseCommits.payload}->>'parentNodeRef'
+            end`,
+          ref: sql<string | null>`case
+            when jsonb_typeof(${busabaseCommits.payload}->'ref') = 'string'
+              then ${busabaseCommits.payload}->>'ref'
+            end`,
+        })
+        .from(busabaseCommits)
+        .where(
+          and(
+            eq(busabaseCommits.spaceId, getContextSpaceId()),
+            inArray(busabaseCommits.id, commitIds),
+          ),
+        )),
+    );
+  }
+  const scopeHintsByCommitId = new Map(scopeHintRows.map((row) => [row.id, row]));
   const scopes = new Map<string, Set<string>>();
   const unresolved = new Set<string>();
   const refsByChangeRequest = new Map<string, Set<string>>();
   for (const operation of operations) {
     const scope = scopes.get(operation.changeRequestId) ?? new Set<string>();
     const refs = refsByChangeRequest.get(operation.changeRequestId) ?? new Set<string>();
+    const scopeHints = scopeHintsByCommitId.get(operation.headCommitId);
     const nodeId =
       operation.nodeId ??
       (operation.baseId ? baseNodeById.get(operation.baseId) : undefined) ??
-      operation.parentNodeId ??
+      scopeHints?.parentNodeId ??
       undefined;
     if (nodeId) scope.add(nodeId);
-    else if (operation.parentNodeRef && refs.has(operation.parentNodeRef)) {
+    else if (scopeHints?.parentNodeRef && refs.has(scopeHints.parentNodeRef)) {
       // The earlier declaration's existing parent already anchors this new subtree.
     } else if (
       operation.operation === "node_create" &&
       !operation.nodeId &&
       !operation.baseId &&
-      !operation.parentNodeRef
+      !scopeHints?.parentNodeRef
     ) {
       scope.add(rootNodeIdForSpace(getContextSpaceId()));
     } else unresolved.add(operation.changeRequestId);
-    if (operation.ref) refs.add(operation.ref);
+    if (scopeHints?.ref) refs.add(scopeHints.ref);
     scopes.set(operation.changeRequestId, scope);
     refsByChangeRequest.set(operation.changeRequestId, refs);
   }
@@ -3131,8 +3195,10 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
           // types (spec D2/D3). `doc_update` below is unaffected — Doc keeps its own
           // merge handler.
           await mergeRichNodeDocumentUpdate(ctx, item, node, headCommit);
+          await refreshNodeContentSearch(ctx.db, node);
         } else if (item.operation === "doc_update") {
           await mergeDocUpdate(ctx, item, node, headCommit);
+          await refreshNodeContentSearch(ctx.db, node);
         } else {
           throw new Error(`Unsupported node operation: ${item.operation}`);
         }

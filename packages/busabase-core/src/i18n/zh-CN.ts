@@ -261,6 +261,17 @@ export const dashboardZhCN: CoreI18nMessages = {
       SW_CONTROL_TIMEOUT: "AirApp 预览的 Service Worker 未能接管当前页面。请重新运行此 AirApp。",
     },
   },
+  agents: {
+    addAgent: "添加 Agent",
+    actionsFor: "{name} 的操作",
+    deleteConnection: "删除连接",
+    mineTab: "我的",
+    spaceTab: "空间站",
+    mineEmptyTitle: "还没有连接 Agent",
+    mineEmptyBody: "连接 Claude Code、Codex 或 Buda AI Agent 后即可开始使用。",
+    spaceEmptyTitle: "此空间站还没有共享 Agent",
+    spaceEmptyBody: "空间站成员添加的 Agent 会显示在这里，供团队共同使用。",
+  },
   form: {
     alreadyExists: "这个节点已经存在表单，请更新现有表单，不要重复创建。",
     invalidCursor: "表单分页链接无效，请刷新后重试。",
@@ -554,6 +565,8 @@ export const dashboardZhCN: CoreI18nMessages = {
     loadMore: "加载更多",
     noMatchesTitle: "没有匹配结果",
     noMatchesBody: "试试标题、字段名、频道或数据库。",
+    partialContentBody:
+      "部分文档较长，搜索只索引了开头部分，所以这里未必是全部结果。用 grep 可以完整扫描每篇文档。",
     noRecentTitle: "暂无最近访问",
     noRecentBody: "打开过的数据库、文档等会显示在这里，方便快速跳转。",
     typeToSearchTitle: "搜索内容",
@@ -1332,12 +1345,8 @@ export const dashboardZhCN: CoreI18nMessages = {
       "把「{name}」的操作手册交给你已经在用的 Agent（Claude Code、Codex、Cursor）。它会学会这个 App 怎么用；这个空间里不会创建或改动任何东西。",
     agentPromptLabel: "把这段粘贴给你的 Agent",
     agentPromptBody:
-      "安装 Busabase 应用技能「{name}」，以便你之后可以操作它：\n\n{command}\n\n只安装技能——先不要在我的 Busabase 空间里创建、修改或删除任何东西。装好之后，用几句话告诉我这个 App 是做什么的，以及如果我让你去搭建它，会创建些什么。",
+      "安装 Busabase 应用技能「{name}」，以便你之后可以操作它。\n\n安装前，先确认当前环境已经连接 Busabase，并且连接的是正确的目标空间{targetSpace}。如果当前环境尚未配置 Busabase 连接，或连接指向其他空间，请先阅读并遵循下面的连接引导：\n\n{setupUrl}\n\n连接就绪后，执行：\n\n{command}\n\n只安装技能——先不要在我的 Busabase 空间里创建、修改或删除任何东西。装好之后，用几句话告诉我这个 App 是做什么的，以及如果我让你去搭建它，会创建些什么。",
     agentRefHint: "安装的是仓库默认分支。这条目录读取自 {ref}。",
-    agentConnectTitle: "还要让 Agent 能访问这个空间",
-    agentConnectBody:
-      "技能告诉 Agent 这个 App 怎么用；连接 Busabase 才让它真的能读写你的数据。只需设置一次。",
-    agentConnectAction: "连接你的 Agent",
     agentNoSkillTitle: "这个包不带 Agent 手册",
     agentNoSkillBody:
       "这里没有 SKILL.md，Agent 无从安装，只能靠猜你的表结构。请改用界面安装；装完仍可以在节点的「•••」菜单里把该节点的提示词交给 Agent。",

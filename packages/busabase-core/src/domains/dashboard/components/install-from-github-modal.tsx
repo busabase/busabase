@@ -22,9 +22,10 @@ import {
 } from "kui/dialog";
 import { Input } from "kui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "kui/tabs";
-import { CircleCheck, Github, LoaderCircle, Sparkles, TriangleAlert } from "lucide-react";
+import { CircleCheck, LoaderCircle, Sparkles, TriangleAlert } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { fmt, useCoreI18n } from "../../../i18n";
+import { GithubIcon } from "../helpers/brand-icons";
 import { nodeIconForType } from "../helpers/node-icons";
 import { AgentInstallPanel, type AgentIntegrationTarget } from "./agent-install-panel";
 
@@ -149,9 +150,9 @@ interface InstallFromGithubModalProps {
   /** Package name already known by catalog entry points, used in the dialog title. */
   initialPackageName?: string;
   /**
-   * Host configuration for the "Connect your agent" dialog offered on the Agent
-   * install tab — which edition's guidance to show, and which space to pin the
-   * copied setup prompt to. Omit and it falls back to Desktop's local guidance.
+   * Host configuration for the Agent install prompt — which edition's setup
+   * guidance to include, and which space to pin it to. Omit and it falls back to
+   * Desktop's local guidance.
    */
   agentIntegration?: AgentIntegrationTarget;
 }
@@ -385,7 +386,11 @@ export function InstallFromGithubModal({
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            {initialPackageName ? <Sparkles className="size-4" /> : <Github className="size-4" />}
+            {initialPackageName ? (
+              <Sparkles className="size-4" />
+            ) : (
+              <GithubIcon className="size-4" />
+            )}
             {initialPackageName
               ? fmt(messages.install.packageTitle, { name: initialPackageName })
               : messages.install.title}

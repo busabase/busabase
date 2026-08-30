@@ -187,6 +187,10 @@ export function SearchDialog({
     enabled: open && tab !== "recent" && debouncedQuery.length > 0,
   });
   const response = searchQuery.data ?? null;
+  // Node content is indexed only up to a cap, so a thin or empty result is not
+  // proof of absence. Surfaced in the empty state rather than swallowed —
+  // otherwise "no matches" quietly means two different things.
+  const contentTruncated = response?.contentTruncated ?? false;
   const allResults = response?.results ?? [];
   const isSearching = searchQuery.isFetching;
   const searchError = searchQuery.isError
@@ -504,7 +508,9 @@ export function SearchDialog({
                   body={
                     isRecentTab && !hasQuery
                       ? messages.search.noRecentBody
-                      : messages.search.noMatchesBody
+                      : contentTruncated
+                        ? messages.search.partialContentBody
+                        : messages.search.noMatchesBody
                   }
                 />
               )}

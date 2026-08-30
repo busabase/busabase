@@ -5,6 +5,7 @@ import { datasetZhCnScenario } from "./dataset.zh-cn";
 import { directoryListingZhCnScenario } from "./directory-listing.zh-cn";
 import { expandZhCnScenario } from "./expand.zh-cn";
 import { financeInvoiceZhCnScenario } from "./finance-invoice.zh-cn";
+import { nestedFoldersZhCnScenario } from "./nested-folders.zh-cn";
 import { zhCnNodeTypesScenario } from "./node-types.zh-cn";
 import { agentGalleryZhCnScenario } from "./product-gallery.zh-cn";
 import { roadmapZhCnScenario } from "./product-roadmap.zh-cn";
@@ -34,5 +35,6 @@ export const zhCnScenario: SeedScenario = withSeedNodeIcons(
     agentGalleryZhCnScenario,
     roadmapZhCnScenario,
     zhCnNodeTypesScenario,
+    nestedFoldersZhCnScenario,
   ),
 );

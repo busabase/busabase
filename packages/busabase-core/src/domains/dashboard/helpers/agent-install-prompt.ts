@@ -56,10 +56,14 @@ export interface AgentInstallPromptOptions {
   source: AgentInstallSource;
   /** The package's display name, used when the source carries no subdirectory. */
   packageName: string;
+  /** Credential-free onboarding guide for this host and target space. */
+  setupUrl: string;
+  /** Cloud only: the exact space the agent must verify before installing. */
+  targetSpaceId?: string;
   /**
-   * Localized body with `{name}` and `{command}` placeholders — the dialog passes
-   * `messages.install.agentPromptBody`, so the pasted text follows the UI
-   * language the way `createAgentSkillPrompt` already does.
+   * Localized body with `{name}`, `{command}`, `{setupUrl}`, and `{targetSpace}`
+   * placeholders — the dialog passes `messages.install.agentPromptBody`, so the
+   * pasted text follows the UI language the way `createAgentSkillPrompt` does.
    */
   template: string;
   fmt: (template: string, values: Record<string, string>) => string;
@@ -69,10 +73,14 @@ export interface AgentInstallPromptOptions {
 export const buildAgentInstallPrompt = ({
   source,
   packageName,
+  setupUrl,
+  targetSpaceId,
   template,
   fmt,
 }: AgentInstallPromptOptions): string =>
   fmt(template, {
     name: skillNameForSource(source) ?? packageName,
     command: buildAgentInstallCommand(source),
+    setupUrl,
+    targetSpace: targetSpaceId ? ` (${targetSpaceId})` : "",
   });

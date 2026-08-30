@@ -285,6 +285,17 @@ export const coreMessagesEn = {
         "AirApp preview's Service Worker could not take control of this page. Try running the AirApp again.",
     },
   },
+  agents: {
+    addAgent: "Add agent",
+    actionsFor: "Actions for {name}",
+    deleteConnection: "Delete connection",
+    mineTab: "Mine",
+    spaceTab: "Space",
+    mineEmptyTitle: "No agents connected yet",
+    mineEmptyBody: "Connect Claude Code, Codex, or a Buda AI Agent to get started.",
+    spaceEmptyTitle: "No shared agents in this space yet",
+    spaceEmptyBody: "Agents added by space members will appear here for the team to use.",
+  },
   form: {
     alreadyExists:
       "A form already exists for this node. Update the existing form instead of creating another one.",
@@ -585,6 +596,10 @@ export const coreMessagesEn = {
     loadMore: "Load more",
     noMatchesTitle: "No matches",
     noMatchesBody: "Try a title, field name, channel, or Base.",
+    /** Shown when node content was indexed only up to the projection cap, so
+     *  an empty result cannot be read as "the workspace does not contain this". */
+    partialContentBody:
+      "Some documents are long enough that only their beginning is indexed for search, so this may not be the whole story. Use grep to scan every document in full.",
     noRecentTitle: "Nothing recent yet",
     noRecentBody: "Bases, docs, and other things you open will show up here for a quick jump back.",
     typeToSearchTitle: "Search inside content",
@@ -1398,12 +1413,8 @@ export const coreMessagesEn = {
       "Hand the manual for “{name}” to an agent you already use — Claude Code, Codex, Cursor. It learns how this app works; nothing in this space is created or changed.",
     agentPromptLabel: "Paste this to your agent",
     agentPromptBody:
-      'Install the Busabase app skill "{name}" so you can operate it later:\n\n{command}\n\nInstall the skill only — do not create, change or delete anything in my Busabase space yet. Once it is installed, tell me in a few lines what this app does and what it would create if I asked you to set it up.',
+      'Install the Busabase app skill "{name}" so you can operate it later.\n\nBefore installing, confirm that this environment is connected to Busabase and points to the correct target space{targetSpace}. If the Busabase connection is not configured or points to another space, read and follow this setup guide first:\n\n{setupUrl}\n\nOnce the connection is ready, run:\n\n{command}\n\nInstall the skill only — do not create, change or delete anything in my Busabase space yet. Once it is installed, tell me in a few lines what this app does and what it would create if I asked you to set it up.',
     agentRefHint: "Installs the repository's default branch. This entry was read from {ref}.",
-    agentConnectTitle: "Your agent still needs access to this space",
-    agentConnectBody:
-      "The skill tells an agent how this app works; connecting Busabase is what lets it actually read and write your data. It is a one-time setup.",
-    agentConnectAction: "Connect your agent",
     agentNoSkillTitle: "This package carries no agent manual",
     agentNoSkillBody:
       "There is no SKILL.md here, so an agent has nothing to install — it would have to infer your tables. Install it into the UI instead; you can still hand an agent that node's own prompts afterwards.",

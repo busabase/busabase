@@ -144,6 +144,10 @@ describe("Busabase OpenAPI record get route", () => {
     // Embed-link create/list/revoke now belong to this shared contract so
     // Desktop can execute them directly and Cloud can forward the same paths
     // to a remote tunnel (+3 -> 107).
-    expect(operationCount).toBe(107);
+    // `GET /nodes/{nodeId}/ancestors` added (+1 -> 108). Public for the same
+    // reason `nodes.list` is — it returns ids from the tree the caller can
+    // already read, under the same node-visibility ACL — and it is what lets a
+    // depth-bounded sidebar open straight to a deep node on a cold load.
+    expect(operationCount).toBe(108);
   });
 });
