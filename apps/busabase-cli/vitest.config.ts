@@ -3,13 +3,24 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   resolve: {
-    alias: {
-      // The workspace `busabase-sdk` package resolves to its built `dist/`, which
-      // isn't present during a source test run. Point at the SDK source so CLI
-      // tests exercise the real client without a build step (the SDK's own deps
-      // — busabase-contract, @orpc/* — resolve to source / node_modules).
-      "busabase-sdk": path.resolve(__dirname, "../busabase-sdk/src/index.ts"),
-    },
+    // An array, and the subpath entry first, because a bare string `find` is a PREFIX
+    // match: mapping "busabase-sdk" to `src/index.ts` silently rewrote
+    // `busabase-sdk/airapp-check` to `src/index.ts/airapp-check` and failed with
+    // ENOTDIR. Every subpath the SDK exports has to resolve to its own source file.
+    alias: [
+      {
+        // The workspace `busabase-sdk` package resolves to its built `dist/`, which
+        // isn't present during a source test run. Point at the SDK source so CLI tests
+        // exercise the real client without a build step (the SDK's own deps —
+        // busabase-contract, @orpc/* — resolve to source / node_modules).
+        find: /^busabase-sdk\/(.+)$/,
+        replacement: path.resolve(__dirname, "../busabase-sdk/src/$1.ts"),
+      },
+      {
+        find: /^busabase-sdk$/,
+        replacement: path.resolve(__dirname, "../busabase-sdk/src/index.ts"),
+      },
+    ],
   },
   test: {
     environment: "node",

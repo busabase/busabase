@@ -5,7 +5,7 @@
  */
 import type { BusabaseClient } from "busabase-sdk";
 import { exportFull } from "./export/full-exporter.js";
-import { readArchive } from "./format/archive-reader.js";
+import { verifyArchive } from "./format/archive-reader.js";
 import { importFull } from "./import/full-importer.js";
 
 /** Progress is diagnostics, not data — it must never pollute `--output json` on stdout. */
@@ -115,19 +115,22 @@ export const runRestore = async (
   }
 
   reportProgress(`Reading ${options.file} …`);
-  // Integrity-verifies the whole archive before a single row is replayed.
-  const archive = await readArchive(options.file);
+  // Streams the whole archive once, hashing incrementally (never buffering a
+  // whole entry — see archive-reader.ts), and verifies every entry against
+  // the manifest before a single row is replayed.
+  const manifest = await verifyArchive(options.file);
   reportProgress(
-    `Archive: fidelity=${archive.manifest.fidelity} space=${archive.manifest.spaceId} exportedAt=${archive.manifest.exportedAt}`,
+    `Archive: fidelity=${manifest.fidelity} space=${manifest.spaceId} exportedAt=${manifest.exportedAt}`,
   );
-  if (archive.manifest.fidelity !== "full") throw new Error(STATE_ONLY_RESTORE_MESSAGE);
+  if (manifest.fidelity !== "full") throw new Error(STATE_ONLY_RESTORE_MESSAGE);
   if (options.intoFolder) {
     throw new Error("--into-folder only applies to state-only archives.");
   }
 
   const result = await importFull({
     client,
-    archive,
+    archivePath: options.file,
+    sourceSpaceId: manifest.spaceId,
     onProgress: (message) => reportProgress(`  ${message}`),
   });
 
@@ -135,7 +138,7 @@ export const runRestore = async (
     return {
       restored: result.ok,
       file: options.file,
-      spaceId: archive.manifest.spaceId,
+      spaceId: manifest.spaceId,
       warnings: result.warnings,
     };
   }

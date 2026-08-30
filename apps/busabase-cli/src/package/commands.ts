@@ -4,6 +4,7 @@
  */
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { dirname, join, relative, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   PACKAGE_SKILL_ENTRY,
   TemplateManifestSchema,
@@ -17,7 +18,7 @@ import {
 import { applyInstall } from "busabase-package/apply";
 import { collectPackageTree, findSourceNode } from "busabase-package/collect";
 import { type DiscoveredPackage, resolvePackageToInstall } from "busabase-package/discover";
-import { fetchGithubPackageFiles } from "busabase-package/github";
+import { fetchGithubPackageFiles, type ParsedGithubUrl } from "busabase-package/github";
 import { buildTemplateIndex, renderTemplateIndex } from "busabase-package/index-build";
 import { readPackageTree } from "busabase-package/layout-read";
 import { renderPackageTree, writePackageFiles } from "busabase-package/layout-write";
@@ -65,16 +66,61 @@ export interface InstallCommandOptions {
   noSampleRecords?: boolean;
 }
 
+/**
+ * `install <source>` accepts a GitHub repo URL (unchanged) or, for local
+ * package-authoring/testing, a directory on disk or a `file://` URL to one —
+ * the exact output `busabase-cli export` writes. `new URL(...)` throws on a
+ * bare/relative filesystem path (no scheme), which is what makes a path fall
+ * through to "local" here without needing its own flag.
+ */
+export const isLocalPackageSource = (raw: string): boolean => {
+  let url: URL;
+  try {
+    url = new URL(raw.trim());
+  } catch {
+    return true;
+  }
+  return url.protocol !== "http:" && url.protocol !== "https:";
+};
+
+interface ResolvedPackageSource {
+  /** Human-readable origin for progress messages and re-suggested commands. */
+  label: string;
+  files: Map<string, Buffer>;
+  /** Set only for a GitHub source — a local install has no repo/ref to stamp. */
+  github?: ParsedGithubUrl;
+}
+
+export const resolvePackageSource = async (
+  rawSource: string,
+  options: { githubToken?: string },
+): Promise<ResolvedPackageSource> => {
+  if (!isLocalPackageSource(rawSource)) {
+    const { source, files } = await fetchGithubPackageFiles(rawSource, {
+      githubToken: options.githubToken,
+    });
+    return { label: `${source.owner}/${source.repo}`, files, github: source };
+  }
+  const dir = rawSource.trim().startsWith("file://") ? fileURLToPath(rawSource.trim()) : rawSource;
+  const files = await readDirectoryFiles(dir);
+  if (files.size === 0) {
+    throw new Error(
+      `No files found under "${dir}". Expected a package directory written by \`busabase-cli export\` (a busabase.json at its root).`,
+    );
+  }
+  return { label: dir, files };
+};
+
 export const runInstall = async (
   client: BusabaseClient,
   repoUrl: string,
   options: InstallCommandOptions,
 ): Promise<unknown> => {
-  reportProgress(`Fetching ${repoUrl} …`);
-  const { source, files } = await fetchGithubPackageFiles(repoUrl, {
+  reportProgress(`Reading ${repoUrl} …`);
+  const { label, files, github } = await resolvePackageSource(repoUrl, {
     githubToken: options.githubToken,
   });
-  reportProgress(`Downloaded ${files.size} file(s) from ${source.owner}/${source.repo}.`);
+  reportProgress(`Loaded ${files.size} file(s) from ${label}.`);
 
   // The zip extractor already stripped the archive root and the addressed subdir,
   // so a package's manifest sits at the root of what we hold — but the URL may
@@ -122,12 +168,11 @@ export const runInstall = async (
     serverUrl: options.serverUrl,
     installSampleRecords: !options.noSampleRecords,
     source: {
-      repo: `${source.owner}/${source.repo}`,
-      ref: source.ref,
+      ...(github ? { repo: `${github.owner}/${github.repo}`, ref: github.ref } : {}),
       ...(resolved.subdir
         ? { subdir: resolved.subdir }
-        : source.subdir
-          ? { subdir: source.subdir }
+        : github?.subdir
+          ? { subdir: github.subdir }
           : {}),
     },
   });
