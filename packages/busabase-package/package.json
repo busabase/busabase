@@ -1,7 +1,7 @@
 {
   "name": "busabase-package",
-  "description": "The `busabase-package@1` format: GitHub source, layout read/write, install planning, and the five-pass apply. Shared by busabase-cli (`install` / `export`) and busabase-core's server-side install domain. Node-only APIs are fine here — it is never browser-bundled.",
-  "version": "0.20.0",
+  "description": "The `busabase-package@1` format: GitHub source, layout read/write, install planning, and the five-pass apply. Shared by busabase-cli (`install` / `export`) and busabase-core's server-side install domain. Node-only APIs are fine here \u2014 it is never browser-bundled.",
+  "version": "0.21.0",
   "private": false,
   "license": "MIT",
   "homepage": "https://github.com/busabase/busabase/tree/main/packages/busabase-package",
@@ -18,6 +18,10 @@
       "./apply": {
         "types": "./dist/apply.d.ts",
         "default": "./dist/apply.js"
+      },
+      "./audit": {
+        "types": "./dist/audit.d.ts",
+        "default": "./dist/audit.js"
       },
       "./client": {
         "types": "./dist/client.d.ts",
@@ -72,6 +76,10 @@
     "./apply": {
       "types": "./src/apply.ts",
       "default": "./src/apply.ts"
+    },
+    "./audit": {
+      "types": "./src/audit.ts",
+      "default": "./src/audit.ts"
     },
     "./client": {
       "types": "./src/client.ts",
