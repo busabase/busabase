@@ -125,6 +125,16 @@ const config = {
   experimental: {
     // Prevent header-based RSC responses from sharing a URL cache key with HTML.
     validateRSCRequestHeaders: true,
+    // The proxy.ts middleware layer enforces its own body-size cap ahead of
+    // any Route Handler, defaulting to 10MB — `busabase-cli restore` batches
+    // `dump.import.tables` rows by both count AND bytes, but a single
+    // attachment's base64-encoded bytes can still exceed that on its own
+    // (observed live against a real production space: individual files
+    // large enough to push even a same-request batch of one over 10MB),
+    // and the server rejected it as a generic "malformed request" with no
+    // indication of the real cause. Match the export side's own tolerance
+    // for large single files.
+    proxyClientMaxBodySize: "100mb",
   },
   turbopack: {
     root: monorepoRoot,
@@ -146,7 +156,7 @@ const config = {
     "@aws-sdk/client-s3",
     "@aws-sdk/s3-request-presigner",
   ],
-  allowedDevOrigins: ["hkt1.bika.ltd"],
+  allowedDevOrigins: ["*.bika.ltd"],
   transpilePackages: ["busabase-contract", "busabase-core"],
   async headers() {
     return [

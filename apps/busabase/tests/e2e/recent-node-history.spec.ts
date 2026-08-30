@@ -85,7 +85,15 @@ test("a cold direct URL records a deep node omitted from the sidebar prefetch", 
     await expect(page.getByRole("heading", { name: docName })).toBeVisible({
       timeout: RENDER_TIMEOUT,
     });
-    await expect(page.getByRole("link", { name: docName, exact: true })).toHaveCount(0);
+    // The sidebar now expands to a cold-loaded deep node's ancestor chain and
+    // lazily fetches each folder's children as it unrolls, so this doc's own
+    // parent folder ends up expanded too and renders the doc as a sidebar
+    // link. That is intentional: a cold direct URL used to leave the sidebar
+    // fully collapsed with nothing highlighted. The doc's initial PREFETCH
+    // still never reached this deep, which is the setup this test actually
+    // needs -- the search hit below still has to come from Recent visits,
+    // not from an ordinary always-rendered link.
+    await expect(page.getByRole("link", { name: docName, exact: true })).toHaveCount(1);
 
     await page.getByRole("button", { name: "Search", exact: true }).click();
     const dialog = page.getByRole("dialog");

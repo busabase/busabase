@@ -3,23 +3,47 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   resolve: {
-    alias: {
-      "~": path.resolve(__dirname, "./src"),
-      // `busabase-cli` / `busabase-sdk` resolve to their built `dist/` via package
-      // exports; point at source so the CLI golden-path e2e runs without a build.
-      "busabase-cli": path.resolve(__dirname, "../busabase-cli/src/index.ts"),
-      "busabase-sdk": path.resolve(__dirname, "../busabase-sdk/src/index.ts"),
-      "busabase-contract/api-client": path.resolve(
-        __dirname,
-        "../../packages/busabase-contract/src/api-client/index.ts",
-      ),
-      "busabase-core/logic/store": path.resolve(
-        __dirname,
-        "../../packages/busabase-core/src/logic/store.ts",
-      ),
-      "server-only": path.resolve(__dirname, "./tests/mocks/server-only.ts"),
-      "sharelib/storage": path.resolve(__dirname, "../../packages/openlib/storage/index.ts"),
-    },
+    // An array, not an object: a plain-object string key is matched by PREFIX, and
+    // `busabase-sdk` now has a subpath (`airapp-check`) that a bare-string alias
+    // silently rewrote to `.../src/index.ts/airapp-check` — ENOTDIR, and it crashed
+    // at module load, before either cli-template test ran, since busabase-cli's
+    // run.ts now imports it at the top level for every command, not just `check`.
+    // Same fix as apps/busabase-cli/vitest.config.ts; keep the two in sync if the
+    // SDK gains more subpaths.
+    alias: [
+      { find: "~", replacement: path.resolve(__dirname, "./src") },
+      // `busabase-cli` has only its bare `.` export today, so a plain string is
+      // still correct here — but see the busabase-sdk entries below for what
+      // breaks the moment that stops being true.
+      {
+        find: "busabase-cli",
+        replacement: path.resolve(__dirname, "../busabase-cli/src/index.ts"),
+      },
+      {
+        find: /^busabase-sdk\/(.+)$/,
+        replacement: path.resolve(__dirname, "../busabase-sdk/src/$1.ts"),
+      },
+      {
+        find: /^busabase-sdk$/,
+        replacement: path.resolve(__dirname, "../busabase-sdk/src/index.ts"),
+      },
+      {
+        find: "busabase-contract/api-client",
+        replacement: path.resolve(
+          __dirname,
+          "../../packages/busabase-contract/src/api-client/index.ts",
+        ),
+      },
+      {
+        find: "busabase-core/logic/store",
+        replacement: path.resolve(__dirname, "../../packages/busabase-core/src/logic/store.ts"),
+      },
+      { find: "server-only", replacement: path.resolve(__dirname, "./tests/mocks/server-only.ts") },
+      {
+        find: "sharelib/storage",
+        replacement: path.resolve(__dirname, "../../packages/openlib/storage/index.ts"),
+      },
+    ],
   },
   test: {
     environment: "node",

@@ -3,6 +3,7 @@
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { NodeVO } from "busabase-contract/types";
 import { BusabaseAgentSkillButton } from "busabase-core/dashboard/agent-skill-button";
+import { GithubIcon } from "busabase-core/dashboard/brand-icons";
 import {
   type BusabaseDashboardChrome,
   BusabaseDashboardShell as CoreDashboardShell,
@@ -10,17 +11,7 @@ import {
 import type { MoveNodePayload } from "busabase-core/dashboard/use-move-node";
 import { useCoreI18n } from "busabase-core/i18n";
 import { DropdownMenuItem, DropdownMenuSeparator } from "kui/dropdown-menu";
-import {
-  Activity,
-  Archive,
-  Bot,
-  Github,
-  Images,
-  Inbox,
-  LayoutGrid,
-  Network,
-  Sparkles,
-} from "lucide-react";
+import { Activity, Archive, Bot, Images, Inbox, LayoutGrid, Network, Shapes } from "lucide-react";
 import { useAddDemoParam } from "openlib/ui/dashboard";
 import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
@@ -194,12 +185,12 @@ export function BusabaseDashboardShell({
           onSelect={() => navigate(addDemoParam("/templates"))}
           className={currentPath.startsWith("/templates") ? "bg-accent" : undefined}
         >
-          <Sparkles />
+          <Shapes />
           <span>{coreMessages.nav.templates}</span>
         </DropdownMenuItem>
         {onInstallClick ? (
           <DropdownMenuItem onSelect={onInstallClick}>
-            <Github />
+            <GithubIcon />
             <span>{coreMessages.nav.installFromGithub}</span>
           </DropdownMenuItem>
         ) : null}
