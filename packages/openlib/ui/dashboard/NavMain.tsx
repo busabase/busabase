@@ -45,6 +45,7 @@ import {
   memo,
   type ReactNode,
   useCallback,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -144,6 +145,41 @@ const getNavItemKey = (item: NavKeyItem, index: number, prefix = "item") =>
 const isExternalUrl = (url: string) => url.startsWith("http://") || url.startsWith("https://");
 
 /**
+ * Renders nothing; asks the consumer to load `item`'s children exactly once
+ * per mount. Rendered only inside an OPEN folder that declares `hasChildren`
+ * but has no loaded `items` yet, so mounting IS the "this folder is showing
+ * and has nothing to show" signal.
+ *
+ * Why this and not the `Collapsible`'s own `onOpenChange`: a folder also opens
+ * with no toggle event at all. `isOpen` is true whenever the folder — or any
+ * descendant — is the active route, so merely NAVIGATING to a folder expands
+ * it. Radix only fires `onOpenChange` for interactions with the trigger, so
+ * that route-driven open never reached `onExpand`, and any folder past the
+ * host's eager prefetch depth (whose children only ever arrive lazily) stayed
+ * permanently, silently empty in the sidebar while its own detail page listed
+ * the children just fine. Reacting to the rendered `isOpen` state instead of
+ * to one of the events that can produce it covers every route into it.
+ */
+function NavLazyExpandTrigger({
+  item,
+  onExpand,
+}: {
+  item: NavItem;
+  onExpand: (item: NavItem) => void;
+}) {
+  // Read through a ref so `item` — a fresh object on every parent render —
+  // stays out of the dependency list. One ask per mount is exactly right: the
+  // folder row this renders inside is keyed by the node's id, so a different
+  // folder is a different mount.
+  const itemRef = useRef(item);
+  itemRef.current = item;
+  useEffect(() => {
+    onExpand(itemRef.current);
+  }, [onExpand]);
+  return null;
+}
+
+/**
  * The ONE button footprint for every hover-revealed row control, at every depth.
  *
  * `size-5` + a `size-4` icon deliberately matches kui's own `SidebarMenuAction`
@@ -216,14 +252,39 @@ interface NavMainProps {
    */
   isDropAllowed?: (draggedId: string, targetId: string, position: NavDropPosition) => boolean;
   /**
-   * Called when a folder row (`item.hasChildren` or `item.items`) transitions
-   * to open while it has no loaded `items` yet (`item.hasChildren: true` but
-   * `items` empty/undefined) — the signal for a consumer that lazy-loads a
-   * folder's children on first expand to kick off that fetch. Never called
-   * for a folder that already has `items` loaded, or on every open/close —
-   * only the "needs its children" transition.
+   * Called for a folder row that is rendered OPEN while it has no loaded
+   * `items` yet (`item.hasChildren: true`, `items` empty/undefined) — the
+   * signal for a consumer that lazy-loads a folder's children to kick off
+   * that fetch. Never called for a folder that already has `items` loaded.
+   *
+   * Deliberately tied to the rendered open STATE, not to a toggle event: a
+   * folder also opens by simply being (or containing) the active route, with
+   * no `onOpenChange` ever firing. Expect it once per such row per mount, so
+   * it must be idempotent — re-opening a folder whose children are already
+   * cached will call it again.
    */
   onExpand?: (item: NavItem) => void;
+  /**
+   * Ids of the folders on the path to the currently-active row — its ancestor
+   * chain, supplied by the consumer (which is the only side that can resolve
+   * it; see below). Any row whose `id` is in here is treated as being on the
+   * active path: it renders open, and if its children are not loaded yet the
+   * usual `onExpand` fetch fires for it.
+   *
+   * Needed because "am I an ancestor of the active row?" is otherwise answered
+   * by walking `items` — which only sees children ALREADY LOADED. For a tree
+   * that is lazily expanded, landing directly on a deep url (a refresh, a
+   * bookmark, a shared link) means none of the ancestors have been fetched, so
+   * that walk finds nothing, nothing expands, and nothing can ever expand:
+   * without an expansion there is no fetch, and without a fetch there is
+   * nothing to expand. This breaks the deadlock — each expanded ancestor loads
+   * the next level, which contains the next ancestor, and so on down to the
+   * active row.
+   *
+   * Omit for a consumer that loads its whole tree eagerly; the `items` walk
+   * already covers that case.
+   */
+  activeAncestorIds?: ReadonlySet<string>;
 }
 
 function NavMainComponent({
@@ -235,6 +296,7 @@ function NavMainComponent({
   onNodeDrop,
   isDropAllowed,
   onExpand,
+  activeAncestorIds,
 }: NavMainProps) {
   const [location, setLocation] = useLocation();
   const currentSearch = useSearch();
@@ -244,9 +306,165 @@ function NavMainComponent({
   const isPathActive = (url?: string) =>
     !!url && (location === url || (url !== "/" && location.startsWith(`${url}/`)));
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
-  // Per-folder manual expand/collapse override (by nav-item key). A folder on the
-  // active route is always expanded; this only adds extra opens for other folders.
-  const [openOverrides, setOpenOverrides] = useState<Record<string, boolean>>({});
+  // Per-folder manual expand/collapse override, by nav-item key.
+  //
+  // A COLLAPSE carries the location it was made at and expires the moment
+  // location changes to anything else — see the pruning effect below, which
+  // is what actually enforces "anything else". Comparing the override's `at`
+  // against the CURRENT location on every render instead (no effect, no
+  // pruning) was tried first and breaks the instant you navigate away and
+  // back to the exact same path: collapse Brand Kit while on
+  // `/folder/brand-kit`, go Home, click back down through 2026 Launch ->
+  // Launch Assets -> Brand Kit — location is `/folder/brand-kit` again, so a
+  // plain string comparison cannot tell "never left" from "left and
+  // returned", and the stale collapse reappears hiding the very row you just
+  // navigated to.
+  //
+  // Existing at all is what makes the chevron work on the folder you are
+  // currently inside: that folder is pinned open by `isActiveTree`, so
+  // Radix's `onOpenChange(!open)` — `open` always `true` — sends `false` on
+  // every click, and nothing would move without an override to override it.
+  //
+  // An EXPAND has neither hazard, so it simply persists as you browse.
+  const [openOverrides, setOpenOverrides] = useState<Record<string, { open: boolean; at: string }>>(
+    {},
+  );
+  // Enforces "expires on navigation" for a collapse: fires on every location
+  // change and drops any override whose `at` is not THIS location, before the
+  // next render computes `isOpen`. An expand is untouched — it has no reason
+  // to expire.
+  useEffect(() => {
+    setOpenOverrides((prev) => {
+      let changed = false;
+      const next: typeof prev = {};
+      for (const [key, override] of Object.entries(prev)) {
+        if (override.open || override.at === location) {
+          next[key] = override;
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location]);
+
+  // Scrolls the row whose OWN url exactly matches the current location into
+  // view. Exists because a depth-bounded, lazily-expanded tree can land the
+  // just-navigated-to row anywhere: past the visible fold entirely, or
+  // sitting behind a host's fixed sidebar footer (both look, to a user, like
+  // the row never loaded — it did, it's just off-screen).
+  //
+  // Reacts to actual DOM mutations inside the tree (by a `data-nav-url`
+  // attribute set on every row below), rather than a fixed-length poll or a
+  // mount-triggered ref — both were tried first, and both guess at a timing
+  // budget that real async loading doesn't respect:
+  //
+  // - A mount-triggered ref only fires for a row that GENUINELY mounts fresh.
+  //   That covers a cold deep-link (refresh, bookmark, shared link), whose row
+  //   only exists once `NavLazyExpandTrigger`'s ancestor-chain fetch resolves
+  //   — but not clicking DOWN through an already-expanded tree (Product Ops
+  //   -> 2026 Launch -> ... -> Brand Kit), which navigates onto a row that was
+  //   ALREADY in the DOM before the click (you have to see a row to click it,
+  //   so nothing mounts). No mount, so the ref never fires.
+  // - A fixed settle-then-check poll (wait N x 100ms, hope nothing moves
+  //   again after) covers that case, but Brand Kit's own further children
+  //   loading in — a SEPARATE lazy fetch, on a real network, with no fixed
+  //   upper bound — can keep shifting the row's position well past whatever
+  //   budget seemed "generous enough" in testing, silently reintroducing the
+  //   exact bug this is fixing.
+  //
+  // A MutationObserver has no such budget to guess: every time the tree's DOM
+  // actually changes, it re-runs the same visibility check, however many
+  // times that takes, however long the underlying fetches take. It stops
+  // after `CORRECTION_WINDOW_MS` of no further mutations (or that much time
+  // has elapsed since navigation) so it doesn't fight a user who has since
+  // scrolled elsewhere on their own.
+  const navContainerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const CORRECTION_WINDOW_MS = 4000;
+    const deadline = Date.now() + CORRECTION_WINDOW_MS;
+    let debounceId: ReturnType<typeof setTimeout> | undefined;
+    let stopId: ReturnType<typeof setTimeout>;
+
+    const evaluate = () => {
+      const headerEl = navContainerRef.current?.querySelector<HTMLElement>(
+        `[data-nav-url="${CSS.escape(location)}"]`,
+      );
+      if (!headerEl) return;
+      // The `<li>` wrapping this row. For a leaf, `data-nav-url` already
+      // lives on the `<li>` itself, so this is a no-op. For a FOLDER,
+      // `data-nav-url` lives on its inner header `<div>` — the `<li>` also
+      // wraps its `CollapsibleContent`, i.e. every currently-visible child —
+      // and that's deliberately what gets checked and scrolled here, not just
+      // the header. A folder whose OWN header is already on-screen but whose
+      // children still land behind the footer is the exact scenario this fix
+      // exists for: the whole point of navigating into a folder is to see
+      // what's in it, so "the header made it, its contents didn't" is not
+      // success.
+      const el = headerEl.closest<HTMLElement>("li") ?? headerEl;
+      // Gate on ACTUAL occlusion, not merely "call scrollIntoView and let the
+      // browser decide" (`block: "nearest"` is a no-op when already visible,
+      // but landed a couple of pixels short of the true fold in this
+      // sidebar's doubly-nested scroll containers — a host's own wrapper
+      // around this tree, inside kui's own `SidebarContent`, each scrolling
+      // independently). A plain viewport-bounds check alone isn't enough
+      // either: a row sitting exactly in a fixed footer's band still reports
+      // a rect fully inside the window (the footer PAINTS OVER it, it isn't
+      // clipped out of the layout). So also check the footer's own band
+      // directly, if this host renders one (kui's `Sidebar` primitive, which
+      // this component is built to run inside) — `elementFromPoint` alone
+      // only samples ONE pixel, meaningless for a tall folder-plus-children
+      // box, where the header can be clear while a child two rows down is
+      // still covered.
+      const rect = el.getBoundingClientRect();
+      const footerRect = document.querySelector('[data-sidebar="footer"]')?.getBoundingClientRect();
+      const overlapsFooter =
+        !!footerRect && rect.bottom > footerRect.top && rect.top < footerRect.bottom;
+      const paintedAtHeaderCenter = document.elementFromPoint(
+        rect.left + rect.width / 2,
+        rect.top + headerEl.getBoundingClientRect().height / 2,
+      );
+      const alreadyVisible =
+        rect.top >= 0 &&
+        rect.bottom <= window.innerHeight &&
+        !overlapsFooter &&
+        !!paintedAtHeaderCenter &&
+        headerEl.contains(paintedAtHeaderCenter);
+      if (alreadyVisible) return;
+      // `block: "start"`, not `"center"`: a folder's children render BELOW
+      // its header, never above, so pinning the header near the top of the
+      // scrollport leaves the maximum possible room for them, where centering
+      // would waste half that room above the header where there is nothing to
+      // show. `"start"` clears the nested-container rounding shortfall
+      // `"nearest"` suffered from just as reliably — the fix for that was
+      // "give it real margin", and `"start"` gives just as much as `"center"`
+      // did.
+      el.scrollIntoView({ block: "start" });
+    };
+
+    const observer = new MutationObserver(() => {
+      if (Date.now() > deadline) {
+        observer.disconnect();
+        return;
+      }
+      // Coalesce a burst of mutations (a folder's children arriving is
+      // several DOM insertions, not one) into a single re-check per burst.
+      clearTimeout(debounceId);
+      debounceId = setTimeout(evaluate, 50);
+    });
+    if (navContainerRef.current) {
+      observer.observe(navContainerRef.current, { childList: true, subtree: true });
+    }
+    evaluate(); // the "nothing more is going to change" case: no mutations, check once up front.
+    stopId = setTimeout(() => observer.disconnect(), CORRECTION_WINDOW_MS);
+
+    return () => {
+      observer.disconnect();
+      clearTimeout(debounceId);
+      clearTimeout(stopId);
+    };
+  }, [location]);
 
   const dragEnabled = Boolean(onNodeDrop);
   // Titles of every draggable row, for the `DragOverlay` chip that follows the
@@ -610,8 +828,17 @@ function NavMainComponent({
     const isActiveTree =
       Boolean(item.isActive) ||
       isPathActive(item.url) ||
+      // Consumer-supplied ancestor chain FIRST-CLASS alongside the `items`
+      // walk below, not as a fallback to it: the walk cannot see unloaded
+      // children, which is exactly the cold-load case this covers.
+      (!!item.id && (activeAncestorIds?.has(item.id) ?? false)) ||
       (item.items?.some((subItem) => isDescendantActive(subItem)) ?? false);
-    const isOpen = isActiveTree || (openOverrides[itemKey] ?? false);
+    // Whatever survived the pruning effect (see `openOverrides`) is by
+    // definition still valid: an expand, or a collapse whose location has not
+    // changed since. Its absence — never set, or since pruned — falls back to
+    // the route-derived default.
+    const override = openOverrides[itemKey];
+    const isOpen = override !== undefined ? override.open : isActiveTree;
 
     // If item declares sub-items, render as a folder-style row, even when the
     // current folder is empty. `hasChildren` alone (no `items` loaded yet —
@@ -633,20 +860,18 @@ function NavMainComponent({
           key={itemKey}
           asChild
           open={isOpen}
+          // Records the user's explicit intent only. The lazy-children fetch
+          // is NOT kicked off from here — see `NavLazyExpandTrigger` below for
+          // why it keys off the rendered open state instead of this event.
           onOpenChange={(open) => {
-            setOpenOverrides((prev) => ({ ...prev, [itemKey]: open }));
-            // Fire the lazy-load signal only on the actual "needs children"
-            // transition — a folder that already has `items` loaded (or is
-            // being closed) never triggers a refetch.
-            if (open && item.hasChildren && !item.items?.length) {
-              onExpand?.(item);
-            }
+            setOpenOverrides((prev) => ({ ...prev, [itemKey]: { open, at: location } }));
           }}
           className="group/collapsible"
         >
           <ItemWrapper>
             <div
               ref={dragProps?.setNodeRef}
+              data-nav-url={item.url || undefined}
               style={dragProps?.style}
               // The sortable ref binds to just this header row, NOT the outer
               // list item — that <li> also wraps the expanded
@@ -764,6 +989,13 @@ function NavMainComponent({
                     ),
                   );
                 })()}
+                {/* Asks the consumer for this folder's children the first
+                    time it is rendered open with none loaded — however it got
+                    opened (chevron, folder-name navigation, or an active
+                    descendant route). Renders nothing itself. */}
+                {isOpen && item.hasChildren && folderItems.length === 0 && onExpand && (
+                  <NavLazyExpandTrigger item={item} onExpand={onExpand} />
+                )}
                 {/* Lazy-load placeholder: shown only while a `hasChildren`
                     folder's children are being fetched (never alongside
                     already-loaded `items`, which render above instead). Plain
@@ -805,6 +1037,7 @@ function NavMainComponent({
         <SidebarMenuItem
           key={itemKey}
           ref={dragProps?.setNodeRef}
+          data-nav-url={item.url || undefined}
           style={dragProps?.style}
           className={`group/nav-row ${dropIndicatorClass(item.id)}`}
         >
@@ -879,6 +1112,7 @@ function NavMainComponent({
       <SidebarMenuSubItem
         key={itemKey}
         ref={dragProps?.setNodeRef}
+        data-nav-url={item.url || undefined}
         style={dragProps?.style}
         className={`group/nav-row relative ${dropIndicatorClass(item.id)}`}
       >
@@ -929,7 +1163,10 @@ function NavMainComponent({
   const hasDynamicGroup = items.some((group) => group.isDynamic);
 
   const content = (
-    <div className={hasDynamicGroup ? "flex flex-col flex-1 min-h-0 gap-1" : "contents"}>
+    <div
+      ref={navContainerRef}
+      className={hasDynamicGroup ? "flex flex-col flex-1 min-h-0 gap-1" : "contents"}
+    >
       {items.map((group, groupIndex) => {
         const HeaderActionIcon = group.headerAction;
         const GroupIcon = group.icon;

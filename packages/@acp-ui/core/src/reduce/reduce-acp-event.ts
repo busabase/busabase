@@ -144,16 +144,49 @@ function textOf(content: ContentBlock): string | null {
 }
 
 /**
- * Images and audio become `AcpAttachment`s. `resource_link`/`resource` are
- * explicitly out of scope (see `AcpAttachment`'s doc comment) and, like the
- * eight unhandled `sessionUpdate` kinds, fall through as neither text nor an
- * attachment — silently ignored rather than surfaced as unreadable JSON.
+ * Images, audio and embedded resources become `AcpAttachment`s.
+ *
+ * A `resource` arrives as either `TextResourceContents` or
+ * `BlobResourceContents`; `AcpAttachment.data` is uniformly base64, so a text
+ * resource is re-encoded here rather than stored in a second representation
+ * the renderers would each have to branch on. `resource_link` stays out of
+ * scope (see `AcpAttachment`'s doc comment) and, like the eight unhandled
+ * `sessionUpdate` kinds, falls through as neither text nor an attachment —
+ * silently ignored rather than surfaced as unreadable JSON.
  */
 function attachmentOf(content: ContentBlock): AcpAttachment | null {
   if (content.type === "image" || content.type === "audio") {
     return { kind: content.type, data: content.data, mimeType: content.mimeType };
   }
+  if (content.type === "resource") {
+    const resource = content.resource;
+    const filename = filenameFromUri(resource.uri);
+    const mimeType = resource.mimeType ?? "application/octet-stream";
+    if ("text" in resource) {
+      return { kind: "file", data: encodeUtf8Base64(resource.text), mimeType, filename };
+    }
+    return { kind: "file", data: resource.blob, mimeType, filename };
+  }
   return null;
+}
+
+/** The trailing path segment of a resource `uri`, percent-decoded, for display. */
+function filenameFromUri(uri: string): string | undefined {
+  const withoutQuery = uri.split(/[?#]/)[0] ?? "";
+  const last = withoutQuery.split("/").pop();
+  if (!last) return undefined;
+  try {
+    return decodeURIComponent(last) || undefined;
+  } catch {
+    return last;
+  }
+}
+
+function encodeUtf8Base64(text: string): string {
+  const bytes = new TextEncoder().encode(text);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
 }
 
 function appendChunk(

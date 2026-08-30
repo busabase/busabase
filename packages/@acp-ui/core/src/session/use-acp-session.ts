@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { attachmentToContentBlock } from "../prompt/attachment-media";
 import type { AcpAttachment, AcpBlock, AcpPermissionBlock, AcpUiEvent, AcpUsage } from "../reduce";
 import {
   foldSessionTitle,
@@ -187,12 +188,8 @@ export function useAcpSession(port: AcpSessionPort, key: string | null): AcpSess
               type: "session_update",
               update: {
                 sessionUpdate: "user_message_chunk",
-                content: {
-                  type: attachment.kind,
-                  data: attachment.data,
-                  mimeType: attachment.mimeType,
-                },
-              } as never,
+                content: attachmentToContentBlock(attachment),
+              },
             }),
           ),
         ];

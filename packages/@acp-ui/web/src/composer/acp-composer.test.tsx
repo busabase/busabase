@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { AcpComposer, toAttachments } from "./acp-composer";
 
 const submitButton = () => screen.getByRole("button", { name: /Submit|Stop/ });
-const attachButton = () => screen.getByRole("button", { name: "Attach an image or audio clip" });
+const attachButton = () => screen.getByRole("button", { name: "Attach a file" });
 
 describe("sending", () => {
   it("sends the trimmed text on Enter and clears the field", async () => {
@@ -241,12 +241,38 @@ describe("toAttachments", () => {
     expect(result[0].kind).toBe("audio");
   });
 
-  // Guards the one thing ACP's AcpAttachment can represent: image/audio only.
-  it("drops a file whose media type isn't image or audio", () => {
+  // Anything that isn't image/audio is a `file` — an ACP embedded resource —
+  // rather than being dropped, which is what "attach a PDF" needs.
+  it('classifies everything else as kind "file", keeping the filename', () => {
+    const result = toAttachments([
+      {
+        type: "file",
+        mediaType: "application/pdf",
+        filename: "report.pdf",
+        url: "data:application/pdf;base64,QUJD",
+      },
+    ]);
+    expect(result).toEqual([
+      { kind: "file", data: "QUJD", mimeType: "application/pdf", filename: "report.pdf" },
+    ]);
+  });
+
+  it("keeps a file the browser could not type at all", () => {
+    // An extensionless `Dockerfile` reports `mediaType: ""`. Falling back to
+    // a MIME type keeps it representable; the bytes decide text-vs-blob later.
+    const result = toAttachments([
+      { type: "file", mediaType: "", filename: "Dockerfile", url: "data:;base64,QUJD" },
+    ]);
+    expect(result).toEqual([
+      { kind: "file", data: "QUJD", mimeType: "application/octet-stream", filename: "Dockerfile" },
+    ]);
+  });
+
+  it("omits filename rather than sending an empty one", () => {
     const result = toAttachments([
       { type: "file", mediaType: "application/pdf", url: "data:application/pdf;base64,QUJD" },
     ]);
-    expect(result).toEqual([]);
+    expect(result[0]).not.toHaveProperty("filename");
   });
 
   // If kui's blob→data conversion ever failed and fell back to the original
@@ -261,5 +287,38 @@ describe("toAttachments", () => {
 
   it("returns an empty array for no files", () => {
     expect(toAttachments([])).toEqual([]);
+  });
+});
+
+describe("staging a document", () => {
+  it("shows a document's filename, which a thumbnail-only chip could not", async () => {
+    render(<AcpComposer disabled={false} onSend={vi.fn()} />);
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    await userEvent.upload(fileInput, fakeFile("q3-report.pdf", "application/pdf"));
+
+    // The whole reason documents render through the `inline` variant: two
+    // attached PDFs must be tellable apart before sending.
+    expect(await screen.findByText("q3-report.pdf")).toBeInTheDocument();
+  });
+
+  it("delivers a document to onSend as a file attachment", async () => {
+    const onSend = vi.fn();
+    render(<AcpComposer disabled={false} onSend={onSend} />);
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    await userEvent.upload(fileInput, fakeFile("notes.md", "text/markdown"));
+    await userEvent.click(submitButton());
+
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    const [, attachments] = onSend.mock.calls[0];
+    expect(attachments).toHaveLength(1);
+    expect(attachments[0]).toMatchObject({ kind: "file", filename: "notes.md" });
+  });
+
+  it("refuses a file over the size cap and says so, instead of failing at send", async () => {
+    render(<AcpComposer disabled={false} maxFileSize={10} onSend={vi.fn()} />);
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    await userEvent.upload(fileInput, fakeFile("big.pdf", "application/pdf", "way-past-ten-bytes"));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/too large/i);
   });
 });

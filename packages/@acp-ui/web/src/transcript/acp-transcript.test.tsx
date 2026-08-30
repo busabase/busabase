@@ -95,6 +95,40 @@ describe("attachments", () => {
     renderBlocks([message({ text: "plain text" })]);
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
   });
+
+  it("names a file attachment instead of showing an anonymous icon", () => {
+    renderBlocks([
+      message({
+        text: "here you go",
+        attachments: [
+          {
+            kind: "file",
+            data: "JVBERi0=",
+            mimeType: "application/pdf",
+            filename: "q3-report.pdf",
+          },
+        ],
+      }),
+    ]);
+    expect(screen.getByText("q3-report.pdf")).toBeInTheDocument();
+    // A document is not an <img>, and must not materialise a data: URL it
+    // would never display — that would double a multi-megabyte payload.
+    expect(screen.queryByRole("img")).not.toBeInTheDocument();
+  });
+
+  it("renders an image and a file side by side, each in its own strip", () => {
+    renderBlocks([
+      message({
+        text: "both",
+        attachments: [
+          { kind: "image", data: "abc", mimeType: "image/png" },
+          { kind: "file", data: "def", mimeType: "text/csv", filename: "rows.csv" },
+        ],
+      }),
+    ]);
+    expect(screen.getByRole("img")).toBeInTheDocument();
+    expect(screen.getByText("rows.csv")).toBeInTheDocument();
+  });
 });
 
 describe("tool calls", () => {

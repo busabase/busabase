@@ -58,7 +58,7 @@
   },
   "dependencies": {
     "@acp-ui/core": "workspace:*",
-    "lucide-react": "^0.556.0"
+    "lucide-react": "^1.34.0"
   },
   "peerDependencies": {
     "kui": "workspace:*",
