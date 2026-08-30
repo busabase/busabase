@@ -1,7 +1,7 @@
 {
   "name": "busabase-core",
   "description": "Shared Busabase open-core protocol, local store, API helpers, and dashboard components.",
-  "version": "0.20.0",
+  "version": "0.21.0",
   "private": true,
   "type": "module",
   "exports": {
@@ -253,6 +253,10 @@
       "types": "./src/domains/dashboard/helpers/node-icons.ts",
       "default": "./src/domains/dashboard/helpers/node-icons.ts"
     },
+    "./dashboard/brand-icons": {
+      "types": "./src/domains/dashboard/helpers/brand-icons.tsx",
+      "default": "./src/domains/dashboard/helpers/brand-icons.tsx"
+    },
     "./dashboard/home": {
       "types": "./src/domains/dashboard/helpers/home.ts",
       "default": "./src/domains/dashboard/helpers/home.ts"
@@ -375,6 +379,7 @@
     "@orpc/server": "^1.14.6",
     "@orpc/tanstack-query": "1.14.6",
     "@orpc/zod": "^1.14.6",
+    "@radix-ui/react-dialog": "^1.1.23",
     "@scelar/nodepod": "^1.9.20",
     "@tanstack/react-query": "^5.101.0",
     "@tanstack/react-virtual": "^3.13.12",
@@ -386,7 +391,7 @@
     "framer-motion": "^12.33.0",
     "ignore": "^7.0.5",
     "kui": "workspace:*",
-    "lucide-react": "^0.556.0",
+    "lucide-react": "^1.34.0",
     "micromark": "^4.0.2",
     "open-domains": "workspace:*",
     "openlib": "workspace:*",
@@ -423,6 +428,7 @@
     "bench:records:pg": "BENCH_ENGINE=postgres NODE_OPTIONS='--conditions=react-server --expose-gc --max-old-space-size=4096' tsx scripts/bench-records.ts",
     "bench:inbox": "NODE_OPTIONS='--conditions=react-server --expose-gc --max-old-space-size=4096' tsx scripts/bench-inbox.ts",
     "verify:inbox-index": "NODE_OPTIONS='--conditions=react-server' tsx scripts/verify-inbox-index.ts",
-    "bench:node-grep": "NODE_OPTIONS=--conditions=react-server tsx scripts/bench-node-grep.ts"
+    "bench:node-grep": "NODE_OPTIONS=--conditions=react-server tsx scripts/bench-node-grep.ts",
+    "backfill:node-content-search": "NODE_OPTIONS=--conditions=react-server tsx scripts/backfill-node-content-search.ts"
   }
 }
