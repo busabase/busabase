@@ -3,7 +3,7 @@
 import { create } from "zustand";
 import type { AirAppRunner, AirAppRunnerKind } from "../components/runners/types";
 
-const DEFAULT_RUNNER_KIND: AirAppRunnerKind = "nodepod";
+const DEFAULT_RUNNER_KIND: AirAppRunnerKind = "browser";
 
 /**
  * AirApp runner metadata, keyed globally by node id, so each node retains its
@@ -49,7 +49,7 @@ interface AirAppRunnerStoreState {
   /** The user's selected engine per node, independent of whether a run is
    *  currently in flight — read by `RunPanel` before starting a new run, and
    *  set by the engine-picker UI in `AirAppDetailView`. Defaults to
-   *  `"nodepod"` (V1's only engine) for any node with no explicit choice. */
+   *  `"browser"` (V1's only engine) for any node with no explicit choice. */
   selectedKinds: Record<string, AirAppRunnerKind>;
   selectRunnerKind: (nodeId: string, kind: AirAppRunnerKind) => void;
   getSelectedRunnerKind: (nodeId: string) => AirAppRunnerKind;

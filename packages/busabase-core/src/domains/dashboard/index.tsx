@@ -2073,6 +2073,7 @@ function BusabaseDashboardContent({
           onClose={closeChangeRequest}
           onMerge={mergeChangeRequest}
           onReject={rejectChangeRequest}
+          onRevised={refresh}
           readOnly={readOnlyChangeRequestPreview}
         />
       );
@@ -2394,6 +2395,7 @@ function BusabaseDashboardContent({
     mergeChangeRequest,
     records,
     readOnlyChangeRequestPreview,
+    refresh,
     rejectChangeRequest,
     isBaseSetupRoute,
     selectedChangeRequest,

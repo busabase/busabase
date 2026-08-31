@@ -180,6 +180,11 @@ export const baseSchema = z.object({
   }),
   createdAt: z.string(),
   fields: z.array(baseFieldSchema),
+  // The owning node's `metadata` (busabase_nodes.metadata, not a
+  // busabase_bases column) — see `BaseVO.metadata`'s docstring. Without this
+  // key here, oRPC's `.output(baseSchema)` would silently strip the field
+  // `toBaseVO` now populates before it ever reaches the client.
+  metadata: z.record(z.string(), z.unknown()).default({}),
 });
 
 export const createBaseInputSchema = z.object({

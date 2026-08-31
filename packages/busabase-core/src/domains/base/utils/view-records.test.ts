@@ -10,6 +10,7 @@ const base: BaseVO = {
   description: "",
   reviewPolicy: { kind: "single", requiredApprovals: 1 },
   createdAt: "2026-01-01T00:00:00.000Z",
+  metadata: {},
   fields: [
     {
       id: "name",

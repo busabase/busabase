@@ -556,6 +556,9 @@ function FieldColumnHeader({
         </Popover>
       </span>
       {promptsOpen && (
+        // No `metadata` prop — a field-scoped dialog never reads custom scenario
+        // prompts (node-agent-prompts-v2.md §7.3 only replaces the whole-node
+        // scenario tier; see `buildNodeAgentPrompts`'s `scope.kind` check).
         <NodeAgentPromptsDialog
           nodeId={baseNodeId}
           nodeName={baseName}

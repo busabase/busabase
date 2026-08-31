@@ -90,34 +90,68 @@ describe("resolveRunPlan — explicit manifest", () => {
       /preferredEngine/,
     );
   });
+
+  it("does not claim there is no manifest when there is one", () => {
+    // A manifest carrying only `preferredEngine` still goes down the inference
+    // path for `runtime`. Reporting that as "no airapp.json" is a log line the
+    // reader can check and find false, and it sends them debugging a file that
+    // was read correctly.
+    const plan = resolveRunPlan(manifest({ preferredEngine: "local" }));
+    expect(plan.explanation).not.toContain("no airapp.json");
+    expect(plan.explanation).toContain('airapp.json declares no "runtime"');
+    expect(plan.preferredEngine).toBe("local");
+    // The genuine absence still reads as absence.
+    expect(resolveRunPlan({ "package.json": "{}" }).explanation).toContain("no airapp.json");
+  });
+
+  it("accepts a retired engine name and resolves it to the current one", () => {
+    // An `airapp.json` lives in someone else's repository. Busabase renamed
+    // these values and cannot rewrite the manifests that pinned the old ones,
+    // so rejecting them would fail apps over a rename they had no part in.
+    expect(resolveRunPlan(manifest({ preferredEngine: "nodepod" })).preferredEngine).toBe(
+      "browser",
+    );
+    expect(resolveRunPlan(manifest({ preferredEngine: "sandock" })).preferredEngine).toBe("remote");
+    expect(resolveRunPlan(manifest({ preferredEngine: "local-node" })).preferredEngine).toBe(
+      "local",
+    );
+  });
+
+  it("names the removed engine specifically instead of listing valid values at it", () => {
+    // `srt` was real, not a typo. Told only "must be one of browser, local,
+    // remote", the author has to diff two lists and still learns nothing about
+    // why theirs went away.
+    expect(() => resolveRunPlan(manifest({ preferredEngine: "srt" }))).toThrow(/removed/);
+    expect(() => resolveRunPlan(manifest({ preferredEngine: "srt" }))).toThrow(/remote/);
+  });
 });
 
 describe("engine eligibility", () => {
   it("lets node run anywhere but confines python to real OS processes", () => {
-    expect(isEngineEligible("nodepod", "node")).toBe(true);
+    expect(isEngineEligible("browser", "node")).toBe(true);
     expect(isEngineEligible("local", "node")).toBe(true);
-    expect(isEngineEligible("nodepod", "python")).toBe(false);
+    expect(isEngineEligible("browser", "python")).toBe(false);
     expect(isEngineEligible("local", "python")).toBe(true);
-    expect(isEngineEligible("srt", "python")).toBe(true);
+    expect(isEngineEligible("remote", "python")).toBe(true);
   });
 
   it("never auto-selects an engine that cannot run the app", () => {
     // The failure this prevents: a Python app auto-running on the constant
-    // "nodepod" default the instant its node is opened.
-    expect(resolveEngine("python", "nodepod", ["nodepod", "local", "srt"])).toBe("local");
+    // "browser" default the instant its node is opened.
+    expect(resolveEngine("python", "browser", ["browser", "local", "remote"])).toBe("local");
   });
 
   it("honours the wanted engine when it is eligible and available", () => {
-    expect(resolveEngine("node", "nodepod", ["nodepod", "local"])).toBe("nodepod");
-    expect(resolveEngine("python", "srt", ["nodepod", "local", "srt"])).toBe("srt");
+    expect(resolveEngine("node", "browser", ["browser", "local"])).toBe("browser");
+    expect(resolveEngine("python", "remote", ["browser", "local", "remote"])).toBe("remote");
   });
 
   it("falls back rather than failing when the wanted engine is unavailable here", () => {
-    expect(resolveEngine("node", "srt", ["nodepod"])).toBe("nodepod");
+    expect(resolveEngine("node", "remote", ["browser"])).toBe("browser");
   });
 
   it("returns null when this deployment cannot run the app at all", () => {
-    expect(resolveEngine("python", "nodepod", ["nodepod"])).toBeNull();
+    expect(resolveEngine("python", "browser", ["browser"])).toBeNull();
   });
 });
 

@@ -42,12 +42,11 @@ export const airAppRunLocalInputSchema = z.object({
    *  The in-browser Nodepod engine never uses this field: it hands raw bytes to
    *  `Nodepod.boot({ files })` directly and skips the base64 round trip. */
   binaryFiles: z.record(z.string(), z.string()).optional().default({}),
-  /** Server-side execution mode. `"local"` spawns a bare host Node.js
-   *  process (previewable, data bridge via reverse proxy, NOT OS-isolated);
-   *  `"srt"` wraps the same commands in the OS sandbox (isolated execution,
-   *  but live preview is unreachable). `"nodepod"` never calls this endpoint —
-   *  it runs entirely in-browser. */
-  engine: z.enum(["local", "srt", "sandock"]).default("local"),
+  /** Where the server should run it. `"local"` spawns a bare process on the
+   *  Busabase host (previewable, data bridge via reverse proxy, NOT isolated);
+   *  `"remote"` runs the same lifecycle on a provisioned machine elsewhere.
+   *  `"browser"` never reaches this endpoint — it runs entirely in the tab. */
+  engine: z.enum(["local", "remote"]).default("local"),
 });
 
 export const airAppRuntimeEventSchema = z.discriminatedUnion("type", [

@@ -1,6 +1,6 @@
 import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
 import type { AuditEventVO, ChangeRequestVO, OperationVO, ReviewVO } from "busabase-contract/types";
-import { Check, ChevronRight, GitMerge, Loader2, Sparkles, X } from "lucide-react";
+import { Check, ChevronRight, GitMerge, Loader2, PencilLine, Sparkles, X } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
@@ -28,6 +28,7 @@ import { useIsAnonymousVisitor } from "../visitor-context";
 import { SubjectCommentThread } from "./comments";
 import { UserRefButton } from "./identity";
 import { OperationFieldChanges } from "./operation-diff";
+import { isChangeRequestRevisable, OperationReviseForm } from "./operation-revise";
 import {
   BackLink,
   BusabaseSidePanel,
@@ -134,21 +135,27 @@ export function OperationReviewSection({
   changeRequest,
   client,
   defaultOpen,
+  onRevised,
   operation,
   readOnly = false,
 }: {
   changeRequest: ChangeRequestVO;
   client: BusabaseDashboardApiClient;
   defaultOpen: boolean;
+  onRevised?: () => void | Promise<void>;
   operation: OperationVO;
   readOnly?: boolean;
 }) {
   const messages = useCoreI18n();
   const isAnonymous = useIsAnonymousVisitor();
   const [open, setOpen] = useState(defaultOpen);
+  const [editing, setEditing] = useState(false);
   const meta = operationMeta[operation.operation];
   const changedSinceReview = operationChangedSinceReview(changeRequest, operation);
   const targetHref = getOperationTargetHref(changeRequest, operation);
+  // An anonymous visitor may hold `submit` on a public share (enough to OPEN a
+  // change request) but never enough to re-author someone else's operation.
+  const canRevise = !readOnly && !isAnonymous && isChangeRequestRevisable(changeRequest);
 
   return (
     <div className="scroll-mt-20 border-b last:border-b-0" id={`op-${operation.id}`}>
@@ -187,6 +194,19 @@ export function OperationReviewSection({
             {getOperationImpact(operation, messages)}
           </span>
         )}
+        {canRevise && !editing ? (
+          <button
+            className="inline-flex shrink-0 items-center gap-1 rounded-md border px-2 py-1 font-medium text-xs transition-colors hover:bg-accent/40"
+            onClick={() => {
+              setOpen(true);
+              setEditing(true);
+            }}
+            type="button"
+          >
+            <PencilLine size={12} />
+            {messages.operationRevise.edit}
+          </button>
+        ) : null}
       </div>
       {open ? (
         <div className="px-4 pb-4">
@@ -195,7 +215,18 @@ export function OperationReviewSection({
               {getOperationMessage(operation)}
             </p>
           ) : null}
-          <OperationFieldChanges changeRequest={changeRequest} operation={operation} />
+          {editing ? (
+            <OperationReviseForm
+              changeRequest={changeRequest}
+              client={client}
+              key={operation.headCommitId}
+              onCancel={() => setEditing(false)}
+              onRevised={onRevised}
+              operation={operation}
+            />
+          ) : (
+            <OperationFieldChanges changeRequest={changeRequest} operation={operation} />
+          )}
           {!isAnonymous ? (
             <div className="mt-4">
               <div className="font-medium text-foreground text-xs">
@@ -223,11 +254,13 @@ export function OperationReviewList({
   changeRequest,
   client,
   focusOperationId,
+  onRevised,
   readOnly = false,
 }: {
   changeRequest: ChangeRequestVO;
   client: BusabaseDashboardApiClient;
   focusOperationId: string | null;
+  onRevised?: () => void | Promise<void>;
   readOnly?: boolean;
 }) {
   const operations = changeRequest.operations
@@ -244,6 +277,7 @@ export function OperationReviewList({
             focusOperationId ? operation.id === focusOperationId : operations.length === 1
           }
           key={operation.id}
+          onRevised={onRevised}
           operation={operation}
           readOnly={readOnly}
         />
@@ -315,9 +349,36 @@ export function MergeTimelineEntry({ event }: { event: AuditEventVO }) {
   );
 }
 
+export function RevisionTimelineEntry({ event }: { event: AuditEventVO }) {
+  const messages = useCoreI18n();
+  const locale = useCoreLocale();
+
+  return (
+    <div className="flex items-start gap-2.5 rounded-lg border bg-background/40 px-3 py-2.5">
+      <span className="mt-0.5 shrink-0 text-muted-foreground">
+        <PencilLine size={16} />
+      </span>
+      <div className="min-w-0">
+        <div className="text-sm">
+          <UserRefButton
+            fallbackId={event.actorId}
+            user={event.actor}
+            title={messages.identity.reviewerDetail}
+          />{" "}
+          {messages.review.revisedThisChangeRequest}
+          <span className="ml-2 text-muted-foreground text-xs">
+            {formatDetailTime(event.createdAt, locale)}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export type DiscussionTimelineItem =
   | { review: ReviewVO; timestamp: string; type: "review" }
-  | { event: AuditEventVO; timestamp: string; type: "merge" };
+  | { event: AuditEventVO; timestamp: string; type: "merge" }
+  | { event: AuditEventVO; timestamp: string; type: "revision" };
 
 export const getChangeRequestMergeEvents = (
   auditEvents: AuditEventVO[],
@@ -326,6 +387,22 @@ export const getChangeRequestMergeEvents = (
   auditEvents.filter(
     (event) =>
       event.changeRequestId === changeRequestId && event.action === "change_request.merged",
+  );
+
+/**
+ * `change_request.updated` is written by several paths; only `reviseOperation`
+ * tags it `revision: true` (see `logic/cr-lifecycle.ts`), so the timeline shows
+ * re-authoring without also surfacing unrelated lifecycle bookkeeping.
+ */
+export const getChangeRequestRevisionEvents = (
+  auditEvents: AuditEventVO[],
+  changeRequestId: string,
+): AuditEventVO[] =>
+  auditEvents.filter(
+    (event) =>
+      event.changeRequestId === changeRequestId &&
+      event.action === "change_request.updated" &&
+      event.metadata.revision === true,
   );
 
 export function ChangeRequestDiscussion({
@@ -352,8 +429,15 @@ export function ChangeRequestDiscussion({
       timestamp: event.createdAt,
       type: "merge" as const,
     }));
+    const revisionItems = getChangeRequestRevisionEvents(auditEvents, changeRequest.id).map(
+      (event) => ({
+        event,
+        timestamp: event.createdAt,
+        type: "revision" as const,
+      }),
+    );
 
-    return [...reviewItems, ...mergeItems].sort((first, second) =>
+    return [...reviewItems, ...mergeItems, ...revisionItems].sort((first, second) =>
       first.timestamp.localeCompare(second.timestamp),
     );
   }, [auditEvents, changeRequest.id, changeRequest.reviews]);
@@ -367,8 +451,10 @@ export function ChangeRequestDiscussion({
             <Fragment key={item.type === "review" ? item.review.id : item.event.id}>
               {item.type === "review" ? (
                 <ReviewTimelineEntry review={item.review} />
-              ) : (
+              ) : item.type === "merge" ? (
                 <MergeTimelineEntry event={item.event} />
+              ) : (
+                <RevisionTimelineEntry event={item.event} />
               )}
             </Fragment>
           ))}
@@ -573,6 +659,7 @@ export function ChangeRequestDetailPage({
   onClose,
   onMerge,
   onReject,
+  onRevised,
   readOnly = false,
 }: {
   auditEvents: AuditEventVO[];
@@ -584,6 +671,7 @@ export function ChangeRequestDetailPage({
   onClose: (changeRequestId: string, reason?: string) => void;
   onMerge: (changeRequestId: string) => void;
   onReject: (changeRequestId: string, reason?: string) => void;
+  onRevised?: () => void | Promise<void>;
   readOnly?: boolean;
 }) {
   const messages = useCoreI18n();
@@ -612,6 +700,7 @@ export function ChangeRequestDetailPage({
           onClose={onClose}
           onMerge={onMerge}
           onReject={onReject}
+          onRevised={onRevised}
           readOnly={readOnly}
         />
       </section>
@@ -629,6 +718,7 @@ export function ChangeRequestReviewLayout({
   onClose,
   onMerge,
   onReject,
+  onRevised,
   readOnly = false,
 }: {
   auditEvents: AuditEventVO[];
@@ -640,6 +730,7 @@ export function ChangeRequestReviewLayout({
   onClose: (changeRequestId: string, reason?: string) => void;
   onMerge: (changeRequestId: string) => void;
   onReject: (changeRequestId: string, reason?: string) => void;
+  onRevised?: () => void | Promise<void>;
   readOnly?: boolean;
 }) {
   const messages = useCoreI18n();
@@ -759,6 +850,7 @@ export function ChangeRequestReviewLayout({
               changeRequest={changeRequest}
               client={client}
               focusOperationId={focusOperationId}
+              onRevised={onRevised}
               readOnly={readOnly}
             />
           </section>

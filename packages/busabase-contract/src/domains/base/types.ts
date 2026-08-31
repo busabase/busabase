@@ -79,6 +79,16 @@ export interface BaseVO {
   };
   createdAt: string;
   fields: BaseFieldVO[];
+  /**
+   * The owning node's own `metadata` (from `busabase_nodes.metadata`, NOT a
+   * `busabase_bases` column) — carried here so a Base-only caller (e.g. the
+   * Agent Prompts dialog reached from `BaseDetailHeader`, which only has a
+   * `BaseVO` on hand) can read `metadata.agentPrompts` the same way every
+   * other node type's `NodeVO.metadata` already does. Kept as
+   * `Record<string, unknown>` to match `NodeVO.metadata` and
+   * `NodePromptContext.metadata` rather than inventing a narrower type.
+   */
+  metadata: Record<string, unknown>;
 }
 
 export type ViewFilterOperator =

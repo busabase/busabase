@@ -1,20 +1,23 @@
-import { EventEmitter } from "node:events";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 /**
  * Unit coverage for `packages/busabase-core/src/domains/airapp/logic/local-runtime.ts`
- * — the sandboxed npm install/dev execution engine backing the `"local"`
- * AirApp runner. This file previously had zero test coverage. Real sandboxed
+ * — the install/dev execution engine backing the `"local"` AirApp runner. Real
  * process spawning is never exercised here (that's covered separately by
- * live/manual verification); instead `@anthropic-ai/sandbox-runtime` and
- * `node:child_process`'s `spawn` are mocked so the pure/logic pieces
- * (port detection, workdir isolation, file writing, sandbox config shape,
- * the concurrency mutex, and the fail-open warning path) are tested in
- * isolation, matching this repo's `tests/text-cache-local-streaming.test.ts`
- * style (real fs for fs-touching code, `vi.mock` for external deps).
+ * live/manual verification); instead `node:child_process`'s `spawn` is mocked
+ * so the pure/logic pieces (port detection, workdir isolation, file writing)
+ * are tested in isolation, matching this repo's
+ * `tests/text-cache-local-streaming.test.ts` style (real fs for fs-touching
+ * code, `vi.mock` for external deps).
+ *
+ * The sandbox-config, concurrency-mutex and fail-open-warning suites that used
+ * to live here went with the `"srt"` engine they covered: it network-isolated
+ * the process, which also made its port unreachable for preview, so it was
+ * never offered by `resolveAvailableAirAppEngines` and never ran. Isolated
+ * execution is now `logic/sandock-runtime.ts`'s job.
  */
 
 describe("detectPort", () => {
@@ -139,113 +142,5 @@ describe("writeFiles", () => {
     await expect(writeFiles(tmpDir, {})).resolves.toBeUndefined();
     const entries = await import("node:fs/promises").then((fs) => fs.readdir(tmpDir));
     expect(entries).toEqual([]);
-  });
-});
-
-describe("buildSandboxConfig", () => {
-  it("scopes allowWrite to exactly the workdir, denies sensitive read paths, and allow-lists npm registry with no denied domains", async () => {
-    const { buildSandboxConfig } = await import("../src/domains/airapp/logic/local-runtime");
-    const workdir = "/tmp/some-airapp-workdir";
-    const config = buildSandboxConfig(workdir);
-
-    expect(config.filesystem.allowWrite).toEqual([workdir]);
-    expect(config.filesystem.denyRead).toContain("~/.ssh");
-    expect(config.filesystem.denyRead).toContain("~/.aws");
-    expect(config.network.allowedDomains).toContain("registry.npmjs.org");
-    expect(config.network.deniedDomains).toEqual([]);
-  });
-});
-
-describe("acquireSandboxLock", () => {
-  it("serializes concurrent acquisitions: the second caller does not resolve until the first releases", async () => {
-    const { acquireSandboxLock } = await import("../src/domains/airapp/logic/local-runtime");
-
-    const release1 = await acquireSandboxLock();
-
-    let secondResolved = false;
-    const second = acquireSandboxLock().then((release2) => {
-      secondResolved = true;
-      return release2;
-    });
-
-    // Flush microtasks; the second acquisition must still be pending.
-    await Promise.race([second.then(() => undefined), new Promise<void>((r) => setTimeout(r, 20))]);
-    expect(secondResolved).toBe(false);
-
-    release1();
-
-    const release2 = await second;
-    expect(secondResolved).toBe(true);
-    release2();
-  });
-});
-
-// The dependency-check fail-open warning is specific to the `"srt"` engine
-// (the bare `"local"` engine spawns directly and never touches
-// SandboxManager), so this path is exercised with `engine: "srt"`.
-describe("runAirAppLocal — srt fail-open sandboxing-unsupported warning path", () => {
-  afterEach(() => {
-    vi.resetModules();
-    vi.doUnmock("@anthropic-ai/sandbox-runtime");
-    vi.doUnmock("node:child_process");
-    vi.doUnmock("../src/logic/node-acl");
-  });
-
-  it("surfaces a 'sandboxing' warning log as the first event and still proceeds with the run", async () => {
-    vi.resetModules();
-
-    vi.doMock("@anthropic-ai/sandbox-runtime", () => ({
-      SandboxManager: {
-        checkDependencies: () => ({ errors: ["socat not installed"], warnings: [] }),
-        isSupportedPlatform: () => true,
-        initialize: vi.fn(async () => undefined),
-        wrapWithSandboxArgv: vi.fn(async (_command: string) => ({
-          argv: ["node", "-e", ""],
-          env: {},
-        })),
-        cleanupAfterCommand: vi.fn(() => undefined),
-        reset: vi.fn(async () => undefined),
-      },
-    }));
-
-    vi.doMock("node:child_process", () => ({
-      spawn: vi.fn(() => {
-        const child = new EventEmitter() as EventEmitter & {
-          stdout: EventEmitter;
-          stderr: EventEmitter;
-        };
-        child.stdout = new EventEmitter();
-        child.stderr = new EventEmitter();
-        // Emit exit asynchronously so listeners are attached first.
-        setTimeout(() => {
-          child.emit("exit", 0);
-        }, 0);
-        return child;
-      }),
-    }));
-    vi.doMock("../src/logic/node-acl", () => ({
-      assertNodePermission: vi.fn(async () => undefined),
-    }));
-
-    const { runAirAppLocal } = await import("../src/domains/airapp/logic/local-runtime");
-
-    const events: Array<{ type: string; [key: string]: unknown }> = [];
-    for await (const event of runAirAppLocal({
-      nodeId: "test-node",
-      files: {},
-      engine: "srt",
-    })) {
-      events.push(event as { type: string; [key: string]: unknown });
-    }
-
-    expect(events.length).toBeGreaterThan(0);
-    const first = events[0];
-    expect(first.type).toBe("log");
-    expect(String(first.line)).toMatch(/sandboxing/i);
-    expect(String(first.line)).toMatch(/socat not installed/i);
-
-    // The run proceeds (fail-open) rather than hard-failing: it should reach
-    // at least the "installed" stage after the warning.
-    expect(events.some((e) => e.type === "installed")).toBe(true);
   });
 });

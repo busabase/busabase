@@ -24,13 +24,13 @@ export function toBase64(bytes: Uint8Array): string {
 }
 
 /**
- * `AirAppRunner` implementation backed by a real server-side
- * `npm install` + `npm run dev` OS process. Backs BOTH the `"local"`
- * (bare host Node.js — previewable, data bridge via reverse proxy) and
- * `"srt"` (OS-sandboxed via `@anthropic-ai/sandbox-runtime`'s `SandboxManager`
- * — isolated, but no live preview) engines; the two differ ONLY in the
- * server-side execution mode, selected by the `engine` option passed straight
- * through to the `runLocal` RPC (see `logic/local-runtime.ts`).
+ * `AirAppRunner` implementation backed by a real server-side install + dev
+ * process. Backs BOTH server-side engines — `"local"` (a bare process on the
+ * Busabase host) and `"remote"` (a machine provisioned per run) — because they
+ * differ only in *where* the server runs the commands, which is selected by the
+ * `engine` option passed straight through to the `runLocal` RPC and produces
+ * the identical event stream either way (see `logic/local-runtime.ts` and
+ * `logic/sandock-runtime.ts`).
  * Driven over the single
  * `airapps.runLocal` oRPC event iterator rather than separate RPCs per
  * `AirAppRunner` method — the server naturally runs install straight into
@@ -46,7 +46,7 @@ export function toBase64(bytes: Uint8Array): string {
 export class LocalRunner implements AirAppRunner {
   private readonly orpc: BusabaseQueryUtils;
   private readonly nodeId: string;
-  private readonly engine: "local" | "srt" | "sandock";
+  private readonly engine: "local" | "remote";
   private files: Record<string, string> = {};
   private binaryFiles: Record<string, string> = {};
   private controller: AbortController | null = null;
@@ -59,7 +59,7 @@ export class LocalRunner implements AirAppRunner {
   constructor(options: {
     orpc: BusabaseQueryUtils;
     nodeId: string;
-    engine: "local" | "srt" | "sandock";
+    engine: "local" | "remote";
   }) {
     this.orpc = options.orpc;
     this.nodeId = options.nodeId;

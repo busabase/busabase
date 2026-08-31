@@ -16,16 +16,15 @@ export function createAirAppRunner(
   context: { orpc: BusabaseQueryUtils; nodeId: string },
 ): AirAppRunner {
   switch (kind) {
-    case "nodepod":
+    case "browser":
       return new NodepodRunner();
+    // One client for both server-side engines, on purpose: where the process
+    // runs is decided server-side, and a remote machine reaches the browser
+    // through the identical event sequence.
     case "local":
       return new LocalRunner({ ...context, engine: "local" });
-    case "srt":
-      return new LocalRunner({ ...context, engine: "srt" });
-    // Same client, same stream: the engine is decided server-side, and a remote
-    // sandbox reaches the browser through the identical event sequence.
-    case "sandock":
-      return new LocalRunner({ ...context, engine: "sandock" });
+    case "remote":
+      return new LocalRunner({ ...context, engine: "remote" });
     default: {
       const exhaustive: never = kind;
       throw new Error(`Unknown AirApp runner kind: ${exhaustive}`);

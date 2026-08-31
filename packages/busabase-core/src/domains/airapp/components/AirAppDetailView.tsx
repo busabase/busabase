@@ -125,6 +125,7 @@ export function AirAppDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) 
       <>
         <AirAppRunControls airapp={airapp} fullscreenState={fullscreenState} runner={runner} />
         <NodeAgentPromptsButton
+          metadata={airapp.node.metadata}
           nodeId={airapp.node.id}
           nodeName={airapp.node.name}
           nodeType="airapp"

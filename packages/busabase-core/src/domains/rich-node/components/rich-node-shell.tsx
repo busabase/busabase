@@ -186,7 +186,12 @@ export function RichNodeShell({
         )}
         {!isAnonymous && actions}
         {!isAnonymous && (
-          <NodeAgentPromptsButton nodeId={node.id} nodeName={node.name} nodeType={nodeType} />
+          <NodeAgentPromptsButton
+            metadata={node.metadata}
+            nodeId={node.id}
+            nodeName={node.name}
+            nodeType={nodeType}
+          />
         )}
         {/* One "•••" menu instead of the Permissions + Delete button pair this
             header used to render — same set of actions (plus Rename/Share,

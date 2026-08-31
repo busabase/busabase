@@ -16,13 +16,11 @@
  * it: adding a language is a new `AirAppRuntimeDescriptor` in `RUNTIMES` below,
  * and no existing branch is edited.
  *
- * PURITY: this module is isomorphic and must stay that way. The browser-side
- * Nodepod engine resolves its own plan (it runs in a Web Worker, with no server
- * round trip), the engine picker needs eligibility on the client, and the
- * server-side engines resolve the same plan from the same code. So: no
- * `node:*` imports, no `~/db`, no `server-only`. The network allowlist lives
- * here because a list of domains is inert data; only its *use* (building an srt
- * sandbox config) is server-side.
+ * PURITY: this module is isomorphic and must stay that way. The `browser`
+ * engine resolves its own plan (it runs in a Web Worker, with no server round
+ * trip), the engine picker needs eligibility on the client, and the server-side
+ * engines resolve the same plan from the same code. So: no `node:*` imports, no
+ * `~/db`, no `server-only`.
  */
 
 import type { AirAppRunnerKind } from "busabase-contract/domains/airapp/contract";
@@ -69,8 +67,6 @@ export interface RunPlan {
   /** Declared by the author. When absent the engine sniffs `readyPatterns`. */
   port?: number;
   readyPatterns: RegExp[];
-  /** Domains the srt OS sandbox must allow for `install` to succeed. */
-  networkAllowlist: string[];
   /**
    * Directories, relative to the run's workdir, to prepend to `PATH`.
    *
@@ -107,13 +103,12 @@ export interface AirAppRuntimeDescriptor {
   markerFiles: string[];
   /**
    * `null` means "runs anywhere". `"os-process"` means the engine must be a
-   * real OS process — which is how Nodepod (a JavaScript runtime inside a
-   * browser tab) is excluded without any engine needing to know that Python
-   * exists.
+   * real OS process — which is how the `browser` engine (a JavaScript runtime
+   * inside a browser tab) is excluded without any engine needing to know that
+   * Python exists.
    */
   requiresExecutionModel: "os-process" | null;
   readyPatterns: RegExp[];
-  networkAllowlist: string[];
   pathPrepend: string[];
   /**
    * Defaults for a file tree already known to be this runtime. Takes the tree
@@ -128,7 +123,6 @@ const NODE_RUNTIME: AirAppRuntimeDescriptor = {
   markerFiles: ["package.json"],
   requiresExecutionModel: null,
   readyPatterns: COMMON_READY_PATTERNS,
-  networkAllowlist: ["registry.npmjs.org", "*.npmjs.org", "registry.npmmirror.com"],
   // npm already puts `node_modules/.bin` on PATH for `npm run`, so nothing to add.
   pathPrepend: [],
   defaults: () => ({ install: "npm install", start: "npm run dev" }),
@@ -137,18 +131,13 @@ const NODE_RUNTIME: AirAppRuntimeDescriptor = {
 const PYTHON_RUNTIME: AirAppRuntimeDescriptor = {
   kind: "python",
   markerFiles: ["requirements.txt", "pyproject.toml"],
-  // CPython is a real binary. Nodepod cannot host it under any configuration.
+  // CPython is a real binary. The browser engine cannot host it under any
+  // configuration.
   requiresExecutionModel: "os-process",
   readyPatterns: [
     ...COMMON_READY_PATTERNS,
     // Uvicorn/Hypercorn print a full URL; Flask's dev server prints "Running on".
     /running on https?:\/\/[^\s:]+:(\d{2,5})/i,
-  ],
-  networkAllowlist: [
-    "pypi.org",
-    "files.pythonhosted.org",
-    "*.pythonhosted.org",
-    "pypi.tuna.tsinghua.edu.cn",
   ],
   // The venv's bin goes first, so the start command's `python3` is the one the
   // install command populated. Nothing hardcodes the path, so an app that
@@ -179,10 +168,10 @@ const PYTHON_RUNTIME: AirAppRuntimeDescriptor = {
       : // A `pyproject.toml` project installs itself; `-e` keeps edits live so a
         // restart picks up source changes without reinstalling.
         'sh -c "python3 -m venv .venv && .venv/bin/python -m pip install -e ."',
-    // Bind 0.0.0.0, not localhost: under srt the process is network-namespaced,
-    // and under the reverse proxy the connection arrives from outside the app's
-    // own loopback. A default of 127.0.0.1 produces a server that logs success
-    // and refuses every proxied request.
+    // Bind 0.0.0.0, not localhost: under the reverse proxy the connection
+    // arrives from outside the app's own loopback, and a remote engine reaches
+    // it from outside the container's. A default of 127.0.0.1 produces a server
+    // that logs success and refuses every proxied request.
     start: `python3 -m uvicorn main:app --host 0.0.0.0 --port ${PORT_PLACEHOLDER}`,
   }),
 };
@@ -209,13 +198,13 @@ export const getRuntimeDescriptor = (kind: AirAppRuntimeKind): AirAppRuntimeDesc
 
 /** How each engine executes a command — the other half of the eligibility rule. */
 export const ENGINE_EXECUTION_MODEL: Record<AirAppRunnerKind, "browser-js" | "os-process"> = {
-  nodepod: "browser-js",
+  browser: "browser-js",
   local: "os-process",
-  srt: "os-process",
-  // A container is a real machine: it runs whatever the RunPlan says, with no
-  // per-language support to add. That is why it shares `os-process` rather than
-  // getting a model of its own.
-  sandock: "os-process",
+  // A provisioned machine is still a real machine: it runs whatever the RunPlan
+  // says, with no per-language support to add. That is why `remote` shares
+  // `os-process` rather than getting a model of its own — the axis that matters
+  // here is "can this execute a binary", not "whose box is it".
+  remote: "os-process",
 };
 
 /**
@@ -235,7 +224,7 @@ export const isEngineEligible = (engine: AirAppRunnerKind, runtime: AirAppRuntim
  * this deployment offers.
  *
  * Needed because opening an AirApp auto-runs it: a Python app whose selected
- * engine defaulted to the constant `"nodepod"` would auto-start on the one
+ * engine defaulted to the constant `"browser"` would auto-start on the one
  * engine guaranteed to fail, before the user could touch anything. Returns
  * `null` when nothing available can run this app, which the caller must render
  * as an explicit "this deployment can't run this app" state rather than
@@ -317,6 +306,28 @@ export const tokenizeCommand = (command: string): string[] => {
   return tokens;
 };
 
+/**
+ * Engine names an `airapp.json` in the wild may still carry.
+ *
+ * The values were renamed from product names (`nodepod`, `sandock`) to the
+ * location they actually describe. An AirApp's manifest is a file in somebody
+ * else's repository, though — Busabase does not own it and cannot rewrite it —
+ * so an app pinned to the old name must keep resolving rather than fail
+ * validation on a rename it had no part in. Accepting both spellings costs one
+ * lookup; rejecting the old one costs every previously-authored app.
+ */
+const LEGACY_ENGINE_ALIASES: Record<string, AirAppRunnerKind> = {
+  nodepod: "browser",
+  sandock: "remote",
+  // Predates `nodepod` -> `browser`; still found in the oldest manifests.
+  "local-node": "local",
+};
+
+/** Removed engine — rejected with its own message rather than as "unknown". */
+const RETIRED_ENGINE = "srt";
+
+const PREFERRED_ENGINE_ERROR = `\`airapp.json\`'s \`preferredEngine\` must be one of ${Object.keys(ENGINE_EXECUTION_MODEL).join(", ")}`;
+
 const parseManifest = (raw: string): { manifest: AirAppManifest } | { error: string } => {
   let parsed: unknown;
   try {
@@ -350,18 +361,32 @@ const parseManifest = (raw: string): { manifest: AirAppManifest } | { error: str
     }
   }
   const preferredEngine = candidate.preferredEngine;
+  let normalizedEngine: AirAppRunnerKind | undefined;
   if (preferredEngine !== undefined) {
-    if (
-      typeof preferredEngine !== "string" ||
-      !Object.hasOwn(ENGINE_EXECUTION_MODEL, preferredEngine)
-    ) {
+    if (typeof preferredEngine !== "string") {
+      return { error: PREFERRED_ENGINE_ERROR };
+    }
+    if (preferredEngine === RETIRED_ENGINE) {
+      // Named separately from "unknown value" because the author did not
+      // guess — this engine existed, and the reason it stopped is worth one
+      // sentence rather than a list of valid values they must diff against.
       return {
-        error: `\`airapp.json\`'s \`preferredEngine\` must be one of ${Object.keys(ENGINE_EXECUTION_MODEL).join(", ")}`,
+        error: `\`airapp.json\` declares \`preferredEngine: "srt"\`, an engine that has been removed: it network-isolated the process, so its port was never reachable for preview. Use "remote" for isolated execution, or delete the field.`,
       };
     }
+    const resolved = LEGACY_ENGINE_ALIASES[preferredEngine] ?? preferredEngine;
+    if (!Object.hasOwn(ENGINE_EXECUTION_MODEL, resolved)) {
+      return { error: PREFERRED_ENGINE_ERROR };
+    }
+    normalizedEngine = resolved as AirAppRunnerKind;
   }
 
-  return { manifest: candidate as AirAppManifest };
+  return {
+    manifest: {
+      ...(candidate as AirAppManifest),
+      ...(normalizedEngine ? { preferredEngine: normalizedEngine } : {}),
+    },
+  };
 };
 
 /** Thrown for a malformed `airapp.json`. A bad manifest is an authoring error worth surfacing. */
@@ -417,17 +442,27 @@ export const resolveRunPlan = (files: Record<string, unknown>): RunPlan => {
       const ambiguous = RUNTIMES.filter((entry) =>
         entry.markerFiles.some((candidate) => present.has(candidate)),
       );
+      // Inference runs in two different situations and they must not read the
+      // same. A manifest that exists but declares no `runtime` used to be
+      // reported as "no airapp.json", which is a log line stating something the
+      // reader can verify is false — it sent someone debugging a manifest that
+      // was in fact being read correctly. Say which case this is.
+      const manifestState = present.has(AIRAPP_MANIFEST_PATH)
+        ? `${AIRAPP_MANIFEST_PATH} declares no "runtime"`
+        : `no ${AIRAPP_MANIFEST_PATH}`;
       explanation =
         ambiguous.length > 1
-          ? `no ${AIRAPP_MANIFEST_PATH}; inferred "${runtime}" from ${marker} (also saw ${ambiguous
+          ? `${manifestState}; inferred "${runtime}" from ${marker} (also saw ${ambiguous
               .filter((entry) => entry.kind !== runtime)
               .map((entry) => entry.kind)
               .join(", ")} markers — declare "runtime" to override)`
-          : `no ${AIRAPP_MANIFEST_PATH}; inferred "${runtime}" from ${marker}`;
+          : `${manifestState}; inferred "${runtime}" from ${marker}`;
     } else {
       runtime = "node";
       source = "default";
-      explanation = `no ${AIRAPP_MANIFEST_PATH} and no runtime marker file; defaulting to "node"`;
+      explanation = present.has(AIRAPP_MANIFEST_PATH)
+        ? `${AIRAPP_MANIFEST_PATH} declares no "runtime" and no runtime marker file is present; defaulting to "node"`
+        : `no ${AIRAPP_MANIFEST_PATH} and no runtime marker file; defaulting to "node"`;
     }
   }
 
@@ -440,7 +475,6 @@ export const resolveRunPlan = (files: Record<string, unknown>): RunPlan => {
     start: manifest.start ?? defaults.start,
     port: manifest.port,
     readyPatterns: descriptor.readyPatterns,
-    networkAllowlist: descriptor.networkAllowlist,
     pathPrepend: descriptor.pathPrepend,
     preferredEngine: manifest.preferredEngine,
     source,

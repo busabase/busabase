@@ -19,7 +19,12 @@
  * the agent can locate the target without guessing.
  */
 
+import {
+  type CustomPromptDef,
+  customAgentPromptsSchema,
+} from "busabase-contract/contract/node-agent-prompt-schemas";
 import { GENERIC_NODE_OPERATION_KINDS, getNodeType } from "busabase-contract/domains";
+import { iStringParse } from "openlib/i18n/i-string";
 import type { CoreLocale } from "../../../i18n";
 import type { CoreI18nMessages } from "../../../i18n/messages";
 import { operationLabelKeys } from "./change-request";
@@ -62,6 +67,14 @@ export interface NodePromptContext {
   spaceId?: string;
   /** Defaults to the whole node. */
   scope?: NodePromptScope;
+  /**
+   * The node's own `metadata` (from its loaded `NodeVO`), read here ONLY for
+   * `metadata.agentPrompts` — this node's custom scenario prompts (Feature 3,
+   * `node-agent-prompts-v2.md` §7.3). Optional and safe to omit: a caller with
+   * no loaded `NodeVO` (or a projection that doesn't carry metadata) simply
+   * gets the node type's default scenarios, same as before this field existed.
+   */
+  metadata?: Record<string, unknown>;
 }
 
 export interface NodePrompt {
@@ -849,6 +862,58 @@ const RECORD_SCENARIOS: PromptDef[] = [
   },
 ];
 
+// ── Custom scenario prompts (Feature 3) ─────────────────────────────────────────
+
+/** Every locale `PromptDef.label`/`.body` are keyed on — derived from an
+ * already-exhaustive `Record<CoreLocale, …>` above instead of a second
+ * hardcoded locale list that could drift from it. */
+const CORE_LOCALES = Object.keys(TARGET_LINE) as CoreLocale[];
+
+/**
+ * Adapt one validated custom prompt (`CustomPromptDef` — iString label/body, a
+ * literal `"{target}"` placeholder) into the same `PromptDef` shape the curated
+ * `SCENARIOS_BY_TYPE` arrays use, so it flows through the exact `buildCuratedPrompt`
+ * assembly below unchanged. `iStringParse` resolves each locale once, with the
+ * same fallback behavior already used for Base field names; `{target}` is
+ * substituted at render time with the identical target string a curated
+ * prompt's `body(target)` receives.
+ */
+const customPromptDefToPromptDef = (custom: CustomPromptDef): PromptDef => {
+  const label = Object.fromEntries(
+    CORE_LOCALES.map((locale) => [locale, iStringParse(custom.label, locale)]),
+  ) as Record<CoreLocale, string>;
+  const body = Object.fromEntries(
+    CORE_LOCALES.map((locale) => {
+      const template = iStringParse(custom.body, locale);
+      return [locale, (target: string) => template.replaceAll("{target}", target)];
+    }),
+  ) as Record<CoreLocale, (target: string) => string>;
+  return { key: custom.key, intent: custom.intent, label, body };
+};
+
+/**
+ * Read this node's `metadata.agentPrompts` (written by `busabase-cli nodes
+ * set-agent-prompts` or a direct API call) and, when present and valid, return
+ * it as `PromptDef`s meant to REPLACE `SCENARIOS_BY_TYPE[nodeType]` for the
+ * whole-node dialog (§7.3).
+ *
+ * Returns `undefined` — "fall through to the node type's default scenarios" —
+ * when the key is absent, an empty array, or fails `.safeParse`. That last
+ * case is the safety net §10's failure matrix requires: corrupt jsonb (a
+ * manual edit, or a write that bypassed the CLI's own validation) must never
+ * crash the dialog or render garbage, it must render exactly what the node
+ * would have shown before this feature existed.
+ */
+const readCustomAgentPrompts = (
+  metadata: Record<string, unknown> | undefined,
+): PromptDef[] | undefined => {
+  const raw = metadata?.agentPrompts;
+  if (!Array.isArray(raw) || raw.length === 0) return undefined;
+  const parsed = customAgentPromptsSchema.safeParse(raw);
+  if (!parsed.success) return undefined;
+  return parsed.data.map(customPromptDefToPromptDef);
+};
+
 // ── Assembly ──────────────────────────────────────────────────────────────────
 
 /**
@@ -871,7 +936,15 @@ export function buildNodeAgentPrompts(
     record: RECORD_SCENARIOS,
     cell: CELL_SCENARIOS,
   };
-  const scenarioDefs = SCENARIOS_BY_SCOPE[scope.kind] ?? SCENARIOS_BY_TYPE[context.nodeType] ?? [];
+  // Custom scenario prompts (§7.3) are authored per NODE and only ever replace
+  // the whole-node dialog's scenario tier — a field/record/cell-scoped dialog
+  // always uses its own narrower, scope-specific set above, same as before this
+  // feature existed. A node's custom prompts have no opinion about "just this
+  // column" or "just this record".
+  const scenarioDefs =
+    scope.kind === "node"
+      ? (readCustomAgentPrompts(context.metadata) ?? SCENARIOS_BY_TYPE[context.nodeType] ?? [])
+      : (SCENARIOS_BY_SCOPE[scope.kind] ?? SCENARIOS_BY_TYPE[context.nodeType] ?? []);
 
   const buildCuratedPrompt = (prompt: PromptDef, tier: PromptTier, group: string): NodePrompt => {
     const intent = prompt.intent ?? "change";

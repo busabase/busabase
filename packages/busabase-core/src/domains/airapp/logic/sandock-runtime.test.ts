@@ -169,7 +169,7 @@ describe("runAirAppSandock", () => {
     // being alive to reap.
     expect(calls[0]?.args.activeDeadlineSeconds).toBeGreaterThan(0);
     // The app is told what it is running under, same as every other engine.
-    expect(calls[0]?.args.env).toMatchObject({ BUSABASE_AIRAPP_RUNTIME: "sandock" });
+    expect(calls[0]?.args.env).toMatchObject({ BUSABASE_AIRAPP_RUNTIME: "remote" });
 
     // Node defaults, unchanged — this engine adds no per-language handling.
     const install = calls.find((c) => c.op === "shell" && String(c.args.cmd).includes("npm"));

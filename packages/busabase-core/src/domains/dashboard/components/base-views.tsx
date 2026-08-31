@@ -1110,7 +1110,12 @@ function BaseDetailHeader({ base, orpc }: { base: BaseVO | null; orpc: BusabaseQ
   useRegisterTopbarNodeActions(
     base && !isAnon ? (
       <>
-        <NodeAgentPromptsButton nodeId={base.nodeId} nodeName={base.name} nodeType="base" />
+        <NodeAgentPromptsButton
+          metadata={base.metadata}
+          nodeId={base.nodeId}
+          nodeName={base.name}
+          nodeType="base"
+        />
         <NodePinButton
           payload={{ nodeId: base.nodeId }}
           tabId={nodeSidePanelTabId("base", base.nodeId)}

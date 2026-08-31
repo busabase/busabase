@@ -79,7 +79,7 @@ describe("AirApp keepalive store", () => {
           logLines: [],
           previewUrl: "/preview/node-a",
           runner,
-          runnerKind: "nodepod",
+          runnerKind: "browser",
           status: "ready",
         },
       },

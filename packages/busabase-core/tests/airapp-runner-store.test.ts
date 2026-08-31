@@ -22,8 +22,8 @@ describe("airapp runner store", () => {
     const currentRunner = createRunner();
     const store = useAirAppRunnerStore.getState();
 
-    store.beginRun(nodeId, firstRunner, "nodepod");
-    store.beginRun(nodeId, currentRunner, "nodepod");
+    store.beginRun(nodeId, firstRunner, "browser");
+    store.beginRun(nodeId, currentRunner, "browser");
 
     store.setError(nodeId, firstRunner, "CancelledError");
     store.setStatus(nodeId, firstRunner, "installing");
