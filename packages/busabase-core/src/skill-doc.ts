@@ -396,7 +396,7 @@ ${authLine}  -H 'content-type: application/json' \\
   --data '{"pattern": "Termination", "sources": ["files"], "scope": {"files": {"drivePath": "contracts/"}}, "contextLines": 2}'
 # → { matches: [{ source: "files", assetId, fileName, drivePath, line, column, text, before, after }],
 #     coverage: { files: { scanned, missing: [assetId, ...], stale: [...],
-#                          unsearchable, errored, notReached }, docs: {...}, records: {...} }, truncated }
+#                          unsearchable, errored, notReached }, nodes: {...}, records: {...} }, truncated }
 # \`missing\` names binary assets with no text yet — extract-and-supply them, don't assume
 # full coverage. \`stale\` names assets whose text was derived from a since-replaced file.
 
@@ -427,31 +427,31 @@ curl -X POST ${base}/api/v1/grep \\
 ${authLine}  -H 'content-type: application/json' \\
   --data '{"pattern": "Termination", "sources": ["files", "nodes", "records"], "contextLines": 2}'
 # → { matches: [{ source: "files", assetId, fileName, drivePath, line, column, text, before, after }
-#              | { source: "docs", nodeId, slug, name, line, column, text, before, after }
+#              | { source: "nodes", type, nodeId, slug, name, line, column, text, before, after }
 #              | { source: "records", baseId, baseSlug, recordId, fieldSlug, line, column, text, before, after },
 #              ...],
 #     coverage: { files: { scanned, missing, stale, unsearchable, errored, notReached },
-#                 docs: { scanned, errored, notReached },
+#                 nodes: { scanned, errored, notReached },
 #                 records: { scanned, errored, notReached } },
 #     truncated }
-# matches are ordered files-first, then docs, then records. Scope down to one source (and narrow
-# further — assetIds/drivePath/mimeTypes for files, nodeIds for docs, baseIds/baseSlugs for
+# matches are ordered files-first, then nodes, then records. Scope down to one source (and narrow
+# further — assetIds/drivePath/mimeTypes for files, nodeIds/types for nodes, baseIds/baseSlugs for
 # records — baseIds/baseSlugs are a union: either match puts a Base in scope) with
-# "sources": ["docs"] etc.:
+# "sources": ["nodes"] etc.:
 curl -X POST ${base}/api/v1/grep \\
 ${authLine}  -H 'content-type: application/json' \\
-  --data '{"pattern": "ACME Corp", "sources": ["docs"], "scope": {"docs": {"nodeIds": ["nod_..."]}}}'
+  --data '{"pattern": "ACME Corp", "sources": ["nodes"], "scope": {"nodes": {"nodeIds": ["nod_..."]}}}'
 curl -X POST ${base}/api/v1/grep \\
 ${authLine}  -H 'content-type: application/json' \\
   --data '{"pattern": "ACME Corp", "sources": ["records"], "scope": {"records": {"baseSlugs": ["contracts"]}}}'
 \`\`\`
 
-After a grep match with \`source: "docs"\`, read just the lines around it instead of the whole
-Doc body (\`docs/:nodeId\` returns the ENTIRE body) — the same files grep →
-\`assets/:assetId/text/lines\` follow-up loop above, for Docs:
+After a grep match with \`source: "nodes"\`, read just the lines around it instead of the whole
+node body (\`nodes/:nodeId\` returns the ENTIRE body) — the same files grep →
+\`assets/:assetId/text/lines\` follow-up loop above, for node content:
 
 \`\`\`bash
-curl "${base}/api/v1/docs/:nodeId/lines?startLine=118&endLine=122"${H}
+curl "${base}/api/v1/nodes/:nodeId/lines?startLine=118&endLine=122"${H}
 # → { lines: [...], startLine, endLine, totalLines, truncated }
 \`\`\`
 
