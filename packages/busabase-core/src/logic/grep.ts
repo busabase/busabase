@@ -99,11 +99,16 @@ const requestedNodeTypes = (
  * one knob tunes both): each candidate costs a storage round trip, so a
  * sequential loop made total latency the SUM of every node's fetch instead of
  * roughly the slowest in each batch.
+ *
+ * The default must stay in lockstep with the files adapter's `grepConcurrency`
+ * (16 — see the reasoning there: this batch is dominated by storage round trips,
+ * not CPU). One knob, one number; a silent drift between the two would make the
+ * env var mean different things for `sources: ["files"]` and `sources: ["nodes"]`.
  */
 const nodeScanConcurrency = (): number => {
   const raw = process.env.BUSABASE_GREP_CONCURRENCY;
   const parsed = raw ? Number(raw) : Number.NaN;
-  return Number.isInteger(parsed) && parsed >= 1 ? parsed : 4;
+  return Number.isInteger(parsed) && parsed >= 1 ? parsed : 16;
 };
 
 interface NodeCandidate {

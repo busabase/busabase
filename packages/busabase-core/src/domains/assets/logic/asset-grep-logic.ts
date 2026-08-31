@@ -93,11 +93,25 @@ export const READ_LINES_MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
  * scanned in parallel per batch. Mirrors `grepTimeoutMs`'s style: read once
  * per call (cheap), parsed as a number, falling back to the default on a
  * missing/invalid value.
+ *
+ * WHY 16 AND NOT 4 (the original default). This batch governs `openAssetTextSource`
+ * as well as the scan, and on a remote storage provider that call is a network
+ * fetch per uncached file (`text-cache.ts`), not CPU work. The old default was
+ * sized for the scan half and starved the fetch half: measured against a Drive
+ * shaped like the HK insurance library (884 files, 60 MB of text), a cold cache
+ * spends ~135 ms per file on the object GET, so at 4-wide the 10 s
+ * `grepTimeoutMs` budget only ever reached about a THIRD of the candidates and
+ * every such call came back `notReached > 0` — which reads to an agent as "narrow
+ * the scope and search again", i.e. a whole extra round trip for the user.
+ *
+ * The scan half does not regress at 16: on that same corpus the JS scanner
+ * measured 631 ms at 16 vs 686 ms at 4. See
+ * `apps/busabase/content/spec/drive-retrieval-latency.md`.
  */
 const grepConcurrency = (): number => {
   const raw = process.env.BUSABASE_GREP_CONCURRENCY;
   const parsed = raw ? Number(raw) : Number.NaN;
-  return Number.isInteger(parsed) && parsed >= 1 ? parsed : 4;
+  return Number.isInteger(parsed) && parsed >= 1 ? parsed : 16;
 };
 
 // ── Candidate resolution ────────────────────────────────────────────────────

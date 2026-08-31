@@ -1,3 +1,4 @@
+import { GrepSourceSchema } from "busabase-contract/contract/grep-schemas";
 import { describe, expect, it } from "vitest";
 import { buildSkillMarkdown } from "../src/skill-doc";
 
@@ -349,5 +350,58 @@ describe("bootstrap edition confirmation", () => {
     );
     expect(localBootstrap).not.toContain("Open Busabase Dashboard");
     expect(localBootstrap).not.toContain("/dashboard/{space_id}/home");
+  });
+});
+
+/**
+ * Drift guard for the grep section — the doc is the only instruction most agents
+ * ever read, so a rename in the contract that misses it costs every one of them a
+ * failed call plus a retry before they recover.
+ *
+ * This is not hypothetical: 0.18.0 renamed the grep source `docs` → `nodes` and
+ * 0.19.0 replaced `GET /docs/{nodeId}/lines` with `GET /nodes/{nodeId}/lines`, and
+ * this doc kept teaching both for two releases. These assertions read the valid
+ * names off `GrepSourceSchema` itself rather than hard-coding them, so the next
+ * rename fails here instead of in a user's agent.
+ */
+describe("skill doc — grep surface stays in sync with the contract", () => {
+  const validSources = new Set<string>(GrepSourceSchema.options);
+
+  /** Every `"sources": ["a", "b"]` array the doc tells an agent to send. */
+  const documentedSources = (doc: string): string[] =>
+    [...doc.matchAll(/"sources":\s*\[([^\]]*)\]/g)].flatMap((match) =>
+      [...match[1].matchAll(/"([^"]+)"/g)].map((inner) => inner[1]),
+    );
+
+  /** Every `source: "x"` the doc shows in a documented response shape. */
+  const documentedResultSources = (doc: string): string[] =>
+    [...doc.matchAll(/\bsource:\s*"([^"]+)"/g)].map((match) => match[1]);
+
+  /** Every top-level key of a `"scope": { ... }` object the doc tells an agent to send. */
+  const documentedScopeKeys = (doc: string): string[] =>
+    [...doc.matchAll(/"scope":\s*\{\s*"([^"]+)"/g)].map((match) => match[1]);
+
+  it("only tells agents to request grep sources the contract accepts", () => {
+    const requested = documentedSources(cloud);
+    expect(requested.length).toBeGreaterThan(0);
+    for (const source of requested) expect(validSources).toContain(source);
+  });
+
+  it("only shows grep result sources the contract can return", () => {
+    const shown = documentedResultSources(cloud);
+    expect(shown.length).toBeGreaterThan(0);
+    for (const source of shown) expect(validSources).toContain(source);
+  });
+
+  it("only scopes grep by a source the contract accepts", () => {
+    const keys = documentedScopeKeys(cloud);
+    expect(keys.length).toBeGreaterThan(0);
+    for (const key of keys) expect(validSources).toContain(key);
+  });
+
+  it("points ranged node reads at the route that still exists", () => {
+    expect(cloud).toContain("/api/v1/nodes/:nodeId/lines");
+    // Retired in 0.19.0 — resolved doc nodes only, and 404s today.
+    expect(cloud).not.toContain("/api/v1/docs/:nodeId/lines");
   });
 });

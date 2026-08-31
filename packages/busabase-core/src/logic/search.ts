@@ -307,36 +307,49 @@ const searchFileScanTimeoutMs = (): number => {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 5_000;
 };
 
-// Upper bound on how many asset-usage rows a single search scans before
-// falling back to metadata/body matching in JS. Without this, the query below
-// pulled every asset usage in the space unconditionally — fine for a handful
-// of files, but an unbounded full-table fetch (plus a JS loop over all of it)
-// for any space that has accumulated a large asset library. Ordered by
-// recency so the cap favors the files someone is most likely searching for.
+// Upper bound on how many asset-usage rows the CONTENT-scan fallback below
+// reads before giving up — it pays for a real object-storage read per
+// candidate, so it needs a cost bound the way `searchNodeContent` doesn't.
+// Ordered by recency so the cap favors the files someone is most likely
+// searching for. Deliberately NOT applied to identity matching (see spec S2):
+// that used to be the same cap serving both jobs, which meant an exact
+// filename match could be pushed out of the window by unrelated churn
+// elsewhere in the space (record attachments, CR attachments…) and search
+// would report a clean empty result — indistinguishable from "does not
+// exist". A cost bound on a live body-scan is defensible; the same bound
+// silently hiding an exact name match is not.
 const MAX_ASSET_USAGE_SCAN_ROWS = 1000;
 
-const searchAssetBackedFiles = async (query: string, limit: number): Promise<SearchResultVO[]> => {
-  const db = await getDb();
-  const spaceId = getContextSpaceId();
-  const rows = await db
-    .select({
-      assetId: busabaseAssets.id,
-      assetName: busabaseAssets.name,
-      contentKind: busabaseAssets.contentKind,
-      fileName: attachments.fileName,
-      usageMetadata: busabaseAssetUsages.metadata,
-      usagePath: busabaseAssetUsages.path,
-      ownerType: busabaseAssetUsages.ownerType,
-      recordId: busabaseAssetUsages.recordId,
-      fieldSlug: busabaseAssetUsages.fieldSlug,
-      blockId: busabaseAssetUsages.blockId,
-      updatedAt: busabaseAssetUsages.updatedAt,
-      nodeId: busabaseNodes.id,
-      nodeName: busabaseNodes.name,
-      nodeDescription: busabaseNodes.description,
-      nodeSlug: busabaseNodes.slug,
-      nodeType: busabaseNodes.type,
-    })
+/** Shared select shape both phases below query — kept in one place so they can never drift. */
+const assetUsageRowSelection = () => ({
+  assetId: busabaseAssets.id,
+  assetName: busabaseAssets.name,
+  contentKind: busabaseAssets.contentKind,
+  fileName: attachments.fileName,
+  usageMetadata: busabaseAssetUsages.metadata,
+  usagePath: busabaseAssetUsages.path,
+  ownerType: busabaseAssetUsages.ownerType,
+  recordId: busabaseAssetUsages.recordId,
+  fieldSlug: busabaseAssetUsages.fieldSlug,
+  blockId: busabaseAssetUsages.blockId,
+  updatedAt: busabaseAssetUsages.updatedAt,
+  nodeId: busabaseNodes.id,
+  nodeName: busabaseNodes.name,
+  nodeDescription: busabaseNodes.description,
+  nodeSlug: busabaseNodes.slug,
+  nodeType: busabaseNodes.type,
+});
+
+type AssetUsageRow = Awaited<ReturnType<typeof queryAssetUsageRows>>[number];
+
+const queryAssetUsageRows = (
+  db: DbInstance,
+  spaceId: string,
+  extraCondition: ReturnType<typeof and> | undefined,
+  limitRows: number,
+) =>
+  db
+    .select(assetUsageRowSelection())
     .from(busabaseAssetUsages)
     .innerJoin(busabaseAssets, eq(busabaseAssetUsages.assetId, busabaseAssets.id))
     .innerJoin(attachments, eq(busabaseAssets.attachmentId, attachments.id))
@@ -347,10 +360,88 @@ const searchAssetBackedFiles = async (query: string, limit: number): Promise<Sea
         eq(busabaseAssetUsages.spaceId, spaceId),
         isNull(busabaseNodes.archivedAt),
         buildNodeVisibilityCondition(db),
+        extraCondition,
       ),
     )
     .orderBy(desc(busabaseAssetUsages.updatedAt))
-    .limit(MAX_ASSET_USAGE_SCAN_ROWS);
+    .limit(limitRows);
+
+/**
+ * The IDENTITY a user searches a file by — never internal metadata (ids,
+ * hashes, MIME types, owner/field/block references) — pushed into SQL so a
+ * match is found regardless of how the row ranks by recency (spec S2).
+ * `displayName` lives inside a jsonb column, hence the `->>'` extraction
+ * rather than a typed column reference.
+ */
+const fileIdentitySqlCondition = (pattern: string) =>
+  or(
+    ilike(busabaseAssets.name, pattern),
+    sql`${busabaseAssetUsages.metadata}->>'displayName' ILIKE ${pattern}`,
+    ilike(attachments.fileName, pattern),
+    ilike(busabaseAssetUsages.path, pattern),
+    ilike(busabaseNodes.name, pattern),
+    ilike(busabaseNodes.description, pattern),
+    ilike(busabaseNodes.slug, pattern),
+  );
+
+const rowResultKey = (row: AssetUsageRow): string =>
+  `${row.assetId}:${row.nodeId}:${row.usagePath}:${row.recordId}:${row.fieldSlug}:${row.blockId}`;
+
+const toFileSearchResult = (row: AssetUsageRow, body: string): SearchResultVO => {
+  const displayName =
+    typeof row.usageMetadata.displayName === "string" ? row.usageMetadata.displayName : null;
+  return {
+    id: rowResultKey(row),
+    kind: "file",
+    title: displayName
+      ? displayName
+      : row.usagePath
+        ? row.usagePath.split("/").at(-1) || row.assetName
+        : row.assetName,
+    body: body.slice(0, 280),
+    eyebrow: `${row.nodeName} · ${row.ownerType}`,
+    href: fileResultHref(row.nodeType, row.nodeSlug),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+};
+
+/**
+ * Files matched by a live CONTENT scan — the expensive fallback for a phrase
+ * that isn't in any candidate's identity. Bounded by `MAX_ASSET_USAGE_SCAN_ROWS`
+ * candidates and a wall-clock budget, and skips anything `identityMatchedKeys`
+ * already produced a result for (phase 1 already covers those).
+ */
+const scanFileContents = async (
+  db: DbInstance,
+  spaceId: string,
+  query: string,
+  limit: number,
+  identityMatchedKeys: Set<string>,
+): Promise<{ results: SearchResultVO[]; scannedAllEligible: boolean }> => {
+  const rows = await queryAssetUsageRows(db, spaceId, undefined, MAX_ASSET_USAGE_SCAN_ROWS);
+
+  // Cheap existence check, independent of `rows` above: answers "did the cap
+  // leave anything out", which the matched rows can never answer on their own
+  // — the case this exists for is exactly zero content matches, where asking
+  // the (empty) hit set whether anything was capped always says "no" exactly
+  // when the caller most needs to be told otherwise (mirrors `searchNodeContent`'s
+  // `truncatedInScope`, spec D2b).
+  const [beyondCap] = await db
+    .select({ id: busabaseAssetUsages.id })
+    .from(busabaseAssetUsages)
+    .innerJoin(busabaseNodes, eq(busabaseAssetUsages.nodeId, busabaseNodes.id))
+    .where(
+      and(
+        eq(busabaseNodes.spaceId, spaceId),
+        eq(busabaseAssetUsages.spaceId, spaceId),
+        isNull(busabaseNodes.archivedAt),
+        buildNodeVisibilityCondition(db),
+      ),
+    )
+    .orderBy(desc(busabaseAssetUsages.updatedAt))
+    .offset(MAX_ASSET_USAGE_SCAN_ROWS)
+    .limit(1);
+  const overCap = beyondCap !== undefined;
 
   // Same "one source of truth for what text an asset has" infrastructure the
   // grep engine uses (`asset-grep-logic.ts`'s `grepAssets`), instead of a
@@ -382,86 +473,104 @@ const searchAssetBackedFiles = async (query: string, limit: number): Promise<Sea
   const results: SearchResultVO[] = [];
 
   for (const row of rows) {
-    // Cheap, already-in-memory columns. Most hits match here (name / path /
-    // metadata), so we test them BEFORE ever reaching for the file body.
-    const displayName =
-      typeof row.usageMetadata.displayName === "string" ? row.usageMetadata.displayName : null;
-    // Ordinary search may find a file by identity, but internal metadata is
-    // not user content. Raw JSON, hashes, MIME types, ids, owner types and
-    // field/block references must not produce invisible, inexplicable hits.
-    const identityText = [
-      row.assetName,
-      displayName,
-      row.fileName,
-      row.usagePath,
-      row.nodeName,
-      row.nodeDescription,
-      row.nodeSlug,
-    ]
-      .filter(Boolean)
-      .join(" ");
-
-    let body = [row.nodeDescription, row.usagePath, row.fileName].filter(Boolean).join(" ");
-    if (!fileMatchesQuery(query, identityText)) {
-      // Only now — when metadata didn't already match — pay for the file
-      // body, and only for an asset with a `present` text row (a `missing` /
-      // `none` / `stale` row, or no row at all, means: not eligible — fall
-      // through exactly like today's "not eligible" path, no error).
-      const textRow = textRows.get(row.assetId);
-      if (!textRow || textRow.status !== "present") {
-        continue;
-      }
-      // Budget check BEFORE starting this candidate's body scan — once the
-      // deadline trips, every REMAINING candidate skips straight to this same
-      // "not eligible for body scan" fallthrough (they still get the
-      // metadata-only matching above, unaffected).
-      if (Date.now() >= deadline) {
-        continue;
-      }
-      let matchedLine: string | undefined;
-      try {
-        const source = await openAssetTextSource(textRow);
-        for await (const line of source.iterateLines()) {
-          if (fileMatchesQuery(query, line)) {
-            matchedLine = line;
-            break;
-          }
-        }
-      } catch {
-        // Best-effort, mirrors the old `.catch(() => "")` swallow: a read
-        // failure (deleted mid-flight, corrupt cache, etc.) is treated as no
-        // match on this file rather than failing the whole search.
-      }
-      if (matchedLine === undefined) {
-        continue;
-      }
-      // The matched LINE, not the whole file — we no longer hold the whole
-      // body in memory, so the snippet now reflects the real match location
-      // instead of arbitrary head bytes (see the task's disclosed behavior
-      // change).
-      // Put the evidence first. `SearchResultVO.body` is capped below, and the
-      // metadata blob can easily exceed that cap before the matching line is
-      // reached, leaving a correct result with no visible reason for the hit.
-      body = matchedLine;
+    if (identityMatchedKeys.has(rowResultKey(row))) {
+      // Phase 1 (SQL, uncapped) already matched and returned this exact row —
+      // scanning its body too would just re-find the same result a second time.
+      continue;
     }
-    results.push({
-      id: `${row.assetId}:${row.nodeId}:${row.usagePath}:${row.recordId}:${row.fieldSlug}:${row.blockId}`,
-      kind: "file",
-      title: displayName
-        ? displayName
-        : row.usagePath
-          ? row.usagePath.split("/").at(-1) || row.assetName
-          : row.assetName,
-      body: body.slice(0, 280),
-      eyebrow: `${row.nodeName} · ${row.ownerType}`,
-      href: fileResultHref(row.nodeType, row.nodeSlug),
-      updatedAt: row.updatedAt.toISOString(),
-    });
+    // Only reachable for candidates identity didn't already match, and only
+    // for an asset with a `present` text row (a `missing` / `none` / `stale`
+    // row, or no row at all, means: not eligible — skip, no error).
+    const textRow = textRows.get(row.assetId);
+    if (!textRow || textRow.status !== "present") {
+      continue;
+    }
+    // Budget check BEFORE starting this candidate's body scan — once the
+    // deadline trips, every REMAINING candidate is skipped the same way.
+    if (Date.now() >= deadline) {
+      continue;
+    }
+    let matchedLine: string | undefined;
+    try {
+      const source = await openAssetTextSource(textRow);
+      for await (const line of source.iterateLines()) {
+        if (fileMatchesQuery(query, line)) {
+          matchedLine = line;
+          break;
+        }
+      }
+    } catch {
+      // Best-effort, mirrors the old `.catch(() => "")` swallow: a read
+      // failure (deleted mid-flight, corrupt cache, etc.) is treated as no
+      // match on this file rather than failing the whole search.
+    }
+    if (matchedLine === undefined) {
+      continue;
+    }
+    // The matched LINE, not the whole file — the snippet reflects the real
+    // match location instead of arbitrary head bytes.
+    results.push(toFileSearchResult(row, matchedLine));
     if (results.length >= limit) {
-      return results;
+      break;
     }
   }
-  return results;
+  return { results, scannedAllEligible: !overCap };
+};
+
+const searchAssetBackedFiles = async (
+  query: string,
+  limit: number,
+): Promise<{ results: SearchResultVO[]; truncated: boolean }> => {
+  const db = await getDb();
+  const spaceId = getContextSpaceId();
+  const pattern = `%${query}%`;
+
+  // Phase 1: identity match, pushed into SQL, NOT subject to
+  // `MAX_ASSET_USAGE_SCAN_ROWS` — an indexed string comparison over the whole
+  // space costs nothing like a body scan, so there is no reason to let an
+  // exact filename match go missing just because other, newer, unrelated
+  // usages outrank it by recency (spec S2).
+  const identityRows = await queryAssetUsageRows(
+    db,
+    spaceId,
+    fileIdentitySqlCondition(pattern),
+    limit,
+  );
+  const identityResults = identityRows.map((row) =>
+    toFileSearchResult(
+      row,
+      [row.nodeDescription, row.usagePath, row.fileName].filter(Boolean).join(" "),
+    ),
+  );
+
+  if (identityResults.length >= limit) {
+    // Already have everything this call can return — no need to pay for a
+    // content scan, and nothing was left uninspected as a RESULT of this
+    // search (a caller wanting content coverage on a later page would still
+    // hit the scan below).
+    return { results: identityResults, truncated: false };
+  }
+
+  const identityMatchedKeys = new Set(identityRows.map(rowResultKey));
+  const { results: contentResults, scannedAllEligible } = await scanFileContents(
+    db,
+    spaceId,
+    query,
+    limit - identityResults.length,
+    identityMatchedKeys,
+  );
+
+  return {
+    results: [...identityResults, ...contentResults],
+    // Only worth flagging when identity found NOTHING: that's the case spec S2
+    // actually cares about — a query whose only path to a match was the capped
+    // content scan, so an incomplete scan could plausibly be hiding a real file
+    // behind an empty-looking result. Once identity already confirmed the file
+    // exists, that specific "doesn't exist" false reading is off the table —
+    // an uncapped content scan finding additional, separate matches is a real
+    // but lesser concern than what this flag was built to solve.
+    truncated: identityResults.length === 0 && !scannedAllEligible,
+  };
 };
 
 export const searchBusabase = async (
@@ -608,7 +717,7 @@ export const searchBusabase = async (
   const changeRequestsById = new Map(
     changeRequestRows.map((changeRequest) => [changeRequest.id, changeRequest]),
   );
-  const [projectionResults, fileResults] = await Promise.all([
+  const [projectionResults, fileSearch] = await Promise.all([
     Promise.all(
       projectionRows.slice(0, parsed.limit).flatMap((row) => {
         if (row.recordId) {
@@ -624,7 +733,9 @@ export const searchBusabase = async (
         return [];
       }),
     ),
-    wantsFiles ? searchAssetBackedFiles(query, parsed.limit) : Promise.resolve([]),
+    wantsFiles
+      ? searchAssetBackedFiles(query, parsed.limit)
+      : Promise.resolve({ results: [] as SearchResultVO[], truncated: false }),
   ]);
 
   // Node CONTENT. Only on the first page: like `names`, these are not part of
@@ -648,7 +759,7 @@ export const searchBusabase = async (
   for (const result of [
     ...projectionResults,
     ...baseResults,
-    ...fileResults,
+    ...fileSearch.results,
     ...nodeContent.results,
   ]) {
     dedupedResults.set(`${result.kind}:${result.id}`, result);
@@ -658,8 +769,10 @@ export const searchBusabase = async (
   return {
     // Reported even when this page has hits: it says the ANSWER may be
     // incomplete, which is exactly what a caller needs in order to describe an
-    // empty or thin result honestly (spec D2b).
-    contentTruncated: nodeContent.truncated,
+    // empty or thin result honestly (spec D2b). ORed across every source that
+    // can be capped — node content and file content are two independent ways
+    // the same promise can break.
+    contentTruncated: nodeContent.truncated || fileSearch.truncated,
     hasMore: projectionRows.length > parsed.limit,
     limit: parsed.limit,
     offset: parsed.offset,

@@ -263,18 +263,33 @@ describe("Unified Grep — POST /grep (files + docs + records)", () => {
       nodeIds.push(nodeId);
     }
 
-    const result = await client.grep({
-      pattern: "BUDGETNEEDLE-\\d",
-      sources: ["nodes"],
-      maxMatches: 2,
-      // Scope to just these 5 nodes — see the archived-doc test above for why.
-      scope: { nodes: { nodeIds } },
-    });
+    // Pin the pool width instead of inheriting the default. A dispatched batch
+    // always runs to completion, so "some candidates were never reached" only
+    // happens when the budget trips BETWEEN batches — with 5 candidates and a
+    // default wide enough to hold all of them, `notReached` is legitimately 0
+    // and this scenario stops existing. Pinning it to 2 keeps the assertion
+    // about budget accounting rather than about whatever the default happens to
+    // be (it moved 4 → 16; see `grepConcurrency`), matching how
+    // `drive-grep-concurrency.test.ts` sets this env var explicitly.
+    const previousConcurrency = process.env.BUSABASE_GREP_CONCURRENCY;
+    process.env.BUSABASE_GREP_CONCURRENCY = "2";
+    try {
+      const result = await client.grep({
+        pattern: "BUDGETNEEDLE-\\d",
+        sources: ["nodes"],
+        maxMatches: 2,
+        // Scope to just these 5 nodes — see the archived-doc test above for why.
+        scope: { nodes: { nodeIds } },
+      });
 
-    expect(result.truncated).toBe(true);
-    expect(result.matches.length).toBeLessThanOrEqual(2);
-    expect(result.coverage.nodes.notReached).toBeGreaterThan(0);
-    expect(result.coverage.nodes.scanned + result.coverage.nodes.notReached).toBe(nodeIds.length);
+      expect(result.truncated).toBe(true);
+      expect(result.matches.length).toBeLessThanOrEqual(2);
+      expect(result.coverage.nodes.notReached).toBeGreaterThan(0);
+      expect(result.coverage.nodes.scanned + result.coverage.nodes.notReached).toBe(nodeIds.length);
+    } finally {
+      if (previousConcurrency === undefined) delete process.env.BUSABASE_GREP_CONCURRENCY;
+      else process.env.BUSABASE_GREP_CONCURRENCY = previousConcurrency;
+    }
   });
 
   it("files-only grep exposes file matches and the complete honest files coverage block", async () => {
