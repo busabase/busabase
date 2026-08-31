@@ -549,9 +549,22 @@ describe("describeBusabaseAirAppRuntime", () => {
   });
 
   it("reports a known engine both verbatim and narrowed", () => {
+    expect(describeBusabaseAirAppRuntime({ BUSABASE_AIRAPP_RUNTIME: "browser" })).toMatchObject({
+      runtime: "browser",
+      knownRuntime: "browser",
+      hosted: true,
+    });
+  });
+
+  it("keeps the verbatim value while narrowing a retired name to the current one", () => {
+    // The two fields answer different questions, which is why both exist:
+    // `runtime` is what this deployment actually said (useful in a log or a
+    // debug panel), `knownRuntime` is what it means now. A deployment still
+    // emitting `nodepod` must not make an app fall through to the unknown
+    // branch just because Busabase renamed the value.
     expect(describeBusabaseAirAppRuntime({ BUSABASE_AIRAPP_RUNTIME: "nodepod" })).toMatchObject({
       runtime: "nodepod",
-      knownRuntime: "nodepod",
+      knownRuntime: "browser",
       hosted: true,
     });
   });
@@ -570,6 +583,7 @@ describe("describeBusabaseAirAppRuntime", () => {
 
   it("gets the renamed and newer engines right, which the old list did not", () => {
     expect(describeBusabaseAirAppRuntime({ BUSABASE_AIRAPP_RUNTIME: "local" }).hosted).toBe(true);
+    expect(describeBusabaseAirAppRuntime({ BUSABASE_AIRAPP_RUNTIME: "remote" }).hosted).toBe(true);
     expect(describeBusabaseAirAppRuntime({ BUSABASE_AIRAPP_RUNTIME: "sandock" }).hosted).toBe(true);
   });
 

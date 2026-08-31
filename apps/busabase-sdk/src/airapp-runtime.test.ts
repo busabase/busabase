@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   asKnownBusabaseAirAppRuntime,
+  BUSABASE_AIRAPP_RUNTIME_ALIASES,
   BUSABASE_AIRAPP_RUNTIME_ENV,
   BUSABASE_AIRAPP_RUNTIMES,
   isBusabaseAirAppHosted,
@@ -37,12 +38,26 @@ describe("AirApp runtime identification", () => {
     expect(readBusabaseAirAppRuntime({})).toBe("");
   });
 
-  it("still names the engine that was renamed, and not the old name", () => {
-    // `local-node` became `local`; an app branching on the old string would be
-    // branching on something Busabase no longer emits.
-    expect(asKnownBusabaseAirAppRuntime("local")).toBe("local");
-    expect(asKnownBusabaseAirAppRuntime("local-node")).toBeNull();
-    // …but it is still hosted, which is what keeps such an app working.
+  it("normalises a retired engine name to the current one", () => {
+    // The direction that actually occurs: an app pins an SDK, but the Busabase
+    // *deployment* serving it is whatever it is. A older deployment still
+    // emitting `nodepod`/`sandock`/`local-node` must classify as the engine
+    // those became, not as "unknown" — otherwise an app that branches (a demo
+    // printing where it runs, an embed check) loses the answer on every
+    // deployment that has not caught up.
+    expect(asKnownBusabaseAirAppRuntime("nodepod")).toBe("browser");
+    expect(asKnownBusabaseAirAppRuntime("sandock")).toBe("remote");
+    expect(asKnownBusabaseAirAppRuntime("local-node")).toBe("local");
+    // Hosting never depended on any of this, and still does not.
     expect(isBusabaseAirAppHosted("local-node")).toBe(true);
+  });
+
+  it("keeps the alias table from shadowing a current name", () => {
+    // An alias whose key is also a live runtime would silently rewrite a value
+    // Busabase is emitting today — the lookup runs before the membership test.
+    for (const [from, to] of Object.entries(BUSABASE_AIRAPP_RUNTIME_ALIASES)) {
+      expect(BUSABASE_AIRAPP_RUNTIMES).not.toContain(from);
+      expect(BUSABASE_AIRAPP_RUNTIMES).toContain(to);
+    }
   });
 });

@@ -47,7 +47,23 @@ export const BUSABASE_AIRAPP_RUNTIME_ENV = "BUSABASE_AIRAPP_RUNTIME";
  * So the list names runtimes; {@link isBusabaseAirAppHosted} decides hosting,
  * from presence alone, and needs no upgrade to stay correct.
  */
-export const BUSABASE_AIRAPP_RUNTIMES = ["nodepod", "local", "srt", "sandock", "embed"] as const;
+export const BUSABASE_AIRAPP_RUNTIMES = ["browser", "local", "remote", "embed"] as const;
+
+/**
+ * Names Busabase has emitted in the past and may still be emitting to an app
+ * pinned to an older deployment. Kept separate from the list above so the
+ * current vocabulary stays readable, and exported so an app that genuinely
+ * wants to branch (a demo that prints where it is running, say) can normalise
+ * instead of growing its own if-chain. Nothing here gates `hosted`.
+ */
+export const BUSABASE_AIRAPP_RUNTIME_ALIASES: Record<string, BusabaseAirAppRuntime> = {
+  nodepod: "browser",
+  sandock: "remote",
+  "local-node": "local",
+  // Removed engine; mapped to the nearest current one rather than dropped, so
+  // an app reached by an old deployment still classifies rather than throwing.
+  srt: "local",
+};
 
 export type BusabaseAirAppRuntime = (typeof BUSABASE_AIRAPP_RUNTIMES)[number];
 
@@ -75,10 +91,14 @@ export const isBusabaseAirAppHosted = (runtime: string = readBusabaseAirAppRunti
  * predates is normal, not an error, and the caller should fall back to generic
  * behaviour rather than break.
  */
-export const asKnownBusabaseAirAppRuntime = (runtime: string): BusabaseAirAppRuntime | null =>
-  (BUSABASE_AIRAPP_RUNTIMES as readonly string[]).includes(runtime)
-    ? (runtime as BusabaseAirAppRuntime)
+export const asKnownBusabaseAirAppRuntime = (runtime: string): BusabaseAirAppRuntime | null => {
+  // Aliases first, so an app pinned to this SDK keeps classifying correctly
+  // when reached by a deployment still emitting a retired name.
+  const resolved = BUSABASE_AIRAPP_RUNTIME_ALIASES[runtime] ?? runtime;
+  return (BUSABASE_AIRAPP_RUNTIMES as readonly string[]).includes(resolved)
+    ? (resolved as BusabaseAirAppRuntime)
     : null;
+};
 
 /** The body every AirApp serves at `__airapp/runtime`. */
 export interface BusabaseAirAppRuntimeReport {
