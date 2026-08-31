@@ -77,7 +77,7 @@ ENV NODE_ENV=production \
     PG_DATABASE_URL=pglite:///data/pgdata \
     STORAGE_URL="local:/data/storage?base_url=/api/storage&upload_url=/api/storage/upload"
 WORKDIR /app
-RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates ripgrep && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /app/apps/busabase/.next/standalone ./
 COPY --from=build /app/apps/busabase/.next/static ./apps/busabase/.next/static
