@@ -2237,4 +2237,255 @@ describe("busabase-cli commands", () => {
       ]);
     });
   });
+
+  // Feature 3 (node-agent-prompts-v2.md §7.4) — the CLI write path for a node's
+  // custom scenario prompts. Client-side schema validation must reject a
+  // malformed file BEFORE any network request; only a valid array reaches
+  // `nodes.updateMetadata`, and it is stored under the `agentPrompts` key
+  // untransformed.
+  describe("nodes set-agent-prompts", () => {
+    const validPrompts = [
+      {
+        key: "weekly-severity-summary",
+        intent: "read-only",
+        label: { en: "Weekly severity summary", "zh-CN": "本周按严重程度汇总" },
+        body: {
+          en: "Summarize tickets opened in {target} in the last 7 days, grouped by severity.",
+          "zh-CN": "汇总 {target} 最近 7 天新建的工单，按严重程度分组。",
+        },
+      },
+      {
+        key: "draft-response",
+        label: "Draft a response to the selected ticket",
+        body: "Draft a reply to the ticket currently selected in {target}, matching our support tone.",
+      },
+    ];
+
+    it("validates and writes a well-formed file via nodes.updateMetadata", async () => {
+      const dir = await mkdtemp(join(tmpdir(), "busabase-cli-agent-prompts-"));
+      const file = join(dir, "prompts.json");
+      await writeFile(file, JSON.stringify(validPrompts));
+      const calls: Array<{ body: unknown; method: string; url: string }> = [];
+      const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+      global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = input instanceof Request ? input : new Request(input, init);
+        calls.push({
+          body: request.body ? await requestBody(request) : null,
+          method: request.method,
+          url: request.url,
+        });
+        return jsonResponse({ id: "nod_1", metadata: { agentPrompts: validPrompts } });
+      }) as typeof fetch;
+
+      try {
+        const exitCode = await runCli([
+          "--base-url",
+          "http://localhost:15419",
+          "--output",
+          "json",
+          "nodes",
+          "set-agent-prompts",
+          "--node-id",
+          "nod_1",
+          "--file",
+          file,
+        ]);
+
+        expect(exitCode).toBe(0);
+        expect(calls).toEqual([
+          expect.objectContaining({
+            body: { metadata: { agentPrompts: validPrompts } },
+            method: "PATCH",
+            url: "http://localhost:15419/api/v1/nodes/nod_1/metadata",
+          }),
+        ]);
+        expect(JSON.parse(log.mock.calls.at(-1)?.[0] as string)).toEqual({
+          id: "nod_1",
+          metadata: { agentPrompts: validPrompts },
+        });
+      } finally {
+        await rm(dir, { force: true, recursive: true });
+      }
+    });
+
+    it("rejects duplicate keys before making any network request", async () => {
+      const dir = await mkdtemp(join(tmpdir(), "busabase-cli-agent-prompts-"));
+      const file = join(dir, "prompts.json");
+      await writeFile(
+        file,
+        JSON.stringify([
+          { key: "dup", label: "One", body: "Body one about {target}" },
+          { key: "dup", label: "Two", body: "Body two about {target}" },
+        ]),
+      );
+      global.fetch = vi.fn() as typeof fetch;
+
+      try {
+        const exitCode = await runCli([
+          "--base-url",
+          "http://localhost:15419",
+          "nodes",
+          "set-agent-prompts",
+          "--node-id",
+          "nod_1",
+          "--file",
+          file,
+        ]);
+
+        expect(exitCode).toBe(EXIT_CODES.VALIDATION);
+        expect(global.fetch).not.toHaveBeenCalled();
+      } finally {
+        await rm(dir, { force: true, recursive: true });
+      }
+    });
+
+    it("rejects a label over the character limit before making any network request", async () => {
+      const dir = await mkdtemp(join(tmpdir(), "busabase-cli-agent-prompts-"));
+      const file = join(dir, "prompts.json");
+      await writeFile(
+        file,
+        JSON.stringify([{ key: "too-long", label: "x".repeat(81), body: "Body about {target}" }]),
+      );
+      global.fetch = vi.fn() as typeof fetch;
+
+      try {
+        const exitCode = await runCli([
+          "--base-url",
+          "http://localhost:15419",
+          "nodes",
+          "set-agent-prompts",
+          "--node-id",
+          "nod_1",
+          "--file",
+          file,
+        ]);
+
+        expect(exitCode).toBe(EXIT_CODES.VALIDATION);
+        expect(global.fetch).not.toHaveBeenCalled();
+      } finally {
+        await rm(dir, { force: true, recursive: true });
+      }
+    });
+
+    it("rejects an invalid locale key before making any network request", async () => {
+      const dir = await mkdtemp(join(tmpdir(), "busabase-cli-agent-prompts-"));
+      const file = join(dir, "prompts.json");
+      await writeFile(
+        file,
+        JSON.stringify([
+          { key: "bad-locale", label: { xx: "Not a real locale" }, body: "Body about {target}" },
+        ]),
+      );
+      global.fetch = vi.fn() as typeof fetch;
+
+      try {
+        const exitCode = await runCli([
+          "--base-url",
+          "http://localhost:15419",
+          "nodes",
+          "set-agent-prompts",
+          "--node-id",
+          "nod_1",
+          "--file",
+          file,
+        ]);
+
+        expect(exitCode).toBe(EXIT_CODES.VALIDATION);
+        expect(global.fetch).not.toHaveBeenCalled();
+      } finally {
+        await rm(dir, { force: true, recursive: true });
+      }
+    });
+
+    it("rejects a file that isn't valid JSON before making any network request", async () => {
+      const dir = await mkdtemp(join(tmpdir(), "busabase-cli-agent-prompts-"));
+      const file = join(dir, "prompts.json");
+      await writeFile(file, "{ not valid json");
+      global.fetch = vi.fn() as typeof fetch;
+
+      try {
+        const exitCode = await runCli([
+          "--base-url",
+          "http://localhost:15419",
+          "nodes",
+          "set-agent-prompts",
+          "--node-id",
+          "nod_1",
+          "--file",
+          file,
+        ]);
+
+        expect(exitCode).toBe(EXIT_CODES.VALIDATION);
+        expect(global.fetch).not.toHaveBeenCalled();
+      } finally {
+        await rm(dir, { force: true, recursive: true });
+      }
+    });
+
+    it("rejects more than 50 prompts before making any network request", async () => {
+      const dir = await mkdtemp(join(tmpdir(), "busabase-cli-agent-prompts-"));
+      const file = join(dir, "prompts.json");
+      const tooMany = Array.from({ length: 51 }, (_, i) => ({
+        key: `prompt-${i}`,
+        label: "Label",
+        body: "Body about {target}",
+      }));
+      await writeFile(file, JSON.stringify(tooMany));
+      global.fetch = vi.fn() as typeof fetch;
+
+      try {
+        const exitCode = await runCli([
+          "--base-url",
+          "http://localhost:15419",
+          "nodes",
+          "set-agent-prompts",
+          "--node-id",
+          "nod_1",
+          "--file",
+          file,
+        ]);
+
+        expect(exitCode).toBe(EXIT_CODES.VALIDATION);
+        expect(global.fetch).not.toHaveBeenCalled();
+      } finally {
+        await rm(dir, { force: true, recursive: true });
+      }
+    });
+
+    it("accepts an empty array (clears custom prompts back to the type default)", async () => {
+      const dir = await mkdtemp(join(tmpdir(), "busabase-cli-agent-prompts-"));
+      const file = join(dir, "prompts.json");
+      await writeFile(file, "[]");
+      const calls: Array<{ body: unknown; method: string; url: string }> = [];
+      global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = input instanceof Request ? input : new Request(input, init);
+        calls.push({
+          body: request.body ? await requestBody(request) : null,
+          method: request.method,
+          url: request.url,
+        });
+        return jsonResponse({ id: "nod_1", metadata: { agentPrompts: [] } });
+      }) as typeof fetch;
+
+      try {
+        const exitCode = await runCli([
+          "--base-url",
+          "http://localhost:15419",
+          "nodes",
+          "set-agent-prompts",
+          "--node-id",
+          "nod_1",
+          "--file",
+          file,
+        ]);
+
+        expect(exitCode).toBe(0);
+        expect(calls).toEqual([
+          expect.objectContaining({ body: { metadata: { agentPrompts: [] } } }),
+        ]);
+      } finally {
+        await rm(dir, { force: true, recursive: true });
+      }
+    });
+  });
 });

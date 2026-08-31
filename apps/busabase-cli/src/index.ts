@@ -9,4 +9,5 @@ export {
   normalizeBaseUrl,
 } from "busabase-sdk";
 export { render } from "./format.js";
-export { HELP, runCli } from "./run.js";
+export { HELP, pkgVersion, runCli } from "./run.js";
+export { checkForUpdate } from "./update-check.js";

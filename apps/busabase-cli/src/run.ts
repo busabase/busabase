@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { basename, extname } from "node:path";
+import { customAgentPromptsSchema } from "busabase-contract/contract/node-agent-prompt-schemas";
 import { BUSABASE_TASKS, TASK_SUPERSEDED_MCP_TOOLS } from "busabase-contract/tasks";
 import {
   type BusabaseClient,
@@ -626,7 +627,7 @@ function runLocalArgAction(
   };
 }
 
-function pkgVersion(): string {
+export function pkgVersion(): string {
   try {
     const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
       version?: string;
@@ -1339,6 +1340,63 @@ Examples:
           submittedBy: opts.submittedBy as string | undefined,
         }),
       ),
+    );
+
+  addGlobalFlags(nodes.command("set-agent-prompts"))
+    .description(
+      "Set a node's custom scenario prompts, shown in the Agent Prompts dialog instead of the node type's generic ones. Capability prompts (what the node type can actually do) are unaffected.",
+    )
+    .requiredOption("--node-id <id>", "node id to customize")
+    .requiredOption(
+      "--file <path>",
+      "JSON file: an array of { key, intent?, label, body } — see the help text below",
+    )
+    .addHelpText(
+      "after",
+      `
+Each entry: { key: string (unique per node), intent?: "read-only" | "change",
+label: string | { <locale>: string }, body: string | { <locale>: string } }.
+Locale keys (when using the object form): en, zh-CN, zh-TW, ja, ko, de, fr, es,
+pt — anything else fails validation as "Invalid input" on that field.
+"body" may contain a literal "{target}" placeholder, substituted at render time
+with the same node/space description every built-in prompt uses. At most 50
+entries per node, 80 characters per localized label, 8 KiB per localized body.
+
+The file is validated against this exact schema BEFORE any network request —
+a malformed file (duplicate key, an over-limit label/body, an unrecognized
+locale) is reported entry-by-entry and nothing is written. \`--file\`'s
+contents ARE the array to store; this command does not reshape it.
+
+Examples:
+  busabase-cli nodes set-agent-prompts --node-id nod_123 --file prompts.json`,
+    )
+    .action(
+      runAction(state, (client, opts) => {
+        const filePath = opts.file as string;
+        let raw: unknown;
+        try {
+          raw = JSON.parse(readFileSync(filePath, "utf8"));
+        } catch (error) {
+          throw new CliOutcomeError(
+            "VALIDATION",
+            `Could not read/parse ${filePath} as JSON: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
+        const parsed = customAgentPromptsSchema.safeParse(raw);
+        if (!parsed.success) {
+          const detail = formatIssues(parsed.error.issues);
+          throw new CliOutcomeError(
+            "VALIDATION",
+            `Invalid agent prompts in ${filePath}${detail ? ` — ${detail}` : ""}`,
+          );
+        }
+        return client.nodes.updateMetadata({
+          nodeId: opts.nodeId as string,
+          metadata: { agentPrompts: parsed.data },
+        });
+      }),
     );
 
   const bases = program.command("bases").description("Bases (structured tables)");
