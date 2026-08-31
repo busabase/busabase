@@ -1915,7 +1915,11 @@ export const loadBasesByIds = async (baseIds: string[]): Promise<Map<string, Bas
     return new Map<string, BaseVO>();
   }
 
-  const baseRows = await db.select().from(busabaseBases).where(inArray(busabaseBases.id, baseIds));
+  const baseRows = await db
+    .select({ base: busabaseBases, nodeMetadata: busabaseNodes.metadata })
+    .from(busabaseBases)
+    .innerJoin(busabaseNodes, eq(busabaseNodes.id, busabaseBases.nodeId))
+    .where(inArray(busabaseBases.id, baseIds));
   // Soft-deleted fields must NOT reach the VO — `getBase` has always filtered
   // them and this path did not, so the same Base described two different
   // schemas depending on which query loaded it. That leaked into every
@@ -1929,11 +1933,12 @@ export const loadBasesByIds = async (baseIds: string[]): Promise<Map<string, Bas
     .from(busabaseBaseFields)
     .where(and(inArray(busabaseBaseFields.baseId, baseIds), isNull(busabaseBaseFields.deletedAt)));
   return new Map(
-    baseRows.map((base) => [
+    baseRows.map(({ base, nodeMetadata }) => [
       base.id,
       toBaseVO(
         base,
         fieldRows.filter((field) => field.baseId === base.id),
+        nodeMetadata,
       ),
     ]),
   );

@@ -132,7 +132,18 @@ export const toFieldVO = (field: BaseFieldPO): BaseFieldVO => ({
   options: field.options ?? {},
 });
 
-export const toBaseVO = (base: BasePO, fields: BaseFieldPO[]): BaseVO => ({
+/**
+ * `nodeMetadata` is `busabase_nodes.metadata` for this base's OWN node row —
+ * not a `busabase_bases` column, so every caller must fetch it itself (join
+ * `busabaseNodes` on `base.nodeId`, or pass `{}` when the value is provably
+ * discarded downstream, e.g. a search-result projection). Required (not
+ * defaulted to `{}`) so a new call site can't silently drop it.
+ */
+export const toBaseVO = (
+  base: BasePO,
+  fields: BaseFieldPO[],
+  nodeMetadata: Record<string, unknown>,
+): BaseVO => ({
   id: base.id,
   nodeId: base.nodeId,
   slug: base.slug,
@@ -141,6 +152,7 @@ export const toBaseVO = (base: BasePO, fields: BaseFieldPO[]): BaseVO => ({
   reviewPolicy: base.reviewPolicy,
   createdAt: base.createdAt.toISOString(),
   fields: fields.sort((a, b) => a.position - b.position).map(toFieldVO),
+  metadata: nodeMetadata,
 });
 
 // `view.type` is a free-text DB column; map it to a known ViewType, defaulting

@@ -119,6 +119,7 @@ export function FileTreeDetailView({
     fileTree ? (
       <>
         <NodeAgentPromptsButton
+          metadata={fileTree.node.metadata}
           nodeId={fileTree.node.id}
           nodeName={fileTree.node.name}
           nodeType={nodeType}
@@ -569,6 +570,7 @@ export function FileNodeDetailView({
     detail ? (
       <>
         <NodeAgentPromptsButton
+          metadata={detail.node.metadata}
           nodeId={detail.node.id}
           nodeName={detail.node.name}
           nodeType="file"
@@ -708,7 +710,12 @@ export function DocDetailView({
         >
           {messages.common.edit}
         </button>
-        <NodeAgentPromptsButton nodeId={doc.node.id} nodeName={doc.node.name} nodeType="doc" />
+        <NodeAgentPromptsButton
+          metadata={doc.node.metadata}
+          nodeId={doc.node.id}
+          nodeName={doc.node.name}
+          nodeType="doc"
+        />
         <NodePinButton
           payload={{ nodeId: doc.node.id }}
           tabId={nodeSidePanelTabId("doc", doc.node.id)}
@@ -890,6 +897,7 @@ export function FolderDetailView({
     folder ? (
       <>
         <NodeAgentPromptsButton
+          metadata={folder.node.metadata}
           nodeId={folder.node.id}
           nodeName={folder.node.name}
           nodeType="folder"
@@ -1107,7 +1115,12 @@ function FormNodeDetailView({ nodes = [], onNodeLoaded, orpc, slug }: NodeDetail
   useRegisterTopbarNodeActions(
     node && !isAnonymous ? (
       <>
-        <NodeAgentPromptsButton nodeId={node.id} nodeName={node.name} nodeType="form" />
+        <NodeAgentPromptsButton
+          metadata={node.metadata}
+          nodeId={node.id}
+          nodeName={node.name}
+          nodeType="form"
+        />
         <NodePinButton
           payload={{ nodeId: node.id }}
           tabId={nodeSidePanelTabId("form", node.id)}

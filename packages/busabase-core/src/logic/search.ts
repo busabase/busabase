@@ -751,6 +751,14 @@ export const searchBusabase = async (
       toBaseVO(
         base,
         allBaseFields.filter((field) => field.baseId === base.id),
+        // `{}` is deliberate, not a shortcut: this VO only feeds
+        // `toBaseSearchResult` below, which never reads `.metadata`. The two
+        // queries this Base row can come from (`name`/`description`/`slug`
+        // match and the field-name match) are two separate fan-out branches
+        // merged by id into `baseRowsById` — joining `busabaseNodes` into both
+        // just to thread a value nothing consumes would be real, avoidable
+        // query cost for zero behavior change.
+        {},
       ),
     ),
   );

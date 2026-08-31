@@ -37,16 +37,17 @@ import type { AirAppMountedFile, AirAppRunnerKind } from "./runners/types";
  *
  * Opening an AirApp runs it, which is the right feel for a document and the
  * wrong one for a bill: clicking down a folder of AirApps would otherwise
- * provision a sandbox for each node passed through. Nodepod is exempt — its run
- * is free and instant, so debouncing it would only make the good case slower.
+ * provision a machine for each node passed through. The `browser` engine is
+ * exempt — its run is free and instant, so debouncing it would only make the
+ * good case slower.
  */
 const REMOTE_AUTO_RUN_DWELL_MS = 1200;
 
 /** Engines whose runs are free and instant, so opening a node may start them at once. */
-const FREE_ENGINES: AirAppRunnerKind[] = ["nodepod"];
+const FREE_ENGINES: AirAppRunnerKind[] = ["browser"];
 
 /**
- * Owns the Nodepod runner lifecycle (mount/install/start, log streaming,
+ * Owns the AirApp runner lifecycle (mount/install/start, log streaming,
  * preview URL) independent of which tab is currently visible. Called once at
  * the AirAppDetailView level so switching between the App/Files/Logs tabs
  * never unmounts this state and never disposes a live running app.
@@ -76,7 +77,7 @@ export function useAirAppRunner({
   const entry = useAirAppRunnerStore(selectEntry);
   const { status, logLines, previewUrl, error } = entry;
   const selectedRunnerKind = useAirAppRunnerStore((state) =>
-    nodeId ? (state.selectedKinds[nodeId] ?? "nodepod") : "nodepod",
+    nodeId ? (state.selectedKinds[nodeId] ?? "browser") : "browser",
   );
   const availableEngines = useAirAppEngineAvailability();
   const setRunnerKind = useCallback(
@@ -100,7 +101,7 @@ export function useAirAppRunner({
     // runner is constructed — and the answer lives in the app's own files. The
     // alternative (construct the stored default, then discover the mismatch
     // during install) is what would make opening a Python AirApp auto-start it
-    // on Nodepod, a browser JavaScript runtime, and fail every single time.
+    // in the browser, a JavaScript-only runtime, and fail every single time.
     //
     // Only the manifest needs to be fetched: runtime inference keys off which
     // marker files exist, which the listing already tells us.
@@ -140,8 +141,8 @@ export function useAirAppRunner({
         engineNote = `[busabase] engine "${resolved}" selected for runtime "${plan.runtime}"\n`;
         // Write the derived engine back to the selection, so the picker names
         // the engine that is actually running. Leaving it alone showed
-        // "Nodepod (Browser)" beside a Python app running on Local Node — the
-        // toolbar contradicting the logs, with the logs being right.
+        // "In browser" beside a Python app running on the host — the toolbar
+        // contradicting the logs, with the logs being right.
         store.selectRunnerKind(currentNodeId, resolved);
       }
       runnerKind = resolved;
@@ -426,17 +427,15 @@ export function AirAppRunControls({
   };
 
   const engineLabel: Record<AirAppRunnerKind, string> = {
-    nodepod: messages.airapp.engineNodepod,
+    browser: messages.airapp.engineBrowser,
     local: messages.airapp.engineLocal,
-    srt: messages.airapp.engineSrt,
-    sandock: messages.airapp.engineSandock,
+    remote: messages.airapp.engineRemote,
   };
 
   const engineHint: Record<AirAppRunnerKind, string> = {
-    nodepod: messages.airapp.engineNodepodHint,
+    browser: messages.airapp.engineBrowserHint,
     local: messages.airapp.engineLocalHint,
-    srt: messages.airapp.engineSrtHint,
-    sandock: messages.airapp.engineSandockHint,
+    remote: messages.airapp.engineRemoteHint,
   };
 
   const pinToSidePanel = () => {
@@ -460,9 +459,12 @@ export function AirAppRunControls({
       <span className="hidden text-muted-foreground/70 text-xs sm:inline">
         {statusLabel[status]}
       </span>
-      {/* Engine picker is a dev-only affordance: in a production build this
-       *  compiles out entirely, so end users never see it and always get the
-       *  default engine ("nodepod"). */}
+      {/* Shown only where there is a choice to make. A deployment that offers
+       *  one engine renders no picker at all — which is every cloud deployment
+       *  with no remote provider configured, and was the basis of an earlier
+       *  comment here claiming this "compiles out in production". It does not:
+       *  there is no build-time gate, and the single-user build (which offers
+       *  `browser` + `local`) does show this control to end users. */}
       {availableEngines.length > 1 ? (
         <>
           <Select

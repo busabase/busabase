@@ -102,6 +102,7 @@ export function NodeAgentPromptsDialog({
   spaceId,
   spaceName,
   scope,
+  metadata,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -112,6 +113,11 @@ export function NodeAgentPromptsDialog({
   spaceName?: string;
   /** Narrows the prompts to one column or one record. Omit for the whole node. */
   scope?: NodePromptScope;
+  /** The node's own `metadata` — read for `metadata.agentPrompts` (Feature 3's
+   *  per-node custom scenario prompts). Omit when the caller has no loaded
+   *  `NodeVO` on hand; the dialog falls back to the node type's default
+   *  scenarios, same as before this prop existed. */
+  metadata?: Record<string, unknown>;
 }) {
   const messages = useCoreI18n();
   const locale = useCoreLocale();
@@ -125,8 +131,8 @@ export function NodeAgentPromptsDialog({
   }, [spaceId]);
 
   const context: NodePromptContext = useMemo(
-    () => ({ nodeType, nodeName, nodeId, spaceId: resolvedSpaceId, spaceName, scope }),
-    [nodeType, nodeName, nodeId, resolvedSpaceId, spaceName, scope],
+    () => ({ nodeType, nodeName, nodeId, spaceId: resolvedSpaceId, spaceName, scope, metadata }),
+    [nodeType, nodeName, nodeId, resolvedSpaceId, spaceName, scope, metadata],
   );
 
   const { scenarios, capabilities } = useMemo(

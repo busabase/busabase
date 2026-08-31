@@ -3230,6 +3230,10 @@ const buildBaseVO = (base: SeedBaseDef, anchor: Date): BaseVO => ({
   reviewPolicy: REVIEW_POLICY,
   createdAt: iso(anchor, 200),
   fields: base.fields.map((field, index) => toBaseFieldVO(base.id, field, index)),
+  // `SeedBaseDef` (unlike `SeedFolderDef`) has no `metadata` field yet — the
+  // in-memory demo dataset has no real `busabase_nodes` row behind it to read
+  // one from. Custom Agent Prompts for a demo Base is out of scope here.
+  metadata: {},
 });
 
 /**

@@ -60,4 +60,34 @@ describe("Agent prompt sidebar sections", () => {
     ).toEqual(["doc-draft", "doc-review"]);
     expect(sections.find((section) => section.name === "Content")?.items[0]?.key).toBe("doc-read");
   });
+
+  it("renders a node's custom scenario prompts (Feature 3) when metadata carries them", () => {
+    const { scenarios, capabilities } = buildNodeAgentPrompts(
+      {
+        nodeId: "nod_base_support",
+        nodeName: "Customer Support Tickets",
+        nodeType: "base",
+        spaceId: "spc_acme",
+        metadata: {
+          agentPrompts: [
+            {
+              key: "weekly-severity-summary",
+              intent: "read-only",
+              label: "Weekly severity summary",
+              body: "Summarize tickets opened in {target} in the last 7 days, grouped by severity.",
+            },
+          ],
+        },
+      },
+      "en",
+      coreMessagesEn,
+    );
+    const sections = buildPromptSections(scenarios, capabilities, "Scenarios");
+
+    expect(
+      sections.find((section) => section.name === "Scenarios")?.items.map(({ key }) => key),
+    ).toEqual(["weekly-severity-summary"]);
+    // The generic Base scenario is gone, replaced — not merged alongside it.
+    expect(scenarios.map((prompt) => prompt.key)).not.toContain("base-bulk-import");
+  });
 });

@@ -31,6 +31,7 @@ export function NodeAgentPromptsButton({
   scope,
   spaceId,
   spaceName,
+  metadata,
 }: {
   nodeId: string;
   nodeName: string;
@@ -39,6 +40,11 @@ export function NodeAgentPromptsButton({
   scope?: NodePromptScope;
   spaceId?: string;
   spaceName?: string;
+  /** The node's own `metadata` — read for `metadata.agentPrompts` (Feature 3's
+   *  per-node custom scenario prompts). Omit when the caller has no loaded
+   *  `NodeVO` on hand (e.g. a `BaseVO`-only header); the dialog falls back to
+   *  the node type's default scenarios, same as before this prop existed. */
+  metadata?: Record<string, unknown>;
 }) {
   const messages = useCoreI18n();
   const [open, setOpen] = useState(false);
@@ -68,6 +74,7 @@ export function NodeAgentPromptsButton({
       </Button>
       {open && (
         <NodeAgentPromptsDialog
+          metadata={metadata}
           nodeId={nodeId}
           nodeName={nodeName}
           nodeType={nodeType}

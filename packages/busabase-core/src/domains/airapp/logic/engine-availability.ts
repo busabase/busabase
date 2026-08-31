@@ -33,12 +33,10 @@ export interface AirAppEngineAvailabilityOptions {
 export function resolveAvailableAirAppEngines(
   options: AirAppEngineAvailabilityOptions,
 ): AirAppRunnerKind[] {
-  const engines: AirAppRunnerKind[] = ["nodepod"];
+  // `browser` is unconditional: it runs in the viewer's own tab, so there is
+  // no configuration that could make it unavailable.
+  const engines: AirAppRunnerKind[] = ["browser"];
   if (options.allowHostProcesses) engines.push("local");
-  if (resolveSandockConfig(options.env ?? process.env)) engines.push("sandock");
-  // `srt` is deliberately never listed. It network-isolates the process, so it
-  // can run an app but never preview one — offering it in a picker whose whole
-  // purpose is "see your app running" would be offering a dead end. It stays
-  // reachable to code that wants isolated execution with logs only.
+  if (resolveSandockConfig(options.env ?? process.env)) engines.push("remote");
   return engines;
 }

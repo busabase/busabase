@@ -12,7 +12,7 @@
  * damaging one: the app silently skips its own OAuth gate, calls `/api/v1`
  * with no credential, and reports a connection error the user can't act on.
  *
- * Both engines spawn the AirApp's own process (`npm run dev`), so the host can
+ * Every engine spawns the AirApp's own process (`npm run dev`), so the host can
  * simply *tell* the app what it is. That is a positive fact the browser cannot
  * fake or misread, and it is independent of hostname, port, tunnel, iframe
  * nesting and sub-path proxying. The app's server (`server.js` in the
@@ -25,8 +25,19 @@
  * ever set it.
  */
 
-/** Every runtime in which Busabase itself is hosting the AirApp process. */
-export type AirAppHostedRuntime = "nodepod" | "local" | "srt" | "sandock" | "embed";
+/**
+ * Every runtime in which Busabase itself is hosting the AirApp process.
+ *
+ * Mirrors `AirAppRunnerKind` plus `"embed"`, which is not a runner: it is the
+ * embedded-preview host, which spawns nothing and so never appears in a picker.
+ *
+ * Apps must NOT compare against this list. Presence of the variable is what
+ * means "hosted"; a membership test is what broke 66 shipped apps when
+ * `local-node` was renamed to `local`, and is now rejected by the app
+ * template's own checker. The union exists to keep Busabase's own emitters
+ * honest, not to be copied into an app.
+ */
+export type AirAppHostedRuntime = "browser" | "local" | "remote" | "embed";
 
 /** Env var name — kept here so the two engines and the docs can't drift apart. */
 export const AIRAPP_RUNTIME_ENV_VAR = "BUSABASE_AIRAPP_RUNTIME";

@@ -258,6 +258,10 @@ export function BusabaseDashboardShell({
     id: string;
     name: string;
     type: string;
+    /** For `metadata.agentPrompts` (per-node custom scenario prompts,
+     *  node-agent-prompts-v2.md §7.3) — the sidebar row already has the full
+     *  `NodeVO` when this is set, so this is free, not a second fetch. */
+    metadata: Record<string, unknown>;
   } | null>(null);
   // The node targeted by the sidebar "•••" → "Share" / "Delete" actions. Both
   // carry more of the node than the other targets do: Share needs the slug to
@@ -576,7 +580,12 @@ export function BusabaseDashboardShell({
         ? (node) => setMoveTarget({ id: node.id, name: node.name })
         : undefined,
       onOpenAgentPrompts: (node) =>
-        setPromptsTarget({ id: node.id, name: node.name, type: node.type }),
+        setPromptsTarget({
+          id: node.id,
+          name: node.name,
+          type: node.type,
+          metadata: node.metadata,
+        }),
       // Share and Delete carry the same orpc gate as Permissions/Rename: both
       // dialogs are pure mutation surfaces (a public link toggle, a node_delete
       // change request) with nothing to call without a wired client.
@@ -808,6 +817,7 @@ export function BusabaseDashboardShell({
         )}
         {promptsTarget && (
           <NodeAgentPromptsDialog
+            metadata={promptsTarget.metadata}
             nodeId={promptsTarget.id}
             nodeName={promptsTarget.name}
             nodeType={promptsTarget.type}

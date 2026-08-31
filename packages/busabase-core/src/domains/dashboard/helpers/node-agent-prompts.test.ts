@@ -178,6 +178,216 @@ const LOCALE_EXPECTATIONS: Record<
   },
 };
 
+/**
+ * Feature 3 — per-node custom scenario prompts (node-agent-prompts-v2.md §7.3).
+ *
+ * `metadata.agentPrompts`, when present and valid, REPLACES the node type's
+ * `SCENARIOS_BY_TYPE` scenarios for the whole-node dialog only; the capability
+ * tier and every scoped (field/record/cell) dialog are untouched. Read-time
+ * validation must fail SAFE — corrupt or malformed data falls back to the type
+ * default rather than crashing or rendering garbage (§10's failure matrix).
+ */
+describe("buildNodeAgentPrompts custom scenario prompts", () => {
+  const CUSTOM_PROMPTS = [
+    {
+      key: "weekly-severity-summary",
+      intent: "read-only" as const,
+      label: { en: "Weekly severity summary", "zh-CN": "本周按严重程度汇总" },
+      body: {
+        en: "Summarize tickets opened in {target} in the last 7 days, grouped by severity.",
+        "zh-CN": "汇总 {target} 最近 7 天新建的工单，按严重程度分组。",
+      },
+    },
+    {
+      key: "draft-response",
+      label: "Draft a response to the selected ticket",
+      body: "Draft a reply to the ticket currently selected in {target}, matching our support tone.",
+    },
+  ];
+
+  it("replaces the type's default scenarios with the node's custom ones", () => {
+    const { scenarios, capabilities } = buildNodeAgentPrompts(
+      { ...BASE_CONTEXT, metadata: { agentPrompts: CUSTOM_PROMPTS } },
+      "en",
+      coreMessagesEn,
+    );
+    expect(scenarios.map((prompt) => prompt.key)).toEqual([
+      "weekly-severity-summary",
+      "draft-response",
+    ]);
+    expect(scenarios.map((prompt) => prompt.key)).not.toContain("base-bulk-import");
+    // Capability tier is derived from the type registry, never authored — must
+    // be bit-for-bit identical to the no-custom-prompts case.
+    expect(capabilities).toEqual(build().capabilities);
+  });
+
+  it("substitutes {target} with the same target line a curated prompt receives", () => {
+    const { scenarios } = buildNodeAgentPrompts(
+      { ...BASE_CONTEXT, metadata: { agentPrompts: CUSTOM_PROMPTS } },
+      "en",
+      coreMessagesEn,
+    );
+    const summary = scenarios.find((prompt) => prompt.key === "weekly-severity-summary");
+    expect(summary?.body).toContain(
+      'Summarize tickets opened in Target: the Busabase Base "Posts" (nodeId: nod_base_blog)',
+    );
+    expect(summary?.body).not.toContain("{target}");
+  });
+
+  it("resolves the plain-string iString form for every locale (no translation supplied)", () => {
+    const { scenarios } = buildNodeAgentPrompts(
+      { ...BASE_CONTEXT, metadata: { agentPrompts: CUSTOM_PROMPTS } },
+      "zh-CN",
+      dashboardZhCN,
+    );
+    const draft = scenarios.find((prompt) => prompt.key === "draft-response");
+    expect(draft?.label).toBe("Draft a response to the selected ticket");
+    expect(draft?.body).toContain("Draft a reply to the ticket currently selected in");
+  });
+
+  it("uses the requested locale when a translation is supplied", () => {
+    const { scenarios } = buildNodeAgentPrompts(
+      { ...BASE_CONTEXT, metadata: { agentPrompts: CUSTOM_PROMPTS } },
+      "zh-CN",
+      dashboardZhCN,
+    );
+    const summary = scenarios.find((prompt) => prompt.key === "weekly-severity-summary");
+    expect(summary?.label).toBe("本周按严重程度汇总");
+    expect(summary?.body).toContain("汇总");
+  });
+
+  it("keeps read-only prompts free of the approval instruction and applies it when intent is omitted", () => {
+    const { scenarios } = buildNodeAgentPrompts(
+      { ...BASE_CONTEXT, metadata: { agentPrompts: CUSTOM_PROMPTS } },
+      "en",
+      coreMessagesEn,
+    );
+    const summary = scenarios.find((prompt) => prompt.key === "weekly-severity-summary");
+    const draft = scenarios.find((prompt) => prompt.key === "draft-response");
+    expect(summary?.body).not.toContain("Submit the change as a ChangeRequest");
+    // Omitted `intent` must default to requiring approval, same as a curated
+    // prompt with no `intent` — a custom prompt cannot silently skip review.
+    expect(draft?.body).toContain("Submit the change as a ChangeRequest");
+  });
+
+  it("falls through to the type default when metadata.agentPrompts is absent", () => {
+    const withNoMetadata = buildNodeAgentPrompts(BASE_CONTEXT, "en", coreMessagesEn);
+    const withEmptyMetadata = buildNodeAgentPrompts(
+      { ...BASE_CONTEXT, metadata: {} },
+      "en",
+      coreMessagesEn,
+    );
+    expect(withEmptyMetadata.scenarios.map((p) => p.key)).toEqual(
+      withNoMetadata.scenarios.map((p) => p.key),
+    );
+  });
+
+  it("falls through to the type default when agentPrompts is an empty array", () => {
+    const { scenarios } = buildNodeAgentPrompts(
+      { ...BASE_CONTEXT, metadata: { agentPrompts: [] } },
+      "en",
+      coreMessagesEn,
+    );
+    expect(scenarios.map((prompt) => prompt.key)).toContain("base-bulk-import");
+  });
+
+  it("falls through safely when agentPrompts is not an array (corrupt jsonb)", () => {
+    const { scenarios } = buildNodeAgentPrompts(
+      { ...BASE_CONTEXT, metadata: { agentPrompts: { not: "an array" } } },
+      "en",
+      coreMessagesEn,
+    );
+    expect(scenarios.map((prompt) => prompt.key)).toContain("base-bulk-import");
+  });
+
+  it("falls through safely when an entry fails schema validation (e.g. a bad manual edit)", () => {
+    const { scenarios } = buildNodeAgentPrompts(
+      {
+        ...BASE_CONTEXT,
+        metadata: {
+          agentPrompts: [{ key: "broken", label: 12345, body: "Body about {target}" }],
+        },
+      },
+      "en",
+      coreMessagesEn,
+    );
+    expect(scenarios.map((prompt) => prompt.key)).toContain("base-bulk-import");
+  });
+
+  it("falls through safely on duplicate keys within the custom list", () => {
+    const { scenarios } = buildNodeAgentPrompts(
+      {
+        ...BASE_CONTEXT,
+        metadata: {
+          agentPrompts: [
+            { key: "dup", label: "One", body: "Body one about {target}" },
+            { key: "dup", label: "Two", body: "Body two about {target}" },
+          ],
+        },
+      },
+      "en",
+      coreMessagesEn,
+    );
+    expect(scenarios.map((prompt) => prompt.key)).toContain("base-bulk-import");
+  });
+
+  it("never crashes when metadata itself is malformed junk", () => {
+    expect(() =>
+      buildNodeAgentPrompts(
+        { ...BASE_CONTEXT, metadata: { agentPrompts: "just a string" } },
+        "en",
+        coreMessagesEn,
+      ),
+    ).not.toThrow();
+  });
+
+  it("does NOT apply a node's custom prompts to a field/record/cell-scoped dialog", () => {
+    const metadata = { agentPrompts: CUSTOM_PROMPTS };
+    const fieldScoped = buildNodeAgentPrompts(
+      { ...BASE_CONTEXT, metadata, scope: { kind: "field", ...FIELD } },
+      "en",
+      coreMessagesEn,
+    );
+    expect(fieldScoped.scenarios.map((p) => p.key)).toEqual([
+      "field-clean-values",
+      "field-fill-blanks",
+      "field-audit",
+      "field-redesign",
+    ]);
+
+    const recordScoped = buildNodeAgentPrompts(
+      { ...BASE_CONTEXT, metadata, scope: { kind: "record", ...RECORD } },
+      "en",
+      coreMessagesEn,
+    );
+    expect(recordScoped.scenarios.map((p) => p.key)).toEqual([
+      "record-complete",
+      "record-rewrite",
+      "record-explain",
+    ]);
+
+    const cellScoped = buildNodeAgentPrompts(
+      { ...BASE_CONTEXT, metadata, scope: { kind: "cell", ...RECORD, ...FIELD } },
+      "en",
+      coreMessagesEn,
+    );
+    expect(cellScoped.scenarios.map((p) => p.key)).toEqual([
+      "cell-rewrite",
+      "cell-derive",
+      "cell-explain",
+    ]);
+  });
+
+  it("does not affect a node type that has no default scenarios either (still additive-only)", () => {
+    const { scenarios } = buildNodeAgentPrompts(
+      { ...BASE_CONTEXT, nodeType: "folder", metadata: {} },
+      "en",
+      coreMessagesEn,
+    );
+    expect(scenarios).toEqual([]);
+  });
+});
+
 describe("Doc read prompt", () => {
   it("is a Content capability rather than a scenario and keeps mutating Doc prompts approval-first", () => {
     const { scenarios, capabilities } = buildNodeAgentPrompts(DOC_CONTEXT, "en", coreMessagesEn);

@@ -13,11 +13,11 @@ import { createContext, type ReactNode, useContext } from "react";
  * wrong is a picker that offers an engine which cannot work, discovered only
  * after clicking Run.
  *
- * The default is the one engine that is always available: Nodepod runs in the
+ * The default is the one engine that is always available: `browser` runs in the
  * page itself, so it needs nothing configured. A host that passes nothing gets
  * exactly that, which is a safe floor rather than an optimistic guess.
  */
-const AirAppEngineAvailabilityContext = createContext<AirAppRunnerKind[]>(["nodepod"]);
+const AirAppEngineAvailabilityContext = createContext<AirAppRunnerKind[]>(["browser"]);
 
 interface AirAppEngineAvailabilityProviderProps {
   children: ReactNode;
@@ -29,7 +29,7 @@ export function AirAppEngineAvailabilityProvider({
   engines,
 }: AirAppEngineAvailabilityProviderProps) {
   return (
-    <AirAppEngineAvailabilityContext.Provider value={engines ?? ["nodepod"]}>
+    <AirAppEngineAvailabilityContext.Provider value={engines ?? ["browser"]}>
       {children}
     </AirAppEngineAvailabilityContext.Provider>
   );

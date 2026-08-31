@@ -2,8 +2,8 @@ import "server-only";
 
 import type { AirAppRuntimeEvent } from "busabase-contract/domains/airapp/contract";
 
-/** The engines that run server-side. `nodepod` never reaches this layer — it is the browser. */
-type AirAppRunnerEngine = "local" | "srt" | "sandock";
+/** The engines that run server-side. `browser` never reaches this layer — it is the tab. */
+type AirAppRunnerEngine = "local" | "remote";
 
 import { assertNodePermission } from "../../../logic/node-acl";
 import { currentPreviewOwner } from "./local-preview-registry";
@@ -173,10 +173,9 @@ const runtimeFor = (
   signal: AbortSignal,
 ): AsyncGenerator<AirAppRuntimeEvent> => {
   switch (engine) {
-    case "sandock":
+    case "remote":
       return runAirAppSandock(input, signal);
     case "local":
-    case "srt":
       return runAirAppLocal({ ...input, engine }, signal);
     default: {
       const exhaustive: never = engine;

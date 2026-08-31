@@ -7,8 +7,13 @@ import { airAppRuntimeEnv } from "../utils/airapp-runtime-env";
 import { registerLocalPreview, unregisterLocalPreview } from "./local-preview-registry";
 
 /**
- * The Sandock engine: an AirApp running in a remote container instead of on the
- * host.
+ * The `"remote"` engine, as implemented by Sandock: an AirApp running on a
+ * machine provisioned per run instead of on the Busabase host.
+ *
+ * Sandock is named here, in the adapter, and nowhere in the contract — the wire
+ * value is `"remote"`, which is the property the caller is choosing. Swapping
+ * this provider is then a change to this file plus `runtimeFor`'s switch, not a
+ * breaking change to every AirApp manifest that pinned an engine.
  *
  * **There is no per-language work in this file, and that is the point.** A
  * sandbox is a machine with a shell; "supporting Python" is not a feature
@@ -171,7 +176,7 @@ export async function* runAirAppSandock(
       // A container that stays up while we exec into it — the same shape buda
       // uses. Without this the sandbox would exit as soon as its entrypoint did.
       command: ["/bin/sh", "-c", "sleep infinity"],
-      env: { ...airAppRuntimeEnv("sandock"), PORT: String(port) },
+      env: { ...airAppRuntimeEnv("remote"), PORT: String(port) },
       activeDeadlineSeconds: SANDBOX_DEADLINE_SECONDS,
     });
     sandboxId = created.data.id;

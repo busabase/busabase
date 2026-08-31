@@ -15,7 +15,7 @@ import {
  *
  * The contract only holds if the host really injects the variable, so this
  * asserts it reaches the spawned process rather than just existing as a
- * constant. The in-browser Nodepod engine passes the same fragment through
+ * constant. The in-browser engine passes the same fragment through
  * `Nodepod.boot`/`spawn`, which is covered by live verification instead: it
  * needs a real Service Worker and Web Worker runtime.
  */
@@ -26,9 +26,9 @@ describe("airAppRuntimeEnv", () => {
   });
 
   it("produces a spreadable single-key fragment per hosted runtime", () => {
-    expect(airAppRuntimeEnv("nodepod")).toEqual({ BUSABASE_AIRAPP_RUNTIME: "nodepod" });
+    expect(airAppRuntimeEnv("browser")).toEqual({ BUSABASE_AIRAPP_RUNTIME: "browser" });
     expect(airAppRuntimeEnv("local")).toEqual({ BUSABASE_AIRAPP_RUNTIME: "local" });
-    expect(airAppRuntimeEnv("srt")).toEqual({ BUSABASE_AIRAPP_RUNTIME: "srt" });
+    expect(airAppRuntimeEnv("remote")).toEqual({ BUSABASE_AIRAPP_RUNTIME: "remote" });
     expect(airAppRuntimeEnv("embed")).toEqual({ BUSABASE_AIRAPP_RUNTIME: "embed" });
   });
 });
@@ -40,7 +40,7 @@ describe("runAirAppLocal — runtime env injection", () => {
     vi.doUnmock("../src/logic/node-acl");
   });
 
-  const collectSpawns = async (engine: "local" | "srt") => {
+  const collectSpawns = async () => {
     vi.resetModules();
 
     const spawn = vi.fn(() => {
@@ -57,19 +57,8 @@ describe("runAirAppLocal — runtime env injection", () => {
     vi.doMock("../src/logic/node-acl", () => ({
       assertNodePermission: vi.fn(async () => undefined),
     }));
-    vi.doMock("@anthropic-ai/sandbox-runtime", () => ({
-      SandboxManager: {
-        checkDependencies: () => ({ errors: [], warnings: [] }),
-        isSupportedPlatform: () => true,
-        initialize: vi.fn(async () => undefined),
-        wrapWithSandboxArgv: vi.fn(async () => ({ argv: ["node", "-e", ""], env: {} })),
-        cleanupAfterCommand: vi.fn(() => undefined),
-        reset: vi.fn(async () => undefined),
-      },
-    }));
-
     const { runAirAppLocal } = await import("../src/domains/airapp/logic/local-runtime");
-    for await (const _event of runAirAppLocal({ nodeId: "env-node", files: {}, engine })) {
+    for await (const _event of runAirAppLocal({ nodeId: "env-node", files: {}, engine: "local" })) {
       // drain
     }
     return spawn.mock.calls.map(
@@ -78,21 +67,13 @@ describe("runAirAppLocal — runtime env injection", () => {
   };
 
   it("tells a bare local app what it is, alongside the injected PORT", async () => {
-    const envs = await collectSpawns("local");
+    const envs = await collectSpawns();
     expect(envs.length).toBeGreaterThan(0);
     for (const env of envs) {
       expect(env.BUSABASE_AIRAPP_RUNTIME).toBe("local");
       // The app is reverse-proxied onto a sub-path of busabase's origin; PORT is
       // how the proxy finds it, and both must survive together.
       expect(Number.parseInt(env.PORT ?? "", 10)).toBeGreaterThan(0);
-    }
-  });
-
-  it("tells a sandboxed srt app what it is, even though srt injects no PORT", async () => {
-    const envs = await collectSpawns("srt");
-    expect(envs.length).toBeGreaterThan(0);
-    for (const env of envs) {
-      expect(env.BUSABASE_AIRAPP_RUNTIME).toBe("srt");
     }
   });
 });

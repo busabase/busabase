@@ -5,26 +5,32 @@ export type {
 } from "../filetree/types";
 
 /**
- * Which engine an AirApp's dev server runs under.
+ * Where an AirApp's dev server runs. One axis — whose machine executes the
+ * code — and nothing else, which is what keeps the three values comparable:
  *
- * - `"nodepod"` boots the `@scelar/nodepod` in-browser Web Worker runtime (V1,
- *   unchanged) — a virtual, browser-side filesystem + process.
- * - `"local"` runs a real `npm install` + `npm run dev` as a **bare**
- *   server-side OS process (NOT OS-isolated — trust model is the local host).
- *   Its listening port IS reachable from the host, so the same-origin reverse
- *   proxy preview (`/api/airapp-preview/{nodeId}/`) and the
- *   `/api/v1` same-origin data access both work.
- * - `"srt"` runs the same `npm install` + `npm run dev` lifecycle wrapped in
- *   `@anthropic-ai/sandbox-runtime`'s `SandboxManager` for real OS-level
- *   isolation (seccomp/bubblewrap on Linux, `sandbox-exec` on macOS). Isolated
- *   execution + logs work, but live web preview is UNAVAILABLE: srt
- *   network-isolates the process, so its app port is not reachable from the
- *   host reverse proxy.
+ * - `"browser"` runs the app inside the viewer's own tab, on the
+ *   `@scelar/nodepod` Web Worker runtime: a virtual, browser-side filesystem +
+ *   process. Nothing is installed and nothing is spawned on any server, so it
+ *   is the one engine every deployment can always offer — and the only one
+ *   restricted to JavaScript.
+ * - `"local"` runs a real `npm install` / `npm run dev` (or the equivalent for
+ *   whatever language the app declares) as a bare OS process on the machine
+ *   hosting Busabase. Any language, previewable, but **not isolated** — the
+ *   trust model is the host's, which is why only the single-user build offers
+ *   it.
+ * - `"remote"` runs the same lifecycle on a separate machine provisioned per
+ *   run (today: a Sandock container). Any language, isolated, and nothing
+ *   executes on the Busabase host — at the cost of needing a provider
+ *   configured, and of being someone's bill.
  *
- * All three stream back to the browser over the `airapps.runLocal` oRPC
- * event iterator — see
- * `busabase-core/domains/airapp/components/runners/local-runner.ts`
- * (which backs both `local` and `srt`, differing only in the server-side
- * execution mode).
+ * The value names the location, never the product or the mechanism, so that
+ * swapping Nodepod for another in-browser runtime, or Sandock for a different
+ * remote provider, is an adapter change and not a wire-format change. Product
+ * names stay where the products actually are: `nodepod-runner.ts`,
+ * `sandock-runtime.ts`, `SANDOCK_BASE_URL`.
+ *
+ * `local` and `remote` both stream back to the browser over the
+ * `airapps.runLocal` oRPC event iterator; `browser` never calls it. See
+ * `busabase-core/domains/airapp/components/runners/`.
  */
-export type AirAppRunnerKind = "nodepod" | "local" | "srt" | "sandock";
+export type AirAppRunnerKind = "browser" | "local" | "remote";

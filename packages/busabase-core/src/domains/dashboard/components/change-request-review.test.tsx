@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
-import type { ChangeRequestVO } from "busabase-contract/types";
+import type { AuditEventVO, ChangeRequestVO } from "busabase-contract/types";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
@@ -13,6 +13,11 @@ Object.assign(globalThis, { React });
 
 vi.mock("./operation-diff", () => ({
   OperationFieldChanges: () => React.createElement("div", null, "Before & Co → After Ltd"),
+  // `operation-revise` imports these from the same module; leaving them out of the
+  // mock makes them `undefined` and the revise form throws the moment it opens.
+  getOperationFieldLabel: (_cr: unknown, _op: unknown, slug: string) => slug,
+  isLongTextValue: (value: unknown) =>
+    typeof value === "string" && (value.length > 56 || value.includes("\n")),
 }));
 
 const timestamp = "2026-08-25T08:00:00.000Z";
@@ -77,6 +82,7 @@ const changeRequest = {
     reviewPolicy: { kind: "single", requiredApprovals: 1 },
     createdAt: timestamp,
     fields: [],
+    metadata: {},
   },
   node: null,
   operations: [operation],
@@ -95,15 +101,19 @@ const useStaticLocation = (): [string, (path: string) => void] => [
 ];
 const useStaticSearch = () => "";
 
-const renderReview = (readOnly: boolean, visitorKind: DashboardVisitorKind = "member") =>
+const renderReview = (
+  readOnly: boolean,
+  visitorKind: DashboardVisitorKind = "member",
+  overrides: { auditEvents?: AuditEventVO[]; changeRequest?: ChangeRequestVO } = {},
+) =>
   renderToStaticMarkup(
     <QueryClientProvider client={new QueryClient()}>
       <Router hook={useStaticLocation} searchHook={useStaticSearch}>
         <CoreI18nProvider locale="en">
           <DashboardVisitorProvider visitorKind={visitorKind}>
             <ChangeRequestReviewLayout
-              auditEvents={[]}
-              changeRequest={changeRequest}
+              auditEvents={overrides.auditEvents ?? []}
+              changeRequest={overrides.changeRequest ?? changeRequest}
               client={client}
               focusOperationId={null}
               onApprove={() => undefined}
@@ -146,5 +156,68 @@ describe("Change Request read-only preview", () => {
     expect(markup).toContain("Discussion");
     expect(markup).not.toContain("Comments on this change");
     expect(markup).not.toContain("No comments yet. Start the discussion below.");
+  });
+});
+
+const revisionEvent = {
+  id: "aud_revision",
+  action: "change_request.updated",
+  actorId: "usr_reviewer",
+  actor: null,
+  baseId: "bas_customers",
+  recordId: null,
+  changeRequestId: "crq_preview",
+  operationId: "opr_preview",
+  commitId: "cmt_after",
+  metadata: { operation: "record_update", revision: true },
+  createdAt: timestamp,
+} as unknown as AuditEventVO;
+
+describe("Operation revise entry point", () => {
+  it("offers Edit on a revisable change request", () => {
+    expect(renderReview(false)).toContain("Edit");
+  });
+
+  it("withholds Edit in the read-only preview", () => {
+    expect(renderReview(true)).not.toContain(">Edit<");
+  });
+
+  it("withholds Edit from anonymous embed visitors", () => {
+    expect(renderReview(false, "anonymous")).not.toContain(">Edit<");
+  });
+
+  it.each(["approved", "merged", "rejected", "closed"])(
+    "withholds Edit once the change request is %s",
+    (status) => {
+      const markup = renderReview(false, "member", {
+        changeRequest: { ...changeRequest, status } as ChangeRequestVO,
+      });
+
+      expect(markup).not.toContain(">Edit<");
+    },
+  );
+
+  it("offers Edit on a conflicted change request — revising is the documented exit", () => {
+    const markup = renderReview(false, "member", {
+      changeRequest: { ...changeRequest, status: "conflict" } as ChangeRequestVO,
+    });
+
+    expect(markup).toContain("Edit");
+  });
+});
+
+describe("Revision timeline", () => {
+  it("records a revision in the discussion timeline", () => {
+    const markup = renderReview(false, "member", { auditEvents: [revisionEvent] });
+
+    expect(markup).toContain("revised this change request");
+  });
+
+  it("ignores non-revision change_request.updated bookkeeping", () => {
+    const markup = renderReview(false, "member", {
+      auditEvents: [{ ...revisionEvent, metadata: {} } as unknown as AuditEventVO],
+    });
+
+    expect(markup).not.toContain("revised this change request");
   });
 });

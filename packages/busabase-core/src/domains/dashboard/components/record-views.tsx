@@ -110,7 +110,12 @@ export function RecordTopbarActions({
     <div className="flex items-center gap-2">
       {/* Record-scoped Agent prompts. The View/Edit switch next to it is the
           record's whole toolbar, so this is the only place a per-record "ask my
-          agent to fix THIS row" entry point can live. */}
+          agent to fix THIS row" entry point can live. No `metadata` prop: a
+          node's custom scenario prompts (node-agent-prompts-v2.md §7.3) only
+          ever replace the WHOLE-NODE dialog's scenario tier, never a
+          record/cell-scoped one (see `buildNodeAgentPrompts`'s `scope.kind`
+          check) — passing it here would be inert even if `BaseVO` carried
+          metadata, which it doesn't. */}
       <NodeAgentPromptsButton
         nodeId={base.nodeId}
         nodeName={base.name}
@@ -1431,6 +1436,9 @@ function CellAgentPromptsButton({ field, record }: { field: BaseFieldVO; record:
         <Sparkles className="size-3" />
       </button>
       {open && (
+        // No `metadata` prop — same reasoning as `RecordTopbarActions` above:
+        // a cell-scoped dialog never reads custom scenario prompts (§7.3 only
+        // replaces the whole-node scenario tier).
         <NodeAgentPromptsDialog
           nodeId={record.base.nodeId}
           nodeName={record.base.name}

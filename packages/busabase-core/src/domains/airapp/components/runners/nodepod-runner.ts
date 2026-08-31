@@ -52,14 +52,14 @@ export class NodepodRunner implements AirAppRunner {
 
   /**
    * `runtimeKind` is what the running app sees in `BUSABASE_AIRAPP_RUNTIME` —
-   * the same in-browser engine backs both the dashboard preview (`"nodepod"`)
+   * the same in-browser engine backs both the dashboard preview (`"browser"`)
    * and the public embed (`"embed"`), and an app may legitimately behave
    * differently in the two (the embed relays `/api/v1` through a
    * capability-scoped, read-only route rather than the viewer's session).
    */
   constructor(
     private readonly previewScript?: string,
-    private readonly runtimeKind: AirAppHostedRuntime = "nodepod",
+    private readonly runtimeKind: AirAppHostedRuntime = "browser",
   ) {}
 
   private requirePlan(): RunPlan {
