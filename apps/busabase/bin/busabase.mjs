@@ -2,7 +2,7 @@
 // `busabase` — one command, two roles:
 //   • `busabase server`  → boot the bundled Next standalone app (pglite, zero setup)
 //   • anything else       → delegate to the busabase-cli client (talks to /api/v1)
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
@@ -14,6 +14,33 @@ const pkgRoot = resolve(here, "..");
 function flag(argv, name) {
   const i = argv.indexOf(`--${name}`);
   return i >= 0 ? argv[i + 1] : undefined;
+}
+
+function pkgVersion() {
+  try {
+    const pkg = JSON.parse(readFileSync(resolve(pkgRoot, "package.json"), "utf8"));
+    return pkg.version ?? "0.0.0";
+  } catch {
+    return "0.0.0";
+  }
+}
+
+/**
+ * Read-only "new version available" notice — checks THIS package (`busabase`),
+ * not `busabase-cli`, even though it's `busabase-cli`'s `checkForUpdate` doing
+ * the work: an end user running `npx busabase …` only ever installed `busabase`
+ * itself, so that's the version that should be compared, regardless of which
+ * code path (server boot, or a delegated client command) triggered the check.
+ */
+async function printUpdateNoticeIfAny() {
+  try {
+    const { checkForUpdate } = await import("busabase-cli");
+    const notice = await checkForUpdate("busabase", pkgVersion());
+    if (notice) console.error(notice);
+  } catch {
+    // busabase-cli not resolvable/built (e.g. running straight from source
+    // without a build step) — never let this block startup or a command.
+  }
 }
 
 // Colorize only on a real terminal that hasn't opted out (NO_COLOR).
@@ -44,7 +71,7 @@ function printSplash({ host, port, dataDir }) {
   out.push("");
   for (const line of logo) out.push(c.brand(line));
   out.push(
-    `${c.dim("   open-source review app")} ${c.dim("·")} ${c.dim("self-hosted, zero-setup")}`,
+    `${c.dim("   open-source review app")} ${c.dim("·")} ${c.dim(`v${pkgVersion()}`)} ${c.dim("·")} ${c.dim("self-hosted, zero-setup")}`,
   );
   out.push("");
   out.push(`   ${c.green("➜")}  ${c.bold("Server")}   ${c.cyan(url)}`);
@@ -182,6 +209,7 @@ async function startServer(argv) {
   // Standalone server.js resolves static/public relative to its own directory.
   process.chdir(dirname(entry));
   printSplash({ host, port, dataDir });
+  await printUpdateNoticeIfAny();
   await import(entry);
 }
 
@@ -224,6 +252,9 @@ async function main() {
       `\nServer:\n  busabase server [--port <n>] [--host <addr>] [--data <dir>]\n${c.dim("  boots the bundled Busabase server (zero setup, pglite) — see `busabase server --help`")}`,
     );
   }
+  // stderr only, same reasoning as busabase-cli's own bin — a delegated
+  // command's stdout is the contract a caller's `--output json` parses.
+  await printUpdateNoticeIfAny();
   process.exit(code);
 }
 

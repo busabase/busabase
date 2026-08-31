@@ -70,8 +70,8 @@ test.describe("AirApp runtimes", () => {
     });
 
     // 2. The engine was NOT the stored default. Auto-run means a Python app
-    //    would otherwise have started on Nodepod — a browser JavaScript runtime
-    //    — and failed every time.
+    //    would otherwise have started on the `browser` engine — a JavaScript
+    //    runtime in a tab — and failed every time.
     await expect(page.getByText(/engine "local" selected for runtime "python"/)).toBeVisible();
 
     // 3. It really installed and started: uvicorn's own banner, which no Node
@@ -82,7 +82,7 @@ test.describe("AirApp runtimes", () => {
 
     // 4. The toolbar names the engine that is actually running, not the stale
     //    stored default.
-    await expect(page.getByRole("combobox")).toContainText(/Local machine/i);
+    await expect(page.getByRole("combobox")).toContainText(/This machine/i);
 
     // 5. And the preview serves the app's markup through the same-origin
     //    reverse proxy — the assertion the logs cannot make. This is also the
@@ -96,6 +96,93 @@ test.describe("AirApp runtimes", () => {
         .frameLocator('[data-dashboard-active-view] iframe[title="AirApp preview"]:visible')
         .getByRole("heading", { name: "Running on Python" }),
     ).toBeVisible({ timeout: RUN_READY_TIMEOUT });
+  });
+
+  test("offers the engines this deployment can actually run, named by location", async ({
+    page,
+    request,
+  }) => {
+    // The OSS build sets `allowHostProcesses: true`, so it offers exactly two:
+    // the tab and the host. The picker only renders when there is a choice, so
+    // its presence here is itself part of the assertion — an earlier comment in
+    // RunPanel claimed this control "compiles out in production", which it does
+    // not.
+    const app = await createFromDemo(request, [], "e2e engine picker");
+    await page.goto(`/dashboard/local/airapp/${app.slug}`);
+
+    const picker = page.getByRole("combobox");
+    await expect(picker).toBeVisible({ timeout: RUN_READY_TIMEOUT });
+    await expect(picker).toContainText(/In browser/i);
+
+    await picker.click();
+    const options = page.getByRole("listbox").getByRole("option");
+    // Named for where the code runs. A product name here (`Nodepod`,
+    // `Sandock`) is the thing this rename removed from the user-facing surface.
+    // Scoped to the listbox on purpose: matching the whole page also matches
+    // node names in the sidebar, which made this assertion pass or fail on
+    // whatever the workspace happened to contain.
+    await expect(options.filter({ hasText: /In browser/i })).toHaveCount(1);
+    await expect(options.filter({ hasText: /This machine/i })).toHaveCount(1);
+    await expect(options.filter({ hasText: /Nodepod|Sandock|srt/i })).toHaveCount(0);
+    // `remote` needs a provider configured; this deployment has none, so it
+    // must not be offered — the picker promising an engine that cannot work is
+    // the failure `resolveAvailableAirAppEngines` exists to prevent.
+    await expect(options.filter({ hasText: /Remote machine/i })).toHaveCount(0);
+    await page.keyboard.press("Escape");
+  });
+
+  test("accepts an airapp.json still pinned to a retired engine name", async ({
+    page,
+    request,
+  }) => {
+    // An `airapp.json` lives in someone else's repository. Busabase renamed
+    // these values and cannot rewrite those files, so `nodepod` must still
+    // resolve rather than fail the app over a rename it had no part in.
+    const app = await createFromDemo(
+      request,
+      [{ path: "airapp.json", content: JSON.stringify({ preferredEngine: "nodepod" }, null, 2) }],
+      "e2e legacy engine name",
+    );
+
+    await page.goto(`/dashboard/local/airapp/${app.slug}`);
+    await openLogs(page);
+
+    // No manifest error, and it runs.
+    await expect(page.getByText(/preferredEngine/)).toHaveCount(0);
+    await expect(page.getByText(/\$ npm install/)).toBeVisible({ timeout: RUN_READY_TIMEOUT });
+    await expect(page.getByRole("combobox")).toContainText(/In browser/i);
+    // And the log says the manifest was read. It used to say "no airapp.json"
+    // here — a line the reader can check and find false, which is what sent
+    // someone debugging a manifest that was in fact working.
+    await expect(page.getByText(/airapp\.json declares no "runtime"/)).toBeVisible();
+    await expect(page.getByText(/no airapp\.json/)).toHaveCount(0);
+  });
+
+  test("rejects the removed engine at authoring time, naming it specifically", async ({
+    request,
+  }) => {
+    // Where this actually surfaces, verified rather than assumed: the write-time
+    // validator refuses the manifest, so the author is told at the moment they
+    // save it — not after navigating to a node that then fails to run. `srt` was
+    // a real engine, not a typo, so being told only "must be one of browser,
+    // local, remote" would leave them diffing two lists and none the wiser.
+    const response = await request.post("/api/v1/file-trees", {
+      data: {
+        type: "airapp",
+        autoMerge: true,
+        slug: slugify(unique("e2e removed engine")),
+        name: unique("e2e removed engine"),
+        files: [
+          { path: "airapp.json", content: JSON.stringify({ preferredEngine: "srt" }, null, 2) },
+        ],
+      },
+    });
+
+    expect(response.status()).toBe(422);
+    const body = await response.json();
+    expect(body.code).toBe("AIRAPP_NOT_RUNNABLE");
+    expect(body.data.reason).toContain("an engine that has been removed");
+    expect(body.data.reason).toContain('Use "remote" for isolated execution');
   });
 
   test("leaves a plain Node AirApp on the in-browser engine", async ({ page, request }) => {
