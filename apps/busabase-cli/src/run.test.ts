@@ -2261,7 +2261,7 @@ describe("busabase-cli commands", () => {
       },
     ];
 
-    it("validates and writes a well-formed file via nodes.updateMetadata", async () => {
+    it("validates and writes a well-formed file via nodes.updateAgentPrompts", async () => {
       const dir = await mkdtemp(join(tmpdir(), "busabase-cli-agent-prompts-"));
       const file = join(dir, "prompts.json");
       await writeFile(file, JSON.stringify(validPrompts));
@@ -2274,7 +2274,7 @@ describe("busabase-cli commands", () => {
           method: request.method,
           url: request.url,
         });
-        return jsonResponse({ id: "nod_1", metadata: { agentPrompts: validPrompts } });
+        return jsonResponse({ nodeId: "nod_1", agentPrompts: validPrompts });
       }) as typeof fetch;
 
       try {
@@ -2294,14 +2294,14 @@ describe("busabase-cli commands", () => {
         expect(exitCode).toBe(0);
         expect(calls).toEqual([
           expect.objectContaining({
-            body: { metadata: { agentPrompts: validPrompts } },
-            method: "PATCH",
-            url: "http://localhost:15419/api/v1/nodes/nod_1/metadata",
+            body: { agentPrompts: validPrompts },
+            method: "PUT",
+            url: "http://localhost:15419/api/v1/nodes/nod_1/agent-prompts",
           }),
         ]);
         expect(JSON.parse(log.mock.calls.at(-1)?.[0] as string)).toEqual({
-          id: "nod_1",
-          metadata: { agentPrompts: validPrompts },
+          nodeId: "nod_1",
+          agentPrompts: validPrompts,
         });
       } finally {
         await rm(dir, { force: true, recursive: true });
@@ -2464,7 +2464,7 @@ describe("busabase-cli commands", () => {
           method: request.method,
           url: request.url,
         });
-        return jsonResponse({ id: "nod_1", metadata: { agentPrompts: [] } });
+        return jsonResponse({ nodeId: "nod_1", agentPrompts: [] });
       }) as typeof fetch;
 
       try {
@@ -2480,9 +2480,60 @@ describe("busabase-cli commands", () => {
         ]);
 
         expect(exitCode).toBe(0);
-        expect(calls).toEqual([
-          expect.objectContaining({ body: { metadata: { agentPrompts: [] } } }),
+        expect(calls).toEqual([expect.objectContaining({ body: { agentPrompts: [] } })]);
+      } finally {
+        await rm(dir, { force: true, recursive: true });
+      }
+    });
+
+    /**
+     * The CLI and the server are released separately, so a current CLI routinely
+     * talks to a server that predates the endpoint it wants. Without the
+     * fallback this command would simply stop working against every such
+     * server — which is exactly how an earlier change took a working command to
+     * zero results in production.
+     */
+    it("falls back to the metadata endpoint when the server has no agent-prompts route", async () => {
+      const dir = await mkdtemp(join(tmpdir(), "busabase-cli-agent-prompts-"));
+      const file = join(dir, "prompts.json");
+      await writeFile(file, JSON.stringify(validPrompts));
+      const calls: Array<{ body: unknown; method: string; url: string }> = [];
+      global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = input instanceof Request ? input : new Request(input, init);
+        calls.push({
+          body: request.body ? await requestBody(request) : null,
+          method: request.method,
+          url: request.url,
+        });
+        // An older server has no such route and answers 404.
+        if (request.url.endsWith("/agent-prompts")) {
+          return new Response(JSON.stringify({ message: "Not found" }), {
+            headers: { "content-type": "application/json" },
+            status: 404,
+          });
+        }
+        return jsonResponse({ id: "nod_1", metadata: { agentPrompts: validPrompts } });
+      }) as typeof fetch;
+
+      try {
+        const exitCode = await runCli([
+          "--base-url",
+          "http://localhost:15419",
+          "nodes",
+          "set-agent-prompts",
+          "--node-id",
+          "nod_1",
+          "--file",
+          file,
         ]);
+
+        expect(exitCode).toBe(0);
+        // Tried the new route first, then wrote where an old server still reads.
+        expect(calls.map((call) => `${call.method} ${new URL(call.url).pathname}`)).toEqual([
+          "PUT /api/v1/nodes/nod_1/agent-prompts",
+          "PATCH /api/v1/nodes/nod_1/metadata",
+        ]);
+        expect(calls.at(-1)?.body).toEqual({ metadata: { agentPrompts: validPrompts } });
       } finally {
         await rm(dir, { force: true, recursive: true });
       }

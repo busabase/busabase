@@ -38,6 +38,27 @@ const isNetworkError = (error: unknown): boolean =>
     error instanceof Error ? error.message : String(error),
   );
 
+/**
+ * Whether an already-thrown error is worth another attempt.
+ *
+ * `shouldRetry` below decides from a `Response`; this decides from an `Error`,
+ * for callers that retry ABOVE the fetch layer (see `backup`'s exporter, which
+ * has to retry oRPC reads that `withRetry` refuses to repeat because they are
+ * POSTs). The distinction that matters is transient-vs-deterministic: a dropped
+ * socket or a 502 may answer differently next time, while a 404, a validation
+ * refusal or a shape mismatch answers identically every time — retrying those
+ * only burns the backoff, which at scale (one per attachment, on a space with
+ * tens of thousands) is the difference between a slow backup and a stalled one.
+ */
+export function isTransientError(error: unknown): boolean {
+  if (isNetworkError(error)) return true;
+  const status = (error as { status?: unknown } | null)?.status;
+  if (typeof status === "number") return status === 429 || status >= 500;
+  // Callers that turn a bad response into an `Error` (`throw new Error(
+  // \`HTTP ${res.status}\`)`) keep the code only in the message.
+  return /\bHTTP (429|5\d\d)\b/.test(error instanceof Error ? error.message : String(error));
+}
+
 /** `Retry-After` is either delay-seconds or an HTTP-date; both are legal. */
 export function parseRetryAfter(header: string | null, now = Date.now()): number | undefined {
   if (!header) return undefined;
