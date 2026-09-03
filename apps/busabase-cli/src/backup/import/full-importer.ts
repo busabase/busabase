@@ -65,6 +65,13 @@ export interface FullImportOptions {
   archivePath: string;
   /** The archive's `manifest.spaceId` — the space it was ORIGINALLY exported from, needed so the server can remap the root node deterministically instead of guessing from row content. */
   sourceSpaceId: string;
+  /**
+   * Continue a restore whose process was killed partway through (Ctrl-C, OOM,
+   * a dropped connection). Replays the whole archive with the server skipping
+   * rows that already landed, and — critically — does NOT roll back on
+   * failure, since the point is to keep the progress an earlier attempt made.
+   */
+  resume?: boolean;
   onProgress?: (message: string) => void;
 }
 
@@ -146,10 +153,10 @@ export async function streamNdjsonRows(
 export async function importFull(
   options: FullImportOptions,
 ): Promise<{ ok: boolean; warnings: string[] }> {
-  const { client, archivePath, sourceSpaceId, onProgress } = options;
+  const { client, archivePath, sourceSpaceId, resume = false, onProgress } = options;
   const log = onProgress ?? (() => {});
 
-  const { sessionId } = await client.dump.importBegin({ sourceSpaceId });
+  const { sessionId } = await client.dump.importBegin({ sourceSpaceId, resume });
   try {
     const docBodyRows: Array<{ nodeId: string; markdown: string }> = [];
 
@@ -211,7 +218,11 @@ export async function importFull(
     const result = await client.dump.importCommit({ sessionId });
     return result;
   } catch (error) {
-    await client.dump.importAbort({ sessionId }).catch(() => undefined);
+    // Rolling back a RESUMED restore would delete the progress this run just
+    // recovered while leaving whatever the killed run had already landed —
+    // moving the restore backwards. Leave it where it is so another
+    // `--resume` can carry on from here.
+    if (!resume) await client.dump.importAbort({ sessionId }).catch(() => undefined);
     throw error;
   }
 }

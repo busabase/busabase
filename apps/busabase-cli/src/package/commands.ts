@@ -25,6 +25,7 @@ import { renderPackageTree, writePackageFiles } from "busabase-package/layout-wr
 import {
   assertPlanIsApplicable,
   buildInstallPlan,
+  findPlanBlockers,
   renderPlan,
   resolveTargetState,
 } from "busabase-package/plan";
@@ -64,6 +65,8 @@ export interface InstallCommandOptions {
    * already has real data may not want demo rows appearing in it.
    */
   noSampleRecords?: boolean;
+  /** Keep what a failed install created instead of moving it to Trash. */
+  noRollback?: boolean;
 }
 
 /**
@@ -155,8 +158,20 @@ export const runInstall = async (
   });
 
   if (options.dryRun) {
-    const report = `${renderPlan(plan)}\n\nDry run — nothing was created.`;
-    return options.json ? { dryRun: true, ...toPlanSummary(plan) } : report;
+    // Run the SAME checks a real install runs, and report them instead of
+    // throwing — a dry run's whole job is to say what would happen. It used to
+    // return before `assertPlanIsApplicable` ran at all, so it printed a
+    // clean-looking plan for packages that could not install: name collisions,
+    // a missing `--auto-merge`, and required fields the package cannot fill
+    // all went unmentioned until the real run hit them (the last of those only
+    // once the server was already writing records).
+    const blockers = findPlanBlockers(plan, Boolean(options.autoMerge));
+    const verdict =
+      blockers.length === 0
+        ? "Dry run — nothing was created. No blockers found."
+        : `Dry run — nothing was created.\n\nThis package would NOT install as-is:\n\n${blockers.join("\n\n")}`;
+    const report = `${renderPlan(plan)}\n\n${verdict}`;
+    return options.json ? { dryRun: true, blockers, ...toPlanSummary(plan) } : report;
   }
 
   assertPlanIsApplicable(plan, Boolean(options.autoMerge));
@@ -167,6 +182,7 @@ export const runInstall = async (
     onProgress: reportProgress,
     serverUrl: options.serverUrl,
     installSampleRecords: !options.noSampleRecords,
+    rollbackOnFailure: !options.noRollback,
     source: {
       ...(github ? { repo: `${github.owner}/${github.repo}`, ref: github.ref } : {}),
       ...(resolved.subdir

@@ -3,14 +3,29 @@
  * `.bbdump` archive format. Thin orchestration: drain every dump-eligible table
  * into an archive, or verify an archive and replay it into an empty space.
  */
+import { access } from "node:fs/promises";
 import type { BusabaseClient } from "busabase-sdk";
-import { exportFull } from "./export/full-exporter.js";
+import { exportFull, SPOOL_SUFFIXES } from "./export/full-exporter.js";
 import { verifyArchive } from "./format/archive-reader.js";
 import { importFull } from "./import/full-importer.js";
 
 /** Progress is diagnostics, not data — it must never pollute `--output json` on stdout. */
 const reportProgress = (message: string): void => {
   console.error(message);
+};
+
+/** Which of this archive's spool files a previous, interrupted run left behind. */
+const findSpoolFiles = async (outFile: string): Promise<string[]> => {
+  const present: string[] = [];
+  for (const suffix of SPOOL_SUFFIXES) {
+    try {
+      await access(`${outFile}${suffix}`);
+      present.push(`${outFile}${suffix}`);
+    } catch {
+      // absent — nothing to resume from for this one
+    }
+  }
+  return present;
 };
 
 /**
@@ -48,11 +63,14 @@ const STATE_ONLY_RESTORE_MESSAGE = [
 export interface BackupCommandOptions {
   outFile: string;
   includeHistory: boolean;
+  resume?: boolean;
   stateOnly?: boolean;
   json: boolean;
   /** Host to resolve a local server's root-relative asset urls against — see FullExportOptions.sourceHost. */
   baseUrl: string;
   spaceId?: string;
+  /** `--retries`, honoured by the export's own retry loops — see FullExportOptions.retries. */
+  retries?: number;
   toolVersion: string;
 }
 
@@ -68,8 +86,23 @@ export const runBackup = async (
     );
   }
 
+  // A killed backup leaves its downloaded blobs in `.part` files next to the
+  // archive. Without `--resume` they would be silently overwritten and
+  // re-downloaded — say so rather than quietly repeating ~2/3 of the run.
+  if (!options.resume) {
+    const orphaned = await findSpoolFiles(options.outFile);
+    if (orphaned.length > 0) {
+      reportProgress(
+        `  NOTE: found ${orphaned.length} partial file(s) from an interrupted backup ` +
+          `(${orphaned.join(", ")}). Re-run with --resume to continue from them; ` +
+          "this run will start over and overwrite them.",
+      );
+    }
+  }
+
   reportProgress(
-    `Backing up space ${spaceId} → ${options.outFile} (full fidelity, history=${options.includeHistory})`,
+    `Backing up space ${spaceId} → ${options.outFile} (full fidelity, history=${options.includeHistory}` +
+      `${options.resume ? ", resuming" : ""})`,
   );
   const manifest = await exportFull({
     client,
@@ -78,6 +111,8 @@ export const runBackup = async (
     sourceHost: options.baseUrl,
     includeHistory: options.includeHistory,
     toolVersion: options.toolVersion,
+    resume: Boolean(options.resume),
+    retries: options.retries,
     onProgress: (message) => reportProgress(`  ${message}`),
   });
 
@@ -111,7 +146,10 @@ export const runRestore = async (
   options: RestoreCommandOptions,
 ): Promise<unknown> => {
   if (options.resume) {
-    throw new Error("--resume is not implemented yet in this version.");
+    reportProgress(
+      "Resuming: rows already present are left alone, and this run will NOT roll back on " +
+        "failure. Only do this to continue THIS archive into THIS space.",
+    );
   }
 
   reportProgress(`Reading ${options.file} …`);
@@ -131,6 +169,7 @@ export const runRestore = async (
     client,
     archivePath: options.file,
     sourceSpaceId: manifest.spaceId,
+    resume: Boolean(options.resume),
     onProgress: (message) => reportProgress(`  ${message}`),
   });
 

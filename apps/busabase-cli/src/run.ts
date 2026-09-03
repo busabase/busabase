@@ -56,9 +56,11 @@ import { findChangeRequestId, waitForChangeRequest } from "./wait.js";
 
 /**
  * CLI config = the SDK's resolved client config plus the terminal-only `output`
- * mode. `output` never reaches the client factory; it drives {@link render}.
+ * mode and the resolved `retries` count. `output` never reaches the client
+ * factory; it drives {@link render}. `retries` is already baked into `fetch`,
+ * but is carried separately for commands that retry above the fetch layer.
  */
-type ResolvedConfig = BusabaseConfig & { output: OutputFormat };
+type ResolvedConfig = BusabaseConfig & { output: OutputFormat; retries: number };
 
 /** Public docs page covering every error below, for both Cloud and local. Linked from each error. */
 const DOCS_TROUBLESHOOTING = "https://busabase.com/docs/troubleshooting";
@@ -100,8 +102,16 @@ function resolveConfig(opts: OptionValues): ResolvedConfig {
     process.env.BUSABASE_BASE_URL ??
     file.BUSABASE_BASE_URL ??
     DEFAULT_BASE_URL;
+  const retries = (opts.retries as number | undefined) ?? DEFAULT_RETRIES;
   return {
     baseUrl,
+    /**
+     * The number itself, not just the `fetch` built from it. `backup` retries
+     * at a level this wrapper cannot reach — see `FullExportOptions.retries` —
+     * and has to honour the same flag, or `--retries` silently means nothing
+     * for the one command whose failures cost hours.
+     */
+    retries,
     // The CLI has no --web-url flag yet; same-origin is the overwhelmingly common
     // case, matching busabase-sdk's own resolveConfig default.
     webUrl: process.env.BUSABASE_WEB_URL ?? file.BUSABASE_WEB_URL ?? baseUrl,
@@ -116,7 +126,7 @@ function resolveConfig(opts: OptionValues): ResolvedConfig {
     // One wrapper serves the typed client (`createBusabaseClient` takes a
     // `fetch`) and `rawFetch`, so health / openapi / `api` retry the same way
     // every contract call does.
-    fetch: withRetry(fetch, { retries: (opts.retries as number | undefined) ?? DEFAULT_RETRIES }),
+    fetch: withRetry(fetch, { retries }),
   };
 }
 
@@ -488,6 +498,30 @@ type Handler = (
 ) => Promise<unknown>;
 
 /** Wrap a leaf-command handler: resolve config, build the client, render the result. */
+/**
+ * Is this a 404 — either "this server has no such route" or "no such node"?
+ *
+ * Duck-typed rather than an `instanceof ORPCError` check, because this package
+ * deliberately depends on no `@orpc/*` package; the SDK builds the error and
+ * only its `status` is needed here.
+ *
+ * Not distinguishing the two 404s is safe for the one thing this gates: a
+ * version fallback whose other branch targets the SAME node. An old server
+ * answers 404 because the route is missing and the fallback then succeeds; a
+ * current server answers 404 because the node does not exist, the fallback
+ * asks about the same missing node and 404s too, and the caller still sees a
+ * "not found" error. The cost of guessing wrong is one extra request, not a
+ * write landing somewhere unintended.
+ */
+function isNotFound(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "status" in error &&
+    (error as { status?: unknown }).status === 404
+  );
+}
+
 function runAction(state: CliState, handler: Handler) {
   return async (_opts: OptionValues, cmd: Command): Promise<void> => {
     const opts = cmd.optsWithGlobals();
@@ -1371,7 +1405,7 @@ Examples:
   busabase-cli nodes set-agent-prompts --node-id nod_123 --file prompts.json`,
     )
     .action(
-      runAction(state, (client, opts) => {
+      runAction(state, async (client, opts) => {
         const filePath = opts.file as string;
         let raw: unknown;
         try {
@@ -1392,10 +1426,28 @@ Examples:
             `Invalid agent prompts in ${filePath}${detail ? ` — ${detail}` : ""}`,
           );
         }
-        return client.nodes.updateMetadata({
-          nodeId: opts.nodeId as string,
-          metadata: { agentPrompts: parsed.data },
-        });
+        const nodeId = opts.nodeId as string;
+        // Prefer the dedicated endpoint; fall back to the metadata key it
+        // replaced when the server does not have it yet.
+        //
+        // The CLI and the server ship separately, so a current CLI routinely
+        // talks to an older server. Calling only the new route would make this
+        // command fail outright against every server not yet upgraded — which
+        // is precisely how a previous change took a working command to zero
+        // results in production. The fallback writes where an older server
+        // still reads from, so the command keeps working either way.
+        try {
+          return await client.nodes.updateAgentPrompts({
+            nodeId,
+            agentPrompts: parsed.data,
+          });
+        } catch (error) {
+          if (!isNotFound(error)) throw error;
+          return await client.nodes.updateMetadata({
+            nodeId,
+            metadata: { agentPrompts: parsed.data },
+          });
+        }
       }),
     );
 
@@ -1791,6 +1843,10 @@ Examples:
       "--no-sample-records",
       "propose a template's sample rows for review instead of merging them (default: merged, so the app is not empty on first open)",
     )
+    .option(
+      "--no-rollback",
+      "keep whatever a failed install created (default: it is moved to Trash)",
+    )
     .addHelpText(
       "after",
       `
@@ -1838,6 +1894,7 @@ field with nothing linked yet does not trigger this.`,
           skill: opts.skill as string | undefined,
           // commander maps `--no-sample-records` to `sampleRecords: false`.
           noSampleRecords: opts.sampleRecords === false,
+          noRollback: opts.rollback === false,
           json: config.output === "json",
           githubToken: process.env.GITHUB_TOKEN,
           serverUrl: config.baseUrl,
@@ -1958,9 +2015,13 @@ and as something \`busabase-cli install\` can install.`,
     .option("-o, --out-file <file>", "output archive path", "space.bbdump")
     .option(
       "--no-history",
-      "full-fidelity rows, but omit the history tables (commits, change requests, operations, comments, reviews, audit events)",
+      "drop finished change requests, reviews, comments and audit events (unfinished work is kept)",
     )
     .option("--state-only", "superseded by `busabase-cli export` — see the error text")
+    .option(
+      "--resume",
+      "continue an interrupted backup, reusing the attachment bytes it already downloaded",
+    )
     .addHelpText(
       "after",
       `
@@ -1971,7 +2032,13 @@ webhook signing secrets are never written to it.
 Examples:
   busabase-cli backup                                        # → ./space.bbdump
   busabase-cli backup -o ./backups/acme-2026-07-19.bbdump
-  busabase-cli backup --no-history                           # smaller: current state only
+  busabase-cli backup --no-history                           # current state + unfinished work
+
+\`--no-history\` still restores completely: every record, field value, file and
+permission is there. What it leaves out is the paper trail — change requests
+that are already finished, their reviews and comments, and the audit log of who
+did what when. Change requests still in review (or approved but unmerged) are
+KEPT, because those are unfinished work rather than history.
 
 To hand content to someone else rather than back it up, use \`busabase-cli export\`,
 which writes a readable, diffable package directory you can push to GitHub.`,
@@ -1981,10 +2048,12 @@ which writes a readable, diffable package directory you can push to GitHub.`,
         runBackup(client, {
           outFile: opts.outFile as string,
           includeHistory: opts.history !== false,
+          resume: Boolean(opts.resume),
           stateOnly: Boolean(opts.stateOnly),
           json: config.output === "json",
           baseUrl: config.baseUrl,
           spaceId: config.spaceId,
+          retries: config.retries,
           toolVersion: pkgVersion(),
         }),
       ),
@@ -1993,7 +2062,10 @@ which writes a readable, diffable package directory you can push to GitHub.`,
   addGlobalFlags(program.command("restore"))
     .description("Restore a .bbdump archive into an EMPTY space, preserving original ids")
     .argument("<file>", "path to the .bbdump archive")
-    .option("--resume", "resume a previously interrupted restore (not yet implemented)")
+    .option(
+      "--resume",
+      "continue a restore whose process was killed partway through (same archive, same space)",
+    )
     .option("--into-folder <name>", "state-only archives only — see the error text")
     .addHelpText(
       "after",

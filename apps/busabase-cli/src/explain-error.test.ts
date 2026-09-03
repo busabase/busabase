@@ -16,6 +16,7 @@ const config = (over: Record<string, unknown> = {}) => ({
   baseUrl: "https://busabase.com",
   webUrl: "https://busabase.com",
   output: "table" as const,
+  retries: 2,
   ...over,
 });
 
