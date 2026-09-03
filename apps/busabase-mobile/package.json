@@ -1,6 +1,6 @@
 {
   "name": "busabase-mobile",
-  "version": "0.30.1",
+  "version": "0.40.0",
   "main": "expo-router/entry",
   "private": true,
   "scripts": {
