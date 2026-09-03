@@ -111,14 +111,7 @@ export function AgentInstallPanel({
           readOnly
           value={prompt}
         />
-        <div className="flex items-center justify-between gap-3">
-          {plan.source.ref ? (
-            <span className="text-muted-foreground text-xs">
-              {fmt(messages.install.agentRefHint, { ref: plan.source.ref })}
-            </span>
-          ) : (
-            <span />
-          )}
+        <div className="flex justify-end">
           <Button className="shrink-0" onClick={() => void copy()}>
             {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
             {copied ? messages.agentPrompts.copied : messages.agentPrompts.copy}

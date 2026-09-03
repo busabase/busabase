@@ -24,6 +24,8 @@
 // Layout mirrors `agent-skill-button.tsx` (kui Dialog + readonly textarea +
 // transient "Copied" state) so the two agent-facing dialogs feel like one feature.
 
+import { useQuery } from "@tanstack/react-query";
+import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "kui/dialog";
 import { Check, Copy } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -102,7 +104,7 @@ export function NodeAgentPromptsDialog({
   spaceId,
   spaceName,
   scope,
-  metadata,
+  orpc,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -113,11 +115,22 @@ export function NodeAgentPromptsDialog({
   spaceName?: string;
   /** Narrows the prompts to one column or one record. Omit for the whole node. */
   scope?: NodePromptScope;
-  /** The node's own `metadata` — read for `metadata.agentPrompts` (Feature 3's
-   *  per-node custom scenario prompts). Omit when the caller has no loaded
-   *  `NodeVO` on hand; the dialog falls back to the node type's default
-   *  scenarios, same as before this prop existed. */
-  metadata?: Record<string, unknown>;
+  /**
+   * Fetches this node's custom prompts when the dialog opens.
+   *
+   * They used to arrive as the node's `metadata`, already loaded by the sidebar
+   * list — free to read, but it meant every node in every listing carried a
+   * field capped at 50 prompts x 8 KiB per locale. The list stopped carrying it,
+   * so the dialog asks for it, and only while it is open.
+   *
+   * `null` means "do not fetch": a field/record/cell-scoped dialog never shows
+   * custom prompts (they replace the WHOLE-NODE scenario tier only — see
+   * `buildNodeAgentPrompts`'s `scope.kind` check), so a request there would be
+   * pure waste. Required rather than optional precisely so that is a decision
+   * each call site states, not something a caller can forget into a silent
+   * fallback to the type defaults.
+   */
+  orpc: BusabaseQueryUtils | null;
 }) {
   const messages = useCoreI18n();
   const locale = useCoreLocale();
@@ -130,9 +143,33 @@ export function NodeAgentPromptsDialog({
     setResolvedSpaceId(resolveSpaceId(spaceId));
   }, [spaceId]);
 
+  // `enabled: open` is the whole point of the move: closed dialogs cost nothing,
+  // and the request starts the moment one opens rather than riding along on
+  // every sidebar load whether or not anyone ever opens it.
+  const promptsOptions = orpc?.nodes.getAgentPrompts.queryOptions({ input: { nodeId } });
+  const promptsQuery = useQuery({
+    queryKey: promptsOptions?.queryKey ?? ["node-agent-prompts", "not-fetched", nodeId],
+    // Never runs — `enabled` is false whenever there are no real options — but
+    // it has to satisfy the same result type so the query stays typed.
+    queryFn: promptsOptions?.queryFn ?? (async () => ({ nodeId, agentPrompts: null })),
+    enabled: open && promptsOptions !== undefined,
+  });
+  // A disabled query stays `pending` forever, so the spinner has to be gated on
+  // there being a fetch at all — otherwise a scoped dialog, which deliberately
+  // never fetches, would show a spinner that never resolves.
+  const promptsLoading = promptsOptions !== undefined && promptsQuery.isPending;
+
   const context: NodePromptContext = useMemo(
-    () => ({ nodeType, nodeName, nodeId, spaceId: resolvedSpaceId, spaceName, scope, metadata }),
-    [nodeType, nodeName, nodeId, resolvedSpaceId, spaceName, scope, metadata],
+    () => ({
+      nodeType,
+      nodeName,
+      nodeId,
+      spaceId: resolvedSpaceId,
+      spaceName,
+      scope,
+      customPrompts: promptsQuery.data?.agentPrompts ?? undefined,
+    }),
+    [nodeType, nodeName, nodeId, resolvedSpaceId, spaceName, scope, promptsQuery.data],
   );
 
   const { scenarios, capabilities } = useMemo(
@@ -165,15 +202,28 @@ export function NodeAgentPromptsDialog({
         </DialogHeader>
         <DialogDescription>{messages.agentPrompts.intro}</DialogDescription>
 
-        <PromptPanel
-          sections={sections}
-          active={active}
-          onSelect={setSelected}
-          onCopy={copy}
-          copied={copied}
-          copyLabel={messages.agentPrompts.copy}
-          copiedLabel={messages.agentPrompts.copied}
-        />
+        {promptsLoading ? (
+          // Only while the FIRST read is in flight. A node with no custom
+          // prompts still renders its type's defaults, so showing those
+          // immediately and swapping them for custom ones a moment later would
+          // read as the dialog changing its mind — worse than a brief wait.
+          <div
+            className="flex min-h-40 items-center justify-center text-sm text-muted-foreground"
+            data-testid="node-agent-prompts-loading"
+          >
+            {messages.common.loading}
+          </div>
+        ) : (
+          <PromptPanel
+            sections={sections}
+            active={active}
+            onSelect={setSelected}
+            onCopy={copy}
+            copied={copied}
+            copyLabel={messages.agentPrompts.copy}
+            copiedLabel={messages.agentPrompts.copied}
+          />
+        )}
       </DialogContent>
     </Dialog>
   );

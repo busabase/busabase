@@ -565,10 +565,16 @@ function BusabaseDashboardContent({
     return baseViews.find((view) => view.slug === childId || view.id === childId) ?? null;
   }, [baseChildParams?.childId, baseViews]);
   const recordPaginationUrl = useMemo(() => readRecordPagination(search), [search]);
+  // Kanban and Calendar are listed here not because they show a pagination
+  // bar, but because neither needs the whole Base anymore: Kanban's columns
+  // and Calendar's month grid each fetch their own scoped slice. Keeping a
+  // view type OUT of this set is what routes it into the drain loop below.
   const usesPagePagination =
     selectedBaseView === null ||
     selectedBaseView.type === "table" ||
-    selectedBaseView.type === "gallery";
+    selectedBaseView.type === "gallery" ||
+    selectedBaseView.type === "kanban" ||
+    selectedBaseView.type === "calendar";
   const setRecordPaginationUrl = useCallback(
     (page: number, pageSize = recordPaginationUrl.pageSize, replace = false) => {
       const nextSearch = writeRecordPagination(search, { page, pageSize });
@@ -1151,6 +1157,13 @@ function BusabaseDashboardContent({
       queryClient.invalidateQueries({ queryKey: listKeys.recordsPage }),
       queryClient.invalidateQueries({ queryKey: listKeys.recordsCount }),
       queryClient.invalidateQueries({ queryKey: listKeys.bases }),
+      // The board's per-column reads and its header aggregate use hand-written
+      // keys, so the orpc-derived keys above do not cover them. Without this a
+      // dragged card lands in its new column while both counts stay stale.
+      queryClient.invalidateQueries({ queryKey: ["busabase", "kanban-column"] }),
+      queryClient.invalidateQueries({ queryKey: ["busabase", "kanban-counts"] }),
+      // Same reasoning for Calendar's month-scoped reads.
+      queryClient.invalidateQueries({ queryKey: ["busabase", "calendar-range"] }),
       queryClient.invalidateQueries({ queryKey: listKeys.auditEvents }),
       queryClient.invalidateQueries({
         queryKey: orpc.bases.listViews.queryOptions({ input: { baseId: activeBase?.id ?? "" } })
@@ -2227,6 +2240,7 @@ function BusabaseDashboardContent({
     if (isNewRecordRoute) {
       return (
         <RecordEditorView
+          client={client}
           base={activeBase}
           mode="new"
           onSubmitCreate={submitCreateRecord}
@@ -2244,6 +2258,7 @@ function BusabaseDashboardContent({
       }
       return (
         <RecordEditorView
+          client={client}
           base={activeBase}
           mode="edit"
           onSubmitError={setError}
@@ -2292,6 +2307,7 @@ function BusabaseDashboardContent({
       }
       return (
         <BaseDetailView
+          client={client}
           activeView={selectedBaseView}
           archivedViews={archivedViewsForBase}
           archivedRecords={archivedRecordsForBase}

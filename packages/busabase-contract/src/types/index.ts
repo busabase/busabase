@@ -89,6 +89,8 @@ export type AuditAction =
   | "asset.text_written"
   | "asset.text_marked_none"
   | "node.metadata_updated"
+  | "node.settings_updated"
+  | "node.agent_prompts_updated"
   | "node.purged";
 
 export interface UserRefVO {
@@ -138,6 +140,17 @@ export interface NodeVO {
   metadata: Record<string, unknown> & {
     version?: string;
   };
+  /**
+   * System settings the product DOES read and act on — the opposite of
+   * `metadata` above, which is why they are separate fields with separate
+   * endpoints. Written only by `PATCH /nodes/{nodeId}/settings`, whose input is
+   * a closed schema; the generic metadata endpoint cannot address it.
+   *
+   * Absent (or an absent key) means "unset". For an AirApp's engine that means
+   * "follow the app" — `airapp.json` decides — which is why absence has to stay
+   * distinguishable from any particular value.
+   */
+  settings?: { airappEngine?: "browser" | "local" | "remote" | null };
   /**
    * This node's OWN declared visibility, or null when it inherits from its
    * ancestors. A real column rather than a metadata key, because it is the node

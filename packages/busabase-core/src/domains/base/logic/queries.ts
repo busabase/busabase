@@ -3,6 +3,7 @@ import "server-only";
 import { ORPCError } from "@orpc/server";
 import {
   countRecordsInputSchema,
+  groupRecordsInputSchema,
   listRecordsInputSchema,
   listRecordsPageInputSchema,
 } from "busabase-contract/domains/base/contract/record-schemas";
@@ -15,6 +16,7 @@ import {
   eq,
   exists,
   gt,
+  gte,
   ilike,
   inArray,
   isNotNull,
@@ -56,7 +58,13 @@ import {
   toViewVO,
   VALUE_TEXT_INDEX_LIMIT,
 } from "../../../logic/vo";
-import { applyViewConfigToEvaluableRecords, applyViewConfigToRecords } from "../utils/view-records";
+import {
+  applyViewConfigToEvaluableRecords,
+  applyViewConfigToRecords,
+  DATE_RANGE_FIELD_TYPES,
+  GROUPABLE_FIELD_TYPES,
+  groupKeyForValue,
+} from "../utils/view-records";
 
 export { listInputSchema, recordFieldFilterInputSchema, recordFieldGetInputSchema };
 
@@ -471,9 +479,65 @@ export const listRecordsPage = async (input: z.input<typeof listRecordsPageInput
   if (pageVisible) {
     recordFilters.push(pageVisible);
   }
+  if (parsed.dateRange) {
+    const rangeField = base.fields.find((field) => field.slug === parsed.dateRange?.fieldSlug);
+    if (!rangeField) {
+      throw new ORPCError("NOT_FOUND", {
+        message: `Field not found in Base ${base.id}: ${parsed.dateRange.fieldSlug}`,
+      });
+    }
+    if (!DATE_RANGE_FIELD_TYPES.has(rangeField.type)) {
+      throw new ORPCError("BAD_REQUEST", {
+        message: `Cannot scope by a ${rangeField.type} field: ${rangeField.slug}. dateRange requires one of: ${[...DATE_RANGE_FIELD_TYPES].join(", ")}.`,
+      });
+    }
+    const { gte: gteIso, lt: ltIso, fieldSlug } = parsed.dateRange;
+    // A real UTC-instant comparison on the typed `valueDate` column — no
+    // client-matcher parity question here, unlike `buildExactRecordFilter`'s
+    // predicates. The caller resolved the viewer's timezone into these two
+    // absolute instants already; the server only compares timestamps.
+    recordFilters.push(
+      exists(
+        db
+          .select({ one: sql`1` })
+          .from(busabaseFieldValues)
+          .where(
+            and(
+              eq(busabaseFieldValues.recordId, busabaseRecords.id),
+              eq(busabaseFieldValues.fieldSlug, fieldSlug),
+              isNull(busabaseFieldValues.deletedAt),
+              gte(busabaseFieldValues.valueDate, new Date(gteIso)),
+              lt(busabaseFieldValues.valueDate, new Date(ltIso)),
+            ),
+          ),
+      ) as SQL,
+    );
+  }
+  // The View's own filters AND any ad-hoc ones (a board column's
+  // `stackField equals <choice>`). Both are authoritative here — see the
+  // `filters` doc on `listRecordsPageInputSchema` for why these are not the
+  // superset semantics `records.list` uses.
+  const effectiveViewConfig: ViewConfigVO | undefined =
+    parsed.filters?.length || viewConfig
+      ? {
+          filters: [...(viewConfig?.filters ?? []), ...(parsed.filters ?? [])],
+          sorts: viewConfig?.sorts ?? [],
+        }
+      : undefined;
   const needsExactViewEvaluation = Boolean(
-    viewConfig && (viewConfig.filters.length > 0 || viewConfig.sorts.length > 0),
+    effectiveViewConfig &&
+      (effectiveViewConfig.filters.length > 0 || effectiveViewConfig.sorts.length > 0),
   );
+
+  // NOTE: there is deliberately no "all filters are pushable → SQL LIMIT/OFFSET"
+  // fast path here, even though `resolveAggregateFilterScope` could prove it.
+  // The exact-evaluation path below orders by the client's own comparator,
+  // whose fallback is `updatedAt desc, id desc` (`compareRecordsByViewSort`),
+  // while the SQL path below orders by `createdAt desc, id desc`. Serving some
+  // pages from one ordering and some from the other would let a record repeat
+  // on one page and vanish from another as the user pages through a column.
+  // Unifying those two orderings is a separate change; until then, a filtered
+  // page is always exact-evaluated.
 
   // The ordinary All view and presentation-only saved views can use true SQL
   // random access: count once, then hydrate only the requested page.
@@ -518,8 +582,8 @@ export const listRecordsPage = async (input: z.input<typeof listRecordsPageInput
   // view that filters or sorts BY a lookup field can only be evaluated after
   // hydration. Rather than half-resolve it, that case falls through unchanged.
   const viewFieldSlugs = new Set([
-    ...(viewConfig?.filters ?? []).map((filter) => filter.fieldSlug),
-    ...(viewConfig?.sorts ?? []).map((sort) => sort.fieldSlug),
+    ...(effectiveViewConfig?.filters ?? []).map((filter) => filter.fieldSlug),
+    ...(effectiveViewConfig?.sorts ?? []).map((sort) => sort.fieldSlug),
   ]);
   const dependsOnLookup = base.fields.some(
     (field) => field.type === "lookup" && viewFieldSlugs.has(field.slug),
@@ -543,7 +607,7 @@ export const listRecordsPage = async (input: z.input<typeof listRecordsPageInput
         fields: (row.fields ?? {}) as Record<string, unknown>,
       })),
       base.fields,
-      viewConfig,
+      effectiveViewConfig,
     );
     const total = ordered.length;
     const totalPages = Math.ceil(total / parsed.pageSize);
@@ -576,7 +640,7 @@ export const listRecordsPage = async (input: z.input<typeof listRecordsPageInput
     .where(and(...recordFilters))
     .orderBy(desc(busabaseRecords.createdAt), desc(busabaseRecords.id));
   const candidates = await hydrateRecords(candidateRows);
-  const ordered = applyViewConfigToRecords(candidates, viewConfig);
+  const ordered = applyViewConfigToRecords(candidates, effectiveViewConfig);
   const total = ordered.length;
   const totalPages = Math.ceil(total / parsed.pageSize);
   const page = totalPages === 0 ? 1 : Math.min(parsed.page, totalPages);
@@ -680,12 +744,34 @@ const hasTruncatedFieldValue = async (
  * for those two operators before trusting this "true", since truncation is a
  * per-field-data fact this (operator, type, value) triple can't see.
  */
+type ExactFilterField = {
+  type: string;
+  options?: { choices?: Array<{ id: string; name: string }> };
+};
+
+const selectChoicesOf = (
+  field: ExactFilterField | undefined,
+): Array<{ id: string; name: string }> => field?.options?.choices ?? [];
+
+/**
+ * The label a `select` value renders as, lower-cased — mirroring `choiceLabel`
+ * (utils/view-records.ts): a known choice id becomes its NAME, anything else
+ * (a stale id, a value written past validation) falls back to the raw string.
+ */
+const selectLabelOf = (field: ExactFilterField | undefined, value: unknown): string => {
+  const id = typeof value === "string" ? value : "";
+  return (selectChoicesOf(field).find((choice) => choice.id === id)?.name ?? id).toLowerCase();
+};
+
+/** A choice whose name renders as "empty" to `recordMatchesViewFilter`. */
+const isBlankLabel = (name: string): boolean => name === "" || name === "-";
+
 const isFilterExactlyPushable = (
   operator: string,
-  fieldType: string | undefined,
+  field: ExactFilterField | undefined,
   value: unknown,
 ): boolean => {
-  const type = fieldType ?? "";
+  const type = field?.type ?? "";
   if (EXACT_TEXT_TYPES.has(type)) {
     if (operator === "not_empty" || operator === "is_empty") return true;
     if (operator === "contains" || operator === "equals") return isScalarFilterValue(value);
@@ -702,6 +788,16 @@ const isFilterExactlyPushable = (
   if (type === "checkbox") {
     return operator === "is_true" || operator === "is_false";
   }
+  if (type === "select") {
+    if (operator === "not_empty" || operator === "is_empty") return true;
+    if (operator !== "equals" && operator !== "contains") return false;
+    if (!isScalarFilterValue(value)) return false;
+    // An empty expected label would also match every record that has NO value
+    // for this field (their preview text is ""), and the EXISTS-based predicate
+    // below can only see records that HAVE a projected row. Rather than bolt on
+    // an absence join, leave that case to the exact fallback.
+    return selectLabelOf(field, value) !== "";
+  }
   return false;
 };
 
@@ -709,9 +805,9 @@ const isFilterExactlyPushable = (
 const buildExactRecordFilter = (
   db: Awaited<ReturnType<typeof getDb>>,
   filter: { fieldSlug: string; operator: string; value?: unknown },
-  fieldType: string | undefined,
+  field: ExactFilterField | undefined,
 ): SQL => {
-  const type = fieldType ?? "";
+  const type = field?.type ?? "";
   const matches = (predicate: SQL): SQL =>
     exists(
       db
@@ -756,6 +852,50 @@ const buildExactRecordFilter = (
   if (PUSHABLE_NUMBER_TYPES.has(type)) {
     return filter.operator === "not_empty" ? matches(isPresent) : notMatches(isPresent);
   }
+  if (type === "select") {
+    // `valueText` holds the choice ID; the client compares choice NAMES. So the
+    // matching ids are resolved here, from the Base's own choice list, and the
+    // SQL only ever matches ids. The second arm of each OR covers a value that
+    // is NOT a known choice id (a stale id, or a value written past field
+    // validation) — `choiceLabel` renders those as the raw string, so the
+    // predicate applies to `valueText` directly, exactly as the client would.
+    const choices = selectChoicesOf(field);
+    const knownIds = choices.map((choice) => choice.id);
+    const unknownId: SQL = knownIds.length
+      ? (not(inArray(busabaseFieldValues.valueText, knownIds)) as SQL)
+      : sql`true`;
+    const idIn = (ids: string[]): SQL =>
+      ids.length ? (inArray(busabaseFieldValues.valueText, ids) as SQL) : sql`false`;
+
+    if (filter.operator === "not_empty" || filter.operator === "is_empty") {
+      // Present ⟺ the rendered label is neither "" nor the "-" placeholder. A
+      // choice may itself be named "-" (a legitimate "N/A" option), in which
+      // case picking it still reads as EMPTY to the client.
+      const labelledPresent = or(
+        idIn(choices.filter((choice) => !isBlankLabel(choice.name)).map((choice) => choice.id)),
+        and(unknownId, isPresent),
+      ) as SQL;
+      return filter.operator === "not_empty"
+        ? matches(labelledPresent)
+        : notMatches(labelledPresent);
+    }
+
+    const expected = selectLabelOf(field, filter.value); // already lower-cased
+    const nameMatches = (name: string): boolean =>
+      filter.operator === "equals"
+        ? name.toLowerCase() === expected
+        : name.toLowerCase().includes(expected);
+    const rawMatches =
+      filter.operator === "equals"
+        ? ilike(busabaseFieldValues.valueText, escapeLikePattern(expected))
+        : ilike(busabaseFieldValues.valueText, `%${escapeLikePattern(expected)}%`);
+    return matches(
+      or(
+        idIn(choices.filter((choice) => nameMatches(choice.name)).map((choice) => choice.id)),
+        and(unknownId, rawMatches),
+      ) as SQL,
+    );
+  }
   // checkbox. `valueText` mirrors both the real-boolean and the string
   // "true"/"false" write shapes (see `normalizeFieldValue`), so a plain text
   // comparison is exact without touching `valueBool` (which a string-typed
@@ -774,6 +914,121 @@ const buildExactRecordFilter = (
       ne(busabaseFieldValues.valueText, "false"),
     ) as SQL,
   );
+};
+
+/**
+ * Shared scope resolution for the exactness-sensitive aggregates
+ * (`countRecords`, `groupRecords`). Both publish a number a dashboard renders
+ * as authoritative, so both need the same question answered: can this
+ * (View filters + ad-hoc filters) set become a SQL predicate PROVEN identical
+ * to `recordMatchesViewFilter`, or must the caller evaluate every row instead?
+ *
+ * `exactPredicates` is the SQL to AND into the aggregate when that proof
+ * holds, and `null` when it doesn't — the caller then takes its own exact-but-
+ * not-free fallback path. An empty array means "no filters at all", which is
+ * trivially exact.
+ */
+const resolveAggregateFilterScope = async (
+  db: Awaited<ReturnType<typeof getDb>>,
+  baseId: string,
+  viewId: string | undefined,
+  adHocFilters: ViewFilterVO[] | undefined,
+) => {
+  const base = await getBase(baseId);
+  if (!base) {
+    throw new ORPCError("NOT_FOUND", { message: `Base not found: ${baseId}` });
+  }
+
+  let viewFilters: ViewFilterVO[] = [];
+  if (viewId) {
+    const [view] = await db
+      .select()
+      .from(busabaseViews)
+      .where(
+        and(
+          eq(busabaseViews.id, viewId),
+          eq(busabaseViews.baseId, base.id),
+          eq(busabaseViews.spaceId, getContextSpaceId()),
+          eq(busabaseViews.status, "active"),
+        ),
+      )
+      .limit(1);
+    if (!view) {
+      throw new ORPCError("NOT_FOUND", { message: `View not found: ${viewId}` });
+    }
+    viewFilters = normalizeViewConfig(view.config).filters;
+  }
+  // View filters AND ad-hoc filters when both are given — "this View, further
+  // narrowed by these extra conditions" is the only reading that makes sense
+  // for a dashboard tile built on top of a saved View.
+  const allFilters: ViewFilterVO[] = [...viewFilters, ...(adHocFilters ?? [])];
+  if (allFilters.length === 0) {
+    return { base, allFilters, exactPredicates: [] as SQL[], dependsOnLookup: false };
+  }
+
+  const resolved = allFilters.map((filter) => ({
+    filter,
+    // The whole field, not just its type: proving a `select` filter exact
+    // requires that field's own choice list (a label predicate has to be
+    // resolved into the set of choice ids that produce it).
+    field: base.fields.find((entry) => entry.slug === filter.fieldSlug),
+  }));
+  // A `lookup` field's value is computed at hydration time from other records,
+  // not stored in the commit — so a filter on one can only be evaluated after
+  // hydration, same constraint `listRecordsPage` has.
+  const dependsOnLookup = resolved.some((entry) => entry.field?.type === "lookup");
+
+  // Truncation probe: for the (fieldSlug) set behind a contains/equals filter
+  // on a text type, check once each whether ANY stored value for that field in
+  // this Base is at/over VALUE_TEXT_INDEX_LIMIT — narrow index lookups
+  // (base_id, field_slug), not a scan. A truncated field can't trust the SQL
+  // contains/equals predicate (see `hasTruncatedFieldValue`), so it forces that
+  // filter — and therefore the whole aggregate — to the exact fallback.
+  const truncationProbeSlugs = new Set(
+    resolved
+      .filter(
+        (entry) =>
+          TRUNCATION_SENSITIVE_OPERATORS.has(entry.filter.operator) &&
+          EXACT_TEXT_TYPES.has(entry.field?.type ?? ""),
+      )
+      .map((entry) => entry.filter.fieldSlug),
+  );
+  const truncatedSlugs = new Set(
+    (
+      await Promise.all(
+        [...truncationProbeSlugs].map(async (fieldSlug) => ({
+          fieldSlug,
+          truncated: await hasTruncatedFieldValue(db, base.id, fieldSlug),
+        })),
+      )
+    )
+      .filter((entry) => entry.truncated)
+      .map((entry) => entry.fieldSlug),
+  );
+
+  const allExact =
+    !dependsOnLookup &&
+    resolved.every((entry) => {
+      if (!isFilterExactlyPushable(entry.filter.operator, entry.field, entry.filter.value)) {
+        return false;
+      }
+      if (
+        TRUNCATION_SENSITIVE_OPERATORS.has(entry.filter.operator) &&
+        truncatedSlugs.has(entry.filter.fieldSlug)
+      ) {
+        return false;
+      }
+      return true;
+    });
+
+  return {
+    base,
+    allFilters,
+    dependsOnLookup,
+    exactPredicates: allExact
+      ? resolved.map((entry) => buildExactRecordFilter(db, entry.filter, entry.field))
+      : null,
+  };
 };
 
 /**
@@ -826,96 +1081,17 @@ export const countRecords = async (input?: z.input<typeof countRecordsInputSchem
   // viewId/filters both require baseId (schema-enforced), so the Base — and
   // its real field definitions, which exactness depends on — is always
   // resolvable from here on.
-  const base = await getBase(parsed.baseId as string);
-  if (!base) {
-    throw new ORPCError("NOT_FOUND", { message: `Base not found: ${parsed.baseId}` });
-  }
-
-  let viewFilters: ViewFilterVO[] = [];
-  if (parsed.viewId) {
-    const [view] = await db
-      .select()
-      .from(busabaseViews)
-      .where(
-        and(
-          eq(busabaseViews.id, parsed.viewId),
-          eq(busabaseViews.baseId, base.id),
-          eq(busabaseViews.spaceId, getContextSpaceId()),
-          eq(busabaseViews.status, "active"),
-        ),
-      )
-      .limit(1);
-    if (!view) {
-      throw new ORPCError("NOT_FOUND", { message: `View not found: ${parsed.viewId}` });
-    }
-    viewFilters = normalizeViewConfig(view.config).filters;
-  }
-  // View filters AND ad-hoc filters when both are given — "this View, further
-  // narrowed by these extra conditions" is the only reading that makes sense
-  // for a dashboard tile built on top of a saved View.
-  const allFilters: ViewFilterVO[] = [...viewFilters, ...(parsed.filters ?? [])];
-
-  if (allFilters.length === 0) {
-    // viewId pointed at a view with no filters configured — plain SQL COUNT.
-    return sqlCount();
-  }
-
-  const resolved = allFilters.map((filter) => ({
-    filter,
-    fieldType: base.fields.find((field) => field.slug === filter.fieldSlug)?.type,
-  }));
-  // A `lookup` field's value is computed at hydration time from other
-  // records, not stored in the commit — so a filter on one can only be
-  // evaluated after hydration, same constraint `listRecordsPage` has.
-  const dependsOnLookup = resolved.some((entry) => entry.fieldType === "lookup");
-
-  // Truncation probe: for the (fieldSlug) set behind a contains/equals filter
-  // on a text type, check once each whether ANY stored value for that field
-  // in this Base is at/over VALUE_TEXT_INDEX_LIMIT — narrow index lookups
-  // (base_id, field_slug), not a scan. A truncated field can't trust the SQL
-  // contains/equals predicate (see `hasTruncatedFieldValue`), so it forces
-  // that filter — and therefore the whole count — to the exact fallback.
-  const truncationProbeSlugs = new Set(
-    resolved
-      .filter(
-        (entry) =>
-          TRUNCATION_SENSITIVE_OPERATORS.has(entry.filter.operator) &&
-          EXACT_TEXT_TYPES.has(entry.fieldType ?? ""),
-      )
-      .map((entry) => entry.filter.fieldSlug),
-  );
-  const truncatedSlugs = new Set(
-    (
-      await Promise.all(
-        [...truncationProbeSlugs].map(async (fieldSlug) => ({
-          fieldSlug,
-          truncated: await hasTruncatedFieldValue(db, base.id, fieldSlug),
-        })),
-      )
-    )
-      .filter((entry) => entry.truncated)
-      .map((entry) => entry.fieldSlug),
+  const { base, allFilters, dependsOnLookup, exactPredicates } = await resolveAggregateFilterScope(
+    db,
+    parsed.baseId as string,
+    parsed.viewId,
+    parsed.filters,
   );
 
-  const allExact =
-    !dependsOnLookup &&
-    resolved.every((entry) => {
-      if (!isFilterExactlyPushable(entry.filter.operator, entry.fieldType, entry.filter.value)) {
-        return false;
-      }
-      if (
-        TRUNCATION_SENSITIVE_OPERATORS.has(entry.filter.operator) &&
-        truncatedSlugs.has(entry.filter.fieldSlug)
-      ) {
-        return false;
-      }
-      return true;
-    });
-
-  if (allExact) {
-    return sqlCount(
-      resolved.map((entry) => buildExactRecordFilter(db, entry.filter, entry.fieldType)),
-    );
+  if (exactPredicates) {
+    // Includes the "viewId pointed at a view with no filters" case, where the
+    // predicate list is empty and this is a plain SQL COUNT.
+    return sqlCount(exactPredicates);
   }
 
   // Fallback: exact, not cheap. At least one filter's server/client parity
@@ -952,6 +1128,155 @@ export const countRecords = async (input?: z.input<typeof countRecordsInputSchem
   const candidates = await hydrateRecords(candidateRecordRows);
   const matched = applyViewConfigToRecords(candidates, viewConfigForFallback);
   return { total: matched.length };
+};
+
+/**
+ * Count active records per group for one `select` or `checkbox` field — the
+ * split a Kanban column header or a summary tile needs, WITHOUT reading the
+ * records themselves. Scoped like `countRecords` (Base, optional saved View,
+ * optional ad-hoc filters) and held to the same exactness bar: provably-exact
+ * filters stay a single SQL aggregate, anything else falls back to evaluating
+ * every candidate row and grouping in memory.
+ *
+ * Groups with zero records are omitted — the Base's field definition already
+ * lists every choice, so the client knows which buckets to render empty.
+ */
+export const groupRecords = async (input: z.input<typeof groupRecordsInputSchema>) => {
+  await ensureReady();
+  const db = await getDb();
+  const parsed = groupRecordsInputSchema.parse(input);
+
+  const { base, allFilters, dependsOnLookup, exactPredicates } = await resolveAggregateFilterScope(
+    db,
+    parsed.baseId,
+    parsed.viewId,
+    parsed.filters,
+  );
+
+  const field = base.fields.find((entry) => entry.slug === parsed.fieldSlug);
+  if (!field) {
+    throw new ORPCError("NOT_FOUND", {
+      message: `Field not found in Base ${parsed.baseId}: ${parsed.fieldSlug}`,
+    });
+  }
+  if (!GROUPABLE_FIELD_TYPES.has(field.type)) {
+    throw new ORPCError("BAD_REQUEST", {
+      message: `Cannot group by a ${field.type} field: ${parsed.fieldSlug}. Groupable types: ${[...GROUPABLE_FIELD_TYPES].join(", ")}.`,
+    });
+  }
+
+  const baseFilters: SQL[] = [
+    eq(busabaseRecords.spaceId, getContextSpaceId()),
+    eq(busabaseRecords.baseId, base.id),
+    eq(busabaseRecords.status, "active"),
+  ];
+  const groupVisible = buildBaseVisibilityExists(db, busabaseRecords.baseId);
+  if (groupVisible) {
+    baseFilters.push(groupVisible);
+  }
+
+  const toResponse = (counts: Map<string | null, number>) => {
+    const groups = [...counts.entries()]
+      .map(([value, count]) => ({ value, count }))
+      // Stable output: named buckets by key, the null bucket last.
+      .sort((left, right) => {
+        if (left.value === right.value) return 0;
+        if (left.value === null) return 1;
+        if (right.value === null) return -1;
+        return left.value < right.value ? -1 : 1;
+      });
+    return { groups, total: groups.reduce((sum, group) => sum + group.count, 0) };
+  };
+
+  if (exactPredicates) {
+    // The group key is read as a scalar SUBQUERY rather than a JOIN on
+    // busabase_field_values: that table has no unique index on
+    // (record_id, field_slug) — uniqueness is maintained by the projection's
+    // delete-then-insert (see logic/field-values.ts) — so a JOIN would
+    // double-count any record that ever ends up with a duplicate row. A
+    // subquery makes every record contribute exactly once no matter what,
+    // which is the same guarantee `buildExactRecordFilter`'s EXISTS gives.
+    //
+    // It has to be a two-level query: Postgres rejects grouping BY a
+    // correlated subquery directly ("subquery uses ungrouped column ... from
+    // outer query"), so the inner select resolves one key per record and the
+    // outer one aggregates those keys.
+    const keyed = db
+      .select({
+        groupKey: sql<string | null>`(${db
+          .select({ value: busabaseFieldValues.valueText })
+          .from(busabaseFieldValues)
+          .where(
+            and(
+              eq(busabaseFieldValues.recordId, busabaseRecords.id),
+              eq(busabaseFieldValues.fieldSlug, parsed.fieldSlug),
+              isNull(busabaseFieldValues.deletedAt),
+            ),
+          )
+          .limit(1)})`.as("group_key"),
+      })
+      .from(busabaseRecords)
+      .where(and(...baseFilters, ...exactPredicates))
+      .as("keyed_records");
+
+    const rows = await db
+      .select({ value: keyed.groupKey, count: sql<number>`count(*)::int` })
+      .from(keyed)
+      .groupBy(keyed.groupKey);
+
+    const counts = new Map<string | null, number>();
+    for (const row of rows) {
+      // An empty projection and a missing row both mean "no value"; a checkbox
+      // additionally folds its null bucket into "false".
+      const key = groupKeyForValue(row.value, field.type);
+      counts.set(key, (counts.get(key) ?? 0) + Number(row.count));
+    }
+    return toResponse(counts);
+  }
+
+  // Fallback: exact, not cheap — same shape as `countRecords`'s. Evaluate every
+  // candidate row, then group the survivors by their raw commit value.
+  const viewConfigForFallback: ViewConfigVO = { filters: allFilters, sorts: [] };
+  const countsFromRecords = (records: Array<{ fields: Record<string, unknown> }>) => {
+    const counts = new Map<string | null, number>();
+    for (const record of records) {
+      const key = groupKeyForValue(record.fields[parsed.fieldSlug], field.type);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return counts;
+  };
+
+  if (!dependsOnLookup) {
+    const candidateRows = await db
+      .select({
+        id: busabaseRecords.id,
+        updatedAt: busabaseRecords.updatedAt,
+        fields: busabaseCommits.payload,
+      })
+      .from(busabaseRecords)
+      .innerJoin(busabaseCommits, eq(busabaseCommits.id, busabaseRecords.headCommitId))
+      .where(and(...baseFilters));
+    const matched = applyViewConfigToEvaluableRecords(
+      candidateRows.map((row) => ({
+        id: row.id,
+        updatedAt: row.updatedAt.toISOString(),
+        fields: (row.fields ?? {}) as Record<string, unknown>,
+      })),
+      base.fields,
+      viewConfigForFallback,
+    );
+    return toResponse(countsFromRecords(matched));
+  }
+
+  const candidateRecordRows = await db
+    .select()
+    .from(busabaseRecords)
+    .where(and(...baseFilters));
+  const candidates = await hydrateRecords(candidateRecordRows);
+  const matched = applyViewConfigToRecords(candidates, viewConfigForFallback);
+  return toResponse(
+    countsFromRecords(matched.map((record) => ({ fields: record.headCommit.payload }))),
+  );
 };
 
 export const getRecord = async (recordId: string) => {

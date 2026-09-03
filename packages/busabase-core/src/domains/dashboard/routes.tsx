@@ -119,8 +119,8 @@ export const getBusabaseDashboardRoutes = (
     {
       path: "/apps",
       component: dashboard,
-      breadcrumb: "App Library",
-      title: "App Library",
+      breadcrumb: messages?.nav.apps ?? "App Launcher",
+      title: messages?.nav.apps ?? "App Launcher",
     },
     {
       // Specific-before-generic (see the trailing `/agents/:agentSlug` entry) —

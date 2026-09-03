@@ -38,12 +38,12 @@ const createDemoFetch =
 /**
  * Procedures that must NEVER be folded into a batch request.
  *
- * `live.subscribe` is an Event Iterator — a long-lived SSE stream. A batch is
- * one HTTP request that completes when all its members complete, so batching a
- * stream would hold the whole batch open for the lifetime of the subscription
+ * `airapps.runLocal` and `live.subscribe` are Event Iterators — long-lived
+ * SSE streams. A batch completes only after all its members complete, so a
+ * stream would hold the batch open for the lifetime of the run or subscription
  * and stall every sibling call in it.
  */
-const UNBATCHABLE_PROCEDURES = new Set(["live.subscribe"]);
+const UNBATCHABLE_PROCEDURES = new Set(["airapps.runLocal", "live.subscribe"]);
 
 const isBatchable = (path: readonly string[]): boolean =>
   !UNBATCHABLE_PROCEDURES.has(path.join("."));

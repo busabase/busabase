@@ -3504,7 +3504,11 @@ export const buildDemoDataset = (
         name: def.name,
         description: def.description,
         icon: seedNodeIcon({ ...def, nodeType: type }),
-        metadata: { entryFile: config.entryFile, visibility: "workspace", version: "0.1.0" },
+        // No `entryFile`: it is a property of the node TYPE and is read from
+        // its config, never from here. This was the last writer of a key
+        // nothing read — the seed's copy only ever shadowed the type's value
+        // with an identical one.
+        metadata: { visibility: "workspace", version: "0.1.0" },
         position: def.position,
         createdAt: rootCreatedAt,
         updatedAt: rootCreatedAt,

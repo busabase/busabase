@@ -12,6 +12,16 @@ vi.mock("../../../logic/node-acl", () => ({
   assertNodePermission: vi.fn(async () => undefined),
 }));
 
+/**
+ * What this deployment offers. Mocked because these tests are about session
+ * mechanics, not about engine policy — but mutable rather than constant, so the
+ * gate itself can be exercised below with the list a real cloud deployment has.
+ */
+let availableEngines: string[] = ["browser", "local", "remote"];
+vi.mock("./engine-availability", () => ({
+  resolveAvailableAirAppEngines: () => availableEngines,
+}));
+
 /** Owner is ambient in production; pinned here so the tests can talk about two of them. */
 let currentOwner = "user-1";
 vi.mock("./local-preview-registry", () => ({
@@ -102,6 +112,7 @@ beforeEach(async () => {
   finish = null;
   aborted = false;
   currentOwner = "user-1";
+  availableEngines = ["browser", "local", "remote"];
   mod = await import("./run-session");
   await mod.__resetRunSessionsForTest();
 });
@@ -167,6 +178,15 @@ describe("run sessions", () => {
         .map((s) => s.owner)
         .sort(),
     ).toEqual(["user-1", "user-2"]);
+
+    currentOwner = "user-1";
+    expect(await attachAndCollect(mod.runOrAttachSession(INPUT), 1)).toEqual([
+      { type: "log", line: "a\n" },
+    ]);
+    currentOwner = "user-2";
+    expect(await attachAndCollect(mod.runOrAttachSession(INPUT), 1)).toEqual([
+      { type: "log", line: "b\n" },
+    ]);
   });
 
   it("stops a run on request, and treats stopping nothing as a non-error", async () => {
@@ -211,6 +231,26 @@ describe("run sessions", () => {
     expect(mod.listRunSessions().map((s) => s.nodeId)).toEqual(["watched"]);
 
     await watched.return(undefined as never);
+  });
+
+  it("starts the default 15-minute idle clock only after the last subscriber detaches", async () => {
+    expect(mod.DEFAULT_IDLE_TTL_MS).toBe(15 * 60 * 1000);
+    const stream = mod.runOrAttachSession(INPUT);
+    const pending = stream.next();
+    await vi.waitFor(() => expect(emit).not.toBeNull());
+    emit?.({ type: "log", line: "ready to idle\n" });
+    await pending;
+
+    const whileAttached = await mod.sweepIdleRunSessions(Date.now() + mod.DEFAULT_IDLE_TTL_MS + 1);
+    expect(whileAttached).toBe(0);
+    expect(aborted).toBe(false);
+
+    await stream.return(undefined as never);
+    const detachedAt = Date.now();
+    expect(await mod.sweepIdleRunSessions(detachedAt + mod.DEFAULT_IDLE_TTL_MS - 1)).toBe(0);
+    expect(aborted).toBe(false);
+    expect(await mod.sweepIdleRunSessions(detachedAt + mod.DEFAULT_IDLE_TTL_MS + 1)).toBe(1);
+    expect(aborted).toBe(true);
   });
 
   it("marks a run that exits non-zero as failed rather than leaving it 'running'", async () => {
@@ -305,5 +345,41 @@ describe("per-owner concurrency cap", () => {
     expect(live).toContain("newest");
 
     await watched.return(undefined as never);
+  });
+});
+
+describe("engines this deployment does not offer", () => {
+  /**
+   * The failure this prevents: `resolveAvailableAirAppEngines` decided the
+   * engine list, but only the dashboard page components ever read it. This
+   * handler took the client's word, so on shared infrastructure the only thing
+   * between a `runLocal` call and a host process was that no honest client
+   * would ask for one.
+   */
+  it("refuses the host engine on a deployment that does not offer it", async () => {
+    availableEngines = ["browser"];
+    const session = mod.runOrAttachSession(INPUT);
+    await expect(session.next()).rejects.toThrow(/not offered by this deployment/);
+    expect(runs).toBe(0);
+  });
+
+  it("names what is available, because 'not offered here' is not 'forbidden'", async () => {
+    // A deployment with no remote provider is not denying the caller anything —
+    // it has nothing to run this on, and the message should say which engines
+    // it does have rather than reading as a permission error.
+    availableEngines = ["browser"];
+    const session = mod.runOrAttachSession({ ...INPUT, engine: "remote" as const });
+    await expect(session.next()).rejects.toThrow(/available: browser/);
+  });
+
+  it("still starts an engine the deployment does offer", async () => {
+    availableEngines = ["browser", "local"];
+    const session = mod.runOrAttachSession(INPUT);
+    const pending = session.next();
+    await vi.waitFor(() => expect(emit).not.toBeNull());
+    emit?.({ type: "log", line: "installing\n" });
+    await pending;
+    expect(runs).toBe(1);
+    await session.return(undefined as never);
   });
 });

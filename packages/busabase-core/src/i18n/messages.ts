@@ -231,6 +231,9 @@ export const coreMessagesEn = {
     librarySubtitle: "AirApps in this space — mini apps built on Busabase data and workflows.",
     libraryEmptyTitle: "No AirApps yet",
     libraryEmptyBody: "AirApps you create in this space will show up here.",
+    libraryErrorTitle: "Couldn't load AirApps",
+    libraryErrorBody: "Something went wrong loading the AirApps in this space.",
+    libraryRetry: "Retry",
     tabPreview: "App",
     tabFiles: "Files",
     tabLogs: "Logs",
@@ -259,6 +262,10 @@ export const coreMessagesEn = {
     exitFullscreen: "Exit fullscreen",
     details: "AirApp details",
     engineLabel: "Engine",
+    engineFollowApp: "Follow the app",
+    engineFollowAppNamed: "Follow the app ({engine})",
+    engineFollowAppHint:
+      "This app's airapp.json decides. Pick an engine to override it for this node.",
     engineBrowser: "In browser",
     engineBrowserHint: "Runs in this tab · free and instant · JavaScript only",
     engineLocal: "This machine",
@@ -267,6 +274,8 @@ export const coreMessagesEn = {
     engineRemoteHint: "Provisioned per run, any language · isolated",
     noEligibleEngine:
       "No engine on this deployment can run a {runtime} AirApp. Ask an operator to enable a local or remote runtime.",
+    pythonNeedsSandock:
+      "Python AirApps are not supported on this deployment. Configure Sandock to run them.",
     // Keyed by `NodepodServiceWorkerErrorCode`. Each one names the phase that
     // actually failed instead of blaming the browser: only the first two are
     // real capability gaps, the rest are recoverable and say so.
@@ -347,7 +356,7 @@ export const coreMessagesEn = {
     archive: "Archive",
     assets: "Assets",
     agents: "Agents",
-    apps: "App Library",
+    apps: "App Launcher",
     graph: "Graph View",
     // The sidebar section holding the whole node tree — every node type, not
     // just Bases. Named for the scope it covers ("everything in this space"),
@@ -408,7 +417,7 @@ export const coreMessagesEn = {
     recentEmptyBody: "Bases and documents you open will show up here.",
     recentViewAll: "View all",
     recentAppsTitle: "Recently used AirApps",
-    recentAppsViewAll: "View App Library",
+    recentAppsViewAll: "Open App Launcher",
     activityTitle: "Recent activity",
     activityViewAll: "View all activity",
     activityEmptyBody: "Changes made across this workspace will show up here.",
@@ -665,6 +674,8 @@ export const coreMessagesEn = {
     iconUploadFailed: "Failed to upload icon",
   },
   base: {
+    /** Placeholder for the relation field picker's server-backed search box. */
+    searchRecordsToLink: "Search records to link",
     all: "All",
     newView: "New view",
     editView: "Edit view",
@@ -723,6 +734,7 @@ export const coreMessagesEn = {
     deleteViewRequestBody:
       'This creates a delete change request for "{name}". The view remains available until that request is reviewed and merged.',
     archivedViewsCount: "{count} archived view{plural}",
+    archivedViews: "Archived views",
     recordStatus: "Record status",
     selectRecord: "Select record",
     selectAllRecords: "Select all records",
@@ -1077,6 +1089,9 @@ export const coreMessagesEn = {
     showFull: "Show full",
     preview: "Preview",
     embedTitle: "{label} embed",
+    /** Hover text for a relation chip whose target cannot be loaded at all — deleted, or in a Base this viewer cannot see. Distinct from an archived target, which stays reachable and is marked separately. */
+    relationUnavailable:
+      "This record is unavailable — it may have been deleted, or you may not have access to it.",
   },
   createNode: {
     title: "New{suffix}",
@@ -1427,7 +1442,6 @@ export const coreMessagesEn = {
     agentPromptLabel: "Paste this to your agent",
     agentPromptBody:
       'Install the Busabase app skill "{name}" so you can operate it later.\n\nBefore installing, confirm that this environment is connected to Busabase and points to the correct target space{targetSpace}. If the Busabase connection is not configured or points to another space, read and follow this setup guide first:\n\n{setupUrl}\n\nOnce the connection is ready, run:\n\n{command}\n\nInstall the skill only — do not create, change or delete anything in my Busabase space yet. Once it is installed, tell me in a few lines what this app does and what it would create if I asked you to set it up.',
-    agentRefHint: "Installs the repository's default branch. This entry was read from {ref}.",
     agentNoSkillTitle: "This package carries no agent manual",
     agentNoSkillBody:
       "There is no SKILL.md here, so an agent has nothing to install — it would have to infer your tables. Install it into the UI instead; you can still hand an agent that node's own prompts afterwards.",

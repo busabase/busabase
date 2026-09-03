@@ -32,6 +32,8 @@ import { useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
 import { CoreI18nProvider, coreMessagesByLocale } from "../../../i18n";
+import { AirAppEngineAvailabilityProvider } from "../../airapp/components/engine-availability-context";
+import type { AirAppRunnerKind } from "../../airapp/components/runners/types";
 import { nodeIconGlyph, resolveNodeIcon } from "../helpers/node-icons";
 import type { MoveNodePayload } from "../hooks/use-move-node";
 import { parseNodeDetailRoute } from "../utils/node-route";
@@ -157,6 +159,8 @@ interface BusabaseDashboardShellProps {
   orpc?: BusabaseQueryUtils;
   /** Active UI locale for the sidebar nav labels (defaults to English). */
   locale?: string;
+  /** Server-resolved engines, also needed by settings opened from the sidebar shell. */
+  availableAirAppEngines?: AirAppRunnerKind[];
   /**
    * Wires up sidebar drag-and-drop reordering/reparenting AND the sidebar
    * "•••" → "Move to…" dialog (see `NodeMoveDialog`) — both funnel through
@@ -218,6 +222,7 @@ export function BusabaseDashboardShell({
   chrome,
   orpc,
   locale,
+  availableAirAppEngines,
   onMoveNode,
   loadingNodeIds,
   onExpandNode,
@@ -254,14 +259,14 @@ export function BusabaseDashboardShell({
   // Move/Rename/Permissions this needs no mutation and no host wiring — the
   // dialog only reads the node-type registry and copies text — so it is offered
   // unconditionally on every node type.
+  // No `metadata` here any more: the custom prompts it used to carry are their
+  // own column now, fetched by the dialog when it opens. Keeping them on the
+  // sidebar row was "free" only in the sense that the list already paid for it —
+  // on every load, for every node, whether or not anyone opened this dialog.
   const [promptsTarget, setPromptsTarget] = useState<{
     id: string;
     name: string;
     type: string;
-    /** For `metadata.agentPrompts` (per-node custom scenario prompts,
-     *  node-agent-prompts-v2.md §7.3) — the sidebar row already has the full
-     *  `NodeVO` when this is set, so this is free, not a second fetch. */
-    metadata: Record<string, unknown>;
   } | null>(null);
   // The node targeted by the sidebar "•••" → "Share" / "Delete" actions. Both
   // carry more of the node than the other targets do: Share needs the slug to
@@ -584,7 +589,6 @@ export function BusabaseDashboardShell({
           id: node.id,
           name: node.name,
           type: node.type,
-          metadata: node.metadata,
         }),
       // Share and Delete carry the same orpc gate as Permissions/Rename: both
       // dialogs are pure mutation surfaces (a public link toggle, a node_delete
@@ -801,23 +805,25 @@ export function BusabaseDashboardShell({
           {children}
         </DashboardLayout>
         {orpc && settingsTarget && (
-          <NodeSettingsDialog
-            focusField={settingsTarget.focusField}
-            initialTab={settingsTarget.tab}
-            nodeId={settingsTarget.id}
-            nodeName={settingsTarget.name}
-            nodeSlug={settingsTarget.slug}
-            nodeType={settingsTarget.type}
-            onOpenChange={(next) => {
-              if (!next) setSettingsTarget(null);
-            }}
-            open
-            orpc={orpc}
-          />
+          <AirAppEngineAvailabilityProvider engines={availableAirAppEngines}>
+            <NodeSettingsDialog
+              focusField={settingsTarget.focusField}
+              initialTab={settingsTarget.tab}
+              nodeId={settingsTarget.id}
+              nodeName={settingsTarget.name}
+              nodeSlug={settingsTarget.slug}
+              nodeType={settingsTarget.type}
+              onOpenChange={(next) => {
+                if (!next) setSettingsTarget(null);
+              }}
+              open
+              orpc={orpc}
+            />
+          </AirAppEngineAvailabilityProvider>
         )}
         {promptsTarget && (
           <NodeAgentPromptsDialog
-            metadata={promptsTarget.metadata}
+            orpc={orpc ?? null}
             nodeId={promptsTarget.id}
             nodeName={promptsTarget.name}
             nodeType={promptsTarget.type}

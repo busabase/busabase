@@ -96,7 +96,7 @@ const resolveEmbedTargetMetadata = async (
   typeId: string,
 ): Promise<EmbedTargetMetadata | null> => {
   const db = await getDb();
-  const actorId = resolveActorId("local-user");
+  const actorId = resolveActorId("local-admin");
   const spaceId = getContextSpaceId();
   let scopeNodeId: string | null = null;
   let targetName = typeId;
@@ -105,7 +105,7 @@ const resolveEmbedTargetMetadata = async (
     scopeNodeId = typeId;
   } else if (type === "change-request") {
     const changeRequest = await getChangeRequest(typeId);
-    scopeNodeId = changeRequest?.nodeId ?? changeRequest?.base?.nodeId ?? null;
+    scopeNodeId = changeRequest ? changeRequestEmbedScopeNodeId(changeRequest) : null;
     targetName = changeRequest?.id ?? typeId;
   } else {
     const record = await getRecord(typeId);
@@ -136,6 +136,20 @@ const resolveEmbedTargetMetadata = async (
     nodeType: type === "node" ? node.type : null,
   };
 };
+
+function changeRequestEmbedScopeNodeId(
+  changeRequest: NonNullable<Awaited<ReturnType<typeof getChangeRequest>>>,
+): string | null {
+  const canonicalScope = changeRequest.nodeId ?? changeRequest.base?.nodeId;
+  if (canonicalScope) return canonicalScope;
+
+  const operation = changeRequest.primaryOperation;
+  if (operation?.operation !== "node_create") return null;
+  const payload = operation.headCommit.payload as { parentNodeId?: unknown };
+  return typeof payload.parentNodeId === "string" && payload.parentNodeId
+    ? payload.parentNodeId
+    : null;
+}
 
 const toEmbedLinkVO = (row: {
   id: string;
@@ -187,7 +201,7 @@ export const createEmbedLink = async (input: CreateEmbedLinkDTO): Promise<Create
       type: input.type,
       typeId: input.typeId,
       secretHash: hashEmbedSecret(secret),
-      createdBy: resolveActorId("local-user"),
+      createdBy: resolveActorId("local-admin"),
       createdByApiKeyId: source?.apiKey?.id ?? LOCAL_API_KEY_ID,
       frameMode: input.framePolicy.mode,
       allowedOrigins: input.framePolicy.allowedOrigins,
@@ -393,6 +407,7 @@ export interface EmbedRequestContext {
   actorId: string;
   spaceId: string;
   restrictedVisibility: boolean;
+  embedTargetNodeId?: string;
 }
 
 /**
@@ -428,6 +443,7 @@ export const resolveEmbedRequestContext = async (
     actorId: active.row.createdBy,
     spaceId: active.row.spaceId,
     restrictedVisibility: active.actorState.restrictedVisibility,
+    ...(active.row.type === "node" ? { embedTargetNodeId: active.row.typeId } : {}),
   };
 };
 
@@ -469,6 +485,7 @@ export const resolveEmbedLink = async (
         actorId: row.createdBy,
         spaceId: row.spaceId,
         restrictedVisibility: actorState.restrictedVisibility,
+        ...(row.type === "node" ? { embedTargetNodeId: row.typeId } : {}),
       },
       async () => {
         if (row.type === "change-request") {
@@ -558,6 +575,7 @@ export const resolveAirAppEmbedRuntime = async (
         actorId: capability.createdBy,
         spaceId: capability.spaceId,
         restrictedVisibility: capability.restrictedVisibility,
+        embedTargetNodeId: capability.nodeId,
       },
       async () => {
         const airapp = await getAirApp(capability.nodeId);

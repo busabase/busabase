@@ -15,6 +15,10 @@ import {
 } from "../domains/registry";
 import { type NodeIcon, NodeIconSchema } from "../types/node-icon";
 import { autoMergeNotAccepted } from "./auto-merge";
+import { customAgentPromptsSchema } from "./node-agent-prompt-schemas";
+
+/** @see nodeSettingsSchema — declared here so `NodeOutput` can reference it. */
+export type NodeSettings = { airappEngine?: "browser" | "local" | "remote" | null };
 
 export interface NodeOutput {
   id: string;
@@ -35,6 +39,15 @@ export interface NodeOutput {
   metadata: Record<string, unknown> & {
     version?: string;
   };
+  /**
+   * System settings the product DOES read and act on — the opposite of
+   * `metadata` above, and separate for that reason.
+   *
+   * Written only by `PATCH /nodes/{nodeId}/settings`, whose input is a closed
+   * schema; the generic metadata endpoint cannot address it. See
+   * `nodeSettingsSchema`.
+   */
+  settings?: NodeSettings;
   /**
    * This node's OWN declared visibility, or null when it simply inherits from
    * its ancestors. Access control, so it is a real column rather than a
@@ -75,6 +88,7 @@ const nodeSchema: z.ZodType<NodeOutput> = z.lazy(() =>
     name: z.string(),
     description: z.string(),
     metadata: z.object({ version: z.string().optional() }).catchall(z.unknown()).default({}),
+    settings: nodeSettingsSchema.default({}),
     explicitVisibility: z.enum(["private", "workspace", "public"]).nullable().default(null),
     icon: NodeIconSchema.nullable().default(null),
     position: z.number(),
@@ -203,6 +217,69 @@ const isDescendantOutputSchema = z.object({
 const updateNodeMetadataInputSchema = z.object({
   nodeId: z.string(),
   metadata: z.record(z.string(), z.unknown()),
+});
+
+/**
+ * System settings Busabase itself acts on, per node.
+ *
+ * A CLOSED object, unlike `metadata`'s `z.record(z.string(), z.unknown())`.
+ * That difference is the point: `metadata` is the open bag callers put their
+ * own keys in, and its endpoint merges whatever it is handed. Anything the
+ * product *reads and acts on* must not live there — `metadata.visibility` had
+ * to be pulled out into its own column precisely because the generic endpoint
+ * handed a `write`-level actor a door into an ACL input.
+ *
+ * Adding a key here is a deliberate change to this schema, which is what keeps
+ * `PATCH /nodes/{nodeId}/settings` from becoming a second free-form bag.
+ *
+ * `strictObject`, not `object`: zod's default is to STRIP an unknown key, which
+ * would hand a client that misspelled `airappEngine` a 200 and no effect —
+ * exactly the silent failure a closed schema exists to prevent. Verified
+ * against a running server, where the permissive version returned 200.
+ */
+export const nodeSettingsSchema = z.strictObject({
+  /**
+   * Which engine an AirApp runs on, when a human has chosen.
+   *
+   * `undefined` means "follow the app" — `airapp.json`'s `preferredEngine`
+   * decides, or the default does. A value means somebody overrode it in the
+   * node settings dialog, and it outranks the manifest from then on. So absence
+   * must stay distinguishable from any particular value; `null` clears an
+   * override and returns the node to following the app.
+   */
+  airappEngine: z.enum(["browser", "local", "remote"]).nullish(),
+});
+
+const updateNodeSettingsInputSchema = z.object({
+  nodeId: z.string(),
+  settings: nodeSettingsSchema,
+});
+
+/**
+ * This node's custom scenario prompts.
+ *
+ * A separate read from `nodes.get`/`nodes.list` on purpose: the list is capped
+ * at 50 prompts x 8 KiB of body per locale, so carrying it on every node of
+ * every sidebar load is exactly what its own column exists to avoid. The dialog
+ * asks for it when it opens.
+ *
+ * `agentPrompts: null` means "this node has never set any" — distinct from `[]`,
+ * which means "set, and deliberately empty". Both fall back to the node type's
+ * default scenarios in the UI, but only the first is a node nobody has touched.
+ */
+const getNodeAgentPromptsInputSchema = z.object({
+  nodeId: z.string(),
+});
+
+const nodeAgentPromptsSchema = z.object({
+  nodeId: z.string(),
+  agentPrompts: customAgentPromptsSchema.nullable(),
+});
+
+const updateNodeAgentPromptsInputSchema = z.object({
+  nodeId: z.string(),
+  /** Replaces the whole list — this is not a merge. Send `null` to clear. */
+  agentPrompts: customAgentPromptsSchema.nullable(),
 });
 
 // Cheap name/slug-only node lookup — the backend half of the dashboard's
@@ -440,6 +517,7 @@ const liveEventSchema = z.object({
     // `nodeIds` so open dashboards refetch the node tree instead of showing a
     // stale whiteboard/workflow/HTML document until the next reload.
     "node.metadata_updated",
+    "node.settings_updated",
   ]),
   spaceId: z.string(),
   actorId: z.string(),
@@ -476,6 +554,8 @@ const auditActionSchema = z.enum([
   "asset.text_written",
   "asset.text_marked_none",
   "node.metadata_updated",
+  "node.settings_updated",
+  "node.agent_prompts_updated",
   "node.purged",
 ]);
 
@@ -862,6 +942,10 @@ export {
   isDescendantInputSchema,
   isDescendantOutputSchema,
   updateNodeMetadataInputSchema,
+  updateNodeSettingsInputSchema,
+  getNodeAgentPromptsInputSchema,
+  nodeAgentPromptsSchema,
+  updateNodeAgentPromptsInputSchema,
   searchNodesByNameInputSchema,
   nodeSearchResultSchema,
   commitSchema,

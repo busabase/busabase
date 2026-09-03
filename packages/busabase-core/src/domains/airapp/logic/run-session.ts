@@ -5,10 +5,12 @@ import type { AirAppRuntimeEvent } from "busabase-contract/domains/airapp/contra
 /** The engines that run server-side. `browser` never reaches this layer — it is the tab. */
 type AirAppRunnerEngine = "local" | "remote";
 
+import { ORPCError } from "@orpc/server";
 import { assertNodePermission } from "../../../logic/node-acl";
+import { resolveAvailableAirAppEngines } from "./engine-availability";
 import { currentPreviewOwner } from "./local-preview-registry";
 import { runAirAppLocal } from "./local-runtime";
-import { runAirAppSandock } from "./sandock-runtime";
+import { __resetSandockRuntimeForTest, runAirAppSandock } from "./sandock-runtime";
 
 /**
  * A run is a **session**, not a request.
@@ -256,6 +258,33 @@ const enforceOwnerLimit = async (owner: string, limit: number): Promise<void> =>
 };
 
 /**
+ * Refuse an engine this deployment does not offer.
+ *
+ * `resolveAvailableAirAppEngines` decided which engines exist here, but until
+ * now it was consulted only by the dashboard page components, to populate a
+ * picker. This handler took the client's word for it — so the list was a UI
+ * suggestion, not a rule, and the one thing standing between a `runLocal` call
+ * and a host process was that no honest client would ask for one.
+ *
+ * That is the wrong shape for a decision about executing somebody else's code
+ * on shared infrastructure. It was reachable without even naming the engine:
+ * the contract used to default `engine` to `"local"`, so a call that omitted
+ * the field asked for a host process by accident. (That default is gone; this
+ * check is what makes its absence enforceable rather than merely polite.)
+ *
+ * Deliberately phrased as "not offered here" rather than "forbidden": a
+ * deployment that has no remote provider configured is not denying the caller
+ * anything, it simply has nothing to run it on, and the message should say so.
+ */
+const assertEngineOfferedHere = (engine: AirAppRunnerEngine): void => {
+  const available = resolveAvailableAirAppEngines();
+  if (available.includes(engine)) return;
+  throw new ORPCError("FORBIDDEN", {
+    message: `AirApp engine "${engine}" is not offered by this deployment (available: ${available.join(", ")}).`,
+  });
+};
+
+/**
  * Start a run, or attach to the one already going for this `(nodeId, owner)`.
  *
  * Attaching rather than starting a second run is what makes a page reload feel
@@ -276,6 +305,7 @@ export async function* runOrAttachSession(
   // in `runAirAppLocal` — that generator now runs detached from any request, so
   // it must not depend on ambient context to decide who may do what.
   await assertNodePermission(input.nodeId, "write");
+  assertEngineOfferedHere(input.engine);
   const owner = currentPreviewOwner();
 
   const existing = readSession(input.nodeId, owner);
@@ -394,6 +424,7 @@ export async function __resetRunSessionsForTest(): Promise<void> {
     clearInterval(sweepTimer);
     sweepTimer = null;
   }
+  await __resetSandockRuntimeForTest();
 }
 
 /** Test/diagnostic view of what is currently running. */

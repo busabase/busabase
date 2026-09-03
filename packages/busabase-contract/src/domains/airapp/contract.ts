@@ -45,8 +45,14 @@ export const airAppRunLocalInputSchema = z.object({
   /** Where the server should run it. `"local"` spawns a bare process on the
    *  Busabase host (previewable, data bridge via reverse proxy, NOT isolated);
    *  `"remote"` runs the same lifecycle on a provisioned machine elsewhere.
-   *  `"browser"` never reaches this endpoint — it runs entirely in the tab. */
-  engine: z.enum(["local", "remote"]).default("local"),
+   *  `"browser"` never reaches this endpoint — it runs entirely in the tab.
+   *
+   *  Required, deliberately. This used to default to `"local"`, so a call that
+   *  simply omitted the field asked the server to spawn a host process — the
+   *  most privileged of the two options, reached by saying nothing. Naming the
+   *  engine is now the caller's job, and the handler independently refuses one
+   *  this deployment does not offer. */
+  engine: z.enum(["local", "remote"]),
 });
 
 export const airAppRuntimeEventSchema = z.discriminatedUnion("type", [

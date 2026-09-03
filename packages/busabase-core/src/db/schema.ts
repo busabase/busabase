@@ -104,22 +104,96 @@ export const busabaseNodes = pgTable(
     slug: text("slug").notNull(),
     name: text("name").notNull(),
     description: text("description").notNull().default(""),
+    // Free-form extension data — the caller's bag. What is declared below is
+    // only what the product itself still touches; everything else a caller puts
+    // here is theirs and is passed through untouched.
+    //
+    // The optional keys are deliberately few, and shrinking. `visibility` and
+    // `entryFile` were product-enforced fields that spec D1 says must not live
+    // in a free-form bag, and both moved: visibility to the
+    // `explicitVisibility` column, entryFile to the node TYPE's config. Four
+    // more — `attachmentId`, `fileName`, `mimeType`, `contentHash` — were
+    // declared here and never read or written by anything; a type that claims
+    // to hold product state it does not hold is how the next reader concludes
+    // this bag is authoritative when it is not.
     metadata: jsonb("metadata")
       .$type<
         Record<string, unknown> & {
-          entryFile?: string;
+          /**
+           * Create-time only, and promoted immediately: every create path calls
+           * `initializeNodeAcl`, which lifts this into the
+           * `explicitVisibility` COLUMN. `PATCH /nodes/{id}/metadata` refuses
+           * the key outright — writing it there set the declared value and none
+           * of the materialized ACL, which read as a 200 saying the node was
+           * private while it was not.
+           */
           visibility?: "private" | "workspace" | "public";
+          /**
+           * A label the USER writes and the product never interprets — no
+           * semver comparison, no upgrade check, no staleness detection
+           * anywhere. Exactly what a free-form bag is for, which is why the
+           * metadata PATCH door is closed to it while the field itself stays.
+           */
           version?: string;
+          /** Create-time input for a file node; the durable truth is the asset-usage row. */
           assetId?: string;
-          attachmentId?: string;
-          fileName?: string;
-          mimeType?: string;
+          /** Read by the asset text cache, on ASSET metadata rather than a node's. */
           size?: number;
-          contentHash?: string | null;
         }
       >()
       .notNull()
       .default({}),
+    // System settings for this node — a CLOSED set of keys Busabase itself
+    // understands, deliberately not `metadata`.
+    //
+    // `metadata` is `Record<string, unknown> &` on purpose: it is the open bag
+    // callers may put their own keys in, and `PATCH /nodes/{id}/metadata`
+    // merges whatever it is handed with only `write` permission. That is the
+    // right shape for user data and the wrong one for anything Busabase acts
+    // on — `metadata.visibility` had to be pulled out into
+    // `explicitVisibility` for exactly this reason, because the generic
+    // endpoint handed a `write`-level actor a door into an ACL input.
+    //
+    // So this column exists as its own thing with its own writer, and the
+    // generic metadata endpoint cannot address it at all. The type is a closed
+    // interface rather than an index signature so that adding a key is a
+    // deliberate schema change, not something a caller can do by sending one.
+    settings: jsonb("settings")
+      .$type<{
+        /**
+         * Which engine this AirApp runs on, when a human has chosen.
+         *
+         * Absent means "follow the app": `airapp.json`'s `preferredEngine`
+         * decides, or the default does. Present means a person overrode it in
+         * the node settings dialog, and it outranks the manifest from then on.
+         * That difference is why absence has to stay distinguishable from any
+         * particular value: `null` and `"browser"` mean different things here,
+         * so the column stores the absence rather than defaulting it away.
+         */
+        airappEngine?: "browser" | "local" | "remote";
+      }>()
+      .notNull()
+      .default({}),
+    /**
+     * This node's custom scenario prompts, replacing the node type's defaults
+     * in the "Ask agent" dialog. Its own column rather than a `settings` key,
+     * and the reason is size, not taste: `settings` rides along on every
+     * `NodeVO`, so it is shipped once per node on every sidebar load, while
+     * this list is capped at 50 prompts x 8 KiB of body PER LOCALE. A value
+     * that large has to be excluded from list reads, and a jsonb key inside
+     * another column cannot be excluded — only a column can.
+     *
+     * So list queries select columns explicitly and leave this one out; the
+     * dialog fetches it when it opens (`nodes.getAgentPrompts`). It lived in
+     * `metadata` before, where it had both problems at once: unbounded shape
+     * and no way to leave it behind.
+     *
+     * Shape is validated by `customAgentPromptsSchema` at the write endpoint;
+     * readers still `.safeParse` it, because jsonb written before that endpoint
+     * existed (or by a direct SQL edit) must degrade to the type defaults
+     * rather than crash the dialog.
+     */
+    agentPrompts: jsonb("agent_prompts").$type<unknown[]>(),
     // This node's custom avatar (emoji or cropped/uploaded image), or NULL
     // when it has none — every host falls back to the type-default icon
     // (`nodeIconForType`) in that case. A real (nullable, no-default) column
@@ -605,6 +679,48 @@ export const busabaseAuditEvents = pgTable(
 );
 
 export type NodePO = typeof busabaseNodes.$inferSelect;
+
+/**
+ * A node as every LIST read returns it: all columns except `agentPrompts`.
+ *
+ * `agentPrompts` is capped at 50 prompts x 8 KiB of body per locale, and a
+ * sidebar load reads every node in the tree. Selecting it there would move that
+ * much jsonb out of Postgres on every page load to serve a dialog that is
+ * opened occasionally, so list queries name their columns (`nodeListColumns`)
+ * instead of `select()`-ing the row.
+ */
+export type NodeListPO = Omit<NodePO, "agentPrompts">;
+
+/**
+ * The column list behind `NodeListPO` — pass to `db.select(nodeListColumns)`.
+ *
+ * Every column except `agentPrompts`. A new column added to the table above is
+ * NOT added here automatically; that is deliberate, because the question "does
+ * a sidebar load need this?" should be answered once per column rather than by
+ * default. `NodeListPO` will not compile against `toNodeVO` if a column
+ * `toNodeVO` reads goes missing here.
+ */
+export const nodeListColumns = {
+  id: busabaseNodes.id,
+  spaceId: busabaseNodes.spaceId,
+  parentId: busabaseNodes.parentId,
+  type: busabaseNodes.type,
+  slug: busabaseNodes.slug,
+  name: busabaseNodes.name,
+  description: busabaseNodes.description,
+  metadata: busabaseNodes.metadata,
+  settings: busabaseNodes.settings,
+  icon: busabaseNodes.icon,
+  position: busabaseNodes.position,
+  explicitVisibility: busabaseNodes.explicitVisibility,
+  effectiveVisibility: busabaseNodes.effectiveVisibility,
+  effectivePublicScope: busabaseNodes.effectivePublicScope,
+  effectivePublicRequiresPassword: busabaseNodes.effectivePublicRequiresPassword,
+  archivedAt: busabaseNodes.archivedAt,
+  deletedAt: busabaseNodes.deletedAt,
+  createdAt: busabaseNodes.createdAt,
+  updatedAt: busabaseNodes.updatedAt,
+} as const;
 export type NodePrincipalPO = typeof busabaseNodePrincipals.$inferSelect;
 export type FavoritePO = typeof busabaseFavorites.$inferSelect;
 export type CommentPO = typeof busabaseComments.$inferSelect;

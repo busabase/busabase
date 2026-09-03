@@ -147,7 +147,7 @@ interface InstallFromGithubModalProps {
    */
   initialRepoUrl?: string;
   initialIntoFolder?: string;
-  /** Package name already known by catalog entry points, used in the dialog title. */
+  /** Package name already known by catalog entry points, used in the title and to omit repeated details. */
   initialPackageName?: string;
   /**
    * Host configuration for the Agent install prompt — which edition's setup
@@ -348,9 +348,9 @@ export function InstallFromGithubModal({
     !autoMergeUnmet;
 
   /**
-   * A card-supplied URL is shown as provenance in the package summary, not as an
-   * editable field: editing it here would silently turn "install this template"
-   * into "install something else", with the card's name still on the dialog.
+   * A card-supplied URL is not editable: changing it here would silently turn
+   * "install this template" into "install something else", with the card's name
+   * still on the dialog.
    */
   const urlLocked = Boolean(initialRepoUrl);
 
@@ -455,7 +455,11 @@ export function InstallFromGithubModal({
 
               {plan ? (
                 <>
-                  <PackageSummary messages={messages} plan={plan} />
+                  <PackageSummary
+                    initialPackageName={initialPackageName}
+                    messages={messages}
+                    plan={plan}
+                  />
 
                   <Tabs onValueChange={(next) => setTab(next as "agent" | "ui")} value={tab}>
                     <TabsList className="w-full">
@@ -674,14 +678,22 @@ export function InstallFromGithubModal({
   );
 }
 
-/** The package's own identity, so the user can tell what they actually fetched. */
-function PackageSummary({
+/** Package identity for the manual URL flow, where no preceding detail page supplied it. */
+export function PackageSummary({
+  initialPackageName,
   messages,
   plan,
 }: {
+  initialPackageName?: string;
   messages: ReturnType<typeof useCoreI18n>;
   plan: InstallPlanVO;
 }) {
+  // Template Center already showed this information on the detail page. The
+  // manual GitHub flow still needs it because the URL is the user's only input.
+  if (initialPackageName) {
+    return null;
+  }
+
   const meta = [
     plan.package.version
       ? fmt(messages.install.packageVersion, { version: plan.package.version })

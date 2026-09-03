@@ -25,7 +25,7 @@ export const dashboardZhTW: CoreI18nMessages = {
     search: "搜尋",
     activity: "動態",
     archive: "封存",
-    apps: "應用庫",
+    apps: "應用啟動台",
     workspace: "工作區",
     new: "新增",
     templates: "範本",
@@ -71,7 +71,7 @@ export const dashboardZhTW: CoreI18nMessages = {
     recentTitle: "最近造訪",
     recentEmptyBody: "你開啟過的資料庫與文件會顯示在這裡。",
     recentAppsTitle: "最近使用的 AirApps",
-    recentAppsViewAll: "查看應用庫",
+    recentAppsViewAll: "開啟應用啟動台",
     activityTitle: "最近動態",
     activityViewAll: "查看全部動態",
     activityEmptyBody: "這個工作區裡發生的變更會顯示在這裡。",
@@ -81,6 +81,10 @@ export const dashboardZhTW: CoreI18nMessages = {
     librarySubtitle: "此空間中的 AirApps —— 以 Busabase 資料與工作流程建置的迷你應用程式。",
     libraryEmptyTitle: "暫無 AirApps",
     libraryEmptyBody: "你在此空間建立的 AirApps 會顯示在這裡。",
+    libraryErrorTitle: "無法載入 AirApps",
+    libraryErrorBody: "載入此空間中的 AirApps 時發生錯誤。",
+    libraryRetry: "重試",
+    pythonNeedsSandock: "不支援 Python AirApp，需要設定 Sandock。",
   },
   inbox: {
     ...dashboardZhCN.inbox,
@@ -306,7 +310,6 @@ export const dashboardZhTW: CoreI18nMessages = {
     agentPromptLabel: "把這段貼上給你的 Agent",
     agentPromptBody:
       "安裝 Busabase 應用技能「{name}」，以便你之後可以操作它。\n\n安裝前，先確認目前環境已經連接 Busabase，並且連接的是正確的目標空間{targetSpace}。如果目前環境尚未設定 Busabase 連接，或連接指向其他空間，請先閱讀並遵循下方的連接指引：\n\n{setupUrl}\n\n連接就緒後，執行：\n\n{command}\n\n只安裝技能——先不要在我的 Busabase 空間裡建立、修改或刪除任何東西。裝好之後，用幾句話告訴我這個 App 是做什麼的，以及如果我讓你去建置它，會建立些什麼。",
-    agentRefHint: "安裝的是倉庫預設分支。這條目錄讀取自 {ref}。",
     agentNoSkillTitle: "這個套件不帶 Agent 手冊",
     agentNoSkillBody:
       "這裡沒有 SKILL.md，Agent 無從安裝，只能靠猜你的表結構。請改用介面安裝；裝完仍可以在節點的「•••」選單裡把該節點的提示詞交給 Agent。",

@@ -395,6 +395,390 @@ describe("dump domain logic — oRPC integration", () => {
     expect(userGrant?.role).toBe("write");
   });
 
+  // ── exportDocBodies reaches an ARCHIVED Doc, which nodes.get refuses ───
+  it("exportDocBodies returns the body of an ARCHIVED Doc — the body nodes.get refuses to serve", async () => {
+    // Reproduces a real production data-loss bug. `nodes.get({ type: "doc" })`
+    // deliberately 404s on an archived node (Trash is a separate,
+    // metadata-only read path), but the raw `nodes` table dump includes
+    // archived rows by design. The exporter read bodies through `nodes.get`,
+    // so every archived Doc was skipped with a warning: 75 of 88 bodies on the
+    // real Vika Team space, all of which restored back EMPTY. A dump route has
+    // to see the whole table, exactly like `exportTables` does.
+    const spaceId = "space_dump_archived_doc";
+    const approveAndMerge = (changeRequestId: string) =>
+      inSpace(spaceId, () =>
+        client.changeRequests
+          .review({ changeRequestIds: [changeRequestId], verdict: "approved" })
+          .then(() => client.changeRequests.merge({ changeRequestIds: [changeRequestId] })),
+      );
+
+    const liveDoc = await inSpace(spaceId, () =>
+      client.docs.create({
+        autoMerge: true,
+        slug: "still-live",
+        name: "Still Live",
+        body: "live body\n",
+      }),
+    );
+    const archivedDoc = await inSpace(spaceId, () =>
+      client.docs.create({
+        autoMerge: true,
+        slug: "about-to-be-archived",
+        name: "About To Be Archived",
+        body: "# Archived\n\nContent that must survive a backup.\n",
+      }),
+    );
+
+    // Archive it through the real path (a merged node-delete change request),
+    // not by poking `archivedAt` — the point is that a genuinely archived Doc
+    // behaves this way, not that a hand-set column does.
+    const cr = await inSpace(spaceId, () =>
+      client.nodes.createChangeRequest({
+        operations: [{ kind: "delete", nodeId: archivedDoc.node.id }],
+        autoMerge: false,
+      }),
+    );
+    await approveAndMerge(cr.id);
+
+    // Precondition: the ordinary read path really does refuse it. If this ever
+    // starts succeeding, the bug this route exists for is gone and the comment
+    // above is stale — better to fail loudly than to keep a route nobody needs.
+    await expect(
+      inSpace(spaceId, () => client.nodes.get({ nodeId: archivedDoc.node.id, type: "doc" })),
+    ).rejects.toThrow();
+
+    const { bodies } = await inSpace(spaceId, () =>
+      client.dump.exportDocBodies({ nodeIds: [liveDoc.node.id, archivedDoc.node.id] }),
+    );
+    const byId = new Map(bodies.map((b) => [b.nodeId, b.markdown]));
+    expect(byId.get(archivedDoc.node.id)).toBe(
+      "# Archived\n\nContent that must survive a backup.\n",
+    );
+    expect(byId.get(liveDoc.node.id)).toBe("live body\n");
+  });
+
+  // ── exportDocBodies is space-scoped and Doc-scoped ────────────────────
+  it("exportDocBodies omits an id belonging to another space rather than reading its body", async () => {
+    // The route reads object storage by a key derived from a caller-supplied
+    // id, so "is this a Doc in MY space" is load-bearing, not cosmetic — the
+    // same reason `exportTableRows`'s spaceId filter is.
+    const victimSpace = "space_dump_docs_victim";
+    const attackerSpace = "space_dump_docs_attacker";
+    const victimDoc = await inSpace(victimSpace, () =>
+      client.docs.create({
+        autoMerge: true,
+        slug: "private-doc",
+        name: "Private Doc",
+        body: "secrets\n",
+      }),
+    );
+
+    const { bodies } = await inSpace(attackerSpace, () =>
+      client.dump.exportDocBodies({ nodeIds: [victimDoc.node.id] }),
+    );
+    expect(bodies).toEqual([]);
+  });
+
+  // ── fieldValues FK violation surfaces a clear CONFLICT, not a raw 500 ──
+  it("importTables rejects a fieldValues row whose recordId this archive doesn't carry with a clear CONFLICT, not a raw FK crash", async () => {
+    // Reproduces a real production incident: a backup of an actively-used
+    // space took over an hour. `records` is fetched (and snapshotted) long
+    // before the much larger `fieldValues` table finishes — a record created
+    // live in that gap was captured by `fieldValues` (id-paged, not
+    // creation-time-ordered, so not confined to the tail) but missed by the
+    // earlier `records` snapshot. The resulting archive restored ~1.1M
+    // fieldValues rows successfully and then failed on the very last batch
+    // with a raw, undiagnosable "Internal server error" — a genuine Postgres
+    // FK violation on `fieldValues.recordId`. `full-roundtrip.test.ts`
+    // already proves the export-side fix (drop-with-warning) works; this
+    // covers the import-side fix for an archive that predates that fix (or
+    // any FK gap it doesn't catch) — it must fail with a clear, actionable
+    // message instead of an opaque crash.
+    const targetSpace = "space_dump_fk_violation";
+    const nodeId = "nod_fk_violation_base_node";
+    const baseId = "bse_fk_violation";
+    const commitId = "cmt_fk_violation";
+
+    const { sessionId } = await inSpace(targetSpace, () =>
+      client.dump.importBegin({ sourceSpaceId: targetSpace }),
+    );
+
+    const rootId = rootNodeIdForSpace(targetSpace);
+    await inSpace(targetSpace, () =>
+      client.dump.importTables({
+        sessionId,
+        table: "nodes",
+        rows: [
+          {
+            id: nodeId,
+            spaceId: targetSpace,
+            parentId: rootId,
+            type: "base",
+            slug: "fk-violation-base",
+            name: "FK Violation Base",
+            description: "",
+            metadata: {},
+            position: 0,
+            archivedAt: null,
+            deletedAt: null,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          },
+        ],
+      }),
+    );
+    await inSpace(targetSpace, () =>
+      client.dump.importTables({
+        sessionId,
+        table: "bases",
+        rows: [
+          {
+            id: baseId,
+            spaceId: targetSpace,
+            nodeId,
+            slug: "fk-violation-base",
+            name: "FK Violation Base",
+            description: "",
+            reviewPolicy: { kind: "single", requiredApprovals: 1 },
+            createdAt: new Date().toISOString(),
+            archivedAt: null,
+            deletedAt: null,
+          },
+        ],
+      }),
+    );
+    await inSpace(targetSpace, () =>
+      client.dump.importTables({
+        sessionId,
+        table: "commits",
+        rows: [
+          {
+            id: commitId,
+            spaceId: targetSpace,
+            baseId,
+            targetType: "base",
+            nodeId: null,
+            operationId: null,
+            parentCommitId: null,
+            payload: {},
+            operation: "record_create",
+            message: "",
+            author: "test",
+            createdAt: new Date().toISOString(),
+          },
+        ],
+      }),
+    );
+
+    // Deliberately DO NOT import a `records` row for "rec_never_exported" —
+    // this is the exact gap the production incident hit: a fieldValues row
+    // referencing a record this archive never carries.
+    await expect(
+      inSpace(targetSpace, () =>
+        client.dump.importTables({
+          sessionId,
+          table: "fieldValues",
+          rows: [
+            {
+              id: "fvl_fk_violation",
+              spaceId: targetSpace,
+              baseId,
+              commitId,
+              recordId: "rec_never_exported",
+              changeRequestId: null,
+              operationId: null,
+              fieldId: null,
+              fieldSlug: "title",
+              fieldType: "text",
+              valueText: "orphaned",
+              valueNumber: null,
+              valueBool: null,
+              valueDate: null,
+              valueJson: null,
+              valueHash: null,
+              deletedAt: null,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            },
+          ],
+        }),
+      ),
+    ).rejects.toThrow(/does not carry|kept changing while a long backup/i);
+  });
+
+  // ── resume: continue an interrupted restore instead of demanding empty ─
+  it("resume continues a killed restore: non-empty space accepted, existing rows skipped, no rollback", async () => {
+    // A restore that FAILS rolls itself back, so a plain re-run works. What
+    // cannot roll back is a restore whose PROCESS died — Ctrl-C, OOM, a
+    // dropped connection. That leaves the space holding however many rows had
+    // landed, and every later attempt was refused ("requires an empty target
+    // space") with no way forward except wiping it. `--resume` is that way
+    // forward.
+    const targetSpace = "space_dump_resume";
+    const rootId = rootNodeIdForSpace(targetSpace);
+    const nodeRow = (i: number) => ({
+      id: `nod_resume_${i}`,
+      spaceId: targetSpace,
+      parentId: rootId,
+      type: "folder",
+      slug: `resume-${i}`,
+      name: `Resume ${i}`,
+      description: "",
+      metadata: {},
+      position: i,
+      archivedAt: null,
+      deletedAt: null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    // First attempt lands two nodes, then its process "dies" — no commit, no
+    // abort, session simply abandoned.
+    const first = await inSpace(targetSpace, () =>
+      client.dump.importBegin({ sourceSpaceId: targetSpace }),
+    );
+    await inSpace(targetSpace, () =>
+      client.dump.importTables({
+        sessionId: first.sessionId,
+        table: "nodes",
+        rows: [nodeRow(0), nodeRow(1)],
+      }),
+    );
+
+    // Without --resume the space is now un-restorable, and the error says what to do.
+    await expect(
+      inSpace(targetSpace, () => client.dump.importBegin({ sourceSpaceId: targetSpace })),
+    ).rejects.toThrow(/--resume/);
+
+    // With it, the same archive replays: the two existing rows are skipped
+    // rather than colliding, and the third lands.
+    const second = await inSpace(targetSpace, () =>
+      client.dump.importBegin({ sourceSpaceId: targetSpace, resume: true }),
+    );
+    await inSpace(targetSpace, () =>
+      client.dump.importTables({
+        sessionId: second.sessionId,
+        table: "nodes",
+        rows: [nodeRow(0), nodeRow(1), nodeRow(2)],
+      }),
+    );
+
+    const afterResume = await inSpace(targetSpace, () => client.nodes.list({ types: ["folder"] }));
+    expect(afterResume.filter((n) => n.slug.startsWith("resume-"))).toHaveLength(3);
+
+    // Aborting a resumed session must NOT roll back — it would delete the
+    // progress this run recovered while leaving the killed run's rows behind,
+    // moving the restore backwards.
+    await inSpace(targetSpace, () => client.dump.importAbort({ sessionId: second.sessionId }));
+    const afterAbort = await inSpace(targetSpace, () => client.nodes.list({ types: ["folder"] }));
+    expect(afterAbort.filter((n) => n.slug.startsWith("resume-"))).toHaveLength(3);
+  });
+
+  // ── resume must not silently skip everything when ids live elsewhere ──
+  it("resume refuses when the archive's ids already belong to a DIFFERENT space", async () => {
+    // Caught by real end-to-end verification, not by the test above: dump ids
+    // are a single GLOBAL primary key, not scoped per space. The first
+    // implementation used a blanket `onConflictDoNothing()`, so restoring into
+    // a second space while the SOURCE space was still live in the same
+    // database made every replayed row collide with its own original — the
+    // whole archive was skipped and the restore reported success over a space
+    // that stayed empty. Silently doing nothing is the worst possible outcome
+    // for a restore, so this must be an error.
+    const liveSpace = "space_dump_resume_live";
+    const otherSpace = "space_dump_resume_other";
+    const nodeId = "nod_resume_collision";
+    const row = (spaceId: string) => ({
+      id: nodeId,
+      spaceId,
+      parentId: rootNodeIdForSpace(spaceId),
+      type: "folder",
+      slug: "collision",
+      name: "Collision",
+      description: "",
+      metadata: {},
+      position: 0,
+      archivedAt: null,
+      deletedAt: null,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    // The id lands in `liveSpace` first — as if that space were still live.
+    const first = await inSpace(liveSpace, () =>
+      client.dump.importBegin({ sourceSpaceId: liveSpace }),
+    );
+    await inSpace(liveSpace, () =>
+      client.dump.importTables({
+        sessionId: first.sessionId,
+        table: "nodes",
+        rows: [row(liveSpace)],
+      }),
+    );
+    await inSpace(liveSpace, () => client.dump.importCommit({ sessionId: first.sessionId }));
+
+    // Now resume the same archive into a different space. The row "exists", but
+    // it belongs to somebody else — that must be reported, never skipped.
+    const second = await inSpace(otherSpace, () =>
+      client.dump.importBegin({ sourceSpaceId: liveSpace, resume: true }),
+    );
+    await expect(
+      inSpace(otherSpace, () =>
+        client.dump.importTables({
+          sessionId: second.sessionId,
+          table: "nodes",
+          rows: [row(liveSpace)],
+        }),
+      ),
+    ).rejects.toThrow(/already exist in a DIFFERENT space/);
+  });
+
+  // ── importAbort deletes in chunks, not one round trip per row ─────────
+  it("importAbort removes every inserted row without issuing one DELETE per id", async () => {
+    // A restore of the validated production space inserts 1,473,822 rows, so
+    // the old per-row `delete().where(eq(id))` loop meant that many sequential
+    // round trips to undo it — hours, on the error path that runs precisely
+    // when a restore has already gone wrong. Chunked `inArray` does it in
+    // `ceil(n / 2000)` statements instead.
+    const targetSpace = "space_dump_abort_bulk";
+    const { sessionId } = await inSpace(targetSpace, () =>
+      client.dump.importBegin({ sourceSpaceId: targetSpace }),
+    );
+
+    const rootId = rootNodeIdForSpace(targetSpace);
+    const total = 25;
+    await inSpace(targetSpace, () =>
+      client.dump.importTables({
+        sessionId,
+        table: "nodes",
+        rows: Array.from({ length: total }, (_, i) => ({
+          id: `nod_abort_bulk_${i}`,
+          spaceId: targetSpace,
+          parentId: rootId,
+          type: "folder",
+          slug: `abort-bulk-${i}`,
+          name: `Abort Bulk ${i}`,
+          description: "",
+          metadata: {},
+          position: i,
+          archivedAt: null,
+          deletedAt: null,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        })),
+      }),
+    );
+
+    const before = await inSpace(targetSpace, () => client.nodes.list({ types: ["folder"] }));
+    expect(before.filter((n) => n.slug.startsWith("abort-bulk-"))).toHaveLength(total);
+
+    await inSpace(targetSpace, () => client.dump.importAbort({ sessionId }));
+
+    // Every row this session inserted is gone — the chunked delete must not
+    // silently skip a partial final chunk.
+    const after = await inSpace(targetSpace, () => client.nodes.list({ types: ["folder"] }));
+    expect(after.filter((n) => n.slug.startsWith("abort-bulk-"))).toHaveLength(0);
+  });
+
   // ── admin gate: full-fidelity dump is a space owner/admin operation ────────
   // `dump.exportTables` is a raw table scan that bypasses node ACLs, so a
   // non-manager member could otherwise exfiltrate private nodes. The guard reads

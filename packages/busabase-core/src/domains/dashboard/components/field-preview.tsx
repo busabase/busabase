@@ -43,7 +43,12 @@ export const shouldCollapsePreview = (field: BaseFieldVO | undefined, value: unk
   }
   const text =
     field.type === "html" ? stripHtmlTags(fieldValueToString(value)) : fieldValueToString(value);
-  return text.length > 180 || text.split(/\r?\n/).length > 4;
+  // Rich preview types (rendered HTML/Markdown/code) get a taller collapse threshold than plain
+  // longtext — a short truncation reads as broken content for a rendered preview.
+  const isRichContent = ["markdown", "html", "code", "json", "yaml"].includes(field.type);
+  const lengthThreshold = isRichContent ? 600 : 180;
+  const lineThreshold = isRichContent ? 12 : 4;
+  return text.length > lengthThreshold || text.split(/\r?\n/).length > lineThreshold;
 };
 
 export function FieldBadge({ chip }: { chip: FieldChip }) {
@@ -502,20 +507,38 @@ export function FieldValuePreview({
             ? getRecordTitle(linkedRecord, messages)
             : shortIdentifier(recordId);
           const chipClassName = "max-w-64 truncate rounded-md border bg-card px-2 py-0.5 text-xs";
+          // A relation whose target has been archived used to render exactly
+          // like a live one — same border, same colour, same link — so a row
+          // could point at something sitting in the trash with nothing on
+          // screen saying so. The record is still reachable (`records.get`
+          // returns archived rows), so keep the link and mark it instead:
+          // struck through, dimmed, and named as archived on hover.
+          const isArchived = linkedRecord?.status === "archived";
           return linkedRecord ? (
             <Link
-              className={`${chipClassName} text-primary transition-colors hover:border-primary/40 hover:bg-primary/5 hover:underline`}
+              className={`${chipClassName} transition-colors ${
+                isArchived
+                  ? "text-muted-foreground line-through decoration-muted-foreground/60 hover:border-muted-foreground/40 hover:bg-muted/40"
+                  : "text-primary hover:border-primary/40 hover:bg-primary/5 hover:underline"
+              }`}
               href={mergeSearchIntoHref(
                 `/base/${linkedRecord.base.slug}/${linkedRecord.id}`,
                 currentSearch,
               )}
               key={recordId}
-              title={label}
+              title={isArchived ? `${label} (${messages.common.archived})` : label}
             >
               {label}
             </Link>
           ) : (
-            <span className={chipClassName} key={recordId} title={recordId}>
+            // Not archived — genuinely unreachable: hard-deleted, or in a Base
+            // this viewer cannot see. Distinct from the archived case above,
+            // and previously indistinguishable from it.
+            <span
+              className={`${chipClassName} border-dashed text-muted-foreground`}
+              key={recordId}
+              title={`${recordId} — ${messages.recordView.relationUnavailable}`}
+            >
               {label}
             </span>
           );
@@ -634,7 +657,7 @@ export function MultilineFieldPreview({
       <div
         className={
           collapsible && !expanded
-            ? "max-h-28 min-w-0 overflow-hidden [mask-image:linear-gradient(180deg,#000_72%,transparent)]"
+            ? "max-h-72 min-w-0 overflow-hidden [mask-image:linear-gradient(180deg,#000_72%,transparent)]"
             : "min-w-0"
         }
       >

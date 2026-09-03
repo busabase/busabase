@@ -100,7 +100,7 @@ describe("Busabase OpenAPI record get route", () => {
     expect(spec.paths?.["/api/v1/bases/{baseId}/restore/change-requests"]).toBeUndefined();
   });
 
-  it("keeps the compressed public API at 107 operations", async () => {
+  it("keeps the compressed public API at 113 operations", async () => {
     const spec = await getBusabaseOpenApiSpec();
     const operationCount = Object.values(spec.paths ?? {}).reduce(
       (count, pathItem) =>
@@ -148,6 +148,26 @@ describe("Busabase OpenAPI record get route", () => {
     // reason `nodes.list` is — it returns ids from the tree the caller can
     // already read, under the same node-visibility ACL — and it is what lets a
     // depth-bounded sidebar open straight to a deep node on a cold load.
-    expect(operationCount).toBe(108);
+    // `GET /records/group-by` added (+1 -> 109). Public for the same reason
+    // `records.count` is — it reports aggregate counts over records the caller
+    // can already read — and it is what lets a board column header or a summary
+    // tile show its split without draining the whole Base to the client.
+    // `POST /dump/export/doc-bodies` added (+1 -> 110). The export-side
+    // counterpart to the `docBodies` pseudo-table `dump.importTables` already
+    // accepted: `nodes.get` refuses an ARCHIVED Doc, so a backup driven
+    // through it captured 13 of 88 bodies on a real space and restored the
+    // other 75 empty. Manager-gated like every other `dump.*` route.
+    // `PATCH /nodes/{nodeId}/settings` added (+1 -> 111). Public for the same
+    // reason `PATCH /nodes/{nodeId}/metadata` is, and gated at the same `write`
+    // level: it edits one property of a node the caller can already write to.
+    // What differs is the shape, not the exposure — settings takes a CLOSED
+    // schema Busabase itself acts on, so an unknown key is refused rather than
+    // merged, which is exactly why it is a separate endpoint instead of another
+    // key in the free-form metadata bag.
+    // +2 for the node agent-prompt pair (`GET`/`PUT /nodes/{id}/agent-prompts`)
+    // -> 113. A read and a write rather than a field on the node: the list is
+    // capped at 50 prompts x 8 KiB per locale, so it is excluded from every node
+    // listing and has to be asked for on its own.
+    expect(operationCount).toBe(113);
   });
 });

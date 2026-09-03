@@ -214,6 +214,9 @@ export const dashboardZhCN: CoreI18nMessages = {
     librarySubtitle: "此空间中的 AirApps —— 基于 Busabase 数据与工作流构建的迷你应用。",
     libraryEmptyTitle: "暂无 AirApps",
     libraryEmptyBody: "你在此空间中创建的 AirApps 会显示在这里。",
+    libraryErrorTitle: "无法加载 AirApps",
+    libraryErrorBody: "加载此空间中的 AirApps 时出错了。",
+    libraryRetry: "重试",
     tabPreview: "应用",
     tabFiles: "文件",
     tabLogs: "日志",
@@ -241,6 +244,9 @@ export const dashboardZhCN: CoreI18nMessages = {
     exitFullscreen: "退出全屏",
     details: "AirApp 详情",
     engineLabel: "运行引擎",
+    engineFollowApp: "跟随 App",
+    engineFollowAppNamed: "跟随 App（{engine}）",
+    engineFollowAppHint: "由该 App 的 airapp.json 决定。选一个引擎可为本节点覆盖它。",
     engineBrowser: "浏览器内",
     engineBrowserHint: "就在这个标签页里跑 · 免费且即时 · 只支持 JavaScript",
     engineLocal: "本机",
@@ -249,6 +255,7 @@ export const dashboardZhCN: CoreI18nMessages = {
     engineRemoteHint: "每次运行单独开一台，任意语言 · 隔离",
     noEligibleEngine:
       "本部署没有引擎能运行 {runtime} 类型的 AirApp。请让运维启用本机或远程运行时。",
+    pythonNeedsSandock: "不支持 Python AirApp，需要配置 Sandock。",
     swError: {
       INSECURE_CONTEXT: "AirApp 预览需要 HTTPS。请用 HTTPS 打开此工作区，或使用桌面端。",
       SERVICE_WORKER_UNAVAILABLE:
@@ -321,7 +328,7 @@ export const dashboardZhCN: CoreI18nMessages = {
     archive: "归档",
     assets: "资产",
     agents: "Agents",
-    apps: "应用库",
+    apps: "应用启动台",
     graph: "图谱视图",
     workspace: "工作区",
     base: "数据库",
@@ -377,7 +384,7 @@ export const dashboardZhCN: CoreI18nMessages = {
     recentEmptyBody: "你打开过的数据库和文档会显示在这里。",
     recentViewAll: "查看全部",
     recentAppsTitle: "最近使用的 AirApps",
-    recentAppsViewAll: "查看应用库",
+    recentAppsViewAll: "打开应用启动台",
     activityTitle: "最近动态",
     activityViewAll: "查看全部动态",
     activityEmptyBody: "这个工作区里发生的变更会显示在这里。",
@@ -623,6 +630,7 @@ export const dashboardZhCN: CoreI18nMessages = {
     iconUploadFailed: "图标上传失败",
   },
   base: {
+    searchRecordsToLink: "搜索要关联的记录",
     all: "全部",
     newView: "新建视图",
     editView: "编辑视图",
@@ -680,6 +688,7 @@ export const dashboardZhCN: CoreI18nMessages = {
     createDeleteRequestLabel: "创建删除请求",
     deleteViewRequestBody: "这会为“{name}”创建删除变更请求。该视图会保留到请求评审并合并后。",
     archivedViewsCount: "{count} 个已归档视图",
+    archivedViews: "已归档视图",
     recordStatus: "记录状态",
     selectRecord: "选择记录",
     selectAllRecords: "全选记录",
@@ -1027,6 +1036,7 @@ export const dashboardZhCN: CoreI18nMessages = {
     showFull: "显示全部",
     preview: "预览",
     embedTitle: "{label} 嵌入内容",
+    relationUnavailable: "该记录不可用 — 可能已被删除，或你没有访问权限。",
   },
   createNode: {
     title: "新建{suffix}",
@@ -1359,7 +1369,6 @@ export const dashboardZhCN: CoreI18nMessages = {
     agentPromptLabel: "把这段粘贴给你的 Agent",
     agentPromptBody:
       "安装 Busabase 应用技能「{name}」，以便你之后可以操作它。\n\n安装前，先确认当前环境已经连接 Busabase，并且连接的是正确的目标空间{targetSpace}。如果当前环境尚未配置 Busabase 连接，或连接指向其他空间，请先阅读并遵循下面的连接引导：\n\n{setupUrl}\n\n连接就绪后，执行：\n\n{command}\n\n只安装技能——先不要在我的 Busabase 空间里创建、修改或删除任何东西。装好之后，用几句话告诉我这个 App 是做什么的，以及如果我让你去搭建它，会创建些什么。",
-    agentRefHint: "安装的是仓库默认分支。这条目录读取自 {ref}。",
     agentNoSkillTitle: "这个包不带 Agent 手册",
     agentNoSkillBody:
       "这里没有 SKILL.md，Agent 无从安装，只能靠猜你的表结构。请改用界面安装；装完仍可以在节点的「•••」菜单里把该节点的提示词交给 Agent。",

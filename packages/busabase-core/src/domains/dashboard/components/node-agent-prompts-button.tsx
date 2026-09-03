@@ -16,6 +16,7 @@
 // a button in, and it opens the same dialog (see `dashboard-shell.tsx`'s
 // `onOpenAgentPrompts`).
 
+import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import { Button } from "kui/button";
 import { Sparkles } from "lucide-react";
 import { useState } from "react";
@@ -31,7 +32,7 @@ export function NodeAgentPromptsButton({
   scope,
   spaceId,
   spaceName,
-  metadata,
+  orpc,
 }: {
   nodeId: string;
   nodeName: string;
@@ -40,11 +41,9 @@ export function NodeAgentPromptsButton({
   scope?: NodePromptScope;
   spaceId?: string;
   spaceName?: string;
-  /** The node's own `metadata` — read for `metadata.agentPrompts` (Feature 3's
-   *  per-node custom scenario prompts). Omit when the caller has no loaded
-   *  `NodeVO` on hand (e.g. a `BaseVO`-only header); the dialog falls back to
-   *  the node type's default scenarios, same as before this prop existed. */
-  metadata?: Record<string, unknown>;
+  /** Fetches this node's custom prompts once the dialog opens; `null` for a
+   *  scoped dialog, which never shows them. See the dialog's `orpc` doc. */
+  orpc: BusabaseQueryUtils | null;
 }) {
   const messages = useCoreI18n();
   const [open, setOpen] = useState(false);
@@ -74,7 +73,7 @@ export function NodeAgentPromptsButton({
       </Button>
       {open && (
         <NodeAgentPromptsDialog
-          metadata={metadata}
+          orpc={orpc}
           nodeId={nodeId}
           nodeName={nodeName}
           nodeType={nodeType}

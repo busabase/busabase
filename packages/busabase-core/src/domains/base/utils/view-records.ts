@@ -120,8 +120,18 @@ export const getViewFieldPreviewText = (field: BaseFieldVO | undefined, value: u
   if (field.type === "select") {
     return choiceLabel(field, value);
   }
-  if (field.type === "multiselect" && Array.isArray(value)) {
-    return value.map((item) => choiceLabel(field, item)).join(", ");
+  // A record's multiselect value is an array of choice ids; a view FILTER's
+  // value is a single choice id (the filter editor writes `choice.id`). Both
+  // sides pass through here — `recordMatchesViewFilter` formats the record
+  // value and the filter value with this same function — so the non-array
+  // branch must map its id to a label too. Guarding the whole case on
+  // `Array.isArray` left the filter value as a raw id ("opt_urgent") while the
+  // record side became labels ("Urgent, Later"), so equals/contains on a
+  // multiselect field never matched anything.
+  if (field.type === "multiselect") {
+    return Array.isArray(value)
+      ? value.map((item) => choiceLabel(field, item)).join(", ")
+      : choiceLabel(field, value);
   }
   if (field.type === "number" && field.options.number?.format === "currency") {
     return formatNumberField(value, field.options.number);
@@ -145,6 +155,45 @@ export const getViewFieldPreviewText = (field: BaseFieldVO | undefined, value: u
     return resolveEmbedPreview(value, field)?.label ?? previewText(value, field.type);
   }
   return previewText(value, field.type);
+};
+
+/**
+ * Field types whose STORED value is itself a grouping key, so a SQL GROUP BY
+ * produces exactly the buckets a client would build from the same records.
+ * Text is excluded (`valueText` is truncated at `VALUE_TEXT_INDEX_LIMIT`, so
+ * two distinct long values can collide into one bucket), and so is date
+ * (bucketing by day depends on the VIEWER's timezone, which the server doesn't
+ * have — the same reasoning that keeps date out of the exact filter pushdown).
+ */
+export const GROUPABLE_FIELD_TYPES: ReadonlySet<string> = new Set(["select", "checkbox"]);
+
+/**
+ * Field types that project into the `valueDate` column (mirrors
+ * `DATE_FIELD_TYPES` in `logic/vo.ts`, which this file cannot import without
+ * creating a cycle — `resolveDateField`, `listRecordsPage`'s `dateRange`, and
+ * demo mode all need the same list independently of that projection code).
+ * `created_time`/`updated_time` are computed at commit time (see
+ * `field-types.ts`'s `compute`) but flow through the same projection as a
+ * plain `date` field once written, so a UTC range predicate applies to them
+ * identically.
+ */
+export const DATE_RANGE_FIELD_TYPES: ReadonlySet<string> = new Set([
+  "date",
+  "created_time",
+  "updated_time",
+]);
+
+/**
+ * Normalize one raw stored value to its group key. Shared by the SQL path, the
+ * evaluate-in-memory fallback and demo mode so all three bucket identically.
+ */
+export const groupKeyForValue = (value: unknown, fieldType: string): string | null => {
+  if (fieldType === "checkbox") {
+    // `recordMatchesViewFilter` treats false/"false"/null/undefined alike, so
+    // an unset checkbox belongs in the "false" bucket rather than its own.
+    return value === true || value === "true" ? "true" : "false";
+  }
+  return typeof value === "string" && value !== "" ? value : null;
 };
 
 /**

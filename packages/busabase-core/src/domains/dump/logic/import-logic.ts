@@ -32,11 +32,16 @@ import { DUMP_IMPORT_ORDER, DUMP_TABLE_REGISTRY } from "./table-registry";
  * session for its own lifetime (minutes, not days) — so a lightweight
  * in-memory record with a TTL sweep is simpler than a `busabase_dump_sessions`
  * table and avoids adding a persistent table for a purely transient concept.
- * This does mean a session cannot survive a server restart — `--resume` in
- * `busabase-dump` is implemented at the CLI/archive level (idMap + step
- * markers on disk), not by resuming a dead server-side session; a resumed
- * full-fidelity import calls `importBegin` again against the still-empty
- * space and replays whichever table batches were not yet marked done.
+ * This does mean a session cannot survive a server restart, and `--resume`
+ * deliberately does not try to. It starts a BRAND NEW session with
+ * `resume: true` against the (now non-empty) space and replays the whole
+ * archive, letting `ON CONFLICT DO NOTHING` skip whatever already landed.
+ * Nothing about the dead session is recovered, so nothing has to be persisted
+ * to recover it — the archive on disk is the only state a resume needs.
+ *
+ * (An earlier version of this comment described an "idMap + step markers on
+ * disk" scheme at the CLI level. No such thing was ever built; `--resume`
+ * simply threw "not implemented yet" until it was replaced by the above.)
  */
 interface ImportSession {
   id: string;
@@ -51,6 +56,11 @@ interface ImportSession {
   sourceSpaceId: string;
   createdAt: number;
   insertedIds: Map<string, Set<string>>;
+  /**
+   * Continuing an interrupted restore. Inserts become `ON CONFLICT DO
+   * NOTHING`, and `importAbort` refuses to run — see both call sites.
+   */
+  resume: boolean;
 }
 
 const SESSION_TTL_MS = 60 * 60 * 1000; // 1h — generous for a large space import.
@@ -96,17 +106,26 @@ export const beginImportSession = async (
   // that specific row as not counting toward "empty" (see `importTableRows`'s
   // matching skip for the `nodes` table below, so re-importing the source's
   // own root node row doesn't collide with it on insert).
-  const [existing] = await db
-    .select({ id: busabaseNodes.id })
-    .from(busabaseNodes)
-    .where(
-      and(eq(busabaseNodes.spaceId, spaceId), ne(busabaseNodes.id, rootNodeIdForSpace(spaceId))),
-    )
-    .limit(1);
-  if (existing) {
-    throw new ORPCError("BAD_REQUEST", {
-      message: "Full-fidelity import requires an empty target space (node tree is not empty).",
-    });
+  // `resume` deliberately skips this: continuing an interrupted restore means
+  // the space is expected to be non-empty. See the flag's own doc comment on
+  // `ImportBeginInputSchema` for why a failed restore does not need this but a
+  // KILLED one does.
+  if (!input.resume) {
+    const [existing] = await db
+      .select({ id: busabaseNodes.id })
+      .from(busabaseNodes)
+      .where(
+        and(eq(busabaseNodes.spaceId, spaceId), ne(busabaseNodes.id, rootNodeIdForSpace(spaceId))),
+      )
+      .limit(1);
+    if (existing) {
+      throw new ORPCError("BAD_REQUEST", {
+        message:
+          "Full-fidelity import requires an empty target space (node tree is not empty). " +
+          "If a previous restore of THIS archive into THIS space was interrupted, re-run with " +
+          "`--resume` to continue it.",
+      });
+    }
   }
 
   const sessionId = generateId("dumpsess");
@@ -116,6 +135,7 @@ export const beginImportSession = async (
     sourceSpaceId: input.sourceSpaceId,
     createdAt: Date.now(),
     insertedIds: new Map(),
+    resume: input.resume,
   });
   return { sessionId };
 };
@@ -260,10 +280,86 @@ export const importTableRows = async (input: ImportTablesInput): Promise<ImportT
   );
   if (stampedRows.length === 0) return { inserted: 0 };
 
+  let rowsToInsert = stampedRows;
+  if (session.resume) {
+    // Resuming a killed restore replays the whole archive, so rows that
+    // already landed must be skipped rather than collide.
+    //
+    // NOT `onConflictDoNothing()`: dump ids are a single GLOBAL primary key,
+    // not scoped per space. If the SOURCE space is still live in this same
+    // database, every replayed row collides with its own original — so a
+    // blanket "do nothing" silently skips the entire archive and reports
+    // success over a space that stayed empty. Reproduced exactly that way
+    // before this check existed.
+    //
+    // Look the ids up instead: a collision inside THIS space is our own
+    // earlier progress (skip it), while a collision belonging to any other
+    // space means the caller is resuming into the wrong place and must be
+    // told, not silently ignored.
+    const ids = stampedRows.map((row) => row.id as string);
+    const existing = await queryInChunks<{ id: string; spaceId: string | null }>(
+      ids,
+      (idsChunk) =>
+        db
+          .select({ id: table.id, spaceId: table.spaceId })
+          .from(table as never)
+          .where(inArray(table.id, idsChunk)) as unknown as Promise<
+          Array<{ id: string; spaceId: string | null }>
+        >,
+    );
+    const foreign = existing.filter((row) => row.spaceId !== spaceId);
+    if (foreign.length > 0) {
+      throw new ORPCError("CONFLICT", {
+        message:
+          `Cannot resume: ${foreign.length} row(s) in table "${input.table}" already exist in a ` +
+          `DIFFERENT space (e.g. id ${foreign[0]?.id}). A full-fidelity restore replays original ` +
+          "ids, which are unique across the whole database — so this archive's rows are already " +
+          "in use elsewhere here, and continuing would be restoring into the wrong place. " +
+          "`--resume` is only for continuing the SAME archive into the SAME space.",
+      });
+    }
+    const alreadyMine = new Set(existing.map((row) => row.id));
+    rowsToInsert = stampedRows.filter((row) => !alreadyMine.has(row.id as string));
+    if (rowsToInsert.length === 0) return { inserted: 0 };
+  }
+
   try {
-    await db.insert(table as never).values(stampedRows as never[]);
+    await db.insert(table as never).values(rowsToInsert as never[]);
   } catch (error) {
-    const pgCode = (error as { cause?: { code?: string } } | undefined)?.cause?.code;
+    const cause = (
+      error as { cause?: { code?: string; detail?: string; constraint?: string } } | undefined
+    )?.cause;
+    const pgCode = cause?.code;
+    if (pgCode === "23503") {
+      // Real FK violation (fieldValues.recordId/.changeRequestId/.operationId/
+      // .baseId/.commitId all reference other dump tables) — reproduced live:
+      // a backup of an actively-used space took over an hour, and content
+      // created live partway through was captured by a LATER table
+      // (fieldValues, itself id-paged rather than creation-time-ordered) but
+      // missed by an EARLIER one (records) whose snapshot had already been
+      // taken. `full-exporter.ts` now cross-checks and drops what it can
+      // catch at export time, but an archive from before that fix — or any
+      // FK this check doesn't cover — still reaches here as a raw Postgres
+      // "insert or update on table ... violates foreign key constraint" with
+      // no indication of WHICH row or WHY. Spell it out instead.
+      //
+      // Two different causes land here and the message must not presume one:
+      // (a) drift — the source space changed under a long backup; (b) the
+      // archive deliberately omits a whole referenced table, which is what a
+      // `--no-history` backup does (`records.headCommitId` is a NOT NULL FK
+      // into `commits`, so such an archive can never restore). Naming only (a)
+      // sent a real `--no-history` restore chasing a phantom race.
+      throw new ORPCError("CONFLICT", {
+        message:
+          `Restore failed: table "${input.table}" has a row referencing something this archive ` +
+          `does not carry (constraint ${cause?.constraint ?? "unknown"}). Either the archive omits ` +
+          "a whole table it depends on (a history-less backup cannot be restored — every record " +
+          "points at the commit that produced it), or the source space kept changing while a long " +
+          "backup was still running, so a later-exported table captured content an earlier one had " +
+          "already missed. Re-run the backup with history included, and against a quiet space." +
+          (cause?.detail ? ` (${cause.detail})` : ""),
+      });
+    }
     if (pgCode === "23505") {
       // Every dump table's `id` is a bare, database-wide primary key (not
       // scoped per space — see table-registry.ts). A restore replays the
@@ -289,10 +385,13 @@ export const importTableRows = async (input: ImportTablesInput): Promise<ImportT
   }
 
   const seen = session.insertedIds.get(input.table) ?? new Set<string>();
-  for (const row of stampedRows) seen.add((row as Record<string, unknown>).id as string);
+  for (const row of rowsToInsert) seen.add((row as Record<string, unknown>).id as string);
   session.insertedIds.set(input.table, seen);
 
-  return { inserted: stampedRows.length };
+  // Report what was actually written, not what was offered. Under `--resume`
+  // these differ, and a count that always echoed the request size is how a
+  // restore that inserted nothing still printed a full-looking summary.
+  return { inserted: rowsToInsert.length };
 };
 
 /**
@@ -316,6 +415,34 @@ export const queryInChunks = async <Row>(
     rows.push(...(await runQuery(ids.slice(i, i + ORPHAN_CHECK_CHUNK_SIZE))));
   }
   return rows;
+};
+
+/**
+ * How many storage existence checks may be in flight at once.
+ *
+ * These are HEAD requests against object storage, one per imported attachment
+ * — 10,486 of them on a real production restore, previously issued strictly
+ * one at a time inside the single `importCommit` request. Serialized, that is
+ * the slowest part of finalizing a large restore by a wide margin, and it is
+ * pure latency: nothing about the check depends on the previous one.
+ */
+const STORAGE_CHECK_CONCURRENCY = 16;
+
+/**
+ * Which of `keys` have no bytes in storage. Order of the result does not
+ * matter (it is only counted), so this fans out in fixed-size waves rather
+ * than preserving input order.
+ */
+export const findMissingObjects = async (keys: string[]): Promise<string[]> => {
+  const missing: string[] = [];
+  for (let i = 0; i < keys.length; i += STORAGE_CHECK_CONCURRENCY) {
+    const wave = keys.slice(i, i + STORAGE_CHECK_CONCURRENCY);
+    const present = await Promise.all(wave.map((key) => storage.objectExists(key)));
+    wave.forEach((key, index) => {
+      if (!present[index]) missing.push(key);
+    });
+  }
+  return missing;
 };
 
 /**
@@ -444,11 +571,7 @@ const checkBlobCompleteness = async (
       .from(attachments)
       .where(inArray(attachments.id, idsChunk)),
   );
-  const missing: string[] = [];
-  for (const row of rows) {
-    const exists = await storage.objectExists(row.storageKey);
-    if (!exists) missing.push(row.storageKey);
-  }
+  const missing = await findMissingObjects(rows.map((row) => row.storageKey));
   return missing.length > 0
     ? [`${missing.length} attachment(s) have no bytes in storage for their storageKey.`]
     : [];
@@ -480,12 +603,11 @@ const checkAssetTextBlobCompleteness = async (
         and(eq(busabaseAssetTexts.spaceId, spaceId), inArray(busabaseAssetTexts.id, idsChunk)),
       ),
   );
-  const missing: string[] = [];
-  for (const row of rows) {
-    if (row.status === "none" || row.textStorageKey === "") continue;
-    const exists = await storage.objectExists(row.textStorageKey);
-    if (!exists) missing.push(row.textStorageKey);
-  }
+  const missing = await findMissingObjects(
+    rows
+      .filter((row) => row.status !== "none" && row.textStorageKey !== "")
+      .map((row) => row.textStorageKey),
+  );
   return missing.length > 0
     ? [
         `${missing.length} assetTexts row(s) have no bytes in storage for their textStorageKey — the extracted text they claim to hold is not searchable (grep will silently return no matches for it).`,
@@ -497,13 +619,30 @@ export const commitImportSession = async (sessionId: string): Promise<ImportComm
   requireSpaceManagerForDump();
   const session = requireSession(sessionId);
   const warnings: string[] = [];
-
-  if (!session.insertedIds.has("nodes")) {
-    warnings.push("No nodes were imported in this session — the space will remain empty.");
-  }
-
   const db = await getDb();
   const spaceId = session.spaceId;
+
+  if (!session.insertedIds.has("nodes")) {
+    // Under `--resume` this session legitimately adds no nodes — the killed
+    // run already landed them, and re-offering the same rows inserts nothing.
+    // Asking the session alone then produced "the space will remain empty" on
+    // a resume that had just restored the space completely. Ask the SPACE.
+    const [anyNode] = session.resume
+      ? await db
+          .select({ id: busabaseNodes.id })
+          .from(busabaseNodes)
+          .where(
+            and(
+              eq(busabaseNodes.spaceId, spaceId),
+              ne(busabaseNodes.id, rootNodeIdForSpace(spaceId)),
+            ),
+          )
+          .limit(1)
+      : [];
+    if (!anyNode) {
+      warnings.push("No nodes were imported in this session — the space will remain empty.");
+    }
+  }
   const fieldValueIds = session.insertedIds.get("fieldValues") ?? new Set<string>();
   const linkIds = session.insertedIds.get("recordLinks") ?? new Set<string>();
   const assetIds = session.insertedIds.get("assets") ?? new Set<string>();
@@ -527,6 +666,18 @@ export const abortImportSession = async (sessionId: string): Promise<{ ok: boole
   const session = requireSession(sessionId);
   const db = await getDb();
 
+  // A resumed restore must never roll back. Its whole purpose is to build on
+  // rows a previous, killed attempt already landed, and this session only
+  // knows about the ones IT inserted — so rolling back would delete the newly
+  // recovered progress while leaving the older rows, moving the restore
+  // backwards and stranding it in a state neither run can finish. The CLI
+  // already skips calling this under `--resume`; refuse here too so a direct
+  // API caller cannot do it either.
+  if (session.resume) {
+    sessions.delete(sessionId);
+    return { ok: true };
+  }
+
   // Best-effort cleanup, children before parents (reverse of import order).
   // Only ever touches rows this session itself inserted, in the space that
   // was validated empty at `importBegin` — never a blanket space wipe.
@@ -534,8 +685,16 @@ export const abortImportSession = async (sessionId: string): Promise<{ ok: boole
     const ids = session.insertedIds.get(table);
     if (!ids || ids.size === 0) continue;
     const drizzleTable = DUMP_TABLE_REGISTRY[table];
-    for (const rowId of ids) {
-      await db.delete(drizzleTable as never).where(eq(drizzleTable.id, rowId));
+    // Chunked `inArray`, not one DELETE per id. A restore of the validated
+    // production space inserts 1,473,822 rows, so the old per-row loop meant
+    // that many sequential round trips to undo it — hours, on the error path
+    // that runs precisely when a restore has already gone wrong. Reuses the
+    // same chunk size as the integrity queries so a single statement can never
+    // grow an unbounded parameter list.
+    const idList = [...ids];
+    for (let i = 0; i < idList.length; i += ORPHAN_CHECK_CHUNK_SIZE) {
+      const chunk = idList.slice(i, i + ORPHAN_CHECK_CHUNK_SIZE);
+      await db.delete(drizzleTable as never).where(inArray(drizzleTable.id, chunk));
     }
   }
 

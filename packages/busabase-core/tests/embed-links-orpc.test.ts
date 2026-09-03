@@ -2,11 +2,13 @@ import { OpenAPIHandler } from "@orpc/openapi/fetch";
 import { createRouterClient } from "@orpc/server";
 import { describe, expect, it } from "vitest";
 import { createBusabaseClient } from "../../../apps/busabase-sdk/src/client";
+import { runWithLocalContext } from "../src/context";
 import {
   EMBED_PUBLIC_ID_PATTERN,
   EMBED_SECRET_PATTERN,
   resolveEmbedLink,
 } from "../src/domains/embed-links/logic";
+import { ROOT_NODE_ID } from "../src/logic/kernel";
 import { busabaseRouter } from "../src/router";
 import { busabaseDemoRouter } from "../src/router-demo";
 import { seedScenario } from "./helpers/seed-scenario";
@@ -69,6 +71,30 @@ describe("embed links — Desktop oRPC integration", () => {
     await expect(
       demo.embedLinks.create({ type: "node", typeId: "nod_demo" }),
     ).rejects.toMatchObject({ code: "FORBIDDEN" });
+  });
+
+  it("uses the local request origin for generated capability URLs", async () => {
+    await seedScenario("embed-links-request-origin");
+    const client = createRouterClient(busabaseRouter);
+    const doc = await client.docs.create({
+      autoMerge: true,
+      slug: "embed-request-origin",
+      name: "Embed Request Origin",
+      body: "# Request origin",
+    });
+    if (!("node" in doc)) throw new Error("expected a materialized Doc");
+
+    const created = await runWithLocalContext(
+      {
+        vaultRuntimeEnv: {},
+        localUserName: "Local Admin",
+        embedOrigin: "http://127.0.0.1:43127",
+      },
+      () => client.embedLinks.create({ type: "node", typeId: doc.node.id }),
+    );
+
+    expect(new URL(created.url).origin).toBe("http://127.0.0.1:43127");
+    expect(new URL(created.iframeUrl).origin).toBe("http://127.0.0.1:43127");
   });
 
   it("serves embed-link administration on the shared /api/v1 REST paths", async () => {
@@ -179,6 +205,42 @@ describe("embed links — Desktop oRPC integration", () => {
     await expect(resolveEmbedLink(apiCreated.id, apiToken)).resolves.toMatchObject({
       type: "change-request",
       changeRequest: { id: pendingDoc.id },
+    });
+  });
+
+  it("creates a ChangeRequest embed for a pending node create scoped to its parent", async () => {
+    await seedScenario("embed-links-pending-node-create");
+    const client = createRouterClient(busabaseRouter);
+    const pending = await client.nodes.createChangeRequest({
+      autoMerge: false,
+      operations: [
+        {
+          kind: "create",
+          parentNodeId: ROOT_NODE_ID,
+          nodeType: "doc",
+          slug: "pending-embed-doc",
+          name: "Pending Embed Doc",
+        },
+      ],
+    });
+
+    expect(pending).toMatchObject({ nodeId: null, status: "in_review" });
+    const created = await client.embedLinks.create({
+      type: "change-request",
+      typeId: pending.id,
+      framePolicy: { mode: "anywhere", allowedOrigins: [] },
+    });
+    const url = new URL(created.url);
+    const token = url.searchParams.get("token") ?? "";
+
+    expect(created).toMatchObject({
+      active: true,
+      type: "change-request",
+      typeId: pending.id,
+    });
+    await expect(resolveEmbedLink(created.id, token)).resolves.toMatchObject({
+      type: "change-request",
+      changeRequest: { id: pending.id, status: "in_review" },
     });
   });
 });

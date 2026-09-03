@@ -38,6 +38,7 @@ import {
   isHiddenOnCreate,
   isSystemFieldType,
 } from "../../base/field-types";
+import { getPrimaryField } from "../../base/utils/primary-field";
 import {
   EMPTY_WHITEBOARD_FIELD_VALUE,
   parseWhiteboardFieldValue,
@@ -117,6 +118,7 @@ export function RecordTopbarActions({
           check) — passing it here would be inert even if `BaseVO` carried
           metadata, which it doesn't. */}
       <NodeAgentPromptsButton
+        orpc={null}
         nodeId={base.nodeId}
         nodeName={base.name}
         nodeType="base"
@@ -450,6 +452,7 @@ export function RecordDetailView({
 
 export function RecordEditorView({
   base,
+  client,
   mode,
   onSubmitCreate,
   onSubmitError,
@@ -459,6 +462,7 @@ export function RecordEditorView({
   record,
 }: {
   base: BaseVO | null;
+  client: BusabaseDashboardApiClient;
   mode: "new" | "edit";
   onSubmitCreate?: (
     base: BaseVO,
@@ -581,6 +585,7 @@ export function RecordEditorView({
               .filter((field) => mode === "edit" || !isHiddenOnCreate(field.type))
               .map((field) => (
                 <RecordFieldInput
+                  client={client}
                   editorInstanceKey={mode === "edit" && record ? record.id : "new"}
                   field={field}
                   key={field.id}
@@ -631,7 +636,138 @@ export function RecordEditorView({
   );
 }
 
+/**
+ * Options for a relation field. The records already in memory are NOT enough:
+ * a Base is paged, so the record a user wants to link may simply not be loaded.
+ * Typing queries the server (`contains` on the target Base's primary field),
+ * and the already-selected records are always merged in so the control can
+ * still render its own value.
+ */
+function RelationFieldEditor({
+  client,
+  field,
+  inputId,
+  fieldName,
+  loadedRecords,
+  onChange,
+  value,
+}: {
+  client: BusabaseDashboardApiClient;
+  field: BaseFieldVO;
+  inputId: string;
+  fieldName: string;
+  loadedRecords: RecordVO[];
+  onChange: (value: unknown) => void;
+  value: string[];
+}) {
+  const messages = useCoreI18n();
+  const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const targetBaseId = field.options.targetBaseId;
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(query.trim()), 250);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  // The target Base's primary field is what `getRecordTitle` renders, so it is
+  // also what the user is typing against. The Base list is small and cached;
+  // there is no single-Base read on this client.
+  const basesQuery = useQuery({
+    enabled: Boolean(targetBaseId),
+    queryFn: () => client.listBases(),
+    queryKey: ["busabase", "relation-bases"],
+    staleTime: 60_000,
+  });
+  const targetBase = basesQuery.data?.find((base) => base.id === targetBaseId);
+  const primarySlug = getPrimaryField(targetBase)?.slug;
+
+  const optionsQuery = useQuery({
+    enabled: Boolean(targetBaseId) && (!debouncedQuery || Boolean(primarySlug)),
+    queryFn: () =>
+      client.listRecordsPage({
+        baseId: targetBaseId as string,
+        pageSize: 50,
+        ...(debouncedQuery && primarySlug
+          ? {
+              filters: [
+                {
+                  fieldSlug: primarySlug,
+                  fieldType: "text" as const,
+                  operator: "contains" as const,
+                  value: debouncedQuery,
+                },
+              ],
+            }
+          : {}),
+      }),
+    queryKey: ["busabase", "relation-options", targetBaseId, primarySlug ?? "", debouncedQuery],
+  });
+
+  // Selected records must stay in the list even when they fall outside the
+  // current search, or the browser drops them from the control's value.
+  const selectedRecords = loadedRecords.filter((record) => value.includes(record.id));
+  const seen = new Set(selectedRecords.map((record) => record.id));
+  const options = [
+    ...selectedRecords,
+    ...(optionsQuery.data?.records ?? []).filter((record) => {
+      if (seen.has(record.id)) return false;
+      seen.add(record.id);
+      return true;
+    }),
+  ];
+  // A selected id whose record isn't loaded yet still needs an entry, otherwise
+  // selecting anything else would silently drop it.
+  const orphanIds = value.filter((id) => !seen.has(id));
+
+  return (
+    <div className="grid gap-1.5">
+      <input
+        aria-label={`${messages.base.searchRecordsToLink} — ${fieldName}`}
+        className="h-9 w-full rounded-md border border-border/70 bg-card px-2.5 py-1.5 text-sm outline-none transition-colors focus:border-primary"
+        onChange={(event) => setQuery(event.target.value)}
+        placeholder={messages.base.searchRecordsToLink}
+        type="search"
+        value={query}
+      />
+      <select
+        aria-label={fieldName}
+        className="min-h-9 w-full rounded-md border border-border/70 bg-card px-2.5 py-1.5 text-sm outline-none transition-colors focus:border-primary"
+        id={inputId}
+        multiple={field.options.multiple ?? true}
+        onChange={(event) => {
+          const selected = Array.from(event.currentTarget.selectedOptions).map(
+            (option) => option.value,
+          );
+          onChange(field.options.multiple === false ? (selected[0] ?? "") : selected);
+        }}
+        // React requires a scalar for a single-select and an array for a
+        // multi-select; passing an array to a single-select warns and leaves the
+        // control unbound, so a single-relation field showed no current value.
+        value={field.options.multiple === false ? (value[0] ?? "") : value}
+      >
+        {orphanIds.map((id) => (
+          <option key={id} value={id}>
+            {id}
+          </option>
+        ))}
+        {options.map((item) => (
+          <option key={item.id} value={item.id}>
+            {getRecordTitle(item, messages)}
+          </option>
+        ))}
+      </select>
+      {optionsQuery.isFetching ? (
+        <span className="text-muted-foreground text-[11px]">{messages.common.loading}</span>
+      ) : debouncedQuery && options.length === selectedRecords.length ? (
+        <span className="text-muted-foreground text-[11px]">{messages.search.noMatchesTitle}</span>
+      ) : null}
+    </div>
+  );
+}
+
 function RecordFieldInput({
+  client,
   editorInstanceKey,
   field,
   onChange,
@@ -639,6 +775,7 @@ function RecordFieldInput({
   records,
   value,
 }: {
+  client: BusabaseDashboardApiClient;
   /**
    * Identifies which record's editor session this is ("new" for the create
    * form, otherwise the record id) — `RecordEditorView` reuses the same
@@ -709,25 +846,15 @@ function RecordFieldInput({
           value={value}
         />
       ) : kind === "relation" ? (
-        <select
-          aria-label={fieldName}
-          className="min-h-9 w-full rounded-md border border-border/70 bg-card px-2.5 py-1.5 text-sm outline-none transition-colors focus:border-primary"
-          id={inputId}
-          multiple={field.options.multiple ?? true}
-          onChange={(event) => {
-            const selected = Array.from(event.currentTarget.selectedOptions).map(
-              (option) => option.value,
-            );
-            onChange(field.options.multiple === false ? (selected[0] ?? "") : selected);
-          }}
+        <RelationFieldEditor
+          client={client}
+          field={field}
+          fieldName={fieldName}
+          inputId={inputId}
+          loadedRecords={targetRecords}
+          onChange={onChange}
           value={relationValue}
-        >
-          {targetRecords.map((item) => (
-            <option key={item.id} value={item.id}>
-              {getRecordTitle(item, messages)}
-            </option>
-          ))}
-        </select>
+        />
       ) : kind === "select" ? (
         <select
           aria-label={fieldName}
@@ -1436,10 +1563,11 @@ function CellAgentPromptsButton({ field, record }: { field: BaseFieldVO; record:
         <Sparkles className="size-3" />
       </button>
       {open && (
-        // No `metadata` prop — same reasoning as `RecordTopbarActions` above:
-        // a cell-scoped dialog never reads custom scenario prompts (§7.3 only
-        // replaces the whole-node scenario tier).
+        // `orpc={null}` — same reasoning as `RecordTopbarActions` above: a
+        // cell-scoped dialog never reads custom scenario prompts (§7.3 only
+        // replaces the whole-node scenario tier), so it must not fetch them.
         <NodeAgentPromptsDialog
+          orpc={null}
           nodeId={record.base.nodeId}
           nodeName={record.base.name}
           nodeType="base"

@@ -15,7 +15,7 @@ import {
   Table2,
   Workflow,
 } from "lucide-react";
-import { createElement, forwardRef } from "react";
+import { createElement, forwardRef, useId } from "react";
 
 /**
  * Maps a node-type definition's platform-neutral `icon` id (declared in each
@@ -45,7 +45,7 @@ export const nodeIconForType = (type: string): LucideIcon => nodeIconForId(getNo
 /** A node's resolved avatar — a custom emoji/image, or a fallback to its type icon. */
 export type ResolvedNodeIcon =
   | { kind: "emoji"; value: string }
-  | { kind: "image"; url: string }
+  | { kind: "image"; url: string; shape: "app" | "square" }
   | { kind: "type"; Icon: LucideIcon };
 
 /**
@@ -62,7 +62,11 @@ export const resolveNodeIcon = (node: {
     return { kind: "emoji", value: node.icon.value };
   }
   if (node.icon?.type === "attachment" && node.icon.url) {
-    return { kind: "image", url: node.icon.url };
+    return {
+      kind: "image",
+      url: node.icon.url,
+      shape: node.type === "airapp" ? "app" : "square",
+    };
   }
   return { kind: "type", Icon: nodeIconForType(node.type) };
 };
@@ -80,7 +84,7 @@ export const resolveNodeIcon = (node: {
  *
  * Prefer rendering a `ResolvedNodeIcon` directly (a plain `<img>`/emoji `span`)
  * wherever the call site is free to choose its own markup (e.g.
- * `AppGalleryCard`) — this wrapper exists only for the `LucideIcon`-typed seam.
+ * `AppLauncherItem`) — this wrapper exists only for the `LucideIcon`-typed seam.
  */
 export const nodeIconGlyph = (resolved: ResolvedNodeIcon): LucideIcon => {
   if (resolved.kind === "type") return resolved.Icon;
@@ -104,9 +108,20 @@ export const nodeIconGlyph = (resolved: ResolvedNodeIcon): LucideIcon => {
     EmojiGlyph.displayName = "NodeEmojiIconGlyph";
     return EmojiGlyph;
   }
-  const { url } = resolved;
-  const ImageGlyph = forwardRef<SVGSVGElement, LucideProps>(({ className, size = 24 }, ref) =>
-    createElement(
+  const { shape, url } = resolved;
+  const roundedImage = shape === "app";
+  const ImageGlyph = forwardRef<SVGSVGElement, LucideProps>(({ className, size = 24 }, ref) => {
+    const clipId = useId();
+    const image = createElement("image", {
+      key: "image",
+      href: url,
+      width: 24,
+      height: 24,
+      preserveAspectRatio: "xMidYMid slice",
+      ...(roundedImage ? { clipPath: `url(#${clipId})` } : {}),
+    });
+
+    return createElement(
       "svg",
       {
         ref,
@@ -117,14 +132,22 @@ export const nodeIconGlyph = (resolved: ResolvedNodeIcon): LucideIcon => {
         className,
         "aria-hidden": "true",
       },
-      createElement("image", {
-        href: url,
-        width: 24,
-        height: 24,
-        preserveAspectRatio: "xMidYMid slice",
-      }),
-    ),
-  );
+      roundedImage
+        ? [
+            createElement(
+              "defs",
+              { key: "defs" },
+              createElement(
+                "clipPath",
+                { id: clipId },
+                createElement("rect", { width: 24, height: 24, rx: 5, ry: 5 }),
+              ),
+            ),
+            image,
+          ]
+        : image,
+    );
+  });
   ImageGlyph.displayName = "NodeImageIconGlyph";
   return ImageGlyph;
 };

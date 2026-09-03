@@ -2,6 +2,8 @@ import { oc } from "@orpc/contract";
 import {
   ExportAssetTextInputSchema,
   ExportAssetTextVOSchema,
+  ExportDocBodiesInputSchema,
+  ExportDocBodiesVOSchema,
   ExportTablesInputSchema,
   ExportTablesVOSchema,
   ImportAbortVOSchema,
@@ -46,6 +48,17 @@ export const dumpContract = {
     })
     .input(ExportAssetTextInputSchema)
     .output(ExportAssetTextVOSchema),
+  exportDocBodies: oc
+    .route({
+      method: "POST",
+      path: "/dump/export/doc-bodies",
+      tags: ["Dump"],
+      summary: "Read the raw markdown for a batch of Doc nodes",
+      successDescription:
+        "The raw body behind each requested Doc, read straight from object storage — archived Docs included, which the ordinary `nodes.get` deliberately refuses. Ids that do not resolve to a Doc in this space are omitted rather than failing the batch.",
+    })
+    .input(ExportDocBodiesInputSchema)
+    .output(ExportDocBodiesVOSchema),
   importBegin: oc
     .route({
       method: "POST",

@@ -175,6 +175,7 @@ export const AGENT_EXCLUDED_MCP_TOOLS: readonly string[] = [
   // rows around, and a half-driven session leaves an import open.
   "dump_export_tables",
   "dump_export_asset_text",
+  "dump_export_doc_bodies",
   "dump_import_begin",
   "dump_import_tables",
   "dump_import_commit",

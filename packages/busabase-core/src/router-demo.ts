@@ -1,6 +1,11 @@
 import { implement, ORPCError } from "@orpc/server";
 import { busabaseContract } from "busabase-contract/contract/busabase";
-import { applyViewConfigToRecords } from "./domains/base/utils/view-records";
+import {
+  applyViewConfigToRecords,
+  DATE_RANGE_FIELD_TYPES,
+  GROUPABLE_FIELD_TYPES,
+  groupKeyForValue,
+} from "./domains/base/utils/view-records";
 import { guidesRouter } from "./domains/guides/router";
 import { listTemplates } from "./domains/templates/logic/catalog";
 import { buildActivityItemsFromVOs } from "./logic/activity";
@@ -164,6 +169,19 @@ export const busabaseDemoRouter = os.router({
     }),
     updateMetadata: os.nodes.updateMetadata.handler(() => {
       throw demoUnsupported("Update node metadata");
+    }),
+    updateSettings: os.nodes.updateSettings.handler(() => {
+      throw demoUnsupported("Update node settings");
+    }),
+    // Readable in demo mode, unlike its write sibling: the dialog calls this on
+    // every open, and a throw here would turn "this node has no custom prompts"
+    // into an error toast on a workspace that is meant to be browsable.
+    getAgentPrompts: os.nodes.getAgentPrompts.handler(({ input }) => ({
+      nodeId: input.nodeId,
+      agentPrompts: null,
+    })),
+    updateAgentPrompts: os.nodes.updateAgentPrompts.handler(() => {
+      throw demoUnsupported("Update node agent prompts");
     }),
     updateContent: os.nodes.updateContent.handler(() => {
       throw demoUnsupported("Update node content");
@@ -546,6 +564,9 @@ export const busabaseDemoRouter = os.router({
     exportAssetText: os.dump.exportAssetText.handler(() => {
       throw demoUnsupported("Export space");
     }),
+    exportDocBodies: os.dump.exportDocBodies.handler(() => {
+      throw demoUnsupported("Export space");
+    }),
     importBegin: os.dump.importBegin.handler(() => {
       throw demoUnsupported("Import space");
     }),
@@ -737,9 +758,39 @@ export const busabaseDemoRouter = os.router({
       if (input.viewId && !view) {
         throw new ORPCError("NOT_FOUND", { message: `View not found: ${input.viewId}` });
       }
+      let scoped = await demoListRecords({ baseId: base.id });
+      if (input.dateRange) {
+        const rangeField = base.fields.find((field) => field.slug === input.dateRange?.fieldSlug);
+        if (!rangeField) {
+          throw new ORPCError("NOT_FOUND", {
+            message: `Field not found in Base ${base.id}: ${input.dateRange.fieldSlug}`,
+          });
+        }
+        if (!DATE_RANGE_FIELD_TYPES.has(rangeField.type)) {
+          throw new ORPCError("BAD_REQUEST", {
+            message: `Cannot scope by a ${rangeField.type} field: ${rangeField.slug}. dateRange requires one of: ${[...DATE_RANGE_FIELD_TYPES].join(", ")}.`,
+          });
+        }
+        const gteMs = new Date(input.dateRange.gte).getTime();
+        const ltMs = new Date(input.dateRange.lt).getTime();
+        const { fieldSlug } = input.dateRange;
+        scoped = scoped.filter((record) => {
+          const raw = record.headCommit.payload[fieldSlug];
+          if (typeof raw !== "string") return false;
+          const ms = new Date(raw).getTime();
+          return !Number.isNaN(ms) && ms >= gteMs && ms < ltMs;
+        });
+      }
+      // The View's filters AND any ad-hoc ones, exactly as the real handler
+      // merges them — a demo board column must page the same way a real one does.
       const ordered = applyViewConfigToRecords(
-        await demoListRecords({ baseId: base.id }),
-        view?.config,
+        scoped,
+        input.filters?.length || view
+          ? {
+              filters: [...(view?.config.filters ?? []), ...(input.filters ?? [])],
+              sorts: view?.config.sorts ?? [],
+            }
+          : undefined,
       );
       const total = ordered.length;
       const totalPages = Math.ceil(total / input.pageSize);
@@ -776,6 +827,51 @@ export const busabaseDemoRouter = os.router({
         sorts: [],
       });
       return { total: matched.length };
+    }),
+    groupBy: os.records.groupBy.handler(async ({ input }) => {
+      // Same story as `count` above: no SQL to group in, so this runs the exact
+      // fallback the real handler keeps for un-pushable filters, over the demo
+      // space's in-memory VOs. Kept in lockstep so a demo board's column counts
+      // match what a real Base would report.
+      const base = demoGetBase(input.baseId);
+      if (!base) {
+        throw new ORPCError("NOT_FOUND", { message: `Base not found: ${input.baseId}` });
+      }
+      const field = base.fields.find((entry) => entry.slug === input.fieldSlug);
+      if (!field) {
+        throw new ORPCError("NOT_FOUND", {
+          message: `Field not found in Base ${input.baseId}: ${input.fieldSlug}`,
+        });
+      }
+      if (!GROUPABLE_FIELD_TYPES.has(field.type)) {
+        throw new ORPCError("BAD_REQUEST", {
+          message: `Cannot group by a ${field.type} field: ${input.fieldSlug}. Groupable types: ${[...GROUPABLE_FIELD_TYPES].join(", ")}.`,
+        });
+      }
+      const view = input.viewId
+        ? demoListViews(base.id).find((item) => item.id === input.viewId)
+        : undefined;
+      if (input.viewId && !view) {
+        throw new ORPCError("NOT_FOUND", { message: `View not found: ${input.viewId}` });
+      }
+      const matched = applyViewConfigToRecords(await demoListRecords({ baseId: base.id }), {
+        filters: [...(view?.config.filters ?? []), ...(input.filters ?? [])],
+        sorts: [],
+      });
+      const counts = new Map<string | null, number>();
+      for (const record of matched) {
+        const key = groupKeyForValue(record.headCommit.payload[input.fieldSlug], field.type);
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+      }
+      const groups = [...counts.entries()]
+        .map(([value, count]) => ({ value, count }))
+        .sort((left, right) => {
+          if (left.value === right.value) return 0;
+          if (left.value === null) return 1;
+          if (right.value === null) return -1;
+          return left.value < right.value ? -1 : 1;
+        });
+      return { groups, total: groups.reduce((sum, group) => sum + group.count, 0) };
     }),
     get: os.records.get.handler(({ input }) => {
       const record =

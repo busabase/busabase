@@ -61,6 +61,7 @@ import {
   createAuditEventInputSchema,
   createCommentInputSchema,
   createNodeChangeRequestInputSchema,
+  getNodeAgentPromptsInputSchema,
   inboxSnapshotInputSchema,
   inboxSnapshotResponseSchema,
   isDescendantInputSchema,
@@ -73,6 +74,7 @@ import {
   listNodesInputSchema,
   liveEventSchema,
   moveNodeInputSchema,
+  nodeAgentPromptsSchema,
   nodePrincipalSchema,
   nodeSchema,
   nodeSearchResultSchema,
@@ -82,7 +84,9 @@ import {
   searchInputSchema,
   searchNodesByNameInputSchema,
   searchResponseSchema,
+  updateNodeAgentPromptsInputSchema,
   updateNodeMetadataInputSchema,
+  updateNodeSettingsInputSchema,
 } from "./schemas";
 
 const changeRequestBatchFailureSchema = z.object({
@@ -283,6 +287,39 @@ export const busabaseContractRoutes = {
       })
       .input(updateNodeMetadataInputSchema)
       .output(nodeSchema),
+    updateSettings: oc
+      .route({
+        method: "PATCH",
+        path: "/nodes/{nodeId}/settings",
+        tags: ["Nodes"],
+        summary: "Update node system settings",
+        successDescription:
+          "Replaced the node's system settings. Unlike metadata this is a closed set of keys Busabase itself acts on, so an unknown key is rejected rather than stored. Send a key as null to clear it — for an AirApp's engine that returns the node to following its airapp.json. Requires write access on the node.",
+      })
+      .input(updateNodeSettingsInputSchema)
+      .output(nodeSchema),
+    getAgentPrompts: oc
+      .route({
+        method: "GET",
+        path: "/nodes/{nodeId}/agent-prompts",
+        tags: ["Nodes"],
+        summary: "Get node custom agent prompts",
+        successDescription:
+          "This node's custom scenario prompts, which replace the node type's default prompts in the Ask-agent dialog. `null` means the node has never had any set, which is not the same as an empty list. Read separately from the node itself because the list is large enough (50 prompts x 8 KiB per locale) that carrying it on every node listing would be its own problem. Requires read access on the node.",
+      })
+      .input(getNodeAgentPromptsInputSchema)
+      .output(nodeAgentPromptsSchema),
+    updateAgentPrompts: oc
+      .route({
+        method: "PUT",
+        path: "/nodes/{nodeId}/agent-prompts",
+        tags: ["Nodes"],
+        summary: "Replace node custom agent prompts",
+        successDescription:
+          "Replaced this node's custom scenario prompts — the whole list, not a merge. Send `null` to clear them and return the node to its type's default prompts. Requires write access on the node.",
+      })
+      .input(updateNodeAgentPromptsInputSchema)
+      .output(nodeAgentPromptsSchema),
     updateContent: oc
       .route({
         method: "PUT",

@@ -98,6 +98,43 @@ export const ExportAssetTextVOSchema = z.object({
 });
 export type ExportAssetTextVO = z.infer<typeof ExportAssetTextVOSchema>;
 
+/**
+ * `POST /dump/export/doc-bodies` — read the raw markdown behind a batch of Doc
+ * nodes, straight from object storage.
+ *
+ * The export side's counterpart to the `docBodies` pseudo-table on
+ * `importTables`. Without it a backup has no way to reach a Doc's body except
+ * the ordinary `nodes.get({ type: "doc" })`, which deliberately 404s on an
+ * ARCHIVED node (Trash is read through a separate metadata-only endpoint) —
+ * while the raw `nodes` table dump includes archived rows by design. The result
+ * was a backup that silently archived 13 of 88 Doc bodies on a real production
+ * space and warned about the other 75: restoring it brought every archived Doc
+ * back empty. A full-fidelity dump has to see the whole table, archived rows
+ * included, exactly like every other `dump.*` route.
+ *
+ * Batched rather than one-request-per-Doc because the old path spent one HTTP
+ * round trip per Doc. `DOC_BODY_MAX_BYTES` (300,000) caps any single body, so
+ * the batch cap below bounds a response at ~7.5MB worst case.
+ */
+export const EXPORT_DOC_BODIES_MAX_BATCH = 25;
+
+export const ExportDocBodiesInputSchema = z.object({
+  nodeIds: z.array(z.string()).min(1).max(EXPORT_DOC_BODIES_MAX_BATCH),
+});
+export type ExportDocBodiesInput = z.infer<typeof ExportDocBodiesInputSchema>;
+
+export const ExportDocBodiesVOSchema = z.object({
+  /**
+   * One entry per requested node that is a Doc in this space. A node id that
+   * does not resolve is simply absent (not an error): the caller asked for a
+   * batch, and one bad id must not cost it the other 24. A Doc that exists but
+   * has no body object yet yields `markdown: ""`, matching what a read through
+   * the Doc domain would return.
+   */
+  bodies: z.array(z.object({ nodeId: z.string(), markdown: z.string() })),
+});
+export type ExportDocBodiesVO = z.infer<typeof ExportDocBodiesVOSchema>;
+
 export const ImportBeginInputSchema = z.object({
   /**
    * The space id the archive was ORIGINALLY exported from (`manifest.spaceId`
@@ -111,6 +148,28 @@ export const ImportBeginInputSchema = z.object({
    * comment in `import-logic.ts`.
    */
   sourceSpaceId: z.string(),
+  /**
+   * Continue a restore that was interrupted partway through, instead of
+   * requiring an empty space.
+   *
+   * A restore that FAILS rolls itself back (`importAbort`), so the target is
+   * left clean and a plain re-run works. What cannot roll itself back is a
+   * restore whose process died — Ctrl-C, OOM, a dropped connection, the
+   * machine rebooting. That leaves the space holding however many of the
+   * archive's rows had landed, and every subsequent attempt is refused
+   * ("requires an empty target space") with no way forward except wiping it.
+   *
+   * In this mode the empty-space guard is skipped and inserts become
+   * `ON CONFLICT DO NOTHING`, so replaying the same archive re-lands only what
+   * is missing. Blobs and doc bodies are content-addressed writes to object
+   * storage and were already idempotent.
+   *
+   * DANGEROUS if pointed at the wrong space: rows that collide are silently
+   * skipped rather than reported, so restoring archive A into a space holding
+   * archive B's data would interleave the two instead of refusing. Only pass
+   * it to continue the SAME archive into the SAME space.
+   */
+  resume: z.boolean().optional().default(false),
 });
 export type ImportBeginInput = z.infer<typeof ImportBeginInputSchema>;
 

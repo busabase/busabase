@@ -1,6 +1,6 @@
 /**
  * Which engine an `AirAppRunner` is backed by, surfaced in the UI's engine
- * picker (see `AirAppDetailView`'s toolbar) and persisted per-node in
+ * setting (see `NodeSettingsDialog`'s General tab) and persisted per-node in
  * `airapp-runner-store.ts` so switching tabs/nodes remembers the user's last
  * choice. Re-exported from `busabase-contract` (the type is shared with the
  * server-side `runLocal` oRPC contract) — kept here too as the

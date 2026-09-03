@@ -75,6 +75,43 @@ export const listRecordsResponseSchema = z.object({
 export const listRecordsPageInputSchema = z.object({
   baseId: z.string().min(1),
   viewId: z.string().min(1).optional(),
+  /**
+   * Extra conditions ANDed with the View's own filters — "this View, further
+   * narrowed". The motivating case is one board column: the saved View's
+   * filters plus `stackField equals <choice>`, paged independently of the
+   * other columns.
+   *
+   * Unlike `records.list`'s `filters` (a SUPERSET push-down the client then
+   * narrows), these are applied with the same authority as a saved View's:
+   * every returned page is exactly what the client's own matcher would keep.
+   * That distinction is the whole point — a *superset* page can be missing
+   * records, and a board column that silently drops cards reads as data loss.
+   */
+  filters: z.array(listRecordsFilterSchema).optional(),
+  /**
+   * Scope the page to records whose `date`/`created_time`/`updated_time` field
+   * falls in `[gte, lt)` — an absolute UTC instant range, not a `filters`
+   * condition. It is deliberately NOT an operator on `listRecordsFilterSchema`:
+   * that model mirrors the client's label-based view-filter matching (see
+   * `recordMatchesViewFilter`), which for a date renders via
+   * `toLocaleDateString()` — meaningless without knowing the viewer's
+   * timezone, which the server never has. A UTC instant range has no such
+   * ambiguity, so it is resolved once here, by the caller (who DOES know the
+   * viewer's timezone), and applied as a real timestamp comparison.
+   *
+   * The motivating case is a Calendar month grid: the client computes the UTC
+   * bounds of its own local 42-day grid and asks for only that slice, instead
+   * of every record in the Base.
+   */
+  dateRange: z
+    .object({
+      fieldSlug: z.string().min(1),
+      /** Inclusive lower bound, ISO 8601 UTC instant. */
+      gte: z.string(),
+      /** Exclusive upper bound, ISO 8601 UTC instant. */
+      lt: z.string(),
+    })
+    .optional(),
   page: z.coerce.number().int().min(1).optional().default(1),
   pageSize: z.coerce.number().int().min(1).max(100).optional().default(50),
 });
@@ -129,6 +166,46 @@ export const countRecordsInputSchema = countRecordsShapeSchema.optional().defaul
 
 export const countRecordsResponseSchema = z.object({
   /** Total active records in the space (optionally scoped to a base). */
+  total: z.number().int().nonnegative(),
+});
+
+export const groupRecordsInputSchema = z.object({
+  /** Group within exactly one Base — a field slug is only unambiguous there. */
+  baseId: z.string().min(1),
+  /**
+   * The field to group by. Restricted to `select` and `checkbox`: their stored
+   * value IS the grouping key (a choice id / a boolean), so a SQL GROUP BY
+   * returns exactly the buckets a client would build. Text/number keys would
+   * be truncated at the projection limit, and date keys would bucket by the
+   * server's timezone rather than the viewer's — both would report a
+   * confidently wrong split, so they're rejected instead of approximated.
+   */
+  fieldSlug: z.string().min(1),
+  /** Group only the rows a saved View would display (its filters; sort ignored). */
+  viewId: z.string().min(1).optional(),
+  /** Ad-hoc filters, ANDed with the View's own when both are given. */
+  filters: z.array(listRecordsFilterSchema).optional(),
+});
+
+export const groupRecordsResponseSchema = z.object({
+  groups: z.array(
+    z.object({
+      /**
+       * The raw stored key: a `select` choice id, or `"true"`/`"false"` for a
+       * checkbox. For a select, `null` is the bucket of records with no value
+       * (what a Kanban board shows as its "Uncategorized" column). A checkbox
+       * never reports `null` — an unset checkbox counts as `"false"`, matching
+       * how view filters already treat it (`is_false` covers null/undefined).
+       *
+       * Choice LABELS are deliberately not resolved here — the client already
+       * holds the Base's field definitions and renders labels itself, and
+       * returning ids keeps this response stable across a choice rename.
+       */
+      value: z.string().nullable(),
+      count: z.number().int().nonnegative(),
+    }),
+  ),
+  /** Sum of every group's count — the same number `records.count` would return. */
   total: z.number().int().nonnegative(),
 });
 

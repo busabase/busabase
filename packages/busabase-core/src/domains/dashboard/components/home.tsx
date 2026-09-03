@@ -7,7 +7,7 @@ import { ChevronRight } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { type ReactNode, useMemo, useSyncExternalStore } from "react";
 import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
-import { AppGalleryGrid } from "../../airapp/components/app-gallery-card";
+import { AppLauncherGrid } from "../../airapp/components/app-launcher";
 import { type ActivityEvent, buildActivityEventFromItem } from "../helpers/activity-events";
 import {
   getChangeRequestScopeName,
@@ -278,7 +278,7 @@ export function HomeView({
                 name="recentApps"
                 title={home.recentAppsTitle}
               >
-                <AppGalleryGrid nodes={recentAppNodes} />
+                <AppLauncherGrid nodes={recentAppNodes} />
               </HomeSection>
             ) : null}
 
