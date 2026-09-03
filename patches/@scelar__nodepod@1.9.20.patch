@@ -19,7 +19,7 @@ index 307376c0cbb4940d59529d698c101dd06be062bb..1b00146dbc2263d28422aae40340da0e
    // register a new tab's MessagePort. if the same tab reinits (same token,
    // new channel from controllerchange) drop the old port first so stale
    // entries don't accumulate. RequestProxy resends claim-instance after.
-@@ -708,6 +718,84 @@ self.addEventListener("fetch", (event) => {
+@@ -708,6 +718,93 @@ self.addEventListener("fetch", (event) => {
      return;
    }
  
@@ -35,6 +35,15 @@ index 307376c0cbb4940d59529d698c101dd06be062bb..1b00146dbc2263d28422aae40340da0e
 +  //      capability header instead.
 +  if (url.pathname.startsWith("/api/airapp-embed-bridge/")) return;
 +
++  // [busabase patch] `/api/airapp-preview/*` is always a host route.
++  //      A stopped Nodepod can leave a broad path claim such as "/" behind;
++  //      without this guard it captures the next Sandock iframe navigation.
++  //      Bypass pod routing so the request reaches Busabase's authenticated
++  //      reverse proxy, which strips host credentials before Sandock.
++  if (
++    url.pathname === "/api/airapp-preview" ||
++    url.pathname.startsWith("/api/airapp-preview/")
++  ) return;
 +  // 1.6. [busabase patch] `/api/v1/*` is Busabase's own public REST surface — a
 +  //      real host route, never something a pod serves. Pass it through to the
 +  //      network instead of answering it from the sandboxed virtual server, so
