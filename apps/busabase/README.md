@@ -161,7 +161,7 @@ Follow its onboarding to connect to this workspace. Propose material changes as 
 
 </details>
 
-**[Claude Code guide](./docs/claude-code.md)** explains the local skill and Cloud plugin. **[Bring Your Own Agent](./docs/bring-your-agent.md)** covers the agent-neutral flow and permanent skill installation.
+**[Claude Code guide](./docs/claude-code.md)** explains the local skill and Cloud plugin. **[DeepSeek Harness guide](./docs/deepseek-harness.md)** covers the `@busabase/dsh-plugin` local integration. **[Bring Your Own Agent](./docs/bring-your-agent.md)** covers the agent-neutral flow and permanent skill installation.
 
 Agents can connect in four ways:
 

@@ -127,7 +127,7 @@ onboarding 절차에 따라 이 워크스페이스에 연결하세요. 중요한
 
 </details>
 
-**[Claude Code 가이드](./claude-code.md)** 와 **[Bring Your Own Agent](./bring-your-agent.md)** 에 자세한 연결 절차가 있습니다.
+**[Claude Code 가이드](./claude-code.md)**, **[DeepSeek Harness 가이드](./deepseek-harness.md)**(`@busabase/dsh-plugin` 로컬 연동), **[Bring Your Own Agent](./bring-your-agent.md)** 에 자세한 연결 절차가 있습니다.
 
 | 연결 방식 | 적합한 용도 |
 | --- | --- |
