@@ -72,7 +72,16 @@ export interface AgentChatTabPayload {
    * starts one, which is why this is not required to open the tab.
    */
   sessionId?: string;
+  /**
+   * Text to drop into the composer without sending it (Ask Agent). One-shot:
+   * the tab clears it via `consumeAgentChatDraft` the moment it lands, so a
+   * remount cannot replay it into the user's next draft.
+   */
+  draft?: { id: string; text: string };
 }
+
+/** The tab id for an agent — one per agent, whatever node the question is about. */
+export const agentChatTabId = (agentSlug: string): string => `agent-${agentSlug}`;
 
 /**
  * Open (or re-activate) an agent conversation.
@@ -80,16 +89,41 @@ export interface AgentChatTabPayload {
  * Keyed by agent rather than by session: one tab per agent, switching sessions
  * inside it. Keying by session would let a single agent accumulate a tab per
  * conversation, which is the tab-strip clutter this panel exists to avoid.
+ *
+ * `openTab` alone is not enough for a *second* Ask Agent click: it finds the id
+ * already open and only re-activates it, keeping the first click's payload. So
+ * this follows up with `updateTabPayload` — same tab, new session/draft.
  */
 export const openAgentChatTab = (
   agentSlug: string,
   agentName: string,
-  sessionId?: string,
+  options: { sessionId?: string; draft?: { id: string; text: string } } = {},
 ): void => {
-  useSidePanelStore.getState().openTab({
-    id: `agent-${agentSlug}`,
-    type: AGENT_CHAT_TAB_TYPE,
-    title: agentName,
-    payload: { agentSlug, sessionId } satisfies AgentChatTabPayload,
-  });
+  const id = agentChatTabId(agentSlug);
+  const payload: AgentChatTabPayload = {
+    agentSlug,
+    ...(options.sessionId ? { sessionId: options.sessionId } : {}),
+    ...(options.draft ? { draft: options.draft } : {}),
+  };
+  const store = useSidePanelStore.getState();
+  store.openTab({ id, type: AGENT_CHAT_TAB_TYPE, title: agentName, payload });
+  store.updateTabPayload(id, payload);
+};
+
+/**
+ * Retire a draft the tab has already put in the composer.
+ *
+ * Without this, the draft would live in the payload forever and re-apply on any
+ * remount — the panel keeps inactive tabs mounted, but "forever" is a long time
+ * to be one unmount away from pasting an old prompt into someone's half-typed
+ * message.
+ */
+export const consumeAgentChatDraft = (agentSlug: string, draftId: string): void => {
+  const id = agentChatTabId(agentSlug);
+  const tab = useSidePanelStore.getState().tabs.find((candidate) => candidate.id === id);
+  if (!tab) return;
+  const payload = tab.payload as AgentChatTabPayload;
+  if (payload.draft?.id !== draftId) return;
+  const { draft: _draft, ...rest } = payload;
+  useSidePanelStore.getState().updateTabPayload(id, rest satisfies AgentChatTabPayload);
 };

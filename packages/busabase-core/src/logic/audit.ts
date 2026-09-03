@@ -22,6 +22,18 @@ import {
   busabaseOperations,
   busabaseRecords,
 } from "../db/schema";
+import {
+  dispatchAgentMentions,
+  insertCommentMentions,
+  loadCommentMentions,
+  mentionMemberIds,
+  toCommentMentionVOs,
+} from "./comment-mention-store";
+import {
+  CommentMentionValidationError,
+  hasAgentMention,
+  normalizeCommentMentions,
+} from "./comment-mentions";
 import { CURRENT_USER_ID, id, listInputSchema, now } from "./kernel";
 import { assertNodePermission, assertWorkspacePermission } from "./node-acl";
 import { toAuditEventVO, toCommentVO } from "./vo";
@@ -72,10 +84,22 @@ export const commentSubjectInputSchema = z.object({
   subjectId: z.string().min(1),
 });
 
+/**
+ * One `@` mention as the composer submits it. `start`/`end` are UTF-16 code
+ * unit offsets into `body`; see `./comment-mentions` for why and for the
+ * surrogate-pair rule the server enforces on them.
+ */
+export const commentMentionInputSchema = z.object({
+  type: z.enum(["member", "agent"]),
+  id: z.string().min(1),
+  start: z.number().int().min(0),
+  end: z.number().int().min(0),
+});
+
 export const createCommentInputSchema = commentSubjectInputSchema.extend({
   authorId: z.string().optional().default(CURRENT_USER_ID),
   body: z.string().trim().min(1),
-  mentionsAi: z.boolean().optional().default(false),
+  mentions: z.array(commentMentionInputSchema).optional().default([]),
 });
 
 export { listInputSchema };
@@ -422,11 +446,25 @@ export const listComments = async (input: z.infer<typeof commentSubjectInputSche
       ),
     )
     .orderBy(asc(busabaseComments.createdAt));
-  const users = await resolveUserRefs(comments.map((comment) => comment.authorId));
-  return comments.map((comment) => toCommentVO(comment, users));
+  const mentionsByComment = await loadCommentMentions(
+    db,
+    comments.map((comment) => comment.id),
+  );
+  const mentionRows = [...mentionsByComment.values()].flat();
+  const users = await resolveUserRefs([
+    ...comments.map((comment) => comment.authorId),
+    ...mentionMemberIds(mentionRows),
+  ]);
+  return comments.map((comment) =>
+    toCommentVO(
+      comment,
+      users,
+      toCommentMentionVOs(mentionsByComment.get(comment.id) ?? [], users),
+    ),
+  );
 };
 
-// `z.input`, not `z.infer`: `mentionsAi` has `.optional().default(false)`, so the
+// `z.input`, not `z.infer`: `mentions` has `.optional().default([])`, so the
 // inferred OUTPUT type makes it required while callers legitimately omit it.
 // `.parse()` below fills the default in. Matches `createDoc`/`createBase`.
 export const createComment = async (input: z.input<typeof createCommentInputSchema>) => {
@@ -441,6 +479,35 @@ export const createComment = async (input: z.input<typeof createCommentInputSche
     getContextSpaceId(),
   );
   await assertAuditSubjectPermission(subjectLinks, "write");
+
+  // Spans are validated against the body BEFORE anything is written, and a bad
+  // span rejects the whole comment rather than being quietly dropped — a
+  // mention the user deliberately made and we silently discarded is the exact
+  // "looks like it worked, did nothing" failure this feature exists to end.
+  let mentions: ReturnType<typeof normalizeCommentMentions>;
+  try {
+    mentions = normalizeCommentMentions(parsed.body, parsed.mentions);
+  } catch (error) {
+    if (error instanceof CommentMentionValidationError) {
+      throw new ORPCError("BAD_REQUEST", {
+        message: error.message,
+        data: { reason: error.reason },
+      });
+    }
+    throw error;
+  }
+
+  // `comments.create` is classified `node("write")`, but an agent mention
+  // reaches a capability the agents router guards at workspace `write`. The
+  // endpoint's own classification must NOT be raised — that would break
+  // ordinary commenting for everyone below it — so the agent branch asserts the
+  // agents floor independently and REJECTS, never silently drops. This is the
+  // load-bearing control: the picker hiding agent rows is UI, not authorization.
+  if (hasAgentMention(mentions)) {
+    assertWorkspacePermission("write");
+  }
+
+  const authorId = resolveActorId(parsed.authorId);
   const timestamp = now();
   const [comment] = await db
     .insert(busabaseComments)
@@ -452,16 +519,46 @@ export const createComment = async (input: z.input<typeof createCommentInputSche
       changeRequestId: subjectLinks.changeRequestId,
       operationId: subjectLinks.operationId,
       commitId: subjectLinks.commitId,
-      authorId: resolveActorId(parsed.authorId),
+      authorId,
       body: parsed.body,
-      mentionsAi: parsed.mentionsAi,
       createdAt: timestamp,
       updatedAt: timestamp,
     })
     .returning();
-  if (parsed.mentionsAi && subjectLinks.changeRequestId) {
+
+  const mentionRows = await insertCommentMentions(db, {
+    commentId: comment.id,
+    authorId,
+    mentions,
+  });
+
+  // Dispatch happens after the comment is committed. It can only move a mention
+  // row to `linked`/`failed`; it never rolls back or errors the comment.
+  const dispatchedRows = await dispatchAgentMentions(db, {
+    commentId: comment.id,
+    body: parsed.body,
+    authorId,
+    spaceId: getContextSpaceId(),
+    subjectType: parsed.subjectType,
+    subjectId: parsed.subjectId,
+    changeRequestId: subjectLinks.changeRequestId,
+    rows: mentionRows,
+  });
+
+  // The webhook stays as a PARALLEL, opt-in channel for external subscribers —
+  // the internal agent call does not replace it. Its payload now names the
+  // agents that were mentioned instead of carrying a bare boolean.
+  const agentSlugs = dispatchedRows
+    .filter((row) => row.targetType === "agent")
+    .map((row) => row.targetId);
+  if (agentSlugs.length > 0 && subjectLinks.changeRequestId) {
     const { notifyAgentOfChangeRequest } = await import("./cr-lifecycle");
-    notifyAgentOfChangeRequest(subjectLinks.changeRequestId, "ai_mention");
+    notifyAgentOfChangeRequest(subjectLinks.changeRequestId, "ai_mention", {
+      commentId: comment.id,
+      agentSlugs,
+    });
   }
-  return toCommentVO(comment, await resolveUserRefs([comment.authorId]));
+
+  const users = await resolveUserRefs([authorId, ...mentionMemberIds(dispatchedRows)]);
+  return toCommentVO(comment, users, toCommentMentionVOs(dispatchedRows, users));
 };

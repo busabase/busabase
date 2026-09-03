@@ -25,17 +25,23 @@
 // transient "Copied" state) so the two agent-facing dialogs feel like one feature.
 
 import { useQuery } from "@tanstack/react-query";
+import { hasApiKeyLevel } from "busabase-contract/access-control/api-key-level";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "kui/dialog";
-import { Check, Copy } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Check, Copy, Loader2, Sparkles } from "lucide-react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { useLocation } from "wouter";
 import { useCoreI18n, useCoreLocale } from "../../../i18n";
+import { AgentTargetPicker } from "../../agents/components/agent-target-picker";
+import { useAskAgent } from "../../agents/hooks/use-ask-agent";
 import {
   buildNodeAgentPrompts,
   type NodePrompt,
   type NodePromptContext,
   type NodePromptScope,
 } from "../helpers/node-agent-prompts";
+import { useDashboardOrpc } from "../orpc-context";
+import { useWorkspacePermissionLevel } from "./split-submit-button";
 
 export interface PromptSection {
   name: string;
@@ -104,7 +110,7 @@ export function NodeAgentPromptsDialog({
   spaceId,
   spaceName,
   scope,
-  orpc,
+  orpc: orpcProp,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -134,6 +140,21 @@ export function NodeAgentPromptsDialog({
 }) {
   const messages = useCoreI18n();
   const locale = useCoreLocale();
+  // Two ways in, because the two callers differ: the node-detail toolbars mount
+  // inside `DashboardOrpcProvider` and let the context supply this, while the
+  // shell's sidebar dialog passes it explicitly. An explicit prop wins; the
+  // context is the fallback. Undefined for a host that never wired oRPC at all
+  // (the chromeless mobile WebView, SSR) — Ask Agent is then simply not
+  // offered, exactly as the shell's other orpc-gated actions behave.
+  const orpcFromContext = useDashboardOrpc();
+  const orpc = orpcProp ?? orpcFromContext;
+  // Driving an agent is workspace `manage` (it can start arbitrary local code),
+  // and the core router now enforces that. Hiding the button for anyone below
+  // that bar keeps the offer honest — the server is still the authority, this
+  // only avoids showing an action that would be refused. Copy stays available
+  // to everyone: pasting a prompt into your own terminal needs no permission
+  // from Busabase.
+  const canAskAgent = hasApiKeyLevel(useWorkspacePermissionLevel(), "manage");
   const [resolvedSpaceId, setResolvedSpaceId] = useState<string | undefined>(spaceId);
   const [selected, setSelected] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -222,6 +243,16 @@ export function NodeAgentPromptsDialog({
             copied={copied}
             copyLabel={messages.agentPrompts.copy}
             copiedLabel={messages.agentPrompts.copied}
+            askAgentSlot={
+              orpc && canAskAgent ? (
+                <AskAgentAction
+                  nodeId={nodeId}
+                  onClose={() => onOpenChange(false)}
+                  orpc={orpc}
+                  prompt={active}
+                />
+              ) : null
+            }
           />
         )}
       </DialogContent>
@@ -229,7 +260,105 @@ export function NodeAgentPromptsDialog({
   );
 }
 
-/** Sectioned list (left) + preview & copy (right). */
+/**
+ * "Ask Agent" — the same prompt the Copy button hands to the clipboard, handed
+ * to an agent instead.
+ *
+ * Sits next to Copy rather than replacing it: copying is still the right move
+ * when the agent lives in a terminal outside Busabase, and this feature is for
+ * the agents Busabase can already talk to.
+ */
+function AskAgentAction({
+  nodeId,
+  onClose,
+  orpc,
+  prompt,
+}: {
+  nodeId: string;
+  onClose: () => void;
+  orpc: BusabaseQueryUtils;
+  prompt?: NodePrompt;
+}) {
+  const messages = useCoreI18n();
+  const [, setLocation] = useLocation();
+
+  const onNoAgents = useCallback(() => {
+    // Only reached on a *successful* empty catalog (see `use-ask-agent`) —
+    // there is genuinely nothing connected, so the honest next step is the
+    // flow that connects one.
+    onClose();
+    setLocation("/agents/new");
+  }, [onClose, setLocation]);
+
+  const ask = useAskAgent({ nodeId, onHandedOff: onClose, onNoAgents, orpc });
+
+  if (ask.targets) {
+    return (
+      <div className="flex min-w-0 flex-1 flex-col gap-2">
+        <p className="text-muted-foreground text-xs">{messages.agentPrompts.pickAgent}</p>
+        <AgentTargetPicker
+          disabled={ask.isStarting}
+          emptyLabel={messages.agentPrompts.noAgents}
+          onSelect={ask.pickTarget}
+          targets={ask.targets}
+        />
+        {ask.startError ? <AskAgentError message={ask.startError} onRetry={ask.reset} /> : null}
+      </div>
+    );
+  }
+
+  if (ask.loadError) {
+    return <AskAgentError message={messages.agentPrompts.askAgentLoadFailed} onRetry={ask.retry} />;
+  }
+
+  return (
+    <div className="flex min-w-0 flex-1 flex-col items-start gap-2">
+      <button
+        className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-60"
+        disabled={!prompt || ask.isLoading || ask.isStarting}
+        onClick={() => prompt && ask.ask(prompt.body)}
+        type="button"
+      >
+        {ask.isLoading || ask.isStarting ? (
+          <Loader2 className="size-4 animate-spin" />
+        ) : (
+          <Sparkles className="size-4" />
+        )}
+        {ask.isStarting
+          ? messages.agentPrompts.askAgentStarting
+          : ask.isLoading
+            ? messages.agentPrompts.askAgentLoading
+            : messages.agentPrompts.askAgent}
+      </button>
+      {ask.startError ? <AskAgentError message={ask.startError} onRetry={ask.reset} /> : null}
+    </div>
+  );
+}
+
+/**
+ * A failure that keeps the dialog — and the selected prompt — exactly where
+ * they were. The whole point: a network blip must not cost the user the prompt
+ * they had chosen, nor be mistaken for "you have no agents".
+ */
+function AskAgentError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  const messages = useCoreI18n();
+  return (
+    <div className="flex min-w-0 flex-1 items-center gap-2 text-destructive text-xs">
+      <span className="min-w-0 flex-1 truncate" title={message}>
+        {message}
+      </span>
+      <button
+        className="shrink-0 rounded border px-2 py-1 font-medium text-foreground hover:bg-muted"
+        onClick={onRetry}
+        type="button"
+      >
+        {messages.agentPrompts.askAgentRetry}
+      </button>
+    </div>
+  );
+}
+
+/** Sectioned list (left) + preview & actions (right). */
 function PromptPanel({
   sections,
   active,
@@ -238,6 +367,7 @@ function PromptPanel({
   copied,
   copyLabel,
   copiedLabel,
+  askAgentSlot,
 }: {
   sections: PromptSection[];
   active?: NodePrompt;
@@ -246,6 +376,8 @@ function PromptPanel({
   copied: boolean;
   copyLabel: string;
   copiedLabel: string;
+  /** Ask Agent, or null when no host wired oRPC. Rendered beside Copy. */
+  askAgentSlot?: ReactNode;
 }) {
   return (
     <div className="grid min-h-0 gap-3 sm:grid-cols-[minmax(0,13rem)_minmax(0,1fr)]">
@@ -281,9 +413,10 @@ function PromptPanel({
           readOnly
           value={active?.body ?? ""}
         />
-        <div className="flex justify-end">
+        <div className="flex flex-wrap items-start justify-end gap-2">
+          {askAgentSlot}
           <button
-            className="inline-flex h-9 items-center gap-2 rounded-md border bg-card px-3 text-sm font-medium hover:bg-muted"
+            className="inline-flex h-9 shrink-0 items-center gap-2 rounded-md border bg-card px-3 text-sm font-medium hover:bg-muted"
             onClick={onCopy}
             type="button"
           >

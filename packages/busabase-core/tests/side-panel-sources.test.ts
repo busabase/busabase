@@ -9,6 +9,7 @@
 
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  consumeAgentChatDraft,
   isPinnableNode,
   openAgentChatTab,
   pinNodeToSidePanel,
@@ -102,11 +103,56 @@ describe("side panel sources", () => {
   });
 
   it("keys an agent tab by agent, so a second session reuses the same tab", () => {
-    openAgentChatTab("claude", "Claude Code", "session-1");
-    openAgentChatTab("claude", "Claude Code", "session-2");
+    openAgentChatTab("claude", "Claude Code", { sessionId: "session-1" });
+    openAgentChatTab("claude", "Claude Code", { sessionId: "session-2" });
 
     const state = useSidePanelStore.getState();
     expect(state.tabs).toHaveLength(1);
     expect(state.tabs[0]).toMatchObject({ id: "agent-claude", type: "agent-chat" });
+  });
+
+  // The bug this guards: `openTab` only re-activates an id it already has, so
+  // without the follow-up payload write the second Ask Agent would land the
+  // user in the FIRST question's session with no new prompt in the composer.
+  it("re-targets an already-open agent tab at the new session and draft", () => {
+    openAgentChatTab("claude", "Claude Code", {
+      sessionId: "session-1",
+      draft: { id: "d1", text: "First question" },
+    });
+    openAgentChatTab("claude", "Claude Code", {
+      sessionId: "session-2",
+      draft: { id: "d2", text: "Second question" },
+    });
+
+    expect(useSidePanelStore.getState().tabs[0]?.payload).toEqual({
+      agentSlug: "claude",
+      sessionId: "session-2",
+      draft: { id: "d2", text: "Second question" },
+    });
+  });
+
+  it("drops the draft once the tab reports it landed, but keeps the session", () => {
+    openAgentChatTab("claude", "Claude Code", {
+      sessionId: "session-1",
+      draft: { id: "d1", text: "Summarise this" },
+    });
+
+    consumeAgentChatDraft("claude", "d1");
+
+    expect(useSidePanelStore.getState().tabs[0]?.payload).toEqual({
+      agentSlug: "claude",
+      sessionId: "session-1",
+    });
+  });
+
+  it("ignores a stale consume for a draft that has already been replaced", () => {
+    openAgentChatTab("claude", "Claude Code", { draft: { id: "d1", text: "One" } });
+    openAgentChatTab("claude", "Claude Code", { draft: { id: "d2", text: "Two" } });
+
+    consumeAgentChatDraft("claude", "d1");
+
+    expect(useSidePanelStore.getState().tabs[0]?.payload).toMatchObject({
+      draft: { id: "d2", text: "Two" },
+    });
   });
 });

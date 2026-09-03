@@ -5,6 +5,7 @@ import type {
   AuditEventVO,
   BaseFieldVO,
   BaseVO,
+  CommentMentionVO,
   CommentSubjectType,
   CommentVO,
   CommitVO,
@@ -302,7 +303,16 @@ export const toReviewVO = (review: ReviewPO, users?: UserRefMap): ReviewVO => ({
   createdAt: review.createdAt.toISOString(),
 });
 
-export const toCommentVO = (comment: CommentPO, users?: UserRefMap): CommentVO => ({
+/**
+ * `mentions` are passed in rather than read here: they live in their own table,
+ * and every caller already batches one `loadCommentMentions` query for the
+ * whole thread instead of paying an N+1 per comment.
+ */
+export const toCommentVO = (
+  comment: CommentPO,
+  users?: UserRefMap,
+  mentions: CommentMentionVO[] = [],
+): CommentVO => ({
   id: comment.id,
   subjectType: comment.subjectType as CommentSubjectType,
   subjectId: comment.subjectId,
@@ -313,7 +323,7 @@ export const toCommentVO = (comment: CommentPO, users?: UserRefMap): CommentVO =
   authorId: comment.authorId,
   author: userRef(users, comment.authorId),
   body: comment.body,
-  mentionsAi: comment.mentionsAi,
+  mentions,
   createdAt: comment.createdAt.toISOString(),
   updatedAt: comment.updatedAt.toISOString(),
 });

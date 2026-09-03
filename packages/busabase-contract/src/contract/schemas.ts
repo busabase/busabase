@@ -402,6 +402,54 @@ const reviewSchema = z.object({
 
 const commentSubjectTypeSchema = z.enum(["record", "change_request", "operation", "commit"]);
 
+/**
+ * Who a mention points at. `member` tags a person; `agent` names a launchable
+ * Agent target and is what actually starts a session.
+ */
+const commentMentionTargetTypeSchema = z.enum(["member", "agent"]);
+
+/**
+ * Dispatch lifecycle of ONE mention row, before a session exists.
+ *
+ * `not_applicable` is every member row (a person is not dispatched to).
+ * Once `linked`, running/waiting/done/failed belongs to the agent session,
+ * never to a second status column here.
+ */
+const commentMentionDispatchStatusSchema = z.enum(["not_applicable", "queued", "linked", "failed"]);
+
+/**
+ * One mention as the composer submits it.
+ *
+ * `start`/`end` are **UTF-16 code unit** offsets into `body` — the same unit
+ * `<textarea>` selection APIs and `String.prototype.slice` use, so nothing has
+ * to convert at the UI boundary. A label containing an astral-plane character
+ * (an emoji in a display name) therefore spans two units per visible glyph;
+ * the server rejects a span that would split a surrogate pair.
+ *
+ * No `label` here on purpose: the client never supplies identity. The server
+ * resolves the display name from the member/catalog it already trusts.
+ */
+const commentMentionInputSchema = z.object({
+  type: commentMentionTargetTypeSchema,
+  /** Member/actor id, or launchable agent slug (`claude-acp`, `buda:<agentId>`). */
+  id: z.string().min(1),
+  start: z.number().int().min(0),
+  end: z.number().int().min(0),
+});
+
+const commentMentionSchema = z.object({
+  id: z.string(),
+  type: commentMentionTargetTypeSchema,
+  targetId: z.string(),
+  /** Server-resolved display name. Falls back to the raw target id. */
+  label: z.string(),
+  start: z.number().int(),
+  end: z.number().int(),
+  dispatchStatus: commentMentionDispatchStatusSchema,
+  sessionId: z.string().nullable(),
+  error: z.string().nullable(),
+});
+
 const commentSchema = z.object({
   id: z.string(),
   subjectType: commentSubjectTypeSchema,
@@ -413,7 +461,7 @@ const commentSchema = z.object({
   authorId: z.string(),
   author: userRefSchema.nullable().optional().default(null),
   body: z.string(),
-  mentionsAi: z.boolean(),
+  mentions: z.array(commentMentionSchema).default([]),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -455,7 +503,9 @@ const changeRequestSchema = z.object({
 
 // A unit of work for an external agent (poll via /agent/tasks). Self-describing:
 // the full change request (operations + diffs), why it is queued, the requested-
-// changes summary, and the `@ai` comments directing the revision.
+// changes summary, and the agent-mentioning comments directing the revision.
+// Each of those comments carries its `mentions`, so a poller can finally see
+// WHICH agent was asked instead of only that "some agent" was.
 const agentTaskSchema = z.object({
   changeRequest: changeRequestSchema,
   trigger: z.enum(["changes_requested", "ai_mention"]),
@@ -747,7 +797,12 @@ const commentSubjectInputSchema = z.object({
 const createCommentInputSchema = commentSubjectInputSchema.extend({
   authorId: z.string().optional().default("local-admin"),
   body: z.string().trim().min(1),
-  mentionsAi: z.boolean().optional().default(false),
+  /**
+   * Structured mentions, owned by the composer. Never inferred from the body by
+   * regex: display names contain spaces and collide with ordinary prose, so
+   * "ask codex about this" must not invoke Codex.
+   */
+  mentions: z.array(commentMentionInputSchema).optional().default([]),
 });
 
 const listInputSchema = z
@@ -952,6 +1007,10 @@ export {
   operationSchema,
   reviewSchema,
   commentSubjectTypeSchema,
+  commentMentionTargetTypeSchema,
+  commentMentionDispatchStatusSchema,
+  commentMentionInputSchema,
+  commentMentionSchema,
   commentSchema,
   changeRequestStatusSchema,
   changeRequestSchema,

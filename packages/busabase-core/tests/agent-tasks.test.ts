@@ -61,7 +61,7 @@ describe("Agent task queue — oRPC", () => {
       autoMerge: false,
     });
 
-  it("queues request-changes and @ai-mentioned CRs, and skips quiet ones", async () => {
+  it("queues request-changes and agent-mentioned CRs, and skips quiet ones", async () => {
     const requested = await openCr("Needs changes");
     await client.changeRequests.review({
       changeRequestIds: [requested.id],
@@ -69,12 +69,25 @@ describe("Agent task queue — oRPC", () => {
       reason: "Tighten the intro. @ai",
     });
 
-    const mentioned = await openCr("Has an @ai mention");
+    const mentioned = await openCr("Has an agent mention");
     await client.comments.create({
       subjectType: "change_request",
       subjectId: mentioned.id,
-      body: "@ai please add a source link",
-      mentionsAi: true,
+      // A slug deliberately absent from the catalog: `resolveLaunch` refuses it,
+      // so dispatch fails fast instead of npx-spawning a real agent in a test —
+      // and the queue must list the CR anyway, because the ASK happened.
+      body: "@Codex please add a source link",
+      mentions: [{ type: "agent", id: "test-missing-agent", start: 0, end: 6 }],
+    });
+
+    // A comment that only mentions PEOPLE must never enter the agent queue —
+    // that is the difference the boolean could not express.
+    const memberOnly = await openCr("Only a teammate was tagged");
+    await client.comments.create({
+      subjectType: "change_request",
+      subjectId: memberOnly.id,
+      body: "@Alice can you look?",
+      mentions: [{ type: "member", id: "local-editor", start: 0, end: 6 }],
     });
 
     const quiet = await openCr("Just awaiting review");
@@ -91,6 +104,21 @@ describe("Agent task queue — oRPC", () => {
     expect(mentionedTask?.aiComments.some((comment) => comment.body.includes("source link"))).toBe(
       true,
     );
+    // The queue can finally say WHICH agent was asked, not just that one was.
+    expect(
+      mentionedTask?.aiComments.flatMap((comment) =>
+        comment.mentions.filter((m) => m.type === "agent").map((m) => m.targetId),
+      ),
+    ).toEqual(["test-missing-agent"]);
+
+    // A dispatch that could not start still leaves a visible, named reason.
+    const failedMention = mentionedTask?.aiComments
+      .flatMap((comment) => comment.mentions)
+      .find((m) => m.type === "agent");
+    expect(failedMention?.dispatchStatus).toBe("failed");
+    expect(failedMention?.error).toBeTruthy();
+
+    expect(byId.has(memberOnly.id)).toBe(false);
 
     // A plain in_review CR with no agent signal is not the agent's job.
     expect(byId.has(quiet.id)).toBe(false);
@@ -108,7 +136,7 @@ describe("Agent task queue — oRPC", () => {
       true,
     );
 
-    // Revising returns the CR to in_review; with no @ai mention it leaves the queue.
+    // Revising returns the CR to in_review; with no agent mention it leaves the queue.
     await client.operations.revise({
       operationId,
       fields: { title: "Revise me", body: "v2", channel: "blog" },

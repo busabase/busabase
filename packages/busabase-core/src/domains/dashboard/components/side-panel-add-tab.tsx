@@ -149,7 +149,11 @@ export function SidePanelAddTab({
               agents.map((agent) => (
                 <DropdownMenuItem
                   key={agent.slug}
-                  onSelect={() => openAgentChatTab(agent.slug, agent.agentName, agent.latest?.id)}
+                  onSelect={() =>
+                    openAgentChatTab(agent.slug, agent.agentName, {
+                      sessionId: agent.latest?.id,
+                    })
+                  }
                 >
                   <Bot className="size-4" />
                   <span className="flex-1 truncate">{agent.agentName}</span>

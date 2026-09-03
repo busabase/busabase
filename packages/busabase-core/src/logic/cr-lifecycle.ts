@@ -55,6 +55,7 @@ import type {
 import {
   busabaseBases,
   busabaseChangeRequests,
+  busabaseCommentMentions,
   busabaseComments,
   busabaseCommits,
   busabaseNodes,
@@ -131,6 +132,11 @@ const refreshNodeContentSearch = async (
 
 import { dispatchWebhookEvent, hasWebhookRuleFor } from "../domains/webhook/logic/dispatch";
 import { insertAuditEvent } from "./audit";
+import {
+  loadCommentMentions,
+  mentionMemberIds,
+  toCommentMentionVOs,
+} from "./comment-mention-store";
 import { parseCommitPayload } from "./commit-payload-schemas";
 import { insertCommit } from "./commits";
 import { projectCommitFields, refreshRecordQueryStatistics } from "./field-values";
@@ -837,14 +843,36 @@ export type AgentTaskTrigger = "changes_requested" | "ai_mention";
  * Stays synchronous (void-returning) so both call sites — which already don't
  * await it — keep working unchanged.
  */
-export const notifyAgentOfChangeRequest = (changeRequestId: string, trigger: AgentTaskTrigger) => {
+/**
+ * `mention` describes WHICH agents an `ai_mention` was addressed to.
+ *
+ * The webhook survives the removal of `mentions_ai` as a deliberately parallel
+ * channel for external subscribers — but a subscriber that only ever learned
+ * "some comment said @ai" could not act on it. Now it gets the comment id and
+ * the agent slugs, which is the whole reason the boolean was worth replacing.
+ */
+export interface AgentMentionWebhookContext {
+  commentId: string;
+  agentSlugs: string[];
+}
+
+export const notifyAgentOfChangeRequest = (
+  changeRequestId: string,
+  trigger: AgentTaskTrigger,
+  mention?: AgentMentionWebhookContext,
+) => {
   void (async () => {
     const db = await getDb();
     await dispatchWebhookEvent(db, {
       spaceId: getContextSpaceId(),
       baseId: null,
       eventType: trigger,
-      payload: { event: "agent.task", trigger, changeRequestId },
+      payload: {
+        event: "agent.task",
+        trigger,
+        changeRequestId,
+        ...(mention ? { commentId: mention.commentId, agentSlugs: mention.agentSlugs } : {}),
+      },
     });
   })().catch((error) => {
     console.error("[busabase] notifyAgentOfChangeRequest dispatch failed", error);
@@ -2942,17 +2970,28 @@ export const listAgentTasks = async () => {
   }
 
   const changeRequestIds = openChangeRequests.map((changeRequest) => changeRequest.id);
+  // Sourced from the mentions table, not a boolean on the comment: a queued task
+  // now carries WHICH agent was asked (in each comment's `mentions`), which is
+  // the whole point of replacing `mentions_ai`. An INNER JOIN also means a
+  // comment that mentions only members never lands in the agent queue.
   const aiCommentRows = await db
-    .select()
+    .selectDistinct({ comment: busabaseComments })
     .from(busabaseComments)
+    .innerJoin(
+      busabaseCommentMentions,
+      and(
+        eq(busabaseCommentMentions.commentId, busabaseComments.id),
+        eq(busabaseCommentMentions.targetType, "agent"),
+      ),
+    )
     .where(
       and(
         eq(busabaseComments.spaceId, spaceId),
-        eq(busabaseComments.mentionsAi, true),
         inArray(busabaseComments.changeRequestId, changeRequestIds),
       ),
     )
-    .orderBy(asc(busabaseComments.createdAt));
+    .orderBy(asc(busabaseComments.createdAt))
+    .then((rows) => rows.map((row) => row.comment));
   const aiCommentsByChangeRequest = new Map<string, (typeof aiCommentRows)[0][]>();
   for (const comment of aiCommentRows) {
     if (!comment.changeRequestId) {
@@ -2968,7 +3007,15 @@ export const listAgentTasks = async () => {
       changeRequest.status === "changes_requested" ||
       aiCommentsByChangeRequest.has(changeRequest.id),
   );
-  const commentUsers = await resolveUserRefs(aiCommentRows.map((comment) => comment.authorId));
+  const mentionsByComment = await loadCommentMentions(
+    db,
+    aiCommentRows.map((comment) => comment.id),
+  );
+  const allMentionRows = [...mentionsByComment.values()].flat();
+  const commentUsers = await resolveUserRefs([
+    ...aiCommentRows.map((comment) => comment.authorId),
+    ...mentionMemberIds(allMentionRows),
+  ]);
 
   return Promise.all(
     queued.map(async (changeRequestRow) => {
@@ -2986,7 +3033,11 @@ export const listAgentTasks = async () => {
           : "ai_mention") as AgentTaskTrigger,
         reviewReason: latestReview?.reason ?? null,
         aiComments: (aiCommentsByChangeRequest.get(changeRequestRow.id) ?? []).map((comment) =>
-          toCommentVO(comment, commentUsers),
+          toCommentVO(
+            comment,
+            commentUsers,
+            toCommentMentionVOs(mentionsByComment.get(comment.id) ?? [], commentUsers),
+          ),
         ) as CommentVO[],
       };
     }),

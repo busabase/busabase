@@ -99,6 +99,7 @@ import { useDashboardRoutes } from "./hooks/use-dashboard-routes";
 import { useKeyboardShortcut } from "./hooks/use-keyboard-shortcut";
 import { useBusabaseLiveSync } from "./hooks/use-live-sync";
 import { getNodeDetail, type LoadedNode } from "./node-detail-registry";
+import { DashboardOrpcProvider } from "./orpc-context";
 import { type DashboardVisitorKind, DashboardVisitorProvider } from "./visitor-context";
 
 // Flattens the (already-fetched, for sidebar-tree rendering) node tree into
@@ -2560,11 +2561,16 @@ function BusabaseDashboardContent({
     </div>
   );
 
+  // Every dashboard route renders this component (see `routes.tsx`), so this is
+  // the one place that reaches every node toolbar, base view, record view and
+  // side-panel tab at once — which is what the leaf-level Ask Agent action needs.
+  const provided = <DashboardOrpcProvider orpc={orpc}>{content}</DashboardOrpcProvider>;
+
   if (embedded) {
-    return <div className="flex min-h-0 min-w-0 flex-1 flex-col">{content}</div>;
+    return <div className="flex min-h-0 min-w-0 flex-1 flex-col">{provided}</div>;
   }
 
   return (
-    <main className="flex min-h-screen flex-col bg-background text-foreground">{content}</main>
+    <main className="flex min-h-screen flex-col bg-background text-foreground">{provided}</main>
   );
 }

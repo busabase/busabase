@@ -33,6 +33,18 @@ export function SubmitPermissionProvider({
   );
 }
 
+/**
+ * The host-resolved workspace permission level for this render.
+ *
+ * Named for the submit buttons it was built for, but it is simply "what this
+ * viewer may do here", so other capability-gated affordances read it too rather
+ * than growing a second, parallel context that could disagree with this one.
+ * Defaults to `manage`, matching the open-source single-user host where
+ * busabase-core's own server-side seam also defaults to manager.
+ */
+export const useWorkspacePermissionLevel = (): ApiKeyPermissionLevel =>
+  useContext(SubmitPermissionContext);
+
 /** Pure ordering/visibility policy, exported for focused tests. */
 export function resolveSubmitActionOrder(
   permissionLevel: ApiKeyPermissionLevel,

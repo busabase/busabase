@@ -38,6 +38,18 @@ export interface SidePanelStoreState {
   /** Opens (and activates) `tab`. If a tab with the same `id` is already
    *  open, just activates it instead of adding a duplicate. */
   openTab: (tab: SidePanelTab) => void;
+  /**
+   * Replaces the payload of an already-open tab, leaving its position and
+   * identity alone. No-op when `id` is not open.
+   *
+   * `openTab` deliberately does NOT update the payload of a tab it finds
+   * already open — it only re-activates it. That is right for pinning a node
+   * (the payload is the node, and it has not changed), but it is exactly wrong
+   * for a tab whose payload carries *instructions*: asking the same agent a
+   * second question re-opens the same tab id, so the second question would be
+   * silently dropped. This is the way to say "same tab, new contents".
+   */
+  updateTabPayload: (id: string, payload: unknown) => void;
   /** Closes the tab with `id`. If it was the active tab, activates the
    *  previous tab in the list (or `null`, closing the panel, if none left). */
   closeTab: (id: string) => void;
@@ -94,6 +106,14 @@ export const useSidePanelStore = create<SidePanelStoreState>()(
           activeTabId: tab.id,
           isOpen: true,
         });
+      },
+
+      updateTabPayload: (id, payload) => {
+        const { tabs } = get();
+        if (!tabs.some((tab) => tab.id === id)) {
+          return;
+        }
+        set({ tabs: tabs.map((tab) => (tab.id === id ? { ...tab, payload } : tab)) });
       },
 
       closeTab: (id) => {

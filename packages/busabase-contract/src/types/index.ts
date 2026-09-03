@@ -378,6 +378,38 @@ export interface ReviewVO {
   createdAt: string;
 }
 
+export type CommentMentionTargetType = "member" | "agent";
+
+/**
+ * Dispatch state of one mention BEFORE a session exists. Once `linked`, the
+ * agent session owns running/waiting/done/failed — it is never mirrored here.
+ */
+export type CommentMentionDispatchStatus = "not_applicable" | "queued" | "linked" | "failed";
+
+/**
+ * One mention as the composer submits it. `start`/`end` are UTF-16 code unit
+ * offsets into the comment body (see the contract schema for why).
+ */
+export interface CommentMentionInputDTO {
+  type: CommentMentionTargetType;
+  id: string;
+  start: number;
+  end: number;
+}
+
+export interface CommentMentionVO {
+  id: string;
+  type: CommentMentionTargetType;
+  targetId: string;
+  /** Server-resolved display name; falls back to the raw target id. */
+  label: string;
+  start: number;
+  end: number;
+  dispatchStatus: CommentMentionDispatchStatus;
+  sessionId: string | null;
+  error: string | null;
+}
+
 export interface CommentVO {
   id: string;
   subjectType: CommentSubjectType;
@@ -389,7 +421,7 @@ export interface CommentVO {
   authorId: string;
   author?: UserRefVO | null;
   body: string;
-  mentionsAi: boolean;
+  mentions: CommentMentionVO[];
   createdAt: string;
   updatedAt: string;
 }

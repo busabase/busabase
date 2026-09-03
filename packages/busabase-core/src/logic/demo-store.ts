@@ -25,6 +25,8 @@ import type {
   BaseVO,
   ChangeRequestStatus,
   ChangeRequestVO,
+  CommentMentionInputDTO,
+  CommentMentionVO,
   CommentSubjectType,
   CommentVO,
   FileNodeVO,
@@ -51,6 +53,7 @@ import { zhCnScenario } from "../demo/scenarios/zh-cn";
 import { getPrimaryField } from "../domains/base/utils/primary-field";
 import { type DocLinesResult, sliceDocLinesRange, splitDocLines } from "../domains/doc/handlers";
 import { collectAncestorIds } from "./ancestor-chain";
+import { type NormalizedCommentMention, normalizeCommentMentions } from "./comment-mentions";
 import { isSearchableNodeType, NODE_CONTENT_ADAPTERS } from "./node-content";
 import { toPublicAuditMetadata, toPublicSourceMetadata } from "./source-attribution";
 
@@ -1109,16 +1112,33 @@ export const demoCreateAuditEvent = (input: {
     createdAt: nowIso(),
   });
 
-export const demoCreateComment = (input: {
-  subjectType: CommentVO["subjectType"];
-  subjectId: string;
-  authorId?: string;
-  body: string;
-  mentionsAi?: boolean;
-}): CommentVO => {
+/**
+ * Echo a comment back as a VO. Demo mode persists nothing, so this is a shape,
+ * not a write — but the mention spans still go through the same validator the
+ * real path uses, so a demo client cannot ship spans the real server would
+ * reject.
+ *
+ * `mentionOverrides` lets the demo router stamp real dispatch state onto agent
+ * rows after it starts the scripted session (see `router-demo.ts`).
+ */
+export const demoCreateComment = (
+  input: {
+    subjectType: CommentVO["subjectType"];
+    subjectId: string;
+    authorId?: string;
+    body: string;
+    mentions?: CommentMentionInputDTO[];
+  },
+  mentionOverrides?: (
+    mention: NormalizedCommentMention,
+    index: number,
+  ) => Partial<CommentMentionVO>,
+): CommentVO => {
   const createdAt = nowIso();
+  const commentId = demoId("qcomment");
+  const normalized = normalizeCommentMentions(input.body, input.mentions ?? []);
   return {
-    id: demoId("qcomment"),
+    id: commentId,
     subjectType: input.subjectType,
     subjectId: input.subjectId,
     recordId: input.subjectType === "record" ? input.subjectId : null,
@@ -1127,7 +1147,18 @@ export const demoCreateComment = (input: {
     commitId: input.subjectType === "commit" ? input.subjectId : null,
     authorId: input.authorId ?? DEMO_ACTOR_ID,
     body: input.body,
-    mentionsAi: input.mentionsAi ?? false,
+    mentions: normalized.map((mention, index) => ({
+      id: `${commentId}_mention_${index}`,
+      type: mention.type,
+      targetId: mention.targetId,
+      label: mention.targetId,
+      start: mention.start,
+      end: mention.end,
+      dispatchStatus: mention.type === "agent" ? ("queued" as const) : ("not_applicable" as const),
+      sessionId: null,
+      error: null,
+      ...mentionOverrides?.(mention, index),
+    })),
     createdAt,
     updatedAt: createdAt,
   };

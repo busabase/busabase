@@ -36,6 +36,7 @@ import { AirAppEngineAvailabilityProvider } from "../../airapp/components/engine
 import type { AirAppRunnerKind } from "../../airapp/components/runners/types";
 import { nodeIconGlyph, resolveNodeIcon } from "../helpers/node-icons";
 import type { MoveNodePayload } from "../hooks/use-move-node";
+import { DashboardOrpcProvider } from "../orpc-context";
 import { parseNodeDetailRoute } from "../utils/node-route";
 import { getSidebarTopLevelNodes } from "../utils/sidebar-node-tree";
 import { NodeDeleteDialog } from "./file-tree-browser";
@@ -822,16 +823,22 @@ export function BusabaseDashboardShell({
           </AirAppEngineAvailabilityProvider>
         )}
         {promptsTarget && (
-          <NodeAgentPromptsDialog
-            orpc={orpc ?? null}
-            nodeId={promptsTarget.id}
-            nodeName={promptsTarget.name}
-            nodeType={promptsTarget.type}
-            onOpenChange={(next) => {
-              if (!next) setPromptsTarget(null);
-            }}
-            open
-          />
+          // The shell is chrome AROUND the dashboard, so this dialog sits
+          // outside the `DashboardOrpcProvider` that `BusabaseDashboard` mounts
+          // over its own children — it needs its own, or the sidebar row's
+          // prompts dialog would be the one place with no Ask Agent button.
+          <DashboardOrpcProvider orpc={orpc}>
+            <NodeAgentPromptsDialog
+              orpc={orpc ?? null}
+              nodeId={promptsTarget.id}
+              nodeName={promptsTarget.name}
+              nodeType={promptsTarget.type}
+              onOpenChange={(next) => {
+                if (!next) setPromptsTarget(null);
+              }}
+              open
+            />
+          </DashboardOrpcProvider>
         )}
         {orpc && shareTarget && (
           <NodeShareDialog
