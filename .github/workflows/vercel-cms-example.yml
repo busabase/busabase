@@ -7,7 +7,7 @@ on:
     branches: [main]
     paths:
       - "packages/busabase-cms-nextjs-example/**"
-      - "packages/busabase-cms/**"
+      - "packages/busabase-cms-sdk/**"
       - "apps/busabase-sdk/**"
       - "packages/busabase-contract/**"
       - "pnpm-lock.yaml"
@@ -18,7 +18,7 @@ on:
     branches: [main]
     paths:
       - "packages/busabase-cms-nextjs-example/**"
-      - "packages/busabase-cms/**"
+      - "packages/busabase-cms-sdk/**"
       - "apps/busabase-sdk/**"
       - "packages/busabase-contract/**"
       - "pnpm-lock.yaml"
