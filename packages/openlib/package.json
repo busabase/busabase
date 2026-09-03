@@ -37,6 +37,14 @@
       "types": "./realtime/index.ts",
       "default": "./realtime/index.ts"
     },
+    "./cache": {
+      "types": "./cache/index.ts",
+      "default": "./cache/index.ts"
+    },
+    "./cache/types": {
+      "types": "./cache/types.ts",
+      "default": "./cache/types.ts"
+    },
     "./storage": {
       "types": "./storage/index.ts",
       "default": "./storage/index.ts"
@@ -112,6 +120,7 @@
     "fumadocs-core": "16.14.5",
     "fumadocs-ui": "16.14.5",
     "kui": "workspace:*",
+    "lmdb": "^3.5.1",
     "mime-types": "^2.1.35",
     "nanoid": "^5.1.5",
     "negotiator": "^0.6.3",

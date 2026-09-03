@@ -61,6 +61,16 @@ export interface CollectOptions {
    * trap `busabase-dump`'s exporter hit and documents.)
    */
   baseUrl: string;
+  /**
+   * Base id → its `resourceKey`-restored slug, for every Base under `root`
+   * that install renamed. Computed once from the source tree (see
+   * {@link collectBaseResourceKeys}) and threaded through so a relation
+   * field's `targetBaseSlug` can be resolved to the restored name even
+   * though {@link buildIndexes} otherwise only sees each Base's raw current
+   * server slug. Callers building a `CollectOptions` by hand (tests) can
+   * omit it — it defaults to empty, meaning "nothing was install-renamed."
+   */
+  baseResourceKeys?: ReadonlyMap<string, string>;
 }
 
 /** Find the subtree to export by node slug or id. */
@@ -89,19 +99,26 @@ export const collectPackageTree = async (
   // `[root]` so exporting a non-folder node directly still collects it.
   const children = root.type === "folder" ? (root.children ?? []) : [root];
   const { skillSource, rest } = partitionTemplateSkill(children);
-  const nodes = await collectNodes(client, rest, options);
+  const collectOptions: CollectOptions = {
+    ...options,
+    baseResourceKeys: collectBaseResourceKeys(children),
+  };
+  const nodes = await collectNodes(client, rest, collectOptions);
   const tree: PackageTree = {
     manifest: { ...options.manifest, format: PACKAGE_FORMAT },
-    nodes: restorePackageSlugs(nodes, children),
-    ...(skillSource ? { rootSkill: await collectRootSkill(client, skillSource, options) } : {}),
-    assets: await collectDocAssets(client, nodes, options),
+    nodes,
+    ...(skillSource
+      ? { rootSkill: await collectRootSkill(client, skillSource, collectOptions) }
+      : {}),
+    assets: await collectDocAssets(client, nodes, collectOptions),
   };
-  assertSelfContained(tree, options);
+  assertSelfContained(tree, collectOptions);
   return tree;
 };
 
 /**
- * Undo the slugs INSTALL chose, restoring the ones the package declared.
+ * Undo the slug INSTALL chose for one node, restoring the one the package
+ * declared.
  *
  * Install prefixes a template's Base slugs with the target folder (`contacts` →
  * `kelly-crm-contacts`) and records the original as the node's `resourceKey`.
@@ -111,48 +128,56 @@ export const collectPackageTree = async (
  * which is the property that lets a user install a template, adjust it, and
  * publish the result without the names drifting a little further each time.
  *
- * The root folder's own stamp is skipped: its `resourceKey` is the reserved
- * `app-root` marker, not a slug anything should be named after.
+ * The app-root stamp is skipped: `resourceKey` is the reserved `app-root`
+ * marker there, not a slug anything should be named after.
+ *
+ * Applied to the ONE node `source` describes — never through a space-wide
+ * slug→slug rename table. An earlier version built exactly that table (keyed
+ * by each node's *current* slug) and applied it by re-matching slugs across
+ * the whole exported tree; that broke the moment two unrelated nodes shared a
+ * slug anywhere in the space — observed live: an AirApp installed into a
+ * folder auto-named after it end up BOTH called "social-media" pre-restore
+ * (the folder, and the app before its own stamp renamed it back to "airapp"),
+ * so the app's rename bled onto its own parent folder on export.
  */
-const restorePackageSlugs = (
-  nodes: readonly PackageNode[],
-  sources: readonly SourceNode[],
-): PackageNode[] => {
-  const renames = new Map<string, string>();
-  const index = (list: readonly SourceNode[]): void => {
+const restoredNodeSlug = (source: Pick<SourceNode, "slug" | "metadata">): string => {
+  const key = source.metadata?.resourceKey;
+  if (
+    typeof key === "string" &&
+    key !== APP_ROOT_RESOURCE_KEY &&
+    key !== source.slug &&
+    NODE_SLUG_PATTERN.test(key)
+  ) {
+    return key;
+  }
+  return source.slug;
+};
+
+/**
+ * The other half of slug restoration: a relation field's `targetBaseSlug` (set
+ * from `context.baseSlugById` in {@link toPackageField}, itself built by
+ * {@link buildIndexes} from each Base's raw current server slug) must resolve
+ * to whatever THAT target Base's own node slug gets restored to, or the
+ * package would ship a relation pointing at a name it never actually wrote.
+ *
+ * Keyed by Base id (globally unique, unlike slug — see {@link restoredNodeSlug}'s
+ * doc) so `buildIndexes` can look a target base's restored slug up without
+ * re-deriving it from a name that might collide with something else in the
+ * space.
+ */
+const collectBaseResourceKeys = (sources: readonly SourceNode[]): Map<string, string> => {
+  const byBaseId = new Map<string, string>();
+  const walk = (list: readonly SourceNode[]): void => {
     for (const source of list) {
-      const key = source.metadata?.resourceKey;
-      if (
-        typeof key === "string" &&
-        key !== APP_ROOT_RESOURCE_KEY &&
-        key !== source.slug &&
-        NODE_SLUG_PATTERN.test(key)
-      ) {
-        renames.set(source.slug, key);
+      if (source.type === "base") {
+        const restored = restoredNodeSlug(source);
+        if (restored !== source.slug) byBaseId.set(source.baseId ?? source.slug, restored);
       }
-      if (source.children) index(source.children);
+      if (source.children) walk(source.children);
     }
   };
-  index(sources);
-  if (renames.size === 0) return [...nodes];
-
-  const rewriteField = <T extends { options: { targetBaseSlug?: string } }>(field: T): T => {
-    const target = field.options.targetBaseSlug;
-    if (!target) return field;
-    const renamed = renames.get(target);
-    return renamed ? { ...field, options: { ...field.options, targetBaseSlug: renamed } } : field;
-  };
-
-  const rewrite = (node: PackageNode): PackageNode => {
-    const slug = renames.get(node.slug) ?? node.slug;
-    if (node.type === "folder") return { ...node, slug, children: node.children.map(rewrite) };
-    if (node.type === "base") {
-      return { ...node, slug, base: { ...node.base, fields: node.base.fields.map(rewriteField) } };
-    }
-    return { ...node, slug };
-  };
-
-  return nodes.map(rewrite);
+  walk(sources);
+  return byBaseId;
 };
 
 /**
@@ -268,7 +293,7 @@ const collectNode = async (
   options: CollectOptions,
 ): Promise<PackageNode | undefined> => {
   const common = {
-    slug: source.slug,
+    slug: restoredNodeSlug(source),
     name: source.name,
     description: source.description ?? "",
     // `export` always writes position, so round trips preserve sibling order exactly.
@@ -323,8 +348,22 @@ const collectBase = async (
       `Base node "${source.slug}" has no Base behind it (looked up ${baseId}). The space may be mid-migration; re-run export.`,
     );
   }
-  const views = await client.bases.listViews({ baseId: base.id });
-  const { baseSlugById, fieldSlugById } = await buildIndexes(client);
+  const allViews = await client.bases.listViews({ baseId: base.id });
+  // A view predating the slug requirement (real production data: a View
+  // whose `slug` is `""`) fails `PackageViewSchema` — the package on disk
+  // parses as invalid, so EVERY later `install` of it fails outright, far
+  // from the export that actually produced it. Drop just that one view with
+  // a warning rather than shipping a package `install` can never read.
+  const views = allViews.filter((view) => view.slug.length > 0);
+  if (views.length !== allViews.length) {
+    options.warn(
+      `Base "${common.slug}" has ${allViews.length - views.length} view(s) with no slug — they were dropped (predates the slug requirement; rename it in the UI to keep it).`,
+    );
+  }
+  const { baseSlugById, fieldSlugById } = await buildIndexes(
+    client,
+    options.baseResourceKeys ?? new Map(),
+  );
 
   const fields = [...base.fields]
     .sort((a, b) => a.position - b.position)
@@ -332,7 +371,7 @@ const collectBase = async (
       toPackageField(field, {
         fieldSlugById,
         baseSlugById,
-        baseSlug: base.slug,
+        baseSlug: common.slug,
         warn: options.warn,
       }),
     );
@@ -367,12 +406,13 @@ const collectBase = async (
  */
 const buildIndexes = async (
   client: PackageClient,
+  baseResourceKeys: ReadonlyMap<string, string>,
 ): Promise<{ baseSlugById: Map<string, string>; fieldSlugById: Map<string, string> }> => {
   const bases = await client.bases.list({});
   const baseSlugById = new Map<string, string>();
   const fieldSlugById = new Map<string, string>();
   for (const base of bases) {
-    baseSlugById.set(base.id, base.slug);
+    baseSlugById.set(base.id, baseResourceKeys.get(base.id) ?? base.slug);
     for (const field of base.fields ?? []) fieldSlugById.set(field.id, field.slug);
   }
   return { baseSlugById, fieldSlugById };
@@ -661,6 +701,22 @@ export const assertSelfContained = (tree: PackageTree, options: CollectOptions):
 
   for (const node of baseNodes) {
     if (node.type !== "base") continue;
+    // A REQUIRED attachment field can never be satisfied by this format:
+    // `collectRecords` drops every attachment value (the format carries field
+    // definitions, not bytes), so the column is empty in every exported record
+    // by construction. Install then rejects the package — observed on a real
+    // space, which failed after creating 2,903 records with
+    // `Invalid field value: 文件 is required`. Unlike the relation case below,
+    // this needs no per-record check: there is no value that could survive.
+    for (const field of node.base.fields) {
+      if (field.type !== "attachment" || !field.required) continue;
+      field.required = false;
+      options.warn(
+        `Base "${node.slug}": attachment field "${field.slug}" is required in the source, but ` +
+          `${PACKAGE_FORMAT} never carries attachment values — the field would be empty in every ` +
+          "installed record and the install would fail. It is marked NOT required in this package.",
+      );
+    }
     for (const field of node.base.fields) {
       const targetBaseSlug = field.options.targetBaseSlug;
       if (field.type !== "relation" || !targetBaseSlug) continue;
@@ -671,6 +727,10 @@ export const assertSelfContained = (tree: PackageTree, options: CollectOptions):
       }
     }
     let dangling = 0;
+    // Fields where dropping a dangling value left a REQUIRED relation empty.
+    // Tracked per field (not per record) because `required` is part of the
+    // Base's schema — there is no way to say "required except on these rows".
+    const emptiedRequired = new Map<string, number>();
     for (const record of node.records) {
       for (const field of node.base.fields) {
         if (field.type !== "relation") continue;
@@ -683,12 +743,40 @@ export const assertSelfContained = (tree: PackageTree, options: CollectOptions):
         // package that says "self-contained" still ships a reference `apply`'s
         // pass 5 cannot resolve, and `install` fails outright on a record that
         // export already told the user was cleaned up.
-        if (kept.length !== keys.length) record.fields[field.slug] = kept;
+        if (kept.length !== keys.length) {
+          record.fields[field.slug] = kept;
+          if (kept.length === 0 && field.required) {
+            emptiedRequired.set(field.slug, (emptiedRequired.get(field.slug) ?? 0) + 1);
+          }
+        }
       }
     }
     if (dangling > 0) {
       options.warn(
         `Base "${node.slug}" has ${dangling} relation value(s) pointing at records outside the exported subtree — they were dropped.`,
+      );
+    }
+    // Emptying a REQUIRED relation leaves the package contradicting its own
+    // schema, and `install` refuses the WHOLE package over it
+    // (`record-dependencies.ts`: "is missing required relation"). Observed on a
+    // real space: a record's `project` pointed at a row that had since been
+    // archived, archived rows are not exported, so the value was dropped — and
+    // the resulting package could not be installed anywhere, including back
+    // into the space it came from.
+    //
+    // Relax the constraint in the PACKAGE rather than inventing data or
+    // silently dropping the record. The exported Base is then slightly more
+    // permissive than the source, which is stated plainly below — an installable
+    // package that says what it loosened beats a faithful one nobody can install.
+    for (const [slug, count] of emptiedRequired) {
+      const field = node.base.fields.find((candidate) => candidate.slug === slug);
+      if (!field) continue;
+      field.required = false;
+      options.warn(
+        `Base "${node.slug}": relation field "${slug}" is required in the source, but ${count} ` +
+          "record(s) point only at records outside the export (typically archived ones, which " +
+          "are never exported). It is marked NOT required in this package so the package can be " +
+          "installed; those records install with that field empty.",
       );
     }
   }

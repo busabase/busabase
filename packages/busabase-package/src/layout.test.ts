@@ -406,6 +406,56 @@ describe("validation", () => {
       ...Object.entries(entries).map(([path, value]) => [path, text(value)] as [string, Buffer]),
     ]);
 
+  const readAirApp = (entries: Record<string, string>) =>
+    readPackageTree(
+      withContent({
+        "content/app/_node.json": JSON.stringify({ type: "airapp", name: "App" }),
+        ...entries,
+      }),
+    );
+
+  it("accepts an explicit Python AirApp without package.json", () => {
+    expect(
+      readAirApp({
+        "content/app/airapp.json": JSON.stringify({
+          runtime: "python",
+          install: 'python3 -c "print(1)"',
+          start: "python3 server.py --port $PORT",
+        }),
+        "content/app/server.py": "print('ready')",
+      }).nodes[0],
+    ).toMatchObject({ type: "airapp", slug: "app" });
+  });
+
+  it("accepts an inferred Python AirApp without package.json", () => {
+    expect(
+      readAirApp({
+        "content/app/requirements.txt": "fastapi\n",
+        "content/app/main.py": "app = object()",
+      }).nodes[0],
+    ).toMatchObject({ type: "airapp", slug: "app" });
+  });
+
+  it("still rejects a default Node AirApp without package.json", () => {
+    expect(() => readAirApp({ "content/app/server.js": "console.log('ready')" })).toThrow(
+      /package\.json required by its default Node lifecycle/,
+    );
+  });
+
+  it("accepts a Node AirApp with a fully custom lifecycle and no package.json", () => {
+    expect(
+      readAirApp({
+        "content/app/airapp.json": JSON.stringify({
+          runtime: "node",
+          install: "node setup.js",
+          start: "node server.js",
+        }),
+        "content/app/server.js": "console.log('ready')",
+        "content/app/setup.js": "console.log('installed')",
+      }).nodes[0],
+    ).toMatchObject({ type: "airapp", slug: "app" });
+  });
+
   it("rejects a reserved name at a file-tree node's root", () => {
     const files = withContent({
       "content/s/_node.json": JSON.stringify({ type: "skill", name: "S" }),

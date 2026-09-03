@@ -553,22 +553,75 @@ const renderNodeTree = (nodes: readonly PackageNode[], indent: string): string[]
 };
 
 /**
- * §4 + §12: without `--auto-merge` an unmerged base has no field ids to patch and no
- * records to link, so passes 2-5 cannot run. Fail fast and say exactly why.
+ * A required field the package cannot satisfy for at least one record. The
+ * server rejects these — but only once it is already writing records, deep into
+ * pass 4 of 5, having created everything before them.
+ *
+ * Real occurrence: a package whose `content-artifacts` Base declared a REQUIRED
+ * attachment field (`busabase-package@1` never carries attachment bytes, so the
+ * column is empty in every record) failed with `Invalid field value: 文件 is
+ * required` **after creating 2,903 records**. `export` no longer produces such
+ * packages, but one written by hand — or exported before that fix — still can,
+ * and `install` should say so before touching the target.
  */
-export const assertPlanIsApplicable = (plan: InstallPlan, autoMerge: boolean): void => {
+const findUnsatisfiableRequiredFields = (plan: InstallPlan): string[] => {
+  const problems: string[] = [];
+  for (const node of walkNodes(plan.tree.nodes)) {
+    if (node.type !== "base") continue;
+    for (const field of node.base.fields) {
+      if (!field.required) continue;
+      const missing = node.records.filter((record) => {
+        const value = record.fields[field.slug];
+        if (value === null || value === undefined || value === "") return true;
+        return Array.isArray(value) && value.length === 0;
+      }).length;
+      if (missing === 0) continue;
+      problems.push(
+        `  • Base "${node.slug}", field "${field.slug}" (${field.type}) is required, but ` +
+          `${missing} of ${node.records.length} record(s) carry no value for it.`,
+      );
+    }
+  }
+  return problems;
+};
+
+/**
+ * Everything that would stop this plan from applying, as messages — so a dry
+ * run can REPORT them and a real install can throw on them, from one source of
+ * truth. Previously the checks lived only inside `assertPlanIsApplicable`,
+ * which `--dry-run` returned before ever reaching: a dry run therefore printed
+ * a clean-looking plan for a package that could not install at all.
+ */
+export const findPlanBlockers = (plan: InstallPlan, autoMerge: boolean): string[] => {
+  const blockers: string[] = [];
   if (plan.collisions.some((collision) => !collision.renamedTo)) {
     const list = plan.collisions
       .filter((collision) => !collision.renamedTo)
       .map((collision) => `  • ${collision.kind} "${collision.slug}" (${collision.path})`)
       .join("\n");
-    throw new Error(
+    blockers.push(
       `Install would collide with content that already exists:\n${list}\n\nNothing was created. Re-run with --rename to install the colliding items under suffixed slugs (e.g. "-2"), or pick a different --into-folder.`,
     );
   }
   if (plan.requiresAutoMerge && !autoMerge) {
-    throw new Error(
+    blockers.push(
       "This package's records carry relation values, and a relation stores the ids of the records it points at — which only exist once the records are merged. Installing review-first would leave every relation empty.\n\nRe-run with --auto-merge to install it (this trusts the package author: records are created immediately instead of landing as change requests you review first).",
     );
   }
+  const unsatisfiable = findUnsatisfiableRequiredFields(plan);
+  if (unsatisfiable.length > 0) {
+    blockers.push(
+      `This package cannot satisfy its own required fields:\n${unsatisfiable.join("\n")}\n\nThe server rejects these while writing records, partway through the install. Re-export the package (export relaxes fields it cannot fill), or edit the Base definitions in the package to make them optional.`,
+    );
+  }
+  return blockers;
+};
+
+/**
+ * §4 + §12: without `--auto-merge` an unmerged base has no field ids to patch and no
+ * records to link, so passes 2-5 cannot run. Fail fast and say exactly why.
+ */
+export const assertPlanIsApplicable = (plan: InstallPlan, autoMerge: boolean): void => {
+  const blockers = findPlanBlockers(plan, autoMerge);
+  if (blockers.length > 0) throw new Error(blockers.join("\n\n"));
 };

@@ -1,6 +1,11 @@
 import { PACKAGE_FORMAT } from "busabase-contract/domains/package/types";
 import { describe, expect, it } from "vitest";
-import { assertPlanIsApplicable, buildInstallPlan, type ExistingNode } from "./plan";
+import {
+  assertPlanIsApplicable,
+  buildInstallPlan,
+  type ExistingNode,
+  findPlanBlockers,
+} from "./plan";
 import type { PackageBaseNode, PackageTree } from "./tree";
 
 const baseNode = (
@@ -136,6 +141,83 @@ describe("collision detection", () => {
     });
     expect(() => assertPlanIsApplicable(plan, true)).toThrow(/--rename/);
     expect(() => assertPlanIsApplicable(plan, true)).toThrow(/products/);
+  });
+});
+
+describe("findPlanBlockers — required fields the package cannot fill", () => {
+  const requiredAttachment = {
+    slug: "file",
+    name: "文件",
+    type: "attachment" as const,
+    required: true,
+    position: 0,
+    options: {},
+  };
+
+  it("reports a required field no record carries a value for, before anything is written", () => {
+    // The real failure: a package with a REQUIRED attachment field installed
+    // fine through planning and died in pass 4 of 5 — `Invalid field value:
+    // 文件 is required` — after the server had already created 2,903 records.
+    // Planning knows enough to say this up front.
+    const plan = buildInstallPlan(
+      tree([baseNode("artifacts", [requiredAttachment], [{ key: "rec-1", fields: {} }])]),
+      noTarget,
+      {},
+    );
+
+    const blockers = findPlanBlockers(plan, true);
+    expect(blockers).toHaveLength(1);
+    expect(blockers[0]).toContain('Base "artifacts", field "file" (attachment) is required');
+    expect(blockers[0]).toContain("1 of 1 record(s)");
+    // And the real install path throws on the same finding.
+    expect(() => assertPlanIsApplicable(plan, true)).toThrow(/cannot satisfy its own required/);
+  });
+
+  it("counts only the records actually missing a value", () => {
+    const plan = buildInstallPlan(
+      tree([
+        baseNode(
+          "artifacts",
+          [requiredAttachment],
+          [
+            { key: "rec-1", fields: { file: [] } }, // empty array counts as missing
+            { key: "rec-2", fields: { file: "asset-1" } },
+            { key: "rec-3", fields: {} },
+          ],
+        ),
+      ]),
+      noTarget,
+      {},
+    );
+
+    expect(findPlanBlockers(plan, true)[0]).toContain("2 of 3 record(s)");
+  });
+
+  it("says nothing when every record satisfies the required field", () => {
+    const plan = buildInstallPlan(
+      tree([
+        baseNode(
+          "artifacts",
+          [requiredAttachment],
+          [{ key: "rec-1", fields: { file: "asset-1" } }],
+        ),
+      ]),
+      noTarget,
+      {},
+    );
+
+    expect(findPlanBlockers(plan, true)).toEqual([]);
+  });
+
+  it("ignores optional fields left empty", () => {
+    const optional = { ...requiredAttachment, required: false };
+    const plan = buildInstallPlan(
+      tree([baseNode("artifacts", [optional], [{ key: "rec-1", fields: {} }])]),
+      noTarget,
+      {},
+    );
+
+    expect(findPlanBlockers(plan, true)).toEqual([]);
   });
 });
 
