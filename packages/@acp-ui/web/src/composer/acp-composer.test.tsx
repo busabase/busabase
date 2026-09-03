@@ -1,7 +1,7 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { AcpComposer, toAttachments } from "./acp-composer";
+import { AcpComposer, mergeDraft, toAttachments } from "./acp-composer";
 
 const submitButton = () => screen.getByRole("button", { name: /Submit|Stop/ });
 const attachButton = () => screen.getByRole("button", { name: "Attach a file" });
@@ -287,6 +287,120 @@ describe("toAttachments", () => {
 
   it("returns an empty array for no files", () => {
     expect(toAttachments([])).toEqual([]);
+  });
+});
+
+// Ask Agent (busabase) drops a prompt into the draft without sending it. The
+// two things that make that safe rather than annoying: never destroying what
+// the user already typed, and never firing twice for one user action.
+describe("prefilling a draft", () => {
+  it("fills an empty composer and leaves it unsent", async () => {
+    const onSend = vi.fn();
+    render(
+      <AcpComposer
+        disabled={false}
+        draft={{ id: "d1", text: "Summarise this doc" }}
+        onSend={onSend}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByRole("textbox")).toHaveValue("Summarise this doc"));
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("focuses the field and parks the caret at the end, ready to edit", async () => {
+    render(
+      <AcpComposer
+        disabled={false}
+        draft={{ id: "d1", text: "Rename the fields" }}
+        onSend={vi.fn()}
+      />,
+    );
+
+    const box = screen.getByRole("textbox") as HTMLTextAreaElement;
+    await waitFor(() => expect(box).toHaveFocus());
+    expect(box.selectionStart).toBe("Rename the fields".length);
+    expect(box.selectionEnd).toBe("Rename the fields".length);
+  });
+
+  it("appends on a new line instead of eating an unsent draft", async () => {
+    const { rerender } = render(<AcpComposer disabled={false} onSend={vi.fn()} />);
+    await userEvent.type(screen.getByRole("textbox"), "but only last week");
+
+    rerender(
+      <AcpComposer
+        disabled={false}
+        draft={{ id: "d1", text: "Summarise this" }}
+        onSend={vi.fn()}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(screen.getByRole("textbox")).toHaveValue("but only last week\nSummarise this"),
+    );
+  });
+
+  it("applies a given draft id exactly once, however often it re-renders", async () => {
+    const draft = { id: "d1", text: "Summarise this" };
+    const { rerender } = render(<AcpComposer disabled={false} draft={draft} onSend={vi.fn()} />);
+    await waitFor(() => expect(screen.getByRole("textbox")).toHaveValue("Summarise this"));
+
+    rerender(<AcpComposer disabled={false} draft={{ ...draft }} onSend={vi.fn()} />);
+    await waitFor(() => expect(screen.getByRole("textbox")).toHaveValue("Summarise this"));
+  });
+
+  it("appends again for a new id — a second Ask Agent is a second insertion", async () => {
+    const { rerender } = render(
+      <AcpComposer disabled={false} draft={{ id: "d1", text: "First" }} onSend={vi.fn()} />,
+    );
+    await waitFor(() => expect(screen.getByRole("textbox")).toHaveValue("First"));
+
+    rerender(
+      <AcpComposer disabled={false} draft={{ id: "d2", text: "Second" }} onSend={vi.fn()} />,
+    );
+    await waitFor(() => expect(screen.getByRole("textbox")).toHaveValue("First\nSecond"));
+  });
+
+  it("tells the host the draft landed, so it can retire it", async () => {
+    const onDraftApplied = vi.fn();
+    render(
+      <AcpComposer
+        disabled={false}
+        draft={{ id: "d1", text: "Summarise this" }}
+        onDraftApplied={onDraftApplied}
+        onSend={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(onDraftApplied).toHaveBeenCalledWith("d1"));
+    expect(onDraftApplied).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends the prefilled text only once the user presses Enter", async () => {
+    const onSend = vi.fn();
+    render(
+      <AcpComposer disabled={false} draft={{ id: "d1", text: "Summarise this" }} onSend={onSend} />,
+    );
+    await waitFor(() => expect(screen.getByRole("textbox")).toHaveValue("Summarise this"));
+
+    expect(onSend).not.toHaveBeenCalled();
+    await userEvent.keyboard("{Enter}");
+    expect(onSend).toHaveBeenCalledWith("Summarise this", undefined);
+  });
+});
+
+describe("mergeDraft", () => {
+  it("replaces an empty or whitespace-only draft outright", () => {
+    expect(mergeDraft("", "next")).toBe("next");
+    expect(mergeDraft("   \n ", "next")).toBe("next");
+  });
+
+  it("keeps typed text and adds the prompt on its own line", () => {
+    expect(mergeDraft("typed", "next")).toBe("typed\nnext");
+  });
+
+  it("does not stack blank lines when the draft already ends in one", () => {
+    expect(mergeDraft("typed\n\n", "next")).toBe("typed\nnext");
   });
 });
 
