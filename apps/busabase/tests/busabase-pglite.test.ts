@@ -289,7 +289,6 @@ describe("busabase pglite integration flow", () => {
     const comment = await store.createComment({
       authorId: "vitest-reviewer",
       body: "This canonical record is ready for the AI industry briefing.",
-      mentionsAi: true,
       subjectId: mergedRecord.id,
       subjectType: "record",
     });

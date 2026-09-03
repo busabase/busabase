@@ -11,8 +11,15 @@ interface ChangeRequestVO {
   status: string;
 }
 
-interface RecordVO {
-  id: string;
+interface CommentMentionVO {
+  type: "member" | "agent";
+  targetId: string;
+  label: string;
+  start: number;
+  end: number;
+  dispatchStatus: string;
+  sessionId: string | null;
+  error: string | null;
 }
 
 interface CommentVO {
@@ -20,7 +27,7 @@ interface CommentVO {
   subjectType: string;
   subjectId: string;
   body: string;
-  mentionsAi: boolean;
+  mentions: CommentMentionVO[];
 }
 
 const listComments = (subjectType: string, subjectId: string) =>
@@ -63,16 +70,43 @@ export async function run() {
     );
   });
 
-  await step("POST /comments — @agent mention (mentionsAi=true)", async () => {
+  // A structured mention, not a regex over the text: `start`/`end` are UTF-16
+  // code unit offsets into `body`, and the server validates them rather than
+  // guessing a target from prose.
+  const MENTION_BODY = "@Alice please attach the source and re-request review.";
+
+  await step("POST /comments — structured @member mention", async () => {
     if (!crId) return;
     const comment = await api<CommentVO>("POST", "/comments", {
       subjectType: "change_request",
       subjectId: crId,
       authorId: "demo-reviewer",
-      body: "@agent please attach the source and re-request review.",
-      mentionsAi: true,
+      body: MENTION_BODY,
+      mentions: [{ type: "member", id: "local-editor", start: 0, end: 6 }],
     });
-    assert(comment.mentionsAi === true, "expected mentionsAi=true");
+    assert(comment.mentions.length === 1, "expected exactly one mention");
+    assert(comment.mentions[0].targetId === "local-editor", "unexpected mention target");
+    assert(
+      comment.body.slice(comment.mentions[0].start, comment.mentions[0].end) === "@Alice",
+      "mention span does not cover the mention text",
+    );
+  });
+
+  await step("POST /comments — an out-of-bounds span is rejected, not dropped", async () => {
+    if (!crId) return;
+    let rejected = false;
+    try {
+      await api<CommentVO>("POST", "/comments", {
+        subjectType: "change_request",
+        subjectId: crId,
+        authorId: "demo-reviewer",
+        body: "short",
+        mentions: [{ type: "member", id: "local-editor", start: 0, end: 999 }],
+      });
+    } catch {
+      rejected = true;
+    }
+    assert(rejected, "expected an out-of-bounds mention span to be rejected");
   });
 
   await step("GET /comments — CR comments include the ones we posted", async () => {
@@ -80,8 +114,8 @@ export async function run() {
     const comments = await listComments("change_request", crId);
     assert(comments.length >= 2, `expected >= 2 comments, got ${comments.length}`);
     assert(
-      comments.some((c) => c.mentionsAi),
-      "expected at least one @agent mention",
+      comments.some((c) => c.mentions.length > 0),
+      "expected at least one structured mention",
     );
   });
 
