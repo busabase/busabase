@@ -35,6 +35,7 @@ import {
   type TemplateManifest,
 } from "busabase-contract/domains/package/template";
 import { parseFrontmatter } from "./frontmatter";
+import { resolveAirAppPackageLifecycle } from "./layout-read";
 import { type PackageFileTreeNode, type PackageNode, type PackageTree, walkNodes } from "./tree";
 
 export interface TemplateValidation {
@@ -141,10 +142,12 @@ export const validateTemplate = (tree: PackageTree): TemplateValidation => {
   }
 
   // ── Hard 6: an AirApp that can actually boot ──────────────────────────────
-  // (`layout-read` already refuses a package whose AirApp has no package.json,
-  // so by the time a tree exists this is about the `dev` script nodepod runs.)
+  // Only the default Node start command needs a package.json `dev` script.
+  // Python and fully custom lifecycles are validated by their runtime plan.
   for (const node of walkNodes(tree.nodes)) {
     if (!isAirApp(node)) continue;
+    const lifecycle = resolveAirAppPackageLifecycle(node.files, node.slug);
+    if (lifecycle.runtime !== "node" || !lifecycle.usesDefaultStart) continue;
     const manifestFile = node.files.find((file) => file.path === "package.json");
     if (!manifestFile) continue;
     let scripts: Record<string, unknown> | undefined;
@@ -161,7 +164,7 @@ export const validateTemplate = (tree: PackageTree): TemplateValidation => {
     }
     if (typeof scripts?.dev !== "string") {
       errors.push(
-        `AirApp "${node.slug}": package.json has no \`dev\` script. Busabase starts an AirApp with \`npm run dev\`, so without it the app installs and then never boots.`,
+        `AirApp "${node.slug}": package.json has no \`dev\` script. This AirApp uses the default Node start command \`npm run dev\`, so without it the app installs and then never boots.`,
       );
     }
   }

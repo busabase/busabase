@@ -122,4 +122,127 @@ describe("assertSelfContained — dangling same-package relations", () => {
     expect(artifacts.records[0].fields.project).toEqual(["rec-project-live"]);
     expect(warnings).toEqual([]);
   });
+
+  it("relaxes a REQUIRED relation the drop emptied, so the package can still be installed", () => {
+    // The real failure this exists for: on the production space a record's
+    // `project` pointed at a row archived on 2026-08-24. Archived rows are not
+    // exported, so the value was dropped — leaving a `required` relation empty,
+    // which `record-dependencies.ts` rejects with "is missing required
+    // relation. Nothing was installed." The export succeeded and produced a
+    // package that could not be installed anywhere, including back into the
+    // space it came from.
+    const required = { ...relationField("project", "video-projects"), required: true };
+    const artifacts = baseNode("artifacts", {
+      base: { name: "artifacts", description: "", fields: [required], views: [] },
+      records: [
+        // Emptied by the drop — this is what breaks install.
+        { key: "rec-artifact-1", fields: { project: ["rec-project-archived"] } },
+        // Still resolvable; must not be disturbed.
+        { key: "rec-artifact-2", fields: { project: ["rec-project-live"] } },
+      ],
+    });
+    const videoProjects = baseNode("video-projects", {
+      records: [{ key: "rec-project-live", fields: {} }],
+    });
+    const tree: PackageTree = { manifest: manifest(), nodes: [artifacts, videoProjects] };
+
+    const warnings: string[] = [];
+    assertSelfContained(tree, {
+      manifest: manifest(),
+      warn: (m) => warnings.push(m),
+      baseUrl: "http://localhost",
+    });
+
+    // The constraint is relaxed IN THE PACKAGE — that is what makes it
+    // installable — while the surviving value is untouched.
+    expect(artifacts.base.fields[0].required).toBe(false);
+    expect(artifacts.records[0].fields.project).toEqual([]);
+    expect(artifacts.records[1].fields.project).toEqual(["rec-project-live"]);
+    // And it says so, naming the field and how many records are affected.
+    expect(warnings).toHaveLength(2);
+    expect(warnings[1]).toContain('relation field "project" is required in the source');
+    expect(warnings[1]).toContain("1 record(s)");
+    expect(warnings[1]).toContain("NOT required in this package");
+  });
+
+  it("relaxes a REQUIRED attachment field, which this format can never carry a value for", () => {
+    // Same class of bug as the relation case, but unconditional: the format
+    // carries field definitions, never attachment bytes, so a required
+    // attachment column is empty in every exported record by construction.
+    // The real install died after creating 2,903 records with
+    // `Invalid field value: 文件 is required`.
+    const attachment = {
+      slug: "file",
+      name: "文件",
+      type: "attachment" as const,
+      required: true,
+      position: 0,
+      options: {},
+    };
+    const artifacts = baseNode("artifacts", {
+      base: { name: "artifacts", description: "", fields: [attachment], views: [] },
+      records: [{ key: "rec-1", fields: {} }],
+    });
+    const tree: PackageTree = { manifest: manifest(), nodes: [artifacts] };
+
+    const warnings: string[] = [];
+    assertSelfContained(tree, {
+      manifest: manifest(),
+      warn: (m) => warnings.push(m),
+      baseUrl: "http://localhost",
+    });
+
+    expect(artifacts.base.fields[0].required).toBe(false);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('attachment field "file" is required in the source');
+    expect(warnings[0]).toContain("never carries attachment values");
+  });
+
+  it("leaves an optional attachment field untouched", () => {
+    const attachment = {
+      slug: "file",
+      name: "文件",
+      type: "attachment" as const,
+      required: false,
+      position: 0,
+      options: {},
+    };
+    const artifacts = baseNode("artifacts", {
+      base: { name: "artifacts", description: "", fields: [attachment], views: [] },
+      records: [{ key: "rec-1", fields: {} }],
+    });
+    const tree: PackageTree = { manifest: manifest(), nodes: [artifacts] };
+
+    const warnings: string[] = [];
+    assertSelfContained(tree, {
+      manifest: manifest(),
+      warn: (m) => warnings.push(m),
+      baseUrl: "http://localhost",
+    });
+
+    expect(artifacts.base.fields[0].required).toBe(false);
+    expect(warnings).toEqual([]);
+  });
+
+  it("leaves a required relation alone when nothing was dropped from it", () => {
+    const required = { ...relationField("project", "video-projects"), required: true };
+    const artifacts = baseNode("artifacts", {
+      base: { name: "artifacts", description: "", fields: [required], views: [] },
+      records: [{ key: "rec-artifact-1", fields: { project: ["rec-project-live"] } }],
+    });
+    const videoProjects = baseNode("video-projects", {
+      records: [{ key: "rec-project-live", fields: {} }],
+    });
+    const tree: PackageTree = { manifest: manifest(), nodes: [artifacts, videoProjects] };
+
+    const warnings: string[] = [];
+    assertSelfContained(tree, {
+      manifest: manifest(),
+      warn: (m) => warnings.push(m),
+      baseUrl: "http://localhost",
+    });
+
+    expect(artifacts.base.fields[0].required).toBe(true);
+    expect(warnings).toEqual([]);
+  });
 });

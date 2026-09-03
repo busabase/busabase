@@ -322,3 +322,45 @@ describe("staging a document", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(/too large/i);
   });
 });
+
+describe("the file picker itself", () => {
+  // Regression: `maxFiles` defaulted to 10 while the hidden input had no
+  // `multiple` attribute, so the paperclip button accepted exactly one file.
+  // Only a real browser surfaces this — jsdom uploads whatever you hand it.
+  it("lets the picker select more than one file when maxFiles allows it", () => {
+    render(<AcpComposer disabled={false} onSend={vi.fn()} />);
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    expect(input.multiple).toBe(true);
+  });
+
+  it("keeps the picker single-file when the host caps attachments at one", () => {
+    render(<AcpComposer disabled={false} maxFiles={1} onSend={vi.fn()} />);
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    expect(input.multiple).toBe(false);
+  });
+});
+
+describe("composer layout inside kui's InputGroup", () => {
+  // `PromptInputFooter` renders `data-align="block-end"`, which flips
+  // `InputGroup` to `flex-col` — and it is `items-center`, so a direct child
+  // without a width is centred rather than left-aligned. jsdom computes no
+  // layout, so the class is the only thing assertable here; the real-browser
+  // check that motivated it measured the strip floating in the middle of the
+  // composer instead of sitting flush above the textarea.
+  it("gives the staged-attachment strip a full width so it aligns with the textarea", async () => {
+    render(<AcpComposer disabled={false} onSend={vi.fn()} />);
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    await userEvent.upload(fileInput, fakeFile("notes.md", "text/markdown"));
+
+    // Walk up to the element that is a DIRECT child of the InputGroup — that
+    // is the one flex centring acts on. `closest(".w-full")` would be vacuous:
+    // the InputGroup itself carries `w-full`.
+    const group = document.querySelector('[data-slot="input-group"]') as HTMLElement;
+    let strip = (await screen.findByText("notes.md")) as HTMLElement;
+    while (strip.parentElement && strip.parentElement !== group) {
+      strip = strip.parentElement;
+    }
+    expect(strip.parentElement).toBe(group);
+    expect(strip.className).toContain("w-full");
+  });
+});

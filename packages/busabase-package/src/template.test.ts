@@ -159,6 +159,22 @@ describe("validateTemplate — hard conditions", () => {
     expect(result.errors.join()).toContain("`dev` script");
   });
 
+  it("accepts a Python AirApp without package.json or an npm dev script", () => {
+    const result = validate({
+      "content/kelly-email-app/package.json": null,
+      "content/kelly-email-app/server.js": null,
+      "content/kelly-email-app/airapp.json": JSON.stringify({
+        runtime: "python",
+        install: 'python3 -c "print(1)"',
+        start: "python3 server.py --port $PORT",
+      }),
+      "content/kelly-email-app/server.py": "print('ready')",
+    });
+    expect(result.ok).toBe(true);
+    expect(result.errors.join()).not.toContain("package.json");
+    expect(result.errors.join()).not.toContain("`dev` script");
+  });
+
   it("refuses to guess between two undeclared AirApps", () => {
     const result = validate({
       "busabase.json": JSON.stringify({

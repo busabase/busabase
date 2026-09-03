@@ -682,15 +682,30 @@ export class S3Storage implements IStorage {
   /**
    * 检查对象是否存在
    */
+  /**
+   * Existence check via HEAD, never GET.
+   *
+   * This used to send a `GetObjectCommand` and discard the result. The AWS SDK
+   * v3 resolves that promise as soon as the response HEADERS arrive, with the
+   * body still an unread stream — and a body that is never consumed or
+   * destroyed keeps its connection checked out of the agent's pool until it
+   * times out. `dump.importCommit` calls this once per imported attachment in
+   * a plain loop (10,486 times on a real production restore), so every one of
+   * those pinned a socket while also transferring the whole object's bytes for
+   * a question that only needs headers.
+   *
+   * `getObjectMetadata` below already had this right; this now matches it.
+   */
   async objectExists(key: string): Promise<boolean> {
     try {
-      const { GetObjectCommand } = await loadS3Sdk();
+      const { HeadObjectCommand } = await loadS3Sdk();
       const client = await this.getClient();
-      const command = new GetObjectCommand({
-        Bucket: this.config.bucketName,
-        Key: key,
-      });
-      await client.send(command);
+      await client.send(
+        new HeadObjectCommand({
+          Bucket: this.config.bucketName,
+          Key: key,
+        }),
+      );
       return true;
     } catch {
       return false;

@@ -76,6 +76,69 @@ const decodeText = (bytes: Buffer, filePath: string): string => {
   return text;
 };
 
+const AIRAPP_MANIFEST_FILENAME = "airapp.json";
+const PYTHON_RUNTIME_MARKERS = ["requirements.txt", "pyproject.toml"] as const;
+
+export interface AirAppPackageLifecycle {
+  runtime: "node" | "python";
+  usesDefaultInstall: boolean;
+  usesDefaultStart: boolean;
+}
+
+/**
+ * Resolve only the lifecycle facts the package format needs to validate.
+ * Keep the same explicit -> inferred -> default order as Busabase's runtime
+ * descriptor without making busabase-package depend on busabase-core (core
+ * already depends on this package).
+ */
+export const resolveAirAppPackageLifecycle = (
+  files: readonly PackageFileEntry[],
+  slug: string,
+): AirAppPackageLifecycle => {
+  const paths = new Set(files.map((file) => file.path));
+  const manifestFile = files.find((file) => file.path === AIRAPP_MANIFEST_FILENAME);
+  let manifest: Record<string, unknown> = {};
+
+  if (manifestFile) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(decodeText(manifestFile.bytes, AIRAPP_MANIFEST_FILENAME));
+    } catch (error) {
+      throw new Error(
+        `AirApp "${slug}" has an invalid ${AIRAPP_MANIFEST_FILENAME}: ${(error as Error).message}`,
+      );
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error(
+        `AirApp "${slug}" has an invalid ${AIRAPP_MANIFEST_FILENAME}: expected an object.`,
+      );
+    }
+    manifest = parsed as Record<string, unknown>;
+  }
+
+  const declaredRuntime = manifest.runtime;
+  if (declaredRuntime !== undefined && declaredRuntime !== "node" && declaredRuntime !== "python") {
+    throw new Error(
+      `AirApp "${slug}" declares unknown runtime ${JSON.stringify(declaredRuntime)} in ${AIRAPP_MANIFEST_FILENAME}.`,
+    );
+  }
+
+  const runtime =
+    declaredRuntime === "node" || declaredRuntime === "python"
+      ? declaredRuntime
+      : PYTHON_RUNTIME_MARKERS.some((path) => paths.has(path))
+        ? "python"
+        : "node";
+  const hasCustomCommand = (key: "install" | "start") =>
+    typeof manifest[key] === "string" && manifest[key].trim().length > 0;
+
+  return {
+    runtime,
+    usesDefaultInstall: !hasCustomCommand("install"),
+    usesDefaultStart: !hasCustomCommand("start"),
+  };
+};
+
 const parseJsonFile = (files: PackageFiles, filePath: string): unknown => {
   const bytes = files.get(filePath);
   if (!bytes) throw new Error(`Missing ${filePath}`);
@@ -319,17 +382,20 @@ const readDirNode = (files: PackageFiles, dir: string, slug: string): PackageNod
       entries.map((entry) => entry.path),
       `${meta.type} "${slug}"`,
     );
-    // An AirApp that installs cleanly and then refuses to boot is the hardest
-    // failure to attribute, so the one thing an ignore file may never remove is
-    // the manifest nodepod runs `npm run dev` from.
-    if (meta.type === "airapp" && !entries.some((entry) => entry.path === "package.json")) {
-      throw new Error(
-        `AirApp "${slug}" has no package.json to install${
-          ignore.isEmpty
-            ? ""
-            : ` — check ${dir}${PACKAGE_AIRAPP_IGNORE}, which must never exclude it`
-        }. Nothing was installed.`,
-      );
+    if (meta.type === "airapp") {
+      const lifecycle = resolveAirAppPackageLifecycle(entries, slug);
+      const needsPackageJson =
+        lifecycle.runtime === "node" &&
+        (lifecycle.usesDefaultInstall || lifecycle.usesDefaultStart);
+      if (needsPackageJson && !entries.some((entry) => entry.path === "package.json")) {
+        throw new Error(
+          `AirApp "${slug}" has no package.json required by its default Node lifecycle${
+            ignore.isEmpty
+              ? ""
+              : ` — check ${dir}${PACKAGE_AIRAPP_IGNORE}, which must never exclude it`
+          }. Nothing was installed.`,
+        );
+      }
     }
     return {
       type: meta.type,

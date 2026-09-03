@@ -319,6 +319,72 @@ describe("partial install diagnostics", () => {
     expect(getInstallFailureDetails(new Error("unrelated"))).toBeUndefined();
     expect(getInstallFailureDetails(undefined)).toBeUndefined();
   });
+
+  it("moves what it created to Trash, so a failure does not leave the space dirty", async () => {
+    // A real failure left 2,903 records and dozens of Bases behind with no way
+    // to clean them up, and those leftovers then collide with the next attempt
+    // at the same package. Deleting the target folder takes the whole subtree.
+    const { calls, client } = createFakeServer();
+    client.bases.createField = async () => {
+      throw new Error("simulated field failure");
+    };
+
+    const caught = await applyInstall(
+      client,
+      planFor([relationBase("contacts", "companies", "inverse")]),
+      { autoMerge: true },
+    ).catch((error: unknown) => error);
+
+    expect((caught as Error).message).toContain("Rolled back");
+    const deletes = calls.filter(
+      (call) =>
+        call.method === "nodes.createChangeRequest" &&
+        JSON.stringify(call.input).includes('"kind":"delete"'),
+    );
+    expect(deletes).toHaveLength(1);
+    expect(JSON.stringify(deletes[0].input)).toContain('"autoMerge":true');
+  });
+
+  it("leaves everything in place under --no-rollback", async () => {
+    const { calls, client } = createFakeServer();
+    client.bases.createField = async () => {
+      throw new Error("simulated field failure");
+    };
+
+    const caught = await applyInstall(
+      client,
+      planFor([relationBase("contacts", "companies", "inverse")]),
+      { autoMerge: true, rollbackOnFailure: false },
+    ).catch((error: unknown) => error);
+
+    expect((caught as Error).message).toContain("--no-rollback");
+    expect(
+      calls.filter((call) => JSON.stringify(call.input).includes('"kind":"delete"')),
+    ).toHaveLength(0);
+  });
+
+  it("does not delete anything when installing into a folder that already existed", async () => {
+    // The new nodes sit among the user's own and cannot be told apart safely
+    // here — say so rather than guess, because deleting the wrong thing is far
+    // worse than leaving a mess.
+    const { calls, client } = createFakeServer();
+    client.bases.createField = async () => {
+      throw new Error("simulated field failure");
+    };
+    const plan = {
+      ...planFor([relationBase("contacts", "companies", "inverse")]),
+      existingTargetFolderNodeId: "nod_users_own_folder",
+    };
+
+    const caught = await applyInstall(client, plan, { autoMerge: true }).catch(
+      (error: unknown) => error,
+    );
+
+    expect((caught as Error).message).toContain("cannot be told apart safely");
+    expect(
+      calls.filter((call) => JSON.stringify(call.input).includes('"kind":"delete"')),
+    ).toHaveLength(0);
+  });
 });
 
 describe("package-only option keys never reach the API", () => {

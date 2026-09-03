@@ -122,6 +122,14 @@ function AttachButton({ disabled }: { disabled: boolean }) {
  * image on its own, but a document rendered that way is a nameless file icon,
  * and two attached PDFs would be indistinguishable. Documents therefore use
  * the `inline` variant, which keeps the filename visible.
+ *
+ * `w-full` is load-bearing. `PromptInputFooter` renders with
+ * `data-align="block-end"`, which switches kui's `InputGroup` to
+ * `flex-col` — and it is `items-center`, so in a column that centres every
+ * child horizontally. A width-less wrapper therefore shrinks to its content
+ * and floats in the middle of the composer instead of sitting above the
+ * textarea. (The previous single `grid` strip escaped this only because that
+ * variant carries its own `ml-auto w-fit`.)
  */
 function StagedAttachments() {
   const attachments = usePromptInputAttachments();
@@ -131,7 +139,7 @@ function StagedAttachments() {
   const rest = attachments.files.filter((file) => !(file.mediaType ?? "").startsWith("image/"));
 
   return (
-    <div className="space-y-2 px-3 pt-2">
+    <div className="w-full space-y-2 px-3 pt-2">
       {images.length > 0 ? (
         <Attachments variant="grid">
           {images.map((file) => (
@@ -207,6 +215,13 @@ export function AcpComposer({
       className={className}
       maxFileSize={maxFileSize}
       maxFiles={maxFiles}
+      // Without this the hidden `<input type="file">` has no `multiple`
+      // attribute, so the OS picker — the paperclip button, i.e. the primary
+      // affordance — accepts exactly one file, while drag-drop and paste
+      // happily add several. `maxFiles` promised up to ten and the picker
+      // silently allowed one. Caught by driving the real browser; jsdom tests
+      // upload a single file and never exercise the picker's own limit.
+      multiple={maxFiles !== 1}
       onError={(err) =>
         setAttachError(
           err.code === "max_file_size"
@@ -220,7 +235,9 @@ export function AcpComposer({
     >
       <StagedAttachments />
       {attachError ? (
-        <p className="px-3 pt-2 text-destructive text-xs" role="alert">
+        // `w-full` for the same reason as `StagedAttachments` — a direct
+        // `InputGroup` child without it is centred, not left-aligned.
+        <p className="w-full px-3 pt-2 text-destructive text-xs" role="alert">
           {attachError}
         </p>
       ) : null}

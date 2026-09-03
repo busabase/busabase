@@ -70,6 +70,17 @@ export const RECORD_BATCH_SIZE = 200;
 export interface ApplyOptions {
   autoMerge: boolean;
   submittedBy?: string;
+  /**
+   * Move what a failed install created to Trash instead of leaving it. Defaults
+   * to on.
+   *
+   * A half-finished install is not useful to anybody, and its leftovers collide
+   * with the next attempt at the same package — a real failure left 2,903
+   * records and dozens of Bases behind with no way to clean them up. Trash is
+   * reversible, so this cannot destroy anything outright. Pass `false` to keep
+   * the wreckage for debugging.
+   */
+  rollbackOnFailure?: boolean;
   /** Progress reporting; `install` prints these as the passes run. */
   onProgress?: (message: string) => void;
   /**
@@ -148,6 +159,12 @@ export const applyInstall = async (
     pendingChangeRequests: 0,
     warnings: [...plan.warnings],
   };
+  // The TOP of everything this install creates — enough to undo it, because
+  // deleting a node takes its whole subtree (its Bases, their records, nested
+  // folders) with it. Either one freshly-made target folder, or, when
+  // installing into a folder the user already had, that folder's new children.
+  // Never the pre-existing folder itself: that is the user's, not ours.
+  const createdRootNodeIds: string[] = [];
   const fieldIds: FieldIdIndex = new Map();
   const bases: BaseContext[] = [];
   const progress = options.onProgress ?? (() => {});
@@ -188,6 +205,7 @@ export const applyInstall = async (
         metadata: app?.rootMetadata,
       });
       state.created.folders++;
+      createdRootNodeIds.push(state.targetFolderNodeId);
     }
     await createStructure(
       client,
@@ -344,8 +362,16 @@ export const applyInstall = async (
     const pending = state.pendingChangeRequests
       ? ` ${state.pendingChangeRequests} ChangeRequest(s) may still be pending.`
       : "";
+    const rollback = await rollbackPartialInstall(client, {
+      createdRootNodeIds,
+      enabled: options.rollbackOnFailure !== false,
+      installedIntoExistingFolder: Boolean(plan.existingTargetFolderNodeId),
+      anythingCreated: Object.values(state.created).some((count) => count > 0),
+      submittedBy: options.submittedBy ?? "busabase-cli install",
+      progress,
+    });
     const reason = error instanceof Error ? error.message : String(error);
-    const message = `Install stopped during ${phase}. ${partial}${pending} Cause: ${reason}`;
+    const message = `Install stopped during ${phase}. ${partial}${pending}${rollback} Cause: ${reason}`;
     const details: InstallFailureDetails = {
       phase,
       targetFolderSlug: plan.targetFolderSlug,
@@ -361,6 +387,64 @@ export const applyInstall = async (
     }
     throw attachInstallFailureDetails(new Error(message), details);
   }
+};
+
+/**
+ * Undo a failed install by moving what it created to Trash.
+ *
+ * Deleting a node takes its whole subtree — Bases, their records, nested
+ * folders — so undoing an install is a matter of deleting the roots it made,
+ * not walking everything it touched. It moves them to Trash rather than
+ * purging: purge refuses a subtree containing a Base (which every real package
+ * has), and Trash is reversible, which matters for an automatic action taken
+ * while something has already gone wrong.
+ *
+ * Only ever deletes a target folder THIS install created. Installing into a
+ * folder the user already had is reported instead of guessed at: the new nodes
+ * sit among the user's own, and there is no reliable way here to tell which
+ * were ours. Deleting the wrong thing is far worse than leaving a mess.
+ *
+ * Best-effort: a rollback runs after a failure, so it can hit the same broken
+ * condition. Whatever happens is reported, never thrown — the install error is
+ * the one the caller needs.
+ */
+const rollbackPartialInstall = async (
+  client: PackageClient,
+  args: {
+    createdRootNodeIds: readonly string[];
+    enabled: boolean;
+    installedIntoExistingFolder: boolean;
+    anythingCreated: boolean;
+    submittedBy: string;
+    progress: (message: string) => void;
+  },
+): Promise<string> => {
+  if (!args.anythingCreated) return "";
+  if (!args.enabled) return " Left in place (--no-rollback).";
+  if (args.createdRootNodeIds.length === 0) {
+    return args.installedIntoExistingFolder
+      ? " Not rolled back: this installed into a folder that already existed, so its new items sit among yours and cannot be told apart safely — remove them by hand."
+      : " Nothing to roll back.";
+  }
+
+  args.progress("Install failed — moving what it created to Trash…");
+  const failures: string[] = [];
+  for (const nodeId of args.createdRootNodeIds) {
+    try {
+      await client.nodes.createChangeRequest({
+        operations: [{ kind: "delete", nodeId }],
+        message: "Roll back a failed install",
+        submittedBy: args.submittedBy,
+        autoMerge: true,
+      });
+    } catch (rollbackError) {
+      failures.push(
+        `${nodeId} (${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)})`,
+      );
+    }
+  }
+  if (failures.length === 0) return " Rolled back: everything it created was moved to Trash.";
+  return ` Rollback incomplete — could not remove ${failures.join("; ")}. Remove them by hand.`;
 };
 
 /**
