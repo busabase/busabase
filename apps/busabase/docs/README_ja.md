@@ -127,7 +127,7 @@ onboarding に従ってこのワークスペースへ接続してください。
 
 </details>
 
-**[Claude Code ガイド](./claude-code.md)** と **[Bring Your Own Agent](./bring-your-agent.md)** に詳しい接続手順があります。
+**[Claude Code ガイド](./claude-code.md)**、**[DeepSeek Harness ガイド](./deepseek-harness.md)**（`@busabase/dsh-plugin` のローカル連携）、**[Bring Your Own Agent](./bring-your-agent.md)** に詳しい接続手順があります。
 
 | 接続方法 | 用途 |
 | --- | --- |

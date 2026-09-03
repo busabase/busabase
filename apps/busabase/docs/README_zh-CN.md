@@ -129,7 +129,7 @@ http://localhost:15419/SETUP_SKILL.md
 
 </details>
 
-**[Claude Code 指南](./claude-code.md)** 介绍本地 Skill 和 Cloud plugin；**[Bring Your Own Agent](./bring-your-agent.md)** 介绍通用接入流程。
+**[Claude Code 指南](./claude-code.md)** 介绍本地 Skill 和 Cloud plugin；**[DeepSeek Harness 指南](./deepseek-harness.md)** 介绍 `@busabase/dsh-plugin` 的本地集成；**[Bring Your Own Agent](./bring-your-agent.md)** 介绍通用接入流程。
 
 | 接入方式 | 适合场景 |
 | --- | --- |
