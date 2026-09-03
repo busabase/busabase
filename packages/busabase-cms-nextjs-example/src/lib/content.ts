@@ -10,8 +10,8 @@ import {
   type PostVO,
   readCmsOrFallback,
   type TagVO,
-} from "busabase-cms";
-import { createCachedBusabaseCms } from "busabase-cms/next";
+} from "busabase-cms-sdk";
+import { createCachedBusabaseCms } from "busabase-cms-sdk/next";
 
 const defaultLocale = process.env.BUSABASE_CMS_DEFAULT_LOCALE?.trim() || "en";
 const configuredLocales = (process.env.BUSABASE_CMS_LOCALES ?? "en,zh-CN")

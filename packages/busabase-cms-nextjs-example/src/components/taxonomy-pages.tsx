@@ -1,4 +1,4 @@
-import type { CategoryVO, CmsTaxonomyKind, TagVO } from "busabase-cms";
+import type { CategoryVO, CmsTaxonomyKind, TagVO } from "busabase-cms-sdk";
 import { FolderTree, Tag } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";

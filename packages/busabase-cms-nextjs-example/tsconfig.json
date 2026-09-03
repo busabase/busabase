@@ -20,8 +20,8 @@
     ],
     "paths": {
       "@/*": ["./src/*"],
-      "busabase-cms": ["../busabase-cms/src/index.ts"],
-      "busabase-cms/*": ["../busabase-cms/src/*.ts"],
+      "busabase-cms-sdk": ["../busabase-cms-sdk/src/index.ts"],
+      "busabase-cms-sdk/*": ["../busabase-cms-sdk/src/*.ts"],
       "busabase-sdk": ["../../apps/busabase-sdk/src/index.ts"],
       "busabase-sdk/*": ["../../apps/busabase-sdk/src/*.ts"],
       "busabase-contract/contract/cloud": ["../busabase-contract/src/contract/cloud.ts"],

@@ -4,15 +4,15 @@
   "private": true,
   "description": "Runnable Next.js and Fumadocs example for the four-Base Busabase CMS.",
   "scripts": {
-    "predev": "pnpm --filter busabase-sdk build && pnpm --filter busabase-cms build",
+    "predev": "pnpm --filter busabase-sdk build && pnpm --filter busabase-cms-sdk build",
     "dev": "next dev",
-    "prebuild": "pnpm --filter busabase-sdk build && pnpm --filter busabase-cms build",
+    "prebuild": "pnpm --filter busabase-sdk build && pnpm --filter busabase-cms-sdk build",
     "build": "next build",
     "start": "next start",
     "typecheck": "next typegen && tsc --noEmit"
   },
   "dependencies": {
-    "busabase-cms": "workspace:*",
+    "busabase-cms-sdk": "workspace:*",
     "busabase-sdk": "workspace:*",
     "fumadocs-core": "16.14.5",
     "fumadocs-ui": "16.14.5",
