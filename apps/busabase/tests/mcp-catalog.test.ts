@@ -1,7 +1,9 @@
 import { busabaseContract } from "busabase-contract/contract/busabase";
 import { AGENT_EXCLUDED_MCP_TOOLS, TASK_SUPERSEDED_MCP_TOOLS } from "busabase-contract/tasks";
+import { runWithLocalContext } from "busabase-core/context";
 import { createMcpToolsFromOpenApiContract } from "openlib/mcp";
 import { describe, expect, it } from "vitest";
+import { resolveLocalMcpBaseUrl } from "../src/app/api/mcp/handler";
 
 /**
  * What the self-hosted server actually publishes over `/api/mcp`.
@@ -20,6 +22,19 @@ const publishedToolNames = () =>
   }).map((tool) => tool.name);
 
 describe("self-hosted MCP catalog", () => {
+  it("routes internal tool calls back to the server handling the MCP request", async () => {
+    await expect(
+      runWithLocalContext(
+        {
+          vaultRuntimeEnv: {},
+          localUserName: "Local Admin",
+          embedOrigin: "http://127.0.0.1:43127",
+        },
+        async () => resolveLocalMcpBaseUrl(),
+      ),
+    ).resolves.toBe("http://127.0.0.1:43127");
+  });
+
   it("never publishes the Vault", () => {
     // `vault.get` returns each item's DECRYPTED value — `rowToVO` in
     // busabase-core decodes it, and the per-item `access.reveal` policy is

@@ -23,6 +23,26 @@ import {
 } from "busabase-core/domains/agents/logic/agent-session-store";
 import { resumeCloudTunnelOnBoot } from "~/domains/settings/logic/cloud-tunnel-client";
 
+/**
+ * Declare what this build is, before anything asks.
+ *
+ * `APP_ENV` is how the server decides whether it may run an AirApp as a process
+ * on itself (`engine-availability.ts`). This build's host IS the user's own
+ * machine — that is the entire premise of a self-hosted server — so it says so
+ * rather than requiring every user to set an environment variable to get the
+ * engine the product is supposed to offer them.
+ *
+ * `||=`, not `=`: an operator who set `APP_ENV` deliberately (`LOCAL` while
+ * developing, `DESKTOP` inside the desktop app) has said something more
+ * specific, and this must not overwrite it.
+ *
+ * Busabase Cloud has no equivalent line. Its deployment sets `APP_ENV` itself,
+ * and an unset value resolves to "shared infrastructure" — the restrictive
+ * answer — so a cloud deployment that forgets cannot accidentally end up
+ * spawning app processes next to the server.
+ */
+process.env.APP_ENV ||= "SELF-HOSTED";
+
 const SWEEP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 type GlobalWithSweep = typeof globalThis & { __busabaseAgentSweepTimer?: NodeJS.Timeout };

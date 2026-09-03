@@ -159,9 +159,12 @@ test("dashboard routes render the review-first seeded experience", async ({ page
     .getByRole("button", { name: /Weekend briefing/ })
     .first()
     .click();
-  await expect(page.getByRole("button", { name: "Show full" }).first()).toBeVisible();
-  await page.getByRole("button", { name: "Show full" }).first().click();
-  await expect(page.getByRole("button", { name: "Show less" }).first()).toBeVisible();
+  // This seeded briefing is short enough to render in full: rich previews only
+  // collapse behind "Show full" past a much taller threshold, so asserting the
+  // toggle here would test the seed's length rather than the product. The
+  // collapse chrome is covered by `record-detail-scroll.spec.ts`, against
+  // content that test makes long itself.
+  await expect(page.getByText("Local data control is becoming a buyer requirement.")).toBeVisible();
   // HTML is rendered safely — no raw script leaks through.
   await expect(page.getByText("alert('unsafe')")).toHaveCount(0);
 

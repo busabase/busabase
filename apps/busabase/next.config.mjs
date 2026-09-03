@@ -155,6 +155,15 @@ const config = {
     "@electric-sql/pglite",
     "@aws-sdk/client-s3",
     "@aws-sdk/s3-request-presigner",
+    // `lmdb` is the optional LMDB cache backend (`openlib/cache`), reached only
+    // when REDIS_URL uses the `lmdb://` protocol — `cache/index.ts` already
+    // `await import`s it lazily. Bundling it anyway breaks the build outright:
+    // its `open.js` does `moduleRequire('cbor-x')`, an OPTIONAL peer that is
+    // resolvable here but not in the open-source workspace, so the bundler
+    // reports `Module not found: Can't resolve 'cbor-x'` and the dev server
+    // never starts. It is also a native module (node-addon-api + per-platform
+    // .node binaries), which is exactly what this list is for.
+    "lmdb",
   ],
   allowedDevOrigins: ["*.bika.ltd"],
   transpilePackages: ["busabase-contract", "busabase-core"],

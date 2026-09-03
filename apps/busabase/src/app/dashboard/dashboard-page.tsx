@@ -1,6 +1,5 @@
-import type { AirAppRunnerKind } from "busabase-contract/domains/airapp/contract";
-import { resolveAvailableAirAppEngines } from "busabase-core/domains/airapp/logic/engine-availability";
 import { getLocalUserName } from "~/lib/local-user";
+import { resolveBusabaseAirAppEngines } from "./airapp-engine-availability";
 import { DashboardClient } from "./client";
 
 interface DashboardPageOptions {
@@ -12,14 +11,11 @@ export const renderDashboardPage = async (
   initialPath = "/home",
   options: DashboardPageOptions = {},
 ) => {
-  // Resolved here because only the server can see whether a Sandock is
-  // configured, and the browser must not guess: a picker that offers an engine
-  // this deployment does not have is a failure the user discovers by clicking
-  // Run. `allowHostProcesses` is true because this build's host *is* the user's
-  // own machine — the trust model already says so.
-  const availableAirAppEngines: AirAppRunnerKind[] = resolveAvailableAirAppEngines({
-    allowHostProcesses: true,
-  });
+  // Resolved server-side because only the server may inspect Sandock secrets.
+  // OSS AirApp execution offers the browser engine plus remote only when
+  // Sandock is configured. Python without Sandock therefore reaches the
+  // RunPanel guidance instead of silently spawning a local host process.
+  const availableAirAppEngines = resolveBusabaseAirAppEngines();
   return (
     <DashboardClient
       availableAirAppEngines={availableAirAppEngines}

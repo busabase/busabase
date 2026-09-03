@@ -41,6 +41,7 @@ async function handle(request: Request) {
     {
       vaultRuntimeEnv,
       localUserName: getLocalUserName(),
+      embedOrigin: url.origin,
       aclOverride: resolveRelayPermissionContext(request.headers),
     },
     run,

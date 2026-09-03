@@ -71,7 +71,10 @@ async function handle(request: Request) {
     }
 
     const vaultRuntimeEnv = await readBuiltinVaultRuntimeEnv();
-    return await runWithLocalContext({ vaultRuntimeEnv, localUserName: getLocalUserName() }, run);
+    return await runWithLocalContext(
+      { vaultRuntimeEnv, localUserName: getLocalUserName(), embedOrigin: url.origin },
+      run,
+    );
   } catch (error) {
     if (error instanceof ORPCError) {
       return addCorsHeaders(
