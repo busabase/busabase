@@ -176,6 +176,13 @@
       "when": 1788345105774,
       "tag": "0024_add_node_settings_and_agent_prompts",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1788404320833,
+      "tag": "0025_flimsy_the_anarchist",
+      "breakpoints": true
     }
   ]
 }

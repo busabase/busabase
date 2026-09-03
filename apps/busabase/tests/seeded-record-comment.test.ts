@@ -67,9 +67,6 @@ describe("comments on seeded records", () => {
       subjectId: seeded.id,
       authorId: "seeded-record-commenter",
       body: "Commenting on a seeded record used to 404 with its commit id.",
-      // Required since #5961 made mentionsAi non-optional on the store input.
-      // false matches the column default; this test is not about AI mentions.
-      mentionsAi: false,
     });
     expect(comment.subjectId).toBe(seeded.id);
     expect(comment.recordId).toBe(seeded.id);
