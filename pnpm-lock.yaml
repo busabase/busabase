@@ -525,60 +525,11 @@ importers:
         specifier: ^4.1.11
         version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@24.13.2)(@vitest/coverage-v8@4.1.11)(jsdom@25.0.1(bufferutil@4.1.0)(utf-8-validate@6.0.6))(msw@2.12.10(@types/node@24.13.2)(typescript@7.0.2))(vite@7.1.9(@types/node@24.13.2)(jiti@2.7.0)(lightningcss@1.32.0)(sass@1.101.0)(stylus@0.64.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0))
 
-  packages/busabase-cms:
-    dependencies:
-      busabase-sdk:
-        specifier: workspace:*
-        version: link:../../apps/busabase-sdk
-      fumadocs-core:
-        specifier: 16.14.5
-        version: 16.14.5(@mdx-js/mdx@3.1.1)(@types/estree-jsx@1.0.5)(@types/hast@3.0.5)(@types/mdast@4.0.4)(@types/react@19.2.17)(lucide-react@1.34.0(react@19.2.7))(next@16.3.3(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@playwright/test@1.58.2)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.101.0))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(zod@4.4.3)
-      rehype-sanitize:
-        specifier: ^6.0.0
-        version: 6.0.0
-      remark-gfm:
-        specifier: ^4.0.1
-        version: 4.0.1
-      sanitize-html:
-        specifier: ^2.17.6
-        version: 2.17.6
-      server-only:
-        specifier: ^0.0.1
-        version: 0.0.1
-      zod:
-        specifier: ^4.3.6
-        version: 4.4.3
-    devDependencies:
-      '@types/node':
-        specifier: ^24.13.2
-        version: 24.13.2
-      '@types/react':
-        specifier: ^19.2.17
-        version: 19.2.17
-      '@types/sanitize-html':
-        specifier: ^2.16.1
-        version: 2.16.1
-      next:
-        specifier: 16.3.3
-        version: 16.3.3(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@playwright/test@1.58.2)(@types/node@24.13.2)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.101.0)
-      react:
-        specifier: ^19.2.7
-        version: 19.2.7
-      tsdown:
-        specifier: ^0.22.14
-        version: 0.22.14(@typescript/native-preview@7.0.0-dev.20260707.2)(tsx@4.21.0)(typescript@7.0.2)
-      typescript:
-        specifier: ^7.0.2
-        version: 7.0.2
-      vitest:
-        specifier: ^4.1.11
-        version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@24.13.2)(@vitest/coverage-v8@4.1.11)(jsdom@27.4.0(@noble/hashes@2.2.0)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(msw@2.12.10(@types/node@24.13.2)(typescript@7.0.2))(vite@7.1.9(@types/node@24.13.2)(jiti@2.7.0)(lightningcss@1.32.0)(sass@1.101.0)(stylus@0.64.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0))
-
   packages/busabase-cms-nextjs-example:
     dependencies:
-      busabase-cms:
+      busabase-cms-sdk:
         specifier: workspace:*
-        version: link:../busabase-cms
+        version: link:../busabase-cms-sdk
       busabase-sdk:
         specifier: workspace:*
         version: link:../../apps/busabase-sdk
@@ -622,6 +573,55 @@ importers:
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
+
+  packages/busabase-cms-sdk:
+    dependencies:
+      busabase-sdk:
+        specifier: ^0.30.1
+        version: 0.30.1(@opentelemetry/api@1.9.1)
+      fumadocs-core:
+        specifier: 16.14.5
+        version: 16.14.5(@mdx-js/mdx@3.1.1)(@types/estree-jsx@1.0.5)(@types/hast@3.0.5)(@types/mdast@4.0.4)(@types/react@19.2.17)(lucide-react@1.34.0(react@19.2.7))(next@16.3.3(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@playwright/test@1.58.2)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.101.0))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(zod@4.4.3)
+      rehype-sanitize:
+        specifier: ^6.0.0
+        version: 6.0.0
+      remark-gfm:
+        specifier: ^4.0.1
+        version: 4.0.1
+      sanitize-html:
+        specifier: ^2.17.6
+        version: 2.17.6
+      server-only:
+        specifier: ^0.0.1
+        version: 0.0.1
+      zod:
+        specifier: ^4.3.6
+        version: 4.4.3
+    devDependencies:
+      '@types/node':
+        specifier: ^24.13.2
+        version: 24.13.2
+      '@types/react':
+        specifier: ^19.2.17
+        version: 19.2.17
+      '@types/sanitize-html':
+        specifier: ^2.16.1
+        version: 2.16.1
+      next:
+        specifier: 16.3.3
+        version: 16.3.3(@babel/core@7.29.7)(@opentelemetry/api@1.9.1)(@playwright/test@1.58.2)(@types/node@24.13.2)(babel-plugin-react-compiler@1.0.0)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(sass@1.101.0)
+      react:
+        specifier: ^19.2.7
+        version: 19.2.7
+      tsdown:
+        specifier: ^0.22.14
+        version: 0.22.14(@typescript/native-preview@7.0.0-dev.20260707.2)(tsx@4.21.0)(typescript@7.0.2)
+      typescript:
+        specifier: ^7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: ^4.1.11
+        version: 4.1.11(@opentelemetry/api@1.9.1)(@types/node@24.13.2)(@vitest/coverage-v8@4.1.11)(jsdom@27.4.0(@noble/hashes@2.2.0)(bufferutil@4.1.0)(utf-8-validate@6.0.6))(msw@2.12.10(@types/node@24.13.2)(typescript@7.0.2))(vite@7.1.9(@types/node@24.13.2)(jiti@2.7.0)(lightningcss@1.32.0)(sass@1.101.0)(stylus@0.64.0)(terser@5.49.0)(tsx@4.21.0)(yaml@2.9.0))
 
   packages/busabase-contract:
     dependencies:
@@ -6717,6 +6717,10 @@ packages:
     resolution: {integrity: sha512-ZMANVnAixE6AWWnPzlW2KpUrxhm9woycYvPOo67jWHyFowASTEd9s+QN1EIMsSDtwhIxN4sWE1jotpuDUIgyIw==}
     engines: {node: '>=6.14.2'}
 
+  busabase-sdk@0.30.1:
+    resolution: {integrity: sha512-gQJftQOXA+6vvhjbmxHVxJkE6hBhHfO9PSlu2rWIwTXRqDrvqWmbLfZoVWF2hNmkZDj0CYIxqfGNJOJFHLH6QA==}
+    engines: {node: '>=24.18.0'}
+
   bytes@3.1.2:
     resolution: {integrity: sha512-/Nf7TyzTx6S3yRJObOAV7956r8cr2+Oj8AC5dt8wSP3BQAoeX58NoHyCU8P8zGkNXStjTSi6fzO6F0pBdcYbEg==}
     engines: {node: '>= 0.8'}
@@ -10028,10 +10032,6 @@ packages:
 
   postcss@8.5.15:
     resolution: {integrity: sha512-FfR8sjd4em2T6fb3I2MwAJU7HWVMr9zba+enmQeeWFfCbm+UOC/0X4DS8XtpUTMwWMGbjKYP7xjfNekzyGmB3A==}
-    engines: {node: ^10 || ^12 || >=14}
-
-  postcss@8.5.22:
-    resolution: {integrity: sha512-KBDEIpLrvpv16pp3K0Fw+UCoZfopFjjgeB+0tA/aaThfEE74kKDLrgg603YvOWJyg3+WYtyq3xYsQWsIyZlPqQ==}
     engines: {node: ^10 || ^12 || >=14}
 
   postcss@8.5.23:
@@ -19187,6 +19187,15 @@ snapshots:
       node-gyp-build: 4.8.4
     optional: true
 
+  busabase-sdk@0.30.1(@opentelemetry/api@1.9.1):
+    dependencies:
+      '@orpc/client': 1.14.6(@opentelemetry/api@1.9.1)
+      '@orpc/contract': 1.14.6(@opentelemetry/api@1.9.1)
+      '@orpc/openapi-client': 1.14.6(@opentelemetry/api@1.9.1)
+      zod: 4.4.3
+    transitivePeerDependencies:
+      - '@opentelemetry/api'
+
   bytes@3.1.2: {}
 
   c12@3.1.0(magicast@0.3.5):
@@ -21316,7 +21325,7 @@ snapshots:
 
   hast-util-from-html-isomorphic@2.0.0:
     dependencies:
-      '@types/hast': 3.0.4
+      '@types/hast': 3.0.5
       hast-util-from-dom: 5.0.1
       hast-util-from-html: 2.0.3
       unist-util-remove-position: 5.0.0
@@ -21369,7 +21378,7 @@ snapshots:
 
   hast-util-sanitize@5.0.2:
     dependencies:
-      '@types/hast': 3.0.4
+      '@types/hast': 3.0.5
       '@ungap/structured-clone': 1.3.0
       unist-util-position: 5.0.0
 
@@ -21447,7 +21456,7 @@ snapshots:
 
   hast-util-whitespace@3.0.0:
     dependencies:
-      '@types/hast': 3.0.4
+      '@types/hast': 3.0.5
 
   hastscript@6.0.0:
     dependencies:
@@ -22286,7 +22295,7 @@ snapshots:
   mdast-util-mdx-expression@2.0.1:
     dependencies:
       '@types/estree-jsx': 1.0.5
-      '@types/hast': 3.0.4
+      '@types/hast': 3.0.5
       '@types/mdast': 4.0.4
       devlop: 1.1.0
       mdast-util-from-markdown: 2.0.2
@@ -22297,7 +22306,7 @@ snapshots:
   mdast-util-mdx-jsx@3.2.0:
     dependencies:
       '@types/estree-jsx': 1.0.5
-      '@types/hast': 3.0.4
+      '@types/hast': 3.0.5
       '@types/mdast': 4.0.4
       '@types/unist': 3.0.3
       ccount: 2.0.1
@@ -22324,7 +22333,7 @@ snapshots:
   mdast-util-mdxjs-esm@2.0.1:
     dependencies:
       '@types/estree-jsx': 1.0.5
-      '@types/hast': 3.0.4
+      '@types/hast': 3.0.5
       '@types/mdast': 4.0.4
       devlop: 1.1.0
       mdast-util-from-markdown: 2.0.2
@@ -23600,12 +23609,6 @@ snapshots:
       picocolors: 1.1.1
       source-map-js: 1.2.1
 
-  postcss@8.5.22:
-    dependencies:
-      nanoid: 3.3.18
-      picocolors: 1.1.1
-      source-map-js: 1.2.1
-
   postcss@8.5.23:
     dependencies:
       nanoid: 3.3.18
@@ -24557,7 +24560,7 @@ snapshots:
 
   rehype-sanitize@6.0.0:
     dependencies:
-      '@types/hast': 3.0.4
+      '@types/hast': 3.0.5
       hast-util-sanitize: 5.0.2
 
   reinterval@1.1.0: {}
@@ -24829,7 +24832,7 @@ snapshots:
       is-plain-object: 5.0.0
       launder: 1.7.1
       parse-srcset: 1.0.2
-      postcss: 8.5.22
+      postcss: 8.5.23
 
   sass@1.101.0:
     dependencies:

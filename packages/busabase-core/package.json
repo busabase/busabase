@@ -1,7 +1,7 @@
 {
   "name": "busabase-core",
   "description": "Shared Busabase open-core protocol, local store, API helpers, and dashboard components.",
-  "version": "0.40.0",
+  "version": "0.40.1",
   "private": true,
   "type": "module",
   "exports": {
@@ -32,6 +32,10 @@
     "./logic/node-acl": {
       "types": "./src/logic/node-acl.ts",
       "default": "./src/logic/node-acl.ts"
+    },
+    "./logic/comment-mentions": {
+      "types": "./src/logic/comment-mentions.ts",
+      "default": "./src/logic/comment-mentions.ts"
     },
     "./logic/cr-lifecycle": {
       "types": "./src/logic/cr-lifecycle.ts",
@@ -348,6 +352,10 @@
     "./i18n/zh-cn": {
       "types": "./src/i18n/zh-CN.ts",
       "default": "./src/i18n/zh-CN.ts"
+    },
+    "./domains/agents/utils/agent-targets": {
+      "types": "./src/domains/agents/utils/agent-targets.ts",
+      "default": "./src/domains/agents/utils/agent-targets.ts"
     },
     "./domains/agents/logic/agent-origin-guard": {
       "types": "./src/domains/agents/logic/agent-origin-guard.ts",
