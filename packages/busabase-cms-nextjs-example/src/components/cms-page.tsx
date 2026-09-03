@@ -1,5 +1,5 @@
-import type { PageVO } from "busabase-cms";
-import { sanitizeLandingPageHtml } from "busabase-cms/fumadocs";
+import type { PageVO } from "busabase-cms-sdk";
+import { sanitizeLandingPageHtml } from "busabase-cms-sdk/fumadocs";
 import type { Metadata } from "next";
 
 export const generateCmsPageMetadata = (page: PageVO): Metadata => ({

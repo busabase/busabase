@@ -1,5 +1,5 @@
-import { getSafeCmsExternalUrl, type PostVO } from "busabase-cms";
-import { getSafeMarkdownToc, SafeMarkdown } from "busabase-cms/fumadocs";
+import { getSafeCmsExternalUrl, type PostVO } from "busabase-cms-sdk";
+import { getSafeMarkdownToc, SafeMarkdown } from "busabase-cms-sdk/fumadocs";
 import { ArrowLeft, CalendarDays, Download, Paperclip, UserRound } from "lucide-react";
 import type { Metadata } from "next";
 import Image from "next/image";
