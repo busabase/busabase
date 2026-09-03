@@ -442,6 +442,20 @@ export function ChangeRequestDiscussion({
     );
   }, [auditEvents, changeRequest.id, changeRequest.reviews]);
 
+  /**
+   * The people this Change Request already names, offered to the `@` picker
+   * alongside the thread's own comment authors. Not a member query: this package
+   * has no space-member endpoint by design, so the mentionable set is whoever
+   * the VOs on screen already identify.
+   */
+  const mentionCandidates = useMemo(
+    () => [
+      { id: changeRequest.submittedBy, user: changeRequest.submittedByUser },
+      ...changeRequest.reviews.map((review) => ({ id: review.reviewerId, user: review.reviewer })),
+    ],
+    [changeRequest.reviews, changeRequest.submittedBy, changeRequest.submittedByUser],
+  );
+
   return (
     <section className="mt-8 max-w-4xl">
       <div className="font-semibold text-base">{messages.review.discussion}</div>
@@ -465,6 +479,7 @@ export function ChangeRequestDiscussion({
           <SubjectCommentThread
             client={client}
             emptyLabel={messages.comments.noCommentsDiscussion}
+            extraMentionCandidates={mentionCandidates}
             placeholder={messages.comments.placeholderDiscussion}
             readOnly={readOnly}
             subjectId={changeRequest.id}

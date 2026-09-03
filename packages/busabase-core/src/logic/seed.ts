@@ -20,6 +20,7 @@ import {
   busabaseBaseFields,
   busabaseBases,
   busabaseChangeRequests,
+  busabaseCommentMentions,
   busabaseComments,
   busabaseCommits,
   busabaseForms,
@@ -50,6 +51,7 @@ import type {
 } from "../demo/seed-types";
 import { writeDocBody } from "../domains/doc/handlers";
 import { writeFileTreeTextFile } from "../domains/filetree/handlers";
+import { mentionSpansFromLabels } from "./comment-mentions";
 import { insertCommit } from "./commits";
 import { projectCommitFields, refreshRecordQueryStatistics } from "./field-values";
 import {
@@ -1370,10 +1372,36 @@ const seedCommentsIfMissing = async (createdAt: Date, comments: SeedCommentDef[]
       commitId,
       authorId: comment.authorId,
       body: comment.body,
-      mentionsAi: comment.mentionsAi ?? false,
       createdAt: commentedAt,
       updatedAt: commentedAt,
     });
+
+    const mentions = mentionSpansFromLabels(comment.body, comment.mentions ?? []);
+    if (mentions.length > 0) {
+      await db.insert(busabaseCommentMentions).values(
+        mentions.map((mention, index) => ({
+          id: `${comment.id}_mention_${index}`,
+          commentId: comment.id,
+          targetType: mention.type,
+          targetId: mention.targetId,
+          startOffset: mention.start,
+          endOffset: mention.end,
+          label: mention.label ?? mention.text.replace(/^@/, ""),
+          // Seeded agent mentions record that dispatch happened at the time the
+          // fixture depicts; `sessionId` stays null because the session they
+          // refer to is not part of the seed. The status strip only offers
+          // "open session" when there is a real id to open.
+          dispatchStatus:
+            mention.type === "agent" ? ("linked" as const) : ("not_applicable" as const),
+          sessionId: null,
+          error: null,
+          // Seeded member mentions are historical: nothing in the seed should
+          // land as an unread notification for whoever opens the demo.
+          readAt: mention.type === "member" ? commentedAt : null,
+          createdAt: commentedAt,
+        })),
+      );
+    }
   }
 };
 

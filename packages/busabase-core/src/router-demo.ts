@@ -1,5 +1,17 @@
 import { implement, ORPCError } from "@orpc/server";
 import { busabaseContract } from "busabase-contract/contract/busabase";
+import { getContextDemoLocale } from "./context";
+import {
+  cancelDemoAgentSession,
+  closeDemoAgentSession,
+  createDemoAgentSession,
+  DEMO_AGENT_SLUG,
+  demoAgentCatalogEntry,
+  listDemoAgentSessions,
+  promptDemoAgentSession,
+  respondToDemoAgentPermission,
+  subscribeDemoAgentSession,
+} from "./domains/agents/logic/demo-agent";
 import {
   applyViewConfigToRecords,
   DATE_RANGE_FIELD_TYPES,
@@ -306,7 +318,35 @@ export const busabaseDemoRouter = os.router({
   },
   comments: {
     list: os.comments.list.handler(({ input }) => demoListComments(input)),
-    create: os.comments.create.handler(({ input }) => demoCreateComment(input)),
+    /**
+     * Demo mode dispatches agent mentions for real — against the scripted demo
+     * agent. That is the whole point of `demo-agent.ts` existing: a mention in
+     * the demo starts a watchable session instead of showing a chip that does
+     * nothing, which is the exact failure this feature was written to end.
+     *
+     * The prompt is NOT awaited here, same as the real router and the demo
+     * `sessions.prompt` handler: the script parks on its permission card until
+     * a human answers it.
+     */
+    create: os.comments.create.handler(({ input }) =>
+      demoCreateComment(input, (mention) => {
+        if (mention.type !== "agent") return {};
+        try {
+          const session = createDemoAgentSession(mention.targetId);
+          promptDemoAgentSession(session.id, input.body);
+          return {
+            label: session.agentName,
+            dispatchStatus: "linked" as const,
+            sessionId: session.id,
+          };
+        } catch (error) {
+          return {
+            dispatchStatus: "failed" as const,
+            error: error instanceof Error ? error.message : String(error),
+          };
+        }
+      }),
+    ),
   },
   agent: {
     listTasks: os.agent.listTasks.handler(() => demoListAgentTasks()),
@@ -480,8 +520,11 @@ export const busabaseDemoRouter = os.router({
     }),
   },
   agents: {
-    // Demo mode cannot spawn a process or hold a socket, so the catalog renders
-    // with everything explicitly unavailable rather than pretending otherwise.
+    // Demo mode cannot spawn a process or hold a socket, so every REAL agent is
+    // still explicitly unavailable — the demo keeps telling the truth about
+    // what a local install adds. What it no longer does is refuse everything:
+    // the scripted demo agent (see `logic/demo-agent.ts`) is appended below so
+    // Ask Agent is a working button here rather than a permanently greyed one.
     catalog: os.agents.catalog.handler(() => [
       {
         slug: "claude-acp",
@@ -512,28 +555,74 @@ export const busabaseDemoRouter = os.router({
         available: false,
         unavailableReason: "Connecting to agents is disabled in the demo.",
       },
+      demoAgentCatalogEntry(getContextDemoLocale()),
     ]),
     connections: {
-      list: os.agents.connections.list.handler(() => []),
+      list: os.agents.connections.list.handler(() => {
+        const sessions = listDemoAgentSessions();
+        const latest = sessions[0];
+        if (!latest) return [];
+        return [
+          {
+            slug: DEMO_AGENT_SLUG,
+            agentName: latest.agentName,
+            transport: "local-subprocess" as const,
+            sessionCount: sessions.length,
+            latest,
+            ownedByCurrentUser: true,
+          },
+        ];
+      }),
     },
     disconnect: os.agents.disconnect.handler(() => {
       throw demoUnsupported("Delete an agent connection");
     }),
     sessions: {
-      list: os.agents.sessions.list.handler(() => []),
-      create: os.agents.sessions.create.handler(() => {
-        throw demoUnsupported("Connect to an agent");
+      list: os.agents.sessions.list.handler(() => listDemoAgentSessions()),
+      create: os.agents.sessions.create.handler(({ input }) => {
+        try {
+          return createDemoAgentSession(input.slug);
+        } catch (error) {
+          throw new ORPCError("BAD_REQUEST", {
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
       }),
-      prompt: os.agents.sessions.prompt.handler(() => {
-        throw demoUnsupported("Message an agent");
+      // Deliberately NOT awaited: the script parks on its permission card until
+      // a human answers, so awaiting the turn here would hold this HTTP
+      // response open indefinitely. Same contract as the real router — "prompt
+      // accepted", not "turn finished".
+      prompt: os.agents.sessions.prompt.handler(({ input }) => {
+        try {
+          promptDemoAgentSession(input.sessionId, input.text);
+          return { accepted: true, sessionId: input.sessionId };
+        } catch (error) {
+          throw new ORPCError("BAD_REQUEST", {
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
       }),
-      cancel: os.agents.sessions.cancel.handler(() => ({ ok: true })),
-      respondToPermission: os.agents.sessions.respondToPermission.handler(() => ({ ok: true })),
-      close: os.agents.sessions.close.handler(() => ({ ok: true })),
-      // Demo mode can never have a live session, because `create` refuses. So
-      // this closes immediately instead of hanging a subscriber forever — the
-      // UI's empty state is what the demo user should see, not a spinner.
-      subscribe: os.agents.sessions.subscribe.handler(async function* () {}),
+      cancel: os.agents.sessions.cancel.handler(({ input }) => {
+        cancelDemoAgentSession(input.sessionId);
+        return { ok: true };
+      }),
+      respondToPermission: os.agents.sessions.respondToPermission.handler(({ input }) => {
+        try {
+          respondToDemoAgentPermission(input.sessionId, input.requestId, input.optionId);
+          return { ok: true };
+        } catch (error) {
+          throw new ORPCError("BAD_REQUEST", {
+            message: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }),
+      close: os.agents.sessions.close.handler(({ input }) => {
+        closeDemoAgentSession(input.sessionId);
+        return { ok: true };
+      }),
+      subscribe: os.agents.sessions.subscribe.handler(async function* ({ input, signal }) {
+        yield* subscribeDemoAgentSession(input.sessionId, input.afterSeq, signal);
+      }),
     },
   },
   webhooks: {

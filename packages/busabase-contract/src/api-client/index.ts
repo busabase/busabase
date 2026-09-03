@@ -12,6 +12,7 @@ import type { iString } from "openlib/i18n/i-string";
 import { type BusabaseContract, busabaseContract } from "../contract/busabase";
 import type { NodeContentInput } from "../contract/node-content-schemas";
 import type { NodeDetailVO } from "../contract/node-detail-schemas";
+import type { AgentCatalogEntryVO } from "../domains/agents/types";
 import type {
   InstallFromGithubDTO,
   InstallPlanFromGithubDTO,
@@ -29,6 +30,7 @@ import type {
   ChangeRequestReviewBatchResultVO,
   ChangeRequestStatus,
   ChangeRequestVO,
+  CommentMentionInputDTO,
   CommentSubjectType,
   CommentVO,
   DriveReadFileVO,
@@ -87,10 +89,16 @@ export interface BusabaseDashboardApiClient {
     subjectId: string;
   }) => Promise<CommentVO[]>;
   listAgentTasks: () => Promise<AgentTaskVO[]>;
+  /**
+   * Connectable agent backends. The `@`-mention picker needs this to offer
+   * launchable Agent targets alongside members; normalize it through
+   * `normalizeAgentTargets` rather than reading `connectedAgents` alone.
+   */
+  listAgentCatalog: () => Promise<AgentCatalogEntryVO[]>;
   createComment: (payload: {
     authorId?: string;
     body: string;
-    mentionsAi?: boolean;
+    mentions?: CommentMentionInputDTO[];
     subjectType: CommentSubjectType;
     subjectId: string;
   }) => Promise<CommentVO>;
@@ -535,6 +543,7 @@ export const createBusabaseRestApiClient = (
     createAuditEvent: (payload) => client.auditEvents.create(payload),
     listComments: (subject) => client.comments.list(subject),
     listAgentTasks: () => client.agent.listTasks({}),
+    listAgentCatalog: () => client.agents.catalog({}),
     createComment: (payload) => client.comments.create(payload),
     listNodes: () => client.nodes.list(),
     listNodeChildren: (parentId, depth) => client.nodes.list({ parentId, depth }),

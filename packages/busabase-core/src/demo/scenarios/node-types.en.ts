@@ -1,3 +1,4 @@
+import { DEMO_AGENT_SLUG } from "../../domains/agents/logic/demo-agent";
 import {
   AIRAPP_DEMO_COMPLIANCE_BOARD,
   AIRAPP_DEMO_DEAL_PIPELINE,
@@ -682,8 +683,15 @@ avg_review_minutes,42,28,-33%
       subjectType: "change_request",
       subjectId: "crq_seed",
       authorId: "local-editor",
-      body: 'Strong thesis. Before I approve, can you ground the "next control surface" claim with a dated source? @agent',
-      mentionsAi: true,
+      body: 'Strong thesis. Before I approve, can you ground the "next control surface" claim with a dated source? @Demo Agent',
+      mentions: [
+        {
+          type: "agent",
+          targetId: DEMO_AGENT_SLUG,
+          text: "@Demo Agent",
+          label: "Demo Agent",
+        },
+      ],
       minutesAgo: 34,
     },
     {
@@ -715,8 +723,16 @@ avg_review_minutes,42,28,-33%
       subjectType: "change_request",
       subjectId: "crq_seed_skill_research_editor",
       authorId: "skill-maintainer-agent",
-      body: "The merge-guardrails section keeps unsourced market claims out. @agent please double-check the benchmark line.",
-      mentionsAi: true,
+      body: "The merge-guardrails section keeps unsourced market claims out. @Demo Agent please double-check the benchmark line, and @local-editor take a look after.",
+      mentions: [
+        {
+          type: "agent",
+          targetId: DEMO_AGENT_SLUG,
+          text: "@Demo Agent",
+          label: "Demo Agent",
+        },
+        { type: "member", targetId: "local-editor", text: "@local-editor", label: "Editor" },
+      ],
       minutesAgo: 5,
     },
     {

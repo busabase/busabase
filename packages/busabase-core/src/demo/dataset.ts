@@ -23,6 +23,7 @@ import type {
   ViewVO,
 } from "busabase-contract/types";
 import type { DemoUseCase } from "../context";
+import { mentionSpansFromLabels } from "../logic/comment-mentions";
 import { DEMO_ROOT_NODE_ICON, seedNodeIcon, withSeedNodeIcons } from "./node-icons";
 import {
   AGENT_INTEGRATIONS_BASES,
@@ -3831,7 +3832,23 @@ export const buildDemoDataset = (
         ...base,
         authorId: comment.authorId,
         body: comment.body,
-        mentionsAi: comment.mentionsAi ?? false,
+        mentions: mentionSpansFromLabels(comment.body, comment.mentions ?? []).map(
+          (mention, index) => ({
+            id: `${comment.id}_mention_${index}`,
+            type: mention.type,
+            targetId: mention.targetId,
+            label: mention.label ?? mention.text.replace(/^@/, ""),
+            start: mention.start,
+            end: mention.end,
+            // Mirrors `logic/seed.ts`: a seeded agent mention depicts a dispatch
+            // that already happened, but the session it produced is not part of
+            // the fixture, so there is no id to offer.
+            dispatchStatus:
+              mention.type === "agent" ? ("linked" as const) : ("not_applicable" as const),
+            sessionId: null,
+            error: null,
+          }),
+        ),
         createdAt,
         updatedAt: createdAt,
       },

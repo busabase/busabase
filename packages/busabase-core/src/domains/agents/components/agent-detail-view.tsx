@@ -1,7 +1,7 @@
 "use client";
 
 import type { AcpAttachment } from "@acp-ui/core/reduce";
-import { AcpComposer } from "@acp-ui/web/composer";
+import { AcpComposer, type AcpComposerDraft } from "@acp-ui/web/composer";
 import { AcpSessionMeta } from "@acp-ui/web/session-meta";
 import { AcpConversation } from "@acp-ui/web/transcript";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -16,10 +16,12 @@ import {
   DropdownMenuTrigger,
 } from "kui/dropdown-menu";
 import { ArrowLeft, Bot, ChevronDown, MessageSquarePlus } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AGENT_CHAT_TAB_TYPE,
   type AgentChatTabPayload,
+  agentChatTabId,
+  consumeAgentChatDraft,
 } from "../../dashboard/components/side-panel-sources";
 import { registerSidePanelTab, type SidePanelTabProps } from "../../dashboard/side-panel-registry";
 import { useSidePanelStore } from "../../dashboard/store/side-panel-store";
@@ -47,6 +49,21 @@ interface AgentDetailViewProps {
   orpc: BusabaseQueryUtils;
   agentSlug: string;
   onBack: () => void;
+  /**
+   * Select this session on mount, and again whenever it changes. Ask Agent
+   * resolves the (node, agent) session *before* opening this view, so the view
+   * is told which conversation to show rather than guessing "the newest one" —
+   * which would land a question about one node in another node's transcript.
+   */
+  initialSessionId?: string;
+  /**
+   * A prompt to prefill (never send) into the composer. See `AcpComposerDraft`:
+   * re-supplying the same `id` is a no-op, so this is safe to leave hanging in
+   * a prop.
+   */
+  draft?: AcpComposerDraft | null;
+  /** Fired once the draft is in the field, so the owner can retire it. */
+  onDraftApplied?: (id: string) => void;
 }
 
 /**
@@ -56,9 +73,27 @@ interface AgentDetailViewProps {
  * navigates into — connecting a *new* agent type happens on the Add page, not
  * here.
  */
-export function AgentDetailView({ orpc, agentSlug, onBack }: AgentDetailViewProps) {
+export function AgentDetailView({
+  orpc,
+  agentSlug,
+  onBack,
+  initialSessionId,
+  draft,
+  onDraftApplied,
+}: AgentDetailViewProps) {
   const queryClient = useQueryClient();
-  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(
+    initialSessionId ?? null,
+  );
+
+  // Follow the caller's target when it changes. This is what makes a SECOND
+  // Ask Agent — about a different node, in the already-open tab — switch the
+  // conversation instead of prefilling the previous node's transcript. Not
+  // folded into the `activeSessionId` memo below because a manual click in the
+  // session rail must still win afterwards.
+  useEffect(() => {
+    if (initialSessionId) setSelectedSessionId(initialSessionId);
+  }, [initialSessionId]);
 
   const sessions = useQuery({
     ...orpc.agents.sessions.list.queryOptions(),
@@ -263,6 +298,8 @@ export function AgentDetailView({ orpc, agentSlug, onBack }: AgentDetailViewProp
 
             <AcpComposer
               className="border-0 border-t p-3"
+              draft={draft}
+              onDraftApplied={onDraftApplied}
               disabled={
                 active.status === "busy" ||
                 active.status === "waiting_permission" ||
@@ -313,11 +350,18 @@ export function AgentDetailView({ orpc, agentSlug, onBack }: AgentDetailViewProp
  * navigating — inside a panel, backing out of an agent is dismissing it.
  */
 function AgentChatSidePanelTab({ orpc, payload }: SidePanelTabProps) {
-  const { agentSlug } = payload as AgentChatTabPayload;
+  const { agentSlug, sessionId, draft } = payload as AgentChatTabPayload;
+  const onDraftApplied = useCallback(
+    (id: string) => consumeAgentChatDraft(agentSlug, id),
+    [agentSlug],
+  );
   return (
     <AgentDetailView
       agentSlug={agentSlug}
-      onBack={() => useSidePanelStore.getState().closeTab(`agent-${agentSlug}`)}
+      draft={draft ?? null}
+      initialSessionId={sessionId}
+      onBack={() => useSidePanelStore.getState().closeTab(agentChatTabId(agentSlug))}
+      onDraftApplied={onDraftApplied}
       orpc={orpc}
     />
   );

@@ -4,7 +4,7 @@ import path from "node:path";
 import { createRouterClient } from "@orpc/server";
 import { inArray, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { getBusabaseCmsBaseDefinition } from "../../busabase-cms/src/schema";
+import { getBusabaseCmsBaseDefinition } from "../../busabase-cms-sdk/src/schema";
 import { getDb } from "../src/db";
 import { busabaseBases, busabaseNodes, busabaseRecords } from "../src/db/schema";
 import {

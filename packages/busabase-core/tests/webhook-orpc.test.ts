@@ -312,7 +312,7 @@ describe("Webhook automation domain — oRPC", () => {
       expect(deliveries[0]?.status).toBe("success");
     });
 
-    it("notify_agent replaces the old env-var push for @ai mentions", async () => {
+    it("notify_agent fires for an agent mention and names the agent", async () => {
       received = [];
       await client.webhooks.create({
         name: "test ai_mention",
@@ -330,11 +330,13 @@ describe("Webhook automation domain — oRPC", () => {
         submittedBy: "webhook-test",
         autoMerge: false,
       });
-      await client.comments.create({
+      const comment = await client.comments.create({
         subjectType: "change_request",
         subjectId: cr.id,
-        body: "@ai please help",
-        mentionsAi: true,
+        // Not a real catalog slug on purpose — the webhook must fire on the
+        // MENTION, independently of whether the session could be started.
+        body: "@Codex please help",
+        mentions: [{ type: "agent", id: "test-missing-agent", start: 0, end: 6 }],
       });
       expect(await waitForHit("agent-hook")).toBe(true);
 
@@ -342,6 +344,39 @@ describe("Webhook automation domain — oRPC", () => {
       const parsed = JSON.parse(hit!.body);
       expect(parsed.trigger).toBe("ai_mention");
       expect(parsed.changeRequestId).toBe(cr.id);
+      // The payload upgrade: a subscriber can now act on it, because it says
+      // which agent was asked and in which comment, not just "something said @ai".
+      expect(parsed.commentId).toBe(comment.id);
+      expect(parsed.agentSlugs).toEqual(["test-missing-agent"]);
+    });
+
+    it("notify_agent does NOT fire when only a teammate is mentioned", async () => {
+      received = [];
+      await client.webhooks.create({
+        name: "test member-only mention",
+        eventType: "ai_mention",
+        baseId: null,
+        actionKind: "notify_agent",
+        config: { targetUrl: hookUrl("member-hook") },
+        enabled: true,
+      });
+
+      const cr = await client.bases.createChangeRequest({
+        baseId: blogBaseId,
+        fields: { title: "Human only", body: "v1", channel: "blog" },
+        message: "Initial",
+        submittedBy: "webhook-test",
+        autoMerge: false,
+      });
+      await client.comments.create({
+        subjectType: "change_request",
+        subjectId: cr.id,
+        body: "@Alice can you look?",
+        mentions: [{ type: "member", id: "local-editor", start: 0, end: 6 }],
+      });
+
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(received.some((r) => r.path === "/member-hook")).toBe(false);
     });
 
     it("run_function calls fetch directly from inside the sandbox and the delivery is recorded", async () => {

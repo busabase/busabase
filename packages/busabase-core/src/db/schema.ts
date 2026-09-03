@@ -91,6 +91,16 @@ export const busabaseCommentSubjectEnum = pgEnum("busabase_comment_subject", [
   "operation",
   "commit",
 ]);
+export const busabaseCommentMentionTargetEnum = pgEnum("busabase_comment_mention_target", [
+  "member",
+  "agent",
+]);
+export const busabaseCommentMentionDispatchEnum = pgEnum("busabase_comment_mention_dispatch", [
+  "not_applicable",
+  "queued",
+  "linked",
+  "failed",
+]);
 
 export const busabaseNodes = pgTable(
   "busabase_nodes",
@@ -608,7 +618,6 @@ export const busabaseComments = pgTable(
     commitId: text("commit_id").references(() => busabaseCommits.id, { onDelete: "cascade" }),
     authorId: text("author_id").notNull(),
     body: text("body").notNull(),
-    mentionsAi: boolean("mentions_ai").notNull().default(false),
     createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
   },
@@ -622,6 +631,75 @@ export const busabaseComments = pgTable(
     index("busabase_comments_change_request_created_idx").on(base.changeRequestId, base.createdAt),
     index("busabase_comments_operation_created_idx").on(base.operationId, base.createdAt),
     index("busabase_comments_commit_created_idx").on(base.commitId, base.createdAt),
+  ],
+);
+
+/**
+ * Structured `@` mentions carried by one comment.
+ *
+ * Replaces the old `busabase_comments.mentions_ai` boolean outright. That
+ * column only ever said "this text contains the letters @ai" — not who was
+ * meant, not where in the body — so it could not be converted into a row here
+ * and was dropped rather than back-filled. Pre-migration comments keep their
+ * body verbatim; `@ai` simply renders as ordinary text.
+ *
+ * `startOffset`/`endOffset` are UTF-16 code unit offsets into the comment body
+ * — the same unit the composer's `<textarea>` selection API uses. Named with an
+ * `_offset` suffix because `end` is a reserved word in SQL.
+ *
+ * No `spaceId` column: a mention has no identity apart from its comment, and
+ * every read reaches it through `commentId`, which is already space-scoped.
+ */
+export const busabaseCommentMentions = pgTable(
+  "busabase_comment_mentions",
+  {
+    id: text("id").primaryKey(),
+    commentId: text("comment_id")
+      .notNull()
+      .references(() => busabaseComments.id, { onDelete: "cascade" }),
+    targetType: busabaseCommentMentionTargetEnum("target_type").notNull(),
+    /** Member/actor id, or launchable agent slug (`claude-acp`, `buda:<agentId>`). */
+    targetId: text("target_id").notNull(),
+    startOffset: integer("start_offset").notNull(),
+    endOffset: integer("end_offset").notNull(),
+    /**
+     * Display name resolved server-side at write time. Agent rows snapshot the
+     * catalog name so reading a thread never has to probe for agent binaries;
+     * member rows re-resolve live and use this only as a fallback.
+     */
+    label: text("label"),
+    dispatchStatus: busabaseCommentMentionDispatchEnum("dispatch_status")
+      .notNull()
+      .default("not_applicable"),
+    sessionId: text("session_id"),
+    error: text("error"),
+    /**
+     * Per-recipient read state for member rows — this is what makes the Inbox
+     * mentions tab possible without a notifications table. Always null for
+     * agent rows. A self-mention is written pre-stamped so it never inflates
+     * your own unread count.
+     */
+    readAt: timestamp("read_at", { mode: "date" }),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (base) => [
+    index("busabase_comment_mentions_comment_idx").on(base.commentId, base.startOffset),
+    /**
+     * Deliberately PARTIAL, agent rows only. Mentioning the same teammate twice
+     * in one comment ("@Alice see the top — and @Alice the footer too") is
+     * legitimate and each occurrence needs its own span row to render its own
+     * chip. Multiple member rows are display data; multiple agent rows would be
+     * duplicate invocations.
+     */
+    uniqueIndex("busabase_comment_mentions_agent_unique")
+      .on(base.commentId, base.targetId)
+      .where(sql`${base.targetType} = 'agent'`),
+    /** The Inbox unread query: "unread member mentions addressed to me". */
+    index("busabase_comment_mentions_recipient_unread_idx").on(
+      base.targetType,
+      base.targetId,
+      base.readAt,
+    ),
   ],
 );
 
@@ -724,6 +802,7 @@ export const nodeListColumns = {
 export type NodePrincipalPO = typeof busabaseNodePrincipals.$inferSelect;
 export type FavoritePO = typeof busabaseFavorites.$inferSelect;
 export type CommentPO = typeof busabaseComments.$inferSelect;
+export type CommentMentionPO = typeof busabaseCommentMentions.$inferSelect;
 export type CommitPO = typeof busabaseCommits.$inferSelect;
 export type ChangeRequestPO = typeof busabaseChangeRequests.$inferSelect;
 export type OperationPO = typeof busabaseOperations.$inferSelect;

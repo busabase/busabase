@@ -1,3 +1,4 @@
+import { DEMO_AGENT_SLUG } from "../../domains/agents/logic/demo-agent";
 import type { SeedScenario } from "../seed-types";
 
 // 简体中文的各 node type 示例内容：Docs + Files + 评审 Comments。与英文
@@ -512,8 +513,15 @@ Busabase 是面向 AI Agent 的审批优先数据库：每一次写入都是一�
       subjectType: "change_request",
       subjectId: "crq_seed",
       authorId: "local-editor",
-      body: "论点很扎实。批准之前，能否给“下一个 Agent 操控界面”这个说法补一个带日期的来源？@agent",
-      mentionsAi: true,
+      body: "论点很扎实。批准之前，能否给“下一个 Agent 操控界面”这个说法补一个带日期的来源？@演示 Agent",
+      mentions: [
+        {
+          type: "agent",
+          targetId: DEMO_AGENT_SLUG,
+          text: "@演示 Agent",
+          label: "演示 Agent",
+        },
+      ],
       minutesAgo: 34,
     },
     {
@@ -545,8 +553,16 @@ Busabase 是面向 AI Agent 的审批优先数据库：每一次写入都是一�
       subjectType: "change_request",
       subjectId: "crq_seed_skill_research_editor",
       authorId: "skill-maintainer-agent",
-      body: "合并护栏这一节能挡住没有来源的市场类说法。@agent 请再核对一下基准数据那一行。",
-      mentionsAi: true,
+      body: "合并护栏这一节能挡住没有来源的市场类说法。@演示 Agent 请再核对一下基准数据那一行，@local-editor 之后也看一下。",
+      mentions: [
+        {
+          type: "agent",
+          targetId: DEMO_AGENT_SLUG,
+          text: "@演示 Agent",
+          label: "演示 Agent",
+        },
+        { type: "member", targetId: "local-editor", text: "@local-editor", label: "编辑" },
+      ],
       minutesAgo: 5,
     },
     {

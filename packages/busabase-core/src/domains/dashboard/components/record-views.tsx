@@ -68,6 +68,7 @@ import {
 import { mergeSearchIntoHref, useHrefWithCurrentSearch } from "../helpers/link-search";
 import type { RecordSubmitOptions } from "../helpers/view-types";
 import { useIsAnonymousVisitor } from "../visitor-context";
+import { renderMentionedText } from "./comments";
 import {
   FieldBadgeList,
   FieldValuePreview,
@@ -1744,9 +1745,12 @@ function RecordCommentsPanel({
   const createMutation = useMutation({
     mutationFn: (text: string) =>
       client.createComment({
+        // No mention picker on this surface yet (record comments are the next
+        // phase) — but the duplicated `@ai` regex is gone regardless: it wrote a
+        // boolean the server no longer has, and guessing a target from prose is
+        // exactly what structured mentions exist to stop.
         authorId: "local-admin",
         body: text,
-        mentionsAi: /(^|\s)@ai(\s|$)/i.test(text),
         subjectId: record.id,
         subjectType: "record",
       }),
@@ -1807,7 +1811,10 @@ function RecordCommentsPanel({
                 </div>
               </div>
               <div className="mt-2 whitespace-pre-wrap break-words text-sm leading-6">
-                {comment.body}
+                {/* Read-only chips: this surface cannot yet CREATE a mention,
+                    but one made from mobile or the API must still render as a
+                    mention here rather than as raw text. */}
+                {renderMentionedText(comment.body, 0, comment.mentions)}
               </div>
             </div>
           ))

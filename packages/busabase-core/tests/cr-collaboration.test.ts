@@ -215,23 +215,59 @@ describe("Change-request collaboration — oRPC", () => {
   });
 
   // ── comments ──────────────────────────────────────────────────────────────
-  it("creates and lists comments on a change request, flagging AI mentions", async () => {
+  it("creates and lists comments on a change request, persisting structured mentions", async () => {
     const cr = await createCr({ title: "commented", body: "b", channel: "blog" });
 
+    const body = "Please review @Alice";
     const created = await client.comments.create({
       subjectType: "change_request",
       subjectId: cr.id,
-      body: "Please review @ai",
-      mentionsAi: true,
+      body,
+      mentions: [{ type: "member", id: "local-editor", start: 14, end: 20 }],
     });
-    expect(created.body).toBe("Please review @ai");
+    expect(created.body).toBe(body);
+    expect(created.mentions).toHaveLength(1);
+    expect(created.mentions[0]?.targetId).toBe("local-editor");
+    expect(created.mentions[0]?.dispatchStatus).toBe("not_applicable");
 
     const listed = await client.comments.list({
       subjectType: "change_request",
       subjectId: cr.id,
     });
     expect(listed.map((c) => c.id)).toContain(created.id);
-    expect(listed.find((c) => c.id === created.id)?.mentionsAi).toBe(true);
+    const found = listed.find((c) => c.id === created.id);
+    // Spans survive the round trip exactly, so the chip lands on the same text.
+    expect(found?.mentions.map((m) => [m.start, m.end])).toEqual([[14, 20]]);
+    expect(body.slice(14, 20)).toBe("@Alice");
+  });
+
+  it("rejects a mention whose span is out of bounds instead of dropping it", async () => {
+    const cr = await createCr({ title: "bad span", body: "b", channel: "blog" });
+    await expect(
+      client.comments.create({
+        subjectType: "change_request",
+        subjectId: cr.id,
+        body: "short",
+        mentions: [{ type: "member", id: "local-editor", start: 0, end: 99 }],
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("keeps both spans when the same member is mentioned twice", async () => {
+    const cr = await createCr({ title: "twice", body: "b", channel: "blog" });
+    const body = "@Alice top and @Alice footer";
+    const created = await client.comments.create({
+      subjectType: "change_request",
+      subjectId: cr.id,
+      body,
+      mentions: [
+        { type: "member", id: "local-editor", start: 0, end: 6 },
+        { type: "member", id: "local-editor", start: 15, end: 21 },
+      ],
+    });
+    // The partial unique index is agent-only on purpose: naming one person
+    // twice is legitimate writing and each chip needs its own row.
+    expect(created.mentions).toHaveLength(2);
   });
 
   // ── audit events ──────────────────────────────────────────────────────────

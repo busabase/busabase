@@ -245,6 +245,23 @@ export interface SeedFormDef {
   };
 }
 
+/**
+ * A seeded `@` mention.
+ *
+ * Spans are derived from `text` rather than written out, because a hand-counted
+ * UTF-16 offset in a CJK seed string is a silent corruption waiting to happen.
+ * `text` must appear verbatim in the comment body.
+ */
+export interface SeedCommentMentionDef {
+  type: "member" | "agent";
+  /** Member/actor id, or launchable agent catalog slug. */
+  targetId: string;
+  /** Exact substring of `body` this mention covers, e.g. `"@Demo Agent"`. */
+  text: string;
+  /** Display label. Defaults to `text` without its leading `@`. */
+  label?: string;
+}
+
 export interface SeedCommentDef {
   id: string;
   subjectType: "record" | "change_request" | "operation" | "commit";
@@ -252,7 +269,7 @@ export interface SeedCommentDef {
   subjectId: string;
   authorId: string;
   body: string;
-  mentionsAi?: boolean;
+  mentions?: SeedCommentMentionDef[];
   /** Minutes before the dataset "now" anchor that this comment was posted. */
   minutesAgo: number;
 }
