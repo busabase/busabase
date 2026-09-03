@@ -3,6 +3,7 @@ import {
   AIRAPP_DEMO_DEAL_PIPELINE,
   AIRAPP_DEMO_HONO_API,
   AIRAPP_DEMO_PURE_HTML,
+  AIRAPP_DEMO_PYTHON_EXPLICIT,
   AIRAPP_DEMO_SQLITE,
 } from "../../domains/airapp/demo-content";
 import type { SeedScenario } from "../seed-types";
@@ -14,12 +15,11 @@ import type { SeedScenario } from "../seed-types";
 // whiteboard-node changelog for why).
 //
 // AirApp content comes from `domains/airapp/demo-content` — the same catalog
-// `apps/busabase/scripts/demo/14-airapps.ts` uses to create all 10 demos via
-// the REST API, so the two never drift. Only the fast, dependency-light demos
-// (Pure HTML, Hono API, SQLite, Deal Pipeline Board, Compliance Status Board —
-// all zero npm dependencies) are seeded here; the Vite-based ones (slower
-// installs, two of them deliberately broken) are left out of this fast
-// baseline seed. Deal Pipeline Board / Compliance Status Board read the
+// `apps/busabase/scripts/demo/14-airapps.ts` uses for its full REST API gallery,
+// so the two never drift. This baseline seeds the fast Node set (Pure HTML,
+// Hono API, SQLite, Deal Pipeline Board and Compliance Status Board) plus the
+// dependency-free explicit Python example. Slower Vite-based and deliberately
+// broken examples stay out. Deal Pipeline Board / Compliance Status Board read the
 // `deals` / `compliance-checklists` Bases live at Run-time via the
 // same-origin `/api/v1` surface (see `demo-content.ts`'s docblock) — those
 // Bases come from a different scenario (`cross-functional.ts`) in this same
@@ -499,6 +499,15 @@ export const enNodeTypesScenario: SeedScenario = {
       description: AIRAPP_DEMO_COMPLIANCE_BOARD.description,
       position: 4,
       files: AIRAPP_DEMO_COMPLIANCE_BOARD.files,
+    },
+    {
+      nodeType: "airapp",
+      nodeId: "nod_airapp_python_explicit_demo",
+      slug: AIRAPP_DEMO_PYTHON_EXPLICIT.slug,
+      name: AIRAPP_DEMO_PYTHON_EXPLICIT.name,
+      description: AIRAPP_DEMO_PYTHON_EXPLICIT.description,
+      position: 5,
+      files: AIRAPP_DEMO_PYTHON_EXPLICIT.files,
     },
   ],
   docs: [

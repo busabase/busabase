@@ -12,7 +12,7 @@ import { iStringToText } from "openlib/i18n/i-string";
 import { storage } from "openlib/storage";
 import { getContextSpaceId, LOCAL_SPACE_ID } from "../context";
 import { getDb } from "../db";
-import type { BasePO, NodePO } from "../db/schema";
+import type { BasePO, NodeListPO } from "../db/schema";
 import {
   attachments,
   busabaseAssets,
@@ -1395,7 +1395,7 @@ const seedCommentsIfMissing = async (createdAt: Date, comments: SeedCommentDef[]
  * an expand affordance instead of silently rendering them as leaves.
  */
 export const buildNodeTree = (
-  nodes: NodePO[],
+  nodes: NodeListPO[],
   bases: BasePO[],
   options?: { rootParentId?: string | null; forceHasChildrenIds?: Set<string> },
 ): NodeVO[] => {
@@ -1403,7 +1403,7 @@ export const buildNodeTree = (
   const forceHasChildrenIds = options?.forceHasChildrenIds;
   const baseIdByNodeId = new Map(bases.map((base) => [base.nodeId, base.id]));
   const presentIds = new Set(nodes.map((node) => node.id));
-  const childrenByParentId = new Map<string | null, NodePO[]>();
+  const childrenByParentId = new Map<string | null, NodeListPO[]>();
   for (const node of nodes) {
     // Orphan promotion: a node whose parent is NOT part of `nodes` is attached
     // at the requested root instead of being silently dropped. `nodes` is
@@ -1428,10 +1428,10 @@ export const buildNodeTree = (
     childrenByParentId.set(parentKey, siblings);
   }
 
-  const sortNodes = (items: NodePO[]) =>
+  const sortNodes = (items: NodeListPO[]) =>
     items.sort((a, b) => a.position - b.position || a.createdAt.getTime() - b.createdAt.getTime());
 
-  const hydrate = (node: NodePO): NodeVO => {
+  const hydrate = (node: NodeListPO): NodeVO => {
     const children = sortNodes(childrenByParentId.get(node.id) ?? []).map(hydrate);
     const hasChildren = children.length > 0 || (forceHasChildrenIds?.has(node.id) ?? false);
     return toNodeVO(node, baseIdByNodeId.get(node.id) ?? null, children, hasChildren);

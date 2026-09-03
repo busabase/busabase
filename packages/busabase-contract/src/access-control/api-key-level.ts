@@ -125,6 +125,10 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   // `folders.get` / `fileTrees.get`. Still a plain node-scoped read: the
   // per-node ACL inside busabase-core decides which nodes resolve at all.
   "nodes.get": node("read"),
+  // Read, same as `nodes.get`: these are the node's own prompts, split into a
+  // separate call for size, not for secrecy — anyone who can read the node can
+  // read them.
+  "nodes.getAgentPrompts": node("read"),
   "nodes.searchByName": node("read"),
   "nodes.isDescendant": node("read"),
   // The ancestor chain of one node. A `read` for the same reason
@@ -174,6 +178,16 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   "files.create": node("write"),
   "nodes.move": node("write"),
   "nodes.updateMetadata": node("write"),
+  // Same `write` level as metadata: both edit a property of one node the caller
+  // can already write to. What separates them is the SHAPE, not the permission —
+  // `settings` takes a closed schema Busabase itself acts on, so an unknown key
+  // is refused rather than merged in. That is why it is a second endpoint and
+  // not another key in the metadata bag.
+  "nodes.updateSettings": node("write"),
+  // Write, like every other edit to one node's own properties. Its READ sibling
+  // is deliberately not here — `nodes.getAgentPrompts` is a plain node read and
+  // sits with the other `read` entries.
+  "nodes.updateAgentPrompts": node("write"),
   "nodes.toggleFavorite": node("write"),
   "comments.create": node("write"),
   // Manage, not write: audit entries are records of what the SYSTEM did, and
@@ -200,6 +214,7 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   "vault.clear": workspace("manage"),
   "dump.exportTables": workspace("manage"),
   "dump.exportAssetText": workspace("manage"),
+  "dump.exportDocBodies": workspace("manage"),
   "dump.importBegin": workspace("manage"),
   "dump.importTables": workspace("manage"),
   "dump.importCommit": workspace("manage"),
@@ -294,6 +309,7 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   "records.list": node("read"),
   "records.listPage": node("read"),
   "records.count": node("read"),
+  "records.groupBy": node("read"),
   "records.get": node("read"),
   "records.search": node("read"),
   "records.listChangeRequests": node("read"),

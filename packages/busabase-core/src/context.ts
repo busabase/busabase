@@ -117,6 +117,8 @@ export interface BusabaseContext {
    * Desktop's loopback port.
    */
   embedOrigin?: string;
+  /** Exact node one Embed Link authorizes; never a workspace-wide grant. */
+  embedTargetNodeId?: string;
   /**
    * Display name injected by the single-user open-source host. Cloud must not
    * set this; it resolves registered users through `resolveUsers`.
@@ -349,8 +351,8 @@ export function runWithMemberContext<T>(
  *
  * Distinct from `runWithAnonymousContext` ("guest"): a guest's authority
  * comes from the NODE being explicitly publicly shared; an embed visitor's
- * authority comes from possessing the LINK, and V1 links carry Space-scoped
- * read.
+ * authority comes from possessing the LINK, and the context carries the exact
+ * node that link authorizes.
  *
  * `actorId` is supplied by the caller and is deliberately the link's
  * CREATOR, not an anonymous sentinel — kept for attribution and for their
@@ -420,7 +422,7 @@ export function runWithEmbedContext<T>(
  * nothing here and keeps the permissive local default.
  */
 export function runWithLocalContext<T>(
-  ctx: Pick<BusabaseContext, "vaultRuntimeEnv" | "localUserName"> & {
+  ctx: Pick<BusabaseContext, "vaultRuntimeEnv" | "localUserName" | "embedOrigin"> & {
     aclOverride?: Pick<
       BusabaseContext,
       "isSpaceManager" | "permissionLevel" | "permissionLevelIsCeiling"
@@ -575,6 +577,11 @@ export async function resolveEmbedActorState(input: {
  */
 export function getContextEmbedOrigin(): string | undefined {
   return storage.getStore()?.embedOrigin;
+}
+
+/** Exact node authorized by the current Embed Link, if this is an embed request. */
+export function getContextEmbedTargetNodeId(): string | undefined {
+  return storage.getStore()?.embedTargetNodeId;
 }
 
 /** True when the current request is served by the stateless demo router. */

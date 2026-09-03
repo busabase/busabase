@@ -17,6 +17,8 @@ import {
   createBulkChangeRequestInputSchema,
   createBulkUpdateChangeRequestInputSchema,
   createChangeRequestInputSchema,
+  groupRecordsInputSchema,
+  groupRecordsResponseSchema,
   listRecordsInputSchema,
   listRecordsPageInputSchema,
   listRecordsPageResponseSchema,
@@ -193,7 +195,7 @@ export const recordContract = {
       tags: ["Records"],
       summary: "List a numbered record page",
       successDescription:
-        "A random-access page of active records. When viewId is supplied, the saved view is authoritatively filtered and sorted before total and page slicing are calculated.",
+        "A random-access page of active records. When viewId is supplied, the saved view is authoritatively filtered and sorted before total and page slicing are calculated. `dateRange` additionally scopes to a `[gte, lt)` UTC instant window on a date/created_time/updated_time field.",
     })
     .input(listRecordsPageInputSchema)
     .output(listRecordsPageResponseSchema),
@@ -211,6 +213,26 @@ export const recordContract = {
     })
     .input(countRecordsInputSchema)
     .output(countRecordsResponseSchema),
+  groupBy: oc
+    .route({
+      method: "GET",
+      path: "/records/group-by",
+      tags: ["Records"],
+      summary: "Count records per group",
+      description:
+        "One SQL GROUP BY returning every bucket's exact count — the split a board column header or a summary tile needs, without reading the records themselves. " +
+        "`fieldSlug` must name a `select` or `checkbox` field: their stored value IS the grouping key, so the buckets are exactly the ones a client would build. Grouping by a text, number or date field is rejected rather than approximated (text keys are truncated at the projection limit; date keys would bucket by the server's timezone, not the viewer's). " +
+        "`viewId` and `filters` narrow the set first, with the same exactness rules as `records.count`: provably-exact conditions stay a cheap SQL aggregate, anything else falls back to evaluating every matching row server-side — exact, but not free on a large Base. " +
+        'Groups come back keyed by raw choice id (or `"true"`/`"false"`), with `null` for records that have no value; labels are the client\'s to render.',
+      successDescription:
+        "Every group's exact count, plus the total across all groups. Groups with zero records are omitted — a Base's full choice list lives in its field definition, so the client already knows which buckets to render empty.",
+    })
+    .errors({
+      BAD_REQUEST: { status: 400, message: "Field is not groupable" },
+      NOT_FOUND: { status: 404, message: "Base or field not found" },
+    })
+    .input(groupRecordsInputSchema)
+    .output(groupRecordsResponseSchema),
   get: oc
     .route({
       method: "GET",

@@ -181,7 +181,7 @@ const LOCALE_EXPECTATIONS: Record<
 /**
  * Feature 3 — per-node custom scenario prompts (node-agent-prompts-v2.md §7.3).
  *
- * `metadata.agentPrompts`, when present and valid, REPLACES the node type's
+ * `customPrompts`, when present and valid, REPLACES the node type's
  * `SCENARIOS_BY_TYPE` scenarios for the whole-node dialog only; the capability
  * tier and every scoped (field/record/cell) dialog are untouched. Read-time
  * validation must fail SAFE — corrupt or malformed data falls back to the type
@@ -207,7 +207,7 @@ describe("buildNodeAgentPrompts custom scenario prompts", () => {
 
   it("replaces the type's default scenarios with the node's custom ones", () => {
     const { scenarios, capabilities } = buildNodeAgentPrompts(
-      { ...BASE_CONTEXT, metadata: { agentPrompts: CUSTOM_PROMPTS } },
+      { ...BASE_CONTEXT, customPrompts: CUSTOM_PROMPTS },
       "en",
       coreMessagesEn,
     );
@@ -223,7 +223,7 @@ describe("buildNodeAgentPrompts custom scenario prompts", () => {
 
   it("substitutes {target} with the same target line a curated prompt receives", () => {
     const { scenarios } = buildNodeAgentPrompts(
-      { ...BASE_CONTEXT, metadata: { agentPrompts: CUSTOM_PROMPTS } },
+      { ...BASE_CONTEXT, customPrompts: CUSTOM_PROMPTS },
       "en",
       coreMessagesEn,
     );
@@ -236,7 +236,7 @@ describe("buildNodeAgentPrompts custom scenario prompts", () => {
 
   it("resolves the plain-string iString form for every locale (no translation supplied)", () => {
     const { scenarios } = buildNodeAgentPrompts(
-      { ...BASE_CONTEXT, metadata: { agentPrompts: CUSTOM_PROMPTS } },
+      { ...BASE_CONTEXT, customPrompts: CUSTOM_PROMPTS },
       "zh-CN",
       dashboardZhCN,
     );
@@ -247,7 +247,7 @@ describe("buildNodeAgentPrompts custom scenario prompts", () => {
 
   it("uses the requested locale when a translation is supplied", () => {
     const { scenarios } = buildNodeAgentPrompts(
-      { ...BASE_CONTEXT, metadata: { agentPrompts: CUSTOM_PROMPTS } },
+      { ...BASE_CONTEXT, customPrompts: CUSTOM_PROMPTS },
       "zh-CN",
       dashboardZhCN,
     );
@@ -258,7 +258,7 @@ describe("buildNodeAgentPrompts custom scenario prompts", () => {
 
   it("keeps read-only prompts free of the approval instruction and applies it when intent is omitted", () => {
     const { scenarios } = buildNodeAgentPrompts(
-      { ...BASE_CONTEXT, metadata: { agentPrompts: CUSTOM_PROMPTS } },
+      { ...BASE_CONTEXT, customPrompts: CUSTOM_PROMPTS },
       "en",
       coreMessagesEn,
     );
@@ -270,13 +270,9 @@ describe("buildNodeAgentPrompts custom scenario prompts", () => {
     expect(draft?.body).toContain("Submit the change as a ChangeRequest");
   });
 
-  it("falls through to the type default when metadata.agentPrompts is absent", () => {
+  it("falls through to the type default when customPrompts is absent", () => {
     const withNoMetadata = buildNodeAgentPrompts(BASE_CONTEXT, "en", coreMessagesEn);
-    const withEmptyMetadata = buildNodeAgentPrompts(
-      { ...BASE_CONTEXT, metadata: {} },
-      "en",
-      coreMessagesEn,
-    );
+    const withEmptyMetadata = buildNodeAgentPrompts({ ...BASE_CONTEXT }, "en", coreMessagesEn);
     expect(withEmptyMetadata.scenarios.map((p) => p.key)).toEqual(
       withNoMetadata.scenarios.map((p) => p.key),
     );
@@ -284,7 +280,7 @@ describe("buildNodeAgentPrompts custom scenario prompts", () => {
 
   it("falls through to the type default when agentPrompts is an empty array", () => {
     const { scenarios } = buildNodeAgentPrompts(
-      { ...BASE_CONTEXT, metadata: { agentPrompts: [] } },
+      { ...BASE_CONTEXT, customPrompts: [] },
       "en",
       coreMessagesEn,
     );
@@ -293,7 +289,7 @@ describe("buildNodeAgentPrompts custom scenario prompts", () => {
 
   it("falls through safely when agentPrompts is not an array (corrupt jsonb)", () => {
     const { scenarios } = buildNodeAgentPrompts(
-      { ...BASE_CONTEXT, metadata: { agentPrompts: { not: "an array" } } },
+      { ...BASE_CONTEXT, customPrompts: { not: "an array" } as never },
       "en",
       coreMessagesEn,
     );
@@ -304,9 +300,7 @@ describe("buildNodeAgentPrompts custom scenario prompts", () => {
     const { scenarios } = buildNodeAgentPrompts(
       {
         ...BASE_CONTEXT,
-        metadata: {
-          agentPrompts: [{ key: "broken", label: 12345, body: "Body about {target}" }],
-        },
+        customPrompts: [{ key: "broken", label: 12345, body: "Body about {target}" }] as never,
       },
       "en",
       coreMessagesEn,
@@ -318,12 +312,10 @@ describe("buildNodeAgentPrompts custom scenario prompts", () => {
     const { scenarios } = buildNodeAgentPrompts(
       {
         ...BASE_CONTEXT,
-        metadata: {
-          agentPrompts: [
-            { key: "dup", label: "One", body: "Body one about {target}" },
-            { key: "dup", label: "Two", body: "Body two about {target}" },
-          ],
-        },
+        customPrompts: [
+          { key: "dup", label: "One", body: "Body one about {target}" },
+          { key: "dup", label: "Two", body: "Body two about {target}" },
+        ],
       },
       "en",
       coreMessagesEn,
@@ -331,10 +323,10 @@ describe("buildNodeAgentPrompts custom scenario prompts", () => {
     expect(scenarios.map((prompt) => prompt.key)).toContain("base-bulk-import");
   });
 
-  it("never crashes when metadata itself is malformed junk", () => {
+  it("never crashes when the custom list itself is malformed junk", () => {
     expect(() =>
       buildNodeAgentPrompts(
-        { ...BASE_CONTEXT, metadata: { agentPrompts: "just a string" } },
+        { ...BASE_CONTEXT, customPrompts: "just a string" as never },
         "en",
         coreMessagesEn,
       ),
@@ -342,9 +334,9 @@ describe("buildNodeAgentPrompts custom scenario prompts", () => {
   });
 
   it("does NOT apply a node's custom prompts to a field/record/cell-scoped dialog", () => {
-    const metadata = { agentPrompts: CUSTOM_PROMPTS };
+    const customPrompts = CUSTOM_PROMPTS;
     const fieldScoped = buildNodeAgentPrompts(
-      { ...BASE_CONTEXT, metadata, scope: { kind: "field", ...FIELD } },
+      { ...BASE_CONTEXT, customPrompts, scope: { kind: "field", ...FIELD } },
       "en",
       coreMessagesEn,
     );
@@ -356,7 +348,7 @@ describe("buildNodeAgentPrompts custom scenario prompts", () => {
     ]);
 
     const recordScoped = buildNodeAgentPrompts(
-      { ...BASE_CONTEXT, metadata, scope: { kind: "record", ...RECORD } },
+      { ...BASE_CONTEXT, customPrompts, scope: { kind: "record", ...RECORD } },
       "en",
       coreMessagesEn,
     );
@@ -367,7 +359,7 @@ describe("buildNodeAgentPrompts custom scenario prompts", () => {
     ]);
 
     const cellScoped = buildNodeAgentPrompts(
-      { ...BASE_CONTEXT, metadata, scope: { kind: "cell", ...RECORD, ...FIELD } },
+      { ...BASE_CONTEXT, customPrompts, scope: { kind: "cell", ...RECORD, ...FIELD } },
       "en",
       coreMessagesEn,
     );
@@ -380,7 +372,7 @@ describe("buildNodeAgentPrompts custom scenario prompts", () => {
 
   it("does not affect a node type that has no default scenarios either (still additive-only)", () => {
     const { scenarios } = buildNodeAgentPrompts(
-      { ...BASE_CONTEXT, nodeType: "folder", metadata: {} },
+      { ...BASE_CONTEXT, nodeType: "folder" },
       "en",
       coreMessagesEn,
     );

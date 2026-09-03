@@ -217,6 +217,9 @@ export const dashboardJa: CoreI18nMessages = {
       "このスペースの AirApps — Busabase のデータとワークフロー上に構築されたミニアプリです。",
     libraryEmptyTitle: "AirApps はまだありません",
     libraryEmptyBody: "このスペースで作成した AirApps がここに表示されます。",
+    libraryErrorTitle: "AirApps を読み込めませんでした",
+    libraryErrorBody: "このスペースの AirApps の読み込み中にエラーが発生しました。",
+    libraryRetry: "再試行",
     tabPreview: "アプリ",
     tabFiles: "ファイル",
     tabLogs: "ログ",
@@ -245,6 +248,10 @@ export const dashboardJa: CoreI18nMessages = {
     exitFullscreen: "全画面表示を終了",
     details: "AirApp の詳細",
     engineLabel: "エンジン",
+    engineFollowApp: "アプリに従う",
+    engineFollowAppNamed: "アプリに従う（{engine}）",
+    engineFollowAppHint:
+      "このアプリの airapp.json が決定します。エンジンを選ぶとこのノードでは上書きされます。",
     engineBrowser: "ブラウザ内",
     engineBrowserHint: "このタブ内で実行 · 無料かつ即時 · JavaScript のみ",
     engineLocal: "このマシン",
@@ -253,6 +260,8 @@ export const dashboardJa: CoreI18nMessages = {
     engineRemoteHint: "実行ごとに払い出し、任意の言語 · 分離あり",
     noEligibleEngine:
       "このデプロイには {runtime} の AirApp を実行できるエンジンがありません。ローカルまたはリモートのランタイムの有効化を運用者に依頼してください。",
+    pythonNeedsSandock:
+      "Python AirApp はサポートされていません。実行するには Sandock を設定してください。",
     swError: {
       INSECURE_CONTEXT:
         "AirApp プレビューには HTTPS が必要です。このワークスペースを HTTPS で開くか、デスクトップアプリをご利用ください。",
@@ -330,7 +339,7 @@ export const dashboardJa: CoreI18nMessages = {
     archive: "アーカイブ",
     assets: "アセット",
     agents: "エージェント",
-    apps: "アプリライブラリ",
+    apps: "アプリランチャー",
     graph: "グラフビュー",
     workspace: "ワークスペース",
     base: "ベース",
@@ -386,7 +395,7 @@ export const dashboardJa: CoreI18nMessages = {
     recentEmptyBody: "開いたベースやドキュメントがここに表示されます。",
     recentViewAll: "すべて表示",
     recentAppsTitle: "最近使用した AirApps",
-    recentAppsViewAll: "アプリライブラリを表示",
+    recentAppsViewAll: "アプリランチャーを開く",
     activityTitle: "最近のアクティビティ",
     activityViewAll: "すべてのアクティビティを表示",
     activityEmptyBody: "このワークスペースで行われた変更がここに表示されます。",
@@ -633,6 +642,7 @@ export const dashboardJa: CoreI18nMessages = {
     iconUploadFailed: "アイコンのアップロードに失敗しました",
   },
   base: {
+    searchRecordsToLink: "リンクするレコードを検索",
     all: "すべて",
     newView: "新しいビュー",
     editView: "ビューを編集",
@@ -691,6 +701,7 @@ export const dashboardJa: CoreI18nMessages = {
     deleteViewRequestBody:
       "「{name}」の削除変更リクエストを作成します。レビューされマージされるまで、このビューは利用可能なままです。",
     archivedViewsCount: "{count} 件のアーカイブ済みビュー",
+    archivedViews: "アーカイブ済みビュー",
     recordStatus: "レコードステータス",
     selectRecord: "レコードを選択",
     selectAllRecords: "すべてのレコードを選択",
@@ -1049,6 +1060,8 @@ export const dashboardJa: CoreI18nMessages = {
     showFull: "すべて表示",
     preview: "プレビュー",
     embedTitle: "{label} の埋め込み",
+    relationUnavailable:
+      "このレコードは利用できません — 削除されたか、アクセス権がない可能性があります。",
   },
   createNode: {
     title: "新規{suffix}",
@@ -1398,8 +1411,6 @@ export const dashboardJa: CoreI18nMessages = {
     agentPromptLabel: "これをエージェントに貼り付けてください",
     agentPromptBody:
       "Busabase アプリスキル「{name}」を導入して、後で操作できるようにしてください。\n\n導入前に、この環境が Busabase に接続済みで、正しい対象スペース{targetSpace}に接続されていることを確認してください。Busabase の接続が未設定、または別のスペースを参照している場合は、先に次の接続ガイドを読んで従ってください：\n\n{setupUrl}\n\n接続の準備ができたら、次を実行してください：\n\n{command}\n\nスキルの導入だけを行い、私の Busabase スペースにはまだ何も作成・変更・削除しないでください。導入できたら、このアプリが何をするものか、セットアップを頼んだら何が作られるかを数行で教えてください。",
-    agentRefHint:
-      "リポジトリの既定ブランチを導入します。このカタログ項目は {ref} から読み取られました。",
     agentNoSkillTitle: "このパッケージにはエージェント向けマニュアルがありません",
     agentNoSkillBody:
       "SKILL.md がないためエージェントに導入するものがなく、テーブル構造を推測するしかありません。UI に導入し、後からノードの「•••」メニューからプロンプトを渡してください。",

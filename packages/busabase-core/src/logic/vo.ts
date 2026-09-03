@@ -31,7 +31,7 @@ import type {
   BasePO,
   CommentPO,
   CommitPO,
-  NodePO,
+  NodeListPO,
   OperationPO,
   RecordLinkPO,
   ReviewPO,
@@ -221,7 +221,7 @@ export const toViewVO = (view: ViewPO, users?: UserRefMap): ViewVO => ({
 // but weren't fetched, so `children` is `[]` yet `hasChildren` must stay
 // `true` to keep the sidebar's expand affordance).
 export const toNodeVO = (
-  node: NodePO,
+  node: NodeListPO,
   baseId: string | null,
   children: NodeVO[] = [],
   hasChildren: boolean = children.length > 0,
@@ -233,6 +233,7 @@ export const toNodeVO = (
   name: node.name,
   description: node.description,
   metadata: node.metadata ?? {},
+  settings: node.settings ?? {},
   explicitVisibility: node.explicitVisibility ?? null,
   icon: node.icon ?? null,
   position: node.position,
@@ -252,7 +253,7 @@ export const toNodeVO = (
  * every registered built-in node type has `hasDetail: true`, so this is
  * never conditional.
  */
-export const toNodeSearchResultVO = (node: NodePO): NodeSearchResultVO => ({
+export const toNodeSearchResultVO = (node: NodeListPO): NodeSearchResultVO => ({
   id: node.id,
   type: node.type,
   name: node.name,

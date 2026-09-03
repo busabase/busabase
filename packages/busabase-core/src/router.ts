@@ -50,6 +50,7 @@ import {
   getAuthInfo,
   getChangeRequest,
   getInboxSnapshot,
+  getNodeAgentPrompts,
   isDescendantOf,
   listAgentTasks,
   listArchivedNodes,
@@ -68,7 +69,9 @@ import {
   searchBusabase,
   searchNodesByName,
   toggleNodeFavorite,
+  updateNodeAgentPrompts,
   updateNodeMetadata,
+  updateNodeSettings,
 } from "./logic/store";
 
 // Kernel oRPC router: kernel routes inline (search / nodes / audit / comments /
@@ -139,6 +142,15 @@ const busabaseRouterImpl = busabase.router({
     move: busabase.nodes.move.handler(async ({ input }) => moveNode(input)),
     updateMetadata: busabase.nodes.updateMetadata.handler(async ({ input }) =>
       updateNodeMetadata(input),
+    ),
+    updateSettings: busabase.nodes.updateSettings.handler(async ({ input }) =>
+      updateNodeSettings(input),
+    ),
+    getAgentPrompts: busabase.nodes.getAgentPrompts.handler(async ({ input }) =>
+      getNodeAgentPrompts(input),
+    ),
+    updateAgentPrompts: busabase.nodes.updateAgentPrompts.handler(async ({ input }) =>
+      updateNodeAgentPrompts(input),
     ),
     updateContent: busabase.nodes.updateContent.handler(async ({ input }) =>
       updateNodeContent(input),

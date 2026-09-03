@@ -4,7 +4,6 @@ import { useQuery } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { AirAppVO } from "busabase-contract/types";
 import { Button } from "kui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "kui/select";
 import { CircleStop, Loader2, Maximize, Minimize, Pin, Play, RotateCcw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useSearch } from "wouter";
@@ -17,11 +16,13 @@ import { useSidePanelStore } from "../../dashboard/store/side-panel-store";
 import { airAppSidePanelTabId } from "../store/airapp-keepalive-store";
 import {
   type AirAppRunStatus,
+  DEFAULT_RUNNER_KIND,
   IDLE_ENTRY,
   useAirAppRunnerStore,
 } from "../store/airapp-runner-store";
 import {
   AIRAPP_MANIFEST_PATH,
+  type AirAppRuntimeKind,
   resolveEngine,
   resolveRunPlan,
 } from "../utils/airapp-runtime-descriptor";
@@ -45,6 +46,64 @@ const REMOTE_AUTO_RUN_DWELL_MS = 1200;
 
 /** Engines whose runs are free and instant, so opening a node may start them at once. */
 const FREE_ENGINES: AirAppRunnerKind[] = ["browser"];
+
+export const airAppAutoRunDelay = (
+  selectionsHydrated: boolean,
+  selected: AirAppRunnerKind,
+): number | null => {
+  if (!selectionsHydrated) return null;
+  return FREE_ENGINES.includes(selected) ? 0 : REMOTE_AUTO_RUN_DWELL_MS;
+};
+
+type EligibleAirAppRunner<T> =
+  | { runnerKind: AirAppRunnerKind; runner: T }
+  | { runnerKind: null; runner: null };
+
+/**
+ * Resolve compatibility before constructing a runner. Keeping the factory
+ * behind this gate makes the important negative guarantee executable: a
+ * Python AirApp on a browser-only deployment never boots a browser runner.
+ */
+export const createEligibleAirAppRunner = <T,>({
+  runtime,
+  preferredEngine,
+  userChose,
+  wantedKind,
+  availableEngines,
+  createRunner,
+}: {
+  runtime: AirAppRuntimeKind;
+  preferredEngine?: AirAppRunnerKind;
+  /** Whether `wantedKind` is a choice the user made, or merely the default. */
+  userChose: boolean;
+  wantedKind: AirAppRunnerKind;
+  availableEngines: readonly AirAppRunnerKind[];
+  createRunner: (kind: AirAppRunnerKind) => T;
+}): EligibleAirAppRunner<T> => {
+  const runnerKind = resolveEngine(
+    runtime,
+    // The person outranks the file. `preferredEngine` is what the app's author
+    // (usually an agent) put in `airapp.json`; `wantedKind` is what the person
+    // looking at the node chose in its settings. Only when they have chosen
+    // nothing does the manifest get to decide.
+    //
+    // It used to be `preferredEngine ?? wantedKind` — the manifest always won,
+    // silently, and the settings dialog showed a value that was not what would
+    // happen. Neither the dialog nor the logs said the file had an opinion.
+    userChose ? wantedKind : (preferredEngine ?? wantedKind),
+    availableEngines,
+  );
+  if (!runnerKind) return { runnerKind: null, runner: null };
+  return { runnerKind, runner: createRunner(runnerKind) };
+};
+
+export const noEligibleAirAppEngineMessage = (
+  messages: ReturnType<typeof useCoreI18n>,
+  runtime: AirAppRuntimeKind,
+): string =>
+  runtime === "python"
+    ? messages.airapp.pythonNeedsSandock
+    : fmt(messages.airapp.noEligibleEngine, { runtime });
 
 /**
  * Owns the AirApp runner lifecycle (mount/install/start, log streaming,
@@ -76,18 +135,14 @@ export function useAirAppRunner({
   );
   const entry = useAirAppRunnerStore(selectEntry);
   const { status, logLines, previewUrl, error } = entry;
-  const selectedRunnerKind = useAirAppRunnerStore((state) =>
-    nodeId ? (state.selectedKinds[nodeId] ?? "browser") : "browser",
-  );
+  const selectionsHydrated = useAirAppRunnerStore((state) => state.selectionsHydrated);
   const availableEngines = useAirAppEngineAvailability();
-  const setRunnerKind = useCallback(
-    (kind: AirAppRunnerKind) => {
-      if (nodeId) {
-        useAirAppRunnerStore.getState().selectRunnerKind(nodeId, kind);
-      }
-    },
-    [nodeId],
-  );
+
+  useEffect(() => {
+    if (!useAirAppRunnerStore.persist.hasHydrated()) {
+      void useAirAppRunnerStore.persist.rehydrate();
+    }
+  }, []);
 
   const run = useCallback(async () => {
     if (!airapp) {
@@ -95,7 +150,13 @@ export function useAirAppRunner({
     }
     const currentNodeId = airapp.node.id;
     const store = useAirAppRunnerStore.getState();
-    const wantedKind = store.getSelectedRunnerKind(currentNodeId);
+    // The override lives on the NODE now, not in this browser. `undefined` means
+    // nobody has overridden it, which is what lets `airapp.json` decide — the
+    // distinction the old `localStorage` map could only express by absence, and
+    // the reason absence must stay meaningful.
+    const savedEngine = airapp.node.settings?.airappEngine ?? null;
+    const userChose = savedEngine !== null;
+    const wantedKind = savedEngine ?? DEFAULT_RUNNER_KIND;
 
     // Which engine can actually run this app has to be settled BEFORE the
     // runner is constructed — and the answer lives in the app's own files. The
@@ -105,8 +166,8 @@ export function useAirAppRunner({
     //
     // Only the manifest needs to be fetched: runtime inference keys off which
     // marker files exist, which the listing already tells us.
-    let runnerKind = wantedKind;
     let engineNote: string | null = null;
+    let plan: ReturnType<typeof resolveRunPlan>;
     try {
       const probeFiles: Record<string, string> = {};
       for (const file of airapp.files) probeFiles[file.path] = "";
@@ -118,34 +179,7 @@ export function useAirAppRunner({
         });
         if (manifest.encoding === "utf8") probeFiles[AIRAPP_MANIFEST_PATH] = manifest.content;
       }
-      const plan = resolveRunPlan(probeFiles);
-      // The app's own preference outranks a stale per-tab selection, but only
-      // as a preference: an app pinning an engine this deployment lacks still
-      // runs on whatever else is eligible instead of becoming unrunnable.
-      // An app's own preference is honoured only if this deployment actually
-      // has that engine. A pin the host cannot satisfy must not make the app
-      // unrunnable — it falls back to whatever else is eligible.
-      const preferred = plan.preferredEngine ?? wantedKind;
-      const resolved = resolveEngine(plan.runtime, preferred, availableEngines);
-      if (!resolved) {
-        useAirAppRunnerStore
-          .getState()
-          .failBeforeRun(
-            currentNodeId,
-            wantedKind,
-            fmt(messages.airapp.noEligibleEngine, { runtime: plan.runtime }),
-          );
-        return;
-      }
-      if (resolved !== wantedKind) {
-        engineNote = `[busabase] engine "${resolved}" selected for runtime "${plan.runtime}"\n`;
-        // Write the derived engine back to the selection, so the picker names
-        // the engine that is actually running. Leaving it alone showed
-        // "In browser" beside a Python app running on the host — the toolbar
-        // contradicting the logs, with the logs being right.
-        store.selectRunnerKind(currentNodeId, resolved);
-      }
-      runnerKind = resolved;
+      plan = resolveRunPlan(probeFiles);
     } catch (caught) {
       // A malformed `airapp.json` is named here rather than swallowed: falling
       // back to defaults would run something the author did not ask for.
@@ -159,7 +193,37 @@ export function useAirAppRunner({
       return;
     }
 
-    const runner = createAirAppRunner(runnerKind, { orpc, nodeId: currentNodeId });
+    // A pin the host cannot satisfy falls back to an eligible engine; a Python
+    // app on a browser-only deployment stops here without ever constructing the
+    // incompatible browser runner.
+    const resolved = createEligibleAirAppRunner({
+      runtime: plan.runtime,
+      preferredEngine: plan.preferredEngine,
+      userChose,
+      wantedKind,
+      availableEngines,
+      createRunner: (kind) => createAirAppRunner(kind, { orpc, nodeId: currentNodeId }),
+    });
+    if (!resolved.runnerKind) {
+      store.failBeforeRun(
+        currentNodeId,
+        wantedKind,
+        noEligibleAirAppEngineMessage(messages, plan.runtime),
+      );
+      return;
+    }
+    const { runnerKind, runner } = resolved;
+    // Record what actually ran, so the auto-run debounce below knows whether
+    // opening this node provisions something. This used to be written into the
+    // user's saved *selection* — the only slot available — which is how a
+    // fallback came to silently rewrite a setting the user had chosen. It is a
+    // separate concern now: `node.settings.airappEngine` is what was asked for
+    // (and only a person writes it), `lastEffectiveKinds` is what happened.
+    store.recordEffectiveRunnerKind(currentNodeId, runnerKind);
+    if (runnerKind !== wantedKind) {
+      // The log is the honest place to report a fallback.
+      engineNote = `[busabase] engine "${runnerKind}" selected for runtime "${plan.runtime}"\n`;
+    }
     store.beginRun(currentNodeId, runner, runnerKind);
     if (engineNote) {
       useAirAppRunnerStore.getState().appendLog(currentNodeId, runner, engineNote);
@@ -283,17 +347,25 @@ export function useAirAppRunner({
     // Only the free engine starts on sight. For anything that provisions — a
     // host process, a remote sandbox — the node has to still be open a moment
     // later, so clicking through a list costs nothing.
-    const selected = useAirAppRunnerStore.getState().getSelectedRunnerKind(nodeId);
-    if (FREE_ENGINES.includes(selected)) {
+    // What this node COSTS, not what was asked for. A node whose manifest pins a
+    // remote engine provisions a machine even though the stored selection still
+    // reads `browser` — debouncing on the selection would start one on sight,
+    // for every node clicked past.
+    const effective = useAirAppRunnerStore.getState().getEffectiveRunnerKind(nodeId);
+    const delay = airAppAutoRunDelay(selectionsHydrated, effective);
+    if (delay === null) {
+      return;
+    }
+    if (delay === 0) {
       void run();
       return;
     }
     const timer = setTimeout(() => {
       const latest = useAirAppRunnerStore.getState().entries[nodeId];
       if (!latest || latest.status === "idle") void run();
-    }, REMOTE_AUTO_RUN_DWELL_MS);
+    }, delay);
     return () => clearTimeout(timer);
-  }, [nodeId, airapp, run]);
+  }, [nodeId, airapp, run, selectionsHydrated]);
 
   const stop = useCallback(async () => {
     if (!nodeId) return;
@@ -322,8 +394,6 @@ export function useAirAppRunner({
     stop,
     isBusy,
     isLive,
-    runnerKind: selectedRunnerKind,
-    setRunnerKind,
   };
 }
 
@@ -413,8 +483,7 @@ export function AirAppRunControls({
   fullscreenState,
 }: AirAppRunControlsProps) {
   const messages = useCoreI18n();
-  const availableEngines = useAirAppEngineAvailability();
-  const { status, previewUrl, run, stop, isBusy, isLive, runnerKind, setRunnerKind } = runner;
+  const { status, previewUrl, run, stop, isBusy, isLive } = runner;
   const { fullscreen, setFullscreen } = fullscreenState;
 
   const statusLabel: Record<AirAppRunStatus, string> = {
@@ -424,18 +493,6 @@ export function AirAppRunControls({
     starting: messages.airapp.statusStarting,
     ready: messages.airapp.statusReady,
     error: messages.airapp.statusError,
-  };
-
-  const engineLabel: Record<AirAppRunnerKind, string> = {
-    browser: messages.airapp.engineBrowser,
-    local: messages.airapp.engineLocal,
-    remote: messages.airapp.engineRemote,
-  };
-
-  const engineHint: Record<AirAppRunnerKind, string> = {
-    browser: messages.airapp.engineBrowserHint,
-    local: messages.airapp.engineLocalHint,
-    remote: messages.airapp.engineRemoteHint,
   };
 
   const pinToSidePanel = () => {
@@ -459,38 +516,6 @@ export function AirAppRunControls({
       <span className="hidden text-muted-foreground/70 text-xs sm:inline">
         {statusLabel[status]}
       </span>
-      {/* Shown only where there is a choice to make. A deployment that offers
-       *  one engine renders no picker at all — which is every cloud deployment
-       *  with no remote provider configured, and was the basis of an earlier
-       *  comment here claiming this "compiles out in production". It does not:
-       *  there is no build-time gate, and the single-user build (which offers
-       *  `browser` + `local`) does show this control to end users. */}
-      {availableEngines.length > 1 ? (
-        <>
-          <Select
-            disabled={isBusy}
-            onValueChange={(value) => setRunnerKind(value as AirAppRunnerKind)}
-            value={runnerKind}
-          >
-            <SelectTrigger
-              aria-label={messages.airapp.engineLabel}
-              className="h-7 w-auto min-w-0 gap-1 px-2 text-xs"
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {availableEngines.map((engine) => (
-                <SelectItem key={engine} value={engine}>
-                  {engineLabel[engine]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <span className="hidden text-muted-foreground/70 text-xs 2xl:inline">
-            {engineHint[runnerKind]}
-          </span>
-        </>
-      ) : null}
       {airapp && showPinToSidePanel ? (
         <Button
           aria-label={messages.nodeDetail.pinToSidePanel}
@@ -602,6 +627,14 @@ export function AirAppPreviewPending({ status }: { status: AirAppRunStatus }) {
   );
 }
 
+export function AirAppRunError({ error }: { error: string }) {
+  return (
+    <div className="border-border/60 border-b bg-destructive/5 px-4 py-2 text-destructive text-xs">
+      {error}
+    </div>
+  );
+}
+
 /** "App" tab content: the live preview iframe, optionally topped by a local
  *  run toolbar (see `showToolbar`).
  *
@@ -645,11 +678,7 @@ export function AirAppRunPreview({
         </div>
       ) : null}
 
-      {error ? (
-        <div className="border-border/60 border-b bg-destructive/5 px-4 py-2 text-destructive text-xs">
-          {error}
-        </div>
-      ) : null}
+      {error ? <AirAppRunError error={error} /> : null}
 
       <div className="relative min-h-0 flex-1">
         {previewUrl && fullscreen ? (

@@ -1,4 +1,5 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
+import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
 import type {
   BaseFieldVO,
   BaseVO,
@@ -15,6 +16,7 @@ import { Dialog, DialogContent, DialogTitle } from "kui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "kui/popover";
 import { Skeleton } from "kui/skeleton";
 import {
+  Archive,
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
@@ -556,10 +558,12 @@ function FieldColumnHeader({
         </Popover>
       </span>
       {promptsOpen && (
-        // No `metadata` prop — a field-scoped dialog never reads custom scenario
+        // `orpc={null}` — a field-scoped dialog never reads custom scenario
         // prompts (node-agent-prompts-v2.md §7.3 only replaces the whole-node
-        // scenario tier; see `buildNodeAgentPrompts`'s `scope.kind` check).
+        // scenario tier; see `buildNodeAgentPrompts`'s `scope.kind` check), so
+        // it must not spend a request fetching them.
         <NodeAgentPromptsDialog
+          orpc={null}
           nodeId={baseNodeId}
           nodeName={baseName}
           nodeType="base"
@@ -758,6 +762,7 @@ function BusaBaseTableRowsSkeleton({
 
 export function BusaBaseTable({
   activeView,
+  client,
   archivedViews = [],
   archivedRecords = [],
   archivedPagination,
@@ -776,6 +781,7 @@ export function BusaBaseTable({
   scrollElementRef,
   views,
 }: {
+  client: BusabaseDashboardApiClient;
   activeView: ViewVO | null;
   archivedViews?: ViewVO[];
   archivedRecords?: RecordVO[];
@@ -824,6 +830,7 @@ export function BusaBaseTable({
   const [viewActionError, setViewActionError] = useState<string | null>(null);
   const [showArchivedRecords, setShowArchivedRecords] = useState(false);
   const [restoringViewId, setRestoringViewId] = useState<string | null>(null);
+  const [showArchivedViews, setShowArchivedViews] = useState(false);
   const [restoringRecordId, setRestoringRecordId] = useState<string | null>(null);
   const [quickUpdatingFieldId, setQuickUpdatingFieldId] = useState<string | null>(null);
   const [viewEditorRequest, setViewEditorRequest] = useState<ViewConfigEditorRequest | null>(null);
@@ -1087,7 +1094,7 @@ export function BusaBaseTable({
             ) : null}
           </span>
           <div className="flex shrink-0 items-center gap-2">
-            {activeView && !isAnon ? (
+            {!isAnon && (activeView || archivedViews.length > 0) ? (
               <details className="relative">
                 <summary
                   aria-label={messages.base.viewActions}
@@ -1097,30 +1104,53 @@ export function BusaBaseTable({
                 >
                   <MoreHorizontal size={15} />
                 </summary>
-                <div className="absolute right-0 z-50 mt-1 w-40 rounded-md border border-border/70 bg-card p-1 shadow-md">
-                  <button
-                    className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-medium text-foreground text-xs transition-colors hover:bg-accent"
-                    onClick={(event) => {
-                      setEditingViewMode("edit");
-                      event.currentTarget.closest("details")?.removeAttribute("open");
-                    }}
-                    type="button"
-                  >
-                    <PenLine size={13} />
-                    {messages.base.editView}
-                  </button>
-                  <button
-                    className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-medium text-rejected-strong text-xs transition-colors hover:bg-rejected/17 disabled:opacity-60"
-                    disabled={isDeletingView}
-                    onClick={(event) => {
-                      setConfirmDeleteView(activeView);
-                      event.currentTarget.closest("details")?.removeAttribute("open");
-                    }}
-                    type="button"
-                  >
-                    <Trash2 size={13} />
-                    {isDeletingView ? messages.common.deleting : messages.base.deleteView}
-                  </button>
+                <div className="absolute right-0 z-50 mt-1 w-48 rounded-md border border-border/70 bg-card p-1 shadow-md">
+                  {activeView ? (
+                    <>
+                      <button
+                        className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-medium text-foreground text-xs transition-colors hover:bg-accent"
+                        onClick={(event) => {
+                          setEditingViewMode("edit");
+                          event.currentTarget.closest("details")?.removeAttribute("open");
+                        }}
+                        type="button"
+                      >
+                        <PenLine size={13} />
+                        {messages.base.editView}
+                      </button>
+                      <button
+                        className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-medium text-rejected-strong text-xs transition-colors hover:bg-rejected/17 disabled:opacity-60"
+                        disabled={isDeletingView}
+                        onClick={(event) => {
+                          setConfirmDeleteView(activeView);
+                          event.currentTarget.closest("details")?.removeAttribute("open");
+                        }}
+                        type="button"
+                      >
+                        <Trash2 size={13} />
+                        {isDeletingView ? messages.common.deleting : messages.base.deleteView}
+                      </button>
+                    </>
+                  ) : null}
+                  {archivedViews.length > 0 ? (
+                    <button
+                      className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-medium text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground ${
+                        activeView ? "mt-1 border-border/60 border-t pt-2" : ""
+                      }`}
+                      data-testid="archived-views-menu-item"
+                      onClick={(event) => {
+                        setShowArchivedViews(true);
+                        event.currentTarget.closest("details")?.removeAttribute("open");
+                      }}
+                      type="button"
+                    >
+                      <Archive size={13} />
+                      {fmt(messages.base.archivedViewsCount, {
+                        count: archivedViews.length,
+                        plural: archivedViews.length === 1 ? "" : "s",
+                      })}
+                    </button>
+                  ) : null}
                 </div>
               </details>
             ) : null}
@@ -1199,39 +1229,52 @@ export function BusaBaseTable({
         pending={isDeletingView}
         title={messages.base.createDeleteRequestTitle}
       />
-      {archivedViews.length > 0 ? (
-        <details className="mb-3 rounded-md border border-border/50 text-xs">
-          <summary className="flex cursor-pointer list-none items-center gap-1.5 px-3 py-2 font-medium text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
-            <ChevronRight className="size-3 transition-transform details-open:rotate-90" />
-            {fmt(messages.base.archivedViewsCount, {
-              count: archivedViews.length,
-              plural: archivedViews.length === 1 ? "" : "s",
-            })}
-          </summary>
-          <div className="divide-y divide-border/40 border-border/40 border-t">
-            {archivedViews.map((view) => (
-              <div className="flex items-center justify-between px-3 py-2" key={view.id}>
-                <span className="text-muted-foreground">{view.name}</span>
-                {onRestoreView ? (
-                  <button
-                    className="inline-flex items-center gap-1 rounded border border-border/60 bg-card px-2 py-1 text-xs transition-colors hover:bg-accent disabled:opacity-50"
-                    disabled={restoringViewId === view.id}
-                    onClick={() => {
-                      setRestoringViewId(view.id);
-                      onRestoreView(view).finally(() => setRestoringViewId(null));
-                    }}
-                    type="button"
-                  >
-                    <RotateCcw className="size-3" />
-                    {restoringViewId === view.id
-                      ? messages.common.restoring
-                      : messages.common.restore}
-                  </button>
-                ) : null}
-              </div>
-            ))}
-          </div>
-        </details>
+      {showArchivedViews && archivedViews.length > 0 ? (
+        <Dialog
+          onOpenChange={(nextOpen) => {
+            if (!nextOpen) {
+              setShowArchivedViews(false);
+            }
+          }}
+          open
+        >
+          <DialogContent
+            aria-describedby={undefined}
+            className="w-[calc(100%-2rem)] sm:max-w-md"
+            data-testid="archived-views-dialog"
+          >
+            <DialogTitle className="text-base">{messages.base.archivedViews}</DialogTitle>
+            <div className="max-h-[60vh] divide-y divide-border/40 overflow-y-auto">
+              {archivedViews.map((view) => (
+                <div
+                  className="flex items-center justify-between gap-3 py-2"
+                  data-archived-view-id={view.id}
+                  key={view.id}
+                >
+                  <span className="min-w-0 truncate text-muted-foreground text-sm">
+                    {view.name}
+                  </span>
+                  {onRestoreView ? (
+                    <button
+                      className="inline-flex shrink-0 items-center gap-1 rounded border border-border/60 bg-card px-2 py-1 text-xs transition-colors hover:bg-accent disabled:opacity-50"
+                      disabled={restoringViewId === view.id}
+                      onClick={() => {
+                        setRestoringViewId(view.id);
+                        onRestoreView(view).finally(() => setRestoringViewId(null));
+                      }}
+                      type="button"
+                    >
+                      <RotateCcw className="size-3" />
+                      {restoringViewId === view.id
+                        ? messages.common.restoring
+                        : messages.common.restore}
+                    </button>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          </DialogContent>
+        </Dialog>
       ) : null}
       {activeView?.type === "gallery" ? (
         <BusaBaseGallery
@@ -1247,12 +1290,12 @@ export function BusaBaseTable({
         <BusaBaseKanban
           activeView={activeView}
           base={base}
+          client={client}
           fields={fields}
           onMoveRecord={onMoveRecord}
-          records={records}
         />
       ) : activeView?.type === "calendar" ? (
-        <BusaBaseCalendar activeView={activeView} base={base} fields={fields} records={records} />
+        <BusaBaseCalendar activeView={activeView} base={base} client={client} fields={fields} />
       ) : activeView?.type === "gantt" ? (
         <BusaBaseGantt
           activeView={activeView}

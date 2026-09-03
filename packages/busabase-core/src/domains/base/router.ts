@@ -27,6 +27,7 @@ import {
   getBase,
   getRecord,
   getRecordByField,
+  groupRecords,
   listArchivedBases,
   listArchivedRecordsPaged,
   listArchivedViews,
@@ -151,6 +152,7 @@ export const recordRouter = {
   ),
   listPage: os.records.listPage.handler(async ({ input }) => listRecordsPage(input)),
   count: os.records.count.handler(async ({ input }) => countRecords(input)),
+  groupBy: os.records.groupBy.handler(async ({ input }) => groupRecords(input)),
   get: os.records.get.handler(async ({ input }) => {
     const record =
       "recordId" in input ? await getRecord(input.recordId) : await getRecordByField(input);

@@ -7,16 +7,15 @@
  *     that creates all of these via the real REST API (`POST /file-trees`).
  *   - `packages/busabase-core/src/demo/scenarios/node-types.en.ts` — a
  *     lower-level seed path (direct DB writes, no HTTP) consumed by
- *     `pnpm db:seed:all` and demo mode. It only seeds the three fast,
- *     dependency-light demos (Pure HTML, Hono API, SQLite) — the Vite-based
- *     ones are intentionally left out of that fast baseline seed (slower
- *     installs, and two of the six are deliberately-broken negative
- *     examples).
+ *     `pnpm db:seed:all` and demo mode. It seeds the fast, dependency-light
+ *     catalog: five Node examples plus the dependency-free explicit Python
+ *     example. Slower Vite-based and deliberately broken examples stay out of
+ *     this baseline seed.
  *
- * What each demo shows about the Run panel (Nodepod-backed, see
- * `packages/busabase-core/src/domains/airapp/`) — 6 working, 2 kept as live,
- * runnable negative examples rather than deleted, so a Run click shows the
- * real upstream failure instead of it only being documented in prose:
+ * What each demo shows about the Run panel (see
+ * `packages/busabase-core/src/domains/airapp/`) — the full gallery includes
+ * working examples and runnable negative examples, so a Run click shows real
+ * upstream behavior instead of it only being documented in prose:
  *
  *   1. "Pure HTML Demo"         — no package.json dependencies, no framework,
  *      no bundler: index.html + CSS + a script tag, served by a five-line
@@ -149,6 +148,12 @@
 import { AIRAPP_DEMO_DATA_EXPLORER } from "./demo-content-data-explorer";
 import { AIRAPP_DEMO_KELLY_EMAIL } from "./demo-content-kelly-email";
 import {
+  AIRAPP_DEMO_NODE_PINNED_LOCAL,
+  AIRAPP_DEMO_PYTHON_EXPLICIT,
+  AIRAPP_DEMO_PYTHON_INFERRED,
+} from "./demo-content-runtimes";
+
+export {
   AIRAPP_DEMO_NODE_PINNED_LOCAL,
   AIRAPP_DEMO_PYTHON_EXPLICIT,
   AIRAPP_DEMO_PYTHON_INFERRED,

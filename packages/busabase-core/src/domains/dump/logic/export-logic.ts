@@ -4,14 +4,17 @@ import { ORPCError } from "@orpc/server";
 import type {
   ExportAssetTextInput,
   ExportAssetTextVO,
+  ExportDocBodiesInput,
+  ExportDocBodiesVO,
   ExportTablesInput,
   ExportTablesVO,
 } from "busabase-contract/domains/dump/types";
-import { and, asc, eq, gt } from "drizzle-orm";
+import { and, asc, eq, gt, inArray } from "drizzle-orm";
 import { storage } from "openlib/storage";
 import { getContextSpaceId } from "../../../context";
 import { getDb } from "../../../db";
-import { attachments, busabaseAssets, busabaseAssetTexts } from "../../../db/schema";
+import { attachments, busabaseAssets, busabaseAssetTexts, busabaseNodes } from "../../../db/schema";
+import { docBodyKey } from "../../doc/handlers";
 import { requireSpaceManagerForDump } from "./_guard";
 import { DUMP_TABLE_REGISTRY } from "./table-registry";
 
@@ -42,6 +45,56 @@ export const exportTableRows = async (input: ExportTablesInput): Promise<ExportT
   const nextCursor = typedRows.length === input.limit ? typedRows[typedRows.length - 1].id : null;
 
   return { rows: typedRows, nextCursor };
+};
+
+/**
+ * Read the raw markdown behind a batch of Doc nodes, straight from object
+ * storage — the export-side counterpart to the `docBodies` pseudo-table on
+ * `importTables`.
+ *
+ * Why this bypasses the Doc domain entirely: `nodes.get({ type: "doc" })`
+ * deliberately 404s on an ARCHIVED node (Trash is a separate, metadata-only
+ * read path), but the raw `nodes` table dump includes archived rows by design.
+ * A backup driven through the ordinary read path therefore captured only the
+ * live Docs and warned about the rest — on a real production space, 13 of 88
+ * bodies, with the other 75 restoring back EMPTY. A dump route has to see the
+ * whole table, archived rows included, exactly like `exportTableRows` above.
+ *
+ * The `spaceId` + `type` filter is load-bearing for the same reason it is in
+ * `exportTableRows`: this reads storage by a key derived from a caller-supplied
+ * id, so the node must be proven to be a Doc in the caller's own space first,
+ * or a manager in space A could name a node id belonging to space B and read
+ * its body back.
+ */
+export const exportDocBodies = async (input: ExportDocBodiesInput): Promise<ExportDocBodiesVO> => {
+  requireSpaceManagerForDump();
+  const spaceId = getContextSpaceId();
+  const db = await getDb();
+
+  const owned = await db
+    .select({ id: busabaseNodes.id })
+    .from(busabaseNodes)
+    .where(
+      and(
+        eq(busabaseNodes.spaceId, spaceId),
+        eq(busabaseNodes.type, "doc"),
+        inArray(busabaseNodes.id, input.nodeIds),
+      ),
+    );
+
+  const bodies = await Promise.all(
+    owned.map(async (row) => ({
+      nodeId: row.id,
+      // A Doc with no body object yet is a legitimate state (created, never
+      // written) — read it as an empty body, the same as the Doc domain's own
+      // reader does, rather than failing the whole batch over it.
+      markdown: (await storage.getObject(docBodyKey(row.id)).catch(() => Buffer.from(""))).toString(
+        "utf8",
+      ),
+    })),
+  );
+
+  return { bodies };
 };
 
 /**

@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type {
   BaseFieldVO,
@@ -45,6 +46,7 @@ import { SplitSubmitButton } from "./split-submit-button";
 
 export function BaseDetailView({
   activeView,
+  client,
   archivedViews = [],
   archivedRecords = [],
   archivedPagination,
@@ -63,6 +65,7 @@ export function BaseDetailView({
   onUpdateView,
   views,
 }: {
+  client: BusabaseDashboardApiClient;
   activeView: ViewVO | null;
   archivedViews?: ViewVO[];
   archivedRecords?: RecordVO[];
@@ -122,6 +125,7 @@ export function BaseDetailView({
         <div className="px-6 py-5">
           <BusaBaseTable
             activeView={activeView}
+            client={client}
             archivedViews={baseArchivedViews}
             archivedRecords={baseArchivedRecords}
             archivedPagination={archivedPagination}
@@ -1111,7 +1115,7 @@ function BaseDetailHeader({ base, orpc }: { base: BaseVO | null; orpc: BusabaseQ
     base && !isAnon ? (
       <>
         <NodeAgentPromptsButton
-          metadata={base.metadata}
+          orpc={orpc}
           nodeId={base.nodeId}
           nodeName={base.name}
           nodeType="base"

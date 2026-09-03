@@ -1,5 +1,6 @@
 import "server-only";
 
+import { cache } from "openlib/cache";
 import { getContextActorId } from "../../../context";
 
 /**
@@ -26,12 +27,11 @@ import { getContextActorId } from "../../../context";
  * single shared constant on the open-source single-user host, where "another
  * user" does not exist.
  *
- * IMPORTANT — this is a module-level `Map`, so it is single-server /
- * single-process only, the same limitation class as the `SandboxManager`
- * process-wide singleton the local runtime already relies on: a run and the
- * proxy request for its preview must be handled by the same Next.js server
- * process. That is already true for a host-spawned process (it is reachable
- * only from the host that spawned it), so no external store is needed here.
+ * The module-level `Map` is only a hot cache. The authoritative target is also
+ * written to the configured cache because Next.js can evaluate the RPC stream
+ * and Preview route in separate module contexts even in a single replica.
+ * Production Sandock requires Redis; run sessions remain process-owned and
+ * therefore still require the explicit single-instance topology.
  */
 
 /** Owner key on a host with no authenticated actor (open-source, single user). */
@@ -54,6 +54,10 @@ export const LOCAL_PREVIEW_OWNER = "local";
  * same-origin preview path instead of needing its own.
  */
 const localPreviewPorts = new Map<string, Map<string, string>>();
+const PREVIEW_TARGET_TTL_SECONDS = 4 * 60 * 60;
+
+const previewTargetKey = (nodeId: string, owner: string): string =>
+  `busabase:airapp-preview:${Buffer.from(JSON.stringify([owner, nodeId])).toString("base64url")}`;
 
 /**
  * The owner key for the current server-side context — used by the runtime when
@@ -63,21 +67,72 @@ const localPreviewPorts = new Map<string, Map<string, string>>();
  */
 export const currentPreviewOwner = (): string => getContextActorId() ?? LOCAL_PREVIEW_OWNER;
 
-export function registerLocalPreview(nodeId: string, owner: string, targetBaseUrl: string): void {
+export async function registerLocalPreview(
+  nodeId: string,
+  owner: string,
+  targetBaseUrl: string,
+): Promise<void> {
+  const target = targetBaseUrl.replace(/\/+$/, "");
   const forOwner = localPreviewPorts.get(owner) ?? new Map<string, string>();
-  forOwner.set(nodeId, targetBaseUrl.replace(/\/+$/, ""));
+  forOwner.set(nodeId, target);
   localPreviewPorts.set(owner, forOwner);
+  try {
+    const provider = await cache;
+    await provider?.set(previewTargetKey(nodeId, owner), target, PREVIEW_TARGET_TTL_SECONDS);
+  } catch (error) {
+    console.warn("[AirApp Preview] Failed to persist preview target:", error);
+  }
 }
 
-export function getLocalPreviewTarget(nodeId: string, owner: string): string | undefined {
-  return localPreviewPorts.get(owner)?.get(nodeId);
+export async function getLocalPreviewTarget(
+  nodeId: string,
+  owner: string,
+): Promise<string | undefined> {
+  try {
+    const provider = await cache;
+    if (!provider) return localPreviewPorts.get(owner)?.get(nodeId);
+    const shared = await provider.get(previewTargetKey(nodeId, owner));
+    if (!shared) {
+      const forOwner = localPreviewPorts.get(owner);
+      if (forOwner) {
+        forOwner.delete(nodeId);
+        if (forOwner.size === 0) localPreviewPorts.delete(owner);
+      }
+      return undefined;
+    }
+    const forOwner = localPreviewPorts.get(owner) ?? new Map<string, string>();
+    forOwner.set(nodeId, shared);
+    localPreviewPorts.set(owner, forOwner);
+    return shared;
+  } catch (error) {
+    console.warn("[AirApp Preview] Failed to read shared preview target:", error);
+    return undefined;
+  }
 }
 
-export function unregisterLocalPreview(nodeId: string, owner: string): void {
+export async function unregisterLocalPreview(
+  nodeId: string,
+  owner: string,
+  expectedTarget?: string,
+): Promise<void> {
   const forOwner = localPreviewPorts.get(owner);
-  if (!forOwner) return;
-  forOwner.delete(nodeId);
-  // Drop the owner bucket once empty so a long-lived server doesn't accumulate
-  // one entry per user who has ever run an AirApp.
-  if (forOwner.size === 0) localPreviewPorts.delete(owner);
+  if (forOwner) {
+    const current = forOwner.get(nodeId);
+    if (!expectedTarget || current === expectedTarget.replace(/\/+$/, "")) {
+      forOwner.delete(nodeId);
+      if (forOwner.size === 0) localPreviewPorts.delete(owner);
+    }
+  }
+  try {
+    const provider = await cache;
+    if (!provider) return;
+    const key = previewTargetKey(nodeId, owner);
+    if (expectedTarget) {
+      await provider.deleteIfValue(key, expectedTarget.replace(/\/+$/, ""));
+    } else {
+      await provider.del(key);
+    }
+  } catch (error) {
+    console.warn("[AirApp Preview] Failed to remove shared preview target:", error);
+  }
 }

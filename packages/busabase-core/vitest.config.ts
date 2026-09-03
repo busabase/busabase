@@ -18,6 +18,7 @@ export default defineConfig({
       "src/domains/agents/utils/**/*.test.ts",
       "src/domains/airapp/logic/**/*.test.ts",
       "src/domains/airapp/components/**/*.test.tsx",
+      "src/domains/airapp/store/**/*.test.ts",
       "src/domains/airapp/utils/**/*.test.ts",
       "src/domains/assets/utils/**/*.test.ts",
       "src/domains/base/utils/**/*.test.ts",
@@ -27,6 +28,7 @@ export default defineConfig({
       "src/domains/embed-links/**/*.test.ts",
       "src/domains/rich-node/utils/**/*.test.ts",
       "src/domains/templates/components/**/*.test.tsx",
+      "src/demo/**/*.test.ts",
       "src/logic/**/*.test.ts",
     ],
     // DB-heavy oRPC/PGLite integration tests exceed vitest's 5s default on cold

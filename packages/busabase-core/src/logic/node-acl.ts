@@ -11,6 +11,7 @@ import { and, eq, exists, inArray, isNotNull, isNull, ne, or, type SQL, sql } fr
 import {
   getContextActorId,
   getContextCredentialPermissionCeiling,
+  getContextEmbedTargetNodeId,
   getContextIsSpaceManager,
   getContextPermissionLevel,
   getContextPermissionLevelIsCeiling,
@@ -18,6 +19,7 @@ import {
   getContextSpaceId,
   getContextUnlockedShareNodeIds,
   isAnonymousVisitor,
+  isEmbedVisitor,
   resolveActorId,
 } from "../context";
 import { getDb } from "../db";
@@ -232,7 +234,10 @@ export const buildNodeVisibilityCondition = (
         ne(busabaseNodes.effectiveVisibility, "private"),
       );
 
-  return or(defaultVisible, grantExists);
+  const embedTargetNodeId = isEmbedVisitor() ? getContextEmbedTargetNodeId() : undefined;
+  const embedTarget = embedTargetNodeId ? eq(busabaseNodes.id, embedTargetNodeId) : undefined;
+
+  return or(defaultVisible, grantExists, embedTarget);
 };
 
 /**
@@ -306,6 +311,8 @@ export async function getEffectiveNodeLevel(
     .where(and(eq(busabaseNodes.id, nodeId), eq(busabaseNodes.spaceId, spaceId)))
     .limit(1);
   if (!node) return null;
+
+  if (isEmbedVisitor() && getContextEmbedTargetNodeId() === nodeId) return "read";
 
   // Managers bypass node visibility/grant rules, but only after proving the
   // node belongs to this request's space. Otherwise a guessed cross-space id

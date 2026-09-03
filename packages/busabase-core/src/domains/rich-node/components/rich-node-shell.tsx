@@ -187,7 +187,7 @@ export function RichNodeShell({
         {!isAnonymous && actions}
         {!isAnonymous && (
           <NodeAgentPromptsButton
-            metadata={node.metadata}
+            orpc={orpc}
             nodeId={node.id}
             nodeName={node.name}
             nodeType={nodeType}

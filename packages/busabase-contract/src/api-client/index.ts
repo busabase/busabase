@@ -121,6 +121,42 @@ export interface BusabaseDashboardApiClient {
   getRecord: (recordId: string) => Promise<RecordVO>;
   listRecordChangeRequests: (recordId: string) => Promise<ChangeRequestVO[]>;
   searchRecords: (filter: BusabaseRecordFieldTextFilter) => Promise<RecordVO[]>;
+  /**
+   * One numbered page of a Base, optionally narrowed by exact filters. Unlike
+   * `searchRecords` (which matches a field's text EXACTLY), the filters here
+   * support `contains`, which is what a lookup field's picker needs to find a
+   * record by part of its name without every record being loaded client-side.
+   */
+  /**
+   * Exact per-bucket counts for a `select`/`checkbox` field, in one SQL
+   * aggregate. A board column header needs the REAL total, not the number of
+   * cards fetched so far — a count that climbs while you scroll is worse than
+   * no count.
+   */
+  groupRecords: (params: {
+    baseId: string;
+    fieldSlug: string;
+    viewId?: string;
+  }) => Promise<{ groups: Array<{ value: string | null; count: number }>; total: number }>;
+  listRecordsPage: (params: {
+    baseId: string;
+    viewId?: string;
+    filters?: Array<{
+      fieldSlug: string;
+      fieldType?: string;
+      operator: "contains" | "equals" | "not_empty" | "is_empty" | "is_true" | "is_false";
+      value?: unknown;
+    }>;
+    /**
+     * Scope to `[gte, lt)` on a date/created_time/updated_time field — real
+     * UTC instants, resolved by the caller (who knows the viewer's timezone;
+     * the server never does). A Calendar month grid uses this to fetch only
+     * its own slice instead of the whole Base.
+     */
+    dateRange?: { fieldSlug: string; gte: string; lt: string };
+    page?: number;
+    pageSize?: number;
+  }) => Promise<{ records: RecordVO[]; total: number; totalPages: number; page: number }>;
   listBases: () => Promise<BaseVO[]>;
   createBase: (payload: {
     parentNodeId?: string;
@@ -533,6 +569,8 @@ export const createBusabaseRestApiClient = (
     getRecord: (recordId) => client.records.get({ recordId }),
     listRecordChangeRequests: (recordId) => client.records.listChangeRequests({ recordId }),
     searchRecords: (filter) => client.records.search(filter),
+    groupRecords: (params) => client.records.groupBy(params),
+    listRecordsPage: (params) => client.records.listPage(params),
     listBases: () => client.bases.list({}),
     createBase: (payload) => client.bases.create(payload),
     createNodeChangeRequest: (payload) => client.nodes.createChangeRequest(payload),

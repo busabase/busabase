@@ -20,6 +20,7 @@
  */
 
 import {
+  type CustomAgentPrompts,
   type CustomPromptDef,
   customAgentPromptsSchema,
 } from "busabase-contract/contract/node-agent-prompt-schemas";
@@ -68,13 +69,16 @@ export interface NodePromptContext {
   /** Defaults to the whole node. */
   scope?: NodePromptScope;
   /**
-   * The node's own `metadata` (from its loaded `NodeVO`), read here ONLY for
-   * `metadata.agentPrompts` — this node's custom scenario prompts (Feature 3,
-   * `node-agent-prompts-v2.md` §7.3). Optional and safe to omit: a caller with
-   * no loaded `NodeVO` (or a projection that doesn't carry metadata) simply
-   * gets the node type's default scenarios, same as before this field existed.
+   * This node's custom scenario prompts, already fetched and validated by the
+   * caller (`nodes.getAgentPrompts`), REPLACING the node type's defaults.
+   *
+   * Optional and safe to omit — that is also what a caller passes while the
+   * fetch is still in flight — and the node then shows its type's default
+   * scenarios, exactly as it did before this field existed. It used to be the
+   * node's whole `metadata` bag with this key dug out of it; the value now has
+   * its own column and its own read, so the bag is no longer involved.
    */
-  metadata?: Record<string, unknown>;
+  customPrompts?: CustomAgentPrompts;
 }
 
 export interface NodePrompt {
@@ -905,11 +909,14 @@ const customPromptDefToPromptDef = (custom: CustomPromptDef): PromptDef => {
  * would have shown before this feature existed.
  */
 const readCustomAgentPrompts = (
-  metadata: Record<string, unknown> | undefined,
+  customPrompts: CustomAgentPrompts | undefined,
 ): PromptDef[] | undefined => {
-  const raw = metadata?.agentPrompts;
-  if (!Array.isArray(raw) || raw.length === 0) return undefined;
-  const parsed = customAgentPromptsSchema.safeParse(raw);
+  if (!Array.isArray(customPrompts) || customPrompts.length === 0) return undefined;
+  // Validated a second time on purpose. The server parses what it stores, but
+  // this helper is also reached from tests and from hosts that build a context
+  // by hand, and §10's failure matrix wants a bad list to degrade to the type
+  // defaults rather than render garbage — wherever it came from.
+  const parsed = customAgentPromptsSchema.safeParse(customPrompts);
   if (!parsed.success) return undefined;
   return parsed.data.map(customPromptDefToPromptDef);
 };
@@ -943,7 +950,7 @@ export function buildNodeAgentPrompts(
   // column" or "just this record".
   const scenarioDefs =
     scope.kind === "node"
-      ? (readCustomAgentPrompts(context.metadata) ?? SCENARIOS_BY_TYPE[context.nodeType] ?? [])
+      ? (readCustomAgentPrompts(context.customPrompts) ?? SCENARIOS_BY_TYPE[context.nodeType] ?? [])
       : (SCENARIOS_BY_SCOPE[scope.kind] ?? SCENARIOS_BY_TYPE[context.nodeType] ?? []);
 
   const buildCuratedPrompt = (prompt: PromptDef, tier: PromptTier, group: string): NodePrompt => {

@@ -54,6 +54,8 @@ export const auditEventInputSchema = z.object({
     "asset.text_written",
     "asset.text_marked_none",
     "node.metadata_updated",
+    "node.settings_updated",
+    "node.agent_prompts_updated",
     "node.purged",
   ]),
   actorId: z.string().optional().default("local-viewer"),

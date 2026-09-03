@@ -263,17 +263,42 @@ const requiredRelationCycleFiles = (): Map<string, string> => {
 };
 
 /**
- * A failure the planner CANNOT preflight: a required TEXT value the sample row
- * omits, which only the Base rejects, and only in pass 4 — after the folder, the
- * three Bases and the AirApp/Skill change requests already exist.
+ * A failure the planner CANNOT preflight: an OPTIONAL number field carrying a
+ * value that is not a number, which only the Base rejects, and only in pass 4 —
+ * after the folder, the three Bases and the AirApp/Skill change requests already
+ * exist.
+ *
+ * It has to be a kind of breakage the preflight is blind to, and "required field
+ * with no value" no longer qualifies: `findUnsatisfiableRequiredFields` catches
+ * exactly that, before anything is created. Preflight only reasons about
+ * required-ness, never about whether a value fits its field's type — so this
+ * still reaches pass 4, and that is the path being tested. Not every runtime
+ * failure is predictable (permissions, a dropped connection, a constraint the
+ * planner does not model), so the partial-install path stays reachable and needs
+ * to keep behaving.
  */
 const runtimeFailureFiles = (): Map<string, string> => {
   const files = requiredRelationTemplateFiles();
+  const activities = JSON.parse(files.get("content/activities/base.json") ?? "{}");
+  activities.fields.push({
+    slug: "hours",
+    name: "Hours",
+    type: "number",
+    required: false,
+    position: 3,
+    options: {},
+  });
+  files.set("content/activities/base.json", JSON.stringify(activities));
   files.set(
     "content/activities/records.ndjson",
     `${JSON.stringify({
       key: "activity-1",
-      fields: { company: "company-1", contact: "contact-1" },
+      fields: {
+        subject: "Discovery call",
+        company: "company-1",
+        contact: "contact-1",
+        hours: "soon",
+      },
     })}\n`,
   );
   return files;
@@ -571,6 +596,38 @@ describe("install.fromGithub — a template", () => {
       expect(roots).toHaveLength(0);
     });
 
+    /**
+     * The failure the test below used to provoke, now caught before anything is
+     * created — which is the whole point of preflighting it. A dry run that
+     * printed a clean plan for a package guaranteed to die in pass 4 was worse
+     * than useless: it told the user to go ahead.
+     */
+    it("rejects a package that cannot satisfy its own required fields, creating nothing", async () => {
+      const files = requiredRelationTemplateFiles();
+      files.set(
+        "content/activities/records.ndjson",
+        `${JSON.stringify({
+          key: "activity-1",
+          fields: { company: "company-1", contact: "contact-1" },
+        })}\n`,
+      );
+      zipball = await zipFiles(files, "required-crm-unsatisfiable-main");
+      const spaceId = "space_tpl_unsatisfiable_required";
+
+      await expect(
+        inSpace(spaceId, () =>
+          client.install.fromGithub({
+            repoUrl: "https://github.com/acme/required-crm",
+            autoMerge: true,
+          }),
+        ),
+      ).rejects.toThrow("cannot satisfy its own required fields");
+
+      const nodes = await inSpace(spaceId, () => client.nodes.list());
+      const roots = nodes.length === 1 && nodes[0].children ? nodes[0].children : nodes;
+      expect(roots).toHaveLength(0);
+    });
+
     it("reports a partial install as an ORPCError carrying the diagnostics", async () => {
       zipball = await zipFiles(runtimeFailureFiles(), "required-crm-runtime-main");
       const spaceId = "space_tpl_partial_install";
@@ -592,7 +649,7 @@ describe("install.fromGithub — a template", () => {
       expect(caught).toBeInstanceOf(ORPCError);
       const error = caught as ORPCError<string, unknown>;
       expect(error.message).toContain("Install stopped during Pass 4/5 (sample records)");
-      expect(error.message).toContain("Subject is required");
+      expect(error.message).toContain("Hours must be a number");
 
       const failure = InstallFailureVOSchema.safeParse(error.data);
       expect(failure.success).toBe(true);
@@ -601,11 +658,19 @@ describe("install.fromGithub — a template", () => {
       expect(failure.data.created.bases).toBe(3);
       expect(installFailureTouchedWorkspace(failure.data)).toBe(true);
 
-      // And the resources it names really are there — which is why the client has
-      // to refresh its tree on this path rather than treat it as a no-op.
+      // The failure rolls itself back, so the tree the user is left with no
+      // longer holds the half-install — but it DID change on the way there, so
+      // the client still has to refresh rather than treat this as a no-op.
+      expect(error.message).toContain("Rolled back");
       const nodes = await inSpace(spaceId, () => client.nodes.list());
       const roots = nodes.length === 1 && nodes[0].children ? nodes[0].children : nodes;
-      expect(roots.find((node) => node.slug === "required-crm")).toBeDefined();
+      expect(roots.find((node) => node.slug === "required-crm")).toBeUndefined();
+
+      // Trashed, not destroyed. This is an automatic action taken while
+      // something has already gone wrong, so it has to stay reversible: the
+      // folder and everything under it is still restorable from Trash.
+      const trashed = await inSpace(spaceId, () => client.nodes.list({ status: "archived" }));
+      expect(trashed.some((node) => node.slug === "required-crm")).toBe(true);
     });
   });
 });

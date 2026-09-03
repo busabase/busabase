@@ -24,6 +24,18 @@ import { Info, Shield, SlidersHorizontal } from "lucide-react";
 import { useContext, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useCoreI18n, useCoreLocale } from "../../../i18n";
+import {
+  type AirAppEngineChoice,
+  AirAppEngineSetting,
+  FOLLOW_APP,
+  resolveAvailableAirAppRunnerKind,
+} from "../../airapp/components/AirAppEngineSetting";
+import { useAirAppEngineAvailability } from "../../airapp/components/engine-availability-context";
+import type { AirAppRunnerKind } from "../../airapp/components/runners/types";
+import {
+  AIRAPP_MANIFEST_PATH,
+  parseAirAppManifest,
+} from "../../airapp/utils/airapp-runtime-descriptor";
 import { getNodePropertyItems } from "../helpers/node-property-items";
 import { AssetMetadataBlock } from "./assets";
 import { NodeIconPicker } from "./node-icon-picker";
@@ -197,12 +209,39 @@ function GeneralTabContent({
   const t = messages.nodeSettings;
   const queryClient = useQueryClient();
   const nameInputRef = useRef<HTMLInputElement>(null);
+  const availableAirAppEngines = useAirAppEngineAvailability();
+  // The saved override now lives on the NODE, not in this browser. It used to
+  // be `localStorage`, which made "which engine this AirApp runs on" a property
+  // of whoever happened to be looking at it: two people opening the same node
+  // got different answers, and the choice did not travel with the node the way
+  // every other node setting does.
+  const savedEngine = detail?.node.settings?.airappEngine ?? null;
 
   const [name, setName] = useState(nodeName);
   const [description, setDescription] = useState("");
   const [icon, setIcon] = useState<NodeIcon | null>(null);
   const [iconDirty, setIconDirty] = useState(false);
+  const [runnerKind, setRunnerKind] = useState<AirAppEngineChoice>(FOLLOW_APP);
+  /** What `airapp.json` asks for, so "follow the app" can name it. */
+  const [appPreferred, setAppPreferred] = useState<AirAppRunnerKind | undefined>(undefined);
   const hydratedRef = useRef(false);
+  const runnerKindDirtyRef = useRef(false);
+
+  const updateSettings = useMutation(orpc.nodes.updateSettings.mutationOptions());
+
+  /**
+   * Persist the engine override onto the node.
+   *
+   * `null` clears it, which is what "follow the app" means — the server drops
+   * the key rather than storing a sentinel, so a later reader never has to
+   * decide whether `null` and absent differ. They do not.
+   */
+  const saveEngine = async () => {
+    await updateSettings.mutateAsync({
+      nodeId,
+      settings: { airappEngine: runnerKind === FOLLOW_APP ? null : runnerKind },
+    });
+  };
 
   // Reset local edit state whenever the dialog opens for a (possibly new) node.
   useEffect(() => {
@@ -211,7 +250,46 @@ function GeneralTabContent({
       return;
     }
     setName(nodeName);
+    runnerKindDirtyRef.current = false;
+    setAppPreferred(undefined);
   }, [open, nodeName]);
+
+  // Adopt the node's saved override once the shared `nodes.get` fetch resolves,
+  // unless the user has already changed this dialog's draft.
+  useEffect(() => {
+    if (!open || runnerKindDirtyRef.current) return;
+    setRunnerKind(
+      savedEngine
+        ? resolveAvailableAirAppRunnerKind(savedEngine, availableAirAppEngines)
+        : FOLLOW_APP,
+    );
+  }, [availableAirAppEngines, open, savedEngine]);
+
+  // Read what the app itself asks for, so "follow the app" names a concrete
+  // engine. Without this the dialog could say "follow the app" while
+  // `airapp.json` said `remote` — the same "the screen does not match what will
+  // happen" problem this control exists to end.
+  useEffect(() => {
+    if (!open || nodeType !== "airapp") return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const manifest = await orpc.fileTrees.readFile.call({
+          nodeId,
+          filePath: AIRAPP_MANIFEST_PATH,
+          type: "airapp",
+        });
+        if (cancelled || manifest.encoding !== "utf8") return;
+        setAppPreferred(parseAirAppManifest(manifest.content).preferredEngine);
+      } catch {
+        // No manifest, or an unreadable one. "Follow the app" then simply means
+        // the default — which is exactly what it will do.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [nodeId, nodeType, open, orpc]);
 
   // Seed description/icon once the shared `nodes.get` fetch resolves — guarded
   // so a background refetch never clobbers an in-progress edit.
@@ -268,12 +346,14 @@ function GeneralTabContent({
         await reviewCr.mutateAsync({ changeRequestIds: [changeRequest.id], verdict: "approved" });
         await mergeCr.mutateAsync({ changeRequestIds: [changeRequest.id] });
         await invalidateNodes();
+        if (nodeType === "airapp" && runnerKindDirtyRef.current) await saveEngine();
         toast.success(t.saved);
         onRenamed?.(trimmed);
         onClose();
         return;
       }
       await invalidateNodes();
+      if (nodeType === "airapp" && runnerKindDirtyRef.current) await saveEngine();
       toast.success(t.changeRequestSubmitted);
       onClose();
     } catch (err) {
@@ -322,6 +402,19 @@ function GeneralTabContent({
           value={description}
         />
       </div>
+
+      {nodeType === "airapp" ? (
+        <AirAppEngineSetting
+          appPreferred={appPreferred}
+          availableEngines={availableAirAppEngines}
+          disabled={!detail}
+          onValueChange={(next) => {
+            runnerKindDirtyRef.current = true;
+            setRunnerKind(next);
+          }}
+          value={runnerKind}
+        />
+      ) : null}
 
       <div className="flex justify-end border-border/50 border-t pt-4">
         <SplitSubmitButton

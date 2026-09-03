@@ -2,8 +2,15 @@ import "server-only";
 
 import { ORPCError } from "@orpc/server";
 import {
+  type CustomAgentPrompts,
+  customAgentPromptsSchema,
+} from "busabase-contract/contract/node-agent-prompt-schemas";
+import {
+  getNodeAgentPromptsInputSchema,
   searchNodesByNameInputSchema,
+  updateNodeAgentPromptsInputSchema,
   updateNodeMetadataInputSchema,
+  updateNodeSettingsInputSchema,
 } from "busabase-contract/contract/schemas";
 import { CREATABLE_NODE_TYPES } from "busabase-contract/domains";
 import { fieldNameSchema } from "busabase-contract/domains/base/contract/base-schemas";
@@ -21,6 +28,7 @@ import {
   busabaseFavorites,
   busabaseNodes,
   busabaseOperations,
+  nodeListColumns,
 } from "../db/schema";
 import { docBodyKey } from "../domains/doc/handlers";
 import { insertAuditEvent } from "./audit";
@@ -176,7 +184,7 @@ const fetchChildNodeRows = async (
 ) =>
   parentIds.length
     ? db
-        .select()
+        .select(nodeListColumns)
         .from(busabaseNodes)
         .where(
           and(
@@ -192,7 +200,7 @@ const fetchChildNodeRows = async (
 /** The space-root row(s) — `parentId IS NULL` (today, always exactly one per space). */
 const fetchRootNodeRows = async (db: Awaited<ReturnType<typeof getDb>>, spaceId: string) =>
   db
-    .select()
+    .select(nodeListColumns)
     .from(busabaseNodes)
     .where(and(eq(busabaseNodes.spaceId, spaceId), isNull(busabaseNodes.parentId)))
     .orderBy(asc(busabaseNodes.position), asc(busabaseNodes.createdAt));
@@ -286,7 +294,7 @@ export const listNodes = async (input?: ListNodesInput): Promise<NodeVO[]> => {
   if (input?.parentId === undefined && input?.depth === undefined) {
     const [nodeRows, baseRows] = await Promise.all([
       db
-        .select()
+        .select(nodeListColumns)
         .from(busabaseNodes)
         // Exclude archived nodes (archived base nodes are kept but must leave the
         // tree, mirroring how bases.list hides archived bases) and nodes the
@@ -334,7 +342,7 @@ export const listNodeSummaries = async (
   const spaceId = getContextSpaceId();
 
   const rows = await db
-    .select()
+    .select(nodeListColumns)
     .from(busabaseNodes)
     .where(
       and(
@@ -421,7 +429,7 @@ export const listArchivedNodes = async (): Promise<NodeVO[]> => {
   const db = await getDb();
   const spaceId = getContextSpaceId();
   const nodeRows = await db
-    .select()
+    .select(nodeListColumns)
     .from(busabaseNodes)
     .where(
       and(
@@ -463,7 +471,7 @@ export const searchNodesByName = async (
   const pattern = `%${escapedQuery}%`;
 
   const rows = await db
-    .select()
+    .select(nodeListColumns)
     .from(busabaseNodes)
     .where(
       and(
@@ -489,7 +497,7 @@ export const loadNodesByIds = async (nodeIds: string[]): Promise<Map<string, Nod
   const db = await getDb();
   const spaceId = getContextSpaceId();
   const nodeRows = await db
-    .select()
+    .select(nodeListColumns)
     .from(busabaseNodes)
     .where(and(eq(busabaseNodes.spaceId, spaceId), inArray(busabaseNodes.id, nodeIds)));
   const baseRows = nodeRows.length
@@ -556,7 +564,7 @@ export const purgeNode = async (nodeId: string): Promise<{ purged: boolean }> =>
   const db = await getDb();
   const spaceId = getContextSpaceId();
   const [node] = await db
-    .select()
+    .select(nodeListColumns)
     .from(busabaseNodes)
     .where(and(eq(busabaseNodes.id, nodeId), eq(busabaseNodes.spaceId, spaceId)))
     .limit(1);
@@ -910,7 +918,7 @@ export const updateNodeMetadata = async (
   const actorId = resolveActorId("local-user");
 
   const [node] = await db
-    .select()
+    .select(nodeListColumns)
     .from(busabaseNodes)
     .where(
       and(
@@ -1038,6 +1046,220 @@ export const updateNodeMetadata = async (
 };
 
 /**
+ * Replace a node's system settings.
+ *
+ * Deliberately a REPLACE, not the top-level jsonb merge `updateNodeMetadata`
+ * does. A merge cannot express "clear this key", and clearing is a real user
+ * action here: removing `airappEngine` is how an AirApp goes back to following
+ * its own `airapp.json` instead of a person's override. With a merge the only
+ * way to say that would be a sentinel, and a sentinel in a settings bag is how
+ * bags rot.
+ *
+ * `null` on a key means the same thing as omitting it — both clear it — because
+ * a client editing one field of a form should not have to know which of the two
+ * spellings the server wanted.
+ *
+ * Requires `write`, like the metadata endpoint. Unlike it, the input is a
+ * closed schema, so an unknown key is a 400 rather than something stored and
+ * silently ignored forever.
+ */
+export const updateNodeSettings = async (
+  input: z.input<typeof updateNodeSettingsInputSchema>,
+): Promise<NodeVO> => {
+  await ensureReady();
+  const db = await getDb();
+  const spaceId = getContextSpaceId();
+  const parsed = updateNodeSettingsInputSchema.parse(input);
+  const actorId = resolveActorId("local-user");
+
+  const [node] = await db
+    .select(nodeListColumns)
+    .from(busabaseNodes)
+    .where(
+      and(
+        eq(busabaseNodes.id, parsed.nodeId),
+        eq(busabaseNodes.spaceId, spaceId),
+        isNull(busabaseNodes.archivedAt),
+        isNull(busabaseNodes.deletedAt),
+      ),
+    )
+    .limit(1);
+  if (!node) {
+    throw new ORPCError("NOT_FOUND", { message: `Node not found: ${parsed.nodeId}` });
+  }
+
+  await assertNodePermission(node.id, "write", actorId);
+
+  // Drop nulls rather than storing them: absent and null mean the same thing,
+  // and keeping only one of the two spellings on disk means readers never have
+  // to handle both.
+  const settings = Object.fromEntries(
+    Object.entries(parsed.settings).filter(([, value]) => value !== null && value !== undefined),
+  ) as typeof node.settings;
+
+  const timestamp = now();
+  const [updatedNode] = await db
+    .update(busabaseNodes)
+    .set({ settings, updatedAt: timestamp })
+    .where(and(eq(busabaseNodes.id, parsed.nodeId), eq(busabaseNodes.spaceId, spaceId)))
+    .returning();
+  if (!updatedNode) {
+    throw new ORPCError("NOT_FOUND", { message: `Node not found: ${parsed.nodeId}` });
+  }
+
+  const [base] = await db
+    .select({ id: busabaseBases.id })
+    .from(busabaseBases)
+    .where(
+      and(
+        eq(busabaseBases.nodeId, updatedNode.id),
+        eq(busabaseBases.spaceId, spaceId),
+        isNull(busabaseBases.deletedAt),
+      ),
+    )
+    .limit(1);
+
+  await insertAuditEvent(db, {
+    action: "node.settings_updated",
+    actorId,
+    baseId: base?.id ?? null,
+    metadata: { nodeId: updatedNode.id, updatedKeys: Object.keys(settings).sort() },
+  });
+
+  await publishNodeMetadataUpdated({
+    spaceId,
+    nodeId: updatedNode.id,
+    actorId,
+    baseId: base?.id ?? null,
+  });
+
+  return toNodeVO(updatedNode, base?.id ?? null);
+};
+
+/**
+ * Read one node's custom scenario prompts.
+ *
+ * Its own call rather than a field on `nodes.get`: the column is excluded from
+ * every list read (see `schema.ts`'s `agentPrompts`), so the only way to reach
+ * it is to ask for it, which is what the Ask-agent dialog does when it opens.
+ *
+ * Stored jsonb is `.safeParse`d rather than trusted. Rows written before the
+ * write endpoint existed — the feature shipped storing this under
+ * `metadata.agentPrompts`, reachable by the generic metadata PATCH — can hold a
+ * shape this schema rejects, and the dialog must then show the node type's
+ * defaults, not an error. Returning `null` is exactly that instruction.
+ */
+export const getNodeAgentPrompts = async (
+  input: z.input<typeof getNodeAgentPromptsInputSchema>,
+): Promise<{ nodeId: string; agentPrompts: CustomAgentPrompts | null }> => {
+  await ensureReady();
+  const db = await getDb();
+  const spaceId = getContextSpaceId();
+  const parsed = getNodeAgentPromptsInputSchema.parse(input);
+  const actorId = resolveActorId("local-user");
+
+  const [node] = await db
+    .select({ id: busabaseNodes.id, agentPrompts: busabaseNodes.agentPrompts })
+    .from(busabaseNodes)
+    .where(
+      and(
+        eq(busabaseNodes.id, parsed.nodeId),
+        eq(busabaseNodes.spaceId, spaceId),
+        isNull(busabaseNodes.deletedAt),
+      ),
+    )
+    .limit(1);
+  if (!node) {
+    throw new ORPCError("NOT_FOUND", { message: `Node not found: ${parsed.nodeId}` });
+  }
+
+  await assertNodePermission(node.id, "read", actorId);
+
+  if (node.agentPrompts === null || node.agentPrompts === undefined) {
+    return { nodeId: node.id, agentPrompts: null };
+  }
+  const validated = customAgentPromptsSchema.safeParse(node.agentPrompts);
+  return { nodeId: node.id, agentPrompts: validated.success ? validated.data : null };
+};
+
+/**
+ * Replace one node's custom scenario prompts. Replace, never merge: the list is
+ * ordered and keyed by the author, so a merge would have to invent a rule for
+ * which side wins per key, and the CLI that writes this always sends the whole
+ * file anyway.
+ *
+ * `null` clears the column, returning the node to its type's default prompts —
+ * distinct from `[]`, which is "set, and deliberately empty".
+ */
+export const updateNodeAgentPrompts = async (
+  input: z.input<typeof updateNodeAgentPromptsInputSchema>,
+): Promise<{ nodeId: string; agentPrompts: CustomAgentPrompts | null }> => {
+  await ensureReady();
+  const db = await getDb();
+  const spaceId = getContextSpaceId();
+  const parsed = updateNodeAgentPromptsInputSchema.parse(input);
+  const actorId = resolveActorId("local-user");
+
+  const [node] = await db
+    .select({ id: busabaseNodes.id })
+    .from(busabaseNodes)
+    .where(
+      and(
+        eq(busabaseNodes.id, parsed.nodeId),
+        eq(busabaseNodes.spaceId, spaceId),
+        isNull(busabaseNodes.archivedAt),
+        isNull(busabaseNodes.deletedAt),
+      ),
+    )
+    .limit(1);
+  if (!node) {
+    throw new ORPCError("NOT_FOUND", { message: `Node not found: ${parsed.nodeId}` });
+  }
+
+  await assertNodePermission(node.id, "write", actorId);
+
+  const timestamp = now();
+  const [updatedNode] = await db
+    .update(busabaseNodes)
+    .set({ agentPrompts: parsed.agentPrompts, updatedAt: timestamp })
+    .where(and(eq(busabaseNodes.id, parsed.nodeId), eq(busabaseNodes.spaceId, spaceId)))
+    .returning();
+  if (!updatedNode) {
+    throw new ORPCError("NOT_FOUND", { message: `Node not found: ${parsed.nodeId}` });
+  }
+
+  const [base] = await db
+    .select({ id: busabaseBases.id })
+    .from(busabaseBases)
+    .where(
+      and(
+        eq(busabaseBases.nodeId, updatedNode.id),
+        eq(busabaseBases.spaceId, spaceId),
+        isNull(busabaseBases.deletedAt),
+      ),
+    )
+    .limit(1);
+
+  await insertAuditEvent(db, {
+    action: "node.agent_prompts_updated",
+    actorId,
+    baseId: base?.id ?? null,
+    // The prompt bodies are the user's own text and can be large; the audit log
+    // records that the list changed and how long it now is, not its contents.
+    metadata: { nodeId: updatedNode.id, promptCount: parsed.agentPrompts?.length ?? null },
+  });
+
+  await publishNodeMetadataUpdated({
+    spaceId,
+    nodeId: updatedNode.id,
+    actorId,
+    baseId: base?.id ?? null,
+  });
+
+  return { nodeId: updatedNode.id, agentPrompts: parsed.agentPrompts };
+};
+
+/**
  * Toggle the current actor's favorite on a node — Notion-style "⭐ Favorites":
  * a true upsert-or-delete against the `(nodeId, actorId)` unique pair
  * (`busabase_favorites_node_actor_uniq`), never a blind insert. Race-safe at
@@ -1093,7 +1315,7 @@ export const listFavoriteNodes = async (actorId: string): Promise<NodeVO[]> => {
   const spaceId = getContextSpaceId();
 
   const rows = await db
-    .select({ node: busabaseNodes })
+    .select({ node: nodeListColumns })
     .from(busabaseFavorites)
     .innerJoin(busabaseNodes, eq(busabaseNodes.id, busabaseFavorites.nodeId))
     .where(

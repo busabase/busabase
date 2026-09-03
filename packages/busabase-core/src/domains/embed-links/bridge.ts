@@ -107,6 +107,7 @@ export const createAirAppEmbedBridgeHandler = ({
         actorId: capability.createdBy,
         spaceId: capability.spaceId,
         restrictedVisibility: capability.restrictedVisibility,
+        embedTargetNodeId: capability.nodeId,
       },
       async () => {
         const result = pathname.startsWith(rpcPrefix)

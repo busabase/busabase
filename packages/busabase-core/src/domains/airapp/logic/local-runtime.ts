@@ -344,6 +344,7 @@ export async function* runAirAppLocal(
   // forever — and with it the process-group reap it owns. Every such run leaked
   // the whole `sh -> python3` tree.
   let activeCommand: AsyncGenerator<string, number | null> | null = null;
+  let registeredPreviewTarget: string | null = null;
 
   try {
     await writeFiles(workdir, input.files, input.binaryFiles);
@@ -386,10 +387,11 @@ export async function* runAirAppLocal(
       plan.port === undefined ? null : waitForPortOpen(port, signal);
     let pendingNext: Promise<IteratorResult<string, number | null>> | null = null;
 
-    const markReady = (readyPort: number) => {
+    const markReady = async (readyPort: number) => {
       // A URL, not a port: the proxy forwards to whatever origin an engine
       // registers, so a remote engine can reuse the same-origin preview path.
-      registerLocalPreview(input.nodeId, owner, `http://127.0.0.1:${readyPort}`);
+      registeredPreviewTarget = `http://127.0.0.1:${readyPort}`;
+      await registerLocalPreview(input.nodeId, owner, registeredPreviewTarget);
     };
 
     let exitCode: number | null = null;
@@ -406,7 +408,7 @@ export async function* runAirAppLocal(
           portProbe = null;
           if (!sawReady && !signal?.aborted) {
             sawReady = true;
-            markReady(port);
+            await markReady(port);
             yield { type: "ready", previewUrl: `/api/airapp-preview/${input.nodeId}/` };
           }
           // `pendingNext` is deliberately still outstanding — the next loop
@@ -441,7 +443,7 @@ export async function* runAirAppLocal(
           // links resolve under this sub-path regardless of trailing-slash
           // normalization. Same-origin is what lets the running app use the
           // same-origin `/api/v1` data access.
-          markReady(detected);
+          await markReady(detected);
           yield { type: "ready", previewUrl: `/api/airapp-preview/${input.nodeId}/` };
         }
       }
@@ -457,6 +459,8 @@ export async function* runAirAppLocal(
     // Closing the inner generator is what actually kills the app: it runs the
     // `finally` in `runCommand`, which reaps the process group.
     await activeCommand?.return(null).catch(() => undefined);
-    unregisterLocalPreview(input.nodeId, owner);
+    if (registeredPreviewTarget) {
+      await unregisterLocalPreview(input.nodeId, owner, registeredPreviewTarget);
+    }
   }
 }

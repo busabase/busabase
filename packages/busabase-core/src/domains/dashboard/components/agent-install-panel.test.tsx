@@ -20,6 +20,7 @@ const plan: InstallPlanVO = {
   source: {
     owner: "busabase",
     repo: "skills",
+    ref: "main",
     subdir: "skills/kelly-email",
   },
   targetFolderSlug: "kelly-email",
@@ -60,6 +61,8 @@ describe("AgentInstallPanel", () => {
     expect(markup).toContain("npx skills add busabase/skills --skill kelly-email");
     expect(markup).not.toContain("Your agent still needs access to this space");
     expect(markup).not.toContain("Connect your agent");
+    expect(markup).not.toContain("Installs the repository&#x27;s default branch");
+    expect(markup).toMatch(/<div class="flex justify-end"><button/);
 
     const copyPromptClasses = getButtonClasses(markup, "Copy prompt");
     expect(copyPromptClasses).toContain("bg-primary");

@@ -61,23 +61,21 @@ describe("Agent prompt sidebar sections", () => {
     expect(sections.find((section) => section.name === "Content")?.items[0]?.key).toBe("doc-read");
   });
 
-  it("renders a node's custom scenario prompts (Feature 3) when metadata carries them", () => {
+  it("renders a node's custom scenario prompts (Feature 3) once they are fetched", () => {
     const { scenarios, capabilities } = buildNodeAgentPrompts(
       {
         nodeId: "nod_base_support",
         nodeName: "Customer Support Tickets",
         nodeType: "base",
         spaceId: "spc_acme",
-        metadata: {
-          agentPrompts: [
-            {
-              key: "weekly-severity-summary",
-              intent: "read-only",
-              label: "Weekly severity summary",
-              body: "Summarize tickets opened in {target} in the last 7 days, grouped by severity.",
-            },
-          ],
-        },
+        customPrompts: [
+          {
+            key: "weekly-severity-summary",
+            intent: "read-only" as const,
+            label: "Weekly severity summary",
+            body: "Summarize tickets opened in {target} in the last 7 days, grouped by severity.",
+          },
+        ],
       },
       "en",
       coreMessagesEn,

@@ -1,7 +1,9 @@
+import { useInfiniteQuery } from "@tanstack/react-query";
+import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
 import type { BaseFieldVO, BaseVO, RecordVO, ViewVO } from "busabase-contract/types";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useSearch } from "wouter";
 import { useCoreI18n } from "../../../i18n";
 import { getRecordTitle } from "../helpers/change-request";
@@ -38,23 +40,80 @@ const recordDayKey = (value: unknown): string | null => {
   return Number.isNaN(parsed.getTime()) ? null : dayKey(parsed);
 };
 
+/** Records per request within the current month's slice (server max is 100). */
+const RANGE_PAGE_SIZE = 100;
+
 export function BusaBaseCalendar({
   activeView,
   base,
+  client,
   fields,
-  records,
 }: {
   activeView: ViewVO | null;
   base: BaseVO | null;
+  client: BusabaseDashboardApiClient;
   fields: BaseFieldVO[];
-  records: RecordVO[];
 }) {
   const messages = useCoreI18n();
   const currentSearch = useSearch();
   const dateField = resolveDateField(base, fields, activeView?.config.dateFieldSlug);
-  const baseSlug = base?.slug ?? records[0]?.base.slug ?? "";
+  const baseId = base?.id ?? "";
   const today = new Date();
   const [cursor, setCursor] = useState({ year: today.getFullYear(), month: today.getMonth() });
+
+  // Build a 6-week grid starting on the Sunday on/before the 1st of the month,
+  // in LOCAL time — unchanged from before. `gridEnd` is the day AFTER the grid's
+  // last cell, so `[gridStart, gridEnd)` is exactly the 42 rendered days.
+  const firstOfMonth = new Date(cursor.year, cursor.month, 1);
+  const gridStart = new Date(firstOfMonth);
+  gridStart.setDate(1 - firstOfMonth.getDay());
+  const gridEnd = new Date(gridStart);
+  gridEnd.setDate(gridStart.getDate() + 42);
+
+  // `Date#toISOString()` converts a LOCAL instant to its exact UTC equivalent —
+  // this is what lets the server compare real timestamps with zero ambiguity
+  // about the viewer's timezone, which it never has (see the `dateRange` doc on
+  // `listRecordsPageInputSchema`). The client resolves the grid boundaries;
+  // the server just compares.
+  const rangeQuery = useInfiniteQuery({
+    enabled: Boolean(baseId) && Boolean(dateField),
+    getNextPageParam: (last: { page: number; totalPages: number }) =>
+      last.page < last.totalPages ? last.page + 1 : undefined,
+    initialPageParam: 1,
+    queryFn: ({ pageParam }) =>
+      client.listRecordsPage({
+        baseId,
+        dateRange: {
+          fieldSlug: dateField?.slug ?? "",
+          gte: gridStart.toISOString(),
+          lt: gridEnd.toISOString(),
+        },
+        page: pageParam as number,
+        pageSize: RANGE_PAGE_SIZE,
+        ...(activeView?.id ? { viewId: activeView.id } : {}),
+      }),
+    queryKey: [
+      "busabase",
+      "calendar-range",
+      baseId,
+      activeView?.id ?? "",
+      dateField?.slug ?? "",
+      gridStart.toISOString(),
+    ],
+  });
+
+  // A day cell's overflow badge ("+N") needs the TRUE count for every day in
+  // the grid, not just the first page — so this month-scoped slice is drained
+  // fully, same shape the old code used for the WHOLE Base. The difference is
+  // what it's bounded by: a real calendar month, not however large the Base
+  // has grown to. React Query gives no `data` for a not-yet-loaded queryKey
+  // (switching months changes the key), so the grid never shows a stale
+  // month's records while this runs.
+  useEffect(() => {
+    if (rangeQuery.hasNextPage && !rangeQuery.isFetchingNextPage) {
+      void rangeQuery.fetchNextPage();
+    }
+  }, [rangeQuery.hasNextPage, rangeQuery.isFetchingNextPage, rangeQuery.fetchNextPage]);
 
   if (!dateField) {
     return (
@@ -62,7 +121,14 @@ export function BusaBaseCalendar({
     );
   }
 
-  // Bucket records by day.
+  const records = (rangeQuery.data?.pages ?? []).flatMap((page) => page.records);
+  const baseSlug = base?.slug ?? records[0]?.base.slug ?? "";
+  // True until the month's slice has been fully drained — see the effect above.
+  const isLoadingMonth =
+    rangeQuery.isPending || rangeQuery.hasNextPage || rangeQuery.isFetchingNextPage;
+
+  // Bucket records by day — unchanged from before; still local time, still
+  // over whatever the current data set is (now the month's slice, not the Base).
   const recordsByDay = new Map<string, RecordVO[]>();
   for (const record of records) {
     const key = recordDayKey(record.headCommit.payload[dateField.slug]);
@@ -75,10 +141,6 @@ export function BusaBaseCalendar({
     recordsByDay.get(key)?.push(record);
   }
 
-  // Build a 6-week grid starting on the Sunday on/before the 1st of the month.
-  const firstOfMonth = new Date(cursor.year, cursor.month, 1);
-  const gridStart = new Date(firstOfMonth);
-  gridStart.setDate(1 - firstOfMonth.getDay());
   const days: Date[] = [];
   for (let i = 0; i < 42; i++) {
     const d = new Date(gridStart);
@@ -129,6 +191,11 @@ export function BusaBaseCalendar({
         >
           {messages.base.calendarToday}
         </button>
+        {/* Never silent: a spinner while the month's slice loads, so an
+            in-progress fetch can't be mistaken for a genuinely empty month. */}
+        {isLoadingMonth ? (
+          <span className="text-muted-foreground text-xs">{messages.common.loading}</span>
+        ) : null}
       </div>
 
       <div className="grid grid-cols-7 border-border/50 border-t border-l">
