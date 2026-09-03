@@ -19,13 +19,39 @@ import {
   usePromptInputAttachments,
 } from "kui/ai-elements/prompt-input";
 import { PaperclipIcon } from "lucide-react";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 
 /** 10 MB. Base64 inflates a payload by a third, and the whole prompt travels
  * as one JSON-RPC message — a cap here is what keeps a stray 200 MB video
  * from becoming a 270 MB request body nothing downstream is sized for. */
 const DEFAULT_MAX_FILE_SIZE = 10 * 1024 * 1024;
 const DEFAULT_MAX_FILES = 10;
+
+/**
+ * Text a host wants dropped into the draft *without sending it*.
+ *
+ * `id` is what makes this safe to hand in declaratively: the same `id` is
+ * applied at most once, so a re-render (or a parent that keeps passing the same
+ * object) cannot re-insert the text. Hand a fresh `id` per user action to
+ * insert again.
+ */
+export interface AcpComposerDraft {
+  id: string;
+  text: string;
+}
+
+/**
+ * Merge an insertion into whatever the user already typed.
+ *
+ * Appending on a fresh line rather than overwriting is the whole point: the
+ * draft may hold something the user typed and has not sent, and a feature that
+ * silently eats it would be worse than not offering the insertion at all.
+ * Exported for its own test — this is the rule, not an implementation detail.
+ */
+export const mergeDraft = (existing: string, addition: string): string => {
+  if (existing.trim() === "") return addition;
+  return `${existing.replace(/\s+$/, "")}\n${addition}`;
+};
 
 export interface AcpComposerProps {
   /** Called with the trimmed text, and any attachments, once the user submits. */
@@ -47,6 +73,16 @@ export interface AcpComposerProps {
   onStop?: () => void;
   placeholder?: string;
   className?: string;
+  /**
+   * Prefill, never send. busabase's "Ask Agent" hands the chosen prompt in this
+   * way so the moment before sending — the one where people actually narrow the
+   * ask ("…but only the last week") — still belongs to the user. An agent turn
+   * costs money and minutes; an accidental click must be recoverable by
+   * clearing a textbox, not by cancelling a running session.
+   */
+  draft?: AcpComposerDraft | null;
+  /** Fired once `draft` has landed in the field, so the host can retire it. */
+  onDraftApplied?: (id: string) => void;
   /** Per-file ceiling in bytes. Defaults to 10 MB. */
   maxFileSize?: number;
   /** How many files may be staged at once. Defaults to 10. */
@@ -190,10 +226,30 @@ export function AcpComposer({
   onStop,
   placeholder,
   className,
+  draft,
+  onDraftApplied,
   maxFileSize = DEFAULT_MAX_FILE_SIZE,
   maxFiles = DEFAULT_MAX_FILES,
 }: AcpComposerProps) {
   const [attachError, setAttachError] = useState<string | null>(null);
+  // The field is uncontrolled (kui's `PromptInput` reads it out of the form on
+  // submit and resets the form afterwards), so an insertion is a DOM write, not
+  // a state update. There is no React state to keep in sync — which is also why
+  // this cannot be done from outside the composer without reaching through it.
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const appliedDraftId = useRef<string | null>(null);
+
+  useEffect(() => {
+    const field = textareaRef.current;
+    if (!draft || !field || appliedDraftId.current === draft.id) return;
+    appliedDraftId.current = draft.id;
+    field.value = mergeDraft(field.value, draft.text);
+    field.focus();
+    // Caret at the end: the insertion is a starting point to edit, and landing
+    // the cursor anywhere else would make the user press End before typing.
+    field.setSelectionRange(field.value.length, field.value.length);
+    onDraftApplied?.(draft.id);
+  }, [draft, onDraftApplied]);
 
   const handleSubmit = (message: PromptInputMessage, event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -242,7 +298,7 @@ export function AcpComposer({
         </p>
       ) : null}
       <PromptInputBody>
-        <PromptInputTextarea disabled={disabled} placeholder={placeholder} />
+        <PromptInputTextarea disabled={disabled} placeholder={placeholder} ref={textareaRef} />
       </PromptInputBody>
       <PromptInputFooter>
         <AttachButton disabled={disabled} />
