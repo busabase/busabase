@@ -1,6 +1,7 @@
 "use client";
 
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
+import type { AirAppRunnerKind } from "busabase-contract/domains/airapp/contract";
 import type { NodeVO } from "busabase-contract/types";
 import { BusabaseAgentSkillButton } from "busabase-core/dashboard/agent-skill-button";
 import { GithubIcon } from "busabase-core/dashboard/brand-icons";
@@ -26,6 +27,7 @@ const BUSABASE_LOGO = "/icon.svg";
 
 interface BusabaseDashboardShellProps {
   children: ReactNode;
+  availableAirAppEngines?: AirAppRunnerKind[];
   activeChangeRequestCount?: number;
   nodes: NodeVO[];
   onSearchClick: () => void;
@@ -60,6 +62,7 @@ interface BusabaseDashboardShellProps {
  */
 export function BusabaseDashboardShell({
   activeChangeRequestCount,
+  availableAirAppEngines,
   children,
   nodes,
   onSearchClick,
@@ -219,6 +222,7 @@ export function BusabaseDashboardShell({
     <>
       <CoreDashboardShell
         activeChangeRequestCount={activeChangeRequestCount}
+        availableAirAppEngines={availableAirAppEngines}
         chrome={chrome}
         locale={locale}
         nodes={nodes}

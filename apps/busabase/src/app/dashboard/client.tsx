@@ -355,6 +355,7 @@ function DashboardClientContent({
                 ? undefined
                 : (changeRequestCountsQuery.data?.review ?? 0)
             }
+            availableAirAppEngines={availableAirAppEngines}
             nodes={nodes}
             orpc={orpc}
             onSearchClick={() => setIsSearchOpen(true)}

@@ -3,6 +3,7 @@ import { createBusabaseOpenApiClient } from "busabase-contract/api-client";
 import { busabaseContract } from "busabase-contract/contract/busabase";
 import { AGENT_EXCLUDED_MCP_TOOLS, TASK_SUPERSEDED_MCP_TOOLS } from "busabase-contract/tasks";
 import {
+  getContextEmbedOrigin,
   getContextPermissionLevel,
   getContextPermissionLevelIsCeiling,
   runWithLocalContext,
@@ -28,6 +29,9 @@ const withheldFromMcp = new Set<string>([
   ...AGENT_EXCLUDED_MCP_TOOLS,
   ...GUIDE_SUPERSEDED_MCP_TOOLS,
 ]);
+
+export const resolveLocalMcpBaseUrl = (): string =>
+  getContextEmbedOrigin() ?? "http://localhost:15419";
 
 const openApiMcpHandler = createOpenApiMcpHandler({
   // Task-level tools shared with busabase-cli and busabase-cloud, plus the guide tool — the
@@ -59,7 +63,11 @@ const openApiMcpHandler = createOpenApiMcpHandler({
   createClient: () => {
     const ceiling = getContextPermissionLevelIsCeiling() ? getContextPermissionLevel() : undefined;
     return createBusabaseOpenApiClient({
-      baseUrl: process.env.NEXT_PUBLIC_APP_URL || "http://localhost:15419",
+      // The CLI can start this prebuilt Next bundle on any loopback port.
+      // NEXT_PUBLIC_* values are inlined at build time, so using that env here
+      // sends MCP tools back to the build machine's origin instead of the
+      // server handling this request.
+      baseUrl: resolveLocalMcpBaseUrl(),
       headers: ceiling ? { [BUSABASE_RELAY_PERMISSION_LEVEL_HEADER]: ceiling } : {},
     });
   },
@@ -108,6 +116,7 @@ export const mcpHandler = async (request: Request) => {
     {
       vaultRuntimeEnv,
       localUserName: getLocalUserName(),
+      embedOrigin: new URL(request.url).origin,
       // Honour a caller-supplied credential ceiling on this MCP session — the
       // same header the tunnel forwards for a Cloud API key, and what a
       // Busabase-spawned agent now sends to cap itself at proposing rather

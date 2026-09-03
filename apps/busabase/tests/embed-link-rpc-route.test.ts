@@ -73,6 +73,7 @@ describe("Desktop RPC embed capability", () => {
       actorId: "local-user",
       spaceId: "local",
       restrictedVisibility: false,
+      embedTargetNodeId: "nod_1",
     });
 
     const response = await POST(requestWithCapability());
@@ -88,6 +89,7 @@ describe("Desktop RPC embed capability", () => {
         actorId: "local-user",
         spaceId: "local",
         restrictedVisibility: false,
+        embedTargetNodeId: "nod_1",
       },
       expect.any(Function),
     );

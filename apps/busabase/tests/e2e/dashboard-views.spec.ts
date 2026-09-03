@@ -73,11 +73,11 @@ test("activity entries link through to a working detail page", async ({ page }) 
 
 // `label` is the user-visible nav string the topbar renders (`nav.*` in
 // packages/busabase-core/src/i18n/messages.ts), not the route segment — the two
-// deliberately differ for the App Library, whose path stayed `/apps`. Renaming a
+// deliberately differ for App Launcher, whose path stays `/apps`. Renaming a
 // nav label means updating it here too.
 for (const view of [
   { label: "Agents", path: "/agents" },
-  { label: "App Library", path: "/apps" },
+  { label: "App Launcher", path: "/apps" },
   { label: "Templates", path: "/templates" },
 ]) {
   test(`${view.label} route shows the correct topbar label`, async ({ page }) => {
@@ -87,3 +87,37 @@ for (const view of [
     ).toBeVisible({ timeout: RENDER_TIMEOUT });
   });
 }
+
+test("App Launcher renders accessible launcher items without changing their links", async ({
+  page,
+}) => {
+  await page.goto("/dashboard/local/apps?demo=1", { waitUntil: "commit" });
+
+  await expect(
+    page.locator("[data-dashboard-topbar]").getByText("App Launcher", { exact: true }),
+  ).toBeVisible({ timeout: RENDER_TIMEOUT });
+  // The in-body <h1> is intentional and matches `AgentsListView` — sibling list
+  // views reached from the Space Selector all open with their own heading over a
+  // `border-b`, so content starts at the same height on every one of them.
+  await expect(page.getByRole("heading", { name: "App Launcher", exact: true })).toHaveCount(1);
+
+  const items = page.locator("[data-app-launcher-item]");
+  await expect(items.first()).toBeVisible({ timeout: RENDER_TIMEOUT });
+  expect(await items.count()).toBeGreaterThan(0);
+
+  const firstItem = items.first();
+  await expect(firstItem.locator("[data-airapp-icon]")).toBeVisible();
+  await expect(firstItem).toHaveAttribute("aria-label", /\S+/);
+  await expect(firstItem).toHaveAttribute("href", /\/airapp\/[^?]+\?.*demo=1/);
+
+  const hasHorizontalOverflow = await page.evaluate(
+    () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+  );
+  expect(hasHorizontalOverflow).toBe(false);
+
+  await firstItem.click();
+  await expect(page).toHaveURL(/\/dashboard\/local\/airapp\/[^?]+\?.*demo=1/, {
+    timeout: RENDER_TIMEOUT,
+  });
+  await expect(page.getByText(/not found/i)).toHaveCount(0);
+});

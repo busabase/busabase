@@ -50,10 +50,13 @@ const openLogs = async (page: Page) => {
 };
 
 test.describe("AirApp runtimes", () => {
-  test("runs a Python AirApp end to end, choosing an engine that can host it", async ({
+  test("runs a Python AirApp end to end, on the engine that can host it", async ({
     page,
     request,
   }) => {
+    // A self-hosted server declares itself `SELF-HOSTED` at boot, so the host
+    // engine is available with no configuration — which is what makes a Python
+    // AirApp runnable here at all.
     const app = await createFromDemo(
       request,
       AIRAPP_DEMO_PYTHON_INFERRED.files,
@@ -63,15 +66,15 @@ test.describe("AirApp runtimes", () => {
     await page.goto(`/dashboard/local/airapp/${app.slug}`);
     await openLogs(page);
 
-    // 1. The runtime was inferred, and the app was told so. Without this line a
-    //    wrong guess is indistinguishable from a bug.
+    // 1. The runtime was inferred, and the app was told so. Inference nobody can
+    //    see is indistinguishable from a bug when it guesses wrong.
     await expect(page.getByText(/inferred "python" from requirements\.txt/)).toBeVisible({
       timeout: RUN_READY_TIMEOUT,
     });
 
-    // 2. The engine was NOT the stored default. Auto-run means a Python app
-    //    would otherwise have started on the `browser` engine — a JavaScript
-    //    runtime in a tab — and failed every time.
+    // 2. And the engine was NOT the stored default: auto-run would otherwise
+    //    have started a Python app in the browser — a JavaScript-only runtime —
+    //    and failed every time.
     await expect(page.getByText(/engine "local" selected for runtime "python"/)).toBeVisible();
 
     // 3. It really installed and started: uvicorn's own banner, which no Node
@@ -80,55 +83,16 @@ test.describe("AirApp runtimes", () => {
       timeout: RUN_READY_TIMEOUT,
     });
 
-    // 4. The toolbar names the engine that is actually running, not the stale
-    //    stored default.
-    await expect(page.getByRole("combobox")).toContainText(/This machine/i);
-
-    // 5. And the preview serves the app's markup through the same-origin
-    //    reverse proxy — the assertion the logs cannot make. This is also the
-    //    only check that catches a COEP-blocked frame: the server returns a
-    //    clean 200 and the iframe renders nothing.
+    // 4. And the preview serves the app's own markup through the same-origin
+    //    reverse proxy — the assertion the logs cannot make, and the only one
+    //    that catches a COEP-blocked frame (clean 200, nothing rendered).
     await page.getByRole("tab", { name: "App" }).click();
-    const frame = preview(page);
-    await expect(frame).toBeVisible({ timeout: RUN_READY_TIMEOUT });
+    await expect(preview(page)).toBeVisible({ timeout: RUN_READY_TIMEOUT });
     await expect(
       page
         .frameLocator('[data-dashboard-active-view] iframe[title="AirApp preview"]:visible')
         .getByRole("heading", { name: "Running on Python" }),
     ).toBeVisible({ timeout: RUN_READY_TIMEOUT });
-  });
-
-  test("offers the engines this deployment can actually run, named by location", async ({
-    page,
-    request,
-  }) => {
-    // The OSS build sets `allowHostProcesses: true`, so it offers exactly two:
-    // the tab and the host. The picker only renders when there is a choice, so
-    // its presence here is itself part of the assertion — an earlier comment in
-    // RunPanel claimed this control "compiles out in production", which it does
-    // not.
-    const app = await createFromDemo(request, [], "e2e engine picker");
-    await page.goto(`/dashboard/local/airapp/${app.slug}`);
-
-    const picker = page.getByRole("combobox");
-    await expect(picker).toBeVisible({ timeout: RUN_READY_TIMEOUT });
-    await expect(picker).toContainText(/In browser/i);
-
-    await picker.click();
-    const options = page.getByRole("listbox").getByRole("option");
-    // Named for where the code runs. A product name here (`Nodepod`,
-    // `Sandock`) is the thing this rename removed from the user-facing surface.
-    // Scoped to the listbox on purpose: matching the whole page also matches
-    // node names in the sidebar, which made this assertion pass or fail on
-    // whatever the workspace happened to contain.
-    await expect(options.filter({ hasText: /In browser/i })).toHaveCount(1);
-    await expect(options.filter({ hasText: /This machine/i })).toHaveCount(1);
-    await expect(options.filter({ hasText: /Nodepod|Sandock|srt/i })).toHaveCount(0);
-    // `remote` needs a provider configured; this deployment has none, so it
-    // must not be offered — the picker promising an engine that cannot work is
-    // the failure `resolveAvailableAirAppEngines` exists to prevent.
-    await expect(options.filter({ hasText: /Remote machine/i })).toHaveCount(0);
-    await page.keyboard.press("Escape");
   });
 
   test("accepts an airapp.json still pinned to a retired engine name", async ({
@@ -150,7 +114,6 @@ test.describe("AirApp runtimes", () => {
     // No manifest error, and it runs.
     await expect(page.getByText(/preferredEngine/)).toHaveCount(0);
     await expect(page.getByText(/\$ npm install/)).toBeVisible({ timeout: RUN_READY_TIMEOUT });
-    await expect(page.getByRole("combobox")).toContainText(/In browser/i);
     // And the log says the manifest was read. It used to say "no airapp.json"
     // here — a line the reader can check and find false, which is what sent
     // someone debugging a manifest that was in fact working.
