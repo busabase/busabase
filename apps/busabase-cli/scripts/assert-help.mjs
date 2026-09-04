@@ -45,6 +45,9 @@ const createChangeRequestHelp = execFileSync(
 );
 
 const required = [
+  "login [--device-code]",
+  "[--no-wait] [--resume-code <code>]",
+  "qrcode [-o, --out-file <path>] [--ascii]",
   "export -o, --out-dir <dir> [--name <name>] [--dry-run]",
   "nodes create --type <folder|base|skill|drive|airapp|file|doc|form|whiteboard|workflow|html>",
   "bases create-change-request --base-id <id>",

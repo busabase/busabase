@@ -727,8 +727,8 @@ async function repairResourceOwnership(
     return { repair, expected, fields: additiveFieldsFor(detail, expected) };
   });
 
-  // One ChangeRequest per added field, each subject to the same approval-first
-  // rule as any other change. A pending one is not a failure — it is the Space
+  // One ChangeRequest per added field, each subject to the same permission-aware
+  // merge rule as any other change. A pending one is not a failure — it is the Space
   // admin's turn — so report which requests are waiting instead of retrying.
   const pendingFieldRequests: string[] = [];
   for (const migration of migrations) {
@@ -858,7 +858,7 @@ async function provisionOnce(
   }
 
   // `autoMerge: true` still yields a pending ChangeRequest when the actor lacks
-  // write access — that is approval-first working as designed, not a failure.
+  // write access — that is the permission model working as designed, not a failure.
   if (changeRequest?.status !== "merged") {
     throw setupError(
       "SETUP_PENDING",

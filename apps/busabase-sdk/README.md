@@ -120,7 +120,7 @@ An app that ships its own AirApp node inside the Folder declares it too — `air
 
 **Bases evolve by appending fields.** A live Base whose fields are a strict *prefix* of the declaration is an older schema of yours: the missing suffix is added, one approval-gated `bases.fieldChangeRequest` per field, and anything left unapproved surfaces as `SETUP_PENDING` naming the requests. A field renamed, retyped, reordered, or removed is not an upgrade this can reason about, so it refuses rather than guessing which shape is right.
 
-Failures are an `AirAppSetupError` carrying a `code`: `SETUP_REQUIRED` (offer to initialize), `SETUP_PENDING` (submitted, awaiting approval — approval-first working as designed), `SETUP_CONFLICT`, `SETUP_PERMISSION`, `SCHEMA_INCOMPLETE`. `message` keeps the `"CODE: detail"` shape so code that parses the prefix keeps working.
+Failures are an `AirAppSetupError` carrying a `code`: `SETUP_REQUIRED` (offer to initialize), `SETUP_PENDING` (submitted, awaiting approval — the permission model working as designed), `SETUP_CONFLICT`, `SETUP_PERMISSION`, `SCHEMA_INCOMPLETE`. `message` keeps the `"CODE: detail"` shape so code that parses the prefix keeps working.
 
 ### `busabase-sdk/airapp-gate` — the connect UI (browser)
 

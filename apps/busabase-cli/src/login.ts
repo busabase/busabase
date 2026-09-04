@@ -21,6 +21,13 @@ import { activeCredentialPath, loadDotEnvFile, writeDotEnvFile } from "./config-
  *
  * Both end the same way: verify against `/api/v1/auth`, pick the target space, and
  * write `BUSABASE_BASE_URL` / `BUSABASE_API_KEY` / `BUSABASE_SPACE_ID`.
+ *
+ * Device authorization additionally splits into a **two-turn agent flow**:
+ * `--no-wait` starts it and returns the verification URL plus a resume code at
+ * once (no blocking, no credential written), and `--resume-code <code>` finishes
+ * it in a later invocation. This exists because many agent harnesses only relay
+ * a turn's FINAL message — a URL printed mid-command while this process blocks
+ * polling never reaches the user, so the blocking flow silently times out.
  */
 
 const OAUTH_TIMEOUT_MS = 5 * 60 * 1000;
@@ -45,6 +52,12 @@ export interface LoginOptions {
   oauth?: boolean;
   /** `--no-browser` sets this false: print the URL instead of opening a browser. */
   browser: boolean;
+  /** `--no-wait`: start a device sign-in and return immediately with a resume code. */
+  noWait?: boolean;
+  /** `--resume-code <code>`: finish a device sign-in started earlier with `--no-wait`. */
+  resumeCode?: string;
+  /** Active `--profile`, echoed into agent-facing resume/recovery commands only. */
+  profile?: string;
 }
 
 export interface LogoutOptions {
@@ -309,11 +322,21 @@ async function readDeviceResponse(response: Response): Promise<DeviceTokenRespon
   return (await response.json().catch(() => ({}))) as DeviceTokenResponse;
 }
 
-/** RFC 8628 login: no local callback and no credential ever written to output. */
-async function deviceLogin(
-  baseUrl: string,
-  useBrowser: boolean,
-): Promise<{ token: string; apiKeyExpiresAt?: string }> {
+/** Fallback lifetime for a device code when the server does not declare one. */
+const DEVICE_CODE_TTL_SECONDS = 15 * 60;
+
+interface DeviceAuthorization {
+  deviceCode: string;
+  userCode: string;
+  verificationUri: string;
+  /** `verification_uri_complete` when given — the link to actually open. */
+  verificationUrl: string;
+  expiresInSeconds: number;
+  intervalSeconds: number;
+}
+
+/** Step 1 of RFC 8628: ask the server for a device code + verification URL. */
+async function requestDeviceAuthorization(baseUrl: string): Promise<DeviceAuthorization> {
   const origin = new URL(baseUrl).origin;
   let codeResponse: Response;
   try {
@@ -340,19 +363,31 @@ async function deviceLogin(
   if (!code.device_code || !code.user_code || !code.verification_uri) {
     throw new Error("Device sign-in returned an incomplete authorization response.");
   }
+  return {
+    deviceCode: code.device_code,
+    userCode: code.user_code,
+    verificationUri: code.verification_uri,
+    verificationUrl: code.verification_uri_complete ?? code.verification_uri,
+    expiresInSeconds: Math.max(1, code.expires_in ?? DEVICE_CODE_TTL_SECONDS),
+    intervalSeconds: Math.max(1, code.interval ?? 5),
+  };
+}
 
-  const verificationUrl = code.verification_uri_complete ?? code.verification_uri;
-  say("");
-  say("Authorize Busabase CLI in any browser:");
-  say(`  ${code.verification_uri}`);
-  say(`  Code: ${code.user_code}`);
-  say("");
-  if (useBrowser) openBrowser(verificationUrl);
-  say("Waiting for authorization…");
-
-  const expiresInSeconds = Math.max(1, code.expires_in ?? 15 * 60);
-  const deadline = Date.now() + expiresInSeconds * 1000;
-  let intervalSeconds = Math.max(1, code.interval ?? 5);
+/**
+ * Step 2 of RFC 8628: poll until the user approves, then finalize into an API
+ * key. Callable on its own for `--resume-code` (the device code outlives this
+ * process server-side, so resuming needs no new endpoint). `restartCommand`
+ * names the exact command to rerun once a code has expired — a resumed sign-in
+ * must not tell the user to plain "run login" and silently drop their flags.
+ */
+async function pollDeviceApiKey(
+  baseUrl: string,
+  auth: Pick<DeviceAuthorization, "deviceCode" | "intervalSeconds" | "expiresInSeconds">,
+  restartCommand: string,
+): Promise<{ token: string; apiKeyExpiresAt?: string }> {
+  const origin = new URL(baseUrl).origin;
+  const deadline = Date.now() + auth.expiresInSeconds * 1000;
+  let intervalSeconds = auth.intervalSeconds;
   let consecutiveNetworkFailures = 0;
   // The CLI's poll and the browser's approve are independent requests with no session
   // affinity; a just-approved code can briefly still read back as pending. Purely
@@ -371,7 +406,7 @@ async function deviceLogin(
         headers: { "content-type": "application/json", origin },
         body: JSON.stringify({
           grant_type: "urn:ietf:params:oauth:grant-type:device_code",
-          device_code: code.device_code,
+          device_code: auth.deviceCode,
           client_id: BUSABASE_CLI_CLIENT_ID,
         }),
       });
@@ -380,7 +415,7 @@ async function deviceLogin(
       consecutiveNetworkFailures += 1;
       if (consecutiveNetworkFailures >= 3) {
         throw new Error(
-          "Device sign-in lost its network connection. Check connectivity and run `busabase-cli login` again.",
+          `Device sign-in lost its network connection. Check connectivity and run \`${restartCommand}\` again.`,
         );
       }
       continue;
@@ -394,7 +429,7 @@ async function deviceLogin(
           authorization: `Bearer ${payload.access_token}`,
           "content-type": "application/json",
         },
-        body: JSON.stringify({ deviceCode: code.device_code }),
+        body: JSON.stringify({ deviceCode: auth.deviceCode }),
       });
       const finalized = (await finalizeResponse.json().catch(() => ({}))) as {
         apiKey?: string;
@@ -434,7 +469,7 @@ async function deviceLogin(
       case "access_denied":
         throw new Error("Device sign-in was denied. No credential was saved.");
       case "expired_token":
-        throw new Error("The device code expired. Run `busabase-cli login` to request a new one.");
+        throw new Error(`The device code expired. Run \`${restartCommand}\` to request a new one.`);
       default:
         throw new Error(
           `Device sign-in failed${payload.error_description ? `: ${payload.error_description}` : ` (HTTP ${tokenResponse.status})`}.`,
@@ -442,7 +477,34 @@ async function deviceLogin(
     }
   }
 
-  throw new Error("The device code expired. Run `busabase-cli login` to request a new one.");
+  throw new Error(`The device code expired. Run \`${restartCommand}\` to request a new one.`);
+}
+
+/** RFC 8628 login: no local callback and no credential ever written to output. */
+async function deviceLogin(
+  baseUrl: string,
+  useBrowser: boolean,
+  profile?: string,
+): Promise<{ token: string; apiKeyExpiresAt?: string }> {
+  const auth = await requestDeviceAuthorization(baseUrl);
+  say("");
+  say("Authorize Busabase CLI in any browser:");
+  say(`  ${auth.verificationUri}`);
+  say(`  Code: ${auth.userCode}`);
+  say("");
+  if (useBrowser) openBrowser(auth.verificationUrl);
+  if (!isInteractive()) {
+    // Piped / agent harness. If only a turn's final message reaches the user,
+    // the URL above never will — point the agent at the two-turn flow instead.
+    say(
+      `[AI agent] This command blocks (up to ${Math.round(auth.expiresInSeconds / 60)} minutes) until the user approves in a browser. ` +
+        "If your harness only delivers a turn's final message, the user will never see the URL above. Instead run " +
+        `\`${buildLoginCommand(baseUrl, profile, "--no-wait --output json")}\`, send verification_url to the user as your final message, ` +
+        "end the turn, and finish later with `--resume-code`. Do not restart login after showing the URL — a restart invalidates it.",
+    );
+  }
+  say("Waiting for authorization…");
+  return pollDeviceApiKey(baseUrl, auth, buildLoginCommand(baseUrl, profile, ""));
 }
 
 /** Exchange a rotating refresh token for a new OAuth token set. */
@@ -501,6 +563,69 @@ function pickSpaceId(verify: AuthVerify, preselected?: string): string | undefin
   return fallback;
 }
 
+// ── Agent-facing recovery commands ────────────────────────────────────────────
+
+/**
+ * Assemble a copy-paste-runnable `busabase-cli login …` for THIS connection —
+ * non-default base URL and active profile included — so an agent (or the JSON
+ * error envelope) never hands the user a command that targets the wrong host
+ * or the wrong account.
+ */
+export const buildLoginCommand = (
+  baseUrl: string,
+  profile: string | undefined,
+  suffix: string,
+): string => {
+  const parts = ["busabase-cli login"];
+  if (normalizeBaseUrl(baseUrl) !== normalizeBaseUrl(DEFAULT_BASE_URL)) {
+    parts.push(`--base-url ${normalizeBaseUrl(baseUrl)}`);
+  }
+  if (profile) parts.push(`--profile ${profile}`);
+  if (suffix) parts.push(suffix);
+  return parts.join(" ");
+};
+
+/**
+ * Machine-readable next step for an auth failure, attached to the JSON error
+ * envelope (the human prose in `explainError` stays as-is). Written for an
+ * agent recovering without a terminal: the two-turn device flow is the one
+ * path that works when only a turn's final message reaches the user.
+ */
+export function authRecoveryHint(
+  code: "UNAUTHORIZED" | "FORBIDDEN",
+  baseUrl: string,
+  profile?: string,
+  endpoint?: { procedureId?: string; level?: string; declared?: boolean },
+): string {
+  if (code === "FORBIDDEN") {
+    // When the failing command maps to one contract endpoint, the required level
+    // comes from the same policy table the server gates on — so say which level,
+    // instead of "ask an admin for more" and leaving them to guess how much more.
+    const needed =
+      endpoint?.procedureId && endpoint.level
+        ? `\`${endpoint.procedureId}\` requires an API key at level \`${endpoint.level}\`${
+            endpoint.declared ? "" : " (no explicit policy for it; the server fails closed to this)"
+          }. Check yours with \`busabase-cli whoami\`. `
+        : "";
+    return (
+      "The credential was accepted but lacks permission for this action. " +
+      needed +
+      "Confirm the target space (`busabase-cli space list`, then `busabase-cli space use <id>`), " +
+      "or ask a space admin to issue a key at the level above. Note a `changeRequest`-level key " +
+      "can propose but deliberately cannot merge its own proposal."
+    );
+  }
+  const start = buildLoginCommand(baseUrl, profile, "--no-wait --output json");
+  const resume = buildLoginCommand(baseUrl, profile, "--resume-code <resume_code>");
+  return (
+    `Run \`${start}\` to get verification_url and resume_code. Show verification_url to the user ` +
+    "EXACTLY as returned (an opaque string — never re-encode, trim, or re-wrap it) and end this " +
+    `turn so they can approve it on any device. After they confirm, run \`${resume}\` to finish ` +
+    "signing in, then retry this command. Do not restart login after showing the URL — a restart " +
+    "invalidates it. For headless automation, pass --api-key <token> from the environment instead."
+  );
+}
+
 // ── Entry points ──────────────────────────────────────────────────────────────
 
 interface LoginTarget {
@@ -515,8 +640,8 @@ interface LoginTarget {
  */
 async function chooseTarget(): Promise<LoginTarget> {
   const cloud = normalizeBaseUrl(DEFAULT_BASE_URL);
-  say("Busabase is an approval-first database and knowledge base for AI agents.");
-  say("Agents propose changes; humans review and merge what becomes trusted data.");
+  say("Busabase is your AI agents' database, knowledge base, apps library, and skills registry.");
+  say("Every change goes in as a change request, so it keeps a message, a diff, and a history.");
   say("This login connects the CLI to the Busabase instance you want to use.");
   say("");
   say("How should this CLI connect?");
@@ -559,9 +684,41 @@ export async function runLogin(options: LoginOptions): Promise<Record<string, st
   let baseUrl = normalizeBaseUrl(options.baseUrl);
   let apiKey = options.apiKey;
 
+  if (options.noWait && apiKey) {
+    throw new Error("--no-wait starts a device sign-in and cannot be combined with --api-key.");
+  }
+  if (options.noWait && options.resumeCode) {
+    throw new Error(
+      "--no-wait and --resume-code are the two halves of one sign-in — pass one, not both.",
+    );
+  }
+
+  // Turn 1 of the two-turn agent flow: start device authorization and hand back
+  // the verification URL plus a resume code, WITHOUT blocking and WITHOUT
+  // writing any credential. Turn 2 is `--resume-code` below.
+  if (options.noWait) {
+    const auth = await requestDeviceAuthorization(baseUrl);
+    const resume = buildLoginCommand(baseUrl, options.profile, `--resume-code ${auth.deviceCode}`);
+    return {
+      status: "authorization pending",
+      verification_url: auth.verificationUrl,
+      user_code: auth.userCode,
+      resume_code: auth.deviceCode,
+      expires_in: String(auth.expiresInSeconds),
+      hint:
+        "Show verification_url to the user EXACTLY as returned — it is an opaque string; never " +
+        "re-encode, trim, or re-wrap it — then END THIS TURN so they can approve it on any device " +
+        "(a QR code helps: `busabase-cli qrcode <verification_url> --out-file qr.png`). After the " +
+        `user confirms, run \`${resume}\` to finish signing in. Do NOT start a new login in the ` +
+        "meantime — a fresh login invalidates this link.",
+    };
+  }
+
   // Flags are express lanes; otherwise the interactive menu picks base URL + method.
-  let method: LoginTarget["method"];
-  if (apiKey) {
+  let method: LoginTarget["method"] | "device-resume";
+  if (options.resumeCode) {
+    method = "device-resume";
+  } else if (apiKey) {
     method = "api-key";
   } else if (options.deviceCode) {
     method = "device";
@@ -601,7 +758,22 @@ export async function runLogin(options: LoginOptions): Promise<Record<string, st
   let apiKeyExpiresAt: string | undefined;
   let refreshTokenValue: string | undefined;
   if (method === "device") {
-    const result = await deviceLogin(baseUrl, options.browser);
+    const result = await deviceLogin(baseUrl, options.browser, options.profile);
+    token = result.token;
+    apiKeyExpiresAt = result.apiKeyExpiresAt;
+  } else if (method === "device-resume") {
+    // Turn 2: the device code from `--no-wait` is still pending server-side —
+    // re-enter the poll loop with it, then persist exactly like a fresh login.
+    say("Resuming device sign-in…");
+    const result = await pollDeviceApiKey(
+      baseUrl,
+      {
+        deviceCode: options.resumeCode ?? "",
+        intervalSeconds: 5,
+        expiresInSeconds: DEVICE_CODE_TTL_SECONDS,
+      },
+      buildLoginCommand(baseUrl, options.profile, "--no-wait"),
+    );
     token = result.token;
     apiKeyExpiresAt = result.apiKeyExpiresAt;
   } else if (method === "loopback-oauth") {
@@ -637,8 +809,13 @@ export async function runLogin(options: LoginOptions): Promise<Record<string, st
 
   return {
     status: "signed in",
-    method: method === "loopback-oauth" ? "oauth" : method,
-    credentialType: method === "device" ? "api_key" : expiresAt ? "oauth" : "api_key",
+    method: method === "loopback-oauth" ? "oauth" : method === "device-resume" ? "device" : method,
+    credentialType:
+      method === "device" || method === "device-resume"
+        ? "api_key"
+        : expiresAt
+          ? "oauth"
+          : "api_key",
     user: verify.user?.email ?? verify.user?.name ?? verify.user?.id ?? "(unknown)",
     space: spaceId ?? "(server default)",
     // Surfaced so a non-interactive caller (typically an agent) can see whether the

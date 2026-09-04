@@ -6,7 +6,6 @@ import { BUSABASE_TASKS, TASK_SUPERSEDED_MCP_TOOLS } from "busabase-contract/tas
 import {
   type BusabaseClient,
   type ResolvedConfig as BusabaseConfig,
-  cloudContract,
   createBusabaseClient,
   DEFAULT_BASE_URL,
   getRecordByField,
@@ -33,15 +32,31 @@ import {
 import { runBackup, runRestore } from "./backup/commands.js";
 import { banner } from "./banner.js";
 import {
+  activeCredentialTarget,
+  isMultiProfile,
   loadConfigFile,
   loadDotEnvFile,
   resolveCredentialTarget,
   setActiveCredentialTarget,
 } from "./config-file.js";
+import {
+  type ContractProcedure,
+  contractProcedures,
+  kebab,
+  matchRoute,
+} from "./contract-catalog.js";
+import {
+  DRY_RUN_NO_WRITE_NOTE,
+  DryRunInterception,
+  dryRunFetch,
+  observeRequests,
+  renderDryRunPlan,
+} from "./dry-run.js";
 import { CliOutcomeError, classifyError, EXIT_CODES, errorEnvelope, toIssues } from "./errors.js";
 import { type OutputFormat, render, slim } from "./format.js";
 import {
   assertCredentialNotExpired,
+  authRecoveryHint,
   maybeAutoRefresh,
   runLogin,
   runLogout,
@@ -50,7 +65,24 @@ import {
 import { type CheckLayer, runCheck } from "./package/check.js";
 import { runExport, runIndex, runInstall } from "./package/commands.js";
 import { paginateAll } from "./paginate.js";
+import {
+  QR_DEFAULT_SIZE,
+  QR_DISPLAY_HINT,
+  QR_MAX_SIZE,
+  QR_MIN_SIZE,
+  renderQrAscii,
+  safeQrOutputPath,
+  writeQrPng,
+} from "./qrcode-command.js";
 import { withRetry } from "./retry.js";
+import {
+  describeEndpoint,
+  listEndpoints,
+  renderEndpoint,
+  renderList,
+  requiredLevelFor,
+  sampleEndpointId,
+} from "./schema-command.js";
 import { registerTaskCommands } from "./task-command.js";
 import { findChangeRequestId, waitForChangeRequest } from "./wait.js";
 
@@ -315,10 +347,10 @@ function parseJsonValue(raw: string, flagName: string): unknown {
  * Render a validation error's per-issue detail as `path: message`.
  *
  * Load-bearing, not cosmetic: a schema that refuses a field explains WHY in the
- * issue message (e.g. "`autoMerge` is not accepted here: deleting a field
- * soft-deletes its stored values with it… Omit the flag."). Without this the
- * caller sees only the generic envelope "Input validation failed" and is no
- * better off than when the field was silently dropped.
+ * issue message (e.g. "deleteMode: Invalid option: expected \"archive\"" — hard
+ * delete after retention was never implemented). Without this the caller sees
+ * only the generic envelope "Input validation failed" and is no better off than
+ * when the field was silently dropped.
  */
 function formatIssues(issues: unknown): string | undefined {
   const parsed = toIssues(issues);
@@ -489,6 +521,14 @@ async function putTextCommand(client: BusabaseClient, opts: OptionValues) {
 interface CliState {
   /** Last config a command resolved — lets `runCli` explain transport errors with the real target. */
   config?: ResolvedConfig;
+  /**
+   * Contract id of the endpoint the running command calls (`records.changeRequest`),
+   * when it maps to exactly one. Set by the generated leaves; lets a `403` name the
+   * permission level this specific call needed instead of giving generic advice.
+   */
+  procedureId?: string;
+  /** Method + path of the last request sent — resolves the endpoint behind a task command. */
+  lastRequest?: { method: string; pathname: string };
 }
 
 type Handler = (
@@ -530,14 +570,34 @@ function runAction(state: CliState, handler: Handler) {
     if (refreshedToken) config.apiKey = refreshedToken;
     state.config = config;
     assertCredentialNotExpired(config.apiKey);
+    // Outermost wrapper, so an interception never reaches `withRetry` and can
+    // never be mistaken for a transient failure worth repeating.
+    const dryRun = Boolean(opts.dryRun);
+    config.fetch = observeRequests(config.fetch ?? fetch, (seen) => {
+      state.lastRequest = seen;
+    });
+    if (dryRun) config.fetch = dryRunFetch(config.fetch);
     const client = createBusabaseClient(config);
-    if (opts.all) {
-      await streamAllPages(client, opts, config, handler);
-      return;
+    try {
+      if (opts.all) {
+        await streamAllPages(client, opts, config, handler);
+        return;
+      }
+      const result = await handler(client, opts, config);
+      console.log(render(opts.slim ? slim(result) : result, config.output));
+      if (dryRun) console.error(DRY_RUN_NO_WRITE_NOTE);
+      if (opts.wait) await awaitReview(client, opts, config, result);
+    } catch (error) {
+      if (!(error instanceof DryRunInterception)) throw error;
+      // A suppressed write is a successful dry run, not a failed command: the
+      // plan goes to stdout (it is the result the caller asked for) and the exit
+      // code stays 0 so a script can branch on the real thing failing.
+      console.log(
+        config.output === "json"
+          ? render({ dryRun: true, wouldSend: error.plan }, config.output)
+          : renderDryRunPlan(error.plan),
+      );
     }
-    const result = await handler(client, opts, config);
-    console.log(render(opts.slim ? slim(result) : result, config.output));
-    if (opts.wait) await awaitReview(client, opts, config, result);
   };
 }
 
@@ -682,21 +742,10 @@ export function pkgVersion(): string {
 // its group already has a same-named command, or when it is a nicer-named alias
 // of a curated one (GENERATED_SKIP).
 
-/** camelCase → kebab-case for flag and command names (createChangeRequest → create-change-request). */
-const kebab = (value: string): string => value.replace(/([a-z0-9])([A-Z])/g, "$1-$2").toLowerCase();
-
-type ContractProcedure = {
-  "~orpc": {
-    route: { method: string; path: string; summary?: string; tags?: string[] };
-    inputSchema?: unknown;
-  };
-};
-
-const isProcedure = (node: unknown): node is ContractProcedure =>
-  typeof node === "object" &&
-  node !== null &&
-  typeof (node as { "~orpc"?: { route?: { method?: unknown } } })["~orpc"]?.route?.method ===
-    "string";
+// `kebab`, `ContractProcedure` and the contract walk live in ./contract-catalog.js
+// so the generated command tree and `busabase-cli schema` describe the same set of
+// endpoints — two independent walkers would drift, and the drift only shows up when
+// someone trusts the wrong one.
 
 type GenFlagKind = "string" | "number" | "boolean" | "enum" | "json";
 interface GenField {
@@ -889,6 +938,9 @@ const GENERATED_SKIP = new Set<string>([
   // consolidation.
 ]);
 
+/** Routes that change nothing — they run for real under `--dry-run`, so no flag is offered. */
+const READ_ROUTE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+
 /** Walk `cloudContract` and register a leaf command per procedure not already covered by hand. */
 function registerGeneratedCommands(program: Command, state: CliState): void {
   const getGroup = (displayName: string, tag?: string): Command =>
@@ -980,9 +1032,20 @@ function registerGeneratedCommands(program: Command, state: CliState): void {
       }
     }
     addGlobalFlags(leaf);
-    leaf.addHelpText("after", `\nOpenAPI: ${route.method} ${route.path}`);
+    // Only where it means something: a GET changes nothing, so offering to
+    // suppress its write would advertise a guarantee with no content.
+    if (!READ_ROUTE_METHODS.has(route.method.toUpperCase())) {
+      leaf.option("--dry-run", "print the request this would send and send nothing");
+    }
+    const procedureId = [...navPath, procKey].join(".");
+    leaf.addHelpText(
+      "after",
+      `\nOpenAPI: ${route.method} ${route.path}\nRequires API key level: ${requiredLevelFor(procedureId).level}`,
+    );
     leaf.action(
       runAction(state, (client, opts) => {
+        // Recorded before the call so a 403 can name this endpoint's required level.
+        state.procedureId = procedureId;
         let input: unknown = {};
         for (const f of fields) {
           if (f.pinned !== undefined) {
@@ -1008,27 +1071,16 @@ function registerGeneratedCommands(program: Command, state: CliState): void {
     );
   };
 
-  const walk = (node: Record<string, unknown>, navPath: string[]): void => {
-    for (const key of Object.keys(node)) {
-      if (key === "~orpc") continue;
-      const child = node[key];
-      const id = [...navPath, key].join(".");
-      if (isProcedure(child)) {
-        if (GENERATED_SKIP.has(id)) continue;
-        // navPath[0] is always the top-level group; any deeper segments (nested
-        // contract groups, e.g. nodes.principals.list) are folded into the leaf
-        // name by addLeaf rather than becoming a third command level.
-        const parent = navPath.length
-          ? getGroup(kebab(navPath[0]), child["~orpc"].route.tags?.[0])
-          : program;
-        addLeaf(parent, navPath, key, child);
-      } else if (child && typeof child === "object") {
-        walk(child as Record<string, unknown>, [...navPath, key]);
-      }
-    }
-  };
-
-  walk(cloudContract as unknown as Record<string, unknown>, []);
+  for (const { id, navPath, key, proc } of contractProcedures()) {
+    if (GENERATED_SKIP.has(id)) continue;
+    // navPath[0] is always the top-level group; any deeper segments (nested
+    // contract groups, e.g. nodes.principals.list) are folded into the leaf
+    // name by addLeaf rather than becoming a third command level.
+    const parent = navPath.length
+      ? getGroup(kebab(navPath[0]), proc["~orpc"].route.tags?.[0])
+      : program;
+    addLeaf(parent, navPath, key, proc);
+  }
 }
 
 /**
@@ -1127,13 +1179,56 @@ export function buildProgram(state: CliState = {}): Command {
       runAction(state, (_client, _opts, config) => rawFetch(config, "GET", "/api/v1/openapi.json")),
     );
 
+  addGlobalFlags(program.command("schema"))
+    .argument("[endpoint...]", "contract id, e.g. `bases.list` or `bases list`; omit to list all")
+    .description("Print one endpoint's input/output schema — offline, no credential")
+    .addOption(
+      new Option("--io <half>", "print only one half of the schema").choices(["input", "output"]),
+    )
+    .addHelpText(
+      "after",
+      `
+Answers "what do I send, and what comes back" without fetching anything. The
+contract is compiled into this CLI, so \`schema\` works offline and unauthenticated.
+
+Prefer it over \`busabase-cli openapi\`: that returns the WHOLE document — 936 KB
+across 103 endpoints as of 2026-09-04, with every type inlined per endpoint — so
+reading one endpoint's arguments out of it costs roughly 234k tokens. One
+endpoint through \`schema\` is a few KB.
+
+  busabase-cli schema                                 # every endpoint: id, method, path
+  busabase-cli schema ${sampleEndpointId()}                       # input + output schema
+  busabase-cli schema records.changeRequest --io input  # just what to send
+  busabase-cli schema records list --output json       # machine-readable
+
+Ids are the contract path. \`schema\` also accepts the space-separated and kebab
+spellings, so you can paste back whatever you saw.`,
+    )
+    .action((endpoint: string[], _opts: OptionValues, cmd: Command) => {
+      const opts = cmd.optsWithGlobals();
+      const config = resolveConfig(opts);
+      state.config = config;
+      const io = opts.io as "input" | "output" | undefined;
+      if (!endpoint || endpoint.length === 0) {
+        const entries = listEndpoints();
+        console.log(
+          config.output === "json" ? render(entries, config.output) : renderList(entries),
+        );
+        return;
+      }
+      const described = describeEndpoint(endpoint.join("."), io);
+      console.log(
+        config.output === "json" ? render(described, config.output) : renderEndpoint(described),
+      );
+    });
+
   addGlobalFlags(program.command("whoami"))
     .description("Active space, user, and membership")
     .action(runAction(state, (client) => client.auth.verify()));
 
   addGlobalFlags(program.command("guide"))
     .argument("[topic]", "which guide to read; omit to list the topics this server serves")
-    .description("Read the Busabase operating manual (approval-first rules, AirApp contract)")
+    .description("Read the Busabase operating manual (workspace conventions, AirApp contract)")
     .addHelpText(
       "after",
       `
@@ -1142,7 +1237,7 @@ expects, which no flag or schema can express on its own.
 
 Examples:
   busabase-cli guide                 # what is available here
-  busabase-cli guide workspace       # the approval-first workflow
+  busabase-cli guide workspace       # the change-request workflow
   busabase-cli guide airapp          # REQUIRED before writing any AirApp file`,
     )
     .action(async (topic: string | undefined, _opts: OptionValues, cmd: Command) => {
@@ -1172,11 +1267,16 @@ Examples:
     .option("--oauth", "legacy same-machine OAuth callback flow")
     .option("--no-browser", "print the sign-in URL instead of opening a browser")
     .option("--refresh", "rotate the saved OAuth token set (no browser, no re-login)")
+    .option(
+      "--no-wait",
+      "start a device sign-in and return verification_url + resume_code at once (for agents)",
+    )
+    .option("--resume-code <code>", "finish a device sign-in started earlier with --no-wait")
     .addHelpText(
       "after",
       `
-Busabase is an approval-first database and knowledge base for AI agents: agents
-propose changes, humans review and merge what becomes trusted data.
+Busabase is your AI agents' database, knowledge base, apps library, and skills registry.
+Every change goes in as a change request, so it keeps a message, a diff, and a history.
 
 Run interactively, login explains the connection choices and writes the selected
 Busabase instance to ~/.busabase/.env:
@@ -1194,10 +1294,20 @@ The flags below skip the menu (handy for scripts / CI):
   busabase-cli login --base-url http://localhost:15419 # connect to a local server (no auth)
   busabase-cli login --refresh                         # rotate the OAuth token set (auto-runs too)
   busabase-cli login --profile work                    # add a SECOND account, then switch to it
+  busabase-cli login --no-wait --output json           # agent: URL + resume code, returns at once
+  busabase-cli login --resume-code <code>              # agent: finish after the user authorized
 
 Login never blocks on a Space question, interactive or not: with more than one Space it always
 accepts the server-resolved default (the one you were most recently active in) and prints the
-full list — switch anytime with \`busabase-cli space use <id>\`.`,
+full list — switch anytime with \`busabase-cli space use <id>\`.
+
+For AI agents: the blocking flows above print the verification URL mid-command, and
+a harness that only relays a turn's final message will drop it — the user never
+sees the URL and login silently times out. Use the two-turn flow instead: run
+\`--no-wait --output json\` now, send verification_url to the user as your final
+message (verbatim — never re-encode or re-wrap it; \`busabase-cli qrcode\` renders
+it scannable), end the turn, then run \`--resume-code <code>\` after they confirm.
+Do not restart login after showing the URL — a restart invalidates it.`,
     )
     .action(async (_opts: OptionValues, cmd: Command) => {
       const opts = cmd.optsWithGlobals();
@@ -1212,6 +1322,12 @@ full list — switch anytime with \`busabase-cli space use <id>\`.`,
             deviceCode: Boolean(opts.deviceCode),
             oauth: Boolean(opts.oauth),
             browser: opts.browser !== false,
+            // `--no-wait` is commander's negation of the global `--wait` flag
+            // (same `wait` attribute). Login has no --wait behavior of its own,
+            // so `wait === false` means exactly "the user passed --no-wait".
+            noWait: opts.wait === false,
+            resumeCode: opts.resumeCode as string | undefined,
+            profile: opts.profile as string | undefined,
           });
       // Only after a successful sign-in: preserve the account already on disk as
       // `default` and make this one active. Doing it here (not before) keeps a
@@ -1229,6 +1345,47 @@ full list — switch anytime with \`busabase-cli space use <id>\`.`,
       state.config = config;
       const summary = await runLogout({ baseUrl: config.baseUrl, apiKey: config.apiKey });
       console.log(render(summary, config.output));
+    });
+
+  addGlobalFlags(program.command("qrcode"))
+    .description("Render a URL (e.g. a login verification URL) as a QR code")
+    .argument("<url>", "URL to encode — treated as an opaque string, byte-for-byte")
+    .option("-o, --out-file <path>", "write a PNG here (under cwd, the temp dir, or your home)")
+    .option("--ascii", "print a terminal QR code to stdout instead of writing a PNG")
+    .option(
+      "--size <px>",
+      `PNG size in pixels (${QR_MIN_SIZE}-${QR_MAX_SIZE}, default ${QR_DEFAULT_SIZE})`,
+      parsePositiveInt,
+    )
+    .addHelpText(
+      "after",
+      `
+Made for the two-turn login: \`login --no-wait\` returns a verification_url the
+user often approves on a phone — a QR code removes the copy-a-long-URL step.
+
+  busabase-cli qrcode "<verification_url>" --out-file qr.png
+  busabase-cli qrcode "<verification_url>" --ascii
+
+Forward URLs verbatim: never re-encode, trim, or re-wrap a verification URL —
+a reworded URL is a 404 on the user's phone.`,
+    )
+    .action(async (url: string, _opts: OptionValues, cmd: Command) => {
+      const opts = cmd.optsWithGlobals();
+      const config = resolveConfig(opts);
+      state.config = config;
+      if (opts.ascii) {
+        console.log(await renderQrAscii(url));
+        return;
+      }
+      const outFile = opts.outFile as string | undefined;
+      if (!outFile) {
+        throw new Error("Pass --out-file <path> for a PNG, or --ascii for terminal output.");
+      }
+      const filePath = safeQrOutputPath(outFile);
+      await writeQrPng(url, filePath, (opts.size as number | undefined) ?? QR_DEFAULT_SIZE);
+      console.log(
+        render({ status: "qr code written", filePath, url, hint: QR_DISPLAY_HINT }, config.output),
+      );
     });
 
   const auth = program.command("auth").description("Accounts (profiles) and CLI settings");
@@ -1344,6 +1501,7 @@ than as a 403 later. The choice is stored in the active profile and mirrored to
       "Permanently delete an ALREADY-archived node and its subtree (irreversible). Archive it first with `nodes archive` if it isn't archived yet.",
     )
     .requiredOption("--node-id <id>", "archived node id to purge")
+    .option("--dry-run", "print the request this would send and send nothing")
     .action(
       runAction(state, (client, opts) => client.nodes.purge({ nodeId: opts.nodeId as string })),
     );
@@ -1364,6 +1522,7 @@ Examples:
   busabase-cli nodes move --node-id nod_123 --position 0
   busabase-cli nodes move --node-id nod_123 --parent-node-id nod_456 --position 2`,
     )
+    .option("--dry-run", "print the request this would send and send nothing")
     .action(
       runAction(state, (client, opts) =>
         client.nodes.move({
@@ -1404,6 +1563,7 @@ contents ARE the array to store; this command does not reshape it.
 Examples:
   busabase-cli nodes set-agent-prompts --node-id nod_123 --file prompts.json`,
     )
+    .option("--dry-run", "print the request this would send and send nothing")
     .action(
       runAction(state, async (client, opts) => {
         const filePath = opts.file as string;
@@ -1490,6 +1650,7 @@ Examples:
       "attachment option: allowed MIME type, repeatable",
       collectValues,
     )
+    .option("--dry-run", "print the request this would send and send nothing")
     .action(
       runAction(state, (client, opts) =>
         client.bases.createField({
@@ -1532,6 +1693,7 @@ Examples:
   busabase-cli bases update-field-change-request --base-id bse_123 --field-id bsf_123 --name "封面 Cover Image" --max-files 1 --allowed-mime image/png --allowed-mime image/svg+xml
   busabase-cli bases update-field-change-request --base-id bse_123 --field-id bsf_123 --options-json @field-options.json`,
     )
+    .option("--dry-run", "print the request this would send and send nothing")
     .action(
       runAction(state, (client, opts) => {
         const patch: Record<string, unknown> = {};
@@ -1583,6 +1745,7 @@ Examples:
   busabase-cli bases create-change-request --base-id bse_123 --fields-json '{"title":"Hello"}' --auto-merge   # skip review, create immediately
   busabase-cli bases create-change-request --base-id bse_123 --fields-json '{"title":"Hello"}' --require-review   # always propose a Change Request`,
     )
+    .option("--dry-run", "print the request this would send and send nothing")
     .action(
       runAction(state, (client, opts) =>
         client.bases.createChangeRequest({
@@ -1753,6 +1916,7 @@ Example:
 
 Use the JSON output directly in an attachment field value, e.g. {"cover_image":[<output>]}.`,
       )
+      .option("--dry-run", "print the request this would send and send nothing")
       .action(runAction(state, (_client, opts, config) => uploadAsset(config, opts)));
 
   const assetsCommand = program.command("assets").description("Assets");
@@ -2087,6 +2251,7 @@ To add content to a space that is already in use, use \`busabase-cli install\` i
 To copy a still-live space's current content into another space, use
 \`busabase-cli export\` + \`busabase-cli install\` instead of backup/restore.`,
     )
+    .option("--dry-run", "print the request this would send and send nothing")
     .action(
       runArgAction(state, (file, client, opts, config) =>
         runRestore(client, {
@@ -2108,6 +2273,7 @@ To copy a still-live space's current content into another space, use
     .requiredOption("--path <p>", "path under /api/v1, e.g. /bases")
     .option("--query <k=v...>", "query-string param, repeatable")
     .option("--body-json <json>", "JSON request body")
+    .option("--dry-run", "print the request this would send and send nothing")
     .action(
       runAction(state, (_client, opts, config) => {
         const query = new URLSearchParams();
@@ -2258,6 +2424,26 @@ export async function runCli(argv: string[]): Promise<number> {
       return EXIT_CODES.USAGE;
     }
     const classified = classifyError(error);
+    // Auth failures additionally carry an agent-facing `hint`: the exact
+    // recovery command for THIS connection (base URL + profile pre-filled), so
+    // an agent hitting a 401 mid-task recovers without reverse-engineering the
+    // stderr prose. See content/spec/cli-first-login-ux.md in apps/busabase.
+    if (classified.code === "UNAUTHORIZED" || classified.code === "FORBIDDEN") {
+      const hintConfig = state.config ?? resolveConfig({});
+      const profile = isMultiProfile() ? activeCredentialTarget().profile : undefined;
+      // The command's own contract id when it has one; otherwise resolve the last
+      // request off the wire, which is the only way to name the endpoint behind a
+      // curated task command (it may legitimately call several).
+      const procedureId =
+        state.procedureId ??
+        (state.lastRequest
+          ? matchRoute(state.lastRequest.method, state.lastRequest.pathname)?.id
+          : undefined);
+      classified.hint = authRecoveryHint(classified.code, hintConfig.baseUrl, profile, {
+        procedureId,
+        ...(procedureId ? requiredLevelFor(procedureId) : {}),
+      });
+    }
     // The envelope goes to stdout because that is where a caller parsing
     // `--output json` already reads from; the prose still goes to stderr, so a
     // human sees exactly what they saw before and a pipeline sees neither twice.

@@ -307,3 +307,128 @@ describe("runLogin --device-code", () => {
     await assertion;
   });
 });
+
+describe("runLogin --no-wait / --resume-code (two-turn agent flow)", () => {
+  const deviceEndpoints = (onToken: (polls: number) => Response) => {
+    let polls = 0;
+    return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      if (request.url.endsWith("/api/auth/device/token")) {
+        polls += 1;
+        return onToken(polls);
+      }
+      if (request.url.endsWith("/api/v1/device/finalize")) {
+        return jsonResponse({
+          apiKey: API_KEY,
+          apiKeyId: "apk_1",
+          expiresAt: null,
+          credentialType: "api_key",
+        });
+      }
+      if (request.url.endsWith("/api/v1/auth")) {
+        return jsonResponse({
+          user: { id: "usr_1", email: "dev@example.com" },
+          space: { id: "spc_1", name: "Space One" },
+          spaces: [{ id: "spc_1", name: "Space One" }],
+        });
+      }
+      throw new Error(`Unexpected request: ${request.url}`);
+    });
+  };
+
+  it("--no-wait returns the URL + resume code at once, without blocking or writing credentials", async () => {
+    const fetchSpy = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      if (request.url.endsWith("/api/auth/device/code")) {
+        return jsonResponse({
+          device_code: "resume-me",
+          user_code: "ABCD2345",
+          verification_uri: `${CLOUD}/device`,
+          verification_uri_complete: `${CLOUD}/device?user_code=ABCD2345`,
+          expires_in: 900,
+          interval: 5,
+        });
+      }
+      throw new Error(`Unexpected request: ${request.url}`);
+    });
+    global.fetch = fetchSpy as unknown as typeof fetch;
+
+    const summary = await runLogin({ baseUrl: CLOUD, noWait: true, browser: true });
+
+    expect(summary.status).toBe("authorization pending");
+    expect(summary.verification_url).toBe(`${CLOUD}/device?user_code=ABCD2345`);
+    expect(summary.user_code).toBe("ABCD2345");
+    expect(summary.resume_code).toBe("resume-me");
+    expect(summary.expires_in).toBe("900");
+    expect(summary.hint).toContain("--resume-code resume-me");
+    expect(summary.hint).toContain("END THIS TURN");
+    // Turn 1 must not open a browser, must not poll, and must persist nothing.
+    expect(spawnMock).not.toHaveBeenCalled();
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(loadDotEnvFile()).toEqual({});
+  });
+
+  it("--resume-code re-enters the poll with the pending code and persists like a fresh login", async () => {
+    global.fetch = deviceEndpoints(() =>
+      jsonResponse({ access_token: ACCESS_TOKEN, expires_in: 3600 }),
+    ) as unknown as typeof fetch;
+
+    const login = runLogin({ baseUrl: CLOUD, resumeCode: "resume-me", browser: true });
+    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.advanceTimersByTimeAsync(0);
+    const summary = await login;
+
+    expect(summary.status).toBe("signed in");
+    expect(summary.method).toBe("device");
+    expect(summary.credentialType).toBe("api_key");
+    expect(loadDotEnvFile().BUSABASE_API_KEY).toBe(API_KEY);
+    // The resume never requests a fresh device code — restarting would
+    // invalidate the link the user is in the middle of approving.
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
+  it("--resume-code with an expired code names the exact restart command and writes nothing", async () => {
+    global.fetch = deviceEndpoints(() =>
+      jsonResponse({ error: "expired_token" }, 400),
+    ) as unknown as typeof fetch;
+
+    const login = runLogin({ baseUrl: CLOUD, resumeCode: "stale-code", browser: true });
+    const outcome = login.then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    await vi.advanceTimersByTimeAsync(5_000);
+    const error = await outcome;
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain("expired");
+    expect((error as Error).message).toContain("busabase-cli login --no-wait");
+    expect(loadDotEnvFile()).toEqual({});
+  });
+
+  it("keeps the just-approved reassurance line on the resume path", async () => {
+    global.fetch = deviceEndpoints((polls) =>
+      polls < 5
+        ? jsonResponse({ error: "authorization_pending" }, 400)
+        : jsonResponse({ access_token: ACCESS_TOKEN, expires_in: 3600 }),
+    ) as unknown as typeof fetch;
+
+    const login = runLogin({ baseUrl: CLOUD, resumeCode: "resume-me", browser: true });
+    await vi.advanceTimersByTimeAsync(30_000);
+    await login;
+
+    expect(stderr.join("")).toContain("Still waiting…");
+  });
+
+  it("rejects contradictory flag combinations before any network call", async () => {
+    const fetchSpy = vi.fn();
+    global.fetch = fetchSpy as unknown as typeof fetch;
+    await expect(
+      runLogin({ baseUrl: CLOUD, noWait: true, apiKey: "sk_x", browser: true }),
+    ).rejects.toThrow("--api-key");
+    await expect(
+      runLogin({ baseUrl: CLOUD, noWait: true, resumeCode: "c", browser: true }),
+    ).rejects.toThrow("two halves");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
