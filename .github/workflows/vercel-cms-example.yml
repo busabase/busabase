@@ -43,7 +43,7 @@ concurrency:
 env:
   NODE_VERSION: 24.18.0
   DEPLOY_ENVIRONMENT: ${{ (github.event_name == 'push' || inputs.environment == 'production') && 'production' || 'preview' }}
-  BUSABASE_BASE_URL: https://demo.busabase.com
+  BUSABASE_CMS_BASE_URL: https://demo.busabase.com
   BUSABASE_CMS_FOLDER_SLUG: cms
   BUSABASE_CMS_DEFAULT_LOCALE: en
   BUSABASE_CMS_LOCALES: en,zh-CN
@@ -100,7 +100,7 @@ jobs:
         run: |
           set -euo pipefail
           cms_folder_id=$(
-            curl --fail --silent --show-error "${BUSABASE_BASE_URL}/api/v1/nodes" |
+            curl --fail --silent --show-error "${BUSABASE_CMS_BASE_URL}/api/v1/nodes" |
               jq --raw-output --arg slug "$BUSABASE_CMS_FOLDER_SLUG" \
                 '[.. | objects | select(.type == "folder" and .slug == $slug) | .id][0] // empty'
           )
@@ -120,7 +120,25 @@ jobs:
 
       - name: Pull Vercel environment
         if: steps.vercel_config.outputs.ready == 'true'
-        run: vercel pull --yes --environment="$DEPLOY_ENVIRONMENT" --token="$VERCEL_TOKEN"
+        shell: bash
+        run: |
+          set -euo pipefail
+          vercel pull --yes --environment="$DEPLOY_ENVIRONMENT" --token="$VERCEL_TOKEN"
+          # `vercel build` prerenders the statically-generated content routes
+          # (/categories and /tags), so the CMS config has to be present at
+          # BUILD time — passing it only to `vercel deploy` is too late, those
+          # pages are already baked. Their 5m revalidate does not rescue them
+          # either: the deployment serves the prerendered empty state.
+          # `vercel build` reads .vercel/.env.<target>.local, which `vercel pull`
+          # just wrote, so append the CMS config there.
+          env_file=".vercel/.env.${DEPLOY_ENVIRONMENT}.local"
+          {
+            echo "BUSABASE_CMS_BASE_URL=${BUSABASE_CMS_BASE_URL}"
+            echo "BUSABASE_CMS_FOLDER_ID=${BUSABASE_CMS_FOLDER_ID}"
+            echo "BUSABASE_CMS_DEFAULT_LOCALE=${BUSABASE_CMS_DEFAULT_LOCALE}"
+            echo "BUSABASE_CMS_LOCALES=${BUSABASE_CMS_LOCALES}"
+            echo "NEXT_PUBLIC_SITE_URL=${NEXT_PUBLIC_SITE_URL}"
+          } >> "$env_file"
 
       - name: Build Vercel project
         if: steps.vercel_config.outputs.ready == 'true'
@@ -140,7 +158,7 @@ jobs:
         run: |
           set -euo pipefail
           cms_runtime_env=(
-            --env "BUSABASE_CMS_BASE_URL=${BUSABASE_BASE_URL}"
+            --env "BUSABASE_CMS_BASE_URL=${BUSABASE_CMS_BASE_URL}"
             --env "BUSABASE_CMS_FOLDER_ID=${BUSABASE_CMS_FOLDER_ID}"
             --env "BUSABASE_CMS_DEFAULT_LOCALE=${BUSABASE_CMS_DEFAULT_LOCALE}"
             --env "BUSABASE_CMS_LOCALES=${BUSABASE_CMS_LOCALES}"
@@ -164,6 +182,6 @@ jobs:
             echo
             echo "- Environment: **${DEPLOY_ENVIRONMENT}**"
             echo "- URL: [${DEPLOYMENT_URL}](${DEPLOYMENT_URL})"
-            echo "- CMS endpoint: [${BUSABASE_BASE_URL}](${BUSABASE_BASE_URL})"
+            echo "- CMS endpoint: [${BUSABASE_CMS_BASE_URL}](${BUSABASE_CMS_BASE_URL})"
             echo "- CMS folder: \`${BUSABASE_CMS_FOLDER_ID}\`"
           } >> "$GITHUB_STEP_SUMMARY"
