@@ -17,7 +17,7 @@ You connect in two moves: **paste one prompt** to onboard, then **install a perm
 
    ![Graph View — the structure the agent proposed, made concrete.](../public/assets/readme/busabase-graph-view.webp)
 
-5. **It seeds sample records without another approval step.** Versioned starter records are written through audited, idempotent Change Requests and auto-merged only during initialization. Everyday agent work remains review-first.
+5. **It seeds sample records without another approval step.** Versioned starter records are written through audited, idempotent Change Requests. Everyday agent work goes through the same pipeline, merging immediately or waiting for you according to the key's permission level.
 
    ![The Inbox — every AI submission waits here for your review.](../public/assets/readme/busabase-inbox-review.webp)
 
