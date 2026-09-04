@@ -286,6 +286,9 @@ describe("busabase-cli golden path (skill commands, in-process)", () => {
   // expose it — and `bases_field_change_request` / `file_trees_create_change_request`
   // are both in TASK_SUPERSEDED_MCP_TOOLS, so the task is an MCP client's only
   // route to either. Same unreachable-capability shape #5949 fixed for records.
+  // Since then the delete/convert/delete-batch carve-outs went away too, so this
+  // now pins the tri-state on EVERY operation: `--auto-merge` merges, plain
+  // proposes-or-merges by permission, `--require-review` always proposes.
   it("exposes autoMerge on the field and file-tree tasks, both directions", async () => {
     const bases = (await cli("bases", "list")) as Array<{ id: string; slug: string }>;
     const blogId = bases.find((b) => b.slug === "blog")?.id as string;
@@ -325,30 +328,34 @@ describe("busabase-cli golden path (skill commands, in-process)", () => {
     )) as { status?: string };
     expect(proposed.status).toBe("in_review");
 
-    // `delete` has no autoMerge in the endpoint schema at all — and asking for one
-    // is now REJECTED with a reason rather than silently ignored, so the CLI exits
-    // non-zero. That rejection is the point: a dropped flag is indistinguishable
-    // from "the server chose review", which is how the original bug survived.
+    // `delete` used to REJECT `--auto-merge` outright. It is permission-aware now
+    // like every other field operation, so the same call merges — this local CLI
+    // runs as the workspace owner, who has write on the Base's node.
     const fieldId = after.fields.find((f) => f.slug === "cli_auto_field")?.id as string;
-    await expect(
-      cli(
-        "bases",
-        "field-change-request",
-        "--base-id",
-        blogId,
-        "--operation",
-        "delete",
-        "--field-id",
-        fieldId,
-        "--auto-merge",
-      ),
-      // Not just "it failed": the per-issue REASON has to survive the trip to the
-      // CLI surface. It did not until `explainError` learned to render
-      // `data.issues` — before that the user saw only "Input validation failed",
-      // which is no more actionable than the silent drop this replaced.
-    ).rejects.toThrow(/soft-deletes its stored values/);
+    const fieldDeleteMerged = (await cli(
+      "bases",
+      "field-change-request",
+      "--base-id",
+      blogId,
+      "--operation",
+      "delete",
+      "--field-id",
+      fieldId,
+      "--auto-merge",
+    )) as { status?: string };
+    expect(fieldDeleteMerged.status).toBe("merged");
 
-    // Without the flag the very same delete proposes normally.
+    // ...and `--require-review` is how a caller asks for the old behaviour back.
+    await cli(
+      "bases",
+      "field-change-request",
+      "--base-id",
+      blogId,
+      "--operation",
+      "restore",
+      "--field-id",
+      fieldId,
+    );
     const deleteCr = (await cli(
       "bases",
       "field-change-request",
@@ -358,6 +365,7 @@ describe("busabase-cli golden path (skill commands, in-process)", () => {
       "delete",
       "--field-id",
       fieldId,
+      "--require-review",
     )) as { status?: string };
     expect(deleteCr.status).toBe("in_review");
 
@@ -382,22 +390,34 @@ describe("busabase-cli golden path (skill commands, in-process)", () => {
     )) as { status?: string };
     expect(fileMerged.status).toBe("merged");
 
-    // A delete batch asking to merge is rejected with a reason (and a suggested
-    // remedy), not quietly downgraded.
-    await expect(
-      cli(
-        "nodes",
-        "files-change-request",
-        "--kind",
-        "skill",
-        "--node-id",
-        skillId,
-        "--operations-json",
-        JSON.stringify([{ kind: "delete", path: "cli-auto.md" }]),
-        "--auto-merge",
-      ),
-    ).rejects.toThrow(/Split the deletes into their own change request/);
+    // A delete batch asking to merge used to be rejected with a 400. It now merges
+    // like any other batch — the deleted file's previous bytes stay in the change
+    // request's history either way.
+    const fileDeleteMerged = (await cli(
+      "nodes",
+      "files-change-request",
+      "--kind",
+      "skill",
+      "--node-id",
+      skillId,
+      "--operations-json",
+      JSON.stringify([{ kind: "delete", path: "cli-auto.md" }]),
+      "--auto-merge",
+    )) as { status?: string };
+    expect(fileDeleteMerged.status).toBe("merged");
 
+    // `--require-review` still parks a delete batch for a human.
+    await cli(
+      "nodes",
+      "files-change-request",
+      "--kind",
+      "skill",
+      "--node-id",
+      skillId,
+      "--operations-json",
+      JSON.stringify([{ kind: "create", path: "cli-auto.md", content: "x" }]),
+      "--auto-merge",
+    );
     const fileDelete = (await cli(
       "nodes",
       "files-change-request",
@@ -407,6 +427,7 @@ describe("busabase-cli golden path (skill commands, in-process)", () => {
       skillId,
       "--operations-json",
       JSON.stringify([{ kind: "delete", path: "cli-auto.md" }]),
+      "--require-review",
     )) as { status?: string };
     expect(fileDelete.status).toBe("in_review");
   });

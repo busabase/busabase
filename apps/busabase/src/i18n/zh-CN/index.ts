@@ -10,9 +10,9 @@ const zhCN = {
     unavailable: "内容不可用",
   },
   seo: {
-    title: "Busabase 布沙知识仓 - 本地 AI 知识库与智能数据库",
+    title: "Busabase 布沙知识仓 - AI Agent 的本地数据中台与应用中台",
     description:
-      "Busabase（布沙知识仓）是开源、本地优先的 AI 知识库与智能数据库，结合结构化数据、知识图谱和人工审核，让 Agent 产出成为可追溯、可复用的正式知识。",
+      "Busabase（布沙知识仓）是开源、本地优先的 AI Agent 工作区：数据库、知识库、应用库、技能库合在一处。每次改动都带说明、差异和完整历史，把 Agent 的产出沉淀成真正用得上的数据、文档、技能和应用。",
   },
   shell: {
     graphView: "图谱视图",
@@ -197,97 +197,13 @@ const zhCN = {
     aboutDescription:
       "登录会在弹窗（桌面版则在浏览器）中打开 Busabase Cloud，并生成一个仅作用于此隧道的凭证——不是你完整的云端账号会话。断开连接会撤销该凭证。",
   },
+
+  // The /about, /download and /support pages this block used to feed were
+  // removed; the marketing site is a separate application. Only the
+  // Swagger page title is still rendered from here, so the other 56 keys were
+  // deleted rather than left to drift out of date in three locales.
   marketing: {
-    rootDescription: "Busabase 的开源本地评审引擎。",
-    aboutTitle: "关于 BusaBase",
-    aboutDescription:
-      "BusaBase 是面向 AI 代理的审批优先数据库。每条 AI 生成记录都必须经过人工评审，才能成为正式记录。",
-    aboutEyebrow: "我们为什么构建 BusaBase",
-    aboutHeadline: "AI 代理不应该以无限速度制造垃圾内容",
-    aboutSubhead: "面向 AI 代理的审批优先数据库。",
-    aboutCategory: "类别：",
-    aboutCategoryValue: "面向 AI 代理的（审批 | 隐私）优先（数据库 | 知识库）",
-    convictionTitle: "我们的判断",
-    convictionP1:
-      "AI 代理生成内容的速度已经超过了人类评估它的能力。结果是：数据库塞满未经评审的输出，知识库没人信任，团队被无法采取行动的 AI 噪音淹没。",
-    convictionP2:
-      "我们构建 BusaBase，是因为相信 AI 代理应该服务于人的利益，而不是只优化吞吐量。每一段 AI 生成内容都应该先通过人工判断，才有资格进入知识库。",
-    convictionP3:
-      "这意味着：变更请求进入系统，人类评审，需要时请求修改，然后批准。只有这样，它才会成为正式记录。审计轨迹永久保留，团队始终掌控。",
-    whatIsTitle: "BusaBase 是什么",
-    pillarApprovalTitle: "审批优先",
-    pillarApprovalBody:
-      "没有人工批准，任何 AI 输出都不会成为正式记录。变更请求 → 评审 → 合并。始终如此。",
-    pillarPrivacyTitle: "隐私优先",
-    pillarPrivacyBody: "开源本地引擎。除非你主动选择，否则数据不会离开你的机器。不需要 SaaS。",
-    pillarAgentTitle: "代理原生",
-    pillarAgentBody: "REST API 和结构化 schema 从一开始就为 AI 代理工作流设计，而不是事后改造。",
-    openCoreTitle: "开放核心",
-    openCoreP1:
-      "BusaBase OSS（此应用）是开源本地引擎：无需登录、单一本地工作区、PGLite 持久化、REST API。它是基础层：永久免费、可自托管、可审计。",
-    openCoreP2:
-      "BusaBase Cloud 基于同一核心，提供多用户工作区、团队角色、计费和企业审计日志。它是为不想运行基础设施的团队准备的托管层。",
-    aboutCtaTitle: "今天开始评审 AI 输出",
-    aboutCtaBody: "运行本地引擎，把 AI 代理接到 API，让人类决定哪些内容成为正式记录。",
-    openDashboard: "打开工作台",
-    viewOnGithub: "在 GitHub 查看",
-    downloadTitle: "下载 Busabase Desktop",
-    downloadDescription:
-      "从公开 Busabase 桌面发布频道下载适用于 macOS、Windows 和 Linux 的 Busabase Desktop。",
-    downloadOgDescription: "以本地优先桌面应用运行 Busabase，用于审批优先的 AI 代理数据工作流。",
     apiDocsTitle: "Busabase API 文档",
-    desktopBadge: "Busabase Desktop",
-    downloadHeadline: "为你的电脑下载 Busabase",
-    downloadSubhead:
-      "通过专注的桌面应用运行面向 AI 代理的审批优先本地数据库，包含本地存储、评审队列和可更新发布。",
-    downloadLatest: "下载最新版本",
-    openWebDashboard: "打开网页版工作台",
-    latestDesktopBuild: "最新桌面版本",
-    version: "版本 {version}",
-    appleSilicon: "Apple Silicon",
-    intel: "Intel",
-    windows: "Windows",
-    linux: "Linux",
-    macAppleSiliconDescription: "适用于搭载 M 系列芯片的新款 Mac。",
-    macIntelDescription: "适用于 Intel 芯片 Mac。",
-    windowsDescription: "从最新发布中选择 .msi 或 .exe 安装包。",
-    linuxDescription: "从最新发布中选择 .deb 安装包。",
-    mobileTitle: "移动端",
-    mobileBody: "随时处理评审队列和批准流程：获取适用于 iPhone、iPad 和 Android 的 Busabase 应用。",
-    iphoneIpad: "iPhone 与 iPad",
-    phoneTablet: "手机与平板",
-    appStoreAction: "在 App Store 下载",
-    googlePlayAction: "在 Google Play 获取",
-    signingNoticeTitle: "签名提示",
-    signingNoticeBody:
-      "在代码签名和 notarization 完全配置前，macOS 和 Windows 安装包可能会显示平台安全警告。",
-    installFlowTitle: "安装流程",
-    installStep1: "下载适用于你操作系统的安装包。",
-    installStep2: "打开 Busabase Desktop 并启动本地评审引擎。",
-    installStep3: "使用发布频道获取后续桌面更新。",
-  },
-  support: {
-    title: "Busabase 支持",
-    description:
-      "获取 Busabase Desktop、Busabase Mobile、Agent Skill 设置和审批优先数据库工作流的帮助。",
-    badge: "支持",
-    headline: "获取 Busabase 帮助",
-    subhead: "这些支持入口适用于 Busabase Desktop、Busabase Mobile、本地评审工作流和 AI 代理设置。",
-    emailTitle: "邮件支持",
-    emailBody: "请发送工作区、设备和问题简述。可能时附上截图或日志。",
-    setupTitle: "设置 Agent Skill",
-    setupBody:
-      "连接 Claude Code、Codex 或其他 AI 代理到 Busabase，让它可以创建需要评审的变更请求。",
-    setupAction: "打开设置指南",
-    downloadTitle: "下载应用",
-    downloadBody: "安装用于本地评审引擎的桌面应用，或用移动应用随时评审变更。",
-    downloadAction: "打开下载页",
-    dashboardTitle: "打开工作台",
-    dashboardBody: "查看 Busabase 工作区中的本地收件箱、动态、数据库结构和待处理变更请求。",
-    dashboardAction: "打开工作台",
-    includeTitle: "请包含哪些信息",
-    includeBody:
-      "为了更快排查问题，请包含 Busabase 版本、操作系统、你使用的是 Desktop、Mobile、Cloud 还是自托管模式，以及失败的具体操作。",
   },
 } satisfies Translatable<BaseTranslation>;
 

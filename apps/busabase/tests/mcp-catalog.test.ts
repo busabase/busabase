@@ -56,6 +56,18 @@ describe("self-hosted MCP catalog", () => {
     expect(names).not.toContain("airapps_run_local_node");
   });
 
+  it("never publishes one person's mention inbox", () => {
+    // These carry no user id — the actor comes from context — so on an agent's
+    // credential they operate on the person who issued it. Reading that inbox
+    // gives an agent nothing (its own mentions are `targetType = "agent"`, which
+    // this query excludes), and `mark_mentions_read` would let it clear the
+    // unread state that is the only thing telling a human someone is waiting on
+    // them. Both stay available over `/api/v1` with the owner's own key.
+    const names = publishedToolNames();
+    expect(names).not.toContain("comments_list_mentions");
+    expect(names).not.toContain("comments_mark_mentions_read");
+  });
+
   it("still publishes the everyday surface", () => {
     // The counterweight: the exclusions above must not have taken anything real
     // with them.
