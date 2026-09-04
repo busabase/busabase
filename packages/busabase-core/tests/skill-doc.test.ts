@@ -123,13 +123,17 @@ describe("generated Cloud onboarding", () => {
       editionConfirmed: true,
     });
 
+    // Two-turn sign-in: the FIRST login line is the non-blocking starter, and the
+    // resume line that finishes it follows. A blocking `--device-code` login would
+    // print its URL mid-command, where a final-message-only harness never sees it.
     expect(
       cloudWithoutPreselectedSpace
         .split("\n")
-        .find((line) => line.startsWith("npx --yes busabase-cli@latest login ")),
-    ).toBe(
-      "npx --yes busabase-cli@latest login --device-code --base-url https://busabase.com --no-browser",
-    );
+        .filter((line) => line.startsWith("npx --yes busabase-cli@latest login ")),
+    ).toEqual([
+      "npx --yes busabase-cli@latest login --no-wait --output json --base-url https://busabase.com",
+      "npx --yes busabase-cli@latest login --resume-code <resume_code> --output json --base-url https://busabase.com",
+    ]);
     expect(cloudWithoutPreselectedSpace).toContain("Login never asks which Space to use");
     expect(cloudWithoutPreselectedSpace).toContain(
       "it takes the server default (the Space the user was most\nrecently active in)",
@@ -144,14 +148,27 @@ describe("generated Cloud onboarding", () => {
   });
 
   it("instructs the agent to hand off device approval without blocking", () => {
-    expect(cloudBootstrap).toContain("managed background process or persistent terminal session");
-    expect(cloudBootstrap).toContain("capture both `stdout` and `stderr`");
-    expect(cloudBootstrap).toContain("Do not wait for the command to exit before replying");
-    expect(cloudBootstrap).toContain("After the user approves, resume or poll it until it exits");
-    expect(cloudBootstrap).toContain("start a\nsecond login while the first is running");
-    expect(localBootstrap).not.toContain(
+    // Two turns, not one blocking command kept alive in the background: a harness
+    // that only delivers a turn's FINAL message never shows the user a URL printed
+    // mid-command, so the old single-command flow timed out with the user none the wiser.
+    expect(cloudBootstrap).toContain("Sign-in is two commands, one per conversational turn");
+    expect(cloudBootstrap).toContain(
+      "actually receives the link even if your harness only delivers a turn's final message",
+    );
+    expect(cloudBootstrap).toContain("writes no credential\nyet");
+    expect(cloudBootstrap).toContain("then **end your turn**");
+    expect(cloudBootstrap).toContain(
+      "it is an opaque string, so never\nre-encode, trim, or re-wrap it",
+    );
+    expect(cloudBootstrap).toContain(
+      "second login while one is pending — a fresh login invalidates the link the user is about to approve",
+    );
+    // The superseded workaround must not linger anywhere in the doc.
+    expect(cloudBootstrap).not.toContain(
       "managed background process or persistent terminal session",
     );
+    expect(cloudBootstrap).not.toContain("Do not wait for the command to exit before replying");
+    expect(localBootstrap).not.toContain("--no-wait");
   });
 
   it("requires the agent to surface the selected Space to the user, not just switch silently", () => {
@@ -206,7 +223,8 @@ describe("generated Cloud onboarding", () => {
       .filter((line) => line.startsWith("npx --yes busabase-cli@latest "));
 
     expect(cloudCliLines).toEqual([
-      "npx --yes busabase-cli@latest login --device-code --base-url https://busabase.com --space-id spc_x --no-browser",
+      "npx --yes busabase-cli@latest login --no-wait --output json --base-url https://busabase.com",
+      "npx --yes busabase-cli@latest login --resume-code <resume_code> --output json --base-url https://busabase.com --space-id spc_x",
     ]);
     expect(desktopCliLines).toEqual([
       'npx --yes busabase-cli@latest login --base-url "http://localhost:15419"',
@@ -265,13 +283,16 @@ describe("bootstrap edition confirmation", () => {
       expect(doc).toContain("## Step 0 — Welcome and confirm the edition");
       expect(doc).toContain("Your first reply must follow the model below");
       expect(doc).toContain("👋 Welcome! This is **Busabase** (https://busabase.com)");
-      expect(doc).toContain("A wrong move stays a harmless\n> proposal until you approve it.");
+      expect(doc).toContain(
+        "every change I make goes in as a **ChangeRequest**, so you can always see what",
+      );
       expect(doc).toContain("Before I connect, which edition would you like to use?");
       expect(doc).toContain("**A. Busabase Cloud**");
       expect(doc).toContain("**B. Busabase Personal Desktop**");
       expect(doc).not.toContain("## Step 1 — Confirm the edition");
       expect(doc).not.toContain("```bash");
       expect(doc).not.toContain("curl ");
+      expect(doc).not.toContain("busabase-cli@latest login");
       expect(doc).not.toContain("login --device-code");
       expect(doc).not.toContain("npx skills add");
       expect(doc).not.toContain("/api/v1/");
@@ -300,7 +321,7 @@ describe("bootstrap edition confirmation", () => {
     expect(localBootstrap).toContain("## Step 0 — Connect to Busabase Personal Desktop");
     expect(cloudBootstrap).not.toContain("## Step 1 — Device sign-in recovery");
     expect(cloudBootstrap).toContain(
-      "If the code expires or authorization fails, explain what happened; if the user still wants to\ncontinue, rerun the same login command above once.",
+      "If `resume_code` has expired or authorization failed, explain what happened; if the user still wants\nto continue, start over from the `--no-wait` command above once.",
     );
     expect(cloudBootstrap).toContain("| 1 | 🔌 **Connect** | Step 0 | device login");
     expect(localBootstrap).toContain(

@@ -210,7 +210,7 @@ export interface SeedRichNodeDef {
 
 /**
  * A Form node plus its `busabase_forms` config. The form submits into an
- * already-seeded Base (`targetBaseId`) as a pending, approval-first
+ * already-seeded Base (`targetBaseId`) as a pending, review-first
  * ChangeRequest, and carries an agent-authored HTML page so the demo shows the
  * Form-as-Node feature the way it is meant to be used.
  */

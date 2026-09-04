@@ -236,6 +236,7 @@ describe("Boundary P2 — oRPC", () => {
     const tagField = base.fields.find((f) => f.slug === "tag");
     if (!tagField) throw new Error("tag field missing");
     const delCr = await client.bases.fieldChangeRequest({
+      autoMerge: false,
       operation: "delete",
       baseId: base.id,
       fieldId: tagField.id,
@@ -278,6 +279,7 @@ describe("Boundary P2 — oRPC", () => {
 
     // Delete the field → filter referencing it is removed
     const delCr = await client.bases.fieldChangeRequest({
+      autoMerge: false,
       operation: "delete",
       baseId: base.id,
       fieldId: colorField.id,
@@ -307,11 +309,15 @@ describe("Boundary P2 — oRPC", () => {
     const amountField = base.fields.find((f) => f.slug === "amount");
     if (!amountField) throw new Error("amount field missing");
 
+    // `autoMerge: false` throughout: convert is permission-aware now, and this
+    // test is about the one-in-review-convert-at-a-time lock, which only exists
+    // while a CR is actually pending.
     const first = await client.bases.fieldChangeRequest({
       operation: "convert",
       baseId: base.id,
       fieldId: amountField.id,
       newType: "number",
+      autoMerge: false,
     });
 
     // A second immediate attempt is rejected (active lock).
@@ -321,6 +327,7 @@ describe("Boundary P2 — oRPC", () => {
         baseId: base.id,
         fieldId: amountField.id,
         newType: "number",
+        autoMerge: false,
       }),
     ).rejects.toThrow(/already in review/i);
 
@@ -341,6 +348,7 @@ describe("Boundary P2 — oRPC", () => {
       baseId: base.id,
       fieldId: amountField.id,
       newType: "number",
+      autoMerge: false,
     });
     expect(second.id).not.toBe(first.id);
 

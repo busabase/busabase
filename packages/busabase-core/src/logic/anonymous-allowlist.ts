@@ -64,6 +64,9 @@ const ANONYMOUS_READ_ALLOWLIST: ReadonlySet<string> = new Set([
   // below carries that boundary, and `logic/node-detail.ts` enforces it on the
   // RESOLVED node type before any hydration happens.
   "nodes.get",
+  // Lightweight route guard. Active rows still pass through the public-share
+  // ACL; archived rows deliberately collapse to `unavailable`.
+  "nodes.resolveRouteState",
   "bases.get",
   // A base's views and rows are reachable only via a base the visitor could
   // already `bases.get`; the base-visibility EXISTS clause carries the same

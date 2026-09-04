@@ -99,7 +99,7 @@ describe("buildNodeAgentPrompts scoping", () => {
     expect(capabilities.map((prompt) => prompt.key)).toEqual(["record_update"]);
   });
 
-  it("keeps approval-first guidance on mutating scenarios and every capability", () => {
+  it("keeps the do-not-self-approve guidance on mutating scenarios and every capability", () => {
     for (const scope of [
       undefined,
       { kind: "field", ...FIELD } as const,
@@ -381,7 +381,7 @@ describe("buildNodeAgentPrompts custom scenario prompts", () => {
 });
 
 describe("Doc read prompt", () => {
-  it("is a Content capability rather than a scenario and keeps mutating Doc prompts approval-first", () => {
+  it("is a Content capability rather than a scenario and keeps mutating Doc prompts review-gated", () => {
     const { scenarios, capabilities } = buildNodeAgentPrompts(DOC_CONTEXT, "en", coreMessagesEn);
 
     expect(scenarios.map((prompt) => prompt.key)).toEqual(["doc-draft", "doc-review"]);

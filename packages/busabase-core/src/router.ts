@@ -30,6 +30,7 @@ import {
 } from "./logic/anonymous-allowlist";
 import { grepUnified } from "./logic/grep";
 import { subscribeBusabaseLiveEvents } from "./logic/live-events";
+import { listMentionInbox, markMentionsRead } from "./logic/mention-inbox";
 import {
   getPublicScopeOfNodeRef,
   grantNodePrincipal,
@@ -40,6 +41,7 @@ import {
 import { listNodeActivity, listRecordActivity } from "./logic/node-activity";
 import { readNodeLines } from "./logic/node-content";
 import { getNodeDetail, listNodeAncestorIds } from "./logic/node-detail";
+import { resolveNodeRouteState } from "./logic/node-route-state";
 import { disableNodeShare, getNodeShare, setNodeShare } from "./logic/node-share";
 import {
   closeChangeRequest,
@@ -135,6 +137,9 @@ const busabaseRouterImpl = busabase.router({
     })),
     ancestors: busabase.nodes.ancestors.handler(async ({ input }) =>
       listNodeAncestorIds(input.nodeId, input.type),
+    ),
+    resolveRouteState: busabase.nodes.resolveRouteState.handler(async ({ input }) =>
+      resolveNodeRouteState(input.nodeId, input.type),
     ),
     createChangeRequest: busabase.nodes.createChangeRequest.handler(async ({ input }) =>
       createNodeChangeRequest(input),
@@ -253,6 +258,12 @@ const busabaseRouterImpl = busabase.router({
   comments: {
     list: busabase.comments.list.handler(async ({ input }) => listComments(input)),
     create: busabase.comments.create.handler(async ({ input }) => createComment(input)),
+    listMentions: busabase.comments.listMentions.handler(async ({ input }) =>
+      listMentionInbox(await getDb(), input),
+    ),
+    markMentionsRead: busabase.comments.markMentionsRead.handler(async ({ input }) =>
+      markMentionsRead(await getDb(), input),
+    ),
   },
   agent: {
     listTasks: busabase.agent.listTasks.handler(async () => listAgentTasks()),

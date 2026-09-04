@@ -393,7 +393,17 @@ export interface BusabaseDashboardApiClient {
       autoMerge?: boolean;
     },
   ) => Promise<RecordUpdateChangeRequestResult>;
-  createDeleteChangeRequest: (recordId: string) => Promise<ChangeRequestVO>;
+  /**
+   * Archive a record. `autoMerge: true` asks the server to apply it in ONE call
+   * (it still lands as a pending Change Request if the caller lacks write on the
+   * Base's node — the flag is not a permission override), `false` always leaves
+   * it for review. Check `materialized` on the result to see which happened;
+   * the same union `createUpdateChangeRequest` already returns.
+   */
+  createDeleteChangeRequest: (
+    recordId: string,
+    options?: { autoMerge?: boolean },
+  ) => Promise<RecordUpdateChangeRequestResult>;
   mergeChangeRequest: (
     changeRequestId: string,
   ) => Promise<{ changeRequest: ChangeRequestVO; record: RecordVO | null; view: ViewVO | null }>;
@@ -661,17 +671,18 @@ export const createBusabaseRestApiClient = (
       client.bases.createChangeRequest({ baseId, ...payload }) as Promise<ChangeRequestVO>,
     createUpdateChangeRequest: (recordId, payload) =>
       client.records.changeRequest({ recordId, operation: "update", ...payload }),
-    createDeleteChangeRequest: async (recordId) => {
-      const result = await client.records.changeRequest({
+    // Tri-state forwarded, never defaulted: the dashboard's delete is a TWO-mode
+    // button ("delete now" / "request review") and which one the user pressed —
+    // not their permission level — is what decides. Passing the flag explicitly
+    // keeps that true while collapsing "delete now" from create-CR + approve +
+    // merge (two round trips, 2N for a bulk delete) down to one call.
+    createDeleteChangeRequest: (recordId, options) =>
+      client.records.changeRequest({
         recordId,
         operation: "delete",
         deleteMode: "archive",
-      });
-      if (result.materialized) {
-        throw new Error("Record delete unexpectedly returned a materialized record");
-      }
-      return result;
-    },
+        ...(options?.autoMerge === undefined ? {} : { autoMerge: options.autoMerge }),
+      }),
     mergeChangeRequest: async (changeRequestId) => {
       const { results } = await client.changeRequests.merge({
         changeRequestIds: [changeRequestId],

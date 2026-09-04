@@ -52,6 +52,9 @@ interface UseBusabaseLiveSyncOptions {
     // query (not the tree), so it needs its own invalidation everywhere
     // `nodes` is invalidated below, or another tab's edit never shows up.
     nodeDetail: QueryKey;
+    // Partial key matching every route-state lookup. Node mutations can change
+    // an open URL from active to archived (or back) without changing the URL.
+    nodeRouteState: QueryKey;
     records: QueryKey;
     recordsPage: QueryKey;
     recordsCount: QueryKey;
@@ -145,6 +148,7 @@ export function useBusabaseLiveSync({
       listKeys.changeRequestCounts,
       listKeys.nodes,
       listKeys.nodeDetail,
+      listKeys.nodeRouteState,
       listKeys.records,
       listKeys.recordsPage,
       listKeys.recordsCount,
@@ -202,6 +206,8 @@ export function useBusabaseLiveSync({
           return stableListKeys.inboxSnapshot;
         case "nodeDetail":
           return stableListKeys.nodeDetail;
+        case "nodeRouteState":
+          return stableListKeys.nodeRouteState;
         case "nodes":
           return stableListKeys.nodes;
         case "records":
@@ -241,6 +247,7 @@ export function useBusabaseLiveSync({
       metadataInvalidationBatcher.cancel();
       void queryClient.invalidateQueries({ queryKey: stableListKeys.nodes });
       void queryClient.invalidateQueries({ queryKey: stableListKeys.nodeDetail });
+      void queryClient.invalidateQueries({ queryKey: stableListKeys.nodeRouteState });
       void queryClient.invalidateQueries({ queryKey: stableListKeys.archivedNodes });
       void queryClient.invalidateQueries({ queryKey: stableListKeys.bases });
       void queryClient.invalidateQueries({ queryKey: stableListKeys.archivedBases });

@@ -67,7 +67,7 @@ export function AirAppDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) 
     enabled: Boolean(slug),
   });
   // `nodes.get` is one route for every node type, so narrow to the AirApp branch.
-  const airapp = asNodeDetail(airappQuery.data, "airapp");
+  const airapp = asNodeDetail(airappQuery.isError ? undefined : airappQuery.data, "airapp");
   useReportLoadedNode(airapp?.node, onNodeLoaded);
 
   // Reset the open file when switching airapp nodes.

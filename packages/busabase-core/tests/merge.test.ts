@@ -158,6 +158,9 @@ describe("Staleness-aware 3-way merge — oRPC", () => {
     }
 
     const deleteHeroCr = await client.bases.fieldChangeRequest({
+      // review-first: field delete is permission-aware now, and this test merges
+      // the proposal explicitly to control the ordering against `recordCr`.
+      autoMerge: false,
       operation: "delete",
       baseId: base.id,
       fieldId: heroFieldId,

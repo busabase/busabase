@@ -467,12 +467,14 @@ describe("Base-domain DB lifecycle — oRPC", () => {
       const beforeIds = (await client.records.list()).records.map((r) => r.id);
       expect(beforeIds).toContain(recordId);
 
-      const deleteCr = await client.records.changeRequest({
+      // Permission-aware: the seeded local actor holds `write`, so an omitted
+      // `autoMerge` archives the record in this one call — no separate approve.
+      const deleted = await client.records.changeRequest({
         operation: "delete",
         recordId,
         message: "Remove",
       });
-      await approveAndMerge(deleteCr.id);
+      expect(deleted.materialized).toBe(true);
 
       const afterIds = (await client.records.list()).records.map((r) => r.id);
       expect(afterIds).not.toContain(recordId);
@@ -500,8 +502,7 @@ describe("Base-domain DB lifecycle — oRPC", () => {
 
     it("refuses to delete an already-archived record", async () => {
       const recordId = await createRecord({ title: "Twice", body: "b", channel: "blog" });
-      const cr = await client.records.changeRequest({ operation: "delete", recordId });
-      await approveAndMerge(cr.id);
+      await client.records.changeRequest({ operation: "delete", recordId });
 
       // The code matters as much as the message: this guard used to throw a bare
       // Error, which the transport turned into a 500 with the message swallowed.

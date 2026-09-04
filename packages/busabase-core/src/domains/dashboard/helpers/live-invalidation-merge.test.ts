@@ -58,6 +58,7 @@ describe("merge invalidation scope", () => {
     const batch = classifyLiveInvalidation(mergedEvent({ nodeIds: ["node-1"] }));
 
     expect(batch.targets).toContain("nodes");
+    expect(batch.targets).toContain("nodeRouteState");
     expect(batch.targets).toContain("bases");
     expect(batch.baseIds).toContain("base-1");
   });

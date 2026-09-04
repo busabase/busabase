@@ -12,7 +12,7 @@ const os = implement(busabaseContract);
  * Same source as MCP's `busabase_guide` tool and its `resources/*` documents, so
  * the two surfaces cannot end up saying different things — that was the whole
  * problem: anything driving `/api/v1` (busabase-cli, a script, a CI step) was
- * told none of the approval-first rules an MCP client is told on connect.
+ * told none of the write-hygiene rules an MCP client is told on connect.
  *
  * Not served here are the workspace-dynamic topics `apps` and `skill:<slug>`.
  * They read the manuals installed in this particular workspace and need a

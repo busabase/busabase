@@ -757,7 +757,7 @@ export function AirAppSidePanelPreview({ orpc, payload }: SidePanelTabProps) {
     enabled: Boolean(nodeId),
   });
   // `nodes.get` is one route for every node type, so narrow to the AirApp branch.
-  const airapp = asNodeDetail(airappQuery.data, "airapp");
+  const airapp = asNodeDetail(airappQuery.isError ? undefined : airappQuery.data, "airapp");
   const runner = useAirAppRunner({ orpc, airapp });
 
   if (!airapp) {

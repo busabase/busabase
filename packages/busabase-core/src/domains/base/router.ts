@@ -103,6 +103,7 @@ export const baseRouter = {
           input.fieldId,
           input.submittedBy,
           input.message,
+          input.autoMerge,
         );
       case "convert":
         return createConvertFieldChangeRequest(
@@ -112,6 +113,7 @@ export const baseRouter = {
           input.selectChoiceMode,
           input.submittedBy,
           input.message,
+          input.autoMerge,
         );
       case "reorder":
         return createReorderFieldsChangeRequest(
@@ -132,14 +134,14 @@ export const baseRouter = {
     }
   }),
   previewFieldConversion: os.bases.previewFieldConversion.handler(async ({ input }) => {
-    const { baseId, fieldId, newType } = input;
-    return previewFieldConversion(baseId, fieldId, newType);
+    const { baseId, fieldId, newType, selectChoiceMode } = input;
+    return previewFieldConversion(baseId, fieldId, newType, selectChoiceMode);
   }),
   lifecycleChangeRequest: os.bases.lifecycleChangeRequest.handler(async ({ input }) => {
     const { baseId, submittedBy, message } = input;
     switch (input.operation) {
       case "archive":
-        return createArchiveBaseChangeRequest(baseId, submittedBy, message);
+        return createArchiveBaseChangeRequest(baseId, submittedBy, message, input.autoMerge);
       case "restore":
         return createRestoreBaseChangeRequest(baseId, submittedBy, message, input.autoMerge);
     }
@@ -174,16 +176,18 @@ export const recordRouter = {
       }
       case "delete": {
         const { recordId, operation: _op, ...rest } = input;
-        return {
-          ...(await createDeleteChangeRequest(recordId, rest)),
-          materialized: false as const,
-        };
+        // All three operations now decide `materialized` themselves from the
+        // actor's write permission — the delete/restore branches used to hard-code
+        // `materialized: false` because they could never merge.
+        return createDeleteChangeRequest(recordId, rest);
       }
       case "restore":
-        return {
-          ...(await createRestoreChangeRequest(input.recordId, input.submittedBy, input.message)),
-          materialized: false as const,
-        };
+        return createRestoreChangeRequest(
+          input.recordId,
+          input.submittedBy,
+          input.message,
+          input.autoMerge,
+        );
     }
   }),
   listChangeRequests: os.records.listChangeRequests.handler(async ({ input }) =>

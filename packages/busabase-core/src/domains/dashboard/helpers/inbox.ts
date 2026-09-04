@@ -1,6 +1,13 @@
 import type { CoreI18nMessages } from "../../../i18n";
 
-export type InboxViewKey = "review" | "changes" | "created" | "approved" | "merged" | "rejected";
+export type InboxViewKey =
+  | "review"
+  | "mentions"
+  | "changes"
+  | "created"
+  | "approved"
+  | "merged"
+  | "rejected";
 
 export const inboxTabLabel = (messages: CoreI18nMessages, key: InboxViewKey): string => {
   const labels: Record<InboxViewKey, string> = {
@@ -9,6 +16,7 @@ export const inboxTabLabel = (messages: CoreI18nMessages, key: InboxViewKey): st
     created: messages.inbox.created,
     merged: messages.inbox.merged,
     rejected: messages.inbox.closed,
+    mentions: messages.inbox.mentions,
     review: messages.inbox.forReview,
   };
   return labels[key];
@@ -16,8 +24,19 @@ export const inboxTabLabel = (messages: CoreI18nMessages, key: InboxViewKey): st
 
 export const getLocationPath = (location: string) => location.split("?")[0] || "/";
 
-const INBOX_VIEW_KEYS: readonly InboxViewKey[] = [
+/**
+ * Every Inbox tab, in display order — and the ONLY list of them.
+ *
+ * The toolbar used to keep its own hardcoded copy, which is why adding a key
+ * here once shipped a tab that the URL accepted but no one could click. One
+ * array, read by both the router-ish `readInboxView` and the tab bar.
+ */
+export const INBOX_VIEW_KEYS: readonly InboxViewKey[] = [
   "review",
+  // Right after "for review": both answer "what is waiting on me", which is
+  // what the Inbox is for. The CR-shaped tabs that follow are about a change
+  // request's lifecycle, not about the reader.
+  "mentions",
   "changes",
   "created",
   "approved",

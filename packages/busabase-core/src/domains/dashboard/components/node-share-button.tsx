@@ -121,10 +121,22 @@ export function NodeShareDialog({
     });
   }, [spaceId, nodeType, nodeSlug]);
 
-  const invalidate = () =>
-    queryClient.invalidateQueries({
-      queryKey: orpc.nodes.share.get.queryOptions({ input: { nodeId } }).queryKey,
-    });
+  // Both the share row itself AND the node listings: `NodeVO.shared` is what
+  // draws the sidebar's "shared publicly" marker, so publishing/revoking here
+  // has to refresh the tree (and Favorites, built from the same rows) or the
+  // marker would lag a full page load behind the switch the user just flipped.
+  // `nodes.list` is keyed by its input (the sidebar's lazy per-folder fetches
+  // each have their own entry), so this invalidates the whole `nodes.list`
+  // prefix rather than one input.
+  const invalidate = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({
+        queryKey: orpc.nodes.share.get.queryOptions({ input: { nodeId } }).queryKey,
+      }),
+      queryClient.invalidateQueries({ queryKey: orpc.nodes.list.key() }),
+      queryClient.invalidateQueries({ queryKey: orpc.nodes.listFavorites.key() }),
+    ]);
+  };
 
   const handleToggle = async (next: boolean) => {
     try {
@@ -218,7 +230,13 @@ export function NodeShareDialog({
           <div className="flex items-start justify-between gap-3">
             <Label className="flex flex-col gap-1" htmlFor="node-share-public">
               <span className="font-medium text-sm">{t.shareToWeb}</span>
-              <span className="text-muted-foreground text-xs">{t.shareToWebHint}</span>
+              <span className="text-muted-foreground text-xs">
+                {/* An AirApp is a program, so "anyone with the link can open
+                    this" understates what sharing does: the visitor's browser
+                    downloads and RUNS its files. Say so where the decision is
+                    made, not in a doc nobody reads. */}
+                {nodeType === "airapp" ? t.shareToWebAirAppHint : t.shareToWebHint}
+              </span>
             </Label>
             <Switch
               checked={isPublic}
@@ -230,22 +248,28 @@ export function NodeShareDialog({
 
           {isPublic && (
             <div className="space-y-4 border-border/60 border-t pt-4">
-              {/* Capability */}
-              <div className="flex items-center justify-between gap-3">
-                <Label className="font-medium text-sm">{t.capabilityLabel}</Label>
-                <Select
-                  onValueChange={(value) => handleCapability(value as NodeShareCapability)}
-                  value={share?.capability ?? "read"}
-                >
-                  <SelectTrigger className="h-8 w-44">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="read">{t.capabilityRead}</SelectItem>
-                    <SelectItem value="submit">{t.capabilitySubmit}</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+              {/* Capability — only where "submit" is a real option. The server
+                  only ever routes ONE procedure through the submit tier
+                  (`forms.submit`), so on every other type this select offered a
+                  choice with no effect: you could pick "Allow submissions", it
+                  saved, and nothing anywhere behaved differently. */}
+              {publicAccessOf(nodeType) === "submit" && (
+                <div className="flex items-center justify-between gap-3">
+                  <Label className="font-medium text-sm">{t.capabilityLabel}</Label>
+                  <Select
+                    onValueChange={(value) => handleCapability(value as NodeShareCapability)}
+                    value={share?.capability ?? "read"}
+                  >
+                    <SelectTrigger className="h-8 w-44">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="read">{t.capabilityRead}</SelectItem>
+                      <SelectItem value="submit">{t.capabilitySubmit}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
 
               {/* Only meaningful once the link may submit at all — on a
                   view-only link there is nothing to require a sign-in for. */}

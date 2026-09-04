@@ -8,6 +8,7 @@ import {
   EMBED_BASE_SECURITY_HEADERS,
   EMBED_RUNTIME_CAPABILITY_HEADER,
   EMBED_RUNTIME_NODE_HEADER,
+  PUBLIC_SHARE_RUNTIME_SPACE_HEADER,
 } from "./capability";
 import { resolveAirAppEmbedCapability } from "./logic";
 import { airAppEmbedDataRouter } from "./runtime-router";
@@ -36,6 +37,7 @@ const withoutCredentials = async (request: Request, pathname: string): Promise<R
   headers.delete("cookie");
   headers.delete(EMBED_RUNTIME_CAPABILITY_HEADER);
   headers.delete(EMBED_RUNTIME_NODE_HEADER);
+  headers.delete(PUBLIC_SHARE_RUNTIME_SPACE_HEADER);
   const hasBody = request.method !== "GET" && request.method !== "HEAD";
   return new Request(source, {
     method: request.method,
@@ -61,6 +63,25 @@ export interface AirAppEmbedBridgeOptions {
    * checked. Desktop has no such state and omits it.
    */
   withHostContext?: <T>(fn: () => Promise<T>) => Promise<T>;
+  /**
+   * Resolve the caller's PUBLIC-SHARE authority, or null when the header names
+   * a node that is not publicly shared as an AirApp.
+   *
+   * This is the bridge's second credential mode, and it is injected rather than
+   * implemented here because "is this node publicly shared" is host state: on
+   * Cloud it also has to honor the signed unlock cookie a password-protected
+   * share hands out. A host with no public sharing omits this, and the mode
+   * simply does not exist for it.
+   *
+   * The authority it returns must be the ANONYMOUS visitor — strictly smaller
+   * than an embed capability. A shared AirApp is opened by whoever was sent the
+   * link, routinely a signed-in stranger looking at their own workspace, so the
+   * one thing it must never do is borrow the viewer's session.
+   */
+  resolvePublicShareAuthority?: (
+    request: Request,
+    nodeId: string,
+  ) => Promise<(<T>(fn: () => Promise<T>) => Promise<T>) | null>;
 }
 
 /**
@@ -75,21 +96,53 @@ export const createAirAppEmbedBridgeHandler = ({
   rpcPrefix,
   db,
   withHostContext = (fn) => fn(),
+  resolvePublicShareAuthority,
 }: AirAppEmbedBridgeOptions) => {
+  /**
+   * Which credential the caller presented, resolved into "run the router with
+   * THIS authority" — or null when nothing checks out.
+   *
+   * The embed capability is tried first and, when one is present, it decides
+   * the request outright: a caller holding a capability is not silently
+   * downgraded to the public-share path if it fails to resolve.
+   */
+  const resolveAuthority = async (
+    request: Request,
+    nodeId: string,
+  ): Promise<(<T>(fn: () => Promise<T>) => Promise<T>) | null> => {
+    const encoded = decodeEmbedCapability(
+      request.headers.get(EMBED_RUNTIME_CAPABILITY_HEADER) ?? undefined,
+    );
+    if (encoded) {
+      const capability = await withHostContext(() =>
+        resolveAirAppEmbedCapability(encoded.id, encoded.secret, nodeId),
+      );
+      if (!capability) return null;
+      return (fn) =>
+        runWithEmbedContext(
+          {
+            db,
+            actorId: capability.createdBy,
+            spaceId: capability.spaceId,
+            restrictedVisibility: capability.restrictedVisibility,
+            embedTargetNodeId: capability.nodeId,
+          },
+          fn,
+        );
+    }
+    if (!resolvePublicShareAuthority) return null;
+    return resolvePublicShareAuthority(request, nodeId);
+  };
+
   return async (
     request: Request,
     context: { params: Promise<{ path?: string[] }> },
   ): Promise<Response> => {
-    const encoded = decodeEmbedCapability(
-      request.headers.get(EMBED_RUNTIME_CAPABILITY_HEADER) ?? undefined,
-    );
     const expectedNodeId = request.headers.get(EMBED_RUNTIME_NODE_HEADER)?.trim();
-    if (!encoded || !expectedNodeId) return errorResponse(404, "Embed not found");
+    if (!expectedNodeId) return errorResponse(404, "Embed not found");
 
-    const capability = await withHostContext(() =>
-      resolveAirAppEmbedCapability(encoded.id, encoded.secret, expectedNodeId),
-    );
-    if (!capability) return errorResponse(404, "Embed not found");
+    const withAuthority = await resolveAuthority(request, expectedNodeId);
+    if (!withAuthority) return errorResponse(404, "Embed not found");
 
     const { path = [] } = await context.params;
     const pathname = `/${path.join("/")}`;
@@ -101,30 +154,21 @@ export const createAirAppEmbedBridgeHandler = ({
     }
     const upstream = await withoutCredentials(request, pathname);
 
-    return runWithEmbedContext(
-      {
-        db,
-        actorId: capability.createdBy,
-        spaceId: capability.spaceId,
-        restrictedVisibility: capability.restrictedVisibility,
-        embedTargetNodeId: capability.nodeId,
-      },
-      async () => {
-        const result = pathname.startsWith(rpcPrefix)
-          ? await rpcHandler.handle(upstream, { context: {}, prefix: rpcPrefix })
-          : await openApiHandler.handle(upstream, { context: {} });
-        if (!result.matched) return errorResponse(404, "Embed data route not found");
-        const headers = new Headers(result.response.headers);
-        for (const [name, value] of Object.entries(EMBED_BASE_SECURITY_HEADERS)) {
-          headers.set(name, value);
-        }
-        headers.set("pragma", "no-cache");
-        return new Response(result.response.body, {
-          status: result.response.status,
-          statusText: result.response.statusText,
-          headers,
-        });
-      },
-    );
+    return withAuthority(async () => {
+      const result = pathname.startsWith(rpcPrefix)
+        ? await rpcHandler.handle(upstream, { context: {}, prefix: rpcPrefix })
+        : await openApiHandler.handle(upstream, { context: {} });
+      if (!result.matched) return errorResponse(404, "Embed data route not found");
+      const headers = new Headers(result.response.headers);
+      for (const [name, value] of Object.entries(EMBED_BASE_SECURITY_HEADERS)) {
+        headers.set(name, value);
+      }
+      headers.set("pragma", "no-cache");
+      return new Response(result.response.body, {
+        status: result.response.status,
+        statusText: result.response.statusText,
+        headers,
+      });
+    });
   };
 };

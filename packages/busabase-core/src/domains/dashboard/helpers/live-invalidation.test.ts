@@ -43,6 +43,7 @@ describe("live invalidation classification", () => {
       "archivedNodes",
       "auditEvents",
       "nodeDetail",
+      "nodeRouteState",
       "nodes",
     ]);
   });
@@ -62,6 +63,7 @@ describe("live invalidation classification", () => {
     );
     expect(merged.targets).toContain("records");
     expect(merged.targets).toContain("nodes");
+    expect(merged.targets).toContain("nodeRouteState");
     expect(merged.baseIds).toContain("base-1");
   });
 });

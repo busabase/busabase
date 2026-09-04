@@ -50,6 +50,7 @@ import {
   NodeIconUploadUrlInputSchema,
   NodeIconUploadUrlVOSchema,
 } from "./node-icon-upload-schemas";
+import { NodeRouteStateVOSchema } from "./node-route-state-schemas";
 import {
   agentTaskSchema,
   auditEventSchema,
@@ -71,8 +72,12 @@ import {
   listChangeRequestsPageResponseSchema,
   listChangeRequestsResponseSchema,
   listInputSchema,
+  listMentionInboxInputSchema,
   listNodesInputSchema,
   liveEventSchema,
+  markMentionsReadInputSchema,
+  markMentionsReadOutputSchema,
+  mentionInboxPageSchema,
   moveNodeInputSchema,
   nodeAgentPromptsSchema,
   nodePrincipalSchema,
@@ -255,6 +260,17 @@ export const busabaseContractRoutes = {
       })
       .input(getNodeInputSchema)
       .output(nodeAncestorsVOSchema),
+    resolveRouteState: oc
+      .route({
+        method: "GET",
+        path: "/nodes/route-state/{nodeId}",
+        tags: ["Nodes"],
+        summary: "Resolve whether a dashboard node route is active, archived, or unavailable",
+        successDescription:
+          "A lightweight route state. Archived nodes return only tombstone metadata, never node content. Hidden, deleted, ambiguous, and anonymous archived nodes are all unavailable.",
+      })
+      .input(getNodeInputSchema)
+      .output(NodeRouteStateVOSchema),
     createChangeRequest: oc
       .route({
         method: "POST",
@@ -606,6 +622,35 @@ export const busabaseContractRoutes = {
       })
       .input(createCommentInputSchema)
       .output(commentSchema),
+    /**
+     * The Inbox's Mentions tab: comments this caller was `@`-mentioned in.
+     *
+     * Scoped to the caller — there is no "whose mentions" input, because a
+     * mention inbox that could be pointed at somebody else would be a way to
+     * read comments across the workspace by proxy.
+     */
+    listMentions: oc
+      .route({
+        method: "GET",
+        path: "/comments/mentions",
+        tags: ["Comments"],
+        summary: "List comments that mention me",
+        successDescription:
+          "One entry per comment the caller is mentioned in, newest first, with the unread count for the tab badge.",
+      })
+      .input(listMentionInboxInputSchema)
+      .output(mentionInboxPageSchema),
+    markMentionsRead: oc
+      .route({
+        method: "POST",
+        path: "/comments/mentions/read",
+        tags: ["Comments"],
+        summary: "Mark my mentions on a comment as read",
+        successDescription:
+          "Stamps every unread mention this caller has on that comment, and returns the remaining unread count.",
+      })
+      .input(markMentionsReadInputSchema)
+      .output(markMentionsReadOutputSchema),
   },
   agent: {
     listTasks: oc

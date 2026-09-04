@@ -23,7 +23,19 @@ export interface NodeArchiveInput {
   message?: string;
   submittedBy?: string;
   autoMerge?: boolean;
+  requireReview?: boolean;
 }
+
+/**
+ * `autoMerge` is tri-state — unset (permission-aware default), forced on, forced
+ * off — but a CLI boolean flag is presence-only, so `--auto-merge` alone could
+ * never express "forced off". Same two-flag shape as `node_create`.
+ */
+const mergeIntent = (input: NodeArchiveInput): { autoMerge?: boolean } => {
+  if (input.requireReview) return { autoMerge: false };
+  if (input.autoMerge) return { autoMerge: true };
+  return {};
+};
 
 export const nodeArchiveTask: TaskDefinition<NodeArchiveInput> = {
   name: "node_archive",
@@ -31,7 +43,7 @@ export const nodeArchiveTask: TaskDefinition<NodeArchiveInput> = {
   summary: "Archive a node (reversible; the node moves to Trash)",
   guidance:
     "This is the only way to move a node into the archived state, and it is reversible — the node appears in the Trash view and can be restored. " +
-    "It is review-first by default: it proposes a ChangeRequest for a human unless you pass autoMerge. " +
+    "Review is permission-aware, decided server-side: it archives immediately when your key has write access on the node and lands as a pending ChangeRequest otherwise. Pass requireReview to always propose instead. " +
     "Do NOT use node_purge to remove a node: purge is permanent and only accepts a node that has ALREADY been archived by this task.",
   annotations: { readOnly: false, destructive: false },
   params: [
@@ -45,18 +57,30 @@ export const nodeArchiveTask: TaskDefinition<NodeArchiveInput> = {
     {
       name: "autoMerge",
       kind: "boolean",
-      description: "Archive immediately instead of proposing a ChangeRequest for review.",
+      description:
+        "Archive immediately if you have write access. Not a permission override — a changeRequest-level key still gets a pending CR. Default is permission-aware: archive when you can, otherwise propose.",
+    },
+    {
+      name: "requireReview",
+      kind: "boolean",
+      description:
+        "Always propose a pending ChangeRequest instead of archiving, even with write access.",
     },
   ],
   examples: [
     "busabase-cli nodes archive --node-id nod_123",
-    "busabase-cli nodes archive --node-id nod_123 --auto-merge   # skip review",
+    "busabase-cli nodes archive --node-id nod_123 --require-review   # leave it for a human",
   ],
   execute: async (client: BusabaseTaskClient, input: NodeArchiveInput) =>
     client.nodes.createChangeRequest({
       message: input.message ?? "Archive node",
       submittedBy: input.submittedBy,
-      autoMerge: Boolean(input.autoMerge),
+      // Tri-state pass-through. This used to be `Boolean(input.autoMerge)`, which
+      // turned "the caller said nothing" into an explicit `false` and so forced
+      // review on every archive — overriding the endpoint's own permission-aware
+      // default from the client side, which is the one thing a task layer must
+      // not do.
+      ...mergeIntent(input),
       // Wire kind is "delete"; its semantics are a soft archive. See the file
       // comment — this mapping is exactly what the task layer exists to hide.
       operations: [{ kind: "delete", nodeId: input.nodeId }],

@@ -54,7 +54,7 @@ import { FormulaError } from "../formula";
 import { baseNotFound } from "./errors";
 import { resolveLookupFieldOptions } from "./field-ops";
 import { getBase } from "./queries";
-import { resolveRelationFieldOptions } from "./relation-options";
+import { assertRelationOnlyOptionsOrThrow, resolveRelationFieldOptions } from "./relation-options";
 
 export {
   createBaseInputSchema,
@@ -192,6 +192,9 @@ export const createBase = async (input: z.input<typeof createBaseInputSchema>) =
   // a lookup needs to find its target Base. The lookup TARGET Base is a
   // different, already-existing Base — a relation field cannot be created
   // without a resolvable targetBaseId — so it is safe to load here.
+  for (const field of parsed.fields) {
+    assertRelationOnlyOptionsOrThrow(field.type, field.slug, field.options);
+  }
   const relationResolvedFields = await Promise.all(
     parsed.fields.map(async (field) => ({
       ...field,
@@ -1154,6 +1157,34 @@ export const createDeleteChangeRequest = async (
     commitId,
     metadata: { deleteMode: parsed.deleteMode, operation: "record_delete" },
   });
+  // Permission-aware, exactly like `update` above. Archiving used to be pinned
+  // review-first for everyone; it no longer is (see
+  // `busabase-contract/src/contract/auto-merge.ts`) — `delete` ARCHIVES, and
+  // `restore` puts it back, so a write-capable actor archiving their own record
+  // was being made to approve their own undo-able cleanup.
+  //
+  // The pending-review notification is published ONLY on the review branch:
+  // pinging a reviewer's inbox about a change request that merges microseconds
+  // later is a phantom notification (same ordering `finalizeChangeRequest`
+  // enforces for the endpoints that can use it — this one can't, because it
+  // returns the archived record, not just the change request).
+  const base = await getBase(record.baseId);
+  if (!base) {
+    throw baseNotFound(record.baseId);
+  }
+  const autoMerge = shouldAutoMerge(
+    parsed.autoMerge,
+    await hasNodePermission(base.nodeId, "write", resolveActorId(parsed.submittedBy)),
+  );
+  if (autoMerge) {
+    await reviewChangeRequest(changeRequestId, { verdict: "approved" });
+    const merged = await mergeChangeRequest(changeRequestId);
+    if (!merged.record) {
+      throw new Error("Auto-merge did not produce an archived record");
+    }
+    return { ...merged.record, materialized: true as const };
+  }
+
   await publishChangeRequestPendingReview({
     spaceId: getContextSpaceId(),
     baseId: record.baseId,
@@ -1165,7 +1196,7 @@ export const createDeleteChangeRequest = async (
   if (!changeRequest) {
     throw new Error("Failed to create delete changeRequest");
   }
-  return changeRequest;
+  return { ...changeRequest, materialized: false as const };
 };
 
 export const createUpdateChangeRequest = async (
@@ -1315,6 +1346,7 @@ export const createRestoreChangeRequest = async (
   recordId: string,
   submittedBy = "local-editor",
   message?: string,
+  autoMerge?: boolean,
 ) => {
   await ensureReady();
   const db = await getDb();
@@ -1411,6 +1443,21 @@ export const createRestoreChangeRequest = async (
     commitId,
     metadata: { operation: "record_restore" },
   });
+  // Permission-aware — see the note on the delete path above. Restoring is the
+  // undo of an archive, so if anything it has less at stake than the delete.
+  const shouldMerge = shouldAutoMerge(
+    autoMerge,
+    await hasNodePermission(base.nodeId, "write", resolveActorId(submittedBy)),
+  );
+  if (shouldMerge) {
+    await reviewChangeRequest(changeRequestId, { verdict: "approved" });
+    const merged = await mergeChangeRequest(changeRequestId);
+    if (!merged.record) {
+      throw new Error("Auto-merge did not produce a restored record");
+    }
+    return { ...merged.record, materialized: true as const };
+  }
+
   await publishChangeRequestPendingReview({
     spaceId: getContextSpaceId(),
     baseId: record.baseId,
@@ -1422,13 +1469,14 @@ export const createRestoreChangeRequest = async (
   if (!changeRequest) {
     throw new Error("Failed to create restore changeRequest");
   }
-  return changeRequest;
+  return { ...changeRequest, materialized: false as const };
 };
 
 export const createArchiveBaseChangeRequest = async (
   baseId: string,
   submittedBy = "local-editor",
   message?: string,
+  autoMerge?: boolean,
 ) => {
   await ensureReady();
   const db = await getDb();
@@ -1500,18 +1548,21 @@ export const createArchiveBaseChangeRequest = async (
     commitId,
     metadata: { operation: "base_archive" },
   });
-  await publishChangeRequestPendingReview({
-    spaceId: getContextSpaceId(),
-    baseId: base.id,
+  // Permission-aware, and the same helper `createRestoreBaseChangeRequest`
+  // already used — archive was the last endpoint in this family still pinned
+  // review-first for everyone. It is the widest blast radius of the six
+  // (a Base and every record in it leave every listing at once), which is an
+  // argument for `autoMerge: false` at the call site, not for taking the choice
+  // away from a write-capable owner.
+  return finalizeChangeRequest({
     changeRequestId,
-    submittedBy: resolveActorId(submittedBy),
+    nodeId: base.nodeId,
+    requestedAutoMerge: autoMerge,
+    submittedBy,
+    baseId: base.id,
+    label: "archive base",
+    kind: "structural",
   });
-
-  const changeRequest = await getChangeRequest(changeRequestId);
-  if (!changeRequest) {
-    throw new Error("Failed to create archive base change request");
-  }
-  return changeRequest;
 };
 
 export const createRestoreBaseChangeRequest = async (

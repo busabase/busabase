@@ -217,7 +217,7 @@ const scopeLine = (locale: CoreLocale, scope: NodePromptScope): string => {
 };
 
 /**
- * Mutating prompts retain Busabase's approval-first rule. Reply-language
+ * Mutating prompts ask the agent not to self-approve. Reply-language
  * guidance is separate because read-only prompts need it without accidentally
  * asking the agent to create a change.
  */

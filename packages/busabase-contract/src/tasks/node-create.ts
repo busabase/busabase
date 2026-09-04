@@ -119,7 +119,7 @@ export const nodeCreateTask: TaskDefinition<NodeCreateInput> = {
   summary: "Create a workspace node of any type",
   guidance:
     "One call creates any of the 11 node types with its type-specific payload: `fields` for a Base, `body` for a Doc, `files` for a Skill/Drive/AirApp, `assetId` for a File. " +
-    "Busabase is approval-first: by default this proposes a ChangeRequest for a human to review, and only merges immediately when you already have write access. " +
+    "Review is permission-aware, decided server-side: this merges immediately when you already have write access on the parent node, and proposes a ChangeRequest for a human otherwise. " +
     "Pass requireReview to always propose instead of merging.",
   annotations: { readOnly: false, destructive: false },
   params: [

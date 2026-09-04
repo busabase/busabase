@@ -154,7 +154,7 @@ const rows: GalleryRow[] = [
     minutesAgo: 210,
     fields: {
       name: "OpenClaw",
-      tagline: "Open-source agent runtime for approval-first workflows.",
+      tagline: "Open-source agent runtime for reviewable workflows.",
       category: "automation",
       status: "beta",
       website: "https://github.com/busabase",

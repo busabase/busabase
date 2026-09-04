@@ -92,14 +92,16 @@ export function buildSkillMarkdown(origin: string, ctx?: SkillMarkdownContext): 
 
   return `---
 name: busabase
-description: Use Busabase as an approval-first knowledge base over HTTP. List Bases and Nodes, propose changes as ChangeRequests, approve or reject them, merge approved ChangeRequests into canonical state, and read records, nodes, and Skill files back.
+description: Use Busabase as a workspace for AI agents over HTTP — database, knowledge base, apps library, and skills registry. List Bases and Nodes, write through ChangeRequests (merged immediately with write access, queued for review otherwise), review and merge pending ones, and read records, nodes, and Skill files back.
 ---
 
 # Busabase Skill
 
-Busabase is an approval-first review engine for AI-generated content. Agents never
-mutate canonical data directly — they open ChangeRequests, wait for review, then
-merge.
+Busabase is a workspace for AI agents: a database, knowledge base, apps library, and
+skills registry. Agents write through **ChangeRequests**, so every change carries a
+message, a diff, and an audit trail. Whether a change request merges immediately or
+waits for a human is decided by the API key's permission level — a \`write\` key lands
+it in one call, a \`changeRequest\` key leaves it pending in the review inbox.
 ${
   needsSetup
     ? `
@@ -653,10 +655,10 @@ this document.
 Your first reply must follow the model below in the user's language. Adapt it naturally, but do not
 run commands, probe a server, or claim Busabase is already connected. Ask no additional questions.
 
-> 👋 Welcome! This is **Busabase** (${site}) — an approval-first workspace for working safely
-> with AI agents. Your data lives in **Bases**, and I never change it directly: every change becomes
-> a **ChangeRequest** that you review before it reaches the real data. A wrong move stays a harmless
-> proposal until you approve it.
+> 👋 Welcome! This is **Busabase** (${site}) — a workspace built for AI agents: your database,
+> knowledge base, apps library, and skills registry in one place. Your data lives in **Bases** and
+> other nodes, and every change I make goes in as a **ChangeRequest**, so you can always see what
+> changed, undo it, or have changes wait for your review when you want them to.
 >
 > Before I connect, which edition would you like to use?
 >
@@ -733,23 +735,31 @@ afterwards.`
 ### 0a. Sign in`
 }
 
-Run this command in a managed background process or persistent terminal session. Keep its
-process/session handle and capture both \`stdout\` and \`stderr\`:
+Sign-in is two commands, one per conversational turn. The first returns immediately, so the user
+actually receives the link even if your harness only delivers a turn's final message:
 
 \`\`\`bash
-${BUSABASE_CLI} login --device-code --base-url ${site}${preselectedSpaceId ? ` --space-id ${preselectedSpaceId}` : ""} --no-browser
+${BUSABASE_CLI} login --no-wait --output json --base-url ${site}
 \`\`\`
 
-As soon as the verification URL and code appear, show both to the user and ask them to approve in
-any browser. Do not wait for the command to exit before replying.
+It returns \`verification_url\`, \`user_code\` and \`resume_code\` right away, and writes no credential
+yet. Show \`verification_url\` to the user exactly as returned — it is an opaque string, so never
+re-encode, trim, or re-wrap it — then **end your turn** so they can approve it on any device. To let
+them approve from a phone, render it as a QR code with
+\`${BUSABASE_CLI} qrcode "<verification_url>" --out-file qr.png\` and include the image in your reply.
 
-Keep the same process running. After the user approves, resume or poll it until it exits, then
-continue from its safe summary: selected Space, \`availableSpaces\`, \`createdSpace\` and
+After the user confirms they approved, finish the sign-in in a later turn:
+
+\`\`\`bash
+${BUSABASE_CLI} login --resume-code <resume_code> --output json --base-url ${site}${preselectedSpaceId ? ` --space-id ${preselectedSpaceId}` : ""}
+\`\`\`
+
+Continue from its safe summary: selected Space, \`availableSpaces\`, \`createdSpace\` and
 \`bootstrapRequired\`. Never ask the user to paste a secret, print \`~/.busabase/.env\`, or start a
-second login while the first is running.
+second login while one is pending — a fresh login invalidates the link the user is about to approve.
 
-If the code expires or authorization fails, explain what happened; if the user still wants to
-continue, rerun the same login command above once.
+If \`resume_code\` has expired or authorization failed, explain what happened; if the user still wants
+to continue, start over from the \`--no-wait\` command above once.
 
 ${preselectedSpaceId ? `The dashboard supplied \`--space-id ${preselectedSpaceId}\` — lock it as the target: never create or\nswitch Spaces, and never ask the user to pick one. Preselection only fixes *which* Space; it does not\ndecide whether that Space needs initializing, so read \`bootstrapRequired\` below regardless.\n\n` : ""}Branch on the summary's \`bootstrapRequired\` alone, never on whether a Space happens to be empty:
 

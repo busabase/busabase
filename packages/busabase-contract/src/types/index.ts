@@ -175,6 +175,13 @@ export interface NodeVO {
    * as `children.length > 0`.
    */
   hasChildren?: boolean;
+  /**
+   * This node carries its OWN live public share (`nodes.share`) — see the
+   * matching field on the contract's `NodeOutput` (contract/schemas.ts).
+   * Optional/omitted means the read path didn't resolve share state at all,
+   * NOT that the node is unshared.
+   */
+  shared?: boolean;
 }
 
 // Keep the plain open-domains `AttachmentRef` available for lower-level file
@@ -424,6 +431,36 @@ export interface CommentVO {
   mentions: CommentMentionVO[];
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * One row of the Inbox's Mentions tab.
+ *
+ * Keyed by comment, not by mention row: being named twice in one comment is
+ * legitimate (each occurrence renders its own chip) but it is still one thing
+ * to go read, so it is one entry here.
+ */
+export interface MentionInboxItemVO {
+  commentId: string;
+  subjectType: CommentSubjectType;
+  body: string;
+  authorId: string;
+  author: UserRefVO | null;
+  createdAt: string;
+  unread: boolean;
+  /**
+   * Dashboard-relative path to the comment in context, or null when the
+   * subject has no page of its own (a `commit`-scoped comment not attached to
+   * a change request — there is no commit detail route). A null href still
+   * renders a row.
+   */
+  href: string | null;
+}
+
+export interface MentionInboxPageVO {
+  items: MentionInboxItemVO[];
+  total: number;
+  unreadCount: number;
 }
 
 export interface AgentTaskVO {

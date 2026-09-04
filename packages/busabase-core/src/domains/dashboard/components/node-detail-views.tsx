@@ -110,7 +110,7 @@ export function FileTreeDetailView({
     enabled: Boolean(slug),
   });
   // `nodes.get` is one route for every node type, so narrow to this view's branch.
-  const fileTree = asNodeDetail(fileTreeQuery.data, nodeType);
+  const fileTree = asNodeDetail(fileTreeQuery.isError ? undefined : fileTreeQuery.data, nodeType);
   useReportLoadedNode(fileTree?.node, onNodeLoaded);
   // `enabled: !hideActions` keeps the side-panel preview instance of this
   // same component (rendered with `hideActions`) from ever touching the
@@ -564,7 +564,7 @@ export function FileNodeDetailView({
     ...orpc.nodes.get.queryOptions({ input: { nodeId: slug ?? "", type: "file" } }),
     enabled: Boolean(slug),
   });
-  const detail = asNodeDetail(fileQuery.data, "file");
+  const detail = asNodeDetail(fileQuery.isError ? undefined : fileQuery.data, "file");
   useReportLoadedNode(detail?.node, onNodeLoaded);
   useRegisterTopbarNodeActions(
     detail ? (
@@ -686,7 +686,7 @@ export function DocDetailView({
     ...orpc.nodes.get.queryOptions({ input: { nodeId: slug ?? "", type: "doc" } }),
     enabled: Boolean(slug),
   });
-  const doc = asNodeDetail(docQuery.data, "doc");
+  const doc = asNodeDetail(docQuery.isError ? undefined : docQuery.data, "doc");
   useReportLoadedNode(doc?.node, onNodeLoaded);
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -891,7 +891,7 @@ export function FolderDetailView({
     ...orpc.nodes.get.queryOptions({ input: { nodeId: slug ?? "", type: "folder" } }),
     enabled: Boolean(slug),
   });
-  const folder = asNodeDetail(folderQuery.data, "folder");
+  const folder = asNodeDetail(folderQuery.isError ? undefined : folderQuery.data, "folder");
   useReportLoadedNode(folder?.node, onNodeLoaded);
   useRegisterTopbarNodeActions(
     folder ? (
@@ -1096,14 +1096,14 @@ function FormNodeDetailView({ nodes = [], onNodeLoaded, orpc, slug }: NodeDetail
     enabled: Boolean(slug && !isAnonymous),
     retry: false,
   });
-  const nodeDetail = asNodeDetail(nodeQuery.data, "form");
+  const nodeDetail = asNodeDetail(nodeQuery.isError ? undefined : nodeQuery.data, "form");
   const node = nodeDetail?.node ?? (slug ? findNodeBySlug(nodes, "form", slug) : null);
   const formQuery = useQuery({
     ...orpc.forms.getByNode.queryOptions({ input: { nodeId: slug ?? "" } }),
     enabled: Boolean(slug),
     retry: false,
   });
-  const form = formQuery.data ?? null;
+  const form = formQuery.isError ? null : (formQuery.data ?? null);
   useReportLoadedNode(node, onNodeLoaded);
 
   // Form used to register ONLY the Share button — no Agent prompts, no Pin, no

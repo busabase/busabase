@@ -59,3 +59,33 @@ export const resolveRelationFieldOptions = async <T extends Record<string, unkno
   resolved.targetBaseId = target.id;
   return resolved as T;
 };
+
+/**
+ * `options.multiple` is a RELATION-only switch — it decides whether a relation cell holds
+ * one record id or a list (see the relation editor in `record-views.tsx`, the only reader).
+ * Nothing reads it for any other field type.
+ *
+ * The field `options` bag is shared across every field type, so before this guard a
+ * `select` happily accepted, persisted, and then ignored `multiple: true`: the schema read
+ * as multi-valued and the mistake only surfaced at the first record write, as
+ * `must be one of its options`. A list of choices is its own field type — `multiselect` —
+ * which is what the error points at.
+ *
+ * Rejects the key's PRESENCE, not just `true`: `multiple: false` on a `select` is equally
+ * meaningless, and one rule is easier to reason about than two.
+ */
+export const assertRelationOnlyOptionsOrThrow = (
+  type: string,
+  slug: string,
+  options: Record<string, unknown> | null | undefined,
+) => {
+  if (!options || type === "relation" || !("multiple" in options)) {
+    return;
+  }
+  const useMultiselect =
+    type === "select" ? ' For a multi-value choice field use type "multiselect".' : "";
+  throw new ORPCError("BAD_REQUEST", {
+    message: `Field "${slug}": options.multiple only applies to relation fields, not "${type}".${useMultiselect}`,
+    data: { slug, type },
+  });
+};

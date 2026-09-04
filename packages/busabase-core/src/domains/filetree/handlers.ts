@@ -1006,31 +1006,17 @@ export const createFileTreeChangeRequest = async (
     changeRequestId,
     metadata: { operation: `${config.type}_update`, nodeId: node.id },
   });
-  // Destructive operations stay in front of a human no matter what the caller
-  // asked for: deleting a mounted file destroys content, which is the same line
-  // that keeps record `delete` review-only. `autoMerge` is honoured only when the
-  // WHOLE batch is create / update / metadata_update — a mixed batch is not
-  // partially merged, because a half-applied CR is not a state the review model
-  // can express (same all-or-nothing reasoning as the node-tree endpoint).
-  //
-  // Rejected loudly rather than quietly downgraded: silently ignoring a flag the
-  // caller passed is the exact failure mode this whole rollout exists to fix (an
-  // agent cannot tell "ignored" from "the server decided review"). Unlike the
-  // schema-level refusals, this one cannot live in the schema — it is a property
-  // of the operations array, not of a single field.
-  const hasDestructiveOperation = parsed.operations.some(
-    (operation) => operation.kind === "delete",
-  );
-  if (hasDestructiveOperation && parsed.autoMerge === true) {
-    throw new ORPCError("BAD_REQUEST", {
-      message:
-        "`autoMerge` is not accepted for a batch containing a delete: removing a mounted file destroys content, so the whole batch requires review. Split the deletes into their own change request, or omit the flag.",
-    });
-  }
+  // Every operation kind — deletes included — takes the same permission-aware
+  // `autoMerge` default as the rest of the write surface. A batch containing a
+  // `delete` used to be pinned to review and to reject `autoMerge: true` with a
+  // 400; both are gone (see `busabase-contract/src/contract/auto-merge.ts`).
+  // The reviewable record is not lost by merging: the deleted file's previous
+  // bytes stay in the ChangeRequest's commit history either way, so the only
+  // thing the old rule bought was making a solo owner approve their own cleanup.
   return finalizeChangeRequest({
     changeRequestId,
     nodeId: node.id,
-    requestedAutoMerge: hasDestructiveOperation ? false : parsed.autoMerge,
+    requestedAutoMerge: parsed.autoMerge,
     submittedBy: parsed.submittedBy,
     baseId: null,
     label: labelLower(config),

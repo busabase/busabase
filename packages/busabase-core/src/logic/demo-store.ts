@@ -348,6 +348,51 @@ export const demoListComments = (input: {
     (comment) => comment.subjectType === input.subjectType && comment.subjectId === input.subjectId,
   );
 
+/**
+ * Read state for the demo's Mentions tab.
+ *
+ * The demo dataset is rebuilt per request and its comment VOs carry no
+ * `readAt` (the real column lives on `busabase_comment_mentions`, which demo
+ * mode never touches), so "already read" has to live somewhere else. A
+ * module-level set is enough and matches how `demo-agent.ts` keeps its
+ * scripted session state: it survives within a browsing session, which is all
+ * a demo needs, and costs nothing when the tab is never opened.
+ */
+const demoReadMentionCommentIds = new Set<string>();
+
+/** Comment ids in the demo dataset that `@`-mention the demo visitor. */
+const demoMentionedCommentIds = (): CommentVO[] =>
+  dataset()
+    .comments.filter((comment) =>
+      comment.mentions.some(
+        (mention) => mention.type === "member" && mention.targetId === DEMO_ACTOR_ID,
+      ),
+    )
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+
+export const demoListMentionInbox = (input: { page: number; pageSize: number }) => {
+  const all = demoMentionedCommentIds();
+  const offset = (input.page - 1) * input.pageSize;
+  return {
+    all,
+    page: all.slice(offset, offset + input.pageSize),
+    unreadCount: all.filter((comment) => !demoReadMentionCommentIds.has(comment.id)).length,
+    isUnread: (commentId: string) => !demoReadMentionCommentIds.has(commentId),
+  };
+};
+
+export const demoMarkMentionsRead = (commentId: string) => {
+  const known = demoMentionedCommentIds().some((comment) => comment.id === commentId);
+  const marked = known && !demoReadMentionCommentIds.has(commentId) ? 1 : 0;
+  if (known) demoReadMentionCommentIds.add(commentId);
+  return {
+    marked,
+    unreadCount: demoMentionedCommentIds().filter(
+      (comment) => !demoReadMentionCommentIds.has(comment.id),
+    ).length,
+  };
+};
+
 // `demoListDocs` is gone with `GET /docs`; Docs are listed through
 // `nodes.list({ types: ["doc"] })`, which returns summaries and no bodies.
 

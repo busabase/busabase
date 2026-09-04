@@ -178,6 +178,14 @@ describe("procedure permission policy", () => {
     });
   });
 
+  it("classifies the dashboard route-state guard as a node-scoped read", () => {
+    expect(resolveProcedurePermissionPolicy(["nodes", "resolveRouteState"])).toEqual({
+      level: "read",
+      scope: "node",
+    });
+    expect(resolveRequiredLevel(["workbench", "nodes", "resolveRouteState"], "GET")).toBe("read");
+  });
+
   it("classifies the RPC-only Inbox snapshot like its list and count reads", () => {
     expect(resolveProcedurePermissionPolicy(["changeRequests", "inboxSnapshot"])).toEqual({
       level: "read",

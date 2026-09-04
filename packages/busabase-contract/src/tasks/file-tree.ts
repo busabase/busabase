@@ -209,8 +209,8 @@ export interface FileTreeChangeRequestInput extends FileTreeGetInput {
  * off — but a CLI boolean flag is presence-only, so `--auto-merge` alone could
  * never express "forced off". Same two-flag shape as `node_create`.
  *
- * A batch containing a `delete` is review-first server-side no matter what this
- * sends, so don't imply otherwise in the flag's description.
+ * Applies to every operation kind, deletes included — a delete batch used to be
+ * pinned review-first server-side regardless of this flag, and no longer is.
  */
 const mergeIntent = (input: FileTreeChangeRequestInput): { autoMerge?: boolean } => {
   if (input.requireReview) return { autoMerge: false };
@@ -244,9 +244,9 @@ export const nodeFilesChangeRequestTask: TaskDefinition<FileTreeChangeRequestInp
   guidance:
     "Review is permission-aware, decided server-side: the change merges immediately when your key " +
     "has write access on the node and lands as a pending ChangeRequest otherwise — check the " +
-    "response's `status`. Pass requireReview to always propose instead. A batch containing a " +
-    "`delete` is ALWAYS review-first regardless of permission, by design — deleting a mounted file " +
-    "destroys content, and a batch is never partially merged. " +
+    "response's `status`. Pass requireReview to always propose instead — worth doing for a batch " +
+    "containing a `delete`, since that removes a mounted file (its previous bytes stay in the " +
+    "change request's history, and a batch is never partially merged). " +
     "Each operation is one of create / update / delete / metadata_update. " +
     "Include `baseContentHash` (from `node_file_read`) on an update so a concurrent edit is caught. " +
     // Same trap as `node_create`'s `files`, one edit later: an AirApp is run with `npm run dev`,

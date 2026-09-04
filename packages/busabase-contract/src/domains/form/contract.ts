@@ -59,7 +59,7 @@ export const formContract = {
       tags: ["Forms"],
       summary: "Submit a filled-in form",
       successDescription:
-        "Creates an approval-first record-create ChangeRequest on the target Base.",
+        "Creates a review-first record-create ChangeRequest on the target Base — a form submission always waits for a human, whoever submitted it.",
     })
     .input(SubmitFormInputSchema.extend({ nodeId: z.string() }))
     .output(FormSubmitResultSchema),

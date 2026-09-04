@@ -95,6 +95,7 @@ describe("node / field restore fixes", () => {
     await approveAndMerge(
       (
         await client.records.changeRequest({
+          autoMerge: false,
           operation: "delete",
           recordId: r1,
           deleteMode: "archive",
@@ -145,8 +146,14 @@ describe("node / field restore fixes", () => {
 
     // Delete "dup", then create a NEW active field that reuses the slug.
     await approveAndMerge(
-      (await client.bases.fieldChangeRequest({ operation: "delete", baseId, fieldId: oldDupId }))
-        .id,
+      (
+        await client.bases.fieldChangeRequest({
+          autoMerge: false,
+          operation: "delete",
+          baseId,
+          fieldId: oldDupId,
+        })
+      ).id,
     );
     await approveAndMerge(
       (

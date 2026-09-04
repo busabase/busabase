@@ -17,7 +17,7 @@ import type { MergeCtx } from "../../../../logic/cr-lifecycle";
 import { id } from "../../../../logic/kernel";
 import { type MaterializeArgs, registerMaterializer } from "../../../../logic/materialize";
 import { registerNodeRuntime } from "../../../../logic/node-runtime";
-import { resolveRelationFieldOptions } from "../relation-options";
+import { assertRelationOnlyOptionsOrThrow, resolveRelationFieldOptions } from "../relation-options";
 
 export const materializeBaseNode = async (
   ctx: MergeCtx,
@@ -66,20 +66,25 @@ export const materializeBaseNode = async (
           required?: boolean;
           options?: Record<string, unknown>;
         }>
-      ).map(async (field, index) => ({
-        id: id("bsf"),
-        spaceId: getContextSpaceId(),
-        baseId,
-        slug: field.slug,
-        name: iStringToText(field.name),
-        type: field.type ?? "text",
-        required: field.required ?? false,
-        position: index,
-        // Resolve targetBaseSlug → id on the SAME merge transaction (ctx.db) — a
-        // node-CR base-create commit stores field options verbatim, so this is
-        // where the node path's relation slug is resolved.
-        options: await resolveRelationFieldOptions(db, field.options ?? {}),
-      })),
+      ).map(async (field, index) => {
+        const type = field.type ?? "text";
+        // A node-CR base-create commit stores field options verbatim, so this is the
+        // only place the `bases.create --fields-json` path validates them.
+        assertRelationOnlyOptionsOrThrow(type, field.slug, field.options);
+        return {
+          id: id("bsf"),
+          spaceId: getContextSpaceId(),
+          baseId,
+          slug: field.slug,
+          name: iStringToText(field.name),
+          type,
+          required: field.required ?? false,
+          position: index,
+          // Resolve targetBaseSlug → id on the SAME merge transaction (ctx.db), which
+          // is where the node path's relation slug is resolved.
+          options: await resolveRelationFieldOptions(db, field.options ?? {}),
+        };
+      }),
     ),
   );
   return baseNodeId;

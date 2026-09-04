@@ -136,6 +136,9 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   // already list, resolved through the same per-node ACL, and reveals nothing
   // a `nodes.list` would not.
   "nodes.ancestors": node("read"),
+  // Dashboard tombstone guard. It returns only a node id for active routes and
+  // minimal metadata for an archived route the caller can already see.
+  "nodes.resolveRouteState": node("read"),
   // ---- changeRequest: the full proposal-lifecycle family (never touches live
   // data), plus amending a still-pending proposal, plus uploading/writing an
   // asset for use inside a not-yet-merged proposal (deliberate inclusion). ----
@@ -237,6 +240,14 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   "activity.listForNode": node("read"),
   "activity.listForRecord": node("read"),
   "comments.list": node("read"),
+  // Both are scoped to the caller's own mentions by the handler, never to a
+  // supplied user id, so they expose nothing a `read` key could not already
+  // reach through `comments.list`. `markMentionsRead` writes only a read
+  // stamp on the caller's own rows — that is not content authorship, so
+  // holding it to `write` would mean a read-only member could see an unread
+  // badge they are not allowed to clear.
+  "comments.listMentions": node("read"),
+  "comments.markMentionsRead": node("read"),
   "agent.listTasks": node("read"),
   // The SSE payload is space-wide and not yet per-event node filtered.
   "live.subscribe": workspace("manage"),

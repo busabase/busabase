@@ -187,6 +187,9 @@ export const AGENT_EXCLUDED_MCP_TOOLS: readonly string[] = [
   // already gets its `parentId` from `nodes_get` and the whole shape from
   // `nodes_list`; this adds no reach, only UI plumbing.
   "nodes_ancestors",
+  // Dashboard-only tombstone lookup used to choose the archived status page.
+  // Agents already have active detail and archived-list tasks.
+  "nodes_resolve_route_state",
   // Installing a package writes a whole subtree of nodes into the workspace from
   // a third-party GitHub repo. That is a human's decision about what to trust,
   // not a step an agent should take on its own. `busabase-cli install` keeps it.
@@ -205,4 +208,19 @@ export const AGENT_EXCLUDED_MCP_TOOLS: readonly string[] = [
   "vault_get",
   "vault_update",
   "vault_clear",
+  // One human's personal notification state. Both are scoped to the caller from
+  // context, so on an agent's credential they resolve to the PERSON who issued
+  // it, not to the agent: `listMentions` filters `targetType = "member"`, and an
+  // agent's own mentions are `targetType = "agent"` — so there is no reading
+  // here an agent could want, only its owner's inbox.
+  //
+  // `markMentionsRead` is the one that actually costs something. It stamps
+  // `readAt` on that person's unread rows, which is the only signal telling them
+  // a teammate is waiting on them. An agent clearing it means the mention is
+  // delivered, marked read, and never seen by a human — the exact silent-drop
+  // this feature exists to end, arriving through the tool catalog instead. A
+  // script that wants to forward its own mentions elsewhere still has both over
+  // `/api/v1` with the owner's key, where the person chose to point it.
+  "comments_list_mentions",
+  "comments_mark_mentions_read",
 ];

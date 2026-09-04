@@ -206,16 +206,16 @@ function buildClient(raw: RawClient) {
         mergeImmediately?: boolean;
       }) => {
         const { mergeImmediately, recordId, ...rest } = input;
-        const cr = await raw.records.changeRequest({
+        // Mirrors the dashboard facade: one call, with `mergeImmediately`
+        // forwarded as the endpoint's own `autoMerge` rather than replayed as a
+        // separate approve+merge round trip.
+        return raw.records.changeRequest({
+          autoMerge: mergeImmediately === true,
           operation: "delete",
           recordId,
           submittedBy: rest.submittedBy ?? "local-editor",
           message: rest.message,
         });
-        if (mergeImmediately) {
-          await approveAndMerge(cr.id);
-        }
-        return cr;
       },
       listLinks: (input: { recordId: string }) => raw.records.listLinks(input),
     },

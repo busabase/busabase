@@ -1315,7 +1315,7 @@ const records: SeedRecordDef[] = [
       asset: [],
       brief: "Launch article covering local-first approval databases for agent workflows.",
       channel: "blog",
-      seo_title: "Approval-first database for AI agents",
+      seo_title: "The workspace AI agents build in",
       status: "draft",
       title: "Busabase launch brief",
     },
@@ -1347,7 +1347,7 @@ const records: SeedRecordDef[] = [
     baseId: ids.contentBase,
     commitId: "cmt_seed_content_newsletter",
     fields: {
-      title: "Newsletter: The case for approval-first data",
+      title: "Newsletter: The case for data agents can build on",
       channel: "newsletter",
       brief:
         "500-word newsletter piece for the AI engineering audience. Lead with the horror story of an agent overwriting production records. Pivot to the Change Request solution. CTA: try Busabase.",
@@ -2678,8 +2678,8 @@ const changeRequests: SeedChangeRequestDef[] = [
         fields: {
           ...records[5].fields,
           brief:
-            "Launch article, comparison section, screenshot plan, and SEO metadata for local-first approval databases.",
-          seo_title: "Busabase: approval-first database for AI agents",
+            "Launch article, comparison section, screenshot plan, and SEO metadata for local-first agent workspaces.",
+          seo_title: "Busabase: database, knowledge base, apps and skills for AI agents",
           status: "ready",
         },
         message: "Move launch brief to publish-ready",
@@ -2755,10 +2755,10 @@ const changeRequests: SeedChangeRequestDef[] = [
           slug: "/busabase-vs-airtable",
           category: "comparison",
           locale: "en",
-          title: "Busabase vs Airtable — approval-first database for AI agent workflows",
+          title: "Busabase vs Airtable — the workspace AI agents build in",
           meta_description:
             "Airtable is built for human teams. Busabase is built for AI agents that propose data and humans that approve it. Compare local-first design, Change Requests, and agent hooks.",
-          target_keywords: "busabase vs airtable, ai agent database, approval-first database",
+          target_keywords: "busabase vs airtable, ai agent database, agent workspace",
           html_body:
             '<section class="hero"><h1>Busabase vs Airtable</h1><p>Airtable stores flexible data for human teams. Busabase gives AI agents a proposal layer — every agent write is a reviewable Change Request before it becomes a trusted record.</p></section><section class="comparison"><h2>Key differences</h2><ul><li>Busabase is local-first by default</li><li>Every write is a Change Request, not a direct row edit</li><li>Agents propose; humans approve</li></ul></section>',
           status: "draft",
@@ -3063,7 +3063,7 @@ const bulkResearch = bulkRows(
 );
 
 const CONTENT_TITLES = [
-  "Launch brief: approval-first DB",
+  "Launch brief: the agent workspace",
   "YouTube script: agent review loop",
   "Blog: provenance as a feature",
   "Social campaign: trust layer",
@@ -3377,7 +3377,7 @@ const buildComparePage = (spec: CompareSpec, locale: "en" | "zh-CN"): SeedRecord
     ? `<section style="padding:3rem 1.5rem;text-align:center;background:var(--background);">
 <p style="display:inline-block;background:var(--muted);color:var(--foreground);border:1px solid var(--border);border-radius:9999px;padding:0.2rem 0.9rem;font-size:0.75rem;font-weight:700;margin-bottom:1.25rem;letter-spacing:0.06em;">COMPARISON</p>
 <h1 style="font-size:2.2rem;font-weight: 600;line-height:1.2;margin:0 auto 1rem;max-width:600px;color:var(--foreground);">Busabase vs ${spec.name}<br><span style="color:var(--foreground);">Which is safe for AI agents?</span></h1>
-<p style="max-width:520px;margin:0 auto 2rem;color:var(--muted-foreground);font-size:1.05rem;line-height:1.65;">${spec.name} is a great ${spec.enThem.toLowerCase()}. Busabase is an approval-first structured database where AI agents <strong>propose</strong> changes and humans <strong>approve</strong> before anything becomes canonical.</p>
+<p style="max-width:520px;margin:0 auto 2rem;color:var(--muted-foreground);font-size:1.05rem;line-height:1.65;">${spec.name} is a great ${spec.enThem.toLowerCase()}. Busabase is the structured workspace AI agents build in: every write is a <strong>Change Request</strong> with a message, a diff and a history — and you can hold any of it for <strong>review</strong>.</p>
 <a href="/dashboard" style="background:var(--primary);color:var(--primary-foreground);padding:0.65rem 1.75rem;border-radius:0.5rem;font-weight:700;font-size:0.9rem;text-decoration:none;display:inline-block;">Try Busabase free →</a>
 </section>
 <section style="padding:2.25rem 1.5rem;">
@@ -3385,9 +3385,9 @@ const buildComparePage = (spec: CompareSpec, locale: "en" | "zh-CN"): SeedRecord
 ${compareTable(
   ["Capability", spec.name, "Busabase"],
   [
-    ["Primary use", spec.enThem, "Approval-first DB for AI agents"],
-    ["AI agent write gate", "✗ direct writes", "✓ Change Requests"],
-    ["Human approval inbox", "✗", "✓ Built-in"],
+    ["Primary use", spec.enThem, "The workspace AI agents build in"],
+    ["AI agent write trail", "✗ silent writes", "✓ Change Requests"],
+    ["Optional review inbox", "✗", "✓ Built-in"],
     ["Audit / commit trail", "~ limited", "✓ Every write logged"],
     ["Pricing", "Per-seat / managed", "Free & open source"],
   ],
@@ -3396,7 +3396,7 @@ ${compareTable(
     : `<section style="padding:3rem 1.5rem;text-align:center;background:var(--background);">
 <p style="display:inline-block;background:var(--muted);color:var(--foreground);border:1px solid var(--border);border-radius:9999px;padding:0.2rem 0.9rem;font-size:0.75rem;font-weight:700;margin-bottom:1.25rem;letter-spacing:0.06em;">对比</p>
 <h1 style="font-size:2.2rem;font-weight: 600;line-height:1.25;margin:0 auto 1rem;max-width:600px;color:var(--foreground);">Busabase vs ${spec.name}<br><span style="color:var(--foreground);">谁更适合 AI agent？</span></h1>
-<p style="max-width:520px;margin:0 auto 2rem;color:var(--muted-foreground);font-size:1.05rem;line-height:1.7;">${spec.name} 是很好的${spec.zhThem}。Busabase 是面向 AI agent 的<strong>审批优先</strong>结构化数据库——agent <strong>提议</strong>修改，人工<strong>审批</strong>后才会成为正式数据。</p>
+<p style="max-width:520px;margin:0 auto 2rem;color:var(--muted-foreground);font-size:1.05rem;line-height:1.7;">${spec.name} 是很好的${spec.zhThem}。Busabase 是 AI agent 干活的结构化工作区——每次写入都是带说明、差异和历史的<strong>变更请求</strong>，需要把关时随时可以让它停下来<strong>等人审</strong>。</p>
 <a href="/dashboard" style="background:var(--primary);color:var(--primary-foreground);padding:0.65rem 1.75rem;border-radius:0.5rem;font-weight:700;font-size:0.9rem;text-decoration:none;display:inline-block;">免费试用 Busabase →</a>
 </section>
 <section style="padding:2.25rem 1.5rem;">
@@ -3404,9 +3404,9 @@ ${compareTable(
 ${compareTable(
   ["能力", spec.name, "Busabase"],
   [
-    ["核心定位", spec.zhThem, "面向 AI agent 的审批优先数据库"],
-    ["AI 写入闸门", "✗ 直接写入", "✓ 变更请求"],
-    ["人工审批收件箱", "✗", "✓ 内置"],
+    ["核心定位", spec.zhThem, "AI agent 干活的工作区"],
+    ["AI 写入留痕", "✗ 悄悄写入", "✓ 变更请求"],
+    ["可选的人工审核收件箱", "✗", "✓ 内置"],
     ["审计 / 提交记录", "~ 有限", "✓ 每次写入留痕"],
     ["价格", "按席位 / 托管", "免费 & 开源"],
   ],
@@ -3419,11 +3419,11 @@ ${compareTable(
     fields: {
       slug,
       title: en
-        ? `Busabase vs ${spec.name} — approval-first database for AI agents`
-        : `Busabase vs ${spec.name} —— 面向 AI agent 的审批优先数据库`,
+        ? `Busabase vs ${spec.name} — the workspace AI agents build in`
+        : `Busabase vs ${spec.name} —— AI agent 的数据中台与应用中台`,
       meta_description: en
-        ? `Compare Busabase and ${spec.name} for AI-agent workflows. Busabase adds Change Requests, a human approval inbox, and a full commit trail on top of a local-first database.`
-        : `对比 Busabase 与 ${spec.name} 在 AI agent 工作流中的差异。Busabase 在本地优先数据库之上提供变更请求、人工审批收件箱与完整提交记录。`,
+        ? `Compare Busabase and ${spec.name} for AI-agent workflows. Busabase adds Change Requests, an optional review inbox, and a full commit trail on top of a local-first database.`
+        : `对比 Busabase 与 ${spec.name} 在 AI agent 工作流中的差异。Busabase 在本地优先数据库之上提供变更请求、可选的人工审核收件箱与完整提交记录。`,
       target_keywords: en
         ? `busabase vs ${spec.name.toLowerCase()}, ${spec.name.toLowerCase()} alternative, ai agent database`
         : `busabase vs ${spec.name.toLowerCase()}, ${spec.name} 替代, AI agent 数据库`,

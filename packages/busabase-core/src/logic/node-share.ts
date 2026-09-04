@@ -77,6 +77,41 @@ export async function getNodeShare(nodeId: string) {
 }
 
 /**
+ * Every node in the current space that carries its OWN live public share —
+ * one query for the whole space, NOT one `getNodeShare` per row, so a sidebar
+ * tree of any size costs a single extra round trip.
+ *
+ * "Own" is the point: this deliberately reads `busabase_node_shares` rather
+ * than the materialized `busabase_nodes.effective_public_scope`, which is the
+ * INHERITED answer (a doc under a shared folder has a scope but nobody
+ * published the doc). See `NodeVO.shared`.
+ *
+ * No permission assertion here, unlike `getNodeShare`: every caller feeds this
+ * into an already ACL-filtered node listing and intersects by id, so a node the
+ * actor cannot see never reaches them regardless of what this returns.
+ */
+export async function listOwnLiveShareNodeIds(): Promise<Set<string>> {
+  const db = await getDb();
+  const rows = await db
+    .select({
+      nodeId: busabaseNodeShares.nodeId,
+      scope: busabaseNodeShares.scope,
+      expiresAt: busabaseNodeShares.expiresAt,
+    })
+    .from(busabaseNodeShares)
+    .where(
+      and(
+        eq(busabaseNodeShares.spaceId, getContextSpaceId()),
+        eq(busabaseNodeShares.scope, "public"),
+      ),
+    );
+  // Expiry is enforced HERE rather than in SQL, through the same `isShareLive`
+  // predicate every other read uses — an expired share must not show a marker
+  // saying the node is published when the link no longer opens.
+  return new Set(rows.filter(isShareLive).map((row) => row.nodeId));
+}
+
+/**
  * Recompute `effective_public_scope` for `rootNodeId` and every descendant.
  *
  * Mirrors `recomputeEffectiveVisibility`'s write-time philosophy: resolve the

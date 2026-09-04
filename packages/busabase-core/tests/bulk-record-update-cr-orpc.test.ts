@@ -125,6 +125,7 @@ describe("bulk record update ChangeRequest — oRPC integration", () => {
     const foreign = await createRecord(otherBaseId, { name: "Foreign" });
     const archived = await createRecord(baseId, { name: "Archived" });
     const archiveCr = await client.records.changeRequest({
+      autoMerge: false,
       operation: "delete",
       recordId: archived.id,
     });

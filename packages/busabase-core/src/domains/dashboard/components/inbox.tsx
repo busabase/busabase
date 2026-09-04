@@ -1,6 +1,10 @@
-import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
-import type { ChangeRequestStatus, ChangeRequestVO } from "busabase-contract/types";
+import type {
+  ChangeRequestStatus,
+  ChangeRequestVO,
+  MentionInboxItemVO,
+} from "busabase-contract/types";
 import { ChevronDown, Loader2 } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
@@ -17,8 +21,8 @@ import {
   statusAccent,
   statusTone,
 } from "../helpers/change-request";
-import { formatListTime } from "../helpers/format";
-import { type InboxViewKey, inboxTabLabel } from "../helpers/inbox";
+import { formatListTime, formatUserRefLabel } from "../helpers/format";
+import { INBOX_VIEW_KEYS, type InboxViewKey, inboxTabLabel } from "../helpers/inbox";
 import { useHrefWithCurrentSearch } from "../helpers/link-search";
 import { resolveSubmissionIdentity } from "../helpers/source-attribution";
 import type { BusabaseListGroup } from "../helpers/view-types";
@@ -202,11 +206,39 @@ function InboxList({
       );
     }
   }, [orpc, queryClient, snapshotQuery.data?.counts]);
+  // Mentions are comments, not change requests, so they cannot ride
+  // `inboxSnapshot` (which is CR-shaped end to end). Separate query, same list
+  // primitives. Only fetched while the tab is active — every other tab would
+  // otherwise pay for a query it never renders — except the count, which the
+  // badge needs even when you are standing somewhere else.
+  const mentionsQuery = useQuery({
+    ...orpc.comments.listMentions.queryOptions({ input: { page, pageSize } }),
+    enabled: activeView === "mentions",
+  });
+  const mentionCountQuery = useQuery({
+    ...orpc.comments.listMentions.queryOptions({ input: { page: 1, pageSize: 1 } }),
+    enabled: activeView !== "mentions",
+  });
+  const unreadMentions =
+    activeView === "mentions"
+      ? (mentionsQuery.data?.unreadCount ?? 0)
+      : (mentionCountQuery.data?.unreadCount ?? 0);
+
+  const markRead = useMutation({
+    ...orpc.comments.markMentionsRead.mutationOptions(),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: orpc.comments.listMentions.queryOptions({ input: { page, pageSize } }).queryKey,
+      });
+    },
+  });
+
   const counts = snapshotQuery.data?.counts;
   const inboxCounts: Record<InboxViewKey, number> = {
     approved: counts?.approved ?? 0,
     changes: counts?.changes ?? 0,
     created: counts?.created ?? 0,
+    mentions: unreadMentions,
     merged: counts?.merged ?? 0,
     rejected: counts?.rejected ?? 0,
     review: counts?.review ?? 0,
@@ -255,8 +287,27 @@ function InboxList({
   const closedCreated = activeChangeRequests.filter(
     (changeRequest) => !isOpenStatus(changeRequest.status),
   );
-  const groups =
-    activeView === "created"
+  const mentionItems = mentionsQuery.data?.items ?? [];
+  const isMentions = activeView === "mentions";
+  const groups: BusabaseListGroup[] = isMentions
+    ? [
+        {
+          count: mentionItems.length,
+          items: mentionItems.map((item) => (
+            <MentionRow
+              item={item}
+              key={item.commentId}
+              onOpen={(commentId) => {
+                // Optimistic-ish: the row is already navigating away, so the
+                // badge should not wait for the round trip to stop counting a
+                // comment the reader is, right now, reading.
+                if (item.unread) markRead.mutate({ commentId });
+              }}
+            />
+          )),
+        },
+      ]
+    : activeView === "created"
       ? [
           {
             count: openCreated.length,
@@ -280,35 +331,47 @@ function InboxList({
     <BusabaseList
       empty={
         <EmptyState
-          title={fmt(messages.inbox.empty, { label: inboxTabLabel(messages, activeView) })}
-          body={messages.inbox.emptyBody}
-          action={emptyGuide}
+          title={
+            isMentions
+              ? messages.inbox.mentionsEmpty
+              : fmt(messages.inbox.empty, { label: inboxTabLabel(messages, activeView) })
+          }
+          body={isMentions ? messages.inbox.mentionsEmptyBody : messages.inbox.emptyBody}
+          action={isMentions ? undefined : emptyGuide}
         />
       }
       groups={groups}
       pagination={
         <RecordsPaginationBar
-          isFetching={snapshotQuery.isFetching}
-          isLoading={snapshotQuery.isLoading}
+          isFetching={isMentions ? mentionsQuery.isFetching : snapshotQuery.isFetching}
+          isLoading={isMentions ? mentionsQuery.isLoading : snapshotQuery.isLoading}
           onPageChange={setPage}
           onPageSizeChange={(next) => {
             setPageSize(next);
             setPage(1);
           }}
           onRetry={() => {
-            void snapshotQuery.refetch();
+            void (isMentions ? mentionsQuery.refetch() : snapshotQuery.refetch());
           }}
-          page={snapshotQuery.data?.page ?? page}
+          page={isMentions ? page : (snapshotQuery.data?.page ?? page)}
           pageSize={pageSize}
-          total={snapshotQuery.data?.total ?? 0}
-          totalPages={snapshotQuery.data?.totalPages ?? 0}
+          total={isMentions ? (mentionsQuery.data?.total ?? 0) : (snapshotQuery.data?.total ?? 0)}
+          totalPages={
+            isMentions
+              ? Math.max(1, Math.ceil((mentionsQuery.data?.total ?? 0) / pageSize))
+              : (snapshotQuery.data?.totalPages ?? 0)
+          }
         />
       }
-      isLoading={snapshotQuery.isLoading}
-      isError={snapshotQuery.isError}
-      errorBody={snapshotQuery.error instanceof Error ? snapshotQuery.error.message : undefined}
+      isLoading={isMentions ? mentionsQuery.isLoading : snapshotQuery.isLoading}
+      isError={isMentions ? mentionsQuery.isError : snapshotQuery.isError}
+      errorBody={
+        (isMentions ? mentionsQuery.error : snapshotQuery.error) instanceof Error
+          ? (isMentions ? mentionsQuery.error : snapshotQuery.error)?.message
+          : undefined
+      }
       onRetry={() => {
-        void snapshotQuery.refetch();
+        void (isMentions ? mentionsQuery.refetch() : snapshotQuery.refetch());
       }}
       toolbar={
         <>
@@ -389,7 +452,7 @@ function BusabaseListToolbar({
   counts: Record<InboxViewKey, number>;
 }) {
   const messages = useCoreI18n();
-  const tabs: InboxViewKey[] = ["review", "changes", "created", "approved", "merged", "rejected"];
+  const tabs = INBOX_VIEW_KEYS;
 
   return (
     <nav
@@ -423,6 +486,66 @@ function BusabaseListToolbar({
         );
       })}
     </nav>
+  );
+}
+
+/**
+ * One comment the reader was `@`-mentioned in.
+ *
+ * Not a `ChangeRequestVO` row: a mention is a comment, so it gets its own
+ * renderer rather than being squeezed into the CR shape the other tabs use.
+ * Everything around it — list, pagination, empty state — is still shared.
+ */
+function MentionRow({
+  item,
+  onOpen,
+}: {
+  item: MentionInboxItemVO;
+  onOpen: (commentId: string) => void;
+}) {
+  const messages = useCoreI18n();
+  const locale = useCoreLocale();
+  const href = useHrefWithCurrentSearch(item.href ?? "");
+  const author = formatUserRefLabel(item.author, item.authorId, messages);
+  const body = (
+    <div className="group relative grid min-h-14 items-center gap-1 py-2.5 pr-3 pl-5 transition-colors hover:bg-accent/25">
+      {/* Unread rail, same left-edge scanning affordance the CR rows use. */}
+      {item.unread ? (
+        <span
+          aria-hidden
+          className="absolute top-2 bottom-2 left-1.5 w-[3px] rounded-full bg-primary"
+        />
+      ) : null}
+      <div className="flex min-w-0 items-center gap-2">
+        <span className="truncate font-medium text-sm">{author}</span>
+        {item.unread ? (
+          <span className="shrink-0 rounded-full bg-primary/12 px-1.5 py-0.5 font-medium text-[10px] text-primary">
+            {messages.inbox.mentionsUnread}
+          </span>
+        ) : null}
+        <span className="ml-auto shrink-0 text-muted-foreground text-xs">
+          {formatListTime(item.createdAt, locale)}
+        </span>
+      </div>
+      <p className="truncate text-muted-foreground text-sm">{item.body}</p>
+    </div>
+  );
+
+  // A `commit`-scoped comment on no change request has no page to open. It
+  // still renders — dropping it would be the one case where being mentioned
+  // silently never reaches you — but as static text with a reason, not a link
+  // that goes nowhere.
+  if (!item.href) {
+    return (
+      <div key={item.commentId} title={messages.inbox.mentionsNoLink}>
+        {body}
+      </div>
+    );
+  }
+  return (
+    <Link href={href} key={item.commentId} onClick={() => onOpen(item.commentId)}>
+      {body}
+    </Link>
   );
 }
 

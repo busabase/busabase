@@ -1,3 +1,4 @@
+import { NODE_TYPES } from "busabase-contract/domains";
 import { describe, expect, it } from "vitest";
 import { parseNodeActivityRoute, parseNodeDetailRoute } from "./node-route";
 
@@ -26,6 +27,16 @@ describe("parseNodeDetailRoute", () => {
 
   it("rejects Bases — their own deeper routes share this two-segment shape", () => {
     expect(parseNodeDetailRoute("/base/blog-posts")).toBeNull();
+  });
+
+  it("recognizes every registered detail type except Base", () => {
+    for (const type of NODE_TYPES) {
+      if (type === "base") continue;
+      expect(parseNodeDetailRoute(`/${type}/route-state-check`)).toEqual({
+        type,
+        slug: "route-state-check",
+      });
+    }
   });
 
   it("rejects routes that merely look like a node route", () => {

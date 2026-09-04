@@ -38,11 +38,10 @@ export const recordChangeTask: TaskDefinition<RecordChangeInput> = {
   cliPath: ["records", "change-request"],
   summary: "Propose a change to an existing record (update / delete / restore)",
   guidance:
-    "Review is permission-aware, decided server-side: `update` merges immediately when your key " +
-    "has write access on the Base's node and lands as a pending ChangeRequest otherwise — check the " +
-    "response's `materialized` field to see which happened. Pass explicit `autoMerge: false` to " +
-    "force review even when you could write directly. `delete` and `restore` are always review-first " +
-    "regardless of permission, by design. " +
+    "Review is permission-aware for all three operations, decided server-side: the change merges " +
+    "immediately when your key has write access on the Base's node and lands as a pending " +
+    "ChangeRequest otherwise — check the response's `materialized` field to see which happened. " +
+    "Pass explicit `autoMerge: false` to force review even when you could write directly. " +
     "`delete` ARCHIVES the record — it is reversible with `restore`, not an erase. " +
     "For update, `fields` is keyed by field slug and only needs the fields you are changing; " +
     "if you set the Base's PRIMARY (first) field, keep it a short human-readable title.",
@@ -72,16 +71,14 @@ export const recordChangeTask: TaskDefinition<RecordChangeInput> = {
     {
       name: "autoMerge",
       kind: "boolean",
-      appliesWhen: { param: "operation", values: ["update"] },
       description:
-        "Skip review and apply the update immediately if you have write access. Not a permission override — a changeRequest-level key still gets a pending CR. Default is permission-aware: merge when you can, otherwise propose.",
+        "Skip review and apply the change immediately if you have write access. Not a permission override — a changeRequest-level key still gets a pending CR. Default is permission-aware: merge when you can, otherwise propose.",
     },
     {
       name: "requireReview",
       kind: "boolean",
-      appliesWhen: { param: "operation", values: ["update"] },
       description:
-        "Always propose a pending ChangeRequest for this update, even with write access. delete/restore are review-first regardless.",
+        "Always propose a pending ChangeRequest instead of applying the change, even with write access.",
     },
   ],
   examples: [
@@ -106,18 +103,23 @@ export const recordChangeTask: TaskDefinition<RecordChangeInput> = {
         ...common,
         operation: "update",
         fields: input.fields,
-        // Only `update` carries the merge intent — the endpoint's delete/restore
-        // branches have no `autoMerge` in their schema at all, by design.
         ...mergeIntent(input),
       } as RecordInput);
     }
+    // delete/restore carry the merge intent too — their schemas used to have no
+    // `autoMerge` at all, so this used to drop the caller's flag on the floor.
     if (input.operation === "delete") {
       return client.records.changeRequest({
         ...common,
         operation: "delete",
         deleteMode: "archive",
+        ...mergeIntent(input),
       } as RecordInput);
     }
-    return client.records.changeRequest({ ...common, operation: "restore" } as RecordInput);
+    return client.records.changeRequest({
+      ...common,
+      operation: "restore",
+      ...mergeIntent(input),
+    } as RecordInput);
   },
 };

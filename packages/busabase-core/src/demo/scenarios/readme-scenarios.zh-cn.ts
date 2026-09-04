@@ -1164,7 +1164,7 @@ export const readmeScenariosZhCnScenario: SeedScenario = {
           "针对 AI Agent 工作流的本地优先审批数据库产品介绍文章，对比方案，包含截图计划和 SEO 元数据。",
         channel: "blog",
         status: "draft",
-        seo_title: "Busabase：面向AI Agent的审批优先数据库",
+        seo_title: "Busabase：AI Agent 的数据中台与应用中台",
       },
       message: "种子数据：内容流程发布简报",
       author: "seed-content",
@@ -1843,7 +1843,7 @@ export const readmeScenariosZhCnScenario: SeedScenario = {
           fields: {
             brief:
               "本地优先审批数据库介绍文章、对比章节、截图计划和 SEO 元数据，涵盖 AI Agent 工作流场景。",
-            seo_title: "Busabase：面向AI Agent的审批优先数据库",
+            seo_title: "Busabase：AI Agent 的数据中台与应用中台",
             status: "ready",
           },
           message: "发布简报进入就绪状态",

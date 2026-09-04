@@ -346,9 +346,25 @@ export const mergeBaseConvertField = async (
         const raw = row.valueJson ?? row.valueText ?? row.valueNumber ?? row.valueBool ?? null;
         if (raw === null || raw === undefined) continue;
         const text = typeof raw === "string" ? raw : String(raw);
-        if (text && !existingNames.has(text)) {
-          existingNames.add(text);
-          extra.push({ id: `auto_${extra.length + newChoices.length}`, name: text });
+        // A multiselect cell is comma-separated: `fromText` splits it and matches each
+        // part against a choice NAME. So auto_create has to mint one choice per part —
+        // minting a single choice from the whole cell (`"a,b"`) leaves every
+        // comma-containing value matching nothing, and the conversion below silently
+        // drops it to `[]` while parking a junk `"a,b"` choice on the field.
+        // `select` keeps whole-cell semantics, which is what its `fromText` branch matches.
+        const names =
+          fieldData.newType === "multiselect"
+            ? text
+                .split(",")
+                .map((part) => part.trim())
+                .filter(Boolean)
+            : text
+              ? [text]
+              : [];
+        for (const name of names) {
+          if (existingNames.has(name)) continue;
+          existingNames.add(name);
+          extra.push({ id: `auto_${extra.length + newChoices.length}`, name });
         }
       }
       const last = chunk[chunk.length - 1];

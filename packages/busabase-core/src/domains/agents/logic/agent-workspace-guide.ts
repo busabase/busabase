@@ -14,7 +14,7 @@
  * connect to by hand (the "copy setup prompt" button). Spec §3: this feature
  * changes who dials, not what is dialled — so an agent Busabase spawns and an
  * agent the user wired up themselves get identical tools and identical
- * approval-first rules, and there is no second surface to keep in sync.
+ * write-hygiene rules, and there is no second surface to keep in sync.
  *
  * Mirrors the base-URL convention `handler.ts` already uses for its own
  * loopback client, rather than inventing a second one.
@@ -31,7 +31,7 @@ export function resolveBusabaseMcpUrl(): string {
  * Deliberately short, and deliberately *not* a copy of the MCP server's own
  * `instructions`/`busabase://skill` (see `mcp-skill.ts`) — the agent already
  * receives those over MCP, and duplicating them here would double the token
- * cost and create two places to keep the approval-first rules correct.
+ * cost and create two places to keep the write-hygiene rules correct.
  *
  * What it covers instead is the one thing MCP cannot tell the agent, because it
  * is a fact about the filesystem rather than about Busabase: **this directory is
@@ -71,12 +71,15 @@ this workspace has, then \`skill:<slug>\` to read one. Do that **before** acting
 on an app's data: guessing a schema the app already documents is how records end
 up in the wrong table.
 
-## Writes are proposals, not edits
+## Writes go through Change Requests
 
-Busabase is approval-first. A write does not change canonical data directly; it
-creates a **Change Request** that a human reviews and merges. Say so plainly when
-you report what you did: "I've proposed X for your review," not "I've updated X."
-Do not attempt to review or merge your own proposal.
+A write does not mutate a table invisibly; it creates a **Change Request** that
+carries a message, a diff, and an undo. Whether it merges straight away or waits
+for a human is decided server-side by your credential's permission level — don't
+reason about it, make the write and read the response's status, then report what
+actually happened: "I've updated X" when it merged, "I've proposed X for your
+review" when it did not. Do not review or merge a proposal the user has not asked
+you to decide on.
 
 ## Files you create here
 

@@ -1425,10 +1425,20 @@ const seedCommentsIfMissing = async (createdAt: Date, comments: SeedCommentDef[]
 export const buildNodeTree = (
   nodes: NodeListPO[],
   bases: BasePO[],
-  options?: { rootParentId?: string | null; forceHasChildrenIds?: Set<string> },
+  options?: {
+    rootParentId?: string | null;
+    forceHasChildrenIds?: Set<string>;
+    /**
+     * Node ids carrying their OWN live public share (see `NodeVO.shared`).
+     * Omit entirely when the caller didn't resolve share state — every node
+     * then reports `shared: undefined` ("unknown"), not `false`.
+     */
+    sharedNodeIds?: Set<string>;
+  },
 ): NodeVO[] => {
   const rootParentId = options?.rootParentId ?? null;
   const forceHasChildrenIds = options?.forceHasChildrenIds;
+  const sharedNodeIds = options?.sharedNodeIds;
   const baseIdByNodeId = new Map(bases.map((base) => [base.nodeId, base.id]));
   const presentIds = new Set(nodes.map((node) => node.id));
   const childrenByParentId = new Map<string | null, NodeListPO[]>();
@@ -1462,7 +1472,13 @@ export const buildNodeTree = (
   const hydrate = (node: NodeListPO): NodeVO => {
     const children = sortNodes(childrenByParentId.get(node.id) ?? []).map(hydrate);
     const hasChildren = children.length > 0 || (forceHasChildrenIds?.has(node.id) ?? false);
-    return toNodeVO(node, baseIdByNodeId.get(node.id) ?? null, children, hasChildren);
+    return toNodeVO(
+      node,
+      baseIdByNodeId.get(node.id) ?? null,
+      children,
+      hasChildren,
+      sharedNodeIds ? sharedNodeIds.has(node.id) : undefined,
+    );
   };
 
   return sortNodes(childrenByParentId.get(rootParentId) ?? []).map(hydrate);
