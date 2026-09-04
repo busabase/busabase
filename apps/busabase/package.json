@@ -18,7 +18,7 @@
     "pglite",
     "cli"
   ],
-  "version": "0.40.1",
+  "version": "0.41.0",
   "private": false,
   "license": "MIT",
   "homepage": "https://github.com/busabase/busabase/tree/main/apps/busabase",
@@ -94,7 +94,7 @@
     "@scelar/nodepod": "^1.9.20",
     "@tailwindcss/postcss": "^4.3.3",
     "@tanstack/react-query": "^5.101.0",
-    "@types/node": "^24.13.2",
+    "@types/node": "^26.3.0",
     "@types/react": "19.2.17",
     "@types/react-dom": "^19.2.3",
     "@types/ws": "^8.18.1",
