@@ -89,8 +89,8 @@ interactively and it asks **where** your Busabase is — every option boils down
 same saved config, differing only in base URL and how (if at all) it gets a token:
 
 ```
-Busabase is an approval-first database and knowledge base for AI agents.
-Agents propose changes; humans review and merge what becomes trusted data.
+Busabase is your AI agents' database, knowledge base, apps library, and skills registry.
+Every change goes in as a change request, so it keeps a message, a diff, and a history.
 
 How should this CLI connect?
   1. Local/Desktop on this computer — no account, no login

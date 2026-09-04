@@ -71,6 +71,13 @@ export interface ClassifiedError {
    */
   retryable: boolean;
   exitCode: number;
+  /**
+   * Agent-facing recovery: the exact next command to run, fully assembled for
+   * this connection (base URL, profile). Attached by the CLI's error path — see
+   * `authRecoveryHint` in `login.ts` — not derived here, because classification
+   * has no access to the resolved config.
+   */
+  hint?: string;
 }
 
 /** The JSON written to stdout when `--output json` is set and the command failed. */
@@ -81,6 +88,7 @@ export interface CliErrorEnvelope {
   message: string;
   issues?: CliErrorIssue[];
   retryable: boolean;
+  hint?: string;
 }
 
 const RETRYABLE: ReadonlySet<CliErrorCode> = new Set(["RATE_LIMITED", "SERVER_ERROR", "NETWORK"]);
@@ -186,6 +194,7 @@ export function errorEnvelope(classified: ClassifiedError): CliErrorEnvelope {
     message: classified.message,
     ...(classified.issues ? { issues: classified.issues } : {}),
     retryable: classified.retryable,
+    ...(classified.hint ? { hint: classified.hint } : {}),
   };
 }
 

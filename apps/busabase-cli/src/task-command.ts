@@ -206,6 +206,13 @@ const registerOne = (
     applyParam(cmd, param);
   }
 
+  // A task may call several endpoints, so it has no single HTTP method — but it
+  // does declare whether it reads. Offering `--dry-run` only on the ones that
+  // write keeps the flag meaningful everywhere it appears.
+  if (!task.annotations.readOnly) {
+    cmd.option("--dry-run", "print the request this would send and send nothing");
+  }
+
   // `guidance` is the paragraph that tells a caller how to USE the command —
   // that `nextCursor` non-null means keep paging rather than raise `limit`, that
   // finding a record by field value is a different task. The MCP adapter has
