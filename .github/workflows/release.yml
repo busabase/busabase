@@ -1,0 +1,169 @@
+# Cuts a GitHub Release once a version's artifacts are actually published.
+#
+# Why this is a third workflow and not a step at the end of `publish-npm.yml`:
+# `Publish npm` and `Docker` are independent workflows with DIFFERENT path
+# filters. A commit under `apps/busabase-cli/**` runs only the first; a commit
+# under `apps/busabase/**` runs both. Tacking a release onto either one would cut
+# a release announcing artifacts that do not exist yet.
+#
+# So this runs after EITHER completes and gates on the artifacts themselves:
+# it only creates the release once `busabase@<version>` is on npm AND the
+# matching Docker Hub tag exists. Whichever workflow finishes last finds both and
+# cuts the release; the earlier one finds one missing and no-ops. No barrier, no
+# deadlock when only one of the two ran.
+#
+# Idempotent, like the rest of this repo's publishing: if the release already
+# exists it exits 0 without touching anything. Re-running is always safe.
+#
+# History note: versions before v0.40.x were published to npm and Docker Hub only
+# — the two orphan tags v0.19.1/v0.19.2 predate this workflow. Nothing is
+# backfilled: GitHub cannot backdate `published_at`, so backfilled releases would
+# all claim today's date and misrepresent the project more than their absence
+# does.
+name: Release
+
+on:
+  workflow_run:
+    workflows: ["Publish npm", "Docker"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    # workflow_run fires on failure too; only a successful publish should release.
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      # For workflow_run, `github.sha` is the default branch tip, which may have
+      # moved on. Tag the commit the triggering run actually built.
+      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Read versions
+        id: v
+        run: |
+          set -euo pipefail
+          {
+            echo "app=$(jq -r .version apps/busabase/package.json)"
+            echo "cli=$(jq -r .version apps/busabase-cli/package.json)"
+            echo "sdk=$(jq -r .version apps/busabase-sdk/package.json)"
+            echo "package=$(jq -r .version packages/busabase-package/package.json)"
+            echo "cms_sdk=$(jq -r .version packages/busabase-cms-sdk/package.json)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Gate on the release not already existing
+        id: exists
+        run: |
+          set -euo pipefail
+          if gh release view "v${{ steps.v.outputs.app }}" >/dev/null 2>&1; then
+            echo "Release v${{ steps.v.outputs.app }} already exists — nothing to do."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The whole point of this workflow: never announce an artifact that is not
+      # there yet. If either is missing, the OTHER workflow is still running (or
+      # never ran) and its completion will re-enter here.
+      - name: Gate on artifacts being published
+        id: gate
+        if: steps.exists.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          v="${{ steps.v.outputs.app }}"
+          ready=true
+
+          if npm view "busabase@${v}" version >/dev/null 2>&1; then
+            echo "npm  busabase@${v}  OK"
+          else
+            echo "npm  busabase@${v}  NOT PUBLISHED YET"
+            ready=false
+          fi
+
+          code=$(curl -s -o /dev/null -w '%{http_code}' \
+            "https://hub.docker.com/v2/repositories/busabase/busabase/tags/${v}")
+          if [ "$code" = "200" ]; then
+            echo "docker  busabase/busabase:${v}  OK"
+          else
+            echo "docker  busabase/busabase:${v}  NOT PUSHED YET (HTTP ${code})"
+            ready=false
+          fi
+
+          echo "ready=${ready}" >> "$GITHUB_OUTPUT"
+          if [ "$ready" != "true" ]; then
+            echo "::notice::Artifacts incomplete for v${v}; the other workflow's completion will retry this."
+          fi
+
+      - name: Build release notes
+        id: notes
+        if: steps.exists.outputs.skip == 'false' && steps.gate.outputs.ready == 'true'
+        run: |
+          set -euo pipefail
+          v="${{ steps.v.outputs.app }}"
+
+          # GitHub's own "What's Changed" for the range since the previous release.
+          generated=$(gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+            -f tag_name="v${v}" -f target_commitish="${SHA}" --jq .body)
+
+          {
+            echo "### Install"
+            echo
+            echo '```sh'
+            echo "npx busabase@${v} server                  # run the server"
+            echo "npx busabase-cli@${{ steps.v.outputs.cli }} --help          # API client"
+            echo "docker run --rm -p 15419:15419 -v ~/.busabase/data:/data busabase/busabase:${v}"
+            echo '```'
+            echo
+            echo "### Published artifacts"
+            echo
+            echo "| Package | Version |"
+            echo "| --- | --- |"
+            echo "| [busabase](https://www.npmjs.com/package/busabase) | \`${v}\` |"
+            echo "| [busabase-cli](https://www.npmjs.com/package/busabase-cli) | \`${{ steps.v.outputs.cli }}\` |"
+            echo "| [busabase-sdk](https://www.npmjs.com/package/busabase-sdk) | \`${{ steps.v.outputs.sdk }}\` |"
+            echo "| [busabase-package](https://www.npmjs.com/package/busabase-package) | \`${{ steps.v.outputs.package }}\` |"
+            echo "| [busabase-cms-sdk](https://www.npmjs.com/package/busabase-cms-sdk) | \`${{ steps.v.outputs.cms_sdk }}\` |"
+            echo
+            echo "Short-name aliases \`busa-cli\` and \`busa-sdk\` ship the same built artifacts."
+            echo
+            echo "Container images (multi-arch, amd64 + arm64):"
+            echo
+            echo "- \`busabase/busabase:${v}\` · \`busabase/busabase:latest\`"
+            echo "- \`ghcr.io/busabase/busabase:${v}\`"
+            echo
+            echo "${generated}"
+          } > /tmp/notes.md
+
+          cat /tmp/notes.md
+
+      - name: Create the release
+        if: steps.exists.outputs.skip == 'false' && steps.gate.outputs.ready == 'true'
+        run: |
+          set -euo pipefail
+          v="${{ steps.v.outputs.app }}"
+          gh release create "v${v}" \
+            --target "${SHA}" \
+            --title "v${v}" \
+            --notes-file /tmp/notes.md
+          echo "Created https://github.com/${GITHUB_REPOSITORY}/releases/tag/v${v}"
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## Release v${{ steps.v.outputs.app }}"
+            echo "- already existed: ${{ steps.exists.outputs.skip }}"
+            echo "- artifacts ready: ${{ steps.gate.outputs.ready || 'n/a' }}"
+          } >> "$GITHUB_STEP_SUMMARY"
