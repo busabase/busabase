@@ -57,14 +57,13 @@ describe("relay permission ceiling over the real OSS OpenAPI boundary", () => {
     expect(serialized).toContain("relay-merged-folder");
   });
 
-  // The seven operations that deliberately never auto-merge now REJECT `autoMerge`
-  // with an actionable message instead of silently dropping it — a silently
-  // ignored flag is indistinguishable, to an agent, from "the server decided to
-  // require review", which is how the original bug survived. Blanket `.strict()`
-  // was rejected for this: the SDK/CLI ship ahead of the server on npm and
-  // busabase is self-hosted, so an unknown-but-newer optional field is normal
-  // traffic that must keep degrading gracefully.
-  it("rejects autoMerge with an actionable reason where it never applies", async () => {
+  // These operations — field delete, field convert, Base archive — used to REJECT
+  // `autoMerge: true` with a 400 no matter who asked. They are permission-aware
+  // now like the rest of the write surface, and this asserts it over the REAL
+  // HTTP/OpenAPI boundary rather than in-process: the schema, the router, and the
+  // logic layer all had to change together, and an in-process call would not have
+  // caught a stale contract still refusing the field at the transport edge.
+  it("merges the formerly review-only operations when the caller may write", async () => {
     const post = async (path: string, body: unknown) => {
       const response = await route.POST(
         new Request(`http://localhost/api/v1${path}`, {
@@ -106,52 +105,43 @@ describe("relay permission ceiling over the real OSS OpenAPI boundary", () => {
     const baseId: string = base.id;
     const fieldId: string = base.fields.find((f: { slug: string }) => f.slug === "note").id;
 
-    const cases: Array<[string, unknown, RegExp]> = [
-      [
-        `/bases/${baseId}/fields/change-requests`,
-        { operation: "delete", baseId, fieldId, autoMerge: true },
-        /soft-deletes its stored values/,
-      ],
-      [
-        `/bases/${baseId}/fields/change-requests`,
-        { operation: "convert", baseId, fieldId, newType: "number", autoMerge: true },
-        /previewFieldConversion/,
-      ],
-      [
-        // Archive and restore became one operation-discriminated endpoint in
-        // #5959; `archive` is the branch that still refuses autoMerge.
-        `/bases/${baseId}/lifecycle/change-requests`,
-        { operation: "archive", autoMerge: true },
-        /every record in it from every listing/,
-      ],
-    ];
-
-    for (const [path, body, expected] of cases) {
-      const { status, payload } = await post(path, body);
-      expect(status, `${path} should reject autoMerge`).toBe(400);
-      // The point is not just "it failed" — the message must say why AND what to
-      // do, which is exactly what `unrecognized key` would not have said.
-      expect(messageOf(payload)).toMatch(expected);
-      expect(messageOf(payload)).toMatch(/autoMerge/);
-    }
-
-    // Omitting the flag on the very same operation still works — the rejection is
-    // scoped to asking for a merge, not to the operation.
-    const omitted = await post(`/bases/${baseId}/lifecycle/change-requests`, {
-      operation: "archive",
+    // Each of the three used to answer 400 here. Ordering matters: convert first
+    // (it needs the field alive), then delete, then archive the whole Base.
+    const convert = await post(`/bases/${baseId}/fields/change-requests`, {
+      operation: "convert",
+      baseId,
+      fieldId,
+      newType: "number",
+      autoMerge: true,
     });
-    expect(omitted.status).toBe(200);
-    expect(omitted.payload.status).toBe("in_review");
+    expect(convert.status, messageOf(convert.payload)).toBe(200);
+    expect(convert.payload.status).toBe("merged");
 
-    // And an explicit `false` is accepted, not pedantically refused: it asks for
-    // exactly what these operations already do, and every review-first call site in
-    // this repo passes a uniform `autoMerge: false`.
-    const explicitFalse = await post(`/bases/${baseId}/lifecycle/change-requests`, {
+    const fieldDelete = await post(`/bases/${baseId}/fields/change-requests`, {
+      operation: "delete",
+      baseId,
+      fieldId,
+      autoMerge: true,
+    });
+    expect(fieldDelete.status, messageOf(fieldDelete.payload)).toBe(200);
+    expect(fieldDelete.payload.status).toBe("merged");
+
+    // `autoMerge: false` is still the way to ask for a human, on the very same
+    // operations — the point of the change was to stop FORCING review, not to
+    // remove the option.
+    const pendingArchive = await post(`/bases/${baseId}/lifecycle/change-requests`, {
       operation: "archive",
       autoMerge: false,
     });
-    expect(explicitFalse.status).toBe(200);
-    expect(explicitFalse.payload.status).toBe("in_review");
+    expect(pendingArchive.status).toBe(200);
+    expect(pendingArchive.payload.status).toBe("in_review");
+
+    const archive = await post(`/bases/${baseId}/lifecycle/change-requests`, {
+      operation: "archive",
+      autoMerge: true,
+    });
+    expect(archive.status, messageOf(archive.payload)).toBe(200);
+    expect(archive.payload.status).toBe("merged");
   });
 
   // Views gained `autoMerge` after node/base/record did, so re-assert the same

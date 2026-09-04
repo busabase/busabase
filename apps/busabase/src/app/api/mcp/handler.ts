@@ -93,7 +93,7 @@ const openApiMcpHandler = createOpenApiMcpHandler({
       name: "busabase-skill",
       title: "Busabase agent skill",
       description:
-        "The full approval-first workflow: everyday tools, proposing structure, field types, starter blueprints, the revision loop, error handling, and the untrusted-content rules.",
+        "The full change-request workflow: everyday tools, proposing structure, field types, starter blueprints, the revision loop, error handling, and the untrusted-content rules.",
       mimeType: "text/markdown",
       read: () => buildBusabaseMcpSkill({ spaceTargeting: false }),
     },

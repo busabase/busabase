@@ -385,11 +385,16 @@ async function main() {
   );
 
   // --- record_delete (last; archives the record) ---------------------------
+  // `autoMerge: false` keeps this walking the propose → approve → merge path the
+  // rest of this script exercises. Record delete is permission-aware now, so
+  // omitting it would archive in one call and `deleteCr.id` would be the record's.
   const deleteCr = await createDeleteChangeRequest(recordId as string, {
     message: "verify delete",
     submittedBy: "local-editor",
     deleteMode: "archive",
+    autoMerge: false,
   });
+  assert.equal(deleteCr.materialized, false, "record_delete honoured autoMerge: false");
   await approveAndMerge(deleteCr.id);
   const deleted = await getRecord(recordId as string);
   assert.equal(deleted?.status, "archived", "record_delete archived the record");
