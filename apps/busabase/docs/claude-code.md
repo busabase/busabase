@@ -152,7 +152,7 @@ Claude should call `auth_verify` before any other Cloud operation. If your accou
 than one space, Claude must show the spaces and ask you to choose one instead of guessing. Keep the
 selected `targetSpaceId` for the rest of the task.
 
-## The approval-first editing loop
+## The editing loop
 
 For read-only work, Claude searches or reads the selected workspace and reports the result. For an
 edit, the safe workflow is:

@@ -2,7 +2,7 @@
 
 [← Back to the README](../README.md)
 
-Concrete things people build on Busabase — the same review-first workflow applied to different kinds of data and content.
+Concrete things people build on Busabase — the same change-request workflow applied to different kinds of data and content.
 
 **Contents**
 
