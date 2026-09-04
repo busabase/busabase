@@ -80,6 +80,19 @@ export interface NavItem {
    */
   badge?: string | number;
   /**
+   * Optional persistent status icon at the trailing edge of the row — a state
+   * marker (e.g. "this node is publicly shared"), NOT an action: no click
+   * handler, skipped by the keyboard order.
+   *
+   * Unlike the hover cluster (`renderRowActions`) this is visible while the row
+   * is IDLE, which is the whole point — you can scan a tree for the marked rows
+   * without hovering each one. It shares that cluster's trailing slot, so it
+   * fades out on hover/focus exactly as the controls fade in.
+   */
+  statusIcon?: LucideIcon;
+  /** Tooltip/accessible label for `statusIcon`. Required for it to render. */
+  statusIconTitle?: string;
+  /**
    * Optional space name for recent task items
    */
   spaceName?: string;

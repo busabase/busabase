@@ -691,6 +691,30 @@ function NavMainComponent({
    * "more" always last), anchored `right-1` for every row type. Flex handles the
    * spacing, so adding a control never needs another magic offset again.
    */
+  /**
+   * A persistent state marker (see `NavItem.statusIcon`) — e.g. the globe on a
+   * publicly shared node. Shares the trailing slot with `renderRowActions` and
+   * fades out exactly as that cluster fades in, so an idle row shows state and
+   * a hovered row shows controls. `pointer-events-none` keeps it from swallowing
+   * the hover meant for the controls underneath.
+   *
+   * One implementation for all three row variants, which is only possible
+   * because they now share the `group/nav-row` hover group.
+   */
+  const renderRowStatusIcon = (item: NavItem) => {
+    const StatusIcon = item.statusIcon;
+    if (!StatusIcon || !item.statusIconTitle) return null;
+    return (
+      <span
+        className="pointer-events-none absolute right-2 top-1/2 flex -translate-y-1/2 items-center text-sidebar-foreground/50 transition-opacity group-focus-within/nav-row:opacity-0 group-hover/nav-row:opacity-0 group-data-[collapsible=icon]:hidden"
+        title={item.statusIconTitle}
+      >
+        <StatusIcon aria-hidden="true" className="size-3.5 shrink-0" />
+        <span className="sr-only">{item.statusIconTitle}</span>
+      </span>
+    );
+  };
+
   const renderRowActions = ({
     itemKey,
     item,
@@ -786,6 +810,14 @@ function NavMainComponent({
     (item.onDelete && item.id ? 1 : 0) +
     (item.actions?.length ? 1 : 0);
 
+  /**
+   * Trailing slots a row must reserve. The status marker is always visible, so
+   * a row carrying one needs its slot reserved even when it has no hover
+   * controls at all — otherwise a long title runs underneath it.
+   */
+  const countRowTrailingSlots = (item: NavItem, canDrag: boolean) =>
+    Math.max(countRowActions(item, canDrag), item.statusIcon && item.statusIconTitle ? 1 : 0);
+
   // A subtree is "active" if the item itself, or ANY descendant at any depth,
   // matches the current route — used to auto-open every ancestor folder along
   // the path to the active row, regardless of nesting depth.
@@ -853,7 +885,7 @@ function NavMainComponent({
       const canDrag = rowDragEnabled && Boolean(item.id);
       const hoverActionCount = countRowActions(item, canDrag);
       const hasHoverActions = hoverActionCount > 0;
-      const trailingPadding = navRowTrailingPadding(hoverActionCount);
+      const trailingPadding = navRowTrailingPadding(countRowTrailingSlots(item, canDrag));
       const ItemWrapper = depth === 0 ? SidebarMenuItem : SidebarMenuSubItem;
       const renderFolderRow = (dragProps?: NavRowDragProps) => (
         <Collapsible
@@ -946,6 +978,7 @@ function NavMainComponent({
                   </button>
                 </CollapsibleTrigger>
               )}
+              {renderRowStatusIcon(item)}
               {hasHoverActions &&
                 renderRowActions({ itemKey, item, canDrag, dragProps, moreActionsTitle })}
             </div>
@@ -1058,7 +1091,9 @@ function NavMainComponent({
               isActive={
                 location === item.url || (item.url !== "/" && location.startsWith(`${item.url}/`))
               }
-              className="hover:bg-accent data-[active=true]:bg-accent"
+              className={`hover:bg-accent data-[active=true]:bg-accent ${
+                item.statusIcon && item.statusIconTitle ? "pr-8" : ""
+              }`}
             >
               {isExternalUrl(item.url) ? (
                 // External link - use regular anchor tag
@@ -1081,6 +1116,7 @@ function NavMainComponent({
               {item.badge}
             </SidebarMenuBadge>
           )}
+          {renderRowStatusIcon(item)}
           {leafActionCount > 0 &&
             renderRowActions({
               itemKey,
@@ -1119,7 +1155,7 @@ function NavMainComponent({
         <SidebarMenuSubButton
           asChild
           isActive={isSubItemActive}
-          className={navRowTrailingPadding(subActionCount)}
+          className={navRowTrailingPadding(countRowTrailingSlots(item, subCanDrag))}
         >
           {isExternalUrl(item.url) ? (
             // External link - use regular anchor tag
@@ -1136,6 +1172,7 @@ function NavMainComponent({
             </SPALink>
           )}
         </SidebarMenuSubButton>
+        {renderRowStatusIcon(item)}
         {subActionCount > 0 &&
           renderRowActions({
             itemKey,
@@ -1287,6 +1324,28 @@ function NavMainComponent({
   );
 }
 
+/**
+ * Do `prev` and `next` carry the same status markers (`NavItem.statusIcon`) on
+ * the row itself AND every descendant?
+ *
+ * The rest of the memo comparison is deliberately shallow — top-level items
+ * only, and for their children just the count. That is fine for fields a caller
+ * changes on the row it rebuilds; a status marker is not one of those. Walks
+ * only until the first difference and reads two fields per row.
+ */
+const sameStatusMarkers = (prev: NavItem, next: NavItem): boolean => {
+  if (prev.statusIcon !== next.statusIcon || prev.statusIconTitle !== next.statusIconTitle) {
+    return false;
+  }
+  const prevChildren = prev.items ?? [];
+  const nextChildren = next.items ?? [];
+  if (prevChildren.length !== nextChildren.length) return false;
+  return prevChildren.every((child, index) => {
+    const nextChild = nextChildren[index];
+    return nextChild !== undefined && sameStatusMarkers(child, nextChild);
+  });
+};
+
 // Memoize component with custom comparison to prevent unnecessary re-renders
 export const NavMain = memo(NavMainComponent, (prevProps, nextProps) => {
   // Compare items array length
@@ -1328,6 +1387,12 @@ export const NavMain = memo(NavMainComponent, (prevProps, nextProps) => {
         prevItem.url !== nextItem.url ||
         prevItem.title !== nextItem.title ||
         prevItem.badge !== nextItem.badge ||
+        // Recursive, unlike every other check here: a status marker flips on ONE
+        // row at an arbitrary depth (publish a doc three folders down) while
+        // nothing about its ancestors changes, so the shallow `items.length`
+        // comparison below would keep the whole tree memoized and the marker
+        // would only appear after some unrelated re-render.
+        !sameStatusMarkers(prevItem, nextItem) ||
         prevItem.status !== nextItem.status ||
         prevItem.spaceName !== nextItem.spaceName ||
         prevItem.createdAt !== nextItem.createdAt ||
