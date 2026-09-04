@@ -140,7 +140,7 @@ jobs:
         run: |
           set -euo pipefail
           cms_runtime_env=(
-            --env "BUSABASE_BASE_URL=${BUSABASE_BASE_URL}"
+            --env "BUSABASE_CMS_BASE_URL=${BUSABASE_BASE_URL}"
             --env "BUSABASE_CMS_FOLDER_ID=${BUSABASE_CMS_FOLDER_ID}"
             --env "BUSABASE_CMS_DEFAULT_LOCALE=${BUSABASE_CMS_DEFAULT_LOCALE}"
             --env "BUSABASE_CMS_LOCALES=${BUSABASE_CMS_LOCALES}"
