@@ -354,6 +354,10 @@ export const createDeleteChangeRequestInputSchema = z.object({
   // Only "archive" is supported — hard delete after retention was never
   // implemented, so the API no longer accepts it (breaking change).
   deleteMode: z.enum(["archive"]).optional().default("archive"),
+  // Permission-aware, same tri-state as `update`. Archiving is reversible via
+  // `restore`, so it is not held to a stricter rule than the rest of the write
+  // surface (see `busabase-contract/src/contract/auto-merge.ts`).
+  autoMerge: z.boolean().optional(),
 });
 
 export const reviseOperationInputSchema = z.object({

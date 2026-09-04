@@ -26,7 +26,7 @@ export function FormDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug:
     enabled: Boolean(slug),
     retry: false,
   });
-  const form = formQuery.data ?? null;
+  const form = formQuery.isError ? null : (formQuery.data ?? null);
   const submit = useMutation(orpc.forms.submit.mutationOptions());
   const [values, setValues] = useState<Record<string, unknown>>({});
   const [tab, setTab] = useState<"form" | "code">("form");

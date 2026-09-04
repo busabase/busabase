@@ -60,6 +60,13 @@ export function useDashboardRoutes() {
   const nodeDetailRoute = useMemo(() => parseNodeDetailRoute(location), [location]);
   // Same shape, for `/{type}/:slug/activity`.
   const nodeActivityRoute = useMemo(() => parseNodeActivityRoute(location), [location]);
+  const routeNodeRef = useMemo(
+    () =>
+      selectedBaseSlug
+        ? ({ type: "base", slug: selectedBaseSlug } as const)
+        : (nodeActivityRoute ?? nodeDetailRoute),
+    [nodeActivityRoute, nodeDetailRoute, selectedBaseSlug],
+  );
   const selectedChangeRequestId =
     operationParams?.changeRequestId ?? changeRequestParams?.changeRequestId ?? null;
 
@@ -104,6 +111,7 @@ export function useDashboardRoutes() {
     selectedFolderSlug,
     nodeDetailRoute,
     nodeActivityRoute,
+    routeNodeRef,
     selectedChangeRequestId,
   };
 }

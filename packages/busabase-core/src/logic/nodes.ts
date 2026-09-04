@@ -41,6 +41,7 @@ import {
   buildNodeVisibilityCondition,
   hasNodePermission,
 } from "./node-acl";
+import { listOwnLiveShareNodeIds } from "./node-share";
 import { assertNodeSlugAvailable, nodeSlugConflict } from "./node-slug";
 import { buildNodeTree, ensureReady } from "./seed";
 import { toNodeSearchResultVO, toNodeVO } from "./vo";
@@ -266,17 +267,19 @@ const listNodesBounded = async (
     frontier = deepestLevelIds;
   }
 
-  const [hasChildrenIds, baseRows] = await Promise.all([
+  const [hasChildrenIds, baseRows, sharedNodeIds] = await Promise.all([
     idsWithChildren(db, spaceId, deepestLevelIds),
     fetchBaseRowsForNodeIds(
       db,
       allRows.map((row) => row.id),
     ),
+    listOwnLiveShareNodeIds(),
   ]);
 
   return buildNodeTree(allRows, baseRows, {
     rootParentId: parentId,
     forceHasChildrenIds: hasChildrenIds,
+    sharedNodeIds,
   });
 };
 
@@ -292,7 +295,7 @@ export const listNodes = async (input?: ListNodesInput): Promise<NodeVO[]> => {
   // Only a caller that explicitly sets `parentId` and/or `depth` gets the
   // depth-bounded behavior below.
   if (input?.parentId === undefined && input?.depth === undefined) {
-    const [nodeRows, baseRows] = await Promise.all([
+    const [nodeRows, baseRows, sharedNodeIds] = await Promise.all([
       db
         .select(nodeListColumns)
         .from(busabaseNodes)
@@ -309,8 +312,12 @@ export const listNodes = async (input?: ListNodesInput): Promise<NodeVO[]> => {
         )
         .orderBy(asc(busabaseNodes.position), asc(busabaseNodes.createdAt)),
       db.select().from(busabaseBases).where(eq(busabaseBases.spaceId, spaceId)),
+      // Which of those nodes are published (`NodeVO.shared`) — one extra
+      // space-scoped query for the whole tree, so the sidebar can mark them
+      // without a per-node `nodes.share.get`.
+      listOwnLiveShareNodeIds(),
     ]);
-    return buildNodeTree(nodeRows, baseRows);
+    return buildNodeTree(nodeRows, baseRows, { sharedNodeIds });
   }
 
   return listNodesBounded(db, spaceId, input.parentId ?? null, input.depth);
@@ -1336,5 +1343,11 @@ export const listFavoriteNodes = async (actorId: string): Promise<NodeVO[]> => {
     favoriteNodes.map((node) => node.id),
   );
   const baseIdByNodeId = new Map(baseRows.map((base) => [base.nodeId, base.id]));
-  return favoriteNodes.map((node) => toNodeVO(node, baseIdByNodeId.get(node.id) ?? null));
+  // Same share resolution the tree gets — the Favorites group renders through
+  // the very same sidebar row builder, so a favorited node must be able to
+  // carry the shared marker too.
+  const sharedNodeIds = await listOwnLiveShareNodeIds();
+  return favoriteNodes.map((node) =>
+    toNodeVO(node, baseIdByNodeId.get(node.id) ?? null, [], false, sharedNodeIds.has(node.id)),
+  );
 };

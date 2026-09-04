@@ -136,6 +136,17 @@ export function NodeDeleteDialog({
       const cr = await createCr.mutateAsync({ operations: [{ kind: "delete", nodeId }] });
       await reviewCr.mutateAsync({ changeRequestIds: [cr.id], verdict: "approved" });
       await mergeCr.mutateAsync({ changeRequestIds: [cr.id] });
+      await Promise.all([
+        queryClient.cancelQueries({ queryKey: orpc.nodes.get.key() }),
+        queryClient.cancelQueries({ queryKey: orpc.forms.getByNode.key() }),
+        queryClient.cancelQueries({ queryKey: orpc.nodes.resolveRouteState.key() }),
+      ]);
+      // A failed background refetch retains the previous successful `data` in
+      // TanStack Query. Remove detail families outright so an archived node can
+      // never be painted from that stale value while its tombstone resolves.
+      queryClient.removeQueries({ queryKey: orpc.nodes.get.key() });
+      queryClient.removeQueries({ queryKey: orpc.forms.getByNode.key() });
+      queryClient.removeQueries({ queryKey: orpc.nodes.resolveRouteState.key() });
       await queryClient.invalidateQueries({
         queryKey: orpc.nodes.list.queryOptions({}).queryKey,
       });

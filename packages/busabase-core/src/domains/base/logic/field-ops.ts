@@ -44,7 +44,7 @@ import { convertFieldValue } from "../utils/field-conversion";
 import { isPrimaryField, PRIMARY_FIELD_DELETE_MESSAGE } from "../utils/primary-field";
 import { baseNotFound } from "./errors";
 import { getBase } from "./queries";
-import { resolveRelationFieldOptions } from "./relation-options";
+import { assertRelationOnlyOptionsOrThrow, resolveRelationFieldOptions } from "./relation-options";
 
 export {
   convertFieldChangeRequestInputSchema,
@@ -183,6 +183,7 @@ export const createBaseField = async (baseId: string, input: z.infer<typeof fiel
   }
   await assertNodePermission(base.nodeId, "write");
   const parsed = fieldSchema.parse(input);
+  assertRelationOnlyOptionsOrThrow(parsed.type, parsed.slug, parsed.options);
   const relationResolved = await resolveRelationFieldOptions(db, parsed.options);
   if (parsed.type === "relation" && !relationResolved.targetBaseId) {
     throw relationRequiresTargetBase();
@@ -257,6 +258,7 @@ export const createFieldChangeRequest = async (
   }
 
   const parsed = createFieldChangeRequestInputSchema.parse(input);
+  assertRelationOnlyOptionsOrThrow(parsed.type, parsed.slug, parsed.options);
   const relationResolved = await resolveRelationFieldOptions(db, parsed.options);
   if (parsed.type === "relation" && !relationResolved.targetBaseId) {
     throw relationRequiresTargetBase();
@@ -365,6 +367,7 @@ export const createDeleteFieldChangeRequest = async (
   fieldId: string,
   submittedBy = "local-editor",
   message?: string,
+  autoMerge?: boolean,
 ) => {
   await ensureReady();
   const db = await getDb();
@@ -457,18 +460,19 @@ export const createDeleteFieldChangeRequest = async (
     operationId,
     metadata: { operation: "base_delete_field", fieldSlug: field.slug },
   });
-  await publishChangeRequestPendingReview({
-    spaceId: getContextSpaceId(),
-    baseId: base.id,
+  // Permission-aware, same as the add/update/reorder/restore siblings. Deleting
+  // a field SOFT-deletes it and its stored values, and `restore` brings both
+  // back — which is why it is no longer pinned review-first for everyone (see
+  // `busabase-contract/src/contract/auto-merge.ts`).
+  return finalizeChangeRequest({
     changeRequestId,
-    submittedBy: resolveActorId(submittedBy),
+    nodeId: base.nodeId,
+    requestedAutoMerge: autoMerge,
+    submittedBy,
+    baseId: base.id,
+    label: "field delete",
+    kind: "structural",
   });
-
-  const changeRequest = await getChangeRequest(changeRequestId);
-  if (!changeRequest) {
-    throw new Error("Failed to create delete field change request");
-  }
-  return changeRequest;
 };
 
 export const createUpdateFieldChangeRequest = async (
@@ -498,6 +502,9 @@ export const createUpdateFieldChangeRequest = async (
   const operationId = id("opr");
   const commitId = id("cmt");
   const timestamp = now();
+  if (patch.options !== undefined) {
+    assertRelationOnlyOptionsOrThrow(field.type, field.slug, patch.options);
+  }
   let options =
     patch.options !== undefined
       ? await resolveRelationFieldOptions(db, patch.options)
@@ -589,6 +596,7 @@ export const previewFieldConversion = async (
   baseId: string,
   fieldId: string,
   newType: FieldType,
+  selectChoiceMode: "auto_create" | "null_on_missing" = "null_on_missing",
 ) => {
   await ensureReady();
   const db = await getDb();
@@ -678,7 +686,26 @@ export const previewFieldConversion = async (
         const converted = convertFieldValue(currentValue, field.type, newType, {
           choices: field.options?.choices ?? [],
         });
-        if (converted === null || converted === undefined) {
+        // A conversion to a list type that yields `[]` from a non-empty source dropped
+        // every item — for the caller that is data loss, not a success, so it has to be
+        // reported as a conflict. Counting it as convertible is how a preview could
+        // report "0 conflicts" for a change that wipes the column.
+        //
+        // Under `auto_create` it is NOT a loss: the merge mints a choice per value (per
+        // comma-separated part, for multiselect) before converting, so the value that
+        // matches nothing today will match tomorrow. Only `null_on_missing` really drops it.
+        const mintsMissingChoices =
+          selectChoiceMode === "auto_create" && (newType === "select" || newType === "multiselect");
+        const sourceWasEmpty =
+          currentValue === "" || (Array.isArray(currentValue) && currentValue.length === 0);
+        const droppedEveryItem =
+          !mintsMissingChoices &&
+          !sourceWasEmpty &&
+          Array.isArray(converted) &&
+          converted.length === 0;
+        const droppedScalar =
+          (converted === null || converted === undefined) && !mintsMissingChoices;
+        if (droppedScalar || droppedEveryItem) {
           if (conflicts.length < PREVIEW_CONFLICT_SAMPLE_CAP) {
             conflicts.push({ recordId: row.recordId ?? "", currentValue });
           }
@@ -713,6 +740,7 @@ export const createConvertFieldChangeRequest = async (
   selectChoiceMode: "auto_create" | "null_on_missing" = "null_on_missing",
   submittedBy = "local-editor",
   message?: string,
+  autoMerge?: boolean,
 ) => {
   await ensureReady();
   const db = await getDb();
@@ -836,18 +864,19 @@ export const createConvertFieldChangeRequest = async (
     operationId,
     metadata: { operation: "base_convert_field", fieldSlug: field.slug, newType },
   });
-  await publishChangeRequestPendingReview({
-    spaceId: getContextSpaceId(),
-    baseId: base.id,
+  // Permission-aware. A convert can drop values that do not fit the new type,
+  // which is what `previewFieldConversion` is for — the dry run is the safeguard,
+  // not a mandatory second human. Callers who want the sign-off pass
+  // `autoMerge: false`.
+  return finalizeChangeRequest({
     changeRequestId,
-    submittedBy: resolveActorId(submittedBy),
+    nodeId: base.nodeId,
+    requestedAutoMerge: autoMerge,
+    submittedBy,
+    baseId: base.id,
+    label: "field convert",
+    kind: "structural",
   });
-
-  const changeRequest = await getChangeRequest(changeRequestId);
-  if (!changeRequest) {
-    throw new Error("Failed to create convert field change request");
-  }
-  return changeRequest;
 };
 
 export const createReorderFieldsChangeRequest = async (

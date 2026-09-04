@@ -375,12 +375,17 @@ describe("Unified Grep — POST /grep (files + docs + records)", () => {
     };
 
     const archiveRecord = async (recordId: string) => {
-      const cr = await client.records.changeRequest({ operation: "delete", recordId });
+      const cr = await client.records.changeRequest({
+        autoMerge: false,
+        operation: "delete",
+        recordId,
+      });
       await approveAndMerge(cr.id);
     };
 
     const deleteField = async (baseId: string, fieldId: string) => {
       const cr = await client.bases.fieldChangeRequest({
+        autoMerge: false,
         operation: "delete",
         baseId,
         fieldId,

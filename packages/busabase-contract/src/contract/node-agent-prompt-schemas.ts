@@ -3,8 +3,8 @@ import { z } from "zod";
 
 /**
  * Per-node custom scenario prompts (`node.metadata.agentPrompts`) — the single
- * schema shared by BOTH write and read paths, per
- * `apps/busabase-cloud/content/spec/node-agent-prompts-v2.md` §7.3:
+ * schema shared by BOTH write and read paths, per the node-agent-prompts
+ * design (v2) §7.3:
  *
  * - Write: `busabase-cli nodes set-agent-prompts` validates a file against this
  *   schema client-side, before calling `nodes.updateMetadata` — a malformed file

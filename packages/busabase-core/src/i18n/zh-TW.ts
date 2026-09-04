@@ -18,6 +18,15 @@ export const dashboardZhTW: CoreI18nMessages = {
     item: "項",
     items: "項",
   },
+  nodeDetail: {
+    ...dashboardZhCN.nodeDetail,
+    archivedTitle: "目前節點已封存",
+    archivedBody: "此節點位於垃圾桶，還原後即可繼續存取。",
+    unavailableTitle: "節點無法使用",
+    unavailableBody: "此節點不存在，或你已無權存取。",
+    backToWorkspace: "返回工作區",
+    goToTrash: "前往垃圾桶",
+  },
   nav: {
     ...dashboardZhCN.nav,
     home: "首頁",
@@ -90,6 +99,11 @@ export const dashboardZhTW: CoreI18nMessages = {
     ...dashboardZhCN.inbox,
     title: "評審",
     forReview: "待評審",
+    mentions: "提及我的",
+    mentionsEmpty: "還沒有人提及你。",
+    mentionsEmptyBody: "當同事在留言裡 @ 你時，會出現在這裡。",
+    mentionsUnread: "未讀",
+    mentionsNoLink: "這則留言沒有可開啟的頁面。",
     changesRequested: "已要求修改",
     created: "已建立",
     approved: "已核准",
@@ -344,6 +358,9 @@ export const dashboardZhTW: CoreI18nMessages = {
   },
   share: {
     ...dashboardZhCN.share,
+    shareToWebAirAppHint:
+      "訪客可以執行這個 AirApp。它的檔案會傳送到訪客瀏覽器，並且它能讀取本工作區其他已公開分享的節點。",
+    sharedMarker: "已公開分享",
     requireSignInLabel: "需登入後才能提交",
     requireSignInHint: "任何拿到連結的人都能開啟表單，但只有登入後的訪客才能提交。",
   },

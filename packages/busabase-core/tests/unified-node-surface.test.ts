@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { createRouterClient } from "@orpc/server";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { runWithAnonymousContext } from "../src/context";
+import { LOCAL_SPACE_ID, runWithAnonymousContext, runWithBusabaseContext } from "../src/context";
 import { setNodeShare } from "../src/logic/node-share";
 import { busabaseRouter } from "../src/router";
 
@@ -184,6 +184,13 @@ describe("unified Node surface — oRPC integration", () => {
     expect(asDoc.type).toBe("doc");
     expect(asSkill.type).toBe("skill");
     expect(asDoc.node.id).not.toBe(asSkill.node.id);
+
+    await expect(client.nodes.resolveRouteState({ nodeId: "shared-slug" })).resolves.toEqual({
+      status: "unavailable",
+    });
+    await expect(
+      client.nodes.resolveRouteState({ nodeId: "shared-slug", type: "doc" }),
+    ).resolves.toMatchObject({ status: "active", nodeId: asDoc.node.id });
   });
 
   it("404s a type hint that contradicts the node the id resolves to", async () => {
@@ -209,6 +216,236 @@ describe("unified Node surface — oRPC integration", () => {
     // It is in the Trash listing, which is where an archived node belongs.
     const archived = await client.nodes.list({ status: "archived" });
     expect(archived.some((node) => node.id === created.node.id)).toBe(true);
+  });
+
+  it("resolves active, archived, and unavailable dashboard route states without content", async () => {
+    const active = await client.nodes.resolveRouteState({ nodeId: "unified-doc", type: "doc" });
+    expect(active).toMatchObject({ status: "active" });
+    expect(active).not.toHaveProperty("body");
+
+    const created = await client.docs.create({
+      autoMerge: true,
+      slug: "route-state-archive",
+      name: "Route State Archive",
+      body: "must never cross the tombstone boundary",
+    });
+    if ("status" in created) throw new Error("expected a materialized doc");
+    await client.nodes.createChangeRequest({
+      autoMerge: true,
+      operations: [{ kind: "delete", nodeId: created.node.id }],
+    });
+
+    const archived = await client.nodes.resolveRouteState({
+      nodeId: "route-state-archive",
+      type: "doc",
+    });
+    expect(archived).toMatchObject({
+      status: "archived",
+      nodeId: created.node.id,
+      name: "Route State Archive",
+      slug: "route-state-archive",
+      type: "doc",
+      canRestore: true,
+    });
+    expect(archived).not.toHaveProperty("body");
+    await expect(
+      client.nodes.resolveRouteState({ nodeId: "route-state-missing", type: "doc" }),
+    ).resolves.toEqual({ status: "unavailable" });
+  });
+
+  it("keeps active public links working but hides archived nodes from anonymous visitors", async () => {
+    await expect(
+      runWithAnonymousContext({}, () =>
+        client.nodes.resolveRouteState({ nodeId: publicDocId, type: "doc" }),
+      ),
+    ).resolves.toEqual({ status: "active", nodeId: publicDocId });
+    await expect(
+      runWithAnonymousContext({}, () =>
+        client.nodes.resolveRouteState({ nodeId: publicSkillId, type: "skill" }),
+      ),
+    ).resolves.toEqual({ status: "unavailable" });
+
+    const created = await client.docs.create({
+      autoMerge: true,
+      slug: "route-state-private",
+      name: "Route State Private",
+    });
+    if ("status" in created) throw new Error("expected a materialized doc");
+    await setNodeShare(created.node.id, { scope: "public", capability: "read" });
+    await client.nodes.createChangeRequest({
+      autoMerge: true,
+      operations: [{ kind: "delete", nodeId: created.node.id }],
+    });
+
+    await expect(
+      runWithAnonymousContext({}, () =>
+        client.nodes.resolveRouteState({ nodeId: created.node.id, type: "doc" }),
+      ),
+    ).resolves.toEqual({ status: "unavailable" });
+  });
+
+  it("does not disclose an archived private node to an ungranted restricted member", async () => {
+    const created = await client.docs.create({
+      autoMerge: true,
+      slug: "route-state-restricted",
+      name: "Restricted Archived Route",
+    });
+    if ("status" in created) throw new Error("expected a materialized doc");
+    await client.nodes.updateVisibility({ nodeId: created.node.id, visibility: "private" });
+    await client.nodes.createChangeRequest({
+      autoMerge: true,
+      operations: [{ kind: "delete", nodeId: created.node.id }],
+    });
+
+    await expect(
+      runWithBusabaseContext(
+        {
+          spaceId: LOCAL_SPACE_ID,
+          actorId: "route-state-ungranted",
+          isSpaceManager: false,
+          permissionLevel: "read",
+          restrictedVisibility: true,
+        },
+        () => client.nodes.resolveRouteState({ nodeId: created.node.id, type: "doc" }),
+      ),
+    ).resolves.toEqual({ status: "unavailable" });
+  });
+
+  it("shows visible archived nodes to readers without offering restore", async () => {
+    const created = await client.docs.create({
+      autoMerge: true,
+      slug: "route-state-reader",
+      name: "Reader Archived Route",
+    });
+    if ("status" in created) throw new Error("expected a materialized doc");
+    await client.nodes.createChangeRequest({
+      autoMerge: true,
+      operations: [{ kind: "delete", nodeId: created.node.id }],
+    });
+
+    const readOnly = await runWithBusabaseContext(
+      {
+        spaceId: LOCAL_SPACE_ID,
+        actorId: "route-state-reader",
+        isSpaceManager: false,
+        permissionLevel: "read",
+      },
+      () => client.nodes.resolveRouteState({ nodeId: created.node.id, type: "doc" }),
+    );
+    expect(readOnly).toMatchObject({ status: "archived", canRestore: false });
+  });
+
+  it("prefers an active reused slug and refuses multiple archived tombstones", async () => {
+    const first = await client.docs.create({
+      autoMerge: true,
+      slug: "route-state-reused",
+      name: "First Reused",
+    });
+    if ("status" in first) throw new Error("expected a materialized doc");
+    await client.nodes.createChangeRequest({
+      autoMerge: true,
+      operations: [{ kind: "delete", nodeId: first.node.id }],
+    });
+
+    const second = await client.docs.create({
+      autoMerge: true,
+      slug: "route-state-reused",
+      name: "Second Reused",
+    });
+    if ("status" in second) throw new Error("expected a materialized doc");
+    await expect(
+      client.nodes.resolveRouteState({ nodeId: "route-state-reused", type: "doc" }),
+    ).resolves.toEqual({ status: "active", nodeId: second.node.id });
+
+    await client.nodes.createChangeRequest({
+      autoMerge: true,
+      operations: [{ kind: "delete", nodeId: second.node.id }],
+    });
+    await expect(
+      client.nodes.resolveRouteState({ nodeId: "route-state-reused", type: "doc" }),
+    ).resolves.toEqual({ status: "unavailable" });
+    await expect(
+      client.nodes.resolveRouteState({ nodeId: first.node.id, type: "doc" }),
+    ).resolves.toMatchObject({ status: "archived", nodeId: first.node.id });
+  });
+
+  // `/base/:ref` takes three spellings — the Base slug, the owning NODE id, and
+  // the `busabase_bases` ROW id (see `getBase`). Only the first two live on
+  // `busabase_nodes`, so the row id needs its own hop; a bookmarked
+  // `/base/bse…` URL for a live Base must not read as "node unavailable".
+  it("resolves a Base route by its base-row id, not only by node id or slug", async () => {
+    const base = await client.bases.get({ baseId: "unified-base" });
+    const active = { status: "active", nodeId: base.nodeId };
+    await expect(
+      client.nodes.resolveRouteState({ nodeId: base.slug, type: "base" }),
+    ).resolves.toEqual(active);
+    await expect(
+      client.nodes.resolveRouteState({ nodeId: base.nodeId, type: "base" }),
+    ).resolves.toEqual(active);
+    await expect(
+      client.nodes.resolveRouteState({ nodeId: base.id, type: "base" }),
+    ).resolves.toEqual(active);
+    // The `/base/:slug` route does not always carry a type hint.
+    await expect(client.nodes.resolveRouteState({ nodeId: base.id })).resolves.toEqual(active);
+
+    // The hop is a fallback, so it must not soften any of the existing rules.
+    await expect(client.nodes.resolveRouteState({ nodeId: base.id, type: "doc" })).resolves.toEqual(
+      {
+        status: "unavailable",
+      },
+    );
+    await expect(client.nodes.resolveRouteState({ nodeId: "bse_missing" })).resolves.toEqual({
+      status: "unavailable",
+    });
+  });
+
+  it("carries the archived, ACL, and anonymous rules through the base-row id hop", async () => {
+    const archived = await client.bases.create({
+      slug: "route-state-archived-base",
+      name: "Route State Archived Base",
+      fields: [{ slug: "title", name: "Title", type: "text" }],
+      autoMerge: true,
+    });
+    const archivedBase = await client.bases.get({ baseId: "route-state-archived-base" });
+    expect(archived).toBeTruthy();
+    await client.nodes.createChangeRequest({
+      autoMerge: true,
+      operations: [{ kind: "delete", nodeId: archivedBase.nodeId }],
+    });
+    // Archived by row id resolves to the tombstone, not to "unavailable"…
+    await expect(
+      client.nodes.resolveRouteState({ nodeId: archivedBase.id, type: "base" }),
+    ).resolves.toMatchObject({ status: "archived", nodeId: archivedBase.nodeId, type: "base" });
+    // …and still says nothing to an anonymous visitor.
+    await expect(
+      runWithAnonymousContext({}, () =>
+        client.nodes.resolveRouteState({ nodeId: archivedBase.id, type: "base" }),
+      ),
+    ).resolves.toEqual({ status: "unavailable" });
+
+    await client.bases.create({
+      slug: "route-state-private-base",
+      name: "Route State Private Base",
+      fields: [{ slug: "title", name: "Title", type: "text" }],
+      autoMerge: true,
+    });
+    const privateBase = await client.bases.get({ baseId: "route-state-private-base" });
+    await client.nodes.updateVisibility({ nodeId: privateBase.nodeId, visibility: "private" });
+    // A row id must not become a way around the node ACL the other two refs obey.
+    for (const ref of [privateBase.slug, privateBase.nodeId, privateBase.id]) {
+      await expect(
+        runWithBusabaseContext(
+          {
+            spaceId: LOCAL_SPACE_ID,
+            actorId: "route-state-base-ungranted",
+            isSpaceManager: false,
+            permissionLevel: "read",
+            restrictedVisibility: true,
+          },
+          () => client.nodes.resolveRouteState({ nodeId: ref, type: "base" }),
+        ),
+      ).resolves.toEqual({ status: "unavailable" });
+    }
   });
 
   // ── Candidate B: one cheap summary list ───────────────────────────────────

@@ -3,7 +3,7 @@
  *
  * The manual existed only over MCP: `instructions`, `resources/*` and the
  * `busabase_guide` tool. Anything driving the REST API — busabase-cli, a script,
- * a CI step, an AirApp — was told nothing about the approval-first rules, the
+ * a CI step, an AirApp — was told nothing about the change-request rules, the
  * field types, or the AirApp runtime contract, and was then judged on whether it
  * guessed the house rules. These routes publish the same documents, built from
  * the same source, so the two surfaces cannot drift.

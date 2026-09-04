@@ -221,11 +221,18 @@ export const toViewVO = (view: ViewPO, users?: UserRefMap): ViewVO => ({
 // override (`true` for a node at the depth boundary whose real children exist
 // but weren't fetched, so `children` is `[]` yet `hasChildren` must stay
 // `true` to keep the sidebar's expand affordance).
+//
+// `shared` is the node's OWN live public share (see `NodeVO.shared`). It is
+// resolved from a sibling table (`busabase_node_shares`) rather than the node
+// row, so only a caller that batched that lookup passes it; `undefined` here
+// means "not resolved" and is left OFF the VO entirely rather than emitted as
+// a false that a client would read as "definitely not shared".
 export const toNodeVO = (
   node: NodeListPO,
   baseId: string | null,
   children: NodeVO[] = [],
   hasChildren: boolean = children.length > 0,
+  shared?: boolean,
 ): NodeVO => ({
   id: node.id,
   parentId: node.parentId,
@@ -243,6 +250,7 @@ export const toNodeVO = (
   baseId,
   children,
   hasChildren,
+  ...(shared === undefined ? {} : { shared }),
 });
 
 /**

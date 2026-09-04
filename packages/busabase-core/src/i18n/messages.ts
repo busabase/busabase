@@ -53,6 +53,12 @@ export const coreMessagesEn = {
     moveToTrash: "Move to Trash",
     movedToTrash: "{type} moved to Trash",
     failedDelete: "Failed to delete {type}",
+    archivedTitle: "This node is archived",
+    archivedBody: "This node is in Trash. Restore it to continue using it.",
+    unavailableTitle: "Node unavailable",
+    unavailableBody: "This node does not exist or you no longer have access to it.",
+    backToWorkspace: "Back to workspace",
+    goToTrash: "Go to Trash",
     skill: "Skill",
     drive: "Drive",
     file: "File",
@@ -202,11 +208,23 @@ export const coreMessagesEn = {
   },
   share: {
     title: "Share",
+    /** Tooltip on the sidebar marker shown on every node with a live public link. */
+    sharedMarker: "Shared publicly",
     dialogTitle: "Share",
     shareToWeb: "Share to web",
     shareToWebHint: "Anyone with the link can open this node",
     capabilityLabel: "What visitors can do",
     capabilityRead: "View only",
+    /**
+     * Shown only for an AirApp. Sharing one publishes its SOURCE, not just its
+     * output: the app is a real program, and the only way a visitor can see it
+     * is for their browser to download and run its files. Data access stays
+     * scoped — a shared AirApp reads the workspace's other public nodes and
+     * nothing else — but the code itself is no longer private, and someone
+     * opening the link must never be a surprise to whoever shared it.
+     */
+    shareToWebAirAppHint:
+      "Visitors can run this AirApp. Its files are sent to their browser, and it can read this workspace's other publicly shared nodes.",
     capabilitySubmit: "Allow submissions",
     requireSignInLabel: "Require sign-in to submit",
     requireSignInHint:
@@ -425,6 +443,11 @@ export const coreMessagesEn = {
   inbox: {
     title: "Reviews",
     forReview: "For review",
+    mentions: "Mentions",
+    mentionsEmpty: "No one has mentioned you yet.",
+    mentionsEmptyBody: "When a teammate @-mentions you in a comment, it lands here.",
+    mentionsUnread: "Unread",
+    mentionsNoLink: "This comment has no page to open.",
     changesRequested: "Changes requested",
     created: "Created",
     approved: "Approved",

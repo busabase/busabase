@@ -532,6 +532,7 @@ export function BusabaseDashboardShell({
         moveLabel: messages.move.menuLabel,
         agentPromptsLabel: messages.agentPrompts.title,
         shareLabel: messages.share.title,
+        sharedMarkerLabel: messages.share.sharedMarker,
         deleteLabel: messages.nodeDetail.delete,
       },
       loadingNodeIds,
@@ -621,6 +622,7 @@ export function BusabaseDashboardShell({
       messages.move.menuLabel,
       messages.agentPrompts.title,
       messages.share.title,
+      messages.share.sharedMarker,
       messages.nodeDetail.delete,
       loadingNodeIds,
       orpc,
@@ -911,6 +913,8 @@ interface NavItemLabels {
   moveLabel: string;
   agentPromptsLabel: string;
   shareLabel: string;
+  /** Tooltip on the always-visible "this node is published" sidebar marker. */
+  sharedMarkerLabel: string;
   deleteLabel: string;
 }
 
@@ -1082,6 +1086,15 @@ function buildNavItem(node: NodeVO, ctx: NavItemContext): NavItem[] {
         separatorBefore: true,
       }
     : null;
+  // The always-visible "this node has its own live public link" marker (see
+  // `NodeVO.shared`). Deliberately NOT a hover action: an admin scanning the
+  // tree should be able to see WHICH nodes are published without opening every
+  // "•••" → Share dialog, which was the only way to find out before. A node
+  // that is merely reachable because an ANCESTOR is shared carries no marker —
+  // `shared` is the node's own share row, not the inherited scope.
+  const sharedMarker = node.shared
+    ? { statusIcon: Globe, statusIconTitle: labels.sharedMarkerLabel }
+    : {};
   if (hasCapability(node.type, "container")) {
     const url = nodeHref(node) ?? "";
     return [
@@ -1090,6 +1103,7 @@ function buildNavItem(node: NodeVO, ctx: NavItemContext): NavItem[] {
         url,
         icon,
         id: node.id,
+        ...sharedMarker,
         items: buildNavChildren(node, ctx),
         hasChildren: node.hasChildren ?? node.children.length > 0,
         isLoadingChildren: loadingNodeIds?.has(node.id) ?? false,
@@ -1127,6 +1141,7 @@ function buildNavItem(node: NodeVO, ctx: NavItemContext): NavItem[] {
           url,
           icon,
           id: node.id,
+          ...sharedMarker,
           actions: leafActions.length > 0 ? leafActions : undefined,
         },
       ]

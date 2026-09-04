@@ -148,8 +148,11 @@ export const assetsContract = {
 
   // ── editContent — edit an asset's REAL file content via ChangeRequest ──────
   // Unlike putText (derived/extracted text, direct write, disposable), this
-  // edits the asset's actual mounted Drive/Skill file bytes and always goes
-  // through the existing filetree ChangeRequest pipeline — never auto-merged.
+  // edits the asset's actual mounted Drive/Skill file bytes and goes through the
+  // existing filetree ChangeRequest pipeline, so every edit keeps a reviewable
+  // before/after. Merging is permission-aware like the rest of the write
+  // surface: immediate with write access, pending otherwise or on
+  // `autoMerge: false`.
   editContent: oc
     .route({
       method: "POST",
@@ -157,7 +160,7 @@ export const assetsContract = {
       tags: ["Assets", "Change Requests"],
       summary: "Edit an asset's file content via string-replace edits, as a ChangeRequest",
       successDescription:
-        'Applied the string-replace edits (coding-agent Edit-tool semantics: unique-match or replaceAll) to the asset\'s current mounted Drive/Skill file content and proposed the result as a ChangeRequest (status "in_review") for human review. Reuses the existing filetree update-via-CR pipeline end to end, including baseContentHash optimistic-concurrency conflict protection at merge time. Requires the asset to be mounted in exactly one editable Drive/Skill location.',
+        'Applied the string-replace edits (coding-agent Edit-tool semantics: unique-match or replaceAll) to the asset\'s current mounted Drive/Skill file content and recorded the result as a ChangeRequest — merged immediately when the actor has write access on the mounting node, left "in_review" otherwise or when `autoMerge: false` is passed. Reuses the existing filetree update-via-CR pipeline end to end, including baseContentHash optimistic-concurrency conflict protection at merge time. Requires the asset to be mounted in exactly one editable Drive/Skill location.',
     })
     .input(EditAssetContentInputSchema)
     .output(changeRequestSchema),

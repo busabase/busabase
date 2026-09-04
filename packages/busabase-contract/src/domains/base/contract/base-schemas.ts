@@ -1,6 +1,6 @@
 import { iStringRecordSchema } from "openlib/i18n/i-string";
 import { z } from "zod";
-import { autoMergeNotAccepted } from "../../../contract/auto-merge";
+import { destructiveAutoMerge } from "../../../contract/auto-merge";
 
 // Base-owned field + base Zod schemas. Pure leaf: imports nothing from the kernel
 // contract, so the kernel can embed `baseSchema` eagerly with no import cycle.
@@ -238,20 +238,17 @@ export const createBaseFieldInputSchema = z.object({
  * node, otherwise falls back to a pending ChangeRequest. Explicit `false` forces
  * review even with write access.
  *
- * Deliberately NOT on the `delete` and `convert` branches below. The line this
- * codebase already draws — record `update` auto-merges, record `delete`/`restore`
- * never do, and `assets.editContent` never does — is about whether CONTENT data
- * is at stake, not about the verb. Adding, renaming, reordering, or un-deleting a
- * field touches only the schema; deleting one soft-deletes its stored values with
- * it, and converting one can drop values outright (which is why
- * `previewFieldConversion` exists as a dry run). Those two stay in front of a
- * human.
+ * The `delete` and `convert` branches below used to reject `autoMerge` outright.
+ * They no longer do — see `contract/auto-merge.ts` for why. They carry a
+ * `destructiveAutoMerge` schema instead: the same tri-state, with a description
+ * that says what the operation costs to undo, so a caller who genuinely wants a
+ * second pair of eyes knows to pass `false`.
  */
 const fieldAutoMergeSchema = z
   .boolean()
   .optional()
   .describe(
-    "Whether to approve and merge this field change immediately. Omitted defaults to merging immediately if the actor has write access on the Base's node, otherwise falling back to a pending Change Request; pass explicit false to force review even with write access. Not accepted by the delete and convert operations, which always require review.",
+    "Whether to approve and merge this field change immediately. Omitted defaults to merging immediately if the actor has write access on the Base's node, otherwise falling back to a pending Change Request; pass explicit false to force review even with write access.",
   );
 
 export const createFieldChangeRequestInputSchema = createBaseFieldInputSchema.extend({
@@ -264,8 +261,8 @@ export const deleteFieldChangeRequestInputSchema = z.object({
   fieldId: z.string().min(1),
   message: z.string().optional(),
   submittedBy: z.string().optional().default("local-editor"),
-  autoMerge: autoMergeNotAccepted(
-    "deleting a field soft-deletes its stored values with it, so it always requires review. Omit the flag.",
+  autoMerge: destructiveAutoMerge(
+    "A deleted field is soft-deleted with its stored values and is brought back by the `restore` operation.",
   ),
 });
 
@@ -284,6 +281,14 @@ export const updateFieldChangeRequestInputSchema = z.object({
 export const previewFieldConversionInputSchema = z.object({
   fieldId: z.string().min(1),
   newType: fieldTypeSchema,
+  /**
+   * Mirrors `convertFieldChangeRequest.selectChoiceMode` so the dry run models the
+   * conversion the caller is actually going to submit. Under `auto_create` a value with
+   * no matching choice is not a conflict — the merge mints a choice for it — while under
+   * `null_on_missing` the same value is dropped. Defaults to `null_on_missing`, matching
+   * the mutation's own default.
+   */
+  selectChoiceMode: z.enum(["auto_create", "null_on_missing"]).default("null_on_missing"),
 });
 
 export const previewFieldConversionOutputSchema = z.object({
@@ -299,8 +304,8 @@ export const convertFieldChangeRequestInputSchema = z.object({
   selectChoiceMode: z.enum(["auto_create", "null_on_missing"]).default("null_on_missing"),
   message: z.string().optional(),
   submittedBy: z.string().optional().default("local-editor"),
-  autoMerge: autoMergeNotAccepted(
-    "converting a field's type can drop values, so it always requires review. Run previewFieldConversion first to see what would change, then omit the flag.",
+  autoMerge: destructiveAutoMerge(
+    "A convert can drop values that do not fit the new type — call `previewFieldConversion` first to see exactly which, and pass `autoMerge: false` if you want a human to sign off on that preview.",
   ),
 });
 
@@ -314,8 +319,8 @@ export const reorderFieldsChangeRequestInputSchema = z.object({
 export const archiveBaseInputSchema = z.object({
   message: z.string().optional(),
   submittedBy: z.string().optional().default("local-editor"),
-  autoMerge: autoMergeNotAccepted(
-    "archiving a Base removes it and every record in it from every listing at once, so it always requires review. Omit the flag.",
+  autoMerge: destructiveAutoMerge(
+    'Archiving takes the Base and every record in it out of every listing at once. That is reversible via `operation: "restore"`, but it is the widest-blast-radius write in this family — pass `autoMerge: false` when it should stop for a human.',
   ),
 });
 
@@ -324,9 +329,6 @@ export const restoreBaseInputSchema = z.object({
   submittedBy: z.string().optional().default("local-editor"),
   // Restoring an archived Base is the undo of a destructive act — nothing is at
   // risk, so it takes the same permission-aware default as everything else.
-  // `archiveBaseInputSchema` above deliberately has no `autoMerge`: archiving
-  // takes a whole Base and every record in it out of every listing at once,
-  // which is strictly larger than the record `delete` that is already review-only.
   autoMerge: z.boolean().optional(),
 });
 

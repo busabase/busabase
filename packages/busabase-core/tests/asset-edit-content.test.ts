@@ -87,9 +87,13 @@ describe("assets.editContent — string-replace edits via ChangeRequest", () => 
         content: "Hello ACME Corp, welcome aboard.",
       });
 
+      // `autoMerge: false` is load-bearing: editContent is permission-aware now
+      // (it used to pin review-first for everyone), and this case is specifically
+      // about the file staying untouched until the CR merges.
       const cr = await client.assets.editContent({
         assetId,
         edits: [{ oldString: "ACME Corp", newString: "Umbrella Inc" }],
+        autoMerge: false,
       });
       expect(cr.status).toBe("in_review");
       expect(cr.primaryOperation?.operation).toBe("drive_file_update");
@@ -126,6 +130,7 @@ describe("assets.editContent — string-replace edits via ChangeRequest", () => 
       const cr = await client.assets.editContent({
         assetId,
         edits: [{ oldString: "SUPPORT_TEAM", newString: "ONCALL_TEAM" }],
+        autoMerge: false,
       });
       expect(cr.status).toBe("in_review");
       expect(cr.primaryOperation?.operation).toBe("skill_file_update");
@@ -309,6 +314,7 @@ describe("assets.editContent — string-replace edits via ChangeRequest", () => 
       const editContentCr = await client.assets.editContent({
         assetId,
         edits: [{ oldString: "version one", newString: "version two" }],
+        autoMerge: false,
       });
       expect(editContentCr.status).toBe("in_review");
 

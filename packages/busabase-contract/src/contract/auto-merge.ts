@@ -1,24 +1,30 @@
 import { z } from "zod";
 
 /**
- * `autoMerge` on an operation that deliberately never auto-merges.
+ * `autoMerge` on a destructive-but-reversible operation.
  *
- * These schemas are NOT `.strict()` — and making them strict is not the fix. The
- * SDK and CLI ship on their own npm cadence (published ahead of the server as of
- * writing), and busabase is self-hosted, so a newer client sending a newer
- * optional field to an older server is normal traffic. Blanket strictness turns
- * that graceful degradation into a hard 400 for every field, to catch one.
+ * These six operations (record delete/restore, field delete/convert, Base
+ * archive, mounted-asset content edits, and file batches containing a delete)
+ * used to reject `autoMerge: true` outright: they queued for human review no
+ * matter who called them. That made sense while the product was positioned as
+ * approval-first, but it is not how Busabase is positioned or how the rest of
+ * the write surface behaves — every other write is *permission-aware*
+ * (`shouldAutoMerge`): unset + write access on the target node means "just do
+ * it", and only an explicit `false` forces review.
  *
- * So reject exactly the field that actually confused callers, and say WHY plus
- * what to do instead — an agent reading "unrecognized key: autoMerge" learns
- * nothing it can act on, which is how the original silent-drop bug survived.
+ * A single person running their own workspace hit the old behaviour as pure
+ * friction: archiving one duplicate record left a change request they then had
+ * to go and approve themselves. Reversibility is what makes the permission-aware
+ * default safe here — delete ARCHIVES, archive is undone by restore, and a
+ * field convert is preceded by `previewFieldConversion`. Callers who do want a
+ * second pair of eyes still get it by passing an explicit `autoMerge: false`,
+ * which is exactly how every other endpoint in this family expresses that.
  *
- * Rejects `true` only. An explicit `false` asks for exactly what these operations
- * already do, so refusing it would be pedantry with a cost: every review-first
- * call site in this repo passes a uniform `autoMerge: false`, and clients that do
- * the same must not start collecting 400s on the subset of endpoints where the
- * flag happens to be moot. Same forward-compatibility argument that rules out
- * blanket `.strict()`.
+ * The schemas that use this are NOT `.strict()`, and making them strict is not
+ * the fix: the SDK and CLI ship on their own npm cadence and busabase is
+ * self-hosted, so a newer client sending a newer optional field to an older
+ * server is normal traffic. Blanket strictness turns that graceful degradation
+ * into a hard 400 for every field, to catch one.
  *
  * This lives in its own leaf module (zod only, no sibling imports) on purpose:
  * putting it in `contract/schemas.ts` created an import cycle with the domain
@@ -26,8 +32,12 @@ import { z } from "zod";
  * `ReferenceError: Cannot access 'autoMergeNotAccepted' before initialization`
  * that `tsc` reported as clean.
  */
-export const autoMergeNotAccepted = (reason: string) =>
+export const destructiveAutoMerge = (undoNote: string) =>
   z
-    .literal(false, { error: `\`autoMerge: true\` is not accepted here: ${reason}` })
+    .boolean()
     .optional()
-    .describe(`Only \`false\` (or omitted) is accepted. ${reason}`);
+    .describe(
+      "Whether to approve and merge this change immediately. Omitted defaults to merging " +
+        "immediately if the actor has write access on the target node, otherwise falling back to " +
+        `a pending Change Request; pass explicit false to force review even with write access. ${undoNote}`,
+    );

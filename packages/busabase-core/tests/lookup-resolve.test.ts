@@ -213,6 +213,7 @@ describe("lookup values resolved at read time", () => {
     const relationField = base.fields.find((field) => field.slug === "items");
     if (!relationField) throw new Error("expected the relation field");
     const deleteCr = await client.bases.fieldChangeRequest({
+      autoMerge: false,
       operation: "delete",
       baseId: base.id,
       fieldId: relationField.id,

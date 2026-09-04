@@ -105,7 +105,11 @@ export const listForms = async (input: ListFormsDTO): Promise<ListFormsVO> => {
     eq(busabaseForms.spaceId, spaceId),
     eq(busabaseForms.targetBaseId, input.targetBaseId),
     eq(busabaseForms.status, "active"),
+    isNull(busabaseForms.archivedAt),
     eq(busabaseNodes.spaceId, spaceId),
+    eq(busabaseNodes.type, "form"),
+    isNull(busabaseNodes.archivedAt),
+    isNull(busabaseNodes.deletedAt),
     ...(visible ? [visible] : []),
   ];
   if (input.cursor) {
@@ -157,7 +161,12 @@ export const getFormByNodeId = async (nodeIdOrSlug: string): Promise<FormVO | nu
     .where(
       and(
         eq(busabaseForms.spaceId, spaceId),
+        eq(busabaseForms.status, "active"),
+        isNull(busabaseForms.archivedAt),
         eq(busabaseNodes.spaceId, spaceId),
+        eq(busabaseNodes.type, "form"),
+        isNull(busabaseNodes.archivedAt),
+        isNull(busabaseNodes.deletedAt),
         or(eq(busabaseForms.nodeId, nodeIdOrSlug), eq(busabaseNodes.slug, nodeIdOrSlug)),
         visible,
       ),

@@ -149,7 +149,7 @@ const rows: GalleryRow[] = [
     minutesAgo: 210,
     fields: {
       name: "OpenClaw",
-      tagline: "面向审批优先工作流的开源智能体运行时。",
+      tagline: "面向可评审工作流的开源智能体运行时。",
       category: "automation",
       status: "beta",
       website: "https://github.com/busabase",

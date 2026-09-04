@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { autoMergeNotAccepted } from "../../../contract/auto-merge";
+import { destructiveAutoMerge } from "../../../contract/auto-merge";
 // Records embed the kernel commit VO. This is a one-way import — the kernel
 // contract never imports record schemas — so there is no cycle and no z.lazy.
 import {
@@ -340,8 +340,8 @@ export const recordGetInputSchema = z.union([
 export const restoreRecordInputSchema = z.object({
   message: z.string().optional(),
   submittedBy: z.string().optional().default("local-editor"),
-  autoMerge: autoMergeNotAccepted(
-    "restoring a record brings archived content back into every listing, so it always requires review. Omit the flag.",
+  autoMerge: destructiveAutoMerge(
+    'Restoring is itself the undo of an archive, and is undone again by `operation: "delete"`.',
   ),
 });
 

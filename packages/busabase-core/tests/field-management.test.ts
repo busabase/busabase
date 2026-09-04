@@ -151,15 +151,21 @@ describe("Field management — delete / update / convert", () => {
       });
       const [title, notes] = base.fields;
       if (!title || !notes) throw new Error("Expected two fields");
+      // This test is ABOUT the stale-delete guard at merge time, so the delete
+      // must still be sitting in review when the reorder lands under it —
+      // `autoMerge: false` is what holds it there now that field delete is
+      // permission-aware.
       const deleteRequest = await client.bases.fieldChangeRequest({
         operation: "delete",
         baseId: base.id,
         fieldId: notes.id,
+        autoMerge: false,
       });
       const reorderRequest = await client.bases.fieldChangeRequest({
         operation: "reorder",
         baseId: base.id,
         fieldIds: [notes.id, title.id],
+        autoMerge: false,
       });
       await approveAndMerge(reorderRequest.id);
 
@@ -783,19 +789,20 @@ describe("Field management — delete / update / convert", () => {
         valueText: "to-restore-unique",
       });
       const record = requireFound(allRecords[0], "Created restore test record was not found");
-      const deleteCr = await client.records.changeRequest({
+      // delete/restore are permission-aware like every other write: this actor
+      // has `write`, so both land in one call each.
+      const deleted = await client.records.changeRequest({
         operation: "delete",
         recordId: record.id,
         deleteMode: "archive",
       });
-      await approveAndMerge(deleteCr.id);
+      expect(deleted.materialized).toBe(true);
       // Now restore it
-      const restoreCr = await client.records.changeRequest({
+      const restored2 = await client.records.changeRequest({
         operation: "restore",
         recordId: record.id,
       });
-      expect(restoreCr.status).toBe("in_review");
-      await approveAndMerge(restoreCr.id);
+      expect(restored2.materialized).toBe(true);
       const restored = await client.records.get({ recordId: record.id });
       expect(restored).toBeDefined();
       expect(restored?.status).toBe("active");
@@ -904,13 +911,17 @@ describe("Field management — delete / update / convert", () => {
       });
       const baseId = base.id;
       const scoreId = base.fields.find((f) => f.slug === "score")?.id;
-      // Create first convert CR (don't merge it)
+      // Create first convert CR and leave it pending. `autoMerge: false` is
+      // load-bearing now that convert is permission-aware — without it this
+      // write-capable actor merges immediately and there is no in_review CR for
+      // the one-convert-at-a-time guard to collide with.
       await client.bases.fieldChangeRequest({
         operation: "convert",
         baseId,
         fieldId: scoreId,
         newType: "text",
         selectChoiceMode: "null_on_missing",
+        autoMerge: false,
       });
       // Try to create another - should fail
       await expect(
@@ -920,6 +931,7 @@ describe("Field management — delete / update / convert", () => {
           fieldId: scoreId,
           newType: "text",
           selectChoiceMode: "null_on_missing",
+          autoMerge: false,
         }),
       ).rejects.toThrow();
     });

@@ -70,6 +70,7 @@ import { NodeActivityView, RecordActivityView } from "./components/activity";
 import { BaseGraphView } from "./components/graph-view";
 import { HomeView } from "./components/home";
 import { ActivityView, InboxView } from "./components/inbox";
+import { NodeRouteStateView } from "./components/node-route-state";
 import { RecordDetailView, RecordEditorView, RecordTopbarActions } from "./components/record-views";
 import { SearchDialog } from "./components/search-dialog";
 import { SidePanel, SidePanelToggle } from "./components/side-panel";
@@ -84,6 +85,10 @@ import { getRelationRecordIds } from "./helpers/field";
 import { getLocationPath, readInboxView } from "./helpers/inbox";
 import { createKnownNodeCache, type KnownNode, nodeRoutePath } from "./helpers/known-node-cache";
 import { mergeSearchIntoHref } from "./helpers/link-search";
+import {
+  shouldMountResidentAirApp,
+  shouldShowRouteGuardSkeleton,
+} from "./helpers/node-route-guard";
 import { shouldShowInitialLoadingState } from "./helpers/query-state";
 import { readRecordPagination, writeRecordPagination } from "./helpers/record-pagination-url";
 import { isConflictErrorMessage } from "./helpers/search";
@@ -123,6 +128,8 @@ const flattenNodesForCache = (nodes: NodeVO[]): KnownNode[] =>
 // Records per "load more" page. Server caps limit at 100; 50 keeps parity with
 // the previous single-shot list size while staying paginated.
 const RECORDS_PAGE_SIZE = 50;
+
+type RestorableNode = Pick<NodeVO, "id" | "name" | "type">;
 
 // Field types whose sort can be pushed to the DB (their typed value column orders
 // the same way the client would). Others keep the client-side locale sort.
@@ -200,7 +207,7 @@ interface BusabaseDashboardProps {
    * through a public share link, so the dashboard must confine itself to the
    * ONE shared node it was given and fire only the reads on busabase-core's
    * anonymous allowlist (`bases.get`, `bases.listViews`, `records.list`,
-   * `records.get`, `nodes.get`).
+   * `records.get`, `nodes.get`, `nodes.resolveRouteState`).
    *
    * Every space-wide query below is switched off in that mode. That is a
    * correctness fix, not a security one — the server refuses them either way
@@ -378,6 +385,7 @@ function BusabaseDashboardContent({
       // invalidate this alongside `nodes` or their content goes stale across
       // tabs/agents (see `use-live-sync.ts`).
       nodeDetail: orpc.nodes.get.key() as QueryKey,
+      nodeRouteState: orpc.nodes.resolveRouteState.key() as QueryKey,
       auditEvents: orpc.auditEvents.list.queryOptions({ input: {} }).queryKey as QueryKey,
       assets: orpc.assets.list.queryOptions({}).queryKey as QueryKey,
     }),
@@ -437,8 +445,21 @@ function BusabaseDashboardContent({
     selectedAirappSlug,
     nodeDetailRoute,
     nodeActivityRoute,
+    routeNodeRef,
     selectedChangeRequestId,
   } = useDashboardRoutes();
+  const nodeRouteStateQuery = useQuery({
+    ...orpc.nodes.resolveRouteState.queryOptions({
+      input: {
+        nodeId: routeNodeRef?.slug ?? "",
+        type: routeNodeRef?.type,
+      },
+    }),
+    enabled: Boolean(routeNodeRef),
+  });
+  const nodeRouteState = nodeRouteStateQuery.isError
+    ? ({ status: "unavailable" } as const)
+    : nodeRouteStateQuery.data;
   const activeDetailNode = useMemo(() => {
     if (!nodeDetailRoute) return null;
     const treeNode = flattenNodesForCache(nodeTree).find(
@@ -866,6 +887,19 @@ function BusabaseDashboardContent({
     [operationParams?.operationId, selectedChangeRequest],
   );
   const titlebar = useMemo(() => {
+    if (
+      routeNodeRef &&
+      (nodeRouteState?.status === "archived" || nodeRouteState?.status === "unavailable")
+    ) {
+      return {
+        badge: null,
+        title:
+          nodeRouteState?.status === "archived"
+            ? messages.nodeDetail.archivedTitle
+            : messages.nodeDetail.unavailableTitle,
+      };
+    }
+
     if (isOperationRoute) {
       return {
         badge: selectedChangeRequest ? (
@@ -959,9 +993,26 @@ function BusabaseDashboardContent({
     selectedChangeRequest,
     selectedOperation,
     messages,
+    nodeRouteState,
+    routeNodeRef,
   ]);
 
   const breadcrumbItems = useMemo<BusabaseBreadcrumbItem[]>(() => {
+    if (
+      routeNodeRef &&
+      (nodeRouteState?.status === "archived" || nodeRouteState?.status === "unavailable")
+    ) {
+      return [
+        { href: "/home", label: messages.nav.workspace },
+        {
+          label:
+            nodeRouteState?.status === "archived"
+              ? nodeRouteState.name
+              : messages.nodeDetail.unavailableTitle,
+        },
+      ];
+    }
+
     if (isOperationRoute) {
       return [
         { href: "/inbox", label: messages.inbox.title },
@@ -1145,6 +1196,8 @@ function BusabaseDashboardContent({
     selectedChangeRequest,
     selectedOperation,
     messages,
+    nodeRouteState,
+    routeNodeRef,
   ]);
 
   const refresh = useCallback(async () => {
@@ -1158,6 +1211,11 @@ function BusabaseDashboardContent({
       queryClient.invalidateQueries({ queryKey: listKeys.recordsPage }),
       queryClient.invalidateQueries({ queryKey: listKeys.recordsCount }),
       queryClient.invalidateQueries({ queryKey: listKeys.bases }),
+      queryClient.invalidateQueries({ queryKey: listKeys.nodes }),
+      queryClient.invalidateQueries({ queryKey: listKeys.archivedNodes }),
+      queryClient.invalidateQueries({ queryKey: listKeys.archivedBases }),
+      queryClient.invalidateQueries({ queryKey: listKeys.nodeDetail }),
+      queryClient.invalidateQueries({ queryKey: listKeys.nodeRouteState }),
       // The board's per-column reads and its header aggregate use hand-written
       // keys, so the orpc-derived keys above do not cover them. Without this a
       // dragged card lands in its new column while both counts stay stale.
@@ -1454,17 +1512,24 @@ function BusabaseDashboardContent({
   const submitDeleteRecord = useCallback(
     async (record: RecordVO, options?: RecordSubmitOptions) => {
       setError(null);
-      const changeRequest = await client.createDeleteChangeRequest(record.id);
-      if (options?.mergeImmediately) {
-        await approveAndMergeChangeRequest(changeRequest.id);
+      // One call, not create-CR-then-approve-then-merge: record delete is
+      // permission-aware at the endpoint now, so `autoMerge` carries the button's
+      // intent straight through. Branching on the RESULT rather than on the mode
+      // is what makes this honest for an actor without write on the Base's node —
+      // they asked to delete now, the server queued it, and they land on the
+      // pending request instead of on an "approve failed" error.
+      const result = await client.createDeleteChangeRequest(record.id, {
+        autoMerge: options?.mergeImmediately === true,
+      });
+      if (result.materialized) {
         await refresh();
         setLocation(`/base/${record.base.slug}`);
         return;
       }
-      setLocation(`/inbox/${changeRequest.id}`);
+      setLocation(`/inbox/${result.id}`);
       await refresh();
     },
-    [approveAndMergeChangeRequest, client, refresh, setLocation],
+    [client, refresh, setLocation],
   );
 
   // Bulk delete from the table's multi-select toolbar. There is no batch
@@ -1475,33 +1540,37 @@ function BusabaseDashboardContent({
   // concurrent writes there have been flaky in other flows in this codebase
   // — sequential is slower but safe. Each record's outcome is isolated so a
   // failure partway through doesn't abort the rest, matching the batch
-  // Change-Request review flow above.
+  // Change-Request review flow above. One request per record now, not two:
+  // "delete now" used to be create-CR + approve + merge, i.e. 2N serial round
+  // trips for N selected rows.
   const bulkDeleteRecordsMutation = useMutation({
     mutationFn: async (variables: { records: RecordVO[]; options?: RecordSubmitOptions }) => {
       let ok = 0;
       let failed = 0;
+      let materialized = 0;
       for (const record of variables.records) {
         try {
-          const changeRequest = await client.createDeleteChangeRequest(record.id);
-          if (variables.options?.mergeImmediately) {
-            await approveAndMergeChangeRequest(changeRequest.id);
-          }
+          const result = await client.createDeleteChangeRequest(record.id, {
+            autoMerge: variables.options?.mergeImmediately === true,
+          });
+          if (result.materialized) materialized += 1;
           ok += 1;
         } catch {
           failed += 1;
         }
       }
-      return { ok, failed };
+      return { ok, failed, materialized };
     },
     onMutate: () => setError(null),
     onSuccess: (result, variables) => {
-      // The result tally means something different depending on the mode:
-      // with mergeImmediately the records are actually gone; without it,
-      // "ok" only counts delete Change Requests that were successfully
-      // submitted for review — the records are still present until someone
-      // approves them. Reusing one "deleted" message for both would tell the
-      // user something false happened when they only requested a review.
-      const summary = variables.options?.mergeImmediately
+      // The tally means something different depending on what actually happened:
+      // materialized records are really gone, the rest are only Change Requests
+      // waiting for review — the rows are still there until someone approves.
+      // Keyed on the OUTCOME, not on the requested mode: an actor without write
+      // who presses "delete now" gets pending requests back, and telling them
+      // "N deleted" would be a plain lie.
+      const allMaterialized = result.ok > 0 && result.materialized === result.ok;
+      const summary = allMaterialized
         ? fmt(messages.base.bulkDeleteResult, { ok: result.ok, failed: result.failed })
         : fmt(messages.base.bulkDeleteRequestResult, {
             ok: result.ok,
@@ -1656,7 +1725,7 @@ function BusabaseDashboardContent({
   );
 
   const submitRestoreNode = useCallback(
-    async (node: NodeVO) => {
+    async (node: RestorableNode) => {
       setError(null);
       const changeRequest = await client.createNodeChangeRequest({
         submittedBy: "local-editor",
@@ -1673,6 +1742,12 @@ function BusabaseDashboardContent({
       await queryClient.invalidateQueries({
         queryKey: orpc.nodes.list.queryOptions({}).queryKey,
       });
+      await queryClient.invalidateQueries({ queryKey: listKeys.nodeRouteState });
+      await queryClient.invalidateQueries({ queryKey: listKeys.nodeDetail });
+      if (node.type === "base") {
+        await queryClient.invalidateQueries({ queryKey: listKeys.bases });
+        await queryClient.invalidateQueries({ queryKey: listKeys.archivedBases });
+      }
       toast.success(fmt(messages.base.nodeRestored, { type: node.type }));
     },
     [
@@ -1680,6 +1755,10 @@ function BusabaseDashboardContent({
       client,
       messages.base.nodeRestored,
       messages.base.restoreNodeMessage,
+      listKeys.archivedBases,
+      listKeys.bases,
+      listKeys.nodeDetail,
+      listKeys.nodeRouteState,
       orpc,
       queryClient,
     ],
@@ -1977,6 +2056,9 @@ function BusabaseDashboardContent({
    * also pinned by its `nodeId`, not its `id`.
    */
   const sidePanelCurrentNode = useMemo(() => {
+    if (routeNodeRef && nodeRouteState?.status !== "active") {
+      return null;
+    }
     if (activeDetailNode) {
       return {
         id: activeDetailNode.id,
@@ -1988,16 +2070,22 @@ function BusabaseDashboardContent({
       return { id: activeBase.nodeId, type: "base", name: activeBase.name };
     }
     return null;
-  }, [activeBase, activeDetailNode, selectedBaseSlug]);
+  }, [activeBase, activeDetailNode, nodeRouteState?.status, routeNodeRef, selectedBaseSlug]);
   useKeyboardShortcut({ keys: "cmd+k", handler: openSearch });
   useKeyboardShortcut({ keys: "ctrl+k", handler: openSearch });
 
   const AirAppDetail = chromeless ? undefined : getNodeDetail("airapp");
   const keepAirAppsMounted = Boolean(AirAppDetail);
-  const activeAirappSlug = isAirappRoute ? selectedAirappSlug : null;
+  const activeAirappSlug = shouldMountResidentAirApp(isAirappRoute, nodeRouteState)
+    ? selectedAirappSlug
+    : null;
   const airAppKeepAliveScopeKey = `${cacheSpaceKey}:${currentUserId ?? "anonymous"}`;
 
   const topbarActions = useMemo(() => {
+    if (routeNodeRef && nodeRouteState?.status !== "active") {
+      return null;
+    }
+
     // Record view/edit → a View/Edit switch in the titlebar (far right).
     if ((isRecordRoute || isEditRecordRoute) && activeBase && selectedRecordId) {
       return (
@@ -2037,6 +2125,8 @@ function BusabaseDashboardContent({
     isLegacyBaseSetupRoute,
     isNewRecordRoute,
     isRecordRoute,
+    nodeRouteState?.status,
+    routeNodeRef,
     selectedRecordId,
   ]);
 
@@ -2167,6 +2257,33 @@ function BusabaseDashboardContent({
       );
     }
 
+    if (routeNodeRef) {
+      if (shouldShowRouteGuardSkeleton(nodeRouteState)) {
+        return <NodeDetailSkeleton variant={routeNodeRef.type === "base" ? "folder" : "doc"} />;
+      }
+      if (nodeRouteState?.status === "archived") {
+        return (
+          <NodeRouteStateView
+            onNavigate={setLocation}
+            onRestore={
+              nodeRouteState.canRestore
+                ? () =>
+                    submitRestoreNode({
+                      id: nodeRouteState.nodeId,
+                      name: nodeRouteState.name,
+                      type: nodeRouteState.type,
+                    })
+                : undefined
+            }
+            state={nodeRouteState}
+          />
+        );
+      }
+      if (nodeRouteState?.status === "unavailable") {
+        return <NodeRouteStateView onNavigate={setLocation} state={nodeRouteState} />;
+      }
+    }
+
     if (
       locationPath.startsWith("/base/") &&
       shouldShowInitialLoadingState(activeBase, basesQuery.isFetching)
@@ -2287,25 +2404,6 @@ function BusabaseDashboardContent({
     }
 
     if (locationPath.startsWith("/base/")) {
-      const archivedMatch = selectedBaseSlug
-        ? archivedBases.find(
-            (b) =>
-              b.id === selectedBaseSlug ||
-              b.nodeId === selectedBaseSlug ||
-              b.slug === selectedBaseSlug,
-          )
-        : null;
-      // Cold cache / direct link: the base hasn't resolved yet and either list is
-      // still loading — wait before falling back to an archived match so an
-      // archived response that arrives first cannot flash Trash over a live Base.
-      if (!activeBase && archivedBasesQuery.isFetching) {
-        return <BaseTableSkeleton />;
-      }
-      if (!activeBase && archivedMatch) {
-        return (
-          <ArchivedBasesView archivedBases={[archivedMatch]} onRestoreBase={submitRestoreBase} />
-        );
-      }
       return (
         <BaseDetailView
           client={client}
@@ -2378,7 +2476,6 @@ function BusabaseDashboardContent({
     approveChangeRequest,
     closeChangeRequest,
     auditEvents,
-    archivedBasesQuery.isFetching,
     archivedBasesQuery.isPending,
     archivedNodesQuery.isPending,
     bases,
@@ -2446,7 +2543,6 @@ function BusabaseDashboardContent({
     archivedRecordsPagination,
     deletedFields,
     isArchivedRoute,
-    selectedBaseSlug,
     setLocation,
     recordsPagination,
     recordLoadedNode,
@@ -2463,6 +2559,8 @@ function BusabaseDashboardContent({
     queryClient,
     isTemplateDetailRoute,
     templateDetailParams,
+    routeNodeRef,
+    nodeRouteState,
   ]);
 
   const dashboardActiveView = (
@@ -2510,7 +2608,7 @@ function BusabaseDashboardContent({
           <BusabaseTopbarBreadcrumb items={breadcrumbItems} />
           {titlebar.badge ? <div className="ml-1 shrink-0">{titlebar.badge}</div> : null}
           {topbarActions ? <div className="shrink-0">{topbarActions}</div> : null}
-          <TopbarNodeActionsSlot />
+          {routeNodeRef && nodeRouteState?.status !== "active" ? null : <TopbarNodeActionsSlot />}
           <SidePanelToggle />
         </div>
         {error ? (

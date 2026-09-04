@@ -14,7 +14,7 @@ import {
   OPERATION_KINDS,
 } from "../domains/registry";
 import { type NodeIcon, NodeIconSchema } from "../types/node-icon";
-import { autoMergeNotAccepted } from "./auto-merge";
+import { destructiveAutoMerge } from "./auto-merge";
 import { customAgentPromptsSchema } from "./node-agent-prompt-schemas";
 
 /** @see nodeSettingsSchema — declared here so `NodeOutput` can reference it. */
@@ -77,6 +77,22 @@ export interface NodeOutput {
    * what it equals whenever it's omitted).
    */
   hasChildren?: boolean;
+  /**
+   * This node carries its OWN live public share row (`nodes.share`, scope
+   * `public`, not expired) — what the sidebar renders its "shared" marker
+   * from, so an admin can see at a glance which nodes are published without
+   * opening every "•••" → Share dialog.
+   *
+   * Deliberately NOT the inherited answer: a node under a shared folder IS
+   * publicly reachable (that is `effective_public_scope`, which is what the
+   * ACL gates read), but it is not itself a thing anybody chose to publish,
+   * and marking a whole subtree would drown the one row that matters. Read
+   * "who made this public" off the nearest ancestor with `shared: true`.
+   *
+   * Optional/omitted means the read path didn't resolve share state at all
+   * (e.g. a node detail fetch), NOT that the node is unshared.
+   */
+  shared?: boolean;
 }
 
 const nodeSchema: z.ZodType<NodeOutput> = z.lazy(() =>
@@ -97,6 +113,7 @@ const nodeSchema: z.ZodType<NodeOutput> = z.lazy(() =>
     baseId: z.string().nullable(),
     children: z.array(nodeSchema),
     hasChildren: z.boolean().optional(),
+    shared: z.boolean().optional(),
   }),
 );
 
@@ -466,6 +483,57 @@ const commentSchema = z.object({
   updatedAt: z.string(),
 });
 
+/**
+ * One row of the Inbox's Mentions tab: a comment the caller was `@`-mentioned
+ * in, plus where to go to read it in context.
+ *
+ * Keyed by COMMENT, not by mention row — being named twice in one comment is
+ * legitimate (each occurrence needs its own span to render its own chip), but
+ * it is still one thing to go read, so it is one entry here.
+ */
+const mentionInboxItemSchema = z.object({
+  commentId: z.string(),
+  subjectType: commentSubjectTypeSchema,
+  /** Comment body, for the row's preview line. */
+  body: z.string(),
+  authorId: z.string(),
+  author: userRefSchema.nullable().optional().default(null),
+  createdAt: z.string(),
+  /** Null once read. The newest unread stamp across this comment's mentions. */
+  unread: z.boolean(),
+  /**
+   * Dashboard-relative path to the comment's context, or null when the subject
+   * has no page of its own (a `commit`-scoped comment on a comment that is not
+   * attached to a change request — the repo has no commit detail route).
+   * A null href still renders a row: swallowing the notification because we
+   * cannot link it would leave the recipient never knowing they were mentioned.
+   */
+  href: z.string().nullable(),
+});
+
+const mentionInboxPageSchema = z.object({
+  items: z.array(mentionInboxItemSchema),
+  total: z.number().int(),
+  /** Distinct unread comments — what the tab badge shows. */
+  unreadCount: z.number().int(),
+});
+
+const listMentionInboxInputSchema = z.object({
+  page: z.number().int().min(1).optional().default(1),
+  pageSize: z.number().int().min(1).max(100).optional().default(50),
+});
+
+const markMentionsReadInputSchema = z.object({
+  /** Stamps every unread mention row this caller has on that comment. */
+  commentId: z.string(),
+});
+
+const markMentionsReadOutputSchema = z.object({
+  /** How many rows were stamped; 0 when it was already read. */
+  marked: z.number().int(),
+  unreadCount: z.number().int(),
+});
+
 const changeRequestStatusSchema = z.enum([
   "in_review",
   "changes_requested",
@@ -762,8 +830,8 @@ const createDeleteChangeRequestInputSchema = z.object({
   // Only "archive" is supported — hard delete after retention was never
   // implemented, so the API no longer accepts it (breaking change).
   deleteMode: z.enum(["archive"]).optional().default("archive"),
-  autoMerge: autoMergeNotAccepted(
-    "archiving a record removes user content from every listing, so it always requires review. Omit the flag.",
+  autoMerge: destructiveAutoMerge(
+    'Archiving is reversible: the record leaves every listing but is restored intact by `operation: "restore"`.',
   ),
 });
 
@@ -1012,6 +1080,11 @@ export {
   commentMentionInputSchema,
   commentMentionSchema,
   commentSchema,
+  mentionInboxItemSchema,
+  mentionInboxPageSchema,
+  listMentionInboxInputSchema,
+  markMentionsReadInputSchema,
+  markMentionsReadOutputSchema,
   changeRequestStatusSchema,
   changeRequestSchema,
   changeRequestCountsSchema,

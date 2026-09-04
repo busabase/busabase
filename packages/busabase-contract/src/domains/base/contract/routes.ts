@@ -266,7 +266,7 @@ export const recordContract = {
       tags: ["Records", "Change Requests"],
       summary: "Create record change request",
       successDescription:
-        "Creates a record change request selected by `operation`. Updates auto-merge when the actor has write access unless `autoMerge: false`; delete and restore remain review-first.",
+        "Creates a record change request selected by `operation`. All three operations are permission-aware: they merge immediately when the actor has write access on the Base's node, and land as a pending Change Request otherwise or when `autoMerge: false` is passed.",
     })
     .input(recordChangeRequestInputSchema)
     .output(

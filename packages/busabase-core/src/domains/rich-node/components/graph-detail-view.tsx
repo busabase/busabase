@@ -849,7 +849,7 @@ export function WorkflowDetailView({ orpc, slug, onNodeLoaded }: GraphDetailView
     ...orpc.nodes.get.queryOptions({ input: { nodeId: slug ?? "", type: "workflow" } }),
     enabled: Boolean(slug),
   });
-  const detail = asNodeDetail(detailQuery.data, "workflow");
+  const detail = asNodeDetail(detailQuery.isError ? undefined : detailQuery.data, "workflow");
   useReportLoadedNode(detail?.node, onNodeLoaded);
   if (!detail) {
     return detailQuery.isLoading ? <NodeDetailSkeleton /> : <RichNodeNotFound type="Workflow" />;

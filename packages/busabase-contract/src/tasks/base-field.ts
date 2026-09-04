@@ -86,11 +86,12 @@ export const baseFieldChangeTask: TaskDefinition<BaseFieldChangeInput> = {
   cliPath: ["bases", "field-change-request"],
   summary: "Propose a Base schema change (add / update / delete / convert / reorder / restore)",
   guidance:
-    "Review is permission-aware for add / update / reorder / restore, decided server-side: the " +
+    "Review is permission-aware for every operation, decided server-side: the " +
     "change merges immediately when your key has write access on the Base's node and lands as a " +
     "pending ChangeRequest otherwise — check the response's `status`. Pass requireReview to always " +
-    "propose instead. `delete` and `convert` are ALWAYS review-first regardless of permission, by " +
-    "design: delete soft-deletes the field's stored values with it, and convert can drop values. " +
+    "propose instead. Worth doing on `delete` and `convert` when the data matters: delete " +
+    "soft-deletes the field's stored values with it (restore brings both back), and convert can " +
+    "drop values that do not fit the new type. " +
     "Pick `operation` first, then supply only that operation's arguments — " +
     "add needs slug+name; update needs fieldId+patch; delete/restore need fieldId; " +
     "convert needs fieldId+newType; reorder needs the complete fieldIds order. " +
@@ -172,16 +173,14 @@ export const baseFieldChangeTask: TaskDefinition<BaseFieldChangeInput> = {
     {
       name: "autoMerge",
       kind: "boolean",
-      appliesWhen: { param: "operation", values: ["add", "update", "reorder", "restore"] },
       description:
         "Skip review and apply the schema change immediately if you have write access. Not a permission override — a changeRequest-level key still gets a pending CR. Default is permission-aware: merge when you can, otherwise propose.",
     },
     {
       name: "requireReview",
       kind: "boolean",
-      appliesWhen: { param: "operation", values: ["add", "update", "reorder", "restore"] },
       description:
-        "Always propose a pending ChangeRequest, even with write access. delete and convert are review-first regardless.",
+        "Always propose a pending ChangeRequest, even with write access. Worth passing on delete and convert when the field holds data you would not want dropped without a second look.",
     },
   ],
   examples: [

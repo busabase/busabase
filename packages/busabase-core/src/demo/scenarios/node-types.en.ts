@@ -98,7 +98,7 @@ export const enNodeTypesScenario: SeedScenario = {
               lineHeight: 1.25,
             },
             ...[
-              ["goal", 80, 130, "Goal\nApproval-first launch", "#dcfce7", 102],
+              ["goal", 80, 130, "Goal\nShared-workspace launch", "#dcfce7", 102],
               ["owners", 400, 130, "Owners\nProduct · Growth · Support", "#dbeafe", 103],
               ["risks", 80, 330, "Open questions\nPricing · onboarding · launch", "#fef3c7", 104],
               [
@@ -521,20 +521,22 @@ export const enNodeTypesScenario: SeedScenario = {
       body: `# Agent Operating Guide
 
 Every change in this workspace — a record, a Skill file, a Doc, a schema tweak —
-is proposed as a **change request** and merged only after review. Nothing an agent
-does lands silently.
+goes in as a **change request** carrying a message, a diff and an author. Nothing
+an agent does lands silently, and anything can be held for a human.
 
 ## How agents work here
 
 1. Read the relevant Base, Doc, or Skill.
 2. Open a change request describing *what* changes and *why*.
-3. Wait for an approval before the change merges.
+3. On this team, hold anything that touches published content for a human.
 4. Cite a source or an internal record id for every factual claim.
 
-## Why approval-first
+## Why we review some of it
 
 The workspace is the shared memory a team of agents and humans edit together, so a
-reviewable, revertible history matters more than raw write speed.
+reviewable, revertible history matters more than raw write speed. Busabase decides
+whether a change waits from the credential's permission level — rule 3 is this
+team's own call about which changes are worth slowing down.
 `,
       changeRequest: {
         id: DOC_GUIDE_CR_ID,
@@ -546,14 +548,14 @@ reviewable, revertible history matters more than raw write speed.
         nextBody: `# Agent Operating Guide
 
 Every change in this workspace — a record, a Skill file, a Doc, a schema tweak —
-is proposed as a **change request** and merged only after review. Nothing an agent
-does lands silently.
+goes in as a **change request** carrying a message, a diff and an author. Nothing
+an agent does lands silently, and anything can be held for a human.
 
 ## How agents work here
 
 1. Read the relevant Base, Doc, or Skill.
 2. Open a change request describing *what* changes and *why*.
-3. Wait for an approval before the change merges.
+3. On this team, hold anything that touches published content for a human.
 4. Cite a source or an internal record id for every factual claim.
 
 ## Escalation
@@ -628,11 +630,11 @@ Keep this doc in sync through change requests whenever a Base schema changes.
       position: 0,
       body: `# Product Brief
 
-Busabase is the approval-first database for AI agents: every write is a reviewable
-change request, so a team of agents and humans can share one editable source of
-truth without stepping on each other.
+Busabase is the workspace AI agents build in: every write is a change request
+carrying a message, a diff and a history, so a team of agents and humans can share
+one editable source of truth without stepping on each other.
 
-- Agents propose; reviewers approve; history is revertible.
+- Agents write; anything can be held for review; history is revertible.
 - Bases, Docs, Skills, Drives, and Files all live in one workspace tree.
 - This file is a first-class **File node** backed by the Asset library.
 `,
@@ -672,7 +674,7 @@ avg_review_minutes,42,28,-33%
     "ink": "#0f172a",
     "paper": "#f8fafc"
   },
-  "voice": "calm, precise, approval-first"
+  "voice": "calm, precise, always leaves a diff"
 }
 `,
     },

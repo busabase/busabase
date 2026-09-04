@@ -56,7 +56,7 @@ export function WhiteboardDetailView({ orpc, slug, onNodeLoaded }: WhiteboardDet
     ...orpc.nodes.get.queryOptions({ input: { nodeId: slug ?? "", type: "whiteboard" } }),
     enabled: Boolean(slug),
   });
-  const detail = asNodeDetail(detailQuery.data, "whiteboard");
+  const detail = asNodeDetail(detailQuery.isError ? undefined : detailQuery.data, "whiteboard");
   useReportLoadedNode(detail?.node, onNodeLoaded);
   const node = detail?.node ?? null;
   const initialScene = detail?.document ?? EMPTY_WHITEBOARD_DOCUMENT;

@@ -4,7 +4,7 @@
  * `/assets` library and the "where-used" panel render.
  */
 import { z } from "zod";
-import { autoMergeNotAccepted } from "../../contract/auto-merge";
+import { destructiveAutoMerge } from "../../contract/auto-merge";
 
 /**
  * Derived text-slot status for an Asset (Drive Grep Retrieval). `missing` is
@@ -247,8 +247,10 @@ export type ReadLinesVO = z.infer<typeof ReadLinesVOSchema>;
 // A coding-agent-style Edit-tool shape (oldString → newString, same/first vs
 // replaceAll), applied to the CURRENT, REAL, canonical file content of an asset
 // mounted in a Drive or Skill. Unlike `putText` (derived/extracted text, direct
-// write, disposable), this edits the file's actual bytes and always goes through
-// the existing filetree ChangeRequest pipeline for human review — never auto-merged.
+// write, disposable), this edits the file's actual bytes and goes through the
+// existing filetree ChangeRequest pipeline, so the edit always leaves a
+// reviewable before/after. Whether it stops for a human is permission-aware,
+// same as every other write (see `contract/auto-merge.ts`).
 
 /** One string-replace edit — mirrors a coding-agent Edit tool's exact semantics. */
 export const AssetContentEditSchema = z
@@ -281,8 +283,8 @@ export const EditAssetContentInputSchema = z.object({
       'Explanation shown to the human reviewer. Write a conventional-commit style subject — imperative verb + what + why, e.g. "Fix typo in setup instructions".',
     ),
   submittedBy: z.string().optional().default("agent"),
-  autoMerge: autoMergeNotAccepted(
-    "editContent rewrites the real mounted file bytes, so it always requires review. Omit the flag.",
+  autoMerge: destructiveAutoMerge(
+    "This rewrites the real mounted file bytes; the previous content stays in the Change Request history, so it is recoverable but not one-click undoable.",
   ),
 });
 export type EditAssetContentInput = z.infer<typeof EditAssetContentInputSchema>;

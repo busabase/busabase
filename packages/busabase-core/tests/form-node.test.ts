@@ -398,6 +398,56 @@ describe("Form-as-Node — submission + access gates", () => {
     });
   });
 
+  it("hides an archived Form and rejects member and anonymous submissions", async () => {
+    const created = await client.nodes.createChangeRequest({
+      autoMerge: true,
+      operations: [
+        {
+          kind: "create",
+          nodeType: "form",
+          slug: "t-archived-form",
+          name: "Archived Form",
+        },
+      ],
+    });
+    const archivedFormNodeId = created.mergeSummary.mergedNodeIds?.[0];
+    if (!archivedFormNodeId) throw new Error("expected a materialized Form node");
+    await createForm({
+      nodeId: archivedFormNodeId,
+      targetBaseId: blogBaseId,
+      name: "Archived Form",
+      bindings: [{ inputName: "subject", fieldSlug: "title", required: true }],
+      share: { isPublic: true, anonymousSubmit: true },
+    });
+    await client.nodes.share.set({
+      nodeId: archivedFormNodeId,
+      scope: "public",
+      capability: "submit",
+    });
+    await client.nodes.createChangeRequest({
+      autoMerge: true,
+      operations: [{ kind: "delete", nodeId: archivedFormNodeId }],
+    });
+
+    await expect(getFormByNodeId(archivedFormNodeId)).resolves.toBeNull();
+    await expect(getFormByNodeId("t-archived-form")).resolves.toBeNull();
+    const listed = await listForms({ targetBaseId: blogBaseId });
+    expect(listed.forms.some((form) => form.nodeId === archivedFormNodeId)).toBe(false);
+    await expect(submitForm(archivedFormNodeId, { values: { subject: "member" } })).rejects.toThrow(
+      /Form not found/i,
+    );
+
+    await runWithAnonymousContext({}, async () => {
+      await expect(client.forms.getByNode({ nodeId: archivedFormNodeId })).rejects.toThrow();
+      await expect(
+        client.forms.submit({
+          nodeId: archivedFormNodeId,
+          values: { subject: "anonymous" },
+        }),
+      ).rejects.toThrow();
+    });
+  });
+
   it("hides form configuration when its target Base is not visible", async () => {
     const target = await client.bases.get({ baseId: blogBaseId });
     if (!target) throw new Error("expected target Base");

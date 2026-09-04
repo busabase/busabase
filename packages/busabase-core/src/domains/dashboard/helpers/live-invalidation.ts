@@ -20,6 +20,7 @@ export type LiveInvalidationTarget =
   | "changeRequestsPaged"
   | "inboxSnapshot"
   | "nodeDetail"
+  | "nodeRouteState"
   | "nodes"
   | "records"
   | "recordsCount"
@@ -46,6 +47,7 @@ export const classifyLiveInvalidation = (event: BusabaseLiveEvent): LiveInvalida
     targets.add("auditEvents");
     targets.add("nodes");
     targets.add("nodeDetail");
+    targets.add("nodeRouteState");
     targets.add("archivedNodes");
     return { baseIds, targets };
   }
@@ -68,6 +70,7 @@ export const classifyLiveInvalidation = (event: BusabaseLiveEvent): LiveInvalida
     if (event.nodeIds.length > 0) {
       targets.add("nodes");
       targets.add("nodeDetail");
+      targets.add("nodeRouteState");
       targets.add("archivedNodes");
       targets.add("bases");
       targets.add("archivedBases");
@@ -91,6 +94,7 @@ export const classifyLiveInvalidation = (event: BusabaseLiveEvent): LiveInvalida
       targets.add("recordsCount");
       targets.add("bases");
       targets.add("archivedBases");
+      targets.add("nodeRouteState");
       baseIds.add(event.baseId);
     }
   }

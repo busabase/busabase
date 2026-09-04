@@ -222,6 +222,7 @@ describe("Boundary P3 — oRPC", () => {
 
     // Archive the target record.
     const delCr = await client.records.changeRequest({
+      autoMerge: false,
       operation: "delete",
       recordId: targetRecordId,
     });
@@ -336,10 +337,15 @@ describe("Boundary P3 — oRPC", () => {
 
     expect(await seqOf(ids[1])).toBe(2);
 
-    const delCr = await client.records.changeRequest({ operation: "delete", recordId: ids[1] });
+    const delCr = await client.records.changeRequest({
+      autoMerge: false,
+      operation: "delete",
+      recordId: ids[1],
+    });
     await approveAndMerge(delCr.id);
 
     const restoreCr = await client.records.changeRequest({
+      autoMerge: false,
       operation: "restore",
       recordId: ids[1],
     });

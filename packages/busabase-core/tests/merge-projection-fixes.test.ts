@@ -203,6 +203,7 @@ describe("merge projection fixes", () => {
 
     // Archive T → its inbound link from S is soft-deleted.
     const deleteCr = await client.records.changeRequest({
+      autoMerge: false,
       operation: "delete",
       recordId: tId,
       deleteMode: "archive",
@@ -212,7 +213,11 @@ describe("merge projection fixes", () => {
     expect(linkedWhileArchived.map((l) => l.targetRecordId)).not.toContain(tId);
 
     // Restore T → the link comes back.
-    const restoreCr = await client.records.changeRequest({ operation: "restore", recordId: tId });
+    const restoreCr = await client.records.changeRequest({
+      autoMerge: false,
+      operation: "restore",
+      recordId: tId,
+    });
     await approveAndMerge(restoreCr.id);
     const linkedAfter = await client.records.listLinks({ recordId: sId });
     expect(linkedAfter.map((l) => l.targetRecordId)).toContain(tId);

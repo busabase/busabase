@@ -87,6 +87,7 @@ describe("anonymous allowlist (unit)", () => {
       // `docs.get` / `files.get` / `folders.get` collapsed into this one route.
       "nodes.get",
       "nodes.list",
+      "nodes.resolveRouteState",
       "records.get",
       "records.list",
       "records.listPage",

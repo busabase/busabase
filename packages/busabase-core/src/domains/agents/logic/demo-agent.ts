@@ -58,7 +58,7 @@ const COPY: Record<DemoLocale, DemoCopy> = {
       "1. tighten the summary so it says what this is for\n",
       "2. fill in the two fields that are still empty\n",
       "3. link it to the record it belongs under\n\n",
-      "Busabase is approval-first, so I can't just write this — I'd submit it as a ChangeRequest for you to review.",
+      "I won't write straight into the workspace — I'd submit this as a ChangeRequest so you can see the exact diff first.",
     ],
     toolTitle: "Read this node",
     permissionTitle: "Submit a ChangeRequest with these three edits?",

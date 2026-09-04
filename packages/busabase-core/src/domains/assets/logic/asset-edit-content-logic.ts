@@ -171,13 +171,13 @@ export const editAssetContent = async (input: EditAssetContentInput): Promise<Ch
   const changeRequestInput = {
     message: input.message,
     submittedBy: input.submittedBy,
-    // Explicit `false`, load-bearing: `editContent` is documented as never
-    // auto-merged (see its contract `successDescription`) because it rewrites the
-    // real mounted file bytes. It reaches that guarantee by delegating to the
-    // file-tree CR pipeline, so once that pipeline gained a permission-aware
-    // `autoMerge` default, inheriting the default would have silently revoked this
-    // endpoint's promise for any write-capable caller. Pin it here instead.
-    autoMerge: false as const,
+    // Forwarded, not pinned: `editContent` inherits the file-tree CR pipeline's
+    // permission-aware `autoMerge` default like every other caller of it. It used
+    // to pin `false` to keep a "never auto-merged" promise the contract made; that
+    // promise is gone (see `busabase-contract/src/contract/auto-merge.ts`) because
+    // it made a solo owner approve their own file edit. The before/after is still
+    // captured in the ChangeRequest either way.
+    ...(input.autoMerge === undefined ? {} : { autoMerge: input.autoMerge }),
     operations: [
       {
         kind: "update" as const,

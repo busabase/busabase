@@ -44,12 +44,14 @@ import {
   demoListBases,
   demoListChangeRequests,
   demoListComments,
+  demoListMentionInbox,
   demoListNodeSummaries,
   demoListNodes,
   demoListRecordChangeRequests,
   demoListRecords,
   demoListRecordsByFieldText,
   demoListViews,
+  demoMarkMentionsRead,
   demoMergeChangeRequest,
   demoNodeAncestorIds,
   demoReadFileTreeFile,
@@ -173,6 +175,14 @@ export const busabaseDemoRouter = os.router({
       isDescendant: demoIsDescendant(input.nodeId, input.potentialAncestorId),
     })),
     ancestors: os.nodes.ancestors.handler(({ input }) => demoNodeAncestorIds(input.nodeId)),
+    resolveRouteState: os.nodes.resolveRouteState.handler(({ input }) => {
+      try {
+        const detail = demoGetNodeDetail(input.nodeId, input.type);
+        return { status: "active" as const, nodeId: detail.node.id };
+      } catch {
+        return { status: "unavailable" as const };
+      }
+    }),
     createChangeRequest: os.nodes.createChangeRequest.handler(() => {
       throw demoUnsupported("Node tree change request");
     }),
@@ -346,6 +356,37 @@ export const busabaseDemoRouter = os.router({
           };
         }
       }),
+    ),
+    /**
+     * Same shape as the real Mentions tab, computed from the demo dataset:
+     * comments that `@`-mention the demo visitor. Read state is in-memory
+     * (see `demoListMentionInbox`), so clicking a row clears its badge for
+     * the rest of the browsing session — the tab behaves, rather than being
+     * a dead surface in the demo.
+     */
+    listMentions: os.comments.listMentions.handler(({ input }) => {
+      const inbox = demoListMentionInbox(input);
+      return {
+        items: inbox.page.map((comment) => ({
+          commentId: comment.id,
+          subjectType: comment.subjectType,
+          body: comment.body,
+          authorId: comment.authorId,
+          author: comment.author ?? null,
+          createdAt: comment.createdAt,
+          unread: inbox.isUnread(comment.id),
+          href: comment.changeRequestId
+            ? comment.subjectType === "operation"
+              ? `/inbox/${comment.changeRequestId}/${comment.subjectId}`
+              : `/inbox/${comment.changeRequestId}`
+            : null,
+        })),
+        total: inbox.all.length,
+        unreadCount: inbox.unreadCount,
+      };
+    }),
+    markMentionsRead: os.comments.markMentionsRead.handler(({ input }) =>
+      demoMarkMentionsRead(input.commentId),
     ),
   },
   agent: {

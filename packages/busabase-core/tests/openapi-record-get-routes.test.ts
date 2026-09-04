@@ -91,6 +91,7 @@ describe("Busabase OpenAPI record get route", () => {
     const spec = await getBusabaseOpenApiSpec();
     expect(spec.paths?.["/api/v1/nodes/search"]?.get).toBeDefined();
     expect(spec.paths?.["/api/v1/nodes/favorites"]?.get).toBeDefined();
+    expect(spec.paths?.["/api/v1/nodes/route-state/{nodeId}"]?.get).toBeDefined();
   });
 
   it("serves Base archive and restore through one lifecycle path", async () => {
@@ -100,7 +101,7 @@ describe("Busabase OpenAPI record get route", () => {
     expect(spec.paths?.["/api/v1/bases/{baseId}/restore/change-requests"]).toBeUndefined();
   });
 
-  it("keeps the compressed public API at 113 operations", async () => {
+  it("keeps the compressed public API at 114 operations", async () => {
     const spec = await getBusabaseOpenApiSpec();
     const operationCount = Object.values(spec.paths ?? {}).reduce(
       (count, pathItem) =>
@@ -168,6 +169,17 @@ describe("Busabase OpenAPI record get route", () => {
     // -> 113. A read and a write rather than a field on the node: the list is
     // capped at 50 prompts x 8 KiB per locale, so it is excluded from every node
     // listing and has to be asked for on its own.
-    expect(operationCount).toBe(113);
+    // +2 for the mention inbox pair (`GET /comments/mentions`,
+    // `POST /comments/mentions/read`) -> 115. Both are scoped to the caller
+    // from context and take no user id, so on a key they read and clear that
+    // key's own owner's mentions — which is precisely what makes them worth
+    // publishing: being told elsewhere that someone is waiting on you is the
+    // point of the feature, and a script that polls its own mentions is how
+    // that happens without Busabase shipping an email pipeline. Both sit at
+    // `read` in the permission policy: they expose nothing `comments.list`
+    // does not, and holding the read-stamp at `write` would let a read-only
+    // key see a badge it could never clear.
+    // The dashboard route-state guard adds one lightweight read (+1 -> 116).
+    expect(operationCount).toBe(116);
   });
 });

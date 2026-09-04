@@ -3954,7 +3954,7 @@ export const englishScenario: SeedScenario = withSeedNodeIcons(
       <label for="body">Draft</label>
       <textarea id="body" name="body" required placeholder="Write your pitch or full draft…"></textarea>
       <button type="button" id="btn">Submit for review</button>
-      <p class="note">Reviewed, not published — approval-first.</p>
+      <p class="note">Reviewed, not published — an editor decides.</p>
     </div>
     <div class="ok" id="ok">Thanks! Your draft is now waiting in the editors' review queue.</div>
   </div>

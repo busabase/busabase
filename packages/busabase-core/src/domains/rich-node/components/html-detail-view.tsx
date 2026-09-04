@@ -35,7 +35,7 @@ export function HtmlDetailView({ orpc, slug, onNodeLoaded }: HtmlDetailViewProps
     ...orpc.nodes.get.queryOptions({ input: { nodeId: slug ?? "", type: "html" } }),
     enabled: Boolean(slug),
   });
-  const detail = asNodeDetail(detailQuery.data, "html");
+  const detail = asNodeDetail(detailQuery.isError ? undefined : detailQuery.data, "html");
   useReportLoadedNode(detail?.node, onNodeLoaded);
   const node = detail?.node ?? null;
   const initialDocument = detail?.document ?? DEFAULT_HTML_DOCUMENT;

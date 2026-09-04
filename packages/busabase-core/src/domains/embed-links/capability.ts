@@ -166,3 +166,20 @@ export const decodeEmbedCapability = (
   const secret = value.slice(separator + 1);
   return isValidEmbedPublicId(id) && isValidEmbedSecret(secret) ? { id, secret } : null;
 };
+
+/**
+ * Public-share mode of the AirApp data bridge.
+ *
+ * A publicly shared AirApp runs in the SAME relay as an Embed Link — same route,
+ * same credential-stripping, same read-only router — but authorizes off the
+ * node's public share instead of an embed capability. Reusing the one relay is
+ * deliberate: Nodepod's service worker patch keeps `/api/airapp-embed-bridge/`
+ * out of pod routing and refuses `/api/v1/*` from any pod that booted with a
+ * preview script, so a second, parallel bridge path would silently sit outside
+ * both of those protections.
+ *
+ * The space id is all this header carries — it names WHICH tenant to resolve the
+ * share in, and grants nothing on its own. Authorization is re-derived
+ * server-side from `busabase_nodes.effective_public_scope`.
+ */
+export const PUBLIC_SHARE_RUNTIME_SPACE_HEADER = "x-busabase-public-share-space";
