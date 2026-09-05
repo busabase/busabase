@@ -107,7 +107,10 @@ test("saved view column drag and resize persist through change requests", async 
     .poll(async () => (await resizedHeader.boundingBox())?.width ?? 0)
     .toBeGreaterThan(before.width + 48);
 
-  await expect.poll(() => ({ ...workflowRequests })).toEqual({ merge: 2, review: 2, update: 2 });
+  // One call per change, not three. The dashboard used to pin `autoMerge: false`
+  // and then approve and merge the change request it had just created; it now sends
+  // the intent with the write, so `review`/`merge` staying at 0 is the assertion.
+  await expect.poll(() => ({ ...workflowRequests })).toEqual({ merge: 0, review: 0, update: 2 });
   await expect
     .poll(async () => {
       const views = await json<ViewVO[]>(await request.get(`/api/v1/bases/${blog.id}/views`));

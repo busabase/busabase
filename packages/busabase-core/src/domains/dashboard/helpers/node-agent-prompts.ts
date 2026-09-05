@@ -24,7 +24,11 @@ import {
   type CustomPromptDef,
   customAgentPromptsSchema,
 } from "busabase-contract/contract/node-agent-prompt-schemas";
-import { GENERIC_NODE_OPERATION_KINDS, getNodeType } from "busabase-contract/domains";
+import {
+  GENERIC_NODE_OPERATION_KINDS,
+  getNodeType,
+  listNodeTypes,
+} from "busabase-contract/domains";
 import { iStringParse } from "openlib/i18n/i-string";
 import type { CoreLocale } from "../../../i18n";
 import type { CoreI18nMessages } from "../../../i18n/messages";
@@ -927,6 +931,36 @@ const readCustomAgentPrompts = (
  * Build every prompt available for one node, already localized and interpolated.
  * Returns both tiers; the dialog renders them as consecutive sidebar sections.
  */
+/**
+ * Render one `PromptDef` into the finished, copy-pasteable prompt.
+ *
+ * Module-level rather than a closure inside `buildNodeAgentPrompts` because
+ * `buildCreateNodePrompts` needs exactly the same rendering — same target-line
+ * injection, same approval/reply footer — for prompts whose target is a place
+ * to create in rather than a node to act on.
+ */
+const buildCuratedPrompt = (
+  prompt: PromptDef,
+  locale: CoreLocale,
+  target: string,
+  tier: PromptTier,
+  group: string,
+): NodePrompt => {
+  const intent = prompt.intent ?? "change";
+  const footer =
+    intent === "read-only"
+      ? REPLY_LANGUAGE[locale]
+      : `${APPROVAL_POLICY[locale]} ${REPLY_LANGUAGE[locale]}`;
+
+  return {
+    key: prompt.key,
+    tier,
+    label: prompt.label[locale],
+    group,
+    body: `${prompt.body[locale](target)}\n\n${footer}`,
+  };
+};
+
 export function buildNodeAgentPrompts(
   context: NodePromptContext,
   locale: CoreLocale,
@@ -953,24 +987,8 @@ export function buildNodeAgentPrompts(
       ? (readCustomAgentPrompts(context.customPrompts) ?? SCENARIOS_BY_TYPE[context.nodeType] ?? [])
       : (SCENARIOS_BY_SCOPE[scope.kind] ?? SCENARIOS_BY_TYPE[context.nodeType] ?? []);
 
-  const buildCuratedPrompt = (prompt: PromptDef, tier: PromptTier, group: string): NodePrompt => {
-    const intent = prompt.intent ?? "change";
-    const footer =
-      intent === "read-only"
-        ? REPLY_LANGUAGE[locale]
-        : `${APPROVAL_POLICY[locale]} ${REPLY_LANGUAGE[locale]}`;
-
-    return {
-      key: prompt.key,
-      tier,
-      label: prompt.label[locale],
-      group,
-      body: `${prompt.body[locale](target)}\n\n${footer}`,
-    };
-  };
-
   const scenarios = scenarioDefs.map((scenario) =>
-    buildCuratedPrompt(scenario, "scenario", groupLabels.content),
+    buildCuratedPrompt(scenario, locale, target, "scenario", groupLabels.content),
   );
 
   // Type-specific operations first, then the generic node_* tree ops every type has.
@@ -996,7 +1014,7 @@ export function buildNodeAgentPrompts(
     scope.kind === "node" ? (CONTENT_PROMPTS_BY_TYPE[context.nodeType] ?? []) : [];
   const capabilities: NodePrompt[] = [
     ...curatedContentPrompts.map((prompt) =>
-      buildCuratedPrompt(prompt, "capability", groupLabels.content),
+      buildCuratedPrompt(prompt, locale, target, "capability", groupLabels.content),
     ),
     ...kinds.map((kind): NodePrompt => {
       const labelKey = operationLabelKeys[kind as keyof typeof operationLabelKeys];
@@ -1025,6 +1043,236 @@ export function buildNodeAgentPrompts(
   capabilities.sort(
     (a, b) => (rank.get(a.group) ?? GROUP_ORDER.length) - (rank.get(b.group) ?? GROUP_ORDER.length),
   );
+
+  return { scenarios, capabilities };
+}
+
+// ── Create prompts ────────────────────────────────────────────────────────────
+//
+// The other half of the New-item modal: instead of filling the form yourself,
+// copy a prompt (or hand it straight to an agent) and let the agent create the
+// thing. Deliberately built on the same `PromptDef` machinery as the per-node
+// prompts — the only thing that differs is the target line, which names a place
+// to create *in* rather than a node to act *on*. Everything downstream (the
+// approval footer, the reply-language footer, `AgentPromptsView`) is shared.
+
+/** Where the new item should go. No node exists yet, so there is no `nodeId`. */
+export interface CreateNodePromptContext {
+  spaceId?: string;
+  spaceName?: string;
+  /** The folder the "+" was clicked on. Absent when creating at the root. */
+  parentNodeId?: string;
+  parentName?: string;
+}
+
+const CREATE_TARGET_LINE: Record<CoreLocale, (c: CreateNodePromptContext) => string> = {
+  en: (c) => {
+    const where = c.parentNodeId
+      ? `inside the folder "${c.parentName ?? c.parentNodeId}" (nodeId: ${c.parentNodeId})`
+      : "at the root";
+    const space = c.spaceId
+      ? ` of the space "${c.spaceName ?? c.spaceId}" (spaceId: ${c.spaceId})`
+      : "";
+    return `Target: create something new in Busabase, ${where}${space}.`;
+  },
+  "zh-CN": (c) => {
+    const where = c.parentNodeId
+      ? `文件夹「${c.parentName ?? c.parentNodeId}」（nodeId: ${c.parentNodeId}）里`
+      : "根目录下";
+    const space = c.spaceId ? `空间「${c.spaceName ?? c.spaceId}」（spaceId: ${c.spaceId}）的` : "";
+    return `目标：在 Busabase ${space}${where}新建内容。`;
+  },
+  "zh-TW": (c) => {
+    const where = c.parentNodeId
+      ? `資料夾「${c.parentName ?? c.parentNodeId}」（nodeId: ${c.parentNodeId}）裡`
+      : "根目錄下";
+    const space = c.spaceId ? `空間「${c.spaceName ?? c.spaceId}」（spaceId: ${c.spaceId}）的` : "";
+    return `目標：在 Busabase ${space}${where}新建內容。`;
+  },
+  ja: (c) => {
+    const where = c.parentNodeId
+      ? `フォルダ「${c.parentName ?? c.parentNodeId}」（nodeId: ${c.parentNodeId}）の中`
+      : "ルート直下";
+    const space = c.spaceId
+      ? `スペース「${c.spaceName ?? c.spaceId}」（spaceId: ${c.spaceId}）の`
+      : "";
+    return `対象：Busabase の${space}${where}に新しく作成します。`;
+  },
+};
+
+const CREATE_GROUP_LABEL: Record<CoreLocale, string> = {
+  en: "Create",
+  "zh-CN": "新建",
+  "zh-TW": "新建",
+  ja: "作成",
+};
+
+/**
+ * The row label for one creatable type. Carries the verb, matching how the
+ * per-node capability tier reads ("Create record", not "Record") — the type
+ * name alone next to a "Create" heading reads as a filter, not an action.
+ */
+const CREATE_ITEM_LABEL: Record<CoreLocale, (typeLabel: string) => string> = {
+  en: (typeLabel) => `Create ${typeLabel}`,
+  "zh-CN": (typeLabel) => `新建 ${typeLabel}`,
+  "zh-TW": (typeLabel) => `新建 ${typeLabel}`,
+  ja: (typeLabel) => `${typeLabel} を作成`,
+};
+
+/**
+ * Curated, cross-type scenarios — deliberately NOT filtered by whatever type is
+ * selected in the form tab. Someone who came here came because they do not yet
+ * know what to create; filtering would hide exactly the prompts that span types
+ * ("build me a folder structure"), which is the reason to ask an agent at all.
+ */
+const CREATE_SCENARIOS: PromptDef[] = [
+  {
+    key: "create-base-for",
+    label: {
+      en: "A Base to track something",
+      "zh-CN": "建个表来跟踪某件事",
+      "zh-TW": "建個表來追蹤某件事",
+      ja: "何かを管理する Base を作る",
+    },
+    body: {
+      en: (t) =>
+        `${t}\n\nI want a Base to track something — I'll describe it next. Propose the field schema first (field names, types, and why each one), and create it only after I approve the proposal.`,
+      "zh-CN": (t) =>
+        `${t}\n\n我想要一个表来跟踪某件事——我接下来描述。请先给我字段方案（字段名、类型、每个字段的理由），我确认后再创建。`,
+      "zh-TW": (t) =>
+        `${t}\n\n我想要一個表來追蹤某件事——我接下來描述。請先給我欄位方案（欄位名、型別、每個欄位的理由），我確認後再建立。`,
+      ja: (t) =>
+        `${t}\n\n何かを管理するための Base が欲しいです（内容はこの後説明します）。まずフィールド構成（名前・型・各フィールドの理由）を提案し、私が承認してから作成してください。`,
+    },
+  },
+  {
+    key: "create-base-from-data",
+    label: {
+      en: "Turn this data into a Base",
+      "zh-CN": "把这份数据建成一个表",
+      "zh-TW": "把這份資料建成一個表",
+      ja: "このデータを Base にする",
+    },
+    body: {
+      en: (t) =>
+        `${t}\n\nI'll paste a table (CSV, spreadsheet, or a list). Infer a field schema from it, show me the schema and how many rows you read, then create the Base and import the rows.`,
+      "zh-CN": (t) =>
+        `${t}\n\n我会粘贴一份表格数据（CSV、电子表格或列表）。请据此推断字段结构，先告诉我字段方案和你读到的行数，然后再创建这个表并导入数据。`,
+      "zh-TW": (t) =>
+        `${t}\n\n我會貼上一份表格資料（CSV、試算表或清單）。請據此推斷欄位結構，先告訴我欄位方案和你讀到的列數，然後再建立這個表並匯入資料。`,
+      ja: (t) =>
+        `${t}\n\n表データ（CSV・スプレッドシート・リスト）を貼り付けます。そこからフィールド構成を推測し、構成と読み取った行数を先に提示してから、Base を作成してデータを取り込んでください。`,
+    },
+  },
+  {
+    key: "create-doc-draft",
+    label: {
+      en: "A Doc, and draft it for me",
+      "zh-CN": "建文档并帮我起草",
+      "zh-TW": "建文件並幫我起草",
+      ja: "Doc を作って下書きする",
+    },
+    body: {
+      en: (t) =>
+        `${t}\n\nCreate a Doc and draft its first version from what I describe next. Give me an outline before you write the full draft.`,
+      "zh-CN": (t) =>
+        `${t}\n\n请创建一篇文档，并根据我接下来的描述起草第一版。写全文之前先给我一个大纲。`,
+      "zh-TW": (t) =>
+        `${t}\n\n請建立一篇文件，並根據我接下來的描述起草第一版。寫全文之前先給我一個大綱。`,
+      ja: (t) =>
+        `${t}\n\nDoc を作成し、この後の説明にもとづいて初稿を書いてください。全文を書く前にアウトラインを見せてください。`,
+    },
+  },
+  {
+    key: "create-folder-structure",
+    label: {
+      en: "A whole folder structure",
+      "zh-CN": "建一套文件夹结构",
+      "zh-TW": "建一套資料夾結構",
+      ja: "フォルダ構成をまとめて作る",
+    },
+    body: {
+      en: (t) =>
+        `${t}\n\nI'll describe how I want this area organized. Propose the whole tree — folders, and what goes in each — as a plan I can read in one go, then create it once I approve.`,
+      "zh-CN": (t) =>
+        `${t}\n\n我会描述这块内容想怎么组织。请把整棵树——有哪些文件夹、每个里面放什么——作为一份我能一眼看完的方案给我，我确认后再创建。`,
+      "zh-TW": (t) =>
+        `${t}\n\n我會描述這塊內容想怎麼組織。請把整棵樹——有哪些資料夾、每個裡面放什麼——作為一份我能一眼看完的方案給我，我確認後再建立。`,
+      ja: (t) =>
+        `${t}\n\nこの領域をどう整理したいかを説明します。フォルダ構成と各フォルダの中身を、一度に読める計画としてまとめて提案し、承認後に作成してください。`,
+    },
+  },
+  {
+    key: "create-from-template",
+    label: {
+      en: "Set one up from a template",
+      "zh-CN": "照模板装一套",
+      "zh-TW": "照範本裝一套",
+      ja: "テンプレートから用意する",
+    },
+    body: {
+      en: (t) =>
+        `${t}\n\nLook at what's available in the template center, recommend the one that fits what I describe next, and tell me what it will create before installing it.`,
+      "zh-CN": (t) =>
+        `${t}\n\n请看看模板中心里有什么，根据我接下来的描述推荐最合适的一个，并在安装前告诉我它会创建哪些东西。`,
+      "zh-TW": (t) =>
+        `${t}\n\n請看看範本中心裡有什麼，根據我接下來的描述推薦最合適的一個，並在安裝前告訴我它會建立哪些東西。`,
+      ja: (t) =>
+        `${t}\n\nテンプレートセンターにあるものを確認し、この後の説明に合うものを推薦してください。インストールする前に、何が作成されるかを教えてください。`,
+    },
+  },
+];
+
+const CREATE_CAPABILITY_TEMPLATE: Record<
+  CoreLocale,
+  (target: string, typeLabel: string, nodeType: string) => string
+> = {
+  en: (target, typeLabel, nodeType) =>
+    `${target}\n\nCreate a new ${typeLabel} (node type: "${nodeType}") here.\nAsk me for its name and anything else you need before creating it.`,
+  "zh-CN": (target, typeLabel, nodeType) =>
+    `${target}\n\n请在这里创建一个新的 ${typeLabel}（节点类型：「${nodeType}」）。\n创建前先问我它的名字，以及你还需要的其他信息。`,
+  "zh-TW": (target, typeLabel, nodeType) =>
+    `${target}\n\n請在這裡建立一個新的 ${typeLabel}（節點類型：「${nodeType}」）。\n建立前先問我它的名字，以及你還需要的其他資訊。`,
+  ja: (target, typeLabel, nodeType) =>
+    `${target}\n\nここに新しい ${typeLabel}（ノードタイプ：「${nodeType}」）を作成してください。\n作成する前に、名前と必要な情報を私に確認してください。`,
+};
+
+/**
+ * Prompts for creating something, sibling to `buildNodeAgentPrompts`.
+ *
+ * A separate entry point rather than a `scope` of the node builder: that one
+ * requires `nodeType`/`nodeId`/`nodeName`, none of which exist before the thing
+ * is created, and making them optional would weaken the type for every existing
+ * caller to serve this one.
+ *
+ * The capability tier is derived from the same registry filter the form tab's
+ * type grid uses, so a newly registered creatable type appears in both at once.
+ */
+export function buildCreateNodePrompts(
+  context: CreateNodePromptContext,
+  locale: CoreLocale,
+): { scenarios: NodePrompt[]; capabilities: NodePrompt[] } {
+  const target = CREATE_TARGET_LINE[locale](context);
+  const groupLabels = GROUP_LABELS[locale];
+
+  const scenarios = CREATE_SCENARIOS.map((scenario) =>
+    buildCuratedPrompt(scenario, locale, target, "scenario", groupLabels.content),
+  );
+
+  const capabilities = listNodeTypes()
+    .filter((definition) => definition.capabilities.creatable && !definition.capabilities.hidden)
+    .map((definition): NodePrompt => {
+      const typeLabel = definition.label;
+      return {
+        key: `create-${definition.type}`,
+        tier: "capability",
+        label: CREATE_ITEM_LABEL[locale](typeLabel),
+        group: CREATE_GROUP_LABEL[locale],
+        body: `${CREATE_CAPABILITY_TEMPLATE[locale](target, typeLabel, definition.type)}\n\n${
+          APPROVAL_POLICY[locale]
+        } ${REPLY_LANGUAGE[locale]}`,
+      };
+    });
 
   return { scenarios, capabilities };
 }

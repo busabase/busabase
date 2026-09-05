@@ -25,67 +25,28 @@
 // transient "Copied" state) so the two agent-facing dialogs feel like one feature.
 
 import { useQuery } from "@tanstack/react-query";
-import { hasApiKeyLevel } from "busabase-contract/access-control/api-key-level";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "kui/dialog";
-import { Check, Copy, Loader2, Sparkles } from "lucide-react";
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
-import { useLocation } from "wouter";
+import { useEffect, useMemo, useState } from "react";
 import { useCoreI18n, useCoreLocale } from "../../../i18n";
-import { AgentTargetPicker } from "../../agents/components/agent-target-picker";
-import { useAskAgent } from "../../agents/hooks/use-ask-agent";
 import {
   buildNodeAgentPrompts,
-  type NodePrompt,
   type NodePromptContext,
   type NodePromptScope,
 } from "../helpers/node-agent-prompts";
 import { useDashboardOrpc } from "../orpc-context";
-import { useWorkspacePermissionLevel } from "./split-submit-button";
-
-export interface PromptSection {
-  name: string;
-  items: NodePrompt[];
-}
-
-/** Build the single sidebar: curated scenarios first, then capability groups. */
-export const buildPromptSections = (
-  scenarios: NodePrompt[],
-  capabilities: NodePrompt[],
-  scenariosLabel: string,
-): PromptSection[] => {
-  const sections: PromptSection[] = [];
-  if (scenarios.length > 0) {
-    sections.push({ name: scenariosLabel, items: scenarios });
-  }
-
-  const capabilitySections = new Map<string, NodePrompt[]>();
-  for (const prompt of capabilities) {
-    const bucket = capabilitySections.get(prompt.group);
-    if (bucket) bucket.push(prompt);
-    else capabilitySections.set(prompt.group, [prompt]);
-  }
-
-  return [
-    ...sections,
-    ...[...capabilitySections.entries()].map(([name, items]) => ({ name, items })),
-  ];
-};
-
-export const resolveActivePrompt = (
-  sections: PromptSection[],
-  selected: string | null,
-): NodePrompt | undefined => {
-  const prompts = sections.flatMap((section) => section.items);
-  return prompts.find((prompt) => prompt.key === selected) ?? prompts[0];
-};
+import { AgentPromptsView } from "./agent-prompts-view";
 
 /**
  * The space id used to tell the agent which space to target. Falls back to the
  * `/dashboard/<spaceId>/…` pathname when the caller can't hand one in — every
  * dashboard route is mounted under it. Same approach as `node-share-button`.
+ *
+ * Exported because the New-item modal's create-prompts tab needs the identical
+ * fallback: it also names a space in its target line, and also has callers that
+ * do not thread a space id down.
  */
-const resolveSpaceId = (spaceId?: string): string | undefined => {
+export const resolveSpaceId = (spaceId?: string): string | undefined => {
   if (spaceId) return spaceId;
   if (typeof window === "undefined") return undefined;
   return window.location.pathname.split("/").filter(Boolean)[1];
@@ -154,10 +115,7 @@ export function NodeAgentPromptsDialog({
   // only avoids showing an action that would be refused. Copy stays available
   // to everyone: pasting a prompt into your own terminal needs no permission
   // from Busabase.
-  const canAskAgent = hasApiKeyLevel(useWorkspacePermissionLevel(), "manage");
   const [resolvedSpaceId, setResolvedSpaceId] = useState<string | undefined>(spaceId);
-  const [selected, setSelected] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
 
   // Pathname is only readable after mount; keep SSR output stable.
   useEffect(() => {
@@ -197,19 +155,6 @@ export function NodeAgentPromptsDialog({
     () => buildNodeAgentPrompts(context, locale, messages),
     [context, locale, messages],
   );
-  const sections = useMemo(
-    () => buildPromptSections(scenarios, capabilities, messages.agentPrompts.scenariosTab),
-    [scenarios, capabilities, messages.agentPrompts.scenariosTab],
-  );
-  const active = resolveActivePrompt(sections, selected);
-
-  const copy = async () => {
-    if (!active) return;
-    await navigator.clipboard.writeText(active.body);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1800);
-  };
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[85vh] gap-4 overflow-hidden sm:max-w-3xl">
@@ -223,208 +168,14 @@ export function NodeAgentPromptsDialog({
         </DialogHeader>
         <DialogDescription>{messages.agentPrompts.intro}</DialogDescription>
 
-        {promptsLoading ? (
-          // Only while the FIRST read is in flight. A node with no custom
-          // prompts still renders its type's defaults, so showing those
-          // immediately and swapping them for custom ones a moment later would
-          // read as the dialog changing its mind — worse than a brief wait.
-          <div
-            className="flex min-h-40 items-center justify-center text-sm text-muted-foreground"
-            data-testid="node-agent-prompts-loading"
-          >
-            {messages.common.loading}
-          </div>
-        ) : (
-          <PromptPanel
-            sections={sections}
-            active={active}
-            onSelect={setSelected}
-            onCopy={copy}
-            copied={copied}
-            copyLabel={messages.agentPrompts.copy}
-            copiedLabel={messages.agentPrompts.copied}
-            askAgentSlot={
-              orpc && canAskAgent ? (
-                <AskAgentAction
-                  nodeId={nodeId}
-                  onClose={() => onOpenChange(false)}
-                  orpc={orpc}
-                  prompt={active}
-                />
-              ) : null
-            }
-          />
-        )}
+        <AgentPromptsView
+          askAgent={orpc ? { orpc, sessionScopeId: nodeId } : null}
+          capabilities={capabilities}
+          loading={promptsLoading}
+          onHandedOff={() => onOpenChange(false)}
+          scenarios={scenarios}
+        />
       </DialogContent>
     </Dialog>
-  );
-}
-
-/**
- * "Ask Agent" — the same prompt the Copy button hands to the clipboard, handed
- * to an agent instead.
- *
- * Sits next to Copy rather than replacing it: copying is still the right move
- * when the agent lives in a terminal outside Busabase, and this feature is for
- * the agents Busabase can already talk to.
- */
-function AskAgentAction({
-  nodeId,
-  onClose,
-  orpc,
-  prompt,
-}: {
-  nodeId: string;
-  onClose: () => void;
-  orpc: BusabaseQueryUtils;
-  prompt?: NodePrompt;
-}) {
-  const messages = useCoreI18n();
-  const [, setLocation] = useLocation();
-
-  const onNoAgents = useCallback(() => {
-    // Only reached on a *successful* empty catalog (see `use-ask-agent`) —
-    // there is genuinely nothing connected, so the honest next step is the
-    // flow that connects one.
-    onClose();
-    setLocation("/agents/new");
-  }, [onClose, setLocation]);
-
-  const ask = useAskAgent({ nodeId, onHandedOff: onClose, onNoAgents, orpc });
-
-  if (ask.targets) {
-    return (
-      <div className="flex min-w-0 flex-1 flex-col gap-2">
-        <p className="text-muted-foreground text-xs">{messages.agentPrompts.pickAgent}</p>
-        <AgentTargetPicker
-          disabled={ask.isStarting}
-          emptyLabel={messages.agentPrompts.noAgents}
-          onSelect={ask.pickTarget}
-          targets={ask.targets}
-        />
-        {ask.startError ? <AskAgentError message={ask.startError} onRetry={ask.reset} /> : null}
-      </div>
-    );
-  }
-
-  if (ask.loadError) {
-    return <AskAgentError message={messages.agentPrompts.askAgentLoadFailed} onRetry={ask.retry} />;
-  }
-
-  return (
-    <div className="flex min-w-0 flex-1 flex-col items-start gap-2">
-      <button
-        className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-60"
-        disabled={!prompt || ask.isLoading || ask.isStarting}
-        onClick={() => prompt && ask.ask(prompt.body)}
-        type="button"
-      >
-        {ask.isLoading || ask.isStarting ? (
-          <Loader2 className="size-4 animate-spin" />
-        ) : (
-          <Sparkles className="size-4" />
-        )}
-        {ask.isStarting
-          ? messages.agentPrompts.askAgentStarting
-          : ask.isLoading
-            ? messages.agentPrompts.askAgentLoading
-            : messages.agentPrompts.askAgent}
-      </button>
-      {ask.startError ? <AskAgentError message={ask.startError} onRetry={ask.reset} /> : null}
-    </div>
-  );
-}
-
-/**
- * A failure that keeps the dialog — and the selected prompt — exactly where
- * they were. The whole point: a network blip must not cost the user the prompt
- * they had chosen, nor be mistaken for "you have no agents".
- */
-function AskAgentError({ message, onRetry }: { message: string; onRetry: () => void }) {
-  const messages = useCoreI18n();
-  return (
-    <div className="flex min-w-0 flex-1 items-center gap-2 text-destructive text-xs">
-      <span className="min-w-0 flex-1 truncate" title={message}>
-        {message}
-      </span>
-      <button
-        className="shrink-0 rounded border px-2 py-1 font-medium text-foreground hover:bg-muted"
-        onClick={onRetry}
-        type="button"
-      >
-        {messages.agentPrompts.askAgentRetry}
-      </button>
-    </div>
-  );
-}
-
-/** Sectioned list (left) + preview & actions (right). */
-function PromptPanel({
-  sections,
-  active,
-  onSelect,
-  onCopy,
-  copied,
-  copyLabel,
-  copiedLabel,
-  askAgentSlot,
-}: {
-  sections: PromptSection[];
-  active?: NodePrompt;
-  onSelect: (key: string) => void;
-  onCopy: () => void;
-  copied: boolean;
-  copyLabel: string;
-  copiedLabel: string;
-  /** Ask Agent, or null when no host wired oRPC. Rendered beside Copy. */
-  askAgentSlot?: ReactNode;
-}) {
-  return (
-    <div className="grid min-h-0 gap-3 sm:grid-cols-[minmax(0,13rem)_minmax(0,1fr)]">
-      <div className="max-h-[28vh] overflow-y-auto rounded-md border p-1 sm:max-h-[46vh]">
-        {sections.map((section) => (
-          <div key={section.name}>
-            <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground">
-              {section.name}
-            </div>
-            {section.items.map((prompt) => {
-              const isActive = active?.key === prompt.key;
-              return (
-                <button
-                  className={`w-full truncate rounded px-2 py-1.5 text-left text-sm ${
-                    isActive ? "bg-muted font-medium text-foreground" : "hover:bg-muted/60"
-                  }`}
-                  key={prompt.key}
-                  onClick={() => onSelect(prompt.key)}
-                  title={prompt.label}
-                  type="button"
-                >
-                  {prompt.label}
-                </button>
-              );
-            })}
-          </div>
-        ))}
-      </div>
-
-      <div className="flex min-h-0 flex-col gap-2">
-        <textarea
-          className="min-h-[24vh] resize-none rounded-md border bg-muted/30 p-3 font-mono text-xs leading-relaxed text-foreground outline-none sm:min-h-[46vh]"
-          readOnly
-          value={active?.body ?? ""}
-        />
-        <div className="flex flex-wrap items-start justify-end gap-2">
-          {askAgentSlot}
-          <button
-            className="inline-flex h-9 shrink-0 items-center gap-2 rounded-md border bg-card px-3 text-sm font-medium hover:bg-muted"
-            onClick={onCopy}
-            type="button"
-          >
-            {copied ? <Check size={16} /> : <Copy size={16} />}
-            {copied ? copiedLabel : copyLabel}
-          </button>
-        </div>
-      </div>
-    </div>
   );
 }

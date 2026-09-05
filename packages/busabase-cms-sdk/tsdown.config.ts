@@ -8,7 +8,13 @@ export default defineConfig({
     "integration/index": "src/integration/index.ts",
   },
   format: ["esm"],
-  dts: true,
+  // Typechecking follows workspace source through tsconfig.json so it works in a
+  // fresh checkout. Declaration emit deliberately uses package exports instead,
+  // keeping busabase-sdk's source graph out of this package's build.
+  dts: {
+    generator: "tsgo",
+    tsconfig: "../../tsconfig.busabase-cms-sdk-dts.json",
+  },
   clean: true,
   // package.json's `exports` map points at `./dist/*.js` / `./dist/*.d.ts` —
   // tsdown's default for this package resolves to `.mjs`/`.d.mts` instead.

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { coreMessagesEn } from "../../../i18n/messages";
 import { buildNodeAgentPrompts, type NodePrompt } from "../helpers/node-agent-prompts";
-import { buildPromptSections, resolveActivePrompt } from "./node-agent-prompts-dialog";
+import { buildPromptSections, resolveActivePrompt } from "./agent-prompts-view";
 
 const prompt = (key: string, tier: NodePrompt["tier"], group: string): NodePrompt => ({
   key,

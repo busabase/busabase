@@ -1144,6 +1144,10 @@ export const coreMessagesEn = {
     itemNamePlaceholder: "{type} name",
     slugPlaceholder: "my-slug",
     defaultTitleField: "Title",
+    manualTab: "Create it myself",
+    agentTab: "Let an Agent create it",
+    agentTabHint:
+      "Copy a prompt into your agent, or hand it straight to one — it already says where to create.",
     createRequest: "Create {type} Request",
     createNow: "Create Now",
     creating: "Creating...",

@@ -71,6 +71,23 @@ export type RecordUpdateChangeRequestResult =
   | (RecordVO & { materialized: true })
   | (ChangeRequestVO & { materialized: false });
 
+export type ViewChangeRequestResult =
+  | (ViewVO & { materialized: true })
+  | (ChangeRequestVO & { materialized: false });
+
+/**
+ * Every dashboard write is a two-mode button: "do it now" and "submit for
+ * review". These facades take that intent as `autoMerge` and hand back whichever
+ * branch of the endpoint's union actually happened, instead of pinning
+ * `autoMerge: false` and then replaying approve + merge as two more round trips.
+ *
+ * Read `materialized` (or `status`, where the endpoint returns a plain
+ * ChangeRequestVO) rather than assuming the requested mode is what happened:
+ * `autoMerge: true` is not a permission override, so an actor without write on
+ * the target node still gets a pending Change Request back and should be shown
+ * that, not an "approve failed" error.
+ */
+
 export interface BusabaseDashboardApiClient {
   search: (options: BusabaseSearchOptions) => Promise<SearchResponseVO>;
   listAuditEvents: (options?: BusabaseListOptions) => Promise<AuditEventVO[]>;
@@ -295,6 +312,7 @@ export interface BusabaseDashboardApiClient {
       };
       message?: string;
       submittedBy?: string;
+      autoMerge?: boolean;
     },
   ) => Promise<ChangeRequestVO>;
   createUpdateFieldChangeRequest: (
@@ -319,6 +337,7 @@ export interface BusabaseDashboardApiClient {
       };
       message?: string;
       submittedBy?: string;
+      autoMerge?: boolean;
     },
   ) => Promise<ChangeRequestVO>;
   createReorderFieldsChangeRequest: (
@@ -327,15 +346,13 @@ export interface BusabaseDashboardApiClient {
       fieldIds: string[];
       message?: string;
       submittedBy?: string;
+      autoMerge?: boolean;
     },
   ) => Promise<ChangeRequestVO>;
-  // `autoMerge` is typed `false`, not `boolean`, on purpose: these three facade
-  // methods promise a plain ChangeRequestVO, and that promise is only honest on
-  // the review-first branch of the endpoint's `materialized` union. Dashboard
-  // callers pass an explicit `false` (their "propose for review" affordance must
-  // queue a CR regardless of the actor's own permission) and then approve+merge
-  // separately; a caller that actually wants the one-call auto-merge should use
-  // the oRPC client's `views.changeRequest` directly and narrow the union.
+  // These used to type `autoMerge` as `false` and promise a plain ChangeRequestVO
+  // — honest only on the review-first branch — which forced the "create the view
+  // now" affordance to approve + merge in two extra round trips. They take the
+  // full tri-state and return the union instead.
   createViewChangeRequest: (
     baseId: string,
     payload: {
@@ -346,9 +363,9 @@ export interface BusabaseDashboardApiClient {
       slug: string;
       submittedBy?: string;
       type?: ViewType;
-      autoMerge?: false;
+      autoMerge?: boolean;
     },
-  ) => Promise<ChangeRequestVO>;
+  ) => Promise<ViewChangeRequestResult>;
   createUpdateViewChangeRequest: (
     viewId: string,
     payload: {
@@ -358,9 +375,9 @@ export interface BusabaseDashboardApiClient {
       name?: string;
       submittedBy?: string;
       type?: ViewType;
-      autoMerge?: false;
+      autoMerge?: boolean;
     },
-  ) => Promise<ChangeRequestVO>;
+  ) => Promise<ViewChangeRequestResult>;
   createDeleteViewChangeRequest: (viewId: string) => Promise<ChangeRequestVO>;
   approveChangeRequest: (changeRequestId: string, reason?: string) => Promise<ChangeRequestVO>;
   rejectChangeRequest: (changeRequestId: string, reason?: string) => Promise<ChangeRequestVO>;
@@ -383,7 +400,7 @@ export interface BusabaseDashboardApiClient {
       submittedBy?: string;
       autoMerge?: boolean;
     },
-  ) => Promise<ChangeRequestVO>;
+  ) => Promise<RecordUpdateChangeRequestResult>;
   createUpdateChangeRequest: (
     recordId: string,
     payload: {
@@ -416,22 +433,22 @@ export interface BusabaseDashboardApiClient {
   }) => Promise<AssetDetailVO>;
   createRestoreBaseChangeRequest: (
     baseId: string,
-    payload: { submittedBy?: string; message?: string },
+    payload: { submittedBy?: string; message?: string; autoMerge?: boolean },
   ) => Promise<ChangeRequestVO>;
   createRestoreFieldChangeRequest: (
     baseId: string,
-    payload: { fieldId: string; submittedBy?: string; message?: string },
+    payload: { fieldId: string; submittedBy?: string; message?: string; autoMerge?: boolean },
   ) => Promise<ChangeRequestVO>;
   listArchivedViews: (baseId: string) => Promise<ViewVO[]>;
   listArchivedRecords: (baseId: string) => Promise<RecordVO[]>;
   createRestoreViewChangeRequest: (
     viewId: string,
-    payload: { submittedBy?: string; message?: string; autoMerge?: false },
-  ) => Promise<ChangeRequestVO>;
+    payload: { submittedBy?: string; message?: string; autoMerge?: boolean },
+  ) => Promise<ViewChangeRequestResult>;
   createRestoreRecordChangeRequest: (
     recordId: string,
-    payload: { submittedBy?: string; message?: string },
-  ) => Promise<ChangeRequestVO>;
+    payload: { submittedBy?: string; message?: string; autoMerge?: boolean },
+  ) => Promise<RecordUpdateChangeRequestResult>;
   /**
    * Dry-run "Install from GitHub" — the server fetches the repo, validates the
    * package and reports what it *would* create. Creates nothing. Space
@@ -601,28 +618,15 @@ export const createBusabaseRestApiClient = (
       client.bases.fieldChangeRequest({ baseId, operation: "update", ...payload }),
     createReorderFieldsChangeRequest: (baseId, payload) =>
       client.bases.fieldChangeRequest({ baseId, operation: "reorder", ...payload }),
-    // `autoMerge: false` is pinned here (and on restore below), not merely
-    // defaulted: the endpoint's permission-aware default would auto-merge for a
-    // write-capable actor and hand back a materialized ViewVO, which is not what
-    // this facade's `Promise<ChangeRequestVO>` signature — nor its dashboard
-    // callers, which route the user to `/inbox/{cr.id}` — expect. A payload
-    // `autoMerge` can only be `false`, so the spread cannot widen it back.
-    // The cast narrows the endpoint's `materialized` union to the review-first
-    // branch that the pinned flag guarantees at runtime.
+    // create/update forward the caller's intent and return the union; only
+    // `createDeleteViewChangeRequest` below still pins `autoMerge: false`, and
+    // that one is deliberate — deleting a view has no "do it now" affordance in
+    // the dashboard at all, it always routes the user to `/inbox/{cr.id}`, so a
+    // materialized ViewVO would have nowhere to go.
     createViewChangeRequest: (baseId, payload) =>
-      client.views.changeRequest({
-        baseId,
-        operation: "create",
-        ...payload,
-        autoMerge: false,
-      }) as Promise<ChangeRequestVO>,
+      client.views.changeRequest({ baseId, operation: "create", ...payload }),
     createUpdateViewChangeRequest: (viewId, payload) =>
-      client.views.changeRequest({
-        viewId,
-        operation: "update",
-        ...payload,
-        autoMerge: false,
-      }) as Promise<ChangeRequestVO>,
+      client.views.changeRequest({ viewId, operation: "update", ...payload }),
     createDeleteViewChangeRequest: (viewId) =>
       client.views.changeRequest({
         viewId,
@@ -662,13 +666,8 @@ export const createBusabaseRestApiClient = (
       client.changeRequests.merge({ changeRequestIds }),
     reviseOperation: (operationId, payload) =>
       client.operations.revise({ operationId, ...payload }),
-    // This facade's payload never sets `autoMerge`, so the call always takes the
-    // review-first branch of the endpoint's `materialized` union — narrow back
-    // to the plain ChangeRequestVO this facade has always returned, rather than
-    // pushing the (record-create-only) auto-merge union onto every dashboard
-    // consumer of this interface.
     createChangeRequest: (baseId, payload) =>
-      client.bases.createChangeRequest({ baseId, ...payload }) as Promise<ChangeRequestVO>,
+      client.bases.createChangeRequest({ baseId, ...payload }),
     createUpdateChangeRequest: (recordId, payload) =>
       client.records.changeRequest({ recordId, operation: "update", ...payload }),
     // Tri-state forwarded, never defaulted: the dashboard's delete is a TWO-mode
@@ -706,23 +705,12 @@ export const createBusabaseRestApiClient = (
     listArchivedRecords: async (baseId) =>
       (await client.records.list({ baseId, status: "archived" })).records,
     createRestoreViewChangeRequest: (viewId, payload) =>
-      client.views.changeRequest({
-        viewId,
-        operation: "restore",
-        ...payload,
-        autoMerge: false,
-      }) as Promise<ChangeRequestVO>,
-    createRestoreRecordChangeRequest: async (recordId, payload) => {
-      const result = await client.records.changeRequest({
-        recordId,
-        operation: "restore",
-        ...payload,
-      });
-      if (result.materialized) {
-        throw new Error("Record restore unexpectedly returned a materialized record");
-      }
-      return result;
-    },
+      client.views.changeRequest({ viewId, operation: "restore", ...payload }),
+    // Was `async` with a `throw` on the materialized branch, which is what broke
+    // the dashboard's Restore button once record restore became permission-aware:
+    // the endpoint restored the record and the facade then threw on the way back.
+    createRestoreRecordChangeRequest: (recordId, payload) =>
+      client.records.changeRequest({ recordId, operation: "restore", ...payload }),
     planInstallFromGithub: (input) => client.install.planFromGithub(input),
     installFromGithub: (input) => client.install.fromGithub(input),
     listTemplates: (input) => client.templates.list(input ?? {}),

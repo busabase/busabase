@@ -2,6 +2,7 @@
 
 import type { ApiKeyPermissionLevel } from "busabase-contract/access-control/api-key-level";
 import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
+import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import { type CreatableNodeType, listNodeTypes } from "busabase-contract/domains";
 import { Button } from "kui/button";
 import {
@@ -13,10 +14,14 @@ import {
   DialogTitle,
 } from "kui/dialog";
 import { Input } from "kui/input";
-import { useState } from "react";
-import { fmt, useCoreI18n } from "../../../i18n";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "kui/tabs";
+import { useMemo, useState } from "react";
+import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
+import { buildCreateNodePrompts } from "../helpers/node-agent-prompts";
 import { nodeIconForId } from "../helpers/node-icons";
 import { useAttachmentUpload } from "../hooks/use-attachment-upload";
+import { AgentPromptsView } from "./agent-prompts-view";
+import { resolveSpaceId } from "./node-agent-prompts-dialog";
 import { SplitSubmitButton } from "./split-submit-button";
 
 // The creatable types, composed from the registry — adding a creatable node type
@@ -85,6 +90,14 @@ interface CreateNodeModalProps {
   parent?: { id: string; name: string } | null;
   /** Host-resolved workspace permission for this dashboard-sibling modal. */
   submitPermissionLevel?: ApiKeyPermissionLevel;
+  /**
+   * Enables Ask Agent on the "let an Agent create it" tab. Omit for a host with
+   * no oRPC client — the tab still lists the prompts to copy, which is the half
+   * that needs nothing from Busabase.
+   */
+  orpc?: BusabaseQueryUtils | null;
+  spaceId?: string;
+  spaceName?: string;
 }
 
 export function CreateNodeModal({
@@ -94,8 +107,12 @@ export function CreateNodeModal({
   onCreated,
   parent,
   submitPermissionLevel = "manage",
+  orpc = null,
+  spaceId,
+  spaceName,
 }: CreateNodeModalProps) {
   const messages = useCoreI18n();
+  const locale = useCoreLocale();
   const [selectedType, setSelectedType] = useState(CREATABLE_TYPES[0]?.type ?? "base");
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
@@ -108,6 +125,28 @@ export function CreateNodeModal({
   const activeType =
     CREATABLE_TYPES.find((entry) => entry.type === selectedType) ?? CREATABLE_TYPES[0];
   const uploadAttachment = useAttachmentUpload(apiClient);
+
+  // Deliberately NOT filtered by `selectedType`: someone on this tab is here
+  // because they do not yet know what to create, and filtering would hide the
+  // cross-type scenarios ("build me a folder structure") that are the reason to
+  // ask an agent at all.
+  const createPrompts = useMemo(
+    () =>
+      buildCreateNodePrompts(
+        {
+          parentNodeId: parent?.id,
+          parentName: parent?.name,
+          spaceId: resolveSpaceId(spaceId),
+          spaceName,
+        },
+        locale,
+      ),
+    [parent?.id, parent?.name, spaceId, spaceName, locale],
+  );
+  // One conversation per place-to-create, per agent (see `AskAgentAction`).
+  // Creating three things in the same folder continues one thread; at the root
+  // the space stands in, so a root-level session is still stable across clicks.
+  const askAgentScopeId = parent?.id ?? resolveSpaceId(spaceId) ?? "root";
 
   const reset = () => {
     setName("");
@@ -254,129 +293,148 @@ export function CreateNodeModal({
               suffix: parent ? fmt(messages.createNode.parentSuffix, { name: parent.name }) : "",
             })}
           </DialogTitle>
-          <DialogDescription>
-            {parent
-              ? fmt(messages.createNode.descriptionInParent, { name: parent.name })
-              : messages.createNode.description}
-          </DialogDescription>
         </DialogHeader>
 
-        <div className="flex flex-col gap-3">
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-6">
-            {CREATABLE_TYPES.map((entry) => {
-              const Icon = entry.icon;
-              const isSelected = entry.type === selectedType;
-              return (
-                <button
-                  className={`flex min-w-0 flex-col items-center gap-1.5 rounded-md border px-2 py-3 text-xs transition-colors ${
-                    isSelected
-                      ? "border-primary bg-primary/10 text-foreground"
-                      : "text-muted-foreground hover:bg-muted"
-                  }`}
-                  key={entry.type}
-                  onClick={() => {
-                    setSelectedType(entry.type);
-                    setError(null);
-                  }}
-                  type="button"
-                >
-                  <Icon className="size-5" />
-                  {entry.label}
-                </button>
-              );
-            })}
-          </div>
+        <Tabs className="flex min-h-0 flex-col gap-3" defaultValue="manual">
+          <TabsList className="self-start">
+            <TabsTrigger value="manual">{messages.createNode.manualTab}</TabsTrigger>
+            <TabsTrigger value="agent">{messages.createNode.agentTab}</TabsTrigger>
+          </TabsList>
 
-          <div className="flex flex-col gap-1.5 text-sm">
-            <span className="text-muted-foreground">{messages.common.name}</span>
-            <Input
-              autoFocus
-              onChange={(event) => {
-                setName(event.target.value);
-                if (!slugEdited) {
-                  setSlug(toSlug(event.target.value, selectedType));
-                }
-              }}
-              placeholder={fmt(messages.createNode.itemNamePlaceholder, {
-                type: activeType?.label ?? messages.nodeDetail.item,
+          <TabsContent className="mt-0 flex flex-col gap-3" value="manual">
+            <DialogDescription>
+              {parent
+                ? fmt(messages.createNode.descriptionInParent, { name: parent.name })
+                : messages.createNode.description}
+            </DialogDescription>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-6">
+              {CREATABLE_TYPES.map((entry) => {
+                const Icon = entry.icon;
+                const isSelected = entry.type === selectedType;
+                return (
+                  <button
+                    className={`flex min-w-0 flex-col items-center gap-1.5 rounded-md border px-2 py-3 text-xs transition-colors ${
+                      isSelected
+                        ? "border-primary bg-primary/10 text-foreground"
+                        : "text-muted-foreground hover:bg-muted"
+                    }`}
+                    key={entry.type}
+                    onClick={() => {
+                      setSelectedType(entry.type);
+                      setError(null);
+                    }}
+                    type="button"
+                  >
+                    <Icon className="size-5" />
+                    {entry.label}
+                  </button>
+                );
               })}
-              value={name}
-            />
-          </div>
-          {selectedType === "file" ? (
+            </div>
+
             <div className="flex flex-col gap-1.5 text-sm">
-              <span className="text-muted-foreground">{messages.createNode.file}</span>
+              <span className="text-muted-foreground">{messages.common.name}</span>
               <Input
-                accept="*/*"
+                autoFocus
                 onChange={(event) => {
-                  const file = event.currentTarget.files?.[0] ?? null;
-                  setSelectedFile(file);
-                  if (file && !name.trim()) {
-                    setName(file.name);
-                    if (!slugEdited) {
-                      setSlug(toSlug(file.name, selectedType));
-                    }
+                  setName(event.target.value);
+                  if (!slugEdited) {
+                    setSlug(toSlug(event.target.value, selectedType));
                   }
                 }}
-                type="file"
+                placeholder={fmt(messages.createNode.itemNamePlaceholder, {
+                  type: activeType?.label ?? messages.nodeDetail.item,
+                })}
+                value={name}
               />
-              {selectedFile ? (
-                <span className="text-muted-foreground text-xs">
-                  {selectedFile.type || "application/octet-stream"} · {selectedFile.size} B
-                </span>
-              ) : (
-                <span className="text-muted-foreground text-xs">
-                  {messages.createNode.fileRequired}
-                </span>
-              )}
             </div>
-          ) : null}
-          <div className="flex flex-col gap-1.5 text-sm">
-            <span className="text-muted-foreground">{messages.common.slug}</span>
-            <Input
-              onChange={(event) => {
-                setSlugEdited(true);
-                setSlug(toSlugInput(event.target.value));
-              }}
-              placeholder={messages.createNode.slugPlaceholder}
-              value={slug}
-            />
-          </div>
-          <div className="flex flex-col gap-1.5 text-sm">
-            <span className="text-muted-foreground">{messages.createNode.descriptionOptional}</span>
-            <Input
-              onChange={(event) => setDescription(event.target.value)}
-              placeholder={messages.createNode.descriptionPlaceholder}
-              value={description}
-            />
-          </div>
-          {error ? <p className="text-destructive text-sm">{error}</p> : null}
-        </div>
+            {selectedType === "file" ? (
+              <div className="flex flex-col gap-1.5 text-sm">
+                <span className="text-muted-foreground">{messages.createNode.file}</span>
+                <Input
+                  accept="*/*"
+                  onChange={(event) => {
+                    const file = event.currentTarget.files?.[0] ?? null;
+                    setSelectedFile(file);
+                    if (file && !name.trim()) {
+                      setName(file.name);
+                      if (!slugEdited) {
+                        setSlug(toSlug(file.name, selectedType));
+                      }
+                    }
+                  }}
+                  type="file"
+                />
+                {selectedFile ? (
+                  <span className="text-muted-foreground text-xs">
+                    {selectedFile.type || "application/octet-stream"} · {selectedFile.size} B
+                  </span>
+                ) : (
+                  <span className="text-muted-foreground text-xs">
+                    {messages.createNode.fileRequired}
+                  </span>
+                )}
+              </div>
+            ) : null}
+            <div className="flex flex-col gap-1.5 text-sm">
+              <span className="text-muted-foreground">{messages.common.slug}</span>
+              <Input
+                onChange={(event) => {
+                  setSlugEdited(true);
+                  setSlug(toSlugInput(event.target.value));
+                }}
+                placeholder={messages.createNode.slugPlaceholder}
+                value={slug}
+              />
+            </div>
+            <div className="flex flex-col gap-1.5 text-sm">
+              <span className="text-muted-foreground">
+                {messages.createNode.descriptionOptional}
+              </span>
+              <Input
+                onChange={(event) => setDescription(event.target.value)}
+                placeholder={messages.createNode.descriptionPlaceholder}
+                value={description}
+              />
+            </div>
+            {error ? <p className="text-destructive text-sm">{error}</p> : null}
 
-        <DialogFooter className="flex-col sm:flex-row gap-2">
-          <Button disabled={submitting} onClick={() => onOpenChange(false)} variant="outline">
-            {messages.common.cancel}
-          </Button>
-          <SplitSubmitButton
-            changeRequestAction={{
-              label: fmt(messages.createNode.createRequest, {
-                type: activeType?.label ?? "",
-              }),
-              loadingLabel: messages.createNode.creating,
-              onSubmit: submitAsChangeRequest,
-              isLoading: submitting,
-            }}
-            disabled={isDisabled}
-            hint={messages.createNode.hint}
-            immediateAction={{
-              label: messages.createNode.createNow,
-              loadingLabel: messages.createNode.creating,
-              onSubmit: submitAndMerge,
-              isLoading: submitting,
-            }}
-            permissionLevel={submitPermissionLevel}
-          />
-        </DialogFooter>
+            <DialogFooter className="flex-col sm:flex-row gap-2">
+              <Button disabled={submitting} onClick={() => onOpenChange(false)} variant="outline">
+                {messages.common.cancel}
+              </Button>
+              <SplitSubmitButton
+                changeRequestAction={{
+                  label: fmt(messages.createNode.createRequest, {
+                    type: activeType?.label ?? "",
+                  }),
+                  loadingLabel: messages.createNode.creating,
+                  onSubmit: submitAsChangeRequest,
+                  isLoading: submitting,
+                }}
+                disabled={isDisabled}
+                hint={messages.createNode.hint}
+                immediateAction={{
+                  label: messages.createNode.createNow,
+                  loadingLabel: messages.createNode.creating,
+                  onSubmit: submitAndMerge,
+                  isLoading: submitting,
+                }}
+                permissionLevel={submitPermissionLevel}
+              />
+            </DialogFooter>
+          </TabsContent>
+
+          <TabsContent className="mt-0 flex flex-col gap-3" value="agent">
+            <p className="text-muted-foreground text-sm">{messages.createNode.agentTabHint}</p>
+            <AgentPromptsView
+              askAgent={orpc ? { orpc, sessionScopeId: askAgentScopeId } : null}
+              capabilities={createPrompts.capabilities}
+              onHandedOff={() => onOpenChange(false)}
+              scenarios={createPrompts.scenarios}
+            />
+          </TabsContent>
+        </Tabs>
       </DialogContent>
     </Dialog>
   );
