@@ -138,7 +138,9 @@ test("staged view controls recover a hidden conditioned field with one update CR
   await panel.getByRole("button", { name: "Update View Now" }).click();
 
   await expect(page.locator(`[data-field-slug="${hiddenField.slug}"]`)).toBeVisible();
-  await expect.poll(() => ({ ...workflowRequests })).toEqual({ merge: 1, review: 1, update: 1 });
+  // One call, not three: the write carries its own merge intent, so a separate
+  // review and merge round trip must NOT happen (see the single-call dashboard writes).
+  await expect.poll(() => ({ ...workflowRequests })).toEqual({ merge: 0, review: 0, update: 1 });
   await expect
     .poll(async () => {
       const views = await json<ViewVO[]>(await request.get(`/api/v1/bases/${blog.id}/views`));
@@ -271,7 +273,9 @@ test("edit view reuses the shared fields editor and preserves unrelated config",
   await dialog.getByRole("button", { name: "Update View Now" }).click();
 
   await expect(dialog).toBeHidden();
-  await expect.poll(() => ({ ...workflowRequests })).toEqual({ merge: 1, review: 1, update: 1 });
+  // One call, not three: the write carries its own merge intent, so a separate
+  // review and merge round trip must NOT happen (see the single-call dashboard writes).
+  await expect.poll(() => ({ ...workflowRequests })).toEqual({ merge: 0, review: 0, update: 1 });
   await expect
     .poll(async () => {
       const views = await json<ViewVO[]>(await request.get(`/api/v1/bases/${blog.id}/views`));
