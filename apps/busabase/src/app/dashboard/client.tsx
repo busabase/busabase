@@ -382,6 +382,7 @@ function DashboardClientContent({
         <CreateNodeModal
           apiClient={apiClient}
           open={isCreateOpen}
+          orpc={orpc}
           parent={createParent}
           onOpenChange={(next) => {
             setIsCreateOpen(next);
