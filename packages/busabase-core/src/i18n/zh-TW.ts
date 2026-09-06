@@ -402,5 +402,8 @@ export const dashboardZhTW: CoreI18nMessages = {
   createNode: {
     ...dashboardZhCN.createNode,
     slugRequired: "請填寫 slug —— 它會用在這個項目的網址裡。",
+    manualTab: "自己建",
+    agentTab: "讓 Agent 建",
+    agentTabHint: "把 prompt 複製給你的 Agent，或者直接交給它——裡面已經寫好了要建在哪。",
   },
 };

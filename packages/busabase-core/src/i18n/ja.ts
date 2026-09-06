@@ -1104,6 +1104,10 @@ export const dashboardJa: CoreI18nMessages = {
     itemNamePlaceholder: "{type} 名",
     slugPlaceholder: "my-slug",
     defaultTitleField: "タイトル",
+    manualTab: "自分で作る",
+    agentTab: "Agent に作ってもらう",
+    agentTabHint:
+      "プロンプトをコピーして自分のエージェントに渡すか、そのまま任せてください。どこに作るかは既に書かれています。",
     createRequest: "{type} リクエストを作成",
     createNow: "今すぐ作成",
     creating: "作成中...",

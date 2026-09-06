@@ -18,7 +18,7 @@
     "pglite",
     "cli"
   ],
-  "version": "0.41.0",
+  "version": "0.42.0",
   "private": false,
   "license": "MIT",
   "homepage": "https://github.com/busabase/busabase/tree/main/apps/busabase",

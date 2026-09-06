@@ -87,9 +87,10 @@ export const BUSABASE_MCP_GUIDE_TOOL_NAME = "busabase_guide";
  * so they are ONE source with a flag rather than two files that drift.
  *
  * `spaceTargeting` is the whole difference. Busabase Cloud's API key belongs to a *user* who
- * may be in several spaces, so its handler adds a `targetSpaceId` argument to every tool
- * (`BUSABASE_MCP_TARGET_SPACE_SCHEMA` via `additionalToolsInputSchema`) and the agent has to
- * pick one. The self-hosted server has a single local workspace and no such argument — telling
+ * may be in several spaces, so its handler adds a `targetSpaceId` argument to every space-scoped
+ * tool (`BUSABASE_MCP_TARGET_SPACE_SCHEMA` via `additionalToolsInputSchema` — `auth_verify` itself
+ * is excluded, since it's how the agent discovers the spaces in the first place) and the agent has
+ * to pick one. The self-hosted server has a single local workspace and no such argument — telling
  * its agent to pass `targetSpaceId` would teach a parameter that server rejects.
  *
  * `guideTopics` exists for the same reason: the "More" section must name only the topics that

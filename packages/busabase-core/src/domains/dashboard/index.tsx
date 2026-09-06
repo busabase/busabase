@@ -1309,13 +1309,11 @@ function BusabaseDashboardContent({
     [reviewMutation],
   );
 
-  const approveAndMergeChangeRequest = useCallback(
-    async (changeRequestId: string) => {
-      await client.approveChangeRequest(changeRequestId);
-      return client.mergeChangeRequest(changeRequestId);
-    },
-    [client],
-  );
+  // (There used to be an `approveAndMergeChangeRequest` helper here. Every write
+  // in this file paired it with a pinned `autoMerge: false` to fake a one-step
+  // action out of three requests; they now send the intent to the endpoint and
+  // read the result. Reviewing someone else's proposal from the inbox is a
+  // different thing and still goes through `batchMutation` / `reviewMutation`.)
 
   // Batch review from the inbox. "approveMerge" approves the selected change
   // requests, then merges only the ones that approved cleanly; failures are
@@ -1380,74 +1378,48 @@ function BusabaseDashboardContent({
   const submitCreateRecord = useCallback(
     async (base: BaseVO, fields: Record<string, unknown>, options?: RecordSubmitOptions) => {
       setError(null);
-      // Explicit `autoMerge: false`: this call must always land as a pending CR
-      // regardless of the actor's own permission — `mergeImmediately` below is
-      // what decides whether to separately approve + merge it right away.
-      const changeRequest = await client.createChangeRequest(base.id, {
+      // `autoMerge` carries the button's intent straight to the endpoint, which
+      // decides and reports back — one request instead of create + approve +
+      // merge. Branch on the RESULT, not on the requested mode: `autoMerge: true`
+      // is not a permission override, so an actor without write on the Base's
+      // node lands on their pending request rather than an approve-failed error.
+      const result = await client.createChangeRequest(base.id, {
         fields,
         message: fmt(messages.createNode.createRecordMessage, { base: base.name }),
         submittedBy: "local-editor",
-        autoMerge: false,
+        autoMerge: options?.mergeImmediately === true,
       });
-      if (options?.mergeImmediately) {
-        const merged = await approveAndMergeChangeRequest(changeRequest.id);
-        const mergedRecord = merged.record;
-        if (!mergedRecord) {
-          throw new Error(messages.shell.mergeRecordMissing);
-        }
+      if (result.materialized) {
         await refresh();
-        setLocation(`/base/${mergedRecord.base.slug}/${mergedRecord.id}`);
+        setLocation(`/base/${result.base.slug}/${result.id}`);
         return;
       }
-      setLocation(`/inbox/${changeRequest.id}`);
+      setLocation(`/inbox/${result.id}`);
       await refresh();
     },
-    [
-      approveAndMergeChangeRequest,
-      client,
-      messages.createNode.createRecordMessage,
-      messages.shell.mergeRecordMissing,
-      refresh,
-      setLocation,
-    ],
+    [client, messages.createNode.createRecordMessage, refresh, setLocation],
   );
 
   const submitUpdateRecord = useCallback(
     async (record: RecordVO, fields: Record<string, unknown>, options?: RecordSubmitOptions) => {
       setError(null);
-      const changeRequest = await client.createUpdateChangeRequest(record.id, {
+      const result = await client.createUpdateChangeRequest(record.id, {
         author: "local-editor",
-        autoMerge: false,
+        autoMerge: options?.mergeImmediately === true,
         fields,
         message: fmt(messages.createNode.updateRecordMessage, {
           record: getRecordTitle(record, messages),
         }),
       });
-      if (changeRequest.materialized) {
-        throw new Error("Expected a review-first record update");
-      }
-      if (options?.mergeImmediately) {
-        const merged = await approveAndMergeChangeRequest(changeRequest.id);
-        const mergedRecord = merged.record;
-        if (!mergedRecord) {
-          throw new Error(messages.shell.mergeRecordMissing);
-        }
+      if (result.materialized) {
         await refresh();
-        setLocation(`/base/${mergedRecord.base.slug}/${mergedRecord.id}`);
+        setLocation(`/base/${result.base.slug}/${result.id}`);
         return;
       }
-      setLocation(`/inbox/${changeRequest.id}`);
+      setLocation(`/inbox/${result.id}`);
       await refresh();
     },
-    [
-      approveAndMergeChangeRequest,
-      client,
-      messages.createNode.updateRecordMessage,
-      messages.shell.mergeRecordMissing,
-      messages,
-      refresh,
-      setLocation,
-    ],
+    [client, messages.createNode.updateRecordMessage, messages, refresh, setLocation],
   );
 
   // Kanban drag-to-move: set one field on a record and auto-merge the resulting
@@ -1457,27 +1429,19 @@ function BusabaseDashboardContent({
   const submitMoveRecord = useCallback(
     async (record: RecordVO, fieldSlug: string, value: string | null) => {
       setError(null);
-      const changeRequest = await client.createUpdateChangeRequest(record.id, {
+      // Dragging a card has no "propose it" affordance — it always lands — so
+      // this is one call, not create + approve + merge on every drop.
+      await client.createUpdateChangeRequest(record.id, {
         author: "local-editor",
-        autoMerge: false,
+        autoMerge: true,
         fields: { ...record.headCommit.payload, [fieldSlug]: value },
         message: fmt(messages.createNode.updateRecordMessage, {
           record: getRecordTitle(record, messages),
         }),
       });
-      if (changeRequest.materialized) {
-        throw new Error("Expected a review-first record move");
-      }
-      await approveAndMergeChangeRequest(changeRequest.id);
       await refresh();
     },
-    [
-      approveAndMergeChangeRequest,
-      client,
-      messages,
-      messages.createNode.updateRecordMessage,
-      refresh,
-    ],
+    [client, messages, messages.createNode.updateRecordMessage, refresh],
   );
 
   // Gantt drag-to-reschedule: patch several fields at once (start/end dates) via
@@ -1486,27 +1450,17 @@ function BusabaseDashboardContent({
   const submitPatchRecord = useCallback(
     async (record: RecordVO, patch: Record<string, unknown>) => {
       setError(null);
-      const changeRequest = await client.createUpdateChangeRequest(record.id, {
+      await client.createUpdateChangeRequest(record.id, {
         author: "local-editor",
-        autoMerge: false,
+        autoMerge: true,
         fields: patch,
         message: fmt(messages.createNode.updateRecordMessage, {
           record: getRecordTitle(record, messages),
         }),
       });
-      if (changeRequest.materialized) {
-        throw new Error("Expected a review-first record patch");
-      }
-      await approveAndMergeChangeRequest(changeRequest.id);
       await refresh();
     },
-    [
-      approveAndMergeChangeRequest,
-      client,
-      messages,
-      messages.createNode.updateRecordMessage,
-      refresh,
-    ],
+    [client, messages, messages.createNode.updateRecordMessage, refresh],
   );
 
   const submitDeleteRecord = useCallback(
@@ -1628,25 +1582,27 @@ function BusabaseDashboardContent({
       options?: { mergeImmediately?: boolean },
     ) => {
       setError(null);
+      // `autoMerge` was not being sent at all, so the endpoint's permission-aware
+      // default applied to BOTH modes: a write-capable user pressing "submit for
+      // review" got the rename merged and was then told a request was waiting.
+      // Send the intent, and report what actually happened.
       const changeRequest = await client.createUpdateFieldChangeRequest(base.id, {
         fieldId,
         patch: { name },
         message: fmt(messages.createNode.renameFieldMessage, {
           field: iStringParse(name),
         }),
+        autoMerge: options?.mergeImmediately === true,
       });
-      if (options?.mergeImmediately) {
-        await approveAndMergeChangeRequest(changeRequest.id);
-        await refresh();
+      await refresh();
+      if (changeRequest.status === "merged") {
         toast.success(messages.createNode.fieldRenamed);
         return;
       }
-      await refresh();
       toast.success(messages.createNode.renameRequestSubmitted);
       setLocation(`/inbox/${changeRequest.id}`);
     },
     [
-      approveAndMergeChangeRequest,
       client,
       messages.createNode.fieldRenamed,
       messages.createNode.renameFieldMessage,
@@ -1675,19 +1631,17 @@ function BusabaseDashboardContent({
           field: iStringParse(field.name),
         }),
         submittedBy: "local-editor",
+        autoMerge: options?.mergeImmediately === true,
       });
-      if (options?.mergeImmediately) {
-        await approveAndMergeChangeRequest(changeRequest.id);
-        await refresh();
+      await refresh();
+      if (changeRequest.status === "merged") {
         toast.success(messages.base.recordTitleUpdated);
         return;
       }
-      await refresh();
       toast.success(messages.base.recordTitleRequestSubmitted);
       setLocation(`/inbox/${changeRequest.id}`);
     },
     [
-      approveAndMergeChangeRequest,
       client,
       messages.base.recordTitleRequestSubmitted,
       messages.base.recordTitleUpdated,
@@ -1700,11 +1654,13 @@ function BusabaseDashboardContent({
   const submitRestoreBase = useCallback(
     async (base: BaseVO) => {
       setError(null);
-      const changeRequest = await client.createRestoreBaseChangeRequest(base.id, {
+      // Restore has no "propose it" affordance anywhere in the UI — it is the undo
+      // of an archive — so it asks for the merge directly, in one request.
+      await client.createRestoreBaseChangeRequest(base.id, {
         submittedBy: "local-editor",
         message: fmt(messages.base.restoreBaseMessage, { base: base.name }),
+        autoMerge: true,
       });
-      await approveAndMergeChangeRequest(changeRequest.id);
       await queryClient.invalidateQueries({ queryKey: listKeys.bases });
       await queryClient.invalidateQueries({
         queryKey: orpc.bases.list.queryOptions({ input: { status: "archived" } }).queryKey,
@@ -1713,7 +1669,6 @@ function BusabaseDashboardContent({
       setLocation(`/base/${base.slug}`);
     },
     [
-      approveAndMergeChangeRequest,
       client,
       listKeys.bases,
       messages.base.baseRestored,
@@ -1727,15 +1682,15 @@ function BusabaseDashboardContent({
   const submitRestoreNode = useCallback(
     async (node: RestorableNode) => {
       setError(null);
-      const changeRequest = await client.createNodeChangeRequest({
+      await client.createNodeChangeRequest({
         submittedBy: "local-editor",
         message: fmt(messages.base.restoreNodeMessage, {
           name: node.name,
           type: node.type,
         }),
         operations: [{ kind: "restore", nodeId: node.id }],
+        autoMerge: true,
       });
-      await approveAndMergeChangeRequest(changeRequest.id);
       await queryClient.invalidateQueries({
         queryKey: orpc.nodes.list.queryOptions({ input: { status: "archived" } }).queryKey,
       });
@@ -1751,7 +1706,6 @@ function BusabaseDashboardContent({
       toast.success(fmt(messages.base.nodeRestored, { type: node.type }));
     },
     [
-      approveAndMergeChangeRequest,
       client,
       messages.base.nodeRestored,
       messages.base.restoreNodeMessage,
@@ -1794,22 +1748,16 @@ function BusabaseDashboardContent({
   const submitRestoreField = useCallback(
     async (base: BaseVO, fieldId: string) => {
       setError(null);
-      const changeRequest = await client.createRestoreFieldChangeRequest(base.id, {
+      await client.createRestoreFieldChangeRequest(base.id, {
         fieldId,
         submittedBy: "local-editor",
         message: messages.base.restoreFieldMessage,
+        autoMerge: true,
       });
-      await approveAndMergeChangeRequest(changeRequest.id);
       await refresh();
       toast.success(messages.base.fieldRestored);
     },
-    [
-      approveAndMergeChangeRequest,
-      client,
-      messages.base.fieldRestored,
-      messages.base.restoreFieldMessage,
-      refresh,
-    ],
+    [client, messages.base.fieldRestored, messages.base.restoreFieldMessage, refresh],
   );
 
   const submitCreateView = useCallback(
@@ -1826,24 +1774,16 @@ function BusabaseDashboardContent({
         slug: payload.slug,
         submittedBy: payload.submittedBy ?? "local-editor",
         type: payload.type,
+        autoMerge: options?.mergeImmediately === true,
       });
-      if (options?.mergeImmediately) {
-        const merged = await approveAndMergeChangeRequest(changeRequest.id);
-        await refresh();
-        setLocation(`/base/${base.slug}/${merged.view?.slug ?? payload.slug}`);
+      await refresh();
+      if (changeRequest.materialized) {
+        setLocation(`/base/${base.slug}/${changeRequest.slug}`);
         return;
       }
-      await refresh();
       setLocation(`/inbox/${changeRequest.id}`);
     },
-    [
-      approveAndMergeChangeRequest,
-      client,
-      messages.base.createViewMessage,
-      messages.base.viewSlugRequired,
-      refresh,
-      setLocation,
-    ],
+    [client, messages.base.createViewMessage, messages.base.viewSlugRequired, refresh, setLocation],
   );
 
   const submitUpdateView = useCallback(
@@ -1858,28 +1798,17 @@ function BusabaseDashboardContent({
         name: payload.name,
         submittedBy: payload.submittedBy ?? "local-editor",
         type: payload.type,
+        autoMerge: options?.mergeImmediately === true,
       });
-      if (options?.mergeImmediately) {
-        const merged = await approveAndMergeChangeRequest(changeRequest.id);
+      await refresh();
+      if (changeRequest.materialized) {
         const viewBase = bases.find((item) => item.id === view.baseId);
-        await refresh();
-        setLocation(
-          `/base/${viewBase?.slug ?? activeBase?.slug ?? "blog"}/${merged.view?.slug ?? view.slug}`,
-        );
+        setLocation(`/base/${viewBase?.slug ?? activeBase?.slug ?? "blog"}/${changeRequest.slug}`);
         return;
       }
-      await refresh();
       setLocation(`/inbox/${changeRequest.id}`);
     },
-    [
-      activeBase?.slug,
-      approveAndMergeChangeRequest,
-      bases,
-      client,
-      messages.base.updateViewMessage,
-      refresh,
-      setLocation,
-    ],
+    [activeBase?.slug, bases, client, messages.base.updateViewMessage, refresh, setLocation],
   );
 
   const submitDeleteView = useCallback(
@@ -1895,11 +1824,11 @@ function BusabaseDashboardContent({
   const submitRestoreView = useCallback(
     async (view: ViewVO) => {
       setError(null);
-      const changeRequest = await client.createRestoreViewChangeRequest(view.id, {
+      await client.createRestoreViewChangeRequest(view.id, {
         submittedBy: "local-editor",
         message: fmt(messages.base.restoreViewMessage, { view: view.name }),
+        autoMerge: true,
       });
-      await approveAndMergeChangeRequest(changeRequest.id);
       await queryClient.invalidateQueries({
         queryKey: orpc.bases.listViews.queryOptions({
           input: { baseId: view.baseId, status: "archived" },
@@ -1909,7 +1838,6 @@ function BusabaseDashboardContent({
       toast.success(messages.base.viewRestored);
     },
     [
-      approveAndMergeChangeRequest,
       client,
       messages.base.restoreViewMessage,
       messages.base.viewRestored,
@@ -1922,11 +1850,11 @@ function BusabaseDashboardContent({
   const submitRestoreRecord = useCallback(
     async (record: RecordVO) => {
       setError(null);
-      const changeRequest = await client.createRestoreRecordChangeRequest(record.id, {
+      await client.createRestoreRecordChangeRequest(record.id, {
         submittedBy: "local-editor",
         message: messages.recordView.restoreRecordMessage,
+        autoMerge: true,
       });
-      await approveAndMergeChangeRequest(changeRequest.id);
       await queryClient.invalidateQueries({
         queryKey: orpc.records.list.key(),
       });
@@ -1934,7 +1862,6 @@ function BusabaseDashboardContent({
       toast.success(messages.recordView.recordRestored);
     },
     [
-      approveAndMergeChangeRequest,
       client,
       messages.recordView.recordRestored,
       messages.recordView.restoreRecordMessage,

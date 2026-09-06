@@ -50,7 +50,7 @@
     "lint:err": "biome check . --diagnostic-level=error"
   },
   "dependencies": {
-    "busabase-sdk": "^0.30.1",
+    "busabase-sdk": "workspace:^",
     "fumadocs-core": "16.14.5",
     "rehype-sanitize": "^6.0.0",
     "remark-gfm": "^4.0.1",

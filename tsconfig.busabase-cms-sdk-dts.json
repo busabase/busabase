@@ -1,0 +1,13 @@
+{
+  // Declaration-emit project for packages/busabase-cms-sdk's tsdown build.
+  // The regular package tsconfig maps workspace packages to source so a fresh
+  // checkout can typecheck before dependencies are built. Declaration emit must
+  // instead resolve busabase-sdk through its package exports: following those
+  // source aliases makes tsgo write intermediate .d.ts files beside the sources.
+  "extends": "./packages/busabase-cms-sdk/tsconfig.json",
+  "compilerOptions": {
+    "paths": {}
+  },
+  "include": ["packages/busabase-cms-sdk/src/**/*.ts"],
+  "exclude": ["packages/busabase-cms-sdk/tests/**/*.ts"]
+}
