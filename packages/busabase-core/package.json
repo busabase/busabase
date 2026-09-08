@@ -1,7 +1,7 @@
 {
   "name": "busabase-core",
   "description": "Shared Busabase open-core protocol, local store, API helpers, and dashboard components.",
-  "version": "0.50.0",
+  "version": "0.50.1",
   "private": true,
   "type": "module",
   "exports": {
@@ -180,6 +180,10 @@
     "./domains/templates/components/template-card-summary": {
       "types": "./src/domains/templates/components/template-card-summary.tsx",
       "default": "./src/domains/templates/components/template-card-summary.tsx"
+    },
+    "./domains/templates/components/template-grid": {
+      "types": "./src/domains/templates/components/template-grid.tsx",
+      "default": "./src/domains/templates/components/template-grid.tsx"
     },
     "./domains/templates/components/template-detail-content": {
       "types": "./src/domains/templates/components/template-detail-content.tsx",
