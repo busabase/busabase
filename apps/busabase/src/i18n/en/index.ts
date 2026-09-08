@@ -130,6 +130,7 @@ const en = {
     namePlaceholder: "e.g. Notify Slack on new records",
     eventTypeLabel: "Event",
     eventTypeRecordCreated: "New Record",
+    eventTypeRecordUpdated: "Updated Record",
     eventTypeAiMention: "@AI mention",
     eventTypeChangesRequested: "Changes requested",
     eventTypeAssetUploaded: "Asset uploaded",

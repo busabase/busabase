@@ -1,3 +1,4 @@
+import { AIRAPP_DEMO_FUMADOCS } from "busabase-core/domains/airapp/demo-content";
 import { AIRAPP_DEMO_PYTHON_INFERRED } from "busabase-core/domains/airapp/demo-content-runtimes";
 import { type APIRequestContext, expect, json, type Page, test, unique } from "./_fixtures";
 
@@ -93,6 +94,30 @@ test.describe("AirApp runtimes", () => {
         .frameLocator('[data-dashboard-active-view] iframe[title="AirApp preview"]:visible')
         .getByRole("heading", { name: "Running on Python" }),
     ).toBeVisible({ timeout: RUN_READY_TIMEOUT });
+  });
+
+  test("does not fall back when a required Remote engine is unavailable", async ({
+    page,
+    request,
+  }) => {
+    const app = await createFromDemo(
+      request,
+      AIRAPP_DEMO_FUMADOCS.files,
+      "e2e fumadocs requires remote",
+    );
+
+    await page.goto(`/dashboard/local/airapp/${app.slug}`);
+
+    await expect(
+      page.getByText(
+        "This AirApp requires a Remote machine, but Sandock is not configured on this deployment.",
+      ),
+    ).toBeVisible({ timeout: RUN_READY_TIMEOUT });
+    await expect(preview(page)).toHaveCount(0);
+
+    await openLogs(page);
+    await expect(page.getByText(/\$ npm install/)).toHaveCount(0);
+    await expect(page.locator('[data-airapp-run-status="error"]:visible')).toHaveCount(1);
   });
 
   test("accepts an airapp.json still pinned to a retired engine name", async ({

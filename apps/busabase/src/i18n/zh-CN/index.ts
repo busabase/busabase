@@ -126,6 +126,7 @@ const zhCN = {
     namePlaceholder: "例如：新记录时通知 Slack",
     eventTypeLabel: "事件",
     eventTypeRecordCreated: "新建记录",
+    eventTypeRecordUpdated: "更新记录",
     eventTypeAiMention: "@AI 提及",
     eventTypeChangesRequested: "请求修改",
     eventTypeAssetUploaded: "文件已上传",

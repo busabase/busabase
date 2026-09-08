@@ -54,13 +54,14 @@ RUN pnpm db:seed:build
 FROM base AS drizzle
 WORKDIR /drizzle-only
 COPY apps/busabase/package.json /tmp/app-package.json
+COPY package.json /tmp/root-package.json
 RUN set -e; \
-    node -e "require('node:fs').writeFileSync('package.json', JSON.stringify({ private: true }))"; \
+    node -e "const pm=require('/tmp/root-package.json').packageManager; require('node:fs').writeFileSync('package.json', JSON.stringify(pm ? { private: true, packageManager: pm } : { private: true }))"; \
     APP_JSON=/tmp/app-package.json; \
     DRIZZLE_VERSION=$(node -pe "const p=require('$APP_JSON'); (p.devDependencies?.['drizzle-kit'] || p.dependencies?.['drizzle-kit'] || '').replace(/^[^0-9]*/, '')"); \
     DRIZZLE_ORM_VERSION=$(node -pe "const p=require('$APP_JSON'); (p.devDependencies?.['drizzle-orm'] || p.dependencies?.['drizzle-orm'] || '').replace(/^[^0-9]*/, '')"); \
     POSTGRES_VERSION=$(node -pe "const p=require('$APP_JSON'); (p.devDependencies?.postgres || p.dependencies?.postgres || '').replace(/^[^0-9]*/, '')"); \
-    pnpm add drizzle-kit@${DRIZZLE_VERSION} drizzle-orm@${DRIZZLE_ORM_VERSION} postgres@${POSTGRES_VERSION} --prod --allow-build=esbuild
+    pnpm add drizzle-kit@${DRIZZLE_VERSION} drizzle-orm@${DRIZZLE_ORM_VERSION} postgres@${POSTGRES_VERSION} --save-prod --allow-build=esbuild
 
 FROM node:24.18.0-bookworm-slim AS runner
 ENV NODE_ENV=production \
