@@ -58,6 +58,14 @@ export const useFileTreeController = ({
     currentFolder,
   );
   const defaultNewFilePath = currentFolder ? `${currentFolder}/` : "";
+  // The server rejects a `create` that targets an existing path (it no longer
+  // silently overwrites), so catch the collision while the user is still typing
+  // instead of letting them write a whole file and fail on submit.
+  const newFilePath = newFile?.path.trim() ?? "";
+  const newFilePathError =
+    newFilePath && files.some((file) => file.path === newFilePath)
+      ? `A file already exists at ${newFilePath}. Open it to edit instead.`
+      : null;
   const editorHasUnsavedChanges =
     (!!newFile && (newFile.path !== defaultNewFilePath || newFile.content.length > 0)) ||
     !!fileChangeMessage.trim() ||
@@ -205,7 +213,7 @@ export const useFileTreeController = ({
 
   const submitNewFile = () => {
     const path = newFile?.path.trim();
-    if (!newFile || !path) {
+    if (!newFile || !path || newFilePathError) {
       return;
     }
     void submitOperations(resolveMessage(fileChangeMessage, `Create ${path}`), [
@@ -298,6 +306,7 @@ export const useFileTreeController = ({
     metadataDraft,
     metadataMessagePlaceholder,
     newFile,
+    newFilePathError,
     openFile,
     openFileActions: () => setFileActionsOpen(true),
     openFileForPreview,

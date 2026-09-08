@@ -1,5 +1,13 @@
 import type { SearchResultVO } from "busabase-contract/types";
-import { AppWindow, File, FileText, GitPullRequest, Search, Table2 } from "lucide-react-native";
+import {
+  AppWindow,
+  File,
+  FileText,
+  GitPullRequest,
+  NotebookText,
+  Search,
+  Table2,
+} from "lucide-react-native";
 import { NativeRow, NativeSection } from "~/components/native-screen";
 import { nodeIconForType } from "~/domains/workspace/components/node-icons";
 import type { KnownNode } from "~/domains/workspace/utils/known-node-cache";
@@ -11,6 +19,7 @@ const kindMeta: Record<SearchResultVO["kind"], { label: string; icon: typeof Fil
   change_request: { label: "Change request", icon: GitPullRequest },
   base: { label: "Base", icon: Table2 },
   file: { label: "File", icon: File },
+  node: { label: "Node", icon: NotebookText },
 };
 
 const filePrefixMeta: Record<string, { label: string; icon: typeof FileText }> = {

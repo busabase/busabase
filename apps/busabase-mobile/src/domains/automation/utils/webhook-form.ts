@@ -15,6 +15,7 @@ export const ALL_BASES_VALUE = "__all__";
 
 export const EVENT_TYPE_OPTIONS: { value: WebhookEventType; label: string }[] = [
   { value: "record.created", label: "Record created" },
+  { value: "record.updated", label: "Record updated" },
   { value: "ai_mention", label: "AI mention" },
   { value: "changes_requested", label: "Changes requested" },
   { value: "asset.uploaded", label: "Asset uploaded" },

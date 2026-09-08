@@ -48,14 +48,13 @@ export function NodeDeleteSheet({ visible, node, onClose, onBack }: NodeDeleteSh
   const deleteMutation = useMutation({
     mutationFn: async () => {
       if (!buda) throw new Error(t.common.notConnected);
-      const changeRequest = await buda.client.nodes.createChangeRequest({
+      // One request: the endpoint approves and merges inside the same call when
+      // the actor may write. The two follow-ups used to re-approve a change
+      // request the server had already merged.
+      await buda.client.nodes.createChangeRequest({
+        autoMerge: true,
         operations: [{ kind: "delete", nodeId: node.id }],
       });
-      await buda.client.changeRequests.review({
-        changeRequestIds: [changeRequest.id],
-        verdict: "approved",
-      });
-      await buda.client.changeRequests.merge({ changeRequestIds: [changeRequest.id] });
     },
     onSuccess: async () => {
       await Promise.all([
