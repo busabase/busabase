@@ -4,9 +4,10 @@ import { notFound } from "next/navigation";
 import { CmsPage, generateCmsPageMetadata } from "@/components/cms-page";
 import { generatePostMetadata, PostPage } from "@/components/post-page";
 import {
-  getBlogPostByCanonicalPath,
-  getLandingPageByCanonicalPath,
   parseContentPath,
+  readBlogPostByCanonicalPath,
+  readLandingPageByCanonicalPath,
+  requireCms,
 } from "@/lib/content";
 
 interface CanonicalContentPageProps {
@@ -19,11 +20,17 @@ const getCanonicalContent = async (segments: string[]) => {
   if (!parsed) return null;
 
   if (parsed.segments[0] === "blog") {
-    const post = await getBlogPostByCanonicalPath(parsed.canonicalPath);
+    const post = requireCms(
+      await readBlogPostByCanonicalPath(parsed.canonicalPath),
+      `the content at ${parsed.canonicalPath}`,
+    );
     return post ? { kind: "post" as const, value: post } : null;
   }
 
-  const page = await getLandingPageByCanonicalPath(parsed.canonicalPath);
+  const page = requireCms(
+    await readLandingPageByCanonicalPath(parsed.canonicalPath),
+    `the content at ${parsed.canonicalPath}`,
+  );
   return page ? { kind: "page" as const, value: page } : null;
 };
 

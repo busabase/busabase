@@ -3,10 +3,10 @@ import { notFound } from "next/navigation";
 
 import {
   generateTaxonomyMetadata,
-  getTaxonomy,
+  readTaxonomy,
   TaxonomyArchive,
 } from "@/components/taxonomy-pages";
-import { cmsPathOptions } from "@/lib/content";
+import { cmsPathOptions, requireCms } from "@/lib/content";
 
 interface LocalizedCategoryPageProps {
   params: Promise<{ locale: string; slug: string }>;
@@ -14,7 +14,7 @@ interface LocalizedCategoryPageProps {
 
 const getCategory = async (locale: string, slug: string) => {
   if (locale === cmsPathOptions.defaultLocale) return null;
-  return getTaxonomy("categories", locale, slug);
+  return requireCms(await readTaxonomy("categories", locale, slug), "a localized Category archive");
 };
 
 export async function generateMetadata({ params }: LocalizedCategoryPageProps): Promise<Metadata> {

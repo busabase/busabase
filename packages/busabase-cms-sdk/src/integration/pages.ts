@@ -1,6 +1,6 @@
 import "server-only";
 
-import { readCmsOrFallback } from "../fallback";
+import { type CmsRead, readCmsOrFallback, readCmsStatus } from "../fallback";
 import type { CmsCanonicalPath } from "../routing";
 import type { PageVO } from "../types";
 import type { CmsClientProvider } from "./client";
@@ -13,6 +13,8 @@ export interface CmsPageReads {
   getBusabaseLandingPageByPath: (path: string) => Promise<PageVO | null>;
   listBusabaseLandingPagesOrFallback: () => Promise<PageVO[]>;
   getBusabaseLandingPageByPathOrFallback: (path: string) => Promise<PageVO | null>;
+  /** Status-aware variant, for callers that turn a missing page into a 404. */
+  readBusabaseLandingPageByPath: (path: string) => Promise<CmsRead<PageVO | null>>;
 }
 
 export const createCmsPageReads = (
@@ -22,6 +24,15 @@ export const createCmsPageReads = (
   listBusabaseLandingPages: async () => requireCms().pages.list(),
 
   getBusabaseLandingPageByPath: async (path) => requireCms().pages.getByPath(path),
+
+  readBusabaseLandingPageByPath: async (path) => {
+    const cms = getCms();
+    return readCmsStatus(
+      cms ? () => cms.pages.getByPath(path) : null,
+      null as PageVO | null,
+      `get ${appLabel} page`,
+    );
+  },
 
   listBusabaseLandingPagesOrFallback: async () => {
     const cms = getCms();
@@ -59,6 +70,8 @@ export interface CmsPageHelpersIntegration {
   parseCmsPath: (path: string) => CmsCanonicalPath | null;
   isCmsContentForLocale: (item: { locale: string; path: string }, locale: string) => boolean;
   getBusabaseLandingPageByPathOrFallback: (path: string) => Promise<PageVO | null>;
+  /** Status-aware variant, for callers that turn a missing page into a 404. */
+  readBusabaseLandingPageByPath: (path: string) => Promise<CmsRead<PageVO | null>>;
 }
 
 export interface CmsPageHelpersOptions<TMetadata> {
@@ -72,6 +85,16 @@ export interface CmsPageHelpersOptions<TMetadata> {
 
 export interface CmsPageHelpers<TMetadata> {
   getCmsPageForRequest: (lang: string, path: string | readonly string[]) => Promise<PageVO | null>;
+  /**
+   * Status-aware variant. A CMS Page has no local-MDX equivalent, so a catch-all
+   * route cannot otherwise tell "no page at this path" (a correct, cacheable
+   * 404) from "the CMS is unreachable" (a 404 that would be cached as though the
+   * page had been deleted).
+   */
+  readCmsPageForRequest: (
+    lang: string,
+    path: string | readonly string[],
+  ) => Promise<CmsRead<PageVO | null>>;
   generateCmsPageMetadata: (page: PageVO, lang: string) => TMetadata | Record<string, never>;
 }
 
@@ -84,6 +107,7 @@ export const createCmsPageHelpers = <TMetadata>({
     getBusabaseLandingPageByPathOrFallback,
     isCmsContentForLocale,
     parseCmsPath,
+    readBusabaseLandingPageByPath,
   } = integration;
 
   const getCmsPageForRequest = async (
@@ -95,6 +119,20 @@ export const createCmsPageHelpers = <TMetadata>({
 
     const page = await getBusabaseLandingPageByPathOrFallback(canonicalPath);
     return page && isCmsContentForLocale(page, lang) ? page : null;
+  };
+
+  const readCmsPageForRequest = async (
+    lang: string,
+    path: string | readonly string[],
+  ): Promise<CmsRead<PageVO | null>> => {
+    const canonicalPath = buildCmsPath(lang, path);
+    // A path this app cannot even form is genuinely "no such page" — no read needed.
+    if (!canonicalPath) return { status: "ok", data: null };
+
+    const read = await readBusabaseLandingPageByPath(canonicalPath);
+    if (read.status !== "ok") return read;
+    const page = read.data;
+    return { status: "ok", data: page && isCmsContentForLocale(page, lang) ? page : null };
   };
 
   const generateCmsPageMetadata = (
@@ -113,5 +151,5 @@ export const createCmsPageHelpers = <TMetadata>({
     });
   };
 
-  return { getCmsPageForRequest, generateCmsPageMetadata };
+  return { getCmsPageForRequest, readCmsPageForRequest, generateCmsPageMetadata };
 };

@@ -1,6 +1,6 @@
 import { notFound, permanentRedirect } from "next/navigation";
 
-import { getLandingPageByPreviewRoute } from "@/lib/content";
+import { readLandingPageByPreviewRoute, requireCms } from "@/lib/content";
 
 interface LandingPagePreviewProps {
   params: Promise<{ slug: string[] }>;
@@ -8,7 +8,10 @@ interface LandingPagePreviewProps {
 
 export default async function LandingPagePreview({ params }: LandingPagePreviewProps) {
   const { slug } = await params;
-  const page = await getLandingPageByPreviewRoute(slug.join("/"));
+  const page = requireCms(
+    await readLandingPageByPreviewRoute(slug.join("/")),
+    "a CMS Page preview",
+  );
   if (!page) notFound();
 
   permanentRedirect(page.path);

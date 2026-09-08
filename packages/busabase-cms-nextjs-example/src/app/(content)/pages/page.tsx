@@ -2,7 +2,12 @@ import type { Metadata } from "next";
 
 import { ContentCard } from "@/components/content-card";
 import { EmptyState } from "@/components/empty-state";
-import { canonicalContentPath, hasBusabaseConfig, listLandingPages } from "@/lib/content";
+import {
+  canonicalContentPath,
+  hasBusabaseConfig,
+  readLandingPages,
+  requireCms,
+} from "@/lib/content";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +17,7 @@ export const metadata: Metadata = {
 };
 
 export default async function LandingPageIndex() {
-  const pages = await listLandingPages();
+  const pages = requireCms(await readLandingPages(), "the Pages index");
 
   return (
     <main className="shell">

@@ -3,10 +3,10 @@ import { notFound } from "next/navigation";
 
 import {
   generateTaxonomyMetadata,
-  getTaxonomy,
+  readTaxonomy,
   TaxonomyArchive,
 } from "@/components/taxonomy-pages";
-import { cmsPathOptions } from "@/lib/content";
+import { cmsPathOptions, requireCms } from "@/lib/content";
 
 interface CategoryArchivePageProps {
   params: Promise<{ slug: string }>;
@@ -14,13 +14,19 @@ interface CategoryArchivePageProps {
 
 export async function generateMetadata({ params }: CategoryArchivePageProps): Promise<Metadata> {
   const { slug } = await params;
-  const category = await getTaxonomy("categories", cmsPathOptions.defaultLocale, slug);
+  const category = requireCms(
+    await readTaxonomy("categories", cmsPathOptions.defaultLocale, slug),
+    "a Category archive",
+  );
   return category ? generateTaxonomyMetadata("categories", category) : {};
 }
 
 export default async function CategoryArchivePage({ params }: CategoryArchivePageProps) {
   const { slug } = await params;
-  const category = await getTaxonomy("categories", cmsPathOptions.defaultLocale, slug);
+  const category = requireCms(
+    await readTaxonomy("categories", cmsPathOptions.defaultLocale, slug),
+    "a Category archive",
+  );
   if (!category) notFound();
 
   return <TaxonomyArchive kind="categories" taxonomy={category} />;
