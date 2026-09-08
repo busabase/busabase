@@ -12,6 +12,7 @@
  * plus sibling pure contract schemas only.
  */
 import { z } from "zod";
+import { customAgentPromptsSchema } from "../../contract/node-agent-prompt-schemas";
 import {
   fieldNameSchema,
   fieldTypeSchema,
@@ -158,12 +159,33 @@ export type PackageManifest = z.infer<typeof PackageManifestSchema>;
 
 // ── Sidecars ─────────────────────────────────────────────────────────────────
 
+/**
+ * Scenario Agent prompts for the node this sidecar describes — what a person can
+ * ask an agent to DO with it, carried so it survives export → install.
+ *
+ * Same schema the node's own column and `busabase-cli nodes set-agent-prompts`
+ * validate against (50 per node, 80 chars per label, 8 KiB per body per locale),
+ * so a package cannot smuggle in a list the API would reject.
+ *
+ * Optional and absent by default: a package written before this field, or one
+ * whose author wrote no prompts, is unchanged on disk and installs exactly as
+ * before — the nodes then show their node type's default prompts, which is the
+ * behaviour every package had until now.
+ *
+ * Distinct from `busabase.json`'s template-level `agentPrompts`: that one is a
+ * flat list of strings for the Template Center card and the install-time "Ask
+ * agent" action, about the template as a whole. This one is per node, structured,
+ * and becomes that node's prompts in the dialog after install.
+ */
+const packageNodeAgentPromptsSchema = customAgentPromptsSchema.optional();
+
 /** `_node.json` — marks a directory as a verbatim-content file-tree node. */
 export const PackageFileTreeNodeMetaSchema = z.object({
   type: z.enum(PACKAGE_FILE_TREE_NODE_TYPES),
   name: z.string().min(1),
   description: z.string().default(""),
   position: z.number().int().optional(),
+  agentPrompts: packageNodeAgentPromptsSchema,
 });
 export type PackageFileTreeNodeMeta = z.infer<typeof PackageFileTreeNodeMetaSchema>;
 
@@ -173,6 +195,7 @@ export const PackageFolderMetaSchema = z.object({
   name: z.string().optional(),
   description: z.string().default(""),
   position: z.number().int().optional(),
+  agentPrompts: packageNodeAgentPromptsSchema,
 });
 export type PackageFolderMeta = z.infer<typeof PackageFolderMetaSchema>;
 
@@ -204,6 +227,7 @@ export const PackageDocFrontmatterSchema = z.object({
   name: z.string().min(1),
   description: z.string().default(""),
   position: z.number().int().optional(),
+  agentPrompts: packageNodeAgentPromptsSchema,
 });
 export type PackageDocFrontmatter = z.infer<typeof PackageDocFrontmatterSchema>;
 
@@ -363,6 +387,7 @@ export const PackageBaseSchema = z.object({
     .optional(),
   fields: z.array(PackageBaseFieldSchema).default([]),
   views: z.array(PackageViewSchema).default([]),
+  agentPrompts: packageNodeAgentPromptsSchema,
 });
 export type PackageBase = z.infer<typeof PackageBaseSchema>;
 

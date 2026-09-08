@@ -53,8 +53,11 @@ const api = {
       calls.push({ op: "revokePreviewToken", args: { id, token } });
       return { success: true as const };
     }),
-    shell: vi.fn(async (id: string, options: Record<string, unknown>) => {
-      calls.push({ op: "shell", args: { id, ...options } });
+    shell: vi.fn(async (id: string, options: Record<string, unknown>, callbacks?: unknown) => {
+      calls.push({
+        op: "shell",
+        args: { id, ...options, ...(callbacks ? { streaming: true } : {}) },
+      });
       const next = shellResults.shift() ?? {};
       return envelope({
         stdout: next.stdout ?? "",
@@ -248,8 +251,8 @@ describe("runAirAppSandock", () => {
 
     // The container has to outlive its entrypoint, or there is nothing to exec into.
     expect(calls[0]?.args.command).toEqual(["/bin/sh", "-c", "sleep infinity"]);
-    expect(calls[0]?.args.cpu).toBe(500);
-    expect(calls[0]?.args.memory).toBe(500);
+    expect(calls[0]?.args.cpu).toBe(1000);
+    expect(calls[0]?.args.memory).toBe(1024);
     // Sandock's own deadline is a backstop that does not depend on Busabase
     // being alive to reap.
     expect(calls[0]?.args.activeDeadlineSeconds).toBeGreaterThan(0);
@@ -258,12 +261,18 @@ describe("runAirAppSandock", () => {
 
     // Node defaults, unchanged — this engine adds no per-language handling.
     const install = calls.find((c) => c.op === "shell" && String(c.args.cmd).includes("npm"));
-    expect(install?.args.cmd).toBe("npm install");
+    expect(String(install?.args.cmd)).toContain("npm install");
+    expect(String(install?.args.cmd)).toContain("install still running");
+    expect(install?.args.streaming).toBe(true);
 
     // A dev server never exits, so a foreground `shell` would just hang.
     const start = calls.filter((c) => c.op === "shell").at(-1);
     expect(String(start?.args.cmd)).toContain("setsid");
     expect(String(start?.args.cmd)).toContain("npm run dev");
+    expect(String(start?.args.cmd)).toContain("curl");
+    expect(String(start?.args.cmd)).toContain("http://127.0.0.1:3000/");
+    expect(String(start?.args.cmd)).toContain('wait "$app_pid"');
+    expect(String(start?.args.cmd)).not.toContain("&;");
 
     expect(events.at(-1)).toEqual({ type: "ready", previewUrl: "/api/airapp-preview/n1/" });
     // Registered as a proxy target so the preview stays same-origin. Pointing
@@ -304,6 +313,27 @@ describe("runAirAppSandock", () => {
       previewUrl: "/api/airapp-preview/n1/",
     });
     expect(registered).toEqual([["n1", "u1", "https://3000-tok.sandock.ai"]]);
+  });
+
+  it("accepts an app entry redirect without following it outside the preview origin", async () => {
+    fetchMock.mockResolvedValue(
+      new Response(null, { status: 307, headers: { location: "/docs" } }),
+    );
+    shellResults = [{}, { stdout: "" }, {}];
+
+    const events = await drainUntilReady(
+      mod.runAirAppSandock({ nodeId: "n1", files: NODE_FILES, owner: "u1" }),
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://3000-tok.sandock.ai",
+      expect.objectContaining({ method: "GET", redirect: "manual" }),
+    );
+    expect(events.at(-1)).toEqual({
+      type: "ready",
+      previewUrl: "/api/airapp-preview/n1/",
+    });
   });
 
   it("targets the configured Space through both the client and create request", async () => {
@@ -383,7 +413,9 @@ describe("runAirAppSandock", () => {
     expect(
       calls.some(
         (call) =>
-          call.op === "shell" && call.args.id === "sbx_1" && call.args.cmd === "npm install",
+          call.op === "shell" &&
+          call.args.id === "sbx_1" &&
+          String(call.args.cmd).includes("npm install"),
       ),
     ).toBe(true);
     expect(events).toContainEqual({ type: "log", line: "installed again\n" });

@@ -164,6 +164,7 @@ const createCloudRun = (
   files: Record<string, string>,
   probePath?: string,
   owner = `${nodeId}-owner`,
+  entryPath = "/",
 ): CloudRun => {
   const controller = new AbortController();
   const events: AirAppRuntimeEvent[] = [];
@@ -192,7 +193,8 @@ const createCloudRun = (
             registeredNodeId === nodeId && registeredOwner === owner,
         )?.[2];
       expect(target).toBeDefined();
-      const previewResponse = await waitForPreview(target as string);
+      const entryUrl = new URL(entryPath, target as string);
+      const previewResponse = await waitForPreview(entryUrl.toString());
       const html = await previewResponse.text();
       const probeBody = probePath
         ? await (await fetch(new URL(probePath, target as string))).json()
@@ -217,8 +219,9 @@ const runCloudApp = async (
   nodeId: string,
   files: Record<string, string>,
   probePath?: string,
+  entryPath = "/",
 ): Promise<CloudRunResult> => {
-  const run = createCloudRun(nodeId, files, probePath);
+  const run = createCloudRun(nodeId, files, probePath, `${nodeId}-owner`, entryPath);
   try {
     return await run.ready();
   } finally {
@@ -249,18 +252,29 @@ describe.skipIf(!CLOUD_ENABLED)("runAirAppSandock — against Sandock Cloud", ()
   }, 300_000);
 
   it("installs and serves the Fumadocs demo, including its nested route", async () => {
-    const result = await runCloudApp("sandock-cloud-fumadocs", CLOUD_FUMADOCS_FILES);
-    const log = eventLog(result.events);
+    const run = createCloudRun(
+      "sandock-cloud-fumadocs",
+      CLOUD_FUMADOCS_FILES,
+      undefined,
+      "sandock-cloud-fumadocs-owner",
+      "/docs",
+    );
 
-    expect(log).toContain("provisioning a sandbox");
-    expect(log).toContain("fumadocs-mdx");
-    expect(log).toContain("next dev");
-    expect(result.html).toContain("Fumadocs AirApp");
+    try {
+      const result = await run.ready();
+      const log = eventLog(result.events);
 
-    const nestedUrl = new URL(result.target);
-    nestedUrl.pathname = `${nestedUrl.pathname.replace(/\/$/, "")}/docs/getting-started`;
-    const nestedResponse = await waitForPreview(nestedUrl.toString());
-    expect(await nestedResponse.text()).toContain("Getting Started");
+      expect(log).toContain("provisioning a sandbox");
+      expect(log).toContain("fumadocs-mdx");
+      expect(log).toContain("$ npm run dev");
+      expect(result.html).toContain("Fumadocs AirApp");
+
+      const nestedUrl = new URL("/docs/getting-started", result.target);
+      const nestedResponse = await waitForPreview(nestedUrl.toString());
+      expect(await nestedResponse.text()).toContain("Getting Started");
+    } finally {
+      await run.stop();
+    }
   }, 600_000);
 
   it("keeps concurrent runs of the same AirApp isolated by owner", async () => {

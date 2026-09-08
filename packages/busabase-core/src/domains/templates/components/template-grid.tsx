@@ -18,6 +18,7 @@
  */
 
 import type { TemplateCardVO } from "busabase-contract/domains/templates/types";
+import type { ReactNode } from "react";
 import { ShimmerSkeleton as Skeleton } from "../../dashboard/components/shimmer-skeleton";
 import { TemplateCardSummary, type TemplateStatLabels } from "./template-card-summary";
 
@@ -63,9 +64,11 @@ export function TemplateGrid({
   error,
   emptyLabel,
   onOpenTemplate,
+  children,
   density,
   statLabels,
   columnsClassName = "sm:grid-cols-2 lg:grid-cols-3",
+  gapClassName = "gap-4",
   skeletonCount = TEMPLATE_SKELETON_IDS.length,
 }: {
   templates: readonly TemplateCardVO[];
@@ -78,16 +81,34 @@ export function TemplateGrid({
    */
   error?: string | null;
   emptyLabel: string;
-  onOpenTemplate: (template: TemplateCardVO) => void;
+  /** Click-to-open (the Dashboard picker). Ignored when `children` is given. */
+  onOpenTemplate?: (template: TemplateCardVO) => void;
+  /**
+   * Full control over the cards' markup, pre-rendered by the caller — a
+   * public page needs a real `<a>` (crawlable, works with JS disabled) and
+   * extra body content (tags, a version/author/license table), neither of
+   * which the click-to-open `TemplateCard` supports. `TemplateCardSummary` is
+   * deliberately event-free so callers can wrap it in either a `<button>` or
+   * an `<article>`/`<Link>`; this is the extension point for the latter.
+   *
+   * Deliberately pre-rendered nodes, not a render-prop function: this
+   * component is a Client Component (`"use client"` above) and the public
+   * template page that needs this is a Server Component. A function prop
+   * crossing that boundary is a hard RSC error ("Functions cannot be passed
+   * directly to Client Components"); a tree of already-rendered elements
+   * serializes across it fine, the same way any other `children` does.
+   */
+  children?: ReactNode;
   density?: "compact" | "comfortable";
   statLabels?: TemplateStatLabels;
   /** Grid columns — the modal is narrower than the page and says so here. */
   columnsClassName?: string;
+  gapClassName?: string;
   skeletonCount?: number;
 }) {
   if (isPending) {
     return (
-      <div aria-hidden className={`grid gap-4 ${columnsClassName}`}>
+      <div aria-hidden className={`grid ${gapClassName} ${columnsClassName}`}>
         {TEMPLATE_SKELETON_IDS.slice(0, skeletonCount).map((id) => (
           <div className="overflow-hidden rounded-lg border border-border bg-card" key={id}>
             <Skeleton className="aspect-[16/10] w-full rounded-none" />
@@ -118,16 +139,17 @@ export function TemplateGrid({
   }
 
   return (
-    <div className={`grid gap-4 ${columnsClassName}`}>
-      {templates.map((template) => (
-        <TemplateCard
-          density={density}
-          key={template.id}
-          onOpen={() => onOpenTemplate(template)}
-          statLabels={statLabels}
-          template={template}
-        />
-      ))}
+    <div className={`grid ${gapClassName} ${columnsClassName}`}>
+      {children ??
+        templates.map((template) => (
+          <TemplateCard
+            density={density}
+            key={template.id}
+            onOpen={() => onOpenTemplate?.(template)}
+            statLabels={statLabels}
+            template={template}
+          />
+        ))}
     </div>
   );
 }
