@@ -140,6 +140,7 @@ const ja = {
     namePlaceholder: "例: 新規レコード作成時にSlackへ通知",
     eventTypeLabel: "イベント",
     eventTypeRecordCreated: "新規レコード",
+    eventTypeRecordUpdated: "レコード更新",
     eventTypeAiMention: "@AIメンション",
     eventTypeChangesRequested: "修正リクエスト",
     eventTypeAssetUploaded: "ファイルアップロード",

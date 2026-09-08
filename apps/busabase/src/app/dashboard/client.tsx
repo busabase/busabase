@@ -173,6 +173,12 @@ function DashboardClientContent({
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isInstallOpen, setIsInstallOpen] = useState(false);
   const [createParent, setCreateParent] = useState<{ id: string; name: string } | null>(null);
+  // Stable identity on purpose: this is handed to the memoized dashboard element
+  // below, so a fresh arrow per render would rebuild the whole workbench tree.
+  const openCreateNode = useCallback(() => {
+    setCreateParent(null);
+    setIsCreateOpen(true);
+  }, []);
   const apiClient = useMemo(() => createBusabaseRestApiClient("/api/v1"), []);
   // The SAME key prefix BusabaseDashboard uses for its own queries (its
   // `cacheSpaceKey` prop, passed explicitly below so the two can't drift
@@ -264,9 +270,12 @@ function DashboardClientContent({
         changeRequests={changeRequests}
         embedded
         chromeless={chromeless}
-        emptyGuide={<EmptyAgentGuide edition="desktop" lang={locale} />}
+        emptyGuide={
+          <EmptyAgentGuide edition="desktop" lang={locale} onCreateNode={openCreateNode} />
+        }
         locale={locale}
         nodes={nodes}
+        onCreateNode={openCreateNode}
         provideQueryClient={false}
         records={records}
         readOnlyChangeRequestPreview={readOnlyChangeRequestPreview}
@@ -287,6 +296,7 @@ function DashboardClientContent({
       chromeless,
       readOnlyChangeRequestPreview,
       availableAirAppEngines,
+      openCreateNode,
     ],
   );
   const routes = useMemo(
@@ -408,6 +418,7 @@ function DashboardClientContent({
           apiClient={apiClient}
           open={isInstallOpen}
           onOpenChange={setIsInstallOpen}
+          onCreateNode={openCreateNode}
           // Structure (the folder, its Bases, fields and views) is materialized
           // immediately, so the tree has changed even when every record is still
           // pending review — reload rather than leave a stale sidebar.

@@ -1,4 +1,5 @@
 import { createDevAttachmentRoute } from "openlib/storage/dev-routes";
+import { withStoredObjectHardening } from "~/lib/stored-object-hardening";
 
 export const dynamic = "force-dynamic";
 
@@ -32,5 +33,11 @@ export const dynamic = "force-dynamic";
  * control). This matches the app's existing posture — `/api/rpc` has no auth
  * either. An instance on an untrusted network should sit behind an
  * authenticating reverse proxy, or use S3/R2 so this route is never reached.
+ *
+ * Responses go through `withStoredObjectHardening`, which sandboxes the content
+ * types a browser would execute as a top-level document — see that module for
+ * why CSP is used instead of `Content-Disposition: attachment`.
  */
-export const { GET } = createDevAttachmentRoute({ gateProduction: false });
+export const GET = withStoredObjectHardening(
+  createDevAttachmentRoute({ gateProduction: false }).GET,
+);
