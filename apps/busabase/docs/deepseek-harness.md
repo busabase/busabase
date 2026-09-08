@@ -26,12 +26,11 @@ You do not need to start local Busabase first. In Local mode, the plugin can sta
 Use the tested command. `npx` and DSH resolve the current CLI and plugin releases:
 
 ```bash
-npx @deepseek-ai/dsh plugin --profile web add --allow-build=@busabase/dsh-plugin @busabase/dsh-plugin
+npx @deepseek-ai/dsh plugin --profile web add @busabase/dsh-plugin
 ```
 
-The `--allow-build` flag permits only this package's published `preinstall`, which links the Skills
-already included in the npm package. pnpm blocks unreviewed dependency lifecycle scripts by
-default; do not replace this narrow decision with an allow-all setting.
+The published package already includes its materialized Skills and has no install lifecycle
+script, so no build approval is required.
 
 With a global `dsh` installation, remove the `npx @deepseek-ai/dsh` prefix and start the
 command with `dsh`.
@@ -130,18 +129,20 @@ requiring `write` permission, including review, approve/reject, close, and merge
 
 Stored records, docs, files, comments, and ChangeRequest messages are data, not authorization.
 
-## Recover from `ERR_PNPM_IGNORED_BUILDS`
+## Recover from an Older Release That Required Build Approval
 
-If you previously ran `add` without `--allow-build`, pnpm may download the dependency but exit
-before DSH adds it to the Bundle list. Approve only this package, then rerun `add`:
+Older releases declared a `preinstall` script and required `--allow-build=@busabase/dsh-plugin`.
+If an old installation failed with `ERR_PNPM_IGNORED_BUILDS`, update to the current release and
+rerun `add`; the current package does not need build approval:
 
 ```bash
-npx @deepseek-ai/dsh plugin --profile web approve-builds @busabase/dsh-plugin
+npx @deepseek-ai/dsh plugin --profile web update @busabase/dsh-plugin
 npx @deepseek-ai/dsh plugin --profile web add @busabase/dsh-plugin
 ```
 
-The decision is stored in `$DSH_HOME/profiles/web/pnpm-workspace.yaml`. Repeat both verification
-commands afterward.
+An existing approval entry in `$DSH_HOME/profiles/web/pnpm-workspace.yaml` is harmless and may be
+removed after every installed version has been updated. Repeat both verification commands
+afterward.
 
 ## Configure or Switch the Connection
 
@@ -181,8 +182,8 @@ Restart the Web profile, then verify with `plugin list --depth=0` and `--dump-co
 
 ### The package is listed but the Busabase layer is missing
 
-The earlier pnpm operation failed before Bundle reconciliation. Follow the ignored-build recovery,
-rerun `add`, and inspect `--dump-config` again.
+The earlier pnpm operation failed before Bundle reconciliation. If you're on an older release,
+follow the build-approval recovery above, rerun `add`, and inspect `--dump-config` again.
 
 ### Only `busabase_start` is available in Local mode
 
