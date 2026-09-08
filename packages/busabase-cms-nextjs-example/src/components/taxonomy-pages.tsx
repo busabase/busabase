@@ -9,6 +9,8 @@ import {
   getCategoryArchive,
   getTagArchive,
   listPostsForTaxonomy,
+  readCategoryArchive,
+  readTagArchive,
   taxonomyArchivePath,
 } from "@/lib/content";
 
@@ -55,6 +57,13 @@ export function TaxonomyOverview({ kind, items }: TaxonomyOverviewProps) {
 
 export const getTaxonomy = async (kind: CmsTaxonomyKind, locale: string, slug: string) =>
   kind === "categories" ? getCategoryArchive(locale, slug) : getTagArchive(locale, slug);
+
+/**
+ * Same lookup, but able to say "the CMS was unreachable" instead of folding that
+ * into "no such taxonomy" — which a page would otherwise render as a 404.
+ */
+export const readTaxonomy = async (kind: CmsTaxonomyKind, locale: string, slug: string) =>
+  kind === "categories" ? readCategoryArchive(locale, slug) : readTagArchive(locale, slug);
 
 export const generateTaxonomyMetadata = (
   kind: CmsTaxonomyKind,

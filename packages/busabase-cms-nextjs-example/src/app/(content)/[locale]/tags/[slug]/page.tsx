@@ -3,10 +3,10 @@ import { notFound } from "next/navigation";
 
 import {
   generateTaxonomyMetadata,
-  getTaxonomy,
+  readTaxonomy,
   TaxonomyArchive,
 } from "@/components/taxonomy-pages";
-import { cmsPathOptions } from "@/lib/content";
+import { cmsPathOptions, requireCms } from "@/lib/content";
 
 interface LocalizedTagPageProps {
   params: Promise<{ locale: string; slug: string }>;
@@ -14,7 +14,7 @@ interface LocalizedTagPageProps {
 
 const getTag = async (locale: string, slug: string) => {
   if (locale === cmsPathOptions.defaultLocale) return null;
-  return getTaxonomy("tags", locale, slug);
+  return requireCms(await readTaxonomy("tags", locale, slug), "a localized Tag archive");
 };
 
 export async function generateMetadata({ params }: LocalizedTagPageProps): Promise<Metadata> {

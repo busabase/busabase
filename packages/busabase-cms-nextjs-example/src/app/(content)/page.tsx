@@ -6,10 +6,11 @@ import {
   canonicalContentPath,
   getCmsFolderDashboardUrl,
   hasBusabaseConfig,
-  listBlogPosts,
-  listCategories,
-  listLandingPages,
-  listTags,
+  readBlogPosts,
+  readCategories,
+  readLandingPages,
+  readTags,
+  requireCms,
 } from "@/lib/content";
 
 // Content is cached by busabase-cms; keep the route runtime-rendered so deploy-time
@@ -17,13 +18,16 @@ import {
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
-  const [posts, pages, categories, tags, cmsFolderDashboardUrl] = await Promise.all([
-    listBlogPosts(),
-    listLandingPages(),
-    listCategories(),
-    listTags(),
-    getCmsFolderDashboardUrl(),
-  ]);
+  // The empty state below is the onboarding path ("nothing published yet, go
+  // create something"), so it must only appear when the CMS actually said the
+  // space is empty — not when it could not be reached.
+  const [postsRead, pagesRead, categoriesRead, tagsRead, cmsFolderDashboardUrl] = await Promise.all(
+    [readBlogPosts(), readLandingPages(), readCategories(), readTags(), getCmsFolderDashboardUrl()],
+  );
+  const posts = requireCms(postsRead, "the home page");
+  const pages = requireCms(pagesRead, "the home page");
+  const categories = requireCms(categoriesRead, "the home page");
+  const tags = requireCms(tagsRead, "the home page");
   const hasContent = posts.length > 0 || pages.length > 0;
   const busabaseBaseUrl = process.env.BUSABASE_CMS_BASE_URL?.replace(/\/+$/, "");
   const recentRecords = [...posts, ...pages]

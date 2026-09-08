@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 
 import { ContentCard } from "@/components/content-card";
 import { EmptyState } from "@/components/empty-state";
-import { canonicalContentPath, hasBusabaseConfig, listBlogPosts } from "@/lib/content";
+import { canonicalContentPath, hasBusabaseConfig, readBlogPosts, requireCms } from "@/lib/content";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +12,7 @@ export const metadata: Metadata = {
 };
 
 export default async function BlogIndexPage() {
-  const posts = await listBlogPosts();
+  const posts = requireCms(await readBlogPosts(), "the blog index");
 
   return (
     <main className="shell">
