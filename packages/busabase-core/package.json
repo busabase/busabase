@@ -181,6 +181,10 @@
       "types": "./src/domains/templates/components/template-card-summary.tsx",
       "default": "./src/domains/templates/components/template-card-summary.tsx"
     },
+    "./domains/templates/components/template-grid": {
+      "types": "./src/domains/templates/components/template-grid.tsx",
+      "default": "./src/domains/templates/components/template-grid.tsx"
+    },
     "./domains/templates/components/template-detail-content": {
       "types": "./src/domains/templates/components/template-detail-content.tsx",
       "default": "./src/domains/templates/components/template-detail-content.tsx"
