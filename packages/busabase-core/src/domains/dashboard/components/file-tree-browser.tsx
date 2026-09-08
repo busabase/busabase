@@ -18,10 +18,18 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { FileTreeNodeVO } from "busabase-contract/types";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "kui/collapsible";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "kui/dropdown-menu";
 import { cn } from "kui/utils";
 import {
   ChevronRightIcon,
   Database,
+  Download,
   FileCode,
   FileCog,
   FileIcon,
@@ -31,12 +39,14 @@ import {
   FolderIcon,
   FolderOpenIcon,
   type LucideIcon,
+  MoreHorizontal,
   Paintbrush,
+  Pencil,
+  Trash2,
 } from "lucide-react";
 import {
   type CSSProperties,
   createContext,
-  type KeyboardEvent,
   type ReactNode,
   useCallback,
   useContext,
@@ -104,9 +114,7 @@ export function NodeDeleteDialog({
   const setLocation = (to: string) => rawSetLocation(mergeSearchIntoHref(to, currentSearch));
   const queryClient = useQueryClient();
   const createCr = useMutation(orpc.nodes.createChangeRequest.mutationOptions());
-  const reviewCr = useMutation(orpc.changeRequests.review.mutationOptions());
-  const mergeCr = useMutation(orpc.changeRequests.merge.mutationOptions());
-  const pending = createCr.isPending || reviewCr.isPending || mergeCr.isPending;
+  const pending = createCr.isPending;
   // Deleting a node is manage-only; a public read-only visitor never sees it.
   // Self-gating here covers every mount. All hooks run first.
   const isAnon = useIsAnonymousVisitor();
@@ -133,9 +141,13 @@ export function NodeDeleteDialog({
 
   const handleConfirm = async () => {
     try {
-      const cr = await createCr.mutateAsync({ operations: [{ kind: "delete", nodeId }] });
-      await reviewCr.mutateAsync({ changeRequestIds: [cr.id], verdict: "approved" });
-      await mergeCr.mutateAsync({ changeRequestIds: [cr.id] });
+      // One request: the endpoint approves and merges inside the same call when
+      // the actor may write. The two follow-ups used to re-approve a change
+      // request the server had already merged.
+      await createCr.mutateAsync({
+        autoMerge: true,
+        operations: [{ kind: "delete", nodeId }],
+      });
       await Promise.all([
         queryClient.cancelQueries({ queryKey: orpc.nodes.get.key() }),
         queryClient.cancelQueries({ queryKey: orpc.forms.getByNode.key() }),
@@ -284,14 +296,33 @@ const guessFileTreeIcon = (path: string): LucideIcon => {
   return FILE_TREE_ICON_BY_EXTENSION[ext] ?? FileIcon;
 };
 
-export function renderFileTree(nodes: SkillTreeNode[], depth = 0): ReactNode {
+export function renderFileTree(
+  nodes: SkillTreeNode[],
+  depth = 0,
+  // Decided once for the whole tree, from the root level: any folder anywhere
+  // nests under a root-level folder, so this covers the entire tree.
+  //
+  // Deciding it per level instead breaks the "deeper is further right" rule: a
+  // folder whose children are all files would drop the column for them, and
+  // since losing the spacer (-22px) outweighs one depth step (+14px), those
+  // children rendered 8px LEFT of the root-level files. Reserving the column
+  // whenever the tree has folders keeps file names aligned with sibling folder
+  // names, and a Drive with no folders at all still avoids the phantom indent.
+  reserveChevronColumn = nodes.some((node) => node.type === "folder"),
+): ReactNode {
   return nodes.map((node) =>
     node.type === "folder" ? (
       <DriveFileTreeFolder depth={depth} key={node.path} name={node.name} path={node.path}>
-        {renderFileTree(node.children, depth + 1)}
+        {renderFileTree(node.children, depth + 1, reserveChevronColumn)}
       </DriveFileTreeFolder>
     ) : (
-      <DriveFileTreeFile depth={depth} key={node.path} name={node.name} path={node.path} />
+      <DriveFileTreeFile
+        alignWithFolders={reserveChevronColumn}
+        depth={depth}
+        key={node.path}
+        name={node.name}
+        path={node.path}
+      />
     ),
   );
 }
@@ -301,6 +332,9 @@ interface DriveFileTreeContextType {
   togglePath: (path: string) => void;
   selectedPath?: string;
   onSelect?: (path: string) => void;
+  onDownloadFile?: (path: string) => void;
+  onRemoveFile?: (path: string) => void;
+  onRenameFile?: (path: string) => void;
 }
 
 // oxlint-disable-next-line eslint(no-empty-function)
@@ -318,6 +352,9 @@ export interface DriveFileTreeProps {
   defaultExpanded?: Set<string>;
   selectedPath?: string;
   onSelect?: (path: string) => void;
+  onDownloadFile?: (path: string) => void;
+  onRemoveFile?: (path: string) => void;
+  onRenameFile?: (path: string) => void;
   onExpandedChange?: (expanded: Set<string>) => void;
   children?: ReactNode;
 }
@@ -329,6 +366,9 @@ export function DriveFileTree({
   defaultExpanded,
   selectedPath,
   onSelect,
+  onDownloadFile,
+  onRemoveFile,
+  onRenameFile,
   onExpandedChange,
   className,
   children,
@@ -353,8 +393,16 @@ export function DriveFileTree({
   );
 
   const contextValue = useMemo(
-    () => ({ expandedPaths, onSelect, selectedPath, togglePath }),
-    [expandedPaths, onSelect, selectedPath, togglePath],
+    () => ({
+      expandedPaths,
+      onDownloadFile,
+      onRemoveFile,
+      onRenameFile,
+      onSelect,
+      selectedPath,
+      togglePath,
+    }),
+    [expandedPaths, onDownloadFile, onRemoveFile, onRenameFile, onSelect, selectedPath, togglePath],
   );
 
   return (
@@ -375,6 +423,17 @@ export function DriveFileTree({
 // per-row inline padding keeps the indentation without the extra rules.
 const driveFileTreeRowStyle = (depth: number): CSSProperties => ({
   paddingLeft: 8 + depth * 14,
+});
+
+/**
+ * A folder puts this inline padding on its own `<button>`, where it overrides the
+ * button's `px-2`. A file row puts it on the wrapper `<div>` instead (so the hover
+ * background spans the full row), and the inner button's `px-2` then adds another
+ * 8px on top — which left file names 8px to the right of sibling folder names.
+ * Drop the base inset here and let `px-2` supply it, so both land at the same x.
+ */
+const driveFileTreeFileRowStyle = (depth: number): CSSProperties => ({
+  paddingLeft: depth * 14,
 });
 
 export interface DriveFileTreeFolderProps {
@@ -430,40 +489,82 @@ export interface DriveFileTreeFileProps {
   path: string;
   name: string;
   depth?: number;
+  /** True when the tree contains folders, i.e. a chevron column exists. */
+  alignWithFolders?: boolean;
 }
 
-export function DriveFileTreeFile({ path, name, depth = 0 }: DriveFileTreeFileProps) {
-  const { selectedPath, onSelect } = useContext(DriveFileTreeContext);
+export function DriveFileTreeFile({
+  path,
+  name,
+  depth = 0,
+  alignWithFolders = false,
+}: DriveFileTreeFileProps) {
+  const messages = useCoreI18n();
+  const { selectedPath, onSelect, onDownloadFile, onRemoveFile, onRenameFile } =
+    useContext(DriveFileTreeContext);
   const isSelected = selectedPath === path;
   const FileGlyph = guessFileTreeIcon(path);
-
-  const handleKeyDown = useCallback(
-    (e: KeyboardEvent) => {
-      if (e.key === "Enter" || e.key === " ") {
-        onSelect?.(path);
-      }
-    },
-    [onSelect, path],
-  );
+  const hasActions = Boolean(onDownloadFile || onRemoveFile || onRenameFile);
 
   return (
     <div
       className={cn(
-        "flex cursor-pointer items-center gap-1.5 rounded px-2 py-1 transition-colors hover:bg-muted/50",
+        "group/file-row flex min-h-8 items-center rounded transition-colors duration-150 hover:bg-muted/50 focus-within:bg-muted/50",
         isSelected && "bg-muted",
       )}
-      onClick={() => onSelect?.(path)}
-      onKeyDown={handleKeyDown}
-      role="treeitem"
-      style={driveFileTreeRowStyle(depth)}
-      tabIndex={0}
+      style={driveFileTreeFileRowStyle(depth)}
     >
-      {/* Spacer matching the folder row's chevron, so file names align under folder names. */}
-      <span className="size-4 shrink-0" />
-      <FileGlyph
-        className={cn("size-4 shrink-0 text-muted-foreground", isSelected && "text-foreground")}
-      />
-      <span className={cn("truncate", isSelected && "font-medium text-foreground")}>{name}</span>
+      <button
+        className="flex min-w-0 flex-1 items-center gap-1.5 rounded px-2 py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
+        onClick={() => onSelect?.(path)}
+        role="treeitem"
+        type="button"
+      >
+        {/* Reserve the chevron column when the tree has folders, so file names
+            line up with sibling folder names; a folder-less Drive skips it and
+            avoids indenting every file under a column that is not there. */}
+        {alignWithFolders ? <span aria-hidden className="size-4 shrink-0" /> : null}
+        <FileGlyph
+          aria-hidden
+          className={cn("size-4 shrink-0 text-muted-foreground", isSelected && "text-foreground")}
+        />
+        <span className={cn("truncate", isSelected && "font-medium text-foreground")}>{name}</span>
+      </button>
+      {hasActions ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              aria-label={fmt(messages.nodeDetail.fileActionsFor, { name })}
+              className="mr-1 flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 outline-none transition-[opacity,color,background-color,transform] duration-150 hover:bg-background/70 hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96] group-hover/file-row:opacity-100 data-[state=open]:bg-background/70 data-[state=open]:text-foreground data-[state=open]:opacity-100"
+              onClick={(event) => event.stopPropagation()}
+              type="button"
+            >
+              <MoreHorizontal aria-hidden className="size-3.5" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="min-w-40">
+            {onRenameFile ? (
+              <DropdownMenuItem onSelect={() => onRenameFile(path)}>
+                <Pencil aria-hidden />
+                {messages.nodeDetail.renameFile}
+              </DropdownMenuItem>
+            ) : null}
+            {onDownloadFile ? (
+              <DropdownMenuItem onSelect={() => onDownloadFile(path)}>
+                <Download aria-hidden />
+                {messages.nodeDetail.downloadFile}
+              </DropdownMenuItem>
+            ) : null}
+            {onRemoveFile ? <DropdownMenuSeparator /> : null}
+            {onRemoveFile ? (
+              <DropdownMenuItem onSelect={() => onRemoveFile(path)} variant="destructive">
+                <Trash2 aria-hidden />
+                {messages.nodeDetail.removeFromDrive}
+              </DropdownMenuItem>
+            ) : null}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : null}
     </div>
   );
 }

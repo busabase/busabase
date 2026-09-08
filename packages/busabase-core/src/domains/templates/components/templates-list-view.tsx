@@ -7,17 +7,7 @@ import { Button } from "kui/button";
 import { Input } from "kui/input";
 import { ExternalLink, RefreshCw } from "lucide-react";
 import { useMemo, useState } from "react";
-import { ShimmerSkeleton as Skeleton } from "../../dashboard/components/shimmer-skeleton";
-import { TemplateCardSummary } from "./template-card-summary";
-
-const TEMPLATE_SKELETON_IDS = [
-  "template-skeleton-1",
-  "template-skeleton-2",
-  "template-skeleton-3",
-  "template-skeleton-4",
-  "template-skeleton-5",
-  "template-skeleton-6",
-];
+import { TemplateGrid } from "./template-grid";
 
 interface TemplatesListViewProps {
   orpc: BusabaseQueryUtils;
@@ -28,18 +18,6 @@ interface TemplatesListViewProps {
    * that says who can open it reads as a rule.
    */
   canInstall: boolean;
-}
-
-function TemplateCard({ template, onOpen }: { template: TemplateCardVO; onOpen: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onOpen}
-      className="group flex flex-col overflow-hidden rounded-lg border border-border bg-card text-left transition-colors hover:border-primary/50"
-    >
-      <TemplateCardSummary template={template} screenshotAlt="" />
-    </button>
-  );
 }
 
 /**
@@ -135,49 +113,15 @@ export function TemplatesListView({ orpc, onOpenTemplate, canInstall }: Template
             </p>
           ) : null}
 
-          {catalog.isPending ? (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3" aria-hidden>
-              {TEMPLATE_SKELETON_IDS.map((id) => (
-                <div className="overflow-hidden rounded-lg border border-border bg-card" key={id}>
-                  <Skeleton className="aspect-[16/10] w-full rounded-none" />
-                  <div className="space-y-3 p-4">
-                    <div className="flex items-center justify-between gap-3">
-                      <Skeleton className="h-4 w-2/3" />
-                      <Skeleton className="h-5 w-16" />
-                    </div>
-                    <Skeleton className="h-3 w-full" />
-                    <Skeleton className="h-3 w-4/5" />
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : null}
-
-          {/* An unreachable catalog and an empty one look identical to a user, and
-          only one of them is actionable — so say which this is. */}
-          {catalog.data?.error ? (
-            <p className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-destructive text-xs">
-              {catalog.data.error}
-            </p>
-          ) : null}
-
-          {catalog.data && !catalog.data.error && filtered.length === 0 ? (
-            <p className="text-muted-foreground text-sm">
-              {search ? `Nothing matches “${search}”.` : "This catalog has no templates yet."}
-            </p>
-          ) : null}
-
-          {!catalog.isPending ? (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {filtered.map((template) => (
-                <TemplateCard
-                  key={template.id}
-                  template={template}
-                  onOpen={() => onOpenTemplate(template)}
-                />
-              ))}
-            </div>
-          ) : null}
+          <TemplateGrid
+            emptyLabel={
+              search ? `Nothing matches “${search}”.` : "This catalog has no templates yet."
+            }
+            error={catalog.data?.error}
+            isPending={catalog.isPending}
+            onOpenTemplate={onOpenTemplate}
+            templates={filtered}
+          />
         </div>
       </div>
     </div>

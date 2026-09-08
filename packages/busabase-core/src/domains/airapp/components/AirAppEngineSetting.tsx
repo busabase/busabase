@@ -30,6 +30,7 @@ interface AirAppEngineSettingProps {
    * introduced to end, one level up.
    */
   appPreferred?: AirAppRunnerKind;
+  appRequired?: AirAppRunnerKind;
 }
 
 /** Controlled settings field. Its parent owns draft/save semantics so closing
@@ -40,6 +41,7 @@ export function AirAppEngineSetting({
   onValueChange,
   value,
   appPreferred,
+  appRequired,
 }: AirAppEngineSettingProps) {
   const messages = useCoreI18n();
   const engineLabel: Record<AirAppRunnerKind, string> = {
@@ -60,6 +62,23 @@ export function AirAppEngineSetting({
   const followLabel = appPreferred
     ? fmt(messages.airapp.engineFollowAppNamed, { engine: engineLabel[appPreferred] })
     : messages.airapp.engineFollowApp;
+
+  if (appRequired) {
+    const requirementAvailable = availableEngines.includes(appRequired);
+    return (
+      <div className="space-y-2" data-airapp-engine-required data-airapp-engine-setting>
+        <Label>{messages.airapp.engineLabel}</Label>
+        <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
+          {fmt(messages.airapp.engineRequired, { engine: engineLabel[appRequired] })}
+        </div>
+        <p className="text-muted-foreground text-xs">
+          {requirementAvailable
+            ? messages.airapp.engineRequiredHint
+            : messages.airapp.requiredEngineUnavailable[appRequired]}
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-2" data-airapp-engine-setting>

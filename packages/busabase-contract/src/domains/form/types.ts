@@ -91,10 +91,25 @@ export const FormVOSchema = z.object({
 export type FormVO = z.infer<typeof FormVOSchema>;
 
 export const ListFormsInputSchema = z.object({
-  targetBaseId: z.string().min(1),
-  limit: z.coerce.number().int().min(1).max(100).optional().default(50),
-  /** Opaque createdAt/id keyset cursor. */
-  cursor: z.string().optional(),
+  targetBaseId: z
+    .string()
+    .min(1)
+    .describe("The Base the forms WRITE INTO — required; this is not a space-wide listing."),
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(100)
+    .optional()
+    .default(50)
+    .describe("Forms per page. Capped at 100; ask for the next page with `cursor`."),
+  cursor: z
+    .string()
+    .optional()
+    .describe(
+      "Opaque page cursor: pass back the `nextCursor` from the previous response. " +
+        "Do not construct or parse it.",
+    ),
 });
 export type ListFormsDTO = z.infer<typeof ListFormsInputSchema>;
 

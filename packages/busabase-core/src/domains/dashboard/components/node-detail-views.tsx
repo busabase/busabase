@@ -1,11 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { hasApiKeyLevel } from "busabase-contract/access-control/api-key-level";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
-import type { FormVO, NodeVO } from "busabase-contract/types";
+import type { FileTreeFileVO, FormVO, NodeVO } from "busabase-contract/types";
 import { CodeBlock } from "kui/ai-elements/code-block";
 import { Button } from "kui/button";
 import { cn } from "kui/utils";
 import {
   AppWindow,
+  Download,
   File,
   FileText,
   Folder,
@@ -17,7 +19,7 @@ import {
   Table2,
 } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useLocation, useSearch } from "wouter";
 import { fmt, useCoreI18n } from "../../../i18n";
@@ -26,14 +28,24 @@ import { AirAppSidePanelPreview } from "../../airapp/components/RunPanel";
 import { DocEditor } from "../../doc/components";
 import { useDocImageUpload } from "../../doc/hooks/use-doc-image-upload";
 import { FormDetailView } from "../../form/components/form-detail-view";
+import {
+  buildFileTreeRenameOperations,
+  fileTreeFileName,
+  fileTreeParentPath,
+  fileTreeUploadPath,
+  inferFileTreeMimeType,
+  resolveFileTreePreviewKind,
+} from "../helpers/file-tree-files";
 import { mergeSearchIntoHref } from "../helpers/link-search";
 import { asNodeDetail } from "../helpers/node-detail";
+import { useFileTreeAssetUpload } from "../hooks/use-file-tree-asset-upload";
 import { useRegisterTopbarNodeActions } from "../hooks/use-register-topbar-node-actions";
 import { useReportLoadedNode } from "../hooks/use-report-loaded-node";
 import { type NodeDetailProps, registerNodeDetail } from "../node-detail-registry";
 import { registerSidePanelTab, type SidePanelTabProps } from "../side-panel-registry";
 import { useIsAnonymousVisitor } from "../visitor-context";
-import { AssetMediaPreview, isPreviewableAssetMime } from "./assets";
+import { AssetMediaPreview } from "./assets";
+import { MarkdownFieldPreview } from "./field-preview";
 import {
   buildFileTree,
   collectFolderPaths,
@@ -43,6 +55,12 @@ import {
   renderFileTree,
   type SkillTreeNode,
 } from "./file-tree-browser";
+import {
+  type FileTreeMutationMode,
+  FileTreeRemoveDialog,
+  FileTreeRenameDialog,
+  FileTreeUploadControl,
+} from "./file-tree-file-actions";
 import { NodeActionsMenu } from "./node-actions-menu";
 import { NodeAgentPromptsButton } from "./node-agent-prompts-button";
 import { NodePinButton, nodeSidePanelTabId } from "./node-pin-button";
@@ -50,7 +68,7 @@ import { NodeSettingsDialog } from "./node-settings-dialog";
 import { NodeShareDialog } from "./node-share-button";
 import { EmptyState } from "./primitives";
 import { FileContentSkeleton, NodeDetailSkeleton } from "./skeletons";
-import { SplitSubmitButton } from "./split-submit-button";
+import { SplitSubmitButton, useWorkspacePermissionLevel } from "./split-submit-button";
 
 // Re-exported for backward compat — these building blocks moved to
 // `./file-tree-browser` so `AirAppDetailView` can reuse them without a
@@ -99,11 +117,25 @@ export function FileTreeDetailView({
     [rawSetLocation, currentSearch],
   );
   const [openPath, setOpenPath] = useState<string | null>(null);
+  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState<null | "save" | "changeRequest">(null);
   const [fileActionError, setFileActionError] = useState<string | null>(null);
   const [infoOpen, setInfoOpen] = useState(false);
+  const [renameTarget, setRenameTarget] = useState<FileTreeFileVO | null>(null);
+  const [removeTarget, setRemoveTarget] = useState<FileTreeFileVO | null>(null);
+  const uploadedAssetsRef = useRef(
+    new Map<string, { assetId: string; displayName: string; mimeType: string }>(),
+  );
+  const isAnonymous = useIsAnonymousVisitor();
+  const permissionLevel = useWorkspacePermissionLevel();
+  const canChangeFiles =
+    nodeType === "drive" &&
+    !hideActions &&
+    !isAnonymous &&
+    hasApiKeyLevel(permissionLevel, "changeRequest");
+  const uploadAsset = useFileTreeAssetUpload(orpc);
 
   const fileTreeQuery = useQuery({
     ...orpc.nodes.get.queryOptions({ input: { nodeId: slug ?? "", type: nodeType } }),
@@ -149,6 +181,9 @@ export function FileTreeDetailView({
     setIsEditing(false);
     setDraft("");
     setFileActionError(null);
+    setRenameTarget(null);
+    setRemoveTarget(null);
+    uploadedAssetsRef.current.clear();
   }, [slug]);
 
   const fileQuery = useQuery({
@@ -158,13 +193,15 @@ export function FileTreeDetailView({
     enabled: Boolean(fileTree && openPath),
   });
   const createCr = useMutation(orpc.fileTrees.createChangeRequest.mutationOptions());
-  const reviewCr = useMutation(orpc.changeRequests.review.mutationOptions());
-  const mergeCr = useMutation(orpc.changeRequests.merge.mutationOptions());
 
   const tree = useMemo(() => buildFileTree(fileTree?.files ?? []), [fileTree?.files]);
   const expandedFolders = useMemo(() => new Set(collectFolderPaths(tree)), [tree]);
   const filePaths = useMemo(
     () => new Set((fileTree?.files ?? []).map((file) => file.path)),
+    [fileTree?.files],
+  );
+  const filesByPath = useMemo(
+    () => new Map((fileTree?.files ?? []).map((file) => [file.path, file])),
     [fileTree?.files],
   );
   useEffect(() => {
@@ -178,6 +215,11 @@ export function FileTreeDetailView({
     }
   }, [fileTree, openPath]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset expansion only when opening another file-tree node
+  useEffect(() => {
+    setExpandedPaths(expandedFolders);
+  }, [fileTree?.node.id]);
+
   const selectFile = useCallback(
     (path: string) => {
       // FileTreeFolder also fires onSelect; only react to real files.
@@ -190,6 +232,203 @@ export function FileTreeDetailView({
     },
     [filePaths],
   );
+
+  type FileMutationOperation =
+    | {
+        kind: "create";
+        path: string;
+        assetId: string;
+        displayName?: string;
+        mimeType?: string;
+      }
+    | { kind: "delete"; path: string; baseContentHash?: string };
+
+  const submitFileOperations = async ({
+    message,
+    mode,
+    nextPath,
+    operations,
+    successMessage,
+  }: {
+    message: string;
+    mode: FileTreeMutationMode;
+    nextPath: string | null;
+    operations: FileMutationOperation[];
+    successMessage: string;
+  }) => {
+    if (!fileTree) throw new Error(messages.nodeDetail.couldNotSave);
+    const changeRequest = await createCr.mutateAsync({
+      autoMerge: mode === "immediate",
+      message,
+      nodeId: fileTree.node.id,
+      operations,
+      submittedBy: "web-editor",
+      type: nodeType,
+    });
+
+    if (changeRequest.status !== "merged") {
+      setLocation(`/inbox/${changeRequest.id}`);
+      return false;
+    }
+
+    const deletedPaths = operations
+      .filter(
+        (operation): operation is Extract<FileMutationOperation, { kind: "delete" }> =>
+          operation.kind === "delete",
+      )
+      .map((operation) => operation.path);
+    await Promise.all(
+      deletedPaths.map((path) =>
+        queryClient.cancelQueries({
+          queryKey: orpc.fileTrees.readFile.queryOptions({
+            input: { filePath: path, nodeId: fileTree.node.id, type: nodeType },
+          }).queryKey,
+        }),
+      ),
+    );
+    for (const path of deletedPaths) {
+      queryClient.removeQueries({
+        queryKey: orpc.fileTrees.readFile.queryOptions({
+          input: { filePath: path, nodeId: fileTree.node.id, type: nodeType },
+        }).queryKey,
+      });
+    }
+    setOpenPath(nextPath);
+    await Promise.all([
+      queryClient.invalidateQueries({
+        queryKey: orpc.nodes.get.queryOptions({
+          input: { nodeId: fileTree.node.id, type: nodeType },
+        }).queryKey,
+      }),
+      queryClient.invalidateQueries({ queryKey: orpc.assets.list.key() }),
+    ]);
+    await fileTreeQuery.refetch();
+    setIsEditing(false);
+    setDraft("");
+    setFileActionError(null);
+    toast.success(successMessage);
+    return true;
+  };
+
+  const readFileForAction = async (path: string) => {
+    if (!fileTree) throw new Error(messages.nodeDetail.couldNotReadFile);
+    return queryClient.fetchQuery(
+      orpc.fileTrees.readFile.queryOptions({
+        input: { filePath: path, nodeId: fileTree.node.id, type: nodeType },
+      }),
+    );
+  };
+
+  const uploadFiles = async (files: File[], folder: string, mode: FileTreeMutationMode) => {
+    const uploaded = [] as Array<{
+      assetId: string;
+      displayName: string;
+      mimeType: string;
+      path: string;
+    }>;
+
+    for (const file of files) {
+      const cacheKey = `${file.name}:${file.size}:${file.lastModified}`;
+      let asset = uploadedAssetsRef.current.get(cacheKey);
+      if (!asset) {
+        const result = await uploadAsset(file);
+        if (!result.assetId) throw new Error(messages.nodeDetail.fileUploadMissingAsset);
+        asset = {
+          assetId: result.assetId,
+          displayName: file.name,
+          mimeType: inferFileTreeMimeType(file.name, file.type),
+        };
+        uploadedAssetsRef.current.set(cacheKey, asset);
+      }
+      uploaded.push({ ...asset, path: fileTreeUploadPath(folder, file.name) });
+    }
+
+    const merged = await submitFileOperations({
+      message:
+        uploaded.length === 1 ? `Upload ${uploaded[0]?.path}` : `Upload ${uploaded.length} files`,
+      mode,
+      nextPath: uploaded[0]?.path ?? openPath,
+      operations: uploaded.map((file) => ({
+        assetId: file.assetId,
+        displayName: file.displayName,
+        kind: "create",
+        mimeType: file.mimeType,
+        path: file.path,
+      })),
+      successMessage: messages.nodeDetail.filesUploaded.replace("{count}", String(uploaded.length)),
+    });
+    if (merged && folder) {
+      setExpandedPaths((current) => {
+        const next = new Set(current);
+        const segments = folder.split("/");
+        for (let index = 1; index <= segments.length; index += 1) {
+          next.add(segments.slice(0, index).join("/"));
+        }
+        return next;
+      });
+    }
+    for (const file of files) {
+      uploadedAssetsRef.current.delete(`${file.name}:${file.size}:${file.lastModified}`);
+    }
+  };
+
+  const renameFile = async (nextName: string, mode: FileTreeMutationMode) => {
+    if (!renameTarget) return;
+    const current = await readFileForAction(renameTarget.path);
+    const { nextPath, operations } = buildFileTreeRenameOperations(
+      renameTarget,
+      nextName,
+      current.contentHash || undefined,
+    );
+    await submitFileOperations({
+      message: `Rename ${renameTarget.path} to ${nextPath}`,
+      mode,
+      nextPath,
+      operations,
+      successMessage: messages.nodeDetail.fileRenamed,
+    });
+    setRenameTarget(null);
+  };
+
+  const removeFile = async (mode: FileTreeMutationMode) => {
+    if (!removeTarget) return;
+    const current = await readFileForAction(removeTarget.path);
+    const fileIndex = fileTree?.files.findIndex((file) => file.path === removeTarget.path) ?? -1;
+    const nextFile =
+      fileTree?.files[fileIndex + 1] ??
+      (fileIndex > 0 ? fileTree?.files[fileIndex - 1] : undefined);
+    await submitFileOperations({
+      message: `Remove ${removeTarget.path} from ${nodeType}`,
+      mode,
+      nextPath: nextFile?.path ?? null,
+      operations: [
+        {
+          kind: "delete",
+          path: removeTarget.path,
+          ...(current.contentHash ? { baseContentHash: current.contentHash } : {}),
+        },
+      ],
+      successMessage: messages.nodeDetail.fileRemoved,
+    });
+    setRemoveTarget(null);
+  };
+
+  const downloadFile = async (path: string) => {
+    try {
+      const current = await readFileForAction(path);
+      if (!current.assetUrl) throw new Error(messages.nodeDetail.fileDownloadFailed);
+      const anchor = document.createElement("a");
+      anchor.href = current.assetUrl;
+      anchor.download = current.displayName ?? fileTreeFileName(path);
+      anchor.rel = "noreferrer";
+      anchor.target = "_blank";
+      anchor.click();
+    } catch (caught) {
+      toast.error(
+        caught instanceof Error ? caught.message : messages.nodeDetail.fileDownloadFailed,
+      );
+    }
+  };
 
   const startEditingFile = () => {
     if (!fileQuery.data || fileQuery.data.encoding !== "utf8") {
@@ -213,10 +452,16 @@ export function FileTreeDetailView({
     setBusy(mode);
     setFileActionError(null);
     try {
+      // `autoMerge` carries the button's intent to the endpoint, which decides and
+      // applies it in the same request. It used to be omitted, so the endpoint's
+      // permission-aware default answered BOTH modes the same way: "Request
+      // review" already merged the file for a write-capable user, and the two
+      // calls below then re-approved an already-merged change request.
       const changeRequest = await createCr.mutateAsync({
         nodeId: fileTree.node.id,
         type: nodeType,
         message: `Update ${openPath}`,
+        autoMerge: mode === "save",
         operations: [
           {
             kind: "update",
@@ -226,12 +471,13 @@ export function FileTreeDetailView({
           },
         ],
       });
-      if (mode === "changeRequest") {
+      // Branch on the result, not the requested mode: `autoMerge: true` is not a
+      // permission override, so an actor without write on the node still gets a
+      // pending request back and belongs in the inbox rather than in an error.
+      if (changeRequest.status !== "merged") {
         setLocation(`/inbox/${changeRequest.id}`);
         return;
       }
-      await reviewCr.mutateAsync({ changeRequestIds: [changeRequest.id], verdict: "approved" });
-      await mergeCr.mutateAsync({ changeRequestIds: [changeRequest.id] });
       await queryClient.invalidateQueries({
         queryKey: orpc.nodes.get.queryOptions({
           input: { nodeId: fileTree.node.id, type: nodeType },
@@ -269,6 +515,12 @@ export function FileTreeDetailView({
   const NodeIcon = nodeType === "drive" ? HardDrive : Sparkles;
   const nodeTypeLabel =
     nodeType === "drive" ? messages.nodeDetail.drive : messages.nodeDetail.skill;
+  const previewKind = fileQuery.data
+    ? resolveFileTreePreviewKind(openPath ?? "", fileQuery.data.mimeType)
+    : "code";
+  const previewMimeType = fileQuery.data
+    ? inferFileTreeMimeType(openPath ?? "", fileQuery.data.mimeType)
+    : "application/octet-stream";
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-background">
@@ -315,8 +567,18 @@ export function FileTreeDetailView({
               <div className="font-medium text-muted-foreground text-xs uppercase">
                 {messages.nodeDetail.files}
               </div>
-              <div className="rounded-md border border-border/70 bg-card px-1.5 py-0.5 font-mono text-muted-foreground text-[11px]">
-                {fileCount}
+              <div className="flex items-center gap-1">
+                {canChangeFiles ? (
+                  <FileTreeUploadControl
+                    availableFolders={collectFolderPaths(tree)}
+                    defaultFolder={openPath ? fileTreeParentPath(openPath) : ""}
+                    existingPaths={filePaths}
+                    onSubmit={uploadFiles}
+                  />
+                ) : null}
+                <div className="rounded-md border border-border/70 bg-card px-1.5 py-0.5 font-mono text-muted-foreground text-[11px] tabular-nums">
+                  {fileCount}
+                </div>
               </div>
             </div>
             <div className="min-h-0 flex-1 overflow-auto p-2">
@@ -327,8 +589,20 @@ export function FileTreeDetailView({
               ) : (
                 <DriveFileTree
                   className="rounded-none border-0 bg-transparent font-sans text-[13px]"
-                  defaultExpanded={expandedFolders}
+                  expanded={expandedPaths}
                   key={fileTree.node.id}
+                  onDownloadFile={(path) => void downloadFile(path)}
+                  onRemoveFile={
+                    canChangeFiles && !isEditing
+                      ? (path) => setRemoveTarget(filesByPath.get(path) ?? null)
+                      : undefined
+                  }
+                  onRenameFile={
+                    canChangeFiles && !isEditing
+                      ? (path) => setRenameTarget(filesByPath.get(path) ?? null)
+                      : undefined
+                  }
+                  onExpandedChange={setExpandedPaths}
                   onSelect={selectFile}
                   selectedPath={openPath ?? undefined}
                 >
@@ -344,47 +618,67 @@ export function FileTreeDetailView({
             <div className="min-w-0 truncate font-mono text-muted-foreground text-xs">
               {openPath ?? messages.nodeDetail.selectFile}
             </div>
-            {openPath &&
-            fileQuery.data &&
-            !fileQuery.isError &&
-            fileQuery.data.encoding === "utf8" ? (
-              isEditing ? (
-                <div className="flex shrink-0 flex-wrap items-center gap-2">
-                  <button
-                    className="rounded-md px-2.5 py-1.5 text-muted-foreground text-xs transition-colors hover:bg-muted/60 hover:text-foreground disabled:opacity-40"
-                    disabled={busy !== null}
-                    onClick={cancelEditingFile}
-                    type="button"
+            {openPath && fileQuery.data && !fileQuery.isError ? (
+              <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+                {fileQuery.data.assetUrl ? (
+                  <Button
+                    asChild
+                    className="size-8 text-muted-foreground"
+                    size="icon-sm"
+                    title={messages.nodeDetail.downloadFile}
+                    variant="ghost"
                   >
-                    {messages.common.cancel}
-                  </button>
-                  <SplitSubmitButton
-                    changeRequestAction={{
-                      label: messages.nodeDetail.saveAsChangeRequest,
-                      loadingLabel: messages.nodeDetail.saving,
-                      onSubmit: () => void saveFile("changeRequest"),
-                      isLoading: busy === "changeRequest",
-                    }}
-                    disabled={busy !== null || draft === fileQuery.data.content}
-                    dropdownPosition="below"
-                    hint={messages.common.mergeImmediatelyHint}
-                    immediateAction={{
-                      label: messages.nodeDetail.save,
-                      loadingLabel: messages.nodeDetail.saving,
-                      onSubmit: () => void saveFile("save"),
-                      isLoading: busy === "save",
-                    }}
-                  />
-                </div>
-              ) : (
-                <button
-                  className="w-fit shrink-0 rounded-md border border-border/70 bg-card px-2.5 py-1.5 text-xs transition-colors hover:bg-muted/60"
-                  onClick={startEditingFile}
-                  type="button"
-                >
-                  {messages.common.edit}
-                </button>
-              )
+                    <a
+                      aria-label={messages.nodeDetail.downloadFile}
+                      download={fileQuery.data.displayName ?? fileTreeFileName(openPath)}
+                      href={fileQuery.data.assetUrl}
+                      rel="noreferrer"
+                      target="_blank"
+                    >
+                      <Download aria-hidden className="size-3.5" />
+                    </a>
+                  </Button>
+                ) : null}
+                {fileQuery.data.encoding === "utf8" ? (
+                  isEditing ? (
+                    <div className="flex shrink-0 flex-wrap items-center gap-2">
+                      <button
+                        className="rounded-md px-2.5 py-1.5 text-muted-foreground text-xs transition-colors hover:bg-muted/60 hover:text-foreground disabled:opacity-40"
+                        disabled={busy !== null}
+                        onClick={cancelEditingFile}
+                        type="button"
+                      >
+                        {messages.common.cancel}
+                      </button>
+                      <SplitSubmitButton
+                        changeRequestAction={{
+                          label: messages.nodeDetail.saveAsChangeRequest,
+                          loadingLabel: messages.nodeDetail.saving,
+                          onSubmit: () => void saveFile("changeRequest"),
+                          isLoading: busy === "changeRequest",
+                        }}
+                        disabled={busy !== null || draft === fileQuery.data.content}
+                        dropdownPosition="below"
+                        hint={messages.common.mergeImmediatelyHint}
+                        immediateAction={{
+                          label: messages.nodeDetail.save,
+                          loadingLabel: messages.nodeDetail.saving,
+                          onSubmit: () => void saveFile("save"),
+                          isLoading: busy === "save",
+                        }}
+                      />
+                    </div>
+                  ) : (
+                    <button
+                      className="w-fit shrink-0 rounded-md border border-border/70 bg-card px-2.5 py-1.5 text-xs transition-colors hover:bg-muted/60"
+                      onClick={startEditingFile}
+                      type="button"
+                    >
+                      {messages.common.edit}
+                    </button>
+                  )
+                ) : null}
+              </div>
             ) : null}
           </div>
           {fileActionError ? (
@@ -407,11 +701,11 @@ export function FileTreeDetailView({
               </div>
             ) : fileQuery.data && fileQuery.data.encoding !== "utf8" ? (
               <div className="p-5 text-muted-foreground text-sm">
-                {fileQuery.data.assetUrl && isPreviewableAssetMime(fileQuery.data.mimeType) ? (
+                {fileQuery.data.assetUrl && previewKind !== "code" ? (
                   <div className="mb-4 grid max-h-[55vh] place-items-center overflow-hidden rounded-md border bg-muted">
                     <AssetMediaPreview
                       mediaClassName="max-h-[55vh] w-full object-contain"
-                      mimeType={fileQuery.data.mimeType}
+                      mimeType={previewMimeType}
                       name={fileQuery.data.displayName ?? openPath}
                       url={fileQuery.data.assetUrl}
                     />
@@ -472,6 +766,25 @@ export function FileTreeDetailView({
                 spellCheck={false}
                 value={draft}
               />
+            ) : previewKind === "image" && fileQuery.data?.assetUrl ? (
+              // An SVG is both text and an image: it arrives with
+              // `encoding: "utf8"`, so it never reaches the binary branch above
+              // and used to render as source. Preview it as an image here; the
+              // Edit button still exposes the markup.
+              <div className="p-5">
+                <div className="grid max-h-[70vh] place-items-center overflow-hidden rounded-md border bg-muted">
+                  <AssetMediaPreview
+                    mediaClassName="max-h-[70vh] w-full object-contain"
+                    mimeType={previewMimeType}
+                    name={fileQuery.data.displayName ?? openPath}
+                    url={fileQuery.data.assetUrl}
+                  />
+                </div>
+              </div>
+            ) : previewKind === "markdown" ? (
+              <div className="mx-auto w-full max-w-4xl p-4 md:p-6">
+                <MarkdownFieldPreview value={fileQuery.data?.content ?? ""} />
+              </div>
             ) : (
               <CodeBlock
                 className="min-h-[calc(100vh-15rem)] !rounded-none !border-0 !bg-transparent"
@@ -483,6 +796,23 @@ export function FileTreeDetailView({
           </div>
         </main>
       </div>
+      <FileTreeRenameDialog
+        existingPaths={filePaths}
+        file={renameTarget}
+        onOpenChange={(open) => {
+          if (!open) setRenameTarget(null);
+        }}
+        onSubmit={renameFile}
+        open={renameTarget !== null}
+      />
+      <FileTreeRemoveDialog
+        file={removeTarget}
+        onOpenChange={(open) => {
+          if (!open) setRemoveTarget(null);
+        }}
+        onSubmit={removeFile}
+        open={removeTarget !== null}
+      />
     </div>
   );
 }
@@ -743,8 +1073,6 @@ export function DocDetailView({
   }, [slug]);
 
   const createCr = useMutation(orpc.nodes.updateContent.mutationOptions());
-  const reviewCr = useMutation(orpc.changeRequests.review.mutationOptions());
-  const mergeCr = useMutation(orpc.changeRequests.merge.mutationOptions());
   const uploadImage = useDocImageUpload(orpc);
 
   if (!doc) {
@@ -762,20 +1090,18 @@ export function DocDetailView({
     );
   }
 
-  // Direct Save: propose + approve + merge in one go (mirrors a Base "Save & Merge").
+  // Direct Save: one request. `nodes.updateContent` approves and merges inside the
+  // same call when the actor may write, so this used to pay for two extra round
+  // trips that re-approved an already-merged change request.
   const save = async () => {
     setBusy("save");
     setError(null);
     try {
-      const changeRequest = await createCr.mutateAsync({
+      await createCr.mutateAsync({
         nodeId: doc.node.id,
         content: { kind: "doc", body: draft },
+        autoMerge: true,
       });
-      await reviewCr.mutateAsync({
-        changeRequestIds: [changeRequest.id],
-        verdict: "approved",
-      });
-      await mergeCr.mutateAsync({ changeRequestIds: [changeRequest.id] });
       await docQuery.refetch();
       setIsEditing(false);
     } catch (caught) {

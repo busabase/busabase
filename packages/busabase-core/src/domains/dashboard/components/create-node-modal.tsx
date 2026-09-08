@@ -1,5 +1,6 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
 import type { ApiKeyPermissionLevel } from "busabase-contract/access-control/api-key-level";
 import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
@@ -15,8 +16,11 @@ import {
 } from "kui/dialog";
 import { Input } from "kui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "kui/tabs";
+import { ArrowRight } from "lucide-react";
 import { useMemo, useState } from "react";
+import { useLocation } from "wouter";
 import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
+import { TemplateGrid } from "../../templates/components/template-grid";
 import { buildCreateNodePrompts } from "../helpers/node-agent-prompts";
 import { nodeIconForId } from "../helpers/node-icons";
 import { useAttachmentUpload } from "../hooks/use-attachment-upload";
@@ -113,6 +117,7 @@ export function CreateNodeModal({
 }: CreateNodeModalProps) {
   const messages = useCoreI18n();
   const locale = useCoreLocale();
+  const [, setLocation] = useLocation();
   const [selectedType, setSelectedType] = useState(CREATABLE_TYPES[0]?.type ?? "base");
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
@@ -143,6 +148,18 @@ export function CreateNodeModal({
       ),
     [parent?.id, parent?.name, spaceId, spaceName, locale],
   );
+  /**
+   * Browsing and installing stay where they already work: the Template Center
+   * route owns the detail view, the screenshots, and the install dialog. This
+   * tab exists because people did not know that route was there — it is a
+   * storefront window, not a second checkout — so picking a card closes the
+   * modal and hands off to it.
+   */
+  const openTemplate = (name?: string) => {
+    onOpenChange(false);
+    setLocation(name ? `/templates/${name}` : "/templates");
+  };
+
   // One conversation per place-to-create, per agent (see `AskAgentAction`).
   // Creating three things in the same folder continues one thread; at the root
   // the space stands in, so a root-level session is still stable across clicks.
@@ -299,6 +316,7 @@ export function CreateNodeModal({
           <TabsList className="self-start">
             <TabsTrigger value="manual">{messages.createNode.manualTab}</TabsTrigger>
             <TabsTrigger value="agent">{messages.createNode.agentTab}</TabsTrigger>
+            <TabsTrigger value="template">{messages.createNode.templateTab}</TabsTrigger>
           </TabsList>
 
           <TabsContent className="mt-0 flex flex-col gap-3" value="manual">
@@ -434,8 +452,55 @@ export function CreateNodeModal({
               scenarios={createPrompts.scenarios}
             />
           </TabsContent>
+
+          <TabsContent className="mt-0 flex min-h-0 flex-col gap-3" value="template">
+            <p className="text-muted-foreground text-sm">{messages.createNode.templateTabHint}</p>
+            {orpc ? (
+              <div className="max-h-[46vh] overflow-y-auto pr-1">
+                <TemplateCatalogGrid onOpenTemplate={openTemplate} orpc={orpc} />
+              </div>
+            ) : null}
+            <button
+              className="flex w-fit items-center gap-1 text-muted-foreground text-sm hover:text-foreground"
+              onClick={() => openTemplate()}
+              type="button"
+            >
+              {messages.createNode.templatesBrowseAll}
+              <ArrowRight className="size-4" />
+            </button>
+          </TabsContent>
         </Tabs>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/**
+ * The catalog read, isolated so it only happens when someone looks.
+ *
+ * A separate component rather than a query in the modal because Radix does not
+ * mount an inactive `TabsContent` — so "fetch when the tab is opened" needs no
+ * `enabled` flag, no tracking of which tab is active, and no fake `queryFn` to
+ * satisfy the types while disabled. Mounting IS the trigger.
+ */
+function TemplateCatalogGrid({
+  orpc,
+  onOpenTemplate,
+}: {
+  orpc: BusabaseQueryUtils;
+  onOpenTemplate: (name: string) => void;
+}) {
+  const messages = useCoreI18n();
+  const catalog = useQuery(orpc.templates.list.queryOptions({ input: {} }));
+  return (
+    <TemplateGrid
+      columnsClassName="sm:grid-cols-2"
+      emptyLabel={messages.createNode.templatesEmpty}
+      error={catalog.data?.error}
+      isPending={catalog.isPending}
+      onOpenTemplate={(template) => onOpenTemplate(template.name)}
+      skeletonCount={2}
+      templates={catalog.data?.templates ?? []}
+    />
   );
 }

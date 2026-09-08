@@ -2,6 +2,7 @@ import { DEMO_AGENT_SLUG } from "../../domains/agents/logic/demo-agent";
 import {
   AIRAPP_DEMO_COMPLIANCE_BOARD,
   AIRAPP_DEMO_DEAL_PIPELINE,
+  AIRAPP_DEMO_FUMADOCS,
   AIRAPP_DEMO_HONO_API,
   AIRAPP_DEMO_PURE_HTML,
   AIRAPP_DEMO_PYTHON_EXPLICIT,
@@ -19,8 +20,9 @@ import type { SeedScenario } from "../seed-types";
 // `apps/busabase/scripts/demo/14-airapps.ts` uses for its full REST API gallery,
 // so the two never drift. This baseline seeds the fast Node set (Pure HTML,
 // Hono API, SQLite, Deal Pipeline Board and Compliance Status Board) plus the
-// dependency-free explicit Python example. Slower Vite-based and deliberately
-// broken examples stay out. Deal Pipeline Board / Compliance Status Board read the
+// dependency-free explicit Python example and the Remote-only Fumadocs site.
+// Slower Vite-based and deliberately broken examples stay out. Deal Pipeline
+// Board / Compliance Status Board read the
 // `deals` / `compliance-checklists` Bases live at Run-time via the
 // same-origin `/api/v1` surface (see `demo-content.ts`'s docblock) — those
 // Bases come from a different scenario (`cross-functional.ts`) in this same
@@ -509,6 +511,15 @@ export const enNodeTypesScenario: SeedScenario = {
       description: AIRAPP_DEMO_PYTHON_EXPLICIT.description,
       position: 5,
       files: AIRAPP_DEMO_PYTHON_EXPLICIT.files,
+    },
+    {
+      nodeType: "airapp",
+      nodeId: "nod_airapp_fumadocs_demo",
+      slug: AIRAPP_DEMO_FUMADOCS.slug,
+      name: AIRAPP_DEMO_FUMADOCS.name,
+      description: AIRAPP_DEMO_FUMADOCS.description,
+      position: 6,
+      files: AIRAPP_DEMO_FUMADOCS.files,
     },
   ],
   docs: [

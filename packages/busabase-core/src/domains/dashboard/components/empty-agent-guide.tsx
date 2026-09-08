@@ -1,6 +1,7 @@
 "use client";
 
-import { Bot, Database, GitPullRequest, Sparkles } from "lucide-react";
+import { Bot, Database, GitPullRequest, Plus, Shapes, Sparkles } from "lucide-react";
+import { SPALink } from "openlib/ui/dashboard";
 import { useState } from "react";
 import { useCoreI18n } from "../../../i18n";
 import type { McpGuideEdition } from "./agent-mcp-guides";
@@ -11,9 +12,37 @@ interface EmptyAgentGuideProps {
   edition?: McpGuideEdition;
   /** Current UI language — localizes the pasted prompt in the Agent Integration dialog. */
   lang?: string;
+  /**
+   * Opens the host's "New item" modal. Optional: a host without one (or an
+   * embed with no create surface) simply doesn't get the secondary action —
+   * the template and agent paths still stand on their own.
+   */
+  onCreateNode?: () => void;
 }
 
-export function EmptyAgentGuide({ edition = "desktop", lang }: EmptyAgentGuideProps = {}) {
+/**
+ * The first screen of an empty workspace, ordered by "how soon does this user
+ * see something happen".
+ *
+ * It used to offer exactly one action — connect an agent over MCP — which asks
+ * a brand-new user to LEAVE Busabase (paste a prompt into Claude Code/Cursor,
+ * walk an OAuth flow) before anything at all exists here, and to come back to
+ * the same empty screen. That filtered the whole funnel down to people who had
+ * already installed an agent, and the fallback ("or use the UI buttons") named
+ * a button — the sidebar's lone "+" — that a first-time visitor cannot find.
+ *
+ * So the primary action is now a template: it is the fastest path from empty to
+ * a workspace with Bases, sample rows and — crucially — the author's agent
+ * manual, which is what makes the agent's FIRST conversation succeed instead of
+ * having it guess at a schema that doesn't exist yet. Connecting an agent stays
+ * on this screen, demoted to the text link it should always have been: it is
+ * step two, and it reads as step two.
+ */
+export function EmptyAgentGuide({
+  edition = "desktop",
+  lang,
+  onCreateNode,
+}: EmptyAgentGuideProps = {}) {
   const messages = useCoreI18n();
   const [open, setOpen] = useState(false);
   const guideItems = [
@@ -59,16 +88,39 @@ export function EmptyAgentGuide({ edition = "desktop", lang }: EmptyAgentGuidePr
             );
           })}
         </div>
-        <div className="mt-4 flex flex-wrap items-center gap-2">
+        <div className="mt-4 flex flex-col gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {/* SPALink, not a raw href: this is inside the dashboard's wouter
+                tree, and it carries the current query string (cloud's
+                `?space=tnl_…`, desktop's `?demo=1`) that a bare anchor drops. */}
+            <SPALink
+              className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 font-medium text-primary-foreground text-sm transition hover:bg-primary/90"
+              href="/templates"
+            >
+              <Shapes size={15} />
+              {messages.emptyGuide.startFromTemplate}
+            </SPALink>
+            {onCreateNode ? (
+              <button
+                className="inline-flex h-9 items-center gap-2 rounded-md border border-border bg-background px-3 font-medium text-foreground text-sm transition hover:bg-muted"
+                onClick={onCreateNode}
+                type="button"
+              >
+                <Plus size={15} />
+                {messages.emptyGuide.createManually}
+              </button>
+            ) : null}
+          </div>
+          <span className="text-muted-foreground text-xs">
+            {messages.emptyGuide.startFromTemplateHint}
+          </span>
           <button
-            className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-primary-foreground text-sm font-medium transition hover:bg-primary/90"
+            className="self-start text-muted-foreground text-xs underline underline-offset-4 transition hover:text-foreground"
             onClick={() => setOpen(true)}
             type="button"
           >
-            <Sparkles size={15} />
-            {messages.emptyGuide.openAgentSkills}
+            {messages.emptyGuide.connectAgent}
           </button>
-          <span className="text-muted-foreground text-xs">{messages.emptyGuide.manualHint}</span>
         </div>
       </div>
 
@@ -79,6 +131,17 @@ export function EmptyAgentGuide({ edition = "desktop", lang }: EmptyAgentGuidePr
         edition={edition}
         editionConfirmed
         lang={lang}
+        // Close this dialog first: the host's New item modal is a sibling, and
+        // stacking it under an open Agent Integration dialog leaves the user
+        // creating a Base through a scrim they cannot dismiss.
+        onCreateNode={
+          onCreateNode
+            ? () => {
+                setOpen(false);
+                onCreateNode();
+              }
+            : undefined
+        }
       />
     </>
   );

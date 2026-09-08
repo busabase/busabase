@@ -9,10 +9,15 @@ import type {
   RequestUploadUrlVO,
 } from "open-domains/attachments/types";
 import type { iString } from "openlib/i18n/i-string";
+import type { z } from "zod";
 import { type BusabaseContract, busabaseContract } from "../contract/busabase";
 import type { NodeContentInput } from "../contract/node-content-schemas";
 import type { NodeDetailVO } from "../contract/node-detail-schemas";
 import type { AgentCatalogEntryVO } from "../domains/agents/types";
+import type {
+  groupRecordsInputSchema,
+  groupRecordsResponseSchema,
+} from "../domains/base/contract/record-schemas";
 import type {
   InstallFromGithubDTO,
   InstallPlanFromGithubDTO,
@@ -153,16 +158,19 @@ export interface BusabaseDashboardApiClient {
    * record by part of its name without every record being loaded client-side.
    */
   /**
-   * Exact per-bucket counts for a `select`/`checkbox` field, in one SQL
+   * Exact per-bucket counts, and optionally numeric aggregates, in one SQL
    * aggregate. A board column header needs the REAL total, not the number of
    * cards fetched so far — a count that climbs while you scroll is worse than
    * no count.
+   *
+   * Typed FROM the contract schemas rather than restated. The hand-written
+   * version of this signature silently went stale the moment the endpoint grew
+   * `aggregates` and an optional `fieldSlug`: it still compiled, and it still
+   * described an endpoint that no longer existed.
    */
-  groupRecords: (params: {
-    baseId: string;
-    fieldSlug: string;
-    viewId?: string;
-  }) => Promise<{ groups: Array<{ value: string | null; count: number }>; total: number }>;
+  groupRecords: (
+    params: z.input<typeof groupRecordsInputSchema>,
+  ) => Promise<z.infer<typeof groupRecordsResponseSchema>>;
   listRecordsPage: (params: {
     baseId: string;
     viewId?: string;

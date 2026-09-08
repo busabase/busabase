@@ -113,6 +113,13 @@ export interface AgentIntegrationContentProps {
   targetSpaceId?: string;
   /** Host-owned plugin destinations, shared with its public navigation. */
   pluginItems?: readonly AgentIntegrationPluginItem[];
+  /**
+   * Opens the host's "New item" modal. Every tab here ends in "paste this into
+   * your agent", which is a dead end for someone who has not set one up yet —
+   * this is the way back to a path they can finish today. Omitted on the public
+   * landing page, which has no workspace to create anything in.
+   */
+  onCreateNode?: () => void;
 }
 
 interface AgentIntegrationDialogProps extends AgentIntegrationContentProps {
@@ -148,6 +155,7 @@ export function AgentIntegrationContent({
   lang,
   targetSpaceId,
   pluginItems = [],
+  onCreateNode,
 }: AgentIntegrationContentProps) {
   const contextMessages = useCoreI18n();
   const messages = resolveMessages(lang, contextMessages);
@@ -591,6 +599,17 @@ export function AgentIntegrationContent({
         <p className="text-destructive text-xs" role="alert">
           {messages.integration.copyFailed}
         </p>
+      ) : null}
+      {/* Outside every TabsContent on purpose: whichever transport the user was
+          reading, the answer to "I don't have an agent yet" is the same one. */}
+      {onCreateNode ? (
+        <button
+          className="shrink-0 self-start text-muted-foreground text-xs underline underline-offset-4 transition hover:text-foreground"
+          onClick={onCreateNode}
+          type="button"
+        >
+          {messages.integration.createManually}
+        </button>
       ) : null}
     </Tabs>
   );

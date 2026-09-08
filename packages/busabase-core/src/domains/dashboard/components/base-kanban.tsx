@@ -300,8 +300,15 @@ export function BusaBaseKanban({
     { id: UNCATEGORIZED, name: messages.base.kanbanUncategorized, color: "slate" },
   ];
   // `groupBy` keys the unset bucket as null; the board calls it UNCATEGORIZED.
+  // The key is stringified because the endpoint can now also answer with typed
+  // keys under `bucketing: "sql"` — a board is always on the default GRID
+  // bucketing, where a select's keys are strings, so this only satisfies the
+  // wider type rather than changing what the board sees.
   const countByColumn = new Map<string, number>(
-    (countsQuery.data?.groups ?? []).map((group) => [group.value ?? UNCATEGORIZED, group.count]),
+    (countsQuery.data?.groups ?? []).map((group) => [
+      group.value === null || group.value === undefined ? UNCATEGORIZED : String(group.value),
+      group.count,
+    ]),
   );
 
   const canDrag = Boolean(onMoveRecord);

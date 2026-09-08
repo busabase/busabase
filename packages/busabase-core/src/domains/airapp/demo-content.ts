@@ -146,6 +146,7 @@
  */
 
 import { AIRAPP_DEMO_DATA_EXPLORER } from "./demo-content-data-explorer";
+import { AIRAPP_DEMO_FUMADOCS } from "./demo-content-fumadocs";
 import { AIRAPP_DEMO_KELLY_EMAIL } from "./demo-content-kelly-email";
 import {
   AIRAPP_DEMO_NODE_PINNED_LOCAL,
@@ -153,6 +154,7 @@ import {
   AIRAPP_DEMO_PYTHON_INFERRED,
 } from "./demo-content-runtimes";
 
+export { AIRAPP_DEMO_FUMADOCS } from "./demo-content-fumadocs";
 export {
   AIRAPP_DEMO_NODE_PINNED_LOCAL,
   AIRAPP_DEMO_PYTHON_EXPLICIT,
@@ -1287,6 +1289,7 @@ export const ALL_AIRAPP_DEMOS: AirAppDemoDef[] = [
   AIRAPP_DEMO_COMPLIANCE_BOARD,
   AIRAPP_DEMO_DATA_EXPLORER,
   AIRAPP_DEMO_KELLY_EMAIL,
+  AIRAPP_DEMO_FUMADOCS,
   AIRAPP_DEMO_PYTHON_INFERRED,
   AIRAPP_DEMO_PYTHON_EXPLICIT,
   AIRAPP_DEMO_NODE_PINNED_LOCAL,

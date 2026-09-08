@@ -31,6 +31,8 @@ interface TemplateCenterProps {
   onReviewChangeRequests: () => void;
   /** Passed through to the install dialog's Agent install tab. */
   agentIntegration?: AgentIntegrationTarget;
+  /** Host's "New item" modal — the install dialog's Agent tab offers it as its way out. */
+  onCreateNode?: () => void;
 }
 
 /**
@@ -51,6 +53,7 @@ export function TemplateCenter({
   onInstalled,
   onReviewChangeRequests,
   agentIntegration,
+  onCreateNode,
 }: TemplateCenterProps) {
   const [installing, setInstalling] = useState<TemplateCardVO | null>(null);
 
@@ -116,6 +119,7 @@ export function TemplateCenter({
           }}
           onInstalled={onInstalled}
           onReviewChangeRequests={onReviewChangeRequests}
+          onCreateNode={onCreateNode}
         />
       ) : null}
     </>

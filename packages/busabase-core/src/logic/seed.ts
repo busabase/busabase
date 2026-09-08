@@ -608,6 +608,7 @@ const seedFileTreeNodesIfMissing = async (createdAt: Date, defs: SeedFileTreeDef
           description: def.description,
           icon: seedNodeIcon({ ...def, nodeType: def.nodeType }),
           metadata,
+          position: def.position,
           updatedAt: createdAt,
         })
         .where(and(eq(busabaseNodes.spaceId, spaceId), eq(busabaseNodes.id, def.nodeId)));

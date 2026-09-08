@@ -183,12 +183,15 @@ const listNodesInputSchema = z
       .describe(
         "How many levels beneath the start point to eagerly include (default 2 once either field is set). Capped at 5.",
       ),
-    /**
-     * `active` (default) walks the live tree. `archived` returns the flat set of
-     * soft-archived nodes for the Trash view — no `parentId`/`depth` walk, since
-     * archived nodes are shown as a list, not a tree.
-     */
-    status: z.enum(["active", "archived"]).optional().default("active"),
+    status: z
+      .enum(["active", "archived"])
+      .optional()
+      .default("active")
+      .describe(
+        "`active` walks the live TREE. `archived` returns a FLAT list of soft-archived nodes " +
+          "(the Trash view) with no parent/depth walk — so the response shape you can rely on " +
+          "differs between the two, not just the rows.",
+      ),
     /**
      * Narrow to specific node types and return a FLAT list of lightweight node
      * summaries (`children: []`) instead of walking the tree. This is what
@@ -223,8 +226,13 @@ const listNodesInputSchema = z
   .optional();
 
 const isDescendantInputSchema = z.object({
-  nodeId: z.string(),
-  potentialAncestorId: z.string(),
+  nodeId: z.string().describe("The node walked UPWARDS from — the possible descendant."),
+  potentialAncestorId: z
+    .string()
+    .describe(
+      'The node looked for on the way up. Answers "is `nodeId` inside this one?", not the ' +
+        "reverse — swapping the two silently returns the wrong answer rather than an error.",
+    ),
 });
 
 const isDescendantOutputSchema = z.object({
@@ -307,12 +315,22 @@ const updateNodeAgentPromptsInputSchema = z.object({
 // `.slug` across all registered node types, no content scan, no ranking beyond
 // exact-match-first.
 const searchNodesByNameInputSchema = z.object({
-  query: z.string().min(1),
+  query: z
+    .string()
+    .min(1)
+    .describe("Matched against node NAMES only. Use `/api/v1/search` to search content."),
   // GET route — query params arrive as strings, and oRPC's OpenAPI handler
   // does not coerce them. A bare `z.number()` here rejected every real
   // `?limit=` call with "expected number, received string"; every other
   // limit/page field on a GET route in this file already uses `z.coerce`.
-  limit: z.coerce.number().int().min(1).max(50).optional().default(20),
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(50)
+    .optional()
+    .default(20)
+    .describe("Results to return. Capped at 50 here, unlike most listings' 100."),
 });
 
 const nodeSearchResultSchema = z.object({
@@ -519,8 +537,15 @@ const mentionInboxPageSchema = z.object({
 });
 
 const listMentionInboxInputSchema = z.object({
-  page: z.number().int().min(1).optional().default(1),
-  pageSize: z.number().int().min(1).max(100).optional().default(50),
+  page: z.number().int().min(1).optional().default(1).describe("1-indexed, not 0-indexed."),
+  pageSize: z
+    .number()
+    .int()
+    .min(1)
+    .max(100)
+    .optional()
+    .default(50)
+    .describe("Mentions per page. Capped at 100."),
 });
 
 const markMentionsReadInputSchema = z.object({
@@ -858,8 +883,13 @@ const reviewChangeRequestInputSchema = z.object({
 });
 
 const commentSubjectInputSchema = z.object({
-  subjectType: commentSubjectTypeSchema,
-  subjectId: z.string().min(1),
+  subjectType: commentSubjectTypeSchema.describe(
+    "What the comment thread hangs off, which decides how `subjectId` is interpreted.",
+  ),
+  subjectId: z
+    .string()
+    .min(1)
+    .describe("The subject's id, interpreted according to `subjectType`."),
 });
 
 const createCommentInputSchema = commentSubjectInputSchema.extend({
@@ -875,7 +905,14 @@ const createCommentInputSchema = commentSubjectInputSchema.extend({
 
 const listInputSchema = z
   .object({
-    limit: z.coerce.number().int().min(1).max(100).optional().default(50),
+    limit: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(100)
+      .optional()
+      .default(50)
+      .describe("Rows to return, most recent first. Capped at 100; this listing has no cursor."),
   })
   .optional()
   .default({ limit: 50 });
@@ -886,7 +923,14 @@ const listInputSchema = z
  * differed between `/x` and `/x/archived` was this predicate.
  */
 const listByStatusInputSchema = z.object({
-  status: z.enum(["active", "archived"]).optional().default("active"),
+  status: z
+    .enum(["active", "archived"])
+    .optional()
+    .default("active")
+    .describe(
+      "`active` (default) or the soft-archived set. Archived rows have the SAME shape as live " +
+        "ones — this is a predicate, not a different resource.",
+    ),
 });
 
 // Keyset-paginated change request listing. `status` narrows to specific
@@ -896,12 +940,41 @@ const listByStatusInputSchema = z.object({
 // any operation affects that workspace node, including Base-backed nodes.
 const listChangeRequestsPagedInputSchema = z
   .object({
-    limit: z.coerce.number().int().min(1).max(100).optional().default(50),
-    /** Opaque base64 cursor (`createdAt|id`) for keyset pagination. */
-    cursor: z.string().optional(),
-    status: z.array(changeRequestStatusSchema).optional(),
-    mine: z.boolean().optional(),
-    affectsNodeId: z.string().min(1).optional(),
+    limit: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(100)
+      .optional()
+      .default(50)
+      .describe("Change requests per page. Capped at 100; ask for the next page with `cursor`."),
+    cursor: z
+      .string()
+      .optional()
+      .describe(
+        "Opaque page cursor: pass back the `nextCursor` from the previous response. " +
+          "Do not construct or parse it.",
+      ),
+    status: z
+      .array(changeRequestStatusSchema)
+      .optional()
+      .describe("Keep only these statuses. Omitting it returns every status, not just open ones."),
+    mine: z
+      .boolean()
+      .optional()
+      .describe(
+        "Only change requests CREATED by the acting user — not ones awaiting their review.",
+      ),
+    affectsNodeId: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "Only change requests whose target, or any of their operations, touches this node — " +
+          "including Base-backed nodes. To ask whether a resource already has an unfinished " +
+          "change request, pass this with `limit: 1` rather than paging the space: an empty " +
+          "result is conclusive.",
+      ),
   })
   .optional()
   .default({ limit: 50 });
@@ -916,16 +989,36 @@ const listChangeRequestsResponseSchema = z.object({
 // tab instead of clicking "load more" until they get there; the same filters as
 // the keyset listing apply.
 const changeRequestPageInputShape = {
-  page: z.coerce.number().int().min(1).optional().default(1),
-  pageSize: z.coerce.number().int().min(1).max(100).optional().default(50),
-  status: z.array(changeRequestStatusSchema).optional(),
-  mine: z.boolean().optional(),
+  page: z.coerce.number().int().min(1).optional().default(1).describe("1-indexed, not 0-indexed."),
+  pageSize: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(100)
+    .optional()
+    .default(50)
+    .describe("Change requests per page. Capped at 100."),
+  status: z
+    .array(changeRequestStatusSchema)
+    .optional()
+    .describe("Keep only these statuses. Omitting it returns every status, not just open ones."),
+  mine: z
+    .boolean()
+    .optional()
+    .describe("Only change requests CREATED by the acting user — not ones awaiting their review."),
 };
 
 const listChangeRequestsPageInputSchema = z
   .object({
     ...changeRequestPageInputShape,
-    affectsNodeId: z.string().min(1).optional(),
+    affectsNodeId: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "Only change requests whose target, or any of their operations, touches this node — " +
+          "including Base-backed nodes.",
+      ),
   })
   .optional()
   .default({ page: 1, pageSize: 50 });
@@ -972,9 +1065,22 @@ const inboxSnapshotResponseSchema = listChangeRequestsPageResponseSchema.extend(
 const SEARCH_SOURCES = ["records", "files", "names", "nodes"] as const;
 
 const searchInputSchema = z.object({
-  query: z.string().default(""),
-  limit: z.coerce.number().int().min(1).max(100).optional().default(20),
-  offset: z.coerce.number().int().min(0).optional().default(0),
+  query: z.string().default("").describe("Full-text query. An empty string matches nothing."),
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(100)
+    .optional()
+    .default(20)
+    .describe("Results per page. Capped at 100; note the default is 20, not 50."),
+  offset: z.coerce
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .default(0)
+    .describe("0-indexed skip count. This endpoint pages by offset, not by cursor."),
   /**
    * Restrict which content this call searches. Omitted means all three
    * (unchanged behavior for every caller before this parameter existed).
@@ -987,7 +1093,12 @@ const searchInputSchema = z.object({
   sources: z
     .union([z.array(z.enum(SEARCH_SOURCES)), z.enum(SEARCH_SOURCES)])
     .transform((value) => (Array.isArray(value) ? value : [value]))
-    .optional(),
+    .optional()
+    .describe(
+      "Restrict which content is searched. Omitting it searches ALL sources. " +
+        "Repeat the parameter to pass several (`?sources=records&sources=files`); a single " +
+        "occurrence is accepted as a bare value.",
+    ),
 });
 
 // ── Auth verification (GET /auth) ───────────────────────────────────────────

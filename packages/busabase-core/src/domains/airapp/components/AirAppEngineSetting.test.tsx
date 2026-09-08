@@ -62,6 +62,42 @@ describe("AirAppEngineSetting", () => {
     expect(markup).toContain("Follow the app (Remote machine)");
   });
 
+  it("renders a manifest requirement as read-only and ignores a saved override", () => {
+    const markup = renderToStaticMarkup(
+      <CoreI18nProvider locale="en">
+        <AirAppEngineSetting
+          appRequired="remote"
+          availableEngines={["browser", "remote"]}
+          onValueChange={vi.fn()}
+          value="browser"
+        />
+      </CoreI18nProvider>,
+    );
+
+    expect(markup).toContain("data-airapp-engine-required");
+    expect(markup).toContain("App requires Remote machine");
+    expect(markup).toContain("cannot be overridden");
+    expect(markup).not.toContain("Follow the app");
+    expect(markup).not.toContain("node-settings-airapp-engine");
+  });
+
+  it("explains how to enable a required Remote machine when Sandock is unavailable", () => {
+    const markup = renderToStaticMarkup(
+      <CoreI18nProvider locale="en">
+        <AirAppEngineSetting
+          appRequired="remote"
+          availableEngines={["browser"]}
+          onValueChange={vi.fn()}
+          value={FOLLOW_APP}
+        />
+      </CoreI18nProvider>,
+    );
+
+    expect(markup).toContain("App requires Remote machine");
+    expect(markup).toContain("Sandock is not configured on this deployment.");
+    expect(markup).not.toContain("node-settings-airapp-engine");
+  });
+
   it("falls back to a currently available engine when saved configuration is stale", () => {
     expect(resolveAvailableAirAppRunnerKind("remote", ["browser"])).toBe("browser");
     expect(resolveAvailableAirAppRunnerKind("remote", ["browser", "remote"])).toBe("remote");

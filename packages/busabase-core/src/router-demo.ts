@@ -967,17 +967,41 @@ export const busabaseDemoRouter = os.router({
       if (!base) {
         throw new ORPCError("NOT_FOUND", { message: `Base not found: ${input.baseId}` });
       }
-      const field = base.fields.find((entry) => entry.slug === input.fieldSlug);
-      if (!field) {
-        throw new ORPCError("NOT_FOUND", {
-          message: `Field not found in Base ${input.baseId}: ${input.fieldSlug}`,
-        });
+      // `fieldSlug` is optional — omitted means one bucket over everything,
+      // which is what a summary tile asks for.
+      const groupSlug = input.fieldSlug;
+      const sqlBuckets = input.bucketing === "sql";
+      const field = groupSlug ? base.fields.find((entry) => entry.slug === groupSlug) : undefined;
+      if (groupSlug) {
+        if (!field) {
+          throw new ORPCError("NOT_FOUND", {
+            message: `Field not found in Base ${input.baseId}: ${groupSlug}`,
+          });
+        }
+        // Demo mode mirrors the real endpoint's rule rather than its table: SQL
+        // bucketing groups on the raw stored value, so number and date join the
+        // grid's select/checkbox.
+        const groupable = sqlBuckets
+          ? new Set([
+              ...GROUPABLE_FIELD_TYPES,
+              "number",
+              "auto_number",
+              "date",
+              "created_time",
+              "updated_time",
+            ])
+          : GROUPABLE_FIELD_TYPES;
+        if (!groupable.has(field.type)) {
+          throw new ORPCError("BAD_REQUEST", {
+            message: `Cannot group by a ${field.type} field: ${groupSlug}. Groupable types (bucketing: ${input.bucketing}): ${[...groupable].join(", ")}.`,
+          });
+        }
       }
-      if (!GROUPABLE_FIELD_TYPES.has(field.type)) {
-        throw new ORPCError("BAD_REQUEST", {
-          message: `Cannot group by a ${field.type} field: ${input.fieldSlug}. Groupable types: ${[...GROUPABLE_FIELD_TYPES].join(", ")}.`,
-        });
-      }
+      const bucketKeyFor = (value: unknown) => {
+        if (!sqlBuckets) return groupKeyForValue(value, field?.type ?? "");
+        if (value === null || value === undefined) return null;
+        return value as string | number | boolean;
+      };
       const view = input.viewId
         ? demoListViews(base.id).find((item) => item.id === input.viewId)
         : undefined;
@@ -988,18 +1012,62 @@ export const busabaseDemoRouter = os.router({
         filters: [...(view?.config.filters ?? []), ...(input.filters ?? [])],
         sorts: [],
       });
-      const counts = new Map<string | null, number>();
+      const counts = new Map<string | number | boolean | null, number>();
+      const numbers = new Map<string | number | boolean | null, Map<string, number[]>>();
+      const requested = input.aggregates ?? [];
       for (const record of matched) {
-        const key = groupKeyForValue(record.headCommit.payload[input.fieldSlug], field.type);
+        const key = groupSlug ? bucketKeyFor(record.headCommit.payload[groupSlug]) : null;
         counts.set(key, (counts.get(key) ?? 0) + 1);
+        if (!requested.length) continue;
+        const bucket = numbers.get(key) ?? new Map<string, number[]>();
+        for (const aggregate of requested) {
+          const raw = record.headCommit.payload[aggregate.fieldSlug];
+          const numeric = typeof raw === "number" ? raw : Number(raw);
+          if (raw !== null && raw !== undefined && raw !== "" && Number.isFinite(numeric)) {
+            bucket.set(aggregate.fieldSlug, [...(bucket.get(aggregate.fieldSlug) ?? []), numeric]);
+          }
+        }
+        numbers.set(key, bucket);
       }
+      const aggregatesFor = (key: string | number | boolean | null) => {
+        if (!requested.length) return undefined;
+        const bucket = numbers.get(key) ?? new Map<string, number[]>();
+        const result: Record<string, number | null> = {};
+        for (const aggregate of requested) {
+          const values = bucket.get(aggregate.fieldSlug) ?? [];
+          const label = `${aggregate.fn}:${aggregate.fieldSlug}`;
+          if (aggregate.fn === "count") {
+            result[label] = values.length;
+          } else if (values.length === 0) {
+            result[label] = null;
+          } else {
+            const total = values.reduce((sum, value) => sum + value, 0);
+            result[label] =
+              aggregate.fn === "sum"
+                ? total
+                : aggregate.fn === "avg"
+                  ? total / values.length
+                  : aggregate.fn === "min"
+                    ? Math.min(...values)
+                    : Math.max(...values);
+          }
+        }
+        return result;
+      };
       const groups = [...counts.entries()]
-        .map(([value, count]) => ({ value, count }))
+        .map(([value, count]) => ({
+          value,
+          count,
+          ...(aggregatesFor(value) ? { aggregates: aggregatesFor(value) } : {}),
+        }))
         .sort((left, right) => {
           if (left.value === right.value) return 0;
           if (left.value === null) return 1;
           if (right.value === null) return -1;
-          return left.value < right.value ? -1 : 1;
+          if (typeof left.value === "number" && typeof right.value === "number") {
+            return left.value - right.value;
+          }
+          return String(left.value) < String(right.value) ? -1 : 1;
         });
       return { groups, total: groups.reduce((sum, group) => sum + group.count, 0) };
     }),

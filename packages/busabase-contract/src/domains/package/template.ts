@@ -153,6 +153,32 @@ export const TemplateManifestSchema = z.object({
 export type TemplateManifest = z.infer<typeof TemplateManifestSchema>;
 
 /**
+ * The Template Center's one axis Airtable/Notion galleries have no equivalent
+ * of: not what a template is *for*, but whether installing it lets an agent
+ * act on your behalf. `gated-write` drafts and waits for a human; `local-write`
+ * only ever touches this space's own tables; `read-only` never writes;
+ * `sandbox` seeds generated demo data rather than a real workflow.
+ */
+export const TEMPLATE_RISK_LEVELS = ["gated-write", "local-write", "read-only", "sandbox"] as const;
+export const TemplateRiskLevelSchema = z.enum(TEMPLATE_RISK_LEVELS);
+export type TemplateRiskLevel = (typeof TEMPLATE_RISK_LEVELS)[number];
+
+/**
+ * Normalize a declared `risk` string to a known level, or `undefined`.
+ *
+ * Deliberately never throws. The frontmatter field stays a free-form string
+ * (see `SkillBusabaseMetadataSchema` below) so an author's typo or an
+ * already-published package using a since-retired term (`"review-first"`, from
+ * before this enum existed) fails soft — the card shows "undeclared" instead of
+ * guessing, and the package still installs. Only `busabase-cli check` should
+ * ever turn an unrecognized value into something the author sees and fixes.
+ */
+export const parseTemplateRisk = (raw: string | undefined): TemplateRiskLevel | undefined => {
+  const result = TemplateRiskLevelSchema.safeParse(raw);
+  return result.success ? result.data : undefined;
+};
+
+/**
  * `metadata.busabase` inside the root `SKILL.md`'s YAML frontmatter.
  *
  * `template: true` is an EXPLICIT opt-in, not an inference from "this skill
@@ -165,6 +191,12 @@ export const SkillBusabaseMetadataSchema = z.object({
   folderSlug: z.string().optional(),
   /** Resource keys the manual talks about; each must exist under `content/`. */
   resources: z.array(z.string()).default([]),
+  /**
+   * Free-form on purpose — see `parseTemplateRisk`. Validating this to the enum
+   * here would turn a stranger's typo or a retired term into a hard parse
+   * failure for the whole frontmatter, which is a worse outcome than a card
+   * that cannot show a risk badge.
+   */
   risk: z.string().optional(),
 });
 export type SkillBusabaseMetadata = z.infer<typeof SkillBusabaseMetadataSchema>;

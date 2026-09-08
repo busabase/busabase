@@ -224,6 +224,7 @@ function GeneralTabContent({
   const [runnerKind, setRunnerKind] = useState<AirAppEngineChoice>(FOLLOW_APP);
   /** What `airapp.json` asks for, so "follow the app" can name it. */
   const [appPreferred, setAppPreferred] = useState<AirAppRunnerKind | undefined>(undefined);
+  const [appRequired, setAppRequired] = useState<AirAppRunnerKind | undefined>(undefined);
   const hydratedRef = useRef(false);
   const runnerKindDirtyRef = useRef(false);
 
@@ -252,6 +253,7 @@ function GeneralTabContent({
     setName(nodeName);
     runnerKindDirtyRef.current = false;
     setAppPreferred(undefined);
+    setAppRequired(undefined);
   }, [open, nodeName]);
 
   // Adopt the node's saved override once the shared `nodes.get` fetch resolves,
@@ -280,7 +282,9 @@ function GeneralTabContent({
           type: "airapp",
         });
         if (cancelled || manifest.encoding !== "utf8") return;
-        setAppPreferred(parseAirAppManifest(manifest.content).preferredEngine);
+        const parsedManifest = parseAirAppManifest(manifest.content);
+        setAppPreferred(parsedManifest.preferredEngine);
+        setAppRequired(parsedManifest.requiredEngine);
       } catch {
         // No manifest, or an unreadable one. "Follow the app" then simply means
         // the default — which is exactly what it will do.
@@ -309,9 +313,7 @@ function GeneralTabContent({
   }, [open, focusField]);
 
   const createCr = useMutation(orpc.nodes.createChangeRequest.mutationOptions());
-  const reviewCr = useMutation(orpc.changeRequests.review.mutationOptions());
-  const mergeCr = useMutation(orpc.changeRequests.merge.mutationOptions());
-  const isSaving = createCr.isPending || reviewCr.isPending || mergeCr.isPending;
+  const isSaving = createCr.isPending;
 
   // Same "invalidate the sidebar tree + every cached query keyed by this
   // node's id/slug" sweep `NodeRenameDialog` used — see that component's doc
@@ -331,7 +333,12 @@ function GeneralTabContent({
     const trimmed = name.trim();
     if (!trimmed) return;
     try {
+      // The intent goes to the endpoint, which applies it in the same request.
+      // Omitting it let the permission-aware default answer BOTH modes the same
+      // way, so "submit for review" renamed the node on the spot and then said a
+      // request was waiting.
       const changeRequest = await createCr.mutateAsync({
+        autoMerge: options?.mergeImmediately === true,
         operations: [
           {
             kind: "rename",
@@ -342,18 +349,15 @@ function GeneralTabContent({
           },
         ],
       });
-      if (options?.mergeImmediately) {
-        await reviewCr.mutateAsync({ changeRequestIds: [changeRequest.id], verdict: "approved" });
-        await mergeCr.mutateAsync({ changeRequestIds: [changeRequest.id] });
-        await invalidateNodes();
-        if (nodeType === "airapp" && runnerKindDirtyRef.current) await saveEngine();
+      await invalidateNodes();
+      if (nodeType === "airapp" && runnerKindDirtyRef.current) await saveEngine();
+      // Report what happened, not what was asked for.
+      if (changeRequest.status === "merged") {
         toast.success(t.saved);
         onRenamed?.(trimmed);
         onClose();
         return;
       }
-      await invalidateNodes();
-      if (nodeType === "airapp" && runnerKindDirtyRef.current) await saveEngine();
       toast.success(t.changeRequestSubmitted);
       onClose();
     } catch (err) {
@@ -406,6 +410,7 @@ function GeneralTabContent({
       {nodeType === "airapp" ? (
         <AirAppEngineSetting
           appPreferred={appPreferred}
+          appRequired={appRequired}
           availableEngines={availableAirAppEngines}
           disabled={!detail}
           onValueChange={(next) => {

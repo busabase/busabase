@@ -1076,27 +1076,37 @@ export const mergeFileTreeFile = async (
     throw new ORPCError("BAD_REQUEST", {
       message: `${labelForType(type)} legacy direct binary file commits are no longer supported. Upload binary files as Assets and merge an asset operation.`,
     });
-  } else if (fields.encoding === "asset" && fields.assetId) {
-    await upsertFileAssetAtPath(
-      node,
-      {
-        path: item.filePath,
-        assetId: fields.assetId,
-        displayName: fields.displayName ?? undefined,
-        mimeType: fields.mimeType ?? undefined,
-      },
-      _ctx.db,
-    );
   } else {
-    await upsertFileAssetAtPath(
-      node,
-      {
-        path: item.filePath,
-        content: fields.nextContent ?? "",
-        mimeType: fields.mimeType ?? undefined,
-      },
-      _ctx.db,
-    );
+    if (action === "create") {
+      const existing = await findMountedAsset(node, item.filePath, _ctx.db);
+      if (existing) {
+        throw new ORPCError("CONFLICT", {
+          message: `${labelForType(type)} file already exists: ${item.filePath}`,
+        });
+      }
+    }
+    if (fields.encoding === "asset" && fields.assetId) {
+      await upsertFileAssetAtPath(
+        node,
+        {
+          path: item.filePath,
+          assetId: fields.assetId,
+          displayName: fields.displayName ?? undefined,
+          mimeType: fields.mimeType ?? undefined,
+        },
+        _ctx.db,
+      );
+    } else {
+      await upsertFileAssetAtPath(
+        node,
+        {
+          path: item.filePath,
+          content: fields.nextContent ?? "",
+          mimeType: fields.mimeType ?? undefined,
+        },
+        _ctx.db,
+      );
+    }
   }
 };
 

@@ -116,7 +116,16 @@ export const CreateEmbedLinkInputSchema = z.object({
 export type CreateEmbedLinkDTO = z.infer<typeof CreateEmbedLinkInputSchema>;
 
 export const ListEmbedLinksInputSchema = z
-  .object({ type: EmbedTargetTypeSchema.optional(), typeId: z.string().min(1).optional() })
+  .object({
+    type: EmbedTargetTypeSchema.optional().describe(
+      "Which kind of target the links point at. Omitting it returns links of every kind.",
+    ),
+    typeId: z
+      .string()
+      .min(1)
+      .optional()
+      .describe("The target's id, interpreted according to `type`."),
+  })
   .optional()
   .default({});
 export type ListEmbedLinksDTO = z.infer<typeof ListEmbedLinksInputSchema>;

@@ -155,6 +155,12 @@ interface InstallFromGithubModalProps {
    * Desktop's local guidance.
    */
   agentIntegration?: AgentIntegrationTarget;
+  /**
+   * Opens the host's "New item" modal, offered as the way out of the Agent
+   * install tab for a user who has no agent set up yet. Closes this modal first
+   * — two stacked dialogs is not a place to leave anyone.
+   */
+  onCreateNode?: () => void;
 }
 
 export function InstallFromGithubModal({
@@ -167,6 +173,7 @@ export function InstallFromGithubModal({
   initialIntoFolder,
   initialPackageName,
   agentIntegration,
+  onCreateNode,
 }: InstallFromGithubModalProps) {
   const messages = useCoreI18n();
   const [repoUrl, setRepoUrl] = useState(initialRepoUrl ?? "");
@@ -331,6 +338,16 @@ export function InstallFromGithubModal({
     }
   };
 
+  // Runs the full `close()` (not a bare `onOpenChange(false)`) so a refresh
+  // still fires when the user reached the Agent tab AFTER installing — the
+  // workspace changed, and bailing out to "New item" must not lose that.
+  const createNodeFromHere = onCreateNode
+    ? () => {
+        close();
+        onCreateNode();
+      }
+    : undefined;
+
   // A collision the server could not resolve — `renamedTo` is set only when
   // `rename` was on and produced a free slug.
   const unresolvedCollisions = plan?.collisions.filter((collision) => !collision.renamedTo) ?? [];
@@ -413,7 +430,11 @@ export function InstallFromGithubModal({
             // are complementary rather than alternatives — the UI tab says so,
             // and this is where that sentence has to be actionable, because it
             // is the moment the user has just proved they want the app.
-            <AgentInstallPanel agentIntegration={agentIntegration} plan={plan} />
+            <AgentInstallPanel
+              agentIntegration={agentIntegration}
+              onCreateNode={createNodeFromHere}
+              plan={plan}
+            />
           ) : result ? (
             <ResultStep
               messages={messages}
@@ -472,7 +493,11 @@ export function InstallFromGithubModal({
                     </TabsList>
 
                     <TabsContent className="mt-4" value="agent">
-                      <AgentInstallPanel agentIntegration={agentIntegration} plan={plan} />
+                      <AgentInstallPanel
+                        agentIntegration={agentIntegration}
+                        onCreateNode={createNodeFromHere}
+                        plan={plan}
+                      />
                     </TabsContent>
 
                     <TabsContent className="mt-4 flex flex-col gap-4" value="ui">
