@@ -175,6 +175,25 @@ jobs:
           path: apps/busabase/playwright-report/
           retention-days: 14
 
+  # Build the final runtime image before a release PR can merge. The publishing
+  # workflow still owns registry login and multi-arch pushes on main; this job
+  # is credential-free and proves the Dockerfile against the exact PR tree.
+  docker:
+    name: Docker build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./apps/busabase/Dockerfile
+          platforms: linux/amd64
+          push: false
+          cache-from: type=gha,scope=busabase-pr
+          cache-to: type=gha,mode=max,scope=busabase-pr
+
   benchmark:
     runs-on: ubuntu-latest
     timeout-minutes: 15
