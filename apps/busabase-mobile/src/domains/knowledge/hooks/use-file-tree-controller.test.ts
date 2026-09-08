@@ -139,6 +139,22 @@ describe("useFileTreeController", () => {
     expect(onChangeRequestCreated).toHaveBeenCalledWith("cr-update");
   });
 
+  it("blocks a new file whose path already exists instead of failing on submit", () => {
+    const options = createOptions();
+    const { result } = renderHook(() => useFileTreeController(options));
+
+    act(() => result.current.startNewFile());
+    act(() => result.current.updateNewFilePath("README.md"));
+
+    expect(result.current.newFilePathError).toContain("README.md");
+
+    act(() => result.current.submitNewFile());
+    expect(options.onCreateChangeRequest).not.toHaveBeenCalled();
+
+    act(() => result.current.updateNewFilePath("docs/README.md"));
+    expect(result.current.newFilePathError).toBeNull();
+  });
+
   it("requires confirmation before discarding a changed new file", () => {
     const { result } = renderHook(() => useFileTreeController(createOptions()));
 

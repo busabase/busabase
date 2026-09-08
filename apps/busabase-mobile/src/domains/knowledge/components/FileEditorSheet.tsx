@@ -20,6 +20,7 @@ interface FileEditorSheetProps {
   mode: FileEditorMode;
   saving: boolean;
   actionError: string | null;
+  newFilePathError: string | null;
   message: string;
   messagePlaceholder: string;
   summary?: string;
@@ -41,6 +42,7 @@ export function FileEditorSheet({
   mode,
   saving,
   actionError,
+  newFilePathError,
   message,
   messagePlaceholder,
   summary,
@@ -70,12 +72,14 @@ export function FileEditorSheet({
           <NativeActionBar>
             {actionError ? (
               <NativeInlineError message={actionError} onReset={onClearError} />
+            ) : newFilePathError ? (
+              <NativeInlineError message={newFilePathError} />
             ) : null}
             {newFile ? (
               <Button
                 label="Create change request"
                 loading={saving}
-                disabled={saving || newFile.path.trim().length === 0}
+                disabled={saving || newFile.path.trim().length === 0 || Boolean(newFilePathError)}
                 fullWidth
                 onPress={onCreate}
               />

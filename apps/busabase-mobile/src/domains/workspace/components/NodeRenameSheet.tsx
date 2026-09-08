@@ -62,17 +62,17 @@ export function NodeRenameSheet({ visible, node, onClose, onBack }: NodeRenameSh
       const trimmed = name.trim();
       if (!buda) throw new Error(t.common.notConnected);
       if (!trimmed) throw new Error(t.rename.nameRequired);
+      // `autoMerge` has to be sent. Without it the endpoint's permission-aware
+      // default answered BOTH buttons the same way: "Request rename" renamed the
+      // node on the spot for a write-capable user and this still reported
+      // `merged: false`. Report what the server did, not what was asked for —
+      // `autoMerge: true` is not a permission override, so an actor without write
+      // gets a pending request back either way.
       const changeRequest = await buda.client.nodes.createChangeRequest({
+        autoMerge: mergeImmediately,
         operations: [{ kind: "rename", nodeId: node.id, name: trimmed }],
       });
-      if (mergeImmediately) {
-        await buda.client.changeRequests.review({
-          changeRequestIds: [changeRequest.id],
-          verdict: "approved",
-        });
-        await buda.client.changeRequests.merge({ changeRequestIds: [changeRequest.id] });
-      }
-      return { changeRequest, merged: mergeImmediately };
+      return { changeRequest, merged: changeRequest.status === "merged" };
     },
     onSuccess: async () => {
       await invalidateNodes();

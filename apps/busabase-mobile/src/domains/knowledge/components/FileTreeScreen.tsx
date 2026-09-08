@@ -117,6 +117,7 @@ export function FileTreeScreen({
         mode={controller.fileEditorMode}
         saving={controller.saving}
         actionError={controller.actionError}
+        newFilePathError={controller.newFilePathError}
         message={controller.fileChangeMessage}
         messagePlaceholder={controller.fileEditorMessagePlaceholder}
         summary={controller.fileEditorSummary}
