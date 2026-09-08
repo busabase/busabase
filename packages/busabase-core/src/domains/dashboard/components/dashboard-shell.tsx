@@ -20,6 +20,7 @@ import {
   Plus,
   Search,
   Settings,
+  Shapes,
   Shield,
   Sparkles,
   Star,
@@ -76,7 +77,14 @@ const isCoreLocale = (locale: string | undefined): locale is keyof typeof coreMe
  * in" — so the round trip "review an inbox item → go check a Base → back to
  * Inbox" costs one click instead of another trip through the menu.
  */
-type ContextualNavKey = "inbox" | "activity" | "archived" | "assets" | "agents" | "apps";
+type ContextualNavKey =
+  | "inbox"
+  | "activity"
+  | "archived"
+  | "assets"
+  | "agents"
+  | "apps"
+  | "templates";
 
 /** Maps a wouter location onto its contextual destination, or null for everything else. */
 const contextualNavKeyForPath = (location: string): ContextualNavKey | null => {
@@ -87,6 +95,7 @@ const contextualNavKeyForPath = (location: string): ContextualNavKey | null => {
   if (path === "/assets" || path.startsWith("/assets/")) return "assets";
   if (path === "/agents" || path.startsWith("/agents/")) return "agents";
   if (path === "/apps" || path.startsWith("/apps/")) return "apps";
+  if (path === "/templates" || path.startsWith("/templates/")) return "templates";
   return null;
 };
 
@@ -107,7 +116,8 @@ const isContextualNavKey = (value: string | null): value is ContextualNavKey =>
   value === "archived" ||
   value === "assets" ||
   value === "agents" ||
-  value === "apps";
+  value === "apps" ||
+  value === "templates";
 
 const readStoredContextualNavKey = (): ContextualNavKey | null => {
   try {
@@ -676,6 +686,8 @@ export function BusabaseDashboardShell({
         return { title: "Agents", url: "/agents", icon: Bot };
       case "apps":
         return { title: nav.apps, url: "/apps", icon: LayoutGrid };
+      case "templates":
+        return { title: nav.templates, url: "/templates", icon: Shapes };
       default:
         return null;
     }
@@ -685,6 +697,7 @@ export function BusabaseDashboardShell({
     nav.activity,
     nav.archive,
     nav.apps,
+    nav.templates,
     assetsLabel,
     activeChangeRequestCount,
   ]);

@@ -19,6 +19,7 @@
 
 import type { AirAppRuntimeEvent } from "busabase-contract/domains/airapp/contract";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { AIRAPP_DEMO_FUMADOCS } from "../demo-content";
 
 const LIVE_URL = process.env.AIRAPP_SANDOCK_URL;
 const CLOUD_URL = process.env.AIRAPP_SANDOCK_CLOUD_URL;
@@ -84,6 +85,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
 http.server.ThreadingHTTPServer(("0.0.0.0", int(os.environ["PORT"])), Handler).serve_forever()
 `,
 };
+
+const CLOUD_FUMADOCS_FILES = Object.fromEntries(
+  AIRAPP_DEMO_FUMADOCS.files.map((file) => [file.path, file.content]),
+);
 
 let previous: { url?: string; key?: string; spaceId?: string };
 
@@ -170,7 +175,7 @@ const createCloudRun = (
     ready: async () => {
       const { runAirAppSandock } = await import("./sandock-runtime");
       gen = runAirAppSandock({ nodeId, files, owner }, controller.signal);
-      for (let i = 0; i < 60; i += 1) {
+      for (let i = 0; i < 500; i += 1) {
         const next = await gen.next();
         if (next.done) break;
         events.push(next.value);
@@ -242,6 +247,21 @@ describe.skipIf(!CLOUD_ENABLED)("runAirAppSandock — against Sandock Cloud", ()
     expect(eventLog(reusedPythonRun.events)).toContain("restarting Sandock sandbox");
     expect(reusedPythonRun.html).toContain("Busabase Python Cloud preview");
   }, 300_000);
+
+  it("installs and serves the Fumadocs demo, including its nested route", async () => {
+    const result = await runCloudApp("sandock-cloud-fumadocs", CLOUD_FUMADOCS_FILES);
+    const log = eventLog(result.events);
+
+    expect(log).toContain("provisioning a sandbox");
+    expect(log).toContain("fumadocs-mdx");
+    expect(log).toContain("next dev");
+    expect(result.html).toContain("Fumadocs AirApp");
+
+    const nestedUrl = new URL(result.target);
+    nestedUrl.pathname = `${nestedUrl.pathname.replace(/\/$/, "")}/docs/getting-started`;
+    const nestedResponse = await waitForPreview(nestedUrl.toString());
+    expect(await nestedResponse.text()).toContain("Getting Started");
+  }, 600_000);
 
   it("keeps concurrent runs of the same AirApp isolated by owner", async () => {
     const first = createCloudRun(

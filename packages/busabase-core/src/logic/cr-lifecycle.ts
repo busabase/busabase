@@ -3474,6 +3474,10 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
   // ctx.mergedRecordIds. Used below to fire a `record.created` webhook only
   // for genuinely new records, not every record merely touched by the CR.
   const newlyCreatedRecordIds: string[] = [];
+  // Same tracking, for record_update specifically — fires `record.updated`
+  // without also firing it for record_delete/record_restore, which touch
+  // ctx.mergedRecordIds too but are not an "updated fields" event.
+  const updatedRecordIds: string[] = [];
   await db.transaction(async (tx) => {
     await claimChangeRequestForMerge(tx as unknown as MergeCtx["db"], changeRequest.id, timestamp);
 
@@ -3517,9 +3521,12 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
         case "view_restore":
           await mergeViewRestoreBase(ctx, item, headCommit);
           break;
-        case "record_update":
+        case "record_update": {
+          const beforeCount = ctx.mergedRecordIds.length;
           await mergeRecordUpdateBase(ctx, item, headCommit);
+          updatedRecordIds.push(...ctx.mergedRecordIds.slice(beforeCount));
           break;
+        }
         case "record_delete":
           await mergeRecordDeleteBase(ctx, item, headCommit);
           break;
@@ -3677,6 +3684,47 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
         })
         .catch((error) => {
           console.error("[busabase] record.created webhook dispatch failed", error);
+        });
+    }
+  }
+
+  // Same shape, for `record.updated` — see updatedRecordIds above for why this
+  // is record_update specifically, not every record touched by the CR.
+  if (updatedRecordIds.length > 0) {
+    const webhookSpaceId = getContextSpaceId();
+    const hasListener = await hasWebhookRuleFor(db, {
+      spaceId: webhookSpaceId,
+      baseId: changeRequest.baseId,
+      eventType: "record.updated",
+    });
+    if (hasListener) {
+      const updatedRecordRows = await db
+        .select()
+        .from(busabaseRecords)
+        .where(
+          and(
+            inArray(busabaseRecords.id, updatedRecordIds),
+            eq(busabaseRecords.spaceId, webhookSpaceId),
+          ),
+        );
+      void hydrateRecords(updatedRecordRows)
+        .then(async (recordVOs) => {
+          for (const recordVO of recordVOs) {
+            await dispatchWebhookEvent(db, {
+              spaceId: webhookSpaceId,
+              baseId: changeRequest.baseId,
+              eventType: "record.updated",
+              payload: {
+                recordId: recordVO.id,
+                baseId: changeRequest.baseId,
+                changeRequestId: changeRequest.id,
+                fields: recordVO.headCommit.payload,
+              },
+            });
+          }
+        })
+        .catch((error) => {
+          console.error("[busabase] record.updated webhook dispatch failed", error);
         });
     }
   }

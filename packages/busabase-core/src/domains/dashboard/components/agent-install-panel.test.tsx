@@ -71,4 +71,35 @@ describe("AgentInstallPanel", () => {
     expect(copyPromptClasses).not.toContain("bg-background");
     expect(copyPromptClasses).not.toContain("border-input");
   });
+
+  it("offers a way out for a user who has no agent yet", () => {
+    const withHost = renderToStaticMarkup(
+      <CoreI18nProvider locale="en">
+        <AgentInstallPanel onCreateNode={() => {}} plan={plan} />
+      </CoreI18nProvider>,
+    );
+    expect(withHost).toContain("No agent set up yet?");
+
+    // Hosts that cannot open a New-item modal must not paint a dead link.
+    const withoutHost = renderToStaticMarkup(
+      <CoreI18nProvider locale="en">
+        <AgentInstallPanel plan={plan} />
+      </CoreI18nProvider>,
+    );
+    expect(withoutHost).not.toContain("No agent set up yet?");
+  });
+
+  it("keeps the way out on the no-skill branch, where the tab has nothing else", () => {
+    const markup = renderToStaticMarkup(
+      <CoreI18nProvider locale="en">
+        <AgentInstallPanel
+          onCreateNode={() => {}}
+          plan={{ ...plan, counts: { ...plan.counts, skills: 0 } }}
+        />
+      </CoreI18nProvider>,
+    );
+
+    expect(markup).toContain("This package carries no agent manual");
+    expect(markup).toContain("No agent set up yet?");
+  });
 });

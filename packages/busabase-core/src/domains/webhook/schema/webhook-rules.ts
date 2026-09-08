@@ -3,6 +3,7 @@ import { spaceIdColumn } from "../../../db/space-column";
 
 export type WebhookEventType =
   | "record.created"
+  | "record.updated"
   | "ai_mention"
   | "changes_requested"
   | "asset.uploaded";

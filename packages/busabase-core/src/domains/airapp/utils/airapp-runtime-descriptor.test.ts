@@ -79,6 +79,20 @@ describe("resolveRunPlan — explicit manifest", () => {
     expect(plan.preferredEngine).toBe("local");
   });
 
+  it("accepts canonical required engines and carries the requirement into the run plan", () => {
+    for (const requiredEngine of ["browser", "local", "remote"] as const) {
+      expect(resolveRunPlan(manifest({ requiredEngine })).requiredEngine).toBe(requiredEngine);
+    }
+  });
+
+  it("rejects invalid or ambiguous engine requirements", () => {
+    expect(() => resolveRunPlan(manifest({ requiredEngine: "sandock" }))).toThrow(/requiredEngine/);
+    expect(() => resolveRunPlan(manifest({ requiredEngine: 1 }))).toThrow(/requiredEngine/);
+    expect(() =>
+      resolveRunPlan(manifest({ preferredEngine: "remote", requiredEngine: "remote" })),
+    ).toThrow(/both.*preferredEngine.*requiredEngine/);
+  });
+
   it("rejects a malformed manifest rather than silently falling back", () => {
     expect(() => resolveRunPlan({ [AIRAPP_MANIFEST_PATH]: "{ not json" })).toThrow(
       AirAppManifestError,
@@ -148,6 +162,12 @@ describe("engine eligibility", () => {
 
   it("falls back rather than failing when the wanted engine is unavailable here", () => {
     expect(resolveEngine("node", "remote", ["browser"])).toBe("browser");
+  });
+
+  it("gives a required engine absolute priority without falling back", () => {
+    expect(resolveEngine("node", "browser", ["browser", "remote"], "remote")).toBe("remote");
+    expect(resolveEngine("node", "browser", ["browser"], "remote")).toBeNull();
+    expect(resolveEngine("python", "remote", ["browser", "remote"], "browser")).toBeNull();
   });
 
   it("returns null when this deployment cannot run the app at all", () => {

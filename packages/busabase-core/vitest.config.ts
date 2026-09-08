@@ -28,6 +28,7 @@ export default defineConfig({
       "src/domains/embed-links/**/*.test.ts",
       "src/domains/rich-node/utils/**/*.test.ts",
       "src/domains/templates/components/**/*.test.tsx",
+      "src/domains/templates/logic/**/*.test.ts",
       "src/demo/**/*.test.ts",
       "src/logic/**/*.test.ts",
     ],

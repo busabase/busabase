@@ -16,7 +16,7 @@ import { busabaseRouter } from "../src/router";
 
 /**
  * The `webhook` domain: rules that fire on space/base events (`record.created`,
- * `ai_mention`, `changes_requested`) via a signed HTTP POST, the `notify_agent`
+ * `record.updated`, `ai_mention`, `changes_requested`) via a signed HTTP POST, the `notify_agent`
  * generalization of the old hardcoded agent webhook, or a sandboxed
  * `run_function` action. Covers CRUD, dispatch on real events (record merge / an
  * `@ai` mention), the secret round-trip on update, scoping (disabled / base),
@@ -310,6 +310,90 @@ describe("Webhook automation domain — oRPC", () => {
 
       const deliveries = await client.webhooks.deliveries({ ruleId: rule.id, limit: 10 });
       expect(deliveries[0]?.status).toBe("success");
+    });
+
+    it("fires a signed POST to a webhook rule when a record is updated via CR merge", async () => {
+      received = [];
+      await client.webhooks.create({
+        name: "test record.updated",
+        eventType: "record.updated",
+        baseId: null,
+        actionKind: "webhook",
+        config: { targetUrl: hookUrl("hook-updated"), secret: "s3cr3t" },
+        enabled: true,
+      });
+
+      await createAndMergeRecord(blogBaseId, "Update target");
+      const record = await client.records.get({
+        baseId: blogBaseId,
+        fieldSlug: "title",
+        valueText: "Update target",
+      });
+      await client.records.changeRequest({
+        recordId: record.id,
+        operation: "update",
+        fields: { title: "Updated title", body: "v2", channel: "blog" },
+        message: "Webhook update test",
+        autoMerge: true,
+      });
+
+      expect(await waitForHit("hook-updated")).toBe(true);
+
+      const hit = received.find((r) => r.path === "/hook-updated");
+      const parsed = JSON.parse(hit!.body);
+      expect(parsed.event).toBe("record.updated");
+      expect(parsed.recordId).toBe(record.id);
+      expect(parsed.fields.title).toBe("Updated title");
+      const expectedSig = createHmac("sha256", "s3cr3t").update(hit!.body).digest("hex");
+      expect(hit!.signature).toBe(expectedSig);
+    });
+
+    it("does not fire record.updated for a genuinely new record", async () => {
+      // The negative case that proves record_create and record_update are
+      // actually distinguished, not just that record.updated CAN fire.
+      received = [];
+      await client.webhooks.create({
+        name: "updated-only",
+        eventType: "record.updated",
+        baseId: null,
+        actionKind: "webhook",
+        config: { targetUrl: hookUrl("should-not-fire-on-create") },
+        enabled: true,
+      });
+
+      await createAndMergeRecord(blogBaseId, "Fresh record, should not trigger updated");
+      // Give a wrongly-fired dispatch a chance to land before asserting absence.
+      await sleep(300);
+      expect(received.some((hit) => hit.path === "/should-not-fire-on-create")).toBe(false);
+    });
+
+    it("does not fire record.created for an update to an existing record", async () => {
+      // The mirror negative case.
+      await createAndMergeRecord(blogBaseId, "Existing record for reverse check");
+      const record = await client.records.get({
+        baseId: blogBaseId,
+        fieldSlug: "title",
+        valueText: "Existing record for reverse check",
+      });
+
+      received = [];
+      await client.webhooks.create({
+        name: "created-only",
+        eventType: "record.created",
+        baseId: null,
+        actionKind: "webhook",
+        config: { targetUrl: hookUrl("should-not-fire-on-update") },
+        enabled: true,
+      });
+      await client.records.changeRequest({
+        recordId: record.id,
+        operation: "update",
+        fields: { title: "Existing record, edited", body: "v2", channel: "blog" },
+        message: "Reverse check",
+        autoMerge: true,
+      });
+      await sleep(300);
+      expect(received.some((hit) => hit.path === "/should-not-fire-on-update")).toBe(false);
     });
 
     it("notify_agent fires for an agent mention and names the agent", async () => {

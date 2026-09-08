@@ -60,6 +60,7 @@ export interface WebhookSettingsLabels {
   namePlaceholder: () => string;
   eventTypeLabel: () => string;
   eventTypeRecordCreated: () => string;
+  eventTypeRecordUpdated: () => string;
   eventTypeAiMention: () => string;
   eventTypeChangesRequested: () => string;
   eventTypeAssetUploaded: () => string;
@@ -208,6 +209,8 @@ function eventTypeLabel(eventType: WebhookEventType, labels: WebhookSettingsLabe
   switch (eventType) {
     case "record.created":
       return labels.eventTypeRecordCreated();
+    case "record.updated":
+      return labels.eventTypeRecordUpdated();
     case "ai_mention":
       return labels.eventTypeAiMention();
     case "changes_requested":
@@ -605,6 +608,7 @@ export function WebhookSettingsPanel({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="record.created">{labels.eventTypeRecordCreated()}</SelectItem>
+              <SelectItem value="record.updated">{labels.eventTypeRecordUpdated()}</SelectItem>
               <SelectItem value="ai_mention">{labels.eventTypeAiMention()}</SelectItem>
               <SelectItem value="changes_requested">
                 {labels.eventTypeChangesRequested()}

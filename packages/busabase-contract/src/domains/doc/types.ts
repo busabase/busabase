@@ -16,7 +16,19 @@ import { z } from "zod";
  */
 export const ReadNodeLinesInputSchema = z.object({
   nodeId: z.string(),
-  startLine: z.coerce.number().int().min(1),
-  endLine: z.coerce.number().int().min(1),
+  startLine: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .describe("First line to read. 1-indexed, and INCLUSIVE."),
+  endLine: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .describe(
+      "Last line to read, INCLUSIVE. A range wider than 2000 lines is silently narrowed to " +
+        "the first 2000 rather than rejected — the response reports `lineCountCapped` when " +
+        "that happened, so check it before concluding the file ends there.",
+    ),
 });
 export type ReadNodeLinesInput = z.infer<typeof ReadNodeLinesInputSchema>;

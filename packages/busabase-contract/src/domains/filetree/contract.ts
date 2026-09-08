@@ -189,11 +189,16 @@ export const FILE_TREE_NODE_TYPES = ["skill", "drive", "airapp"] as const;
 export type FileTreeNodeType = (typeof FILE_TREE_NODE_TYPES)[number];
 export const fileTreeNodeTypeSchema = z.enum(FILE_TREE_NODE_TYPES);
 
-/** `nodeId` accepts a node id or a slug. A slug is only unique *within* a type,
- *  so pass `type` alongside it to disambiguate; a node id needs no hint. */
 const fileTreeRefSchema = z.object({
-  nodeId: z.string(),
-  type: fileTreeNodeTypeSchema.optional(),
+  nodeId: z
+    .string()
+    .describe(
+      "A node id OR a slug. A slug is only unique WITHIN a type, so pass `type` alongside one; " +
+        "a node id needs no hint.",
+    ),
+  type: fileTreeNodeTypeSchema
+    .optional()
+    .describe("Disambiguates a slug. Unnecessary — and ignored — when `nodeId` is an id."),
 });
 
 // `list` and `get` are deliberately absent: `GET /file-trees` and

@@ -137,6 +137,40 @@ describe("AirApp runtime engine eligibility", () => {
     expect(result.runnerKind).toBe("remote");
   });
 
+  it("lets a required engine outrank both node settings and the app preference", () => {
+    const createRunner = vi.fn((kind: string) => ({ kind }));
+
+    const result = createEligibleAirAppRunner({
+      runtime: "node",
+      preferredEngine: "local",
+      requiredEngine: "remote",
+      userChose: true,
+      wantedKind: "browser",
+      availableEngines: ["browser", "local", "remote"],
+      createRunner,
+    });
+
+    expect(result).toEqual({ runnerKind: "remote", runner: { kind: "remote" } });
+    expect(createRunner).toHaveBeenCalledOnce();
+    expect(createRunner).toHaveBeenCalledWith("remote");
+  });
+
+  it("does not construct another runner when the required engine is unavailable", () => {
+    const createRunner = vi.fn((kind: string) => ({ kind }));
+
+    const result = createEligibleAirAppRunner({
+      runtime: "node",
+      requiredEngine: "remote",
+      userChose: true,
+      wantedKind: "browser",
+      availableEngines: ["browser", "local"],
+      createRunner,
+    });
+
+    expect(result).toEqual({ runnerKind: null, runner: null });
+    expect(createRunner).not.toHaveBeenCalled();
+  });
+
   it("keeps the Python configuration prompt localized in supported Cloud locales", () => {
     expect(noEligibleAirAppEngineMessage(coreMessagesByLocale.en, "python")).toContain(
       "Configure Sandock",
@@ -146,6 +180,18 @@ describe("AirApp runtime engine eligibility", () => {
     );
     expect(noEligibleAirAppEngineMessage(coreMessagesByLocale.ja, "python")).toContain(
       "Sandock を設定",
+    );
+  });
+
+  it("keeps an unavailable required Remote engine localized", () => {
+    expect(noEligibleAirAppEngineMessage(coreMessagesByLocale.en, "node", "remote")).toBe(
+      "This AirApp requires a Remote machine, but Sandock is not configured on this deployment.",
+    );
+    expect(noEligibleAirAppEngineMessage(coreMessagesByLocale["zh-CN"], "node", "remote")).toBe(
+      "此 AirApp 要求使用远程机器，但本部署尚未配置 Sandock。",
+    );
+    expect(noEligibleAirAppEngineMessage(coreMessagesByLocale.ja, "node", "remote")).toBe(
+      "この AirApp にはリモートマシンが必要ですが、このデプロイでは Sandock が設定されていません。",
     );
   });
 });

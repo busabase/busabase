@@ -160,6 +160,95 @@ describe("Drive API — oRPC integration", () => {
     });
   });
 
+  it("renames a Drive file atomically while preserving its Asset identity", async () => {
+    const asset = await createAsset({
+      fileName: "draft.jpg",
+      mimeType: "image/jpeg",
+      sizeBytes: 512,
+      contentHash: `sha256:${"e".repeat(64)}`,
+    });
+    const drive = await client.fileTrees.create({
+      type: "drive",
+      autoMerge: true,
+      slug: "rename-file-drive",
+      name: "Rename File Drive",
+      files: [{ path: "images/draft.jpg", assetId: asset.assetId }],
+    });
+    const current = await client.fileTrees.readFile({
+      type: "drive",
+      nodeId: drive.node.id,
+      filePath: "images/draft.jpg",
+    });
+
+    const renamed = await client.fileTrees.createChangeRequest({
+      type: "drive",
+      nodeId: drive.node.id,
+      autoMerge: true,
+      message: "Rename draft image",
+      operations: [
+        {
+          kind: "create",
+          path: "images/final.jpg",
+          assetId: asset.assetId,
+          displayName: "final.jpg",
+          mimeType: "image/jpeg",
+        },
+        {
+          kind: "delete",
+          path: "images/draft.jpg",
+          baseContentHash: current.contentHash,
+        },
+      ],
+    });
+
+    expect(renamed.status).toBe("merged");
+    const files = await client.fileTrees.listFiles({ type: "drive", nodeId: drive.node.id });
+    expect(files).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: "images/final.jpg", assetId: asset.assetId }),
+      ]),
+    );
+    expect(files.some((file) => file.path === "images/draft.jpg")).toBe(false);
+  });
+
+  it("refuses a create operation that would overwrite an existing Drive path", async () => {
+    const original = await createAsset({
+      fileName: "original.png",
+      mimeType: "image/png",
+      sizeBytes: 256,
+      contentHash: `sha256:${"f".repeat(64)}`,
+    });
+    const replacement = await createAsset({
+      fileName: "replacement.png",
+      mimeType: "image/png",
+      sizeBytes: 256,
+      contentHash: `sha256:${"9".repeat(64)}`,
+    });
+    const drive = await client.fileTrees.create({
+      type: "drive",
+      autoMerge: true,
+      slug: "create-conflict-drive",
+      name: "Create Conflict Drive",
+      files: [{ path: "logo.png", assetId: original.assetId }],
+    });
+
+    await expect(
+      client.fileTrees.createChangeRequest({
+        type: "drive",
+        nodeId: drive.node.id,
+        autoMerge: true,
+        operations: [{ kind: "create", path: "logo.png", assetId: replacement.assetId }],
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+
+    const file = await client.fileTrees.readFile({
+      type: "drive",
+      nodeId: drive.node.id,
+      filePath: "logo.png",
+    });
+    expect(file.assetId).toBe(original.assetId);
+  });
+
   it("keeps the mounted Asset's identity and cleans up the orphaned upload when replacing a file", async () => {
     const original = await createAsset({
       fileName: "deck-v1.pdf",

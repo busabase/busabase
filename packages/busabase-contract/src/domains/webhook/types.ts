@@ -2,6 +2,7 @@ import { z } from "zod";
 
 export const WebhookEventTypeSchema = z.enum([
   "record.created",
+  "record.updated",
   "ai_mention",
   "changes_requested",
   "asset.uploaded",
@@ -156,6 +157,12 @@ export type ListWebhookRulesInput = z.infer<typeof ListWebhookRulesInputSchema>;
 
 export const ListWebhookDeliveriesInputSchema = z.object({
   ruleId: z.string(),
-  limit: z.coerce.number().int().min(1).max(100).default(20),
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(100)
+    .default(20)
+    .describe("Delivery attempts to return, newest first."),
 });
 export type ListWebhookDeliveriesInput = z.infer<typeof ListWebhookDeliveriesInputSchema>;

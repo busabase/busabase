@@ -1,5 +1,6 @@
 import "server-only";
 
+import { parseTemplateRisk } from "busabase-contract/domains/package/template";
 import type { TemplateCardVO, TemplateCatalogVO } from "busabase-contract/domains/templates/types";
 
 /**
@@ -41,6 +42,8 @@ interface RawTemplate {
   name: string;
   description: string;
   category: string;
+  /** Untrusted — normalized through `parseTemplateRisk` before it reaches the VO. */
+  risk?: string;
   tags?: string[];
   screenshots?: string[];
   agentPrompts?: string[];
@@ -81,11 +84,13 @@ const screenshotUrl = (repo: string, ref: string, subdir: string, file: string):
 
 const toCard = (raw: RawTemplate, repo: string, ref: string): TemplateCardVO => {
   const { sourceUrl, repoUrl } = githubUrls(repo, ref, raw.subdir);
+  const risk = parseTemplateRisk(raw.risk);
   return {
     id: `${repo}/${raw.subdir}`,
     name: raw.name,
     description: raw.description,
     category: raw.category,
+    ...(risk ? { risk } : {}),
     tags: raw.tags ?? [],
     screenshots: (raw.screenshots ?? []).map((file) => screenshotUrl(repo, ref, raw.subdir, file)),
     agentPrompts: raw.agentPrompts ?? [],

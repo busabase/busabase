@@ -364,13 +364,14 @@ const TEST_FIRE_ASSET_ID = "test-asset";
 /**
  * Build a payload representative of what a real event of `rule.eventType`
  * would send — matching the exact shapes `dispatchWebhookEvent`'s real
- * callers build in cr-lifecycle.ts (the `record.created` dispatch inside
- * `_mergeChangeRequest`, and `notifyAgentOfChangeRequest` for `ai_mention` /
- * `changes_requested`) and assets/handlers.ts (`confirmAssetUpload`'s
- * `asset.uploaded` dispatch), so a test-fire looks like the real thing.
+ * callers build in cr-lifecycle.ts (the `record.created` / `record.updated`
+ * dispatches inside `_mergeChangeRequest`, and `notifyAgentOfChangeRequest`
+ * for `ai_mention` / `changes_requested`) and assets/handlers.ts
+ * (`confirmAssetUpload`'s `asset.uploaded` dispatch), so a test-fire looks
+ * like the real thing.
  */
 const buildTestFirePayload = (rule: WebhookRuleRow): Record<string, unknown> => {
-  if (rule.eventType === "record.created") {
+  if (rule.eventType === "record.created" || rule.eventType === "record.updated") {
     return {
       recordId: TEST_FIRE_RECORD_ID,
       baseId: rule.baseId,

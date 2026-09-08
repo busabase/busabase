@@ -37,9 +37,17 @@ export interface AgentIntegrationTarget {
 export function AgentInstallPanel({
   plan,
   agentIntegration,
+  onCreateNode,
 }: {
   plan: InstallPlanVO;
   agentIntegration?: AgentIntegrationTarget;
+  /**
+   * Opens the host's "New item" modal. This tab's only instruction is "paste
+   * this into your agent", so a user who has not set one up yet has nowhere to
+   * go from here — including on the no-skill branch below, where the tab has
+   * nothing to offer at all.
+   */
+  onCreateNode?: () => void;
 }) {
   const messages = useCoreI18n();
   const [copied, setCopied] = useState(false);
@@ -85,13 +93,26 @@ export function AgentInstallPanel({
     }
   };
 
+  const createManuallyLink = onCreateNode ? (
+    <button
+      className="self-start text-muted-foreground text-xs underline underline-offset-4 transition hover:text-foreground"
+      onClick={onCreateNode}
+      type="button"
+    >
+      {messages.install.createManually}
+    </button>
+  ) : null;
+
   if (!hasSkill) {
     return (
-      <Alert>
-        <TriangleAlert className="size-4" />
-        <AlertTitle>{messages.install.agentNoSkillTitle}</AlertTitle>
-        <AlertDescription>{messages.install.agentNoSkillBody}</AlertDescription>
-      </Alert>
+      <div className="flex flex-col gap-3">
+        <Alert>
+          <TriangleAlert className="size-4" />
+          <AlertTitle>{messages.install.agentNoSkillTitle}</AlertTitle>
+          <AlertDescription>{messages.install.agentNoSkillBody}</AlertDescription>
+        </Alert>
+        {createManuallyLink}
+      </div>
     );
   }
 
@@ -118,6 +139,7 @@ export function AgentInstallPanel({
           </Button>
         </div>
       </div>
+      {createManuallyLink}
     </div>
   );
 }

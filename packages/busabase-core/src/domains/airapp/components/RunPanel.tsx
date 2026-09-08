@@ -67,6 +67,7 @@ type EligibleAirAppRunner<T> =
 export const createEligibleAirAppRunner = <T,>({
   runtime,
   preferredEngine,
+  requiredEngine,
   userChose,
   wantedKind,
   availableEngines,
@@ -74,6 +75,7 @@ export const createEligibleAirAppRunner = <T,>({
 }: {
   runtime: AirAppRuntimeKind;
   preferredEngine?: AirAppRunnerKind;
+  requiredEngine?: AirAppRunnerKind;
   /** Whether `wantedKind` is a choice the user made, or merely the default. */
   userChose: boolean;
   wantedKind: AirAppRunnerKind;
@@ -92,6 +94,7 @@ export const createEligibleAirAppRunner = <T,>({
     // happen. Neither the dialog nor the logs said the file had an opinion.
     userChose ? wantedKind : (preferredEngine ?? wantedKind),
     availableEngines,
+    requiredEngine,
   );
   if (!runnerKind) return { runnerKind: null, runner: null };
   return { runnerKind, runner: createRunner(runnerKind) };
@@ -100,10 +103,13 @@ export const createEligibleAirAppRunner = <T,>({
 export const noEligibleAirAppEngineMessage = (
   messages: ReturnType<typeof useCoreI18n>,
   runtime: AirAppRuntimeKind,
+  requiredEngine?: AirAppRunnerKind,
 ): string =>
-  runtime === "python"
-    ? messages.airapp.pythonNeedsSandock
-    : fmt(messages.airapp.noEligibleEngine, { runtime });
+  requiredEngine
+    ? messages.airapp.requiredEngineUnavailable[requiredEngine]
+    : runtime === "python"
+      ? messages.airapp.pythonNeedsSandock
+      : fmt(messages.airapp.noEligibleEngine, { runtime });
 
 /**
  * Owns the AirApp runner lifecycle (mount/install/start, log streaming,
@@ -193,12 +199,13 @@ export function useAirAppRunner({
       return;
     }
 
-    // A pin the host cannot satisfy falls back to an eligible engine; a Python
-    // app on a browser-only deployment stops here without ever constructing the
-    // incompatible browser runner.
+    // A preference the host cannot satisfy falls back to an eligible engine.
+    // A hard requirement, or a Python app on a browser-only deployment, stops
+    // here without ever constructing an incompatible runner.
     const resolved = createEligibleAirAppRunner({
       runtime: plan.runtime,
       preferredEngine: plan.preferredEngine,
+      requiredEngine: plan.requiredEngine,
       userChose,
       wantedKind,
       availableEngines,
@@ -207,8 +214,8 @@ export function useAirAppRunner({
     if (!resolved.runnerKind) {
       store.failBeforeRun(
         currentNodeId,
-        wantedKind,
-        noEligibleAirAppEngineMessage(messages, plan.runtime),
+        plan.requiredEngine ?? wantedKind,
+        noEligibleAirAppEngineMessage(messages, plan.runtime, plan.requiredEngine),
       );
       return;
     }

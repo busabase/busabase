@@ -6,6 +6,7 @@ import {
   groupRecordsInputSchema,
   listRecordsInputSchema,
   listRecordsPageInputSchema,
+  type listRecordsValueFilterNodeSchema,
 } from "busabase-contract/domains/base/contract/record-schemas";
 import type { ViewConfigVO, ViewFilterVO } from "busabase-contract/types";
 import {
@@ -22,6 +23,7 @@ import {
   isNotNull,
   isNull,
   lt,
+  lte,
   ne,
   not,
   or,
@@ -265,6 +267,268 @@ const buildPushableRecordFilter = (
   return null;
 };
 
+// ── Exact value filters ────────────────────────────────────────────────────
+//
+// A different contract from `buildPushableRecordFilter` above, and the
+// difference is the whole point. That one answers "give me a superset cheaply",
+// because its authority is the client's `recordMatchesViewFilter`, which
+// compares rendered preview TEXT. This one answers "give me exactly these
+// rows", by comparing the stored value in its own typed column.
+//
+// Being exact is what lets a caller push `limit` down alongside it. A superset
+// filter can never carry a limit: the server's extra rows would eat the budget
+// and the caller would get a short page it cannot distinguish from a complete
+// one.
+//
+// Exactness here is not a proof obligation the way it is for the aggregates —
+// it is structural. Each family below is admitted only because its stored
+// column IS the value, with no formatting layer to diverge from (the reason a
+// currency number's contains/equals is NOT exactly pushable).
+//
+// `created_time` / `updated_time` join `date`: they are computed at commit time
+// but flow through the SAME projection as a plain date field once written (see
+// `DATE_RANGE_FIELD_TYPES` in utils/view-records.ts, which has always included
+// them for exactly this reason), so a predicate on `value_date` applies to them
+// identically.
+const EXACT_DATE_VALUE_TYPES = new Set(["date", "created_time", "updated_time"]);
+
+// Checkbox compares `value_bool`. Note this is SQL semantics, not grid
+// semantics, and they genuinely differ: `recordMatchesViewFilter` folds an
+// UNSET checkbox in with `false`, while `eq(done, false)` here does not match a
+// record that has no row for `done` at all — the `EXISTS` finds nothing. That
+// is the correct answer for a value filter (SQL's NULL never equals FALSE) and
+// it is what the caller's own local predicate computes, so the two agree.
+const EXACT_BOOLEAN_VALUE_TYPES = new Set(["checkbox"]);
+
+// Text-like families compare `value_text`, and ONLY for `eq`/`ne`.
+//
+// Truncation is not a problem for equality, which is worth spelling out because
+// it looks like one. `value_text` stores the first VALUE_TEXT_INDEX_LIMIT
+// characters. If the comparison value is SHORTER than that limit, then
+// `value_text = $target` holds if and only if the full stored value equals the
+// target: a truncated value has exactly VALUE_TEXT_INDEX_LIMIT characters, so
+// it cannot equal a shorter target. A target at or over the limit is refused
+// below rather than guessed at. `ne` inherits the same equivalence.
+//
+// ORDERING (`gt`/`lt`/…) is deliberately NOT admitted for text, and not because
+// of truncation — the same argument would carry. It is collation: Postgres
+// orders text by the database collation, the caller's local predicate orders it
+// by JavaScript string comparison, and the two disagree (in en_US.UTF-8 `'a' <
+// 'B'`; in JS `'B' < 'a'`). An "exact" filter whose row order the caller cannot
+// reproduce is worse than no filter, so text ordering stays local.
+//
+// `select` is here even though it is absent from PUSHABLE_TEXT_TYPES above, and
+// the difference is the point: that set is about VIEW filters, which compare a
+// choice's rendered label. A value filter compares the stored choice string,
+// which is exactly what the record payload hands the caller.
+const EXACT_TEXT_VALUE_TYPES = new Set([...PUSHABLE_TEXT_TYPES, "select"]);
+const EXACT_TEXT_OPERATORS = new Set(["eq", "ne"]);
+
+/**
+ * What `bucketing: "sql"` can group by, which is wider than the grid's set.
+ *
+ * `GROUPABLE_FIELD_TYPES` (select + checkbox) is narrow because GRID bucketing
+ * groups on the truncatable text projection and buckets dates by the viewer's
+ * day — neither of which the server can do correctly. SQL bucketing groups on
+ * the raw stored column instead: `value_number` for numbers, `value_date` for
+ * the exact instant (not a day), `value_bool` for a checkbox. Text stays out of
+ * both, because two long values can collide at the projection limit.
+ */
+/** A bucket key is the stored value itself once SQL bucketing stops folding. */
+type BucketKey = string | number | boolean | null;
+
+const SQL_GROUPABLE_FIELD_TYPES: ReadonlySet<string> = new Set([
+  ...GROUPABLE_FIELD_TYPES,
+  ...PUSHABLE_NUMBER_TYPES,
+  ...EXACT_DATE_VALUE_TYPES,
+]);
+
+const VALUE_FILTER_COMPARATORS = { eq, ne, gt, gte, lt, lte } as const;
+
+/**
+ * One value filter → SQL, or a 400 explaining why it cannot be exact.
+ *
+ * Refusing is the feature. Silently dropping a condition the way the superset
+ * path does would return a superset while the caller believes it was filtered —
+ * and, because this contract invites them to trust it with `limit`, they would
+ * page through the wrong row set without any signal that it happened.
+ *
+ * The field's type is read from the Base's own definitions, never from a
+ * caller-supplied hint: a lying hint here would produce confidently wrong rows,
+ * whereas on the superset path it only ever costs a missed optimization.
+ */
+const buildExactValueFilter = (
+  db: Awaited<ReturnType<typeof getDb>>,
+  filter: { fieldSlug: string; operator: string; value: number | string | boolean },
+  field: { slug: string; type: string } | undefined,
+): SQL => {
+  if (!field) {
+    throw new ORPCError("BAD_REQUEST", {
+      message: `valueFilters: this Base has no field "${filter.fieldSlug}"`,
+    });
+  }
+  const compare =
+    VALUE_FILTER_COMPARATORS[filter.operator as keyof typeof VALUE_FILTER_COMPARATORS];
+  if (!compare) {
+    throw new ORPCError("BAD_REQUEST", {
+      message: `valueFilters: unsupported operator "${filter.operator}"`,
+    });
+  }
+
+  let predicate: SQL;
+  if (PUSHABLE_NUMBER_TYPES.has(field.type)) {
+    const numeric = typeof filter.value === "number" ? filter.value : Number(filter.value);
+    if (!Number.isFinite(numeric)) {
+      throw new ORPCError("BAD_REQUEST", {
+        message: `valueFilters: "${filter.fieldSlug}" is a number field, but ${JSON.stringify(filter.value)} is not a number`,
+      });
+    }
+    predicate = compare(busabaseFieldValues.valueNumber, numeric) as SQL;
+  } else if (EXACT_DATE_VALUE_TYPES.has(field.type)) {
+    if (typeof filter.value === "boolean") {
+      throw new ORPCError("BAD_REQUEST", {
+        message: `valueFilters: "${filter.fieldSlug}" is a date field, but ${JSON.stringify(filter.value)} is not a valid date`,
+      });
+    }
+    const date = new Date(filter.value);
+    if (Number.isNaN(date.getTime())) {
+      throw new ORPCError("BAD_REQUEST", {
+        message: `valueFilters: "${filter.fieldSlug}" is a date field, but ${JSON.stringify(filter.value)} is not a valid date`,
+      });
+    }
+    predicate = compare(busabaseFieldValues.valueDate, date) as SQL;
+  } else if (EXACT_BOOLEAN_VALUE_TYPES.has(field.type)) {
+    // `"true"` / `"false"` are accepted alongside real booleans because
+    // `records.list` and `records.count` are GET routes: a query string has no
+    // types, so a caller sending `true` gets a string on the wire and there is
+    // no way for the schema to tell it apart from a text value. The number
+    // branch above has the same problem and solves it the same way (`Number()`
+    // on whatever arrives); without this, checkbox filters worked in-process
+    // and 400'd over REST — including from the SDK, which is itself an
+    // OpenAPI client.
+    //
+    // Only these two spellings, and only on a checkbox field. Anything else is
+    // still refused, so a genuine mistake is not laundered into `false`.
+    const asBoolean =
+      typeof filter.value === "boolean"
+        ? filter.value
+        : filter.value === "true"
+          ? true
+          : filter.value === "false"
+            ? false
+            : null;
+    if (asBoolean === null) {
+      throw new ORPCError("BAD_REQUEST", {
+        message: `valueFilters: "${filter.fieldSlug}" is a checkbox field, but ${JSON.stringify(filter.value)} is not a boolean`,
+      });
+    }
+    if (!EXACT_TEXT_OPERATORS.has(filter.operator)) {
+      throw new ORPCError("BAD_REQUEST", {
+        message: `valueFilters: "${filter.operator}" is not meaningful on the checkbox field "${filter.fieldSlug}" — use eq or ne`,
+      });
+    }
+    predicate = compare(busabaseFieldValues.valueBool, asBoolean) as SQL;
+  } else if (EXACT_TEXT_VALUE_TYPES.has(field.type)) {
+    if (typeof filter.value !== "string") {
+      throw new ORPCError("BAD_REQUEST", {
+        message: `valueFilters: "${filter.fieldSlug}" is a ${field.type} field, but ${JSON.stringify(filter.value)} is not a string`,
+      });
+    }
+    if (!EXACT_TEXT_OPERATORS.has(filter.operator)) {
+      throw new ORPCError("BAD_REQUEST", {
+        message:
+          `valueFilters: "${filter.operator}" is not exact on the text field "${filter.fieldSlug}". ` +
+          `Postgres orders text by database collation and a client orders it by its own string comparison, ` +
+          `so an ordering answer would not be reproducible. Only eq and ne are exact on text.`,
+      });
+    }
+    // The equality proof above holds only while the target is shorter than the
+    // projection limit. At or over it, a stored value truncated to exactly the
+    // limit could equal the target while the full value differs — so refuse
+    // rather than return a row set that is quietly wrong at the long tail.
+    if (filter.value.length >= VALUE_TEXT_INDEX_LIMIT) {
+      throw new ORPCError("BAD_REQUEST", {
+        message:
+          `valueFilters: the comparison value for "${filter.fieldSlug}" is ${filter.value.length} characters, ` +
+          `at or over the ${VALUE_TEXT_INDEX_LIMIT}-character projection limit, so an exact text match cannot be proven. ` +
+          `Use \`filters\` for a best-effort match on values this long.`,
+      });
+    }
+    predicate = compare(busabaseFieldValues.valueText, filter.value) as SQL;
+  } else {
+    throw new ORPCError("BAD_REQUEST", {
+      message:
+        `valueFilters: "${filter.fieldSlug}" is a ${field.type} field, which has no exact value column. ` +
+        `Number, date, checkbox and text-like fields can be compared exactly; use \`filters\` for a best-effort match on the rest.`,
+    });
+  }
+
+  // A record with no stored row for this field does not match — the same way
+  // SQL's three-valued logic drops a NULL from every comparison, including the
+  // negative ones (`ne` on an absent field is UNKNOWN, not true).
+  return exists(
+    db
+      .select({ one: sql`1` })
+      .from(busabaseFieldValues)
+      .where(
+        and(
+          eq(busabaseFieldValues.recordId, busabaseRecords.id),
+          eq(busabaseFieldValues.fieldSlug, filter.fieldSlug),
+          isNull(busabaseFieldValues.deletedAt),
+          predicate,
+        ),
+      ),
+  );
+};
+
+/**
+ * One CNF conjunct → SQL: either a single comparison, or an OR of them.
+ *
+ * A disjunct is built with the same `buildExactValueFilter` as a bare
+ * comparison, so an unpushable field inside an `any` raises exactly as it would
+ * outside one. That matters more here than it looks: dropping a disjunct
+ * silently would return a SUBSET (the dropped branch's rows go missing),
+ * whereas dropping a conjunct only widens. Refusing both ways keeps the caller
+ * from having to know which mistake it just made.
+ */
+const buildExactValueFilterNode = (
+  db: Awaited<ReturnType<typeof getDb>>,
+  node:
+    | { fieldSlug: string; operator: string; value: number | string | boolean }
+    | { any: { fieldSlug: string; operator: string; value: number | string | boolean }[] },
+  fieldFor: (slug: string) => { slug: string; type: string } | undefined,
+): SQL => {
+  if ("any" in node) {
+    const branches = node.any.map((leaf) =>
+      buildExactValueFilter(db, leaf, fieldFor(leaf.fieldSlug)),
+    );
+    return (branches.length === 1 ? branches[0] : or(...branches)) as SQL;
+  }
+  return buildExactValueFilter(db, node, fieldFor(node.fieldSlug));
+};
+
+/**
+ * `valueFilters` → SQL predicates, for any endpoint that takes them.
+ *
+ * Shared by list / count / groupBy because the exactness argument is what makes
+ * them worth having on the aggregates at all: an ad-hoc view `filters` set that
+ * cannot be PROVEN exact forces those endpoints to read every candidate row and
+ * decide in memory, while these are exact by construction and stay a single SQL
+ * aggregate. Two copies of this would be two chances for that property to drift.
+ */
+const buildValueFilterPredicates = async (
+  db: Awaited<ReturnType<typeof getDb>>,
+  baseId: string,
+  nodes: z.infer<typeof listRecordsValueFilterNodeSchema>[],
+): Promise<SQL[]> => {
+  const base = await getBase(baseId);
+  if (!base) {
+    throw new ORPCError("NOT_FOUND", { message: `Base not found: ${baseId}` });
+  }
+  const fieldFor = (slug: string) => base.fields.find((entry) => entry.slug === slug);
+  return nodes.map((node) => buildExactValueFilterNode(db, node, fieldFor));
+};
+
 // Which typed value column a sort field maps to. Only number/date sort in SQL —
 // their column ordering matches the client's (numeric / chronological). text and
 // other types keep the client's locale-aware sort (and stay a client concern).
@@ -343,6 +607,17 @@ export const listRecordsPaged = async (input?: z.input<typeof listRecordsInputSc
         filters.push(condition);
       }
     }
+  }
+  // Exact value comparisons, ANDed on top. Unlike the superset filters above,
+  // every one of these either becomes SQL or raises — so whatever survives here
+  // makes the returned row set authoritative for the conditions given.
+  if (parsed.valueFilters?.length) {
+    if (!parsed.baseId) {
+      throw new ORPCError("BAD_REQUEST", {
+        message: "valueFilters requires baseId — a field slug only resolves within one Base",
+      });
+    }
+    filters.push(...(await buildValueFilterPredicates(db, parsed.baseId, parsed.valueFilters)));
   }
 
   const sortInfo = parsed.sort ? sortColumnFor(parsed.sort.fieldType) : null;
@@ -1062,6 +1337,21 @@ export const countRecords = async (input?: z.input<typeof countRecordsInputSchem
   if (parsed.baseId) {
     baseFilters.push(eq(busabaseRecords.baseId, parsed.baseId));
   }
+  // Pushed into the BASE filters, not into the exact-path predicates, so every
+  // route below inherits them — the fast SQL count, the proven-exact count, and
+  // both in-memory fallbacks. The fallbacks only know about `allFilters`, so a
+  // value filter left out here would be silently dropped on those paths.
+  //
+  // They are also exact by construction, so unlike an ad-hoc view `filters` set
+  // they never push a count off its single-`count(*)` fast path. Resolving them
+  // does resolve the Base, so a count carrying valueFilters against an unknown
+  // baseId now 404s where a bare one still returns 0 (the pre-existing
+  // contract for the unscoped case is untouched).
+  if (parsed.valueFilters?.length) {
+    baseFilters.push(
+      ...(await buildValueFilterPredicates(db, parsed.baseId as string, parsed.valueFilters)),
+    );
+  }
 
   const sqlCount = async (extra: SQL[] = []) => {
     const [row] = await db
@@ -1153,17 +1443,59 @@ export const groupRecords = async (input: z.input<typeof groupRecordsInputSchema
     parsed.filters,
   );
 
-  const field = base.fields.find((entry) => entry.slug === parsed.fieldSlug);
-  if (!field) {
-    throw new ORPCError("NOT_FOUND", {
-      message: `Field not found in Base ${parsed.baseId}: ${parsed.fieldSlug}`,
-    });
+  // No `fieldSlug` means one bucket over the whole filtered set — the shape a
+  // summary tile wants, and the reason `aggregates` is worth having at all.
+  const groupSlug = parsed.fieldSlug;
+  const sqlBuckets = parsed.bucketing === "sql";
+  // SQL bucketing widens what can be grouped, and the reason is the same one
+  // that narrowed it: `GROUPABLE_FIELD_TYPES` excludes number and date because
+  // GRID bucketing groups on the truncatable text projection and buckets dates
+  // by the viewer's day. Grouping on `value_number` / `value_date` — the raw
+  // stored instant, not a day — has neither problem. Text stays out either way:
+  // two long values can collide at the projection limit.
+  const groupable = sqlBuckets ? SQL_GROUPABLE_FIELD_TYPES : GROUPABLE_FIELD_TYPES;
+  const field = groupSlug ? base.fields.find((entry) => entry.slug === groupSlug) : undefined;
+  if (groupSlug) {
+    if (!field) {
+      throw new ORPCError("NOT_FOUND", {
+        message: `Field not found in Base ${parsed.baseId}: ${groupSlug}`,
+      });
+    }
+    if (!groupable.has(field.type)) {
+      throw new ORPCError("BAD_REQUEST", {
+        message: `Cannot group by a ${field.type} field: ${groupSlug}. Groupable types (bucketing: ${parsed.bucketing}): ${[...groupable].join(", ")}.`,
+      });
+    }
   }
-  if (!GROUPABLE_FIELD_TYPES.has(field.type)) {
-    throw new ORPCError("BAD_REQUEST", {
-      message: `Cannot group by a ${field.type} field: ${parsed.fieldSlug}. Groupable types: ${[...GROUPABLE_FIELD_TYPES].join(", ")}.`,
-    });
-  }
+
+  /** The column a group key is read from, which is what makes SQL bucketing exact. */
+  const groupColumn = ():
+    | typeof busabaseFieldValues.valueText
+    | typeof busabaseFieldValues.valueNumber
+    | typeof busabaseFieldValues.valueBool
+    | typeof busabaseFieldValues.valueDate => {
+    if (!sqlBuckets) return busabaseFieldValues.valueText;
+    const type = field?.type ?? "";
+    if (PUSHABLE_NUMBER_TYPES.has(type)) return busabaseFieldValues.valueNumber;
+    if (EXACT_DATE_VALUE_TYPES.has(type)) return busabaseFieldValues.valueDate;
+    if (EXACT_BOOLEAN_VALUE_TYPES.has(type)) return busabaseFieldValues.valueBool;
+    return busabaseFieldValues.valueText;
+  };
+
+  /**
+   * Raw stored value → bucket key.
+   *
+   * Grid bucketing folds (an unset checkbox into `false`, an empty string into
+   * the null bucket); SQL bucketing does not fold anything, because `GROUP BY`
+   * gives a missing value its own group. The two disagree on real data, which
+   * is the whole reason `bucketing` is a choice.
+   */
+  const bucketKeyFor = (value: unknown): BucketKey => {
+    if (!sqlBuckets) return groupKeyForValue(value, field?.type ?? "");
+    if (value === null || value === undefined) return null;
+    if (value instanceof Date) return value.toISOString();
+    return value as string | number | boolean;
+  };
 
   const baseFilters: SQL[] = [
     eq(busabaseRecords.spaceId, getContextSpaceId()),
@@ -1174,16 +1506,91 @@ export const groupRecords = async (input: z.input<typeof groupRecordsInputSchema
   if (groupVisible) {
     baseFilters.push(groupVisible);
   }
+  // Exact by construction, so they cost nothing on the fast path — and they are
+  // added to `baseFilters` rather than to `exactPredicates` so BOTH paths honour
+  // them. The in-memory fallback only knows about `allFilters`, so a value
+  // filter left out of the SQL would be silently dropped there.
+  if (parsed.valueFilters?.length) {
+    baseFilters.push(...(await buildValueFilterPredicates(db, parsed.baseId, parsed.valueFilters)));
+  }
 
-  const toResponse = (counts: Map<string | null, number>) => {
+  // Aggregates read `value_number`, so they are exact for the same reason
+  // `valueFilters` are — the column holds the value itself. A field with no such
+  // column is refused rather than summed as zero, which would be a confident
+  // wrong total.
+  const aggregates = parsed.aggregates ?? [];
+  for (const aggregate of aggregates) {
+    const target = base.fields.find((entry) => entry.slug === aggregate.fieldSlug);
+    if (!target) {
+      throw new ORPCError("NOT_FOUND", {
+        message: `Field not found in Base ${parsed.baseId}: ${aggregate.fieldSlug}`,
+      });
+    }
+    if (!PUSHABLE_NUMBER_TYPES.has(target.type)) {
+      throw new ORPCError("BAD_REQUEST", {
+        message:
+          `Cannot ${aggregate.fn} a ${target.type} field: ${aggregate.fieldSlug}. ` +
+          `Aggregates need a numeric value column; only ${[...PUSHABLE_NUMBER_TYPES].join(", ")} have one.`,
+      });
+    }
+  }
+  const aggregateKey = (aggregate: { fn: string; fieldSlug: string }) =>
+    `${aggregate.fn}:${aggregate.fieldSlug}`;
+  /** Aggregate slug → the index of its projected column in the keyed subquery. */
+  const aggregateFieldSlugs = [...new Set(aggregates.map((entry) => entry.fieldSlug))];
+
+  /** Compute the aggregates for one group's raw numeric values, in memory. */
+  const aggregateOver = (
+    valuesBySlug: Map<string, number[]>,
+  ): Record<string, number | null> | undefined => {
+    if (aggregates.length === 0) return undefined;
+    const result: Record<string, number | null> = {};
+    for (const aggregate of aggregates) {
+      const values = valuesBySlug.get(aggregate.fieldSlug) ?? [];
+      if (aggregate.fn === "count") {
+        result[aggregateKey(aggregate)] = values.length;
+        continue;
+      }
+      if (values.length === 0) {
+        // NULL, not 0 — "no rows with a value" and "rows summing to zero" are
+        // different answers, and SQL's aggregates distinguish them.
+        result[aggregateKey(aggregate)] = null;
+        continue;
+      }
+      const total = values.reduce((sum, value) => sum + value, 0);
+      result[aggregateKey(aggregate)] =
+        aggregate.fn === "sum"
+          ? total
+          : aggregate.fn === "avg"
+            ? total / values.length
+            : aggregate.fn === "min"
+              ? Math.min(...values)
+              : Math.max(...values);
+    }
+    return result;
+  };
+
+  const toResponse = (
+    counts: Map<BucketKey, number>,
+    perGroup?: Map<BucketKey, Record<string, number | null> | undefined>,
+  ) => {
     const groups = [...counts.entries()]
-      .map(([value, count]) => ({ value, count }))
-      // Stable output: named buckets by key, the null bucket last.
+      .map(([value, count]) => ({
+        value,
+        count,
+        ...(perGroup?.get(value) ? { aggregates: perGroup.get(value) } : {}),
+      }))
+      // Stable output: named buckets by key, the null bucket last. Keys are no
+      // longer only strings under SQL bucketing, so they compare by their own
+      // type rather than lexically — otherwise 10 would sort before 9.
       .sort((left, right) => {
         if (left.value === right.value) return 0;
         if (left.value === null) return 1;
         if (right.value === null) return -1;
-        return left.value < right.value ? -1 : 1;
+        if (typeof left.value === "number" && typeof right.value === "number") {
+          return left.value - right.value;
+        }
+        return String(left.value) < String(right.value) ? -1 : 1;
       });
     return { groups, total: groups.reduce((sum, group) => sum + group.count, 0) };
   };
@@ -1201,49 +1608,116 @@ export const groupRecords = async (input: z.input<typeof groupRecordsInputSchema
     // correlated subquery directly ("subquery uses ungrouped column ... from
     // outer query"), so the inner select resolves one key per record and the
     // outer one aggregates those keys.
+    //
+    // Each AGGREGATE field gets its own scalar subquery in that inner select,
+    // for the same reason the group key does.
+    const scalarValue = (
+      slug: string,
+      column:
+        | typeof busabaseFieldValues.valueText
+        | typeof busabaseFieldValues.valueNumber
+        | typeof busabaseFieldValues.valueBool
+        | typeof busabaseFieldValues.valueDate,
+    ) =>
+      sql`(${db
+        .select({ value: column })
+        .from(busabaseFieldValues)
+        .where(
+          and(
+            eq(busabaseFieldValues.recordId, busabaseRecords.id),
+            eq(busabaseFieldValues.fieldSlug, slug),
+            isNull(busabaseFieldValues.deletedAt),
+          ),
+        )
+        .limit(1)})`;
+
+    const innerSelection: Record<string, SQL.Aliased> = {
+      groupKey: (groupSlug ? scalarValue(groupSlug, groupColumn()) : sql`null`) as SQL<
+        string | null
+      >,
+    } as never;
+    innerSelection.groupKey = (
+      groupSlug ? scalarValue(groupSlug, groupColumn()) : sql`null::text`
+    ).as("group_key") as SQL.Aliased;
+    aggregateFieldSlugs.forEach((slug, index) => {
+      innerSelection[`agg${index}`] = scalarValue(
+        slug,
+        busabaseFieldValues.valueNumber as never,
+      ).as(`agg${index}`) as SQL.Aliased;
+    });
+
     const keyed = db
-      .select({
-        groupKey: sql<string | null>`(${db
-          .select({ value: busabaseFieldValues.valueText })
-          .from(busabaseFieldValues)
-          .where(
-            and(
-              eq(busabaseFieldValues.recordId, busabaseRecords.id),
-              eq(busabaseFieldValues.fieldSlug, parsed.fieldSlug),
-              isNull(busabaseFieldValues.deletedAt),
-            ),
-          )
-          .limit(1)})`.as("group_key"),
-      })
+      .select(innerSelection as never)
       .from(busabaseRecords)
       .where(and(...baseFilters, ...exactPredicates))
       .as("keyed_records");
 
-    const rows = await db
-      .select({ value: keyed.groupKey, count: sql<number>`count(*)::int` })
-      .from(keyed)
-      .groupBy(keyed.groupKey);
-
-    const counts = new Map<string | null, number>();
-    for (const row of rows) {
-      // An empty projection and a missing row both mean "no value"; a checkbox
-      // additionally folds its null bucket into "false".
-      const key = groupKeyForValue(row.value, field.type);
-      counts.set(key, (counts.get(key) ?? 0) + Number(row.count));
+    const outerSelection: Record<string, SQL> = {
+      value: sql<string | null>`${sql.identifier("keyed_records")}.${sql.identifier("group_key")}`,
+      count: sql<number>`count(*)::int`,
+    };
+    for (const aggregate of aggregates) {
+      const index = aggregateFieldSlugs.indexOf(aggregate.fieldSlug);
+      const column = sql`${sql.identifier("keyed_records")}.${sql.identifier(`agg${index}`)}`;
+      outerSelection[aggregateKey(aggregate)] =
+        aggregate.fn === "count"
+          ? sql<number>`count(${column})::int`
+          : sql<number | null>`${sql.raw(aggregate.fn)}(${column})::double precision`;
     }
-    return toResponse(counts);
+
+    const rows = (await db
+      .select(outerSelection as never)
+      .from(keyed)
+      .groupBy(
+        sql`${sql.identifier("keyed_records")}.${sql.identifier("group_key")}`,
+      )) as unknown as Record<string, unknown>[];
+
+    const counts = new Map<BucketKey, number>();
+    const perGroup = new Map<BucketKey, Record<string, number | null> | undefined>();
+    for (const row of rows) {
+      const key = bucketKeyFor(row.value);
+      counts.set(key, (counts.get(key) ?? 0) + Number(row.count));
+      if (aggregates.length) {
+        const bucket: Record<string, number | null> = {};
+        for (const aggregate of aggregates) {
+          const raw = row[aggregateKey(aggregate)];
+          bucket[aggregateKey(aggregate)] = raw === null || raw === undefined ? null : Number(raw);
+        }
+        perGroup.set(key, bucket);
+      }
+    }
+    return toResponse(counts, aggregates.length ? perGroup : undefined);
   }
 
   // Fallback: exact, not cheap — same shape as `countRecords`'s. Evaluate every
   // candidate row, then group the survivors by their raw commit value.
   const viewConfigForFallback: ViewConfigVO = { filters: allFilters, sorts: [] };
   const countsFromRecords = (records: Array<{ fields: Record<string, unknown> }>) => {
-    const counts = new Map<string | null, number>();
+    const counts = new Map<BucketKey, number>();
+    // Aggregates are computed here too, from the same matched rows — leaving
+    // them to the SQL path only would return counts-with-no-aggregates whenever
+    // a filter could not be proven exact, which reads as "no data" rather than
+    // as "this query took the slow path".
+    const values = new Map<BucketKey, Map<string, number[]>>();
     for (const record of records) {
-      const key = groupKeyForValue(record.fields[parsed.fieldSlug], field.type);
+      const key = groupSlug ? bucketKeyFor(record.fields[groupSlug]) : null;
       counts.set(key, (counts.get(key) ?? 0) + 1);
+      if (!aggregates.length) continue;
+      const bucket = values.get(key) ?? new Map<string, number[]>();
+      for (const slug of aggregateFieldSlugs) {
+        const raw = record.fields[slug];
+        const numeric = typeof raw === "number" ? raw : Number(raw);
+        if (raw !== null && raw !== undefined && raw !== "" && Number.isFinite(numeric)) {
+          bucket.set(slug, [...(bucket.get(slug) ?? []), numeric]);
+        }
+      }
+      values.set(key, bucket);
     }
-    return counts;
+    const perGroup = new Map<BucketKey, Record<string, number | null> | undefined>();
+    for (const key of counts.keys()) {
+      perGroup.set(key, aggregateOver(values.get(key) ?? new Map()));
+    }
+    return { counts, perGroup };
   };
 
   if (!dependsOnLookup) {
@@ -1265,7 +1739,8 @@ export const groupRecords = async (input: z.input<typeof groupRecordsInputSchema
       base.fields,
       viewConfigForFallback,
     );
-    return toResponse(countsFromRecords(matched));
+    const built = countsFromRecords(matched);
+    return toResponse(built.counts, aggregates.length ? built.perGroup : undefined);
   }
 
   const candidateRecordRows = await db
@@ -1274,9 +1749,8 @@ export const groupRecords = async (input: z.input<typeof groupRecordsInputSchema
     .where(and(...baseFilters));
   const candidates = await hydrateRecords(candidateRecordRows);
   const matched = applyViewConfigToRecords(candidates, viewConfigForFallback);
-  return toResponse(
-    countsFromRecords(matched.map((record) => ({ fields: record.headCommit.payload }))),
-  );
+  const built = countsFromRecords(matched.map((record) => ({ fields: record.headCommit.payload })));
+  return toResponse(built.counts, aggregates.length ? built.perGroup : undefined);
 };
 
 export const getRecord = async (recordId: string) => {

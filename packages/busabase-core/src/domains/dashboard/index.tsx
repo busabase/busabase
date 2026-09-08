@@ -200,6 +200,12 @@ interface BusabaseDashboardProps {
   searchOpen?: boolean;
   /** Optional host-provided guide rendered under empty states. */
   emptyGuide?: ReactNode;
+  /**
+   * Opens the host's "New item" modal. Routed to the Template Center's install
+   * dialog, whose Agent install tab is a dead end for a user with no agent set
+   * up yet. The host owns that modal, so the callback has to come from it.
+   */
+  onCreateNode?: () => void;
   /** Active UI locale (e.g. "en", "zh-CN"). Host-injected; defaults to English. */
   locale?: string;
   /**
@@ -265,6 +271,7 @@ function BusabaseDashboardContent({
   changeRequests: initialChangeRequests,
   currentUserId = null,
   emptyGuide,
+  onCreateNode,
   bases: initialBases,
   nodes: nodeTree,
   views: initialViews = [],
@@ -2134,6 +2141,7 @@ function BusabaseDashboardContent({
           orpc={orpc}
           apiClient={apiClient}
           agentIntegration={agentIntegration}
+          onCreateNode={onCreateNode}
           selectedName={isTemplateDetailRoute ? (templateDetailParams?.templateName ?? null) : null}
           onSelect={(template) => setLocation(`/templates/${template.name}`)}
           onBack={() => setLocation("/templates")}
@@ -2409,6 +2417,7 @@ function BusabaseDashboardContent({
     basesQuery.isFetching,
     client,
     emptyGuide,
+    onCreateNode,
     isAgentDetailRoute,
     isChangeRequestRoute,
     isEditRecordRoute,

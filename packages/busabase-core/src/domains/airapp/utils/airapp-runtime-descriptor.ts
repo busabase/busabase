@@ -54,6 +54,11 @@ export interface AirAppManifest {
    * whatever else is eligible, rather than becoming unrunnable.
    */
   preferredEngine?: AirAppRunnerKind;
+  /**
+   * Binding engine requirement. Unlike `preferredEngine`, this cannot be
+   * overridden by node settings and never falls back to another engine.
+   */
+  requiredEngine?: AirAppRunnerKind;
 }
 
 /** How the runtime was decided — surfaced in the Logs tab so inference is never invisible. */
@@ -79,6 +84,7 @@ export interface RunPlan {
    */
   pathPrepend: string[];
   preferredEngine?: AirAppRunnerKind;
+  requiredEngine?: AirAppRunnerKind;
   source: RunPlanSource;
   /** One human-readable sentence for the Logs tab. */
   explanation: string;
@@ -234,7 +240,11 @@ export const resolveEngine = (
   runtime: AirAppRuntimeKind,
   wanted: AirAppRunnerKind,
   available: readonly AirAppRunnerKind[],
+  required?: AirAppRunnerKind,
 ): AirAppRunnerKind | null => {
+  if (required) {
+    return available.includes(required) && isEngineEligible(required, runtime) ? required : null;
+  }
   if (available.includes(wanted) && isEngineEligible(wanted, runtime)) return wanted;
   return available.find((engine) => isEngineEligible(engine, runtime)) ?? null;
 };
@@ -327,6 +337,7 @@ const LEGACY_ENGINE_ALIASES: Record<string, AirAppRunnerKind> = {
 const RETIRED_ENGINE = "srt";
 
 const PREFERRED_ENGINE_ERROR = `\`airapp.json\`'s \`preferredEngine\` must be one of ${Object.keys(ENGINE_EXECUTION_MODEL).join(", ")}`;
+const REQUIRED_ENGINE_ERROR = `\`airapp.json\`'s \`requiredEngine\` must be one of ${Object.keys(ENGINE_EXECUTION_MODEL).join(", ")}`;
 
 const parseManifest = (raw: string): { manifest: AirAppManifest } | { error: string } => {
   let parsed: unknown;
@@ -361,6 +372,13 @@ const parseManifest = (raw: string): { manifest: AirAppManifest } | { error: str
     }
   }
   const preferredEngine = candidate.preferredEngine;
+  const requiredEngine = candidate.requiredEngine;
+  if (preferredEngine !== undefined && requiredEngine !== undefined) {
+    return {
+      error:
+        "`airapp.json` cannot declare both `preferredEngine` and `requiredEngine`; use `requiredEngine` for a binding requirement or `preferredEngine` for a fallback preference",
+    };
+  }
   let normalizedEngine: AirAppRunnerKind | undefined;
   if (preferredEngine !== undefined) {
     if (typeof preferredEngine !== "string") {
@@ -379,6 +397,12 @@ const parseManifest = (raw: string): { manifest: AirAppManifest } | { error: str
       return { error: PREFERRED_ENGINE_ERROR };
     }
     normalizedEngine = resolved as AirAppRunnerKind;
+  }
+  if (
+    requiredEngine !== undefined &&
+    (typeof requiredEngine !== "string" || !Object.hasOwn(ENGINE_EXECUTION_MODEL, requiredEngine))
+  ) {
+    return { error: REQUIRED_ENGINE_ERROR };
   }
 
   return {
@@ -477,6 +501,7 @@ export const resolveRunPlan = (files: Record<string, unknown>): RunPlan => {
     readyPatterns: descriptor.readyPatterns,
     pathPrepend: descriptor.pathPrepend,
     preferredEngine: manifest.preferredEngine,
+    requiredEngine: manifest.requiredEngine,
     source,
     explanation,
   };

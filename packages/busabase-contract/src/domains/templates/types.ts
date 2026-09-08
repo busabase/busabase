@@ -2,13 +2,16 @@
  * Template Center catalog types (pure zod, client-safe).
  *
  * The catalog is the file `busabase-cli index` builds from a skills repository
- * — see `busabase-package/index-build`. It is re-declared here rather than
- * imported because that module is Node-only (it reads packages), and these
- * shapes are rendered in a browser.
+ * — see `busabase-package/index-build`. Most shapes are re-declared here rather
+ * than imported because that module is Node-only (it reads packages) and these
+ * are rendered in a browser; `TemplateRiskLevelSchema` is the one exception,
+ * imported from the package domain because it is already pure zod and a third
+ * copy of the same enum is a worse outcome than the cross-domain import.
  *
  * Spec: `apps/busabase/content/spec/template-center.md` §6.4.
  */
 import { z } from "zod";
+import { TemplateRiskLevelSchema } from "../package/template";
 
 export const TemplateStatsVOSchema = z.object({
   folders: z.number().int(),
@@ -27,6 +30,8 @@ export const TemplateCardVOSchema = z.object({
   name: z.string(),
   description: z.string(),
   category: z.string(),
+  /** Absent when undeclared or unrecognized — the card shows "undeclared", never a guess. */
+  risk: TemplateRiskLevelSchema.optional(),
   tags: z.array(z.string()).default([]),
   /**
    * Absolute URLs, resolved server-side.
@@ -70,8 +75,13 @@ export type TemplateCatalogVO = z.infer<typeof TemplateCatalogVOSchema>;
 
 export const ListTemplatesDTOSchema = z
   .object({
-    /** Bypass the cache — the refresh button. */
-    refresh: z.boolean().optional(),
+    refresh: z
+      .boolean()
+      .optional()
+      .describe(
+        "Bypass the cache and re-fetch the catalogue — what the refresh button does. " +
+          "Slower; leave it off for ordinary reads.",
+      ),
   })
   .optional()
   .default({});

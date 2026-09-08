@@ -41,11 +41,23 @@ export const activityItemSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 
-/** Keyset page request: opaque base64 cursor (`ts|kind|id`) + page size. */
 export const listActivityPagedInputSchema = z
   .object({
-    limit: z.coerce.number().int().min(1).max(100).optional().default(50),
-    cursor: z.string().optional(),
+    limit: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(100)
+      .optional()
+      .default(50)
+      .describe("Items per page. Capped at 100; ask for the next page with `cursor`."),
+    cursor: z
+      .string()
+      .optional()
+      .describe(
+        "Opaque page cursor: pass back the `nextCursor` from the previous response. " +
+          "Do not construct or parse it.",
+      ),
   })
   .optional()
   .default({ limit: 50 });
@@ -57,14 +69,34 @@ export const listActivityResponseSchema = z.object({
 
 /** Node-scoped raw activity stream request — offset/limit only, no cursor. */
 export const listNodeActivityInputSchema = z.object({
-  nodeId: z.string().min(1),
-  limit: z.coerce.number().int().min(1).max(100).optional().default(50),
+  nodeId: z.string().min(1).describe("Activity is scoped to this node alone, not its subtree."),
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(100)
+    .optional()
+    .default(50)
+    .describe(
+      "Most recent events to return, capped at 100. This stream has NO cursor — it is a recent " +
+        "window, not a pageable history; use `/api/v1/activity/paged` to walk further back.",
+    ),
 });
 
 /** Record-scoped raw activity stream request — same shape as node, keyed on recordId. */
 export const listRecordActivityInputSchema = z.object({
-  recordId: z.string().min(1),
-  limit: z.coerce.number().int().min(1).max(100).optional().default(50),
+  recordId: z.string().min(1).describe("Activity for this record's own history."),
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(100)
+    .optional()
+    .default(50)
+    .describe(
+      "Most recent events to return, capped at 100. This stream has NO cursor — it is a recent " +
+        "window, not a pageable history; use `/api/v1/activity/paged` to walk further back.",
+    ),
 });
 
 export type ActivityItemVO = z.infer<typeof activityItemSchema>;
