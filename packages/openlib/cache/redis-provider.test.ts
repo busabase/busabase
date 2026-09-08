@@ -12,7 +12,9 @@ import { RedisCacheProvider } from "./redis-provider";
 
 const createClient = (connect: () => Promise<void>) => ({
   connect: vi.fn(connect),
+  del: vi.fn(async () => 1),
   destroy: vi.fn(),
+  eval: vi.fn(async () => 1),
   get: vi.fn(async () => null),
   on: vi.fn(),
   set: vi.fn(async () => "OK"),
@@ -51,6 +53,22 @@ describe("RedisCacheProvider", () => {
     const provider = new RedisCacheProvider("redis://localhost:6379");
 
     await expect(provider.acquireLock("leader", 60)).resolves.toBe(false);
+  });
+
+  it("stores and checks the owner token when releasing a lock", async () => {
+    const client = createClient(async () => {});
+    mocks.createRedisClient.mockResolvedValue(client);
+    const provider = new RedisCacheProvider("redis://localhost:6379");
+
+    await expect(provider.acquireLock("retry", 15, "owner-1")).resolves.toBe(true);
+    await provider.releaseLock("retry", "owner-1");
+
+    expect(client.set).toHaveBeenCalledWith("retry", "owner-1", { EX: 15, NX: true });
+    expect(client.eval).toHaveBeenCalledWith(expect.any(String), {
+      keys: ["retry"],
+      arguments: ["owner-1"],
+    });
+    expect(client.del).not.toHaveBeenCalled();
   });
 
   it("shares one initial connection across concurrent cache operations", async () => {

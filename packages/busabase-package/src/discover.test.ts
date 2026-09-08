@@ -5,13 +5,13 @@ import type { PackageFiles } from "./layout-read";
 
 const utf8 = (text: string) => Buffer.from(text, "utf8");
 
-const skillMd = (name: string) => `---
+const skillMd = (name: string, risk?: string) => `---
 name: ${name}
 description: The ${name} desk.
 metadata:
   busabase:
     template: true
----
+${risk ? `    risk: ${risk}\n` : ""}---
 
 # ${name}
 `;
@@ -96,6 +96,22 @@ describe("discoverPackages", () => {
         .map((entry) => entry.name)
         .sort(),
     ).toEqual(["kelly-crm", "kelly-email"]);
+  });
+
+  it("carries a recognized declared risk level onto the entry", () => {
+    const files = skillsRepo({
+      "skills/kelly-email/SKILL.md": skillMd("kelly-email", "read-only"),
+    });
+    const entry = discoverPackages(files).find((found) => found.name === "kelly-email");
+    expect(entry?.risk).toBe("read-only");
+  });
+
+  it("leaves risk undefined for an unrecognized declared value", () => {
+    const files = skillsRepo({
+      "skills/kelly-email/SKILL.md": skillMd("kelly-email", "review-first"),
+    });
+    const entry = discoverPackages(files).find((found) => found.name === "kelly-email");
+    expect(entry?.risk).toBeUndefined();
   });
 });
 

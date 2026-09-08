@@ -162,16 +162,20 @@ export class RedisCacheProvider implements CacheProvider {
 
   // ── Locking ────────────────────────────────────────────────
 
-  async acquireLock(key: string, ttlSeconds: number): Promise<boolean> {
+  async acquireLock(key: string, ttlSeconds: number, ownerToken = "1"): Promise<boolean> {
     const r = await this.getClient();
     // A distributed lock cannot be granted without the shared coordinator.
     // Failing closed prevents two pods from both becoming gateway leader.
     if (!r) return false;
-    const result = await r.set(key, "1", { EX: ttlSeconds, NX: true });
+    const result = await r.set(key, ownerToken, { EX: ttlSeconds, NX: true });
     return result === "OK";
   }
 
-  async releaseLock(key: string): Promise<void> {
+  async releaseLock(key: string, ownerToken?: string): Promise<void> {
+    if (ownerToken) {
+      await this.deleteIfValue(key, ownerToken);
+      return;
+    }
     const r = await this.getClient();
     if (!r) return;
     await r.del(key);

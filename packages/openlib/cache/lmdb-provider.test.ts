@@ -117,6 +117,17 @@ describe("LmdbCacheProvider", () => {
     await provider.releaseLock("test-lock");
   });
 
+  it("should release a lock only for its current owner", async () => {
+    await expect(provider.acquireLock("owned-lock", 60, "owner-new")).resolves.toBe(true);
+
+    await provider.releaseLock("owned-lock", "owner-old");
+    await expect(provider.acquireLock("owned-lock", 60, "owner-third")).resolves.toBe(false);
+
+    await provider.releaseLock("owned-lock", "owner-new");
+    await expect(provider.acquireLock("owned-lock", 60, "owner-third")).resolves.toBe(true);
+    await provider.releaseLock("owned-lock", "owner-third");
+  });
+
   // ── Batch ──────────────────────────────────────────────────
 
   it("should execute multi operations", async () => {

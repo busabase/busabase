@@ -90,7 +90,9 @@ export function LangLayoutClient<Locale extends string>({
   return (
     <RootProvider i18n={i18nConfig} {...(theme ? { theme } : {})}>
       <Suspense fallback={children}>
-        <NProgressProvider>{children}</NProgressProvider>
+        <NProgressProvider>
+          {children as React.ComponentProps<typeof NProgressProvider>["children"]}
+        </NProgressProvider>
       </Suspense>
     </RootProvider>
   );

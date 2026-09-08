@@ -180,7 +180,7 @@ export class LmdbCacheProvider implements CacheProvider {
 
   // ── Locking (process-local) ────────────────────────────────
 
-  async acquireLock(key: string, ttlSeconds: number): Promise<boolean> {
+  async acquireLock(key: string, ttlSeconds: number, ownerToken = "1"): Promise<boolean> {
     const db = await this.getDb();
     const lockKey = `${LOCK_PREFIX}${key}`;
     const existing = db.get(lockKey) as StoredValue | undefined;
@@ -190,15 +190,23 @@ export class LmdbCacheProvider implements CacheProvider {
     }
 
     await db.put(lockKey, {
-      value: "1",
+      value: ownerToken,
       expiresAt: Date.now() + ttlSeconds * 1000,
     } satisfies StoredValue);
     return true;
   }
 
-  async releaseLock(key: string): Promise<void> {
+  async releaseLock(key: string, ownerToken?: string): Promise<void> {
     const db = await this.getDb();
     const lockKey = `${LOCK_PREFIX}${key}`;
+    if (ownerToken) {
+      await db.transaction(() => {
+        const stored = db.get(lockKey) as StoredValue | undefined;
+        if (stored?.value !== ownerToken) return;
+        db.remove(lockKey);
+      });
+      return;
+    }
     await db.remove(lockKey);
   }
 

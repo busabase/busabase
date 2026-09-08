@@ -247,6 +247,40 @@ describe("validateTemplate — soft conditions still install", () => {
   });
 });
 
+describe("validateTemplate — declared risk", () => {
+  it("has no risk when the manual never declares one", () => {
+    const result = validate();
+    expect(result.ok).toBe(true);
+    expect(result.risk).toBeUndefined();
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("passes through a recognized risk level", () => {
+    const result = validate({
+      "SKILL.md": SKILL_MD.replace(
+        "    resources:\n      - reviews\n",
+        "    resources:\n      - reviews\n    risk: gated-write\n",
+      ),
+    });
+    expect(result.ok).toBe(true);
+    expect(result.risk).toBe("gated-write");
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("warns — but still installs — on a retired or misspelled risk term", () => {
+    const result = validate({
+      "SKILL.md": SKILL_MD.replace(
+        "    resources:\n      - reviews\n",
+        "    resources:\n      - reviews\n    risk: review-first\n",
+      ),
+    });
+    expect(result.ok).toBe(true);
+    expect(result.risk).toBeUndefined();
+    expect(result.warnings.join()).toContain('risk is "review-first"');
+    expect(result.warnings.join()).toContain("not a recognized level");
+  });
+});
+
 describe("deriveSkillDraft", () => {
   const withoutSkill = () =>
     readPackageTree(

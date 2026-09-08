@@ -84,10 +84,10 @@ export interface CacheProvider {
    * Acquire a lock (SET NX with TTL)
    * @returns true if lock acquired, false if already held
    */
-  acquireLock(key: string, ttlSeconds: number): Promise<boolean>;
+  acquireLock(key: string, ttlSeconds: number, ownerToken?: string): Promise<boolean>;
 
-  /** Release a lock */
-  releaseLock(key: string): Promise<void>;
+  /** Release a lock. When provided, ownerToken prevents deleting a newer owner's lease. */
+  releaseLock(key: string, ownerToken?: string): Promise<void>;
 
   // ── Batch Operations ──────────────────────────────────────
 

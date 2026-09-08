@@ -74,6 +74,12 @@ function SpaceTypeBadge({ space, show }: { space: Space; show: boolean }) {
  * that carries a `description` (white-label hosts) renders that as plain muted
  * text instead, since a sentence does not belong in a badge. Additive — spaces
  * with no `description` render exactly as before.
+ *
+ * `plan: ""` means "this host has no plans", and renders nothing — distinct
+ * from `plan: undefined`, which still falls back to "Free" so every existing
+ * caller keeps its current badge. Uses an empty string rather than widening
+ * the type to `string | null`: eight apps each carry their own local `Space`
+ * type mirroring this one, and none of them needed to change for this.
  */
 function SpaceSubtitle({ space, badgeClassName }: { space: Space; badgeClassName: string }) {
   if (space.description) {
@@ -83,6 +89,7 @@ function SpaceSubtitle({ space, badgeClassName }: { space: Space; badgeClassName
       </span>
     );
   }
+  if (space.plan === "") return null;
   return (
     <span className={`${badgeClassName} ${getPlanBadgeStyle(space.plan ?? "free")}`}>
       {space.plan ?? "Free"}
