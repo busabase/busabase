@@ -29,10 +29,12 @@
  */
 import {
   PACKAGE_SKILL_ENTRY,
+  parseTemplateRisk,
   resolvePrimaryAirApp,
   SkillFrontmatterSchema,
   TEMPLATE_MAX_SAMPLE_RECORDS_PER_BASE,
   type TemplateManifest,
+  type TemplateRiskLevel,
 } from "busabase-contract/domains/package/template";
 import { parseFrontmatter } from "./frontmatter";
 import { resolveAirAppPackageLifecycle } from "./layout-read";
@@ -47,6 +49,15 @@ export interface TemplateValidation {
   primaryAirApp?: string;
   /** Parsed `metadata.busabase` from the root SKILL.md, when readable. */
   template?: TemplateManifest;
+  /**
+   * Declared `metadata.busabase.risk`, normalized to a known level.
+   *
+   * `undefined` covers two different authors' situations the catalog cannot
+   * tell apart from this field alone — nothing declared, or something declared
+   * that does not match a known level (see the `template/incomplete` warning
+   * below, which is what tells the second one apart).
+   */
+  risk?: TemplateRiskLevel;
 }
 
 /**
@@ -128,6 +139,17 @@ export const validateTemplate = (tree: PackageTree): TemplateValidation => {
     }
   }
 
+  // ── Soft: declared risk level ──────────────────────────────────────────────
+  // Never a hard error — see `parseTemplateRisk`. A value that fails to
+  // normalize (a typo, or a retired term like the pre-enum "review-first")
+  // still installs; the card just cannot show a risk badge for it.
+  const risk = parseTemplateRisk(busabaseMeta?.risk);
+  if (busabaseMeta?.risk !== undefined && risk === undefined) {
+    warnings.push(
+      `metadata.busabase.risk is "${busabaseMeta.risk}", which is not a recognized level (gated-write, local-write, read-only, sandbox). The Template Center will show it as undeclared.`,
+    );
+  }
+
   // ── Hard 5: the primary AirApp is unambiguous ─────────────────────────────
   const airapps = airAppSlugs(tree);
   const resolved = resolvePrimaryAirApp(template, airapps);
@@ -204,6 +226,7 @@ export const validateTemplate = (tree: PackageTree): TemplateValidation => {
     warnings,
     ...(primaryAirApp ? { primaryAirApp } : {}),
     ...(template ? { template } : {}),
+    ...(risk ? { risk } : {}),
   };
 };
 

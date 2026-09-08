@@ -164,12 +164,18 @@ export const parseStorageUrl = (url: string): StorageConfig => {
   const forcePathStyle =
     forcePathStyleParam != null ? forcePathStyleParam === "true" : defaults.forcePathStyle;
   const autoCreateBucket = urlObj.searchParams.get("auto_create") === "true";
+  // Set when the server can't reach `endpoint` itself (see StorageConfig.internalEndpoint).
+  const internalEndpointParam = urlObj.searchParams.get("internal_endpoint");
+  const internalEndpoint = internalEndpointParam
+    ? decodeURIComponent(internalEndpointParam)
+    : undefined;
 
   return {
     provider: provider as "s3" | "minio" | "r2",
     accessKeyId,
     secretAccessKey,
     endpoint,
+    internalEndpoint,
     bucketName,
     region,
     forcePathStyle,
@@ -227,6 +233,7 @@ export const getStorageConfigFromEnv = (): StorageConfig => {
  */
 export class S3Storage implements IStorage {
   private clientPromise: Promise<S3ClientType> | null = null;
+  private adminClientPromise: Promise<S3ClientType> | null = null;
   private config: StorageConfig;
   private corsConfigured = false;
 
@@ -251,19 +258,56 @@ export class S3Storage implements IStorage {
 
   /** Lazily create (and cache) the S3 client — defers the @aws-sdk load to first use. */
   private getClient(): Promise<S3ClientType> {
-    this.clientPromise ??= (async () => {
-      const { S3Client } = await loadS3Sdk();
-      return new S3Client({
-        region: this.config.region,
-        endpoint: this.config.endpoint,
-        credentials: {
-          accessKeyId: this.config.accessKeyId as string,
-          secretAccessKey: this.config.secretAccessKey as string,
-        },
-        forcePathStyle: this.config.forcePathStyle,
-      });
-    })();
+    this.clientPromise ??= this.buildClient(this.config.endpoint);
     return this.clientPromise;
+  }
+
+  /**
+   * Client for server-side operations that never leak their URL to a browser
+   * (bucket admin, uploads/downloads/list/delete) — uses `internalEndpoint`
+   * when the deployment set one, since those calls need real connectivity
+   * rather than a signature that matches a public-facing host. Falls back to
+   * the same endpoint as `getClient()` when unset.
+   */
+  private getAdminClient(): Promise<S3ClientType> {
+    this.adminClientPromise ??= this.buildClient(
+      this.config.internalEndpoint ?? this.config.endpoint,
+    );
+    return this.adminClientPromise;
+  }
+
+  private async buildClient(endpoint: string | undefined): Promise<S3ClientType> {
+    const { S3Client } = await loadS3Sdk();
+    return new S3Client({
+      region: this.config.region,
+      endpoint,
+      credentials: {
+        accessKeyId: this.config.accessKeyId as string,
+        secretAccessKey: this.config.secretAccessKey as string,
+      },
+      forcePathStyle: this.config.forcePathStyle,
+      /*
+       * Don't let the SDK negotiate checksums unless an operation actually
+       * requires them.
+       *
+       * Recent AWS SDK v3 defaults append `x-amz-checksum-mode=ENABLED` to
+       * presigned GET URLs. S3-compatible servers that don't fold that query
+       * parameter into their canonical request compute a different signature
+       * and reject the URL with 403 SignatureDoesNotMatch — verified against
+       * SeaweedFS 3.80, where a presigned GET fails with the default and
+       * succeeds with this setting (the parameter disappears). It is a known
+       * SeaweedFS bug (seaweedfs#6598 / #6634 / #6761), but the same class of
+       * breakage hits any non-AWS implementation that lags the SDK's checksum
+       * behaviour, so this guards the whole `minio://` / self-hosted family
+       * rather than one vendor.
+       *
+       * Trade-off: we give up SDK-level payload checksums. Integrity still
+       * rests on TLS/TCP in transit and S3 ETag comparison at rest, and real
+       * AWS S3 does not require checksums for the operations used here.
+       */
+      requestChecksumCalculation: "WHEN_REQUIRED",
+      responseChecksumValidation: "WHEN_REQUIRED",
+    });
   }
 
   /**
@@ -273,7 +317,7 @@ export class S3Storage implements IStorage {
     if (this.corsConfigured) return;
     try {
       const { PutBucketCorsCommand } = await loadS3Sdk();
-      const client = await this.getClient();
+      const client = await this.getAdminClient();
       await client.send(
         new PutBucketCorsCommand({
           Bucket: this.config.bucketName,
@@ -307,7 +351,7 @@ export class S3Storage implements IStorage {
     }
 
     const { HeadBucketCommand, CreateBucketCommand } = await loadS3Sdk();
-    const client = await this.getClient();
+    const client = await this.getAdminClient();
     try {
       await client.send(new HeadBucketCommand({ Bucket: this.config.bucketName }));
     } catch (error: unknown) {
@@ -338,7 +382,7 @@ export class S3Storage implements IStorage {
     await this.ensureBucketExists();
 
     const { PutObjectCommand } = await loadS3Sdk();
-    const client = await this.getClient();
+    const client = await this.getAdminClient();
     const command = new PutObjectCommand({
       Bucket: this.config.bucketName,
       Key: key,
@@ -447,7 +491,7 @@ export class S3Storage implements IStorage {
     await this.ensureBucketExists();
 
     const { CreateMultipartUploadCommand } = await loadS3Sdk();
-    const client = await this.getClient();
+    const client = await this.getAdminClient();
     const command = new CreateMultipartUploadCommand({
       Bucket: this.config.bucketName,
       Key: key,
@@ -497,7 +541,7 @@ export class S3Storage implements IStorage {
     const sortedParts = [...parts].sort((a, b) => a.partNumber - b.partNumber);
 
     const { CompleteMultipartUploadCommand } = await loadS3Sdk();
-    const client = await this.getClient();
+    const client = await this.getAdminClient();
     const command = new CompleteMultipartUploadCommand({
       Bucket: this.config.bucketName,
       Key: key,
@@ -518,7 +562,7 @@ export class S3Storage implements IStorage {
    */
   async abortMultipartUpload(key: string, uploadId: string): Promise<void> {
     const { AbortMultipartUploadCommand } = await loadS3Sdk();
-    const client = await this.getClient();
+    const client = await this.getAdminClient();
     const command = new AbortMultipartUploadCommand({
       Bucket: this.config.bucketName,
       Key: key,
@@ -560,7 +604,7 @@ export class S3Storage implements IStorage {
     const copySource = `${this.config.bucketName}/${cleanSourceKey}`;
 
     const { CopyObjectCommand } = await loadS3Sdk();
-    const client = await this.getClient();
+    const client = await this.getAdminClient();
     const command = new CopyObjectCommand({
       Bucket: this.config.bucketName,
       CopySource: encodeURI(copySource),
@@ -575,7 +619,7 @@ export class S3Storage implements IStorage {
    */
   async getObject(key: string): Promise<Buffer> {
     const { GetObjectCommand } = await loadS3Sdk();
-    const client = await this.getClient();
+    const client = await this.getAdminClient();
     const command = new GetObjectCommand({
       Bucket: this.config.bucketName,
       Key: key,
@@ -605,7 +649,7 @@ export class S3Storage implements IStorage {
    */
   async getObjectRange(key: string, start: number, end: number): Promise<Buffer> {
     const { GetObjectCommand } = await loadS3Sdk();
-    const client = await this.getClient();
+    const client = await this.getAdminClient();
     const command = new GetObjectCommand({
       Bucket: this.config.bucketName,
       Key: key,
@@ -633,7 +677,7 @@ export class S3Storage implements IStorage {
    */
   async deleteObject(key: string): Promise<void> {
     const { DeleteObjectCommand } = await loadS3Sdk();
-    const client = await this.getClient();
+    const client = await this.getAdminClient();
     const command = new DeleteObjectCommand({
       Bucket: this.config.bucketName,
       Key: key,
@@ -655,7 +699,7 @@ export class S3Storage implements IStorage {
     nextContinuationToken?: string;
   }> {
     const { ListObjectsV2Command } = await loadS3Sdk();
-    const client = await this.getClient();
+    const client = await this.getAdminClient();
     const command = new ListObjectsV2Command({
       Bucket: this.config.bucketName,
       Prefix: prefix,
@@ -699,7 +743,7 @@ export class S3Storage implements IStorage {
   async objectExists(key: string): Promise<boolean> {
     try {
       const { HeadObjectCommand } = await loadS3Sdk();
-      const client = await this.getClient();
+      const client = await this.getAdminClient();
       await client.send(
         new HeadObjectCommand({
           Bucket: this.config.bucketName,
@@ -715,7 +759,7 @@ export class S3Storage implements IStorage {
   async getObjectMetadata(key: string): Promise<StorageObjectMetadata | null> {
     try {
       const { HeadObjectCommand } = await loadS3Sdk();
-      const client = await this.getClient();
+      const client = await this.getAdminClient();
       const response = await client.send(
         new HeadObjectCommand({
           Bucket: this.config.bucketName,

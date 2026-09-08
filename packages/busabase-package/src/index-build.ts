@@ -14,6 +14,7 @@
  *
  * Spec: `apps/busabase/content/spec/template-center.md` §6.4.
  */
+import type { TemplateRiskLevel } from "busabase-contract/domains/package/template";
 import { type DiscoveredPackage, discoverPackages } from "./discover";
 import type { PackageFiles } from "./layout-read";
 
@@ -26,6 +27,8 @@ export interface TemplateIndexEntry {
   name: string;
   description: string;
   category: string;
+  /** Not what it does but whether it acts on your behalf — see `TemplateRiskLevel`. */
+  risk?: TemplateRiskLevel;
   tags: string[];
   /** Package-relative paths; a consumer resolves them against the repo. */
   screenshots: string[];
@@ -71,6 +74,7 @@ const toEntry = (found: DiscoveredPackage, airapps: number): TemplateIndexEntry 
   name: found.name,
   description: found.description,
   category: found.category ?? "uncategorized",
+  ...(found.risk ? { risk: found.risk } : {}),
   tags: found.tags ?? [],
   screenshots: found.screenshots,
   agentPrompts: found.agentPrompts ?? [],
