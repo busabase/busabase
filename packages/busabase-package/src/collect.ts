@@ -8,6 +8,7 @@
  * self-containment rule: a relation may not leave the package.
  */
 
+import type { CustomAgentPrompts } from "busabase-contract/contract/node-agent-prompt-schemas";
 import {
   APP_ROOT_RESOURCE_KEY,
   TEMPLATE_SKILL_METADATA_KEY,
@@ -71,6 +72,15 @@ export interface CollectOptions {
    * omit it — it defaults to empty, meaning "nothing was install-renamed."
    */
   baseResourceKeys?: ReadonlyMap<string, string>;
+  /**
+   * Internal, set by {@link collectPackageTree}: has the prompts read already
+   * failed once this export?
+   *
+   * A server without the route fails it for EVERY node, and a hundred identical
+   * warnings is not a hundred times as informative as one. The first failure is
+   * reported and the rest of the export stops asking.
+   */
+  agentPromptsUnavailable?: { value: boolean };
 }
 
 /** Find the subtree to export by node slug or id. */
@@ -102,6 +112,7 @@ export const collectPackageTree = async (
   const collectOptions: CollectOptions = {
     ...options,
     baseResourceKeys: collectBaseResourceKeys(children),
+    agentPromptsUnavailable: options.agentPromptsUnavailable ?? { value: false },
   };
   const nodes = await collectNodes(client, rest, collectOptions);
   const tree: PackageTree = {
@@ -287,6 +298,36 @@ const collectNodes = async (
   return sortNodes(nodes);
 };
 
+/**
+ * This node's scenario Agent prompts, read from the column they live in.
+ *
+ * A separate read per node because that is the only way to get them: they are
+ * deliberately absent from `nodes.list` (50 prompts x 8 KiB per locale is why
+ * they have their own column and their own route).
+ *
+ * Never fatal. A server that predates the route, or a node this key may read but
+ * whose prompts it may not, costs the export those prompts and nothing else —
+ * the package still installs, and its nodes fall back to their type's defaults,
+ * exactly as every package did before the field existed.
+ */
+const collectAgentPrompts = async (
+  client: PackageClient,
+  source: SourceNode,
+  options: CollectOptions,
+): Promise<CustomAgentPrompts | undefined> => {
+  if (options.agentPromptsUnavailable?.value) return undefined;
+  try {
+    const result = await client.nodes.getAgentPrompts({ nodeId: source.id });
+    return result.agentPrompts?.length ? result.agentPrompts : undefined;
+  } catch (error) {
+    if (options.agentPromptsUnavailable) options.agentPromptsUnavailable.value = true;
+    options.warn(
+      `Could not read agent prompts for "${source.slug}": ${(error as Error).message}. Exported without them for this node and every node after it; the installed nodes will show their node type's default prompts.`,
+    );
+    return undefined;
+  }
+};
+
 const collectNode = async (
   client: PackageClient,
   source: SourceNode,
@@ -298,6 +339,7 @@ const collectNode = async (
     description: source.description ?? "",
     // `export` always writes position, so round trips preserve sibling order exactly.
     position: source.position,
+    agentPrompts: await collectAgentPrompts(client, source, options),
   };
 
   switch (source.type) {
@@ -333,7 +375,7 @@ const collectNode = async (
   }
 };
 
-type NodeCommon = Pick<PackageNode, "slug" | "name" | "description" | "position">;
+type NodeCommon = Pick<PackageNode, "slug" | "name" | "description" | "position" | "agentPrompts">;
 
 const collectBase = async (
   client: PackageClient,

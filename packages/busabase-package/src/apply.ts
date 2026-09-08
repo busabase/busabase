@@ -31,6 +31,7 @@
  */
 
 import { createHash } from "node:crypto";
+import type { CustomAgentPrompts } from "busabase-contract/contract/node-agent-prompt-schemas";
 import {
   APP_ROOT_RESOURCE_KEY,
   type AppResourceOwnership,
@@ -580,6 +581,44 @@ const stampResource = async (
   }
 };
 
+/**
+ * Write a node's carried scenario prompts onto the node install just created.
+ *
+ * After creation rather than inline, because the prompts live in their own
+ * column with their own route — no create endpoint accepts them. That has one
+ * visible consequence, and it is the reason for the warning below: on the
+ * review-first path a Doc or File node is a PENDING change request with no node
+ * id yet, so there is nothing to write them to. Structure (folders, Bases,
+ * Skills/AirApps/Drives) is always materialized (see {@link createBase}), so the
+ * nodes that carry most prompts are unaffected.
+ *
+ * Never fails the install, for the same reason {@link stampResource} does not:
+ * the resources are already there and useful, and prompts can be re-applied with
+ * `busabase-cli nodes set-agent-prompts` at any time.
+ */
+const applyAgentPrompts = async (
+  client: PackageClient,
+  nodeId: string | undefined,
+  node: { slug: string; agentPrompts?: CustomAgentPrompts },
+  state: ApplyResult,
+): Promise<void> => {
+  const agentPrompts = node.agentPrompts;
+  if (!agentPrompts?.length) return;
+  if (!nodeId) {
+    state.warnings.push(
+      `"${node.slug}" installs as a change request, so its ${agentPrompts.length} agent prompt(s) were not applied. After merging it, run \`busabase-cli nodes set-agent-prompts\` for that node, or re-install with --auto-merge.`,
+    );
+    return;
+  }
+  try {
+    await client.nodes.updateAgentPrompts({ nodeId, agentPrompts });
+  } catch (error) {
+    state.warnings.push(
+      `Could not set agent prompts on "${node.slug}": ${(error as Error).message}. The node installed fine; it will show its node type's default prompts.`,
+    );
+  }
+};
+
 // ── Pass 1 helpers ───────────────────────────────────────────────────────────
 
 /**
@@ -647,6 +686,7 @@ const createStructure = async (
           submittedBy: options.submittedBy,
         });
         state.created.folders++;
+        await applyAgentPrompts(client, nodeId, node, state);
         await createStructure(
           client,
           node.children,
@@ -686,6 +726,12 @@ const createStructure = async (
         });
         if (result.materialized) state.created.docs++;
         else state.pendingChangeRequests++;
+        await applyAgentPrompts(
+          client,
+          result.materialized ? result.node.id : undefined,
+          node,
+          state,
+        );
         break;
       }
       case "base": {
@@ -725,6 +771,12 @@ const createStructure = async (
         });
         if (result.materialized) state.created.files++;
         else state.pendingChangeRequests++;
+        await applyAgentPrompts(
+          client,
+          result.materialized ? result.node.id : undefined,
+          node,
+          state,
+        );
         break;
       }
     }
@@ -821,6 +873,7 @@ const createBase = async (
   bases.push({ node, baseId: result.id });
   indexFields(fieldIds, node.slug, result.fields);
   await stampResource(client, app, result.nodeId, node.slug, state);
+  await applyAgentPrompts(client, result.nodeId, node, state);
 
   for (const view of node.base.views) {
     const created = await client.views.changeRequest({
@@ -905,6 +958,7 @@ const createFileTreeNode = async (
     // The stamp went with the proposal, so it lands when a human merges.
     state.pendingChangeRequests++;
   }
+  await applyAgentPrompts(client, result.materialized ? result.node.id : undefined, node, state);
 };
 
 // ── Assets ───────────────────────────────────────────────────────────────────

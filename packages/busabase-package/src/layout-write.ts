@@ -13,6 +13,7 @@
  */
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import type { CustomAgentPrompts } from "busabase-contract/contract/node-agent-prompt-schemas";
 import {
   PACKAGE_SKILL_ENTRY,
   PACKAGE_SKILL_SIDECAR_DIRS,
@@ -43,6 +44,7 @@ import {
   type PackageDocAsset,
   type PackageNode,
   type PackageTree,
+  serializeAgentPrompts,
   sortNodes,
 } from "./tree";
 
@@ -124,13 +126,20 @@ const serializeView = (view: PackageView): Record<string, unknown> =>
     }),
   });
 
-const serializeBase = (base: PackageBase, position: number | undefined): Buffer =>
+const serializeBase = (
+  base: PackageBase,
+  position: number | undefined,
+  agentPrompts: CustomAgentPrompts | undefined,
+): Buffer =>
   toJsonFile(
     compact({
       name: base.name,
       description: base.description || undefined,
       position,
       reviewPolicy: base.reviewPolicy,
+      // Before `fields`, so a reviewer reading the diff meets what the Base is
+      // FOR before the column list it is made of.
+      agentPrompts: serializeAgentPrompts(agentPrompts),
       fields: base.fields.map(serializeField),
       views: base.views.map(serializeView),
     }),
@@ -232,6 +241,7 @@ const renderNode = (node: PackageNode, dir: string, files: PackageFiles): void =
         node.children.length === 0 ||
         node.description !== "" ||
         node.position !== undefined ||
+        node.agentPrompts !== undefined ||
         node.name !== undefined;
       if (needsMeta) {
         files.set(
@@ -241,6 +251,7 @@ const renderNode = (node: PackageNode, dir: string, files: PackageFiles): void =
               name: node.name,
               description: node.description || undefined,
               position: node.position,
+              agentPrompts: serializeAgentPrompts(node.agentPrompts),
             }),
           ),
         );
@@ -253,7 +264,12 @@ const renderNode = (node: PackageNode, dir: string, files: PackageFiles): void =
         `${dir}${node.slug}.md`,
         Buffer.from(
           serializeDoc(
-            { name: node.name, description: node.description, position: node.position },
+            {
+              name: node.name,
+              description: node.description,
+              position: node.position,
+              agentPrompts: node.agentPrompts,
+            },
             node.body,
           ),
           "utf8",
@@ -264,7 +280,7 @@ const renderNode = (node: PackageNode, dir: string, files: PackageFiles): void =
     case "base": {
       files.set(
         `${dir}${node.slug}/${PACKAGE_BASE_FILENAME}`,
-        serializeBase(node.base, node.position),
+        serializeBase(node.base, node.position, node.agentPrompts),
       );
       const records = serializeRecords(node.records);
       if (records.byteLength > 0)
@@ -287,6 +303,7 @@ const renderNode = (node: PackageNode, dir: string, files: PackageFiles): void =
             name: node.name,
             description: node.description || undefined,
             position: node.position,
+            agentPrompts: serializeAgentPrompts(node.agentPrompts),
           }),
         ),
       );
@@ -301,7 +318,10 @@ const renderNode = (node: PackageNode, dir: string, files: PackageFiles): void =
       files.set(`${dir}${node.fileName}`, node.bytes);
       // The sidecar only exists when it carries something the filename can't.
       const hasMeta =
-        node.name !== node.fileName || node.description !== "" || node.position !== undefined;
+        node.name !== node.fileName ||
+        node.description !== "" ||
+        node.position !== undefined ||
+        node.agentPrompts !== undefined;
       if (hasMeta) {
         files.set(
           `${dir}${node.fileName}${PACKAGE_NODE_META_SUFFIX}`,
@@ -310,6 +330,7 @@ const renderNode = (node: PackageNode, dir: string, files: PackageFiles): void =
               name: node.name,
               description: node.description || undefined,
               position: node.position,
+              agentPrompts: serializeAgentPrompts(node.agentPrompts),
             }),
           ),
         );

@@ -1,11 +1,13 @@
 /**
- * YAML frontmatter for doc nodes (§6.3): `name`, `description?`, `position?` above
- * the markdown body.
+ * YAML frontmatter for doc nodes (§6.3): `name`, `description?`, `position?`,
+ * `agentPrompts?` above the markdown body.
  *
  * Writing is deterministic (§6.6): a fixed key order and LF endings, so re-exporting
  * an unchanged doc is byte-identical.
  */
+import type { CustomAgentPrompts } from "busabase-contract/contract/node-agent-prompt-schemas";
 import { parse, stringify } from "yaml";
+import { serializeAgentPrompts } from "./tree";
 
 const DELIMITER = "---";
 
@@ -58,6 +60,8 @@ export interface DocFrontmatterFields {
   name: string;
   description: string;
   position: number | undefined;
+  /** This Doc's scenario Agent prompts; omitted from the frontmatter when empty. */
+  agentPrompts?: CustomAgentPrompts;
 }
 
 /** Serialize a doc to `---\n<frontmatter>\n---\n<body>` with a trailing newline. */
@@ -67,6 +71,8 @@ export const serializeDoc = (fields: DocFrontmatterFields, body: string): string
   const data: Record<string, unknown> = { name: fields.name };
   if (fields.description) data.description = fields.description;
   if (fields.position !== undefined) data.position = fields.position;
+  const agentPrompts = serializeAgentPrompts(fields.agentPrompts);
+  if (agentPrompts) data.agentPrompts = agentPrompts;
 
   const yaml = stringify(data, { lineWidth: 0 }).replace(/\n$/, "");
   return `${DELIMITER}\n${yaml}\n${DELIMITER}\n\n${normalizeDocBody(body)}\n`;

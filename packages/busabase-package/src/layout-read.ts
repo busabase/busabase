@@ -19,6 +19,7 @@
  * what keeps a template byte-identical to a plain package below the root.
  */
 
+import type { CustomAgentPrompts } from "busabase-contract/contract/node-agent-prompt-schemas";
 import {
   PACKAGE_AIRAPP_IGNORE,
   PACKAGE_SKILL_ENTRY,
@@ -36,6 +37,7 @@ import {
   PACKAGE_NODE_META_FILENAME,
   PACKAGE_NODE_META_SUFFIX,
   PACKAGE_RECORDS_FILENAME,
+  type PackageBase,
   PackageBaseSchema,
   PackageDocAssetMetaSchema,
   PackageDocFrontmatterSchema,
@@ -159,6 +161,24 @@ const zodParse = <T>(schema: z.ZodType<T>, value: unknown, filePath: string): T 
   }
   return result.data;
 };
+
+/**
+ * A sidecar's `agentPrompts` as the tree carries it — as a spread, so a node that
+ * has none carries no `agentPrompts` KEY at all rather than one set to `undefined`.
+ *
+ * `[]` and "absent" mean the same thing on disk (the node falls back to its type's
+ * default prompts either way), so an empty list is dropped rather than
+ * round-tripping as a sidecar key that changes nothing.
+ */
+/** `base.json` minus the node-level key, so the list lives in exactly one place. */
+const baseWithoutAgentPrompts = (base: PackageBase): PackageBase => {
+  const { agentPrompts: _agentPrompts, ...rest } = base;
+  return rest;
+};
+
+const agentPromptsField = (
+  prompts: CustomAgentPrompts | undefined,
+): { agentPrompts?: CustomAgentPrompts } => (prompts?.length ? { agentPrompts: prompts } : {});
 
 /** Direct children of `dir` (which must end in `/`, or be "" for the root). */
 interface DirEntries {
@@ -403,6 +423,7 @@ const readDirNode = (files: PackageFiles, dir: string, slug: string): PackageNod
       name: meta.name,
       description: meta.description,
       position: meta.position,
+      ...agentPromptsField(meta.agentPrompts),
       files: entries,
     };
   }
@@ -418,7 +439,12 @@ const readDirNode = (files: PackageFiles, dir: string, slug: string): PackageNod
       name: base.name,
       description: base.description,
       position: base.position,
-      base,
+      ...agentPromptsField(base.agentPrompts),
+      // Stripped from the Base payload itself: `base.json` doubles as this node's
+      // sidecar, so its `agentPrompts` describe the NODE. Leaving a copy on
+      // `node.base` would mean the same list existed twice in the tree and the
+      // writer would have to decide which one wins.
+      base: baseWithoutAgentPrompts(base),
       records,
     };
   }
@@ -427,13 +453,14 @@ const readDirNode = (files: PackageFiles, dir: string, slug: string): PackageNod
   const metaPath = `${dir}${PACKAGE_FOLDER_META_FILENAME}`;
   const meta = files.has(metaPath)
     ? zodParse(PackageFolderMetaSchema, parseJsonFile(files, metaPath), metaPath)
-    : { name: undefined, description: "", position: undefined };
+    : { name: undefined, description: "", position: undefined, agentPrompts: undefined };
   return {
     type: "folder",
     slug,
     name: meta.name ?? humanizeSlug(slug),
     description: meta.description,
     position: meta.position,
+    ...agentPromptsField(meta.agentPrompts),
     children: readNodes(files, dir),
   };
 };
@@ -520,13 +547,14 @@ const readFileNode = (
   const sidecarPath = `${dir}${fileName}${PACKAGE_NODE_META_SUFFIX}`;
   const meta = files.has(sidecarPath)
     ? zodParse(PackageFileNodeMetaSchema, parseJsonFile(files, sidecarPath), sidecarPath)
-    : { name: undefined, description: "", position: undefined };
+    : { name: undefined, description: "", position: undefined, agentPrompts: undefined };
   return {
     type: "file",
     slug,
     name: meta.name ?? fileName,
     description: meta.description,
     position: meta.position,
+    ...agentPromptsField(meta.agentPrompts),
     fileName,
     mimeType: guessMimeType(fileName),
     bytes,
@@ -549,6 +577,7 @@ const readDocNode = (bytes: Buffer, dir: string, fileName: string): PackageDocNo
     name: frontmatter.name,
     description: frontmatter.description,
     position: frontmatter.position,
+    ...agentPromptsField(frontmatter.agentPrompts),
     body,
   };
 };
