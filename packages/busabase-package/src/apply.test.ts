@@ -72,6 +72,11 @@ const createFakeServer = (): FakeServer => {
         nodeSeq++;
         return { id: `crq_${++crSeq}`, operations: [{ nodeId: `nod_${nodeSeq}` }] };
       },
+      updateAgentPrompts: async (input: unknown) => {
+        record("nodes.updateAgentPrompts", input);
+        const typed = input as { nodeId: string; agentPrompts: unknown };
+        return { nodeId: typed.nodeId, agentPrompts: typed.agentPrompts };
+      },
     },
     bases: {
       list: async () => [],
@@ -84,7 +89,7 @@ const createFakeServer = (): FakeServer => {
           slug: field.slug,
         }));
         fieldsByBase.set(baseId, fields);
-        return { materialized: true as const, id: baseId, fields };
+        return { materialized: true as const, id: baseId, nodeId: `nod_base_${baseSeq}`, fields };
       },
       createField: async (input: unknown) => {
         record("bases.createField", input);
@@ -265,6 +270,87 @@ describe("target folder", () => {
     expect(calls.some((call) => call.method === "nodes.createChangeRequest")).toBe(false);
     const docCreate = calls.find((call) => call.method === "docs.create");
     expect((docCreate?.input as { parentNodeId: string }).parentNodeId).toBe("nod_root");
+  });
+});
+
+describe("the prompts a package carries", () => {
+  const PROMPTS = [
+    {
+      key: "log-visit",
+      label: "Log a customer visit",
+      body: "Read the `crm` skill in this folder, then add a visit to {target}.",
+    },
+  ];
+
+  it("writes them onto the node it just created", async () => {
+    const { calls, client } = createFakeServer();
+    const base = plainBase("contacts");
+    const result = await applyInstall(client, planFor([{ ...base, agentPrompts: PROMPTS }]), {
+      autoMerge: true,
+    });
+
+    const call = calls.find((entry) => entry.method === "nodes.updateAgentPrompts");
+    expect(call?.input).toEqual({ nodeId: "nod_base_1", agentPrompts: PROMPTS });
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("says nothing at all for a package that carries none — the shape every package had", async () => {
+    const { calls, client } = createFakeServer();
+    await applyInstall(client, planFor([plainBase("contacts")]), { autoMerge: true });
+
+    expect(calls.some((entry) => entry.method === "nodes.updateAgentPrompts")).toBe(false);
+  });
+
+  it("warns instead of failing when the node is still a pending change request", async () => {
+    const { calls, client } = createFakeServer();
+    // Review-first: `docs.create` answers with a change request, so there is no
+    // node id to hang prompts on until a human merges it.
+    const pendingClient = {
+      ...client,
+      docs: {
+        create: async () => ({ materialized: false as const, id: "crq_pending" }),
+      },
+    } as unknown as PackageClient;
+
+    const result = await applyInstall(
+      pendingClient,
+      planFor([
+        {
+          type: "doc",
+          slug: "guide",
+          name: "Guide",
+          description: "",
+          position: 0,
+          body: "",
+          agentPrompts: PROMPTS,
+        },
+      ]),
+      { autoMerge: false },
+    );
+
+    expect(calls.some((entry) => entry.method === "nodes.updateAgentPrompts")).toBe(false);
+    expect(result.warnings.join("\n")).toContain("set-agent-prompts");
+  });
+
+  it("warns instead of failing when the server refuses the write", async () => {
+    const { client } = createFakeServer();
+    const refusing = {
+      ...client,
+      nodes: {
+        ...client.nodes,
+        updateAgentPrompts: async () => {
+          throw new Error("no such route");
+        },
+      },
+    } as unknown as PackageClient;
+
+    const base = plainBase("contacts");
+    const result = await applyInstall(refusing, planFor([{ ...base, agentPrompts: PROMPTS }]), {
+      autoMerge: true,
+    });
+
+    expect(result.created.bases).toBe(1);
+    expect(result.warnings.join("\n")).toContain("no such route");
   });
 });
 

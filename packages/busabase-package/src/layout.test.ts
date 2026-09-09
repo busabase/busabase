@@ -25,6 +25,12 @@ const buildFixture = (): PackageTree => ({
       name: "Getting Started",
       description: "Read me first",
       position: 0,
+      // One carrier of each sidecar kind carries prompts, so the round trip
+      // covers doc frontmatter, `_folder.json`, `base.json`, `_node.json` and a
+      // file node's `.node.json`.
+      agentPrompts: [
+        { key: "summarize", label: "Summarize this for a new hire", body: "Summarize {target}." },
+      ],
       // The image is referenced by ASSET id; its bytes ride along in `assets` below.
       body: "# Hello\n\n![Diagram](/api/assets/astfixture1/raw)\n\nSome body text.",
     },
@@ -34,6 +40,7 @@ const buildFixture = (): PackageTree => ({
       name: "Guides",
       description: "",
       position: 1,
+      agentPrompts: [{ key: "index", label: "Index these guides", body: "Index {target}." }],
       children: [
         {
           type: "doc",
@@ -51,6 +58,14 @@ const buildFixture = (): PackageTree => ({
       name: "Vendors",
       description: "Who we buy from",
       position: 2,
+      agentPrompts: [
+        {
+          key: "add-vendor",
+          label: "Add a vendor",
+          body: "Read the `support-kb` skill in this folder, then add a vendor to {target}.",
+          intent: "change" as const,
+        },
+      ],
       base: {
         name: "Vendors",
         description: "Who we buy from",
@@ -134,6 +149,7 @@ const buildFixture = (): PackageTree => ({
       name: "PDF Summarizer",
       description: "Summarizes PDFs",
       position: 4,
+      agentPrompts: [{ key: "run", label: "Summarize a PDF", body: "Use {target} on my PDF." }],
       files: [
         { path: "SKILL.md", bytes: text("# Skill\n") },
         { path: "scripts/extract.py", bytes: text("print('hi')\n") },
@@ -153,6 +169,7 @@ const buildFixture = (): PackageTree => ({
       name: "Quarterly Report",
       description: "Q3 numbers",
       position: 6,
+      agentPrompts: [{ key: "read", label: "Pull the Q3 numbers", body: "Read {target}." }],
       fileName: "quarterly-report.pdf",
       mimeType: "application/pdf",
       bytes: Buffer.from([0x25, 0x50, 0x44, 0x46]),

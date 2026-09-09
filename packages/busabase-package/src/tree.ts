@@ -4,6 +4,7 @@
  * `plan`/`apply` consume. Plus the format's shared validation rules (§6.3).
  */
 import { extname } from "node:path";
+import type { CustomAgentPrompts } from "busabase-contract/contract/node-agent-prompt-schemas";
 import {
   PACKAGE_BASE_FILENAME,
   PACKAGE_FOLDER_META_FILENAME,
@@ -16,6 +17,30 @@ import {
   type PackageManifest,
   type PackageRecordLine,
 } from "busabase-contract/domains/package/types";
+
+/**
+ * A node's scenario prompts in a fixed key order — determinism (§6.6).
+ *
+ * Written through instead of spread verbatim because the list reaches the writer
+ * from two directions: hand-authored on disk (whatever order the author typed)
+ * and via a zod parse (schema order). Without this, re-exporting an unchanged
+ * package would diff on key order alone.
+ *
+ * `intent` is omitted when absent rather than defaulted to `"change"` here — the
+ * schema owns that default, and writing it out would silently rewrite every
+ * author's file on the first round trip.
+ */
+export const serializeAgentPrompts = (
+  prompts: CustomAgentPrompts | undefined,
+): Record<string, unknown>[] | undefined =>
+  prompts?.length
+    ? prompts.map((prompt) => ({
+        key: prompt.key,
+        ...(prompt.intent ? { intent: prompt.intent } : {}),
+        label: prompt.label,
+        body: prompt.body,
+      }))
+    : undefined;
 
 /** A file carried verbatim inside a skill/airapp/drive, or a `file` node's bytes. */
 export interface PackageFileEntry {
@@ -30,6 +55,17 @@ interface PackageNodeCommon {
   description: string;
   /** Sibling order. Absent → alphabetical by slug. `export` always writes it. */
   position: number | undefined;
+  /**
+   * This node's scenario Agent prompts — "log a customer visit", not an API
+   * restatement — carried in its sidecar so they survive export → install.
+   *
+   * Absent means "the author wrote none", and the installed node falls back to
+   * its node type's default prompts: the behaviour of every package written
+   * before the field existed. Never `[]` from a read — an empty sidecar list is
+   * normalised away, because "set, and deliberately empty" is not a distinction
+   * the on-disk format needs to carry.
+   */
+  agentPrompts?: CustomAgentPrompts;
 }
 
 export interface PackageFolderNode extends PackageNodeCommon {

@@ -8,6 +8,7 @@
  * must also rewrite every relation `targetBaseSlug` that points at it.
  */
 import { PACKAGE_MAX_FILE_COUNT } from "busabase-contract/domains/package/types";
+import { iStringParse } from "openlib/i18n/i-string";
 import type { PackageClient } from "./client";
 import { buildRecordCreateLayers } from "./record-dependencies";
 import { validateTemplate } from "./template";
@@ -503,7 +504,11 @@ export const countTree = (tree: PackageTree): PlanCounts => {
 export const renderPlan = (plan: InstallPlan): string => {
   const lines: string[] = [];
   lines.push(`Package: ${plan.tree.manifest.name}`);
-  if (plan.tree.manifest.description) lines.push(`  ${plan.tree.manifest.description}`);
+  // CLI dry-run output has no locale context to render in — flatten to "en"
+  // first, since a falsiness check on the raw iString object would never be
+  // true even when every locale is blank.
+  const description = iStringParse(plan.tree.manifest.description, "en");
+  if (description) lines.push(`  ${description}`);
   lines.push("");
   lines.push(`Target folder: ${plan.targetFolderSlug}`);
   lines.push("");

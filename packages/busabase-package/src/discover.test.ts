@@ -73,6 +73,27 @@ describe("discoverPackages", () => {
     expect(discoverPackages(singlePackage())[0].templateErrors).toEqual([]);
   });
 
+  it("carries a locale-keyed manifest description through untouched", () => {
+    const files: PackageFiles = new Map([
+      [
+        "busabase.json",
+        utf8(
+          JSON.stringify({
+            format: PACKAGE_FORMAT,
+            name: "support-kb",
+            description: { en: "The support-kb desk.", "zh-CN": "支持知识库工作台。" },
+          }),
+        ),
+      ],
+      ["content/faq.md", utf8("---\nname: FAQ\n---\n\nHello.\n")],
+    ]);
+    const found = discoverPackages(files);
+    expect(found[0].description).toEqual({
+      en: "The support-kb desk.",
+      "zh-CN": "支持知识库工作台。",
+    });
+  });
+
   it("explains itself to an author whose template does not quite validate", () => {
     const files = skillsRepo();
     files.set("skills/kelly-email/busabase.json", utf8(manifest("wrong-name")));

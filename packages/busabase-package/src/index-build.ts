@@ -15,6 +15,7 @@
  * Spec: `apps/busabase/content/spec/template-center.md` §6.4.
  */
 import type { TemplateRiskLevel } from "busabase-contract/domains/package/template";
+import type { iString } from "openlib/i18n/i-string";
 import { type DiscoveredPackage, discoverPackages } from "./discover";
 import type { PackageFiles } from "./layout-read";
 
@@ -25,7 +26,7 @@ export interface TemplateIndexEntry {
   /** Install target: `<repo>` + this subdir is the URL a card's button uses. */
   subdir: string;
   name: string;
-  description: string;
+  description: iString;
   category: string;
   /** Not what it does but whether it acts on your behalf — see `TemplateRiskLevel`. */
   risk?: TemplateRiskLevel;

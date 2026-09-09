@@ -40,7 +40,22 @@ const MANIFEST = {
   },
 };
 
-const BASE = { name: "Reviews", description: "Review items", position: 0, fields: [], views: [] };
+const BASE = {
+  name: "Reviews",
+  description: "Review items",
+  position: 0,
+  // A publishable package tells the user what THIS app is for, per node — see
+  // the `template/node-without-prompts` case below.
+  agentPrompts: [
+    {
+      key: "triage",
+      label: "Triage today's review queue",
+      body: "Read the `fixture-desk` skill in this folder, then triage {target}.",
+    },
+  ],
+  fields: [],
+  views: [],
+};
 
 const files = (overrides: Record<string, string | null> = {}): PackageFiles => {
   const base: Record<string, string> = {
@@ -167,6 +182,45 @@ describe("the manual an agent acts on", () => {
   it("reports nothing for a plain package with no manual", () => {
     const map = files({ "SKILL.md": null, "references/taxonomy.md": null });
     expect(auditSkill(map)).toEqual([]);
+  });
+});
+
+describe('installs, then leaves the user asking "now what?"', () => {
+  it("warns when the package ships no manual to install beside its resources", () => {
+    expect(rules(audit({ "SKILL.md": null, "references/taxonomy.md": null }), "warning")).toContain(
+      "template/no-skill-node",
+    );
+  });
+
+  it("warns about nodes with no scenario prompts, and names them", () => {
+    const { agentPrompts: _drop, ...noPrompts } = BASE;
+    const warnings = audit({ "content/reviews/base.json": JSON.stringify(noPrompts) }).filter(
+      (finding) => finding.rule === "template/node-without-prompts",
+    );
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.message).toContain("reviews");
+  });
+
+  it("does not count folders — a container has nothing to ask an agent for", () => {
+    const map = files({
+      "content/reviews/base.json": null,
+      "content/reviews/records.ndjson": null,
+      "content/notes/_folder.json": JSON.stringify({ name: "Notes" }),
+    });
+    const tree = readPackageTree(map);
+    expect(
+      auditPackage(tree, map, { directoryName: NAME }).map((finding) => finding.rule),
+    ).not.toContain("template/node-without-prompts");
+  });
+
+  it("stays a warning — nothing here stops a package installing", () => {
+    const { agentPrompts: _drop, ...noPrompts } = BASE;
+    const findings = audit({
+      "SKILL.md": null,
+      "references/taxonomy.md": null,
+      "content/reviews/base.json": JSON.stringify(noPrompts),
+    });
+    expect(findings.filter((finding) => finding.severity === "error")).toEqual([]);
   });
 });
 

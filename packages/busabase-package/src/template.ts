@@ -36,6 +36,7 @@ import {
   type TemplateManifest,
   type TemplateRiskLevel,
 } from "busabase-contract/domains/package/template";
+import { iStringParse } from "openlib/i18n/i-string";
 import { parseFrontmatter } from "./frontmatter";
 import { resolveAirAppPackageLifecycle } from "./layout-read";
 import { type PackageFileTreeNode, type PackageNode, type PackageTree, walkNodes } from "./tree";
@@ -250,7 +251,12 @@ export const deriveSkillDraft = (tree: PackageTree): string => {
   const bases = nodes.filter((node) => node.type === "base");
   const airapps = nodes.filter(isAirApp);
   const name = tree.manifest.name;
-  const description = tree.manifest.description || `TODO: one line on what ${name} does.`;
+  // The generated SKILL.md draft is single-locale by design (same reasoning as
+  // readRootSkill in layout-read.ts): flatten before falling back to the TODO
+  // placeholder, since an empty-string check on an iString object would never
+  // be true even when every locale is blank.
+  const flatDescription = iStringParse(tree.manifest.description, "en");
+  const description = flatDescription || `TODO: one line on what ${name} does.`;
 
   // Quoted, always. A description is free text and routinely contains a colon
   // ("Inbox triage: drafts and approvals"), which unquoted turns the line into a

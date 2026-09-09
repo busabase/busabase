@@ -20,6 +20,7 @@
 
 import type { TemplateRiskLevel } from "busabase-contract/domains/package/template";
 import { PACKAGE_MANIFEST_FILENAME } from "busabase-contract/domains/package/types";
+import type { iString } from "openlib/i18n/i-string";
 import { type PackageFiles, readPackageTree } from "./layout-read";
 import { countTree, type PlanCounts } from "./plan";
 import { validateTemplate } from "./template";
@@ -28,7 +29,10 @@ export interface DiscoveredPackage {
   /** Path from the URL's root; `""` when the repo itself is the package. */
   subdir: string;
   name: string;
-  description: string;
+  /** Propagated as-is (not flattened) so a catalog card can render every
+   * declared locale; `name` stays plain because it also doubles as the
+   * install-target slug — see the comment on `PackageManifestSchema.name`. */
+  description: iString;
   /** Installs as an app: Skill node, ownership stamps, sample rows merged. */
   isTemplate: boolean;
   /**
