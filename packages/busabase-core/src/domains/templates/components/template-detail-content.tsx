@@ -81,6 +81,9 @@ export function TemplateDetailContent({
   descriptionLocale = "en",
 }: TemplateDetailContentProps) {
   const { stats } = template;
+  const title = template.displayName
+    ? iStringParse(template.displayName, descriptionLocale)
+    : template.name;
   const contents = [
     [labels.bases, stats.bases],
     [labels.apps, stats.airapps],
@@ -91,7 +94,7 @@ export function TemplateDetailContent({
   ] as const;
   const screenshots = template.screenshots.map((src, index) => ({
     src,
-    alt: `${template.name} ${labels.screenshot(index + 1)}`,
+    alt: `${title} ${labels.screenshot(index + 1)}`,
   }));
 
   return (
@@ -99,7 +102,7 @@ export function TemplateDetailContent({
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex max-w-2xl flex-col gap-2">
           <div className="flex flex-wrap items-center gap-2">
-            <h1 className="font-serif text-2xl font-semibold">{template.name}</h1>
+            <h1 className="font-serif text-2xl font-semibold">{title}</h1>
             <Badge variant="secondary" className="text-[10px]">
               {template.category}
             </Badge>

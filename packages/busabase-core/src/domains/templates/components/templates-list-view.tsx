@@ -53,7 +53,13 @@ export function TemplatesListView({ orpc, onOpenTemplate, canInstall }: Template
     const all = catalog.data?.templates ?? [];
     if (!needle) return all;
     return all.filter((template) =>
-      [template.name, iStringConcat(template.description), template.category, ...template.tags]
+      [
+        template.name,
+        iStringConcat(template.displayName ?? ""),
+        iStringConcat(template.description),
+        template.category,
+        ...template.tags,
+      ]
         .join(" ")
         .toLowerCase()
         .includes(needle),

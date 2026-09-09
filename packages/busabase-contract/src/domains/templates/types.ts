@@ -35,6 +35,12 @@ export const TemplateCardVOSchema = z.object({
    * this file's own convention, not imported, but the reasoning is shared).
    */
   name: z.string(),
+  /**
+   * Optional human-facing card title, shown instead of `name` — never for
+   * identity, `name` still keys the route/install-folder/CLI sort. Absent
+   * when the author didn't declare one; the card then falls back to `name`.
+   */
+  displayName: iStringSchema.optional(),
   /** The catalog card's blurb. iString: `busabase.json`'s own description can
    * be locale-keyed (`{ en: "...", "zh-CN": "..." }`); a plain string is still
    * valid forever. */

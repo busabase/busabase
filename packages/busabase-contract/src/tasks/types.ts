@@ -40,7 +40,17 @@ type FullBusabaseClient = ContractRouterClient<BusabaseContract>;
 export type BusabaseTaskClient = {
   readonly nodes: Pick<
     FullBusabaseClient["nodes"],
-    "createChangeRequest" | "list" | "get" | "principals" | "share"
+    | "createChangeRequest"
+    | "list"
+    | "get"
+    | "principals"
+    | "share"
+    // `node_create` writes the new node's scenario prompts as a second call:
+    // no create endpoint accepts them, because they are addressed by node id
+    // and the id does not exist until the node does. `updateMetadata` is the
+    // fallback path for a server that predates the dedicated endpoint.
+    | "updateAgentPrompts"
+    | "updateMetadata"
   >;
   readonly views: Pick<FullBusabaseClient["views"], "changeRequest">;
   /**

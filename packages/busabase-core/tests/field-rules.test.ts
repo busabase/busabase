@@ -262,12 +262,15 @@ describe("validateRecordFields — rejects bad values per type", () => {
         /does not allow files of type image\/jpeg/,
       );
     });
-    it("enforces the per-field maxFileSize and the 25MB ceiling", () => {
+    it("accepts files through 200MB while enforcing smaller per-field limits", () => {
       const opts = { options: { attachment: { maxFileSize: 2_000 } } };
       expect(checkOne("attachment", [ref({ size: 2_000 })], opts)).toBeNull();
       expect(checkOne("attachment", [ref({ size: 2_001 })], opts)).toMatch(/larger than/);
-      // No per-field limit → the absolute 25MB ceiling still applies.
-      expect(checkOne("attachment", [ref({ size: 25 * 1024 * 1024 + 1 })])).toMatch(/larger than/);
+      expect(checkOne("attachment", [ref({ size: 26 * 1024 * 1024 })])).toBeNull();
+      expect(checkOne("attachment", [ref({ size: 200 * 1024 * 1024 })])).toBeNull();
+      expect(checkOne("attachment", [ref({ size: 200 * 1024 * 1024 + 1 })])).toMatch(
+        /larger than the 200MB limit/,
+      );
     });
     it("formats a sub-1MB limit in KB instead of rounding down to a meaningless 0MB", () => {
       const opts = { options: { attachment: { maxFileSize: 1024 } } };

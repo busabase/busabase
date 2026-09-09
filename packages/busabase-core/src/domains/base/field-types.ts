@@ -203,11 +203,11 @@ const isStringArray = (value: unknown): value is string[] =>
 
 /**
  * Absolute per-file ceiling for attachment values, mirroring the upload guard
- * (open-domains/attachments `MAX_FILE_SIZE` = 25MB). Duplicated as a local constant
+ * (open-domains/attachments `MAX_FILE_SIZE` = 200MB). Duplicated as a local constant
  * so this registry stays isomorphic — importing the server-only upload logic would
  * leak it into the client bundle.
  */
-const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+const MAX_ATTACHMENT_BYTES = 200 * 1024 * 1024;
 
 /**
  * Human-readable byte size for an error message. `Math.round(bytes / (1024*1024))`
@@ -363,7 +363,7 @@ const mimeTypeMatches = (mimeType: string, pattern: string): boolean => {
 /**
  * Validate an `attachment` cell — an Airtable-style ARRAY of attachment refs
  * (empty array = no files). Enforces the field's `options.attachment` limits
- * (maxFiles / allowedMimeTypes / maxFileSize) plus the absolute 25MB ceiling.
+ * (maxFiles / allowedMimeTypes / maxFileSize) plus the absolute 200MB ceiling.
  */
 const attachmentValidator = (value: unknown, def: FieldDef): string | null => {
   const name = fieldDisplayName(def);

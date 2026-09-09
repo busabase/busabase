@@ -72,7 +72,7 @@ export const fieldOptionsSchema = z
       })
       .optional(),
     // Per-field config for `attachment` columns (all optional; logic enforces a
-    // 25MB ceiling regardless).
+    // 200MB ceiling regardless).
     attachment: z
       .object({
         maxFiles: z.number().int().positive().optional(),
