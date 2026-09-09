@@ -27,10 +27,12 @@ export {
   type CmsPageHelpers,
   type CmsPageHelpersIntegration,
   type CmsPageHelpersOptions,
+  type CmsPageIdentity,
   type CmsPageMetadataOptions,
   type CmsPageReads,
   createCmsPageHelpers,
   createCmsPageReads,
+  type ResolvedCmsPage,
 } from "./pages";
 export {
   type BlogCardContent,
