@@ -21,13 +21,41 @@ describe("buildNodeAgentPrompts", () => {
   });
 
   it("uses the shared approval and reply guidance for each mobile locale", () => {
+    // Selected by key, not by position. This asserted on `scenarios[0]` and passed
+    // only because the first entry happened to be a mutating one — so promoting a
+    // read-only scenario to the top of the shared list turned it red without any
+    // mutating prompt having actually lost its approval line.
+    const mutating = (result: ReturnType<typeof buildNodeAgentPrompts>) => {
+      const prompt = result.scenarios.find((entry) => entry.key === "base-bulk-import");
+      if (!prompt)
+        throw new Error("expected the shared Base scenarios to include base-bulk-import");
+      return prompt;
+    };
+
     const english = buildNodeAgentPrompts(context, "en");
-    expect(english.scenarios[0].body).toContain("never merge it without my approval");
-    expect(english.scenarios[0].body).toContain("Reply to me in English");
+    expect(mutating(english).body).toContain("never merge it without my approval");
+    expect(mutating(english).body).toContain("Reply to me in English");
 
     const chinese = buildNodeAgentPrompts(context, "zh-CN");
-    expect(chinese.scenarios[0].body).toContain("未经我批准绝不要合并");
-    expect(chinese.scenarios[0].body).toContain("请用简体中文回复我");
+    expect(mutating(chinese).body).toContain("未经我批准绝不要合并");
+    expect(mutating(chinese).body).toContain("请用简体中文回复我");
+  });
+
+  it("carries the reply guidance but NOT the approval line on read-only scenarios", () => {
+    // The mobile app renders the same bodies, so "read-only" has to read as
+    // read-only here too — an approval line on a prompt that writes nothing is
+    // the kind of wrong that only shows up in a transcript.
+    for (const [locale, reply, approval] of [
+      ["en", "Reply to me in English", "never merge it without my approval"],
+      ["zh-CN", "请用简体中文回复我", "未经我批准绝不要合并"],
+    ] as const) {
+      const readOnly = buildNodeAgentPrompts(context, locale).scenarios.find(
+        (entry) => entry.key === "base-find",
+      );
+      if (!readOnly) throw new Error("expected the shared Base scenarios to include base-find");
+      expect(readOnly.body).toContain(reply);
+      expect(readOnly.body).not.toContain(approval);
+    }
   });
 
   it("leaves no unresolved tokens in shared prompts", () => {
