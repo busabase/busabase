@@ -26,6 +26,8 @@ export interface TemplateIndexEntry {
   /** Install target: `<repo>` + this subdir is the URL a card's button uses. */
   subdir: string;
   name: string;
+  /** Optional human-facing title — absent when the author didn't declare one. */
+  displayName?: iString;
   description: iString;
   category: string;
   /** Not what it does but whether it acts on your behalf — see `TemplateRiskLevel`. */
@@ -73,6 +75,7 @@ export interface TemplateIndex {
 const toEntry = (found: DiscoveredPackage, airapps: number): TemplateIndexEntry => ({
   subdir: found.subdir,
   name: found.name,
+  ...(found.displayName ? { displayName: found.displayName } : {}),
   description: found.description,
   category: found.category ?? "uncategorized",
   ...(found.risk ? { risk: found.risk } : {}),

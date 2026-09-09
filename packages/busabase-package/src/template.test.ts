@@ -384,6 +384,26 @@ describe("round trip", () => {
     );
   });
 
+  it("carries a locale-keyed displayName through export, byte for byte", () => {
+    const files = templateFiles({
+      "busabase.json": JSON.stringify({
+        format: PACKAGE_FORMAT,
+        name: "kelly-email",
+        description: "Inbox triage desk",
+        displayName: { en: "Kelly Email", "zh-CN": "Kelly 邮件" },
+        template: {
+          category: "email",
+          airapp: "kelly-email-app",
+          agentPrompts: ["triage today's mail"],
+          screenshots: ["assets/screenshots/overview.webp"],
+        },
+      }),
+    });
+    const rendered = renderPackageTree(readPackageTree(files));
+    const manifest = JSON.parse(rendered.get("busabase.json")?.toString("utf8") ?? "{}");
+    expect(manifest.displayName).toEqual({ en: "Kelly Email", "zh-CN": "Kelly 邮件" });
+  });
+
   it("keeps the skill at the root on re-render, never under content/", () => {
     const rendered = renderPackageTree(readPackageTree(templateFiles()));
     expect(rendered.has("SKILL.md")).toBe(true);
