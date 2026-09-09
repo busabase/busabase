@@ -7,13 +7,16 @@ import { LOCAL_SPACE_ID } from "../src/context";
 import { getDb } from "../src/db";
 import { busabaseNodes } from "../src/db/schema";
 import { englishScenario } from "../src/demo/dataset";
+import { AIRAPP_DEMO_PURE_HTML } from "../src/domains/airapp/demo-content";
+import { readAirAppFile } from "../src/domains/airapp/handlers";
 import { ensureReady, seedScenario } from "../src/logic/store";
 
 const MIGRATIONS_CWD = path.resolve(__dirname, "../../../apps/busabase");
 const EXISTING_SKILLS_FOLDER_ID = "nod_existing_skills";
+const EXISTING_PURE_HTML_AIRAPP_ID = "nod_existing_pure_html_airapp";
 const OTHER_SPACE_SKILLS_FOLDER_ID = "nod_other_space_skills";
 
-describe("file-tree seed folder adoption", () => {
+describe("file-tree seed identity adoption", () => {
   let dataDir = "";
   let storageDir = "";
   let originalCwd = "";
@@ -53,6 +56,17 @@ describe("file-tree seed folder adoption", () => {
         createdAt,
         updatedAt: createdAt,
       },
+      {
+        id: EXISTING_PURE_HTML_AIRAPP_ID,
+        parentId: "nod_root",
+        type: "airapp",
+        slug: "demo-pure-html",
+        name: "Historical Pure HTML Demo",
+        description: "Created before demo AirApps received canonical ids.",
+        position: 99,
+        createdAt,
+        updatedAt: createdAt,
+      },
     ]);
   });
 
@@ -87,6 +101,32 @@ describe("file-tree seed folder adoption", () => {
       .limit(1);
     expect(seededSkill?.parentId).toBe(EXISTING_SKILLS_FOLDER_ID);
 
+    const localPureHtmlAirApps = await db
+      .select({
+        id: busabaseNodes.id,
+        parentId: busabaseNodes.parentId,
+        name: busabaseNodes.name,
+      })
+      .from(busabaseNodes)
+      .where(
+        and(
+          eq(busabaseNodes.spaceId, LOCAL_SPACE_ID),
+          eq(busabaseNodes.type, "airapp"),
+          eq(busabaseNodes.slug, "demo-pure-html"),
+        ),
+      );
+    expect(localPureHtmlAirApps).toEqual([
+      {
+        id: EXISTING_PURE_HTML_AIRAPP_ID,
+        parentId: "nod_airapps",
+        name: "Pure HTML Demo",
+      },
+    ]);
+    const packageFile = await readAirAppFile(EXISTING_PURE_HTML_AIRAPP_ID, "package.json");
+    expect(packageFile.content).toBe(
+      AIRAPP_DEMO_PURE_HTML.files.find((file) => file.path === "package.json")?.content,
+    );
+
     const [otherSpaceFolder] = await db
       .select({ name: busabaseNodes.name })
       .from(busabaseNodes)
@@ -107,5 +147,17 @@ describe("file-tree seed folder adoption", () => {
       .where(eq(busabaseNodes.id, "nod_skill_ai_research_editor"))
       .limit(1);
     expect(seededSkillAfterRerun?.parentId).toBe(EXISTING_SKILLS_FOLDER_ID);
+
+    const pureHtmlAirAppsAfterRerun = await db
+      .select({ id: busabaseNodes.id })
+      .from(busabaseNodes)
+      .where(
+        and(
+          eq(busabaseNodes.spaceId, LOCAL_SPACE_ID),
+          eq(busabaseNodes.type, "airapp"),
+          eq(busabaseNodes.slug, "demo-pure-html"),
+        ),
+      );
+    expect(pureHtmlAirAppsAfterRerun).toEqual([{ id: EXISTING_PURE_HTML_AIRAPP_ID }]);
   }, 60_000);
 });
