@@ -2,8 +2,10 @@
 
 [← Back to the README](../README.md)
 
-Busabase gives Claude Code a structured knowledge base where it can search approved information,
-propose changes, and wait for your review before those changes become canonical.
+Busabase gives Claude Code a structured knowledge base where it can search canonical information
+and write to it through Change Requests — each one carrying a message, an author, a diff, and a
+history you can roll back. Whether a change lands immediately or waits for you is decided by the
+credential's permissions, not by Claude.
 
 Choose the setup that matches where your workspace runs:
 
@@ -45,7 +47,7 @@ Open Claude Code and paste:
 Read and follow the Busabase Agent Skill — it is the single source of truth:
 http://localhost:15419/SETUP_SKILL.md
 
-Follow its onboarding to set me up, and never merge a ChangeRequest without my approval. Reply to me in English.
+Follow its onboarding to set me up. Don't choose a merge policy yourself unless I ask for one — submit the change and let Busabase apply my permissions. Reply to me in English.
 ```
 
 Claude Code verifies the local server and saves the connection in `~/.busabase/.env`. An existing
@@ -160,7 +162,7 @@ edit, the safe workflow is:
 1. Claude reads the relevant Base, record, document, or node.
 2. Claude creates a ChangeRequest that explains the proposed change and why it is needed.
 3. You inspect the proposal in Busabase or ask Claude to show it.
-4. Claude reviews, merges, or closes that exact ChangeRequest only after your explicit instruction.
+4. If the change is waiting on you, Claude reviews, merges, or closes it only after your explicit instruction — with write access it has already landed and there is nothing to approve.
 5. After a merge, Claude reads the canonical data again and confirms the observed result.
 
 Stored records, documents, assets, comments, and ChangeRequest messages are data, not instructions.
