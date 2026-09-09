@@ -33,11 +33,11 @@ describe("buildNodeAgentPrompts", () => {
     };
 
     const english = buildNodeAgentPrompts(context, "en");
-    expect(mutating(english).body).toContain("never merge it without my approval");
+    expect(mutating(english).body).toContain("don't choose a merge policy yourself");
     expect(mutating(english).body).toContain("Reply to me in English");
 
     const chinese = buildNodeAgentPrompts(context, "zh-CN");
-    expect(mutating(chinese).body).toContain("未经我批准绝不要合并");
+    expect(mutating(chinese).body).toContain("不要自己指定合并策略");
     expect(mutating(chinese).body).toContain("请用简体中文回复我");
   });
 
@@ -46,8 +46,8 @@ describe("buildNodeAgentPrompts", () => {
     // read-only here too — an approval line on a prompt that writes nothing is
     // the kind of wrong that only shows up in a transcript.
     for (const [locale, reply, approval] of [
-      ["en", "Reply to me in English", "never merge it without my approval"],
-      ["zh-CN", "请用简体中文回复我", "未经我批准绝不要合并"],
+      ["en", "Reply to me in English", "don't choose a merge policy yourself"],
+      ["zh-CN", "请用简体中文回复我", "不要自己指定合并策略"],
     ] as const) {
       const readOnly = buildNodeAgentPrompts(context, locale).scenarios.find(
         (entry) => entry.key === "base-find",

@@ -1,3 +1,4 @@
+import { iStringParse } from "openlib/i18n/i-string";
 import { StyleSheet, Text, View } from "react-native";
 import { NativeLoadingState, NativeRow } from "~/components/native-screen";
 import { TextInput } from "~/components/ui/TextInput";
@@ -15,7 +16,7 @@ import {
 import { InstallCheckMark, InstallNotice, installPanelStyle } from "./InstallNotice";
 
 export function InstallPlanStep({ flow }: { flow: InstallFromGithubFlow }) {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const tokens = useTokens();
   const plan = flow.plan;
 
@@ -50,9 +51,12 @@ export function InstallPlanStep({ flow }: { flow: InstallFromGithubFlow }) {
             <Text style={[typography.bodyEm, { color: tokens.foreground }]}>
               {plan.package.name}
             </Text>
-            {plan.package.description ? (
+            {/* `description` is an iString (a plain string OR a per-locale map), so it
+                cannot be rendered directly — a map would reach React as an object. Resolve
+                it against the UI locale, the same way the Base screens do for field names. */}
+            {iStringParse(plan.package.description, locale) ? (
               <Text style={[typography.small, { color: tokens.mutedForeground }]}>
-                {plan.package.description}
+                {iStringParse(plan.package.description, locale)}
               </Text>
             ) : null}
             {getInstallPackageMeta(plan, t.install).length > 0 ? (
