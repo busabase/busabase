@@ -32,6 +32,7 @@ import {
 import { deriveSkillDraft, validateTemplate } from "busabase-package/template";
 import { suggestSlug } from "busabase-package/tree";
 import type { BusabaseClient } from "busabase-sdk";
+import { iStringParse } from "openlib/i18n/i-string";
 
 /** Progress is diagnostics, not data — it must never pollute `--output json` on stdout. */
 const reportProgress = (message: string): void => {
@@ -238,7 +239,11 @@ const renderPackageChoices = (
       .filter(Boolean)
       .join(" · ");
     lines.push(`  ${candidate.name}  (${shape})`);
-    if (candidate.description) lines.push(`    ${candidate.description}`);
+    // A terminal has no locale context of its own — flatten to "en" before the
+    // falsiness check, since an empty-per-locale iString object is still a
+    // truthy object.
+    const description = iStringParse(candidate.description, "en");
+    if (description) lines.push(`    ${description}`);
     for (const error of candidate.templateErrors) {
       lines.push(`    not a template: ${error}`);
     }
@@ -328,7 +333,9 @@ export const runExport = async (
       tree.rootSkill = {
         slug: manifest.name,
         name: manifest.name,
-        description: manifest.description,
+        // The synthetic root skill mirrors SKILL.md frontmatter, which stays
+        // single-locale by design — flatten rather than widen this shape.
+        description: iStringParse(manifest.description, "en"),
         files: [{ path: PACKAGE_SKILL_ENTRY, bytes: Buffer.from(deriveSkillDraft(tree), "utf8") }],
       };
     }
