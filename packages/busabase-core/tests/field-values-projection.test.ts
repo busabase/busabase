@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { createRouterClient } from "@orpc/server";
 import { and, eq } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, assert, beforeAll, describe, expect, it } from "vitest";
 import { DEMO_BASES, DEMO_FOLDERS } from "../src/demo/dataset";
 // Import logic through the same entry points the router uses (store barrel /
 // dynamic imports) — a direct deep import of logic modules at load time flips
@@ -77,6 +77,87 @@ describe("field-values projection layer", () => {
     expect(getRelationRecordIds("")).toEqual([]);
     expect(getRelationRecordIds({ nope: true })).toEqual([]);
   });
+
+  it.each([false, true])(
+    "replaces historical relation slugs by field identity (deleted: %s)",
+    async (deleted) => {
+      const { projectCommitFields } = await import("../src/logic/field-values");
+      const db = await getDb();
+      const { busabaseRecordLinks, busabaseRecords } = await getSchema();
+      const title = `Historical relation ${deleted}`;
+      const otherSlug = `unrelated_${deleted}`;
+      await client.bases.createField({
+        baseId,
+        slug: otherSlug,
+        name: "Unrelated relation",
+        type: "relation",
+        options: { targetBaseId: baseId },
+      });
+      await client.bases.createChangeRequest({
+        baseId,
+        fields: { title },
+        autoMerge: true,
+      });
+      const records = await client.records.list({ baseId });
+      const record = records.records.find((item) => item.headCommit.payload.title === title);
+      assert(record);
+      const [stored] = await db
+        .select()
+        .from(busabaseRecords)
+        .where(eq(busabaseRecords.id, record.id));
+      assert(stored);
+      const projection = {
+        baseId,
+        commitId: stored.headCommitId,
+        recordId: record.id,
+        fields: { title, ref: [record.id] },
+      };
+      await projectCommitFields({
+        ...projection,
+        fields: { ...projection.fields, [otherSlug]: [record.id] },
+      });
+      const links = () =>
+        db
+          .select()
+          .from(busabaseRecordLinks)
+          .where(eq(busabaseRecordLinks.sourceRecordId, record.id));
+      const original = (await links()).find((link) => link.fieldSlug === "ref");
+      const unrelated = (await links()).find((link) => link.fieldSlug === otherSlug);
+      assert(original);
+      assert(unrelated);
+
+      // Historical projections can retain a slug from before a field rename.
+      await db
+        .update(busabaseRecordLinks)
+        .set({ fieldSlug: "previous_ref", deletedAt: deleted ? new Date() : null })
+        .where(eq(busabaseRecordLinks.id, original.id));
+
+      await projectCommitFields(projection);
+      await projectCommitFields(projection);
+      expect((await links()).filter((link) => link.fieldId === original.fieldId)).toEqual([
+        expect.objectContaining({
+          fieldId: original.fieldId,
+          fieldSlug: "ref",
+          targetRecordId: record.id,
+          commitId: stored.headCommitId,
+          deletedAt: null,
+          position: 0,
+        }),
+      ]);
+
+      await db
+        .update(busabaseRecordLinks)
+        .set({ fieldSlug: "previous_ref" })
+        .where(
+          and(
+            eq(busabaseRecordLinks.sourceRecordId, record.id),
+            eq(busabaseRecordLinks.fieldId, original.fieldId),
+          ),
+        );
+      await projectCommitFields({ ...projection, fields: { title, ref: [] } });
+      expect(await links()).toEqual([unrelated]);
+    },
+  );
 
   // ── archived/deleted listing queries ───────────────────────────────────────
 

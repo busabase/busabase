@@ -193,16 +193,18 @@ export const projectCommitFields = async (input: {
   }
 
   if (input.recordId && !input.isNewRecord) {
-    const relationFieldSlugs = Object.entries(input.fields)
-      .filter(([fieldSlug]) => fieldsBySlug.get(fieldSlug)?.type === "relation")
-      .map(([fieldSlug]) => fieldSlug);
-    if (relationFieldSlugs.length > 0) {
+    // Slugs can change; replace links by the stable identity used by their unique index.
+    const relationFieldIds = Object.keys(input.fields).flatMap((fieldSlug) => {
+      const field = fieldsBySlug.get(fieldSlug);
+      return field?.type === "relation" ? [field.id] : [];
+    });
+    if (relationFieldIds.length > 0) {
       await db
         .delete(busabaseRecordLinks)
         .where(
           and(
             eq(busabaseRecordLinks.sourceRecordId, input.recordId),
-            inArray(busabaseRecordLinks.fieldSlug, relationFieldSlugs),
+            inArray(busabaseRecordLinks.fieldId, relationFieldIds),
           ),
         );
     }
