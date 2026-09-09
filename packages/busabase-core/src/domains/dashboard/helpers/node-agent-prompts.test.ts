@@ -112,7 +112,7 @@ describe("buildNodeAgentPrompts scoping", () => {
     "cell-explain",
   ]);
 
-  it("keeps the do-not-self-approve guidance on mutating scenarios and every capability", () => {
+  it("keeps the merge-policy guidance on mutating scenarios and every capability", () => {
     for (const scope of [
       undefined,
       { kind: "field", ...FIELD } as const,
@@ -127,20 +127,20 @@ describe("buildNodeAgentPrompts scoping", () => {
       const mutating = scenarios.filter((prompt) => !MUTATION_EXEMPT.has(prompt.key));
       expect(mutating.length).toBeGreaterThan(0);
       for (const prompt of mutating) {
-        expect(prompt.body).toContain("never merge it without my approval");
+        expect(prompt.body).toContain("don't choose a merge policy yourself");
       }
       for (const prompt of capabilities) {
-        expect(prompt.body).toContain("never merge it without my approval");
+        expect(prompt.body).toContain("don't choose a merge policy yourself");
       }
     }
   });
 
-  it("leaves the approval line OFF read-only scenarios, so 'read-only' means it", () => {
+  it("leaves the merge-policy line OFF read-only scenarios, so 'read-only' means it", () => {
     const { scenarios } = build();
     const readOnly = scenarios.filter((prompt) => MUTATION_EXEMPT.has(prompt.key));
     expect(readOnly.map((prompt) => prompt.key)).toEqual(["base-find", "base-summarize"]);
     for (const prompt of readOnly) {
-      expect(prompt.body).not.toContain("never merge it without my approval");
+      expect(prompt.body).not.toContain("don't choose a merge policy yourself");
     }
   });
 });
@@ -330,7 +330,7 @@ describe("buildNodeAgentPrompts custom scenario prompts", () => {
     expect(summary?.body).toContain("汇总");
   });
 
-  it("keeps read-only prompts free of the approval instruction and applies it when intent is omitted", () => {
+  it("keeps read-only prompts free of the merge-policy instruction and applies it when intent is omitted", () => {
     const { scenarios } = buildNodeAgentPrompts(
       { ...BASE_CONTEXT, customPrompts: CUSTOM_PROMPTS },
       "en",
@@ -338,10 +338,11 @@ describe("buildNodeAgentPrompts custom scenario prompts", () => {
     );
     const summary = scenarios.find((prompt) => prompt.key === "weekly-severity-summary");
     const draft = scenarios.find((prompt) => prompt.key === "draft-response");
-    expect(summary?.body).not.toContain("Submit the change as a ChangeRequest");
-    // Omitted `intent` must default to requiring approval, same as a curated
-    // prompt with no `intent` — a custom prompt cannot silently skip review.
-    expect(draft?.body).toContain("Submit the change as a ChangeRequest");
+    expect(summary?.body).not.toContain("let Busabase apply my permissions");
+    // Omitted `intent` must default to `change`, same as a curated prompt with
+    // no `intent` — a custom prompt cannot silently drop the merge-policy line
+    // and leave the agent free to force a merge (or force a review).
+    expect(draft?.body).toContain("let Busabase apply my permissions");
   });
 
   it("falls through to the type default when customPrompts is absent", () => {
@@ -455,7 +456,7 @@ describe("buildNodeAgentPrompts custom scenario prompts", () => {
 });
 
 describe("Doc read prompt", () => {
-  it("is a Content capability rather than a scenario and keeps mutating Doc prompts review-gated", () => {
+  it("is a Content capability rather than a scenario and keeps the merge-policy line on mutating Doc prompts", () => {
     const { scenarios, capabilities } = buildNodeAgentPrompts(DOC_CONTEXT, "en", coreMessagesEn);
 
     expect(scenarios.map((prompt) => prompt.key)).toEqual(["doc-ask", "doc-draft", "doc-review"]);
@@ -463,9 +464,9 @@ describe("Doc read prompt", () => {
     const contentPrompts = capabilities.filter((prompt) => prompt.group === "Content");
     expect(contentPrompts[0]?.key).toBe("doc-read");
     expect(contentPrompts[0]?.tier).toBe("capability");
-    expect(contentPrompts[0]?.body).not.toContain("Submit the change as a ChangeRequest");
+    expect(contentPrompts[0]?.body).not.toContain("let Busabase apply my permissions");
     expect(scenarios.find((prompt) => prompt.key === "doc-draft")?.body).toContain(
-      "Submit the change as a ChangeRequest and never merge it without my approval",
+      "Submit the change and let Busabase apply my permissions",
     );
   });
 

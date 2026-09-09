@@ -699,7 +699,14 @@ function getMcpGuideUrl(lang?: string): string {
 /**
  * The short, human-readable prompt the user pastes into their agent. Deliberately thin:
  * it points at SKILL.md (the single source of truth for ALL behavior), keeps the one
- * safety rule visible, and sets the agent's reply language. Everything about HOW to
+ * safety rule visible, and sets the agent's reply language.
+ *
+ * That safety rule is "don't pick a merge policy", NOT "never merge". Busabase is
+ * permission-aware (see `contract/auto-merge.ts`): omitting `autoMerge` merges when
+ * the actor has write access and queues for review otherwise. The old wording
+ * ("never merge a ChangeRequest without my approval") had to carve out an exception
+ * for onboarding's own sample initialization — a sign the blanket ban was wrong
+ * rather than that onboarding was special. Both are gone. Everything about HOW to
  * onboard — the welcome, what-it-is, and "ask what to manage first" — lives in SKILL.md.
  */
 export function createAgentSkillPrompt(
@@ -721,18 +728,18 @@ export function createAgentSkillPrompt(
 ${skillUrl}
 ${targetLine}
 
-按它的引导帮我把工作区设置好。除 Skill 明确允许的版本化 system-onboarding 示例初始化外，未经我批准绝不要合并 ChangeRequest。请用简体中文回复我。`;
+按它的引导帮我把工作区设置好。除非我明确要求，否则不要自己指定合并策略——提交后让 Busabase 按我的权限决定是直接合并还是排队待审。请用简体中文回复我。`;
     case "ja":
       return `Busabase Agent Skill を読んで従ってください——これが唯一の信頼できる情報源です：
 ${skillUrl}
 ${targetLine}
 
-オンボーディングに従ってセットアップしてください。Skill が明示的に許可するバージョン付き system-onboarding のサンプル初期化を除き、私の承認なしに ChangeRequest をマージしないでください。日本語で返信してください。`;
+オンボーディングに従ってセットアップしてください。私が明示的に指示しない限り、マージ方針を自分で指定しないでください。提出後は、直ちにマージするか審査待ちにするかを私の権限に基づいて Busabase が判断します。日本語で返信してください。`;
     default:
       return `Read and follow the Busabase Agent Skill — it is the single source of truth:
 ${skillUrl}
 ${targetLine}
 
-Follow its onboarding to set me up. Never merge a ChangeRequest without my approval except for the versioned system-onboarding sample initialization explicitly allowed by the Skill. Reply to me in English.`;
+Follow its onboarding to set me up. Don't choose a merge policy yourself unless I ask for one — submit the change and let Busabase apply my permissions to decide whether it merges now or waits for review. Reply to me in English.`;
   }
 }

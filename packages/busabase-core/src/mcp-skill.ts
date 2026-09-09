@@ -375,7 +375,7 @@ Read the server's message and surface it verbatim — don't paraphrase or guess.
 | 403 | Not permitted in this space | confirm the space and permissions |
 | 404 | Base / change request / record not found | re-list to get a valid id |
 | 409 | State moved (stale hash, already merged) | re-read current state, then retry once |
-| 422 | A rule was violated (e.g. merging an unapproved change request) | follow the approval order; never bypass review |
+| 422 | A rule was violated (e.g. merging a change request that is still waiting on a human) | leave it waiting and tell the user; the approval is theirs |
 | 429 | Rate limited | back off, then retry |
 | 5xx | Server error | retry up to 2x with backoff |
 
@@ -474,25 +474,29 @@ folder with a temporary \`ref\`, and create the Bases inside it via \`parentNode
 real id only exists after merge, so the \`ref\` is what lets one reviewable change build the whole
 tree. Always leave more than one node — a lone empty Base opens as a blank screen.
 
-## 5. Seed a few example records — through the review loop, because that IS the lesson
+## 5. Seed a few example records — and let them land
 
 Propose 3-5 realistic sample records with a single \`bases_create_bulk_change_request\` (one
-review for the batch, not one per row). Give every record a short, human-readable PRIMARY field
+change for the batch, not one per row). Give every record a short, human-readable PRIMARY field
 value, and give the batch a real commit-style \`message\`.
 
-Then **stop and hand the decision to me.** Show me what's waiting and tell me plainly that I
-decide: I can approve and merge it, or reject it and it disappears. **Do not approve or merge it
-yourself, and do not offer to** — this first review is the entire point of the product, and me
-doing it once is how I learn the loop.
+**Do not choose a merge policy.** Omit \`autoMerge\` and read the \`status\` that comes back. This
+is my own new workspace, so I have write access and the batch merges immediately — the records
+are simply there. That is the product working, not a step you skipped. If the status says it is
+waiting instead, say so plainly and tell me the decision is mine; never approve it yourself.
 
-Once I've decided, read the result back (\`record_query\` with the Base's \`baseId\`) and show
-me what is now canonical.
+Then read the result back (\`record_query\` with the Base's \`baseId\`) and show me what is now
+canonical. Point at what came with it: the change carries a message, an author and a full
+history, so I can see what you did and undo it. Tell me that if I ever want a human in front of
+an agent's writes, that is a permission I set — a proposal-only API key — not something you
+decide per change.
 
 ## 6. Confirm we're done, and only now congratulate me
 
-Say it plainly with the tracker complete: connected, workspace built, first change reviewed by
-me, canonical data read back. Then tell me what everyday use looks like — I ask for work, you
-propose, I approve, it merges — and ask what I'd like to do first.
+Say it plainly with the tracker complete: connected, workspace built, first records written,
+canonical data read back. Then tell me what everyday use looks like — I ask for work, you do it,
+and every change carries a message, an author and a history I can read and undo; if I want a
+second pair of eyes on an agent, I give it a proposal-only key. Ask me what I'd like to do first.
 `;
 
 /**
@@ -727,7 +731,7 @@ Conduct rules — these are what make it feel guided rather than dumped on me:
   open questions at once.
 - **Announce -> act -> confirm.** One plain line about what you're doing and why, then a
   checkmark line for what became true.
-- Show a one-line tracker at each milestone: "Target - Design - Build - Review - Run".
+- Show a one-line tracker at each milestone: "Target - Design - Build - Land - Run".
 - I see outcomes and choices, not tool calls.
 
 ## 1. Find the target space and see what I already have
@@ -782,12 +786,14 @@ Read my Base data through \`fetch("/api/v1/…")\` on the app's own origin, usin
 you saw in \`bases_get\` — not guessed ones. Never write a credential or an absolute Busabase
 URL into a file.
 
-## 5. Hand me the review, then the Run
+## 5. Land the app, then the Run
 
-Tell me the change request is waiting and that I decide — I approve it and it merges, or I
-reject it and it's gone. **Do not approve or merge it yourself, and do not offer to.**
+**Do not choose a merge policy** — omit \`autoMerge\` and read the \`status\`. In my own workspace
+the AirApp node lands immediately and there is nothing for me to approve. If the status says it
+is waiting instead, tell me it is waiting and that the decision is mine; never approve it
+yourself, and don't offer to.
 
-Once I've approved it, tell me plainly to open the AirApp node in Busabase and click **Run**:
+Once the node exists, tell me plainly to open the AirApp node in Busabase and click **Run**:
 that installs the dependencies and starts the server in my browser, and the first run takes a
 moment. Ask me to tell you what I see.
 

@@ -221,15 +221,33 @@ const scopeLine = (locale: CoreLocale, scope: NodePromptScope): string => {
 };
 
 /**
- * Mutating prompts ask the agent not to self-approve. Reply-language
- * guidance is separate because read-only prompts need it without accidentally
- * asking the agent to create a change.
+ * Mutating prompts tell the agent not to pick a merge policy at all.
+ *
+ * This used to read "never merge it without my approval", which was written
+ * when Busabase was positioned as approval-first. It no longer is: every write
+ * is permission-aware (`shouldAutoMerge`, and see `contract/auto-merge.ts`) —
+ * omitting `autoMerge` means "merge now if this actor has write access on the
+ * target, otherwise queue for review", and the server decides. A blanket "never
+ * merge" instruction pushed agents toward an explicit `autoMerge: false`, which
+ * forces a review queue on someone who has write access and is exactly the
+ * friction the permission-aware default removed — a person archiving one
+ * duplicate record in their own workspace should not have to go approve it.
+ *
+ * So the instruction names the two things an agent must NOT decide on its own
+ * (force a merge, force a review) and leaves the decision where it belongs. The
+ * "don't approve what is already waiting" half is still real: with a
+ * proposal-only key the change does queue, and approving it is the human's.
+ *
+ * Reply-language guidance stays separate because read-only prompts need it
+ * without accidentally asking the agent to create a change.
  */
-const APPROVAL_POLICY: Record<CoreLocale, string> = {
-  en: "Submit the change as a ChangeRequest and never merge it without my approval.",
-  "zh-CN": "以 ChangeRequest 提交改动，未经我批准绝不要合并。",
-  "zh-TW": "以 ChangeRequest 提交變更，未經我核准絕不要合併。",
-  ja: "変更は ChangeRequest として提出し、私の承認なしに絶対にマージしないでください。",
+const MERGE_POLICY: Record<CoreLocale, string> = {
+  en: "Submit the change and let Busabase apply my permissions — don't choose a merge policy yourself unless I ask for one, and don't approve a request that is already waiting on me.",
+  "zh-CN":
+    "提交改动，让 Busabase 按我的权限来处理——除非我明确要求，否则不要自己指定合并策略，也不要去批准已经在等我处理的请求。",
+  "zh-TW":
+    "提交變更，讓 Busabase 依我的權限處理——除非我明確要求，否則不要自己指定合併策略，也不要去核准已經在等我處理的請求。",
+  ja: "変更を提出し、マージするかどうかは私の権限に基づいて Busabase に任せてください。私が明示的に指示しない限り、マージ方針を自分で指定せず、すでに私の判断を待っているリクエストを承認しないでください。",
 };
 
 const REPLY_LANGUAGE: Record<CoreLocale, string> = {
@@ -1076,7 +1094,7 @@ const buildCuratedPrompt = (
   const footer =
     intent === "read-only"
       ? REPLY_LANGUAGE[locale]
-      : `${APPROVAL_POLICY[locale]} ${REPLY_LANGUAGE[locale]}`;
+      : `${MERGE_POLICY[locale]} ${REPLY_LANGUAGE[locale]}`;
 
   return {
     key: prompt.key,
@@ -1170,7 +1188,7 @@ export function buildNodeAgentPrompts(
         tier: "capability",
         label: opLabel,
         group: groupLabels[group],
-        body: `${CAPABILITY_TEMPLATE[locale](target, opLabel)}\n\n${APPROVAL_POLICY[locale]} ${
+        body: `${CAPABILITY_TEMPLATE[locale](target, opLabel)}\n\n${MERGE_POLICY[locale]} ${
           REPLY_LANGUAGE[locale]
         }`,
       };
@@ -1409,7 +1427,7 @@ export function buildCreateNodePrompts(
         label: CREATE_ITEM_LABEL[locale](typeLabel),
         group: CREATE_GROUP_LABEL[locale],
         body: `${CREATE_CAPABILITY_TEMPLATE[locale](target, typeLabel, definition.type)}\n\n${
-          APPROVAL_POLICY[locale]
+          MERGE_POLICY[locale]
         } ${REPLY_LANGUAGE[locale]}`,
       };
     });
