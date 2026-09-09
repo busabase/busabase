@@ -30,10 +30,11 @@ interface TemplateCardSummaryProps {
   headingHref?: string;
   children?: ReactNode;
   /**
-   * `description` is an iString; this resolves it to one language. A prop, not
-   * `useCoreLocale()` called internally — this component renders in both a
-   * Dashboard client tree and a marketing Server Component tree (see the note
-   * below), and a hook would break the second one outright.
+   * `description` and `displayName` are both iString; this resolves them to
+   * one language. A prop, not `useCoreLocale()` called internally — this
+   * component renders in both a Dashboard client tree and a marketing Server
+   * Component tree (see the note below), and a hook would break the second
+   * one outright.
    */
   descriptionLocale?: LocaleType;
 }
@@ -57,6 +58,9 @@ export function TemplateCardSummary({
   descriptionLocale = "en",
 }: TemplateCardSummaryProps) {
   const [screenshot] = template.screenshots;
+  const title = template.displayName
+    ? iStringParse(template.displayName, descriptionLocale)
+    : template.name;
   const Heading = headingLevel;
   const stats = [
     template.stats.bases > 0
@@ -90,10 +94,10 @@ export function TemplateCardSummary({
             >
               {headingHref ? (
                 <a href={headingHref} className="hover:text-primary hover:underline">
-                  {template.name}
+                  {title}
                 </a>
               ) : (
-                template.name
+                title
               )}
             </Heading>
             {comfortable ? (

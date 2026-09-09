@@ -311,6 +311,7 @@ const toPlanVO = (
   return {
     package: {
       name: manifest.name,
+      ...(manifest.displayName ? { displayName: manifest.displayName } : {}),
       description: manifest.description,
       version: manifest.version,
       author: manifest.author,

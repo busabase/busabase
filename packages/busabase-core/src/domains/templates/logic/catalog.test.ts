@@ -76,3 +76,21 @@ describe("listTemplates — description is iString", () => {
     });
   });
 });
+
+describe("listTemplates — displayName is optional iString", () => {
+  it("is absent when the entry never declares one", async () => {
+    mockCatalog([baseEntry]);
+    const catalog = await listTemplates();
+    expect(catalog.templates[0].displayName).toBeUndefined();
+  });
+
+  it("passes through a locale-keyed displayName without throwing", async () => {
+    mockCatalog([{ ...baseEntry, displayName: { en: "Gated Desk", "zh-CN": "受限工作台" } }]);
+    const catalog = await listTemplates();
+    expect(catalog.error).toBeUndefined();
+    expect(catalog.templates[0].displayName).toEqual({
+      en: "Gated Desk",
+      "zh-CN": "受限工作台",
+    });
+  });
+});

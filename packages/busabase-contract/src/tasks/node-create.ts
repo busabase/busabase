@@ -1,3 +1,7 @@
+import {
+  type CustomAgentPrompts,
+  customAgentPromptsSchema,
+} from "../contract/node-agent-prompt-schemas";
 import { CREATABLE_NODE_TYPES, type CreatableNodeType } from "../domains/registry";
 import type { BusabaseTaskClient, TaskDefinition } from "./types";
 
@@ -57,6 +61,8 @@ export interface NodeCreateInput {
   version?: string;
   autoMerge?: boolean;
   requireReview?: boolean;
+  /** Scenario prompts for the node being created — written in a second call. */
+  agentPrompts?: unknown;
 }
 
 /**
@@ -82,6 +88,100 @@ const rejectMismatchedPayload = (input: NodeCreateInput): void => {
   }
 };
 
+/**
+ * Validate `agentPrompts` BEFORE the node is created, against the same schema
+ * the dedicated endpoint and `nodes set-agent-prompts` use.
+ *
+ * Order matters: prompts are written in a second call, so a malformed list
+ * discovered afterwards would leave a created node behind and still fail. The
+ * caller then has a node they did not expect and an error that reads like the
+ * creation failed. Validating first makes the whole task all-or-nothing for the
+ * one failure mode the caller can actually fix.
+ */
+const parseAgentPrompts = (input: NodeCreateInput): CustomAgentPrompts | undefined => {
+  if (input.agentPrompts === undefined || input.agentPrompts === null) return undefined;
+  const parsed = customAgentPromptsSchema.safeParse(input.agentPrompts);
+  if (!parsed.success) {
+    const detail = parsed.error.issues
+      .map((issue) => `${issue.path.length > 0 ? `${issue.path.join(".")}: ` : ""}${issue.message}`)
+      .join("; ");
+    throw new Error(`Invalid agentPrompts — ${detail}`);
+  }
+  return parsed.data;
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
+
+/**
+ * The node id to hang prompts on, or `undefined` when this call did not
+ * materialize a node.
+ *
+ * Every create endpoint returns a `materialized` discriminator, but the
+ * materialized half is shaped per type: a Base VO carries the owning `nodeId`,
+ * a Doc/File/Skill/Drive/AirApp wraps its node under `node`, and the generic
+ * tree endpoint returns a ChangeRequest whose merged create operation names it.
+ */
+const materializedNodeId = (type: CreatableNodeType, result: unknown): string | undefined => {
+  if (!isRecord(result)) return undefined;
+  if (result.materialized === false) return undefined;
+  if (type === "base") return typeof result.nodeId === "string" ? result.nodeId : undefined;
+  if (isRecord(result.node) && typeof result.node.id === "string") return result.node.id;
+  // folder | form | whiteboard | workflow | html — a ChangeRequest, which only
+  // names a node once it has actually merged.
+  if (result.status !== "merged") return undefined;
+  const operations = Array.isArray(result.operations) ? result.operations : [];
+  const created = operations.find((op) => isRecord(op) && typeof op.nodeId === "string");
+  return isRecord(created) ? (created.nodeId as string) : undefined;
+};
+
+/**
+ * Write the prompts onto the node just created, and report what happened in the
+ * task's own result.
+ *
+ * Two deliberate choices:
+ *
+ * - **A pending ChangeRequest is reported, never silently dropped.** Review-first
+ *   callers get a node id only after a human merges, so the prompts genuinely
+ *   cannot be written here. Saying so (with the command that finishes the job)
+ *   is the difference between "not yet" and a caller believing prompts exist.
+ * - **A server without the dedicated endpoint falls back to the metadata key.**
+ *   The CLI and the server ship separately, so a current caller routinely talks
+ *   to an older server; `nodes set-agent-prompts` already carries this fallback
+ *   for exactly that reason and this path must not be the one that regresses.
+ */
+const writeAgentPrompts = async (
+  client: BusabaseTaskClient,
+  type: CreatableNodeType,
+  result: unknown,
+  agentPrompts: CustomAgentPrompts,
+): Promise<unknown> => {
+  const nodeId = materializedNodeId(type, result);
+  if (!nodeId) {
+    return {
+      ...(isRecord(result) ? result : { result }),
+      agentPromptsWrite: {
+        written: false,
+        reason:
+          "Prompts are addressed by node id, and this call proposed the node for review instead of creating it — there is no node id yet.",
+        nextStep:
+          "Once the change request merges: busabase-cli nodes set-agent-prompts --node-id <nodeId> --file prompts.json",
+      },
+    };
+  }
+  try {
+    await client.nodes.updateAgentPrompts({ nodeId, agentPrompts });
+  } catch (error) {
+    const status = isRecord(error) ? error.status : undefined;
+    if (status !== 404) throw error;
+    await client.nodes.updateMetadata({ nodeId, metadata: { agentPrompts } });
+  }
+  return {
+    ...(isRecord(result) ? result : { result }),
+    agentPromptsWrite: { written: true, nodeId, count: agentPrompts.length },
+  };
+};
+
 /** `autoMerge` is tri-state: unset (permission-aware default), forced on, forced off. */
 const mergeIntent = (input: NodeCreateInput): { autoMerge?: boolean } => {
   if (input.requireReview) return { autoMerge: false };
@@ -98,6 +198,75 @@ const mergeIntent = (input: NodeCreateInput): { autoMerge?: boolean } => {
  */
 const asFieldArray = (value: unknown): BaseCreateInput["fields"] | undefined =>
   Array.isArray(value) ? (value as BaseCreateInput["fields"]) : undefined;
+
+/**
+ * Dispatch to the endpoint that can actually build this node type. Split out
+ * of `execute` so the prompt write that follows reads as its own step.
+ */
+const createNode = async (client: BusabaseTaskClient, input: NodeCreateInput): Promise<unknown> => {
+  const type = input.type;
+  const common = {
+    slug: input.slug,
+    name: input.name,
+    description: input.description,
+    parentNodeId: input.parentNodeId,
+    ...mergeIntent(input),
+  };
+
+  if (FILE_TREE_TYPES.has(type)) {
+    const payload = {
+      ...common,
+      // `type` is the contract's discriminator, so the narrowing has to be
+      // explicit — `FILE_TREE_TYPES.has` doesn't narrow a plain string.
+      type: type as FileTreeCreateInput["type"],
+      ...(Array.isArray(input.files) ? { files: input.files as FileTreeCreateInput["files"] } : {}),
+      ...(input.mergeMode
+        ? { mergeMode: input.mergeMode as FileTreeCreateInput["mergeMode"] }
+        : {}),
+      ...(input.visibility
+        ? { visibility: input.visibility as FileTreeCreateInput["visibility"] }
+        : {}),
+      ...(input.version ? { version: input.version } : {}),
+    };
+    return client.fileTrees.create(payload as FileTreeCreateInput);
+  }
+
+  if (type === "doc") {
+    const payload: DocCreateInput = { ...common, body: input.body ?? "" };
+    return client.docs.create(payload);
+  }
+
+  if (type === "base") {
+    const payload: BaseCreateInput = { ...common, fields: asFieldArray(input.fields) ?? [] };
+    return client.bases.create(payload);
+  }
+
+  if (type === "file") {
+    // Worded without a CLI flag prefix on purpose: the same message surfaces
+    // to an MCP agent, which has an `assetId` argument and no `--asset-id`.
+    if (!input.assetId) throw new Error('assetId is required for type "file".');
+    const payload: FileCreateInput = { ...common, assetId: input.assetId };
+    return client.files.create(payload);
+  }
+
+  // folder | form | whiteboard | workflow | html — no type-specific payload,
+  // so the generic tree endpoint loses nothing here.
+  return client.nodes.createChangeRequest({
+    message: input.message ?? `Create ${type} ${input.name}`,
+    submittedBy: input.submittedBy,
+    ...mergeIntent(input),
+    operations: [
+      {
+        kind: "create",
+        nodeType: type,
+        slug: input.slug,
+        name: input.name,
+        description: input.description,
+        parentNodeId: input.parentNodeId,
+      },
+    ],
+  });
+};
 
 export const nodeCreateTask: TaskDefinition<NodeCreateInput> = {
   name: "node_create",
@@ -120,7 +289,8 @@ export const nodeCreateTask: TaskDefinition<NodeCreateInput> = {
   guidance:
     "One call creates any of the 11 node types with its type-specific payload: `fields` for a Base, `body` for a Doc, `files` for a Skill/Drive/AirApp, `assetId` for a File. " +
     "Review is permission-aware, decided server-side: this merges immediately when you already have write access on the parent node, and proposes a ChangeRequest for a human otherwise. " +
-    "Pass requireReview to always propose instead of merging.",
+    "Pass requireReview to always propose instead of merging. " +
+    "Before you finish: if the person will come back to this node to do the same job again, pass agentPrompts so the node opens with THEIR job on it instead of the node type's generic list.",
   annotations: { readOnly: false, destructive: false },
   params: [
     {
@@ -227,6 +397,17 @@ export const nodeCreateTask: TaskDefinition<NodeCreateInput> = {
       kind: "boolean",
       description: "Always propose a pending ChangeRequest, even with write access.",
     },
+    {
+      name: "agentPrompts",
+      kind: "json",
+      description:
+        "Scenario prompts shown when someone opens this node and asks an agent for something: " +
+        '[{"key":"log-visit","label":"Log a customer visit","body":"{target}\\n\\nAdd a visit record with today\u0027s date, the contact I name, and a one-line summary.","intent":"change"}]. ' +
+        'Write what the PERSON wants in their own words ("Log a customer visit"), not the operation ("Create a record in Visits") — the node type already covers the operations. ' +
+        "These REPLACE the node type\u0027s default scenario prompts, so 2-5 real recurring jobs help and a generic pair is worse than none: omit this when you cannot name one. " +
+        "`{target}` expands to a complete sentence naming the node and space, so give it its own line. " +
+        "Stored in a second call after the node exists, so they are skipped (and reported) when this call proposes a ChangeRequest instead of creating the node; add them afterwards with `nodes set-agent-prompts`.",
+    },
   ],
   examples: [
     'busabase-cli nodes create --type folder --slug cms --name "内容管理 CMS"',
@@ -234,73 +415,15 @@ export const nodeCreateTask: TaskDefinition<NodeCreateInput> = {
     'busabase-cli nodes create --type doc --slug readme --name "README" --body "# Hello"',
     'busabase-cli nodes create --type skill --slug my-skill --name "My Skill" --files-json @files.json',
     'busabase-cli nodes create --type folder --slug cms --name "CMS" --require-review',
+    'busabase-cli nodes create --type base --slug visits --name "Visits" --field title:Title:text --agent-prompts-json @prompts.json',
   ],
   execute: async (client: BusabaseTaskClient, input: NodeCreateInput) => {
     rejectMismatchedPayload(input);
-
-    const type = input.type;
-    const common = {
-      slug: input.slug,
-      name: input.name,
-      description: input.description,
-      parentNodeId: input.parentNodeId,
-      ...mergeIntent(input),
-    };
-
-    if (FILE_TREE_TYPES.has(type)) {
-      const payload = {
-        ...common,
-        // `type` is the contract's discriminator, so the narrowing has to be
-        // explicit — `FILE_TREE_TYPES.has` doesn't narrow a plain string.
-        type: type as FileTreeCreateInput["type"],
-        ...(Array.isArray(input.files)
-          ? { files: input.files as FileTreeCreateInput["files"] }
-          : {}),
-        ...(input.mergeMode
-          ? { mergeMode: input.mergeMode as FileTreeCreateInput["mergeMode"] }
-          : {}),
-        ...(input.visibility
-          ? { visibility: input.visibility as FileTreeCreateInput["visibility"] }
-          : {}),
-        ...(input.version ? { version: input.version } : {}),
-      };
-      return client.fileTrees.create(payload as FileTreeCreateInput);
-    }
-
-    if (type === "doc") {
-      const payload: DocCreateInput = { ...common, body: input.body ?? "" };
-      return client.docs.create(payload);
-    }
-
-    if (type === "base") {
-      const payload: BaseCreateInput = { ...common, fields: asFieldArray(input.fields) ?? [] };
-      return client.bases.create(payload);
-    }
-
-    if (type === "file") {
-      // Worded without a CLI flag prefix on purpose: the same message surfaces
-      // to an MCP agent, which has an `assetId` argument and no `--asset-id`.
-      if (!input.assetId) throw new Error('assetId is required for type "file".');
-      const payload: FileCreateInput = { ...common, assetId: input.assetId };
-      return client.files.create(payload);
-    }
-
-    // folder | form | whiteboard | workflow | html — no type-specific payload,
-    // so the generic tree endpoint loses nothing here.
-    return client.nodes.createChangeRequest({
-      message: input.message ?? `Create ${type} ${input.name}`,
-      submittedBy: input.submittedBy,
-      ...mergeIntent(input),
-      operations: [
-        {
-          kind: "create",
-          nodeType: type,
-          slug: input.slug,
-          name: input.name,
-          description: input.description,
-          parentNodeId: input.parentNodeId,
-        },
-      ],
-    });
+    // Validated before anything is created — see `parseAgentPrompts`.
+    const agentPrompts = parseAgentPrompts(input);
+    const created = await createNode(client, input);
+    return agentPrompts === undefined
+      ? created
+      : writeAgentPrompts(client, input.type, created, agentPrompts);
   },
 };

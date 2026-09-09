@@ -744,10 +744,13 @@ export function PackageSummary({
   // is still a truthy object, so the old `plan.package.description ? ...`
   // guard would have rendered an empty <span> instead of hiding it.
   const description = iStringParse(plan.package.description, locale);
+  const title = plan.package.displayName
+    ? iStringParse(plan.package.displayName, locale)
+    : plan.package.name;
 
   return (
     <section className="flex flex-col gap-1 rounded-md border border-border bg-muted/40 p-3">
-      <span className="font-medium text-foreground text-sm">{plan.package.name}</span>
+      <span className="font-medium text-foreground text-sm">{title}</span>
       {description ? <span className="text-muted-foreground text-sm">{description}</span> : null}
       {meta.length > 0 ? (
         <span className="text-muted-foreground text-xs">{meta.join(" · ")}</span>

@@ -76,4 +76,25 @@ describe("TemplateDetailContent", () => {
     const en = renderToStaticMarkup(<TemplateDetailContent template={localized} />);
     expect(en).toContain("Email operations workspace");
   });
+
+  it("falls back to name when the template declares no displayName", () => {
+    const markup = renderToStaticMarkup(<TemplateDetailContent template={template} />);
+    expect(markup).toContain(">busa-email</h1>");
+  });
+
+  it("prefers a locale-keyed displayName over the identity name", () => {
+    const withDisplayName: TemplateCardVO = {
+      ...template,
+      displayName: { en: "Busa Email", "zh-CN": "Busa 邮件" },
+    };
+
+    const zh = renderToStaticMarkup(
+      <TemplateDetailContent template={withDisplayName} descriptionLocale="zh-CN" />,
+    );
+    expect(zh).toContain(">Busa 邮件</h1>");
+    expect(zh).not.toContain(">busa-email</h1>");
+
+    const en = renderToStaticMarkup(<TemplateDetailContent template={withDisplayName} />);
+    expect(en).toContain(">Busa Email</h1>");
+  });
 });

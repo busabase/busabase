@@ -118,12 +118,10 @@ export const PACKAGE_DEFERRED_FIELD_TYPES: readonly string[] = [
 // ── Limits (v1 guardrails, validated before any write) ───────────────────────
 
 /**
- * Per-file ceiling. Mirrors the server's real attachment ceiling
- * (open-domains/attachments `MAX_FILE_SIZE` = 25MB, itself duplicated as
- * `MAX_ATTACHMENT_BYTES` in busabase-core's `domains/base/field-types.ts`), so a
- * package can never carry a file the target would refuse to store. Duplicated as a
- * local constant for the same reason field-types.ts duplicates it: importing the
- * server-only upload logic would leak it into the client bundle.
+ * Per-file package ceiling. Intentionally tighter than the server's 200MB
+ * attachment ceiling so imported packages remain bounded independently. Kept as a
+ * local constant because importing the server-only upload logic would leak it into
+ * the client bundle.
  */
 export const PACKAGE_MAX_FILE_BYTES = 25 * 1024 * 1024;
 /** Total unpacked size across the whole package. */
@@ -145,9 +143,18 @@ export const PackageManifestSchema = z.object({
    * iString: none of those call sites expect a locale-keyed object, and
    * "the directory name is the package's identity, not a label beside it"
    * (audit.ts) is exactly the argument against ever making it one. A
-   * human-facing translated title belongs in `description` below, not here.
+   * human-facing translated title belongs in `displayName` below, not here.
    */
   name: z.string().min(1),
+  /**
+   * Optional human-facing card title, shown instead of `name` wherever a
+   * template is presented to a reader (never for identity — routing, install
+   * folder, CLI sort, and SKILL.md frontmatter matching all still key off
+   * `name`, untouched by this field). Absent by default: a package written
+   * before this field, or whose author didn't bother, falls back to `name`
+   * and renders exactly as before — this is additive, not a migration.
+   */
+  displayName: iStringSchema.optional(),
   /**
    * The one-line blurb shown on a template's catalog card, and (via
    * `layout-read.ts`) the description on the Folder node created at install

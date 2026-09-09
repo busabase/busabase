@@ -42,7 +42,7 @@ export const APP_BRANDING_LOGO_TYPE = "app-branding-logo";
 
 /**
  * A sidebar logo renders at ~24px and is loaded on every page, so it is capped
- * far below the 25MB attachment ceiling. The Settings tab refuses oversized
+ * far below the 200MB attachment ceiling. The Settings tab refuses oversized
  * files up front for a fast, friendly message; this is the boundary that
  * actually enforces it.
  */

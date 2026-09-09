@@ -104,4 +104,26 @@ describe("PackageSummary", () => {
     expect(markup).toContain("Customer Support");
     expect(markup).not.toMatch(/<span[^>]*><\/span>/);
   });
+
+  it("falls back to the identity name when the package declares no displayName", () => {
+    const markup = renderSummary();
+    expect(markup).toContain("Customer Support");
+  });
+
+  it("prefers a locale-keyed displayName over the identity name", () => {
+    const withDisplayName: InstallPlanVO = {
+      ...plan,
+      package: {
+        ...plan.package,
+        displayName: { en: "Support Desk", "zh-CN": "客服工作台" },
+      },
+    };
+
+    const zh = renderSummary(undefined, "zh-CN", withDisplayName);
+    expect(zh).toContain("客服工作台");
+    expect(zh).not.toContain("Customer Support");
+
+    const en = renderSummary(undefined, "en", withDisplayName);
+    expect(en).toContain("Support Desk");
+  });
 });

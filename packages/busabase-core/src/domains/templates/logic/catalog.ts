@@ -40,6 +40,7 @@ const CACHE_TTL_MS = 60 * 60 * 1000;
 interface RawTemplate {
   subdir: string;
   name: string;
+  displayName?: string;
   description: string;
   category: string;
   /** Untrusted — normalized through `parseTemplateRisk` before it reaches the VO. */
@@ -88,6 +89,7 @@ const toCard = (raw: RawTemplate, repo: string, ref: string): TemplateCardVO => 
   return {
     id: `${repo}/${raw.subdir}`,
     name: raw.name,
+    ...(raw.displayName ? { displayName: raw.displayName } : {}),
     description: raw.description,
     category: raw.category,
     ...(risk ? { risk } : {}),

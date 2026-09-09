@@ -77,6 +77,9 @@ export type InstallPlanCountsVO = z.infer<typeof InstallPlanCountsVOSchema>;
 /** The package's own metadata, as declared in its `busabase.json`. */
 export const InstallPackageInfoVOSchema = z.object({
   name: z.string(),
+  /** Optional human-facing title — falls back to `name` when the package
+   * didn't declare one. Same rendering rule as `description` below. */
+  displayName: iStringSchema.optional(),
   /** iString: `busabase.json`'s own description may be locale-keyed; render
    * with `iStringParse(value, locale)`, never inserted into JSX directly. */
   description: iStringSchema.default(""),
