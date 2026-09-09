@@ -5,6 +5,7 @@ import {
   buildInstallPlan,
   type ExistingNode,
   findPlanBlockers,
+  renderPlan,
 } from "./plan";
 import type { PackageBaseNode, PackageTree } from "./tree";
 
@@ -419,6 +420,39 @@ describe("plan reporting", () => {
     expect(buildInstallPlan(tree([]), noTarget, { intoFolder: "support" }).targetFolderSlug).toBe(
       "support",
     );
+  });
+
+  it("flattens a locale-keyed manifest description to English in the dry-run text", () => {
+    const localizedTree: PackageTree = {
+      manifest: {
+        format: PACKAGE_FORMAT,
+        name: "my-package",
+        description: { en: "The my-package desk.", "zh-CN": "工作台。" },
+        tags: [],
+      },
+      nodes: [],
+    };
+    const plan = buildInstallPlan(localizedTree, noTarget);
+    const rendered = renderPlan(plan);
+    expect(rendered).toContain("The my-package desk.");
+    expect(rendered).not.toContain("[object Object]");
+    expect(rendered).not.toContain("工作台。");
+  });
+
+  it("omits the description line when every locale is blank, rather than printing an empty object", () => {
+    const blankTree: PackageTree = {
+      manifest: {
+        format: PACKAGE_FORMAT,
+        name: "my-package",
+        description: { en: "", "zh-CN": "" },
+        tags: [],
+      },
+      nodes: [],
+    };
+    const plan = buildInstallPlan(blankTree, noTarget);
+    const rendered = renderPlan(plan);
+    expect(rendered).not.toContain("[object Object]");
+    expect(rendered.split("\n")[1]).toBe("");
   });
 
   it("counts every node type and its records", () => {

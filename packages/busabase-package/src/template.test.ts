@@ -321,6 +321,44 @@ describe("deriveSkillDraft", () => {
     // Never invented: the draft must not assert what the app does.
     expect(draft).toContain("kelly-email-app");
   });
+
+  it("flattens a locale-keyed manifest description to its English line", () => {
+    const tree = readPackageTree(
+      templateFiles({
+        "SKILL.md": null,
+        "references/schema.md": null,
+        "scripts/setup.mjs": null,
+        "busabase.json": JSON.stringify({
+          format: PACKAGE_FORMAT,
+          name: "kelly-email",
+          description: { en: "Inbox triage: drafts and approvals", "zh-CN": "收件箱分诊与审批" },
+          template: { category: "email", airapp: "kelly-email-app" },
+        }),
+      }),
+    );
+    const draft = deriveSkillDraft(tree);
+    expect(draft).toContain("Inbox triage: drafts and approvals");
+    expect(draft).not.toContain("[object Object]");
+    expect(draft).not.toContain("收件箱分诊与审批");
+  });
+
+  it("still falls back to a TODO placeholder when every locale is blank", () => {
+    const tree = readPackageTree(
+      templateFiles({
+        "SKILL.md": null,
+        "references/schema.md": null,
+        "scripts/setup.mjs": null,
+        "busabase.json": JSON.stringify({
+          format: PACKAGE_FORMAT,
+          name: "kelly-email",
+          description: { en: "", "zh-CN": "" },
+          template: { category: "email", airapp: "kelly-email-app" },
+        }),
+      }),
+    );
+    const draft = deriveSkillDraft(tree);
+    expect(draft).toContain("TODO: one line on what kelly-email does.");
+  });
 });
 
 describe("round trip", () => {

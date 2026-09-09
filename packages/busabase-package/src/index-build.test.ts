@@ -70,4 +70,21 @@ describe("buildTemplateIndex", () => {
     });
     expect(index.templates[0].risk).toBeUndefined();
   });
+
+  it("carries a locale-keyed manifest description onto the index entry untouched", () => {
+    const localizedManifest = JSON.stringify({
+      format: PACKAGE_FORMAT,
+      name: "gated",
+      description: { en: "The gated desk.", "zh-CN": "受限工作台。" },
+      template: { category: "ops" },
+    });
+    const index = buildTemplateIndex(repo({ "templates/gated/busabase.json": localizedManifest }), {
+      repo: "busabase/templates",
+      ref: "main",
+    });
+    expect(index.templates[0].description).toEqual({
+      en: "The gated desk.",
+      "zh-CN": "受限工作台。",
+    });
+  });
 });

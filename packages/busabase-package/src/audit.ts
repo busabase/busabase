@@ -31,7 +31,7 @@ import { SkillFrontmatterSchema } from "busabase-contract/domains/skill/frontmat
 
 import { parseFrontmatter } from "./frontmatter";
 import type { PackageFiles } from "./layout-read";
-import type { PackageTree } from "./tree";
+import type { PackageNode, PackageTree } from "./tree";
 
 export type AuditSeverity = "error" | "warning";
 
@@ -170,7 +170,49 @@ export const auditPackage = (
     }
   }
 
+  // ── Installs, then leaves the user asking "now what?" ──────────────────────
+  //
+  // Warnings, never errors, and deliberately so: a package with neither is still
+  // correct and still installs. What it is not is *self-driving* — the person who
+  // installs it gets resources and has to supply the knowledge of how to work them,
+  // which is the gap these two rules exist to name at publish time rather than in
+  // a support thread.
+  if (!tree.rootSkill) {
+    warn(
+      "template/no-skill-node",
+      `This package carries no ${PACKAGE_SKILL_ENTRY}, so nothing installs a manual beside its resources. An agent working in the installed folder has nothing to read, and the person who installed it has nothing to point one at.`,
+    );
+  }
+
+  const promptless = nodesWithoutAgentPrompts(tree.nodes);
+  if (promptless.length > 0) {
+    warn(
+      "template/node-without-prompts",
+      `${promptless.length} installed node(s) carry no agentPrompts (${promptless.slice(0, 5).join(", ")}${promptless.length > 5 ? ", …" : ""}). They will show their node type's generic prompts, so nothing tells the user what THIS app is for. Write scenario prompts per node — see \`busabase-cli nodes set-agent-prompts\`.`,
+    );
+  }
+
   return findings;
+};
+
+/**
+ * Node slugs (dotted by folder) with no scenario prompts of their own.
+ *
+ * Folders are exempt: a folder is a container, and the useful prompts hang off the
+ * things inside it. Everything else is something a person opens and then has to
+ * work out what to ask for.
+ */
+const nodesWithoutAgentPrompts = (nodes: readonly PackageNode[], prefix = ""): string[] => {
+  const out: string[] = [];
+  for (const node of nodes) {
+    const path = `${prefix}${node.slug}`;
+    if (node.type === "folder") {
+      out.push(...nodesWithoutAgentPrompts(node.children, `${path}/`));
+      continue;
+    }
+    if (!node.agentPrompts?.length) out.push(path);
+  }
+  return out;
 };
 
 /**
