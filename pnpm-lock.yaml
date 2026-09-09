@@ -828,9 +828,6 @@ importers:
       '@zip.js/zip.js':
         specifier: ^2.8.20
         version: 2.8.20
-      openlib:
-        specifier: workspace:*
-        version: link:../openlib
       yaml:
         specifier: ^2.9.0
         version: 2.9.0
@@ -844,6 +841,9 @@ importers:
       busabase-contract:
         specifier: workspace:*
         version: link:../busabase-contract
+      openlib:
+        specifier: workspace:*
+        version: link:../openlib
       tsdown:
         specifier: ^0.22.14
         version: 0.22.14(@typescript/native-preview@7.0.0-dev.20260707.2)(tsx@4.21.0)(typescript@7.0.2)
