@@ -39,15 +39,31 @@ const plan: InstallPlanVO = {
   applicable: true,
 };
 
-function PackageSummaryProbe({ initialPackageName }: { initialPackageName?: string }) {
+function PackageSummaryProbe({
+  initialPackageName,
+  plan: planOverride,
+}: {
+  initialPackageName?: string;
+  plan?: InstallPlanVO;
+}) {
   const messages = useCoreI18n();
-  return <PackageSummary initialPackageName={initialPackageName} messages={messages} plan={plan} />;
+  return (
+    <PackageSummary
+      initialPackageName={initialPackageName}
+      messages={messages}
+      plan={planOverride ?? plan}
+    />
+  );
 }
 
-const renderSummary = (initialPackageName?: string) =>
+const renderSummary = (
+  initialPackageName?: string,
+  locale: "en" | "zh-CN" = "en",
+  planOverride?: InstallPlanVO,
+) =>
   renderToStaticMarkup(
-    <CoreI18nProvider locale="en">
-      <PackageSummaryProbe initialPackageName={initialPackageName} />
+    <CoreI18nProvider locale={locale}>
+      <PackageSummaryProbe initialPackageName={initialPackageName} plan={planOverride} />
     </CoreI18nProvider>,
   );
 
@@ -62,5 +78,30 @@ describe("PackageSummary", () => {
     expect(markup).toContain("Customer Support");
     expect(markup).toContain("A ready-to-use customer support workspace");
     expect(markup).toContain("busabase/templates");
+  });
+
+  it("renders the active locale of a locale-keyed description", () => {
+    const localizedPlan: InstallPlanVO = {
+      ...plan,
+      package: {
+        ...plan.package,
+        description: { en: "A ready-to-use customer support workspace", "zh-CN": "客户支持工作台" },
+      },
+    };
+
+    const zh = renderSummary(undefined, "zh-CN", localizedPlan);
+    expect(zh).toContain("客户支持工作台");
+    expect(zh).not.toContain("A ready-to-use customer support workspace");
+  });
+
+  it("hides the description span instead of an empty tag when every locale is blank", () => {
+    const blankPlan: InstallPlanVO = {
+      ...plan,
+      package: { ...plan.package, description: { en: "", "zh-CN": "" } },
+    };
+
+    const markup = renderSummary(undefined, "en", blankPlan);
+    expect(markup).toContain("Customer Support");
+    expect(markup).not.toMatch(/<span[^>]*><\/span>/);
   });
 });

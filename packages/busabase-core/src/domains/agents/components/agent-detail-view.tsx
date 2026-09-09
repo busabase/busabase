@@ -15,17 +15,30 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "kui/dropdown-menu";
-import { ArrowLeft, Bot, ChevronDown, MessageSquarePlus } from "lucide-react";
+import {
+  ArrowLeft,
+  AtSign,
+  Bot,
+  ChevronDown,
+  MessageSquarePlus,
+  PanelRight,
+  X,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCoreI18n, useCoreLocale } from "../../../i18n";
+import { resolveSpaceId } from "../../dashboard/components/node-agent-prompts-dialog";
 import {
   AGENT_CHAT_TAB_TYPE,
   type AgentChatTabPayload,
   agentChatTabId,
   consumeAgentChatDraft,
 } from "../../dashboard/components/side-panel-sources";
+import type { LoadedNode } from "../../dashboard/node-detail-registry";
 import { registerSidePanelTab, type SidePanelTabProps } from "../../dashboard/side-panel-registry";
+import { useCurrentNodeStore } from "../../dashboard/store/current-node-store";
 import { useSidePanelStore } from "../../dashboard/store/side-panel-store";
 import { useAgentSession } from "../hooks/use-agent-session";
+import { withNodeContext } from "../utils/agent-message-context";
 import { AgentLoadingState, AgentQueryErrorState } from "./agent-query-state";
 import { TransportBadge } from "./transport-badge";
 
@@ -64,6 +77,27 @@ interface AgentDetailViewProps {
   draft?: AcpComposerDraft | null;
   /** Fired once the draft is in the field, so the owner can retire it. */
   onDraftApplied?: (id: string) => void;
+  /**
+   * The node the user is looking at in the main area, offered as removable
+   * context above the composer.
+   *
+   * Only the side-panel instance passes this, and deliberately so: "the node
+   * you have open" is a fact that exists when a node is on the left and the
+   * agent is on the right. On the full agent page there is no such node — the
+   * agent IS what the user is looking at — so a chip there could only ever
+   * offer a stale one.
+   */
+  contextNode?: LoadedNode | null;
+  /**
+   * Move this conversation into the side panel, so it can sit beside the node
+   * the user goes on to work in.
+   *
+   * Only the full page passes it — inside the panel the conversation is already
+   * there, and a button that re-pins it where it is would be a no-op with a
+   * label. This is also what makes the context chip reachable: the chip only
+   * exists in the panel instance, so "open in side panel" is the door to it.
+   */
+  onOpenInSidePanel?: (sessionId: string, agentName: string) => void;
 }
 
 /**
@@ -80,6 +114,8 @@ export function AgentDetailView({
   initialSessionId,
   draft,
   onDraftApplied,
+  contextNode = null,
+  onOpenInSidePanel,
 }: AgentDetailViewProps) {
   const queryClient = useQueryClient();
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(
@@ -134,14 +170,33 @@ export function AgentDetailView({
   // busabase's own.
   const chat = useAgentSession(orpc, activeSessionId);
 
+  /**
+   * The node whose context the user has waved off, by id.
+   *
+   * Keyed by id rather than a boolean so dismissing is scoped to THAT node:
+   * navigate to a different one and the chip comes back, because the answer to
+   * "did you mean this node?" changed. Nothing about "no, not the Visits table"
+   * implies "and never any node again".
+   */
+  const messages = useCoreI18n();
+  const locale = useCoreLocale();
+  const [dismissedContextId, setDismissedContextId] = useState<string | null>(null);
+  const activeContextNode =
+    contextNode && contextNode.id !== dismissedContextId ? contextNode : null;
+
   const send = useCallback(
     (text: string, attachments?: AcpAttachment[]) => {
       if (!activeSessionId) return;
-      void chat.sendPrompt(text, attachments).then(() => {
+      // The chip is a promise made in the UI ("your message will say which node
+      // you mean"), so it is kept here, at send time, rather than by pre-filling
+      // the textbox — which would make the user delete the line to opt out and
+      // leave them editing our words instead of writing their own.
+      const body = withNodeContext(text, activeContextNode, locale, resolveSpaceId());
+      void chat.sendPrompt(body, attachments).then(() => {
         void queryClient.invalidateQueries({ queryKey: orpc.agents.sessions.list.queryKey() });
       });
     },
-    [activeSessionId, chat, queryClient, orpc],
+    [activeContextNode, activeSessionId, chat, locale, queryClient, orpc],
   );
 
   const agentName = active?.agentName ?? agentSessions[0]?.agentName ?? agentSlug;
@@ -280,6 +335,19 @@ export function AgentDetailView({
               <span className="ml-auto shrink-0 text-muted-foreground text-xs">
                 {STATUS_LABEL[active.status]}
               </span>
+              {onOpenInSidePanel ? (
+                <Button
+                  aria-label={messages.agents.openInSidePanel}
+                  className="shrink-0 text-muted-foreground"
+                  onClick={() => onOpenInSidePanel(active.id, agentName)}
+                  size="icon-sm"
+                  title={messages.agents.openInSidePanel}
+                  type="button"
+                  variant="ghost"
+                >
+                  <PanelRight className="size-4" />
+                </Button>
+              ) : null}
             </header>
 
             {active.error ? (
@@ -295,6 +363,13 @@ export function AgentDetailView({
               emptyTitle="Connected."
               emptyDescription="Send a message to start."
             />
+
+            {activeContextNode ? (
+              <AgentContextChip
+                node={activeContextNode}
+                onDismiss={() => setDismissedContextId(activeContextNode.id)}
+              />
+            ) : null}
 
             <AcpComposer
               className="border-0 border-t p-3"
@@ -342,6 +417,46 @@ export function AgentDetailView({
 }
 
 /**
+ * "You have this node open — I'll mention it."
+ *
+ * Sits above the composer rather than inside it because the composer is shared
+ * with acprouter (`@acp-ui/web`), which has no notion of a workspace node. Kept
+ * out here, busabase gets its context affordance and the shared component stays
+ * as dumb as its README promises.
+ *
+ * Removable, and says what it does before it does it — the alternative (silently
+ * appending a line to what someone wrote) is the kind of helpfulness people
+ * discover only by reading their own message back in a transcript.
+ */
+function AgentContextChip({ node, onDismiss }: { node: LoadedNode; onDismiss: () => void }) {
+  const messages = useCoreI18n();
+  return (
+    // The hint is the row's `title`, not a third column of text: the panel is
+    // ~420px and the row already lost the end of that sentence to an ellipsis at
+    // that width. "Context @Companies ×" says it; the tooltip spells it out.
+    <div
+      className="flex shrink-0 items-center gap-2 border-t px-3 pt-2 text-xs"
+      title={messages.agents.contextChipHint}
+    >
+      <span className="shrink-0 text-muted-foreground">{messages.agents.contextChipLabel}</span>
+      <span className="flex min-w-0 items-center gap-1 rounded-md border bg-muted/50 px-2 py-0.5">
+        <AtSign className="size-3 shrink-0 text-muted-foreground" />
+        <span className="truncate font-medium">{node.name}</span>
+        <button
+          aria-label={messages.agents.contextChipRemove}
+          className="-mr-1 ml-0.5 shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          onClick={onDismiss}
+          title={messages.agents.contextChipRemove}
+          type="button"
+        >
+          <X className="size-3" />
+        </button>
+      </span>
+    </div>
+  );
+}
+
+/**
  * The same view, rendered inside the side panel.
  *
  * Deliberately not a second implementation: `AgentDetailView` adapts to its
@@ -351,6 +466,8 @@ export function AgentDetailView({
  */
 function AgentChatSidePanelTab({ orpc, payload }: SidePanelTabProps) {
   const { agentSlug, sessionId, draft } = payload as AgentChatTabPayload;
+  // Only the panel reads this: it is the instance that sits beside an open node.
+  const contextNode = useCurrentNodeStore((state) => state.node);
   const onDraftApplied = useCallback(
     (id: string) => consumeAgentChatDraft(agentSlug, id),
     [agentSlug],
@@ -358,6 +475,7 @@ function AgentChatSidePanelTab({ orpc, payload }: SidePanelTabProps) {
   return (
     <AgentDetailView
       agentSlug={agentSlug}
+      contextNode={contextNode}
       draft={draft ?? null}
       initialSessionId={sessionId}
       onBack={() => useSidePanelStore.getState().closeTab(agentChatTabId(agentSlug))}

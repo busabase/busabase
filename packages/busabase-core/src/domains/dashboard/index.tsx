@@ -74,7 +74,11 @@ import { NodeRouteStateView } from "./components/node-route-state";
 import { RecordDetailView, RecordEditorView, RecordTopbarActions } from "./components/record-views";
 import { SearchDialog } from "./components/search-dialog";
 import { SidePanel, SidePanelToggle } from "./components/side-panel";
-import { isPinnableNode, pinNodeToSidePanel } from "./components/side-panel-sources";
+import {
+  isPinnableNode,
+  openAgentChatTab,
+  pinNodeToSidePanel,
+} from "./components/side-panel-sources";
 import { BaseTableSkeleton, NodeDetailSkeleton } from "./components/skeletons";
 import { SubmitPermissionProvider } from "./components/split-submit-button";
 import { BusabaseTopbarBreadcrumb, TopbarNodeActionsSlot } from "./components/topbar";
@@ -105,6 +109,7 @@ import { useKeyboardShortcut } from "./hooks/use-keyboard-shortcut";
 import { useBusabaseLiveSync } from "./hooks/use-live-sync";
 import { getNodeDetail, type LoadedNode } from "./node-detail-registry";
 import { DashboardOrpcProvider } from "./orpc-context";
+import { useCurrentNodeStore } from "./store/current-node-store";
 import { type DashboardVisitorKind, DashboardVisitorProvider } from "./visitor-context";
 
 // Flattens the (already-fetched, for sidebar-tree rendering) node tree into
@@ -311,6 +316,7 @@ function BusabaseDashboardContent({
     () => createKnownNodeCache(`${cacheSpaceKey}:${currentUserId ?? "anonymous"}`),
     [cacheSpaceKey, currentUserId],
   );
+  const setCurrentNode = useCurrentNodeStore((state) => state.setNode);
   const [loadedDetailNode, setLoadedDetailNode] = useState<{
     node: LoadedNode;
     scopeKey: string;
@@ -1954,6 +1960,38 @@ function BusabaseDashboardContent({
     }
   }, [activeBase, locationPath, recordLoadedNode, selectedBaseSlug]);
 
+  /**
+   * Publish "the node the user is looking at" for the side panel to offer as
+   * context (see `store/current-node-store`).
+   *
+   * Two sources because node detail has two: the generic registry resolves
+   * `activeDetailNode` for every node type, and Bases render from their own
+   * query. Both are already route-gated, so navigating to Home or the agents
+   * list lands here as `null` — which is the point. A stale node offered as
+   * context for an unrelated question is worse than no context at all.
+   */
+  useEffect(() => {
+    if (activeDetailNode) {
+      setCurrentNode({
+        id: activeDetailNode.id,
+        type: activeDetailNode.type,
+        name: activeDetailNode.name,
+        slug: activeDetailNode.slug,
+      });
+      return;
+    }
+    if (locationPath.startsWith("/base/") && activeBase) {
+      setCurrentNode({
+        id: activeBase.nodeId,
+        type: "base",
+        name: activeBase.name,
+        slug: activeBase.slug,
+      });
+      return;
+    }
+    setCurrentNode(null);
+  }, [activeBase, activeDetailNode, locationPath, setCurrentNode]);
+
   // Global Cmd+K (Mac) / Ctrl+K (Windows/Linux) quick-jump shortcut — opens the
   // search dialog from anywhere in the dashboard. Registered as two separate
   // bindings (not one "meta-or-ctrl" combo) since `useKeyboardShortcut` treats
@@ -2172,6 +2210,13 @@ function BusabaseDashboardContent({
           orpc={orpc}
           agentSlug={agentDetailParams?.agentSlug ?? ""}
           onBack={() => setLocation("/agents")}
+          // Moving the conversation to the panel means leaving this page — the
+          // point is to have it beside something else — so this navigates away
+          // rather than leaving the same chat mounted twice on screen.
+          onOpenInSidePanel={(sessionId, agentName) => {
+            openAgentChatTab(agentDetailParams?.agentSlug ?? "", agentName, { sessionId });
+            setLocation("/home");
+          }}
         />
       );
     }

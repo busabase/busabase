@@ -10,6 +10,7 @@
  *
  * Spec: `apps/busabase/content/spec/template-center.md` §6.4.
  */
+import { iStringSchema } from "openlib/i18n/i-string";
 import { z } from "zod";
 import { TemplateRiskLevelSchema } from "../package/template";
 
@@ -27,8 +28,17 @@ export type TemplateStatsVO = z.infer<typeof TemplateStatsVOSchema>;
 export const TemplateCardVOSchema = z.object({
   /** Stable across a catalog: `<repo>/<subdir>`. What a route keys on. */
   id: z.string(),
+  /**
+   * The package's identity/slug — route key, install-folder name, CLI sort
+   * key. Deliberately plain string, never iString: see the long comment on
+   * `PackageManifestSchema.name` in the package domain (re-declared here per
+   * this file's own convention, not imported, but the reasoning is shared).
+   */
   name: z.string(),
-  description: z.string(),
+  /** The catalog card's blurb. iString: `busabase.json`'s own description can
+   * be locale-keyed (`{ en: "...", "zh-CN": "..." }`); a plain string is still
+   * valid forever. */
+  description: iStringSchema,
   category: z.string(),
   /** Absent when undeclared or unrecognized — the card shows "undeclared", never a guess. */
   risk: TemplateRiskLevelSchema.optional(),

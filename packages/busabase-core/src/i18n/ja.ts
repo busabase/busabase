@@ -350,6 +350,10 @@ export const dashboardJa: CoreI18nMessages = {
     mineEmptyBody: "Claude Code、Codex、または Buda AI Agent を接続してください。",
     spaceEmptyTitle: "このスペースには共有エージェントがまだありません",
     spaceEmptyBody: "スペースのメンバーが追加したエージェントをチームで利用できます。",
+    openInSidePanel: "サイドパネルで続ける",
+    contextChipLabel: "コンテキスト",
+    contextChipHint: "送信時に、開いているノードを添えます。",
+    contextChipRemove: "このコンテキストを付けない",
   },
   form: {
     alreadyExists:

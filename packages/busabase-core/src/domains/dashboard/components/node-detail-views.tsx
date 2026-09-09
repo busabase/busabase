@@ -4,11 +4,13 @@ import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-quer
 import type { FileTreeFileVO, FormVO, NodeVO } from "busabase-contract/types";
 import { CodeBlock } from "kui/ai-elements/code-block";
 import { Button } from "kui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "kui/tabs";
 import { cn } from "kui/utils";
 import {
   AppWindow,
   Download,
   File,
+  Files,
   FileText,
   Folder,
   Form,
@@ -19,7 +21,7 @@ import {
   Table2,
 } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useLocation, useSearch } from "wouter";
 import { fmt, useCoreI18n } from "../../../i18n";
@@ -39,11 +41,14 @@ import {
 import { mergeSearchIntoHref } from "../helpers/link-search";
 import { asNodeDetail } from "../helpers/node-detail";
 import { useFileTreeAssetUpload } from "../hooks/use-file-tree-asset-upload";
+import { useNodeAgentPrompts } from "../hooks/use-node-agent-prompts";
 import { useRegisterTopbarNodeActions } from "../hooks/use-register-topbar-node-actions";
 import { useReportLoadedNode } from "../hooks/use-report-loaded-node";
+import type { LoadedNode } from "../node-detail-registry";
 import { type NodeDetailProps, registerNodeDetail } from "../node-detail-registry";
 import { registerSidePanelTab, type SidePanelTabProps } from "../side-panel-registry";
 import { useIsAnonymousVisitor } from "../visitor-context";
+import { AgentPromptsView } from "./agent-prompts-view";
 import { AssetMediaPreview } from "./assets";
 import { MarkdownFieldPreview } from "./field-preview";
 import {
@@ -63,6 +68,7 @@ import {
 } from "./file-tree-file-actions";
 import { NodeActionsMenu } from "./node-actions-menu";
 import { NodeAgentPromptsButton } from "./node-agent-prompts-button";
+import { resolveSpaceId } from "./node-agent-prompts-dialog";
 import { NodePinButton, nodeSidePanelTabId } from "./node-pin-button";
 import { NodeSettingsDialog } from "./node-settings-dialog";
 import { NodeShareDialog } from "./node-share-button";
@@ -92,6 +98,17 @@ interface FileTreeDetailViewProps {
    *  preview (see `registerSidePanelTab` calls below), where those node-level
    *  actions don't apply to a "glance at it while working elsewhere" view. */
   hideActions?: boolean;
+  /**
+   * Renders AirApp-style tabs with this node as the FIRST one, ahead of the file
+   * browser. Omit and the view is exactly what it was: a file browser with no tab
+   * strip.
+   *
+   * A prop rather than a `nodeType === "skill"` branch because the two node types
+   * sharing this component want different things. A Skill IS a manual — what you
+   * want on opening one is what you can ask an agent to do with it, and the files
+   * are the implementation. A Drive is storage; its files ARE the point.
+   */
+  agentPromptsTab?: ReactNode;
   labels: {
     notFoundTitle: string;
     notFoundBody: string;
@@ -106,6 +123,7 @@ export function FileTreeDetailView({
   nodeType,
   onNodeLoaded,
   hideActions = false,
+  agentPromptsTab,
   labels,
 }: FileTreeDetailViewProps) {
   const messages = useCoreI18n();
@@ -522,8 +540,13 @@ export function FileTreeDetailView({
     ? inferFileTreeMimeType(openPath ?? "", fileQuery.data.mimeType)
     : "application/octet-stream";
 
+  // One wrapper for both shapes: `Tabs` when a prompts tab was supplied (its
+  // trigger list lives INSIDE the header, exactly as AirAppDetailView does it),
+  // a plain div otherwise — so a Drive renders the identical markup it always did.
+  const Frame = agentPromptsTab ? FileTreeTabsFrame : FileTreePlainFrame;
+
   return (
-    <div className="flex h-full min-h-0 w-full flex-col bg-background">
+    <Frame>
       {/* Single compact toolbar (identity + info trigger, actions) replaces the
           old stacked title-block / properties chrome, giving the file browser
           maximum vertical space — mirrors AirAppDetailView's header pattern.
@@ -558,9 +581,28 @@ export function FileTreeDetailView({
             />
           )}
         </div>
+
+        {agentPromptsTab ? (
+          <TabsList className="h-8 shrink-0 gap-1 bg-transparent p-0">
+            <TabsTrigger className={FILE_TREE_TAB_TRIGGER_CLASS} value="prompts">
+              <Sparkles className="size-3.5" />
+              {messages.agentPrompts.title}
+            </TabsTrigger>
+            <TabsTrigger className={FILE_TREE_TAB_TRIGGER_CLASS} value="files">
+              <Files className="size-3.5" />
+              {messages.nodeDetail.files}
+            </TabsTrigger>
+          </TabsList>
+        ) : null}
       </header>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[300px_minmax(0,1fr)]">
+      {agentPromptsTab ? (
+        <TabsContent className="min-h-0 flex-1 overflow-auto p-4" value="prompts">
+          {agentPromptsTab}
+        </TabsContent>
+      ) : null}
+
+      <FileTreeBrowserPane hasTabs={agentPromptsTab !== undefined}>
         <aside className="min-h-[220px] border-border/60 border-b bg-muted/20 lg:min-h-0 lg:border-r lg:border-b-0">
           <div className="flex h-full min-h-0 flex-col">
             <div className="flex min-h-11 items-center justify-between gap-3 border-border/50 border-b px-4">
@@ -795,7 +837,7 @@ export function FileTreeDetailView({
             )}
           </div>
         </main>
-      </div>
+      </FileTreeBrowserPane>
       <FileTreeRenameDialog
         existingPaths={filePaths}
         file={renameTarget}
@@ -813,10 +855,64 @@ export function FileTreeDetailView({
         onSubmit={removeFile}
         open={removeTarget !== null}
       />
-    </div>
+    </Frame>
   );
 }
 
+/** Shared by both trigger buttons; lifted from `AirAppDetailView`'s tab strip. */
+const FILE_TREE_TAB_TRIGGER_CLASS =
+  "h-7 gap-1.5 rounded-lg bg-transparent px-2.5 text-muted-foreground shadow-none transition-colors hover:bg-muted/40 hover:text-foreground data-[state=active]:bg-muted data-[state=active]:text-foreground data-[state=active]:shadow-none";
+
+/** No tabs: the exact markup this view had before the Skill node grew a prompts tab. */
+const FileTreePlainFrame = ({ children }: { children: ReactNode }) => (
+  <div className="flex h-full min-h-0 w-full flex-col bg-background">{children}</div>
+);
+
+/**
+ * Tabs, with the prompts tab first.
+ *
+ * `Tabs` wraps the header rather than sitting under it because the trigger list
+ * belongs IN the header, beside the node's name — the same arrangement (and the
+ * same reason) as `AirAppDetailView`.
+ */
+const FileTreeTabsFrame = ({ children }: { children: ReactNode }) => (
+  <Tabs className="flex h-full min-h-0 w-full flex-col gap-0 bg-background" defaultValue="prompts">
+    {children}
+  </Tabs>
+);
+
+/**
+ * The file browser itself. Inside tabs it is the "files" tab's content;
+ * without them it is the whole body, and renders the same grid either way.
+ *
+ * `forceMount` is deliberate: the browser owns the open file, the edit draft and
+ * the expanded folders, and a tab switch must not silently discard someone's
+ * half-written edit.
+ */
+const FileTreeBrowserPane = ({ hasTabs, children }: { hasTabs: boolean; children: ReactNode }) => {
+  const className = "grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[300px_minmax(0,1fr)]";
+  if (!hasTabs) return <div className={className}>{children}</div>;
+  return (
+    <TabsContent className={`${className} data-[state=inactive]:hidden`} forceMount value="files">
+      {children}
+    </TabsContent>
+  );
+};
+
+/**
+ * A Skill node opens on what you can ASK for, not on its file tree.
+ *
+ * The node is a manual: the useful first question is "what can an agent do with
+ * this", and the prompts answer it in one click (Copy, or Ask Agent). The files
+ * are one tab over for whoever wants to read or edit them — which is also why
+ * there is no separate "Source" tab: the Files tab already opens on `SKILL.md`
+ * (the node's entry file), so a third tab would be a second door to the same
+ * room.
+ *
+ * The prompts are keyed off the LOADED node rather than the route slug because
+ * they need the node's id and name; until it loads, the tab renders nothing and
+ * the file browser behaves exactly as before.
+ */
 export function SkillDetailView({
   orpc,
   slug,
@@ -824,8 +920,24 @@ export function SkillDetailView({
   hideActions,
 }: NodeDetailProps & { hideActions?: boolean }) {
   const messages = useCoreI18n();
+  const [loadedNode, setLoadedNode] = useState<LoadedNode | null>(null);
+  const reportLoaded = useCallback(
+    (node: LoadedNode) => {
+      setLoadedNode(node);
+      onNodeLoaded?.(node);
+    },
+    [onNodeLoaded],
+  );
+
   return (
     <FileTreeDetailView
+      agentPromptsTab={
+        loadedNode ? (
+          <SkillAgentPromptsTab node={loadedNode} orpc={orpc} />
+        ) : (
+          <div className="text-muted-foreground text-sm">{messages.common.loading}</div>
+        )
+      }
       hideActions={hideActions}
       labels={{
         notFoundTitle: messages.nodeDetail.skillNotFoundTitle,
@@ -834,9 +946,36 @@ export function SkillDetailView({
         skeletonVariant: "skill",
       }}
       nodeType="skill"
-      onNodeLoaded={onNodeLoaded}
+      onNodeLoaded={reportLoaded}
       orpc={orpc}
       slug={slug}
+    />
+  );
+}
+
+/**
+ * The same surface the prompts dialog shows — same component, same hook, same
+ * Copy and Ask Agent — rendered inline instead of inside a Dialog.
+ *
+ * `onHandedOff` is a no-op here: there is no dialog to close once the prompt
+ * reaches an agent, and the side panel it opens is its own confirmation.
+ */
+function SkillAgentPromptsTab({ node, orpc }: { node: LoadedNode; orpc: BusabaseQueryUtils }) {
+  const { scenarios, capabilities, loading } = useNodeAgentPrompts({
+    nodeId: node.id,
+    nodeName: node.name,
+    nodeType: "skill",
+    orpc,
+    spaceId: resolveSpaceId(),
+  });
+
+  return (
+    <AgentPromptsView
+      askAgent={{ orpc, sessionScopeId: node.id }}
+      capabilities={capabilities}
+      loading={loading}
+      onHandedOff={() => {}}
+      scenarios={scenarios}
     />
   );
 }

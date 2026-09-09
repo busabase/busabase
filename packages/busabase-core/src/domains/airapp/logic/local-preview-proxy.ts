@@ -38,6 +38,15 @@ const isHtmlElement = (node: HtmlNode): node is HtmlElement => "tagName" in node
 
 const isBusabaseDataBridgeUrl = (url: string): boolean => /^\/api\/v1(?:[/?#]|$)/.test(url);
 
+const previewRedirectLocation = (location: string, nodeId: string): string => {
+  if (!location.startsWith("/") || location.startsWith("//") || isBusabaseDataBridgeUrl(location)) {
+    return location;
+  }
+  const previewPrefix = `/api/airapp-preview/${encodeURIComponent(nodeId)}`;
+  if (location === previewPrefix || location.startsWith(`${previewPrefix}/`)) return location;
+  return `${previewPrefix}${location}`;
+};
+
 const previewBridgeScript = (previewPrefix: string): string =>
   [
     "(() => {",
@@ -326,7 +335,7 @@ export async function proxyLocalPreview(
   }
   const location = upstream.headers.get("location");
   if (location) {
-    responseHeaders.set("location", location);
+    responseHeaders.set("location", previewRedirectLocation(location, nodeId));
   }
 
   // For the HTML document, inject a `<base href>` for relative URLs and rewrite

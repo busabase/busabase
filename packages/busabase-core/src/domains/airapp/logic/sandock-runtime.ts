@@ -56,14 +56,15 @@ const LOG_POLL_MS = 700;
  * indefinitely.
  */
 const SANDBOX_DEADLINE_SECONDS = 4 * 60 * 60;
-const SANDBOX_CPU_MILLICORES = 500;
-const SANDBOX_MEMORY_LIMIT_MB = 500;
+const SANDBOX_CPU_MILLICORES = 1000;
+const SANDBOX_MEMORY_LIMIT_MB = 1024;
 
 const PREVIEW_URL_TTL_SECONDS = 3600;
 
 /** Do not expose an iframe until Sandock can actually reach the app port. */
-const PREVIEW_READY_TIMEOUT_MS = 60_000;
-const PREVIEW_PROBE_TIMEOUT_MS = 5_000;
+const PREVIEW_READY_TIMEOUT_MS = 180_000;
+/** A low-CPU Next.js sandbox may need most of a minute for its first SSR compile. */
+const PREVIEW_PROBE_TIMEOUT_MS = 60_000;
 /** Avoid exposing the iframe during a transient first-success window. */
 const PREVIEW_READY_CONSECUTIVE_SUCCESSES = 3;
 
@@ -252,10 +253,16 @@ const probePreview = async (
   try {
     const response = await fetch(previewUrl, {
       method: "GET",
-      redirect: "error",
+      // A healthy app may redirect `/` to its actual entry route (Fumadocs
+      // redirects to `/docs`). Do not follow arbitrary external redirects,
+      // but treat the response itself as proof that the app port is reachable.
+      redirect: "manual",
       signal: controller.signal,
     });
-    const result = { ready: response.ok, detail: `HTTP ${response.status}` };
+    const result = {
+      ready: response.ok || (response.status >= 300 && response.status < 400),
+      detail: `HTTP ${response.status}`,
+    };
     await response.body?.cancel().catch(() => undefined);
     return result;
   } catch (error) {
@@ -271,6 +278,26 @@ const probePreview = async (
 
 /** Single-quote for `sh -c`, so a path or command containing quotes can't break out. */
 const shellQuote = (value: string): string => `'${value.replaceAll("'", `'"'"'`)}'`;
+
+/** Keep the SSE shell response active while a package manager is quiet. */
+const installCommandWithHeartbeat = (command: string): string =>
+  [
+    `printf '%s\\n' '[busabase] install command started'`,
+    `(${command}) & install_pid=$!`,
+    `while kill -0 "$install_pid" 2>/dev/null; do sleep 20; if kill -0 "$install_pid" 2>/dev/null; then printf '%s\\n' '[busabase] install still running'; fi; done`,
+    `wait "$install_pid"`,
+  ].join("; ");
+
+/**
+ * Warm the app from inside the sandbox so a slow first SSR compile is not
+ * cancelled when an external Preview Proxy probe reaches its timeout.
+ */
+const detachedStartCommand = (command: string, port: number): string =>
+  [
+    `${command} > ${APP_LOG} 2>&1 & app_pid=$!`,
+    `(if command -v curl >/dev/null 2>&1; then attempt=0; while [ "$attempt" -lt 60 ]; do if curl --max-time 180 --silent --show-error --output /dev/null http://127.0.0.1:${port}/; then break; fi; attempt=$((attempt + 1)); sleep 1; done; fi) &`,
+    `wait "$app_pid"`,
+  ].join("\n");
 
 interface ExecutionResultLike {
   stdout?: unknown;
@@ -451,11 +478,19 @@ export async function* runAirAppSandock(
     if (signal?.aborted) return;
 
     yield { type: "log", line: `$ ${installCommand}\n` };
-    const install = await api.sandbox.shell(sandboxId, {
-      cmd: installCommand,
-      workdir: APP_DIR,
-      timeoutMs: INSTALL_TIMEOUT_MS,
-    });
+    const install = await api.sandbox.shell(
+      sandboxId,
+      {
+        cmd: installCommandWithHeartbeat(installCommand),
+        workdir: APP_DIR,
+        timeoutMs: INSTALL_TIMEOUT_MS,
+      },
+      {
+        // Supplying callbacks selects Sandock's streaming SSE endpoint.
+        onStdout: () => undefined,
+        onStderr: () => undefined,
+      },
+    );
     const installStdout = formatExecutionOutput(install.data.stdout);
     const installStderr = formatExecutionOutput(install.data.stderr);
     if (installStdout) yield { type: "log", line: installStdout };
@@ -475,7 +510,7 @@ export async function* runAirAppSandock(
     // does not. `setsid` makes it a session leader so it survives this exec
     // returning, and everything it prints goes to a file we tail below.
     const started = await api.sandbox.shell(sandboxId, {
-      cmd: `cd ${shellQuote(APP_DIR)} && rm -f ${shellQuote(APP_LOG)} && setsid sh -c ${shellQuote(`${startCommand} > ${APP_LOG} 2>&1`)} < /dev/null > /dev/null 2>&1 &`,
+      cmd: `cd ${shellQuote(APP_DIR)} && rm -f ${shellQuote(APP_LOG)} && setsid sh -c ${shellQuote(detachedStartCommand(startCommand, port))} < /dev/null > /dev/null 2>&1 &`,
       workdir: APP_DIR,
       timeoutMs: 60_000,
     });

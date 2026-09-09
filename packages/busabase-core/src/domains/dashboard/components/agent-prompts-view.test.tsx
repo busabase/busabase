@@ -57,7 +57,7 @@ describe("Agent prompt sidebar sections", () => {
 
     expect(
       sections.find((section) => section.name === "Scenarios")?.items.map(({ key }) => key),
-    ).toEqual(["doc-draft", "doc-review"]);
+    ).toEqual(["doc-ask", "doc-draft", "doc-review"]);
     expect(sections.find((section) => section.name === "Content")?.items[0]?.key).toBe("doc-read");
   });
 
