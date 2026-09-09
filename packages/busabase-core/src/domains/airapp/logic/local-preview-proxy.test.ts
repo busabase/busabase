@@ -127,6 +127,30 @@ describe("AirApp preview proxy credential boundary", () => {
     }
   });
 
+  it("keeps root-relative redirects inside the AirApp preview path", async () => {
+    const upstream = await listen((_request, response) => {
+      response.writeHead(307, { location: "/docs?from=home" });
+      response.end();
+    });
+    await registerLocalPreview(NODE_ID, OWNER, upstream.origin);
+
+    try {
+      const response = await proxyLocalPreview(
+        new Request("https://busabase.example/api/airapp-preview/preview-node/"),
+        NODE_ID,
+        "",
+        OWNER,
+      );
+
+      expect(response.status).toBe(307);
+      expect(response.headers.get("location")).toBe(
+        "/api/airapp-preview/preview-node/docs?from=home",
+      );
+    } finally {
+      await upstream.close();
+    }
+  });
+
   it("never retries a non-idempotent request", async () => {
     let requests = 0;
     const upstream = await listen((_request, response) => {

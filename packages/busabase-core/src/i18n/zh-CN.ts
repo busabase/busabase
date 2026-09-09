@@ -338,6 +338,10 @@ export const dashboardZhCN: CoreI18nMessages = {
     mineEmptyBody: "连接 Claude Code、Codex 或 Buda AI Agent 后即可开始使用。",
     spaceEmptyTitle: "此空间站还没有共享 Agent",
     spaceEmptyBody: "空间站成员添加的 Agent 会显示在这里，供团队共同使用。",
+    openInSidePanel: "在侧栏继续",
+    contextChipLabel: "上下文",
+    contextChipHint: "发送时会带上你正在看的节点。",
+    contextChipRemove: "不要带上这个上下文",
   },
   form: {
     alreadyExists: "这个节点已经存在表单，请更新现有表单，不要重复创建。",

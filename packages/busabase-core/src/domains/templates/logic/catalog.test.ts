@@ -56,3 +56,23 @@ describe("listTemplates — risk normalization", () => {
     expect(catalog.templates[0].risk).toBeUndefined();
   });
 });
+
+describe("listTemplates — description is iString", () => {
+  it("passes through a plain-string description unchanged", async () => {
+    mockCatalog([baseEntry]);
+    const catalog = await listTemplates();
+    expect(catalog.templates[0].description).toBe("The gated desk.");
+  });
+
+  it("does not throw oRPC's .output() validation on a locale-keyed description", async () => {
+    mockCatalog([
+      { ...baseEntry, description: { en: "The gated desk.", "zh-CN": "受限工作台。" } },
+    ]);
+    const catalog = await listTemplates();
+    expect(catalog.error).toBeUndefined();
+    expect(catalog.templates[0].description).toEqual({
+      en: "The gated desk.",
+      "zh-CN": "受限工作台。",
+    });
+  });
+});

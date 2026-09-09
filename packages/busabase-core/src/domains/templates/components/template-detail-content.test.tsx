@@ -60,4 +60,20 @@ describe("TemplateDetailContent", () => {
     expect(markup).toContain(">Bases</dt>");
     expect(markup).not.toContain(">Tables</dt>");
   });
+
+  it("renders the requested locale of a locale-keyed description", () => {
+    const localized: TemplateCardVO = {
+      ...template,
+      description: { en: "Email operations workspace", "zh-CN": "邮件运营工作台" },
+    };
+
+    const zh = renderToStaticMarkup(
+      <TemplateDetailContent template={localized} descriptionLocale="zh-CN" />,
+    );
+    expect(zh).toContain("邮件运营工作台");
+    expect(zh).not.toContain("Email operations workspace");
+
+    const en = renderToStaticMarkup(<TemplateDetailContent template={localized} />);
+    expect(en).toContain("Email operations workspace");
+  });
 });

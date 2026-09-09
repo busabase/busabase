@@ -3,6 +3,7 @@
 import type { TemplateCardVO } from "busabase-contract/domains/templates/types";
 import { Button } from "kui/button";
 import { ArrowLeft } from "lucide-react";
+import { useCoreLocale } from "../../../i18n";
 import { TemplateDetailContent } from "./template-detail-content";
 
 interface TemplateDetailViewProps {
@@ -29,6 +30,7 @@ export function TemplateDetailView({
   onInstall,
   canInstall,
 }: TemplateDetailViewProps) {
+  const locale = useCoreLocale();
   return (
     // Same scroll shell as the gallery, `h-full` included — see the note there
     // for why that class is the one doing the work. This page is the taller of
@@ -44,6 +46,7 @@ export function TemplateDetailView({
 
           <TemplateDetailContent
             template={template}
+            descriptionLocale={locale}
             actions={
               <div className="flex flex-col items-end gap-1">
                 <Button onClick={onInstall} disabled={!canInstall}>

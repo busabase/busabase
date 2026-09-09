@@ -24,16 +24,12 @@
 // Layout mirrors `agent-skill-button.tsx` (kui Dialog + readonly textarea +
 // transient "Copied" state) so the two agent-facing dialogs feel like one feature.
 
-import { useQuery } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "kui/dialog";
-import { useEffect, useMemo, useState } from "react";
-import { useCoreI18n, useCoreLocale } from "../../../i18n";
-import {
-  buildNodeAgentPrompts,
-  type NodePromptContext,
-  type NodePromptScope,
-} from "../helpers/node-agent-prompts";
+import { useEffect, useState } from "react";
+import { useCoreI18n } from "../../../i18n";
+import type { NodePromptScope } from "../helpers/node-agent-prompts";
+import { useNodeAgentPrompts } from "../hooks/use-node-agent-prompts";
 import { useDashboardOrpc } from "../orpc-context";
 import { AgentPromptsView } from "./agent-prompts-view";
 
@@ -100,7 +96,6 @@ export function NodeAgentPromptsDialog({
   orpc: BusabaseQueryUtils | null;
 }) {
   const messages = useCoreI18n();
-  const locale = useCoreLocale();
   // Two ways in, because the two callers differ: the node-detail toolbars mount
   // inside `DashboardOrpcProvider` and let the context supply this, while the
   // shell's sidebar dialog passes it explicitly. An explicit prop wins; the
@@ -122,39 +117,23 @@ export function NodeAgentPromptsDialog({
     setResolvedSpaceId(resolveSpaceId(spaceId));
   }, [spaceId]);
 
-  // `enabled: open` is the whole point of the move: closed dialogs cost nothing,
-  // and the request starts the moment one opens rather than riding along on
-  // every sidebar load whether or not anyone ever opens it.
-  const promptsOptions = orpc?.nodes.getAgentPrompts.queryOptions({ input: { nodeId } });
-  const promptsQuery = useQuery({
-    queryKey: promptsOptions?.queryKey ?? ["node-agent-prompts", "not-fetched", nodeId],
-    // Never runs — `enabled` is false whenever there are no real options — but
-    // it has to satisfy the same result type so the query stays typed.
-    queryFn: promptsOptions?.queryFn ?? (async () => ({ nodeId, agentPrompts: null })),
-    enabled: open && promptsOptions !== undefined,
+  // `enabled: open` is the whole point of the fetch living here: closed dialogs
+  // cost nothing, and the request starts the moment one opens rather than riding
+  // along on every sidebar load whether or not anyone ever opens it.
+  const {
+    scenarios,
+    capabilities,
+    loading: promptsLoading,
+  } = useNodeAgentPrompts({
+    enabled: open,
+    nodeId,
+    nodeName,
+    nodeType,
+    orpc,
+    scope,
+    spaceId: resolvedSpaceId,
+    spaceName,
   });
-  // A disabled query stays `pending` forever, so the spinner has to be gated on
-  // there being a fetch at all — otherwise a scoped dialog, which deliberately
-  // never fetches, would show a spinner that never resolves.
-  const promptsLoading = promptsOptions !== undefined && promptsQuery.isPending;
-
-  const context: NodePromptContext = useMemo(
-    () => ({
-      nodeType,
-      nodeName,
-      nodeId,
-      spaceId: resolvedSpaceId,
-      spaceName,
-      scope,
-      customPrompts: promptsQuery.data?.agentPrompts ?? undefined,
-    }),
-    [nodeType, nodeName, nodeId, resolvedSpaceId, spaceName, scope, promptsQuery.data],
-  );
-
-  const { scenarios, capabilities } = useMemo(
-    () => buildNodeAgentPrompts(context, locale, messages),
-    [context, locale, messages],
-  );
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[85vh] gap-4 overflow-hidden sm:max-w-3xl">

@@ -99,6 +99,19 @@ describe("buildNodeAgentPrompts scoping", () => {
     expect(capabilities.map((prompt) => prompt.key)).toEqual(["record_update"]);
   });
 
+  /**
+   * Scenario keys declared `intent: "read-only"`. `NodePrompt` deliberately does
+   * not carry `intent` (the renderer has no use for it once the footer is
+   * built), so the tests name them.
+   */
+  const MUTATION_EXEMPT = new Set([
+    "base-find",
+    "base-summarize",
+    "field-audit",
+    "record-explain",
+    "cell-explain",
+  ]);
+
   it("keeps the do-not-self-approve guidance on mutating scenarios and every capability", () => {
     for (const scope of [
       undefined,
@@ -107,11 +120,72 @@ describe("buildNodeAgentPrompts scoping", () => {
       { kind: "cell", ...RECORD, ...FIELD } as const,
     ]) {
       const { scenarios, capabilities } = build(scope);
-      expect(scenarios[0]?.body).toContain("never merge it without my approval");
+      // Named rather than positional. This used to assert on `scenarios[0]`,
+      // which passed only because the first entry happened to be a mutating one
+      // — so the day a read-only scenario was promoted to the top of a list, the
+      // test failed without a single mutating prompt having lost its guidance.
+      const mutating = scenarios.filter((prompt) => !MUTATION_EXEMPT.has(prompt.key));
+      expect(mutating.length).toBeGreaterThan(0);
+      for (const prompt of mutating) {
+        expect(prompt.body).toContain("never merge it without my approval");
+      }
       for (const prompt of capabilities) {
         expect(prompt.body).toContain("never merge it without my approval");
       }
     }
+  });
+
+  it("leaves the approval line OFF read-only scenarios, so 'read-only' means it", () => {
+    const { scenarios } = build();
+    const readOnly = scenarios.filter((prompt) => MUTATION_EXEMPT.has(prompt.key));
+    expect(readOnly.map((prompt) => prompt.key)).toEqual(["base-find", "base-summarize"]);
+    for (const prompt of readOnly) {
+      expect(prompt.body).not.toContain("never merge it without my approval");
+    }
+  });
+});
+
+/**
+ * Every node type has to offer USING the thing, not only maintaining it.
+ *
+ * This list was maintenance-only for its whole life, and the Skill node made it
+ * obvious: its single scenario was "Improve this skill", so the one node type
+ * that exists to BE run offered no way to run it. The same shape was in the
+ * others — a Doc you could redraft but not ask, a Drive you could reorganise but
+ * not search, a Base you could summarise but not query, an AirApp you could
+ * modify but not understand.
+ *
+ * Pinned by key, because the failure mode is silent: a list with the "use it"
+ * entry deleted still renders, still looks complete, and just quietly sends
+ * everyone back to editing.
+ */
+describe("using the node, not only maintaining it", () => {
+  const scenarioKeys = (nodeType: string) =>
+    buildNodeAgentPrompts(
+      { nodeId: "nod_x", nodeName: "X", nodeType, spaceId: "local" },
+      "en",
+      coreMessagesEn,
+    ).scenarios.map((prompt) => prompt.key);
+
+  it.each([
+    ["skill", "skill-run"],
+    ["doc", "doc-ask"],
+    ["drive", "drive-find"],
+    ["base", "base-find"],
+    ["airapp", "airapp-explain"],
+  ])("%s offers %s", (nodeType, expectedKey) => {
+    expect(scenarioKeys(nodeType)).toContain(expectedKey);
+  });
+
+  it("puts running a Skill first, because that is what the list is opened for", () => {
+    // Not just present — first. The Skill node opens straight onto this list
+    // (its detail view leads with the Agent-prompts tab), and the first entry is
+    // the one already selected when it renders.
+    expect(scenarioKeys("skill")[0]).toBe("skill-run");
+  });
+
+  it("still offers improving a Skill, for the person who authored it", () => {
+    expect(scenarioKeys("skill")).toContain("skill-improve");
   });
 });
 
@@ -384,7 +458,7 @@ describe("Doc read prompt", () => {
   it("is a Content capability rather than a scenario and keeps mutating Doc prompts review-gated", () => {
     const { scenarios, capabilities } = buildNodeAgentPrompts(DOC_CONTEXT, "en", coreMessagesEn);
 
-    expect(scenarios.map((prompt) => prompt.key)).toEqual(["doc-draft", "doc-review"]);
+    expect(scenarios.map((prompt) => prompt.key)).toEqual(["doc-ask", "doc-draft", "doc-review"]);
     expect(scenarios.map((prompt) => prompt.key)).not.toContain("doc-read");
     const contentPrompts = capabilities.filter((prompt) => prompt.group === "Content");
     expect(contentPrompts[0]?.key).toBe("doc-read");

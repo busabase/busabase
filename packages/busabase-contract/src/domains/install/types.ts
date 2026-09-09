@@ -10,6 +10,7 @@
  * what would be created — so the tree becomes a flat, depth-tagged outline and
  * the bytes stay on the server.
  */
+import { iStringSchema } from "openlib/i18n/i-string";
 import { z } from "zod";
 
 /** Every node type the package format can install, as it appears in a plan outline. */
@@ -76,7 +77,9 @@ export type InstallPlanCountsVO = z.infer<typeof InstallPlanCountsVOSchema>;
 /** The package's own metadata, as declared in its `busabase.json`. */
 export const InstallPackageInfoVOSchema = z.object({
   name: z.string(),
-  description: z.string().default(""),
+  /** iString: `busabase.json`'s own description may be locale-keyed; render
+   * with `iStringParse(value, locale)`, never inserted into JSX directly. */
+  description: iStringSchema.default(""),
   version: z.string().optional(),
   author: z.string().optional(),
   license: z.string().optional(),

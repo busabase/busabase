@@ -376,6 +376,10 @@ export const coreMessagesEn = {
     mineEmptyBody: "Connect Claude Code, Codex, or a Buda AI Agent to get started.",
     spaceEmptyTitle: "No shared agents in this space yet",
     spaceEmptyBody: "Agents added by space members will appear here for the team to use.",
+    openInSidePanel: "Continue in side panel",
+    contextChipLabel: "Context",
+    contextChipHint: "Your message will say which node you mean.",
+    contextChipRemove: "Don't send this as context",
   },
   form: {
     alreadyExists:

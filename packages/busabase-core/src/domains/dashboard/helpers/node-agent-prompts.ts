@@ -329,6 +329,26 @@ interface PromptDef {
 
 const BASE_SCENARIOS: PromptDef[] = [
   {
+    key: "base-find",
+    intent: "read-only",
+    label: {
+      en: "Find the records I mean",
+      "zh-CN": "帮我找出符合条件的记录",
+      "zh-TW": "幫我找出符合條件的記錄",
+      ja: "条件に合うレコードを探す",
+    },
+    body: {
+      en: (t) =>
+        `${t}\n\nI'll describe which records I want in plain language. Read the field schema first so you filter on the right fields, then show me the matching records and say how you filtered — I need to be able to tell a wrong filter from an empty result. Read-only; don't change anything.`,
+      "zh-CN": (t) =>
+        `${t}\n\n我会用大白话描述我想要哪些记录。请先读字段结构，确保你筛的是对的字段，然后把符合的记录列给我，并说明你是按什么条件筛的——我需要能分清"筛错了"和"确实没有"。只读，不要改动任何数据。`,
+      "zh-TW": (t) =>
+        `${t}\n\n我會用白話描述我想要哪些記錄。請先讀欄位結構，確保你篩的是對的欄位，然後把符合的記錄列給我，並說明你是按什麼條件篩的——我需要能分清「篩錯了」和「確實沒有」。唯讀，不要改動任何資料。`,
+      ja: (t) =>
+        `${t}\n\n欲しいレコードを普通の言葉で説明します。まずフィールド構成を読んで正しいフィールドで絞り込み、該当レコードを見せたうえで、どう絞り込んだかも教えてください——「条件を間違えた」のか「本当に無い」のかを私が区別できる必要があります。読み取り専用、データは変更しないでください。`,
+    },
+  },
+  {
     key: "base-bulk-import",
     label: {
       en: "Bulk-add records",
@@ -430,6 +450,26 @@ const DOC_READ_PROMPT: PromptDef = {
 
 const DOC_SCENARIOS: PromptDef[] = [
   {
+    key: "doc-ask",
+    intent: "read-only",
+    label: {
+      en: "Answer my question from this doc",
+      "zh-CN": "根据这篇文档回答我",
+      "zh-TW": "根據這篇文件回答我",
+      ja: "この文書に基づいて答えて",
+    },
+    body: {
+      en: (t) =>
+        `${t}\n\nRead this doc, then answer the question I ask next using only what it actually says. Quote the part you are relying on. If the doc does not answer it, say so instead of filling the gap from your own knowledge. Read-only.`,
+      "zh-CN": (t) =>
+        `${t}\n\n请读这篇文档，然后只依据它里面真正写了的内容回答我接下来的问题，并引用你依据的那一段。如果文档里没写，就直接说没写，不要用你自己的知识补上。只读，不要改动。`,
+      "zh-TW": (t) =>
+        `${t}\n\n請讀這篇文件，然後只依據它裡面真正寫了的內容回答我接下來的問題，並引用你依據的那一段。如果文件裡沒寫，就直接說沒寫，不要用你自己的知識補上。唯讀，不要改動。`,
+      ja: (t) =>
+        `${t}\n\nこの文書を読み、次の質問には文書に実際に書かれている内容だけで答えてください。根拠にした箇所を引用してください。文書が答えていない場合は、自分の知識で埋めずに「書かれていない」と伝えてください。読み取り専用です。`,
+    },
+  },
+  {
     key: "doc-draft",
     label: {
       en: "Draft / expand this doc",
@@ -471,6 +511,26 @@ const DOC_SCENARIOS: PromptDef[] = [
 
 const DRIVE_SCENARIOS: PromptDef[] = [
   {
+    key: "drive-find",
+    intent: "read-only",
+    label: {
+      en: "Find something in these files",
+      "zh-CN": "在这些文件里找东西",
+      "zh-TW": "在這些檔案裡找東西",
+      ja: "ファイルの中から探す",
+    },
+    body: {
+      en: (t) =>
+        `${t}\n\nI'll tell you what I'm looking for. Search these files and tell me which file it is in and where, quoting enough of it that I can tell you found the right thing. If it is in several places, list them all rather than picking one. Read-only.`,
+      "zh-CN": (t) =>
+        `${t}\n\n我接下来告诉你我要找什么。请在这些文件里检索，告诉我它在哪个文件、哪个位置，并引用足够的原文让我能判断你找对了。如果多处都有，请全部列出，不要只挑一个。只读，不要改动。`,
+      "zh-TW": (t) =>
+        `${t}\n\n我接下來告訴你我要找什麼。請在這些檔案裡檢索，告訴我它在哪個檔案、哪個位置，並引用足夠的原文讓我能判斷你找對了。如果多處都有，請全部列出，不要只挑一個。唯讀，不要改動。`,
+      ja: (t) =>
+        `${t}\n\n次に探しているものを伝えます。これらのファイルを検索し、どのファイルのどこにあるかを、正しいものを見つけたと私が判断できるだけの原文を引用して教えてください。複数箇所にあるなら、ひとつ選ばず全部挙げてください。読み取り専用です。`,
+    },
+  },
+  {
     key: "drive-organize",
     label: {
       en: "Organize these files",
@@ -511,7 +571,53 @@ const DRIVE_SCENARIOS: PromptDef[] = [
   },
 ];
 
+/**
+ * A Skill node is a CAPABILITY, and the thing people do with a capability is use
+ * it. This list opened with "Improve this skill" and had nothing else — every
+ * prompt on offer treated the reader as the skill's maintainer, when almost
+ * everyone opening one is a person who wants it to do its job for them. Running
+ * it comes first now; improving it is still here, third, for the author.
+ */
 const SKILL_SCENARIOS: PromptDef[] = [
+  {
+    key: "skill-run",
+    label: {
+      en: "Use this skill",
+      "zh-CN": "调用这个 Skill",
+      "zh-TW": "呼叫這個 Skill",
+      ja: "この Skill を実行",
+    },
+    body: {
+      en: (t) =>
+        `${t}\n\nRead this skill's \`SKILL.md\` and any reference files it points at, then follow its workflow to do what I describe next. Follow the skill's own rules over your usual habits, and tell me if it says something you cannot do here.`,
+      "zh-CN": (t) =>
+        `${t}\n\n请读这个 skill 的 \`SKILL.md\` 以及它引用的参考文件，然后按它写的流程完成我接下来描述的任务。以这个 skill 自己的规则为准，不要用你平时的习惯覆盖它；如果它要求的事情你在这里做不到，直接告诉我。`,
+      "zh-TW": (t) =>
+        `${t}\n\n請讀這個 skill 的 \`SKILL.md\` 以及它引用的參考檔案，然後按它寫的流程完成我接下來描述的任務。以這個 skill 自己的規則為準，不要用你平時的習慣覆蓋它；如果它要求的事情你在這裡做不到，直接告訴我。`,
+      ja: (t) =>
+        `${t}\n\nこの skill の \`SKILL.md\` と参照ファイルを読み、そのワークフローに従って次に説明する作業を行ってください。あなたの通常のやり方より skill 自身のルールを優先し、ここでは実行できないことが書かれていれば教えてください。`,
+    },
+  },
+  {
+    key: "skill-explain",
+    intent: "read-only",
+    label: {
+      en: "What can this do for me?",
+      "zh-CN": "这个 Skill 能帮我做什么？",
+      "zh-TW": "這個 Skill 能幫我做什麼？",
+      ja: "これで何ができる？",
+    },
+    body: {
+      en: (t) =>
+        `${t}\n\nRead this skill and tell me in plain language what it does, when I should reach for it, and what it needs from me before it can run — credentials, data, a decision. Read-only; don't run it or change it yet.`,
+      "zh-CN": (t) =>
+        `${t}\n\n请读这个 skill，用大白话告诉我：它是干什么的、什么时候该用它、以及在它能跑起来之前需要我先准备什么（凭据、数据、还是某个决定）。只读——先别执行它，也别改它。`,
+      "zh-TW": (t) =>
+        `${t}\n\n請讀這個 skill，用白話告訴我：它是做什麼的、什麼時候該用它、以及在它能跑起來之前需要我先準備什麼（憑證、資料、還是某個決定）。唯讀——先別執行它，也別改它。`,
+      ja: (t) =>
+        `${t}\n\nこの skill を読んで、平易な言葉で教えてください：何をするものか、どんなときに使うべきか、動かす前に私が用意すべきもの（認証情報・データ・判断）は何か。読み取り専用——まだ実行も変更もしないでください。`,
+    },
+  },
   {
     key: "skill-improve",
     label: {
@@ -534,6 +640,26 @@ const SKILL_SCENARIOS: PromptDef[] = [
 ];
 
 const AIRAPP_SCENARIOS: PromptDef[] = [
+  {
+    key: "airapp-explain",
+    intent: "read-only",
+    label: {
+      en: "What does this app do?",
+      "zh-CN": "这个应用是干什么的？",
+      "zh-TW": "這個應用是做什麼的？",
+      ja: "このアプリは何をする？",
+    },
+    body: {
+      en: (t) =>
+        `${t}\n\nRead the app's source and the tables it reads, then tell me what it is for, who it is for, and which data it shows or writes. I want to understand it before I change it. Read-only.`,
+      "zh-CN": (t) =>
+        `${t}\n\n请读这个应用的代码，以及它读取的那些表，然后告诉我：它是干什么的、给谁用的、展示和写入的分别是哪些数据。我想先看懂它，再谈改它。只读，不要改动。`,
+      "zh-TW": (t) =>
+        `${t}\n\n請讀這個應用的程式碼，以及它讀取的那些表，然後告訴我：它是做什麼的、給誰用的、展示和寫入的分別是哪些資料。我想先看懂它，再談改它。唯讀，不要改動。`,
+      ja: (t) =>
+        `${t}\n\nこのアプリのコードと、それが読んでいるテーブルを読んだうえで、何のためのアプリか、誰向けか、どのデータを表示・書き込みするかを教えてください。変更する前にまず理解したいです。読み取り専用です。`,
+    },
+  },
   {
     key: "airapp-add-feature",
     label: {
@@ -959,6 +1085,20 @@ const buildCuratedPrompt = (
     group,
     body: `${prompt.body[locale](target)}\n\n${footer}`,
   };
+};
+
+/**
+ * Just the "which node am I talking about" sentence, without a prompt around it.
+ *
+ * Exported for the side panel's context chip: when someone types their own
+ * message to an agent with a node open, the chip sends this same line. Sharing
+ * it with the prompts (rather than writing a second, similar sentence in the
+ * agents domain) is what keeps an agent from having to recognise two different
+ * phrasings of the same fact.
+ */
+export const renderNodeTargetLine = (context: NodePromptContext, locale: CoreLocale): string => {
+  const definition = getNodeType(context.nodeType);
+  return TARGET_LINE[locale](context, definition?.label ?? context.nodeType);
 };
 
 export function buildNodeAgentPrompts(

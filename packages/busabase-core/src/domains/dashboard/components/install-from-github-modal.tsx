@@ -23,8 +23,9 @@ import {
 import { Input } from "kui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "kui/tabs";
 import { CircleCheck, LoaderCircle, Sparkles, TriangleAlert } from "lucide-react";
+import { iStringParse } from "openlib/i18n/i-string";
 import { useEffect, useRef, useState } from "react";
-import { fmt, useCoreI18n } from "../../../i18n";
+import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
 import { GithubIcon } from "../helpers/brand-icons";
 import { nodeIconForType } from "../helpers/node-icons";
 import { AgentInstallPanel, type AgentIntegrationTarget } from "./agent-install-panel";
@@ -713,6 +714,8 @@ export function PackageSummary({
   messages: ReturnType<typeof useCoreI18n>;
   plan: InstallPlanVO;
 }) {
+  // Called before the early return below — Rules of Hooks, not style.
+  const locale = useCoreLocale();
   // Template Center already showed this information on the detail page. The
   // manual GitHub flow still needs it because the URL is the user's only input.
   if (initialPackageName) {
@@ -737,12 +740,15 @@ export function PackageSummary({
     plan.source.subdir ? fmt(messages.install.sourceSubdir, { subdir: plan.source.subdir }) : null,
   ].filter((entry): entry is string => entry !== null);
 
+  // Checked after flattening, not before: an empty-per-locale iString object
+  // is still a truthy object, so the old `plan.package.description ? ...`
+  // guard would have rendered an empty <span> instead of hiding it.
+  const description = iStringParse(plan.package.description, locale);
+
   return (
     <section className="flex flex-col gap-1 rounded-md border border-border bg-muted/40 p-3">
       <span className="font-medium text-foreground text-sm">{plan.package.name}</span>
-      {plan.package.description ? (
-        <span className="text-muted-foreground text-sm">{plan.package.description}</span>
-      ) : null}
+      {description ? <span className="text-muted-foreground text-sm">{description}</span> : null}
       {meta.length > 0 ? (
         <span className="text-muted-foreground text-xs">{meta.join(" · ")}</span>
       ) : null}

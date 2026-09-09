@@ -1,6 +1,7 @@
 import type { TemplateCardVO } from "busabase-contract/domains/templates/types";
 import { Badge } from "kui/badge";
 import { AppWindow, Bot, FileText, Rows3, Table2 } from "lucide-react";
+import { iStringParse, type LocaleType } from "openlib/i18n/i-string";
 import type { ReactNode } from "react";
 import { TemplateCardImage } from "./template-card-image";
 
@@ -28,6 +29,13 @@ interface TemplateCardSummaryProps {
   statLabels?: TemplateStatLabels;
   headingHref?: string;
   children?: ReactNode;
+  /**
+   * `description` is an iString; this resolves it to one language. A prop, not
+   * `useCoreLocale()` called internally — this component renders in both a
+   * Dashboard client tree and a marketing Server Component tree (see the note
+   * below), and a hook would break the second one outright.
+   */
+  descriptionLocale?: LocaleType;
 }
 
 /**
@@ -46,6 +54,7 @@ export function TemplateCardSummary({
   statLabels = defaultStatLabels,
   headingHref,
   children,
+  descriptionLocale = "en",
 }: TemplateCardSummaryProps) {
   const [screenshot] = template.screenshots;
   const Heading = headingLevel;
@@ -108,7 +117,7 @@ export function TemplateCardSummary({
               : "line-clamp-2 flex-1 text-xs text-muted-foreground"
           }
         >
-          {template.description}
+          {iStringParse(template.description, descriptionLocale)}
         </p>
 
         {stats.length > 0 ? (

@@ -1,6 +1,7 @@
 import type { TemplateCardVO } from "busabase-contract/domains/templates/types";
 import { Badge } from "kui/badge";
 import { ExternalLink, MessageSquare, PackageOpen } from "lucide-react";
+import { iStringParse, type LocaleType } from "openlib/i18n/i-string";
 import type { ReactNode } from "react";
 import { TemplateScreenshotShowcase } from "./template-screenshot-showcase";
 
@@ -64,6 +65,9 @@ interface TemplateDetailContentProps {
   template: TemplateCardVO;
   labels?: TemplateDetailLabels;
   actions?: ReactNode;
+  /** See the identical note on `TemplateCardSummaryProps` — a prop, not a
+   * hook, because this renders in a Server Component tree too. */
+  descriptionLocale?: LocaleType;
 }
 
 /**
@@ -74,6 +78,7 @@ export function TemplateDetailContent({
   template,
   labels = defaultLabels,
   actions,
+  descriptionLocale = "en",
 }: TemplateDetailContentProps) {
   const { stats } = template;
   const contents = [
@@ -102,7 +107,9 @@ export function TemplateDetailContent({
               <span className="text-xs text-muted-foreground">v{template.version}</span>
             ) : null}
           </div>
-          <p className="text-sm leading-6 text-muted-foreground">{template.description}</p>
+          <p className="text-sm leading-6 text-muted-foreground">
+            {iStringParse(template.description, descriptionLocale)}
+          </p>
           {template.tags.length > 0 ? (
             <ul className="flex flex-wrap gap-1.5" aria-label={labels.tags}>
               {template.tags.map((tag) => (
