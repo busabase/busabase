@@ -156,7 +156,7 @@ Busabase has no built-in model. Connect the agent you already use: Claude Code, 
 Read and follow the Busabase Agent Skill — it is the single source of truth:
 http://localhost:15419/SETUP_SKILL.md
 
-Follow its onboarding to connect to this workspace. Propose material changes as ChangeRequests and never merge one without my approval. Reply to me in English.
+Follow its onboarding to connect to this workspace. Don't choose a merge policy yourself unless I ask for one — submit the change and let Busabase apply my permissions to decide whether it merges now or waits for review. Reply to me in English.
 ```
 
 </details>

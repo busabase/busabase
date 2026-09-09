@@ -2,7 +2,7 @@
 
 [← Back to the README](../README.md)
 
-Busabase has **no built-in model**. It runs locally and speaks plain HTTP, so you point your own agent at it — Claude Code, Cursor, Codex, Gemini CLI, or anything that can call a REST API. The agent *proposes* changes as **Change Requests**; you stay the one who approves and merges. Everything stays on your machine.
+Busabase has **no built-in model**. It runs locally and speaks plain HTTP, so you point your own agent at it — Claude Code, Cursor, Codex, Gemini CLI, or anything that can call a REST API. The agent writes through **Change Requests** — every change carries a message, an author, a diff, and a history you can roll back. Whether one lands immediately or waits for you is decided by the credential's permissions: your own key writes, an agent you hand a proposal-only key has to ask. Everything stays on your machine.
 
 You connect in two moves: **paste one prompt** to onboard, then **install a permanent skill** so the agent just knows Busabase every session.
 
@@ -10,7 +10,7 @@ You connect in two moves: **paste one prompt** to onboard, then **install a perm
 
 ## Onboard with one prompt
 
-1. **Copy the prompt.** In the dashboard sidebar open **Agent Skills** and copy the short prompt. It points your agent at your local `http://localhost:15419/SETUP_SKILL.md` — a self-contained onboarding script — and tells it to reply in your language and never merge without your approval.
+1. **Copy the prompt.** In the dashboard sidebar open **Agent Skills** and copy the short prompt. It points your agent at your local `http://localhost:15419/SETUP_SKILL.md` — a self-contained onboarding script — and tells it to reply in your language and to leave the merge decision to your permissions rather than picking one itself.
 2. **Paste it into your agent.** It opens with a short welcome, connects first, and only asks what you want to manage when this is a genuinely new workspace.
 3. **It connects.** No account or API key is needed locally; the agent confirms the local server is up and saves the base URL to `~/.busabase/.env` so every future session — and the installed skill — can read it.
 4. **It preserves existing workspaces.** An existing workspace, including an intentionally empty one, is connected with zero structure or record writes. A new workspace receives a small starter structure automatically; see it in **Graph View**.
@@ -43,7 +43,7 @@ Once connected, pick whichever fits the task — all three read the same `~/.bus
 
 ![MCP endpoint — connect any MCP-capable agent or IDE.](../public/assets/readme/busabase-mcp.webp)
 
-The loop never changes: **list → propose a Change Request → you review → merge → read back**. Never bypass review unless you explicitly ask for a direct merge.
+The loop never changes: **list → open a Change Request → it merges or it waits → read back**. Which of the two happens is the credential's permissions talking, not the agent's choice — and an agent should never approve something that is waiting on you.
 
 ---
 
