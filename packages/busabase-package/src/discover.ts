@@ -29,6 +29,8 @@ export interface DiscoveredPackage {
   /** Path from the URL's root; `""` when the repo itself is the package. */
   subdir: string;
   name: string;
+  /** Optional human-facing title — absent when the author didn't declare one. */
+  displayName?: iString;
   /** Propagated as-is (not flattened) so a catalog card can render every
    * declared locale; `name` stays plain because it also doubles as the
    * install-target slug — see the comment on `PackageManifestSchema.name`. */
@@ -110,6 +112,7 @@ export const discoverPackages = (files: PackageFiles): DiscoveredPackage[] => {
       subdir,
       name: tree.manifest.name,
       description: tree.manifest.description,
+      ...(tree.manifest.displayName ? { displayName: tree.manifest.displayName } : {}),
       isTemplate: validation.ok,
       templateErrors: validation.ok || !claimsTemplate ? [] : validation.errors,
       counts: countTree(tree),

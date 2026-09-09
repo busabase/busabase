@@ -1,7 +1,7 @@
 /**
  * Attachments upload logic (open-domains) — auth-agnostic, transport-neutral.
  *
- * Any MIME type allowed, 25MB
+ * Any MIME type allowed, 200MB
  * cap, and throws `ORPCError` (all consumers are oRPC). Pure `(input, userId,
  * db, table)` — no auth/billing/context coupling. Hosts pass their own db,
  * userId (real id or "local"), and the `attachments` table instance.
@@ -13,8 +13,8 @@ import { generateNanoID } from "openlib/nanoid";
 import { extractFileExtension, storage } from "openlib/storage";
 import type { attachments } from "../schema/attachments";
 
-/** Max upload size (25MB). Any MIME type is accepted. */
-export const MAX_FILE_SIZE = 25 * 1024 * 1024;
+/** Max upload size (200MB). Any MIME type is accepted. */
+export const MAX_FILE_SIZE = 200 * 1024 * 1024;
 
 /**
  * Root of the BINARY attachment namespace — the only namespace `requestUploadUrl`
@@ -108,9 +108,9 @@ async function findByContentHash(
   return rows[0] ?? null;
 }
 
-/** Per-host upload policy overrides; defaults preserve 25MB / any MIME type. */
+/** Per-host upload policy restrictions; defaults preserve 200MB / any MIME type. */
 export interface UploadPolicyOptions {
-  /** Max upload size in bytes (default: 25MB). */
+  /** Tighter max upload size in bytes (default and absolute ceiling: 200MB). */
   maxFileSize?: number;
   /** Allowed MIME types (default: undefined = any type accepted). */
   allowedMimeTypes?: string[];
@@ -127,7 +127,7 @@ export async function requestUploadUrl(
   // still reusing the shared dedup + content-addressing.
   opts?: UploadPolicyOptions,
 ): Promise<RequestUploadUrlResult> {
-  const maxFileSize = opts?.maxFileSize ?? MAX_FILE_SIZE;
+  const maxFileSize = Math.min(opts?.maxFileSize ?? MAX_FILE_SIZE, MAX_FILE_SIZE);
   if (input.sizeBytes > maxFileSize) {
     throw new ORPCError("BAD_REQUEST", {
       message: `File size exceeds the maximum allowed size of ${maxFileSize / 1024 / 1024}MB`,

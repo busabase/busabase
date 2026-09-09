@@ -81,6 +81,7 @@ const serializeManifest = (manifest: PackageManifest): Buffer =>
     compact({
       format: manifest.format,
       name: manifest.name,
+      displayName: manifest.displayName,
       description: manifest.description || undefined,
       version: manifest.version,
       author: manifest.author,

@@ -87,4 +87,25 @@ describe("buildTemplateIndex", () => {
       "zh-CN": "受限工作台。",
     });
   });
+
+  it("carries a locale-keyed manifest displayName onto the index entry, and omits it when absent", () => {
+    const withDisplayName = JSON.stringify({
+      format: PACKAGE_FORMAT,
+      name: "gated",
+      description: "The gated desk.",
+      displayName: { en: "Gated Desk", "zh-CN": "受限工作台" },
+      template: { category: "ops" },
+    });
+    const index = buildTemplateIndex(repo({ "templates/gated/busabase.json": withDisplayName }), {
+      repo: "busabase/templates",
+      ref: "main",
+    });
+    expect(index.templates[0].displayName).toEqual({ en: "Gated Desk", "zh-CN": "受限工作台" });
+
+    const withoutDisplayName = buildTemplateIndex(repo(), {
+      repo: "busabase/templates",
+      ref: "main",
+    });
+    expect(withoutDisplayName.templates[0].displayName).toBeUndefined();
+  });
 });
