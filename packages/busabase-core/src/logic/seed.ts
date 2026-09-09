@@ -532,8 +532,10 @@ const FILE_TREE_FOLDER_CONFIG: Record<SeedFileTreeDef["nodeType"], FileTreeFolde
  * `writeFileTreeTextFile` — so one generic, scenario-driven seeder replaces
  * what used to be `seedSkillNodeIfMissing`/`seedDriveNodeIfMissing` (each
  * hardcoding its own fixed content, with no AirApp equivalent at all).
- * Idempotent per def, keyed by `def.nodeId`, exactly like the two functions
- * it replaces.
+ * Idempotent per def. A live node with the same space/type/slug is adopted
+ * before falling back to the canonical scenario id, so installations seeded
+ * before stable demo ids were introduced do not collide with the live-slug
+ * uniqueness constraint.
  */
 const seedFileTreeNodesIfMissing = async (createdAt: Date, defs: SeedFileTreeDef[]) => {
   if (defs.length === 0) {
@@ -592,11 +594,26 @@ const seedFileTreeNodesIfMissing = async (createdAt: Date, defs: SeedFileTreeDef
       visibility: "workspace" as const,
       version: "0.1.0",
     };
-    const [existingNode] = await db
+    let [existingNode] = await db
       .select()
       .from(busabaseNodes)
-      .where(and(eq(busabaseNodes.spaceId, spaceId), eq(busabaseNodes.id, def.nodeId)))
+      .where(
+        and(
+          eq(busabaseNodes.spaceId, spaceId),
+          eq(busabaseNodes.type, def.nodeType),
+          eq(busabaseNodes.slug, def.slug),
+          isNull(busabaseNodes.archivedAt),
+        ),
+      )
       .limit(1);
+    if (!existingNode) {
+      [existingNode] = await db
+        .select()
+        .from(busabaseNodes)
+        .where(and(eq(busabaseNodes.spaceId, spaceId), eq(busabaseNodes.id, def.nodeId)))
+        .limit(1);
+    }
+    const actualNodeId = existingNode?.id ?? def.nodeId;
     if (existingNode) {
       await db
         .update(busabaseNodes)
@@ -611,7 +628,7 @@ const seedFileTreeNodesIfMissing = async (createdAt: Date, defs: SeedFileTreeDef
           position: def.position,
           updatedAt: createdAt,
         })
-        .where(and(eq(busabaseNodes.spaceId, spaceId), eq(busabaseNodes.id, def.nodeId)));
+        .where(and(eq(busabaseNodes.spaceId, spaceId), eq(busabaseNodes.id, actualNodeId)));
     } else {
       await db.insert(busabaseNodes).values({
         id: def.nodeId,
@@ -631,7 +648,7 @@ const seedFileTreeNodesIfMissing = async (createdAt: Date, defs: SeedFileTreeDef
     const [node] = await db
       .select()
       .from(busabaseNodes)
-      .where(and(eq(busabaseNodes.spaceId, spaceId), eq(busabaseNodes.id, def.nodeId)))
+      .where(and(eq(busabaseNodes.spaceId, spaceId), eq(busabaseNodes.id, actualNodeId)))
       .limit(1);
     if (!node) {
       throw new Error(`Failed to seed ${def.nodeType} node: ${def.nodeId}`);
