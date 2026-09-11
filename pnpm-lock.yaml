@@ -195,6 +195,9 @@ importers:
       busabase-contract:
         specifier: workspace:*
         version: link:../../packages/busabase-contract
+      busabase-core:
+        specifier: workspace:*
+        version: link:../../packages/busabase-core
       jsqr:
         specifier: ^1.4.0
         version: 1.4.0
