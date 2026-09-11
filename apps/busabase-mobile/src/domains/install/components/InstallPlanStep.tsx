@@ -19,6 +19,10 @@ export function InstallPlanStep({ flow }: { flow: InstallFromGithubFlow }) {
   const { t, locale } = useI18n();
   const tokens = useTokens();
   const plan = flow.plan;
+  // `description` is an iString (a plain string OR a per-locale map), so it
+  // cannot be rendered directly — a map would reach React as an object. Resolve
+  // it against the UI locale, the same way the Base screens do for field names.
+  const packageDescription = plan ? iStringParse(plan.package.description, locale) : "";
 
   return (
     <>
@@ -51,12 +55,9 @@ export function InstallPlanStep({ flow }: { flow: InstallFromGithubFlow }) {
             <Text style={[typography.bodyEm, { color: tokens.foreground }]}>
               {plan.package.name}
             </Text>
-            {/* `description` is an iString (a plain string OR a per-locale map), so it
-                cannot be rendered directly — a map would reach React as an object. Resolve
-                it against the UI locale, the same way the Base screens do for field names. */}
-            {iStringParse(plan.package.description, locale) ? (
+            {packageDescription ? (
               <Text style={[typography.small, { color: tokens.mutedForeground }]}>
-                {iStringParse(plan.package.description, locale)}
+                {packageDescription}
               </Text>
             ) : null}
             {getInstallPackageMeta(plan, t.install).length > 0 ? (
