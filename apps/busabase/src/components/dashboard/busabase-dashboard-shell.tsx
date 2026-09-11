@@ -6,6 +6,7 @@ import type { NodeVO } from "busabase-contract/types";
 import { BusabaseAgentSkillButton } from "busabase-core/dashboard/agent-skill-button";
 import { GithubIcon } from "busabase-core/dashboard/brand-icons";
 import {
+  type AgentIntegrationTarget,
   type BusabaseDashboardChrome,
   BusabaseDashboardShell as CoreDashboardShell,
 } from "busabase-core/dashboard/dashboard-shell";
@@ -52,6 +53,12 @@ interface BusabaseDashboardShellProps {
   onExpandNode?: (nodeId: string) => void;
   /** Server-authoritative descendant check, gates cross-branch drag-and-drop drops. */
   checkIsDescendant?: (params: { nodeId: string; potentialAncestorId: string }) => Promise<boolean>;
+  /**
+   * Connection guidance for the sidebar's Agent-prompts dialog. Forwarded rather
+   * than re-derived here so the sidebar, the node toolbars and the install
+   * dialog all name the same edition and origin.
+   */
+  agentIntegration?: AgentIntegrationTarget;
 }
 
 /**
@@ -76,6 +83,7 @@ export function BusabaseDashboardShell({
   loadingNodeIds,
   onExpandNode,
   checkIsDescendant,
+  agentIntegration,
 }: BusabaseDashboardShellProps) {
   const { activeSpace, spaces, unreadCount, user } = useSPA();
   const [location, navigate] = useLocation();
@@ -222,6 +230,7 @@ export function BusabaseDashboardShell({
     <>
       <CoreDashboardShell
         activeChangeRequestCount={activeChangeRequestCount}
+        agentIntegration={agentIntegration}
         availableAirAppEngines={availableAirAppEngines}
         chrome={chrome}
         locale={locale}
@@ -242,6 +251,7 @@ export function BusabaseDashboardShell({
         webhookLabels={LL.webhookSettings}
         cloudConnectLabels={LL.cloudConnect}
         brandingLabels={LL.appBranding}
+        filePreviewLabels={LL.filePreviewSettings}
         brandingDefaults={brandingDefaults}
         open={settingsDialogOpen}
         onOpenChange={setSettingsDialogOpen}

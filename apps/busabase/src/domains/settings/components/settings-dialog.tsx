@@ -2,12 +2,14 @@
 
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "kui/dialog";
 import type { LucideIcon } from "lucide-react";
-import { Check, Cloud, Languages, Palette, Vault, Webhook } from "lucide-react";
+import { Check, Cloud, FileSearch, Languages, Palette, Vault, Webhook } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { AppBrandingSettingsLabels } from "~/domains/settings/components/app-branding-settings-tab";
 import { AppBrandingSettingsTab } from "~/domains/settings/components/app-branding-settings-tab";
 import type { CloudConnectSettingsLabels } from "~/domains/settings/components/cloud-connect-settings-tab";
 import { CloudConnectSettingsTab } from "~/domains/settings/components/cloud-connect-settings-tab";
+import type { FilePreviewSettingsLabels } from "~/domains/settings/components/file-preview-settings-tab";
+import { FilePreviewSettingsTab } from "~/domains/settings/components/file-preview-settings-tab";
 import type { VaultSettingsLabels } from "~/domains/vault/components/vault-settings-tab";
 import { VaultSettingsTab } from "~/domains/vault/components/vault-settings-tab";
 import type { WebhookSettingsLabels } from "~/domains/webhook/components/webhook-settings-tab";
@@ -22,7 +24,7 @@ interface LanguageOption {
   nativeName: string;
 }
 
-type SettingsTab = "language" | "branding" | "vault" | "webhook" | "cloudConnect";
+type SettingsTab = "language" | "branding" | "filePreview" | "vault" | "webhook" | "cloudConnect";
 
 interface Props {
   labels: SettingsDialogLabels;
@@ -30,6 +32,7 @@ interface Props {
   webhookLabels: WebhookSettingsLabels;
   cloudConnectLabels: CloudConnectSettingsLabels;
   brandingLabels: AppBrandingSettingsLabels;
+  filePreviewLabels: FilePreviewSettingsLabels;
   /** Built-in branding defaults, shown as placeholders in the Branding tab. */
   brandingDefaults: { name: string; description: string; logoUrl: string };
   open?: boolean;
@@ -78,6 +81,7 @@ export function SettingsDialog({
   webhookLabels,
   cloudConnectLabels,
   brandingLabels,
+  filePreviewLabels,
   brandingDefaults,
   open,
   onOpenChange,
@@ -98,6 +102,7 @@ export function SettingsDialog({
   const tabs: { id: SettingsTab; icon: LucideIcon; label: string }[] = [
     { id: "language", icon: Languages, label: labels.languageTab() },
     { id: "branding", icon: Palette, label: labels.brandingTab() },
+    { id: "filePreview", icon: FileSearch, label: labels.filePreviewTab() },
     { id: "vault", icon: Vault, label: labels.vaultTab() },
     { id: "webhook", icon: Webhook, label: labels.webhookTab() },
     { id: "cloudConnect", icon: Cloud, label: labels.cloudConnectTab() },
@@ -139,6 +144,12 @@ export function SettingsDialog({
                 labels={brandingLabels}
                 active={activeTab === "branding"}
                 defaults={brandingDefaults}
+              />
+            ) : null}
+            {activeTab === "filePreview" ? (
+              <FilePreviewSettingsTab
+                labels={filePreviewLabels}
+                active={activeTab === "filePreview"}
               />
             ) : null}
             {activeTab === "vault" ? (

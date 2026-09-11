@@ -360,6 +360,9 @@ function DashboardClientContent({
           </div>
         ) : (
           <BusabaseDashboardShell
+            // Same guidance the dashboard itself gets, so the sidebar row's
+            // Agent prompts name the same local endpoint the node toolbars do.
+            agentIntegration={AGENT_INTEGRATION}
             activeChangeRequestCount={
               changeRequestCountsQuery.isPending
                 ? undefined
@@ -390,6 +393,7 @@ function DashboardClientContent({
           </BusabaseDashboardShell>
         )}
         <CreateNodeModal
+          agentIntegration={AGENT_INTEGRATION}
           apiClient={apiClient}
           open={isCreateOpen}
           orpc={orpc}

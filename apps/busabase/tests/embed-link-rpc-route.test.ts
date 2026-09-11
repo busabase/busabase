@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   resolveDemoMode: vi.fn(),
   resolveEmbedRequestContext: vi.fn(),
+  readBuiltinVaultRuntimeEnv: vi.fn(),
   rpcHandle: vi.fn(),
   runWithBusabaseContext: vi.fn(async (_context: unknown, callback: () => Promise<Response>) =>
     callback(),
@@ -37,7 +38,7 @@ vi.mock("busabase-core/router", () => ({ busabaseRouter: {} }));
 vi.mock("busabase-core/router-demo", () => ({ busabaseDemoRouter: {} }));
 vi.mock("openlib/ui/dashboard/demo", () => ({ resolveDemoMode: mocks.resolveDemoMode }));
 vi.mock("~/domains/vault/logic/vault", () => ({
-  readBuiltinVaultRuntimeEnv: vi.fn(),
+  readBuiltinVaultRuntimeEnv: mocks.readBuiltinVaultRuntimeEnv,
 }));
 vi.mock("~/lib/local-user", () => ({ getLocalUserName: () => "Local User" }));
 
@@ -62,6 +63,7 @@ describe("Desktop RPC embed capability", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.resolveDemoMode.mockReturnValue({ useCase: null, locale: undefined });
+    mocks.readBuiltinVaultRuntimeEnv.mockResolvedValue({});
     mocks.rpcHandle.mockResolvedValue({
       matched: true,
       response: Response.json({ ok: true }),
@@ -80,17 +82,20 @@ describe("Desktop RPC embed capability", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.resolveEmbedRequestContext).toHaveBeenCalledWith(publicId, secret);
-    // The route hands over exactly what the capability resolved to and nothing
-    // else. `visitorKind`, `isSpaceManager` and the read ceiling are pinned by
-    // `runWithEmbedContext` itself, so no transport can weaken them by passing
-    // its own — which is what this route used to do.
+    // The route preserves the capability scope and adds only host-owned preview
+    // configuration. `visitorKind`, `isSpaceManager` and the read ceiling are
+    // pinned by `runWithEmbedContext` itself, so no transport can weaken them.
     expect(mocks.runWithEmbedContext).toHaveBeenCalledWith(
-      {
+      expect.objectContaining({
         actorId: "local-user",
         spaceId: "local",
         restrictedVisibility: false,
         embedTargetNodeId: "nod_1",
-      },
+        filePreview: expect.objectContaining({
+          provider: expect.any(String),
+          credentialSource: "none",
+        }),
+      }),
       expect.any(Function),
     );
     expect(mocks.runWithLocalContext).not.toHaveBeenCalled();

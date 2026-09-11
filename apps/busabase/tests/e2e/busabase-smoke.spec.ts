@@ -73,9 +73,20 @@ test("dashboard routes render the review-first seeded experience", async ({ page
 
   await page.getByRole("button", { name: "Search" }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
-  await page.getByPlaceholder(/Search records/).fill("agent");
+  // Addressed by ROLE, not by placeholder: the placeholder is marketing copy
+  // and renaming it (to "Search apps, skills, records, bases, change
+  // requests…") broke this line with a 60s timeout that named a locator
+  // rather than the copy change that caused it. The searchbox role is what
+  // this step actually depends on.
+  await page.getByRole("dialog").getByRole("searchbox").fill("agent");
   await expect(page.getByRole("tab", { name: /Recent/ })).toHaveAttribute("aria-selected", "true");
-  await expect(page.getByRole("button", { name: /^Agent Integrations/ })).toBeVisible();
+  // Scoped to the dialog and NOT anchored: a search result's accessible name is
+  // "<emoji> <name> <slug>" (e.g. "🔌 Agent Integrations agent-integrations"), so
+  // `/^Agent Integrations/` broke the moment node icons came back to the Recent
+  // list. The emoji and the slug are decoration around the thing under test.
+  await expect(
+    page.getByRole("dialog").getByRole("button", { name: /Agent Integrations/ }),
+  ).toBeVisible();
 
   await page.goto("/dashboard/local/activity");
   await expect(page.locator('[data-dashboard-scroll="activity"]')).toBeVisible();
