@@ -79,7 +79,12 @@ test("dashboard routes render the review-first seeded experience", async ({ page
   // rather than the copy change that caused it. The searchbox role is what
   // this step actually depends on.
   await page.getByRole("dialog").getByRole("searchbox").fill("agent");
-  await expect(page.getByRole("tab", { name: /Recent/ })).toHaveAttribute("aria-selected", "true");
+  // No tab assertion here on purpose. This line used to be
+  // `getByRole("tab", { name: /Recent/ })` with aria-selected, which stopped
+  // existing the moment the dialog moved from tabs to sections — the sections
+  // are plain headings with no role, so there is nothing durable to address.
+  // The assertion below is what this step was ever really checking: that
+  // typing resolves a concrete seeded node.
   // Scoped to the dialog and NOT anchored: a search result's accessible name is
   // "<emoji> <name> <slug>" (e.g. "🔌 Agent Integrations agent-integrations"), so
   // `/^Agent Integrations/` broke the moment node icons came back to the Recent
