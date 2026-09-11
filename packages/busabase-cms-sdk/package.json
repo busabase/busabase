@@ -1,6 +1,6 @@
 {
   "name": "busabase-cms-sdk",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Typed Posts, Pages, Categories, and Tags for Busabase CMS, Next.js, and Fumadocs.",
   "license": "MIT",
   "homepage": "https://github.com/busabase/busabase/tree/main/packages/busabase-cms-sdk",
