@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { basename, extname } from "node:path";
 import { customAgentPromptsSchema } from "busabase-contract/contract/node-agent-prompt-schemas";
 import { BUSABASE_TASKS, TASK_SUPERSEDED_MCP_TOOLS } from "busabase-contract/tasks";
@@ -21,6 +22,10 @@ import {
 } from "commander";
 import {
   activateLoggedInProfile,
+  collectProfileStatus,
+  collectSpaces,
+  describeCredential,
+  envOverrideNotes,
   runAuthConfigList,
   runAuthConfigSet,
   runAuthRemove,
@@ -33,9 +38,14 @@ import { runBackup, runRestore } from "./backup/commands.js";
 import { banner } from "./banner.js";
 import {
   activeCredentialTarget,
+  configJsonPath,
+  currentProfileName,
+  dotEnvPath,
   isMultiProfile,
+  listProfileNames,
   loadConfigFile,
   loadDotEnvFile,
+  profilesDir,
   resolveCredentialTarget,
   setActiveCredentialTarget,
 } from "./config-file.js";
@@ -45,6 +55,18 @@ import {
   kebab,
   matchRoute,
 } from "./contract-catalog.js";
+import {
+  DOCTOR_BLIND_SPOTS,
+  type DoctorCheck,
+  detectInstalledSkill,
+  detectMcpConfig,
+  hasFailure,
+  inferEdition,
+  inspectEnvFile,
+  inspectJsonFile,
+  renderDoctor,
+  summarize,
+} from "./doctor.js";
 import {
   DRY_RUN_NO_WRITE_NOTE,
   DryRunInterception,
@@ -57,6 +79,7 @@ import { type OutputFormat, render, slim } from "./format.js";
 import {
   assertCredentialNotExpired,
   authRecoveryHint,
+  isLocalHost,
   maybeAutoRefresh,
   runLogin,
   runLogout,
@@ -83,7 +106,19 @@ import {
   requiredLevelFor,
   sampleEndpointId,
 } from "./schema-command.js";
+import {
+  buildRuntimeSkillDoc,
+  installSkillDoc,
+  parseSkillTopic,
+  resolveSkillDocument,
+  resolveSkillMode,
+  resolveSkillsDir,
+  SKILL_REGISTRY_HINT,
+  SKILL_TOPICS,
+  skillsDirDefaultHint,
+} from "./skill-command.js";
 import { registerTaskCommands } from "./task-command.js";
+import { checkForUpdate } from "./update-check.js";
 import { findChangeRequestId, waitForChangeRequest } from "./wait.js";
 
 /**
@@ -1133,6 +1168,11 @@ function commandsSection(program: Command, showAll = false): string {
     const leaves = cmd.commands.filter((leaf) => !skip(leaf));
     if (leaves.length > 0) {
       lines.push("");
+      // A group is normally just a namespace, so only its leaves are worth listing.
+      // `skill` is both: it prints a document on its own AND owns `skill install`.
+      // Declaring its own positional argument is what distinguishes the two, and
+      // without this the runnable parent would be missing from the index entirely.
+      if (cmd.registeredArguments.length > 0) lines.push(entry(cmd.name(), cmd));
       for (const leaf of leaves) lines.push(entry(`${cmd.name()} ${leaf.name()}`, leaf));
     } else if (cmd.commands.length === 0) {
       // A group whose every leaf is hidden is not itself runnable — printing it
@@ -1152,10 +1192,495 @@ Several accounts: \`login --profile <name>\` adds one, \`auth status\` lists the
 Cloud): \`space list\` / \`space use\`.
 
 New here? \`busabase-cli guide\` is the operating manual — read \`workspace\` before
-proposing changes. Endpoint commands a task command already covers are hidden;
-\`--help-all\` prints them (they all still run).
+proposing changes. No server yet, or this CLI is all you have? \`skill\` prints the
+same manual straight from the binary, \`skill setup\` prints the onboarding doc, and
+\`skill install\` drops it into your agent's skills directory. Endpoint commands a
+task command already covers are hidden; \`--help-all\` prints them (they all still
+run).
 
 Docs: https://busabase.com/docs · Troubleshooting: ${DOCS_TROUBLESHOOTING}`;
+
+/**
+ * Gather every doctor finding.
+ *
+ * Each probe is individually guarded: the whole point of this command is to work
+ * when the environment does not, so a thrown error anywhere must become a
+ * finding rather than kill the report. Nothing in here is allowed to reject.
+ */
+async function collectDoctorChecks(
+  config: ResolvedConfig,
+  opts: OptionValues,
+): Promise<DoctorCheck[]> {
+  const checks: DoctorCheck[] = [];
+  const home = homedir();
+  const add = (check: DoctorCheck) => checks.push(check);
+
+  // Probe once, never retry. Every other command retries because it wants to
+  // succeed; doctor wants to *report*, and "unreachable" is a valid answer it is
+  // being asked for. Retrying would spend seconds and three lines of "retrying
+  // in 1s" noise to arrive at the same finding.
+  const probe: ResolvedConfig = { ...config, retries: 0, fetch: withRetry(fetch, { retries: 0 }) };
+
+  // ── Config files ───────────────────────────────────────────────────────────
+  const envFile = inspectEnvFile(dotEnvPath());
+  add({
+    id: "config.env",
+    label: "Credential file",
+    probe: "local",
+    state:
+      envFile.state === "present"
+        ? "ok"
+        : envFile.state === "unreadable"
+          ? "fail"
+          : ("warn" as const),
+    detail:
+      envFile.state === "present"
+        ? `${envFile.path} (${envFile.keys.length} keys)`
+        : envFile.state === "empty"
+          ? `${envFile.path} exists but holds no settings`
+          : envFile.state === "unreadable"
+            ? `${envFile.path} exists but could not be read — ${envFile.error}`
+            : `${envFile.path} does not exist`,
+    ...(envFile.state === "present" ? {} : { fix: "busabase-cli login" }),
+  });
+
+  const configFile = inspectJsonFile(configJsonPath());
+  add({
+    id: "config.json",
+    label: "Settings file",
+    probe: "local",
+    state: configFile.state === "unreadable" ? "fail" : "ok",
+    detail:
+      configFile.state === "unreadable"
+        ? `${configFile.path} is not valid JSON — ${configFile.error}`
+        : configFile.state === "missing"
+          ? "none — defaults apply (this is normal)"
+          : `${configFile.path} (${configFile.keys.join(", ")})`,
+    ...(configFile.state === "unreadable"
+      ? { fix: `Repair or delete ${configFile.path}, then run \`busabase-cli auth status\`` }
+      : {}),
+  });
+
+  add({
+    id: "config.profile",
+    label: "Account",
+    probe: "local",
+    state: "ok",
+    detail: isMultiProfile()
+      ? `${currentProfileName()} (of ${listProfileNames().length} in ${profilesDir()})`
+      : `${currentProfileName()} — single account`,
+  });
+
+  // Where each setting actually came from. Precedence is flag > env > file >
+  // default (see resolveConfig); showing the winning layer is what turns "why is
+  // it pointing at the wrong server" from a mystery into one line.
+  add({
+    id: "config.baseUrl",
+    label: "Base URL",
+    probe: "local",
+    state: "ok",
+    detail: `${config.baseUrl}  (from ${settingOrigin(opts.baseUrl, "BUSABASE_BASE_URL", envFile.keys)})`,
+  });
+
+  const envNotes = envOverrideNotes();
+  add({
+    id: "config.envOverrides",
+    label: "Env overrides",
+    probe: "local",
+    state: envNotes.length > 0 ? "warn" : "ok",
+    detail: envNotes.length > 0 ? envNotes.join(" / ") : "none — files are in charge",
+    ...(envNotes.length > 0
+      ? { fix: "Unset those variables if you meant to use the stored account" }
+      : {}),
+  });
+
+  // ── Server ─────────────────────────────────────────────────────────────────
+  let health: Record<string, unknown> | null = null;
+  let healthError = "";
+  try {
+    const body = await rawFetch(probe, "GET", "/api/health");
+    health = body && typeof body === "object" ? (body as Record<string, unknown>) : {};
+  } catch (error) {
+    healthError = (error as Error).message;
+  }
+  add({
+    id: "server.reachable",
+    label: "Server",
+    probe: "live",
+    state: health ? "ok" : "fail",
+    detail: health
+      ? `${config.baseUrl} answered /api/health`
+      : `${config.baseUrl} — ${healthError}`,
+    ...(health ? {} : { fix: "Check the URL, your network, or start the server" }),
+  });
+
+  const edition = inferEdition({ baseUrl: config.baseUrl, health, isLocalHost });
+  add({
+    id: "server.edition",
+    label: "Edition",
+    probe: "inferred",
+    state: edition.edition === "unknown" ? "n-a" : "ok",
+    detail: `${edition.edition} — ${edition.because}`,
+  });
+
+  add({
+    id: "server.version",
+    label: "Server version",
+    probe: edition.serverVersion ? "live" : "skipped",
+    state: edition.serverVersion ? "ok" : "n-a",
+    detail:
+      edition.serverVersion ??
+      (health
+        ? "not reported — the open-source server's /api/health carries no version field"
+        : "unknown — the server did not answer"),
+  });
+
+  // ── Credential ─────────────────────────────────────────────────────────────
+  // Deliberately two findings. A stored key is a fact about this disk; whether
+  // the server still honours it is a different question, and reporting the first
+  // as if it answered the second is the exact lie this command exists to avoid.
+  let auth: Awaited<ReturnType<BusabaseClient["auth"]["verify"]>> | null = null;
+  let authError = "";
+  try {
+    auth = await createBusabaseClient(probe).auth.verify();
+  } catch (error) {
+    authError = (error as Error).message;
+  }
+  // Reported after the live check so the advice can account for it: an env var
+  // can supply a perfectly good credential while nothing is stored on disk, and
+  // telling that user to run `login` would be answering a question they did not
+  // ask. Still surfaced, because "works today, gone when the shell closes" is
+  // exactly the state someone debugging tomorrow needs to know about.
+  const profiles = collectProfileStatus();
+  const stored = profiles.find((p) => p.active) ?? profiles[0];
+  const nothingStored = !stored || stored.credential === "none";
+  add({
+    id: "credential.stored",
+    label: "Credential (stored)",
+    probe: "local",
+    state: nothingStored && !auth ? "warn" : nothingStored ? "n-a" : "ok",
+    detail: !nothingStored
+      ? describeCredential(stored)
+      : auth
+        ? "nothing on disk — the credential in use came from the environment, so it disappears with this shell"
+        : "none stored",
+    ...(nothingStored && !auth ? { fix: "busabase-cli login" } : {}),
+  });
+
+  add({
+    id: "credential.accepted",
+    label: "Credential (live)",
+    probe: auth ? "live" : health ? "live" : "skipped",
+    state: auth ? "ok" : health ? "fail" : "n-a",
+    detail: auth
+      ? `accepted as ${auth.user?.email ?? auth.user?.id ?? "this user"}`
+      : health
+        ? `rejected — ${authError}`
+        : "not checked — the server is unreachable",
+    ...(!auth && health ? { fix: "busabase-cli login" } : {}),
+  });
+
+  // ── Space ──────────────────────────────────────────────────────────────────
+  const spaces = auth ? collectSpaces(auth, config.spaceId) : [];
+  const activeSpace = spaces.find((s) => s.active);
+  add({
+    id: "space.target",
+    label: "Target space",
+    probe: auth ? "live" : "skipped",
+    state: !auth ? "n-a" : activeSpace ? "ok" : "warn",
+    detail: !auth
+      ? "not checked — the credential was not accepted"
+      : activeSpace
+        ? `${activeSpace.name} (${activeSpace.id}) of ${spaces.length} visible`
+        : `no space matches ${config.spaceId ?? "(none configured)"} among ${spaces.length} visible`,
+    ...(auth && !activeSpace ? { fix: "busabase-cli space use <id>" } : {}),
+  });
+
+  // ── Agent surfaces ─────────────────────────────────────────────────────────
+  const skill = detectInstalledSkill({ cwd: process.cwd(), home, exists: existsSync });
+  add({
+    id: "agent.skill",
+    label: "Agent skill",
+    probe: "local",
+    state: skill.found ? "ok" : "warn",
+    detail: skill.found
+      ? `${skill.paths.join(", ")} (version unknown — SKILL.md carries no version field)`
+      : "not installed in any known skills directory",
+    ...(skill.found ? {} : { fix: "busabase-cli skill install" }),
+  });
+
+  const mcp = detectMcpConfig({ cwd: process.cwd(), home, inspect: inspectJsonFile });
+  add({
+    id: "agent.mcp",
+    label: "MCP",
+    probe: "local",
+    state: mcp.broken.length > 0 ? "warn" : mcp.found ? "ok" : "n-a",
+    detail:
+      mcp.broken.length > 0
+        ? `unreadable: ${mcp.broken.map((b) => `${b.path} (${b.error})`).join(", ")}`
+        : mcp.found
+          ? `configured in ${mcp.paths.join(", ")}`
+          : `not found in ${mcp.searched.join(" or ")} — other agent hosts keep this elsewhere and are not searched`,
+  });
+
+  // ── This CLI ───────────────────────────────────────────────────────────────
+  let updateNotice: string | null = null;
+  let updateChecked = true;
+  try {
+    updateNotice = await checkForUpdate("busabase-cli", pkgVersion());
+    // `checkForUpdate` opts out silently on CI / non-TTY, which is right for a
+    // background nag and wrong here — reporting "up to date" when nothing was
+    // asked would be the same not-checked-reads-as-passing failure this command
+    // is built to avoid. Distinguish the two by the conditions it opts out on.
+    updateChecked = process.stdout.isTTY === true && !process.env.CI;
+  } catch {
+    updateChecked = false;
+  }
+  add({
+    id: "cli.version",
+    label: "CLI version",
+    probe: updateChecked ? "live" : "skipped",
+    state: !updateChecked ? "n-a" : updateNotice ? "warn" : "ok",
+    detail: !updateChecked
+      ? `${pkgVersion()} — newer-version check skipped (non-interactive)`
+      : updateNotice
+        ? updateNotice.replace(/\n/g, " ")
+        : `${pkgVersion()} is the latest`,
+    ...(updateChecked && updateNotice ? { fix: "npm install -g busabase-cli@latest" } : {}),
+  });
+
+  return checks;
+}
+
+/** Which layer of the precedence chain supplied a value — flag, env, file, or default. */
+function settingOrigin(flag: unknown, envKey: string, fileKeys: string[]): string {
+  if (flag !== undefined) return "--flag";
+  if (process.env[envKey]) return `$${envKey}`;
+  if (fileKeys.includes(envKey)) return "credential file";
+  return "built-in default";
+}
+
+function registerDoctorCommand(program: Command, state: CliState): void {
+  addGlobalFlags(program.command("doctor"))
+    .description("Check whether this machine can reach Busabase — and say what is wrong if not")
+    .addHelpText(
+      "after",
+      `
+Run this first when something does not work. It reports every part of the setup
+in one pass and never stops early: no config, no credential, no network, no
+server — you still get the full list, with the broken lines marked.
+
+Every line says how it was learned, because the difference matters:
+  [read locally]              from this machine's disk — says nothing about the server
+  [checked against the server] a real request came back
+  [inferred]                  a good guess from an indirect signal, spelled out
+  [not checked]               shown as \`–\`, never as a pass
+
+Exit code is non-zero only when something actually failed; warnings do not fail
+the command, so a script can gate on it.
+
+Not covered by this command:
+${DOCTOR_BLIND_SPOTS.map((gap) => `  - ${gap}`).join("\n")}
+
+Different from its neighbours: \`health\` pings only the server, \`auth status\`
+reads only local files, \`whoami\` needs a working credential to say anything,
+and \`check\` is a linter for template packages on disk — not this machine.`,
+    )
+    .action(async (_opts: OptionValues, cmd: Command) => {
+      const opts = cmd.optsWithGlobals();
+      const config = resolveConfig(opts);
+      state.config = config;
+      const checks = await collectDoctorChecks(config, opts);
+      const report = { checks, summary: summarize(checks) };
+      console.log(config.output === "json" ? render(report, config.output) : renderDoctor(report));
+      // Set the code rather than throwing: the report IS the output, and an
+      // error envelope printed after it would bury the thing the user came for.
+      if (hasFailure(checks)) process.exitCode = EXIT_CODES.ERROR;
+    });
+}
+
+/**
+ * `skill` / `skill install` / `setup-skill`.
+ *
+ * Kept out of `buildProgram` only for size — it is registered inline like every other
+ * command. The one structural note: `skill` carries BOTH its own `[topic]` argument and
+ * an `install` subcommand. Commander resolves `skill install` to the subcommand and
+ * anything else to the parent's action, which is what makes `busabase-cli skill` print a
+ * document with no extra word while `skill install` still reads like a verb.
+ */
+function registerSkillCommand(program: Command, state: CliState): void {
+  const modeOption = () =>
+    new Option("--mode <edition>", "which edition the document should teach").choices([
+      "local",
+      "cloud",
+    ]);
+  const withKeyOption = () =>
+    new Option(
+      "--with-key",
+      "interpolate the resolved API key into the examples (off by default — the document is written to disk)",
+    );
+
+  /** Both the printing and the installing path need the same document; build it once, here. */
+  const docOptionsFor = (opts: OptionValues, config: ResolvedConfig) => ({
+    baseUrl: config.baseUrl,
+    mode: resolveSkillMode({
+      baseUrl: config.baseUrl,
+      spaceId: config.spaceId,
+      override: opts.mode as string | undefined,
+      isLocalHost,
+    }),
+    spaceId: config.spaceId,
+    apiKey: opts.withKey ? config.apiKey : undefined,
+  });
+
+  const skill = addGlobalFlags(program.command("skill"));
+  skill
+    .argument("[topic]", `which document: ${SKILL_TOPICS.join(" | ")}; omit for the everyday skill`)
+    .description("Print the Busabase Agent Skill — works offline, no credential needed")
+    .addOption(modeOption())
+    .addOption(withKeyOption())
+    .addOption(new Option("--offline", "skip the server and print the bundled copy"))
+    .addHelpText(
+      "after",
+      `
+For the case where this CLI is all that got installed. The document is compiled
+into the binary, so \`skill\` answers with no server, no network and no login —
+unlike \`guide\`, which reads whatever the server serves.
+
+  busabase-cli skill                    # the everyday manual, for THIS base URL
+  busabase-cli skill setup              # onboarding: connect, seed, install skills
+  busabase-cli skill > SKILL.md         # stdout is only ever the markdown body
+  busabase-cli skill install            # drop it into an agent's skills directory
+
+\`skill\` is generated locally and cannot fail. \`skill setup\` prefers the server's
+own /SETUP_SKILL.md, which is edition-aware and current; if that server is old,
+unreachable, or not a Busabase host, the bundled copy is printed instead and a
+note saying so goes to stderr — stdout stays clean for redirection either way.
+
+The API key is NOT written into the document unless you pass --with-key, because
+\`skill install\` puts this file inside your project.
+
+Note the singular. \`skill\` is THIS CLI's own instruction manual, and is the same on
+every install. \`skills\` (plural) is a different thing entirely — the Skill nodes
+stored inside your workspace, which \`skills list\` enumerates.`,
+    )
+    .action(async (topic: string | undefined, _opts: OptionValues, cmd: Command) => {
+      const opts = cmd.optsWithGlobals();
+      const config = resolveConfig(opts);
+      state.config = config;
+      const requested = parseSkillTopic(topic);
+      const doc = docOptionsFor(opts, config);
+      const resolved = await resolveSkillDocument(requested, doc, {
+        offline: Boolean(opts.offline),
+        fetchImpl: config.fetch ?? fetch,
+        cliVersion: pkgVersion(),
+      });
+      if (config.output === "json") {
+        console.log(
+          render(
+            {
+              topic: requested,
+              mode: doc.mode,
+              baseUrl: config.baseUrl,
+              source: resolved.source,
+              content: resolved.content,
+            },
+            config.output,
+          ),
+        );
+        return;
+      }
+      // Same split as `guide`: the body is markdown meant to be read or redirected,
+      // so every diagnostic goes to stderr.
+      console.log(resolved.content);
+      if (resolved.note) console.error(`\n[busabase-cli] ${resolved.note}`);
+    });
+
+  addGlobalFlags(skill.command("install"))
+    .argument("[dir]", `skills directory; default: ./.agents/skills, else ./.claude/skills`)
+    .description("Install the Busabase skill into an agent's skills directory")
+    .addOption(new Option("--dir <path>", "same as the positional argument"))
+    .addOption(new Option("--force", "replace an already-installed busabase/SKILL.md"))
+    .addOption(modeOption())
+    .addOption(withKeyOption())
+    .addHelpText(
+      "after",
+      `
+Writes <dir>/busabase/SKILL.md. The copy it writes is generated for THIS machine —
+your base URL, your edition, your space id already filled in — which is what makes
+it worth having next to the registry copy rather than instead of it:
+
+  ${SKILL_REGISTRY_HINT}
+
+That command installs the canonical, placeholder-valued \`busabase\` and
+\`busabase-app-creator\` skills and is still the right way to get both. Use this one
+when you only have the CLI, or when you want the document pre-bound to this host.
+
+An existing file is never overwritten without --force; it may be a copy you edited.
+Default target when neither is present: ${skillsDirDefaultHint()}`,
+    )
+    .action((dir: string | undefined, _opts: OptionValues, cmd: Command) => {
+      const opts = cmd.optsWithGlobals();
+      const config = resolveConfig(opts);
+      state.config = config;
+      const doc = docOptionsFor(opts, config);
+      const target = resolveSkillsDir({
+        explicit: dir ?? (opts.dir as string | undefined),
+        cwd: process.cwd(),
+        home: homedir(),
+        exists: existsSync,
+      });
+      const result = installSkillDoc({
+        dir: target,
+        content: buildRuntimeSkillDoc(doc),
+        force: Boolean(opts.force),
+      });
+      if (!result.written) {
+        // CONFLICT, not USAGE: the command was written correctly, the destination
+        // just already holds something. A script can branch on that distinctly.
+        throw new CliOutcomeError("CONFLICT", `Not installed: ${result.path} — ${result.reason}`);
+      }
+      if (config.output === "json") {
+        console.log(render({ path: result.path, mode: doc.mode, baseUrl: config.baseUrl }, "json"));
+        return;
+      }
+      console.log(`Installed the Busabase skill for ${config.baseUrl} (${doc.mode}) at:`);
+      console.log(`  ${result.path}`);
+      console.error(
+        `\n[busabase-cli] this copy is bound to this host. For the canonical pair, run:\n  ${SKILL_REGISTRY_HINT}`,
+      );
+    });
+
+  // `setup-skill` is the name people reach for after seeing the /SETUP_SKILL.md URL,
+  // so it exists as a real command rather than being something to discover.
+  addGlobalFlags(program.command("setup-skill"))
+    .description("Alias for `skill setup` — the onboarding document")
+    .addOption(modeOption())
+    .addOption(withKeyOption())
+    .addOption(new Option("--offline", "skip the server and print the bundled copy"))
+    .action(async (_opts: OptionValues, cmd: Command) => {
+      const opts = cmd.optsWithGlobals();
+      const config = resolveConfig(opts);
+      state.config = config;
+      const doc = docOptionsFor(opts, config);
+      const resolved = await resolveSkillDocument("setup", doc, {
+        offline: Boolean(opts.offline),
+        fetchImpl: config.fetch ?? fetch,
+        cliVersion: pkgVersion(),
+      });
+      if (config.output === "json") {
+        console.log(
+          render(
+            { topic: "setup", mode: doc.mode, source: resolved.source, content: resolved.content },
+            config.output,
+          ),
+        );
+        return;
+      }
+      console.log(resolved.content);
+      if (resolved.note) console.error(`\n[busabase-cli] ${resolved.note}`);
+    });
+}
 
 /** Exported for the help-example test, which walks the command tree in-process. */
 export function buildProgram(state: CliState = {}): Command {
@@ -1238,7 +1763,11 @@ expects, which no flag or schema can express on its own.
 Examples:
   busabase-cli guide                 # what is available here
   busabase-cli guide workspace       # the change-request workflow
-  busabase-cli guide airapp          # REQUIRED before writing any AirApp file`,
+  busabase-cli guide airapp          # REQUIRED before writing any AirApp file
+
+Guides come from the server, so they need it reachable and they reflect whatever
+that server serves. For the offline, no-credential version of the everyday manual
+— and for installing it as a permanent skill — see \`busabase-cli skill --help\`.`,
     )
     .action(async (topic: string | undefined, _opts: OptionValues, cmd: Command) => {
       const opts = cmd.optsWithGlobals();
@@ -1260,6 +1789,9 @@ Examples:
       console.log(guide.content);
       console.error(`\n[busabase-cli] other topics: ${guide.otherTopics.join(", ") || "(none)"}`);
     });
+
+  registerSkillCommand(program, state);
+  registerDoctorCommand(program, state);
 
   addGlobalFlags(program.command("login"))
     .description("Connect the CLI to Busabase — Personal/local, Cloud, or self-hosted")

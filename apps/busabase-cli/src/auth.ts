@@ -68,7 +68,8 @@ export function collectProfileStatus(): ProfileStatus[] {
   });
 }
 
-function describeCredential(status: ProfileStatus): string {
+/** Exported for `doctor`, which reports the same credential facts in a different frame. */
+export function describeCredential(status: ProfileStatus): string {
   if (status.credential === "none") return "no auth";
   if (status.credential === "api_key") return "API key";
   if (!status.expiresAt) return "OAuth";
@@ -82,7 +83,7 @@ function describeCredential(status: ProfileStatus): string {
 }
 
 /** Warn when an exported env var silently outranks whatever the files say. */
-function envOverrideNotes(): string[] {
+export function envOverrideNotes(): string[] {
   const notes: string[] = [];
   const envProfile = process.env.BUSABASE_PROFILE;
   if (envProfile && envProfile !== currentProfileName()) {

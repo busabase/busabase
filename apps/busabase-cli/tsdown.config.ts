@@ -19,7 +19,18 @@ export default defineConfig({
   outDir: "dist",
   clean: true,
   dts: false,
-  noExternal: [/^busabase-contract/, /^busabase-package/, /^open-domains/, /^openlib/],
+  // `busabase-core/skill-doc` joins the same club for the same reason, with one extra
+  // caveat: busabase-core as a whole is a server package (drizzle, next, AsyncLocalStorage).
+  // ONLY the `skill-doc` entry may be imported from here — it is a zero-import module of
+  // template literals, so bundling it costs text and nothing else. Importing any other
+  // busabase-core path would silently pull the server graph into a published npm CLI.
+  noExternal: [
+    /^busabase-contract/,
+    /^busabase-core/,
+    /^busabase-package/,
+    /^open-domains/,
+    /^openlib/,
+  ],
   // bin/busabase-cli.mjs and package.json#main both expect `dist/*.js` — tsdown's
   // default with platform: "node" resolves to `.mjs` instead (PR #6548 gotcha).
   outExtensions: () => ({ js: ".js" }),

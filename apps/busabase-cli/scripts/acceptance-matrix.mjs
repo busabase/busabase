@@ -7,7 +7,7 @@
  * local HTTP server. Nothing is mocked inside the CLI.
  */
 import { execFile, spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -44,6 +44,11 @@ const server = createServer((req, res) => {
       res.writeHead(code, { "content-type": "application/json" });
       res.end(JSON.stringify(obj));
     };
+    if (req.url === "/api/health") {
+      // doctor probes this. Shaped like the open-source server's response
+      // (no `version` field), which is also what its edition inference reads.
+      return send(200, { status: "ok", service: "busabase", timestamp: new Date(0).toISOString() });
+    }
     if (req.url === "/api/auth/device/code") {
       deviceCodeIssued = `dev-${requestLog.filter((u) => u === "/api/auth/device/code").length}`;
       return send(200, {
@@ -410,6 +415,279 @@ check(
   blockingStderr.includes("https://busabase.com/device") &&
     blockingStderr.includes("Code: WXYZ7890"),
 );
+
+// ══ F. skill / skill install —— 只装了 CLI 没装 skill 的用户 ══
+section("F. skill 自举 (bootstrap without the skill installed)");
+
+// 一台“新版”服务器：真的会 serve /SETUP_SKILL.md。主 stub server 对这个路径返 404，
+// 正好就是旧版/自托管服务器的样子，两种服务器都要覆盖到。
+const LIVE_MARKER = "SERVED-BY-THE-LIVE-HOST";
+const setupServer = createServer((req, res) => {
+  if (req.url === "/SETUP_SKILL.md") {
+    res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+    return res.end(`---\nname: busabase\n---\n# ${LIVE_MARKER}\n`);
+  }
+  res.writeHead(404, { "content-type": "application/json" });
+  res.end(JSON.stringify({ message: "not found" }));
+});
+await new Promise((r) => setupServer.listen(0, "127.0.0.1", r));
+const liveBase = `http://127.0.0.1:${setupServer.address().port}`;
+
+// 一个确定没人监听的端口：断网/服务器没起来的情形。先开再关，拿到一个必然 ECONNREFUSED 的地址。
+const deadProbe = createServer(() => {});
+await new Promise((r) => deadProbe.listen(0, "127.0.0.1", r));
+const deadBase = `http://127.0.0.1:${deadProbe.address().port}`;
+await new Promise((r) => deadProbe.close(r));
+
+const skillOffline = await cli(["skill", "--base-url", deadBase]);
+check(
+  "F",
+  "F1 没有任何服务器时 skill 仍打出完整文档",
+  skillOffline.status === 0 &&
+    skillOffline.stdout.includes("name: busabase") &&
+    skillOffline.stdout.length > 3000,
+  `exit=${skillOffline.status} bytes=${skillOffline.stdout.length}`,
+);
+check("F", "F2 文档按 --base-url 个性化，不是写死的域名", skillOffline.stdout.includes(deadBase));
+
+const setupLive = await cli(["skill", "setup", "--base-url", liveBase]);
+check(
+  "F",
+  "F3 服务器提供 /SETUP_SKILL.md 时取服务端那份",
+  setupLive.status === 0 && setupLive.stdout.includes(LIVE_MARKER),
+  `exit=${setupLive.status}`,
+);
+
+// 主 stub server 对 /SETUP_SKILL.md 返 404 —— 旧服务器。
+const setupOld = await cli(["skill", "setup", "--base-url", base]);
+check(
+  "F",
+  "F4 旧服务器 404 时自动回落且退出码仍为 0",
+  setupOld.status === 0 && setupOld.stdout.length > 3000 && !setupOld.stdout.includes(LIVE_MARKER),
+  `exit=${setupOld.status} bytes=${setupOld.stdout.length}`,
+);
+check(
+  "F",
+  "F5 回落时 stderr 说明用了内嵌副本，stdout 不被污染",
+  setupOld.stderr.includes("bundled with busabase-cli") &&
+    setupOld.stderr.includes("404") &&
+    setupOld.stdout.trimStart().startsWith("---"),
+);
+check(
+  "F",
+  "F6 setup-skill 别名与 skill setup 等价",
+  (await cli(["setup-skill", "--base-url", liveBase])).stdout.includes(LIVE_MARKER),
+);
+
+// 凭据泄漏：这份文档会被 `skill install` 写进用户仓库，默认绝不能带真 key。
+// 必须显式 --mode cloud：环回地址会被正确判成自托管版，而自托管版整份文档都不带
+// 鉴权头，于是「没泄漏」会因为根本没有那一段而假绿——真正要守的是 cloud 那条路。
+const leakEnv = { BUSABASE_API_KEY: "sk_should_never_be_printed" };
+const cloudArgs = ["skill", "--mode", "cloud", "--base-url", deadBase];
+const noKey = await cli(cloudArgs, leakEnv);
+const withKey = await cli([...cloudArgs, "--with-key"], leakEnv);
+check(
+  "F",
+  "F7 cloud 版默认不把真实 API key 写进文档",
+  !noKey.stdout.includes("sk_should_never_be_printed") && noKey.stdout.includes("YOUR_API_KEY"),
+);
+check("F", "F8 --with-key 才注入", withKey.stdout.includes("sk_should_never_be_printed"));
+check(
+  "F",
+  "F13 自托管版整份文档不带鉴权头（--mode 覆盖生效）",
+  !(await cli(["skill", "--base-url", deadBase], leakEnv)).stdout.includes("Authorization: Bearer"),
+);
+
+// install：真的落盘，真的拒绝覆盖。
+const installRoot = mkdtempSync(join(tmpdir(), "busa-skill-install-"));
+const installed = join(installRoot, "busabase", "SKILL.md");
+const install1 = await cli(["skill", "install", installRoot, "--base-url", deadBase]);
+check(
+  "F",
+  "F9 install 真的写出文件并打印绝对路径",
+  install1.status === 0 && existsSync(installed) && install1.stdout.includes(installed),
+  `exit=${install1.status}`,
+);
+check(
+  "F",
+  "F10 落盘内容就是 skill 打印的那份",
+  existsSync(installed) && readFileSync(installed, "utf8").trim() === skillOffline.stdout.trim(),
+);
+const install2 = await cli(["skill", "install", installRoot, "--base-url", deadBase]);
+check(
+  "F",
+  "F11 已存在时拒绝覆盖并以非 0 退出",
+  install2.status !== 0 && `${install2.stdout}${install2.stderr}`.includes("--force"),
+  `exit=${install2.status}`,
+);
+writeFileSync(installed, "EDITED BY THE USER\n");
+const install3 = await cli(["skill", "install", installRoot, "--force", "--base-url", deadBase]);
+check(
+  "F",
+  "F12 --force 才覆盖",
+  install3.status === 0 && !readFileSync(installed, "utf8").includes("EDITED BY THE USER"),
+  `exit=${install3.status}`,
+);
+rmSync(installRoot, { recursive: true, force: true });
+setupServer.close();
+
+// ══ G. doctor —— 环境自检 ══
+section("G. doctor 环境自检 (must report even when everything is broken)");
+
+// G 组自带一个干净的 HOME 和 cwd，免得跑测试的人自己的 ~/.busabase 影响判定。
+const docHome = mkdtempSync(join(tmpdir(), "busa-doctor-home-"));
+const docCwd = mkdtempSync(join(tmpdir(), "busa-doctor-cwd-"));
+const doctor = async (args = [], extraEnv = {}) => {
+  try {
+    const { stdout, stderr } = await execFileAsync(process.execPath, [CLI, "doctor", ...args], {
+      cwd: docCwd,
+      env: { ...cleanEnv({ HOME: docHome, ...extraEnv }), HOME: docHome },
+      timeout: 60_000,
+    });
+    return { status: 0, stdout, stderr };
+  } catch (e) {
+    return { status: e.code ?? 1, stdout: e.stdout ?? "", stderr: e.stderr ?? "" };
+  }
+};
+
+// 一个必然没人监听的地址：断网/服务器没起来。
+const docDead = createServer(() => {});
+await new Promise((r) => docDead.listen(0, "127.0.0.1", r));
+const deadUrl = `http://127.0.0.1:${docDead.address().port}`;
+await new Promise((r) => docDead.close(r));
+
+const t0doc = Date.now();
+const broken = await doctor([], { BUSABASE_BASE_URL: deadUrl });
+const brokenMs = Date.now() - t0doc;
+const LABELS = [
+  "Credential file",
+  "Settings file",
+  "Account",
+  "Base URL",
+  "Env overrides",
+  "Server",
+  "Edition",
+  "Server version",
+  "Credential (stored)",
+  "Credential (live)",
+  "Target space",
+  "Agent skill",
+  "MCP",
+  "CLI version",
+];
+check(
+  "G",
+  "G1 一切皆坏时仍打出全部 14 项，不中途退出",
+  LABELS.every((l) => broken.stdout.includes(l)),
+  `缺: ${LABELS.filter((l) => !broken.stdout.includes(l)).join(",") || "无"}`,
+);
+check("G", "G2 服务器不可达标记为失败", /✗ Server/.test(broken.stdout));
+check("G", "G3 有失败时退出码非 0", broken.status !== 0, `exit=${broken.status}`);
+check(
+  "G",
+  "G4 未检查项显示 – 而不是 ✓",
+  /– Credential \(live\)/.test(broken.stdout) && !/✓ Credential \(live\)/.test(broken.stdout),
+);
+check(
+  "G",
+  "G5 每项标注来源（本地/实时/推断）",
+  broken.stdout.includes("[read locally]") &&
+    broken.stdout.includes("[checked against the server]") &&
+    broken.stdout.includes("[inferred]"),
+);
+check(
+  "G",
+  "G6 不可达时不重试、不拖时间",
+  brokenMs < 15_000 && !broken.stderr.includes("retrying"),
+  `${brokenMs}ms`,
+);
+
+// 真 server + 有效凭据：主 stub server 认 sk_matrix_test，并有 /api/health。
+const healthy = await doctor([], { BUSABASE_BASE_URL: base, BUSABASE_API_KEY: "sk_matrix_test" });
+check(
+  "G",
+  "G7 服务器活着时 Server 变 ok",
+  /✓ Server/.test(healthy.stdout),
+  `exit=${healthy.status}`,
+);
+check("G", "G8 凭据被接受时 Credential (live) 变 ok", /✓ Credential \(live\)/.test(healthy.stdout));
+check(
+  "G",
+  "G9 「本地存着」和「服务端认可」分开报，不混为一谈",
+  healthy.stdout.includes("Credential (stored)") && healthy.stdout.includes("Credential (live)"),
+);
+
+// 凭据被拒：服务器活着但 key 是假的 —— live 必须 fail，而不是沿用本地的乐观判断。
+const badKey = await doctor([], { BUSABASE_BASE_URL: base, BUSABASE_API_KEY: "sk_not_a_real_key" });
+check(
+  "G",
+  "G10 服务器活着但 key 无效 → live 判失败，其他项照常报告",
+  /✗ Credential \(live\)/.test(badKey.stdout) && /✓ Server/.test(badKey.stdout),
+);
+
+// skill 检测：先用 skill install 装进 doctor 的 cwd，再让 doctor 找 —— 顺便验证两条命令的闭环。
+check(
+  "G",
+  "G11 装 skill 前报未安装",
+  /! Agent skill/.test(broken.stdout) && broken.stdout.includes("busabase-cli skill install"),
+);
+const skillInstalled = await cli(
+  ["skill", "install", join(docCwd, ".agents", "skills"), "--base-url", deadUrl],
+  { HOME: docHome },
+);
+const afterInstall = await doctor([], { BUSABASE_BASE_URL: deadUrl });
+check(
+  "G",
+  "G12 skill install 之后 doctor 立刻检出（两条命令对同一位置达成一致）",
+  skillInstalled.status === 0 && /✓ Agent skill/.test(afterInstall.stdout),
+  `install exit=${skillInstalled.status}`,
+);
+
+// MCP：伪造一份含 busabase 条目的 .mcp.json，以及一份坏掉的。
+writeFileSync(
+  join(docCwd, ".mcp.json"),
+  JSON.stringify({ mcpServers: { busabase: { url: base } } }),
+);
+const withMcp = await doctor([], { BUSABASE_BASE_URL: deadUrl });
+check("G", "G13 检出配好的 MCP", /✓ MCP/.test(withMcp.stdout));
+writeFileSync(join(docCwd, ".mcp.json"), "{ this is not json");
+const brokenMcp = await doctor([], { BUSABASE_BASE_URL: deadUrl });
+check(
+  "G",
+  "G14 MCP 配置损坏报警告而不是崩溃",
+  /! MCP/.test(brokenMcp.stdout) && brokenMcp.stdout.includes("unreadable"),
+);
+rmSync(join(docCwd, ".mcp.json"), { force: true });
+
+// 配置文件三态：存在但读不出，必须区别于「不存在」。
+const badConfig = join(docHome, ".busabase", "config.json");
+mkdirSync(join(docHome, ".busabase"), { recursive: true });
+writeFileSync(badConfig, "{ broken");
+const corrupt = await doctor([], { BUSABASE_BASE_URL: deadUrl });
+check(
+  "G",
+  "G15 config.json 损坏被指名，而不是静默当成缺省",
+  /✗ Settings file/.test(corrupt.stdout) && corrupt.stdout.includes("not valid JSON"),
+);
+rmSync(badConfig, { force: true });
+
+// JSON 输出：结构化、可被脚本消费。
+const asJson = await doctor(["--output", "json"], { BUSABASE_BASE_URL: deadUrl });
+let parsedDoctor = null;
+try {
+  parsedDoctor = JSON.parse(asJson.stdout);
+} catch {}
+check(
+  "G",
+  "G16 --output json 是合法 JSON 且每项带 id/state/probe",
+  Boolean(parsedDoctor?.checks?.length) &&
+    parsedDoctor.checks.every((c) => c.id && c.state && c.probe) &&
+    typeof parsedDoctor.summary?.fail === "number",
+  parsedDoctor ? `${parsedDoctor.checks.length} 项` : "解析失败",
+);
+
+rmSync(docHome, { recursive: true, force: true });
+rmSync(docCwd, { recursive: true, force: true });
 
 server.close();
 const passed = results.filter((r) => r.ok).length;
