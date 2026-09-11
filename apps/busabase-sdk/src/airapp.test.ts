@@ -531,7 +531,7 @@ describe("publishAirApp", () => {
     await expect(publishAirApp(client, airAppConfig(), files)).rejects.toThrow(/SETUP_REQUIRED/);
   });
 
-  it("creates the AirApp, review-first, when the Folder exists but has none yet", async () => {
+  it("creates the AirApp as a pending CR when the credential cannot write", async () => {
     const folderNode = node({ metadata: owned("app-root") });
     const create = vi
       .fn()
@@ -554,15 +554,17 @@ describe("publishAirApp", () => {
       files,
     );
 
-    expect(result).toEqual({ status: "created", changeRequestId: "cr-create" });
+    expect(result).toEqual({ status: "created", merged: false, changeRequestId: "cr-create" });
     expect(list).toHaveBeenCalledWith({ status: ["in_review"] });
+    // Not `autoMerge: false` and not `true` — ABSENT, which is what makes the
+    // publish follow the server's permission-aware default.
+    expect(create.mock.calls[0][0]).not.toHaveProperty("autoMerge");
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({
         type: "airapp",
         parentNodeId: "node-1",
         slug: "kelly-crm-app",
         mergeMode: "replace",
-        autoMerge: false,
         files,
       }),
     );
@@ -617,7 +619,11 @@ describe("publishAirApp", () => {
       files,
     );
 
-    expect(result).toEqual({ status: "pending", changeRequestId: "cr-already-pending" });
+    expect(result).toEqual({
+      status: "pending",
+      merged: false,
+      changeRequestId: "cr-already-pending",
+    });
     expect(create).not.toHaveBeenCalled();
   });
 
@@ -662,11 +668,11 @@ describe("publishAirApp", () => {
       files,
     );
 
-    expect(result).toEqual({ status: "pending", changeRequestId: "cr-page-2" });
+    expect(result).toEqual({ status: "pending", merged: false, changeRequestId: "cr-page-2" });
     expect(list).toHaveBeenNthCalledWith(2, { status: ["in_review"], cursor: "page-2" });
   });
 
-  it("proposes an update, review-first, when the AirApp already exists", async () => {
+  it("proposes an update as a pending CR when the credential cannot write", async () => {
     const folderNode = node({ metadata: owned("app-root") });
     const listFiles = vi.fn().mockResolvedValue([{ path: "server.js" }, { path: "package.json" }]);
     const createChangeRequest = vi.fn().mockResolvedValue({ id: "cr-update", status: "in_review" });
@@ -691,16 +697,75 @@ describe("publishAirApp", () => {
       files,
     );
 
-    expect(result).toEqual({ status: "updated", changeRequestId: "cr-update" });
+    expect(result).toEqual({ status: "updated", merged: false, changeRequestId: "cr-update" });
     expect(listFiles).toHaveBeenCalledWith({ nodeId: "node-airapp", type: "airapp" });
+    expect(createChangeRequest.mock.calls[0][0]).not.toHaveProperty("autoMerge");
     expect(createChangeRequest).toHaveBeenCalledWith(
       expect.objectContaining({
         nodeId: "node-airapp",
         type: "airapp",
-        autoMerge: false,
         operations: [{ kind: "update", path: "server.js", content: "console.log(1)" }],
       }),
     );
+  });
+
+  // The other half of permission-aware publishing, and the half that used to be
+  // unreachable: an app whose credential can write to its own Folder publishes
+  // live instead of parking its bundle in a review queue nobody is watching.
+  it("reports the created node when the server merged the create", async () => {
+    const folderNode = node({ metadata: owned("app-root") });
+    // A merged `fileTrees.create` returns the NODE, not a change request — there
+    // is no CR on that path at all, which is why the result carries `nodeId`.
+    const create = vi.fn().mockResolvedValue({ node: { id: "node-airapp" }, materialized: true });
+    const list = vi.fn().mockResolvedValue({ changeRequests: [], nextCursor: null });
+    const client = {
+      nodes: {
+        get: vi
+          .fn()
+          .mockResolvedValue(asFolder(folderNode, [baseChild({ metadata: owned("contacts") })])),
+      },
+      bases: {},
+      fileTrees: { create },
+      changeRequests: { list },
+    } as unknown as Parameters<typeof publishAirApp>[0];
+
+    const result = await publishAirApp(
+      client,
+      airAppConfig({ folder: { ...config().folder, nodeId: "node-1" } }),
+      files,
+    );
+
+    expect(result).toEqual({ status: "created", merged: true, nodeId: "node-airapp" });
+  });
+
+  it("reports merged:true when the server merged the update", async () => {
+    const folderNode = node({ metadata: owned("app-root") });
+    const listFiles = vi.fn().mockResolvedValue([{ path: "server.js" }, { path: "package.json" }]);
+    // The update path always returns a change request; `status` is what says
+    // whether it landed or is waiting.
+    const createChangeRequest = vi.fn().mockResolvedValue({ id: "cr-update", status: "merged" });
+    const client = {
+      nodes: {
+        get: vi
+          .fn()
+          .mockResolvedValue(
+            asFolder(folderNode, [
+              baseChild({ metadata: owned("contacts") }),
+              airAppChild({ metadata: owned("airapp") }),
+            ]),
+          ),
+      },
+      bases: {},
+      fileTrees: { listFiles, createChangeRequest },
+    } as unknown as Parameters<typeof publishAirApp>[0];
+
+    const result = await publishAirApp(
+      client,
+      airAppConfig({ folder: { ...config().folder, nodeId: "node-1" } }),
+      files,
+    );
+
+    expect(result).toEqual({ status: "updated", merged: true, changeRequestId: "cr-update" });
   });
 });
 

@@ -1,9 +1,10 @@
 /**
  * `--wait`: block until a submitted proposal is actually decided.
  *
- * Review-first is the product's whole point, so the useful unit of work for a
- * caller is not "the change request was filed" — it is "the change request was
- * merged, or it wasn't". Without this every caller writes the same poll loop
+ * A write can still land as a pending proposal — a proposal-only credential, no
+ * write access on the target, or an explicit `--require-review` — so the useful
+ * unit of work for a caller is not "the change request was filed" but "the
+ * change request was merged, or it wasn't". Without this every caller writes the same poll loop
  * against `change-requests get`, and an agent that skips it reports a proposal
  * nobody has looked at as a completed task.
  */

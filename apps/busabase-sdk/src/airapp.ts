@@ -114,8 +114,8 @@ export interface AirAppFolderDeclaration {
  * an app's Folder and Bases are plain data-schema resources, safe to bring
  * into existence unattended, but an AirApp is a bundle of code the viewer's
  * browser will execute, so bringing it into existence always goes through
- * `publishAirApp`'s separate, always-review-first ChangeRequest instead of
- * riding along on the same `autoMerge: true` request as the data layer.
+ * `publishAirApp`'s own separate request instead of riding along on the data
+ * layer's structure request.
  * Declaring it here matters for a second reason regardless: without it, an
  * unstamped Folder holding the app's own AirApp would look like it holds an
  * unattributable stranger, and the legacy claim would be refused.
@@ -443,8 +443,8 @@ export function resolveProvisionedFolder(
 
   // The app's own AirApp node, if it declares one. Never created by
   // resolveProvisionedFolder — an AirApp is published via `publishAirApp`'s
-  // own always-review-first ChangeRequest, not alongside the data layer's
-  // `autoMerge: true` structure request — only recognized and stamped here.
+  // own separate request, not alongside the data layer's structure request —
+  // only recognized and stamped here.
   const airAppNode = config.airApp
     ? (folder.children ?? []).find(
         (node) =>
@@ -901,10 +901,21 @@ export interface AirAppFileInput {
   mimeType?: string;
 }
 
+/**
+ * What one publish did. `merged` is the question a caller actually has — did
+ * this bundle go live, or is it waiting for someone?
+ *
+ * A publish is permission-aware like every other write: it merges when the
+ * app's credential holds `write` on the Folder, and falls back to a pending
+ * ChangeRequest when it does not. The CREATE path has no change request at all
+ * once it merges (the node is inserted directly), which is why that branch
+ * carries `nodeId` instead of `changeRequestId`.
+ */
 export type AirAppPublishResult =
-  | { status: "created"; changeRequestId: string }
-  | { status: "updated"; changeRequestId: string }
-  | { status: "pending"; changeRequestId: string };
+  | { status: "created"; merged: true; nodeId: string }
+  | { status: "created"; merged: false; changeRequestId: string }
+  | { status: "updated"; merged: boolean; changeRequestId: string }
+  | { status: "pending"; merged: false; changeRequestId: string };
 
 /**
  * The create-vs-update operation list for one AirApp publish. Pure — no I/O —
@@ -971,9 +982,10 @@ async function findPendingAirAppCreate(
 /**
  * Publish the app's own AirApp bundle: create it under the Folder when this
  * Space has never had it, or propose the local files as an update when it
- * already exists. Always a separate, always-review-first ChangeRequest from
- * the data layer's `provisionDeclaredResources` — see the note on
- * `AirAppNodeDeclaration` for why the two must never share a request.
+ * already exists. Always a separate request from the data layer's
+ * `provisionDeclaredResources` — see the note on `AirAppNodeDeclaration` for
+ * why the two must never share a request. Permission-aware: it merges when the
+ * app's credential can write to the Folder, and waits for review when it cannot.
  *
  * Call after `provisionDeclaredResources` has confirmed the Folder exists.
  * Every call proposes the full local file list, even when nothing actually
@@ -1011,10 +1023,10 @@ export async function publishAirApp(
     // before that review lands would propose another identical create.
     const pendingChangeRequestId = await findPendingAirAppCreate(client, airApp.slug);
     if (pendingChangeRequestId) {
-      return { status: "pending", changeRequestId: pendingChangeRequestId };
+      return { status: "pending", merged: false, changeRequestId: pendingChangeRequestId };
     }
 
-    const changeRequest = await client.fileTrees.create({
+    const result = await client.fileTrees.create({
       type: "airapp",
       parentNodeId: current.folder.nodeId,
       slug: airApp.slug,
@@ -1022,22 +1034,14 @@ export async function publishAirApp(
       description: airApp.description ?? "",
       files: files as FileTreeCreateInput["files"],
       mergeMode: "replace",
-      // Explicit even though this app's write-permission credential would
-      // otherwise auto-merge it: executable AirApp code always gets human
-      // review before it runs in a viewer's browser, no exceptions.
-      autoMerge: false,
+      // `autoMerge` deliberately omitted — permission-aware, like every other
+      // write. An app whose credential can write to the Folder publishes
+      // straight away instead of parking its own bundle in a review queue
+      // nobody else is watching; a weaker credential still gets a ChangeRequest.
     });
-    // `autoMerge: false` always takes the pending-ChangeRequest branch of the
-    // output union at runtime; this narrows the static type to match, rather
-    // than widening `changeRequestId` to `string | undefined` for a branch
-    // that cannot happen.
-    if (changeRequest.materialized) {
-      throw setupError(
-        "SCHEMA_INCOMPLETE",
-        "AirApp create unexpectedly materialized despite autoMerge: false",
-      );
-    }
-    return { status: "created", changeRequestId: changeRequest.id };
+    return result.materialized
+      ? { status: "created", merged: true, nodeId: result.node.id }
+      : { status: "created", merged: false, changeRequestId: result.id };
   }
 
   const deployedFiles = await client.fileTrees.listFiles({
@@ -1054,7 +1058,11 @@ export async function publishAirApp(
     operations,
     message: `Publish ${config.appName} AirApp`,
     submittedBy: config.appId,
-    autoMerge: false,
+    // Permission-aware, same as the create path above.
   });
-  return { status: "updated", changeRequestId: changeRequest.id };
+  return {
+    status: "updated",
+    merged: changeRequest.status === "merged",
+    changeRequestId: changeRequest.id,
+  };
 }
