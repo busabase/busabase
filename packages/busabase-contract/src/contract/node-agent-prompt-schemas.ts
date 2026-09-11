@@ -64,12 +64,20 @@ const customPromptBodySchema = iStringSchema.refine(
  * One custom scenario prompt. `body`'s `{target}` placeholder is substituted at
  * render time with the same target string `PromptDef.body(target)` receives
  * today (see `node-agent-prompts.ts`) — this schema does not interpolate it.
+ *
+ * The placeholder is OPTIONAL and chooses placement only: a `body` that never
+ * mentions `{target}` gets the target line prepended as its first paragraph, so
+ * a custom prompt can never reach an agent without naming the node it acts on.
+ * That is why the schema does not require it — forgetting it is not an error to
+ * reject, it is a default to supply.
  */
 export const customPromptDefSchema = z.object({
   /** Stable id, unique within this node's custom list. */
   key: z.string().trim().min(1, { message: "key must not be empty" }),
   /** Defaults to `change` (same default the curated prompts use) so a prompt
-   * cannot silently bypass the approval-first policy by omission. */
+   * cannot silently opt out of the change-request path by omission — whether that
+   * path then merges immediately or waits for review is the permission layer's
+   * call, not the prompt's. */
   intent: customPromptIntentSchema.optional(),
   /** Short title shown in the dialog's left list. */
   label: customPromptLabelSchema,

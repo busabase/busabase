@@ -12,7 +12,14 @@ import {
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
-import { type KeyboardEvent, useCallback, useEffect, useRef, useState } from "react";
+import {
+  type KeyboardEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { TemplateDetailImage } from "./template-detail-image";
 
 export interface TemplateScreenshot {
@@ -22,6 +29,15 @@ export interface TemplateScreenshot {
 
 interface TemplateScreenshotShowcaseProps {
   screenshots: TemplateScreenshot[];
+  /**
+   * The demo clip's tile, rendered second — right after the cover — so the
+   * shelf reads cover → clip → the rest.
+   *
+   * Passed as a node rather than a src because playback is the clip tile's own
+   * business: this shelf owns scrolling, counting and the image lightbox, and
+   * has no reason to also own a <video> and a second dialog.
+   */
+  videoTile?: ReactNode;
   label: string;
   previousLabel: string;
   nextLabel: string;
@@ -75,6 +91,7 @@ const clickDownloadLink = (href: string, filename: string, openInNewTab = false)
 /** Compact, touch-friendly screenshot shelf shared by website and Dashboard details. */
 export function TemplateScreenshotShowcase({
   screenshots,
+  videoTile,
   label,
   previousLabel,
   nextLabel,
@@ -92,6 +109,19 @@ export function TemplateScreenshotShowcase({
   const [zoom, setZoom] = useState(100);
   const [rotation, setRotation] = useState(0);
 
+  /**
+   * What the shelf actually scrolls through: the screenshots, with the clip
+   * spliced in second. Kept separate from `screenshots` because the lightbox
+   * still indexes into the screenshots alone — a clip is not something you
+   * zoom, rotate or download.
+   */
+  const tiles: Array<{ kind: "image"; imageIndex: number } | { kind: "video" }> = [
+    ...(screenshots[0] ? [{ kind: "image" as const, imageIndex: 0 }] : []),
+    ...(videoTile ? [{ kind: "video" as const }] : []),
+    ...screenshots.slice(1).map((_, index) => ({ kind: "image" as const, imageIndex: index + 1 })),
+  ];
+  const tileCount = tiles.length;
+
   const resetPreviewView = useCallback(() => {
     setZoom(100);
     setRotation(0);
@@ -107,7 +137,7 @@ export function TemplateScreenshotShowcase({
 
   const syncCurrentIndex = useCallback(() => {
     const scroller = scrollerRef.current;
-    if (!scroller || screenshots.length === 0) return;
+    if (!scroller || tileCount === 0) return;
 
     let closestIndex = 0;
     let closestDistance = Number.POSITIVE_INFINITY;
@@ -120,7 +150,7 @@ export function TemplateScreenshotShowcase({
       }
     }
     setCurrentIndex(closestIndex);
-  }, [screenshots.length]);
+  }, [tileCount]);
 
   useEffect(() => {
     const scroller = scrollerRef.current;
@@ -139,14 +169,14 @@ export function TemplateScreenshotShowcase({
   const scrollToIndex = useCallback(
     (index: number) => {
       const scroller = scrollerRef.current;
-      const targetIndex = clampScreenshotIndex(index, screenshots.length);
+      const targetIndex = clampScreenshotIndex(index, tileCount);
       const frame = frameRefs.current[targetIndex];
       if (!scroller || !frame) return;
 
       setCurrentIndex(targetIndex);
       scroller.scrollTo({ behavior: "smooth", left: frame.offsetLeft });
     },
-    [screenshots.length],
+    [tileCount],
   );
 
   const handlePreviewKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -158,7 +188,7 @@ export function TemplateScreenshotShowcase({
   };
 
   const isFirst = currentIndex === 0;
-  const isLast = currentIndex === screenshots.length - 1;
+  const isLast = currentIndex === tileCount - 1;
   const activePreviewIndex = previewIndex ?? 0;
   const preview = previewIndex === null ? null : screenshots[activePreviewIndex];
   const isPreviewFirst = activePreviewIndex === 0;
@@ -191,31 +221,38 @@ export function TemplateScreenshotShowcase({
         aria-label={label}
         role="list"
       >
-        {screenshots.map((screenshot, index) => (
-          <div
-            key={`${screenshot.src}-${index}`}
-            ref={(frame) => {
-              frameRefs.current[index] = frame;
-            }}
-            className="w-[88%] shrink-0 snap-start overflow-hidden rounded-md border border-border bg-muted sm:w-[46%]"
-            role="listitem"
-          >
-            <button
-              type="button"
-              className="group relative block w-full cursor-zoom-in overflow-hidden text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-              aria-label={screenshot.alt}
-              onClick={() => {
-                setCurrentIndex(index);
-                selectPreview(index);
+        {tiles.map((tile, index) => {
+          const screenshot = tile.kind === "image" ? screenshots[tile.imageIndex] : undefined;
+          return (
+            <div
+              key={tile.kind === "image" ? `${screenshot?.src}-${tile.imageIndex}` : "clip"}
+              ref={(frame) => {
+                frameRefs.current[index] = frame;
               }}
+              className="w-[88%] shrink-0 snap-start overflow-hidden rounded-md border border-border bg-muted sm:w-[46%]"
+              role="listitem"
             >
-              <TemplateDetailImage src={screenshot.src} alt={screenshot.alt} />
-              <span className="pointer-events-none absolute end-2 top-2 inline-flex size-8 items-center justify-center rounded-md bg-background/90 text-foreground opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
-                <Expand className="size-4" aria-hidden="true" />
-              </span>
-            </button>
-          </div>
-        ))}
+              {tile.kind === "video" || !screenshot ? (
+                videoTile
+              ) : (
+                <button
+                  type="button"
+                  className="group relative block w-full cursor-zoom-in overflow-hidden text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                  aria-label={screenshot.alt}
+                  onClick={() => {
+                    setCurrentIndex(index);
+                    selectPreview(tile.imageIndex);
+                  }}
+                >
+                  <TemplateDetailImage src={screenshot.src} alt={screenshot.alt} />
+                  <span className="pointer-events-none absolute end-2 top-2 inline-flex size-8 items-center justify-center rounded-md bg-background/90 text-foreground opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+                    <Expand className="size-4" aria-hidden="true" />
+                  </span>
+                </button>
+              )}
+            </div>
+          );
+        })}
         <div aria-hidden="true" className="w-[12%] shrink-0 sm:w-[54%]" />
       </div>
 
@@ -224,7 +261,7 @@ export function TemplateScreenshotShowcase({
           className="min-w-10 text-center text-xs tabular-nums text-muted-foreground"
           aria-live="polite"
         >
-          {currentIndex + 1} / {screenshots.length}
+          {currentIndex + 1} / {tileCount}
         </span>
         <button
           type="button"

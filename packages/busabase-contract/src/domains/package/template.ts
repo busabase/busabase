@@ -121,6 +121,19 @@ export const TemplateManifestSchema = z.object({
   /** Card/detail screenshots, package-relative (`assets/screenshots/overview.webp`). */
   screenshots: z.array(z.string()).default([]),
   /**
+   * Optional demo clip, package-relative (`assets/recordings/busa-crm.mp4`).
+   *
+   * No companion poster field on purpose: the detail page uses
+   * `screenshots[0]`, which the catalog already requires to be the cover. One
+   * declared path instead of two that can disagree with each other.
+   *
+   * Note for anyone adding a sibling field here: this is a plain `z.object`, so
+   * an unrecognized key in `busabase.json` is silently stripped rather than
+   * rejected. A template cannot declare a field ahead of the schema landing —
+   * it just vanishes, with no error from `busabase-cli check`.
+   */
+  video: z.string().optional(),
+  /**
    * Ready-made prompts shown after install ("Ask agent" prefills the first).
    *
    * They are the difference between a folder of tables and something a user can

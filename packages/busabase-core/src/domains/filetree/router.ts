@@ -8,6 +8,7 @@ import {
   readFileTreeFile,
   resolveFileTreeKind,
 } from "./handlers";
+import { getFilePreviewConfiguration, prepareDriveFilePreview } from "./logic/file-preview";
 // Registers skill/drive/airapp as file-tree kinds (side-effect import).
 import "./kinds";
 
@@ -21,6 +22,10 @@ import "./kinds";
 const os = implement(busabaseContract);
 
 export const fileTreeRouter = {
+  previewConfig: os.fileTrees.previewConfig.handler(() => getFilePreviewConfiguration()),
+  preparePreview: os.fileTrees.preparePreview.handler(({ input }) =>
+    prepareDriveFilePreview({ nodeId: input.nodeId, filePath: input.filePath }),
+  ),
   create: os.fileTrees.create.handler(async ({ input }) => {
     const { type, ...rest } = input;
     return createFileTreeNode(resolveKindByType(type), rest);

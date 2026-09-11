@@ -224,6 +224,91 @@ describe("install.fromGithub — server-side install (real PGLite + synthetic zi
     expect(roots.map((node) => node.slug)).not.toContain("test-kb");
   });
 
+  // ── fromGithubStream: the same install, but it speaks while it works ────────
+  //
+  // The bug this route exists for: `fromGithub` does the whole install inside one
+  // silent request, and a proxy in front of the app closes a connection that has
+  // carried no bytes for minutes. The install keeps running server-side, so the
+  // user is told it failed while it actually succeeded — and their retry then
+  // collides with what the "failed" attempt created.
+  it("fromGithubStream reports progress BEFORE the result, then the same result", async () => {
+    const spaceId = "space_install_stream";
+    const seen: { kind: string; message?: string }[] = [];
+    let result: Awaited<ReturnType<Client["install"]["fromGithub"]>> | null = null;
+
+    // Iterate INSIDE the space context, not just obtain the generator there. A
+    // generator body does not run until the first `next()`, so draining it
+    // outside would run the whole install with no ambient space — which is
+    // exactly what a real request does NOT do (the handler and its iteration
+    // share one request scope).
+    await inSpace(spaceId, async () => {
+      const events = await client.install.fromGithubStream({
+        repoUrl: "https://github.com/acme/test-kb",
+        intoFolder: "streamed-kb",
+        autoMerge: true,
+      });
+      for await (const event of events) {
+        seen.push({
+          kind: event.kind,
+          ...(event.kind === "progress" ? { message: event.message } : {}),
+        });
+        if (event.kind === "done") result = event.result;
+      }
+    });
+
+    // Order is the whole point: progress has to arrive while the work is still
+    // happening. A stream that yielded everything at the end would satisfy a
+    // "did we get progress" assertion and still time out at the gateway.
+    const kinds = seen.map((event) => event.kind);
+    expect(kinds.at(-1)).toBe("done");
+    expect(kinds.slice(0, -1).every((kind) => kind === "progress")).toBe(true);
+    expect(kinds.filter((kind) => kind === "progress").length).toBeGreaterThan(1);
+
+    // The first one is emitted before the zipball fetch — the longest step, and
+    // the one `applyInstall` cannot report on because it runs before apply.
+    expect(seen[0]?.message).toMatch(/GitHub/i);
+
+    // Same outcome as the non-streaming route.
+    expect(result?.targetFolderSlug).toBe("streamed-kb");
+    expect(result?.created.docs).toBe(2);
+    expect(result?.created.bases).toBe(1);
+    expect(result?.created.records).toBe(2);
+
+    const nodes = await inSpace(spaceId, () => client.nodes.list());
+    const roots = nodes.length === 1 && nodes[0].children ? nodes[0].children : nodes;
+    expect(roots.map((node) => node.slug)).toContain("streamed-kb");
+  });
+
+  it("fromGithubStream surfaces a refusal as a thrown error, not a silent stream", async () => {
+    const spaceId = "space_install_stream_conflict";
+    // Same folder twice: the second is a slug collision, which the plan refuses
+    // before creating anything. A stream that ended quietly here would look
+    // exactly like success to a caller that only watches for `done`.
+    await inSpace(spaceId, async () => {
+      const first = await client.install.fromGithubStream({
+        repoUrl: "https://github.com/acme/test-kb",
+        intoFolder: "collide-kb",
+        autoMerge: true,
+      });
+      for await (const _event of first) {
+        // drain
+      }
+    });
+
+    await expect(
+      inSpace(spaceId, async () => {
+        const again = await client.install.fromGithubStream({
+          repoUrl: "https://github.com/acme/test-kb",
+          intoFolder: "collide-kb",
+          autoMerge: true,
+        });
+        for await (const _event of again) {
+          // drain — the throw happens here, mid-iteration
+        }
+      }),
+    ).rejects.toThrow();
+  });
+
   // ── fromGithub: the content really materializes ─────────────────────────────
   it("fromGithub materializes the folder, docs, base and records in the DB", async () => {
     const spaceId = "space_install_apply";
@@ -281,11 +366,16 @@ describe("install.fromGithub — server-side install (real PGLite + synthetic zi
     ]);
   });
 
-  // ── review-first: content lands as change requests ──────────────────────────
-  it("without autoMerge, records land as change requests instead of live rows", async () => {
+  // ── content: permission-aware by default, reviewable on request ─────────────
+  it("with autoMerge: false, records land as change requests instead of live rows", async () => {
     const spaceId = "space_install_review";
     const result = await inSpace(spaceId, () =>
-      client.install.fromGithub({ repoUrl: "https://github.com/acme/test-kb" }),
+      client.install.fromGithub({
+        repoUrl: "https://github.com/acme/test-kb",
+        // Explicit — this is now the only way to ask for review. Omitting it is
+        // the permission-aware default, covered by the test below.
+        autoMerge: false,
+      }),
     );
 
     // Structure is always materialized (a pending Base has no id to attach a
@@ -300,6 +390,24 @@ describe("install.fromGithub — server-side install (real PGLite + synthetic zi
       client.records.list({ baseId: articles?.id ?? "" }),
     );
     expect(records).toHaveLength(0);
+  });
+
+  it("by default, records go live — installing is already the trust decision", async () => {
+    const spaceId = "space_install_default";
+    const result = await inSpace(spaceId, () =>
+      client.install.fromGithub({ repoUrl: "https://github.com/acme/test-kb" }),
+    );
+
+    expect(result.created.bases).toBe(1);
+    expect(result.created.records).toBeGreaterThan(0);
+    expect(result.pendingChangeRequests).toBe(0);
+
+    const bases = await inSpace(spaceId, () => client.bases.list({}));
+    const articles = bases.find((base) => base.slug === "articles");
+    const { records } = await inSpace(spaceId, () =>
+      client.records.list({ baseId: articles?.id ?? "" }),
+    );
+    expect(records.length).toBeGreaterThan(0);
   });
 
   // ── collisions ──────────────────────────────────────────────────────────────
@@ -374,12 +482,18 @@ describe("install.fromGithub — server-side install (real PGLite + synthetic zi
   // records carry relation values always came back `applicable: false` — the
   // exact packages auto-merge exists to install. A client gating its submit
   // button on that flag would have made them permanently uninstallable.
-  it("reports a relation-values package as applicable only when planned WITH autoMerge", async () => {
+  it("reports a relation-values package as applicable unless review is forced", async () => {
     const previous = zipball;
     zipball = await zipFiles(buildRelationPackageFiles("rel-kb"), "acme-rel-kb-main");
     try {
       const spaceId = "space_install_applicable";
-      const withoutAutoMerge = await inSpace(spaceId, () =>
+      const forcedReview = await inSpace(spaceId, () =>
+        client.install.planFromGithub({
+          repoUrl: "https://github.com/acme/rel-kb",
+          autoMerge: false,
+        }),
+      );
+      const byDefault = await inSpace(spaceId, () =>
         client.install.planFromGithub({ repoUrl: "https://github.com/acme/rel-kb" }),
       );
       const withAutoMerge = await inSpace(spaceId, () =>
@@ -390,9 +504,15 @@ describe("install.fromGithub — server-side install (real PGLite + synthetic zi
       );
 
       // Same package, same collisions (none) — only the asked-for options differ.
-      expect(withoutAutoMerge.requiresAutoMerge).toBe(true);
+      // `requiresAutoMerge` is a property of the PACKAGE and never moves; what
+      // moves is whether this caller's install would satisfy it.
+      expect(forcedReview.requiresAutoMerge).toBe(true);
+      expect(byDefault.requiresAutoMerge).toBe(true);
       expect(withAutoMerge.requiresAutoMerge).toBe(true);
-      expect(withoutAutoMerge.applicable).toBe(false);
+      expect(forcedReview.applicable).toBe(false);
+      // The plan now answers for what this caller would ACTUALLY get, so the
+      // no-flag preview matches the no-flag install rather than assuming review.
+      expect(byDefault.applicable).toBe(true);
       expect(withAutoMerge.applicable).toBe(true);
     } finally {
       zipball = previous;

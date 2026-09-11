@@ -78,6 +78,24 @@ export const AgentPermissionRequestVOSchema = z.object({
 });
 export type AgentPermissionRequestVO = z.infer<typeof AgentPermissionRequestVOSchema>;
 
+/**
+ * The agent's `category: "model"` ACP config option, reduced to what the UI
+ * needs to render a picker: which value is selected, and what it can become.
+ *
+ * Deliberately not the raw ACP `SessionConfigOption` — that type carries a
+ * `boolean` variant and grouped select options this domain has no use for,
+ * and re-exporting it here would leak an SDK shape across the contract
+ * boundary for a feature that only needs "id, current value, flat choices".
+ */
+export const AgentSessionModelOptionVOSchema = z.object({
+  /** The ACP `configId` to send back on `session/set_config_option`. */
+  id: z.string(),
+  name: z.string(),
+  currentValue: z.string(),
+  options: z.array(z.object({ value: z.string(), name: z.string() })),
+});
+export type AgentSessionModelOptionVO = z.infer<typeof AgentSessionModelOptionVOSchema>;
+
 export const AgentSessionVOSchema = z.object({
   /** Busabase's own id for the session; not the agent's ACP sessionId. */
   id: z.string(),
@@ -90,6 +108,14 @@ export const AgentSessionVOSchema = z.object({
   lastActivityAt: z.string(),
   /** Set when status is "failed"; surfaced verbatim to the user. */
   error: z.string().nullable().default(null),
+  /**
+   * Present only while the agent's `session/new` (or a later
+   * `config_option_update`) has advertised a `category: "model"` select.
+   * `null` for agents that offer no model choice, and for every session
+   * loaded from history — a finished process cannot take a config change,
+   * so there is nothing to render a picker for.
+   */
+  modelOption: AgentSessionModelOptionVOSchema.nullable().default(null),
 });
 export type AgentSessionVO = z.infer<typeof AgentSessionVOSchema>;
 
@@ -202,3 +228,13 @@ export const RespondToAgentPermissionInputSchema = z.object({
   optionId: z.string().min(1),
 });
 export type RespondToAgentPermissionInput = z.infer<typeof RespondToAgentPermissionInputSchema>;
+
+/** Change the session's `category: "model"` config option via `session/set_config_option`. */
+export const SetAgentSessionConfigOptionInputSchema = z.object({
+  sessionId: z.string().min(1),
+  configId: z.string().min(1),
+  value: z.string().min(1),
+});
+export type SetAgentSessionConfigOptionInput = z.infer<
+  typeof SetAgentSessionConfigOptionInputSchema
+>;

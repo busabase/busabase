@@ -19,6 +19,7 @@ import type {
   groupRecordsResponseSchema,
 } from "../domains/base/contract/record-schemas";
 import type {
+  InstallEventVO,
   InstallFromGithubDTO,
   InstallPlanFromGithubDTO,
   InstallPlanVO,
@@ -467,6 +468,14 @@ export interface BusabaseDashboardApiClient {
   /** Performs the install planned by `planInstallFromGithub`. Same admin gate. */
   installFromGithub: (input: InstallFromGithubDTO) => Promise<InstallResultVO>;
   /**
+   * The same install, reporting progress as it runs. Same admin gate.
+   *
+   * Preferred for anything with a user waiting at it: an install is long enough
+   * that a single silent response gets closed by a proxy in front of the app,
+   * and long enough that the person deserves to see which pass it is on.
+   */
+  installFromGithubStream: (input: InstallFromGithubDTO) => Promise<AsyncIterable<InstallEventVO>>;
+  /**
    * The Template Center catalog. Unguarded — it lists public repositories and
    * says nothing about this workspace, so a member who cannot install can still
    * browse. The gate stays on the two install calls above.
@@ -721,6 +730,7 @@ export const createBusabaseRestApiClient = (
       client.records.changeRequest({ recordId, operation: "restore", ...payload }),
     planInstallFromGithub: (input) => client.install.planFromGithub(input),
     installFromGithub: (input) => client.install.fromGithub(input),
+    installFromGithubStream: (input) => client.install.fromGithubStream(input),
     listTemplates: (input) => client.templates.list(input ?? {}),
   };
 };

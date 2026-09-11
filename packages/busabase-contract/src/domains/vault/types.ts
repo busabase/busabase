@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+export const PREVIEWFILE_API_KEY = "PREVIEWFILE_API_KEY";
+
 export const VaultItemKeySchema = z
   .string()
   .trim()
@@ -55,6 +57,11 @@ export const UpdateVaultSettingsInputSchema = z.object({
   items: z.array(VaultItemInputSchema).max(200),
 });
 export type UpdateVaultSettingsDTO = z.infer<typeof UpdateVaultSettingsInputSchema>;
+
+export const UpdatePreviewFileCredentialInputSchema = z.object({
+  apiKey: VaultItemValueSchema.trim().min(1).nullable(),
+});
+export type UpdatePreviewFileCredentialDTO = z.infer<typeof UpdatePreviewFileCredentialInputSchema>;
 
 export const VaultItemVOSchema = VaultItemInputSchema.extend({
   id: z.string(),

@@ -1140,9 +1140,13 @@ function BaseDetailHeader({ base, orpc }: { base: BaseVO | null; orpc: BusabaseQ
     <div className="px-6 pt-5 pb-2">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="truncate font-semibold text-base">{base?.name ?? messages.nav.base}</h1>
+          <h1 className="truncate font-semibold text-xl leading-7">
+            {base?.name ?? messages.nav.base}
+          </h1>
           {base?.description ? (
-            <p className="mt-1 truncate text-muted-foreground text-xs">{base.description}</p>
+            <p className="mt-1 truncate text-muted-foreground text-sm leading-5">
+              {base.description}
+            </p>
           ) : null}
         </div>
       </div>

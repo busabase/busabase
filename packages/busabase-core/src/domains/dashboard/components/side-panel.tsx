@@ -397,7 +397,19 @@ export function SidePanel({
               console.warn(`SidePanel: no renderer registered for tab type "${tab.type}"`);
             }
             return (
-              <div className={tab.id === activeTabId ? "block h-full" : "hidden"} key={tab.id}>
+              // A flex COLUMN, not a plain block: every registered renderer
+              // (agent chat, doc/base/file previews) roots itself in
+              // `flex min-h-0 flex-1` and owns its own `overflow-auto` region,
+              // which only works if its parent establishes the height. Under a
+              // `block` parent `flex-1` is inert, the renderer's height goes to
+              // auto, and anything taller than the panel was silently clipped by
+              // the `overflow-hidden` above with no scrollbar anywhere — the
+              // long agent-conversation list beside a Base could only be read by
+              // zooming the whole browser out.
+              <div
+                className={tab.id === activeTabId ? "flex h-full min-h-0 flex-col" : "hidden"}
+                key={tab.id}
+              >
                 {Renderer ? <Renderer orpc={orpc} payload={tab.payload} /> : null}
               </div>
             );

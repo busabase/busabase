@@ -11,6 +11,7 @@ import {
   ListAgentConnectionsInputSchema,
   PromptAgentSessionInputSchema,
   RespondToAgentPermissionInputSchema,
+  SetAgentSessionConfigOptionInputSchema,
 } from "./types";
 
 /**
@@ -62,6 +63,13 @@ export const agentsContract = {
     respondToPermission: oc
       .input(RespondToAgentPermissionInputSchema)
       .output(z.object({ ok: z.boolean() })),
+
+    /**
+     * Change the session's advertised model via ACP `session/set_config_option`.
+     * `value` is validated against the session's currently advertised options
+     * server-side — this is not a passthrough to the agent.
+     */
+    setConfigOption: oc.input(SetAgentSessionConfigOptionInputSchema).output(AgentSessionVOSchema),
 
     /**
      * Live event stream for one session. Replays buffered events from `afterSeq`

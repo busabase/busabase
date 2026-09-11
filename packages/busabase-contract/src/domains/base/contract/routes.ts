@@ -83,7 +83,7 @@ export const baseContract = {
       tags: ["Bases"],
       summary: "Create Base",
       successDescription:
-        "Review-first by default: a pending ChangeRequest proposing the Base (`materialized: false`). Returns the materialized Base instead (`materialized: true`) when `autoMerge: true` is passed.",
+        "Merged in the same call when the actor has write access on the parent node — the materialized Base comes back (`materialized: true`). Review-first when the actor lacks write access or passes `autoMerge: false`: a pending ChangeRequest proposing the Base (`materialized: false`).",
     })
     .input(createBaseInputSchema)
     .output(
@@ -99,7 +99,7 @@ export const baseContract = {
       tags: ["Bases", "Change Requests"],
       summary: "Create Change Request in Base",
       successDescription:
-        "Review-first by default: a pending ChangeRequest proposing the record (`materialized: false`). Returns the materialized record instead (`materialized: true`) when `autoMerge: true` is passed.",
+        "Merged in the same call when the actor has write access on the Base's node — the materialized record comes back (`materialized: true`). Review-first when the actor lacks write access or passes `autoMerge: false`: a pending ChangeRequest proposing the record (`materialized: false`).",
     })
     .input(createChangeRequestInputSchema.extend({ baseId: z.string() }))
     .output(

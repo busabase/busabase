@@ -47,6 +47,7 @@ interface RawTemplate {
   risk?: string;
   tags?: string[];
   screenshots?: string[];
+  video?: string;
   agentPrompts?: string[];
   version?: string;
   author?: string;
@@ -83,6 +84,25 @@ const githubUrls = (repo: string, ref: string, subdir: string) => {
 const screenshotUrl = (repo: string, ref: string, subdir: string, file: string): string =>
   `https://raw.githubusercontent.com/${repo}/${ref}/${subdir ? `${subdir}/` : ""}${file}`;
 
+/**
+ * Clips resolve against a DIFFERENT host than screenshots, and the difference
+ * is not cosmetic.
+ *
+ * Demo clips are megabytes each, so the catalog repo tracks them with Git LFS —
+ * otherwise every template install, which downloads a zip of the whole repo,
+ * would carry every other template's video. `raw.githubusercontent.com` serves
+ * the LFS *pointer file* as the response body for such a path:
+ *
+ *     version https://git-lfs.github.com/spec/v1
+ *     oid sha256:…
+ *
+ * A <video> pointed there fails silently. `media.githubusercontent.com/media/…`
+ * serves the real bytes. Screenshots are ordinary objects and must keep using
+ * the raw host, so these stay two functions rather than one with a flag.
+ */
+const videoUrl = (repo: string, ref: string, subdir: string, file: string): string =>
+  `https://media.githubusercontent.com/media/${repo}/${ref}/${subdir ? `${subdir}/` : ""}${file}`;
+
 const toCard = (raw: RawTemplate, repo: string, ref: string): TemplateCardVO => {
   const { sourceUrl, repoUrl } = githubUrls(repo, ref, raw.subdir);
   const risk = parseTemplateRisk(raw.risk);
@@ -95,6 +115,7 @@ const toCard = (raw: RawTemplate, repo: string, ref: string): TemplateCardVO => 
     ...(risk ? { risk } : {}),
     tags: raw.tags ?? [],
     screenshots: (raw.screenshots ?? []).map((file) => screenshotUrl(repo, ref, raw.subdir, file)),
+    ...(raw.video ? { video: videoUrl(repo, ref, raw.subdir, raw.video) } : {}),
     agentPrompts: raw.agentPrompts ?? [],
     ...(raw.version ? { version: raw.version } : {}),
     ...(raw.author ? { author: raw.author } : {}),

@@ -1,5 +1,4 @@
 import type { TemplateCardVO } from "busabase-contract/domains/templates/types";
-import { Badge } from "kui/badge";
 import { AppWindow, Bot, FileText, Rows3, Table2 } from "lucide-react";
 import { iStringParse, type LocaleType } from "openlib/i18n/i-string";
 import type { ReactNode } from "react";
@@ -25,7 +24,6 @@ interface TemplateCardSummaryProps {
   screenshotAlt: string;
   density?: "compact" | "comfortable";
   headingLevel?: "h2" | "h3";
-  categoryLabel?: string;
   statLabels?: TemplateStatLabels;
   headingHref?: string;
   children?: ReactNode;
@@ -51,7 +49,6 @@ export function TemplateCardSummary({
   screenshotAlt,
   density = "compact",
   headingLevel = "h3",
-  categoryLabel,
   statLabels = defaultStatLabels,
   headingHref,
   children,
@@ -87,37 +84,24 @@ export function TemplateCardSummary({
       </div>
 
       <div className={comfortable ? "flex flex-1 flex-col p-5" : "flex flex-1 flex-col gap-2 p-4"}>
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <Heading
-              className={comfortable ? "font-serif text-xl font-semibold" : "text-sm font-medium"}
-            >
-              {headingHref ? (
-                <a href={headingHref} className="hover:text-primary hover:underline">
-                  {title}
-                </a>
-              ) : (
-                title
-              )}
-            </Heading>
-            {comfortable ? (
-              <p className="mt-1 text-xs text-muted-foreground">
-                {categoryLabel ? `${categoryLabel}: ` : ""}
-                {template.category}
-              </p>
-            ) : null}
-          </div>
-          {!comfortable ? (
-            <Badge variant="secondary" className="shrink-0 text-[10px]">
-              {template.category}
-            </Badge>
-          ) : null}
-        </div>
+        <Heading
+          className={
+            comfortable ? "min-w-0 font-serif text-xl font-semibold" : "min-w-0 text-sm font-medium"
+          }
+        >
+          {headingHref ? (
+            <a href={headingHref} className="hover:text-primary hover:underline">
+              {title}
+            </a>
+          ) : (
+            title
+          )}
+        </Heading>
 
         <p
           className={
             comfortable
-              ? "mt-3 text-sm leading-6 text-muted-foreground"
+              ? "mt-2 line-clamp-3 text-sm leading-6 text-muted-foreground"
               : "line-clamp-2 flex-1 text-xs text-muted-foreground"
           }
         >
@@ -128,7 +112,7 @@ export function TemplateCardSummary({
           <div
             className={
               comfortable
-                ? "mt-4 flex flex-wrap gap-x-4 gap-y-2 border-y border-border py-3"
+                ? "mt-3 flex flex-wrap gap-x-4 gap-y-1.5"
                 : "flex flex-wrap items-center gap-x-2 gap-y-1"
             }
           >

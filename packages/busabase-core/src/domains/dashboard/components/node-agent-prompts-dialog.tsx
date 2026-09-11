@@ -31,6 +31,7 @@ import { useCoreI18n } from "../../../i18n";
 import type { NodePromptScope } from "../helpers/node-agent-prompts";
 import { useNodeAgentPrompts } from "../hooks/use-node-agent-prompts";
 import { useDashboardOrpc } from "../orpc-context";
+import type { AgentIntegrationTarget } from "./agent-install-panel";
 import { AgentPromptsView } from "./agent-prompts-view";
 
 /**
@@ -67,6 +68,7 @@ export function NodeAgentPromptsDialog({
   spaceId,
   spaceName,
   scope,
+  agentIntegration,
   orpc: orpcProp,
 }: {
   open: boolean;
@@ -78,6 +80,15 @@ export function NodeAgentPromptsDialog({
   spaceName?: string;
   /** Narrows the prompts to one column or one record. Omit for the whole node. */
   scope?: NodePromptScope;
+  /**
+   * Which edition/space the copied prompt should tell an agent to connect to.
+   *
+   * Same two ways in as `orpc` below, and for the same reason: node toolbars sit
+   * inside `AgentIntegrationProvider` and let the context supply it, while the
+   * shell's sidebar dialog — which the host mounts as chrome AROUND the
+   * dashboard, outside that provider — passes it explicitly.
+   */
+  agentIntegration?: AgentIntegrationTarget;
   /**
    * Fetches this node's custom prompts when the dialog opens.
    *
@@ -148,6 +159,7 @@ export function NodeAgentPromptsDialog({
         <DialogDescription>{messages.agentPrompts.intro}</DialogDescription>
 
         <AgentPromptsView
+          agentIntegration={agentIntegration}
           askAgent={orpc ? { orpc, sessionScopeId: nodeId } : null}
           capabilities={capabilities}
           loading={promptsLoading}

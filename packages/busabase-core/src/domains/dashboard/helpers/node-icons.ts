@@ -72,6 +72,41 @@ export const resolveNodeIcon = (node: {
 };
 
 /**
+ * A node's real avatar (custom emoji / uploaded image) with its type icon as
+ * the fallback — the ONE place every "show this node's own identity" list
+ * item resolves its icon from, so a custom icon set anywhere in the app
+ * renders identically everywhere that node is shown: the Search dialog's
+ * Recent/Skills/Apps tabs, the Home page's Recently Visited cards, and any
+ * future list of the same kind. Before this was shared, the Recent tab and
+ * the Home page's recent list each called `nodeIconForType` directly and so
+ * could only ever show the generic type icon — a node with a custom emoji
+ * would show it in the Skills/Apps tabs and silently lose it the moment the
+ * same node appeared in Recent.
+ *
+ * Written with `createElement` rather than JSX so this stays a `.ts` module
+ * (this file already does that for `nodeIconGlyph` below, for the same
+ * reason: some importers are type-only and shouldn't need a JSX toolchain).
+ * A caller free to choose its own markup renders this directly; `NodeAvatar`
+ * itself only decides WHICH visual to show, never its size or shape — the
+ * caller wraps it in whatever fixed-size box its own layout needs (see
+ * `SearchResultRow`'s `size-7` slot for one example).
+ */
+export const NodeAvatar = (props: { node: { type: string; icon?: NodeIcon | null } }) => {
+  const resolved = resolveNodeIcon(props.node);
+  if (resolved.kind === "emoji") {
+    return createElement("span", { className: "text-[15px] leading-none" }, resolved.value);
+  }
+  if (resolved.kind === "image") {
+    return createElement("img", {
+      alt: "",
+      className: "size-full object-cover",
+      src: resolved.url,
+    });
+  }
+  return createElement(resolved.Icon, { className: "size-4" });
+};
+
+/**
  * Wraps a `ResolvedNodeIcon` into a real `LucideIcon`-shaped component — a
  * `forwardRef` around an actual `<svg viewBox="0 0 24 24">`, the same output
  * shape lucide-react's own icons produce — so call sites constrained to the

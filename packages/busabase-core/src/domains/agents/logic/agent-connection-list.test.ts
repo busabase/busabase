@@ -33,6 +33,7 @@ const session = (over: Partial<AgentSessionVO> & { slug: string }): AgentSession
   createdAt: "2026-08-27T10:00:00.000Z",
   lastActivityAt: "2026-08-27T10:00:00.000Z",
   error: null,
+  modelOption: null,
   ...over,
 });
 

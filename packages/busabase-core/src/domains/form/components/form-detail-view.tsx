@@ -6,6 +6,7 @@ import { CheckCircle2, Code2, Eye, Globe, Lock } from "lucide-react";
 import { useCallback, useState } from "react";
 import { useCoreI18n, useIString } from "../../../i18n";
 import { NodeDetailSkeleton } from "../../dashboard/components/skeletons";
+import { isFormNotConfiguredError } from "../utils/not-configured-error";
 import { FormSandboxFrame } from "./form-sandbox-frame";
 import { GeneratedFormField } from "./generated-form-field";
 
@@ -27,6 +28,12 @@ export function FormDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug:
     retry: false,
   });
   const form = formQuery.isError ? null : (formQuery.data ?? null);
+  // "This node has no form config yet" is a state, not a failure. The server
+  // says so with NOT_FOUND, which the generic error branch below would render as
+  // the raw, English, id-bearing `Form not found: nod123…` next to a Retry
+  // button that can never succeed. Route it to the translated empty state
+  // instead — every other cause (offline, 500, permission) still gets Retry.
+  const isNotConfigured = isFormNotConfiguredError(formQuery.error);
   const submit = useMutation(orpc.forms.submit.mutationOptions());
   const [values, setValues] = useState<Record<string, unknown>>({});
   const [tab, setTab] = useState<"form" | "code">("form");
@@ -45,7 +52,7 @@ export function FormDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug:
     return <NodeDetailSkeleton variant="doc" />;
   }
 
-  if (formQuery.isError) {
+  if (formQuery.isError && !isNotConfigured) {
     return (
       <div className="mx-auto max-w-2xl px-6 py-16 text-center">
         <div className="font-semibold text-base">{messages.inbox.loadFailedTitle}</div>
@@ -78,11 +85,19 @@ export function FormDetailView({ orpc, slug }: { orpc: BusabaseQueryUtils; slug:
   const hasCustomPage = Boolean(form.page.code);
   const targetFieldsBySlug = new Map(form.boundFields.map((field) => [field.slug, field]));
 
+  // A submission now lands one of two ways (see `submitForm`): merged on the
+  // spot for someone who can already write to the target Base, or queued for a
+  // reviewer for everyone else — including every public-link visitor. Saying
+  // "sent for review" in both cases told half of them the wrong thing.
   const submittedPanel = (
     <div className="px-6 py-16 text-center">
       <CheckCircle2 className="mx-auto text-merged" size={40} />
       <div className="mt-3 font-semibold text-base">{messages.form.submitted}</div>
-      <p className="mt-2 text-muted-foreground text-sm">{messages.form.pendingReview}</p>
+      <p className="mt-2 text-muted-foreground text-sm">
+        {submit.data?.status === "merged"
+          ? messages.form.submissionMerged
+          : messages.form.pendingReview}
+      </p>
       <p className="mt-1 font-mono text-muted-foreground/70 text-xs">
         {submit.data?.changeRequestId}
       </p>

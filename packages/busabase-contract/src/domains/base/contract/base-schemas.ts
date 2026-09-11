@@ -272,6 +272,31 @@ export const updateFieldChangeRequestInputSchema = z.object({
     name: fieldNameSchema.optional(),
     required: z.boolean().optional(),
     options: fieldOptionsSchema.optional(),
+    /**
+     * Not a patch key — rejected on purpose, and the only key here that is.
+     *
+     * `update` cannot change a field's type; `convert` does, after
+     * `previewFieldConversion` has shown what happens to the stored values.
+     * But `patch` is a plain (non-strict) object, so `{ type: "markdown" }`
+     * used to be stripped silently: the request validated, the change request
+     * merged, `ok: true` came back, and the field was still whatever it was.
+     * A caller reaching for the obvious-but-wrong shape got a successful
+     * no-op, which reads exactly like a successful conversion.
+     *
+     * Blanket `.strict()` is not the fix here — see `contract/auto-merge.ts`
+     * on why these schemas stay open: the SDK ships on its own cadence
+     * against self-hosted servers, so a newer client sending a newer optional
+     * key is normal traffic, and strictness would 400 all of them to catch
+     * this one. Naming the single key that will never be legitimate keeps
+     * that forward compatibility intact.
+     */
+    type: z
+      .never({
+        message:
+          'A field type cannot be changed with `update`. Use operation: "convert" with `newType`, ' +
+          "and call `previewFieldConversion` first to see how many stored values survive it.",
+      })
+      .optional(),
   }),
   message: z.string().optional(),
   submittedBy: z.string().optional().default("local-editor"),

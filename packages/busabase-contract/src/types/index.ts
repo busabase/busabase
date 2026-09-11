@@ -122,6 +122,8 @@ export interface NodeSearchResultVO {
   slug: string;
   path: string;
   updatedAt: string;
+  /** Optional: absent on an older server response. See `NodeVO.icon`. */
+  icon?: NodeIcon | null;
 }
 
 export interface NodeVO {
@@ -359,10 +361,21 @@ export type {
 } from "../domains/assets/types";
 export type { DriveFileVO, DriveReadFileVO, DriveVO } from "../domains/drive/types";
 export type { FileNodeMetadata, FileNodeVO } from "../domains/file-node/types";
-export type { FileTreeFileVO, FileTreeNodeVO, FileTreeReadFileVO } from "../domains/filetree/types";
+export type {
+  FilePreviewConfigurationStatus,
+  FilePreviewConfigVO,
+  FilePreviewCredentialSource,
+  FilePreviewProvider,
+  FilePreviewUnavailableReason,
+  FilePreviewVO,
+  FileTreeFileVO,
+  FileTreeNodeVO,
+  FileTreeReadFileVO,
+} from "../domains/filetree/types";
 // Skill-domain VOs live in the skill domain; re-exported here for the public barrel.
 export type { SkillFileVO, SkillReadFileVO, SkillVO } from "../domains/skill/types";
 export type {
+  UpdatePreviewFileCredentialDTO,
   UpdateVaultSettingsDTO,
   VaultAccessPolicy,
   VaultEnvironment,

@@ -114,6 +114,13 @@ describe("resolveRequiredLevel", () => {
     expect(hasApiKeyLevel("write", level)).toBe(true);
   });
 
+  it("keeps Drive preview preparation read-only and credential updates manage-only", () => {
+    expect(resolveRequiredLevel(["workbench", "fileTrees", "preparePreview"], "POST")).toBe("read");
+    expect(resolveRequiredLevel(["workbench", "vault", "updatePreviewFileCredential"], "PUT")).toBe(
+      "manage",
+    );
+  });
+
   it("classifies direct node metadata updates as write", () => {
     const level = resolveRequiredLevel(["workbench", "nodes", "updateMetadata"], "PATCH");
     expect(level).toBe("write");

@@ -9,7 +9,7 @@ import type { ReactNode } from "react";
  * (RN renderers are compiled in on mobile; this is the web host.)
  */
 
-export type LoadedNode = Pick<NodeVO, "id" | "type" | "name" | "slug">;
+export type LoadedNode = Pick<NodeVO, "id" | "type" | "name" | "slug" | "icon">;
 
 export interface NodeDetailProps {
   orpc: BusabaseQueryUtils;

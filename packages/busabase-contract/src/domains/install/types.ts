@@ -108,9 +108,10 @@ export const InstallPlanVOSchema = z.object({
   warnings: z.array(z.string()).default([]),
   /**
    * True when a record carries a relation VALUE. A relation stores the ids of the
-   * records it points at, and those exist only once the records are merged — so a
-   * review-first install would land every relation empty. `autoMerge` is required
-   * in that case, and the UI must say why.
+   * records it points at, and those exist only once the records are merged — so an
+   * install left for review would land every relation empty. Such a package cannot
+   * be installed by a caller whose content would queue (no write access, or an
+   * explicit `autoMerge: false`), and the UI must say why.
    */
   requiresAutoMerge: z.boolean(),
   /**
@@ -120,10 +121,13 @@ export const InstallPlanVOSchema = z.object({
    *
    * It is therefore an answer to "what happens if I install like this", not a
    * property of the package — a package whose records carry relation values
-   * reports `applicable: false` when planned WITHOUT `autoMerge` and true WITH
-   * it. A client that offers an auto-merge toggle must re-plan when it changes
-   * (the same way it re-plans when `rename` or `intoFolder` change), rather than
-   * treating one plan's `applicable` as final.
+   * reports `applicable: false` when this caller's content would QUEUE and true
+   * when it would merge. Note the plan resolves that the same permission-aware
+   * way the install itself does, so omitting `autoMerge` reports what the caller
+   * would actually get rather than assuming review. A client that offers an
+   * auto-merge toggle must re-plan when it changes (the same way it re-plans when
+   * `rename` or `intoFolder` change), rather than treating one plan's
+   * `applicable` as final.
    *
    * There is deliberately no `blockedReason` string here: the reason is already
    * carried structurally by `collisions[]` (with `renamedTo`) and
@@ -159,6 +163,33 @@ export const InstallResultVOSchema = z.object({
   warnings: z.array(z.string()).default([]),
 });
 export type InstallResultVO = z.infer<typeof InstallResultVOSchema>;
+
+/**
+ * One event from a streaming install.
+ *
+ * A whole install in a single response is what makes the plain `fromGithub`
+ * route time out at a gateway: the work is minutes of GitHub fetch, node
+ * creation, file upload and record writes, and until it finishes the connection
+ * carries no bytes. A proxy in front of the app sees an idle socket and closes
+ * it — the install itself keeps running server-side, so the user is told it
+ * failed while it actually succeeded, which is the worst of both.
+ *
+ * `applyInstall` already reports its progress (`onProgress`); the non-streaming
+ * route simply discarded it. Streaming those same messages keeps bytes moving
+ * AND gives the user something truthful to look at during a long install.
+ */
+export const InstallEventVOSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("progress"),
+    /** Human-readable, already localized by the caller's own copy — display as-is. */
+    message: z.string(),
+  }),
+  z.object({
+    kind: z.literal("done"),
+    result: InstallResultVOSchema,
+  }),
+]);
+export type InstallEventVO = z.infer<typeof InstallEventVOSchema>;
 
 /**
  * What a FAILED install reports, carried as the error's `data`.
@@ -228,7 +259,7 @@ export const InstallFromGithubDTOSchema = z.object({
     .boolean()
     .optional()
     .describe(
-      "Merge the content change requests on the spot instead of leaving them for review. This trusts the package author: a package can carry skills and AirApps, i.e. code this space's agents will execute.",
+      "Whether the package's content change requests merge on the spot. Omitted defaults to merging immediately when the caller holds write access (installing is already a space owner/admin operation, so normally they do), otherwise leaving them for review; pass explicit false to force review even with write access. Either way, installing trusts the package author: a package can carry skills and AirApps, i.e. code this space's agents will execute.",
     ),
 });
 export type InstallFromGithubDTO = z.infer<typeof InstallFromGithubDTOSchema>;

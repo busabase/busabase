@@ -11,10 +11,11 @@ import { getContextIsSpaceManager } from "../../../context";
  * `busabase-package@1` can contain skill and AirApp nodes, and those are code
  * this space's agents will execute. "Any member can install a GitHub repo" is
  * therefore "any member can introduce agent-executed code into the space",
- * which is a privilege-escalation path dressed up as a content import. The
- * approval-first model narrows the blast radius (content lands as change
- * requests) but does not close it: an install with `autoMerge` skips review
- * entirely, and structure is materialized immediately by design.
+ * which is a privilege-escalation path dressed up as a content import. This role
+ * gate is the whole defence, not a second line behind review: content is
+ * permission-aware like every other write, so an owner/admin's install merges on
+ * the spot unless they ask for review explicitly, and structure is materialized
+ * immediately by design.
  *
  * The dry-run path is gated too, not just the write. `planFromGithub` makes the
  * server fetch an arbitrary caller-named GitHub repo and reports back what

@@ -58,6 +58,11 @@ export const TemplateCardVOSchema = z.object({
    * accidentally point at a different ref than the one it installs.
    */
   screenshots: z.array(z.string()).default([]),
+  /**
+   * Absolute URL of the demo clip, or absent. Resolved against a different host
+   * than the screenshots — see `videoUrl` in the catalog logic.
+   */
+  video: z.string().optional(),
   agentPrompts: z.array(z.string()).default([]),
   version: z.string().optional(),
   author: z.string().optional(),

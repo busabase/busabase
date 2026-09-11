@@ -37,7 +37,7 @@ export const fileContract = {
       tags: ["Files"],
       summary: "Create File node",
       successDescription:
-        "Review-first by default: a pending ChangeRequest proposing the File node (`materialized: false`). Returns the materialized File node instead (`materialized: true`) when `autoMerge: true` is passed.",
+        "Merged in the same call when the actor has write access on the parent node — the materialized File node comes back (`materialized: true`). Review-first when the actor lacks write access or passes `autoMerge: false`: a pending ChangeRequest proposing the File node (`materialized: false`).",
     })
     .input(createFileNodeInputSchema)
     .output(

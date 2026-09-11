@@ -1,5 +1,10 @@
 import { oc } from "@orpc/contract";
-import { UpdateVaultSettingsInputSchema, VaultSettingsVOSchema, VaultSuccessSchema } from "./types";
+import {
+  UpdatePreviewFileCredentialInputSchema,
+  UpdateVaultSettingsInputSchema,
+  VaultSettingsVOSchema,
+  VaultSuccessSchema,
+} from "./types";
 
 export const vaultContract = {
   get: oc
@@ -21,6 +26,16 @@ export const vaultContract = {
     })
     .input(UpdateVaultSettingsInputSchema)
     .output(VaultSettingsVOSchema),
+  updatePreviewFileCredential: oc
+    .route({
+      method: "PUT",
+      path: "/vault/previewfile",
+      tags: ["Vault"],
+      summary: "Set or remove the local PreviewFile credential",
+      successDescription: "The credential was updated without returning its value.",
+    })
+    .input(UpdatePreviewFileCredentialInputSchema)
+    .output(VaultSuccessSchema),
   clear: oc
     .route({
       method: "DELETE",

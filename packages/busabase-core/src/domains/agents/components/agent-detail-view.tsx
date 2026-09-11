@@ -20,6 +20,7 @@ import {
   AtSign,
   Bot,
   ChevronDown,
+  Loader2,
   MessageSquarePlus,
   PanelRight,
   X,
@@ -39,7 +40,9 @@ import { useCurrentNodeStore } from "../../dashboard/store/current-node-store";
 import { useSidePanelStore } from "../../dashboard/store/side-panel-store";
 import { useAgentSession } from "../hooks/use-agent-session";
 import { withNodeContext } from "../utils/agent-message-context";
+import { getPromptActivityState } from "../utils/prompt-activity";
 import { AgentLoadingState, AgentQueryErrorState } from "./agent-query-state";
+import { ModelSelectorRow } from "./model-selector-row";
 import { TransportBadge } from "./transport-badge";
 
 /**
@@ -165,10 +168,28 @@ export function AgentDetailView({
     },
   });
 
+  const setConfigOption = useMutation({
+    ...orpc.agents.sessions.setConfigOption.mutationOptions(),
+    onSuccess: (session: AgentSessionVO) => {
+      // Replace, not merge: the response carries the agent's complete,
+      // possibly-changed config state (e.g. a reasoning-effort option tied to
+      // the new model), and the cache should reflect exactly that rather than
+      // a stale local guess.
+      queryClient.setQueryData(
+        orpc.agents.sessions.list.queryKey(),
+        (previous: AgentSessionVO[] | undefined) =>
+          previous?.map((s) => (s.id === session.id ? session : s)),
+      );
+    },
+  });
+
   // Transcript, prompting and permission answering are all `@acp-ui/core`, the
   // same interaction core acprouter drives — only the transport below it is
   // busabase's own.
   const chat = useAgentSession(orpc, activeSessionId);
+  const promptActivity = active
+    ? getPromptActivityState(active.status, chat.sending)
+    : { active: false, starting: false };
 
   /**
    * The node whose context the user has waved off, by id.
@@ -332,8 +353,14 @@ export function AgentDetailView({
                   usage={chat.usage}
                 />
               </div>
-              <span className="ml-auto shrink-0 text-muted-foreground text-xs">
-                {STATUS_LABEL[active.status]}
+              <span
+                className="ml-auto flex shrink-0 items-center gap-1.5 text-muted-foreground text-xs"
+                role={promptActivity.starting ? "status" : undefined}
+              >
+                {promptActivity.starting ? (
+                  <Loader2 aria-hidden="true" className="size-3 animate-spin" />
+                ) : null}
+                {promptActivity.starting ? "starting…" : STATUS_LABEL[active.status]}
               </span>
               {onOpenInSidePanel ? (
                 <Button
@@ -358,7 +385,7 @@ export function AgentDetailView({
 
             <AcpConversation
               blocks={chat.blocks}
-              streaming={active.status === "busy"}
+              streaming={promptActivity.active}
               onAnswerPermission={chat.answerPermission}
               emptyTitle="Connected."
               emptyDescription="Send a message to start."
@@ -371,12 +398,27 @@ export function AgentDetailView({
               />
             ) : null}
 
+            {active.modelOption ? (
+              <ModelSelectorRow
+                modelOption={active.modelOption}
+                disabled={setConfigOption.isPending || active.status !== "idle"}
+                error={setConfigOption.error?.message}
+                onChange={(value) =>
+                  setConfigOption.mutate({
+                    sessionId: active.id,
+                    configId: active.modelOption?.id ?? "",
+                    value,
+                  })
+                }
+              />
+            ) : null}
+
             <AcpComposer
               className="border-0 border-t p-3"
               draft={draft}
               onDraftApplied={onDraftApplied}
               disabled={
-                active.status === "busy" ||
+                promptActivity.active ||
                 active.status === "waiting_permission" ||
                 isFinished(active.status)
               }
@@ -388,8 +430,8 @@ export function AgentDetailView({
                     ? "Respond to the request above to continue…"
                     : `Message ${agentName}…`
               }
-              onStop={chat.cancel}
-              sending={active.status === "busy"}
+              onStop={promptActivity.starting ? undefined : chat.cancel}
+              sending={promptActivity.active}
             />
           </>
         ) : (

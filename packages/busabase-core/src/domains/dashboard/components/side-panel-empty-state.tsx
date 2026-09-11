@@ -6,7 +6,7 @@ import { Bot, Pin, Search } from "lucide-react";
 import { useSyncExternalStore } from "react";
 import { useCoreI18n } from "../../../i18n";
 import type { KnownNodeCache } from "../helpers/known-node-cache";
-import { nodeIconForType } from "../helpers/node-icons";
+import { NodeAvatar } from "../helpers/node-icons";
 import {
   isPinnableNode,
   type PinnableNode,
@@ -130,24 +130,23 @@ export function SidePanelEmptyState({
             {messages.sidePanel.recent}
           </p>
           <div className="flex flex-col">
-            {recents.map((node) => {
-              const Icon = nodeIconForType(node.type);
-              return (
-                <button
-                  className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent/50"
-                  key={node.id}
-                  onClick={() =>
-                    pinNodeToSidePanel({ id: node.id, type: node.type, name: node.name })
-                  }
-                  type="button"
-                >
-                  <Icon className="size-4 shrink-0 text-muted-foreground" />
-                  <span className="min-w-0 flex-1 truncate text-foreground text-xs">
-                    {node.name}
-                  </span>
-                </button>
-              );
-            })}
+            {recents.map((node) => (
+              <button
+                className="flex items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent/50"
+                key={node.id}
+                onClick={() =>
+                  pinNodeToSidePanel({ id: node.id, type: node.type, name: node.name })
+                }
+                type="button"
+              >
+                {/* Same avatar resolution every other Recent list uses — this
+                    panel reads the identical `KnownNodeCache` data. */}
+                <span className="flex size-4 shrink-0 items-center justify-center overflow-hidden text-muted-foreground">
+                  <NodeAvatar node={node} />
+                </span>
+                <span className="min-w-0 flex-1 truncate text-foreground text-xs">{node.name}</span>
+              </button>
+            ))}
           </div>
         </div>
       ) : null}

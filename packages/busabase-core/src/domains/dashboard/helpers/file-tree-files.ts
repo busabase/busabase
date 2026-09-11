@@ -61,6 +61,15 @@ export const resolveFileTreePreviewKind = (path: string, mimeType: string): File
   return "code";
 };
 
+/** Build the documented PreviewFile embed URL without trusting its optional embeddingUrl response. */
+export const buildPreviewFileEmbedUrl = (previewUrl: string, locale: string): string => {
+  const url = new URL(previewUrl);
+  url.searchParams.set("embed", "true");
+  url.searchParams.set("lang", locale);
+  url.searchParams.set("locale", locale);
+  return url.toString();
+};
+
 export const validateFileTreePath = (path: string): string | null => {
   if (!path || path.startsWith("/")) return "relative";
   if (

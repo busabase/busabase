@@ -240,6 +240,7 @@ export const demoSearchNodesByName = (input: {
       slug: node.slug,
       path: `/${node.type}/${node.slug}`,
       updatedAt: node.updatedAt,
+      icon: node.icon,
     }));
 };
 

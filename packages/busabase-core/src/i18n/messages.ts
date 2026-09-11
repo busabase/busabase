@@ -123,6 +123,23 @@ export const coreMessagesEn = {
     readingFile: "Reading {path}…",
     couldNotReadFile: "Could not read file",
     assetFilePreview: "Asset-backed file. Text editing is disabled for this file.",
+    filePreviewPreparing: "Preparing a secure preview…",
+    filePreviewTitle: "File preview",
+    filePreviewPoweredBy: "Previewed by PreviewFile",
+    filePreviewUnavailable: "Preview is unavailable",
+    filePreviewRetry: "Retry",
+    filePreviewUseBuiltin: "Use built-in preview",
+    filePreviewReasons: {
+      not_configured: "PreviewFile has not been configured for this workspace.",
+      invalid_configuration: "The PreviewFile configuration is invalid.",
+      file_too_large: "This file exceeds the configured remote preview size limit.",
+      unsupported: "PreviewFile does not support this file.",
+      authentication_failed: "PreviewFile rejected the configured API key.",
+      rate_limited: "PreviewFile is receiving too many requests. Try again shortly.",
+      timeout: "PreviewFile took too long to respond.",
+      service_unavailable: "PreviewFile is temporarily unavailable.",
+      invalid_response: "PreviewFile returned a response Busabase could not verify.",
+    },
     uploadFiles: "Upload files",
     uploadFilesDescription: "Add one or more files through a reviewable change.",
     uploadDestination: "Upload to",
@@ -387,6 +404,7 @@ export const coreMessagesEn = {
     invalidCursor: "This form page link is invalid. Refresh and try again.",
     submitted: "Submitted",
     pendingReview: "Your submission was sent for review.",
+    submissionMerged: "Your submission was added.",
     submitFailed: "Submission failed",
     notConfigured: "Form not set up yet",
     notConfiguredBody: "This form node has no fields bound to a Base yet.",
@@ -673,13 +691,25 @@ export const coreMessagesEn = {
     impactNode: "{operation} {id}",
   },
   search: {
-    all: "All",
+    /**
+     * NOT a superset of every other tab — it is every CONTENT tab merged
+     * (records/files/nodes, still excluding change requests), which is why
+     * it sits to content tabs' left, not to the whole strip's. Skills and
+     * Apps are never in here: `search` (the procedure this tab reads) has no
+     * "skill"/"airapp" result kind at all — those two live entirely in
+     * `nodes.list`, a different data source. Renamed from "All" because that
+     * name read as "everything above", which stopped being true the moment
+     * Apps/Skills moved to the strip's front.
+     */
+    all: "Content",
     recent: "Recent",
+    skills: "Skills",
+    apps: "Apps",
     records: "Records",
     bases: "Bases",
     changeRequests: "Change Requests",
     closeSearch: "Close search",
-    placeholder: "Search records, bases, change requests…",
+    placeholder: "Search apps, skills, records, bases, change requests…",
     failed: "Search failed",
     searching: "Searching indexed fields…",
     searchingNodes: "Looking for a match…",
@@ -692,6 +722,13 @@ export const coreMessagesEn = {
       "Some documents are long enough that only their beginning is indexed for search, so this may not be the whole story. Use grep to scan every document in full.",
     noRecentTitle: "Nothing recent yet",
     noRecentBody: "Bases, docs, and other things you open will show up here for a quick jump back.",
+    noSkillsTitle: "No skills yet",
+    noSkillsBody: "Skills you install or create show up here, ready to hand to an agent.",
+    noAppsTitle: "No apps yet",
+    noAppsBody: "Apps you install or create show up here, ready to open.",
+    /** "No matches" body for the Skills/Apps tabs, which match a node's name,
+     *  slug and description rather than the content indexed for other tabs. */
+    noNodeMatchesBody: "Nothing here matches that name or description.",
     typeToSearchTitle: "Search inside content",
     typeToSearchBody: "Type a few characters to search record and file content on this tab.",
   },
@@ -1187,6 +1224,29 @@ export const coreMessagesEn = {
       "This record is unavailable — it may have been deleted, or you may not have access to it.",
   },
   createNode: {
+    /**
+     * One line per creatable type, shown under its name in the picker.
+     *
+     * The name alone does not distinguish a Base from a Doc, or a Drive from a
+     * Folder, to anyone who has not already been told â and the picker is the
+     * one screen every user passes through. Each line answers "when would I
+     * pick this", in the user's own vocabulary, not the schema's.
+     */
+    typeHints: {
+      folder: "Groups related items together, like a folder on your computer.",
+      base: "A spreadsheet with database rules — typed columns, filters, saved views.",
+      doc: "One written document, reviewed before it changes.",
+      file: "A single uploaded file — a PDF, an image, anything.",
+      skill: "Written instructions an agent reads before it touches your data.",
+      drive: "A plain pile of files for an agent to read.",
+      airapp: "Turns your data into a small app you can actually use.",
+      whiteboard: "A free-form canvas for sketching and planning.",
+      workflow: "Steps that run on a trigger — events, approvals, actions.",
+      html: "A hand-written HTML page, previewed in a sandbox.",
+      form: "A page that collects answers and writes them into a Base.",
+    },
+    moreTypes: "More types ({count})",
+    fewerTypes: "Fewer types",
     title: "New{suffix}",
     parentSuffix: " in {name}",
     descriptionInParent:
@@ -1308,6 +1368,11 @@ export const coreMessagesEn = {
     askAgentLoadFailed: "Couldn't reach your agents. Nothing was sent.",
     pickAgent: "Which agent should take this?",
     noAgents: "No agent is connected yet.",
+    connectionCheckLeadIn: "Before you begin, ",
+    connectionCheck:
+      "confirm that this environment is connected to Busabase and points to the correct target space{targetSpace}. If the Busabase connection is not configured or points to another space, read and follow this setup guide first:\n\n{setupUrl}",
+    connectionCheckNote:
+      "Copying or sending also appends a short connection check, so your agent can reach this space.",
   },
   fieldTypes: {
     text: "Text",
@@ -1554,7 +1619,7 @@ export const coreMessagesEn = {
       "Hand the manual for “{name}” to an agent you already use — Claude Code, Codex, Cursor. It learns how this app works; nothing in this space is created or changed.",
     agentPromptLabel: "Paste this to your agent",
     agentPromptBody:
-      'Install the Busabase app skill "{name}" so you can operate it later.\n\nBefore installing, confirm that this environment is connected to Busabase and points to the correct target space{targetSpace}. If the Busabase connection is not configured or points to another space, read and follow this setup guide first:\n\n{setupUrl}\n\nOnce the connection is ready, run:\n\n{command}\n\nInstall the skill only — do not create, change or delete anything in my Busabase space yet. Once it is installed, tell me in a few lines what this app does and what it would create if I asked you to set it up.',
+      'Install the Busabase app skill "{name}" so you can operate it later.\n\nBefore installing, {connectionCheck}\n\nOnce the connection is ready, run:\n\n{command}\n\nInstall the skill only — do not create, change or delete anything in my Busabase space yet. Once it is installed, tell me in a few lines what this app does and what it would create if I asked you to set it up.',
     agentNoSkillTitle: "This package carries no agent manual",
     agentNoSkillBody:
       "There is no SKILL.md here, so an agent has nothing to install — it would have to infer your tables. Install it into the UI instead; you can still hand an agent that node's own prompts afterwards.",

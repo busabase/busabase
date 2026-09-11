@@ -448,6 +448,19 @@ export const busabaseDemoRouter = os.router({
     listDeletedFields: os.bases.listDeletedFields.handler(() => []),
   },
   fileTrees: {
+    previewConfig: os.fileTrees.previewConfig.handler(() => ({
+      provider: "builtin" as const,
+      status: "ready" as const,
+      credentialSource: "none" as const,
+      credentialConfigured: false,
+      maxFileSizeBytes: 50 * 1024 * 1024,
+      sessionTtlMinutes: 60,
+      vaultEncryptionConfigured: null,
+    })),
+    preparePreview: os.fileTrees.preparePreview.handler(() => ({
+      state: "builtin" as const,
+      provider: "builtin" as const,
+    })),
     create: os.fileTrees.create.handler(({ input }) => {
       throw demoUnsupported(`Create ${fileTreeLabel(input.type)}`);
     }),
@@ -556,6 +569,9 @@ export const busabaseDemoRouter = os.router({
     update: os.vault.update.handler(() => {
       throw demoUnsupported("Update Vault");
     }),
+    updatePreviewFileCredential: os.vault.updatePreviewFileCredential.handler(() => {
+      throw demoUnsupported("Update PreviewFile credential");
+    }),
     clear: os.vault.clear.handler(() => {
       throw demoUnsupported("Clear Vault");
     }),
@@ -657,6 +673,11 @@ export const busabaseDemoRouter = os.router({
           });
         }
       }),
+      // The scripted demo agent never advertises a `modelOption`, so the UI
+      // never renders a picker to call this from — unreachable in practice.
+      setConfigOption: os.agents.sessions.setConfigOption.handler(() => {
+        throw demoUnsupported("Change agent model");
+      }),
       close: os.agents.sessions.close.handler(({ input }) => {
         closeDemoAgentSession(input.sessionId);
         return { ok: true };
@@ -718,6 +739,13 @@ export const busabaseDemoRouter = os.router({
       throw demoUnsupported("Install from GitHub");
     }),
     fromGithub: os.install.fromGithub.handler(() => {
+      throw demoUnsupported("Install from GitHub");
+    }),
+    // Refused for the same reason as the non-streaming route — but it has to be
+    // declared, because the contract is what the router is checked against: an
+    // unimplemented route is a type error, and a missing one in demo mode would
+    // be a runtime 404 rather than the honest "not available here" message.
+    fromGithubStream: os.install.fromGithubStream.handler(() => {
       throw demoUnsupported("Install from GitHub");
     }),
   },

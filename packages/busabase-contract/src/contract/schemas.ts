@@ -340,6 +340,13 @@ const nodeSearchResultSchema = z.object({
   slug: z.string(),
   path: z.string(),
   updatedAt: z.string(),
+  /**
+   * The node's own custom avatar, same shape as `NodeVO.icon`. Optional so an
+   * older server that predates this field is still a valid response — a
+   * caller that doesn't know it falls back to the type icon exactly as it
+   * always has.
+   */
+  icon: NodeIconSchema.nullable().optional(),
 });
 
 const userRefSchema = z.object({

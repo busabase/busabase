@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { and, eq, notInArray } from "drizzle-orm";
 import type { BusabaseDatabase } from "../../../context";
 import { busabaseVaultItems } from "../schema/vault-items";
 import {
+  PREVIEWFILE_API_KEY,
   UpdateVaultSettingsInputSchema,
   VaultAccessPolicySchema,
   type VaultItemInput,
@@ -27,6 +28,11 @@ const defaultVaultAccess = {
   edit: true,
   share: false,
 };
+
+const HIDDEN_VAULT_KEYS = [PREVIEWFILE_API_KEY] as const;
+
+const isHiddenVaultKey = (key: string): boolean =>
+  HIDDEN_VAULT_KEYS.includes(key as (typeof HIDDEN_VAULT_KEYS)[number]);
 
 function normalizeItem(input: VaultItemInput): VaultItemInput {
   return VaultItemInputSchema.parse({
@@ -93,10 +99,19 @@ async function replaceVaultItems(
   db: BusabaseDatabase,
   ownerId: string,
   items: VaultItemInput[],
-  options: { requireEncryption?: boolean } = {},
+  options: { requireEncryption?: boolean; preserveHidden?: boolean } = {},
 ) {
   const now = new Date();
-  await db.delete(busabaseVaultItems).where(eq(busabaseVaultItems.userId, ownerId));
+  await db
+    .delete(busabaseVaultItems)
+    .where(
+      options.preserveHidden
+        ? and(
+            eq(busabaseVaultItems.userId, ownerId),
+            notInArray(busabaseVaultItems.key, [...HIDDEN_VAULT_KEYS]),
+          )
+        : eq(busabaseVaultItems.userId, ownerId),
+    );
   if (items.length === 0) return;
 
   await db.insert(busabaseVaultItems).values(
@@ -123,7 +138,10 @@ export async function getVaultSettings(
 ): Promise<VaultSettingsVO> {
   const ownerId = normalizeOwnerId(userId);
   const rows = await readVaultRows(db, ownerId);
-  return toSettingsVO(ownerId, rows);
+  return toSettingsVO(
+    ownerId,
+    rows.filter((row) => !isHiddenVaultKey(row.key)),
+  );
 }
 
 export async function updateVaultSettings(
@@ -133,9 +151,54 @@ export async function updateVaultSettings(
   options: { requireEncryption?: boolean } = {},
 ): Promise<VaultSettingsVO> {
   const ownerId = normalizeOwnerId(userId);
-  const items = normalizeItems(input.items);
-  await replaceVaultItems(db, ownerId, items, options);
+  const items = normalizeItems(input.items).filter((item) => !isHiddenVaultKey(item.key));
+  await replaceVaultItems(db, ownerId, items, { ...options, preserveHidden: true });
   return getVaultSettings(db, ownerId);
+}
+
+/**
+ * Manage PreviewFile's browser-hidden Vault item without replacing unrelated
+ * user settings. The plaintext enters in the request body but is never echoed
+ * through either this operation or `getVaultSettings`.
+ */
+export async function updatePreviewFileCredential(
+  db: BusabaseDatabase,
+  userId: string | null | undefined,
+  apiKey: string | null,
+): Promise<{ success: boolean }> {
+  const ownerId = normalizeOwnerId(userId);
+  await db
+    .delete(busabaseVaultItems)
+    .where(
+      and(eq(busabaseVaultItems.userId, ownerId), eq(busabaseVaultItems.key, PREVIEWFILE_API_KEY)),
+    );
+  if (apiKey !== null) {
+    const item = normalizeItem({
+      kind: "secret",
+      key: PREVIEWFILE_API_KEY,
+      value: apiKey,
+      scopeType: "personal",
+      scopeId: null,
+      environment: "local",
+      description: "PreviewFile API key for Drive file previews",
+      access: { runtime: true, reveal: false, edit: true, share: false },
+    });
+    await db.insert(busabaseVaultItems).values({
+      id: item.id ?? createVaultItemId(),
+      userId: ownerId,
+      kind: item.kind,
+      key: item.key,
+      valuePayload: encodeVaultValue(item.value),
+      scopeType: item.scopeType,
+      scopeId: item.scopeId ?? null,
+      environment: item.environment,
+      description: item.description ?? "",
+      access: VaultAccessPolicySchema.parse(item.access ?? defaultVaultAccess),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+  }
+  return { success: true };
 }
 
 export async function clearVaultSettings(
@@ -143,7 +206,19 @@ export async function clearVaultSettings(
   userId: string | null | undefined,
 ): Promise<{ success: boolean }> {
   const ownerId = normalizeOwnerId(userId);
-  await db.delete(busabaseVaultItems).where(eq(busabaseVaultItems.userId, ownerId));
+  // Clearing the Vault clears what the Vault screen showed. Hidden items are
+  // not in that list and have their own management surface (Settings > File
+  // Preview), so wiping them here would silently delete a credential the user
+  // never saw in the thing they just cleared. Same `preserveHidden` rule as
+  // `updateVaultSettings`.
+  await db
+    .delete(busabaseVaultItems)
+    .where(
+      and(
+        eq(busabaseVaultItems.userId, ownerId),
+        notInArray(busabaseVaultItems.key, [...HIDDEN_VAULT_KEYS]),
+      ),
+    );
   return { success: true };
 }
 
@@ -151,7 +226,8 @@ export async function getVaultRuntimeEnv(
   db: BusabaseDatabase,
   userId: string | null | undefined,
 ): Promise<VaultRuntimeEnv> {
-  const settings = await getVaultSettings(db, userId);
+  const ownerId = normalizeOwnerId(userId);
+  const settings = toSettingsVO(ownerId, await readVaultRows(db, ownerId));
   return VaultRuntimeEnvSchema.parse(
     Object.fromEntries(
       settings.items

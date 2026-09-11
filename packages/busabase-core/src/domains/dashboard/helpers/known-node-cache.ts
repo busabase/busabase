@@ -1,4 +1,5 @@
 import { NODE_TYPES, type NodeType } from "busabase-contract/domains";
+import type { NodeIcon } from "busabase-contract/types";
 
 /**
  * Client-side, `localStorage`-persisted cache of every node the dashboard has
@@ -21,6 +22,14 @@ export interface KnownNode {
   slug: string;
   /** Route path this node navigates to, e.g. `/base/{slug}` — NOT a filesystem tree path. */
   path: string;
+  /**
+   * The node's own custom avatar (emoji or uploaded image), or `null`/absent
+   * when it has none — same shape and same fallback rule as `NodeVO.icon`
+   * (`resolveNodeIcon` falls back to the type icon either way). Every writer
+   * of this cache carries whatever it knows, so an older cached entry from
+   * before this field existed is just `undefined`, not a stored lie.
+   */
+  icon?: NodeIcon | null;
   /** ISO 8601 timestamp of the last time the user actually navigated to this node. */
   lastVisitedAt?: string;
 }
@@ -74,6 +83,7 @@ const isKnownNode = (value: unknown): value is KnownNode => {
     typeof node.name === "string" &&
     typeof node.slug === "string" &&
     typeof node.path === "string" &&
+    (node.icon === undefined || node.icon === null || typeof node.icon === "object") &&
     (node.lastVisitedAt === undefined || typeof node.lastVisitedAt === "string")
   );
 };
@@ -147,9 +157,10 @@ const evictIfNeeded = (cache: Map<string, KnownNode>): void => {
 /**
  * Upsert `nodes` by `id`. Every merge always overwrites the denormalized
  * "what does this node currently look like" fields (`type`/`name`/`slug`/
- * `path`) with the freshest data — a node seen again via a sidebar reload or
- * a fresh `nodes.searchByName` hit self-heals a stale cached name/slug (see
- * the "cached node was renamed" row in the Failure Scenario Matrix).
+ * `path`/`icon`) with the freshest data — a node seen again via a sidebar
+ * reload or a fresh `nodes.searchByName` hit self-heals a stale cached
+ * name/slug/icon (see the "cached node was renamed" row in the Failure
+ * Scenario Matrix — a changed custom icon is the same class of staleness).
  * `lastVisitedAt` is preserved unless the incoming record explicitly carries
  * a newer one (only `markVisited`, and a caller that already knows a visit
  * timestamp, ever sets it) — merely re-appearing in a sidebar load or a
@@ -167,6 +178,7 @@ const mergeForScope = (scope: string, nodes: KnownNode[]): void => {
       name: incoming.name,
       slug: incoming.slug,
       path: incoming.path,
+      icon: incoming.icon,
       ...(lastVisitedAt ? { lastVisitedAt } : {}),
     };
     // Delete-then-set moves this key to the END of the Map's iteration

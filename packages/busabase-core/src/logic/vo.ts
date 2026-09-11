@@ -269,6 +269,7 @@ export const toNodeSearchResultVO = (node: NodeListPO): NodeSearchResultVO => ({
   slug: node.slug,
   path: `/${node.type}/${node.slug}`,
   updatedAt: node.updatedAt.toISOString(),
+  icon: node.icon,
 });
 
 export const toRecordLinkVO = (link: RecordLinkPO): RecordLinkVO => ({

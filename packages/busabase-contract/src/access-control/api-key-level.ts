@@ -214,6 +214,7 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   "webhooks.testFire": workspace("manage"),
   "vault.get": workspace("manage"),
   "vault.update": workspace("manage"),
+  "vault.updatePreviewFileCredential": workspace("manage"),
   "vault.clear": workspace("manage"),
   "dump.exportTables": workspace("manage"),
   "dump.exportAssetText": workspace("manage"),
@@ -260,6 +261,10 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
 
   "fileTrees.listFiles": node("read"),
   "fileTrees.readFile": node("read"),
+  "fileTrees.previewConfig": workspace("read"),
+  // POST because it creates a short-lived provider session, but it neither
+  // mutates Busabase data nor exceeds the target Drive's read permission.
+  "fileTrees.preparePreview": node("read"),
   "airapps.runLocal": node("write"),
   "airapps.stopLocal": node("write"),
   "nodes.readLines": node("read"),
@@ -277,6 +282,9 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
 
   "install.planFromGithub": workspace("read"),
   "install.fromGithub": workspace("manage"),
+  // Same act, same gate: streaming only changes how the result is delivered, so
+  // classifying it any lower would make the stream a way around the manage bar.
+  "install.fromGithubStream": workspace("manage"),
   // The Template Center's catalog. Sits at the floor rather than beside
   // `install.fromGithub` because it reads a public repository's index and
   // returns nothing about this workspace — a key that may read anything at all
@@ -301,6 +309,7 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   "agents.sessions.list": workspace("manage"),
   "agents.sessions.create": workspace("manage"),
   "agents.sessions.prompt": workspace("manage"),
+  "agents.sessions.setConfigOption": workspace("manage"),
   "agents.sessions.cancel": workspace("manage"),
   "agents.sessions.close": workspace("manage"),
   "agents.sessions.subscribe": workspace("manage"),

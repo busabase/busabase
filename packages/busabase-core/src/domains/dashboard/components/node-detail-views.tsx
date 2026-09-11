@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { hasApiKeyLevel } from "busabase-contract/access-control/api-key-level";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
-import type { FileTreeFileVO, FormVO, NodeVO } from "busabase-contract/types";
+import type { FilePreviewVO, FileTreeFileVO, FormVO, NodeVO } from "busabase-contract/types";
 import { CodeBlock } from "kui/ai-elements/code-block";
 import { Button } from "kui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "kui/tabs";
@@ -16,6 +16,7 @@ import {
   Form,
   HardDrive,
   Info,
+  RefreshCw,
   Share2,
   Sparkles,
   Table2,
@@ -29,9 +30,11 @@ import { AirAppDetailView } from "../../airapp/components/AirAppDetailView";
 import { AirAppSidePanelPreview } from "../../airapp/components/RunPanel";
 import { DocEditor } from "../../doc/components";
 import { useDocImageUpload } from "../../doc/hooks/use-doc-image-upload";
+import { isBuiltinDrivePreviewSufficient } from "../../filetree/utils/preview-capability";
 import { FormDetailView } from "../../form/components/form-detail-view";
 import {
   buildFileTreeRenameOperations,
+  buildPreviewFileEmbedUrl,
   fileTreeFileName,
   fileTreeParentPath,
   fileTreeUploadPath,
@@ -143,6 +146,17 @@ export function FileTreeDetailView({
   const [infoOpen, setInfoOpen] = useState(false);
   const [renameTarget, setRenameTarget] = useState<FileTreeFileVO | null>(null);
   const [removeTarget, setRemoveTarget] = useState<FileTreeFileVO | null>(null);
+  const [builtinPreviewPath, setBuiltinPreviewPath] = useState<string | null>(null);
+  const [previewAttempt, setPreviewAttempt] = useState(0);
+  const [remotePreview, setRemotePreview] = useState<
+    // `attempt` is the retry generation, not decoration: pressing Retry bumps
+    // `previewAttempt`, which is what re-runs this effect. Dropping the field
+    // would make that dependency look unused.
+    | { path: string; status: "loading"; attempt: number }
+    | { path: string; status: "resolved"; result: FilePreviewVO }
+    | null
+  >(null);
+  const previewRequestRef = useRef(0);
   const uploadedAssetsRef = useRef(
     new Map<string, { assetId: string; displayName: string; mimeType: string }>(),
   );
@@ -168,12 +182,14 @@ export function FileTreeDetailView({
   useRegisterTopbarNodeActions(
     fileTree ? (
       <>
-        <NodeAgentPromptsButton
-          orpc={orpc}
-          nodeId={fileTree.node.id}
-          nodeName={fileTree.node.name}
-          nodeType={nodeType}
-        />
+        {agentPromptsTab ? null : (
+          <NodeAgentPromptsButton
+            orpc={orpc}
+            nodeId={fileTree.node.id}
+            nodeName={fileTree.node.name}
+            nodeType={nodeType}
+          />
+        )}
         <NodePinButton
           payload={{ nodeId: fileTree.node.id }}
           tabId={nodeSidePanelTabId(nodeType, fileTree.node.id)}
@@ -201,6 +217,8 @@ export function FileTreeDetailView({
     setFileActionError(null);
     setRenameTarget(null);
     setRemoveTarget(null);
+    setBuiltinPreviewPath(null);
+    setRemotePreview(null);
     uploadedAssetsRef.current.clear();
   }, [slug]);
 
@@ -210,7 +228,85 @@ export function FileTreeDetailView({
     }),
     enabled: Boolean(fileTree && openPath),
   });
+  const previewConfigQuery = useQuery({
+    ...orpc.fileTrees.previewConfig.queryOptions({}),
+    enabled: nodeType === "drive" && Boolean(slug),
+  });
   const createCr = useMutation(orpc.fileTrees.createChangeRequest.mutationOptions());
+  const { mutateAsync: preparePreviewAsync } = useMutation(
+    orpc.fileTrees.preparePreview.mutationOptions(),
+  );
+
+  // Only a provider that is actually usable reaches the remote path. A broken
+  // or half-finished configuration keeps Drive rendering through the built-in
+  // preview instead of turning every file into an error card; the problem stays
+  // visible in Settings > File Preview and in the server logs. The server
+  // enforces the same rule for the Embed and public API surfaces.
+  const remotePreviewEnabled =
+    previewConfigQuery.data?.provider === "previewfile" &&
+    previewConfigQuery.data.status === "ready";
+  // Same predicate the server enforces, so a Markdown/code/image/PDF file never
+  // pays for a round trip that could only answer "use the built-in preview".
+  // This has to gate BOTH the request below and the render branch further down:
+  // skipping only the request leaves the remote panel waiting for an answer that
+  // is never coming.
+  const builtinPreviewSufficient =
+    Boolean(openPath) &&
+    Boolean(fileQuery.data) &&
+    isBuiltinDrivePreviewSufficient({
+      path: openPath ?? "",
+      mimeType: fileQuery.data?.mimeType ?? "",
+    });
+
+  useEffect(() => {
+    const requestId = previewRequestRef.current + 1;
+    previewRequestRef.current = requestId;
+    if (
+      nodeType !== "drive" ||
+      !remotePreviewEnabled ||
+      !fileTree ||
+      !openPath ||
+      !fileQuery.data ||
+      isEditing ||
+      builtinPreviewPath === openPath ||
+      builtinPreviewSufficient
+    ) {
+      setRemotePreview(null);
+      return;
+    }
+
+    const requestedPath = openPath;
+    setRemotePreview({ path: requestedPath, status: "loading", attempt: previewAttempt });
+    void preparePreviewAsync({ nodeId: fileTree.node.id, filePath: requestedPath, type: "drive" })
+      .then((result) => {
+        if (previewRequestRef.current !== requestId) return;
+        setRemotePreview({ path: requestedPath, status: "resolved", result });
+      })
+      .catch(() => {
+        if (previewRequestRef.current !== requestId) return;
+        setRemotePreview({
+          path: requestedPath,
+          status: "resolved",
+          result: {
+            state: "unavailable",
+            provider: "previewfile",
+            reason: "service_unavailable",
+            retryable: true,
+          },
+        });
+      });
+  }, [
+    builtinPreviewPath,
+    fileQuery.data,
+    fileTree,
+    isEditing,
+    nodeType,
+    openPath,
+    preparePreviewAsync,
+    previewAttempt,
+    remotePreviewEnabled,
+    builtinPreviewSufficient,
+  ]);
 
   const tree = useMemo(() => buildFileTree(fileTree?.files ?? []), [fileTree?.files]);
   const expandedFolders = useMemo(() => new Set(collectFolderPaths(tree)), [tree]);
@@ -246,6 +342,7 @@ export function FileTreeDetailView({
         setIsEditing(false);
         setDraft("");
         setFileActionError(null);
+        setBuiltinPreviewPath(null);
       }
     },
     [filePaths],
@@ -539,65 +636,123 @@ export function FileTreeDetailView({
   const previewMimeType = fileQuery.data
     ? inferFileTreeMimeType(openPath ?? "", fileQuery.data.mimeType)
     : "application/octet-stream";
+  const resolvedRemotePreview =
+    remotePreview?.path === openPath && remotePreview.status === "resolved"
+      ? remotePreview.result
+      : null;
+  const shouldRenderRemotePreview =
+    nodeType === "drive" &&
+    remotePreviewEnabled &&
+    !isEditing &&
+    !builtinPreviewSufficient &&
+    builtinPreviewPath !== openPath &&
+    resolvedRemotePreview?.state !== "builtin";
+  const previewLocale =
+    typeof document === "undefined"
+      ? "en"
+      : document.documentElement.lang || navigator.language || "en";
+  const remotePreviewReason =
+    resolvedRemotePreview?.state === "unavailable"
+      ? messages.nodeDetail.filePreviewReasons[resolvedRemotePreview.reason]
+      : null;
 
-  // One wrapper for both shapes: `Tabs` when a prompts tab was supplied (its
-  // trigger list lives INSIDE the header, exactly as AirAppDetailView does it),
-  // a plain div otherwise — so a Drive renders the identical markup it always did.
+  // One wrapper for both shapes: `Tabs` when a prompts tab was supplied, a
+  // plain div otherwise — so a Drive renders the identical markup it always did.
   const Frame = agentPromptsTab ? FileTreeTabsFrame : FileTreePlainFrame;
+  const infoButton = (
+    <Button
+      aria-label={messages.nodeDetail.details}
+      className="shrink-0 text-muted-foreground"
+      onClick={() => setInfoOpen(true)}
+      size="icon-sm"
+      title={messages.nodeDetail.details}
+      type="button"
+      variant="ghost"
+    >
+      <Info className="size-3.5" />
+    </Button>
+  );
 
   return (
     <Frame>
-      {/* Single compact toolbar (identity + info trigger, actions) replaces the
-          old stacked title-block / properties chrome, giving the file browser
-          maximum vertical space — mirrors AirAppDetailView's header pattern.
-          Description/properties moved into `NodeSettingsDialog`'s Info tab. */}
-      <header className="flex h-12 shrink-0 items-center gap-2 border-border/60 border-b px-3 md:px-4">
-        <div className="flex min-w-0 items-center gap-2">
-          <span title={nodeTypeLabel}>
-            <NodeIcon className="size-4 shrink-0 text-muted-foreground" />
-          </span>
-          <h1 className="truncate font-medium text-foreground text-sm">{fileTree.node.name}</h1>
-          <Button
-            aria-label={messages.nodeDetail.details}
-            className="shrink-0 text-muted-foreground"
-            onClick={() => setInfoOpen(true)}
-            size="icon-sm"
-            title={messages.nodeDetail.details}
-            type="button"
-            variant="ghost"
-          >
-            <Info className="size-3.5" />
-          </Button>
-          {infoOpen && (
-            <NodeSettingsDialog
-              initialTab="info"
-              nodeId={fileTree.node.id}
-              nodeName={fileTree.node.name}
-              nodeSlug={fileTree.node.slug}
-              nodeType={nodeType}
-              onOpenChange={setInfoOpen}
-              open={infoOpen}
-              orpc={orpc}
-            />
-          )}
-        </div>
-
+      <header
+        className={cn(
+          "shrink-0 border-border/60 border-b",
+          agentPromptsTab ? "px-4 pt-5 pb-2 md:px-6" : "flex h-12 items-center gap-2 px-3 md:px-4",
+        )}
+      >
         {agentPromptsTab ? (
-          <TabsList className="h-8 shrink-0 gap-1 bg-transparent p-0">
-            <TabsTrigger className={FILE_TREE_TAB_TRIGGER_CLASS} value="prompts">
-              <Sparkles className="size-3.5" />
-              {messages.agentPrompts.title}
-            </TabsTrigger>
-            <TabsTrigger className={FILE_TREE_TAB_TRIGGER_CLASS} value="files">
-              <Files className="size-3.5" />
-              {messages.nodeDetail.files}
-            </TabsTrigger>
-          </TabsList>
-        ) : null}
+          <div className="min-w-0">
+            <div className="flex min-w-0 items-start gap-2">
+              <div className="min-w-0 flex-1">
+                <h1 className="truncate font-semibold text-foreground text-xl leading-7">
+                  {fileTree.node.name}
+                </h1>
+                {fileTree.node.description ? (
+                  <p
+                    className="mt-1 line-clamp-2 text-muted-foreground text-sm leading-5 md:line-clamp-1"
+                    title={fileTree.node.description}
+                  >
+                    {fileTree.node.description}
+                  </p>
+                ) : null}
+              </div>
+              {infoButton}
+            </div>
+            <TabsList className="mt-3 h-8 shrink-0 gap-1 bg-transparent p-0">
+              <TabsTrigger className={FILE_TREE_TAB_TRIGGER_CLASS} value="prompts">
+                <Sparkles className="size-3.5" />
+                {messages.agentPrompts.title}
+              </TabsTrigger>
+              <TabsTrigger className={FILE_TREE_TAB_TRIGGER_CLASS} value="files">
+                <Files className="size-3.5" />
+                {messages.nodeDetail.files}
+              </TabsTrigger>
+            </TabsList>
+          </div>
+        ) : (
+          <div className="flex min-w-0 items-center gap-2">
+            <span title={nodeTypeLabel}>
+              <NodeIcon className="size-4 shrink-0 text-muted-foreground" />
+            </span>
+            <h1 className="max-w-[60%] shrink-0 truncate font-medium text-foreground text-sm">
+              {fileTree.node.name}
+            </h1>
+            {fileTree.node.description ? (
+              <>
+                <span
+                  aria-hidden="true"
+                  className="hidden shrink-0 text-muted-foreground/40 text-sm lg:inline"
+                >
+                  ·
+                </span>
+                <p
+                  className="hidden min-w-0 flex-1 truncate text-muted-foreground text-sm lg:block"
+                  title={fileTree.node.description}
+                >
+                  {fileTree.node.description}
+                </p>
+              </>
+            ) : null}
+            {infoButton}
+          </div>
+        )}
+        {infoOpen && (
+          <NodeSettingsDialog
+            initialTab="info"
+            nodeId={fileTree.node.id}
+            nodeName={fileTree.node.name}
+            nodeSlug={fileTree.node.slug}
+            nodeType={nodeType}
+            onOpenChange={setInfoOpen}
+            open={infoOpen}
+            orpc={orpc}
+          />
+        )}
       </header>
 
       {agentPromptsTab ? (
-        <TabsContent className="min-h-0 flex-1 overflow-auto p-4" value="prompts">
+        <TabsContent className="min-h-0 flex-1 overflow-hidden" value="prompts">
           {agentPromptsTab}
         </TabsContent>
       ) : null}
@@ -741,6 +896,65 @@ export function FileTreeDetailView({
                   ? fileQuery.error.message
                   : messages.nodeDetail.couldNotReadFile}
               </div>
+            ) : isEditing ? (
+              <textarea
+                aria-label={openPath}
+                className="min-h-[calc(100vh-15rem)] w-full resize-none border-0 bg-background p-4 font-mono text-sm leading-6 outline-none placeholder:text-muted-foreground"
+                onChange={(event) => setDraft(event.target.value)}
+                spellCheck={false}
+                value={draft}
+              />
+            ) : shouldRenderRemotePreview ? (
+              !resolvedRemotePreview || remotePreview?.status === "loading" ? (
+                <div className="grid h-full min-h-[320px] place-items-center p-8 text-center text-muted-foreground text-sm">
+                  <div className="flex flex-col items-center gap-3">
+                    <RefreshCw aria-hidden className="size-5 animate-spin" />
+                    {messages.nodeDetail.filePreviewPreparing}
+                  </div>
+                </div>
+              ) : resolvedRemotePreview.state === "ready" ? (
+                <div className="flex h-full min-h-[520px] flex-col">
+                  <div className="flex h-8 shrink-0 items-center justify-end border-border/50 border-b px-3 text-muted-foreground text-[11px]">
+                    {messages.nodeDetail.filePreviewPoweredBy}
+                  </div>
+                  <iframe
+                    className="min-h-0 flex-1 border-0 bg-background"
+                    referrerPolicy="no-referrer"
+                    sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
+                    src={buildPreviewFileEmbedUrl(resolvedRemotePreview.previewUrl, previewLocale)}
+                    title={messages.nodeDetail.filePreviewTitle}
+                  />
+                </div>
+              ) : (
+                <div className="grid h-full min-h-[320px] place-items-center p-8">
+                  <div className="max-w-md rounded-lg border border-border bg-card p-5 text-center shadow-sm">
+                    <p className="font-medium text-foreground">
+                      {messages.nodeDetail.filePreviewUnavailable}
+                    </p>
+                    <p className="mt-2 text-muted-foreground text-sm">{remotePreviewReason}</p>
+                    <div className="mt-4 flex flex-wrap justify-center gap-2">
+                      {resolvedRemotePreview.retryable ? (
+                        <Button
+                          onClick={() => setPreviewAttempt((attempt) => attempt + 1)}
+                          size="sm"
+                          type="button"
+                          variant="outline"
+                        >
+                          <RefreshCw aria-hidden className="size-3.5" />
+                          {messages.nodeDetail.filePreviewRetry}
+                        </Button>
+                      ) : null}
+                      <Button
+                        onClick={() => setBuiltinPreviewPath(openPath)}
+                        size="sm"
+                        type="button"
+                      >
+                        {messages.nodeDetail.filePreviewUseBuiltin}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )
             ) : fileQuery.data && fileQuery.data.encoding !== "utf8" ? (
               <div className="p-5 text-muted-foreground text-sm">
                 {fileQuery.data.assetUrl && previewKind !== "code" ? (
@@ -800,14 +1014,6 @@ export function FileTreeDetailView({
                   </div>
                 </dl>
               </div>
-            ) : isEditing ? (
-              <textarea
-                aria-label={openPath}
-                className="min-h-[calc(100vh-15rem)] w-full resize-none border-0 bg-background p-4 font-mono text-sm leading-6 outline-none placeholder:text-muted-foreground"
-                onChange={(event) => setDraft(event.target.value)}
-                spellCheck={false}
-                value={draft}
-              />
             ) : previewKind === "image" && fileQuery.data?.assetUrl ? (
               // An SVG is both text and an image: it arrives with
               // `encoding: "utf8"`, so it never reaches the binary branch above
@@ -871,9 +1077,7 @@ const FileTreePlainFrame = ({ children }: { children: ReactNode }) => (
 /**
  * Tabs, with the prompts tab first.
  *
- * `Tabs` wraps the header rather than sitting under it because the trigger list
- * belongs IN the header, beside the node's name — the same arrangement (and the
- * same reason) as `AirAppDetailView`.
+ * `Tabs` wraps the header so its trigger list and content share one state owner.
  */
 const FileTreeTabsFrame = ({ children }: { children: ReactNode }) => (
   <Tabs className="flex h-full min-h-0 w-full flex-col gap-0 bg-background" defaultValue="prompts">
@@ -973,6 +1177,7 @@ function SkillAgentPromptsTab({ node, orpc }: { node: LoadedNode; orpc: Busabase
     <AgentPromptsView
       askAgent={{ orpc, sessionScopeId: node.id }}
       capabilities={capabilities}
+      layout="page"
       loading={loading}
       onHandedOff={() => {}}
       scenarios={scenarios}

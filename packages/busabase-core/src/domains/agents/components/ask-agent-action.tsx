@@ -19,7 +19,6 @@ import { Loader2, Sparkles } from "lucide-react";
 import { useCallback } from "react";
 import { useLocation } from "wouter";
 import { useCoreI18n } from "../../../i18n";
-import type { NodePrompt } from "../../dashboard/helpers/node-agent-prompts";
 import { useAskAgent } from "../hooks/use-ask-agent";
 import { AgentTargetPicker } from "./agent-target-picker";
 
@@ -27,7 +26,7 @@ export function AskAgentAction({
   sessionScopeId,
   onClose,
   orpc,
-  prompt,
+  promptText,
 }: {
   /**
    * Which conversation this belongs to — one session per scope, per agent (see
@@ -41,7 +40,17 @@ export function AskAgentAction({
   sessionScopeId: string;
   onClose: () => void;
   orpc: BusabaseQueryUtils;
-  prompt?: NodePrompt;
+  /**
+   * The finished text to send — already through `renderPromptForDispatch`, so
+   * it carries the connection check the preview does not show.
+   *
+   * A plain string rather than the `NodePrompt`, deliberately: this used to take
+   * the prompt and read `.body` off it, which meant Ask Agent and Copy each
+   * decided for themselves what "the prompt" was. There is now one renderer and
+   * one caller of it, and this signature makes taking a second route a type
+   * error rather than a silent divergence.
+   */
+  promptText?: string;
 }) {
   const messages = useCoreI18n();
   const [, setLocation] = useLocation();
@@ -79,8 +88,8 @@ export function AskAgentAction({
     <div className="flex min-w-0 flex-1 flex-col items-start gap-2">
       <button
         className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-60"
-        disabled={!prompt || ask.isLoading || ask.isStarting}
-        onClick={() => prompt && ask.ask(prompt.body)}
+        disabled={!promptText || ask.isLoading || ask.isStarting}
+        onClick={() => promptText && ask.ask(promptText)}
         type="button"
       >
         {ask.isLoading || ask.isStarting ? (

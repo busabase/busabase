@@ -12,6 +12,7 @@ import {
   listAgentSessions,
   promptAgentSession,
   respondToAgentPermission,
+  setAgentSessionConfigOption,
   subscribeAgentSession,
 } from "./logic/agent-session-manager";
 
@@ -122,6 +123,14 @@ const agentsRouterImpl = {
       try {
         respondToAgentPermission(input.sessionId, input.requestId, input.optionId);
         return { ok: true };
+      } catch (error) {
+        return fail(error);
+      }
+    }),
+
+    setConfigOption: os.agents.sessions.setConfigOption.handler(async ({ input }) => {
+      try {
+        return await setAgentSessionConfigOption(input.sessionId, input.configId, input.value);
       } catch (error) {
         return fail(error);
       }

@@ -94,3 +94,38 @@ describe("listTemplates — displayName is optional iString", () => {
     });
   });
 });
+
+/**
+ * The two asset kinds resolve against different GitHub hosts, and swapping
+ * them is silent: a clip fetched from `raw` returns an LFS pointer file that a
+ * `<video>` simply fails to play, with no error anywhere.
+ */
+describe("listTemplates — asset URLs", () => {
+  it("serves the demo clip from the media host, which resolves LFS objects", async () => {
+    mockCatalog([{ ...baseEntry, video: "assets/recordings/gated.mp4" }]);
+    const result = await listTemplates();
+    expect(result.templates[0]?.video).toBe(
+      "https://media.githubusercontent.com/media/busabase/templates/main/templates/gated/assets/recordings/gated.mp4",
+    );
+  });
+
+  it("keeps screenshots on the raw host, which is right for ordinary objects", async () => {
+    mockCatalog([
+      {
+        ...baseEntry,
+        screenshots: ["assets/screenshots/cover.webp"],
+        video: "assets/recordings/gated.mp4",
+      },
+    ]);
+    const result = await listTemplates();
+    expect(result.templates[0]?.screenshots[0]).toBe(
+      "https://raw.githubusercontent.com/busabase/templates/main/templates/gated/assets/screenshots/cover.webp",
+    );
+  });
+
+  it("leaves video undefined when the entry never declares one", async () => {
+    mockCatalog([baseEntry]);
+    const result = await listTemplates();
+    expect(result.templates[0]?.video).toBeUndefined();
+  });
+});

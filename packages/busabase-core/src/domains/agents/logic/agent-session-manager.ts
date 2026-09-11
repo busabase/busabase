@@ -9,6 +9,7 @@ import {
 } from "busabase-contract/access-control/api-key-level";
 import type {
   AgentSessionEventVO,
+  AgentSessionModelOptionVO,
   AgentSessionStatus,
   AgentSessionVO,
   PromptAttachmentInput,
@@ -49,6 +50,33 @@ import { resolveBusabaseMcpUrl } from "./agent-workspace-guide";
 
 const MAX_BUFFERED_EVENTS = 500;
 
+/**
+ * Reduce the agent's advertised `configOptions` to the one this domain
+ * renders a picker for: a flat `type: "select"` entry tagged
+ * `category: "model"`. Anything else the agent offers (modes, thought level,
+ * boolean toggles) is out of scope for this feature and stays unadvertised
+ * rather than mis-rendered.
+ *
+ * Grouped select options (`SessionConfigSelectGroup[]`) are flattened —
+ * dropping groups rather than modelling them keeps `AgentSessionModelOptionVO`
+ * a flat list, which is all the current picker needs.
+ */
+function findModelOption(
+  configOptions: acp.SessionConfigOption[] | null | undefined,
+): AgentSessionModelOptionVO | null {
+  const selects = configOptions?.filter((candidate) => candidate.type === "select") ?? [];
+  const option =
+    selects.find((candidate) => candidate.category === "model") ??
+    selects.find((candidate) => candidate.id === "model");
+  if (!option || option.type !== "select") return null;
+  const options = option.options.flatMap((entry) =>
+    "options" in entry
+      ? entry.options.map((grouped) => ({ value: grouped.value, name: grouped.name }))
+      : [{ value: entry.value, name: entry.name }],
+  );
+  return { id: option.id, name: option.name, currentValue: option.currentValue, options };
+}
+
 interface LiveSession {
   id: string;
   slug: string;
@@ -63,9 +91,20 @@ interface LiveSession {
   child: ChildProcess | null;
   /** Resolves once initialize + session/new have completed. */
   ready: Promise<void>;
+  /** Reserves the single prompt slot while `ready` is still pending. */
+  promptStarting: boolean;
   prompt: (text: string, attachments?: PromptAttachmentInput[]) => Promise<void>;
   cancel: () => Promise<void>;
   close: () => void;
+  /**
+   * `null` until the agent's `session/new` response (or a later
+   * `config_option_update`) advertises a `category: "model"` select.
+   * Live-only, like the rest of `LiveSession` — a session reloaded from
+   * history after a restart has no process left to send
+   * `session/set_config_option` to, so there is nothing to advertise.
+   */
+  modelOption: AgentSessionModelOptionVO | null;
+  setConfigOption: (configId: string, value: string) => Promise<AgentSessionModelOptionVO | null>;
   seq: number;
   /** Highest `seq` already written to the database; everything above is pending. */
   persistedSeq: number;
@@ -201,9 +240,12 @@ export async function createAgentSession({
     acpSessionId: null,
     child: null,
     ready: Promise.resolve(),
+    promptStarting: false,
     prompt: async () => {},
     cancel: async () => {},
     close: () => {},
+    modelOption: null,
+    setConfigOption: async () => null,
     seq: 0,
     persistedSeq: 0,
     buffer: [],
@@ -295,6 +337,15 @@ export async function createAgentSession({
         return { outcome: { outcome: "selected", optionId } };
       })
       .onNotification(acp.methods.client.session.update, (ctx) => {
+        // `config_option_update` is the agent unilaterally changing a config
+        // value (e.g. auto-downgrading the model on a rate limit) rather than
+        // busabase asking for it — so the local picker must follow the same
+        // notification path `setAgentSessionConfigOption`'s own response
+        // updates it from, or the UI would show a stale selection until the
+        // next full page load.
+        if (ctx.params.update.sessionUpdate === "config_option_update") {
+          session.modelOption = findModelOption(ctx.params.update.configOptions);
+        }
         emit(session, { kind: "acpUpdate", acpUpdate: ctx.params.update });
       });
 
@@ -407,6 +458,7 @@ export async function createAgentSession({
           });
         }
         session.acpSessionId = created.sessionId;
+        session.modelOption = findModelOption(created.configOptions);
         setStatus(session, "idle");
 
         session.prompt = async (text: string, attachments?: PromptAttachmentInput[]) => {
@@ -457,6 +509,21 @@ export async function createAgentSession({
         session.cancel = async () => {
           await ctx.notify(acp.methods.agent.session.cancel, { sessionId: created.sessionId });
           setStatus(session, "idle");
+        };
+
+        session.setConfigOption = async (configId: string, value: string) => {
+          const response = await ctx.request(acp.methods.agent.session.setConfigOption, {
+            sessionId: created.sessionId,
+            configId,
+            value,
+          });
+          // Replace, not patch: a model change can shift what else is
+          // selectable (e.g. a reasoning-effort option tied to the model), so
+          // trusting the agent's complete `configOptions` list is what keeps
+          // dependent values current rather than showing a choice the new
+          // model no longer honours.
+          session.modelOption = findModelOption(response.configOptions);
+          return session.modelOption;
         };
 
         await connectionClosed;
@@ -516,6 +583,7 @@ function toVO(s: LiveSession): AgentSessionVO {
     createdAt: s.createdAt,
     lastActivityAt: s.lastActivityAt,
     error: s.error,
+    modelOption: s.modelOption,
   };
 }
 
@@ -523,6 +591,12 @@ function requireSession(sessionId: string): LiveSession {
   const s = sessions().get(sessionId);
   if (!s) throw new Error(`Unknown agent session: ${sessionId}`);
   return s;
+}
+
+function assertSessionHasNotFailed(session: LiveSession): void {
+  if (session.status === "failed") {
+    throw new Error(session.error ?? "This session has failed.");
+  }
 }
 
 /**
@@ -559,26 +633,66 @@ export async function promptAgentSession(
   attachments?: PromptAttachmentInput[],
 ): Promise<void> {
   const s = requireSession(sessionId);
-  await s.ready;
-  if (s.status === "failed") throw new Error(s.error ?? "This session has failed.");
-  // Echo the user's own message so a late subscriber can render the whole
-  // turn. `attachments` rides along on this same synthetic (non-ACP) event —
-  // the frontend's `translate()` adapter (use-agent-session.ts) knows to
-  // unpack it into image/audio content-block chunks alongside the text one.
-  emit(s, {
-    kind: "acpUpdate",
-    acpUpdate: {
-      sessionUpdate: "user_message",
-      text,
-      ...(attachments && attachments.length > 0 ? { attachments } : {}),
-    },
-  });
-  await s.prompt(text, attachments);
+  assertSessionHasNotFailed(s);
+  if (s.promptStarting || s.status === "busy" || s.status === "waiting_permission") {
+    throw new Error("This agent is still replying. Wait for the current turn to finish.");
+  }
+  s.promptStarting = true;
+
+  try {
+    // Echo and persist the user's own message before waiting for initialize +
+    // session/new. Agent startup may take seconds, but the submitted turn is
+    // already authoritative and should be visible to current and late clients.
+    // `attachments` rides along on this synthetic (non-ACP) event; the
+    // frontend's `translate()` adapter unpacks it into content-block chunks.
+    emit(s, {
+      kind: "acpUpdate",
+      acpUpdate: {
+        sessionUpdate: "user_message",
+        text,
+        ...(attachments && attachments.length > 0 ? { attachments } : {}),
+      },
+    });
+    await flushPendingEvents(s);
+
+    await s.ready;
+    assertSessionHasNotFailed(s);
+    await s.prompt(text, attachments);
+  } finally {
+    s.promptStarting = false;
+  }
 }
 
 export async function cancelAgentSession(sessionId: string): Promise<void> {
   const s = requireSession(sessionId);
   await s.cancel();
+}
+
+/**
+ * Change the session's model via ACP `session/set_config_option`.
+ *
+ * `configId`/`value` are validated against what THIS session most recently
+ * advertised before anything is sent — the picker only ever offers values
+ * from `modelOption`, but the RPC is the trust boundary, not the UI, so a
+ * request naming a stale id or a value the agent never listed is rejected
+ * here rather than forwarded.
+ */
+export async function setAgentSessionConfigOption(
+  sessionId: string,
+  configId: string,
+  value: string,
+): Promise<AgentSessionVO> {
+  const s = requireSession(sessionId);
+  await s.ready;
+  if (!s.modelOption || s.modelOption.id !== configId) {
+    throw new Error("This session has no such config option to set.");
+  }
+  if (!s.modelOption.options.some((option) => option.value === value)) {
+    throw new Error(`"${value}" is not one of the offered options.`);
+  }
+  await s.setConfigOption(configId, value);
+  void persistSessionState(toVO(s), s.acpSessionId);
+  return toVO(s);
 }
 
 /**

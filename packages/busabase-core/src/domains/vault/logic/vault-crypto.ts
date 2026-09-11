@@ -26,6 +26,11 @@ function readEncryptionKey(): Buffer | null {
   return createHash("sha256").update(raw).digest();
 }
 
+/** Whether Vault secrets written by this process are encrypted at rest. */
+export function isVaultEncryptionConfigured(): boolean {
+  return readEncryptionKey() !== null;
+}
+
 function encryptVaultValue(value: string, key: Buffer): EncryptedVaultValuePayload {
   const iv = randomBytes(12);
   const cipher = createCipheriv(ALGORITHM, key, iv);

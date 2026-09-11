@@ -28,6 +28,11 @@ const BASE_CONTEXT: NodePromptContext = {
   spaceId: "local",
 };
 
+/** What `TARGET_LINE.en` renders for `BASE_CONTEXT` — the sentence every prompt,
+ * curated or custom, has to open with unless the author placed it themselves. */
+const TARGET_LINE_EN =
+  'Target: the Busabase Base "Posts" (nodeId: nod_base_blog), in space "local" (spaceId: local).';
+
 const build = (scope?: NodePromptContext["scope"]) =>
   buildNodeAgentPrompts({ ...BASE_CONTEXT, scope }, "en", coreMessagesEn);
 
@@ -306,6 +311,47 @@ describe("buildNodeAgentPrompts custom scenario prompts", () => {
       'Summarize tickets opened in Target: the Busabase Base "Posts" (nodeId: nod_base_blog)',
     );
     expect(summary?.body).not.toContain("{target}");
+  });
+
+  it("prepends the target line when the author's body omits {target}", () => {
+    const { scenarios } = buildNodeAgentPrompts(
+      {
+        ...BASE_CONTEXT,
+        customPrompts: [
+          { key: "no-placeholder", label: "Triage", body: "Triage everything received today." },
+        ],
+      },
+      "en",
+      coreMessagesEn,
+    );
+    const triage = scenarios.find((prompt) => prompt.key === "no-placeholder");
+    // Same sentence a curated prompt opens with, then the author's text as its
+    // own paragraph — an agent must never have to guess which node it is on.
+    expect(triage?.body.startsWith(TARGET_LINE_EN)).toBe(true);
+    expect(triage?.body).toContain(`${TARGET_LINE_EN}\n\nTriage everything received today.`);
+    // The author's own text survives verbatim, and the shared footer still lands.
+    expect(triage?.body).toContain("let Busabase apply my permissions");
+  });
+
+  it("decides placement per locale, so a half-translated body keeps its target everywhere", () => {
+    const customPrompts = [
+      {
+        key: "half-translated",
+        label: { en: "Triage", "zh-CN": "分诊" },
+        // The placeholder was only remembered in one locale.
+        body: { en: "Triage {target} now.", "zh-CN": "现在分诊。" },
+      },
+    ];
+    const en = buildNodeAgentPrompts({ ...BASE_CONTEXT, customPrompts }, "en", coreMessagesEn);
+    const zh = buildNodeAgentPrompts({ ...BASE_CONTEXT, customPrompts }, "zh-CN", dashboardZhCN);
+    // en placed it inline, exactly where the author put it — unchanged behavior.
+    expect(en.scenarios[0]?.body).toContain(
+      'Triage Target: the Busabase Base "Posts" (nodeId: nod_base_blog)',
+    );
+    // zh-CN forgot it, so it is prepended rather than lost.
+    expect(zh.scenarios[0]?.body.startsWith("目标：Busabase 的 ")).toBe(true);
+    expect(zh.scenarios[0]?.body).toContain("（nodeId: nod_base_blog）");
+    expect(zh.scenarios[0]?.body).toContain("现在分诊。");
   });
 
   it("resolves the plain-string iString form for every locale (no translation supplied)", () => {

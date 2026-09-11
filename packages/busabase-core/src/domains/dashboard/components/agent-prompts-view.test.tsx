@@ -1,7 +1,14 @@
+import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { CoreI18nProvider } from "../../../i18n";
 import { coreMessagesEn } from "../../../i18n/messages";
 import { buildNodeAgentPrompts, type NodePrompt } from "../helpers/node-agent-prompts";
-import { buildPromptSections, resolveActivePrompt } from "./agent-prompts-view";
+import {
+  type AgentPromptsLayout,
+  AgentPromptsView,
+  buildPromptSections,
+  resolveActivePrompt,
+} from "./agent-prompts-view";
 
 const prompt = (key: string, tier: NodePrompt["tier"], group: string): NodePrompt => ({
   key,
@@ -10,6 +17,19 @@ const prompt = (key: string, tier: NodePrompt["tier"], group: string): NodePromp
   label: key,
   body: `${key} body`,
 });
+
+const renderView = (layout?: AgentPromptsLayout) =>
+  renderToStaticMarkup(
+    <CoreI18nProvider locale="en">
+      <AgentPromptsView
+        askAgent={null}
+        capabilities={[prompt("create-file", "capability", "Content")]}
+        layout={layout}
+        onHandedOff={() => {}}
+        scenarios={[prompt("draft-video", "scenario", "Scenarios")]}
+      />
+    </CoreI18nProvider>,
+  );
 
 describe("Agent prompt sidebar sections", () => {
   it("puts scenarios first and preserves capability group order", () => {
@@ -87,5 +107,31 @@ describe("Agent prompt sidebar sections", () => {
     ).toEqual(["weekly-severity-summary"]);
     // The generic Base scenario is gone, replaced — not merged alongside it.
     expect(scenarios.map((prompt) => prompt.key)).not.toContain("base-bulk-import");
+  });
+});
+
+describe("Agent prompt layouts", () => {
+  it("renders the full-height page workspace with a readable preview surface", () => {
+    const markup = renderView("page");
+
+    expect(markup).toContain('data-layout="page"');
+    expect(markup).toContain('<nav aria-label="Agent prompts"');
+    expect(markup).toContain("<pre");
+    expect(markup).toContain('aria-current="true"');
+    expect(markup).toContain("grid-rows-[14rem_minmax(0,1fr)]");
+    expect(markup).toContain("md:grid-cols-[17rem_minmax(0,1fr)]");
+    expect(markup).toContain("flex-col");
+    expect(markup).toContain("md:flex-row");
+    expect(markup).not.toContain("shadow-sm");
+    expect(markup).not.toContain("<textarea");
+    expect(markup).not.toContain("max-w-[80ch]");
+  });
+
+  it("keeps the existing compact textarea layout as the default", () => {
+    const markup = renderView();
+
+    expect(markup).toContain('data-layout="compact"');
+    expect(markup).toContain("<textarea");
+    expect(markup).not.toContain('data-layout="page"');
   });
 });

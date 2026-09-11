@@ -1,4 +1,5 @@
 export type {
+  UpdatePreviewFileCredentialDTO,
   UpdateVaultSettingsDTO,
   VaultAccessPolicy,
   VaultEnvironment,
@@ -10,6 +11,8 @@ export type {
   VaultSettingsVO,
 } from "busabase-contract/domains/vault/types";
 export {
+  PREVIEWFILE_API_KEY,
+  UpdatePreviewFileCredentialInputSchema,
   UpdateVaultSettingsInputSchema,
   VaultAccessPolicySchema,
   VaultEnvironmentSchema,

@@ -2,6 +2,7 @@ import "server-only";
 
 import { createRouterClient, ORPCError } from "@orpc/server";
 import type {
+  InstallEventVO,
   InstallFailureVO,
   InstallFromGithubDTO,
   InstallPlanFromGithubDTO,
@@ -20,6 +21,9 @@ import {
   resolveTargetState,
 } from "busabase-package/plan";
 import { type PackageNode, type PackageTree, suggestSlug } from "busabase-package/tree";
+import { getContextSpaceId } from "../../../context";
+import { rootNodeIdForSpace } from "../../../logic/kernel";
+import { hasNodePermission, shouldAutoMerge } from "../../../logic/node-acl";
 import { requireSpaceManagerForInstall } from "./_guard";
 import { fetchPackageFiles } from "./github-source";
 
@@ -114,21 +118,45 @@ const prepareInstall = async (
   return { plan, source, client };
 };
 
+/**
+ * Whether this caller's content would merge on the spot rather than queue.
+ *
+ * Permission-aware, exactly like every other write (`shouldAutoMerge`): omitted
+ * `autoMerge` + `write` means "just do it", and only an explicit `false` forces
+ * review. Content used to be pinned review-first here as a trust boundary
+ * against the package author, but that check does not do what it looks like it
+ * does: `requireSpaceManagerForInstall` already limits installing to a space
+ * owner/admin, so the human approving those change requests was always the same
+ * human who chose the repo a moment earlier. Deciding to install IS the trust
+ * decision; making them re-approve their own import afterwards was ceremony.
+ *
+ * The workspace root is the right node to ask about: `intoFolder` may not exist
+ * yet on a first install, and the root is what every install ultimately hangs
+ * off. It is also what keeps the one cap that still bites — a credential with a
+ * `changeRequest` permission ceiling resolves below `write` here and therefore
+ * still lands its content for review, manager or not.
+ */
+const callerMergesDirectly = async (requestedAutoMerge: boolean | undefined): Promise<boolean> =>
+  shouldAutoMerge(
+    requestedAutoMerge,
+    await hasNodePermission(rootNodeIdForSpace(getContextSpaceId()), "write"),
+  );
+
 export const planInstallFromGithub = async (
   input: InstallPlanFromGithubDTO,
 ): Promise<InstallPlanVO> => {
   const { plan, source } = await prepareInstall(input);
-  // Plan for the options the caller actually intends. Hardcoding `false` here
-  // would report `applicable: false` for every package whose records carry
-  // relation values — the exact packages that auto-merge exists to install —
-  // and a client gating its submit button on that would make them permanently
-  // uninstallable.
-  return toPlanVO(plan, source, input.autoMerge ?? false);
+  // Plan for what this caller would ACTUALLY get, so `applicable` answers the
+  // question they are about to ask. Hardcoding `false` here would report
+  // `applicable: false` for every package whose records carry relation values —
+  // the exact packages auto-merge exists to install — and a client gating its
+  // submit button on that would make them permanently uninstallable.
+  return toPlanVO(plan, source, await callerMergesDirectly(input.autoMerge));
 };
 
 export const installFromGithub = async (input: InstallFromGithubDTO): Promise<InstallResultVO> => {
   const { plan, source, client } = await prepareInstall(input);
-  const autoMerge = Boolean(input.autoMerge);
+  const autoMerge = await callerMergesDirectly(input.autoMerge);
 
   try {
     assertPlanIsApplicable(plan, autoMerge);
@@ -177,6 +205,115 @@ export const installFromGithub = async (input: InstallFromGithubDTO): Promise<In
     warnings: result.warnings,
   };
 };
+
+/**
+ * The same install as {@link installFromGithub}, yielding progress as it goes.
+ *
+ * Why this exists: the non-streaming route does minutes of work before writing
+ * a single byte of response, and a proxy in front of the app closes a socket
+ * that has been idle that long. The install keeps running server-side after the
+ * disconnect, so the user is told it failed while it actually succeeded —
+ * they then retry and hit slug collisions from their own first attempt.
+ *
+ * The fix is not a longer timeout (there is always a bigger template); it is to
+ * stop being silent. `applyInstall` already reports each pass through
+ * `onProgress` — the plain route just threw those messages away.
+ *
+ * The queue below bridges two shapes: `onProgress` is a synchronous callback
+ * that cannot await a consumer, while a generator must not drop events between
+ * yields. Same buffer-and-wake pattern as `runOrAttachSession` in the airapp
+ * domain, for the same reason.
+ */
+export async function* installFromGithubStream(
+  input: InstallFromGithubDTO,
+): AsyncGenerator<InstallEventVO> {
+  // Reported before the await, not after: fetching and unpacking the zipball is
+  // typically the LONGEST single step of an install (measured at ~9s of a ~10s
+  // install of a mid-size template) and it is the one step `applyInstall` cannot
+  // report on, because it happens before apply is even called. Without this the
+  // user watches a spinner through the slowest part and only sees progress once
+  // the quick part starts.
+  yield { kind: "progress", message: "Fetching the package from GitHub…" };
+  const { plan, source, client } = await prepareInstall(input);
+  // Same permission-aware resolution as the non-streaming path above — this is
+  // the one the dashboard actually calls, so hardcoding `false` here would have
+  // left the UI on review-first while everything else merged.
+  const autoMerge = await callerMergesDirectly(input.autoMerge);
+
+  try {
+    assertPlanIsApplicable(plan, autoMerge);
+  } catch (error) {
+    throw new ORPCError("CONFLICT", {
+      message: error instanceof Error ? error.message : "This package cannot be installed as-is.",
+    });
+  }
+
+  yield {
+    kind: "progress",
+    message: `Installing ${plan.tree.manifest.name} into "${plan.targetFolderSlug}"…`,
+  };
+
+  const queue: string[] = [];
+  let wake: (() => void) | null = null;
+  let finished = false;
+
+  const applying = runApply(client, plan, {
+    autoMerge,
+    submittedBy: `install ${source.owner}/${source.repo} (${plan.tree.manifest.name})`,
+    source: {
+      repo: `${source.owner}/${source.repo}`,
+      ref: source.ref,
+      ...(source.subdir ? { subdir: source.subdir } : {}),
+    },
+    serverUrl: process.env.PORT ? `http://localhost:${process.env.PORT}` : undefined,
+    onProgress: (message) => {
+      queue.push(message);
+      wake?.();
+      wake = null;
+    },
+  }).finally(() => {
+    finished = true;
+    wake?.();
+    wake = null;
+  });
+
+  // Attach a handler now so a rejection between here and the `await` below is
+  // never an unhandled one. The real error still reaches the consumer, thrown
+  // by that `await` — this only stops Node from treating it as unobserved.
+  applying.catch(() => {});
+
+  while (true) {
+    while (queue.length > 0) {
+      const message = queue.shift();
+      if (message !== undefined) yield { kind: "progress", message };
+    }
+    if (finished) break;
+    await new Promise<void>((resolve) => {
+      wake = resolve;
+    });
+  }
+
+  // Drain what the apply reported between the last check and finishing —
+  // otherwise the final pass's message is lost exactly when it matters most.
+  while (queue.length > 0) {
+    const message = queue.shift();
+    if (message !== undefined) yield { kind: "progress", message };
+  }
+
+  // Rethrows a failed apply, already wrapped by `runApply` into an ORPCError
+  // carrying the partial-install details.
+  const result = await applying;
+  yield {
+    kind: "done",
+    result: {
+      targetFolderSlug: plan.targetFolderSlug,
+      targetFolderNodeId: result.targetFolderNodeId,
+      created: result.created,
+      pendingChangeRequests: result.pendingChangeRequests,
+      warnings: result.warnings,
+    },
+  };
+}
 
 /**
  * Run the five-pass apply and make sure its failure survives the RPC boundary.

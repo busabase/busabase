@@ -51,7 +51,7 @@ export const docContract = {
       tags: ["Docs"],
       summary: "Create Doc node",
       successDescription:
-        "Review-first by default: a pending ChangeRequest proposing the Doc (`materialized: false`). Returns the materialized Doc node instead (`materialized: true`) when `autoMerge: true` is passed.",
+        "Merged in the same call when the actor has write access on the parent node — the materialized Doc node comes back (`materialized: true`). Review-first when the actor lacks write access or passes `autoMerge: false`: a pending ChangeRequest proposing the Doc (`materialized: false`).",
     })
     .input(createDocInputSchema)
     .output(
