@@ -19,7 +19,7 @@ import {
   usePromptInputAttachments,
 } from "kui/ai-elements/prompt-input";
 import { PaperclipIcon } from "lucide-react";
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
 
 /** 10 MB. Base64 inflates a payload by a third, and the whole prompt travels
  * as one JSON-RPC message — a cap here is what keeps a stray 200 MB video
@@ -87,6 +87,14 @@ export interface AcpComposerProps {
   maxFileSize?: number;
   /** How many files may be staged at once. Defaults to 10. */
   maxFiles?: number;
+  /**
+   * A host-provided control rendered in the footer, between the attach
+   * button and submit — e.g. busabase's per-session model picker. This
+   * composer is shared with acprouter, which has no such control and simply
+   * never passes one; the footer's layout (and every existing host) is
+   * unaffected when this is omitted.
+   */
+  footerControls?: ReactNode;
 }
 
 /** Images and audio have dedicated ACP content blocks; everything else is a file. */
@@ -131,8 +139,20 @@ export function toAttachments(files: PromptInputMessage["files"]): AcpAttachment
   return attachments;
 }
 
-/** Opens the file picker directly — no dropdown menu, since attach is this composer's only action. */
-function AttachButton({ disabled }: { disabled: boolean }) {
+/**
+ * Opens the file picker directly — no dropdown menu, since attach is this
+ * composer's only built-in action. Also carries `footerControls`: both sit in
+ * the same `PromptInputTools` group so `PromptInputFooter`'s `justify-between`
+ * keeps them together on the left, with submit alone on the right, instead of
+ * spreading three items across the row.
+ */
+function AttachButton({
+  disabled,
+  footerControls,
+}: {
+  disabled: boolean;
+  footerControls?: ReactNode;
+}) {
   const attachments = usePromptInputAttachments();
   return (
     <PromptInputTools>
@@ -145,6 +165,7 @@ function AttachButton({ disabled }: { disabled: boolean }) {
       >
         <PaperclipIcon className="size-4" />
       </button>
+      {footerControls}
     </PromptInputTools>
   );
 }
@@ -230,6 +251,7 @@ export function AcpComposer({
   onDraftApplied,
   maxFileSize = DEFAULT_MAX_FILE_SIZE,
   maxFiles = DEFAULT_MAX_FILES,
+  footerControls,
 }: AcpComposerProps) {
   const [attachError, setAttachError] = useState<string | null>(null);
   // The field is uncontrolled (kui's `PromptInput` reads it out of the form on
@@ -301,7 +323,7 @@ export function AcpComposer({
         <PromptInputTextarea disabled={disabled} placeholder={placeholder} ref={textareaRef} />
       </PromptInputBody>
       <PromptInputFooter>
-        <AttachButton disabled={disabled} />
+        <AttachButton disabled={disabled} footerControls={footerControls} />
         <PromptInputSubmit
           disabled={submitDisabled}
           onStop={onStop}

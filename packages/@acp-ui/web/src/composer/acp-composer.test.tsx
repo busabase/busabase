@@ -454,6 +454,36 @@ describe("the file picker itself", () => {
   });
 });
 
+// Busabase's per-session model picker (and any future host control) mounts
+// here rather than as a separate row, so it lives in the same footer/tools
+// area as the attach button — see AcpComposerProps.footerControls.
+describe("footerControls", () => {
+  it("renders nothing extra in the footer by default", () => {
+    render(<AcpComposer disabled={false} onSend={vi.fn()} />);
+    expect(screen.queryByTestId("host-control")).not.toBeInTheDocument();
+  });
+
+  it("renders a host-provided control in the footer, alongside the attach button", () => {
+    render(
+      <AcpComposer
+        disabled={false}
+        footerControls={
+          <button data-testid="host-control" type="button">
+            Model: Auto
+          </button>
+        }
+        onSend={vi.fn()}
+      />,
+    );
+    const control = screen.getByTestId("host-control");
+    expect(control).toBeInTheDocument();
+    // Same immediate parent as the attach button — i.e. the shared
+    // PromptInputTools group, not a second row floated elsewhere in the
+    // footer's justify-between layout.
+    expect(control.parentElement).toBe(attachButton().parentElement);
+  });
+});
+
 describe("composer layout inside kui's InputGroup", () => {
   // `PromptInputFooter` renders `data-align="block-end"`, which flips
   // `InputGroup` to `flex-col` — and it is `items-center`, so a direct child
