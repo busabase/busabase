@@ -286,6 +286,13 @@ describe("busabase-cli — templates (real command line, in-process server)", ()
       "--into-folder",
       "email-no-samples",
       "--no-sample-records",
+      // This file installs the SAME template a second time. Base slugs are
+      // folder-prefixed but a Skill slug is not, so the second copy collides —
+      // which only became visible once content merged by default (it used to sit
+      // as an unmerged proposal, leaving the slug free until someone approved it
+      // and hit the same conflict then). `--rename` is the CLI's answer to a
+      // collision; nothing here is about sample records.
+      "--rename",
     )) as { created: { records: number }; pendingChangeRequests: number };
     expect(result.created.records).toBe(0);
     expect(result.pendingChangeRequests).toBeGreaterThan(0);
@@ -325,9 +332,56 @@ describe("busabase-cli — templates (real command line, in-process server)", ()
     expect(bases.map((base) => base.slug)).toContain("kelly-crm-contacts");
   });
 
-  it("exports a folder as a template, writing a SKILL.md draft when there is none", async () => {
+  it("exports an installed template, carrying its real manual rather than a draft", async () => {
     const target = path.join(outDir, "kelly-crm-export");
     const result = (await cli("export", "kelly-crm", "-o", target, "--template")) as {
+      files: string[];
+      warnings: string[];
+    };
+    expect(result.files).toContain("SKILL.md");
+    // Not a draft: the installed template's own manual is a real Skill node in
+    // the folder now, so export round-trips what the author wrote. It only
+    // became one once content merged by default — it used to sit as an unmerged
+    // proposal, so the folder looked manual-less and export invented a draft.
+    expect(result.warnings.join()).not.toContain("draft");
+
+    const manual = await readFile(path.join(target, "SKILL.md"), "utf8");
+    expect(manual).toContain("template: true");
+    // Verbatim what the package author shipped — including their own resource
+    // slug, not the folder-prefixed one install created. Exporting the prefixed
+    // slug would make the package say something its author never wrote, and
+    // re-installing it would prefix the prefix.
+    expect(manual).toContain("- contacts");
+    expect(manual).not.toContain("kelly-crm-contacts");
+
+    const manifest = JSON.parse(await readFile(path.join(target, "busabase.json"), "utf8"));
+    expect(manifest.template).toBeDefined();
+  });
+
+  it("writes a SKILL.md draft when the folder genuinely has no manual", async () => {
+    // A folder built by hand, not installed from a template — the case the draft
+    // generator exists for. Every installed folder in this file now carries the
+    // template's real manual, so the draft path needs its own fixture.
+    const { createRouterClient } = await import("@orpc/server");
+    const { busabaseRouter } = await import("busabase-core/router");
+    const client = createRouterClient(busabaseRouter);
+    const folder = await client.nodes.createChangeRequest({
+      message: "A hand-built folder",
+      autoMerge: true,
+      operations: [
+        { kind: "create", nodeType: "folder", slug: "plain-notes", name: "Notes", description: "" },
+      ],
+    });
+    await client.bases.create({
+      parentNodeId: folder.operations[0]?.nodeId as string,
+      slug: "jottings",
+      name: "Jottings",
+      fields: [{ slug: "kind", name: "Kind", type: "text", required: false }],
+      autoMerge: true,
+    });
+
+    const target = path.join(outDir, "plain-notes-export");
+    const result = (await cli("export", "plain-notes", "-o", target, "--template")) as {
       files: string[];
       warnings: string[];
     };
@@ -338,16 +392,8 @@ describe("busabase-cli — templates (real command line, in-process server)", ()
     // Deterministic, never invented: the draft names the tables that exist and
     // leaves every judgement as an explicit TODO rather than guessing at it.
     expect(draft).toContain("template: true");
-    // The package's OWN slug, restored from the ownership stamp — not the
-    // prefixed one install created. Exporting the installed slug would make the
-    // package say something its author never wrote, and re-installing it would
-    // prefix the prefix.
-    expect(draft).toContain('- "contacts"');
-    expect(draft).not.toContain("kelly-crm-contacts");
+    expect(draft).toContain('- "jottings"');
     expect(draft).toContain("TODO");
-
-    const manifest = JSON.parse(await readFile(path.join(target, "busabase.json"), "utf8"));
-    expect(manifest.template).toBeDefined();
   });
 
   it("round-trips: the exported template installs again, into its own namespace", async () => {
@@ -362,11 +408,23 @@ describe("busabase-cli — templates (real command line, in-process server)", ()
     );
     zipball = await zipFiles(files, "me-kelly-crm-main");
 
+    // Without `--rename` this now stops UP FRONT with a named collision instead
+    // of installing: Base slugs are folder-prefixed, but a template's manual is a
+    // Skill and skill slugs are unique per SPACE, so the second copy wants a slug
+    // the first one holds. It always did — that conflict simply used to be
+    // deferred until someone approved the first copy's manual. What changed is
+    // that the planner now SEES the manual, so this is a clean pre-flight refusal
+    // that names `--rename`, not a mid-install failure and rollback.
+    await expect(
+      cli("install", "https://github.com/me/kelly-crm", "--into-folder", "crm-again"),
+    ).rejects.toThrow(/collide|--rename/);
+
     const ok = (await cli(
       "install",
       "https://github.com/me/kelly-crm",
       "--into-folder",
       "crm-again",
+      "--rename",
     )) as { installed: boolean };
     expect(ok.installed).toBe(true);
 
@@ -377,5 +435,15 @@ describe("busabase-cli — templates (real command line, in-process server)", ()
     expect(bases.map((base) => base.slug)).toEqual(
       expect.arrayContaining(["kelly-crm-contacts", "crm-again-contacts"]),
     );
+
+    // And the second copy's manual is suffixed rather than lost, so both apps
+    // keep a manual their agents can find.
+    type TreeNode = { type: string; slug: string; children?: TreeNode[] };
+    const flatten = (nodes: TreeNode[]): TreeNode[] =>
+      nodes.flatMap((node) => [node, ...flatten(node.children ?? [])]);
+    const skillSlugs = flatten((await cli("nodes", "list")) as TreeNode[])
+      .filter((node) => node.type === "skill")
+      .map((node) => node.slug);
+    expect(skillSlugs).toEqual(expect.arrayContaining(["kelly-crm", "kelly-crm-2"]));
   });
 });

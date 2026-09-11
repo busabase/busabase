@@ -8,6 +8,7 @@ import {
 } from "busabase-core/context";
 import { checkAgentsRequestOrigin } from "busabase-core/domains/agents/logic/agent-origin-guard";
 import { readEmbedCapabilityRequest } from "busabase-core/domains/embed-links/rpc-capability";
+import { resolveOssFilePreviewRuntimeConfig } from "busabase-core/domains/filetree/preview-config";
 import { busabaseRouter } from "busabase-core/router";
 import { busabaseDemoRouter } from "busabase-core/router-demo";
 import { addCorsHeaders, createCorsHeaders } from "openlib/cors";
@@ -56,6 +57,11 @@ async function handle(request: Request) {
       return await runWithBusabaseContext({ isDemo: true, demoUseCase, demoLocale }, run);
     }
 
+    // Read Vault runtime values before branching so an OSS Embed Link resolves
+    // the same local PreviewFile credential as the full local Dashboard.
+    const vaultRuntimeEnv = await readBuiltinVaultRuntimeEnv();
+    const filePreview = resolveOssFilePreviewRuntimeConfig(vaultRuntimeEnv);
+
     // An embedded Dashboard calls in with its link capability instead of a
     // session. No host context to pass: the single-user local host has no
     // account/membership state for the shared resolver to check.
@@ -67,12 +73,16 @@ async function handle(request: Request) {
       );
     }
     if (embed.kind === "embed") {
-      return await runWithEmbedContext(embed.context, run);
+      return await runWithEmbedContext({ ...embed.context, filePreview }, run);
     }
 
-    const vaultRuntimeEnv = await readBuiltinVaultRuntimeEnv();
     return await runWithLocalContext(
-      { vaultRuntimeEnv, localUserName: getLocalUserName(), embedOrigin: url.origin },
+      {
+        vaultRuntimeEnv,
+        filePreview,
+        localUserName: getLocalUserName(),
+        embedOrigin: url.origin,
+      },
       run,
     );
   } catch (error) {

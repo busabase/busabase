@@ -6,14 +6,20 @@ import { BlobReader, BlobWriter, ZipWriter } from "@zip.js/zip.js";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 /**
- * The review-first install (no `--auto-merge`) against a REAL server.
+ * Both halves of `busabase-cli install`'s content behaviour, against a REAL server.
  *
- * This is the path that used to lose data silently: `bases.create` without
- * autoMerge returns a PENDING change request and therefore no base id, so apply
- * bailed out — and the Base's records, the whole point of the package, were never
- * proposed at all. No error, no warning: you merged the change request and got an
- * empty Base. `package-roundtrip.test.ts` never caught it because it installs with
- * `--auto-merge`.
+ * `--require-review` is the path that used to lose data silently: `bases.create`
+ * without autoMerge returns a PENDING change request and therefore no base id, so
+ * apply bailed out — and the Base's records, the whole point of the package, were
+ * never proposed at all. No error, no warning: you merged the change request and got
+ * an empty Base. `package-roundtrip.test.ts` never caught it because it installs
+ * with `--auto-merge`.
+ *
+ * The no-flag case is the DEFAULT, and it is the opposite assertion: content is
+ * permission-aware like every other write, so an installer who can write to the
+ * space gets live records without approving their own import. It is covered here,
+ * next to its counterpart, so a future change cannot quietly flip one into the
+ * other — which is exactly what this file caught when the default moved.
  *
  * The fixture is deliberately relation-free: a package whose Bases carry relation
  * fields legitimately refuses to install review-first (a relation stores the ids of
@@ -50,7 +56,7 @@ const zipDirectory = async (dir: string, archiveRoot: string): Promise<Buffer> =
   return Buffer.from(await (await writer.close()).arrayBuffer());
 };
 
-describe("busabase-cli install without --auto-merge (real server)", () => {
+describe("busabase-cli install content behaviour (real server)", () => {
   const dirs: string[] = [];
   let outDir = "";
   let zipball: Buffer = Buffer.alloc(0);
@@ -62,6 +68,8 @@ describe("busabase-cli install without --auto-merge (real server)", () => {
   let liveRecordCount = 0;
   let pendingRecordOps = 0;
   let installedBaseSlugs: string[] = [];
+  let defaultLiveRecordCount = 0;
+  let defaultPendingRecordOps = 0;
 
   const mkTmp = async (label: string): Promise<string> => {
     const dir = await mkdtemp(path.join(os.tmpdir(), `busabase-rf-${label}-`));
@@ -175,32 +183,51 @@ describe("busabase-cli install without --auto-merge (real server)", () => {
     await cli("export", "kb", "-o", outDir);
     zipball = await zipDirectory(outDir, "review-first-package-main");
 
-    // ── Target: a fresh, empty database; install WITHOUT --auto-merge ────────
-    await useDatabase(await mkTmp("tgt-db"), await mkTmp("tgt-st"));
-    await cli("install", REPO_URL);
+    // Counts for whichever database is currently mounted: how many records are
+    // LIVE, and how many are still sitting in an unreviewed change request.
+    const measure = async (): Promise<{
+      baseSlugs: string[];
+      live: number;
+      pendingRecordOps: number;
+    }> => {
+      const target = await routerClient();
+      const baseSlugs = (await target.bases.list({})).map((b) => b.slug);
+      let live = 0;
+      let cursor: string | undefined;
+      do {
+        const page = await target.dump.exportTables({ table: "records", cursor, limit: 500 });
+        live += page.rows.length;
+        cursor = page.nextCursor ?? undefined;
+      } while (cursor);
+      // `changeRequests.list` takes only `limit`, so filter by status here.
+      const all = (await target.changeRequests.list({ limit: 100 })).changeRequests as Array<{
+        status: string;
+        operations?: Array<{ operation: string }>;
+      }>;
+      const pending = all
+        .filter((cr) => cr.status === "in_review")
+        .reduce(
+          (sum, cr) =>
+            sum + (cr.operations ?? []).filter((op) => op.operation === "record_create").length,
+          0,
+        );
+      return { baseSlugs, live, pendingRecordOps: pending };
+    };
 
-    const target = await routerClient();
-    installedBaseSlugs = (await target.bases.list({})).map((b) => b.slug);
-    // Live (merged) records in the whole target space.
-    let cursor: string | undefined;
-    do {
-      const page = await target.dump.exportTables({ table: "records", cursor, limit: 500 });
-      liveRecordCount += page.rows.length;
-      cursor = page.nextCursor ?? undefined;
-    } while (cursor);
-    // Records proposed but awaiting review. `changeRequests.list` takes only `limit`,
-    // so filter by status here.
-    const all = (await target.changeRequests.list({ limit: 100 })).changeRequests as Array<{
-      status: string;
-      operations?: Array<{ operation: string }>;
-    }>;
-    pendingRecordOps = all
-      .filter((cr) => cr.status === "in_review")
-      .reduce(
-        (sum, cr) =>
-          sum + (cr.operations ?? []).filter((op) => op.operation === "record_create").length,
-        0,
-      );
+    // ── Target A: a fresh, empty database; install WITH --require-review ─────
+    await useDatabase(await mkTmp("tgt-db"), await mkTmp("tgt-st"));
+    await cli("install", REPO_URL, "--require-review");
+    const reviewed = await measure();
+    installedBaseSlugs = reviewed.baseSlugs;
+    liveRecordCount = reviewed.live;
+    pendingRecordOps = reviewed.pendingRecordOps;
+
+    // ── Target B: another fresh database; install with NO flag (the default) ──
+    await useDatabase(await mkTmp("tgt2-db"), await mkTmp("tgt2-st"));
+    await cli("install", REPO_URL);
+    const byDefault = await measure();
+    defaultLiveRecordCount = byDefault.live;
+    defaultPendingRecordOps = byDefault.pendingRecordOps;
   }, 300_000);
 
   afterAll(async () => {
@@ -218,13 +245,18 @@ describe("busabase-cli install without --auto-merge (real server)", () => {
     expect(installedBaseSlugs).toContain("articles");
   });
 
-  it("proposes the records for review instead of dropping them (the regression)", () => {
+  it("--require-review proposes the records instead of dropping them (the regression)", () => {
     // The bug: this was 0. The records were never proposed, and merging the Base's
     // change request left you with an empty Base and no indication anything was lost.
     expect(pendingRecordOps).toBe(2);
   });
 
-  it("leaves nothing live until the reviewer merges — that is the whole promise", () => {
+  it("--require-review leaves nothing live until the reviewer merges", () => {
     expect(liveRecordCount).toBe(0);
+  });
+
+  it("installs records live by default — an installer does not review their own import", () => {
+    expect(defaultLiveRecordCount).toBe(2);
+    expect(defaultPendingRecordOps).toBe(0);
   });
 });

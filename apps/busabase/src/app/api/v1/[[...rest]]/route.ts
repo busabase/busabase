@@ -1,5 +1,6 @@
 import { OpenAPIHandler } from "@orpc/openapi/fetch";
 import { runWithBusabaseContext, runWithLocalContext } from "busabase-core/context";
+import { resolveOssFilePreviewRuntimeConfig } from "busabase-core/domains/filetree/preview-config";
 import { getBusabaseOpenApiSpec } from "busabase-core/openapi";
 import { BUSABASE_API_ALLOW_HEADERS, BUSABASE_API_METHODS } from "busabase-core/openapi/cors";
 import { encodeBusabaseOpenApiError } from "busabase-core/openapi/error-envelope";
@@ -40,6 +41,7 @@ async function handle(request: Request) {
   return runWithLocalContext(
     {
       vaultRuntimeEnv,
+      filePreview: resolveOssFilePreviewRuntimeConfig(vaultRuntimeEnv),
       localUserName: getLocalUserName(),
       embedOrigin: url.origin,
       aclOverride: resolveRelayPermissionContext(request.headers),
