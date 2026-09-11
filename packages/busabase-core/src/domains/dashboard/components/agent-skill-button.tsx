@@ -17,6 +17,7 @@ import {
   AGENT_BRAND_LINKS,
   createMcpAgentGuides,
   createMcpEndpoint,
+  defaultMcpModeFor,
   getDefaultCloudMcpBaseUrl,
   isSameMcpOrigin,
   isValidMcpBaseUrl,
@@ -165,7 +166,15 @@ export function AgentIntegrationContent({
   // instead of telling them to go find another tab themselves.
   const [transportTab, setTransportTab] = useState("skills");
   const [skillAudience, setSkillAudience] = useState<McpAgentKind>("shell");
-  const [mcpMode, setMcpMode] = useState<McpConnectionMode>("local");
+  const [mcpMode, setMcpMode] = useState<McpConnectionMode>(defaultMcpModeFor(edition));
+  // The homepage keeps one dialog mounted while its edition toggle flips underneath
+  // it, so re-derive the endpoint when the edition changes instead of stranding a
+  // Cloud visitor on localhost (or a Desktop one on the hosted URL).
+  const [editionAtMcpDefault, setEditionAtMcpDefault] = useState(edition);
+  if (editionAtMcpDefault !== edition) {
+    setEditionAtMcpDefault(edition);
+    setMcpMode(defaultMcpModeFor(edition));
+  }
   const [mcpBaseUrls, setMcpBaseUrls] = useState<Record<McpConnectionMode, string>>({
     local: LOCAL_MCP_BASE_URL,
     cloud: getDefaultCloudMcpBaseUrl(defaultOrigin),

@@ -125,6 +125,48 @@ describe("nodes.searchByName", () => {
     expect(lowerCase.length).toBe(byName.length);
   });
 
+  // Regression coverage for the bug this closes: the Search dialog's Recent
+  // tab (and the Home page's Recently Visited cards, and both side-panel
+  // "Recent" lists) all fall back to `nodes.searchByName` on a cache miss —
+  // if this endpoint dropped `icon`, every one of those surfaces would show a
+  // node's custom icon in the Skills/Apps tabs and silently lose it the
+  // instant the same node reached them through this path instead. Exercised
+  // against the REAL database (a genuine `jsonb` column round trip), not a
+  // mock, since the whole bug was a column that was already being SELECTed
+  // but never reached the response shape.
+  it("carries a node's custom icon through to the search-by-name result", async () => {
+    await seedScenario("search-by-name-icon");
+    const raw: RawClient = createRouterClient(busabaseRouter);
+
+    const cr = await raw.nodes.createChangeRequest({
+      autoMerge: true,
+      message: "Seed a skill and an app",
+      operations: [
+        { kind: "create", nodeType: "skill", slug: "icon-skill", name: "Icon Skill" },
+        { kind: "create", nodeType: "airapp", slug: "icon-app", name: "Icon App" },
+      ],
+    });
+    expect(cr.status).toBe("merged");
+
+    const [skillNode] = await raw.nodes.searchByName({ query: "Icon Skill" });
+    const rename = await raw.nodes.createChangeRequest({
+      autoMerge: true,
+      message: "Give the skill a custom icon",
+      operations: [
+        { kind: "rename", nodeId: skillNode?.id ?? "", icon: { type: "emoji", value: "📊" } },
+      ],
+    });
+    expect(rename.status).toBe("merged");
+
+    const withIcon = await raw.nodes.searchByName({ query: "Icon Skill" });
+    expect(withIcon[0]?.icon).toEqual({ type: "emoji", value: "📊" });
+
+    // A node that never had a custom icon set must not silently inherit one —
+    // this is the "no false positive" half of the same assertion.
+    const withoutIcon = await raw.nodes.searchByName({ query: "Icon App" });
+    expect(withoutIcon[0]?.icon ?? null).toBeNull();
+  });
+
   it("ranks an exact slug match first, ahead of a merely-substring match", async () => {
     await seedScenario("search-by-name-exact-match-order");
     const raw: RawClient = createRouterClient(busabaseRouter);

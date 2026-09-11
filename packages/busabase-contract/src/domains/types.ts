@@ -13,6 +13,19 @@ export interface NodeCapabilities {
   hasDetail?: boolean;
   /** Can be created via a node change request. */
   creatable?: boolean;
+  /**
+   * Show in the always-visible first row of a create surface, instead of behind
+   * its "More" disclosure.
+   *
+   * Eleven type names at once is the thing a first-time user cannot parse — they
+   * pick one at random and find out later it was the wrong one. This marks the
+   * few whose name alone is enough to choose correctly (a folder is a folder);
+   * everything else stays exactly one click away rather than being cut.
+   *
+   * Only affects ordering/disclosure, never permission: a type is offered iff
+   * `creatable && !hidden`, whatever this says.
+   */
+  commonlyCreated?: boolean;
   /** How an anonymous visitor may open this node type. Omission fails closed as `no`. */
   publicAccess?: NodePublicAccess;
   /**

@@ -16,7 +16,7 @@ import { Bot, Clock, Pin, Plus, Search } from "lucide-react";
 import { useSyncExternalStore } from "react";
 import { useCoreI18n } from "../../../i18n";
 import type { KnownNodeCache } from "../helpers/known-node-cache";
-import { nodeIconForType } from "../helpers/node-icons";
+import { NodeAvatar } from "../helpers/node-icons";
 import {
   isPinnableNode,
   openAgentChatTab,
@@ -116,20 +116,23 @@ export function SidePanelAddTab({
             {recents.length === 0 ? (
               <DropdownMenuItem disabled>{messages.sidePanel.noRecent}</DropdownMenuItem>
             ) : (
-              recents.map((node) => {
-                const Icon = nodeIconForType(node.type);
-                return (
-                  <DropdownMenuItem
-                    key={node.id}
-                    onSelect={() =>
-                      pinNodeToSidePanel({ id: node.id, type: node.type, name: node.name })
-                    }
-                  >
-                    <Icon className="size-4" />
-                    <span className="flex-1 truncate">{node.name}</span>
-                  </DropdownMenuItem>
-                );
-              })
+              recents.map((node) => (
+                <DropdownMenuItem
+                  key={node.id}
+                  onSelect={() =>
+                    pinNodeToSidePanel({ id: node.id, type: node.type, name: node.name })
+                  }
+                >
+                  {/* Same avatar resolution the Search dialog's Recent tab uses
+                      — this menu reads the identical `KnownNodeCache` data, so a
+                      custom icon must not disappear just because it showed up
+                      here instead of there. */}
+                  <span className="flex size-4 shrink-0 items-center justify-center overflow-hidden">
+                    <NodeAvatar node={node} />
+                  </span>
+                  <span className="flex-1 truncate">{node.name}</span>
+                </DropdownMenuItem>
+              ))
             )}
           </DropdownMenuSubContent>
         </DropdownMenuSub>

@@ -116,6 +116,9 @@ const toVO = (row: typeof busabaseAgentSessions.$inferSelect): AgentSessionVO =>
   createdAt: row.createdAt.toISOString(),
   lastActivityAt: row.lastActivityAt.toISOString(),
   error: row.error,
+  // Live-only (see LiveSession.modelOption): a row loaded from the database
+  // has no running process to send session/set_config_option to.
+  modelOption: null,
 });
 
 /**

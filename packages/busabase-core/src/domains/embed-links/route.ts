@@ -3,6 +3,7 @@ import "server-only";
 import {
   EMBED_SECURITY_HEADERS,
   embedSecurityHeaders,
+  encodeEmbedCapability,
   isValidEmbedPublicId,
   parseEmbedIframeCapability,
   readEmbedCapabilityCookie,
@@ -35,6 +36,8 @@ export interface EmbedRouteOptions {
    * request's own origin.
    */
   redirectBase?: (request: Request) => string;
+  /** Host RPC prefix. Cloud mounts open-core under `/api/rpc/core`; Desktop uses `/api/rpc`. */
+  rpcBasePath?: string;
 }
 
 /**
@@ -49,6 +52,7 @@ export interface EmbedRouteOptions {
 export const createEmbedRouteHandler = ({
   withHostContext = (fn) => fn(),
   redirectBase = (request) => new URL(request.url).origin,
+  rpcBasePath = "/api/rpc",
 }: EmbedRouteOptions = {}) => {
   return async (
     request: Request,
@@ -91,9 +95,16 @@ export const createEmbedRouteHandler = ({
     if (embed.type !== "node") return handOffTo(embed.type);
     if (embed.detail.type === "airapp") return handOffTo("airapp");
 
-    return htmlResponse(renderEmbedDocument(embed.detail, embed.targetName), 200, {
-      ...embedSecurityHeaders(embed.framePolicy),
-      "x-robots-tag": "noindex, nofollow",
-    });
+    return htmlResponse(
+      renderEmbedDocument(embed.detail, embed.targetName, {
+        embedCapability: encodeEmbedCapability(publicId, capability.secret),
+        rpcBasePath,
+      }),
+      200,
+      {
+        ...embedSecurityHeaders(embed.framePolicy),
+        "x-robots-tag": "noindex, nofollow",
+      },
+    );
   };
 };

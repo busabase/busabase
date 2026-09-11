@@ -189,6 +189,51 @@ export const FILE_TREE_NODE_TYPES = ["skill", "drive", "airapp"] as const;
 export type FileTreeNodeType = (typeof FILE_TREE_NODE_TYPES)[number];
 export const fileTreeNodeTypeSchema = z.enum(FILE_TREE_NODE_TYPES);
 
+export const filePreviewProviderSchema = z.enum(["builtin", "previewfile"]);
+export const filePreviewCredentialSourceSchema = z.enum(["environment", "vault", "none"]);
+export const filePreviewConfigurationStatusSchema = z.enum([
+  "ready",
+  "not_configured",
+  "invalid_configuration",
+]);
+export const filePreviewUnavailableReasonSchema = z.enum([
+  "not_configured",
+  "invalid_configuration",
+  "file_too_large",
+  "unsupported",
+  "authentication_failed",
+  "rate_limited",
+  "timeout",
+  "service_unavailable",
+  "invalid_response",
+]);
+
+export const filePreviewConfigSchema = z.object({
+  provider: filePreviewProviderSchema,
+  status: filePreviewConfigurationStatusSchema,
+  credentialSource: filePreviewCredentialSourceSchema,
+  credentialConfigured: z.boolean(),
+  maxFileSizeBytes: z.number().int().positive(),
+  sessionTtlMinutes: z.number().int().positive(),
+  vaultEncryptionConfigured: z.boolean().nullable(),
+});
+
+export const filePreviewSchema = z.discriminatedUnion("state", [
+  z.object({ state: z.literal("builtin"), provider: z.literal("builtin") }),
+  z.object({
+    state: z.literal("ready"),
+    provider: z.literal("previewfile"),
+    previewUrl: z.string().url(),
+    expiresAt: z.string().datetime(),
+  }),
+  z.object({
+    state: z.literal("unavailable"),
+    provider: z.literal("previewfile"),
+    reason: filePreviewUnavailableReasonSchema,
+    retryable: z.boolean(),
+  }),
+]);
+
 const fileTreeRefSchema = z.object({
   nodeId: z
     .string()
@@ -208,6 +253,33 @@ const fileTreeRefSchema = z.object({
 // and read one with `GET /nodes/{nodeId}`, which returns the same
 // `fileTreeNodeSchema` payload under `type: "skill" | "drive" | "airapp"`.
 export const fileTreeContract = {
+  previewConfig: oc
+    .route({
+      method: "GET",
+      path: "/file-trees/preview-config",
+      tags: ["File Trees"],
+      summary: "Get Drive file preview configuration",
+      successDescription:
+        "Resolved preview provider state without exposing the configured API key.",
+    })
+    .output(filePreviewConfigSchema),
+  preparePreview: oc
+    .route({
+      method: "POST",
+      path: "/file-trees/{nodeId}/preview",
+      tags: ["File Trees"],
+      summary: "Prepare a Drive file preview",
+      successDescription:
+        "Returns the built-in provider, a short-lived PreviewFile URL, or a recoverable provider failure.",
+    })
+    .input(
+      z.object({
+        nodeId: z.string().min(1),
+        filePath: z.string().min(1),
+        type: z.literal("drive"),
+      }),
+    )
+    .output(filePreviewSchema),
   create: oc
     .route({
       method: "POST",
@@ -215,7 +287,7 @@ export const fileTreeContract = {
       tags: ["File Trees"],
       summary: "Create file-tree node",
       successDescription:
-        "Review-first by default: a pending ChangeRequest proposing the node (`materialized: false`). Returns the materialized node instead (`materialized: true`) when `autoMerge: true` is passed.",
+        "Merged in the same call when the actor has write access on the target node — the materialized node comes back (`materialized: true`). Review-first when the actor lacks write access or passes `autoMerge: false`: a pending ChangeRequest proposing the node (`materialized: false`).",
     })
     .input(createFileTreeInputSchema.extend({ type: fileTreeNodeTypeSchema }))
     .output(

@@ -129,7 +129,13 @@ describe("Form-as-Node — submission + access gates", () => {
     await rm(storageDir, { force: true, recursive: true });
   });
 
-  it("turns a submission into a record-create ChangeRequest (not a direct write)", async () => {
+  // Still a record-create ChangeRequest and not a direct write — that part never
+  // changed, and is what gives a submission a diff, an author and a history. What
+  // changed is what happens to that CR next: this caller can write the Base, so it
+  // is approved and merged in the same call instead of queueing for them to
+  // approve their own submission. (`form-submit-permission-aware.test.ts` in
+  // apps/busabase covers the other side: an anonymous visitor still queues.)
+  it("turns a submission into a record-create ChangeRequest, merged for a writer", async () => {
     expect(formNodeId).not.toBe("");
     await createForm({
       nodeId: formNodeId,
@@ -145,23 +151,25 @@ describe("Form-as-Node — submission + access gates", () => {
     const result = await submitForm(formNodeId, {
       values: { subject: "Hello", msg: "Body text" },
     });
-    expect(result.status).toBe("pending_review");
+    expect(result.status).toBe("merged");
+    expect(result.recordId).toBeTruthy();
 
-    // No record yet — it's pending review.
+    // The row is live immediately, carrying the submitted values.
     const { records: after } = await client.records.list({});
-    expect(after.length).toBe(before.length);
-
-    // Merging the CR materializes the record with the submitted values.
-    await client.changeRequests.review({
-      changeRequestIds: [result.changeRequestId],
-      verdict: "approved",
-    });
-    await client.changeRequests.merge({ changeRequestIds: [result.changeRequestId] });
-    const { records: merged } = await client.records.list({});
-    expect(merged.length).toBe(before.length + 1);
+    expect(after.length).toBe(before.length + 1);
     expect(
-      merged.some((r) => (r.headCommit.payload as Record<string, unknown>).title === "Hello"),
+      after.some((r) => (r.headCommit.payload as Record<string, unknown>).title === "Hello"),
     ).toBe(true);
+
+    // And it went through the change-request pipeline rather than around it: the
+    // proposal is still there, merged, with the record_create operation on it.
+    const changeRequest = await client.changeRequests.get({
+      changeRequestId: result.changeRequestId,
+    });
+    expect(changeRequest.status).toBe("merged");
+    expect(changeRequest.operations.map((operation) => operation.operation)).toContain(
+      "record_create",
+    );
   });
 
   it("allows multiple forms for one Base and returns stable cursor pages", async () => {

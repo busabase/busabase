@@ -4,6 +4,7 @@ import {
   CLOUD_MCP_BASE_URL,
   createMcpAgentGuides,
   createMcpEndpoint,
+  defaultMcpModeFor,
   getDefaultCloudMcpBaseUrl,
   isSameMcpOrigin,
   isValidMcpBaseUrl,
@@ -15,6 +16,11 @@ import {
 } from "./agent-mcp-guides";
 
 describe("MCP endpoint selection", () => {
+  it("starts each edition on the endpoint that edition actually serves", () => {
+    expect(defaultMcpModeFor("cloud")).toBe("cloud");
+    expect(defaultMcpModeFor("desktop")).toBe("local");
+  });
+
   it("defaults Local to Desktop and Cloud to production on loopback hosts", () => {
     expect(LOCAL_MCP_BASE_URL).toBe("http://localhost:15419");
     expect(CLOUD_MCP_BASE_URL).toBe("https://busabase.com");

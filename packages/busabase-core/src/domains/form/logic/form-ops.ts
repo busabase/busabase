@@ -332,7 +332,7 @@ export const submitForm = async (
   nodeId: string,
   input: SubmitFormDTO,
   caller: { isAnonymous?: boolean } = {},
-): Promise<{ changeRequestId: string; status: "pending_review" }> => {
+): Promise<{ changeRequestId: string; status: "pending_review" | "merged"; recordId?: string }> => {
   const form = await getFormByNodeId(nodeId);
   if (!form) {
     throw formNotFound(nodeId);
@@ -398,16 +398,23 @@ export const submitForm = async (
     });
   }
 
-  const changeRequest = await createFormSubmissionChangeRequest(form.nodeId, form.targetBaseId, {
+  // `autoMerge` is deliberately omitted, so a submission follows the same
+  // permission-aware default as every other write: a member who can already edit
+  // the target Base gets their row straight away instead of having to approve
+  // their own submission, and everyone else waits for a reviewer. The public
+  // path stays safe one layer down, not here: `getEffectiveNodeLevel` resolves an
+  // anonymous request against the target BASE, which a form deliberately never
+  // shares — so it gets no level at all there, and a shared one would still cap
+  // at `read`. Both are decided from the request CONTEXT before any actor id is
+  // read, so no `submittedBy` value can buy a public submitter the `write` that
+  // auto-merging requires.
+  const result = await createFormSubmissionChangeRequest(form.nodeId, form.targetBaseId, {
     fields,
     message: `Form submission: ${form.name}`,
-    submittedBy: caller.isAnonymous ? ANONYMOUS_SUBMITTER : "local-producer",
-    // A form submission is inherently a "propose for review" action — it must
-    // land as a pending ChangeRequest for a human to approve, never a direct
-    // write. Force this regardless of the submitter's own write permission,
-    // overriding the permission-aware auto-merge default: a member filling in a
-    // shared form is still submitting for review, not editing the base.
-    autoMerge: false,
+    // Non-anonymous submissions leave `submittedBy` at its schema default, which
+    // `resolveActorId` replaces with the real actor on any host that resolved
+    // one; naming it here would only shadow that with the local-mode fallback.
+    ...(caller.isAnonymous ? { submittedBy: ANONYMOUS_SUBMITTER } : {}),
   });
 
   // Count the accepted submission (backs submitLimit). Done after the CR exists
@@ -418,7 +425,13 @@ export const submitForm = async (
     .set({ submissionCount: form.submissionCount + 1, updatedAt: now() })
     .where(eq(busabaseForms.id, form.id));
 
-  return { changeRequestId: changeRequest.id, status: "pending_review" };
+  return result.materialized
+    ? {
+        changeRequestId: result.changeRequestId,
+        status: "merged" as const,
+        recordId: result.id,
+      }
+    : { changeRequestId: result.id, status: "pending_review" as const };
 };
 
 // A Form's typed detail is just the node row — its bindings/page/share live on

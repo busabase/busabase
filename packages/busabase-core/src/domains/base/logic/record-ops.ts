@@ -601,7 +601,11 @@ const createChangeRequestInternal = async (
     if (!merged.record) {
       throw new Error("Auto-merge did not produce a record");
     }
-    return { ...merged.record, materialized: true as const };
+    // `changeRequestId` rides along for internal callers that have to report
+    // WHICH proposal landed even on the merged branch (the Form submit endpoint
+    // returns it either way). `recordSchema` does not declare the key, so the
+    // router's output parse drops it and the public shape is unchanged.
+    return { ...merged.record, changeRequestId, materialized: true as const };
   }
   return { ...changeRequest, materialized: false as const };
 };
@@ -613,14 +617,22 @@ export const createChangeRequest = async (baseId: string, input: CreateChangeReq
 /**
  * Form-only proposal entry. Form logic must authorize the Form before calling;
  * this function verifies the active Form still targets the Base, then creates
- * a pending proposal without exposing or sharing that Base with the visitor.
+ * the proposal without exposing or sharing that Base with the visitor.
+ *
+ * `autoMerge` is NOT pinned here: a submission follows the same permission-aware
+ * default as every other write, so a member who could edit the Base directly
+ * does not have to go and approve their own form submission. What keeps a PUBLIC
+ * form safe is the ACL layer, not this call site: `getEffectiveNodeLevel` answers
+ * for the target BASE, which a form never shares publicly, so an anonymous
+ * request resolves to no level there at all — and a shared node would still cap
+ * at `read`. `shouldAutoMerge` can therefore never see `write` for a visitor,
+ * regardless of the `submittedBy` they carry.
  */
 export const createFormSubmissionChangeRequest = async (
   formNodeId: string,
   baseId: string,
   input: CreateChangeRequestInput,
-) =>
-  createChangeRequestInternal(baseId, { ...input, autoMerge: false }, { kind: "form", formNodeId });
+) => createChangeRequestInternal(baseId, input, { kind: "form", formNodeId });
 
 /**
  * Propose many record creates as ONE change request: a single CR with N

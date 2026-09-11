@@ -17,6 +17,8 @@
  * rather than read off a screenshot.
  */
 
+import { renderAgentConnectionCheck } from "./agent-prompt-dispatch";
+
 /** The `source` a plan echoes back, narrowed to what a command line needs. */
 export interface AgentInstallSource {
   owner: string;
@@ -61,11 +63,22 @@ export interface AgentInstallPromptOptions {
   /** Cloud only: the exact space the agent must verify before installing. */
   targetSpaceId?: string;
   /**
-   * Localized body with `{name}`, `{command}`, `{setupUrl}`, and `{targetSpace}`
+   * Localized body with `{name}`, `{command}` and `{connectionCheck}`
    * placeholders — the dialog passes `messages.install.agentPromptBody`, so the
    * pasted text follows the UI language the way `createAgentSkillPrompt` does.
    */
   template: string;
+  /**
+   * The "is this environment even connected?" paragraph, shared verbatim with
+   * the node Agent-prompts dialog (`messages.agentPrompts.connectionCheck`).
+   *
+   * It lives in its own key rather than inline in `template` because both
+   * surfaces hand a prompt to an agent that may have never heard of this space,
+   * and two hand-maintained copies of that paragraph would drift the moment one
+   * of them is reworded. The install-specific lead-in ("Before installing, ")
+   * stays inside `template`, so this reads as one sentence in either caller.
+   */
+  connectionCheck: string;
   fmt: (template: string, values: Record<string, string>) => string;
 }
 
@@ -76,11 +89,20 @@ export const buildAgentInstallPrompt = ({
   setupUrl,
   targetSpaceId,
   template,
+  connectionCheck,
   fmt,
 }: AgentInstallPromptOptions): string =>
   fmt(template, {
     name: skillNameForSource(source) ?? packageName,
     command: buildAgentInstallCommand(source),
-    setupUrl,
-    targetSpace: targetSpaceId ? ` (${targetSpaceId})` : "",
+    // Rendered FIRST, then spliced in: `fmt` is a single pass whose replacements
+    // are not rescanned, so `{setupUrl}`/`{targetSpace}` inside the shared
+    // paragraph would survive as literal braces if they were left to the outer
+    // call. Same reason `renderAgentConnectionCheck` exists at all.
+    connectionCheck: renderAgentConnectionCheck({
+      connectionCheck,
+      fmt,
+      setupUrl,
+      targetSpaceId,
+    }),
   });

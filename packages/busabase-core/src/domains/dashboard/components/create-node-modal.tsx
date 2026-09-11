@@ -20,10 +20,12 @@ import { ArrowRight } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useLocation } from "wouter";
 import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
+import type { CoreI18nMessages } from "../../../i18n/messages";
 import { TemplateGrid } from "../../templates/components/template-grid";
 import { buildCreateNodePrompts } from "../helpers/node-agent-prompts";
 import { nodeIconForId } from "../helpers/node-icons";
 import { useAttachmentUpload } from "../hooks/use-attachment-upload";
+import type { AgentIntegrationTarget } from "./agent-install-panel";
 import { AgentPromptsView } from "./agent-prompts-view";
 import { resolveSpaceId } from "./node-agent-prompts-dialog";
 import { SplitSubmitButton } from "./split-submit-button";
@@ -36,9 +38,51 @@ const CREATABLE_TYPES = listNodeTypes()
   .filter((definition) => definition.capabilities.creatable && !definition.capabilities.hidden)
   .map((definition) => ({
     type: definition.type as CreatableNodeType,
-    label: definition.label,
     icon: nodeIconForId(definition.icon),
+    common: Boolean(definition.capabilities.commonlyCreated),
   }));
+
+// The few whose name alone is enough to choose correctly, and everything else —
+// present, one click behind "More types". Both derived from the registry, so a
+// new node type lands in the right group without editing this dialog.
+const COMMON_TYPES = CREATABLE_TYPES.filter((entry) => entry.common);
+const UNCOMMON_TYPES = CREATABLE_TYPES.filter((entry) => !entry.common);
+// Common first, then the rest — so expanding APPENDS rather than reshuffles, and
+// the four tiles someone has already learned the position of stay put.
+const ORDERED_TYPES = [...COMMON_TYPES, ...UNCOMMON_TYPES];
+
+/**
+ * The node types the picker has copy for — one key per registered type. Both
+ * catalogs below are indexed by it, so adding a node type surfaces here as a
+ * missing-key type error instead of an unlabelled tile.
+ */
+type NodeTypeCopyKey = keyof CoreI18nMessages["createNode"]["typeHints"];
+
+/**
+ * A node type's display name and one-line hint, in the active language.
+ *
+ * The registry's `label` is a hardcoded English identifier (`"Folder"`), which
+ * is why a zh-CN user was looking at eleven English words: the picker rendered
+ * that identifier directly. The translated names already existed — every locale
+ * catalog carries `nodeDetail.<type>` and has for a long time — so this only
+ * has to look them up. The hint is new copy, and is the part that answers the
+ * question the name cannot ("Base or Doc? Drive or Folder?").
+ */
+const useTypeCopy = () => {
+  const messages = useCoreI18n();
+  // Keyed off `typeHints`, not off `CreatableNodeType`: the registry's derived
+  // union has widened to plain `string` (its `Extract<…>` no longer narrows), so
+  // it would index these catalogs as `any`. The hint record has exactly one key
+  // per node type, so using ITS keys means a type added to the registry without
+  // copy is a compile error here rather than a blank tile at runtime.
+  return (type: string) => {
+    const key = type as NodeTypeCopyKey;
+    return {
+      name: messages.nodeDetail[key] ?? messages.nodeDetail.item,
+      hint: messages.createNode.typeHints[key] ?? "",
+    };
+  };
+};
 
 /**
  * Short, stable, ASCII-safe token derived from a string — the fallback used when
@@ -102,6 +146,14 @@ interface CreateNodeModalProps {
   orpc?: BusabaseQueryUtils | null;
   spaceId?: string;
   spaceName?: string;
+  /**
+   * Which edition/space the copied create-prompt should tell an agent to connect
+   * to — the same value the host already passes `InstallFromGithubModal`.
+   *
+   * A prop rather than the dashboard's `AgentIntegrationProvider` because hosts
+   * render this modal as a sibling of `BusabaseDashboard`, not inside it.
+   */
+  agentIntegration?: AgentIntegrationTarget;
 }
 
 export function CreateNodeModal({
@@ -114,6 +166,7 @@ export function CreateNodeModal({
   orpc = null,
   spaceId,
   spaceName,
+  agentIntegration,
 }: CreateNodeModalProps) {
   const messages = useCoreI18n();
   const locale = useCoreLocale();
@@ -129,6 +182,12 @@ export function CreateNodeModal({
 
   const activeType =
     CREATABLE_TYPES.find((entry) => entry.type === selectedType) ?? CREATABLE_TYPES[0];
+  const typeCopy = useTypeCopy();
+  const activeTypeName = activeType ? typeCopy(activeType.type).name : messages.nodeDetail.item;
+  // Expanded when the current selection lives in the "More" group, so reopening
+  // the dialog after picking (say) a Whiteboard never hides what is selected.
+  const [showAllTypes, setShowAllTypes] = useState(false);
+  const typesExpanded = showAllTypes || UNCOMMON_TYPES.some((entry) => entry.type === selectedType);
   const uploadAttachment = useAttachmentUpload(apiClient);
 
   // Deliberately NOT filtered by `selectedType`: someone on this tab is here
@@ -240,7 +299,7 @@ export function CreateNodeModal({
       const changeRequest = await apiClient.createNodeChangeRequest({
         message: fmt(messages.createNode.message, {
           name: trimmedName,
-          type: activeType?.label ?? "item",
+          type: activeTypeName,
         }),
         operations: buildOperations(trimmedName, finalSlug, metadata),
         autoMerge: false,
@@ -276,7 +335,7 @@ export function CreateNodeModal({
         autoMerge: true,
         message: fmt(messages.createNode.message, {
           name: trimmedName,
-          type: activeType?.label ?? "item",
+          type: activeTypeName,
         }),
         operations: buildOperations(trimmedName, finalSlug, metadata),
       });
@@ -325,16 +384,18 @@ export function CreateNodeModal({
                 ? fmt(messages.createNode.descriptionInParent, { name: parent.name })
                 : messages.createNode.description}
             </DialogDescription>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-6">
-              {CREATABLE_TYPES.map((entry) => {
+            {/* Two columns, not six: each tile now carries a sentence, and six
+                across left no room for one. The trade is deliberate — a wider
+                tile a user can read beats a denser grid they cannot. */}
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {(typesExpanded ? ORDERED_TYPES : COMMON_TYPES).map((entry) => {
                 const Icon = entry.icon;
                 const isSelected = entry.type === selectedType;
+                const { name: typeName, hint } = typeCopy(entry.type);
                 return (
                   <button
-                    className={`flex min-w-0 flex-col items-center gap-1.5 rounded-md border px-2 py-3 text-xs transition-colors ${
-                      isSelected
-                        ? "border-primary bg-primary/10 text-foreground"
-                        : "text-muted-foreground hover:bg-muted"
+                    className={`flex min-w-0 items-start gap-2.5 rounded-md border px-3 py-2.5 text-left transition-colors ${
+                      isSelected ? "border-primary bg-primary/10" : "border-border hover:bg-muted"
                     }`}
                     key={entry.type}
                     onClick={() => {
@@ -343,12 +404,37 @@ export function CreateNodeModal({
                     }}
                     type="button"
                   >
-                    <Icon className="size-5" />
-                    {entry.label}
+                    <Icon
+                      className={`mt-0.5 size-5 shrink-0 ${
+                        isSelected ? "text-foreground" : "text-muted-foreground"
+                      }`}
+                    />
+                    <span className="flex min-w-0 flex-col gap-0.5">
+                      <span className="font-medium text-foreground text-sm">{typeName}</span>
+                      {hint ? (
+                        <span className="text-muted-foreground text-xs leading-4">{hint}</span>
+                      ) : null}
+                    </span>
                   </button>
                 );
               })}
             </div>
+            {UNCOMMON_TYPES.length > 0 ? (
+              <button
+                aria-expanded={typesExpanded}
+                className="self-start rounded-md px-1 py-0.5 text-muted-foreground text-xs transition-colors hover:text-foreground disabled:opacity-50"
+                // Collapsing is disabled while the selection lives in the
+                // expanded group — hiding what is currently selected would be a
+                // worse state than an over-long list.
+                disabled={typesExpanded && !showAllTypes}
+                onClick={() => setShowAllTypes((current) => !current)}
+                type="button"
+              >
+                {typesExpanded
+                  ? messages.createNode.fewerTypes
+                  : fmt(messages.createNode.moreTypes, { count: UNCOMMON_TYPES.length })}
+              </button>
+            ) : null}
 
             <div className="flex flex-col gap-1.5 text-sm">
               <span className="text-muted-foreground">{messages.common.name}</span>
@@ -361,7 +447,7 @@ export function CreateNodeModal({
                   }
                 }}
                 placeholder={fmt(messages.createNode.itemNamePlaceholder, {
-                  type: activeType?.label ?? messages.nodeDetail.item,
+                  type: activeTypeName,
                 })}
                 value={name}
               />
@@ -424,7 +510,7 @@ export function CreateNodeModal({
               <SplitSubmitButton
                 changeRequestAction={{
                   label: fmt(messages.createNode.createRequest, {
-                    type: activeType?.label ?? "",
+                    type: activeTypeName,
                   }),
                   loadingLabel: messages.createNode.creating,
                   onSubmit: submitAsChangeRequest,
@@ -446,6 +532,7 @@ export function CreateNodeModal({
           <TabsContent className="mt-0 flex flex-col gap-3" value="agent">
             <p className="text-muted-foreground text-sm">{messages.createNode.agentTabHint}</p>
             <AgentPromptsView
+              agentIntegration={agentIntegration}
               askAgent={orpc ? { orpc, sessionScopeId: askAgentScopeId } : null}
               capabilities={createPrompts.capabilities}
               onHandedOff={() => onOpenChange(false)}

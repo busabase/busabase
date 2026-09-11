@@ -184,6 +184,13 @@ export function InstallFromGithubModal({
   const [rename, setRename] = useState(false);
   const [autoMerge, setAutoMerge] = useState(false);
   const [installing, setInstalling] = useState(false);
+  /**
+   * The latest line the server reported for the install in flight.
+   *
+   * Only the latest, not a log: the passes are sequential and the useful
+   * question during a wait is "what is it doing NOW", not what it already did.
+   */
+  const [installProgress, setInstallProgress] = useState<string | null>(null);
   const [result, setResult] = useState<InstallResultVO | null>(null);
   const [error, setError] = useState<string | null>(null);
   /**
@@ -218,6 +225,7 @@ export function InstallFromGithubModal({
     setRename(false);
     setAutoMerge(false);
     setInstalling(false);
+    setInstallProgress(null);
     setResult(null);
     setError(null);
     setWorkspaceTouchedByFailure(false);
@@ -302,13 +310,24 @@ export function InstallFromGithubModal({
     setInstalling(true);
     setError(null);
     setWorkspaceTouchedByFailure(false);
+    setInstallProgress(null);
     try {
-      const installed = await apiClient.installFromGithub({
+      // Streamed, not awaited as one response: a big template takes long enough
+      // that a single silent request is closed by whatever proxy sits in front
+      // of the app — the install then finishes server-side while the user is
+      // told it failed. The events also give them something true to look at.
+      const events = await apiClient.installFromGithubStream({
         repoUrl: repoUrl.trim(),
         ...(trimmedFolder ? { intoFolder: trimmedFolder } : {}),
         rename,
         autoMerge,
       });
+      let installed: InstallResultVO | null = null;
+      for await (const event of events) {
+        if (event.kind === "progress") setInstallProgress(event.message);
+        else installed = event.result;
+      }
+      if (!installed) throw new Error(messages.install.installFailed);
       setResult(installed);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : messages.install.installFailed);
@@ -654,7 +673,7 @@ export function InstallFromGithubModal({
                   }`}
                 >
                   <LoaderCircle className={installing ? "size-4 animate-spin" : "size-4"} />
-                  {messages.install.installingHint}
+                  {installProgress ?? messages.install.installingHint}
                 </p>
               ) : null}
             </>

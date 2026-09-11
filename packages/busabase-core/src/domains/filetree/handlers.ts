@@ -852,6 +852,63 @@ export const readFileTreeFile = async (
   };
 };
 
+export interface DriveFilePreviewSource {
+  nodeId: string;
+  path: string;
+  assetId: string;
+  storageKey: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  contentHash: string | null;
+}
+
+/**
+ * Resolve one Drive file through the same node ACL as `readFileTreeFile`.
+ * The metadata-only query lets the preview service reject oversized files
+ * before object storage is asked for the bytes.
+ */
+export const readDriveFilePreviewSource = async (
+  config: FileTreeKindConfig,
+  nodeIdOrSlug: string,
+  filePath: string,
+): Promise<DriveFilePreviewSource> => {
+  await ensureReady();
+  if (config.type !== "drive") {
+    throw new ORPCError("NOT_FOUND", { message: `Drive not found: ${nodeIdOrSlug}` });
+  }
+
+  const db = await getDb();
+  const node = await getStorageFileTreeNode("drive", nodeIdOrSlug);
+  if (!node) throw fileTreeNodeNotFound(config, nodeIdOrSlug);
+
+  const path = normalizeUsagePath(filePath);
+  const [row] = await db
+    .select({
+      assetId: busabaseAssets.id,
+      storageKey: attachments.storageKey,
+      fileName: attachments.fileName,
+      mimeType: attachments.mimeType,
+      sizeBytes: attachments.sizeBytes,
+      contentHash: attachments.contentHash,
+    })
+    .from(busabaseAssetUsages)
+    .innerJoin(busabaseAssets, eq(busabaseAssetUsages.assetId, busabaseAssets.id))
+    .innerJoin(attachments, eq(busabaseAssets.attachmentId, attachments.id))
+    .where(
+      and(
+        eq(busabaseAssetUsages.spaceId, getContextSpaceId()),
+        eq(busabaseAssetUsages.ownerType, usageOwnerType("drive")),
+        eq(busabaseAssetUsages.nodeId, node.id),
+        eq(busabaseAssetUsages.path, path),
+      ),
+    )
+    .limit(1);
+  if (!row) throw fileTreeFileNotFound(config, path);
+
+  return { nodeId: node.id, path, ...row };
+};
+
 export const createFileTreeChangeRequest = async (
   config: FileTreeKindConfig,
   nodeIdOrSlug: string,

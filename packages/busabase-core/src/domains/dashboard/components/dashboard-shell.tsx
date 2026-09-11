@@ -40,6 +40,7 @@ import type { MoveNodePayload } from "../hooks/use-move-node";
 import { DashboardOrpcProvider } from "../orpc-context";
 import { parseNodeDetailRoute } from "../utils/node-route";
 import { getSidebarTopLevelNodes } from "../utils/sidebar-node-tree";
+import type { AgentIntegrationTarget } from "./agent-install-panel";
 import { NodeDeleteDialog } from "./file-tree-browser";
 import { NodeAgentPromptsDialog } from "./node-agent-prompts-dialog";
 import { NodeMoveDialog } from "./node-move-dialog";
@@ -152,6 +153,10 @@ export type BusabaseDashboardChrome = Omit<
   | "defaultOpen"
 >;
 
+// Re-exported so a host's shell adapter can type its own forwarding prop without
+// reaching past the package's exports map into `agent-install-panel`.
+export type { AgentIntegrationTarget };
+
 interface BusabaseDashboardShellProps {
   children: ReactNode;
   nodes: NodeVO[];
@@ -216,6 +221,16 @@ interface BusabaseDashboardShellProps {
    * up front, in which case the local walk alone is already authoritative.
    */
   checkIsDescendant?: (params: { nodeId: string; potentialAncestorId: string }) => Promise<boolean>;
+  /**
+   * Which edition/space the sidebar's Agent-prompts dialog should tell an agent
+   * to connect to — the same value the host already passes `BusabaseDashboard`.
+   *
+   * Needed as a prop because the shell is chrome AROUND the dashboard, so it
+   * sits outside the `AgentIntegrationProvider` mounted there. Omit it and the
+   * sidebar row's prompts would be the one place that copies out a prompt with
+   * no connection check.
+   */
+  agentIntegration?: AgentIntegrationTarget;
 }
 
 /**
@@ -238,6 +253,7 @@ export function BusabaseDashboardShell({
   loadingNodeIds,
   onExpandNode,
   checkIsDescendant,
+  agentIntegration,
 }: BusabaseDashboardShellProps) {
   // The node targeted by the sidebar "•••" → Settings/Rename/Permissions
   // actions; drives the one shared `NodeSettingsDialog` rendered below (only
@@ -844,6 +860,7 @@ export function BusabaseDashboardShell({
           // prompts dialog would be the one place with no Ask Agent button.
           <DashboardOrpcProvider orpc={orpc}>
             <NodeAgentPromptsDialog
+              agentIntegration={agentIntegration}
               orpc={orpc ?? null}
               nodeId={promptsTarget.id}
               nodeName={promptsTarget.name}

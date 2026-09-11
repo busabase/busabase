@@ -1,7 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { NodeType } from "busabase-contract/domains";
-import type { NodeSearchResultVO, SearchResultKind, SearchResultVO } from "busabase-contract/types";
+import type {
+  NodeSearchResultVO,
+  NodeVO,
+  SearchResultKind,
+  SearchResultVO,
+} from "busabase-contract/types";
 import { Kbd } from "kui/kbd";
 import { Tabs, TabsList, TabsTrigger } from "kui/tabs";
 import { cn } from "kui/utils";
@@ -23,25 +28,37 @@ import {
   fuzzyMatchKnownNodes,
   type KnownNode,
   type KnownNodeCache,
+  nodeRoutePath,
 } from "../helpers/known-node-cache";
 import { mergeSearchIntoHref } from "../helpers/link-search";
-import { nodeIconForType } from "../helpers/node-icons";
+import { NodeAvatar } from "../helpers/node-icons";
+import { filterNodeListByQuery } from "../helpers/node-list-search";
 import { normalizeSearchText, searchKindIcon } from "../helpers/search";
+import {
+  isContentSearchTab,
+  isNodeListTab,
+  type NodeListTab,
+  type SearchTab,
+  searchTabsFor,
+} from "../helpers/search-tabs";
+import { useIsAnonymousVisitor } from "../visitor-context";
 import { EmptyState } from "./primitives";
 
 // "Recent" replaces the old static-tiles "Bases" landing tab — it's a
 // keyboard-first quick-jump over every node the dashboard has ever shown the
 // user, not a full-text-content search. It's selected by default whenever the
 // dialog opens.
-type SearchTab = "recent" | "all" | "records" | "files" | "change_requests";
-const SEARCH_TABS: SearchTab[] = ["recent", "all", "records", "files", "change_requests"];
 const TAB_KIND: Record<SearchTab, SearchResultKind | null> = {
   recent: null,
   all: null,
   records: "record",
   files: "file",
+  skills: null,
+  apps: null,
   change_requests: "change_request",
 };
+
+const NODE_TYPE_FOR_TAB: Record<NodeListTab, NodeType> = { skills: "skill", apps: "airapp" };
 
 /**
  * One shared shape every result row renders from, regardless of which tab
@@ -80,18 +97,35 @@ const searchResultToDisplay = (result: SearchResultVO): DisplayResult => ({
   icon: searchKindIcon[result.kind],
 });
 
-const knownNodeToDisplay = (node: KnownNode): DisplayResult => {
-  const Icon = nodeIconForType(node.type);
-  return {
-    key: node.id,
-    id: node.id,
-    href: node.path,
-    title: node.name,
-    eyebrow: node.slug,
-    icon: <Icon className="size-4" />,
-    nodeType: node.type,
-  };
-};
+const knownNodeToDisplay = (node: KnownNode): DisplayResult => ({
+  key: node.id,
+  id: node.id,
+  href: node.path,
+  title: node.name,
+  eyebrow: node.slug,
+  icon: <NodeAvatar node={node} />,
+  nodeType: node.type,
+});
+
+const nodeVOToDisplay = (node: NodeVO): DisplayResult => ({
+  key: node.id,
+  id: node.id,
+  href: nodeRoutePath(node.type, node.slug),
+  title: node.name,
+  body: node.description || undefined,
+  eyebrow: node.slug,
+  icon: <NodeAvatar node={node} />,
+  nodeType: node.type,
+});
+
+const nodeVOToKnownNode = (node: NodeVO): KnownNode => ({
+  id: node.id,
+  type: node.type,
+  name: node.name,
+  slug: node.slug,
+  path: nodeRoutePath(node.type, node.slug),
+  icon: node.icon,
+});
 
 const nodeSearchResultToKnownNode = (result: NodeSearchResultVO): KnownNode => ({
   id: result.id,
@@ -99,6 +133,7 @@ const nodeSearchResultToKnownNode = (result: NodeSearchResultVO): KnownNode => (
   name: result.name,
   slug: result.slug,
   path: result.path,
+  icon: result.icon,
 });
 
 export function SearchDialog({
@@ -122,6 +157,11 @@ export function SearchDialog({
   onSelect?: (result: DisplayResult) => void;
 }) {
   const messages = useCoreI18n();
+  // Anonymous (public-link) visitors get a narrower tab set — see
+  // `searchTabsFor`. Read from context, which defaults to "member", so every
+  // host that never opts in is unaffected.
+  const isAnonymousVisitor = useIsAnonymousVisitor();
+  const visibleTabs = useMemo(() => searchTabsFor(isAnonymousVisitor), [isAnonymousVisitor]);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
@@ -175,16 +215,17 @@ export function SearchDialog({
   // shrinking/growing list, not "same length, different items."
   // biome-ignore lint/correctness/useExhaustiveDependencies: query intentionally re-triggers this on every keystroke; it isn't read in the body
   useEffect(() => {
-    if (tab === "recent") setHighlightedIndex(0);
+    if (tab === "recent" || isNodeListTab(tab)) setHighlightedIndex(0);
   }, [tab, query]);
 
-  // Content-search tabs' backend call — UNCHANGED from before this redesign,
-  // except it's now paused while the Recent tab is active: Recent's whole
-  // point is to stay cheap (local cache, or the lightweight `nodes.searchByName`
-  // fallback below), never the heavier full-text/asset-scan `search` procedure.
+  // Content-search tabs' backend call, paused on every tab that does not read
+  // it: Recent's whole point is to stay cheap (local cache, or the lightweight
+  // `nodes.searchByName` fallback below), and Skills/Apps read their own
+  // `nodes.list` instead — firing the full-text/asset-scan `search` procedure
+  // from either would pay for a response nothing renders.
   const searchQuery = useQuery({
     ...orpc.search.queryOptions({ input: { query: debouncedQuery, limit, offset: 0 } }),
-    enabled: open && tab !== "recent" && debouncedQuery.length > 0,
+    enabled: open && isContentSearchTab(tab) && debouncedQuery.length > 0,
   });
   const response = searchQuery.data ?? null;
   // Node content is indexed only up to a cap, so a thin or empty result is not
@@ -204,9 +245,15 @@ export function SearchDialog({
     change_requests: messages.search.changeRequests,
     files: messages.nodeDetail.files,
     records: messages.search.records,
+    skills: messages.search.skills,
+    apps: messages.search.apps,
   };
 
-  // "All" tab excludes change_request; other content tabs filter by kind.
+  // "Content" tab (label "Content", key stays "all" internally) merges every
+  // CONTENT kind `search` can return, excluding change_request; other content
+  // tabs filter by a single kind. It carries no Skills/Apps — `search` has no
+  // "skill"/"airapp" result kind, those come from the separate `nodes.list`
+  // source the two node-list tabs read (see `helpers/search-tabs.ts`).
   const contentSearchResults = useMemo(() => {
     if (tab === "all") return allResults.filter((r) => r.kind !== "change_request");
     const kind = TAB_KIND[tab];
@@ -264,6 +311,44 @@ export function SearchDialog({
     }
   }, [nodeCache, recentNetworkResults]);
 
+  // Skills / Apps tabs. One request per tab, fetched only while that tab is
+  // open and then filtered locally on every keystroke. The input is byte-identical
+  // to `AppsListView`'s (`{ types: ["airapp"] }`), which is what makes React
+  // Query hand back the App Launcher's already-cached list instead of refetching
+  // it — and keeps the two surfaces from ever disagreeing about what exists.
+  const skillsQuery = useQuery({
+    ...orpc.nodes.list.queryOptions({ input: { types: [NODE_TYPE_FOR_TAB.skills] } }),
+    enabled: open && tab === "skills" && !isAnonymousVisitor,
+  });
+  const appsQuery = useQuery({
+    ...orpc.nodes.list.queryOptions({ input: { types: [NODE_TYPE_FOR_TAB.apps] } }),
+    enabled: open && tab === "apps" && !isAnonymousVisitor,
+  });
+  // Matched against the RAW `query`, never `debouncedQuery`: this is a local
+  // array scan, so debouncing it would add lag with nothing to save.
+  const skillMatches = useMemo(
+    () => filterNodeListByQuery(skillsQuery.data ?? [], query),
+    [skillsQuery.data, query],
+  );
+  const appMatches = useMemo(
+    () => filterNodeListByQuery(appsQuery.data ?? [], query),
+    [appsQuery.data, query],
+  );
+  const nodeListTab: NodeListTab | null = isNodeListTab(tab) ? tab : null;
+  const nodeListQuery =
+    nodeListTab === "skills" ? skillsQuery : nodeListTab === "apps" ? appsQuery : null;
+  const nodeListMatches =
+    nodeListTab === "skills" ? skillMatches : nodeListTab === "apps" ? appMatches : [];
+
+  // Same "the app gets faster the more it's used" fold-back the Recent tab does
+  // with its `nodes.searchByName` hits: every Skill/App listed here becomes a
+  // Recent-tab quick-jump target, including ones sitting below the sidebar
+  // tree's lazily-loaded depth that the tree itself never merged.
+  useEffect(() => {
+    const listed = [...(skillsQuery.data ?? []), ...(appsQuery.data ?? [])];
+    if (listed.length > 0) nodeCache.merge(listed.map(nodeVOToKnownNode));
+  }, [nodeCache, skillsQuery.data, appsQuery.data]);
+
   const visibleResults: DisplayResult[] = useMemo(() => {
     if (tab === "recent") {
       const source = recentUsesNetworkFallback
@@ -271,31 +356,54 @@ export function SearchDialog({
         : recentLocalMatches;
       return source.map(knownNodeToDisplay);
     }
+    if (nodeListTab) return nodeListMatches.map(nodeVOToDisplay);
     return contentSearchResults.map(searchResultToDisplay);
   }, [
     tab,
     recentUsesNetworkFallback,
     recentNetworkResults,
     recentLocalMatches,
+    nodeListTab,
+    nodeListMatches,
     contentSearchResults,
   ]);
 
-  // Tab result counts (for badges). Recent's own count is always cheap to
-  // compute (local cache, or the live network-fallback result); the OTHER
-  // tabs' counts depend on `allResults`, which is only ever fetched while a
-  // content-search tab is active (see `searchQuery.enabled` above) — showing
-  // them while sitting on Recent would be a stale/misleading zero, so they're
-  // hidden until the user actually switches to a content-search tab.
+  // Tab result counts (for badges) — `null` means "this number cannot be
+  // trusted right now", which is a different thing from zero and must not be
+  // rendered as one.
+  //
+  // Recent's own count is always cheap to compute (local cache, or the live
+  // network-fallback result), and Skills/Apps can be counted from their own
+  // client-side list as soon as it has loaded — even from another tab, and
+  // even with no query, where the number is simply "how many you own".
+  // The CONTENT tabs' counts all come from `allResults`, which is only ever
+  // fetched while a content-search tab is active (see `searchQuery.enabled`),
+  // so anywhere else they would be a stale, misleading zero.
   const tabCount = useCallback(
-    (t: SearchTab) => {
+    (t: SearchTab): number | null => {
+      if (t === "skills") return skillsQuery.data ? skillMatches.length : null;
+      if (t === "apps") return appsQuery.data ? appMatches.length : null;
+      if (!hasQuery) return null;
       if (t === "recent") {
         return recentUsesNetworkFallback ? recentNetworkResults.length : recentLocalMatches.length;
       }
+      if (!isContentSearchTab(tab)) return null;
       if (t === "all") return allResults.filter((r) => r.kind !== "change_request").length;
       const kind = TAB_KIND[t];
       return kind ? allResults.filter((r) => r.kind === kind).length : allResults.length;
     },
-    [allResults, recentUsesNetworkFallback, recentNetworkResults, recentLocalMatches],
+    [
+      allResults,
+      appMatches.length,
+      appsQuery.data,
+      hasQuery,
+      recentUsesNetworkFallback,
+      recentNetworkResults,
+      recentLocalMatches,
+      skillMatches.length,
+      skillsQuery.data,
+      tab,
+    ],
   );
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset highlight when tab changes
@@ -311,12 +419,20 @@ export function SearchDialog({
     setHighlightedIndex((i) => Math.min(i, visibleResults.length - 1));
   }, [visibleResults.length]);
 
-  const switchTab = useCallback((direction: 1 | -1) => {
-    setTab((current) => {
-      const idx = SEARCH_TABS.indexOf(current);
-      return SEARCH_TABS[(idx + direction + SEARCH_TABS.length) % SEARCH_TABS.length] as SearchTab;
-    });
-  }, []);
+  // Cycles the VISIBLE tabs: walking the full list would let Tab land on a tab
+  // this visitor cannot see, with no way back out of it.
+  const switchTab = useCallback(
+    (direction: 1 | -1) => {
+      setTab((current) => {
+        const idx = visibleTabs.indexOf(current);
+        const from = idx === -1 ? 0 : idx;
+        return visibleTabs[
+          (from + direction + visibleTabs.length) % visibleTabs.length
+        ] as SearchTab;
+      });
+    },
+    [visibleTabs],
+  );
 
   // ONE shared selection path for BOTH keyboard Enter and mouse click (fixes
   // the bug where Enter built a synthetic anchor from the raw `href`,
@@ -387,10 +503,39 @@ export function SearchDialog({
   }
 
   const isRecentTab = tab === "recent";
-  const showLoadingIndicator = isRecentTab
-    ? recentIsSearching && visibleResults.length === 0
-    : isSearching && visibleResults.length === 0;
-  const visibleError = isRecentTab ? recentSearchError : searchError;
+  const nodeListError =
+    nodeListQuery?.isError === true
+      ? nodeListQuery.error instanceof Error
+        ? nodeListQuery.error.message
+        : messages.search.failed
+      : null;
+  const showLoadingIndicator =
+    (nodeListQuery ? nodeListQuery.isPending : isRecentTab ? recentIsSearching : isSearching) &&
+    visibleResults.length === 0;
+  const visibleError = nodeListQuery
+    ? nodeListError
+    : isRecentTab
+      ? recentSearchError
+      : searchError;
+
+  // Skills/Apps land on their full list, so — like Recent — they have something
+  // to show before a single character is typed.
+  const showsResultsWithoutQuery = isRecentTab || nodeListTab !== null;
+  const emptyState =
+    nodeListTab && !hasQuery
+      ? nodeListTab === "skills"
+        ? { title: messages.search.noSkillsTitle, body: messages.search.noSkillsBody }
+        : { title: messages.search.noAppsTitle, body: messages.search.noAppsBody }
+      : nodeListTab
+        ? { title: messages.search.noMatchesTitle, body: messages.search.noNodeMatchesBody }
+        : isRecentTab && !hasQuery
+          ? { title: messages.search.noRecentTitle, body: messages.search.noRecentBody }
+          : {
+              title: messages.search.noMatchesTitle,
+              body: contentTruncated
+                ? messages.search.partialContentBody
+                : messages.search.noMatchesBody,
+            };
 
   return (
     <div
@@ -437,14 +582,14 @@ export function SearchDialog({
             setHighlightedIndex(0);
           }}
         >
-          <TabsList className="h-auto w-full justify-start gap-0.5 border-b bg-transparent px-2 py-2 sm:gap-1 sm:px-3">
-            {SEARCH_TABS.map((t) => {
-              const count = hasQuery && (t === "recent" || tab !== "recent") ? tabCount(t) : null;
+          <TabsList className="h-auto w-full justify-start gap-0.5 overflow-x-auto border-b bg-transparent px-2 py-2 sm:gap-1 sm:px-3">
+            {visibleTabs.map((t) => {
+              const count = tabCount(t);
               return (
                 <TabsTrigger
                   key={t}
                   value={t}
-                  className="group h-7 gap-1 rounded-lg px-1.5 font-medium text-muted-foreground text-xs shadow-none transition-colors data-[state=active]:bg-muted data-[state=active]:text-foreground data-[state=active]:shadow-none sm:gap-1.5 sm:px-2.5 sm:text-[13px]"
+                  className="group h-7 shrink-0 gap-1 rounded-lg px-1.5 font-medium text-muted-foreground text-xs shadow-none transition-colors data-[state=active]:bg-muted data-[state=active]:text-foreground data-[state=active]:shadow-none sm:gap-1.5 sm:px-2.5 sm:text-[13px]"
                 >
                   {tabLabel[t]}
                   {count !== null && count > 0 && (
@@ -463,7 +608,7 @@ export function SearchDialog({
 
         {/* Results area */}
         <div className="min-h-52 overflow-auto px-3 py-3">
-          {isRecentTab || hasQuery ? (
+          {showsResultsWithoutQuery || hasQuery ? (
             <div>
               {visibleError ? (
                 <div className="mb-3 rounded-lg border border-rejected/35 bg-rejected/17 px-3 py-2 text-rejected-strong text-sm">
@@ -487,7 +632,7 @@ export function SearchDialog({
                       />
                     ))}
                   </div>
-                  {!isRecentTab && response?.hasMore && tab !== "change_requests" ? (
+                  {isContentSearchTab(tab) && response?.hasMore && tab !== "change_requests" ? (
                     <button
                       className="mt-3 rounded-lg border bg-card px-3 py-2 font-medium text-sm transition-colors hover:bg-accent/40 disabled:opacity-60"
                       disabled={isSearching}
@@ -499,20 +644,7 @@ export function SearchDialog({
                   ) : null}
                 </>
               ) : (
-                <EmptyState
-                  title={
-                    isRecentTab && !hasQuery
-                      ? messages.search.noRecentTitle
-                      : messages.search.noMatchesTitle
-                  }
-                  body={
-                    isRecentTab && !hasQuery
-                      ? messages.search.noRecentBody
-                      : contentTruncated
-                        ? messages.search.partialContentBody
-                        : messages.search.noMatchesBody
-                  }
-                />
+                <EmptyState body={emptyState.body} title={emptyState.title} />
               )}
             </div>
           ) : (

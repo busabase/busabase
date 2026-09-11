@@ -14,6 +14,7 @@ export default defineConfig({
     // run — it looks green because it never executed. Add the directory when you add the test.
     include: [
       "tests/**/*.test.ts",
+      "src/domains/agents/components/**/*.test.tsx",
       "src/domains/agents/logic/**/*.test.ts",
       "src/domains/agents/utils/**/*.test.ts",
       "src/domains/airapp/logic/**/*.test.ts",
@@ -26,6 +27,8 @@ export default defineConfig({
       "src/domains/dashboard/utils/**/*.test.ts",
       "src/domains/dashboard/components/**/*.test.tsx",
       "src/domains/embed-links/**/*.test.ts",
+      "src/domains/filetree/utils/**/*.test.ts",
+      "src/domains/form/utils/**/*.test.ts",
       "src/domains/rich-node/utils/**/*.test.ts",
       "src/domains/templates/components/**/*.test.tsx",
       "src/domains/templates/logic/**/*.test.ts",

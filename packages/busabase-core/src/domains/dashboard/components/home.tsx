@@ -25,7 +25,7 @@ import {
 } from "../helpers/home";
 import type { KnownNode, KnownNodeCache } from "../helpers/known-node-cache";
 import { useHrefWithCurrentSearch } from "../helpers/link-search";
-import { nodeIconForType } from "../helpers/node-icons";
+import { NodeAvatar } from "../helpers/node-icons";
 import { ActivityRow } from "./activity";
 import { InboxListSkeleton } from "./skeletons";
 
@@ -130,17 +130,21 @@ function PendingReviewRow({ changeRequest }: { changeRequest: ChangeRequestVO })
 
 function RecentNodeCard({ node }: { node: KnownNode }) {
   const href = useHrefWithCurrentSearch(node.path);
-  const Icon = nodeIconForType(node.type);
 
   return (
     <Link
       className="group flex min-w-0 items-center gap-2.5 rounded-lg border border-border/60 bg-card px-3 py-2.5 transition-colors hover:border-border hover:bg-accent/25"
       href={href}
     >
-      <Icon
+      {/* Same avatar resolution the Search dialog's rows use — a custom icon
+          set on this node must look the same here as it does everywhere else
+          it's shown, not silently fall back to the generic type glyph. */}
+      <span
         aria-hidden="true"
-        className="size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-foreground"
-      />
+        className="flex size-4 shrink-0 items-center justify-center overflow-hidden text-muted-foreground transition-colors group-hover:text-foreground"
+      >
+        <NodeAvatar node={node} />
+      </span>
       <span className="min-w-0 flex-1 truncate font-medium text-sm">{node.name}</span>
     </Link>
   );

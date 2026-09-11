@@ -1029,6 +1029,17 @@ const CORE_LOCALES = Object.keys(TARGET_LINE) as CoreLocale[];
  * same fallback behavior already used for Base field names; `{target}` is
  * substituted at render time with the identical target string a curated
  * prompt's `body(target)` receives.
+ *
+ * **The target line is not optional.** A prompt that never names the node is a
+ * prompt the agent has to guess the target of — it is the one part of a prompt
+ * that is load-bearing rather than stylistic. Curated prompts get it for free
+ * because every hand-written body starts with `${t}`; a custom body is author
+ * text, and an author who simply did not know about `{target}` used to ship a
+ * prompt with no target at all, silently. So the placeholder now controls
+ * PLACEMENT, not presence: write `{target}` and it goes exactly where you put
+ * it, omit it and the target line is prepended as its own paragraph. Decided
+ * per locale, because a half-translated body (placeholder in `zh-CN`, forgotten
+ * in `en`) must not lose the target on the locale that forgot it.
  */
 const customPromptDefToPromptDef = (custom: CustomPromptDef): PromptDef => {
   const label = Object.fromEntries(
@@ -1037,7 +1048,12 @@ const customPromptDefToPromptDef = (custom: CustomPromptDef): PromptDef => {
   const body = Object.fromEntries(
     CORE_LOCALES.map((locale) => {
       const template = iStringParse(custom.body, locale);
-      return [locale, (target: string) => template.replaceAll("{target}", target)];
+      const placed = template.includes("{target}");
+      return [
+        locale,
+        (target: string) =>
+          placed ? template.replaceAll("{target}", target) : `${target}\n\n${template}`,
+      ];
     }),
   ) as Record<CoreLocale, (target: string) => string>;
   return { key: custom.key, intent: custom.intent, label, body };

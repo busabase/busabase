@@ -1,5 +1,44 @@
 import type { NodeVO } from "../../types";
 
+export type FilePreviewProvider = "builtin" | "previewfile";
+export type FilePreviewCredentialSource = "environment" | "vault" | "none";
+export type FilePreviewConfigurationStatus = "ready" | "not_configured" | "invalid_configuration";
+export type FilePreviewUnavailableReason =
+  | "not_configured"
+  | "invalid_configuration"
+  | "file_too_large"
+  | "unsupported"
+  | "authentication_failed"
+  | "rate_limited"
+  | "timeout"
+  | "service_unavailable"
+  | "invalid_response";
+
+export interface FilePreviewConfigVO {
+  provider: FilePreviewProvider;
+  status: FilePreviewConfigurationStatus;
+  credentialSource: FilePreviewCredentialSource;
+  credentialConfigured: boolean;
+  maxFileSizeBytes: number;
+  sessionTtlMinutes: number;
+  vaultEncryptionConfigured: boolean | null;
+}
+
+export type FilePreviewVO =
+  | { state: "builtin"; provider: "builtin" }
+  | {
+      state: "ready";
+      provider: "previewfile";
+      previewUrl: string;
+      expiresAt: string;
+    }
+  | {
+      state: "unavailable";
+      provider: "previewfile";
+      reason: FilePreviewUnavailableReason;
+      retryable: boolean;
+    };
+
 export interface FileTreeFileVO {
   path: string;
   name: string;

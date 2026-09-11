@@ -101,7 +101,7 @@ describe("Busabase OpenAPI record get route", () => {
     expect(spec.paths?.["/api/v1/bases/{baseId}/restore/change-requests"]).toBeUndefined();
   });
 
-  it("keeps the compressed public API at 114 operations", async () => {
+  it("keeps the compressed public API at 119 operations", async () => {
     const spec = await getBusabaseOpenApiSpec();
     const operationCount = Object.values(spec.paths ?? {}).reduce(
       (count, pathItem) =>
@@ -180,6 +180,8 @@ describe("Busabase OpenAPI record get route", () => {
     // does not, and holding the read-stamp at `write` would let a read-only
     // key see a badge it could never clear.
     // The dashboard route-state guard adds one lightweight read (+1 -> 116).
-    expect(operationCount).toBe(116);
+    // File Preview adds config, prepare, and OSS credential management
+    // operations (+3 -> 119). All three keep the API key server-side.
+    expect(operationCount).toBe(119);
   });
 });

@@ -98,3 +98,38 @@ describe("TemplateDetailContent", () => {
     expect(en).toContain(">Busa Email</h1>");
   });
 });
+
+describe("TemplateDetailContent — demo clip", () => {
+  it("offers a play control, and does not mount the video until it is opened", () => {
+    const withVideo: TemplateCardVO = {
+      ...template,
+      screenshots: ["https://cdn.example/cover.webp"],
+      video: "https://media.githubusercontent.com/media/o/r/main/t/assets/recordings/t.mp4",
+    };
+    const markup = renderToStaticMarkup(<TemplateDetailContent template={withVideo} />);
+
+    expect(markup).toContain("Play the demo");
+    // The cover carries the preview; the clip itself only exists once the
+    // dialog is open, which is what keeps a gallery page from fetching a
+    // megabyte per card.
+    expect(markup).toContain("https://cdn.example/cover.webp");
+    expect(markup).not.toContain("<video");
+  });
+
+  it("renders no play control when the template declares no clip", () => {
+    const markup = renderToStaticMarkup(<TemplateDetailContent template={template} />);
+    expect(markup).not.toContain("Play the demo");
+  });
+});
+
+describe("TemplateDetailContent — clip without screenshots", () => {
+  it("still offers the clip when the template ships no screenshots at all", () => {
+    const clipOnly: TemplateCardVO = {
+      ...template,
+      screenshots: [],
+      video: "https://media.githubusercontent.com/media/o/r/main/t/assets/recordings/t.mp4",
+    };
+    const markup = renderToStaticMarkup(<TemplateDetailContent template={clipOnly} />);
+    expect(markup).toContain("Play the demo");
+  });
+});

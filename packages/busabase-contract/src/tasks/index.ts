@@ -190,6 +190,11 @@ export const AGENT_EXCLUDED_MCP_TOOLS: readonly string[] = [
   // Dashboard-only tombstone lookup used to choose the archived status page.
   // Agents already have active detail and archived-list tasks.
   "nodes_resolve_route_state",
+  // Dashboard/Embed-only preview plumbing. An agent has no use for a rendered
+  // preview URL, and invoking prepare would upload a Drive file to the selected
+  // third-party provider without adding any data capability for the agent.
+  "file_trees_preview_config",
+  "file_trees_prepare_preview",
   // Installing a package writes a whole subtree of nodes into the workspace from
   // a third-party GitHub repo. That is a human's decision about what to trust,
   // not a step an agent should take on its own. `busabase-cli install` keeps it.

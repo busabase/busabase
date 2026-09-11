@@ -1,3 +1,4 @@
+import { listNodeTypes } from "busabase-contract/domains";
 import { describe, expect, it } from "vitest";
 import { FIELD_TYPE_ORDER } from "../src/domains/base/field-types";
 import {
@@ -64,5 +65,87 @@ describe("Agent setup prompt", () => {
     expect(dashboardCloud.searchParams.get("space")).toBe("space_123");
     expect(dashboardDesktop.searchParams.get("editionConfirmed")).toBe("1");
     expect(dashboardDesktop.searchParams.has("space")).toBe(false);
+  });
+});
+
+/**
+ * The create picker is the one screen every user passes through, and it used to
+ * render the registry's hardcoded English `label` — so a zh-CN user met eleven
+ * English words with no explanation. It now reads its copy from these catalogs,
+ * which means a node type added without copy would silently produce a tile with
+ * no name and no hint. Catch that here instead.
+ */
+describe("node type picker copy", () => {
+  const creatableTypes = listNodeTypes()
+    .filter((definition) => definition.capabilities.creatable && !definition.capabilities.hidden)
+    .map((definition) => definition.type);
+
+  it("names and explains every offered type, in every locale", () => {
+    expect(creatableTypes.length).toBeGreaterThan(0);
+    for (const [locale, messages] of Object.entries(coreMessagesByLocale)) {
+      for (const type of creatableTypes) {
+        const name = (messages.nodeDetail as Record<string, string>)[type];
+        const hint = (messages.createNode.typeHints as Record<string, string>)[type];
+        expect(name, `${locale} is missing a name for "${type}"`).toBeTruthy();
+        expect(hint, `${locale} is missing a hint for "${type}"`).toBeTruthy();
+      }
+    }
+  });
+
+  it("translates the names rather than passing the English identifier through", () => {
+    // The exact bug that was reported: "Folder" shown verbatim on a Chinese UI.
+    expect(coreMessagesByLocale["zh-CN"].nodeDetail.folder).toBe("文件夹");
+    expect(coreMessagesByLocale["zh-CN"].nodeDetail.doc).toBe("文档");
+    expect(coreMessagesByLocale.ja.nodeDetail.folder).toBe("フォルダー");
+    // Base is a typed record table, not a Postgres instance — 数据表, not 数据库.
+    expect(coreMessagesByLocale["zh-CN"].nodeDetail.base).toBe("数据表");
+    expect(coreMessagesByLocale["zh-TW"].nodeDetail.base).toBe("資料表");
+  });
+
+  it("keeps a non-empty 'common' group that is a strict subset of what is offered", () => {
+    const common = listNodeTypes()
+      .filter(
+        (definition) =>
+          definition.capabilities.creatable &&
+          !definition.capabilities.hidden &&
+          definition.capabilities.commonlyCreated,
+      )
+      .map((definition) => definition.type);
+    expect(common.length).toBeGreaterThan(0);
+    // A group covering everything would make the "More types" disclosure a lie.
+    expect(common.length).toBeLessThan(creatableTypes.length);
+    expect(creatableTypes).toEqual(expect.arrayContaining(common));
+  });
+});
+
+/**
+ * Catches UTF-8-decoded-as-Latin-1 corruption in a translation catalog.
+ *
+ * This is not hypothetical: a scripted edit to these files round-tripped a
+ * Chinese string through the wrong codec and turned
+ * "像表格一样填" into "åè¡¨æ ¼ä¸æ ·å¡«". It type-checks, it lints, every other
+ * test passes, and it renders as garbage to exactly the users the string was
+ * written for. The signature is a run of characters in the Latin-1 Supplement
+ * block, which no genuine CJK or English UI string produces.
+ */
+describe("translation catalog encoding", () => {
+  const MOJIBAKE = /[À-ÿ]{2,}/;
+
+  const walk = (value: unknown, path: string, hits: string[]) => {
+    if (typeof value === "string") {
+      if (MOJIBAKE.test(value)) hits.push(`${path}: ${value}`);
+      return;
+    }
+    if (value && typeof value === "object") {
+      for (const [key, child] of Object.entries(value)) walk(child, `${path}.${key}`, hits);
+    }
+  };
+
+  it("has no mojibake in any locale", () => {
+    for (const [locale, messages] of Object.entries(coreMessagesByLocale)) {
+      const hits: string[] = [];
+      walk(messages, locale, hits);
+      expect(hits, `corrupted strings in ${locale}`).toEqual([]);
+    }
   });
 });

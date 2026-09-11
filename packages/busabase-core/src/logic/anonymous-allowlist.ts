@@ -101,8 +101,10 @@ const ANONYMOUS_READ_ALLOWLIST: ReadonlySet<string> = new Set([
  *     the threads (`change-request-review.tsx`); this is the server half of
  *     that decision, so hiding is not the only thing standing between a link
  *     holder and every comment in the Space.
- *   - every mutation — `credentialPermissionCeiling: "read"` already caps
+ *   - data mutations — `credentialPermissionCeiling: "read"` already caps
  *     authority, and nothing here should depend on that being the only cap.
+ *     `fileTrees.preparePreview` is the sole POST exception: it creates no
+ *     Busabase state and remains constrained to the Embed Link's Drive ACL.
  */
 const EMBED_READ_ALLOWLIST: ReadonlySet<string> = new Set([
   "nodes.get",
@@ -115,6 +117,8 @@ const EMBED_READ_ALLOWLIST: ReadonlySet<string> = new Set([
   "changeRequests.get",
   "fileTrees.get",
   "fileTrees.readFile",
+  "fileTrees.previewConfig",
+  "fileTrees.preparePreview",
 ]);
 
 /** True when an Embed Link holder may call this procedure. */

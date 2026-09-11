@@ -153,6 +153,16 @@ export function createMcpEndpoint(baseUrl: string, fallback = LOCAL_MCP_BASE_URL
  */
 export const isWebChatReachable = (edition: McpGuideEdition): boolean => edition === "cloud";
 
+/**
+ * Which MCP endpoint the panel should open on for a given edition. A Cloud host
+ * opening on `local` hands its visitors a `localhost:15419` URL that nothing on
+ * their machine is listening to — the endpoint is only right for the edition
+ * that actually runs there. Either mode stays selectable afterwards; this only
+ * decides the starting point.
+ */
+export const defaultMcpModeFor = (edition: McpGuideEdition): McpConnectionMode =>
+  edition === "cloud" ? "cloud" : "local";
+
 const jsonServerConfig = (mcpUrl: string, urlKey: "url" | "httpUrl" = "url"): string =>
   JSON.stringify(
     {

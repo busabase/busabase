@@ -66,6 +66,7 @@ import "./components/node-detail-views";
 // Side-effect import: registers Whiteboard, Workflow, and HTML renderers.
 import "../rich-node/components/register";
 import { AirAppEngineAvailabilityProvider } from "../airapp/components/engine-availability-context";
+import { AgentIntegrationProvider } from "./agent-integration-context";
 import { NodeActivityView, RecordActivityView } from "./components/activity";
 import { BaseGraphView } from "./components/graph-view";
 import { HomeView } from "./components/home";
@@ -126,6 +127,7 @@ const flattenNodesForCache = (nodes: NodeVO[]): KnownNode[] =>
       name: node.name,
       slug: node.slug,
       path: nodeRoutePath(node.type, node.slug),
+      icon: node.icon,
     },
     ...flattenNodesForCache(node.children),
   ]);
@@ -331,6 +333,7 @@ function BusabaseDashboardContent({
           name: node.name,
           slug: node.slug,
           path: nodeRoutePath(node.type, node.slug),
+          icon: node.icon,
         },
         new Date().toISOString(),
       );
@@ -2643,7 +2646,16 @@ function BusabaseDashboardContent({
   // Every dashboard route renders this component (see `routes.tsx`), so this is
   // the one place that reaches every node toolbar, base view, record view and
   // side-panel tab at once — which is what the leaf-level Ask Agent action needs.
-  const provided = <DashboardOrpcProvider orpc={orpc}>{content}</DashboardOrpcProvider>;
+  const provided = (
+    <DashboardOrpcProvider orpc={orpc}>
+      {/* Same reach, same reason as the orpc provider above: the Agent-prompts
+          dialog hangs off node toolbars nine components down, and it needs to
+          know which edition/space to point an agent at. */}
+      <AgentIntegrationProvider agentIntegration={agentIntegration}>
+        {content}
+      </AgentIntegrationProvider>
+    </DashboardOrpcProvider>
+  );
 
   if (embedded) {
     return <div className="flex min-h-0 min-w-0 flex-1 flex-col">{provided}</div>;

@@ -9,6 +9,7 @@ export const folderNodeType = {
   capabilities: {
     container: true,
     creatable: true,
+    commonlyCreated: true,
     hasDetail: true,
     publicAccess: "detail",
   },

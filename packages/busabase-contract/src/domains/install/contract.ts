@@ -1,5 +1,6 @@
-import { oc } from "@orpc/contract";
+import { eventIterator, oc } from "@orpc/contract";
 import {
+  InstallEventVOSchema,
   InstallFromGithubDTOSchema,
   InstallPlanFromGithubDTOSchema,
   InstallPlanVOSchema,
@@ -43,4 +44,17 @@ export const installContract = {
     })
     .input(InstallFromGithubDTOSchema)
     .output(InstallResultVOSchema),
+  /**
+   * The same install, streamed.
+   *
+   * Kept alongside `fromGithub` rather than replacing it: that route is in the
+   * public OpenAPI surface and a plain request/response is the right shape for
+   * a script. This one exists for a human waiting at a dashboard, where the
+   * install is long enough that a silent connection gets closed by whatever
+   * proxy sits in front of the app — and long enough that a progress line is
+   * worth showing regardless.
+   */
+  fromGithubStream: oc
+    .input(InstallFromGithubDTOSchema)
+    .output(eventIterator(InstallEventVOSchema)),
 };

@@ -50,6 +50,7 @@ describe("agent install prompt", () => {
       setupUrl,
       targetSpaceId: "space_target",
       template: coreMessagesEn.install.agentPromptBody,
+      connectionCheck: coreMessagesEn.agentPrompts.connectionCheck,
       fmt,
     });
     expect(prompt).toContain("npx skills add busabase/skills --skill kelly-email");
@@ -70,6 +71,7 @@ describe("agent install prompt", () => {
       packageName: "Acme CRM",
       setupUrl: createSetupSkillUrl("http://localhost:15419", "desktop", true),
       template: coreMessagesEn.install.agentPromptBody,
+      connectionCheck: coreMessagesEn.agentPrompts.connectionCheck,
       fmt,
     });
     expect(prompt).toContain("Acme CRM");
@@ -87,6 +89,7 @@ describe("agent install prompt", () => {
       packageName: "Kelly Email",
       setupUrl,
       template: coreMessagesEn.install.agentPromptBody,
+      connectionCheck: coreMessagesEn.agentPrompts.connectionCheck,
       fmt,
     });
 
@@ -111,6 +114,7 @@ describe("agent install prompt", () => {
         setupUrl,
         targetSpaceId: "space_localized",
         template: messages.install.agentPromptBody,
+        connectionCheck: messages.agentPrompts.connectionCheck,
         fmt,
       });
 

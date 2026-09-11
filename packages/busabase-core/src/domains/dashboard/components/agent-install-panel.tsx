@@ -72,6 +72,9 @@ export function AgentInstallPanel({
       setupUrl: createSetupSkillUrl(promptOrigin, edition, true, targetSpaceId),
       targetSpaceId,
       template: messages.install.agentPromptBody,
+      // Shared verbatim with the node Agent-prompts dialog, so the "am I even
+      // connected?" instruction is one string rather than two that drift.
+      connectionCheck: messages.agentPrompts.connectionCheck,
       fmt,
     });
   const prompt = buildPromptForOrigin(origin);

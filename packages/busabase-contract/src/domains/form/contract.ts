@@ -59,7 +59,7 @@ export const formContract = {
       tags: ["Forms"],
       summary: "Submit a filled-in form",
       successDescription:
-        "Creates a review-first record-create ChangeRequest on the target Base — a form submission always waits for a human, whoever submitted it.",
+        'Creates a record-create ChangeRequest on the target Base. Merged in the same call when the submitter holds write access on that Base (`status: "merged"`); otherwise it waits for a reviewer (`status: "pending_review"`). A visitor arriving through the form\'s public link is capped at read and therefore always waits.',
     })
     .input(SubmitFormInputSchema.extend({ nodeId: z.string() }))
     .output(FormSubmitResultSchema),

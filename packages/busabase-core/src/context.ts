@@ -67,7 +67,7 @@ export interface BusabaseEmbedActorState {
   restrictedVisibility: boolean;
 }
 
-export interface BusabasePerformanceMetric {
+export interface BusabaseInboxPerformanceMetric {
   name: "change_requests.inbox_snapshot";
   durationMs: number;
   responseBytes: number;
@@ -75,6 +75,33 @@ export interface BusabasePerformanceMetric {
   visibleRows: number;
   pageRows: number;
   managerPath: boolean;
+}
+
+export interface BusabaseFilePreviewPerformanceMetric {
+  name: "file_preview.prepare";
+  provider: "builtin" | "previewfile";
+  outcome: "builtin" | "ready" | "unavailable";
+  reason?: string;
+  durationMs: number;
+  cache: "hit" | "miss" | "none";
+  sizeBucket: "unknown" | "0-1mb" | "1-10mb" | "10-50mb" | "50-500mb" | "over-500mb";
+  visitorKind: "member" | "embed";
+  upstreamStatusClass?: "2xx" | "4xx" | "5xx" | "network";
+}
+
+export type BusabasePerformanceMetric =
+  | BusabaseInboxPerformanceMetric
+  | BusabaseFilePreviewPerformanceMetric;
+
+export interface FilePreviewRuntimeConfig {
+  provider: "builtin" | "previewfile";
+  apiKey?: string;
+  baseUrl: string;
+  maxFileSizeBytes: number;
+  sessionTtlMinutes: number;
+  credentialSource: "environment" | "vault" | "none";
+  vaultEncryptionConfigured: boolean | null;
+  configurationError?: string;
 }
 
 export interface BusabaseContext {
@@ -95,6 +122,8 @@ export interface BusabaseContext {
    * must only be exposed to the request / hosted execution they belong to.
    */
   vaultRuntimeEnv?: Record<string, string>;
+  /** Server-only Drive preview configuration. The API key must never cross a contract boundary. */
+  filePreview?: FilePreviewRuntimeConfig;
   resolveUsers?: (userIds: string[]) => Promise<Map<string, UserRefVO>>;
   /**
    * Host-owned validation for the creator credential behind a public Embed
@@ -422,7 +451,10 @@ export function runWithEmbedContext<T>(
  * nothing here and keeps the permissive local default.
  */
 export function runWithLocalContext<T>(
-  ctx: Pick<BusabaseContext, "vaultRuntimeEnv" | "localUserName" | "embedOrigin"> & {
+  ctx: Pick<
+    BusabaseContext,
+    "vaultRuntimeEnv" | "localUserName" | "embedOrigin" | "filePreview"
+  > & {
     aclOverride?: Pick<
       BusabaseContext,
       "isSpaceManager" | "permissionLevel" | "permissionLevelIsCeiling"
@@ -442,6 +474,20 @@ export function getContextDb(): BusabaseDatabase | undefined {
 /** Active space id for the current request (defaults to the local tenant). */
 export function getContextSpaceId(): string {
   return storage.getStore()?.spaceId ?? LOCAL_SPACE_ID;
+}
+
+/** Resolved server-only Drive preview configuration for this request. */
+export function getContextFilePreviewConfig(): FilePreviewRuntimeConfig {
+  return (
+    storage.getStore()?.filePreview ?? {
+      provider: "builtin",
+      baseUrl: "https://previewfile.dev",
+      maxFileSizeBytes: 50 * 1024 * 1024,
+      sessionTtlMinutes: 60,
+      credentialSource: "none",
+      vaultEncryptionConfigured: null,
+    }
+  );
 }
 
 /**

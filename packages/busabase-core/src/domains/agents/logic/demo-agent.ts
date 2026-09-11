@@ -203,6 +203,7 @@ const toVO = (session: DemoSession): AgentSessionVO => ({
   createdAt: session.createdAt,
   lastActivityAt: session.lastActivityAt,
   error: null,
+  modelOption: null,
 });
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));

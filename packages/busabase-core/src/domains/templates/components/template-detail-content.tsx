@@ -4,6 +4,7 @@ import { ExternalLink, MessageSquare, PackageOpen } from "lucide-react";
 import { iStringParse, type LocaleType } from "openlib/i18n/i-string";
 import type { ReactNode } from "react";
 import { TemplateScreenshotShowcase } from "./template-screenshot-showcase";
+import { TemplateVideoPreview } from "./template-video-preview";
 
 export interface TemplateDetailLabels {
   promptsTitle: string;
@@ -29,6 +30,8 @@ export interface TemplateDetailLabels {
   resetView: string;
   rotateClockwise: string;
   downloadImage: string;
+  /** Accessible name of the demo clip's play button. */
+  playVideo: string;
   screenshot: (index: number) => string;
 }
 
@@ -58,6 +61,7 @@ const defaultLabels: TemplateDetailLabels = {
   resetView: "Reset view",
   rotateClockwise: "Rotate clockwise",
   downloadImage: "Download image",
+  playVideo: "Play the demo",
   screenshot: (index) => (index === 0 ? "Template screenshots" : `Template screenshot ${index}`),
 };
 
@@ -129,10 +133,28 @@ export function TemplateDetailContent({
         {actions}
       </header>
 
-      {screenshots.length > 0 ? (
+      {/* The clip lives in the shelf, so the shelf has to render for a template
+          that has one even with no screenshots — otherwise a declared clip
+          silently disappears. */}
+      {screenshots.length > 0 || template.video ? (
         <TemplateScreenshotShowcase
           key={template.id}
           screenshots={screenshots}
+          videoTile={
+            template.video ? (
+              <TemplateVideoPreview
+                src={template.video}
+                // The first NON-cover shot, not the cover. The clip tile sits
+                // directly beside the cover tile, and postering it with the
+                // same image makes the shelf look like it is showing one
+                // picture twice. An app screen also represents what the clip
+                // actually contains better than the branded cover does.
+                poster={(screenshots[1] ?? screenshots[0])?.src}
+                title={title}
+                playLabel={labels.playVideo}
+              />
+            ) : undefined
+          }
           label={labels.screenshot(0)}
           previousLabel={labels.previousScreenshot}
           nextLabel={labels.nextScreenshot}

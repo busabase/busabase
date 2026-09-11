@@ -148,9 +148,21 @@ export const SubmitFormInputSchema = z.object({
 });
 export type SubmitFormDTO = z.input<typeof SubmitFormInputSchema>;
 
-/** What the submit endpoint returns — the pending ChangeRequest id, never data. */
+/**
+ * What the submit endpoint returns — a ChangeRequest id and what happened to it,
+ * never the record data.
+ *
+ * `status` is permission-aware, like every other write: `merged` when the
+ * submitter holds `write` on the target Base and the submission landed straight
+ * away, `pending_review` when it is waiting for a human. An ANONYMOUS visitor can
+ * never reach `merged`: permission is resolved against the target Base, which a
+ * form does not share publicly, and a public-link request is capped at `read`
+ * even where it is shared. So a public form still always waits.
+ */
 export const FormSubmitResultSchema = z.object({
   changeRequestId: z.string(),
-  status: z.literal("pending_review"),
+  status: z.enum(["pending_review", "merged"]),
+  /** The created record's id, present only when `status` is `merged`. */
+  recordId: z.string().optional(),
 });
 export type FormSubmitResultVO = z.infer<typeof FormSubmitResultSchema>;

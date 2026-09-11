@@ -5,6 +5,7 @@ import type { AcpUiEvent } from "@acp-ui/core/reduce";
 import type { AcpSessionPort } from "@acp-ui/core/session";
 import { useAcpSession } from "@acp-ui/core/session";
 import { consumeEventIterator } from "@orpc/client";
+import { useQueryClient } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type {
   AgentSessionEventVO,
@@ -121,6 +122,7 @@ function translate(event: AgentSessionEventVO): AcpUiEvent[] {
  * already selected rather than opening a new one.
  */
 export function useAgentSession(orpc: BusabaseQueryUtils, sessionId: string | null) {
+  const queryClient = useQueryClient();
   const port = useMemo<AcpSessionPort>(
     () => ({
       start: async () => sessionId ?? "",
@@ -139,6 +141,15 @@ export function useAgentSession(orpc: BusabaseQueryUtils, sessionId: string | nu
               onEvent: (event: AgentSessionEventVO) => {
                 if (cancelled) return;
                 lastSeq = Math.max(lastSeq, event.seq);
+                const update = event.acpUpdate as { sessionUpdate?: unknown } | undefined;
+                if (
+                  event.kind === "acpUpdate" &&
+                  update?.sessionUpdate === "config_option_update"
+                ) {
+                  void queryClient.invalidateQueries({
+                    queryKey: orpc.agents.sessions.list.queryKey(),
+                  });
+                }
                 for (const translated of translate(event)) onEvent(translated);
               },
               onError: () => {
@@ -192,7 +203,7 @@ export function useAgentSession(orpc: BusabaseQueryUtils, sessionId: string | nu
       // core must not append it too — that would show it twice.
       serverEchoesPrompt: true,
     }),
-    [orpc, sessionId],
+    [orpc, queryClient, sessionId],
   );
 
   return useAcpSession(port, sessionId);

@@ -59,4 +59,35 @@ describe("embed document rendering", () => {
     expect(html).not.toContain('href="javascript:');
     expect(html).toContain("<span>Open file</span>");
   });
+
+  it("renders an interactive PreviewFile surface for capability-scoped Drive embeds", () => {
+    const detail = {
+      type: "drive",
+      drive: {
+        node: { id: "nod_drive", name: "Shared files" },
+        entryFile: "README.md",
+        files: [{ path: "README.md" }, { path: '</script><img src=x onerror="alert(1)">' }],
+      },
+      entryFile: {
+        path: "README.md",
+        encoding: "utf8",
+        content: "# Shared files",
+      },
+    } as unknown as EmbedNodeDetailVO;
+
+    const html = renderEmbedDocument(detail, "Shared files", {
+      embedCapability: "emb_abcdefghijklmnop.abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ",
+      rpcBasePath: "/api/rpc/core",
+    });
+
+    expect(html).toContain('data-file-path="README.md"');
+    expect(html).toContain("/api/rpc/core");
+    expect(html).toContain("/fileTrees/preparePreview");
+    expect(html).toContain("x-busabase-embed-capability");
+    expect(html).toContain("Previewed by PreviewFile");
+    expect(html).toContain('sandbox", "allow-same-origin allow-scripts allow-popups allow-forms"');
+    expect(html).toContain("Use built-in preview");
+    expect(html).toContain("&lt;/script&gt;&lt;img src=x onerror=&quot;alert(1)&quot;&gt;");
+    expect(html).not.toContain('</script><img src=x onerror="alert(1)">');
+  });
 });

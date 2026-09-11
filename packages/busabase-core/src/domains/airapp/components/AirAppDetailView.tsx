@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { CodeBlock } from "kui/ai-elements/code-block";
 import { Button } from "kui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "kui/tabs";
-import { AppWindow, Files, Info, MonitorPlay, Terminal } from "lucide-react";
+import { Files, Info, MonitorPlay, Terminal } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { fmt, useCoreI18n } from "../../../i18n";
 import { AssetMediaPreview, isPreviewableAssetMime } from "../../dashboard/components/assets";
@@ -168,12 +168,9 @@ export function AirAppDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) 
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-background">
-      {/* The Tabs root wraps the header so the TabsList can live inside the
-          single compact toolbar row — one ~48px bar (identity + info trigger,
-          tab switcher, run controls, delete) replaces the old stacked
-          title-block / properties / tab-row chrome, giving the app preview
-          maximum vertical space. Name/description/properties moved into
-          `NodeSettingsDialog`'s Info tab. */}
+      {/* The Tabs root wraps the page header so identity, description, and the
+          local view switcher stay together while all operational actions live
+          in the shared topbar. */}
       {/* Controlled so entering fullscreen can force the "App" panel active:
           inactive panels are CSS-hidden, and the preview iframe we grow to
           fill the viewport lives inside that panel. */}
@@ -182,10 +179,21 @@ export function AirAppDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) 
         onValueChange={setSelectedTab}
         value={fullscreenState.fullscreen ? "app" : selectedTab}
       >
-        <header className="flex h-12 shrink-0 items-center gap-2 border-border/60 border-b px-3 md:px-4">
-          <div className="flex min-w-0 items-center gap-2">
-            <AppWindow className="size-4 shrink-0 text-muted-foreground" />
-            <h1 className="truncate font-medium text-foreground text-sm">{airapp.node.name}</h1>
+        <header className="shrink-0 border-border/60 border-b px-4 pt-5 pb-2 md:px-6">
+          <div className="flex min-w-0 items-start gap-2">
+            <div className="min-w-0 flex-1">
+              <h1 className="truncate font-semibold text-foreground text-xl leading-7">
+                {airapp.node.name}
+              </h1>
+              {airapp.node.description ? (
+                <p
+                  className="mt-1 line-clamp-2 text-muted-foreground text-sm leading-5 md:line-clamp-1"
+                  title={airapp.node.description}
+                >
+                  {airapp.node.description}
+                </p>
+              ) : null}
+            </div>
             <Button
               aria-label={messages.airapp.details}
               className="shrink-0 text-muted-foreground"
@@ -211,7 +219,7 @@ export function AirAppDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) 
             )}
           </div>
 
-          <TabsList className="h-8 shrink-0 gap-1 bg-transparent p-0">
+          <TabsList className="mt-3 h-8 shrink-0 gap-1 bg-transparent p-0">
             <TabsTrigger
               className="h-7 gap-1.5 rounded-lg bg-transparent px-2.5 text-muted-foreground shadow-none transition-colors hover:bg-muted/40 hover:text-foreground data-[state=active]:bg-muted data-[state=active]:text-foreground data-[state=active]:shadow-none"
               value="app"
