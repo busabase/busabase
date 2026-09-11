@@ -4,6 +4,10 @@ const port = Number(process.env.PLAYWRIGHT_PORT ?? 15419);
 
 export default defineConfig({
   testDir: "./tests/e2e",
+  // This spec owns a deterministic ACP WebSocket server and an isolated
+  // Busabase process. Its dedicated config supplies both; the shared server
+  // intentionally does not. Run it with `pnpm test:e2e:agent-chat`.
+  testIgnore: "agent-chat.spec.ts",
   // The dashboard is a client SPA that streams its RSC response, so each full-page
   // navigation reloads the bundle and refetches over RPC before content mounts.
   // Give web-first assertions and whole tests room for that (paired with the

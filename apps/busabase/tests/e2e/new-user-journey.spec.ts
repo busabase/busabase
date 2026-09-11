@@ -86,12 +86,9 @@ test("a new user tours the approval-first knowledge base", async ({ page }) => {
     // rather than the copy change that caused it. The searchbox role is what
     // this step actually depends on.
     await page.getByRole("dialog").getByRole("searchbox").fill("agent");
-    // Recent is the default quick-jump surface. Verify it resolves a concrete
-    // seeded node instead of relying on the removed aggregate result-count copy.
-    await expect(page.getByRole("tab", { name: /Recent/ })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
+    // No tab assertion here on purpose — see busabase-smoke.spec.ts. The dialog
+    // moved from tabs to sections, so `getByRole("tab", …)` addresses something
+    // that no longer exists; the result assertion below is the substance.
     // Scoped to the dialog and NOT anchored — see busabase-smoke.spec.ts: a result's
     // accessible name is "<emoji> <name> <slug>", so an anchored match breaks
     // whenever icons or slugs are added to the row.
