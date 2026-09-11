@@ -139,6 +139,42 @@ explicit `--space-id` always wins over the default.
 not refreshable; if a key expires or is revoked, run `busabase-cli login` again and select or
 create another key. Credentials are saved with restricted file permissions.
 
+## Getting the instructions, when the CLI is all you have
+
+Agents reach Busabase from four directions, and which one they land on is rarely a
+choice anybody made: an installed agent skill, this CLI, an MCP client, or plain
+`curl` against the OpenAPI surface. All four are supported and none is the "real"
+one, so the thing that matters is that each can hand out the instructions by itself
+rather than assuming one of the others already did.
+
+```bash
+busabase-cli skill              # the everyday manual, generated for your base URL
+busabase-cli skill setup        # the one-time onboarding document
+busabase-cli skill install      # write it into your agent's skills directory
+```
+
+Note the singular: `skill` is this CLI's own manual, while `skills` (plural) lists
+the Skill nodes stored inside your workspace. Different things.
+
+What each entry point does when conditions are less than perfect:
+
+| Entry point | Not signed in | Server older than the doc | No network at all |
+| --- | --- | --- | --- |
+| `busabase-cli skill` | Full document — it is compiled into the binary and needs no credential | Unaffected, for the same reason | Full document |
+| `busabase-cli skill setup` | Full document | Falls back to the bundled copy, and says so on stderr | Falls back to the bundled copy |
+| `busabase-cli guide <topic>` | Cloud needs a `read` key; self-hosted needs none | Only the topics that server knows (self-hosted serves `workspace` and `airapp`, never `setup`) | Fails — guides are a server call |
+| Installed skill file | Unaffected — it is a local file | Unaffected | Unaffected |
+| MCP (`/api/mcp`) | Cloud requires OAuth; self-hosted does not | Only the prompts/resources that server exposes | Unavailable |
+| `curl` / OpenAPI | Reads need a key on Cloud, none on self-hosted | Whatever that contract version has | Unavailable |
+| `GET /llms.txt`, `GET /SETUP_SKILL.md` | Both are unauthenticated on every edition | `/llms.txt` may be absent on older self-hosted builds | Unavailable |
+
+The rule of thumb: anything the CLI can answer from its own binary (`skill`,
+`schema`) keeps working in every column; anything that has to ask the server
+(`guide`, MCP, `curl`) degrades with the server. `skill setup` deliberately
+straddles the two — it prefers the live document, because that one is
+edition-aware and current, and only falls back so that a bad day still produces
+something usable.
+
 ## Output modes
 
 The default output is `text`, designed for terminals. Tree-like responses such as
