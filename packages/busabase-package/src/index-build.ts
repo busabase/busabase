@@ -35,6 +35,10 @@ export interface TemplateIndexEntry {
   tags: string[];
   /** Package-relative paths; a consumer resolves them against the repo. */
   screenshots: string[];
+  /** Package-relative; a consumer resolves it, and not against the same host as
+   * the screenshots — clips are Git LFS and raw.githubusercontent serves the
+   * pointer file rather than the bytes. */
+  video?: string;
   /** Ready-made prompts an installed app suggests. */
   agentPrompts: string[];
   version?: string;
@@ -81,6 +85,7 @@ const toEntry = (found: DiscoveredPackage, airapps: number): TemplateIndexEntry 
   ...(found.risk ? { risk: found.risk } : {}),
   tags: found.tags ?? [],
   screenshots: found.screenshots,
+  ...(found.video ? { video: found.video } : {}),
   agentPrompts: found.agentPrompts ?? [],
   ...(found.version ? { version: found.version } : {}),
   ...(found.author ? { author: found.author } : {}),

@@ -131,6 +131,14 @@ export const auditPackage = (
     }
   }
 
+  const video = tree.manifest.template?.video;
+  if (video && !present.has(video)) {
+    error(
+      "package/video-missing",
+      `busabase.json declares video "${video}", which is not in the package. The Template Center detail page would show a play button that leads nowhere.`,
+    );
+  }
+
   // ── What must never be published ───────────────────────────────────────────
   for (const relative of paths) {
     const base = relative.slice(relative.lastIndexOf("/") + 1);

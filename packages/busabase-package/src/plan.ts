@@ -338,16 +338,27 @@ const findCollisions = (
   target: TargetState,
 ): PlanCollision[] => {
   const collisions: PlanCollision[] = [];
-  for (const node of walkNodes(tree.nodes)) {
-    if (target.existingNodeSlugsByType.get(node.type)?.has(node.slug)) {
-      collisions.push({
-        kind: node.type === "base" ? "base" : "node",
-        nodeType: node.type,
-        slug: node.slug,
-        path: `${targetFolderSlug}/…/${node.slug} (${node.type} slugs are unique per space)`,
-      });
-    }
-  }
+  const check = (type: string, slug: string): void => {
+    if (!target.existingNodeSlugsByType.get(type)?.has(slug)) return;
+    collisions.push({
+      kind: type === "base" ? "base" : "node",
+      nodeType: type,
+      slug,
+      path: `${targetFolderSlug}/…/${slug} (${type} slugs are unique per space)`,
+    });
+  };
+  for (const node of walkNodes(tree.nodes)) check(node.type, node.slug);
+  // A template's manual is NOT in `tree.nodes` — it is lifted out to
+  // `tree.rootSkill` by `layout-read`, and `applyInstall` creates it separately
+  // in pass 1. It was therefore invisible to collision detection, to `--rename`
+  // and to the plan's own counts, even though the server enforces skill slugs
+  // per SPACE. Installing the same template twice consequently blew up
+  // mid-install ("The skill slug X is already used in this workspace") with a
+  // full rollback, and `--rename` could not help because the planner did not
+  // know the node existed. This is what made that reachable at all: the failure
+  // used to be deferred, because the manual sat as an unmerged proposal and did
+  // not occupy its slug until someone approved it.
+  if (tree.rootSkill) check("skill", tree.rootSkill.slug);
   return collisions;
 };
 
@@ -403,7 +414,30 @@ const applyRenames = (
   const nodeRenames = new Map<string, string>();
   const baseRenames = new Map<string, string>();
 
+  if (tree.rootSkill) {
+    const taken = takenByType.get("skill") ?? new Set<string>();
+    taken.add(tree.rootSkill.slug);
+    takenByType.set("skill", taken);
+  }
+
+  let rootSkillRename: string | undefined;
+
   for (const collision of collisions) {
+    // The root skill is renamed the same way, but it lives beside `nodes` rather
+    // than in it, so it is resolved before the node lookup rather than through it.
+    if (
+      tree.rootSkill &&
+      collision.nodeType === "skill" &&
+      collision.slug === tree.rootSkill.slug
+    ) {
+      const taken = takenByType.get("skill") ?? new Set<string>();
+      const renamed = nextFreeSlug(collision.slug, taken);
+      taken.add(renamed);
+      takenByType.set("skill", taken);
+      rootSkillRename = renamed;
+      collision.renamedTo = renamed;
+      continue;
+    }
     const node = [...walkNodes(tree.nodes)].find(
       (candidate) => candidate.type === collision.nodeType && candidate.slug === collision.slug,
     );
@@ -440,7 +474,13 @@ const applyRenames = (
     return { ...field, options: { ...field.options, targetBaseSlug: renamed } };
   };
 
-  return { ...tree, nodes: tree.nodes.map(rewriteNode) };
+  return {
+    ...tree,
+    nodes: tree.nodes.map(rewriteNode),
+    ...(tree.rootSkill && rootSkillRename
+      ? { rootSkill: { ...tree.rootSkill, slug: rootSkillRename } }
+      : {}),
+  };
 };
 
 const collectWarnings = (tree: PackageTree, warnings: string[]): void => {
