@@ -33,4 +33,37 @@ describe("createBusabaseORPCClient batching", () => {
     expect(batchRequest).toBeDefined();
     expect(batchRequest?.body).not.toContain("airapps/runLocal");
   });
+
+  it("keeps the agent-session event stream out of concurrent RPC batches", async () => {
+    const requests: Array<{ body: string; path: string }> = [];
+    const client = createBusabaseORPCClient("http://localhost/api/rpc", {
+      fetch: async (request) => {
+        requests.push({
+          body: await request.clone().text(),
+          path: new URL(request.url).pathname,
+        });
+        return new Response("", { status: 500 });
+      },
+    });
+
+    await Promise.allSettled([
+      client.agents.sessions.subscribe({
+        sessionId: "ags_batch_regression",
+        afterSeq: -1,
+      }),
+      client.nodes.list({}),
+      client.bases.list({}),
+    ]);
+
+    expect(requests).toHaveLength(2);
+
+    const streamRequest = requests.find((request) =>
+      request.path.includes("agents/sessions/subscribe"),
+    );
+    expect(streamRequest?.path).toBe("/api/rpc/agents/sessions/subscribe");
+
+    const batchRequest = requests.find((request) => request.path.endsWith("/__batch__"));
+    expect(batchRequest).toBeDefined();
+    expect(batchRequest?.body).not.toContain("agents/sessions/subscribe");
+  });
 });

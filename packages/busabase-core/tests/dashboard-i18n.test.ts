@@ -5,7 +5,7 @@ import {
   createAgentSkillPrompt,
   createSetupSkillUrl,
 } from "../src/domains/dashboard/components/agent-skill-button";
-import { coreMessagesByLocale, coreMessagesEn } from "../src/i18n";
+import { coreMessagesByLocale, coreMessagesEn, fmt } from "../src/i18n";
 
 describe("shared dashboard translations", () => {
   it("defines a localized label for every field type", () => {
@@ -30,6 +30,22 @@ describe("shared dashboard translations", () => {
     expect(coreMessagesByLocale.ja.nodeDetail.mediaType).toBe("メディアタイプ");
     expect(coreMessagesByLocale["zh-CN"].form.fieldBindings).toBe("字段绑定");
     expect(coreMessagesByLocale.ja.form.pageSource).toBe("ページソース");
+  });
+
+  it("localizes AgentChat status, navigation, empty states, and composer copy", () => {
+    const zh = coreMessagesByLocale["zh-CN"].agents;
+    const ja = coreMessagesByLocale.ja.agents;
+
+    expect(zh.statusIdle).toBe("空闲");
+    expect(zh.backToAgents).toBe("Agent 列表");
+    expect(zh.newSession).toBe("新建会话");
+    expect(fmt(zh.composerDefaultPlaceholder, { name: "Caedman" })).toBe("给 Caedman 发消息…");
+    expect(ja.statusWaitingPermission).toBe("あなたの判断を待っています");
+    expect(ja.continueConversationFailed).toBe("この会話を続けられませんでした。");
+    expect(ja.noSessionsTitle).toBe("まだセッションがありません");
+    expect(fmt(ja.sessionItemLabel, { status: ja.statusIdle, time: "9月11日 11:00" })).toBe(
+      "9月11日 11:00、待機中",
+    );
   });
 });
 

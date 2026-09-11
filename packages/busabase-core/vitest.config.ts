@@ -2,6 +2,13 @@ import path from "node:path";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
+  // `kui`'s `ai-elements` components are consumed as source `.tsx`, and Vite's
+  // bare esbuild default is the classic JSX transform — which needs a
+  // `React` global that kui (correctly) never imports. Without this, any
+  // test that renders one (e.g. `model-selector-row.tsx`'s `PromptInputSelect`)
+  // fails with "React is not defined". Same fix already applied in
+  // `@acp-ui/web/vitest.config.ts` for the same reason.
+  esbuild: { jsx: "automatic" },
   resolve: {
     alias: {
       // Skill handlers are server-only; neutralize the guard for Node tests.

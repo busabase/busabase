@@ -276,6 +276,67 @@ export const fuzzyMatchKnownNodes = (
   return ranked.slice(0, limit).map((entry) => entry.node);
 };
 
+/**
+ * Combine the instant local cache matches with the authoritative server
+ * `nodes.searchByName` results into one complete, de-duplicated list.
+ *
+ * Local entries keep their positions and come first, on purpose: they are
+ * already on screen by the time the network answers, and re-ordering rows out
+ * from under someone mid-keystroke is worse than showing the newcomers below.
+ * Server rows the cache already knew about are dropped rather than appended —
+ * matched on `id`, so a node renamed on the server still collapses onto its
+ * stale cached twin instead of appearing twice.
+ *
+ * Why this exists: the cache only ever holds what this browser has already
+ * seen (the sidebar tree's eagerly-prefetched depth, expanded folders, visited
+ * nodes). Anything deeper is invisible to it. The search used to consult the
+ * server ONLY when the cache produced zero matches, which meant one shallow
+ * hit was enough to silently suppress every deeper node with the same name —
+ * a result that looked complete and wasn't. Merging instead of falling back is
+ * what makes "no more results" mean it.
+ */
+export const mergeRecentMatches = (
+  local: readonly KnownNode[],
+  network: readonly KnownNode[],
+): KnownNode[] => {
+  if (network.length === 0) return [...local];
+  const seen = new Set(local.map((node) => node.id));
+  const merged = [...local];
+  for (const node of network) {
+    if (seen.has(node.id)) continue;
+    seen.add(node.id);
+    merged.push(node);
+  }
+  return merged;
+};
+
+/**
+ * Reorder merged rows so the ones the user has ACTUALLY visited come first,
+ * and report how many that is — the split a "Recently visited" heading can
+ * honestly be drawn at.
+ *
+ * The cache is not a visit log. It also absorbs the sidebar tree, and (by
+ * design) every node a previous search returned, so "is in the cache" answers
+ * "has this browser heard of it", not "has this person been there". Labelling
+ * the cached half "Recently visited" would therefore lie about any node that
+ * merely appeared in an earlier result list — observed exactly that way: a
+ * folder three levels deep, never opened, sat under "Recently visited" purely
+ * because a previous query had scrolled past it.
+ *
+ * Stable within each group, so a row never jumps position relative to its
+ * peers. Rows arriving later from the server carry no `lastVisitedAt` and so
+ * can only ever land in the second group — they cannot displace anything
+ * already on screen.
+ */
+export const partitionByVisited = (
+  nodes: readonly KnownNode[],
+): { ordered: KnownNode[]; visitedCount: number } => {
+  const visited: KnownNode[] = [];
+  const rest: KnownNode[] = [];
+  for (const node of nodes) (node.lastVisitedAt ? visited : rest).push(node);
+  return { ordered: [...visited, ...rest], visitedCount: visited.length };
+};
+
 const fuzzyMatchForScope = (scope: string, query: string, limit = 20): KnownNode[] =>
   fuzzyMatchKnownNodes(listForScope(scope), query, limit);
 

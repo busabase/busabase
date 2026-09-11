@@ -397,6 +397,26 @@ export const coreMessagesEn = {
     contextChipLabel: "Context",
     contextChipHint: "Your message will say which node you mean.",
     contextChipRemove: "Don't send this as context",
+    statusConnecting: "connecting…",
+    statusIdle: "idle",
+    statusBusy: "replying…",
+    statusWaitingPermission: "waiting for your decision",
+    statusEnded: "ended",
+    statusFailed: "failed",
+    statusStarting: "starting…",
+    loadSessionsFailedTitle: "Couldn't load agent sessions",
+    backToAgents: "Agents",
+    agentMenu: "Agent menu",
+    newSession: "New session",
+    sessionListLabel: "Sessions",
+    sessionItemLabel: "{time}, {status}",
+    conversationConnectedTitle: "Connected.",
+    conversationConnectedBody: "Send a message to start.",
+    noSessionsTitle: "No sessions yet",
+    noSessionsBody: "Start a new session with {name} to begin.",
+    composerWaitingPlaceholder: "Respond to the request above to continue…",
+    composerDefaultPlaceholder: "Message {name}…",
+    continueConversationFailed: "Couldn't continue this conversation.",
   },
   form: {
     alreadyExists:
@@ -702,7 +722,28 @@ export const coreMessagesEn = {
      * Apps/Skills moved to the strip's front.
      */
     all: "Content",
+    /**
+     * With no query this lists recently visited nodes; the moment anything is
+     * typed it searches EVERY node in the workspace by name, so results can
+     * include things the user has never opened. The section headings below
+     * carry that distinction — the tab label deliberately does not try to.
+     *
+     * Briefly renamed "Jump" on the theory that action-naming matched the
+     * industry. It does not: across five products whose search HAS tabs
+     * (Slack, Teams, GitHub, Confluence — plus Spotlight/Raycast, which have
+     * no tabs at all), every tab is named after an ENTITY and none after an
+     * action. "Jump" had no precedent and was reverted before it shipped.
+     */
     recent: "Recent",
+    /** Section heading over the rows that came from this browser's own cache. */
+    sectionRecent: "Recently visited",
+    /** Section heading over rows the server returned that the cache had not seen. */
+    sectionElsewhere: "Elsewhere in this workspace",
+    /** Section heading over doc/page/whiteboard/workflow BODY matches. */
+    sectionDocContent: "Inside documents",
+    /** The filter control that replaced the tab strip. */
+    filterLabel: "Filter",
+    filterAll: "Everything",
     skills: "Skills",
     apps: "Apps",
     records: "Records",

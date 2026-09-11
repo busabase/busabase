@@ -19,6 +19,7 @@ import {
   ArrowLeft,
   AtSign,
   Bot,
+  Check,
   ChevronDown,
   Loader2,
   MessageSquarePlus,
@@ -26,7 +27,7 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useCoreI18n, useCoreLocale } from "../../../i18n";
+import { type CoreI18nMessages, fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
 import { resolveSpaceId } from "../../dashboard/components/node-agent-prompts-dialog";
 import {
   AGENT_CHAT_TAB_TYPE,
@@ -34,31 +35,58 @@ import {
   agentChatTabId,
   consumeAgentChatDraft,
 } from "../../dashboard/components/side-panel-sources";
+import { formatDetailTime, formatFullTime } from "../../dashboard/helpers/format";
 import type { LoadedNode } from "../../dashboard/node-detail-registry";
 import { registerSidePanelTab, type SidePanelTabProps } from "../../dashboard/side-panel-registry";
 import { useCurrentNodeStore } from "../../dashboard/store/current-node-store";
 import { useSidePanelStore } from "../../dashboard/store/side-panel-store";
 import { useAgentSession } from "../hooks/use-agent-session";
 import { withNodeContext } from "../utils/agent-message-context";
-import { getPromptActivityState } from "../utils/prompt-activity";
+import { sendOrContinueAgentPrompt } from "../utils/agent-session-continuation";
+import { shouldRenderAgentMessage } from "../utils/agent-visible-message";
+import { getPromptActivityState, isComposerDisabled } from "../utils/prompt-activity";
 import { AgentLoadingState, AgentQueryErrorState } from "./agent-query-state";
 import { ModelSelectorRow } from "./model-selector-row";
 import { TransportBadge } from "./transport-badge";
 
-/**
- * A session whose process is gone cannot take another message. Persisted
- * sessions made this reachable: before they survived a restart, an `ended`
- * session simply disappeared and the input was never shown for one.
- */
-const isFinished = (status: AgentSessionVO["status"]) => status === "ended" || status === "failed";
+const statusLabel = (status: AgentSessionVO["status"], messages: CoreI18nMessages): string =>
+  ({
+    connecting: messages.agents.statusConnecting,
+    idle: messages.agents.statusIdle,
+    busy: messages.agents.statusBusy,
+    waiting_permission: messages.agents.statusWaitingPermission,
+    ended: messages.agents.statusEnded,
+    failed: messages.agents.statusFailed,
+  })[status];
 
-const STATUS_LABEL: Record<AgentSessionVO["status"], string> = {
-  connecting: "connecting…",
-  idle: "idle",
-  busy: "replying…",
-  waiting_permission: "waiting for your decision",
-  ended: "ended",
-  failed: "failed",
+/**
+ * "Jul 30, 12:34 PM" rather than a bare time: sessions persist, so two
+ * sessions started on different days (or a session sitting a week old) would
+ * otherwise show identical or ambiguous labels. `formatFullTime` (the
+ * complete localized timestamp) backs the accessible name, since the visible
+ * label truncates in both the rail and the compact menu.
+ */
+const sessionTimeLabel = (createdAt: string, locale: string) => ({
+  short: formatDetailTime(createdAt, locale),
+  full: formatFullTime(createdAt, locale),
+});
+
+const sessionItemLabel = (
+  createdAt: string,
+  status: AgentSessionVO["status"],
+  locale: string,
+  messages: CoreI18nMessages,
+) => {
+  const time = sessionTimeLabel(createdAt, locale);
+  const statusText = statusLabel(status, messages);
+  return {
+    ...time,
+    status: statusText,
+    accessible: fmt(messages.agents.sessionItemLabel, {
+      status: statusText,
+      time: time.full,
+    }),
+  };
 };
 
 interface AgentDetailViewProps {
@@ -183,12 +211,30 @@ export function AgentDetailView({
     },
   });
 
+  /**
+   * Covers both known-terminal sessions and the stale-cache window where the
+   * backend became terminal after the latest list poll. Every send goes
+   * through the continuation helper so the prompt RPC's pre-record rejection,
+   * rather than a four-second-old status, is authoritative. The same flag
+   * spans create-session-then-first-prompt so the composer cannot double-send.
+   */
+  const [continuing, setContinuing] = useState(false);
+  const [continuationError, setContinuationError] = useState<string | null>(null);
+
+  // A stale continuation error must not survive a switch away from the
+  // session that produced it — including the switch `onSessionCreated`
+  // itself makes onto the freshly continued session.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only the trigger (activeSessionId changing) matters, not a value read in the body.
+  useEffect(() => {
+    setContinuationError(null);
+  }, [activeSessionId]);
+
   // Transcript, prompting and permission answering are all `@acp-ui/core`, the
   // same interaction core acprouter drives — only the transport below it is
   // busabase's own.
   const chat = useAgentSession(orpc, activeSessionId);
   const promptActivity = active
-    ? getPromptActivityState(active.status, chat.sending)
+    ? getPromptActivityState(active.status, chat.sending || continuing)
     : { active: false, starting: false };
 
   /**
@@ -207,17 +253,55 @@ export function AgentDetailView({
 
   const send = useCallback(
     (text: string, attachments?: AcpAttachment[]) => {
-      if (!activeSessionId) return;
+      if (!active) return;
       // The chip is a promise made in the UI ("your message will say which node
       // you mean"), so it is kept here, at send time, rather than by pre-filling
       // the textbox — which would make the user delete the line to opt out and
       // leave them editing our words instead of writing their own.
       const body = withNodeContext(text, activeContextNode, locale, resolveSpaceId());
-      void chat.sendPrompt(body, attachments).then(() => {
-        void queryClient.invalidateQueries({ queryKey: orpc.agents.sessions.list.queryKey() });
-      });
+      const refreshSessions = () =>
+        queryClient.invalidateQueries({ queryKey: orpc.agents.sessions.list.queryKey() });
+
+      setContinuationError(null);
+      setContinuing(true);
+      void sendOrContinueAgentPrompt(
+        {
+          createSession: async (slug) => createSession.mutateAsync({ slug }),
+          sendPrompt: async (sessionId, promptText, promptAttachments) => {
+            const result = await orpc.agents.sessions.prompt.call({
+              sessionId,
+              text: promptText,
+              ...(promptAttachments && promptAttachments.length > 0
+                ? { attachments: [...promptAttachments] }
+                : {}),
+            });
+            return result.accepted
+              ? { accepted: true }
+              : {
+                  accepted: false,
+                  promptRecorded: result.promptRecorded,
+                  message: result.message,
+                };
+          },
+          onSessionCreated: async (sessionId) => {
+            setSelectedSessionId(sessionId);
+            await refreshSessions();
+          },
+        },
+        { sessionId: active.id, status: active.status },
+        agentSlug,
+        body,
+        attachments,
+      )
+        .then(refreshSessions)
+        .catch((error: unknown) => {
+          setContinuationError(
+            error instanceof Error ? error.message : messages.agents.continueConversationFailed,
+          );
+        })
+        .finally(() => setContinuing(false));
     },
-    [activeContextNode, activeSessionId, chat, locale, queryClient, orpc],
+    [active, activeContextNode, agentSlug, createSession, locale, messages, orpc, queryClient],
   );
 
   const agentName = active?.agentName ?? agentSessions[0]?.agentName ?? agentSlug;
@@ -232,65 +316,88 @@ export function AgentDetailView({
       <AgentQueryErrorState
         error={sessions.error}
         onRetry={() => void sessions.refetch()}
-        title="Couldn't load agent sessions"
+        title={messages.agents.loadSessionsFailedTitle}
       />
     );
   }
 
   return (
     // A container, not a media query: this view is rendered both full-page and
-    // inside the side panel, whose width the user drags between 320 and 760px.
-    // The viewport says nothing useful about either.
-    <div className="@container/agent flex min-h-0 flex-1">
+    // inside the side panel, whose configured width the user drags between 320
+    // and 760px (and whose flex host can make the content narrower). The
+    // viewport says nothing useful about either.
+    <div className="@container/agent flex min-h-0 min-w-0 flex-1" data-testid="agent-detail-view">
       {/* The 256px session rail costs more than it earns once the container is
           narrow — at a 420px panel it would leave 164px for the conversation.
-          Below @2xl it collapses into the header dropdown instead. */}
-      <aside className="hidden w-64 shrink-0 flex-col gap-1 overflow-y-auto border-r p-3 @2xl/agent:flex">
-        <Button variant="ghost" size="sm" className="mb-2 justify-start" onClick={onBack}>
+          Below @2xl it collapses into the header dropdown instead. Header and
+          actions stay fixed (shrink-0); only the session list below scrolls,
+          so "New session" is always reachable regardless of list length. */}
+      <aside className="hidden w-64 shrink-0 flex-col gap-1 border-r p-3 @2xl/agent:flex">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="mb-2 min-w-0 shrink-0 justify-start"
+          onClick={onBack}
+        >
           <ArrowLeft className="size-4" />
-          Agents
+          {messages.agents.backToAgents}
         </Button>
 
-        <div className="flex items-center gap-2 px-1 pb-1">
-          <Bot className="size-4" />
-          <span className="truncate font-medium text-sm">{agentName}</span>
+        <div className="flex min-w-0 shrink-0 items-center gap-2 px-1 pb-1">
+          <Bot className="size-4 shrink-0" />
+          <span className="min-w-0 truncate font-medium text-sm">{agentName}</span>
         </div>
-        <TransportBadge transport={transport} />
+        <div className="shrink-0">
+          <TransportBadge transport={transport} />
+        </div>
 
         <Button
           variant="outline"
           size="sm"
-          className="mt-3"
+          className="mt-3 min-w-0 shrink-0"
           disabled={createSession.isPending}
           onClick={() => createSession.mutate({ slug: agentSlug })}
         >
           <MessageSquarePlus className="size-4" />
-          New session
+          <span className="truncate">{messages.agents.newSession}</span>
         </Button>
 
-        <div className="mt-3 flex flex-col gap-1">
-          {agentSessions.map((session) => (
-            <button
-              type="button"
-              key={session.id}
-              onClick={() => setSelectedSessionId(session.id)}
-              className={`flex items-center justify-between rounded px-2 py-1.5 text-left text-sm hover:bg-accent ${
-                session.id === activeSessionId ? "bg-accent" : ""
-              }`}
-            >
-              <span className="truncate">{new Date(session.createdAt).toLocaleTimeString()}</span>
-              <span className="ml-2 shrink-0 text-muted-foreground text-xs">
-                {STATUS_LABEL[session.status]}
-              </span>
-            </button>
-          ))}
-        </div>
+        <nav
+          aria-label={messages.agents.sessionListLabel}
+          className="mt-3 flex min-h-0 min-w-0 flex-1 flex-col gap-1 overflow-y-auto"
+        >
+          {agentSessions.map((session) => {
+            const isActive = session.id === activeSessionId;
+            const label = sessionItemLabel(session.createdAt, session.status, locale, messages);
+            return (
+              <button
+                type="button"
+                key={session.id}
+                aria-current={isActive ? "true" : undefined}
+                aria-label={label.accessible}
+                data-testid="agent-session-item"
+                onClick={() => setSelectedSessionId(session.id)}
+                title={label.accessible}
+                className={`flex min-w-0 items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-accent ${
+                  isActive ? "bg-accent" : ""
+                }`}
+              >
+                <Check
+                  aria-hidden="true"
+                  className={`size-3.5 shrink-0 ${isActive ? "opacity-100" : "opacity-0"}`}
+                />
+                <span className="min-w-0 flex-1 truncate">{label.short}</span>
+                <span className="ml-2 shrink-0 text-muted-foreground text-xs">{label.status}</span>
+              </button>
+            );
+          })}
+        </nav>
       </aside>
 
-      <section className="flex min-h-0 flex-1 flex-col">
+      <section className="flex min-h-0 min-w-0 flex-1 flex-col">
         {active ? (
           <>
-            <header className="flex items-center gap-2 border-b px-4 py-3">
+            <header className="flex min-w-0 items-center gap-2 border-b px-4 py-3">
               {/* Everything the hidden rail offers, folded into one control.
                   Only mounted while the rail is gone, so the two can never
                   present the same actions twice. */}
@@ -300,10 +407,10 @@ export function AgentDetailView({
                     // Icon-only, so it needs a name of its own — without one
                     // this is an unlabelled button to a screen reader, and the
                     // only route to sessions / New session / back at this width.
-                    aria-label="Agent menu"
-                    className="-ml-2 h-auto shrink-0 gap-1 px-2 py-1 @2xl/agent:hidden"
+                    aria-label={messages.agents.agentMenu}
+                    className="-ml-2 h-11 min-w-11 shrink-0 gap-1 px-2 py-1 @2xl/agent:hidden"
                     size="sm"
-                    title="Agent menu"
+                    title={messages.agents.agentMenu}
                     variant="ghost"
                   >
                     <Bot className="size-4" />
@@ -311,42 +418,65 @@ export function AgentDetailView({
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="start" className="w-60">
-                  <DropdownMenuItem onSelect={onBack}>
+                  <DropdownMenuItem className="min-h-11" onSelect={onBack}>
                     <ArrowLeft className="size-4" />
-                    Agents
+                    {messages.agents.backToAgents}
                   </DropdownMenuItem>
                   <DropdownMenuItem
+                    className="min-h-11"
                     disabled={createSession.isPending}
                     onSelect={() => createSession.mutate({ slug: agentSlug })}
                   >
                     <MessageSquarePlus className="size-4" />
-                    New session
+                    {messages.agents.newSession}
                   </DropdownMenuItem>
                   {agentSessions.length > 0 ? (
                     <>
                       <DropdownMenuSeparator />
-                      <div className="max-h-64 overflow-y-auto">
-                        {agentSessions.map((session) => (
-                          <DropdownMenuItem
-                            key={session.id}
-                            onSelect={() => setSelectedSessionId(session.id)}
-                          >
-                            <span className="flex-1 truncate">
-                              {new Date(session.createdAt).toLocaleTimeString()}
-                            </span>
-                            <span className="shrink-0 text-muted-foreground text-xs">
-                              {STATUS_LABEL[session.status]}
-                            </span>
-                          </DropdownMenuItem>
-                        ))}
+                      <div
+                        aria-label={messages.agents.sessionListLabel}
+                        className="max-h-64 overflow-y-auto"
+                        role="group"
+                      >
+                        {agentSessions.map((session) => {
+                          const isActive = session.id === activeSessionId;
+                          const label = sessionItemLabel(
+                            session.createdAt,
+                            session.status,
+                            locale,
+                            messages,
+                          );
+                          return (
+                            <DropdownMenuItem
+                              key={session.id}
+                              aria-current={isActive ? "true" : undefined}
+                              aria-label={label.accessible}
+                              className="min-h-11"
+                              data-testid="agent-session-item"
+                              onSelect={() => setSelectedSessionId(session.id)}
+                              title={label.accessible}
+                            >
+                              <Check
+                                aria-hidden="true"
+                                className={`size-3.5 shrink-0 ${isActive ? "opacity-100" : "opacity-0"}`}
+                              />
+                              <span className="min-w-0 flex-1 truncate">{label.short}</span>
+                              <span className="shrink-0 text-muted-foreground text-xs">
+                                {label.status}
+                              </span>
+                            </DropdownMenuItem>
+                          );
+                        })}
                       </div>
                     </>
                   ) : null}
                 </DropdownMenuContent>
               </DropdownMenu>
 
-              <div className="min-w-0">
-                <span className="font-medium text-sm">{agentName}</span>
+              <div className="min-w-0 flex-1">
+                <span className="block truncate font-medium text-sm" title={agentName}>
+                  {agentName}
+                </span>
                 <AcpSessionMeta
                   className="truncate text-muted-foreground text-xs"
                   title={chat.title}
@@ -354,18 +484,28 @@ export function AgentDetailView({
                 />
               </div>
               <span
-                className="ml-auto flex shrink-0 items-center gap-1.5 text-muted-foreground text-xs"
-                role={promptActivity.starting ? "status" : undefined}
+                aria-live="polite"
+                className="ml-auto flex max-w-24 shrink-0 items-center gap-1.5 text-muted-foreground text-xs @md/agent:max-w-32"
+                role="status"
+                title={
+                  promptActivity.starting
+                    ? messages.agents.statusStarting
+                    : statusLabel(active.status, messages)
+                }
               >
                 {promptActivity.starting ? (
-                  <Loader2 aria-hidden="true" className="size-3 animate-spin" />
+                  <Loader2 aria-hidden="true" className="size-3 shrink-0 animate-spin" />
                 ) : null}
-                {promptActivity.starting ? "starting…" : STATUS_LABEL[active.status]}
+                <span className="truncate">
+                  {promptActivity.starting
+                    ? messages.agents.statusStarting
+                    : statusLabel(active.status, messages)}
+                </span>
               </span>
               {onOpenInSidePanel ? (
                 <Button
                   aria-label={messages.agents.openInSidePanel}
-                  className="shrink-0 text-muted-foreground"
+                  className="size-11 shrink-0 text-muted-foreground"
                   onClick={() => onOpenInSidePanel(active.id, agentName)}
                   size="icon-sm"
                   title={messages.agents.openInSidePanel}
@@ -377,18 +517,31 @@ export function AgentDetailView({
               ) : null}
             </header>
 
-            {active.error ? (
-              <p className="border-b bg-destructive/10 px-4 py-2 text-destructive text-sm">
+            {active.error && shouldRenderAgentMessage(active.error) ? (
+              <p
+                role="alert"
+                className="min-w-0 break-words border-b bg-destructive/10 px-4 py-2 text-destructive text-sm"
+              >
                 {active.error}
+              </p>
+            ) : null}
+
+            {continuationError && shouldRenderAgentMessage(continuationError) ? (
+              <p
+                role="alert"
+                className="min-w-0 break-words border-b bg-destructive/10 px-4 py-2 text-destructive text-sm"
+              >
+                {continuationError}
               </p>
             ) : null}
 
             <AcpConversation
               blocks={chat.blocks}
+              className="min-w-0"
               streaming={promptActivity.active}
               onAnswerPermission={chat.answerPermission}
-              emptyTitle="Connected."
-              emptyDescription="Send a message to start."
+              emptyTitle={messages.agents.conversationConnectedTitle}
+              emptyDescription={messages.agents.conversationConnectedBody}
             />
 
             {activeContextNode ? (
@@ -398,49 +551,48 @@ export function AgentDetailView({
               />
             ) : null}
 
-            {active.modelOption ? (
-              <ModelSelectorRow
-                modelOption={active.modelOption}
-                disabled={setConfigOption.isPending || active.status !== "idle"}
-                error={setConfigOption.error?.message}
-                onChange={(value) =>
-                  setConfigOption.mutate({
-                    sessionId: active.id,
-                    configId: active.modelOption?.id ?? "",
-                    value,
-                  })
-                }
-              />
-            ) : null}
-
             <AcpComposer
-              className="border-0 border-t p-3"
+              className="min-w-0 border-0 border-t p-3"
               draft={draft}
               onDraftApplied={onDraftApplied}
-              disabled={
-                promptActivity.active ||
-                active.status === "waiting_permission" ||
-                isFinished(active.status)
+              disabled={isComposerDisabled(
+                active.status,
+                promptActivity.active,
+                setConfigOption.isPending,
+              )}
+              footerControls={
+                active.modelOption ? (
+                  <ModelSelectorRow
+                    modelOption={active.modelOption}
+                    disabled={setConfigOption.isPending || active.status !== "idle"}
+                    error={setConfigOption.error?.message}
+                    onChange={(value) =>
+                      setConfigOption.mutate({
+                        sessionId: active.id,
+                        configId: active.modelOption?.id ?? "",
+                        value,
+                      })
+                    }
+                  />
+                ) : undefined
               }
               onSend={send}
               placeholder={
-                isFinished(active.status)
-                  ? "This session has ended — start a new one to keep going."
-                  : active.status === "waiting_permission"
-                    ? "Respond to the request above to continue…"
-                    : `Message ${agentName}…`
+                active.status === "waiting_permission"
+                  ? messages.agents.composerWaitingPlaceholder
+                  : fmt(messages.agents.composerDefaultPlaceholder, { name: agentName })
               }
               onStop={promptActivity.starting ? undefined : chat.cancel}
               sending={promptActivity.active}
             />
           </>
         ) : (
-          <div className="flex flex-1 items-center justify-center p-8 text-center">
+          <div className="flex min-w-0 flex-1 items-center justify-center p-8 text-center">
             <div className="max-w-sm">
               <Bot className="mx-auto size-8 text-muted-foreground" />
-              <h3 className="mt-3 font-medium">No sessions yet</h3>
+              <h3 className="mt-3 font-medium">{messages.agents.noSessionsTitle}</h3>
               <p className="mt-1 text-muted-foreground text-sm">
-                Start a new session with {agentName} to begin.
+                {fmt(messages.agents.noSessionsBody, { name: agentName })}
               </p>
               <Button
                 className="mt-3"
@@ -448,7 +600,7 @@ export function AgentDetailView({
                 onClick={() => createSession.mutate({ slug: agentSlug })}
               >
                 <MessageSquarePlus className="size-4" />
-                New session
+                {messages.agents.newSession}
               </Button>
             </div>
           </div>
@@ -476,17 +628,21 @@ function AgentContextChip({ node, onDismiss }: { node: LoadedNode; onDismiss: ()
     // The hint is the row's `title`, not a third column of text: the panel is
     // ~420px and the row already lost the end of that sentence to an ellipsis at
     // that width. "Context @Companies ×" says it; the tooltip spells it out.
+    // `aria-label` carries the same hint to screen readers and touch, which
+    // never see a `title` tooltip.
     <div
-      className="flex shrink-0 items-center gap-2 border-t px-3 pt-2 text-xs"
+      aria-label={messages.agents.contextChipHint}
+      className="flex min-w-0 shrink-0 items-center gap-2 border-t px-3 pt-2 text-xs"
+      role="group"
       title={messages.agents.contextChipHint}
     >
       <span className="shrink-0 text-muted-foreground">{messages.agents.contextChipLabel}</span>
       <span className="flex min-w-0 items-center gap-1 rounded-md border bg-muted/50 px-2 py-0.5">
         <AtSign className="size-3 shrink-0 text-muted-foreground" />
-        <span className="truncate font-medium">{node.name}</span>
+        <span className="min-w-0 truncate font-medium">{node.name}</span>
         <button
           aria-label={messages.agents.contextChipRemove}
-          className="-mr-1 ml-0.5 shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          className="-my-2 -mr-2 ml-0.5 inline-flex size-11 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
           onClick={onDismiss}
           title={messages.agents.contextChipRemove}
           type="button"

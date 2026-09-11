@@ -9,9 +9,11 @@ import { useQueryClient } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type {
   AgentSessionEventVO,
+  AgentSessionVO,
   PromptAttachmentInput,
 } from "busabase-contract/domains/agents/types";
 import { useMemo } from "react";
+import { shouldRenderAgentMessage } from "../utils/agent-visible-message";
 
 /**
  * Translate one persisted busabase event into zero or more shared-model
@@ -58,10 +60,14 @@ function translate(event: AgentSessionEventVO): AcpUiEvent[] {
   const update = event.acpUpdate as Record<string, unknown>;
   const tag = typeof update.sessionUpdate === "string" ? update.sessionUpdate : "";
 
-  // busabase emits its own session-level note (e.g. "this agent cannot take an
-  // HTTP MCP server, so it has no access to workspace data"). Not an ACP tag.
+  // busabase emits its own session-level notes (e.g. an attachment busabase
+  // could not send to this agent). Not an ACP tag. Filtered rather than
+  // translated unconditionally: a legacy persisted unsupported-HTTP-MCP note
+  // and raw ACP transport-close noise are both session-level text that
+  // reached this path historically, but neither is something the user should
+  // see — see `shouldRenderAgentMessage`.
   if (tag === "note" && typeof update.text === "string") {
-    return [{ type: "note", text: update.text }];
+    return shouldRenderAgentMessage(update.text) ? [{ type: "note", text: update.text }] : [];
   }
 
   // Also busabase's own, and NOT the ACP wire shape: the user's prompt is
@@ -141,6 +147,24 @@ export function useAgentSession(orpc: BusabaseQueryUtils, sessionId: string | nu
               onEvent: (event: AgentSessionEventVO) => {
                 if (cancelled) return;
                 lastSeq = Math.max(lastSeq, event.seq);
+                if (event.kind === "status" && event.status) {
+                  queryClient.setQueryData(
+                    orpc.agents.sessions.list.queryKey(),
+                    (previous: AgentSessionVO[] | undefined) =>
+                      previous?.map((session) =>
+                        session.id === id
+                          ? {
+                              ...session,
+                              status: event.status as AgentSessionVO["status"],
+                              lastActivityAt: event.at,
+                              ...(event.status === "failed" && event.message
+                                ? { error: event.message }
+                                : {}),
+                            }
+                          : session,
+                      ),
+                  );
+                }
                 const update = event.acpUpdate as { sessionUpdate?: unknown } | undefined;
                 if (
                   event.kind === "acpUpdate" &&

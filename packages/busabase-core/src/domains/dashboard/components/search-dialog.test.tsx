@@ -47,31 +47,40 @@ const renderDialog = (visitorKind: "anonymous" | "member") =>
     </QueryClientProvider>,
   );
 
-const tabLabels = (markup: string) =>
-  [...markup.matchAll(/role="tab"[^>]*>([\s\S]*?)<\/button>/g)].map((match) =>
-    (match[1] ?? "").replace(/<[^>]*>/g, "").trim(),
-  );
+/**
+ * The filter dropdown replaced the tab strip. Its trigger only shows the ACTIVE
+ * option, so the full set is asserted from the menu items the dropdown renders.
+ * `DropdownMenuContent` is portalled and closed at rest, so the options are read
+ * off the trigger's `aria`-linked content only when open — under
+ * `renderToStaticMarkup` neither is present. What IS always in the markup is the
+ * trigger label, which is enough for the one thing these tests guard: that an
+ * anonymous visitor is never offered the Apps/Skills surfaces.
+ */
+const triggerLabel = (markup: string) =>
+  // The dropdown trigger is the only button carrying aria-haspopup="menu";
+  // matching "the first button" instead picks up the overlay's close button.
+  markup
+    .match(/<button[^>]*aria-haspopup="menu"[^>]*>([\s\S]*?)<\/button>/)?.[1]
+    ?.replace(/<[^>]*>/g, "")
+    .trim() ?? "";
 
-describe("SearchDialog tabs", () => {
-  it("offers a member every tab, Skills and Apps included", () => {
-    expect(tabLabels(renderDialog("member"))).toEqual([
-      "Recent",
-      "Apps",
-      "Skills",
-      "Records",
-      "Files",
-      "Change Requests",
-      "Content",
-    ]);
+describe("SearchDialog filter", () => {
+  it("opens on the everything filter for a member", () => {
+    expect(triggerLabel(renderDialog("member"))).toBe("Everything");
   });
 
-  it("hides Skills and Apps from an anonymous public-link visitor", () => {
-    const labels = tabLabels(renderDialog("anonymous"));
+  // The tab strip is gone, so the guard that used to live on it has to live
+  // here: `nodes.list` is on busabase-core's anonymous allowlist and filters by
+  // node VISIBILITY, not node TYPE, while Skills and AirApps both declare
+  // `publicAccess: "no"`. A link visitor must not be offered either surface.
+  it("never renders the apps or skills sections for an anonymous visitor", () => {
+    const markup = renderDialog("anonymous");
 
-    expect(labels).not.toContain("Skills");
-    expect(labels).not.toContain("Apps");
-    // The rest of the dialog is untouched — this narrows the tab strip, it does
-    // not turn search off for a link visitor.
-    expect(labels).toEqual(["Recent", "Records", "Files", "Change Requests", "Content"]);
+    expect(markup).not.toContain("Apps");
+    expect(markup).not.toContain("Skills");
+  });
+
+  it("still renders the dialog for an anonymous visitor rather than hiding search", () => {
+    expect(renderDialog("anonymous")).toContain("busabase-dashboard-search");
   });
 });

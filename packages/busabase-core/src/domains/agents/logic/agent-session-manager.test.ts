@@ -44,11 +44,13 @@ vi.mock("@agentclientprotocol/sdk/experimental/ws-client", () => ({
 }));
 
 const {
+  AgentSessionTerminalError,
   createAgentSession,
   setAgentSessionConfigOption,
   closeAgentSessions,
   listAgentSessions,
   promptAgentSession,
+  subscribeAgentSession,
 } = await import("./agent-session-manager");
 
 function linkedStreams(): [Stream, Stream] {
@@ -73,24 +75,34 @@ const MODEL_CONFIG: acp.SessionConfigOption = {
 };
 
 /** Runs a scripted fake agent over one side of a linked stream pair. */
-function serveFakeAgent(stream: Stream, initialConfigOptions: acp.SessionConfigOption[]) {
+function serveFakeAgent(
+  stream: Stream,
+  initialConfigOptions: acp.SessionConfigOption[],
+  options?: { initializeGate?: Promise<void> },
+) {
   let configOptions = initialConfigOptions;
   let setConfigCalls = 0;
+  const promptTexts: string[] = [];
   let connected: acp.AgentContext | undefined;
   const ready = new Promise<void>((resolve) => {
     acp
       .agent()
-      .onRequest(acp.methods.agent.initialize, async () => ({
-        protocolVersion: acp.PROTOCOL_VERSION,
-        agentCapabilities: {},
-      }))
+      .onRequest(acp.methods.agent.initialize, async () => {
+        await options?.initializeGate;
+        return {
+          protocolVersion: acp.PROTOCOL_VERSION,
+          agentCapabilities: {},
+        };
+      })
       .onRequest(acp.methods.agent.session.new, async () => ({
         sessionId: "acp-sess-1",
         configOptions,
       }))
-      .onRequest(acp.methods.agent.session.prompt, async () => ({
-        stopReason: "end_turn" as const,
-      }))
+      .onRequest(acp.methods.agent.session.prompt, async (ctx) => {
+        const text = ctx.params.prompt.find((block) => block.type === "text");
+        if (text?.type === "text") promptTexts.push(text.text);
+        return { stopReason: "end_turn" as const };
+      })
       .onRequest(acp.methods.agent.session.setConfigOption, async (ctx) => {
         setConfigCalls += 1;
         configOptions = configOptions.map((option) => {
@@ -110,6 +122,7 @@ function serveFakeAgent(stream: Stream, initialConfigOptions: acp.SessionConfigO
 
   return {
     setConfigCallCount: () => setConfigCalls,
+    promptTexts: () => promptTexts,
     /** Push a `session/update` config_option_update notification to the client. */
     pushConfigUpdate: async (nextConfigOptions: acp.SessionConfigOption[]) => {
       configOptions = nextConfigOptions;
@@ -176,6 +189,30 @@ describe("agent session manager — model config option", () => {
 
     const settled = await waitUntilSettled(session.id);
     expect(settled.modelOption).toBeNull();
+
+    await closeAgentSessions([session.id]);
+  });
+
+  it("does not emit a note when the agent lacks HTTP MCP support (PUL-214)", async () => {
+    // `serveFakeAgent`'s `initialize` responds with `agentCapabilities: {}` —
+    // no `mcpCapabilities.http` — so this exercises the exact branch that
+    // used to synthesize the "does not support HTTP MCP servers" note.
+    serveFakeAgent(agentSide, [MODEL_CONFIG]);
+    const session = await createAgentSession({ slug: "test-agent", spaceId: "space-1" });
+    await waitUntilSettled(session.id);
+
+    const events = [];
+    for await (const event of subscribeAgentSession(session.id, -1)) {
+      events.push(event);
+      if (event.kind === "status" && event.status === "idle") break;
+    }
+    const noteTexts = events
+      .filter((event) => event.kind === "acpUpdate")
+      .map((event) => (event.acpUpdate as { text?: unknown })?.text)
+      .filter((text): text is string => typeof text === "string");
+    expect(noteTexts.some((text) => text.includes("does not support HTTP MCP servers"))).toBe(
+      false,
+    );
 
     await closeAgentSessions([session.id]);
   });
@@ -290,6 +327,142 @@ describe("promptAgentSession", () => {
     resolveReady?.();
     await result;
     expect(prompt).toHaveBeenCalledWith("hello while starting", undefined);
+  });
+
+  it("marks a terminal rejection before echo as safe for continuation", async () => {
+    const session = {
+      id: "session-terminal-before-echo",
+      slug: "claude",
+      agentName: "Claude Code",
+      transport: "local-subprocess",
+      status: "failed",
+      error: "ACP connection closed",
+      createdAt: new Date().toISOString(),
+      lastActivityAt: new Date().toISOString(),
+      acpSessionId: null,
+      child: null,
+      ready: Promise.resolve(),
+      promptStarting: false,
+      prompt: vi.fn(),
+      cancel: vi.fn(),
+      close: vi.fn(),
+      closed: false,
+      modelOption: null,
+      setConfigOption: vi.fn(),
+      seq: 0,
+      persistedSeq: 0,
+      buffer: [],
+      listeners: new Set(),
+      pendingPermission: null,
+      permissionCounter: 0,
+    };
+    (
+      globalThis as typeof globalThis & { __busabaseAgentSessions?: Map<string, unknown> }
+    ).__busabaseAgentSessions?.set(session.id, session);
+
+    await expect(promptAgentSession(session.id, "continue me")).rejects.toMatchObject({
+      name: AgentSessionTerminalError.name,
+      status: "failed",
+      promptRecorded: false,
+    });
+    expect(session.buffer).toEqual([]);
+  });
+
+  it("marks a terminal transition after echo as unsafe to retry", async () => {
+    let resolveReady: (() => void) | undefined;
+    const ready = new Promise<void>((resolve) => {
+      resolveReady = resolve;
+    });
+    const session = {
+      id: "session-terminal-after-echo",
+      slug: "claude",
+      agentName: "Claude Code",
+      transport: "local-subprocess",
+      status: "connecting",
+      error: null as string | null,
+      createdAt: new Date().toISOString(),
+      lastActivityAt: new Date().toISOString(),
+      acpSessionId: null,
+      child: null,
+      ready,
+      promptStarting: false,
+      prompt: vi.fn(),
+      cancel: vi.fn(),
+      close: vi.fn(),
+      closed: false,
+      modelOption: null,
+      setConfigOption: vi.fn(),
+      seq: 0,
+      persistedSeq: 0,
+      buffer: [],
+      listeners: new Set(),
+      pendingPermission: null,
+      permissionCounter: 0,
+    };
+    (
+      globalThis as typeof globalThis & { __busabaseAgentSessions?: Map<string, unknown> }
+    ).__busabaseAgentSessions?.set(session.id, session);
+
+    const prompt = promptAgentSession(session.id, "record exactly once");
+    await vi.waitFor(() => expect(mocks.persistSessionEvents).toHaveBeenCalledTimes(1));
+    session.status = "failed";
+    session.error = "ACP connection closed";
+    resolveReady?.();
+
+    await expect(prompt).rejects.toMatchObject({
+      name: AgentSessionTerminalError.name,
+      status: "failed",
+      promptRecorded: true,
+    });
+    expect(session.buffer).toHaveLength(1);
+    expect(session.prompt).not.toHaveBeenCalled();
+  });
+
+  it("waits for session/new before sending a prompt created during startup", async () => {
+    const [clientSide, agentSide] = linkedStreams();
+    mocks.createWebSocketStream.mockReturnValue(clientSide);
+    let finishInitialize: (() => void) | undefined;
+    const initializeGate = new Promise<void>((resolve) => {
+      finishInitialize = resolve;
+    });
+    const agent = serveFakeAgent(agentSide, [], { initializeGate });
+    const session = await createAgentSession({ slug: "test-agent", spaceId: "space-1" });
+
+    let promptFinished = false;
+    const prompt = promptAgentSession(session.id, "sent after ready").then(() => {
+      promptFinished = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(promptFinished).toBe(false);
+    expect(agent.promptTexts()).toEqual([]);
+
+    finishInitialize?.();
+    await prompt;
+    expect(agent.promptTexts()).toEqual(["sent after ready"]);
+
+    await closeAgentSessions([session.id]);
+  });
+
+  it("disconnects without waiting for a stalled ACP initialization", async () => {
+    const [clientSide, agentSide] = linkedStreams();
+    mocks.createWebSocketStream.mockReturnValue(clientSide);
+    let finishInitialize: (() => void) | undefined;
+    const initializeGate = new Promise<void>((resolve) => {
+      finishInitialize = resolve;
+    });
+    serveFakeAgent(agentSide, [], { initializeGate });
+    const session = await createAgentSession({ slug: "test-agent", spaceId: "space-1" });
+
+    const closed = closeAgentSessions([session.id]).then(() => "closed" as const);
+    const timeout = new Promise<"timeout">((resolve) => {
+      setTimeout(() => resolve("timeout"), 100);
+    });
+    await expect(Promise.race([closed, timeout])).resolves.toBe("closed");
+    expect((await listAgentSessions()).some((candidate) => candidate.id === session.id)).toBe(
+      false,
+    );
+
+    finishInitialize?.();
   });
 
   it("rejects a second startup prompt without publishing a phantom user message", async () => {
