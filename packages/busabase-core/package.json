@@ -1,7 +1,7 @@
 {
   "name": "busabase-core",
   "description": "Shared Busabase open-core protocol, local store, API helpers, and dashboard components.",
-  "version": "0.52.1",
+  "version": "0.53.0",
   "private": true,
   "type": "module",
   "exports": {
@@ -68,6 +68,10 @@
     "./domains/drive/handlers": {
       "types": "./src/domains/drive/handlers.ts",
       "default": "./src/domains/drive/handlers.ts"
+    },
+    "./domains/filetree/preview-config": {
+      "types": "./src/domains/filetree/logic/preview-config.ts",
+      "default": "./src/domains/filetree/logic/preview-config.ts"
     },
     "./domains/airapp/handlers": {
       "types": "./src/domains/airapp/handlers.ts",
@@ -361,6 +365,10 @@
       "types": "./src/i18n/zh-CN.ts",
       "default": "./src/i18n/zh-CN.ts"
     },
+    "./i18n/zh-CN": {
+      "types": "./src/i18n/zh-CN.ts",
+      "default": "./src/i18n/zh-CN.ts"
+    },
     "./domains/agents/utils/agent-targets": {
       "types": "./src/domains/agents/utils/agent-targets.ts",
       "default": "./src/domains/agents/utils/agent-targets.ts"
@@ -425,10 +433,14 @@
     "zustand": "5.0.12"
   },
   "devDependencies": {
+    "@testing-library/react": "^16.3.2",
     "@types/node": "^26.3.0",
     "@types/react": "19.2.17",
+    "@types/react-dom": "^19.2.3",
     "@types/ws": "^8.18.1",
     "@vitest/coverage-v8": "^4.1.11",
+    "jsdom": "^27.4.0",
+    "react-dom": "^19.2.7",
     "typescript": "^7.0.2",
     "vitest": "^4.1.11"
   },
