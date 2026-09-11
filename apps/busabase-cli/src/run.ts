@@ -1723,7 +1723,9 @@ Examples:
       }),
     );
   addGlobalFlags(bases.command("create-change-request"))
-    .description("Propose a new record via a Change Request — review-first by default")
+    .description(
+      "Create a record via a Change Request — merged immediately if you have write access, otherwise proposed for review",
+    )
     .requiredOption("--base-id <id>", "target Base id")
     .requiredOption("--fields-json <json|@file>", "record fields as JSON, or @file.json")
     .option("--message <text>", "reviewer-facing Change Request message")
@@ -1993,7 +1995,11 @@ Examples:
     .option("--dry-run", "print the plan (tree, record counts, collisions) and create nothing")
     .option(
       "--auto-merge",
-      "merge the package's records and docs on the spot instead of leaving them as change requests to review — this TRUSTS THE PACKAGE AUTHOR, since skills and AirApps carry code your agents will run (default: review first)",
+      "merge the package's records and docs on the spot (the default; the flag is kept so scripts that pass it keep working)",
+    )
+    .option(
+      "--require-review",
+      "leave the package's records and docs as change requests for you to approve, instead of merging them",
     )
     .option(
       "--rename",
@@ -2026,12 +2032,15 @@ Examples:
   busabase-cli install https://github.com/acme/support-kb-template
   busabase-cli install https://github.com/acme/packages/tree/v1.2.0/skills/pdf-summarizer
   busabase-cli install https://github.com/acme/support-kb-template --dry-run
-  busabase-cli install https://github.com/acme/support-kb-template --into-folder support --auto-merge
+  busabase-cli install https://github.com/acme/support-kb-template --into-folder support --require-review
   busabase-cli install ./support-kb-template --dry-run
 
 Folders, Bases, their fields and their views are structure and are always created
-immediately. Records are content: by default they land as change requests for you
-to review, and --auto-merge merges them on the spot instead.
+immediately. Records, docs and app code are content: they merge on the spot too if
+your credential can write to the space, and --require-review leaves them as change
+requests for you to approve instead. Installing is already restricted to a space
+owner/admin, so choosing to install IS the trust decision — remember that a package
+can carry skills and AirApps, i.e. code your agents will run.
 
 A TEMPLATE (a package that also carries a SKILL.md) installs as an app: its
 manual lands as a Skill node, its nodes are stamped as belonging to that app, its
@@ -2043,17 +2052,22 @@ still wait for your review.
 If the URL is a repository that holds several packages rather than being one,
 install lists them and you pick with --skill <name>.
 
-A package whose records carry relation values requires --auto-merge — a relation
-stores the ids of the records it points at, and those exist only once the records
-are merged, so review-first would install every relation empty. Defining a relation
-field with nothing linked yet does not trigger this.`,
+A package whose records carry relation values cannot be installed with
+--require-review — a relation stores the ids of the records it points at, and those
+exist only once the records are merged, so review would install every relation
+empty. Defining a relation field with nothing linked yet does not trigger this.`,
     )
     .action(
       runArgAction(state, (repoUrl, client, opts, config) =>
         runInstall(client, repoUrl, {
           intoFolder: opts.intoFolder as string | undefined,
           dryRun: Boolean(opts.dryRun),
-          autoMerge: Boolean(opts.autoMerge),
+          // Permission-aware by default, like every other write: content merges
+          // unless the caller explicitly asks for review. `--auto-merge` is now a
+          // no-op kept for scripts that still pass it. A credential without write
+          // access still gets change requests — the server falls back gracefully
+          // rather than refusing.
+          autoMerge: opts.requireReview !== true,
           rename: Boolean(opts.rename),
           skill: opts.skill as string | undefined,
           // commander maps `--no-sample-records` to `sampleRecords: false`.
