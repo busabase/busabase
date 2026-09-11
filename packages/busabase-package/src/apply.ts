@@ -1212,14 +1212,22 @@ const createRecords = async (
   recordIdsByKey: Map<string, string>,
   app: AppContext | undefined,
 ): Promise<void> => {
-  // The one deliberate exception to "content goes to review" (spec §13.6). A
-  // template promises an app that works the moment you open it, and an app whose
-  // tables stay empty until the user finds the inbox and approves a dozen change
-  // requests has not delivered that. Scoped tightly: only rows the template
-  // author shipped, only when the package validates AS a template, and never the
-  // AirApp code or the Skill — those stay review-first, because they are the
-  // parts that execute.
-  const mergeRecords = options.autoMerge || (app?.mergeSampleRecords ?? false);
+  // For a TEMPLATE, sample rows are decided by `--no-sample-records` alone, in
+  // BOTH directions — that flag exists for exactly this question and nothing
+  // else answers it:
+  //   - without it, the rows merge even on an install that asked for review
+  //     (spec §13.6: a template promises an app that works the moment you open
+  //     it, and one whose tables stay empty until someone approves a dozen change
+  //     requests has not delivered that);
+  //   - with it, they are proposed even on an install that merges everything else
+  //     — which is the whole point of asking not to have someone's demo data
+  //     dropped straight into your space.
+  // That second direction used to fall out of `autoMerge` defaulting to false.
+  // Now that content is permission-aware and normally merges, reading the flag
+  // directly is what keeps it meaningful instead of silently dead.
+  // A plain (non-template) package has no sample-record concept, so its content
+  // follows `autoMerge` like everything else.
+  const mergeRecords = app ? app.mergeSampleRecords : options.autoMerge;
   const records = [...recordsToCreate].sort((a, b) => a.key.localeCompare(b.key, "en"));
   for (let offset = 0; offset < records.length; offset += RECORD_BATCH_SIZE) {
     const batch = records.slice(offset, offset + RECORD_BATCH_SIZE);

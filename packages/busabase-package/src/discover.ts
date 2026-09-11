@@ -53,6 +53,8 @@ export interface DiscoveredPackage {
   /** Declared `metadata.busabase.risk`, normalized — see `parseTemplateRisk`. */
   risk?: TemplateRiskLevel;
   screenshots: string[];
+  /** Package-relative demo clip path, when the manifest declares one. */
+  video?: string;
   /** Manifest tags merged with the template's own — what a catalog filters on. */
   tags: string[];
   agentPrompts: string[];
@@ -120,6 +122,7 @@ export const discoverPackages = (files: PackageFiles): DiscoveredPackage[] => {
       ...(tree.manifest.template?.category ? { category: tree.manifest.template.category } : {}),
       ...(validation.risk ? { risk: validation.risk } : {}),
       screenshots: tree.manifest.template?.screenshots ?? [],
+      ...(tree.manifest.template?.video ? { video: tree.manifest.template.video } : {}),
       // Both sets: the manifest's own tags describe the package, the template's
       // describe the app. A catalog filters on one list, not two.
       tags: [...new Set([...tree.manifest.tags, ...(tree.manifest.template?.tags ?? [])])],

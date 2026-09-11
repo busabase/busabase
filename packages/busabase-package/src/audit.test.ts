@@ -115,6 +115,31 @@ describe("identity and the catalog card", () => {
       "package/screenshot-missing",
     );
   });
+
+  it("catches a declared demo clip that is not in the package", () => {
+    const withVideo = {
+      ...MANIFEST,
+      template: { ...MANIFEST.template, video: "assets/recordings/fixture.mp4" },
+    };
+    expect(rules(audit({ "busabase.json": JSON.stringify(withVideo) }))).toContain(
+      "package/video-missing",
+    );
+  });
+
+  it("accepts a declared demo clip that ships with the package", () => {
+    const withVideo = {
+      ...MANIFEST,
+      template: { ...MANIFEST.template, video: "assets/recordings/fixture.mp4" },
+    };
+    expect(
+      rules(
+        audit({
+          "busabase.json": JSON.stringify(withVideo),
+          "assets/recordings/fixture.mp4": "not really an mp4",
+        }),
+      ),
+    ).not.toContain("package/video-missing");
+  });
 });
 
 describe("what must never be published", () => {
