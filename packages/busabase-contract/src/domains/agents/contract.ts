@@ -5,6 +5,7 @@ import {
   AgentConnectionVOSchema,
   AgentSessionEventVOSchema,
   AgentSessionIdInputSchema,
+  AgentSessionStatusSchema,
   AgentSessionVOSchema,
   CreateAgentSessionInputSchema,
   DisconnectAgentInputSchema,
@@ -44,12 +45,22 @@ export const agentsContract = {
     create: oc.input(CreateAgentSessionInputSchema).output(AgentSessionVOSchema),
 
     /**
-     * Send a message. Returns as soon as the turn is accepted — the reply arrives
-     * on `subscribe`, not here, so a slow agent never blocks the caller.
+     * Send a message. A terminal session returns `accepted: false` instead of
+     * relying on error text; `promptRecorded` tells the caller whether automatic
+     * continuation can resend without duplicating a server echo.
      */
-    prompt: oc
-      .input(PromptAgentSessionInputSchema)
-      .output(z.object({ accepted: z.boolean(), sessionId: z.string() })),
+    prompt: oc.input(PromptAgentSessionInputSchema).output(
+      z.discriminatedUnion("accepted", [
+        z.object({ accepted: z.literal(true), sessionId: z.string() }),
+        z.object({
+          accepted: z.literal(false),
+          sessionId: z.string(),
+          status: AgentSessionStatusSchema.extract(["ended", "failed"]),
+          promptRecorded: z.boolean(),
+          message: z.string(),
+        }),
+      ]),
+    ),
 
     cancel: oc.input(AgentSessionIdInputSchema).output(z.object({ ok: z.boolean() })),
 

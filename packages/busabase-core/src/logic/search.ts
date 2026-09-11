@@ -6,7 +6,25 @@ import type {
   SearchResponseVO,
   SearchResultVO,
 } from "busabase-contract/types";
-import { and, desc, eq, ilike, inArray, isNotNull, isNull, notExists, or, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  exists,
+  getTableColumns,
+  gte,
+  ilike,
+  inArray,
+  isNotNull,
+  isNull,
+  lte,
+  notExists,
+  or,
+  sql,
+} from "drizzle-orm";
+import type { PgColumn } from "drizzle-orm/pg-core";
 import { iStringConcat, iStringParse, iStringSchema } from "openlib/i18n/i-string";
 import { z } from "zod";
 import { getContextSpaceId } from "../context";
@@ -36,6 +54,7 @@ import {
   buildNodeVisibilityExists,
 } from "./node-acl";
 import { isSearchableNodeType, reindexNodeContent, SEARCHABLE_NODE_TYPES } from "./node-content";
+import { collectSubtreeIds } from "./nodes";
 import { ensureReady } from "./seed";
 import { toBaseVO } from "./vo";
 
@@ -43,6 +62,22 @@ import { toBaseVO } from "./vo";
 // and is named to match grep's `nodes` source.
 export const SEARCH_SOURCES = ["records", "files", "names", "nodes"] as const;
 export type SearchSource = (typeof SEARCH_SOURCES)[number];
+
+/**
+ * Mirrors `contract/schemas.ts`'s `SEARCH_SORTS`. `relevance` is not a column:
+ * it means "let each source keep the ranking it has", which for records is the
+ * full-text `ts_rank` and for everything else is most-recently-updated first.
+ * That is what every caller got before this parameter existed, which is why it
+ * is the default.
+ */
+export const SEARCH_SORTS = [
+  "relevance",
+  "updated_desc",
+  "updated_asc",
+  "created_desc",
+  "created_asc",
+] as const;
+export type SearchSort = (typeof SEARCH_SORTS)[number];
 
 // Schema defined locally to avoid circular deps with store.ts
 export const searchInputSchema = z.object({
@@ -67,7 +102,136 @@ export const searchInputSchema = z.object({
     .union([z.array(z.enum(SEARCH_SOURCES)), z.enum(SEARCH_SOURCES)])
     .transform((value) => (Array.isArray(value) ? value : [value]))
     .optional(),
+  sort: z.enum(SEARCH_SORTS).optional().default("relevance"),
+  updatedAfter: z.string().optional(),
+  updatedBefore: z.string().optional(),
+  inNodeId: z.string().optional(),
 });
+
+/**
+ * The ORDER BY for one source, given its own created/updated columns.
+ *
+ * Each source is ordered by the SAME column the caller asked for, so a mixed
+ * result set is actually comparable — sorting records by rank while sorting
+ * files by mtime would produce a list whose order means nothing.
+ */
+const orderForSort = (
+  sort: SearchSort,
+  columns: { createdAt: PgColumn; updatedAt: PgColumn },
+  // `PgColumn`, not `AnyColumn`: drizzle's `orderBy` rejects the wider type,
+  // and widening it here only moves the error to the call site.
+  relevanceFallback: SQL | PgColumn,
+): SQL | PgColumn => {
+  switch (sort) {
+    case "updated_desc":
+      return desc(columns.updatedAt);
+    case "updated_asc":
+      return asc(columns.updatedAt);
+    case "created_desc":
+      return desc(columns.createdAt);
+    case "created_asc":
+      return asc(columns.createdAt);
+    default:
+      return relevanceFallback;
+  }
+};
+
+/**
+ * A result paired with the value its own source was ORDERED BY.
+ *
+ * Every source already applies `orderForSort` in SQL, so each arrives
+ * internally correct — but they are then concatenated, and concatenation order
+ * (records, then Bases, then files, then node content) silently outranks the
+ * order the caller asked for. Verified against a real server before this
+ * existed: with `sort=updated_desc`, the newest document in the workspace came
+ * back BELOW records an entire minute older, because records are concatenated
+ * first. The list was sorted four times and ordered once.
+ *
+ * The key rides alongside the VO rather than being added to it: which column it
+ * holds depends on the sort of this one call (`createdAt` for the `created_*`
+ * orders, `updatedAt` otherwise), so it is a fact about the query, not a
+ * property of the result.
+ */
+interface SortableResult {
+  result: SearchResultVO;
+  sortKey: string | null;
+}
+
+const sortKeyFor = (
+  sort: SearchSort,
+  timestamps: { createdAt: string | null; updatedAt: string | null },
+) =>
+  sort === "created_desc" || sort === "created_asc" ? timestamps.createdAt : timestamps.updatedAt;
+
+/**
+ * Flatten the per-source groups into the single list the caller sees.
+ *
+ * `relevance` deliberately keeps concatenation order: each source ranks by its
+ * own notion of relevance (full-text rank for records, recency for everything
+ * else), and those scores are not comparable across sources, so interleaving
+ * them would invent a precision that isn't there. The four explicit orders DO
+ * name one shared column, and those are the ones that get merged.
+ */
+const mergeBySort = (groups: SortableResult[][], sort: SearchSort): SearchResultVO[] => {
+  const merged = groups.flat();
+  if (sort === "relevance") return merged.map((entry) => entry.result);
+
+  const ascending = sort === "updated_asc" || sort === "created_asc";
+  const timeOf = (entry: SortableResult) => {
+    if (entry.sortKey === null) return null;
+    const parsed = Date.parse(entry.sortKey);
+    return Number.isNaN(parsed) ? null : parsed;
+  };
+
+  return (
+    merged
+      // Decorated with the original index so ties stay STABLE — two rows sharing
+      // a timestamp (a bulk import; a change request and the records it wrote)
+      // must not swap places between two identical requests, or paging through
+      // them would skip and repeat rows.
+      .map((entry, index) => ({ entry, index, time: timeOf(entry) }))
+      .sort((a, b) => {
+        // A row whose sort column is null cannot be placed in time. Park it
+        // after everything that can be, in arrival order, rather than letting
+        // `null` read as "the beginning of time" and head an ascending list.
+        if (a.time === null || b.time === null) {
+          if (a.time === b.time) return a.index - b.index;
+          return a.time === null ? 1 : -1;
+        }
+        if (a.time === b.time) return a.index - b.index;
+        return ascending ? a.time - b.time : b.time - a.time;
+      })
+      .map(({ entry }) => entry.result)
+  );
+};
+
+/**
+ * The narrowing a caller asked for, passed as one object rather than four
+ * positional arguments — every source needs the same set, and a four-argument
+ * tail is exactly where a future edit swaps two of them silently.
+ */
+export interface SearchNarrowing {
+  sort: SearchSort;
+  updatedAfter?: string;
+  updatedBefore?: string;
+  /** Already resolved to concrete ids; `undefined` means no restriction. */
+  subtreeIds?: string[];
+}
+
+/**
+ * Inclusive date-range predicate over whichever timestamp column a source
+ * exposes. Both bounds optional; `undefined` when neither is set so callers can
+ * drop it straight into `and(...)`.
+ */
+const dateRangeCondition = (
+  column: PgColumn,
+  input: { updatedAfter?: string; updatedBefore?: string },
+) => {
+  const parts: (SQL | undefined)[] = [];
+  if (input.updatedAfter) parts.push(gte(column, new Date(input.updatedAfter)));
+  if (input.updatedBefore) parts.push(lte(column, new Date(input.updatedBefore)));
+  return parts.length > 0 ? and(...parts) : undefined;
+};
 
 export const recordPrimaryText = (record: RecordVO): string => {
   const primarySlug = getPrimaryField(record.base)?.slug;
@@ -219,7 +383,8 @@ const searchNodeContent = async (
   spaceId: string,
   query: string,
   limit: number,
-): Promise<{ results: SearchResultVO[]; truncated: boolean }> => {
+  narrow: SearchNarrowing,
+): Promise<{ results: SortableResult[]; truncated: boolean }> => {
   await selfHealNodeProjections(db, spaceId);
   const pattern = `%${query}%`;
   const rows = await db
@@ -230,6 +395,7 @@ const searchNodeContent = async (
       truncated: busabaseNodeContentSearch.truncated,
       name: busabaseNodes.name,
       slug: busabaseNodes.slug,
+      createdAt: busabaseNodes.createdAt,
       updatedAt: busabaseNodes.updatedAt,
     })
     .from(busabaseNodeContentSearch)
@@ -239,6 +405,8 @@ const searchNodeContent = async (
         eq(busabaseNodeContentSearch.spaceId, spaceId),
         isNull(busabaseNodes.archivedAt),
         buildNodeVisibilityCondition(db),
+        dateRangeCondition(busabaseNodes.updatedAt, narrow),
+        narrow.subtreeIds ? inArray(busabaseNodes.id, narrow.subtreeIds) : undefined,
         or(
           // Whole-lexeme match. Contributes nothing for CJK — Postgres has no
           // segmenter there, so a Chinese run becomes one oversized lexeme that
@@ -251,7 +419,13 @@ const searchNodeContent = async (
         ),
       ),
     )
-    .orderBy(desc(busabaseNodes.updatedAt))
+    .orderBy(
+      orderForSort(
+        narrow.sort,
+        { createdAt: busabaseNodes.createdAt, updatedAt: busabaseNodes.updatedAt },
+        desc(busabaseNodes.updatedAt),
+      ),
+    )
     .limit(limit);
 
   // Whether the ANSWER may be incomplete — deliberately NOT derived from the
@@ -275,13 +449,19 @@ const searchNodeContent = async (
 
   return {
     results: rows.map((row) => ({
-      id: row.nodeId,
-      kind: "node" as const,
-      title: row.name,
-      body: buildNodeSnippet(row.contentText ?? "", query),
-      eyebrow: NODE_KIND_LABEL[row.nodeType] ?? row.nodeType,
-      href: fileResultHref(row.nodeType, row.slug),
-      updatedAt: row.updatedAt?.toISOString() ?? null,
+      result: {
+        id: row.nodeId,
+        kind: "node" as const,
+        title: row.name,
+        body: buildNodeSnippet(row.contentText ?? "", query),
+        eyebrow: NODE_KIND_LABEL[row.nodeType] ?? row.nodeType,
+        href: fileResultHref(row.nodeType, row.slug),
+        updatedAt: row.updatedAt?.toISOString() ?? null,
+      },
+      sortKey: sortKeyFor(narrow.sort, {
+        createdAt: row.createdAt?.toISOString() ?? null,
+        updatedAt: row.updatedAt?.toISOString() ?? null,
+      }),
     })),
     truncated: truncatedInScope !== undefined,
   };
@@ -332,6 +512,7 @@ const assetUsageRowSelection = () => ({
   recordId: busabaseAssetUsages.recordId,
   fieldSlug: busabaseAssetUsages.fieldSlug,
   blockId: busabaseAssetUsages.blockId,
+  createdAt: busabaseAssetUsages.createdAt,
   updatedAt: busabaseAssetUsages.updatedAt,
   nodeId: busabaseNodes.id,
   nodeName: busabaseNodes.name,
@@ -347,6 +528,7 @@ const queryAssetUsageRows = (
   spaceId: string,
   extraCondition: ReturnType<typeof and> | undefined,
   limitRows: number,
+  narrow: SearchNarrowing,
 ) =>
   db
     .select(assetUsageRowSelection())
@@ -360,10 +542,18 @@ const queryAssetUsageRows = (
         eq(busabaseAssetUsages.spaceId, spaceId),
         isNull(busabaseNodes.archivedAt),
         buildNodeVisibilityCondition(db),
+        dateRangeCondition(busabaseAssetUsages.updatedAt, narrow),
+        narrow.subtreeIds ? inArray(busabaseAssetUsages.nodeId, narrow.subtreeIds) : undefined,
         extraCondition,
       ),
     )
-    .orderBy(desc(busabaseAssetUsages.updatedAt))
+    .orderBy(
+      orderForSort(
+        narrow.sort,
+        { createdAt: busabaseAssetUsages.createdAt, updatedAt: busabaseAssetUsages.updatedAt },
+        desc(busabaseAssetUsages.updatedAt),
+      ),
+    )
     .limit(limitRows);
 
 /**
@@ -379,13 +569,54 @@ const fileIdentitySqlCondition = (pattern: string) =>
     sql`${busabaseAssetUsages.metadata}->>'displayName' ILIKE ${pattern}`,
     ilike(attachments.fileName, pattern),
     ilike(busabaseAssetUsages.path, pattern),
-    ilike(busabaseNodes.name, pattern),
-    ilike(busabaseNodes.description, pattern),
-    ilike(busabaseNodes.slug, pattern),
+    // The owning NODE's identity counts for DOCUMENT holders, not code holders.
+    //
+    // `file` — the node IS the file, and its name is the file's visible name,
+    // often nothing like the stored filename ("Finance upload" holding
+    // `quarterly.txt`). `drive` — a place a person puts documents, where
+    // "what is in my Finance Drive" is a real question and the drive's name is
+    // the only handle on it. Both are pinned by existing tests
+    // (`search-asset-content.test.ts`, `search-text-convergence.test.ts`).
+    //
+    // `airapp` / `skill` are programs. Their files are SOURCE, generated from a
+    // scaffold, and nobody searching an app's name is asking for its
+    // `package.json`. Observed: an AirApp called "Quokka Tracker" answered
+    // "quokka" with `style.css`, `server.js` and `client.js` — none of which
+    // contain the query — alongside the node itself, already listed above them
+    // under its own name.
+    //
+    // The line is therefore what the files ARE, not whether the node is a
+    // container: documents get their holder's name, source code does not.
+    and(
+      inArray(busabaseNodes.type, ["file", "drive"]),
+      or(
+        ilike(busabaseNodes.name, pattern),
+        ilike(busabaseNodes.description, pattern),
+        ilike(busabaseNodes.slug, pattern),
+      ),
+    ),
   );
 
 const rowResultKey = (row: AssetUsageRow): string =>
   `${row.assetId}:${row.nodeId}:${row.usagePath}:${row.recordId}:${row.fieldSlug}:${row.blockId}`;
+
+/**
+ * `toFileSearchResult` plus the key the global merge sorts on. The asset
+ * USAGE's timestamps, not the asset's: a file's search result is the usage —
+ * the same asset attached to two records is two results — and the usage is also
+ * what `queryAssetUsageRows` filters and orders by.
+ */
+const toSortableFileResult = (
+  row: AssetUsageRow,
+  body: string,
+  sort: SearchSort,
+): SortableResult => ({
+  result: toFileSearchResult(row, body),
+  sortKey: sortKeyFor(sort, {
+    createdAt: row.createdAt?.toISOString() ?? null,
+    updatedAt: row.updatedAt?.toISOString() ?? null,
+  }),
+});
 
 const toFileSearchResult = (row: AssetUsageRow, body: string): SearchResultVO => {
   const displayName =
@@ -417,8 +648,9 @@ const scanFileContents = async (
   query: string,
   limit: number,
   identityMatchedKeys: Set<string>,
-): Promise<{ results: SearchResultVO[]; scannedAllEligible: boolean }> => {
-  const rows = await queryAssetUsageRows(db, spaceId, undefined, MAX_ASSET_USAGE_SCAN_ROWS);
+  narrow: SearchNarrowing,
+): Promise<{ results: SortableResult[]; scannedAllEligible: boolean }> => {
+  const rows = await queryAssetUsageRows(db, spaceId, undefined, MAX_ASSET_USAGE_SCAN_ROWS, narrow);
 
   // Cheap existence check, independent of `rows` above: answers "did the cap
   // leave anything out", which the matched rows can never answer on their own
@@ -470,7 +702,7 @@ const scanFileContents = async (
   // Wall-clock budget for the WHOLE body-scan phase below (not per file) —
   // computed once, before the loop starts.
   const deadline = Date.now() + searchFileScanTimeoutMs();
-  const results: SearchResultVO[] = [];
+  const results: SortableResult[] = [];
 
   for (const row of rows) {
     if (identityMatchedKeys.has(rowResultKey(row))) {
@@ -509,7 +741,7 @@ const scanFileContents = async (
     }
     // The matched LINE, not the whole file — the snippet reflects the real
     // match location instead of arbitrary head bytes.
-    results.push(toFileSearchResult(row, matchedLine));
+    results.push(toSortableFileResult(row, matchedLine, narrow.sort));
     if (results.length >= limit) {
       break;
     }
@@ -520,7 +752,8 @@ const scanFileContents = async (
 const searchAssetBackedFiles = async (
   query: string,
   limit: number,
-): Promise<{ results: SearchResultVO[]; truncated: boolean }> => {
+  narrow: SearchNarrowing,
+): Promise<{ results: SortableResult[]; truncated: boolean }> => {
   const db = await getDb();
   const spaceId = getContextSpaceId();
   const pattern = `%${query}%`;
@@ -535,11 +768,13 @@ const searchAssetBackedFiles = async (
     spaceId,
     fileIdentitySqlCondition(pattern),
     limit,
+    narrow,
   );
   const identityResults = identityRows.map((row) =>
-    toFileSearchResult(
+    toSortableFileResult(
       row,
       [row.nodeDescription, row.usagePath, row.fileName].filter(Boolean).join(" "),
+      narrow.sort,
     ),
   );
 
@@ -558,6 +793,7 @@ const searchAssetBackedFiles = async (
     query,
     limit - identityResults.length,
     identityMatchedKeys,
+    narrow,
   );
 
   return {
@@ -604,6 +840,22 @@ export const searchBusabase = async (
   const wantsNames = wantsSource("names");
   const wantsNodes = wantsSource("nodes");
 
+  /**
+   * `inNodeId` resolved to the concrete set of node ids it covers.
+   *
+   * Done once here rather than per source: all four need the same answer, and
+   * the walk costs one query per tree LEVEL, not per source. `undefined` when
+   * the caller passed no `inNodeId`, which every condition below treats as
+   * "no restriction" rather than "restrict to nothing".
+   */
+  const subtreeIds = parsed.inNodeId ? await collectSubtreeIds(db, parsed.inNodeId) : undefined;
+  const narrowing: SearchNarrowing = {
+    sort: parsed.sort,
+    updatedAfter: parsed.updatedAfter,
+    updatedBefore: parsed.updatedBefore,
+    subtreeIds,
+  };
+
   const projectionRows = wantsRecords
     ? await db
         .select({
@@ -625,14 +877,49 @@ export const searchBusabase = async (
               ilike(busabaseFieldValues.valueText, pattern),
               ilike(busabaseFieldValues.fieldSlug, pattern),
             ),
+            // "A field value edited inside the window" — filtered before the
+            // GROUP BY, so it reads as "this record was touched then" rather
+            // than needing a HAVING over the aggregate.
+            dateRangeCondition(busabaseFieldValues.updatedAt, parsed),
+            // A field value knows its Base, and a Base knows its node — which
+            // is what `inNodeId` is expressed in.
+            subtreeIds
+              ? exists(
+                  db
+                    .select({ one: sql`1` })
+                    .from(busabaseBases)
+                    .where(
+                      and(
+                        eq(busabaseBases.id, busabaseFieldValues.baseId),
+                        inArray(busabaseBases.nodeId, subtreeIds),
+                      ),
+                    ),
+                )
+              : undefined,
           ),
         )
         .groupBy(busabaseFieldValues.recordId, busabaseFieldValues.changeRequestId)
         .orderBy(
-          desc(
-            sql`max(ts_rank(to_tsvector('simple', coalesce(${busabaseFieldValues.valueText}, '')), plainto_tsquery('simple', ${query})))`,
-          ),
-          desc(sql`max(${busabaseFieldValues.updatedAt})`),
+          ...(parsed.sort === "relevance"
+            ? [
+                desc(
+                  sql`max(ts_rank(to_tsvector('simple', coalesce(${busabaseFieldValues.valueText}, '')), plainto_tsquery('simple', ${query})))`,
+                ),
+                desc(sql`max(${busabaseFieldValues.updatedAt})`),
+              ]
+            : // Grouped, so the sort column has to be an aggregate too. `max`
+              // for the newest-first orders and `min` for oldest-first, so a
+              // record with many edited values sorts by the edge the caller
+              // actually asked about rather than an arbitrary one.
+              [
+                parsed.sort === "updated_desc"
+                  ? desc(sql`max(${busabaseFieldValues.updatedAt})`)
+                  : parsed.sort === "updated_asc"
+                    ? asc(sql`min(${busabaseFieldValues.updatedAt})`)
+                    : parsed.sort === "created_desc"
+                      ? desc(sql`max(${busabaseFieldValues.createdAt})`)
+                      : asc(sql`min(${busabaseFieldValues.createdAt})`),
+              ]),
         )
         .limit(pageSize)
         .offset(parsed.offset)
@@ -660,18 +947,48 @@ export const searchBusabase = async (
       : Promise.resolve([]),
     wantsNames && parsed.offset === 0
       ? db
-          .select()
+          // `getTableColumns` keeps the row FLAT. A bare `.select()` with a
+          // join returns `{ busabase_bases: {...}, busabase_nodes: {...} }`,
+          // which every consumer of these rows below would have to unwrap —
+          // the join exists only to reach the node's timestamps, not to add
+          // columns to the result.
+          .select({
+            ...getTableColumns(busabaseBases),
+            // The node's timestamps, NOT the Base's `createdAt`. This query
+            // both filters and orders by `busabaseNodes.updatedAt` (see below),
+            // so the global merge has to be handed the same value — sorting the
+            // merged list by a column the row was not selected on is how a
+            // "sorted" list ends up in an order nobody asked for.
+            nodeCreatedAt: busabaseNodes.createdAt,
+            nodeUpdatedAt: busabaseNodes.updatedAt,
+          })
           .from(busabaseBases)
+          // `busabase_bases` carries only `createdAt` — no `updatedAt`, no
+          // creator. Its owning NODE has both, so date, author and sort all
+          // resolve through the node rather than being faked from `createdAt`
+          // or silently dropping Bases whenever one of those filters is used.
+          // Dropping them would look like "no Bases matched", which is the
+          // failure mode this whole series exists to remove.
+          .innerJoin(busabaseNodes, eq(busabaseNodes.id, busabaseBases.nodeId))
           .where(
             and(
               eq(busabaseBases.spaceId, spaceId),
               isNull(busabaseBases.archivedAt),
               buildNodeVisibilityExists(db, busabaseBases.nodeId),
+              dateRangeCondition(busabaseNodes.updatedAt, narrowing),
+              subtreeIds ? inArray(busabaseBases.nodeId, subtreeIds) : undefined,
               or(
                 ilike(busabaseBases.name, pattern),
                 ilike(busabaseBases.description, pattern),
                 ilike(busabaseBases.slug, pattern),
               ),
+            ),
+          )
+          .orderBy(
+            orderForSort(
+              narrowing.sort,
+              { createdAt: busabaseNodes.createdAt, updatedAt: busabaseNodes.updatedAt },
+              desc(busabaseNodes.updatedAt),
             ),
           )
       : Promise.resolve([]),
@@ -683,6 +1000,23 @@ export const searchBusabase = async (
             and(
               eq(busabaseBaseFields.spaceId, spaceId),
               buildBaseVisibilityExists(db, busabaseBaseFields.baseId),
+              // A field has no timestamps or creator of its own; it inherits
+              // its Base's node, same as the Base query above.
+              narrowing.updatedAfter || narrowing.updatedBefore || subtreeIds
+                ? exists(
+                    db
+                      .select({ one: sql`1` })
+                      .from(busabaseBases)
+                      .innerJoin(busabaseNodes, eq(busabaseNodes.id, busabaseBases.nodeId))
+                      .where(
+                        and(
+                          eq(busabaseBases.id, busabaseBaseFields.baseId),
+                          dateRangeCondition(busabaseNodes.updatedAt, narrowing),
+                          subtreeIds ? inArray(busabaseBases.nodeId, subtreeIds) : undefined,
+                        ),
+                      ),
+                  )
+                : undefined,
               or(ilike(busabaseBaseFields.name, pattern), ilike(busabaseBaseFields.slug, pattern)),
             ),
           )
@@ -693,8 +1027,18 @@ export const searchBusabase = async (
   const extraBaseRows =
     baseIdsFromFields.length > 0
       ? await db
-          .select()
+          // Same shape as the name-match branch above, node join included. The
+          // two are merged by id into one map, so a Base reached through a FIELD
+          // name has to carry the same timestamps as one reached through its own
+          // name — otherwise it has no sort key, and every explicit sort order
+          // quietly parks it at the bottom of the list.
+          .select({
+            ...getTableColumns(busabaseBases),
+            nodeCreatedAt: busabaseNodes.createdAt,
+            nodeUpdatedAt: busabaseNodes.updatedAt,
+          })
           .from(busabaseBases)
+          .innerJoin(busabaseNodes, eq(busabaseNodes.id, busabaseBases.nodeId))
           .where(
             and(
               inArray(busabaseBases.id, baseIdsFromFields),
@@ -722,20 +1066,32 @@ export const searchBusabase = async (
       projectionRows.slice(0, parsed.limit).flatMap((row) => {
         if (row.recordId) {
           const record = recordsById.get(row.recordId);
-          return record ? [hydrateRecord(record).then(toRecordSearchResult)] : [];
+          return record
+            ? [
+                hydrateRecord(record).then((vo) => ({
+                  result: toRecordSearchResult(vo),
+                  sortKey: sortKeyFor(parsed.sort, vo),
+                })),
+              ]
+            : [];
         }
         if (row.changeRequestId) {
           const changeRequest = changeRequestsById.get(row.changeRequestId);
           return changeRequest
-            ? [hydrateChangeRequest(changeRequest).then(toChangeRequestSearchResult)]
+            ? [
+                hydrateChangeRequest(changeRequest).then((vo) => ({
+                  result: toChangeRequestSearchResult(vo),
+                  sortKey: sortKeyFor(parsed.sort, vo),
+                })),
+              ]
             : [];
         }
         return [];
       }),
     ),
     wantsFiles
-      ? searchAssetBackedFiles(query, parsed.limit)
-      : Promise.resolve({ results: [] as SearchResultVO[], truncated: false }),
+      ? searchAssetBackedFiles(query, parsed.limit, narrowing)
+      : Promise.resolve({ results: [] as SortableResult[], truncated: false }),
   ]);
 
   // Node CONTENT. Only on the first page: like `names`, these are not part of
@@ -743,11 +1099,11 @@ export const searchBusabase = async (
   // page would duplicate them.
   const nodeContent =
     wantsNodes && parsed.offset === 0
-      ? await searchNodeContent(db, spaceId, query, parsed.limit)
-      : { results: [] as SearchResultVO[], truncated: false };
+      ? await searchNodeContent(db, spaceId, query, parsed.limit, narrowing)
+      : { results: [] as SortableResult[], truncated: false };
 
-  const baseResults = [...baseRowsById.values()].map((base) =>
-    toBaseSearchResult(
+  const baseResults = [...baseRowsById.values()].map((base) => ({
+    result: toBaseSearchResult(
       toBaseVO(
         base,
         allBaseFields.filter((field) => field.baseId === base.id),
@@ -755,24 +1111,34 @@ export const searchBusabase = async (
         // `toBaseSearchResult` below, which never reads `.metadata`. The two
         // queries this Base row can come from (`name`/`description`/`slug`
         // match and the field-name match) are two separate fan-out branches
-        // merged by id into `baseRowsById` — joining `busabaseNodes` into both
-        // just to thread a value nothing consumes would be real, avoidable
-        // query cost for zero behavior change.
+        // merged by id into `baseRowsById`; both join `busabaseNodes` so the row
+        // carries the timestamps `sortKey` below needs.
         {},
       ),
     ),
-  );
+    // The Base row's own `createdAt` is deliberately NOT used: the query
+    // filtered and ordered on the owning node, so the merge has to see the same
+    // instant. A Base renamed long after it was created would otherwise sort as
+    // though nothing had happened to it.
+    sortKey: sortKeyFor(parsed.sort, {
+      createdAt: base.nodeCreatedAt?.toISOString() ?? null,
+      updatedAt: base.nodeUpdatedAt?.toISOString() ?? null,
+    }),
+  }));
 
-  const dedupedResults = new Map<string, SearchResultVO>();
-  for (const result of [
+  const dedupedResults = new Map<string, SortableResult>();
+  for (const entry of [
     ...projectionResults,
     ...baseResults,
     ...fileSearch.results,
     ...nodeContent.results,
   ]) {
-    dedupedResults.set(`${result.kind}:${result.id}`, result);
+    dedupedResults.set(`${entry.result.kind}:${entry.result.id}`, entry);
   }
-  const results = [...dedupedResults.values()].slice(0, parsed.limit);
+  // Merge FIRST, slice second. Slicing per-source order and then sorting the
+  // survivors would return whichever 20 happened to be concatenated first,
+  // re-ordered — an answer that looks sorted and is simply the wrong 20.
+  const results = mergeBySort([[...dedupedResults.values()]], parsed.sort).slice(0, parsed.limit);
 
   return {
     // Reported even when this page has hits: it says the ANSWER may be

@@ -1071,6 +1071,24 @@ const inboxSnapshotResponseSchema = listChangeRequestsPageResponseSchema.extend(
 // so both surfaces describe the same content with the same word.
 const SEARCH_SOURCES = ["records", "files", "names", "nodes"] as const;
 
+/**
+ * Result orders, mirroring what a person can actually ask for.
+ *
+ * `relevance` is its own thing rather than a column: only the records source
+ * has a real relevance signal (`ts_rank`), so this means "let each source use
+ * the ranking it has" — which is what every caller got before this parameter
+ * existed, and why it stays the default.
+ */
+export const SEARCH_SORTS = [
+  "relevance",
+  "updated_desc",
+  "updated_asc",
+  "created_desc",
+  "created_asc",
+] as const;
+const SearchSortSchema = z.enum(SEARCH_SORTS);
+export type SearchSort = (typeof SEARCH_SORTS)[number];
+
 const searchInputSchema = z.object({
   query: z.string().default("").describe("Full-text query. An empty string matches nothing."),
   limit: z.coerce
@@ -1106,6 +1124,70 @@ const searchInputSchema = z.object({
         "Repeat the parameter to pass several (`?sources=records&sources=files`); a single " +
         "occurrence is accepted as a bare value.",
     ),
+  sort: SearchSortSchema.optional()
+    .default("relevance")
+    .describe(
+      "Result order. `relevance` (default) keeps each source's own ranking — for records that is " +
+        "the full-text rank, for everything else most-recently-updated first. The four explicit " +
+        "orders sort every source by the same column so a mixed result set is comparable.",
+    ),
+  /**
+   * Both bounds are inclusive ISO 8601 instants, and both are optional — one
+   * on its own is an open-ended range, which is what "since last Monday" and
+   * "before the migration" each need.
+   *
+   * Filters the same timestamp `sort` orders by, so "edited this week, newest
+   * first" reads as one coherent question rather than two unrelated knobs.
+   */
+  /*
+   * `offset: true` is load-bearing, not decoration. Zod's bare `.datetime()`
+   * accepts ONLY a `Z` suffix, so a perfectly valid ISO 8601 instant written
+   * from a non-UTC clock — `2026-01-01T00:00:00+08:00`, which is what most date
+   * pickers produce — came back as a 400 with a raw regex in the message.
+   * Caught by calling the running server, not by any type: the string type is
+   * identical either way.
+   *
+   * A bare local time (no `Z`, no offset) stays rejected on purpose: there is no
+   * honest way to resolve it without guessing whose clock it came from.
+   */
+  updatedAfter: z
+    .string()
+    .datetime({ offset: true })
+    .optional()
+    .describe(
+      "Inclusive lower bound, ISO 8601. A UTC `Z` or an explicit offset; not a bare local time.",
+    ),
+  updatedBefore: z
+    .string()
+    .datetime({ offset: true })
+    .optional()
+    .describe(
+      "Inclusive upper bound, ISO 8601. A UTC `Z` or an explicit offset; not a bare local time.",
+    ),
+  /*
+   * There is deliberately NO `createdBy` here yet.
+   *
+   * `busabase_records` and `busabase_assets` each have a `created_by`, but
+   * `busabase_nodes` and `busabase_bases` do not — so an author filter would
+   * cover records and files while quietly returning nothing from document
+   * bodies and Base names. A filter that answers "nobody wrote that" when it
+   * means "this source cannot tell" is the exact failure this search work has
+   * been removing everywhere else, so it is left out until
+   * `busabase_nodes.created_by` exists (a migration, and its own change).
+   *
+   * Node creators ARE recoverable today from the `node_create` commit's
+   * `author`, and that was considered and rejected: it would make two of the
+   * four sources answer through commit-history archaeology while the other two
+   * read a column, with different performance and different failure modes.
+   */
+  /**
+   * Restrict to a subtree: this node and everything beneath it.
+   *
+   * Resolved by walking the tree in application code (`collectSubtreeIds`),
+   * the same way `isDescendantOf` and permanent-delete already do — workspace
+   * trees are shallow and this repo has no recursive-CTE precedent.
+   */
+  inNodeId: z.string().optional().describe("Limit to this node and its descendants."),
 });
 
 // ── Auth verification (GET /auth) ───────────────────────────────────────────

@@ -135,7 +135,24 @@ interface AirAppRunnerStoreState {
   /** Starts a fresh run for `nodeId`: disposes any existing runner for that
    *  node first, then resets the entry to a clean "loading-files" state. */
   beginRun: (nodeId: string, runner: AirAppRunner, runnerKind: AirAppRunnerKind) => void;
-  setStatus: (nodeId: string, runner: AirAppRunner, status: AirAppRunStatus) => void;
+  /**
+   * Advance a running app's status — everything EXCEPT `"error"`.
+   *
+   * `"error"` is excluded on purpose, and the exclusion is the point: a failed
+   * run has to say why, and this signature carries no message. The two entry
+   * points that CAN fail a run (`setError`, `failBeforeRun`) both require one,
+   * so "status is error" and "there is a reason" cannot come apart.
+   *
+   * Without this, `setStatus(nodeId, runner, "error")` type-checks and leaves
+   * the user with a status chip reading "Failed" above an empty panel — no
+   * message, nothing to act on. Nothing calls it that way today; this keeps it
+   * that way by construction rather than by everyone remembering.
+   */
+  setStatus: (
+    nodeId: string,
+    runner: AirAppRunner,
+    status: Exclude<AirAppRunStatus, "error">,
+  ) => void;
   appendLog: (nodeId: string, runner: AirAppRunner, chunk: string) => void;
   setPreviewUrl: (nodeId: string, runner: AirAppRunner, url: string) => void;
   setError: (nodeId: string, runner: AirAppRunner, message: string) => void;

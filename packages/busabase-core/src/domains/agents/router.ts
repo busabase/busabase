@@ -6,6 +6,7 @@ import { listCatalog } from "./logic/agent-catalog";
 import { disconnectAgentConnection } from "./logic/agent-connection";
 import { listAgentConnections } from "./logic/agent-connection-list";
 import {
+  AgentSessionTerminalError,
   cancelAgentSession,
   closeAgentSession,
   createAgentSession,
@@ -97,6 +98,15 @@ const agentsRouterImpl = {
         await promptAgentSession(input.sessionId, input.text, input.attachments);
         return { accepted: true, sessionId: input.sessionId };
       } catch (error) {
+        if (error instanceof AgentSessionTerminalError) {
+          return {
+            accepted: false,
+            sessionId: input.sessionId,
+            status: error.status,
+            promptRecorded: error.promptRecorded,
+            message: error.message,
+          };
+        }
         return fail(error);
       }
     }),

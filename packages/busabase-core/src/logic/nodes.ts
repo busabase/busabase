@@ -524,8 +524,15 @@ export const loadNodesByIds = async (nodeIds: string[]): Promise<Map<string, Nod
   );
 };
 
-/** Collect a node id + all of its descendants (regardless of archived state). */
-const collectSubtreeIds = async (
+/**
+ * Collect a node id + all of its descendants (regardless of archived state).
+ *
+ * Exported because search's `inNodeId` filter needs the same answer: workspace
+ * trees are shallow and this repo has no recursive-CTE precedent, so both the
+ * permanent-delete path and the search filter resolve a subtree by walking it
+ * one level at a time rather than in SQL.
+ */
+export const collectSubtreeIds = async (
   db: Awaited<ReturnType<typeof getDb>>,
   rootId: string,
 ): Promise<string[]> => {

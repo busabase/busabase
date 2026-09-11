@@ -149,3 +149,28 @@ describe("AirApp runner cost memory", () => {
     expect(blockedStorage.getItem("selection")).toBeNull();
   });
 });
+
+/**
+ * A run that failed has to say why. The store has three ways to move an entry's
+ * status, and only two of them carry a reason — so the third must not be able
+ * to reach `"error"` at all, or "Failed" can appear over an empty panel with
+ * nothing for the user to act on.
+ *
+ * This is a type-level guarantee, so the assertion is a compile error rather
+ * than a runtime one: `@ts-expect-error` fails the build if the call ever
+ * becomes legal again.
+ */
+describe("failing a run always carries a reason", () => {
+  it("does not let setStatus reach the error state", () => {
+    const runner = {} as Parameters<
+      ReturnType<typeof useAirAppRunnerStore.getState>["setStatus"]
+    >[1];
+
+    // @ts-expect-error -- "error" is deliberately excluded: use setError or
+    // failBeforeRun, both of which require a message.
+    useAirAppRunnerStore.getState().setStatus("nod_1", runner, "error");
+
+    // The reachable statuses still type-check.
+    useAirAppRunnerStore.getState().setStatus("nod_1", runner, "installing");
+  });
+});

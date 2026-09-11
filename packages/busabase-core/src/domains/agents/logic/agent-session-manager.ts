@@ -96,6 +96,7 @@ interface LiveSession {
   prompt: (text: string, attachments?: PromptAttachmentInput[]) => Promise<void>;
   cancel: () => Promise<void>;
   close: () => void;
+  closed: boolean;
   /**
    * `null` until the agent's `session/new` response (or a later
    * `config_option_update`) advertises a `category: "model"` select.
@@ -118,6 +119,20 @@ interface LiveSession {
    */
   pendingPermission: { requestId: string; resolve: (optionId: string) => void } | null;
   permissionCounter: number;
+}
+
+type TerminalAgentSessionStatus = Extract<AgentSessionStatus, "ended" | "failed">;
+
+export class AgentSessionTerminalError extends Error {
+  override readonly name = "AgentSessionTerminalError";
+
+  constructor(
+    readonly status: TerminalAgentSessionStatus,
+    readonly promptRecorded: boolean,
+    message: string,
+  ) {
+    super(message);
+  }
 }
 
 type GlobalWithAgentSessions = typeof globalThis & {
@@ -244,6 +259,7 @@ export async function createAgentSession({
     prompt: async () => {},
     cancel: async () => {},
     close: () => {},
+    closed: false,
     modelOption: null,
     setConfigOption: async () => null,
     seq: 0,
@@ -298,6 +314,10 @@ export async function createAgentSession({
     let releaseConnection: (() => void) | undefined;
     const connectionClosed = new Promise<void>((resolve) => {
       releaseConnection = resolve;
+    });
+    let releaseReady: (() => void) | undefined;
+    const connectionReady = new Promise<void>((resolve) => {
+      releaseReady = resolve;
     });
 
     const app = acp
@@ -371,6 +391,7 @@ export async function createAgentSession({
           // this surface entirely. Declaring false keeps them from asking.
           clientCapabilities: {},
         });
+        if (session.closed) return;
         logAcpConnection("info", "initialize_succeeded", {
           connectionId,
           sessionId: id,
@@ -387,9 +408,10 @@ export async function createAgentSession({
         // agents genuinely differ. Sending an HTTP MCP server to an agent that
         // only speaks stdio-MCP is not harmlessly ignored — it is a malformed
         // session for that agent — so an agent that does not advertise `http`
-        // gets no server and the user gets a visible note explaining why its
-        // Busabase tools are missing, rather than an agent that silently cannot
-        // see their data.
+        // simply gets no server (PUL-214: this used to also emit a visible
+        // "no access to this workspace's data" note, but it fired on every
+        // session/new regardless of whether the turn ever needed workspace
+        // data, which made it noise more often than signal).
         const supportsHttpMcp = initialized.agentCapabilities?.mcpCapabilities?.http === true;
         const mcpServers: acp.McpServer[] = supportsHttpMcp
           ? [
@@ -439,6 +461,7 @@ export async function createAgentSession({
           cwd: workspace,
           mcpServers,
         });
+        if (session.closed) return;
         logAcpConnection("info", "session_new_succeeded", {
           connectionId,
           sessionId: id,
@@ -448,18 +471,8 @@ export async function createAgentSession({
           ...endpointDiagnostics,
         });
 
-        if (!supportsHttpMcp) {
-          emit(session, {
-            kind: "acpUpdate",
-            acpUpdate: {
-              sessionUpdate: "note",
-              text: `${launch.name} does not support HTTP MCP servers, so it has no access to this workspace's data. It can still answer general questions.`,
-            },
-          });
-        }
         session.acpSessionId = created.sessionId;
         session.modelOption = findModelOption(created.configOptions);
-        setStatus(session, "idle");
 
         session.prompt = async (text: string, attachments?: PromptAttachmentInput[]) => {
           if (session.status === "busy" || session.status === "waiting_permission") {
@@ -526,6 +539,8 @@ export async function createAgentSession({
           return session.modelOption;
         };
 
+        setStatus(session, "idle");
+        releaseReady?.();
         await connectionClosed;
       })
       .catch((error: unknown) => {
@@ -540,9 +555,11 @@ export async function createAgentSession({
           ...diagnostics,
         });
         setStatus(session, "failed", diagnostics.message);
+        releaseReady?.();
       });
 
     session.close = () => {
+      session.closed = true;
       logAcpConnection("info", "connection_closing", {
         connectionId,
         sessionId: id,
@@ -554,8 +571,10 @@ export async function createAgentSession({
       releaseConnection?.();
       session.child?.kill();
       if (session.status !== "failed") setStatus(session, "ended");
+      releaseReady?.();
       void connectPromise;
     };
+    await connectionReady;
   })().catch((error: unknown) => {
     const diagnostics = describeAcpError(error);
     logAcpConnection("warn", "setup_failed", {
@@ -593,9 +612,16 @@ function requireSession(sessionId: string): LiveSession {
   return s;
 }
 
-function assertSessionHasNotFailed(session: LiveSession): void {
+function assertSessionCanAcceptPrompt(session: LiveSession, promptRecorded: boolean): void {
   if (session.status === "failed") {
-    throw new Error(session.error ?? "This session has failed.");
+    throw new AgentSessionTerminalError(
+      "failed",
+      promptRecorded,
+      session.error ?? "This session has failed.",
+    );
+  }
+  if (session.status === "ended") {
+    throw new AgentSessionTerminalError("ended", promptRecorded, "This session has ended.");
   }
 }
 
@@ -633,7 +659,7 @@ export async function promptAgentSession(
   attachments?: PromptAttachmentInput[],
 ): Promise<void> {
   const s = requireSession(sessionId);
-  assertSessionHasNotFailed(s);
+  assertSessionCanAcceptPrompt(s, false);
   if (s.promptStarting || s.status === "busy" || s.status === "waiting_permission") {
     throw new Error("This agent is still replying. Wait for the current turn to finish.");
   }
@@ -656,7 +682,7 @@ export async function promptAgentSession(
     await flushPendingEvents(s);
 
     await s.ready;
-    assertSessionHasNotFailed(s);
+    assertSessionCanAcceptPrompt(s, true);
     await s.prompt(text, attachments);
   } finally {
     s.promptStarting = false;
@@ -737,8 +763,8 @@ export async function closeAgentSessions(sessionIds: string[]): Promise<void> {
     sessionIds.map(async (sessionId) => {
       const session = sessions().get(sessionId);
       if (!session) return;
-      await session.ready.catch(() => undefined);
       session.close();
+      await session.ready.catch(() => undefined);
       sessions().delete(sessionId);
     }),
   );
