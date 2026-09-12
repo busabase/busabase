@@ -19,13 +19,11 @@ test("sidebar node visits appear in Search Recent in most-recent order", async (
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
 
-  // Matched on the row's TITLE, not on the row's whole text. A result row now
-  // renders the node's description as well, and one seeded node's description
-  // reads "…a sidebar and two routed pages" — so `hasText: "Pages"` matched that
-  // row too and tripped Playwright's strict mode. `getByText(exact)` addresses
-  // the title span alone, which is the thing this test is actually identifying.
-  const rowByTitle = (title: string) =>
-    dialog.getByRole("button").filter({ has: page.getByText(title, { exact: true }) });
+  // Addressed by the row's own attribute, never by its visible text. Three specs
+  // broke in one release cycle reaching for text: the placeholder copy changed,
+  // an emoji joined the name, and the description moved into the row so
+  // `hasText: "Pages"` started matching a different node.
+  const rowByTitle = (title: string) => dialog.locator(`[data-search-result="${title}"]`);
   const postsResult = rowByTitle("Posts");
   const pagesResult = rowByTitle("Pages");
   await expect(postsResult).toBeVisible();
