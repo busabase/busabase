@@ -12,7 +12,7 @@
  * Demo use-case selector carried by `?demo=…`. `"1"` (the bare `?demo=1`) means the
  * full seeded dataset; the named variants focus the demo on one seeded base
  * (`blog`/`social`/`newsletter`) or one review scenario bundle
- * (`review-loop`/`conflict`/`batch-import`). The values double as the shared-seed
+ * (`review-loop`/`conflict`/`batch-import`) or one industry vertical (`insurance`). The values double as the shared-seed
  * filter tags in `demo/dataset.ts`.
  */
 export const DEMO_USE_CASES = [
@@ -44,6 +44,7 @@ export const DEMO_USE_CASES = [
   "roadmap",
   "stock-picking",
   "formula-lab",
+  "insurance",
 ] as const;
 
 export type DemoUseCase = (typeof DEMO_USE_CASES)[number];

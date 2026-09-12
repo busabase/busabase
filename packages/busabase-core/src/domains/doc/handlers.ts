@@ -293,6 +293,9 @@ export const createDoc = async (
   const createdAt = now();
   try {
     await db.insert(busabaseNodes).values({
+      // Direct-materialization fast path: this insert never reaches
+      // `mergeNodeCreate`, so the creator has to be stamped here too.
+      createdBy: resolveActorId(CURRENT_USER_ID),
       id: nodeId,
       parentId: parentNode.id,
       type: "doc",

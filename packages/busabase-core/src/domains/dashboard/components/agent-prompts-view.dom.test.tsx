@@ -15,6 +15,7 @@ import { AgentPromptsView } from "./agent-prompts-view";
 const prompt: NodePrompt = {
   key: "folder-summarize",
   tier: "scenario",
+  source: "built-in-scenario",
   group: "Content",
   label: "Summarize this folder",
   body: 'Target: the Busabase Folder "Coder" (nodeId: nod_coder).\n\nReply to me in English.',

@@ -98,7 +98,7 @@ export function NodeAgentPromptsDialog({
    * so the dialog asks for it, and only while it is open.
    *
    * `null` means "do not fetch": a field/record/cell-scoped dialog never shows
-   * custom prompts (they replace the WHOLE-NODE scenario tier only — see
+   * custom prompts (they extend the WHOLE-NODE scenario tier only — see
    * `buildNodeAgentPrompts`'s `scope.kind` check), so a request there would be
    * pure waste. Required rather than optional precisely so that is a decision
    * each call site states, not something a caller can forget into a silent
@@ -134,6 +134,10 @@ export function NodeAgentPromptsDialog({
   const {
     scenarios,
     capabilities,
+    customPrompts,
+    canSaveCustomPrompts,
+    saving,
+    saveCustomPrompts,
     loading: promptsLoading,
   } = useNodeAgentPrompts({
     enabled: open,
@@ -163,6 +167,16 @@ export function NodeAgentPromptsDialog({
           askAgent={orpc ? { orpc, sessionScopeId: nodeId } : null}
           capabilities={capabilities}
           loading={promptsLoading}
+          management={
+            orpc && (!scope || scope.kind === "node")
+              ? {
+                  customPrompts,
+                  canSave: canSaveCustomPrompts,
+                  saving,
+                  save: saveCustomPrompts,
+                }
+              : null
+          }
           onHandedOff={() => onOpenChange(false)}
           scenarios={scenarios}
         />

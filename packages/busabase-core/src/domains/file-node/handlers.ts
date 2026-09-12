@@ -221,6 +221,9 @@ export const createFileNode = async (
   const timestamp = now();
   try {
     await db.insert(busabaseNodes).values({
+      // Direct-materialization fast path: this insert never reaches
+      // `mergeNodeCreate`, so the creator has to be stamped here too.
+      createdBy: resolveActorId(CURRENT_USER_ID),
       id: nodeId,
       parentId: parentNode.id,
       type: "file",

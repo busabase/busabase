@@ -106,6 +106,7 @@ export const searchInputSchema = z.object({
   updatedAfter: z.string().optional(),
   updatedBefore: z.string().optional(),
   inNodeId: z.string().optional(),
+  createdBy: z.string().optional(),
 });
 
 /**
@@ -216,7 +217,20 @@ export interface SearchNarrowing {
   updatedBefore?: string;
   /** Already resolved to concrete ids; `undefined` means no restriction. */
   subtreeIds?: string[];
+  /** Actor id, not a user id — agents and API keys create things too. */
+  createdBy?: string;
 }
+
+/**
+ * Creator predicate over whichever column a source exposes.
+ *
+ * A NULL `created_by` never matches. `eq` already gives that (NULL = x is NULL,
+ * not true), and it is the behavior we want spelled out: a node whose creating
+ * commit is gone cannot tell who made it, and must not be attributed to the
+ * person being filtered for.
+ */
+const createdByCondition = (column: PgColumn, narrow: { createdBy?: string }) =>
+  narrow.createdBy ? eq(column, narrow.createdBy) : undefined;
 
 /**
  * Inclusive date-range predicate over whichever timestamp column a source
@@ -261,6 +275,7 @@ const toRecordSearchResult = (record: RecordVO): SearchResultVO => ({
   eyebrow: `${record.base.name} · canonical record`,
   href: `/base/${record.base.slug}/${record.id}`,
   updatedAt: record.updatedAt,
+  createdBy: record.createdBy,
 });
 
 const toChangeRequestSearchResult = (changeRequest: ChangeRequestVO): SearchResultVO => ({
@@ -280,9 +295,15 @@ const toChangeRequestSearchResult = (changeRequest: ChangeRequestVO): SearchResu
   eyebrow: `${changeRequest.base?.name ?? changeRequest.node?.name ?? "Node tree"} · ${changeRequest.status}`,
   href: `/inbox/${changeRequest.id}`,
   updatedAt: changeRequest.updatedAt,
+  // A change request's author is its SUBMITTER — the same identity the
+  // `createdBy` filter matches it on.
+  createdBy: changeRequest.submittedBy,
 });
 
-const toBaseSearchResult = (base: ReturnType<typeof toBaseVO>): SearchResultVO => ({
+const toBaseSearchResult = (
+  base: ReturnType<typeof toBaseVO>,
+  nodeCreatedBy: string | null,
+): SearchResultVO => ({
   id: base.id,
   kind: "base",
   title: base.name,
@@ -291,6 +312,9 @@ const toBaseSearchResult = (base: ReturnType<typeof toBaseVO>): SearchResultVO =
   eyebrow: `${base.fields.length} fields · ${base.slug}`,
   href: `/base/${base.slug}`,
   updatedAt: base.createdAt,
+  // From the owning node, which is where a Base's creator lives — the Base row
+  // has no creator column of its own.
+  createdBy: nodeCreatedBy,
 });
 
 const fileResultHref = (nodeType: string, nodeSlug: string) => {
@@ -397,6 +421,7 @@ const searchNodeContent = async (
       slug: busabaseNodes.slug,
       createdAt: busabaseNodes.createdAt,
       updatedAt: busabaseNodes.updatedAt,
+      createdBy: busabaseNodes.createdBy,
     })
     .from(busabaseNodeContentSearch)
     .innerJoin(busabaseNodes, eq(busabaseNodeContentSearch.nodeId, busabaseNodes.id))
@@ -406,6 +431,7 @@ const searchNodeContent = async (
         isNull(busabaseNodes.archivedAt),
         buildNodeVisibilityCondition(db),
         dateRangeCondition(busabaseNodes.updatedAt, narrow),
+        createdByCondition(busabaseNodes.createdBy, narrow),
         narrow.subtreeIds ? inArray(busabaseNodes.id, narrow.subtreeIds) : undefined,
         or(
           // Whole-lexeme match. Contributes nothing for CJK — Postgres has no
@@ -457,6 +483,7 @@ const searchNodeContent = async (
         eyebrow: NODE_KIND_LABEL[row.nodeType] ?? row.nodeType,
         href: fileResultHref(row.nodeType, row.slug),
         updatedAt: row.updatedAt?.toISOString() ?? null,
+        createdBy: row.createdBy ?? null,
       },
       sortKey: sortKeyFor(narrow.sort, {
         createdAt: row.createdAt?.toISOString() ?? null,
@@ -514,6 +541,7 @@ const assetUsageRowSelection = () => ({
   blockId: busabaseAssetUsages.blockId,
   createdAt: busabaseAssetUsages.createdAt,
   updatedAt: busabaseAssetUsages.updatedAt,
+  assetCreatedBy: busabaseAssets.createdBy,
   nodeId: busabaseNodes.id,
   nodeName: busabaseNodes.name,
   nodeDescription: busabaseNodes.description,
@@ -543,6 +571,9 @@ const queryAssetUsageRows = (
         isNull(busabaseNodes.archivedAt),
         buildNodeVisibilityCondition(db),
         dateRangeCondition(busabaseAssetUsages.updatedAt, narrow),
+        // The ASSET's creator: whoever uploaded the file. An asset-usage row is
+        // created by whoever attached it, which is a different question.
+        createdByCondition(busabaseAssets.createdBy, narrow),
         narrow.subtreeIds ? inArray(busabaseAssetUsages.nodeId, narrow.subtreeIds) : undefined,
         extraCondition,
       ),
@@ -633,6 +664,7 @@ const toFileSearchResult = (row: AssetUsageRow, body: string): SearchResultVO =>
     eyebrow: `${row.nodeName} · ${row.ownerType}`,
     href: fileResultHref(row.nodeType, row.nodeSlug),
     updatedAt: row.updatedAt.toISOString(),
+    createdBy: row.assetCreatedBy ?? null,
   };
 };
 
@@ -854,6 +886,7 @@ export const searchBusabase = async (
     updatedAfter: parsed.updatedAfter,
     updatedBefore: parsed.updatedBefore,
     subtreeIds,
+    createdBy: parsed.createdBy,
   };
 
   const projectionRows = wantsRecords
@@ -881,6 +914,39 @@ export const searchBusabase = async (
             // GROUP BY, so it reads as "this record was touched then" rather
             // than needing a HAVING over the aggregate.
             dateRangeCondition(busabaseFieldValues.updatedAt, parsed),
+            // Creator, for the two things this projection can produce. A field
+            // value has no creator of its own — it is a cell, not an authored
+            // object — so the question is asked of whichever parent this row
+            // belongs to: the RECORD's `created_by`, or the CHANGE REQUEST's
+            // `submitted_by`. `or` rather than two branches because a single
+            // projection row carries exactly one of the two ids and the other
+            // EXISTS simply finds nothing.
+            parsed.createdBy
+              ? or(
+                  exists(
+                    db
+                      .select({ one: sql`1` })
+                      .from(busabaseRecords)
+                      .where(
+                        and(
+                          eq(busabaseRecords.id, busabaseFieldValues.recordId),
+                          eq(busabaseRecords.createdBy, parsed.createdBy),
+                        ),
+                      ),
+                  ),
+                  exists(
+                    db
+                      .select({ one: sql`1` })
+                      .from(busabaseChangeRequests)
+                      .where(
+                        and(
+                          eq(busabaseChangeRequests.id, busabaseFieldValues.changeRequestId),
+                          eq(busabaseChangeRequests.submittedBy, parsed.createdBy),
+                        ),
+                      ),
+                  ),
+                )
+              : undefined,
             // A field value knows its Base, and a Base knows its node — which
             // is what `inNodeId` is expressed in.
             subtreeIds
@@ -961,6 +1027,7 @@ export const searchBusabase = async (
             // "sorted" list ends up in an order nobody asked for.
             nodeCreatedAt: busabaseNodes.createdAt,
             nodeUpdatedAt: busabaseNodes.updatedAt,
+            nodeCreatedBy: busabaseNodes.createdBy,
           })
           .from(busabaseBases)
           // `busabase_bases` carries only `createdAt` — no `updatedAt`, no
@@ -976,6 +1043,9 @@ export const searchBusabase = async (
               isNull(busabaseBases.archivedAt),
               buildNodeVisibilityExists(db, busabaseBases.nodeId),
               dateRangeCondition(busabaseNodes.updatedAt, narrowing),
+              // A Base has no creator column of its own; it answers through the
+              // owning node this query already joins for its dates and sort.
+              createdByCondition(busabaseNodes.createdBy, narrowing),
               subtreeIds ? inArray(busabaseBases.nodeId, subtreeIds) : undefined,
               or(
                 ilike(busabaseBases.name, pattern),
@@ -1012,6 +1082,7 @@ export const searchBusabase = async (
                         and(
                           eq(busabaseBases.id, busabaseBaseFields.baseId),
                           dateRangeCondition(busabaseNodes.updatedAt, narrowing),
+                          createdByCondition(busabaseNodes.createdBy, narrowing),
                           subtreeIds ? inArray(busabaseBases.nodeId, subtreeIds) : undefined,
                         ),
                       ),
@@ -1036,6 +1107,7 @@ export const searchBusabase = async (
             ...getTableColumns(busabaseBases),
             nodeCreatedAt: busabaseNodes.createdAt,
             nodeUpdatedAt: busabaseNodes.updatedAt,
+            nodeCreatedBy: busabaseNodes.createdBy,
           })
           .from(busabaseBases)
           .innerJoin(busabaseNodes, eq(busabaseNodes.id, busabaseBases.nodeId))
@@ -1115,6 +1187,7 @@ export const searchBusabase = async (
         // carries the timestamps `sortKey` below needs.
         {},
       ),
+      base.nodeCreatedBy ?? null,
     ),
     // The Base row's own `createdAt` is deliberately NOT used: the query
     // filtered and ordered on the owning node, so the merge has to see the same

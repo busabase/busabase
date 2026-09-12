@@ -1202,8 +1202,8 @@ export const getNodeAgentPrompts = async (
  * which side wins per key, and the CLI that writes this always sends the whole
  * file anyway.
  *
- * `null` clears the column, returning the node to its type's default prompts —
- * distinct from `[]`, which is "set, and deliberately empty".
+ * `null` clears the custom list. The UI still renders the node type's built-in
+ * prompts because custom prompts are an additive tier, not an override.
  */
 export const updateNodeAgentPrompts = async (
   input: z.input<typeof updateNodeAgentPromptsInputSchema>,

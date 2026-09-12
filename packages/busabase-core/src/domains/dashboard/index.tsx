@@ -74,6 +74,7 @@ import { ActivityView, InboxView } from "./components/inbox";
 import { NodeRouteStateView } from "./components/node-route-state";
 import { RecordDetailView, RecordEditorView, RecordTopbarActions } from "./components/record-views";
 import { SearchDialog } from "./components/search-dialog";
+import { SearchView } from "./components/search-view";
 import { SidePanel, SidePanelToggle } from "./components/side-panel";
 import {
   isPinnableNode,
@@ -2119,6 +2120,13 @@ function BusabaseDashboardContent({
           orpc={orpc}
         />
       );
+    }
+
+    // The full-page search the dialog escalates into. Its own route so a
+    // narrowed search is a URL someone can share or keep in a tab — which is
+    // the whole reason the filter state lives in the query string.
+    if (locationPath === "/search") {
+      return <SearchView orpc={orpc} />;
     }
 
     if (locationPath === "/inbox") {

@@ -35,6 +35,7 @@ import type { CoreI18nMessages } from "../../../i18n/messages";
 import { operationLabelKeys } from "./change-request";
 
 export type PromptTier = "scenario" | "capability";
+export type NodePromptSource = "built-in-scenario" | "custom-scenario" | "capability";
 
 /**
  * What inside the node the prompts are about.
@@ -74,7 +75,8 @@ export interface NodePromptContext {
   scope?: NodePromptScope;
   /**
    * This node's custom scenario prompts, already fetched and validated by the
-   * caller (`nodes.getAgentPrompts`), REPLACING the node type's defaults.
+   * caller (`nodes.getAgentPrompts`). They are appended after the node type's
+   * built-in scenarios so product updates never erase the familiar defaults.
    *
    * Optional and safe to omit — that is also what a caller passes while the
    * fetch is still in flight — and the node then shows its type's default
@@ -89,6 +91,9 @@ export interface NodePrompt {
   /** Stable key — used for list selection and as the copy-state key. */
   key: string;
   tier: PromptTier;
+  source: NodePromptSource;
+  /** Original persisted key. Present only for a custom scenario. */
+  customKey?: string;
   /** Localized, human-readable label shown in the list. */
   label: string;
   /** Localized group heading ("Records", "Fields", …) the list buckets this under. */
@@ -1060,17 +1065,17 @@ const customPromptDefToPromptDef = (custom: CustomPromptDef): PromptDef => {
 };
 
 /**
- * Read this node's `metadata.agentPrompts` (written by `busabase-cli nodes
+ * Read this node's custom `agentPrompts` (written by `busabase-cli nodes
  * set-agent-prompts` or a direct API call) and, when present and valid, return
- * it as `PromptDef`s meant to REPLACE `SCENARIOS_BY_TYPE[nodeType]` for the
+ * them as `PromptDef`s appended after `SCENARIOS_BY_TYPE[nodeType]` for the
  * whole-node dialog (§7.3).
  *
  * Returns `undefined` — "fall through to the node type's default scenarios" —
  * when the key is absent, an empty array, or fails `.safeParse`. That last
  * case is the safety net §10's failure matrix requires: corrupt jsonb (a
  * manual edit, or a write that bypassed the CLI's own validation) must never
- * crash the dialog or render garbage, it must render exactly what the node
- * would have shown before this feature existed.
+ * crash the dialog or render garbage; it simply leaves the built-in scenarios
+ * as the complete scenario tier.
  */
 const readCustomAgentPrompts = (
   customPrompts: CustomAgentPrompts | undefined,
@@ -1105,6 +1110,7 @@ const buildCuratedPrompt = (
   target: string,
   tier: PromptTier,
   group: string,
+  source: NodePromptSource = tier === "scenario" ? "built-in-scenario" : "capability",
 ): NodePrompt => {
   const intent = prompt.intent ?? "change";
   const footer =
@@ -1113,8 +1119,10 @@ const buildCuratedPrompt = (
       : `${MERGE_POLICY[locale]} ${REPLY_LANGUAGE[locale]}`;
 
   return {
-    key: prompt.key,
+    key: source === "custom-scenario" ? `custom:${prompt.key}` : prompt.key,
     tier,
+    source,
+    ...(source === "custom-scenario" ? { customKey: prompt.key } : {}),
     label: prompt.label[locale],
     group,
     body: `${prompt.body[locale](target)}\n\n${footer}`,
@@ -1151,19 +1159,33 @@ export function buildNodeAgentPrompts(
     record: RECORD_SCENARIOS,
     cell: CELL_SCENARIOS,
   };
-  // Custom scenario prompts (§7.3) are authored per NODE and only ever replace
-  // the whole-node dialog's scenario tier — a field/record/cell-scoped dialog
+  // Custom scenario prompts (§7.3) are authored per NODE and are appended after
+  // the whole-node dialog's built-in scenario tier. A field/record/cell-scoped dialog
   // always uses its own narrower, scope-specific set above, same as before this
   // feature existed. A node's custom prompts have no opinion about "just this
   // column" or "just this record".
-  const scenarioDefs =
+  const builtInScenarioDefs =
     scope.kind === "node"
-      ? (readCustomAgentPrompts(context.customPrompts) ?? SCENARIOS_BY_TYPE[context.nodeType] ?? [])
+      ? (SCENARIOS_BY_TYPE[context.nodeType] ?? [])
       : (SCENARIOS_BY_SCOPE[scope.kind] ?? SCENARIOS_BY_TYPE[context.nodeType] ?? []);
+  const customScenarioDefs =
+    scope.kind === "node" ? (readCustomAgentPrompts(context.customPrompts) ?? []) : [];
 
-  const scenarios = scenarioDefs.map((scenario) =>
-    buildCuratedPrompt(scenario, locale, target, "scenario", groupLabels.content),
-  );
+  const scenarios = [
+    ...builtInScenarioDefs.map((scenario) =>
+      buildCuratedPrompt(scenario, locale, target, "scenario", groupLabels.content),
+    ),
+    ...customScenarioDefs.map((scenario) =>
+      buildCuratedPrompt(
+        scenario,
+        locale,
+        target,
+        "scenario",
+        groupLabels.content,
+        "custom-scenario",
+      ),
+    ),
+  ];
 
   // Type-specific operations first, then the generic node_* tree ops every type has.
   // A narrowed dialog drops the node-tree operations entirely (moving or renaming
@@ -1202,6 +1224,7 @@ export function buildNodeAgentPrompts(
       return {
         key: kind,
         tier: "capability",
+        source: "capability",
         label: opLabel,
         group: groupLabels[group],
         body: `${CAPABILITY_TEMPLATE[locale](target, opLabel)}\n\n${MERGE_POLICY[locale]} ${
@@ -1440,6 +1463,7 @@ export function buildCreateNodePrompts(
       return {
         key: `create-${definition.type}`,
         tier: "capability",
+        source: "capability",
         label: CREATE_ITEM_LABEL[locale](typeLabel),
         group: CREATE_GROUP_LABEL[locale],
         body: `${CREATE_CAPABILITY_TEMPLATE[locale](target, typeLabel, definition.type)}\n\n${

@@ -37,6 +37,7 @@ import { mergeSearchIntoHref } from "../helpers/link-search";
 import { NodeAvatar } from "../helpers/node-icons";
 import { filterNodeListByQuery } from "../helpers/node-list-search";
 import { normalizeSearchText, searchKindIcon } from "../helpers/search";
+import { EMPTY_SEARCH_PAGE_STATE, searchPageHref } from "../helpers/search-page";
 import {
   KIND_FOR_SECTION,
   type SearchFilterKey,
@@ -853,6 +854,26 @@ export function SearchDialog({
               <CornerDownLeft className="size-3" />
             </Kbd>
             <Kbd>Tab</Kbd>
+            {/*
+              Escalation to the full page. Only once something has been typed —
+              with an empty query the page has nothing to show, so offering it
+              would be a link to an empty state.
+
+              Carries the query across so the page opens on the same search
+              rather than making the person type it a second time.
+            */}
+            {query.trim() ? (
+              <button
+                className="text-foreground text-xs underline-offset-2 hover:underline"
+                onClick={() => {
+                  onClose();
+                  setLocation(searchPageHref({ ...EMPTY_SEARCH_PAGE_STATE, query }));
+                }}
+                type="button"
+              >
+                {messages.searchPage.seeAllResults}
+              </button>
+            ) : null}
           </div>
           <Kbd>Esc</Kbd>
         </div>
@@ -878,6 +899,13 @@ function SearchResultRow({
         "group flex h-11 w-full items-center gap-3 rounded-lg px-2.5 text-left text-foreground transition-colors",
         highlighted ? "bg-muted" : "hover:bg-muted/60",
       )}
+      // A row is addressable by the node it represents, so a test never has to
+      // reach for its visible text. Three e2e specs broke in one release cycle
+      // doing exactly that — the placeholder copy changed, an emoji joined the
+      // name, and then the description moved into the row and made
+      // `hasText: "Pages"` match a different node entirely.
+      data-search-result={result.title}
+      data-testid="search-result"
       onClick={onSelect}
       onMouseEnter={onHighlight}
       type="button"

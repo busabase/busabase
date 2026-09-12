@@ -259,6 +259,17 @@ export const busabaseNodes = pgTable(
     effectivePublicRequiresPassword: boolean("effective_public_requires_password")
       .notNull()
       .default(false),
+    // Who created this node. Nullable, and stays nullable: it is backfilled from
+    // each node's `node_create` commit, and a node whose creating commit was
+    // pruned genuinely has no answer. NULL means "unknown", never "nobody" —
+    // the author filter treats it as unmatchable rather than inventing a
+    // creator, because answering "nobody wrote that" when the truth is "this
+    // row cannot tell" is the failure this search work keeps removing.
+    //
+    // Not an FK to the users table: `busabase_commits.author` is a free-form
+    // actor id (agents and API keys write commits too, not just seat-holding
+    // users), so an FK would reject exactly the rows the backfill produces.
+    createdBy: text("created_by"),
     // Soft-archive marker. Set when the owning base is archived (base nodes are
     // kept, not deleted, since commits FK-restrict the base). Partial slug index
     // below frees the slug for reuse while archived.
@@ -767,7 +778,14 @@ export type NodePO = typeof busabaseNodes.$inferSelect;
  * opened occasionally, so list queries name their columns (`nodeListColumns`)
  * instead of `select()`-ing the row.
  */
-export type NodeListPO = Omit<NodePO, "agentPrompts">;
+/**
+ * `createdBy` is omitted alongside `agentPrompts` because the column list below
+ * deliberately answers "does a sidebar load need this?" per column, and the
+ * sidebar never renders an author. Search results DO show one, but they are
+ * built from `logic/search.ts`'s own selects, not from this shape — so carrying
+ * it here would add a column to every tree load for no reader.
+ */
+export type NodeListPO = Omit<NodePO, "agentPrompts" | "createdBy">;
 
 /**
  * The column list behind `NodeListPO` — pass to `db.select(nodeListColumns)`.

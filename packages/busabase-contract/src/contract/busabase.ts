@@ -321,7 +321,7 @@ export const busabaseContractRoutes = {
         tags: ["Nodes"],
         summary: "Get node custom agent prompts",
         successDescription:
-          "This node's custom scenario prompts, which replace the node type's default prompts in the Ask-agent dialog. `null` means the node has never had any set, which is not the same as an empty list. Read separately from the node itself because the list is large enough (50 prompts x 8 KiB per locale) that carrying it on every node listing would be its own problem. Requires read access on the node.",
+          "This node's custom scenario prompts, which appear alongside the node type's built-in prompts in the Ask-agent dialog. `null` means the node has never had any set, which is not the same as an empty list. Read separately from the node itself because the list is large enough (50 prompts x 8 KiB per locale) that carrying it on every node listing would be its own problem. Requires read access on the node.",
       })
       .input(getNodeAgentPromptsInputSchema)
       .output(nodeAgentPromptsSchema),
@@ -332,7 +332,7 @@ export const busabaseContractRoutes = {
         tags: ["Nodes"],
         summary: "Replace node custom agent prompts",
         successDescription:
-          "Replaced this node's custom scenario prompts — the whole list, not a merge. Send `null` to clear them and return the node to its type's default prompts. Requires write access on the node.",
+          "Replaced this node's custom scenario prompts — the whole custom list, not a merge. Send `null` to clear custom prompts; built-in prompts are always retained. Requires write access on the node.",
       })
       .input(updateNodeAgentPromptsInputSchema)
       .output(nodeAgentPromptsSchema),

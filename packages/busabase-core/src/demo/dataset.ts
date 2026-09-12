@@ -54,6 +54,7 @@ import {
   FORMULA_LAB_RECORDS,
   FORMULA_LAB_VIEWS,
 } from "./scenarios/formula-functions-lab";
+import { insuranceAgencyScenario } from "./scenarios/insurance-agency";
 import { nestedFoldersScenario } from "./scenarios/nested-folders";
 import { enNodeTypesScenario } from "./scenarios/node-types.en";
 import {
@@ -276,6 +277,7 @@ export const DEMO_FOLDERS: SeedFolderDef[] = [
   },
   ...FINANCE_FOLDERS,
   ...STOCK_PICKING_FOLDERS,
+  ...(insuranceAgencyScenario.folders ?? []),
   ...FORMULA_LAB_FOLDERS,
   ...(readmeScenario.folders ?? []),
   {
@@ -1086,6 +1088,7 @@ export const DEMO_BASES: SeedBaseDef[] = [
   },
   ...FINANCE_BASES,
   ...STOCK_PICKING_BASES,
+  ...(insuranceAgencyScenario.bases ?? []),
   ...FORMULA_LAB_BASES,
   ...DIRECTORY_LISTINGS_BASES,
   ...AGENT_GALLERY_BASES,
@@ -2485,6 +2488,7 @@ export const DEMO_RECORDS: SeedRecordDef[] = [
   ...BULK_MEDIA,
   ...FINANCE_RECORDS,
   ...STOCK_PICKING_RECORDS,
+  ...(insuranceAgencyScenario.records ?? []),
   ...FORMULA_LAB_RECORDS,
   ...DIRECTORY_LISTINGS_RECORDS,
   ...AGENT_GALLERY_RECORDS,
@@ -2588,6 +2592,7 @@ export const DEMO_VIEWS: SeedViewDef[] = [
   },
   ...FINANCE_VIEWS,
   ...STOCK_PICKING_VIEWS,
+  ...(insuranceAgencyScenario.views ?? []),
   ...FORMULA_LAB_VIEWS,
   ...DIRECTORY_LISTINGS_VIEWS,
   ...AGENT_GALLERY_VIEWS,
@@ -3172,6 +3177,7 @@ export const DEMO_CHANGE_REQUESTS: SeedChangeRequestDef[] = [
   },
   ...FINANCE_CHANGE_REQUESTS,
   ...(readmeScenario.changeRequests ?? []),
+  ...(insuranceAgencyScenario.changeRequests ?? []),
 ];
 
 // ── Use-case filtering ───────────────────────────────────────────────────────
@@ -3895,15 +3901,23 @@ export const englishScenario: SeedScenario = withSeedNodeIcons(
     records: DEMO_RECORDS,
     views: DEMO_VIEWS,
     changeRequests: DEMO_CHANGE_REQUESTS,
-    docs: enNodeTypesScenario.docs,
-    files: enNodeTypesScenario.files,
-    fileTreeNodes: enNodeTypesScenario.fileTreeNodes,
+    docs: [...(enNodeTypesScenario.docs ?? []), ...(insuranceAgencyScenario.docs ?? [])],
+    files: [...(enNodeTypesScenario.files ?? []), ...(insuranceAgencyScenario.files ?? [])],
+    fileTreeNodes: [
+      ...(enNodeTypesScenario.fileTreeNodes ?? []),
+      ...(insuranceAgencyScenario.fileTreeNodes ?? []),
+    ],
     richNodes: [
       ...(enNodeTypesScenario.richNodes ?? []),
       ...(nestedFoldersScenario.richNodes ?? []),
+      ...(insuranceAgencyScenario.richNodes ?? []),
     ],
-    comments: enNodeTypesScenario.comments,
+    comments: [
+      ...(enNodeTypesScenario.comments ?? []),
+      ...(insuranceAgencyScenario.comments ?? []),
+    ],
     forms: [
+      ...(insuranceAgencyScenario.forms ?? []),
       {
         nodeId: "nod_form_guest_post",
         folderNodeId: DEMO_CMS_FOLDER_NODE_ID,
