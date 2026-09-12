@@ -11,6 +11,7 @@ const results: SearchResultVO[] = [
     eyebrow: "People",
     href: "/records/1",
     updatedAt: null,
+    createdBy: null,
   },
   {
     id: "base-1",
@@ -20,6 +21,7 @@ const results: SearchResultVO[] = [
     eyebrow: "",
     href: "/base/people",
     updatedAt: null,
+    createdBy: null,
   },
   {
     id: "file-1",
@@ -29,6 +31,7 @@ const results: SearchResultVO[] = [
     eyebrow: "",
     href: "/doc/notes",
     updatedAt: null,
+    createdBy: null,
   },
   {
     id: "cr-1",
@@ -38,6 +41,7 @@ const results: SearchResultVO[] = [
     eyebrow: "",
     href: "/change-requests/cr-1",
     updatedAt: null,
+    createdBy: null,
   },
 ];
 
