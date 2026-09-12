@@ -109,6 +109,21 @@ const DEMO_NODE_EMOJI_BY_SLUG: Readonly<Record<string, string>> = {
   drives: "🗄️",
   airapps: "🚀",
   "globex-cloud-invoice-2026-06-demo": "🧾",
+  insurance: "🛟",
+  "insurance-clients": "👨‍👩‍👧",
+  "insurance-policies": "📑",
+  "insurance-renewals": "🔔",
+  "advisor-playbook": "📖",
+  "product-matrix": "📋",
+  "commission-ledger": "💴",
+  "underwriting-rules": "⚖️",
+  "policy-renewal-assistant": "🔔",
+  "insurance-materials": "🗂️",
+  "insurance-renewal-board": "📊",
+  "book-of-business": "🗺️",
+  "renewal-outreach-workflow": "🔀",
+  "proposal-one-pager": "📄",
+  "insurance-consult-form": "✍️",
 };
 
 const DEFAULT_EMOJI_BY_KIND: Readonly<Record<SeedNodeKind, string>> = {

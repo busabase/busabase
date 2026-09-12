@@ -5,6 +5,7 @@ import { datasetZhCnScenario } from "./dataset.zh-cn";
 import { directoryListingZhCnScenario } from "./directory-listing.zh-cn";
 import { expandZhCnScenario } from "./expand.zh-cn";
 import { financeInvoiceZhCnScenario } from "./finance-invoice.zh-cn";
+import { insuranceAgencyZhCnScenario } from "./insurance-agency.zh-cn";
 import { nestedFoldersZhCnScenario } from "./nested-folders.zh-cn";
 import { zhCnNodeTypesScenario } from "./node-types.zh-cn";
 import { agentGalleryZhCnScenario } from "./product-gallery.zh-cn";
@@ -21,6 +22,7 @@ const mergeScenarios = (...scenarios: SeedScenario[]): SeedScenario => ({
   files: scenarios.flatMap((s) => s.files ?? []),
   fileTreeNodes: scenarios.flatMap((s) => s.fileTreeNodes ?? []),
   richNodes: scenarios.flatMap((s) => s.richNodes ?? []),
+  forms: scenarios.flatMap((s) => s.forms ?? []),
   comments: scenarios.flatMap((s) => s.comments ?? []),
 });
 
@@ -36,5 +38,6 @@ export const zhCnScenario: SeedScenario = withSeedNodeIcons(
     roadmapZhCnScenario,
     zhCnNodeTypesScenario,
     nestedFoldersZhCnScenario,
+    insuranceAgencyZhCnScenario,
   ),
 );

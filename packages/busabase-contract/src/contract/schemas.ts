@@ -627,6 +627,15 @@ const searchResultSchema = z.object({
   eyebrow: z.string(),
   href: z.string(),
   updatedAt: z.string().nullable(),
+  /**
+   * The actor that created this, or null when the source cannot say.
+   *
+   * Present so a result can SHOW its author and so the author filter can be
+   * driven by clicking one — you can only filter by a creator you can actually
+   * see, which beats a free-text box you have to guess the spelling of. Null is
+   * rendered as "unknown", never as a person.
+   */
+  createdBy: z.string().nullable().default(null),
 });
 
 const searchResponseSchema = z.object({
@@ -1164,22 +1173,26 @@ const searchInputSchema = z.object({
     .describe(
       "Inclusive upper bound, ISO 8601. A UTC `Z` or an explicit offset; not a bare local time.",
     ),
-  /*
-   * There is deliberately NO `createdBy` here yet.
+  /**
+   * Restrict to what one actor created.
    *
-   * `busabase_records` and `busabase_assets` each have a `created_by`, but
-   * `busabase_nodes` and `busabase_bases` do not — so an author filter would
-   * cover records and files while quietly returning nothing from document
-   * bodies and Base names. A filter that answers "nobody wrote that" when it
-   * means "this source cannot tell" is the exact failure this search work has
-   * been removing everywhere else, so it is left out until
-   * `busabase_nodes.created_by` exists (a migration, and its own change).
+   * Every source answers from a real column, which is what made this filter
+   * shippable: records and assets carry their own `created_by`, node CONTENT
+   * reads `busabase_nodes.created_by` (added with this change, backfilled from
+   * each node's `node_create` commit), and Bases resolve through the owning
+   * node the Base query already joins for its dates and sort.
    *
-   * Node creators ARE recoverable today from the `node_create` commit's
-   * `author`, and that was considered and rejected: it would make two of the
-   * four sources answer through commit-history archaeology while the other two
-   * read a column, with different performance and different failure modes.
+   * A free-form actor id, not a user id — agents and API keys create things
+   * too, and filtering by "user" would silently drop everything an agent made.
+   *
+   * Nodes whose creating commit is gone have a NULL `created_by` and match no
+   * author. That is deliberate: "this row cannot tell" must not render as
+   * "nobody made it".
    */
+  createdBy: z
+    .string()
+    .optional()
+    .describe("Restrict to one creator. Matches the actor id, which may be an agent or API key."),
   /**
    * Restrict to a subtree: this node and everything beneath it.
    *

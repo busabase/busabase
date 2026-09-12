@@ -260,8 +260,8 @@ const LOCALE_EXPECTATIONS: Record<
 /**
  * Feature 3 — per-node custom scenario prompts (node-agent-prompts-v2.md §7.3).
  *
- * `customPrompts`, when present and valid, REPLACES the node type's
- * `SCENARIOS_BY_TYPE` scenarios for the whole-node dialog only; the capability
+ * `customPrompts`, when present and valid, follows the node type's built-in
+ * scenarios for the whole-node dialog only; the capability
  * tier and every scoped (field/record/cell) dialog are untouched. Read-time
  * validation must fail SAFE — corrupt or malformed data falls back to the type
  * default rather than crashing or rendering garbage (§10's failure matrix).
@@ -284,20 +284,51 @@ describe("buildNodeAgentPrompts custom scenario prompts", () => {
     },
   ];
 
-  it("replaces the type's default scenarios with the node's custom ones", () => {
+  it("keeps type defaults and appends the node's custom scenarios", () => {
     const { scenarios, capabilities } = buildNodeAgentPrompts(
       { ...BASE_CONTEXT, customPrompts: CUSTOM_PROMPTS },
       "en",
       coreMessagesEn,
     );
-    expect(scenarios.map((prompt) => prompt.key)).toEqual([
-      "weekly-severity-summary",
-      "draft-response",
+    expect(scenarios.map((prompt) => prompt.key)).toContain("base-bulk-import");
+    expect(scenarios.slice(-2).map((prompt) => prompt.key)).toEqual([
+      "custom:weekly-severity-summary",
+      "custom:draft-response",
     ]);
-    expect(scenarios.map((prompt) => prompt.key)).not.toContain("base-bulk-import");
     // Capability tier is derived from the type registry, never authored — must
     // be bit-for-bit identical to the no-custom-prompts case.
     expect(capabilities).toEqual(build().capabilities);
+  });
+
+  it("marks built-in and custom scenarios without hiding either source", () => {
+    const { scenarios } = buildNodeAgentPrompts(
+      { ...BASE_CONTEXT, customPrompts: CUSTOM_PROMPTS },
+      "en",
+      coreMessagesEn,
+    );
+
+    expect(scenarios.some((prompt) => prompt.source === "built-in-scenario")).toBe(true);
+    expect(
+      scenarios.filter((prompt) => prompt.source === "custom-scenario").map((prompt) => prompt.key),
+    ).toEqual(["custom:weekly-severity-summary", "custom:draft-response"]);
+  });
+
+  it("marks the default list as built-in when the node has no custom prompts", () => {
+    const { scenarios } = build();
+    expect(scenarios.every((prompt) => prompt.source === "built-in-scenario")).toBe(true);
+  });
+
+  it("does not include custom prompts in a scoped dialog", () => {
+    const { scenarios } = buildNodeAgentPrompts(
+      {
+        ...BASE_CONTEXT,
+        customPrompts: CUSTOM_PROMPTS,
+        scope: { kind: "record", recordId: "rec_1" },
+      },
+      "en",
+      coreMessagesEn,
+    );
+    expect(scenarios.every((prompt) => prompt.source !== "custom-scenario")).toBe(true);
   });
 
   it("substitutes {target} with the same target line a curated prompt receives", () => {
@@ -306,7 +337,7 @@ describe("buildNodeAgentPrompts custom scenario prompts", () => {
       "en",
       coreMessagesEn,
     );
-    const summary = scenarios.find((prompt) => prompt.key === "weekly-severity-summary");
+    const summary = scenarios.find((prompt) => prompt.key === "custom:weekly-severity-summary");
     expect(summary?.body).toContain(
       'Summarize tickets opened in Target: the Busabase Base "Posts" (nodeId: nod_base_blog)',
     );
@@ -324,7 +355,7 @@ describe("buildNodeAgentPrompts custom scenario prompts", () => {
       "en",
       coreMessagesEn,
     );
-    const triage = scenarios.find((prompt) => prompt.key === "no-placeholder");
+    const triage = scenarios.find((prompt) => prompt.key === "custom:no-placeholder");
     // Same sentence a curated prompt opens with, then the author's text as its
     // own paragraph — an agent must never have to guess which node it is on.
     expect(triage?.body.startsWith(TARGET_LINE_EN)).toBe(true);
@@ -344,14 +375,16 @@ describe("buildNodeAgentPrompts custom scenario prompts", () => {
     ];
     const en = buildNodeAgentPrompts({ ...BASE_CONTEXT, customPrompts }, "en", coreMessagesEn);
     const zh = buildNodeAgentPrompts({ ...BASE_CONTEXT, customPrompts }, "zh-CN", dashboardZhCN);
+    const enCustom = en.scenarios.find((prompt) => prompt.key === "custom:half-translated");
+    const zhCustom = zh.scenarios.find((prompt) => prompt.key === "custom:half-translated");
     // en placed it inline, exactly where the author put it — unchanged behavior.
-    expect(en.scenarios[0]?.body).toContain(
+    expect(enCustom?.body).toContain(
       'Triage Target: the Busabase Base "Posts" (nodeId: nod_base_blog)',
     );
     // zh-CN forgot it, so it is prepended rather than lost.
-    expect(zh.scenarios[0]?.body.startsWith("目标：Busabase 的 ")).toBe(true);
-    expect(zh.scenarios[0]?.body).toContain("（nodeId: nod_base_blog）");
-    expect(zh.scenarios[0]?.body).toContain("现在分诊。");
+    expect(zhCustom?.body.startsWith("目标：Busabase 的 ")).toBe(true);
+    expect(zhCustom?.body).toContain("（nodeId: nod_base_blog）");
+    expect(zhCustom?.body).toContain("现在分诊。");
   });
 
   it("resolves the plain-string iString form for every locale (no translation supplied)", () => {
@@ -360,7 +393,7 @@ describe("buildNodeAgentPrompts custom scenario prompts", () => {
       "zh-CN",
       dashboardZhCN,
     );
-    const draft = scenarios.find((prompt) => prompt.key === "draft-response");
+    const draft = scenarios.find((prompt) => prompt.key === "custom:draft-response");
     expect(draft?.label).toBe("Draft a response to the selected ticket");
     expect(draft?.body).toContain("Draft a reply to the ticket currently selected in");
   });
@@ -371,7 +404,7 @@ describe("buildNodeAgentPrompts custom scenario prompts", () => {
       "zh-CN",
       dashboardZhCN,
     );
-    const summary = scenarios.find((prompt) => prompt.key === "weekly-severity-summary");
+    const summary = scenarios.find((prompt) => prompt.key === "custom:weekly-severity-summary");
     expect(summary?.label).toBe("本周按严重程度汇总");
     expect(summary?.body).toContain("汇总");
   });
@@ -382,8 +415,8 @@ describe("buildNodeAgentPrompts custom scenario prompts", () => {
       "en",
       coreMessagesEn,
     );
-    const summary = scenarios.find((prompt) => prompt.key === "weekly-severity-summary");
-    const draft = scenarios.find((prompt) => prompt.key === "draft-response");
+    const summary = scenarios.find((prompt) => prompt.key === "custom:weekly-severity-summary");
+    const draft = scenarios.find((prompt) => prompt.key === "custom:draft-response");
     expect(summary?.body).not.toContain("let Busabase apply my permissions");
     // Omitted `intent` must default to `change`, same as a curated prompt with
     // no `intent` — a custom prompt cannot silently drop the merge-policy line

@@ -505,7 +505,60 @@ export const coreMessagesEn = {
     changeRequestPendingReviewTitle: "New change request",
     changeRequestPendingReviewBody: "A new change request is waiting for your review.",
   },
+  /**
+   * The full-page search at `/search`, which the dialog escalates into.
+   *
+   * Separate block from `search` above on purpose: the dialog is a quick jump
+   * and the page is a narrowing tool, and sharing one vocabulary between them
+   * would push each toward the other's wording.
+   */
+  searchPage: {
+    title: "Search",
+    placeholder: "Search records, files, documents and Bases…",
+    seeAllResults: "See all results",
+    sourceLabel: "Type",
+    sourceAll: "Everything",
+    sourceRecords: "Records",
+    sourceFiles: "Files",
+    sourceNodes: "Document content",
+    sourceNames: "Bases",
+    sortLabel: "Sort",
+    sortRelevance: "Most relevant",
+    sortUpdatedDesc: "Recently updated",
+    sortUpdatedAsc: "Least recently updated",
+    sortCreatedDesc: "Newest",
+    sortCreatedAsc: "Oldest",
+    whenLabel: "Edited",
+    whenAny: "Any time",
+    when7d: "Past 7 days",
+    when30d: "Past 30 days",
+    when365d: "Past year",
+    authorLabel: "Created by",
+    authorAny: "Anyone",
+    /** Shown in place of a creator the source could not report. */
+    authorUnknown: "Unknown",
+    locationLabel: "In",
+    locationAnywhere: "Anywhere",
+    clearFilters: "Clear filters",
+    resultCount: "{count} loaded",
+    loadMore: "Load more",
+    loading: "Searching…",
+    failed: "Search failed",
+    emptyTitle: "Search this workspace",
+    emptyBody:
+      "Find records, file contents, document bodies and Bases — then narrow by type, date, folder or author.",
+    noMatchesTitle: "No matches",
+    noMatchesBody: "Nothing matches that search with these filters.",
+    noMatchesWithFilters: "Try clearing the filters, or searching for something else.",
+    /**
+     * Apps and Skills are searchable in the dialog but not here. Said out loud
+     * rather than left for someone to discover, because "it is missing" and
+     * "it is elsewhere" look identical from an empty result.
+     */
+    appsElsewhere: "Looking for an app or skill? Use quick search.",
+  },
   routes: {
+    search: "Search",
     home: "Home",
     inbox: "Inbox",
     operation: "Operation",
@@ -1414,6 +1467,37 @@ export const coreMessagesEn = {
       "confirm that this environment is connected to Busabase and points to the correct target space{targetSpace}. If the Busabase connection is not configured or points to another space, read and follow this setup guide first:\n\n{setupUrl}",
     connectionCheckNote:
       "Copying or sending also appends a short connection check, so your agent can reach this space.",
+    builtInScenarios: "Built-in scenarios",
+    customScenarios: "Custom scenarios",
+    newCustomPrompt: "New prompt",
+    addPrompt: "Add prompt",
+    noCustomScenariosHint: "Add a prompt for a workflow that is unique to this node.",
+    scenarioActions: "Actions for {name}",
+    newScenarioTitle: "New scenario",
+    editScenario: "Edit scenario",
+    editorIntro:
+      "Write a prompt for a specific scenario so an AI Agent can accurately perform the corresponding task.",
+    scenarioName: "Scenario name",
+    scenarioNamePlaceholder: "For example, Review a research draft",
+    agentAccess: "Agent access",
+    readOnly: "Read only",
+    mayMakeChanges: "May make changes",
+    promptTemplate: "Prompt template",
+    targetHint: "Use {target} to insert this node automatically.",
+    byteCount: "{count} / {limit} bytes",
+    addScenario: "Add scenario",
+    saveChanges: "Save changes",
+    saving: "Saving…",
+    saveFailed: "Couldn't save this scenario. Your draft is still here.",
+    deleteScenario: "Delete scenario",
+    deleteConfirmTitle: "Delete this custom scenario?",
+    deleteConfirmBody:
+      "“{name}” will be removed from this node. Built-in scenarios are unaffected.",
+    nameRequired: "Enter a scenario name.",
+    nameTooLong: "Scenario names can contain at most 80 characters.",
+    bodyRequired: "Enter a prompt template.",
+    bodyTooLarge: "Prompt templates can contain at most 8 KiB per language.",
+    limitReached: "This node already has the maximum of 50 custom scenarios.",
   },
   fieldTypes: {
     text: "Text",

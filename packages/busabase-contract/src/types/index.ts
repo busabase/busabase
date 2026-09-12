@@ -491,6 +491,8 @@ export interface SearchResultVO {
   eyebrow: string;
   href: string;
   updatedAt: string | null;
+  /** Creating actor, or null when the source cannot say. Never render null as a person. */
+  createdBy: string | null;
 }
 
 export interface SearchResponseVO {

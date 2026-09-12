@@ -58,6 +58,16 @@ export const getBusabaseDashboardRoutes = (
       breadcrumb: messages?.routes.home ?? "Home",
       title: messages?.routes.home ?? "Home",
     },
+    // Full-page search. Needs an entry HERE as well as a branch in the
+    // dashboard's `activeView`: this table is what the SPA router matches
+    // against, so a view with no pattern renders "route not found" no matter
+    // what `activeView` would have returned.
+    {
+      path: "/search",
+      component: dashboard,
+      breadcrumb: messages?.routes.search ?? "Search",
+      title: messages?.routes.search ?? "Search",
+    },
     {
       path: "/inbox",
       component: dashboard,

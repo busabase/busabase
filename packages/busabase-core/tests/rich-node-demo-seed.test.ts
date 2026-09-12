@@ -37,7 +37,11 @@ describe.each([
     ).toBeGreaterThan(0);
     expect(
       parseWorkflowDocument(
-        richNodes.find((node) => node.type === "workflow")?.metadata.workflowDocument,
+        // Pinned by id, like the html assertion below: this is the one workflow
+        // that deliberately covers every node kind. Other scenarios ship their
+        // own, narrower workflows, so a bare `find` would match whichever
+        // folder happens to come first.
+        richNodes.find((node) => node.id === "nod_workflow_lead_intake")?.metadata.workflowDocument,
       ).nodes.map((workflowNode) => workflowNode.kind),
     ).toEqual(
       expect.arrayContaining([

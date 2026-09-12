@@ -456,6 +456,26 @@ const mergeNodeCreate = async (ctx: MergeCtx, item: OperationPO, headCommit: Com
     }
     throw error;
   }
+  // Stamp the creator for every node that is born by MERGING a change request:
+  // one write here covers all seven materializers (folder, base, doc, file,
+  // skill, airapp, generic) instead of seven writes that would miss the eighth
+  // type someone adds.
+  //
+  // It does NOT cover everything. `createBase`, `createDoc`, `createFileNode`
+  // and `createFileTreeNode` each have a direct-materialization fast path that
+  // inserts the node itself and never reaches this function; those stamp their
+  // own creator, and `nodes-created-by.test.ts` walks every public creation
+  // entry point so a future path cannot quietly go back to authorless.
+  //
+  // `headCommit.author`, not `ctx.actorId`: the author is what the backfill in
+  // migration 0026 reads, so a node created today and a node backfilled from
+  // 2024 mean the same thing by `created_by`. `ctx.actorId` is the same value on
+  // the real merge path but resolves to `CURRENT_USER_ID` on others, which would
+  // quietly attribute agent-created nodes to whoever was signed in.
+  await db
+    .update(busabaseNodes)
+    .set({ createdBy: headCommit.author })
+    .where(eq(busabaseNodes.id, nodeId));
   // Materialize this node's ACL state: inherited effectiveVisibility +
   // inherited principal rows + creator (= CR submitter, ctx.actorId) grant.
   await initializeNodeAcl(db, getContextSpaceId(), nodeId, parentNode.id, ctx.actorId);

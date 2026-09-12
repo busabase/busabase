@@ -659,47 +659,41 @@ export function FileTreeDetailView({
   // One wrapper for both shapes: `Tabs` when a prompts tab was supplied, a
   // plain div otherwise — so a Drive renders the identical markup it always did.
   const Frame = agentPromptsTab ? FileTreeTabsFrame : FileTreePlainFrame;
-  const infoButton = (
-    <Button
-      aria-label={messages.nodeDetail.details}
-      className="shrink-0 text-muted-foreground"
-      onClick={() => setInfoOpen(true)}
-      size="icon-sm"
-      title={messages.nodeDetail.details}
-      type="button"
-      variant="ghost"
-    >
-      <Info className="size-3.5" />
-    </Button>
-  );
 
   return (
     <Frame>
-      <header
-        className={cn(
-          "shrink-0 border-border/60 border-b",
-          agentPromptsTab ? "px-4 pt-5 pb-2 md:px-6" : "flex h-12 items-center gap-2 px-3 md:px-4",
-        )}
-      >
-        {agentPromptsTab ? (
-          <div className="min-w-0">
-            <div className="flex min-w-0 items-start gap-2">
-              <div className="min-w-0 flex-1">
-                <h1 className="truncate font-semibold text-foreground text-xl leading-7">
+      {agentPromptsTab ? (
+        <header className="shrink-0 border-border/60 border-b">
+          <div className="flex min-w-0 items-start gap-2 px-3 pt-3 pb-2 md:px-4">
+            <span className="flex h-5 shrink-0 items-center" title={nodeTypeLabel}>
+              <NodeIcon className="size-4 translate-y-px text-muted-foreground" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="flex min-w-0 items-center gap-1">
+                <h1 className="truncate font-medium text-foreground text-sm">
                   {fileTree.node.name}
                 </h1>
-                {fileTree.node.description ? (
-                  <p
-                    className="mt-1 line-clamp-2 text-muted-foreground text-sm leading-5 md:line-clamp-1"
-                    title={fileTree.node.description}
-                  >
-                    {fileTree.node.description}
-                  </p>
-                ) : null}
+                <Button
+                  aria-label={messages.nodeDetail.details}
+                  className="shrink-0 text-muted-foreground"
+                  onClick={() => setInfoOpen(true)}
+                  size="icon-sm"
+                  title={messages.nodeDetail.details}
+                  type="button"
+                  variant="ghost"
+                >
+                  <Info className="size-3.5" />
+                </Button>
               </div>
-              {infoButton}
+              {fileTree.node.description ? (
+                <p className="mt-1 text-muted-foreground text-sm leading-relaxed">
+                  {fileTree.node.description}
+                </p>
+              ) : null}
             </div>
-            <TabsList className="mt-3 h-8 shrink-0 gap-1 bg-transparent p-0">
+          </div>
+          <div className="flex min-h-10 items-center px-3 md:px-4">
+            <TabsList className="h-8 shrink-0 gap-1 bg-transparent p-0">
               <TabsTrigger className={FILE_TREE_TAB_TRIGGER_CLASS} value="prompts">
                 <Sparkles className="size-3.5" />
                 {messages.agentPrompts.title}
@@ -710,7 +704,9 @@ export function FileTreeDetailView({
               </TabsTrigger>
             </TabsList>
           </div>
-        ) : (
+        </header>
+      ) : (
+        <header className="flex h-12 shrink-0 items-center gap-2 border-border/60 border-b px-3 md:px-4">
           <div className="flex min-w-0 items-center gap-2">
             <span title={nodeTypeLabel}>
               <NodeIcon className="size-4 shrink-0 text-muted-foreground" />
@@ -734,25 +730,38 @@ export function FileTreeDetailView({
                 </p>
               </>
             ) : null}
-            {infoButton}
+            <Button
+              aria-label={messages.nodeDetail.details}
+              className="shrink-0 text-muted-foreground"
+              onClick={() => setInfoOpen(true)}
+              size="icon-sm"
+              title={messages.nodeDetail.details}
+              type="button"
+              variant="ghost"
+            >
+              <Info className="size-3.5" />
+            </Button>
           </div>
-        )}
-        {infoOpen && (
-          <NodeSettingsDialog
-            initialTab="info"
-            nodeId={fileTree.node.id}
-            nodeName={fileTree.node.name}
-            nodeSlug={fileTree.node.slug}
-            nodeType={nodeType}
-            onOpenChange={setInfoOpen}
-            open={infoOpen}
-            orpc={orpc}
-          />
-        )}
-      </header>
+        </header>
+      )}
+      {infoOpen && (
+        <NodeSettingsDialog
+          initialTab="info"
+          nodeId={fileTree.node.id}
+          nodeName={fileTree.node.name}
+          nodeSlug={fileTree.node.slug}
+          nodeType={nodeType}
+          onOpenChange={setInfoOpen}
+          open={infoOpen}
+          orpc={orpc}
+        />
+      )}
 
       {agentPromptsTab ? (
-        <TabsContent className="min-h-0 flex-1 overflow-hidden" value="prompts">
+        <TabsContent
+          className="mt-0 flex min-h-0 flex-1 flex-col overflow-auto px-4 pb-4"
+          value="prompts"
+        >
           {agentPromptsTab}
         </TabsContent>
       ) : null}
@@ -1094,7 +1103,7 @@ const FileTreeTabsFrame = ({ children }: { children: ReactNode }) => (
  * half-written edit.
  */
 const FileTreeBrowserPane = ({ hasTabs, children }: { hasTabs: boolean; children: ReactNode }) => {
-  const className = "grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[300px_minmax(0,1fr)]";
+  const className = "mt-0 grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[300px_minmax(0,1fr)]";
   if (!hasTabs) return <div className={className}>{children}</div>;
   return (
     <TabsContent className={`${className} data-[state=inactive]:hidden`} forceMount value="files">
@@ -1139,7 +1148,9 @@ export function SkillDetailView({
         loadedNode ? (
           <SkillAgentPromptsTab node={loadedNode} orpc={orpc} />
         ) : (
-          <div className="text-muted-foreground text-sm">{messages.common.loading}</div>
+          <div className="flex h-full items-center justify-center text-muted-foreground text-sm">
+            {messages.common.loading}
+          </div>
         )
       }
       hideActions={hideActions}
@@ -1165,7 +1176,15 @@ export function SkillDetailView({
  * reaches an agent, and the side panel it opens is its own confirmation.
  */
 function SkillAgentPromptsTab({ node, orpc }: { node: LoadedNode; orpc: BusabaseQueryUtils }) {
-  const { scenarios, capabilities, loading } = useNodeAgentPrompts({
+  const {
+    scenarios,
+    capabilities,
+    customPrompts,
+    canSaveCustomPrompts,
+    saving,
+    saveCustomPrompts,
+    loading,
+  } = useNodeAgentPrompts({
     nodeId: node.id,
     nodeName: node.name,
     nodeType: "skill",
@@ -1177,8 +1196,13 @@ function SkillAgentPromptsTab({ node, orpc }: { node: LoadedNode; orpc: Busabase
     <AgentPromptsView
       askAgent={{ orpc, sessionScopeId: node.id }}
       capabilities={capabilities}
-      layout="page"
       loading={loading}
+      management={{
+        customPrompts,
+        canSave: canSaveCustomPrompts,
+        saving,
+        save: saveCustomPrompts,
+      }}
       onHandedOff={() => {}}
       scenarios={scenarios}
     />

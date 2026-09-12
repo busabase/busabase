@@ -114,7 +114,7 @@ export function RecordTopbarActions({
           record's whole toolbar, so this is the only place a per-record "ask my
           agent to fix THIS row" entry point can live. No `metadata` prop: a
           node's custom scenario prompts (node-agent-prompts-v2.md §7.3) only
-          ever replace the WHOLE-NODE dialog's scenario tier, never a
+          ever extend the WHOLE-NODE dialog's scenario tier, never a
           record/cell-scoped one (see `buildNodeAgentPrompts`'s `scope.kind`
           check) — passing it here would be inert even if `BaseVO` carried
           metadata, which it doesn't. */}

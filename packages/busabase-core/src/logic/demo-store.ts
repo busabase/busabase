@@ -866,6 +866,7 @@ export const demoSearch = (input: {
           eyebrow: `${record.base.name} · canonical record`,
           href: `/base/${record.base.slug}/${record.id}`,
           updatedAt: record.updatedAt,
+          createdBy: record.createdBy ?? null,
         }));
 
   const changeRequestResults: SearchResultVO[] = !wantsRecords
@@ -895,6 +896,7 @@ export const demoSearch = (input: {
           eyebrow: `${changeRequest.base?.name ?? "Node tree"} · ${changeRequest.status}`,
           href: `/inbox/${changeRequest.id}`,
           updatedAt: changeRequest.updatedAt,
+          createdBy: changeRequest.submittedBy ?? null,
         }));
 
   const baseResults: SearchResultVO[] = !wantsNames
@@ -909,6 +911,9 @@ export const demoSearch = (input: {
           eyebrow: `${base.fields.length} fields · ${base.slug}`,
           href: `/base/${base.slug}`,
           updatedAt: base.createdAt,
+          // Demo Bases carry no owning-node creator, and inventing one would
+          // make the demo disagree with the real thing about who made what.
+          createdBy: null,
         }));
 
   const results = [...recordResults, ...changeRequestResults, ...baseResults].slice(

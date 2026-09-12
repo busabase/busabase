@@ -2,17 +2,17 @@ import { iStringSchema } from "openlib/i18n/i-string";
 import { z } from "zod";
 
 /**
- * Per-node custom scenario prompts (`node.metadata.agentPrompts`) — the single
+ * Per-node custom scenario prompts (`node.agentPrompts`) — the single
  * schema shared by BOTH write and read paths, per the node-agent-prompts
  * design (v2) §7.3:
  *
  * - Write: `busabase-cli nodes set-agent-prompts` validates a file against this
- *   schema client-side, before calling `nodes.updateMetadata` — a malformed file
- *   never reaches the network.
+ *   schema client-side, before calling `nodes.updateAgentPrompts` — a malformed
+ *   file never reaches the network.
  * - Read: `buildNodeAgentPrompts` (`packages/busabase-core/.../node-agent-prompts.ts`)
- *   `.safeParse`s whatever is stored in `metadata.agentPrompts` and falls back to
- *   the node type's default scenarios on failure, so a bad write (or a manual
- *   jsonb edit) can never crash the Agent Prompts dialog.
+ *   `.safeParse`s whatever is stored in the node's `agentPrompts` column and
+ *   ignores invalid custom entries, so a bad write (or a manual jsonb edit) can
+ *   never crash the Agent Prompts dialog or hide its built-in scenarios.
  *
  * One schema, one place to edit the limits — do not duplicate this validation on
  * either side.
@@ -87,7 +87,7 @@ export const customPromptDefSchema = z.object({
 export type CustomPromptDef = z.infer<typeof customPromptDefSchema>;
 
 /**
- * The full `metadata.agentPrompts` array. `.max` bounds the list; the
+ * The full `agentPrompts` array. `.max` bounds the list; the
  * `superRefine` catches duplicate keys with an issue path pointing at the
  * offending entry, so a CLI/server validation error names which entry and
  * which key collided instead of a bare "keys must be unique".
