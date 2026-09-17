@@ -1,6 +1,7 @@
 import "server-only";
 
 import {
+  buildCmsAlternates,
   type CategoryVO,
   type CmsTaxonomyKind,
   createBusabaseCmsSourceFromConfig,
@@ -11,6 +12,7 @@ import {
   type TagVO,
 } from "busabase-cms-sdk";
 import { createCachedBusabaseCms } from "busabase-cms-sdk/next";
+import { siteUrl } from "./site";
 
 const defaultLocale = process.env.BUSABASE_CMS_DEFAULT_LOCALE?.trim() || "en";
 const configuredLocales = (process.env.BUSABASE_CMS_LOCALES ?? "en,zh-CN")
@@ -214,6 +216,46 @@ export const getLandingPageByPreviewRoute = async (route: string): Promise<PageV
 };
 
 export const canonicalContentPath = (path: string) => cmsPathHelpers.normalizePath(path);
+
+/**
+ * SEO alternates for one piece of CMS content.
+ *
+ * `availableLocales` must be the locales that REALLY have this content. This example
+ * is what people copy, so it demonstrates the rule rather than the shortcut: listing
+ * every configured locale for a page that exists only in English gives Google hreflang
+ * annotations that contradict the canonical, and it discards the whole cluster.
+ */
+export const cmsAlternates = (
+  pathWithoutLocale: string,
+  contentLocale: string,
+  availableLocales: readonly string[],
+) =>
+  buildCmsAlternates(
+    cmsPathHelpers,
+    siteUrl.origin,
+    pathWithoutLocale,
+    contentLocale,
+    availableLocales,
+  );
+
+/** Which locales actually have content at this path, from one already-cached list read. */
+export const availableLocalesForPath = (
+  items: ReadonlyArray<{ locale: string; path: string }>,
+  pathWithoutLocale: string,
+): string[] => {
+  const byCanonicalPath = new Map<string, { locale: string; path: string }>();
+  for (const item of items) {
+    const canonicalPath = cmsPathHelpers.parsePath(item.path)?.canonicalPath;
+    if (canonicalPath) byCanonicalPath.set(canonicalPath, item);
+  }
+
+  return cmsPathOptions.supportedLocales.filter((locale) => {
+    const canonicalPath = cmsPathHelpers.buildPath(locale, pathWithoutLocale.replace(/^\/+/, ""));
+    if (!canonicalPath) return false;
+    const item = byCanonicalPath.get(canonicalPath);
+    return Boolean(item && cmsPathHelpers.isForLocale(item, locale));
+  });
+};
 
 export const buildContentPath = (locale: string, segments: readonly string[]) =>
   cmsPathHelpers.buildPath(locale, segments);

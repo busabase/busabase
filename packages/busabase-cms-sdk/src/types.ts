@@ -120,6 +120,13 @@ export const pageVOSchema = z.object({
   rawFields: rawFieldsSchema,
 });
 
+export const pageSummaryVOSchema = pageVOSchema.omit({
+  body: true,
+  hero: true,
+  features: true,
+  faqs: true,
+});
+
 export const taxonomyFieldsDTOSchema = z
   .object({
     name: z.string().min(1),
@@ -152,6 +159,7 @@ export type PostFieldsDTO = z.infer<typeof postFieldsDTOSchema>;
 export type PostVO = z.infer<typeof postVOSchema>;
 export type PageFieldsDTO = z.infer<typeof pageFieldsDTOSchema>;
 export type PageVO = z.infer<typeof pageVOSchema>;
+export type PageSummaryVO = z.infer<typeof pageSummaryVOSchema>;
 export type CategoryFieldsDTO = z.infer<typeof categoryFieldsDTOSchema>;
 export type CategoryVO = z.infer<typeof categoryVOSchema>;
 export type TagFieldsDTO = z.infer<typeof tagFieldsDTOSchema>;

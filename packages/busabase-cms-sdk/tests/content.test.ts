@@ -6,6 +6,7 @@ import {
   DEFAULT_PAGES_BASE_SLUG,
   DEFAULT_POSTS_BASE_SLUG,
   DEFAULT_TAGS_BASE_SLUG,
+  mapPublishedPageSummaryRecord,
   mapPublishedPostRecord,
 } from "../src/index";
 import type { BusabaseCmsRecord, BusabaseCmsSource } from "../src/source";
@@ -90,6 +91,30 @@ const source = (
 };
 
 describe("createBusabaseCms", () => {
+  it("builds a cache-safe Page summary without rendered content fields", () => {
+    const mapped = mapPublishedPageSummaryRecord(
+      record("page-1", {
+        ...pageFields,
+        "nav-label": "SDK page",
+        "nav-order": 10,
+      }),
+    );
+
+    expect(mapped).toEqual(
+      expect.objectContaining({
+        path: "/use-cases/sdk-test",
+        title: "SDK Page test",
+        seoDescription: "Page description",
+        rawFields: expect.objectContaining({ "nav-label": "SDK page", "nav-order": 10 }),
+      }),
+    );
+    expect(mapped).not.toHaveProperty("body");
+    expect(mapped?.rawFields).not.toHaveProperty("body");
+    expect(mapped?.rawFields).not.toHaveProperty("hero");
+    expect(mapped?.rawFields).not.toHaveProperty("features");
+    expect(mapped?.rawFields).not.toHaveProperty("faqs");
+  });
+
   it("uses the four standard CMS Base slugs", async () => {
     const mock = source({
       [`base-${DEFAULT_POSTS_BASE_SLUG}`]: [
