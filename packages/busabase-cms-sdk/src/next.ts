@@ -12,7 +12,7 @@ import {
   DEFAULT_POSTS_BASE_SLUG,
   DEFAULT_TAGS_BASE_SLUG,
 } from "./content";
-import type { CmsPathHelpers } from "./routing";
+import { buildCmsAlternateLanguages, type CmsPathHelpers } from "./routing";
 
 export interface BusabaseCmsCacheOptions {
   revalidate?: number | false;
@@ -92,6 +92,11 @@ export const createCachedBusabaseCms = (
     "pages",
     options.baseSlugs?.pages ?? DEFAULT_PAGES_BASE_SLUG,
   );
+  const listPageSummaries = cachedList(
+    cms.pages.listSummaries,
+    "pages",
+    `${options.baseSlugs?.pages ?? DEFAULT_PAGES_BASE_SLUG}:summaries`,
+  );
   const listCategories = cachedList(
     cms.categories.list,
     "categories",
@@ -129,6 +134,7 @@ export const createCachedBusabaseCms = (
     },
     pages: {
       list: listPages,
+      listSummaries: listPageSummaries,
       getByPath: cachedGetByArg(
         cms.pages.getByPath,
         "pages",
@@ -182,21 +188,45 @@ const toCmsSitemapEntries = <T extends MinimalCmsItem>(
   isMatch: (canonicalPath: string) => boolean,
   { changeFrequency = "monthly", priority = 0.7 }: CmsSitemapEntryOptions<T>,
   fallbackDate: Date,
-): MetadataRoute.Sitemap =>
-  items.flatMap((item) => {
+): MetadataRoute.Sitemap => {
+  const included = items.flatMap((item) => {
     const parsed = helpers.parsePath(item.path);
     if (!parsed || !isMatch(parsed.canonicalPath) || !helpers.isForLocale(item, parsed.locale)) {
       return [];
     }
-    return [
-      {
-        url: `${baseUrl}${parsed.canonicalPath}`,
-        lastModified: validDateOr(item.updatedAt, fallbackDate),
-        changeFrequency,
-        priority: typeof priority === "function" ? priority(item, parsed.canonicalPath) : priority,
-      },
-    ];
+    return [{ item, parsed }];
   });
+
+  // Each locale of a translated page is a separate CMS record, so the sitemap used to
+  // emit them as unrelated URLs and left Google to infer the relationship from the
+  // page's own hreflang alone. Grouping by the locale-free path recovers the sibling
+  // set here — from the SAME "which locales actually exist" fact the page metadata
+  // uses, so the two surfaces cannot drift apart and contradict each other.
+  const localesByPath = new Map<string, Set<string>>();
+  for (const { parsed } of included) {
+    const locales = localesByPath.get(parsed.pathWithoutLocale) ?? new Set<string>();
+    locales.add(parsed.locale);
+    localesByPath.set(parsed.pathWithoutLocale, locales);
+  }
+
+  return included.map(({ item, parsed }) => {
+    const siblings = localesByPath.get(parsed.pathWithoutLocale) ?? new Set([parsed.locale]);
+    // A single-locale page has no alternates to declare; emitting a one-entry set
+    // would assert a translation relationship that does not exist.
+    const languages =
+      siblings.size > 1
+        ? buildCmsAlternateLanguages(helpers, baseUrl, parsed.pathWithoutLocale, [...siblings])
+        : {};
+
+    return {
+      url: `${baseUrl}${parsed.canonicalPath}`,
+      lastModified: validDateOr(item.updatedAt, fallbackDate),
+      changeFrequency,
+      priority: typeof priority === "function" ? priority(item, parsed.canonicalPath) : priority,
+      ...(Object.keys(languages).length ? { alternates: { languages } } : {}),
+    };
+  });
+};
 
 /** Sitemap entries for Blog Posts — only paths under the `blog` segment are included. */
 export const buildCmsBlogSitemapEntries = <T extends MinimalCmsItem>(

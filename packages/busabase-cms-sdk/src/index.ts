@@ -1,6 +1,7 @@
 export type {
   BusabaseCms,
   BusabaseCmsOptions,
+  BusabaseCmsPageCollection,
   BusabaseCmsPathCollection,
   BusabaseCmsTaxonomyCollection,
   CmsRecordKind,
@@ -15,10 +16,12 @@ export {
   mapActiveCategoryRecord,
   mapActiveTagRecord,
   mapPublishedPageRecord,
+  mapPublishedPageSummaryRecord,
   mapPublishedPostRecord,
 } from "./content";
 export { BusabaseCmsError, BusabaseCmsSchemaDriftError, BusabaseCmsSetupError } from "./errors";
 export * from "./fallback";
+export * from "./jsonld";
 export * from "./links";
 export type { BusabaseCmsSchemaConfig } from "./provision";
 export * from "./routing";

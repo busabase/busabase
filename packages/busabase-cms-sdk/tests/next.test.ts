@@ -208,6 +208,59 @@ describe("CMS sitemap entries", () => {
     expect(entries[0]).toMatchObject({ changeFrequency: "monthly", priority: 0.8 });
   });
 
+  it("cross-links the locales of a translated page with hreflang alternates", () => {
+    // Each locale is its own CMS record, so without this the sitemap listed them as
+    // unrelated URLs and never declared that they are translations of each other.
+    const pages = [
+      { locale: "en", path: "/pricing" },
+      { locale: "zh-CN", path: "/zh-CN/pricing" },
+    ];
+    const entries = buildCmsPageSitemapEntries(pages, helpers, baseUrl);
+
+    const expected = {
+      en: "https://example.com/pricing",
+      "zh-CN": "https://example.com/zh-CN/pricing",
+      "x-default": "https://example.com/pricing",
+    };
+    expect(entries[0].alternates?.languages).toEqual(expected);
+    // Both members of the cluster must declare the same set, or Google drops it.
+    expect(entries[1].alternates?.languages).toEqual(expected);
+  });
+
+  it("declares NO alternates for a page that exists in one locale only", () => {
+    // The live bug on /gpt-6-astra, in sitemap form: advertising a zh-CN alternate for
+    // a page that has no zh-CN version asserts a translation that does not exist.
+    const pages = [{ locale: "en", path: "/gpt-6-astra" }];
+    const entries = buildCmsPageSitemapEntries(pages, helpers, baseUrl);
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0].alternates).toBeUndefined();
+  });
+
+  it("cross-links translated blog posts too", () => {
+    const posts = [
+      { locale: "en", path: "/blog/hello" },
+      { locale: "zh-CN", path: "/zh-CN/blog/hello" },
+    ];
+    const entries = buildCmsBlogSitemapEntries(posts, helpers, baseUrl);
+
+    expect(entries[0].alternates?.languages).toEqual({
+      en: "https://example.com/blog/hello",
+      "zh-CN": "https://example.com/zh-CN/blog/hello",
+      "x-default": "https://example.com/blog/hello",
+    });
+  });
+
+  it("does not cross-link two different pages that merely share a locale", () => {
+    const pages = [
+      { locale: "en", path: "/pricing" },
+      { locale: "en", path: "/about" },
+    ];
+    const entries = buildCmsPageSitemapEntries(pages, helpers, baseUrl);
+
+    expect(entries.every((entry) => entry.alternates === undefined)).toBe(true);
+  });
+
   it("dedupes by URL (ignoring a trailing slash), keeping the first source's entry", () => {
     const first = [{ url: "https://example.com/blog/hello", priority: 0.9 } as never];
     const second = [{ url: "https://example.com/blog/hello/", priority: 0.1 } as never];
