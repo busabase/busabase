@@ -59,7 +59,7 @@ class ResizeObserverMock {
   }
 }
 
-const renderShell = () =>
+const renderShell = (desktopHeight = 640) =>
   render(
     <SettingsDialogShell
       open
@@ -79,6 +79,7 @@ const renderShell = () =>
       accordion
       activeSectionKey="account"
       onSectionChange={vi.fn()}
+      desktopHeight={desktopHeight}
     >
       <div>Settings content</div>
     </SettingsDialogShell>,
@@ -168,6 +169,25 @@ describe("SettingsDialogShell content overflow", () => {
     expect(scrollRegion?.className).toContain("overflow-x-hidden");
     expect(scrollRegion?.className).toContain("overflow-y-auto");
     expect(contentColumn?.className).toContain("min-w-0");
+    expect(contentColumn?.className).toContain("sm:max-h-full");
+  });
+});
+
+describe("SettingsDialogShell responsive height", () => {
+  it("keeps its desktop target height while capping the shell to short viewports", () => {
+    const { container } = renderShell(720);
+    const dialog = container.firstElementChild as HTMLElement | null;
+    const desktopSidebar = container.querySelector<HTMLElement>(
+      '[data-settings-viewport="desktop"]',
+    );
+
+    expect(dialog?.className).toContain("max-h-[calc(100dvh-2rem)]");
+    expect(dialog?.className).toContain(
+      "sm:h-[min(var(--settings-dialog-desktop-height),calc(100dvh-2rem))]",
+    );
+    expect(dialog?.style.getPropertyValue("--settings-dialog-desktop-height")).toBe("720px");
+    expect(desktopSidebar?.className).toContain("sm:h-full");
+    expect(desktopSidebar?.style.height).toBe("");
   });
 });
 

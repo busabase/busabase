@@ -54,7 +54,7 @@ import { useLocation, useSearch } from "wouter";
 import { SidebarTaskList } from "./SidebarTaskList";
 import { mergeSearchIntoHref, SPALink } from "./SPALink";
 import { resolveTreeDrop, type TreeDropRow, type TreeDropTarget } from "./tree-drop";
-import type { NavGroup, NavItem, NavItemAction } from "./types";
+import type { NavGroup, NavItem, NavItemAction, NavMainLabels } from "./types";
 
 export type { NavDropPosition } from "./tree-drop";
 
@@ -214,6 +214,7 @@ const navRowTrailingPadding = (actionCount: number) =>
 
 interface NavMainProps {
   items: NavGroup[];
+  labels?: NavMainLabels;
   /**
    * Callback when a group's header action button is clicked
    * @param groupLabel - The label of the group whose action was clicked
@@ -289,6 +290,7 @@ interface NavMainProps {
 
 function NavMainComponent({
   items,
+  labels,
   onHeaderActionClick,
   onNavItemAction,
   isTaskListExpanded,
@@ -740,13 +742,13 @@ function NavMainComponent({
         <button
           className={`${NAV_ROW_ACTION_BUTTON} cursor-grab text-sidebar-foreground/50 active:cursor-grabbing`}
           onClick={(e) => e.stopPropagation()}
-          title="Drag to reorder"
+          title={labels?.dragToReorder ?? "Drag to reorder"}
           type="button"
           {...(dragProps?.attributes ?? {})}
           {...(dragProps?.listeners ?? {})}
         >
           <GripVertical />
-          <span className="sr-only">Drag to reorder</span>
+          <span className="sr-only">{labels?.dragToReorder ?? "Drag to reorder"}</span>
         </button>
       )}
       {item.onAddChild && (
@@ -757,11 +759,11 @@ function NavMainComponent({
             e.stopPropagation();
             item.onAddChild?.();
           }}
-          title={item.addChildTitle ?? "New"}
+          title={item.addChildTitle ?? labels?.new ?? "New"}
           type="button"
         >
           <Plus />
-          <span className="sr-only">{item.addChildTitle ?? "New"}</span>
+          <span className="sr-only">{item.addChildTitle ?? labels?.new ?? "New"}</span>
         </button>
       )}
       {item.onDelete && item.id && (
@@ -772,11 +774,11 @@ function NavMainComponent({
             e.stopPropagation();
             if (item.id) item.onDelete?.(item.id);
           }}
-          title="Delete"
+          title={labels?.delete ?? "Delete"}
           type="button"
         >
           <Trash2 />
-          <span className="sr-only">Delete</span>
+          <span className="sr-only">{labels?.delete ?? "Delete"}</span>
         </button>
       )}
       {item.actions && item.actions.length > 0 && (
@@ -853,7 +855,7 @@ function NavMainComponent({
     const itemKey = getNavItemKey(item, index, keyPrefix);
     // Label for the per-row "•••" action menu — shared by the folder row and
     // both leaf rows (they all render `item.actions` the same way).
-    const moreActionsTitle = item.moreActionsTitle ?? "More";
+    const moreActionsTitle = item.moreActionsTitle ?? labels?.more ?? "More";
     // A folder is open when it (or one of its descendants, at any depth) is
     // the active route, or when manually expanded. Selecting a folder thus
     // also expands it, and navigating away collapses it again.
@@ -926,7 +928,7 @@ function NavMainComponent({
                   // without this the toggle becomes unclickable once a folder is
                   // nested 3+ levels deep.
                   className="relative z-10 flex size-7 shrink-0 items-center justify-center rounded-md p-0 text-sidebar-foreground/70 outline-none ring-sidebar-ring transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 group-data-[collapsible=icon]:hidden"
-                  title="Toggle"
+                  title={labels?.toggle ?? "Toggle"}
                   type="button"
                 >
                   <ChevronRight
@@ -934,7 +936,7 @@ function NavMainComponent({
                       isOpen ? "rotate-90" : ""
                     }`}
                   />
-                  <span className="sr-only">Toggle</span>
+                  <span className="sr-only">{labels?.toggle ?? "Toggle"}</span>
                 </button>
               </CollapsibleTrigger>
               {item.url ? (
@@ -1230,7 +1232,9 @@ function NavMainComponent({
                     type="button"
                     onClick={() => toggleGroupCollapse(groupKey)}
                     className="inline-flex items-center gap-1.5 py-1 rounded-md hover:bg-sidebar-accent transition-colors cursor-pointer"
-                    title={isCollapsed ? "Expand" : "Collapse"}
+                    title={
+                      isCollapsed ? (labels?.expand ?? "Expand") : (labels?.collapse ?? "Collapse")
+                    }
                   >
                     {GroupIcon && <GroupIcon className="size-3 text-sidebar-foreground/50" />}
                     <span className="text-[11px] uppercase tracking-wider font-medium text-sidebar-foreground/50">
@@ -1437,6 +1441,10 @@ export const NavMain = memo(NavMainComponent, (prevProps, nextProps) => {
   }
 
   if (prevProps.onTaskListExpandToggle !== nextProps.onTaskListExpandToggle) {
+    return false;
+  }
+
+  if (prevProps.labels !== nextProps.labels) {
     return false;
   }
 

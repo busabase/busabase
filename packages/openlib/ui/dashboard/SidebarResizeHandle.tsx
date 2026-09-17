@@ -64,8 +64,10 @@ export function useRestoreSidebarWidth(wrapperRef: React.RefObject<HTMLDivElemen
  */
 export function SidebarResizeHandle({
   wrapperRef,
+  label = "Resize sidebar",
 }: {
   wrapperRef: React.RefObject<HTMLDivElement | null>;
+  label?: string;
 }) {
   const { isMobile, state } = useSidebar();
   const [isResizing, setIsResizing] = React.useState(false);
@@ -107,7 +109,7 @@ export function SidebarResizeHandle({
 
   return (
     <button
-      aria-label="Resize sidebar"
+      aria-label={label}
       className={cn(
         "group fixed inset-y-0 z-20 hidden w-3 -translate-x-1/2 cursor-col-resize touch-none items-center justify-center text-muted-foreground/50 transition-colors duration-150 hover:bg-accent/50 hover:text-foreground md:flex",
         isResizing && "bg-accent/50 text-foreground",
@@ -166,7 +168,7 @@ export function SidebarResizeHandle({
         });
       }}
       style={{ left: "var(--sidebar-width)" }}
-      title="Resize sidebar"
+      title={label}
       type="button"
     >
       <span

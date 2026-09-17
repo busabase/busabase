@@ -21,7 +21,7 @@
  * locale-prefixed path (e.g. `/en`, even when `en` is the default locale)
  * and relies on the server-side `createDefaultLocaleRedirect` middleware
  * (see `./middleware.ts`) to 308-redirect that down to the canonical,
- * prefix-less path. This is the same shape `apps/buda`'s hand-rolled
+ * prefix-less path. This is the same shape Buda's own hand-rolled
  * `layout-client.tsx` already used, and it round-trips correctly in
  * production. See `changelog/20260821-lang-switcher-fix-default-onchange.md`.
  */

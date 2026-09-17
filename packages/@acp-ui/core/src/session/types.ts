@@ -118,6 +118,6 @@ export interface AcpSessionState {
   usage: AcpUsage | null;
   sendPrompt: (text: string, attachments?: readonly AcpAttachment[]) => Promise<void>;
   answerPermission: (block: AcpPermissionBlock, optionId: string) => Promise<void>;
-  /** No-op when the port supplied no `cancel`, or when no turn is in flight. */
+  /** No-op when the port supplied no `cancel`, or before a session exists. */
   cancel: () => Promise<void>;
 }

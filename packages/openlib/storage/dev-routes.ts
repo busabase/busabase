@@ -188,6 +188,16 @@ export interface CreateDevAttachmentRouteOptions {
    * @default true
    */
   gateProduction?: boolean;
+  /**
+   * Read through the configured storage adapter even when
+   * `STORAGE_PUBLIC_BASE_URL` is set.
+   *
+   * Use this when the route must read from the exact backend selected by
+   * `STORAGE_URL`, such as a local upload/read round trip whose process also
+   * carries a stale public-base setting.
+   * @default false
+   */
+  preferStorageAdapter?: boolean;
 }
 
 /**
@@ -230,7 +240,7 @@ export function createDevAttachmentRoute(opts?: CreateDevAttachmentRouteOptions)
       }
       const publicBaseUrl = process.env.STORAGE_PUBLIC_BASE_URL;
 
-      if (publicBaseUrl) {
+      if (publicBaseUrl && !opts?.preferStorageAdapter) {
         // Public-base-URL proxy branch (formerly axios).
         const url = `${publicBaseUrl.replace(/\/$/, "")}/${key}`;
         console.log("[Dev Attachment] Fetching:", url);

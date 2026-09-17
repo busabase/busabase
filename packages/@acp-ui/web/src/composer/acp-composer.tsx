@@ -12,6 +12,7 @@ import {
   PromptInput,
   PromptInputBody,
   PromptInputFooter,
+  PromptInputHeader,
   type PromptInputMessage,
   PromptInputSubmit,
   PromptInputTextarea,
@@ -38,6 +39,16 @@ const DEFAULT_MAX_FILES = 10;
 export interface AcpComposerDraft {
   id: string;
   text: string;
+}
+
+export interface AcpComposerLabels {
+  attachFile: string;
+  removeAttachment: string;
+  submitPrompt: string;
+  stopPrompt: string;
+  fileTooLarge: (limit: number) => string;
+  tooManyFiles: (count: number) => string;
+  attachmentFailed: string;
 }
 
 /**
@@ -95,6 +106,16 @@ export interface AcpComposerProps {
    * unaffected when this is omitted.
    */
   footerControls?: ReactNode;
+  /**
+   * A host-provided control rendered above the textarea, inside the same
+   * bordered surface — e.g. busabase's removable node-context chip. This
+   * composer is shared with acprouter, which has no such control and simply
+   * never passes one; omitted by default so no host renders an empty header
+   * row.
+   */
+  headerControls?: ReactNode;
+  /** The host's UI copy; omitted to keep the existing English defaults. */
+  labels?: Partial<AcpComposerLabels>;
 }
 
 /** Images and audio have dedicated ACP content blocks; everything else is a file. */
@@ -149,15 +170,17 @@ export function toAttachments(files: PromptInputMessage["files"]): AcpAttachment
 function AttachButton({
   disabled,
   footerControls,
+  label,
 }: {
   disabled: boolean;
   footerControls?: ReactNode;
+  label?: string;
 }) {
   const attachments = usePromptInputAttachments();
   return (
     <PromptInputTools>
       <button
-        aria-label="Attach a file"
+        aria-label={label ?? "Attach a file"}
         className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
         disabled={disabled}
         onClick={() => attachments.openFileDialog()}
@@ -188,7 +211,7 @@ function AttachButton({
  * textarea. (The previous single `grid` strip escaped this only because that
  * variant carries its own `ml-auto w-fit`.)
  */
-function StagedAttachments() {
+function StagedAttachments({ removeLabel }: { removeLabel?: string }) {
   const attachments = usePromptInputAttachments();
   if (attachments.files.length === 0) return null;
 
@@ -202,7 +225,7 @@ function StagedAttachments() {
           {images.map((file) => (
             <Attachment data={file} key={file.id} onRemove={() => attachments.remove(file.id)}>
               <AttachmentPreview />
-              <AttachmentRemove />
+              <AttachmentRemove label={removeLabel} />
             </Attachment>
           ))}
         </Attachments>
@@ -213,7 +236,7 @@ function StagedAttachments() {
             <Attachment data={file} key={file.id} onRemove={() => attachments.remove(file.id)}>
               <AttachmentPreview />
               <AttachmentInfo className="max-w-40" />
-              <AttachmentRemove />
+              <AttachmentRemove label={removeLabel} />
             </Attachment>
           ))}
         </Attachments>
@@ -252,6 +275,8 @@ export function AcpComposer({
   maxFileSize = DEFAULT_MAX_FILE_SIZE,
   maxFiles = DEFAULT_MAX_FILES,
   footerControls,
+  headerControls,
+  labels,
 }: AcpComposerProps) {
   const [attachError, setAttachError] = useState<string | null>(null);
   // The field is uncontrolled (kui's `PromptInput` reads it out of the form on
@@ -303,15 +328,18 @@ export function AcpComposer({
       onError={(err) =>
         setAttachError(
           err.code === "max_file_size"
-            ? `That file is too large. The limit is ${Math.round(maxFileSize / (1024 * 1024))} MB.`
+            ? (labels?.fileTooLarge?.(Math.round(maxFileSize / (1024 * 1024))) ??
+                `That file is too large. The limit is ${Math.round(maxFileSize / (1024 * 1024))} MB.`)
             : err.code === "max_files"
-              ? `You can attach at most ${maxFiles} files at a time.`
-              : err.message,
+              ? (labels?.tooManyFiles?.(maxFiles) ??
+                `You can attach at most ${maxFiles} files at a time.`)
+              : (labels?.attachmentFailed ?? err.message),
         )
       }
       onSubmit={handleSubmit}
     >
-      <StagedAttachments />
+      {headerControls ? <PromptInputHeader>{headerControls}</PromptInputHeader> : null}
+      <StagedAttachments removeLabel={labels?.removeAttachment} />
       {attachError ? (
         // `w-full` for the same reason as `StagedAttachments` — a direct
         // `InputGroup` child without it is centred, not left-aligned.
@@ -323,8 +351,13 @@ export function AcpComposer({
         <PromptInputTextarea disabled={disabled} placeholder={placeholder} ref={textareaRef} />
       </PromptInputBody>
       <PromptInputFooter>
-        <AttachButton disabled={disabled} footerControls={footerControls} />
+        <AttachButton
+          disabled={disabled}
+          footerControls={footerControls}
+          label={labels?.attachFile}
+        />
         <PromptInputSubmit
+          aria-label={sending ? (labels?.stopPrompt ?? "Stop") : (labels?.submitPrompt ?? "Submit")}
           disabled={submitDisabled}
           onStop={onStop}
           status={sending ? "streaming" : undefined}

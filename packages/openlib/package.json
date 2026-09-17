@@ -13,6 +13,10 @@
       "types": "./db/index.ts",
       "default": "./db/index.ts"
     },
+    "./db/replicas": {
+      "types": "./db/replicas.ts",
+      "default": "./db/replicas.ts"
+    },
     "./i18n": {
       "types": "./i18n/index.ts",
       "default": "./i18n/index.ts"
@@ -44,6 +48,10 @@
     "./cache/types": {
       "types": "./cache/types.ts",
       "default": "./cache/types.ts"
+    },
+    "./auth/better-auth-rate-limit": {
+      "types": "./auth/better-auth-rate-limit.ts",
+      "default": "./auth/better-auth-rate-limit.ts"
     },
     "./storage": {
       "types": "./storage/index.ts",
@@ -98,6 +106,8 @@
     "**/*.css"
   ],
   "scripts": {
+    "test": "vitest run",
+    "test:postgres-replicas": "vitest run db/replicas.postgres.integration.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [],
@@ -125,8 +135,10 @@
     "nanoid": "^5.1.5",
     "negotiator": "^0.6.3",
     "nprogress": "^0.2.0",
+    "postgres": "^3.4.6",
     "react-easy-crop": "^5.5.6",
     "redis": "^5.10.0",
+    "server-only": "^0.0.1",
     "zod": "^4.3.6"
   },
   "peerDependencies": {

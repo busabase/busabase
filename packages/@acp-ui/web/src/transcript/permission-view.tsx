@@ -42,7 +42,13 @@ function useCountdown(timeoutAt: string | undefined, active: boolean): number | 
  * and deliberately never auto-approves — that is a security property, so the
  * timeout hint is rendered only when the host supplied a deadline.
  */
-export function AcpPermissionView({ block, onAnswer }: AcpPermissionViewProps) {
+export function AcpPermissionView({
+  block,
+  onAnswer,
+  answeredLabel = "Answered:",
+  timeoutLabel = (count) => `Times out in ${count}s if left unanswered.`,
+  timingOutLabel = "Timing out…",
+}: AcpPermissionViewProps) {
   const { resolution } = block;
   const answered = typeof resolution === "object";
   const remainingMs = useCountdown(block.timeoutAt, resolution === "pending");
@@ -52,7 +58,7 @@ export function AcpPermissionView({ block, onAnswer }: AcpPermissionViewProps) {
       <AlertTitle>{block.title}</AlertTitle>
       {answered ? (
         <AlertDescription data-testid="acp-permission-answer">
-          Answered:{" "}
+          {answeredLabel}{" "}
           {block.options.find((o) => o.optionId === resolution.optionId)?.name ??
             resolution.optionId}
         </AlertDescription>
@@ -75,9 +81,7 @@ export function AcpPermissionView({ block, onAnswer }: AcpPermissionViewProps) {
           </div>
           {remainingMs !== null && (
             <span className="text-muted-foreground text-xs" data-testid="acp-permission-countdown">
-              {remainingMs > 0
-                ? `Times out in ${Math.ceil(remainingMs / 1000)}s if left unanswered.`
-                : "Timing out…"}
+              {remainingMs > 0 ? timeoutLabel(Math.ceil(remainingMs / 1000)) : timingOutLabel}
             </span>
           )}
         </AlertDescription>

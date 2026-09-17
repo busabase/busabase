@@ -437,6 +437,38 @@ describe("staging a document", () => {
   });
 });
 
+describe("host translations", () => {
+  const labels = {
+    attachFile: "ファイルを添付",
+    removeAttachment: "添付を削除",
+    submitPrompt: "送信",
+    stopPrompt: "停止",
+    fileTooLarge: (limit: number) => `サイズ上限 ${limit} MB`,
+    tooManyFiles: (count: number) => `最大 ${count} ファイル`,
+    attachmentFailed: "添付に失敗しました",
+  };
+
+  it("names the attach, remove, submit, and stop controls in the host language", async () => {
+    const { rerender } = render(<AcpComposer disabled={false} labels={labels} onSend={vi.fn()} />);
+    expect(screen.getByRole("button", { name: labels.attachFile })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: labels.submitPrompt })).toBeInTheDocument();
+
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    await userEvent.upload(fileInput, fakeFile("notes.md", "text/markdown"));
+    expect(screen.getByRole("button", { name: labels.removeAttachment })).toBeInTheDocument();
+
+    rerender(<AcpComposer disabled labels={labels} onSend={vi.fn()} onStop={vi.fn()} sending />);
+    expect(screen.getByRole("button", { name: labels.stopPrompt })).toBeInTheDocument();
+  });
+
+  it("uses the host language for attachment validation", async () => {
+    render(<AcpComposer disabled={false} labels={labels} maxFileSize={10} onSend={vi.fn()} />);
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    await userEvent.upload(fileInput, fakeFile("big.pdf", "application/pdf", "way-past-ten-bytes"));
+    expect(await screen.findByRole("alert")).toHaveTextContent("サイズ上限 0 MB");
+  });
+});
+
 describe("the file picker itself", () => {
   // Regression: `maxFiles` defaulted to 10 while the hidden input had no
   // `multiple` attribute, so the paperclip button accepted exactly one file.
@@ -481,6 +513,53 @@ describe("footerControls", () => {
     // PromptInputTools group, not a second row floated elsewhere in the
     // footer's justify-between layout.
     expect(control.parentElement).toBe(attachButton().parentElement);
+  });
+});
+
+// Busabase's removable node-context chip mounts here, above the textarea but
+// inside the same bordered surface — see AcpComposerProps.headerControls.
+describe("headerControls", () => {
+  it("renders no header row by default", () => {
+    render(<AcpComposer disabled={false} onSend={vi.fn()} />);
+    expect(screen.queryByTestId("host-header")).not.toBeInTheDocument();
+    // The empty-header guard has to live in AcpComposer itself: kui's
+    // InputGroupAddon (what PromptInputHeader renders) always emits a
+    // `[data-align]` group div regardless of children, so it can't no-op on
+    // its own. Only the footer's addon should exist when headerControls is
+    // omitted — a second one would mean an empty header row snuck in.
+    expect(document.querySelectorAll("[data-align]")).toHaveLength(1);
+  });
+
+  it("renders a host-provided control above the textarea", () => {
+    render(
+      <AcpComposer
+        disabled={false}
+        headerControls={<div data-testid="host-header">Context: doc.md</div>}
+        onSend={vi.fn()}
+      />,
+    );
+    const header = screen.getByTestId("host-header");
+    expect(header).toBeInTheDocument();
+    // DOM order: the header content precedes the textarea.
+    const box = screen.getByRole("textbox");
+    expect(header.compareDocumentPosition(box) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("coexists with footerControls — busabase uses both at once", () => {
+    render(
+      <AcpComposer
+        disabled={false}
+        footerControls={
+          <button data-testid="host-footer" type="button">
+            Model: Auto
+          </button>
+        }
+        headerControls={<div data-testid="host-header">Context: doc.md</div>}
+        onSend={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("host-header")).toBeInTheDocument();
+    expect(screen.getByTestId("host-footer")).toBeInTheDocument();
   });
 });
 

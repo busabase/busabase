@@ -4,7 +4,15 @@ import type {
   AcpPermissionBlock,
   AcpToolCallBlock,
 } from "@acp-ui/core/reduce";
+import type { ToolPart } from "kui/ai-elements/tool";
 import type { ComponentType, ReactNode } from "react";
+import type { AcpToolRunLabels } from "./tool-run-view";
+
+export interface AcpReasoningLabels {
+  thinking: string;
+  brief: string;
+  duration: (seconds: number) => string;
+}
 
 /**
  * The markdown renderer. Defaults to `kui`'s `Response` (Streamdown).
@@ -21,20 +29,27 @@ export interface AcpMessageViewProps {
   /** True while this block is the tail of a still-streaming turn. */
   streaming?: boolean;
   Markdown: AcpMarkdownComponent;
+  reasoningLabel?: AcpReasoningLabels;
 }
 
 export interface AcpToolCallViewProps {
   block: AcpToolCallBlock;
+  statusLabels?: Partial<Record<ToolPart["state"], string>>;
 }
 
 export interface AcpToolRunViewProps {
   /** Two or more consecutive tool calls, collapsed into one row. */
   blocks: AcpToolCallBlock[];
+  labels?: AcpToolRunLabels;
+  statusLabels?: Partial<Record<ToolPart["state"], string>>;
 }
 
 export interface AcpPermissionViewProps {
   block: AcpPermissionBlock;
   onAnswer: (optionId: string) => void;
+  answeredLabel?: string;
+  timeoutLabel?: (count: number) => string;
+  timingOutLabel?: string;
 }
 
 export interface AcpNoteViewProps {
