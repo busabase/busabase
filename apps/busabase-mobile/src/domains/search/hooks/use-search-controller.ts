@@ -1,4 +1,3 @@
-import { skipToken, useQuery } from "@tanstack/react-query";
 import { NODE_TYPES, type NodeType } from "busabase-contract/domains";
 import type { SearchResultVO } from "busabase-contract/types";
 import { useRouter } from "expo-router";
@@ -13,13 +12,13 @@ import {
 import { getMobileNodeDestination } from "~/domains/workspace/utils/node-navigation";
 import type { SearchTab } from "../types/search";
 import {
-  filterSearchResults,
   getSearchTabOptions,
   normalizeSearchText,
   SEARCH_DEBOUNCE_MS,
   SEARCH_PAGE_SIZE,
 } from "../utils/search-results";
 import { useRecentNodeResults } from "./use-recent-node-results";
+import { useTabSearch } from "./use-tab-search";
 
 export const useSearchController = () => {
   const router = useRouter();
@@ -43,14 +42,17 @@ export const useSearchController = () => {
     return () => clearTimeout(timer);
   }, [query]);
 
-  const searchQuery = useQuery(
-    buda
-      ? {
-          ...buda.orpc.search.queryOptions({ input: { query: debouncedQuery, limit, offset: 0 } }),
-          enabled: tab !== "recent" && normalizedDebouncedQuery.length > 0,
-        }
-      : { queryKey: ["no-connection", "search"], queryFn: skipToken },
-  );
+  // One scoped request per source group, instead of one combined call that the
+  // server fills records-first (which is what made the Files tab report nothing
+  // in a record-heavy workspace).
+  const searchQuery = useTabSearch({
+    client: buda?.client ?? null,
+    spaceScope: buda?.spaceScope,
+    query: debouncedQuery,
+    tab,
+    limit,
+    enabled: tab !== "recent" && normalizedDebouncedQuery.length > 0,
+  });
   const recent = useRecentNodeResults({
     buda,
     debouncedQuery,
@@ -61,11 +63,17 @@ export const useSearchController = () => {
     query,
     selected: tab === "recent",
   });
-  const allResults = searchQuery.data?.results ?? [];
-  const contentResults = useMemo(() => filterSearchResults(allResults, tab), [allResults, tab]);
+  // Already scoped and kind-filtered by the request itself.
+  const contentResults = searchQuery.results;
   const tabOptions = useMemo(
-    () => getSearchTabOptions(allResults, recent.results.length),
-    [allResults, recent.results.length],
+    () =>
+      getSearchTabOptions({
+        activeTab: tab,
+        count: tab === "recent" ? recent.results.length : contentResults.length,
+        hasMore: tab === "recent" ? false : searchQuery.hasMore,
+        recentCount: recent.results.length,
+      }),
+    [contentResults.length, recent.results.length, searchQuery.hasMore, tab],
   );
 
   const openKnownNode = useCallback(
@@ -140,14 +148,15 @@ export const useSearchController = () => {
     setError(null);
     if (!searchErrorMessage) return;
     if (tab === "recent") void recent.refetch();
-    else void searchQuery.refetch();
+    else searchQuery.refetch();
   }, [recent.refetch, searchErrorMessage, searchQuery.refetch, tab]);
-  const searching = tab === "recent" ? recent.searching : searchQuery.isFetching;
+  const searching = tab === "recent" ? recent.searching : searchQuery.searching;
 
   return {
     contentResults,
     displayedError,
-    hasMore: searchQuery.data?.hasMore ?? false,
+    contentTruncated: searchQuery.contentTruncated,
+    hasMore: searchQuery.hasMore,
     hasQuery,
     query,
     recentResults: recent.results,

@@ -8,6 +8,10 @@ import {
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 import { getPrimaryTitle } from "~/domains/review/utils/busabase-display";
+import {
+  fetchPendingCountOrNull,
+  type PendingCountClient,
+} from "~/domains/review/utils/pending-count";
 
 const SEEN_KEY_PREFIX = "busabase-mobile.seen-change-requests.v1:";
 const MAX_SEEN_IDS = 500;
@@ -15,14 +19,52 @@ const MAX_SEEN_IDS = 500;
 /** expo-notifications native methods are unavailable on web; guard every call. */
 export const NOTIFICATIONS_SUPPORTED = Platform.OS !== "web";
 
+/**
+ * How far back the watcher looks for change requests it has not announced yet.
+ *
+ * A window, not a total: `changeRequests.list` is newest-first, so anything new
+ * since the last poll is inside it. The BADGE must not be computed from this
+ * window — see `fetchWatchState`.
+ */
+const WATCH_WINDOW = 100;
+
+interface WatchState {
+  changeRequests: ChangeRequestVO[];
+  /**
+   * Whole-space `in_review` count from the server, or null on a server too old
+   * to answer it.
+   */
+  pendingCount: number | null;
+}
+
+/**
+ * The window of recent change requests, plus the real pending total.
+ *
+ * Two separate answers on purpose. The badge on the app icon is the first
+ * number a person sees all day, and it used to be
+ * `recentWindow.filter(in_review).length` — which silently stopped at the
+ * window size, reporting 100 for a space holding any number above it. The
+ * window is still right for deciding what to NOTIFY about (it is newest-first,
+ * so nothing new can fall outside it); it was never right for a total.
+ */
+async function fetchWatchState(
+  serverUrl: string,
+  headers: Record<string, string> = {},
+): Promise<WatchState> {
+  const base = serverUrl.replace(/\/+$/, "");
+  const client = createBusabaseORPCClient(`${base}/api/rpc`, { headers });
+  const [page, pendingCount] = await Promise.all([
+    client.changeRequests.list({ limit: WATCH_WINDOW }),
+    fetchPendingCountOrNull(client.changeRequests as unknown as PendingCountClient),
+  ]);
+  return { changeRequests: page.changeRequests, pendingCount };
+}
+
 export async function fetchChangeRequests(
   serverUrl: string,
   headers: Record<string, string> = {},
 ): Promise<ChangeRequestVO[]> {
-  const base = serverUrl.replace(/\/+$/, "");
-  const client = createBusabaseORPCClient(`${base}/api/rpc`, { headers });
-  const page = await client.changeRequests.list({ limit: 100 });
-  return page.changeRequests;
+  return (await fetchWatchState(serverUrl, headers)).changeRequests;
 }
 
 const scopeKey = (serverUrl: string, spaceId?: string | null) =>
@@ -66,16 +108,24 @@ export async function primeSeenChangeRequests(
   headers: Record<string, string> = {},
   spaceId?: string | null,
 ): Promise<void> {
-  const changeRequests = await fetchChangeRequests(serverUrl, headers);
+  const { changeRequests, pendingCount } = await fetchWatchState(serverUrl, headers);
   await saveSeenIds(serverUrl, new Set(changeRequests.map((item) => item.id)), spaceId);
-  await updateBadge(changeRequests);
+  await updateBadge(changeRequests, pendingCount);
 }
 
-async function updateBadge(changeRequests: ChangeRequestVO[]): Promise<void> {
+async function updateBadge(
+  changeRequests: ChangeRequestVO[],
+  pendingCount: number | null,
+): Promise<void> {
   if (!NOTIFICATIONS_SUPPORTED) {
     return;
   }
-  const pending = changeRequests.filter((item) => item.status === "in_review").length;
+  // Prefer the server's whole-space count. Counting the window is the old
+  // behaviour, kept only for servers that cannot answer `counts` — there it is
+  // still capped, but it is the best number available and a stale badge beats
+  // no badge on a home screen.
+  const pending =
+    pendingCount ?? changeRequests.filter((item) => item.status === "in_review").length;
   try {
     await Notifications.setBadgeCountAsync(pending);
   } catch {
@@ -98,7 +148,7 @@ export async function checkForNewChangeRequests(
   headers: Record<string, string> = {},
   spaceId?: string | null,
 ): Promise<WatchResult> {
-  const changeRequests = await fetchChangeRequests(serverUrl, headers);
+  const { changeRequests, pendingCount } = await fetchWatchState(serverUrl, headers);
   const seen = await loadSeenIds(serverUrl, spaceId);
   const inReview = changeRequests.filter((item) => item.status === "in_review");
   const fresh = inReview.filter((item) => !seen.has(item.id));
@@ -107,7 +157,7 @@ export async function checkForNewChangeRequests(
     seen.add(changeRequest.id);
   }
   await saveSeenIds(serverUrl, seen, spaceId);
-  await updateBadge(changeRequests);
+  await updateBadge(changeRequests, pendingCount);
 
   if (NOTIFICATIONS_SUPPORTED) {
     for (const changeRequest of fresh) {
@@ -127,5 +177,7 @@ export async function checkForNewChangeRequests(
     }
   }
 
-  return { newCount: fresh.length, pendingCount: inReview.length };
+  // The caller's `pendingCount` is the same number the badge shows, for the
+  // same reason: it is a total, not a count of the window that was scanned.
+  return { newCount: fresh.length, pendingCount: pendingCount ?? inReview.length };
 }

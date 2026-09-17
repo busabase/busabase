@@ -18,6 +18,7 @@ const labelByFieldType: Record<FieldType, string> = {
   longtext: "Long text",
   lookup: "Lookup",
   markdown: "Markdown",
+  member: "Member",
   multiselect: "Multi-select",
   number: "Number",
   phone: "Phone",

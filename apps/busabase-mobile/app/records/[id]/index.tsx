@@ -26,8 +26,10 @@ import {
 } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
 import { FieldList } from "~/domains/base/components/FieldList";
+import { pendingChangeRequestId } from "~/domains/base/utils/change-request-result";
 import { CommentsSection } from "~/domains/review/components/CommentsSection";
 import { getStatusLabel, StatusBadge } from "~/domains/review/components/StatusBadge";
+import { SUBMITTED_BY } from "~/domains/review/utils/submitted-by";
 import { ConnectionGuard } from "~/domains/workspace/components/ConnectionGuard";
 import { DrawerScaffold } from "~/domains/workspace/components/DrawerScaffold";
 import { formatDate, shortId } from "~/lib/format";
@@ -65,12 +67,19 @@ function RecordDetailContent() {
         operation: "delete",
         recordId,
         message: "Delete record",
-        submittedBy: "mobile-editor",
+        submittedBy: SUBMITTED_BY,
       });
     },
-    onSuccess: (changeRequest) => {
+    onSuccess: (outcome) => {
       setDeleteSheetOpen(false);
-      router.replace({ pathname: "/change-requests/[id]", params: { id: changeRequest.id } });
+      const reviewId = pendingChangeRequestId(outcome);
+      if (reviewId) {
+        router.replace({ pathname: "/change-requests/[id]", params: { id: reviewId } });
+        return;
+      }
+      // Already deleted — there is no record to return to and no review page,
+      // so leave the detail screen instead of navigating into a dead id.
+      router.back();
     },
   });
 
@@ -176,6 +185,7 @@ function RecordDetailContent() {
         <FieldList
           fields={detailFields}
           definitions={visibleDefinitions}
+          fieldUsers={record.fieldUsers}
           limitToDefinitions
           variant="grouped"
         />

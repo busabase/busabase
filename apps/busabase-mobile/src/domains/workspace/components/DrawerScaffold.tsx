@@ -1,7 +1,6 @@
 import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { hasCapability } from "busabase-contract/domains";
 import type { NodeVO } from "busabase-contract/types";
-import { selectPendingChangeRequests } from "busabase-core/dashboard/home";
 import { usePathname, useRouter } from "expo-router";
 import { Menu } from "lucide-react-native";
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
@@ -16,6 +15,8 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { NativeScreen } from "~/components/native-screen";
+import { InstallFromGithubSheet } from "~/domains/install/components/InstallFromGithubSheet";
+import { usePendingChangeRequests } from "~/domains/review/hooks/use-pending-change-requests";
 import { useI18n } from "~/i18n";
 import { mobile } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
@@ -72,6 +73,17 @@ export function DrawerScaffold({
   const [createOpen, setCreateOpen] = useState(false);
   const [createParent, setCreateParent] = useState<{ id: string; name: string } | null>(null);
   const [actionsTarget, setActionsTarget] = useState<ActionsTarget | null>(null);
+  /**
+   * Owned here, not in the SpaceSelector that triggers it.
+   *
+   * On a compact window the drawer is a `Modal`, and opening install dismisses
+   * it — which unmounts everything under it. A sheet rendered inside the drawer
+   * therefore disappeared in the same tick it was opened, and the "Install from
+   * GitHub" button did nothing at all on a phone (it worked on a tablet, where
+   * the sidebar is persistent and never unmounts). Rendering it out here, as a
+   * sibling of the drawer Modal, is what makes it survive.
+   */
+  const [installOpen, setInstallOpen] = useState(false);
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const navigationLayout = getAppNavigationLayout(windowWidth, windowHeight);
   const sidebarVisible = open || navigationLayout.persistentSidebar;
@@ -92,16 +104,13 @@ export function DrawerScaffold({
     enabled: sidebarVisible && !!buda,
   });
 
-  const changeRequestsQuery = useQuery({
-    ...(buda
-      ? buda.orpc.changeRequests.list.queryOptions({
-          input: {},
-          select: (page) => page.changeRequests,
-        })
-      : { queryKey: ["no-connection", "change-requests"], queryFn: skipToken }),
-    enabled: sidebarVisible && !!buda,
-  });
-  const pendingCount = selectPendingChangeRequests(changeRequestsQuery.data ?? []).length;
+  // Counted by the server, not by whatever fit in a page. This used to fetch
+  // with an empty input — the default `limit: 50` — and count the rows that came
+  // back, so the badge froze at 50 in any space with more than 50 open requests.
+  const pending = usePendingChangeRequests({ enabled: sidebarVisible });
+  // A capped count is not rendered at all: a badge is read as a total, and "50"
+  // against a real 116 is worse than no badge.
+  const pendingCount = pending.capped ? undefined : pending.count;
 
   const favoritesQuery = useQuery({
     ...(buda
@@ -217,6 +226,7 @@ export function DrawerScaffold({
       nodesError={!!nodesQuery.error}
       expandedIds={expandedIds}
       onDismiss={() => setOpen(false)}
+      onRequestInstall={() => setInstallOpen(true)}
       onNavigate={navigate}
       onNavigateNode={navigateNode}
       onOpenActions={(node, allowCreateChild) => setActionsTarget({ node, allowCreateChild })}
@@ -263,6 +273,15 @@ export function DrawerScaffold({
           </NativeScreen>
         </View>
       </View>
+
+      <InstallFromGithubSheet
+        visible={installOpen}
+        onClose={() => setInstallOpen(false)}
+        onReviewChangeRequests={() => {
+          setInstallOpen(false);
+          router.replace("/drawer/inbox");
+        }}
+      />
 
       <Modal
         animationType="fade"

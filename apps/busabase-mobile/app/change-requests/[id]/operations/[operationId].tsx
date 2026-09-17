@@ -26,6 +26,7 @@ import {
 } from "~/domains/base/utils/record-form";
 import { CommentsSection } from "~/domains/review/components/CommentsSection";
 import { getOperationStatusLabel, operationLabels } from "~/domains/review/utils/busabase-display";
+import { SUBMITTED_BY } from "~/domains/review/utils/submitted-by";
 import { ConnectionGuard } from "~/domains/workspace/components/ConnectionGuard";
 import { DrawerScaffold } from "~/domains/workspace/components/DrawerScaffold";
 import { shortId } from "~/lib/format";
@@ -84,7 +85,7 @@ function OperationDetailContent() {
         operationId: operation.id,
         fields: normalizeFormValues(changeRequest.base?.fields ?? [], values),
         message: "Revise operation",
-        author: "mobile-editor",
+        author: SUBMITTED_BY,
       });
     },
     onSuccess: () => {

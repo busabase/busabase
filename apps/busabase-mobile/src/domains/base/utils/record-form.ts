@@ -18,6 +18,10 @@ const EDITABLE_TYPES: ReadonlySet<FieldType> = new Set<FieldType>([
   "email",
   "phone",
   "attachment",
+  // Editable here even though `relation` is not: a member picker is a short flat
+  // roster (`NativeChoicePicker`), while a relation picker would have to search a
+  // whole Base. See RecordMemberField for the full reasoning.
+  "member",
 ]);
 
 const COMPACT_EDITOR_TYPES: ReadonlySet<FieldType> = new Set<FieldType>([
@@ -28,6 +32,7 @@ const COMPACT_EDITOR_TYPES: ReadonlySet<FieldType> = new Set<FieldType>([
   "multiselect",
   "email",
   "phone",
+  "member",
 ]);
 
 /** System / computed field types the form shows read-only (server fills them). */
@@ -50,6 +55,17 @@ export function initialFieldValue(field: BaseFieldVO, value?: unknown): RecordFo
     return Array.isArray(value)
       ? value.filter((item): item is string => typeof item === "string")
       : [];
+  }
+  // `member` mirrors `relation`'s shape: a list, or a scalar id when
+  // `options.multiple === false`. Falling through to `stringifyFieldValue` would
+  // hand the picker a comma-joined string and lose every id after the first.
+  if (field.type === "member") {
+    const ids = Array.isArray(value)
+      ? value.filter((item): item is string => typeof item === "string")
+      : typeof value === "string" && value
+        ? [value]
+        : [];
+    return field.options.multiple === false ? (ids[0] ?? "") : ids;
   }
   if (field.type === "attachment") {
     return getAttachmentRefs(value);
@@ -87,6 +103,14 @@ export function normalizeFormValues(
         return [field.slug, value === true];
       }
       if (field.type === "multiselect") {
+        return [field.slug, Array.isArray(value) ? value : []];
+      }
+      if (field.type === "member") {
+        if (field.options.multiple === false) {
+          // An unset single-member field must go out as null, not "" — the
+          // server validates a non-empty value as an id.
+          return [field.slug, typeof value === "string" && value ? value : null];
+        }
         return [field.slug, Array.isArray(value) ? value : []];
       }
       if (field.type === "attachment") {

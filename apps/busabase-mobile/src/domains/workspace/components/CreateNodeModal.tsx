@@ -24,10 +24,15 @@ const toSlug = (value: string) =>
  * an uploaded Asset behind it — web's dialog therefore ships a file input and
  * keeps its submit button disabled until one is picked. There is no document
  * picker here, so offering `file` could only ever produce an empty file node.
- * A single named exception, NOT a hardcoded allowlist: everything else still
- * comes straight from the registry.
+ * `form` is the same shape of gap: `busabase_forms.target_base_id` is NOT NULL,
+ * so web's dialog asks for the Base the form writes into (and which of its
+ * fields to collect) before it will submit. This sheet has no Base picker, so
+ * offering `form` could only ever produce a node that opens to "Form not set up
+ * yet" — the dead end the type was hidden from every create surface to avoid.
+ * Named exceptions, NOT a hardcoded allowlist: everything else still comes
+ * straight from the registry.
  */
-const UNSUPPORTED_TYPES = new Set<string>(["file"]);
+const UNSUPPORTED_TYPES = new Set<string>(["file", "form"]);
 
 /**
  * The creatable types, composed from the registry exactly like web's

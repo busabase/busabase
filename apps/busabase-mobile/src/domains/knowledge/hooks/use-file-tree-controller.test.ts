@@ -4,6 +4,7 @@ import type { FileTreeNodeVO } from "busabase-contract/types";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { SUBMITTED_BY } from "~/domains/review/utils/submitted-by";
 import { useFileTreeController } from "./use-file-tree-controller";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT =
@@ -114,7 +115,7 @@ describe("useFileTreeController", () => {
     expect(result.current.saving).toBe(true);
     expect(onCreateChangeRequest).toHaveBeenCalledWith({
       message: "Update documentation",
-      submittedBy: "mobile-editor",
+      submittedBy: SUBMITTED_BY,
       operations: [
         {
           kind: "update",

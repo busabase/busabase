@@ -15,6 +15,7 @@ import {
 } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
 import { RecordForm } from "~/domains/base/components/RecordForm";
+import { pendingChangeRequestId } from "~/domains/base/utils/change-request-result";
 import {
   buildInitialFormValues,
   isEditableField,
@@ -22,6 +23,7 @@ import {
   type RecordFormValue,
   recordFormValuesEqual,
 } from "~/domains/base/utils/record-form";
+import { SUBMITTED_BY } from "~/domains/review/utils/submitted-by";
 import { ConnectionGuard } from "~/domains/workspace/components/ConnectionGuard";
 import { DrawerScaffold } from "~/domains/workspace/components/DrawerScaffold";
 import { mobile, radius } from "~/theme/tokens";
@@ -63,11 +65,18 @@ function NewRecordContent() {
         baseId: base.id,
         fields: normalizeFormValues(base.fields, values),
         message: `Create ${base.name} record`,
-        submittedBy: "mobile-editor",
+        submittedBy: SUBMITTED_BY,
       });
     },
-    onSuccess: (changeRequest) => {
-      router.replace({ pathname: "/change-requests/[id]", params: { id: changeRequest.id } });
+    onSuccess: (outcome) => {
+      const reviewId = pendingChangeRequestId(outcome);
+      // Merged immediately: `outcome.id` is the new RECORD — open it, which is
+      // what "I just created this" should land on anyway.
+      router.replace(
+        reviewId
+          ? { pathname: "/change-requests/[id]", params: { id: reviewId } }
+          : { pathname: "/records/[id]", params: { id: outcome.id } },
+      );
     },
   });
 

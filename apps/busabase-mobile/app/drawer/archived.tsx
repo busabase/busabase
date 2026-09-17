@@ -16,12 +16,11 @@ import {
   NativeSection,
 } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
+import { SUBMITTED_BY } from "~/domains/review/utils/submitted-by";
 import { ConnectionGuard } from "~/domains/workspace/components/ConnectionGuard";
 import { DrawerScaffold } from "~/domains/workspace/components/DrawerScaffold";
 import { fmt, useI18n } from "~/i18n";
 import { useTokens } from "~/theme/use-tokens";
-
-const SUBMITTED_BY = "mobile-editor";
 
 const getArchivedNodeMeta = (node: NodeVO) => {
   const label = getNodeType(node.type)?.label ?? node.type;

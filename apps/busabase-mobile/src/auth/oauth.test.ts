@@ -13,7 +13,6 @@ vi.mock("expo-crypto", () => ({
   getRandomBytes: vi.fn(),
 }));
 vi.mock("expo-web-browser", () => ({
-  dismissAuthSession: vi.fn(),
   maybeCompleteAuthSession: vi.fn(),
   openAuthSessionAsync: vi.fn(),
 }));
@@ -155,6 +154,12 @@ describe("signInWithBusabaseCloud authorization request", () => {
     // what stops a live browser session from silently minting a token.
     expect(url.searchParams.get("prompt")).toBeNull();
     expect(url.searchParams.has("prompt")).toBe(false);
+  });
+
+  it("starts sign-in with the browser API available on Android", async () => {
+    await authorizeUrl();
+
+    expect(WebBrowser.openAuthSessionAsync).toHaveBeenCalledOnce();
   });
 
   it("still sends the full PKCE authorization-code request", async () => {

@@ -168,7 +168,6 @@ export async function getValidBusabaseCloudSession(): Promise<CloudSession | nul
 
 export async function signInWithBusabaseCloud(): Promise<CloudSession> {
   const request = await buildAuthorizeUrl();
-  WebBrowser.dismissAuthSession();
   const result = await WebBrowser.openAuthSessionAsync(
     request.url,
     busabaseConfig.oauthRedirectUri,
