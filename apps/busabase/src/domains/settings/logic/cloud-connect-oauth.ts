@@ -18,6 +18,7 @@
  */
 import "server-only";
 import { createHash, randomBytes } from "node:crypto";
+import type { Locale } from "~/i18n/config";
 
 const CLIENT_ID = "busabase-oss";
 const PENDING_FLOW_TTL_MS = 5 * 60 * 1000;
@@ -28,6 +29,7 @@ interface PendingFlow {
   redirectUri: string;
   tunnelId: string;
   createdAt: number;
+  locale?: Locale;
   /**
    * Set when the flow was started from inside the Busabase Desktop shell, so
    * the callback page knows to hand the user back via the `busabase://` deep
@@ -72,6 +74,7 @@ export interface BeginConnectInput {
   cloudUrl: string;
   tunnelId: string;
   redirectUri: string;
+  locale?: Locale;
   /** See {@link PendingFlow.returnToDesktop}. Defaults to `false` (browser tab). */
   returnToDesktop?: boolean;
 }
@@ -90,6 +93,7 @@ export function beginCloudConnectAuthorize(input: BeginConnectInput): { authoriz
     redirectUri: input.redirectUri,
     tunnelId: input.tunnelId,
     createdAt: Date.now(),
+    locale: input.locale,
     returnToDesktop: input.returnToDesktop === true,
   });
 
@@ -122,6 +126,11 @@ export function beginCloudConnectAuthorize(input: BeginConnectInput): { authoriz
 export function isDesktopCloudConnectFlow(state: string | null | undefined): boolean {
   if (!state) return false;
   return getPendingFlows().get(state)?.returnToDesktop === true;
+}
+
+export function getCloudConnectFlowLocale(state: string | null | undefined): Locale | undefined {
+  if (!state) return undefined;
+  return getPendingFlows().get(state)?.locale;
 }
 
 /** Exchange the callback's `code` for a scoped tunnel-connect credential. */

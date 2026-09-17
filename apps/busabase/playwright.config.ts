@@ -4,10 +4,17 @@ const port = Number(process.env.PLAYWRIGHT_PORT ?? 15419);
 
 export default defineConfig({
   testDir: "./tests/e2e",
-  // This spec owns a deterministic ACP WebSocket server and an isolated
-  // Busabase process. Its dedicated config supplies both; the shared server
-  // intentionally does not. Run it with `pnpm test:e2e:agent-chat`.
-  testIgnore: "agent-chat.spec.ts",
+  // Both specs own dependencies this shared server deliberately does not
+  // supply, and each has its own config that does:
+  //   agent-chat.spec.ts      -> a deterministic ACP WebSocket server and an
+  //                              isolated Busabase process. `pnpm test:e2e:agent-chat`.
+  //   agent-chat-live.spec.ts -> real Buda credentials. Its config *throws*
+  //                              without BUDA_ACP_URL/BUDA_API_KEY/BUDA_AGENT_ID.
+  //                              `pnpm test:e2e:agent-chat-live`.
+  // This must stay an array. It was the single string "agent-chat.spec.ts",
+  // which does not match "agent-chat-live.spec.ts" — so the live spec also ran
+  // in this credential-free sweep, where it can only fail, twice, at 60s each.
+  testIgnore: ["agent-chat.spec.ts", "agent-chat-live.spec.ts"],
   // The dashboard is a client SPA that streams its RSC response, so each full-page
   // navigation reloads the bundle and refetches over RPC before content mounts.
   // Give web-first assertions and whole tests room for that (paired with the

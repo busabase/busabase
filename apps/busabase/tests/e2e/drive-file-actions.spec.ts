@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import type { Locator } from "@playwright/test";
 import { expect, test } from "./_fixtures";
 
@@ -54,6 +55,20 @@ test("Drive files can be previewed, uploaded, renamed, and removed", async ({ pa
   await expect(page.getByRole("treeitem", { name: renamedName, exact: true })).toBeVisible();
   await expect(page.getByRole("treeitem", { name: originalName, exact: true })).toHaveCount(0);
   await page.screenshot({ fullPage: true, path: testInfo.outputPath("drive-file-actions.png") });
+
+  const menuDownloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: `Actions for ${renamedName}` }).click();
+  await page.getByRole("menuitem", { name: "Download file" }).click();
+  const menuDownload = await menuDownloadPromise;
+  expect(menuDownload.suggestedFilename()).toBe(renamedName);
+  const menuDownloadPath = await menuDownload.path();
+  expect(menuDownloadPath).not.toBeNull();
+  expect(await readFile(menuDownloadPath as string, "utf8")).toContain("Drive GUI upload");
+
+  const toolbarDownloadPromise = page.waitForEvent("download");
+  await page.getByRole("link", { name: "Download file" }).click();
+  const toolbarDownload = await toolbarDownloadPromise;
+  expect(toolbarDownload.suggestedFilename()).toBe(renamedName);
 
   await page.getByRole("button", { name: `Actions for ${renamedName}` }).click();
   await page.getByRole("menuitem", { name: "Remove from Drive" }).click();

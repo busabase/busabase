@@ -80,6 +80,12 @@
   --input: #d6dada;
   --ring: #161818;
 
+  /* CodeMirror's light palette, adjusted only where text falls below 4.5:1
+     on the Doc code card (#F9FAFA). Syntax color stays inside code content. */
+  --doc-code-escape: #b43d00;
+  --doc-code-type: #006b50;
+  --doc-code-invalid: #b00020;
+
   /* Fumadocs surfaces (docs routes, the OpenAPI reference, shiki code blocks).
      Fumadocs ships its own neutral scale that ignores the tokens above, so the
      docs would otherwise sit on a whiter ground than the rest of the app. */
@@ -120,6 +126,11 @@
   --border: #2a2f2f;
   --input: #2a2f2f;
   --ring: #e7e9e9;
+
+  /* Readable corrections to One Dark on the Doc's elevated code surface. */
+  --doc-code-keyword: #d19ae3;
+  --doc-code-name: #e88c95;
+  --doc-code-comment: #aab3c2;
 
   --color-fd-card: oklch(0.09 0.004 195);
   --color-fd-border: oklch(0.22 0.005 195);

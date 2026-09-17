@@ -76,21 +76,23 @@ test("dashboard routes render the review-first seeded experience", async ({ page
   // Addressed by ROLE, not by placeholder: the placeholder is marketing copy
   // and renaming it (to "Search apps, skills, records, bases, change
   // requests…") broke this line with a 60s timeout that named a locator
-  // rather than the copy change that caused it. The searchbox role is what
+  // rather than the copy change that caused it. The combobox role is what
   // this step actually depends on.
-  await page.getByRole("dialog").getByRole("searchbox").fill("agent");
+  await page.getByRole("dialog").getByRole("combobox", { name: "Search" }).fill("agent");
   // No tab assertion here on purpose. This line used to be
   // `getByRole("tab", { name: /Recent/ })` with aria-selected, which stopped
   // existing the moment the dialog moved from tabs to sections — the sections
   // are plain headings with no role, so there is nothing durable to address.
   // The assertion below is what this step was ever really checking: that
   // typing resolves a concrete seeded node.
-  // Scoped to the dialog and NOT anchored: a search result's accessible name is
-  // "<emoji> <name> <slug>" (e.g. "🔌 Agent Integrations agent-integrations"), so
-  // `/^Agent Integrations/` broke the moment node icons came back to the Recent
-  // list. The emoji and the slug are decoration around the thing under test.
+  // Addressed by the row's own `data-search-result`, the same hook
+  // recent-node-history.spec.ts settled on. Role does not work here: the row is
+  // a <button> element carrying an explicit role="option" (it sits in a
+  // role="listbox"), and an explicit role REPLACES the implicit one — so
+  // `getByRole("button")` can never match it, however the name is written. The
+  // accessible name is unstable anyway ("<emoji> <name> <slug>").
   await expect(
-    page.getByRole("dialog").getByRole("button", { name: /Agent Integrations/ }),
+    page.getByRole("dialog").locator('[data-search-result="Agent Integrations"]'),
   ).toBeVisible();
 
   await page.goto("/dashboard/local/activity");

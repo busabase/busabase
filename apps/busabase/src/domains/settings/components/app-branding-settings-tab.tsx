@@ -53,11 +53,11 @@ const uploadLogo = async (file: File, labels: AppBrandingSettingsLabels): Promis
   const body = new FormData();
   body.append("file", file);
   const res = await fetch("/api/branding/logo", { method: "POST", body });
-  const payload = (await res.json().catch(() => null)) as { url?: string; error?: string } | null;
+  const payload = (await res.json().catch(() => null)) as { url?: string } | null;
   if (!res.ok || !payload?.url) {
-    // The route's 400s explain the actual problem (type, size); fall back to
-    // the generic message when there's nothing useful to show.
-    throw new Error(payload?.error || labels.logoUploadFailed());
+    // Server errors are English API diagnostics, not UI copy. The picker already
+    // validates type/size using localized labels before sending the upload.
+    throw new Error(labels.logoUploadFailed());
   }
   return payload.url;
 };
@@ -127,8 +127,8 @@ export function AppBrandingSettingsTab({ labels, active, defaults }: Props) {
       // as "the upload did nothing".
       await save({ ...form, logoUrl: url });
     } catch (caught) {
-      // Surfaced here rather than rethrown, so `AvatarUpload` doesn't replace
-      // the route's specific 400 ("must be PNG/JPG/…") with a generic message.
+      // Surfaced here rather than rethrown, so AvatarUpload does not replace
+      // the localized upload failure with its own fallback message.
       setError(caught instanceof Error ? caught.message : labels.logoUploadFailed());
     } finally {
       setIsUploading(false);

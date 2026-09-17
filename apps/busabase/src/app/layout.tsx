@@ -6,7 +6,7 @@ import {
   EMPTY_APP_BRANDING,
   getAppBrandingSafe,
 } from "~/domains/settings/logic/app-branding-store";
-import { getBusabaseAppLL, getBusabaseLocaleFromAcceptLanguage } from "~/lib/i18n";
+import { getBusabaseAppLL, getBusabaseLocaleFromRequestHeaders } from "~/lib/i18n";
 import { Providers } from "./providers";
 import "./global.css";
 
@@ -42,7 +42,7 @@ const notoSerifSC = Noto_Serif_SC({
 
 export async function generateMetadata(): Promise<Metadata> {
   const headerList = await headers();
-  const locale = getBusabaseLocaleFromAcceptLanguage(headerList.get("accept-language"));
+  const locale = getBusabaseLocaleFromRequestHeaders(headerList);
   const LL = getBusabaseAppLL(locale);
 
   // The root layout's metadata is already per-request (it reads `headers()`),
@@ -74,7 +74,7 @@ interface Props {
 
 export default async function RootLayout({ children }: Props) {
   const headerList = await headers();
-  const locale = getBusabaseLocaleFromAcceptLanguage(headerList.get("accept-language"));
+  const locale = getBusabaseLocaleFromRequestHeaders(headerList);
 
   return (
     <html

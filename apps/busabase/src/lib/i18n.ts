@@ -1,26 +1,14 @@
 import { type CoreI18nMessages, type CoreLocale, coreMessagesByLocale } from "busabase-core/i18n";
-import { type Locale, SUPPORTED_LOCALES } from "~/i18n/config";
+import { DEMO_LOCALE_HEADER } from "openlib/ui/dashboard/demo";
+import { isBusabaseAppLocale, type Locale, normalizeBusabaseAppLocale } from "~/i18n/app-locale";
 import type { Locales, TranslationFunctions } from "~/i18n/i18n-types";
 import { i18nObject } from "~/i18n/i18n-util";
 import { loadLocale } from "~/i18n/i18n-util.sync";
 
-export const isBusabaseAppLocale = (locale: string | undefined): locale is Locale =>
-  locale !== undefined && SUPPORTED_LOCALES.includes(locale as Locale);
+export { isBusabaseAppLocale, normalizeBusabaseAppLocale };
 
 export const isBusabaseLocale = (locale: string | undefined): locale is CoreLocale =>
   locale !== undefined && locale in coreMessagesByLocale;
-
-export const normalizeBusabaseAppLocale = (locale: string | undefined): Locale | undefined => {
-  if (!locale) return undefined;
-  if (isBusabaseAppLocale(locale)) return locale;
-
-  const normalized = locale.toLowerCase();
-  if (normalized === "zh" || normalized.startsWith("zh-")) return "zh-CN";
-  if (normalized === "ja" || normalized.startsWith("ja-")) return "ja";
-  if (normalized === "en" || normalized.startsWith("en-")) return "en";
-
-  return undefined;
-};
 
 export const normalizeBusabaseLocale = (locale: string | undefined): CoreLocale | undefined => {
   if (!locale) return undefined;
@@ -60,3 +48,8 @@ export const getBusabaseLocaleFromAcceptLanguage = (acceptLanguage: string | nul
 
   return "en";
 };
+
+/** The proxy forwards demo or explicit dashboard URL locale before the App Router renders. */
+export const getBusabaseLocaleFromRequestHeaders = (headers: Pick<Headers, "get">): Locale =>
+  normalizeBusabaseAppLocale(headers.get(DEMO_LOCALE_HEADER) ?? undefined) ??
+  getBusabaseLocaleFromAcceptLanguage(headers.get("accept-language"));

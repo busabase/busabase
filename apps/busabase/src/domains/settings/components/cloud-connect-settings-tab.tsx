@@ -18,6 +18,7 @@ export type CloudConnectSettingsLabels = TranslationFunctions["cloudConnect"];
 
 interface Props {
   labels: CloudConnectSettingsLabels;
+  locale: string;
   /** Whether this tab is the active one — gates polling. */
   active: boolean;
 }
@@ -46,7 +47,7 @@ async function fetchStatus(errorMessage: string): Promise<CloudConnectStatusResp
   return (await res.json()) as CloudConnectStatusResponse;
 }
 
-export function CloudConnectSettingsTab({ labels, active }: Props) {
+export function CloudConnectSettingsTab({ labels, locale, active }: Props) {
   const [snapshot, setSnapshot] = useState<CloudConnectStatusResponse | null>(null);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [statusLoadError, setStatusLoadError] = useState<string | null>(null);
@@ -130,11 +131,14 @@ export function CloudConnectSettingsTab({ labels, active }: Props) {
         // shell, in the OS browser. Tell the server now, while the pending flow
         // is created, so its callback page can deep link the user back to the
         // desktop window instead of asking them to close an uncloseable tab.
-        body: JSON.stringify({ cloudUrl: cloudUrlInput, returnToDesktop: popup === null }),
+        body: JSON.stringify({ cloudUrl: cloudUrlInput, locale, returnToDesktop: popup === null }),
       });
-      const body = (await res.json()) as { authorizeUrl?: string; error?: string };
+      const body = (await res.json()) as { authorizeUrl?: string };
+      if (res.status === 400) {
+        throw new Error(labels.invalidCloudUrl());
+      }
       if (!res.ok || !body.authorizeUrl) {
-        throw new Error(body.error ?? labels.connectFailed());
+        throw new Error(labels.connectFailed());
       }
       if (popup) {
         popup.location.href = body.authorizeUrl;
@@ -151,7 +155,11 @@ export function CloudConnectSettingsTab({ labels, active }: Props) {
       setSnapshot((current) => (current ? { ...current, status: "connecting" } : current));
     } catch (error) {
       popup?.close();
-      setActionError(error instanceof Error ? error.message : labels.connectFailed());
+      setActionError(
+        error instanceof Error && error.message === labels.invalidCloudUrl()
+          ? error.message
+          : labels.connectFailed(),
+      );
     } finally {
       setIsConnecting(false);
     }
@@ -166,8 +174,8 @@ export function CloudConnectSettingsTab({ labels, active }: Props) {
       if (!res.ok) throw new Error(labels.disconnectFailed());
       const next = await fetchStatus(labels.statusRefreshFailed());
       setSnapshot(next);
-    } catch (error) {
-      setActionError(error instanceof Error ? error.message : labels.disconnectFailed());
+    } catch {
+      setActionError(labels.disconnectFailed());
     } finally {
       setIsDisconnecting(false);
     }
@@ -285,10 +293,7 @@ export function CloudConnectSettingsTab({ labels, active }: Props) {
       {(actionError || snapshot?.error) && status !== "connected" ? (
         <Alert variant="destructive">
           <AlertDescription>
-            {actionError ??
-              (snapshot?.error
-                ? labels.statusDiagnostic({ error: snapshot.error })
-                : connectFailedMessage)}
+            {actionError ?? (snapshot?.error ? labels.statusDiagnostic() : connectFailedMessage)}
           </AlertDescription>
         </Alert>
       ) : null}
