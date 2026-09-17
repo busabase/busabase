@@ -2487,13 +2487,16 @@ describe("busabase-cli commands", () => {
     });
 
     /**
-     * The CLI and the server are released separately, so a current CLI routinely
-     * talks to a server that predates the endpoint it wants. Without the
-     * fallback this command would simply stop working against every such
-     * server — which is exactly how an earlier change took a working command to
-     * zero results in production.
+     * The `agent_prompts` column is the only place the server reads these from,
+     * so a 404 has to surface rather than be papered over.
+     *
+     * This used to fall back to `PATCH /nodes/{id}/metadata`, for servers that
+     * predated the endpoint. That is gone: the migration adding the column also
+     * backfilled every existing `metadata.agentPrompts` array, so such a server
+     * recovers its prompts on upgrade — whereas a 404 from any other cause used
+     * to park the list under a key nothing reads and still exit 0.
      */
-    it("falls back to the metadata endpoint when the server has no agent-prompts route", async () => {
+    it("fails instead of writing to metadata when the server has no agent-prompts route", async () => {
       const dir = await mkdtemp(join(tmpdir(), "busabase-cli-agent-prompts-"));
       const file = join(dir, "prompts.json");
       await writeFile(file, JSON.stringify(validPrompts));
@@ -2527,13 +2530,12 @@ describe("busabase-cli commands", () => {
           file,
         ]);
 
-        expect(exitCode).toBe(0);
-        // Tried the new route first, then wrote where an old server still reads.
+        expect(exitCode).not.toBe(0);
+        // The one write it is allowed to attempt — and no metadata PATCH behind it.
         expect(calls.map((call) => `${call.method} ${new URL(call.url).pathname}`)).toEqual([
           "PUT /api/v1/nodes/nod_1/agent-prompts",
-          "PATCH /api/v1/nodes/nod_1/metadata",
         ]);
-        expect(calls.at(-1)?.body).toEqual({ metadata: { agentPrompts: validPrompts } });
+        expect(calls.some((call) => new URL(call.url).pathname.endsWith("/metadata"))).toBe(false);
       } finally {
         await rm(dir, { force: true, recursive: true });
       }

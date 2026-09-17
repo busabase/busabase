@@ -252,3 +252,142 @@ export async function resolveSkillDocument(
     ? { content: live.content, source: "server" }
     : bundled(live.reason ?? "the live document could not be read");
 }
+
+/**
+ * The two frontmatter fields a pointer stub cannot leave behind.
+ *
+ * `name` decides the directory the stub is written to — it has to equal the hosted
+ * skill's own name, or an agent told to "read the crm-visits skill" finds nothing.
+ * `description` is load-bearing for a different reason: an agent decides whether to
+ * invoke a skill from the description alone, so a stub that outsourced it would never
+ * be reached to fetch anything.
+ */
+export interface SkillIdentity {
+  name: string;
+  description: string;
+}
+
+/**
+ * Read `name`/`description` out of a hosted SKILL.md's YAML frontmatter.
+ *
+ * Deliberately a small hand-rolled reader rather than a YAML dependency: the two fields
+ * it needs are flat scalars, and the shapes that actually occur in the wild are plain,
+ * quoted, and folded (`>-`) — the last of which every long Busabase description uses.
+ * Anything stranger is better rejected loudly here than half-understood.
+ */
+export function parseSkillIdentity(body: string): SkillIdentity {
+  const match = /^---\r?\n([\s\S]*?)\r?\n---/.exec(body.trimStart());
+  if (!match) throw new Error("the hosted SKILL.md has no YAML frontmatter");
+  const lines = match[1].split(/\r?\n/);
+  const read = (key: string): string | undefined => {
+    const start = lines.findIndex((line) => line.startsWith(`${key}:`));
+    if (start === -1) return undefined;
+    const inline = lines[start].slice(key.length + 1).trim();
+    // A folded or literal block scalar (`>-`, `>`, `|`) continues on the indented
+    // lines below it. Joining with a space is right for `>`-folded text, which is the
+    // form Busabase's own multi-line descriptions use.
+    if (inline === "" || inline === ">" || inline === ">-" || inline === "|" || inline === "|-") {
+      const rest: string[] = [];
+      for (const line of lines.slice(start + 1)) {
+        if (!/^\s/.test(line) || line.trim() === "") break;
+        rest.push(line.trim());
+      }
+      return rest.join(" ");
+    }
+    return inline.replace(/^["']|["']$/g, "");
+  };
+  const name = read("name");
+  const description = read("description");
+  if (!name) throw new Error("the hosted SKILL.md frontmatter has no `name`");
+  if (!description) {
+    throw new Error(
+      "the hosted SKILL.md frontmatter has no `description`; without it no agent " +
+        "would know when to fetch this skill, so a stub for it cannot work",
+    );
+  }
+  return { name, description };
+}
+
+export interface PointerStubInput extends SkillIdentity {
+  nodeId: string;
+  spaceId?: string;
+  spaceName?: string;
+}
+
+/**
+ * Render the stub. Two details here are not stylistic:
+ *
+ * `--output json` — the default text output renders the body as a one-line preview
+ * (a 40 KB skill comes back as ~400 bytes ending in an ellipsis), so a stub that
+ * omitted it would hand the agent a truncated procedure and no error.
+ *
+ * `@latest` — `npx` will reuse whatever copy of the CLI it already cached, which may
+ * predate the subcommand entirely.
+ *
+ * The fetch-first wording is equally deliberate. A stub whose fetch fails must stop,
+ * not improvise from the one-line description; that failure mode is the whole reason
+ * the body is centralized in the first place.
+ */
+export function buildPointerStub(input: PointerStubInput): string {
+  const space = input.spaceName
+    ? `${input.spaceName}${input.spaceId ? ` \`${input.spaceId}\`` : ""}`
+    : (input.spaceId ?? "—");
+  return `---
+name: ${input.name}
+description: ${JSON.stringify(input.description)}
+---
+
+The body of this skill lives in Busabase, in the same folder as the resources it
+works with, so it moves when they move. **Fetch it before doing anything:**
+
+\`\`\`bash
+npx busabase-cli@latest skills read-file --node-id ${input.nodeId} \\
+  --file-path SKILL.md --output json
+\`\`\`
+
+\`--output json\` is required — the default text output truncates the body to a
+one-line preview. \`@latest\` is required too: \`npx\` will otherwise reuse a cached
+older CLI that may not have this subcommand.
+
+If the fetch fails — no access, the node moved, the network is down — **stop and say
+so.** Do not improvise the procedure from the description above; the body is hosted in
+one place precisely so that every repository runs the same one.
+
+| What | Where |
+| --- | --- |
+| Space | ${space} |
+| Skill node | \`${input.name}\` — \`${input.nodeId}\` |
+`;
+}
+
+/**
+ * Write `<dir>/<name>/SKILL.md`. Same no-clobber rule as `installSkillDoc`, for the
+ * same reason: the file already there may be a real skill someone wrote, and replacing
+ * a body with a pointer to a different one is not a refresh, it is a swap.
+ */
+export function linkSkillDoc(input: {
+  dir: string;
+  name: string;
+  content: string;
+  force: boolean;
+  exists?: (path: string) => boolean;
+  write?: (path: string, content: string) => void;
+}): InstallSkillResult {
+  const exists = input.exists ?? existsSync;
+  const write =
+    input.write ??
+    ((path: string, body: string) => {
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, body, "utf8");
+    });
+  const path = join(input.dir, input.name, "SKILL.md");
+  if (exists(path) && !input.force) {
+    return {
+      path,
+      written: false,
+      reason: `${input.name} already exists there; pass --force to replace it`,
+    };
+  }
+  write(path, content(input.content));
+  return { path, written: true };
+}

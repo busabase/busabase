@@ -24,7 +24,15 @@ try {
     if (!Array.isArray(delegatedArgv) || delegatedArgv.some((arg) => typeof arg !== "string")) {
       throw new Error("BUSABASE_CLI_DELEGATED_ARGV must be a JSON string array.");
     }
-    process.exit(await runCli(delegatedArgv));
+    const delegatedExit = await runCli(delegatedArgv);
+    // process.exit() drops whatever stdout has not flushed, and stdout is async when
+    // it is a pipe — so a large `--output json` body would arrive truncated at one
+    // pipe buffer. Inlined rather than imported from dist: this file is the entry
+    // point and must keep working even when dist is mid-build. See src/flush-stdio.ts.
+    for (const stream of [process.stdout, process.stderr]) {
+      if (stream.writableLength > 0) await new Promise((done) => stream.write("", done));
+    }
+    process.exit(delegatedExit);
   }
   await import(builtCli.href);
 } catch (error) {

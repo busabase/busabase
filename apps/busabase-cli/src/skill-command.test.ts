@@ -1,9 +1,12 @@
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  buildPointerStub,
   buildRuntimeSkillDoc,
   fetchSetupSkill,
   installSkillDoc,
+  linkSkillDoc,
+  parseSkillIdentity,
   parseSkillTopic,
   resolveSkillDocument,
   resolveSkillMode,
@@ -229,5 +232,147 @@ describe("installSkillDoc", () => {
     });
     expect(result.written).toBe(true);
     expect(written[0][1]).toBe("# doc\n");
+  });
+});
+
+describe("parseSkillIdentity", () => {
+  it("reads a plain frontmatter pair", () => {
+    const id = parseSkillIdentity("---\nname: crm-visits\ndescription: Log visits.\n---\n\nbody");
+    expect(id).toEqual({ name: "crm-visits", description: "Log visits." });
+  });
+
+  it("unquotes a quoted description", () => {
+    // The real `cms` skill quotes its description because the text contains a colon,
+    // which is exactly the case a naive split-on-colon reader gets wrong.
+    const id = parseSkillIdentity(
+      '---\nname: cms\ndescription: "Publish content: blog posts and pages."\n---\n',
+    );
+    expect(id.description).toBe("Publish content: blog posts and pages.");
+  });
+
+  it("folds a `>-` block scalar into one line", () => {
+    // Every long Busabase skill description uses this form, so getting it wrong would
+    // produce a stub whose trigger is the single word ">-".
+    const id = parseSkillIdentity(
+      [
+        "---",
+        "name: busabase-app-creator",
+        "description: >-",
+        "  Create a complete",
+        "  isolated workspace app.",
+        "allowed-tools: Bash(*)",
+        "---",
+        "",
+      ].join("\n"),
+    );
+    expect(id).toEqual({
+      name: "busabase-app-creator",
+      description: "Create a complete isolated workspace app.",
+    });
+  });
+
+  it("refuses a body with no frontmatter rather than writing a nameless stub", () => {
+    expect(() => parseSkillIdentity("# Just a heading\n")).toThrow(/no YAML frontmatter/);
+  });
+
+  it("refuses a skill with no description, naming why a stub needs one", () => {
+    // A stub without a trigger is never invoked, so it can never fetch — failing here
+    // is the only way the user learns that before committing a dead file.
+    expect(() => parseSkillIdentity("---\nname: x\n---\n")).toThrow(/no agent/);
+  });
+});
+
+describe("buildPointerStub", () => {
+  const stub = buildPointerStub({
+    name: "crm-visits",
+    description: "Log and review customer visits.",
+    nodeId: "nod123",
+    spaceId: "spc456",
+    spaceName: "Acme Team",
+  });
+
+  it("carries the trigger description into the local frontmatter", () => {
+    expect(stub).toContain('description: "Log and review customer visits."');
+    expect(stub.startsWith("---\nname: crm-visits\n")).toBe(true);
+  });
+
+  it("pins both load-bearing flags in the fetch command itself", () => {
+    // Dropping either one fails silently: no --output json truncates the body to a
+    // preview, and no @latest can resolve a cached CLI without the subcommand.
+    // Assert against the fenced command, NOT the whole document — the prose below it
+    // also names both flags, so a document-wide `toContain` passes even when the
+    // command is broken. (It did, on the first version of this test.)
+    const command = /```bash\n([\s\S]*?)```/.exec(stub)?.[1] ?? "";
+    expect(command).toContain("npx busabase-cli@latest skills read-file --node-id nod123");
+    expect(command).toContain("--output json");
+    expect(command).toContain("--file-path SKILL.md");
+  });
+
+  it("tells the agent to stop on a failed fetch instead of improvising", () => {
+    expect(stub).toMatch(/stop and say\s+so/);
+  });
+
+  it("names the space and node so a human can find them", () => {
+    expect(stub).toContain("Acme Team `spc456`");
+    expect(stub).toContain("`crm-visits` — `nod123`");
+  });
+
+  it("escapes a description containing quotes", () => {
+    const quoted = buildPointerStub({
+      name: "x",
+      description: 'Handle "quoted" input.',
+      nodeId: "nod1",
+    });
+    // JSON.stringify keeps the frontmatter parseable; a raw paste would break the YAML.
+    expect(quoted).toContain('description: "Handle \\"quoted\\" input."');
+  });
+});
+
+describe("linkSkillDoc", () => {
+  it("writes under the hosted skill's own name, not a fixed one", () => {
+    // The directory name IS how an agent resolves "read the crm-visits skill", so it
+    // must follow the remote frontmatter rather than the command that wrote it.
+    const written: string[] = [];
+    const result = linkSkillDoc({
+      dir: "/tmp/skills",
+      name: "crm-visits",
+      content: "stub",
+      force: false,
+      exists: () => false,
+      write: (path) => written.push(path),
+    });
+    expect(result.written).toBe(true);
+    expect(written).toEqual([join("/tmp/skills", "crm-visits", "SKILL.md")]);
+  });
+
+  it("refuses to replace an existing skill without --force", () => {
+    // Overwriting here is not a refresh: it can swap a real, hand-written body for a
+    // pointer at a different skill entirely.
+    const result = linkSkillDoc({
+      dir: "/tmp/skills",
+      name: "crm-visits",
+      content: "stub",
+      force: false,
+      exists: () => true,
+      write: () => {
+        throw new Error("must not write");
+      },
+    });
+    expect(result.written).toBe(false);
+    expect(result.reason).toMatch(/--force/);
+  });
+
+  it("replaces it when --force is given", () => {
+    const written: string[] = [];
+    const result = linkSkillDoc({
+      dir: "/tmp/skills",
+      name: "crm-visits",
+      content: "stub",
+      force: true,
+      exists: () => true,
+      write: (path) => written.push(path),
+    });
+    expect(result.written).toBe(true);
+    expect(written).toHaveLength(1);
   });
 });
