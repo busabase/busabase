@@ -118,7 +118,13 @@ const workspace = (level: ApiKeyPermissionLevel): ProcedurePermissionPolicy => (
  */
 export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPolicy> = {
   "auth.verify": workspace("read"),
+  // The space's member roster, for a `member` field's picker. A workspace read,
+  // not a node read: it is not about any one node's contents, and it reveals only
+  // what a member can already see on any Change Request or comment thread in the
+  // space (the same `UserRefVO`, resolved by the same host seam).
+  "spaces.members": workspace("read"),
   search: node("read"),
+  "searchMetrics.report": node("read"),
   grep: node("read"),
   "nodes.list": node("read"),
   // The unified typed-detail read that replaced `docs.get` / `files.get` /
@@ -306,7 +312,9 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   "agents.catalog": workspace("manage"),
   "agents.connections.list": workspace("manage"),
   "agents.disconnect": workspace("manage"),
+  "agents.deleteHistory": workspace("manage"),
   "agents.sessions.list": workspace("manage"),
+  "agents.sessions.listPaged": workspace("manage"),
   "agents.sessions.create": workspace("manage"),
   "agents.sessions.prompt": workspace("manage"),
   "agents.sessions.setConfigOption": workspace("manage"),

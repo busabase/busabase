@@ -20,7 +20,21 @@ export class ConversionNotSupportedError extends Error {
   }
 }
 
-const UNCONVERTIBLE_FROM: ReadonlySet<FieldType> = new Set(["relation", "attachment"]);
+/**
+ * Types whose stored value cannot be re-expressed as text, in either direction.
+ * `relation` / `member` hold ids that mean nothing outside their own resolver;
+ * `attachment` holds file refs.
+ *
+ * EXPORTED because this set is a safety boundary, not a local detail: callers
+ * that gate a conversion BEFORE running it (`field-ops.ts`) must use the same
+ * list as the converter itself. They used to hardcode their own copy, the two
+ * drifted the moment `member` was added, and the result was a silent column
+ * wipe — the merge's `catch { converted = null }` cannot tell "this value failed
+ * to parse" from "this type was never convertible".
+ */
+const UNCONVERTIBLE_FROM: ReadonlySet<FieldType> = new Set(["relation", "attachment", "member"]);
+
+export const isUnconvertibleFieldType = (type: FieldType): boolean => UNCONVERTIBLE_FROM.has(type);
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const URL_RE = /^https?:\/\//;
@@ -112,7 +126,7 @@ export function fromText(
   if (isSystemFieldType(toType)) {
     throw new ConversionNotSupportedError("text" as FieldType, toType);
   }
-  if (toType === "relation" || toType === "attachment") {
+  if (UNCONVERTIBLE_FROM.has(toType)) {
     throw new ConversionNotSupportedError("text" as FieldType, toType);
   }
 
@@ -216,7 +230,7 @@ export function convertFieldValue(
   if (fromType === toType) return value;
 
   // Validate toType before doing any work
-  if (isSystemFieldType(toType) || toType === "relation" || toType === "attachment") {
+  if (isSystemFieldType(toType) || UNCONVERTIBLE_FROM.has(toType)) {
     throw new ConversionNotSupportedError(fromType, toType);
   }
   if (isSystemFieldType(fromType) || UNCONVERTIBLE_FROM.has(fromType)) {

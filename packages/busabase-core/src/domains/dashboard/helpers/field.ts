@@ -2,7 +2,12 @@ import type { BaseFieldVO, ChangeRequestVO, FieldType, RecordVO } from "busabase
 import type { AttachmentRef } from "open-domains/attachments/types";
 import { iStringParse } from "openlib/i18n/i-string";
 import type { CoreI18nMessages } from "../../../i18n";
+import { getMemberIds } from "../../base/field-types";
 import { resolveEmbedPreview } from "../../base/utils/embed";
+import {
+  EMPTY_WHITEBOARD_FIELD_VALUE,
+  parseWhiteboardFieldValue,
+} from "../../base/utils/whiteboard-value";
 import { fieldValueToString, formatNumberField, formatOpaqueUserId } from "./format";
 import { safeFetchableUrl, stripHtmlTags } from "./html";
 import type { FieldChip } from "./view-types";
@@ -154,6 +159,12 @@ export const fieldPreviewText = (value: unknown, type?: FieldType, messages?: Co
   }
   if (type === "created_by" || type === "updated_by") {
     return formatOpaqueUserId(value, messages);
+  }
+  // Ids, joined — a plain-text projection of a `member` cell for the places that
+  // need a string (change-request summaries, card labels, CSV-ish exports).
+  // Rendering PEOPLE is `MemberChips`, which has the resolved user map.
+  if (type === "member") {
+    return Array.isArray(value) ? value.filter(Boolean).join(", ") : fieldValueToString(value);
   }
   if (type === "auto_number") {
     const text = fieldValueToString(value);
@@ -318,4 +329,41 @@ const looksLikeJson = (value: string) => {
   } catch {
     return false;
   }
+};
+
+/** Default value for a field that's never had a value entered — used on the create form. */
+export const defaultNewFieldValue = (fieldType: FieldType): unknown => {
+  if (fieldType === "relation" || fieldType === "member") return [];
+  if (fieldType === "whiteboard") return structuredClone(EMPTY_WHITEBOARD_FIELD_VALUE);
+  return "";
+};
+
+export const getEditorFieldValue = (field: BaseFieldVO, value: unknown) => {
+  if (field.type === "attachment") {
+    return getAttachmentRefs(value);
+  }
+  if (field.type === "relation") {
+    const relationIds = getRelationRecordIds(value);
+    return field.options.multiple === false ? (relationIds[0] ?? "") : relationIds;
+  }
+  // Same array-or-scalar handling as `relation`. Without this the fallthrough
+  // below JSON-stringified the id list, and the editor then read the whole
+  // `["local-admin"]` string as ONE user id — the picker showed a bogus
+  // "Unknown user [ "local" entry and saving would have written that string back.
+  if (field.type === "member") {
+    const memberIds = getMemberIds(value);
+    return field.options.multiple === false ? (memberIds[0] ?? "") : memberIds;
+  }
+  if (field.type === "multiselect" || field.type === "ai_tags") {
+    return Array.isArray(value)
+      ? value.filter((item): item is string => typeof item === "string")
+      : [];
+  }
+  if (field.type === "checkbox") {
+    return value === true || value === "true";
+  }
+  if (field.type === "whiteboard") {
+    return parseWhiteboardFieldValue(value);
+  }
+  return fieldValueToString(value);
 };

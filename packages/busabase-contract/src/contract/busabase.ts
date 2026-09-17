@@ -87,11 +87,14 @@ import {
   reviewChangeRequestInputSchema,
   reviseOperationInputSchema,
   searchInputSchema,
+  searchInteractionInputSchema,
+  searchInteractionResponseSchema,
   searchNodesByNameInputSchema,
   searchResponseSchema,
   updateNodeAgentPromptsInputSchema,
   updateNodeMetadataInputSchema,
   updateNodeSettingsInputSchema,
+  userRefSchema,
 } from "./schemas";
 
 const changeRequestBatchFailureSchema = z.object({
@@ -166,6 +169,11 @@ export const busabaseContractRoutes = {
     })
     .input(searchInputSchema)
     .output(searchResponseSchema),
+  searchMetrics: {
+    // Internal RPC only: this is dashboard telemetry, not a public REST or
+    // agent capability. Keeping it un-routed prevents OpenAPI/MCP discovery.
+    report: oc.input(searchInteractionInputSchema).output(searchInteractionResponseSchema),
+  },
   // Unified Grep (P2a files+docs, P2b records) — the single public pattern
   // search endpoint. Files-only callers use `sources: ["files"]` and retain
   // the full missing/stale/unsearchable coverage block.
@@ -663,6 +671,19 @@ export const busabaseContractRoutes = {
           "Change requests awaiting an external agent (request-changes or @ai mentions).",
       })
       .output(z.array(agentTaskSchema)),
+  },
+  spaces: {
+    /**
+     * The member roster of the space this request is scoped to — the people a
+     * `member` field's picker may offer.
+     *
+     * RPC-only by design (no `.route(...)`). A procedure WITH a path is
+     * published into `/api/v1` and into every agent's MCP tool catalog; a
+     * workspace member directory belongs in neither. Resolution is delegated to
+     * the host (`BusabaseContext.listMembers`), because membership lives in the
+     * host, not in this engine.
+     */
+    members: oc.output(z.array(userRefSchema)),
   },
   live: {
     // RPC-only by design: no `.route(...)`, so OpenAPI generation and MCP tool

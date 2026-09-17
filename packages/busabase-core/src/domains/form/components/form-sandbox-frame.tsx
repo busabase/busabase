@@ -1,3 +1,4 @@
+import { cn } from "kui/utils";
 import { useEffect, useRef } from "react";
 import { useCoreI18n } from "../../../i18n";
 
@@ -66,10 +67,14 @@ export const buildFormSrcDoc = (page: { code?: string }) => {
 };
 
 export function FormSandboxFrame({
+  className,
+  fill = false,
   page,
   onSubmit,
   height = 560,
 }: {
+  className?: string;
+  fill?: boolean;
   page: { code?: string };
   onSubmit: (values: Record<string, unknown>) => void;
   height?: number;
@@ -96,11 +101,15 @@ export function FormSandboxFrame({
 
   return (
     <iframe
-      className="w-full rounded-lg border border-border/60 bg-card"
+      className={cn(
+        "w-full bg-card",
+        fill ? "h-full border-0" : "rounded-lg border border-border/60",
+        className,
+      )}
       title={messages.form.tabForm}
       sandbox="allow-scripts allow-forms"
       srcDoc={buildFormSrcDoc(page)}
-      style={{ height }}
+      style={fill ? undefined : { height }}
       ref={frameRef}
     />
   );

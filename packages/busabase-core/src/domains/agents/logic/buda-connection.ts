@@ -34,6 +34,8 @@ export interface BudaConnectionSummary {
   agentId: string;
   agentName: string;
   ownedByCurrentUser: boolean;
+  /** The credential still uses the pre-multi-agent vault key. */
+  legacy: boolean;
 }
 
 export type BudaConnectionScope = "mine" | "space";
@@ -88,7 +90,9 @@ async function readUsableRow(slug: string) {
     );
   }
   const agentId = getAgentIdFromBudaSessionSlug(slug);
-  return agentId ? rows.find((row) => row.key === connectionKey(agentId)) : undefined;
+  return agentId
+    ? rows.find((row) => parseStored(decodeVaultValue(row.valuePayload)).agentId === agentId)
+    : undefined;
 }
 
 async function readOwnedRow(slug: string) {
@@ -100,7 +104,9 @@ async function readOwnedRow(slug: string) {
     );
   }
   const agentId = getAgentIdFromBudaSessionSlug(slug);
-  return agentId ? rows.find((row) => row.key === connectionKey(agentId)) : undefined;
+  return agentId
+    ? rows.find((row) => parseStored(decodeVaultValue(row.valuePayload)).agentId === agentId)
+    : undefined;
 }
 
 function parseStored(value: string): StoredBudaConnection {
@@ -138,7 +144,7 @@ export async function saveBudaConnection(connection: StoredBudaConnection): Prom
         updatedAt: new Date(),
       })
       .where(eq(busabaseVaultItems.id, target.id));
-    return target.key === LEGACY_CONNECTION_KEY ? "buda" : getBudaSessionSlug(connection.agentId);
+    return getBudaSessionSlug(connection.agentId);
   }
   await database.insert(busabaseVaultItems).values({
     id: generateNanoID("vlt_", 21),
@@ -211,16 +217,17 @@ export async function listBudaConnections(
   for (const row of rows) {
     const connection = parseStored(decodeVaultValue(row.valuePayload));
     const summary = {
-      slug: row.key === LEGACY_CONNECTION_KEY ? "buda" : getBudaSessionSlug(connection.agentId),
+      slug: getBudaSessionSlug(connection.agentId),
       agentId: connection.agentId,
       agentName: connection.agentName,
       ownedByCurrentUser: row.userId === actorId,
+      legacy: row.key === LEGACY_CONNECTION_KEY,
     };
     const current = byAgentId.get(connection.agentId);
     if (
       !current ||
       (summary.ownedByCurrentUser && !current.ownedByCurrentUser) ||
-      (summary.ownedByCurrentUser === current.ownedByCurrentUser && summary.slug === "buda")
+      (summary.ownedByCurrentUser === current.ownedByCurrentUser && summary.legacy)
     ) {
       byAgentId.set(connection.agentId, summary);
     }
@@ -236,10 +243,23 @@ export async function getBudaConnection(slug = "buda"): Promise<BudaConnection |
     connection = await refresh(row.id, connection);
   }
   return {
-    slug: row.key === LEGACY_CONNECTION_KEY ? "buda" : getBudaSessionSlug(connection.agentId),
+    slug: getBudaSessionSlug(connection.agentId),
     accessToken: connection.accessToken,
     agentId: connection.agentId,
     agentName: connection.agentName,
+  };
+}
+
+/** Resolve only the caller-owned credential, including its legacy storage identity. */
+export async function getOwnedBudaConnectionIdentity(
+  slug: string,
+): Promise<{ canonicalSlug: string; legacy: boolean } | null> {
+  const row = await readOwnedRow(slug);
+  if (!row) return null;
+  const connection = parseStored(decodeVaultValue(row.valuePayload));
+  return {
+    canonicalSlug: getBudaSessionSlug(connection.agentId),
+    legacy: row.key === LEGACY_CONNECTION_KEY,
   };
 }
 

@@ -1,13 +1,13 @@
 "use client";
 
 // busabase-core's runtime i18n seam for the shared dashboard. The dashboard
-// component lives here, but each host app generates its own typesafe-i18n `LL`,
+// component lives here, but each host app owns its own ts7-i18n `LL`,
 // so the host injects the active locale via `CoreI18nProvider` and the
 // dashboard reads strings with `useCoreI18n()`. The `Core*` names are deliberate:
 // in Busabase Cloud this provider sits alongside the cloud app's own i18n
 // context (`useI18nContext`), so the shared-package source stays obvious.
 // Hosts can also import `coreMessagesEn` / `coreMessagesByLocale`
-// into their own typesafe-i18n catalogs to manage these strings.
+// into their own typed catalogs to manage these strings.
 
 import { type iString, iStringParse } from "openlib/i18n/i-string";
 import { createContext, type ReactNode, useCallback, useContext } from "react";

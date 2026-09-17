@@ -1,8 +1,9 @@
 import type { TemplateCardVO } from "busabase-contract/domains/templates/types";
 import { Badge } from "kui/badge";
 import { ExternalLink, MessageSquare, PackageOpen } from "lucide-react";
-import { iStringParse, type LocaleType } from "openlib/i18n/i-string";
+import type { LocaleType } from "openlib/i18n/i-string";
 import type { ReactNode } from "react";
+import { templateTextForLocale } from "../utils/template-locale";
 import { TemplateScreenshotShowcase } from "./template-screenshot-showcase";
 import { TemplateVideoPreview } from "./template-video-preview";
 
@@ -72,6 +73,7 @@ interface TemplateDetailContentProps {
   /** See the identical note on `TemplateCardSummaryProps` — a prop, not a
    * hook, because this renders in a Server Component tree too. */
   descriptionLocale?: LocaleType;
+  preferEnglishFallback?: boolean;
 }
 
 /**
@@ -83,10 +85,11 @@ export function TemplateDetailContent({
   labels = defaultLabels,
   actions,
   descriptionLocale = "en",
+  preferEnglishFallback = false,
 }: TemplateDetailContentProps) {
   const { stats } = template;
   const title = template.displayName
-    ? iStringParse(template.displayName, descriptionLocale)
+    ? templateTextForLocale(template.displayName, descriptionLocale, preferEnglishFallback)
     : template.name;
   const contents = [
     [labels.bases, stats.bases],
@@ -115,7 +118,7 @@ export function TemplateDetailContent({
             ) : null}
           </div>
           <p className="text-sm leading-6 text-muted-foreground">
-            {iStringParse(template.description, descriptionLocale)}
+            {templateTextForLocale(template.description, descriptionLocale, preferEnglishFallback)}
           </p>
           {template.tags.length > 0 ? (
             <ul className="flex flex-wrap gap-1.5" aria-label={labels.tags}>

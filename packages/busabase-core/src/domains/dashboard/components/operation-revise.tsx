@@ -3,7 +3,8 @@ import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
 import type { ChangeRequestVO, OperationVO } from "busabase-contract/types";
 import { Loader2 } from "lucide-react";
 import { useMemo, useState } from "react";
-import { type CoreI18nMessages, useCoreI18n } from "../../../i18n";
+import { type CoreI18nMessages, useCoreI18n, useCoreLocale } from "../../../i18n";
+import { presentCoreError } from "../../../i18n/localize-error";
 import { getOperationFieldLabel, isLongTextValue } from "./operation-diff";
 
 /**
@@ -197,6 +198,7 @@ export function OperationReviseForm({
   operation: OperationVO;
 }) {
   const messages = useCoreI18n();
+  const locale = useCoreLocale();
   const [entries, setEntries] = useState<PayloadDraftEntry[]>(() =>
     buildPayloadDraft(changeRequest, operation, messages),
   );
@@ -215,7 +217,7 @@ export function OperationReviseForm({
       });
     },
     onError: (error: unknown) => {
-      setFailure(error instanceof Error ? error.message : messages.operationRevise.failed);
+      setFailure(presentCoreError(messages, locale, error, messages.operationRevise.failed));
     },
     onSuccess: async () => {
       setFailure(null);

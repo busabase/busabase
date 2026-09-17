@@ -25,7 +25,7 @@
 // transient "Copied" state) so the two agent-facing dialogs feel like one feature.
 
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "kui/dialog";
+import { Dialog, DialogDescription, DialogHeader, DialogTitle } from "kui/dialog";
 import { useEffect, useState } from "react";
 import { useCoreI18n } from "../../../i18n";
 import type { NodePromptScope } from "../helpers/node-agent-prompts";
@@ -33,6 +33,7 @@ import { useNodeAgentPrompts } from "../hooks/use-node-agent-prompts";
 import { useDashboardOrpc } from "../orpc-context";
 import type { AgentIntegrationTarget } from "./agent-install-panel";
 import { AgentPromptsView } from "./agent-prompts-view";
+import { DialogContent } from "./localized-dialog-content";
 
 /**
  * The space id used to tell the agent which space to target. Falls back to the
@@ -97,22 +98,16 @@ export function NodeAgentPromptsDialog({
    * field capped at 50 prompts x 8 KiB per locale. The list stopped carrying it,
    * so the dialog asks for it, and only while it is open.
    *
-   * `null` means "do not fetch": a field/record/cell-scoped dialog never shows
-   * custom prompts (they extend the WHOLE-NODE scenario tier only — see
-   * `buildNodeAgentPrompts`'s `scope.kind` check), so a request there would be
-   * pure waste. Required rather than optional precisely so that is a decision
-   * each call site states, not something a caller can forget into a silent
-   * fallback to the type defaults.
+   * A non-null prop wins; otherwise the dashboard context supplies the client.
+   * Field/record/cell scopes skip the custom-prompt read regardless of where
+   * the client came from, while keeping that client available for Ask Agent.
    */
   orpc: BusabaseQueryUtils | null;
 }) {
   const messages = useCoreI18n();
-  // Two ways in, because the two callers differ: the node-detail toolbars mount
-  // inside `DashboardOrpcProvider` and let the context supply this, while the
-  // shell's sidebar dialog passes it explicitly. An explicit prop wins; the
-  // context is the fallback. Undefined for a host that never wired oRPC at all
-  // (the chromeless mobile WebView, SSR) — Ask Agent is then simply not
-  // offered, exactly as the shell's other orpc-gated actions behave.
+  // Node-detail toolbars use the dashboard context; the shell's sidebar dialog
+  // passes the client explicitly. Hosts with neither keep both Agent actions
+  // and custom-prompt loading unavailable without breaking the prompt viewer.
   const orpcFromContext = useDashboardOrpc();
   const orpc = orpcProp ?? orpcFromContext;
   // Driving an agent is workspace `manage` (it can start arbitrary local code),
@@ -128,9 +123,9 @@ export function NodeAgentPromptsDialog({
     setResolvedSpaceId(resolveSpaceId(spaceId));
   }, [spaceId]);
 
-  // `enabled: open` is the whole point of the fetch living here: closed dialogs
-  // cost nothing, and the request starts the moment one opens rather than riding
-  // along on every sidebar load whether or not anyone ever opens it.
+  // Closed dialogs cost nothing. Custom prompts extend the whole-node scenario
+  // tier only, so scope is the authority for whether this read may run; the
+  // resolved client can still power Ask Agent in a scoped dialog.
   const {
     scenarios,
     capabilities,
@@ -140,7 +135,7 @@ export function NodeAgentPromptsDialog({
     saveCustomPrompts,
     loading: promptsLoading,
   } = useNodeAgentPrompts({
-    enabled: open,
+    enabled: open && (scope === undefined || scope.kind === "node"),
     nodeId,
     nodeName,
     nodeType,
@@ -151,8 +146,11 @@ export function NodeAgentPromptsDialog({
   });
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[85vh] gap-4 overflow-hidden sm:max-w-3xl">
-        <DialogHeader>
+      {/* Match Workspace Settings' roomy modal density: 80vh on mobile and a
+          1020x640 desktop target. The desktop height is capped by the live
+          viewport so short screens still keep the entire shell reachable. */}
+      <DialogContent className="grid h-[80vh] max-h-[calc(100dvh-2rem)] w-[min(96vw,1020px)] min-w-0 grid-rows-[auto_auto_minmax(0,1fr)] gap-2 overflow-hidden p-4 sm:h-[min(640px,calc(100dvh-2rem))] sm:max-w-[1020px] sm:p-5">
+        <DialogHeader className="space-y-1">
           <DialogTitle>
             {messages.agentPrompts.title}
             <span className="ml-2 text-sm font-normal text-muted-foreground">
@@ -162,24 +160,28 @@ export function NodeAgentPromptsDialog({
         </DialogHeader>
         <DialogDescription>{messages.agentPrompts.intro}</DialogDescription>
 
-        <AgentPromptsView
-          agentIntegration={agentIntegration}
-          askAgent={orpc ? { orpc, sessionScopeId: nodeId } : null}
-          capabilities={capabilities}
-          loading={promptsLoading}
-          management={
-            orpc && (!scope || scope.kind === "node")
-              ? {
-                  customPrompts,
-                  canSave: canSaveCustomPrompts,
-                  saving,
-                  save: saveCustomPrompts,
-                }
-              : null
-          }
-          onHandedOff={() => onOpenChange(false)}
-          scenarios={scenarios}
-        />
+        {/* Mobile stacks both panes and scrolls this row; desktop gives the
+            expanded panel the remaining height and lets each pane own overflow. */}
+        <div className="min-h-0 overflow-y-auto sm:overflow-hidden">
+          <AgentPromptsView
+            agentIntegration={agentIntegration}
+            askAgent={orpc ? { orpc, sessionScopeId: nodeId } : null}
+            capabilities={capabilities}
+            loading={promptsLoading}
+            management={
+              orpc && (!scope || scope.kind === "node")
+                ? {
+                    customPrompts,
+                    canSave: canSaveCustomPrompts,
+                    saving,
+                    save: saveCustomPrompts,
+                  }
+                : null
+            }
+            onHandedOff={() => onOpenChange(false)}
+            scenarios={scenarios}
+          />
+        </div>
       </DialogContent>
     </Dialog>
   );

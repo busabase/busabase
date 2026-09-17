@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { NodeType } from "busabase-contract/domains";
 import type { NodeSearchResultVO, NodeVO, SearchResultVO } from "busabase-contract/types";
@@ -10,7 +10,7 @@ import {
 } from "kui/dropdown-menu";
 import { Kbd } from "kui/kbd";
 import { cn } from "kui/utils";
-import { Check, ChevronDown, CornerDownLeft, Search, X } from "lucide-react";
+import { ArrowRight, Check, ChevronDown, CornerDownLeft, Search, X } from "lucide-react";
 import { useAddDemoParam } from "openlib/ui/dashboard";
 import {
   Fragment,
@@ -24,7 +24,8 @@ import {
   useSyncExternalStore,
 } from "react";
 import { useLocation, useSearch } from "wouter";
-import { useCoreI18n } from "../../../i18n";
+import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
+import { presentCoreError } from "../../../i18n/localize-error";
 import {
   fuzzyMatchKnownNodes,
   type KnownNode,
@@ -36,7 +37,12 @@ import {
 import { mergeSearchIntoHref } from "../helpers/link-search";
 import { NodeAvatar } from "../helpers/node-icons";
 import { filterNodeListByQuery } from "../helpers/node-list-search";
-import { normalizeSearchText, searchKindIcon } from "../helpers/search";
+import {
+  highlightSearchText,
+  normalizeSearchText,
+  searchKindIcon,
+  searchSnippetText,
+} from "../helpers/search";
 import { EMPTY_SEARCH_PAGE_STATE, searchPageHref } from "../helpers/search-page";
 import {
   KIND_FOR_SECTION,
@@ -56,6 +62,7 @@ const NODE_TYPE_FOR_SECTION = { skills: "skill", apps: "airapp" } as const satis
   "skills" | "apps",
   NodeType
 >;
+const QUICK_RESULT_LIMIT = 6;
 
 /**
  * One shared shape every result row renders from, regardless of which tab
@@ -82,6 +89,7 @@ interface DisplayResult {
    * something has to check this rather than assume every result is pinnable.
    */
   nodeType?: NodeType;
+  resultKind: SearchResultVO["kind"];
 }
 
 const searchResultToDisplay = (result: SearchResultVO): DisplayResult => ({
@@ -92,6 +100,7 @@ const searchResultToDisplay = (result: SearchResultVO): DisplayResult => ({
   body: result.body || undefined,
   eyebrow: result.eyebrow || undefined,
   icon: searchKindIcon[result.kind],
+  resultKind: result.kind,
 });
 
 const knownNodeToDisplay = (node: KnownNode): DisplayResult => ({
@@ -102,6 +111,7 @@ const knownNodeToDisplay = (node: KnownNode): DisplayResult => ({
   eyebrow: node.slug,
   icon: <NodeAvatar node={node} />,
   nodeType: node.type,
+  resultKind: "node",
 });
 
 const nodeVOToDisplay = (node: NodeVO): DisplayResult => ({
@@ -113,6 +123,7 @@ const nodeVOToDisplay = (node: NodeVO): DisplayResult => ({
   eyebrow: node.slug,
   icon: <NodeAvatar node={node} />,
   nodeType: node.type,
+  resultKind: "node",
 });
 
 const nodeVOToKnownNode = (node: NodeVO): KnownNode => ({
@@ -134,12 +145,14 @@ const nodeSearchResultToKnownNode = (result: NodeSearchResultVO): KnownNode => (
 });
 
 export function SearchDialog({
+  focusReady = true,
   nodeCache,
   orpc,
   onClose,
   open,
   onSelect,
 }: {
+  focusReady?: boolean;
   nodeCache: KnownNodeCache;
   orpc: BusabaseQueryUtils;
   onClose: () => void;
@@ -154,19 +167,30 @@ export function SearchDialog({
   onSelect?: (result: DisplayResult) => void;
 }) {
   const messages = useCoreI18n();
+  const locale = useCoreLocale();
   // Anonymous (public-link) visitors get a narrower tab set — see
   // `searchTabsFor`. Read from context, which defaults to "member", so every
   // host that never opts in is unaffected.
   const isAnonymousVisitor = useIsAnonymousVisitor();
   const visibleFilters = useMemo(() => searchFiltersFor(isAnonymousVisitor), [isAnonymousVisitor]);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const dialogRef = useRef<HTMLElement | null>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
+  const wasOpenRef = useRef(false);
+  const searchSessionRef = useRef<{
+    key: string;
+    id: string;
+    startedAt: number;
+    reported: boolean;
+  } | null>(null);
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [filter, setFilter] = useState<SearchFilterKey>("all");
   const [highlightedIndex, setHighlightedIndex] = useState(0);
-  // Pagination grows the page size (offset stays 0) so React Query owns the full list.
-  const [limit, setLimit] = useState(20);
-  const hasQuery = normalizeSearchText(query).length > 0;
+  const [showLoading, setShowLoading] = useState(false);
+  const [isSlow, setIsSlow] = useState(false);
+  const normalizedQuery = normalizeSearchText(query);
+  const hasQuery = normalizedQuery.length > 0;
   /**
    * The sections on screen for this filter + query state. Everything below
    * gates its request on membership here, so a section that is not rendered
@@ -185,12 +209,51 @@ export function SearchDialog({
   const [, setLocation] = useLocation();
   const currentSearch = useSearch();
   const addDemoParam = useAddDemoParam();
+  const reportSearchMetric = useMutation({
+    ...orpc.searchMetrics.report.mutationOptions(),
+    onError: () => undefined,
+  });
+
+  const ensureSearchSession = useCallback(() => {
+    const key = `${filter}\0${normalizedQuery}`;
+    if (searchSessionRef.current?.key !== key) {
+      searchSessionRef.current = {
+        key,
+        id: globalThis.crypto.randomUUID(),
+        startedAt: Date.now(),
+        reported: false,
+      };
+    }
+    return searchSessionRef.current;
+  }, [filter, normalizedQuery]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || !hasQuery) {
+      searchSessionRef.current = null;
+      return;
+    }
+    ensureSearchSession();
+  }, [ensureSearchSession, hasQuery, open]);
+
+  useEffect(() => {
+    if (open && !wasOpenRef.current) {
+      openerRef.current = document.activeElement as HTMLElement | null;
+      wasOpenRef.current = true;
+      return;
+    }
+    if (!open && wasOpenRef.current) {
+      wasOpenRef.current = false;
+      const opener = openerRef.current;
+      openerRef.current = null;
+      window.requestAnimationFrame(() => opener?.focus());
+    }
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || !focusReady) return;
     const frame = window.requestAnimationFrame(() => inputRef.current?.focus());
     return () => window.cancelAnimationFrame(frame);
-  }, [open]);
+  }, [open, focusReady]);
 
   // Debounce typing into the query that actually drives backend requests
   // (the content-search tabs' `search` call, and the Recent tab's
@@ -200,9 +263,8 @@ export function SearchDialog({
   useEffect(() => {
     const timer = window.setTimeout(() => {
       setDebouncedQuery(query.trim());
-      setLimit(20);
       setHighlightedIndex(0);
-    }, 180);
+    }, 200);
     return () => window.clearTimeout(timer);
   }, [query]);
 
@@ -213,7 +275,6 @@ export function SearchDialog({
       setDebouncedQuery("");
       setFilter("all");
       setHighlightedIndex(0);
-      setLimit(20);
     }
   }, [open]);
 
@@ -249,11 +310,15 @@ export function SearchDialog({
   // explicit calls cannot drift into that shape.
   const scopedInput = (source: "records" | "files" | "nodes" | "names") => ({
     query: debouncedQuery,
-    limit,
+    limit: QUICK_RESULT_LIMIT,
+    mode: "quick" as const,
+    surface: "quick" as const,
     offset: 0,
     sources: [source] as [typeof source],
   });
   const canSearch = open && debouncedQuery.length > 0;
+  const normalizedDebouncedQuery = normalizeSearchText(debouncedQuery);
+  const isDebouncedQueryCurrent = normalizedDebouncedQuery === normalizedQuery;
 
   // `changeRequests` deliberately has no request of its own: the change
   // requests `search` returns are the ones the matching RECORDS came from, so
@@ -274,10 +339,14 @@ export function SearchDialog({
     ...orpc.search.queryOptions({ input: scopedInput("names") }),
     enabled: canSearch && shows("bases"),
   });
-  const contentQueries = [recordsQuery, filesQuery, docContentQuery, baseNamesQuery];
+  const contentQueries = useMemo(
+    () => [recordsQuery, filesQuery, docContentQuery, baseNamesQuery],
+    [recordsQuery, filesQuery, docContentQuery, baseNamesQuery],
+  );
 
   const rowsForSection = useCallback(
     (section: SearchSectionKey): DisplayResult[] => {
+      if (!isDebouncedQueryCurrent) return [];
       const kind = KIND_FOR_SECTION[section];
       if (!kind) return [];
       const source =
@@ -292,16 +361,19 @@ export function SearchDialog({
         .filter((result) => result.kind === kind)
         .map(searchResultToDisplay);
     },
-    [recordsQuery, filesQuery, docContentQuery, baseNamesQuery],
+    [isDebouncedQueryCurrent, recordsQuery, filesQuery, docContentQuery, baseNamesQuery],
   );
 
   // Node content is indexed only up to a cap, so a thin or empty result is not
   // proof of absence. Surfaced in the empty state rather than swallowed —
   // otherwise "no matches" quietly means two different things.
-  const contentTruncated = contentQueries.some((q) => q.data?.contentTruncated ?? false);
-  const isSearching = contentQueries.some((q) => q.isFetching);
-  const searchError =
-    contentQueries.find((q) => q.isError)?.error instanceof Error
+  const contentTruncated =
+    isDebouncedQueryCurrent && contentQueries.some((q) => q.data?.contentTruncated ?? false);
+  const isSearching =
+    (hasQuery && !isDebouncedQueryCurrent) || contentQueries.some((q) => q.isFetching);
+  const searchError = !isDebouncedQueryCurrent
+    ? null
+    : contentQueries.find((q) => q.isError)?.error instanceof Error
       ? (contentQueries.find((q) => q.isError)?.error as Error).message
       : contentQueries.some((q) => q.isError)
         ? messages.search.failed
@@ -349,8 +421,6 @@ export function SearchDialog({
       debouncedQuery.length > 0 &&
       normalizeSearchText(debouncedQuery) === normalizeSearchText(query),
   });
-  const normalizedDebouncedQuery = normalizeSearchText(debouncedQuery);
-  const isDebouncedQueryCurrent = normalizedDebouncedQuery === normalizeSearchText(query);
   const recentNetworkResults = isDebouncedQueryCurrent ? (nodeSearchByNameQuery.data ?? []) : [];
   // Local rows first (already on screen — never reordered under the user),
   // server rows the cache had not seen appended below. This list, not
@@ -376,9 +446,7 @@ export function SearchDialog({
     recentWantsNetworkSearch && (!isDebouncedQueryCurrent || nodeSearchByNameQuery.isFetching);
   const recentSearchError =
     isDebouncedQueryCurrent && nodeSearchByNameQuery.isError
-      ? nodeSearchByNameQuery.error instanceof Error
-        ? nodeSearchByNameQuery.error.message
-        : messages.search.failed
+      ? presentCoreError(messages, locale, nodeSearchByNameQuery.error, messages.search.failed)
       : null;
 
   // Fold every `nodes.searchByName` hit back into the persisted cache — the
@@ -548,7 +616,11 @@ export function SearchDialog({
    * what Enter opens.
    */
   const visibleResults: DisplayResult[] = useMemo(
-    () => populatedSections.flatMap((section) => section.rows),
+    () => populatedSections.flatMap((section) => section.rows).slice(0, QUICK_RESULT_LIMIT),
+    [populatedSections],
+  );
+  const availableResultCount = useMemo(
+    () => populatedSections.reduce((count, section) => count + section.rows.length, 0),
     [populatedSections],
   );
 
@@ -581,23 +653,6 @@ export function SearchDialog({
     setHighlightedIndex((i) => Math.min(i, visibleResults.length - 1));
   }, [visibleResults.length]);
 
-  // Tab still cycles the narrowing control, now that the control is a filter
-  // rather than a tab strip — the keyboard habit survives the redesign.
-  // Cycles the VISIBLE filters only: an anonymous visitor has fewer, and
-  // landing on one they cannot see would be a dead end.
-  const switchFilter = useCallback(
-    (direction: 1 | -1) => {
-      setFilter((current) => {
-        const idx = visibleFilters.indexOf(current);
-        const from = idx === -1 ? 0 : idx;
-        return visibleFilters[
-          (from + direction + visibleFilters.length) % visibleFilters.length
-        ] as SearchFilterKey;
-      });
-    },
-    [visibleFilters],
-  );
-
   // ONE shared selection path for BOTH keyboard Enter and mouse click (fixes
   // the bug where Enter built a synthetic anchor from the raw `href`,
   // skipping the query-string merge the mouse-click path applied): resolve
@@ -606,6 +661,16 @@ export function SearchDialog({
   // after their data loads successfully.
   const select = useCallback(
     (result: DisplayResult) => {
+      if (hasQuery) {
+        const session = ensureSearchSession();
+        reportSearchMetric.mutate({
+          event: "result_click",
+          sessionId: session.id,
+          surface: "quick",
+          position: Math.max(1, visibleResults.findIndex((row) => row.key === result.key) + 1),
+          resultKind: result.resultKind,
+        });
+      }
       onClose();
       // Both the Enter key and the mouse funnel through here, so overriding
       // this one function is enough to redirect every selection path — that
@@ -616,7 +681,17 @@ export function SearchDialog({
       }
       setLocation(addDemoParam(mergeSearchIntoHref(result.href, currentSearch)));
     },
-    [onClose, onSelect, setLocation, addDemoParam, currentSearch],
+    [
+      onClose,
+      onSelect,
+      setLocation,
+      addDemoParam,
+      currentSearch,
+      reportSearchMetric,
+      visibleResults,
+      ensureSearchSession,
+      hasQuery,
+    ],
   );
 
   const handleKeyDown = useCallback(
@@ -627,10 +702,27 @@ export function SearchDialog({
         return;
       }
       if (event.key === "Tab") {
-        event.preventDefault();
-        switchFilter(event.shiftKey ? -1 : 1);
+        const focusable = Array.from(
+          dialogRef.current?.querySelectorAll<HTMLElement>(
+            'button:not([tabindex="-1"]), input, a[href], [tabindex]:not([tabindex="-1"])',
+          ) ?? [],
+        ).filter(
+          (element) => !element.hasAttribute("disabled") && element.getClientRects().length > 0,
+        );
+        const first = focusable[0];
+        const last = focusable.at(-1);
+        if (first && last) {
+          if (event.shiftKey && event.target === first) {
+            event.preventDefault();
+            last.focus();
+          } else if (!event.shiftKey && event.target === last) {
+            event.preventDefault();
+            first.focus();
+          }
+        }
         return;
       }
+      if (event.target !== inputRef.current) return;
       if (event.key === "ArrowDown") {
         event.preventDefault();
         setHighlightedIndex((i) =>
@@ -653,20 +745,62 @@ export function SearchDialog({
         }
       }
     },
-    [onClose, switchFilter, visibleResults, highlightedIndex, select],
+    [onClose, visibleResults, highlightedIndex, select],
   );
 
-  // Grows every scoped request's page size at once. Per-section "load more"
-  // would be better and is deliberately not attempted here: each section would
-  // need its own `limit`, which changes the flat list's length from four
-  // independent places and is exactly where an off-by-one puts `Enter` on the
-  // wrong row. One shared page size keeps that invariant trivial.
-  const canLoadMore = [recordsQuery, filesQuery, docContentQuery, baseNamesQuery].some(
-    (q) => q.data?.hasMore ?? false,
-  );
-  const loadMore = useCallback(() => {
-    setLimit((current) => current + 20);
-  }, []);
+  const quickSearchPending =
+    isSearching ||
+    recentIsSearching ||
+    (shows("apps") && appsQuery.isPending) ||
+    (shows("skills") && skillsQuery.isPending);
+
+  useEffect(() => {
+    setShowLoading(false);
+    setIsSlow(false);
+    if (!normalizedQuery || !quickSearchPending || visibleResults.length > 0) return;
+    const loadingTimer = window.setTimeout(() => setShowLoading(true), 500);
+    const slowTimer = window.setTimeout(() => setIsSlow(true), 1_000);
+    return () => {
+      window.clearTimeout(loadingTimer);
+      window.clearTimeout(slowTimer);
+    };
+  }, [normalizedQuery, quickSearchPending, visibleResults.length]);
+
+  useEffect(() => {
+    const hasSearchError =
+      contentQueries.some((queryResult) => queryResult.isError) ||
+      nodeSearchByNameQuery.isError ||
+      skillsQuery.isError ||
+      appsQuery.isError;
+    if (!open || !hasQuery || !isDebouncedQueryCurrent || quickSearchPending || hasSearchError)
+      return;
+    const session = ensureSearchSession();
+    if (session.reported) return;
+    session.reported = true;
+    reportSearchMetric.mutate({
+      event: "results_shown",
+      sessionId: session.id,
+      surface: "quick",
+      resultCount: visibleResults.length,
+      durationMs: Math.min(120_000, Date.now() - session.startedAt),
+      hasMore:
+        availableResultCount > QUICK_RESULT_LIMIT ||
+        contentQueries.some((queryResult) => queryResult.data?.hasMore ?? false),
+    });
+  }, [
+    open,
+    hasQuery,
+    isDebouncedQueryCurrent,
+    quickSearchPending,
+    ensureSearchSession,
+    reportSearchMetric,
+    visibleResults.length,
+    availableResultCount,
+    contentQueries,
+    nodeSearchByNameQuery.isError,
+    skillsQuery.isError,
+    appsQuery.isError,
+  ]);
 
   if (!open) {
     return null;
@@ -677,11 +811,25 @@ export function SearchDialog({
     : null;
   const showLoadingIndicator =
     visibleResults.length === 0 &&
+    showLoading &&
     (isSearching ||
       recentIsSearching ||
       (shows("apps") && appsQuery.isPending) ||
       (shows("skills") && skillsQuery.isPending));
   const visibleError = recentSearchError ?? searchError ?? nodeListError;
+  const retrySearch = () => {
+    for (const activeQuery of [
+      recordsQuery,
+      filesQuery,
+      docContentQuery,
+      baseNamesQuery,
+      nodeSearchByNameQuery,
+      skillsQuery,
+      appsQuery,
+    ]) {
+      if (activeQuery.isError) void activeQuery.refetch();
+    }
+  };
 
   // Every filter except the content-only ones has something to show before a
   // single character is typed — the things you own, not things you matched.
@@ -696,9 +844,23 @@ export function SearchDialog({
         title: messages.search.noMatchesTitle,
         body: contentTruncated ? messages.search.partialContentBody : messages.search.noMatchesBody,
       };
+  const statusMessage = visibleError
+    ? messages.search.failed
+    : quickSearchPending && visibleResults.length === 0
+      ? isSlow
+        ? messages.search.quickSearchSlow
+        : showLoading
+          ? messages.search.searching
+          : ""
+      : hasQuery && visibleResults.length === 0
+        ? messages.search.noMatchesTitle
+        : visibleResults.length > 0
+          ? fmt(messages.searchPage.resultCount, { count: String(visibleResults.length) })
+          : "";
 
   return (
     <div
+      aria-label={messages.nav.search}
       aria-modal="true"
       className="fixed inset-0 z-50 flex items-start justify-center bg-black/20 px-3 pt-[12vh] backdrop-blur-[1px]"
       role="dialog"
@@ -708,31 +870,87 @@ export function SearchDialog({
         aria-label={messages.search.closeSearch}
         className="absolute inset-0 cursor-default"
         onClick={onClose}
+        tabIndex={-1}
         type="button"
       />
-      <section className="relative flex max-h-[72vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-[var(--shadow-linear-zen-hover,0_8px_32px_-8px_rgba(0,0,0,0.18))]">
+      <section
+        className="relative flex max-h-[72vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-[var(--shadow-linear-zen-hover,0_8px_32px_-8px_rgba(0,0,0,0.18))]"
+        ref={dialogRef}
+      >
         {/* Search input row */}
-        <label className="flex items-center gap-3 border-b px-4">
-          <Search className="size-[18px] shrink-0 text-muted-foreground" />
+        <div className="flex items-center gap-3 border-b px-4">
+          <Search aria-hidden className="size-[18px] shrink-0 text-muted-foreground" />
           <input
+            aria-activedescendant={
+              visibleResults.length > 0 ? `busabase-search-result-${highlightedIndex}` : undefined
+            }
+            aria-autocomplete="list"
+            aria-controls={visibleResults.length > 0 ? "busabase-search-results" : undefined}
+            aria-expanded={visibleResults.length > 0}
+            aria-haspopup="listbox"
+            aria-label={messages.nav.search}
             autoComplete="off"
-            className="h-14 min-w-0 flex-1 bg-transparent font-light text-base text-foreground outline-none placeholder:text-muted-foreground"
+            className="h-14 min-w-0 flex-1 bg-transparent font-light text-base text-foreground outline-none placeholder:text-muted-foreground [&::-webkit-search-cancel-button]:hidden"
             id="busabase-dashboard-search"
             onChange={(event) => setQuery(event.target.value)}
             placeholder={messages.search.placeholder}
             ref={inputRef}
+            role="combobox"
             type="search"
             value={query}
           />
           <button
-            aria-label={messages.search.closeSearch}
+            aria-label={hasQuery ? messages.search.clearSearch : messages.search.closeSearch}
             className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-            onClick={onClose}
+            onClick={() => {
+              if (hasQuery) {
+                setQuery("");
+                setHighlightedIndex(0);
+                inputRef.current?.focus();
+              } else {
+                onClose();
+              }
+            }}
             type="button"
           >
             <X size={15} />
           </button>
-        </label>
+        </div>
+
+        <div aria-atomic="true" aria-live="polite" className="sr-only">
+          {statusMessage}
+        </div>
+
+        {query.trim() ? (
+          <button
+            className="flex h-11 w-full shrink-0 items-center gap-3 border-b bg-muted/30 px-4 text-left font-medium text-sm text-foreground transition-colors hover:bg-muted focus-visible:bg-muted focus-visible:outline-none"
+            onClick={() => {
+              const session = ensureSearchSession();
+              reportSearchMetric.mutate({
+                event: "quick_to_advanced",
+                sessionId: session.id,
+                surface: "quick",
+                resultCount: visibleResults.length,
+              });
+              onClose();
+              setLocation(
+                addDemoParam(
+                  mergeSearchIntoHref(
+                    searchPageHref({ ...EMPTY_SEARCH_PAGE_STATE, query }),
+                    currentSearch,
+                  ),
+                ),
+              );
+            }}
+            type="button"
+          >
+            <Search className="size-4 shrink-0 text-muted-foreground" />
+            <span className="min-w-0 flex-1 truncate">
+              {isSlow ? messages.search.continueAdvanced : messages.search.advancedSearch}
+            </span>
+            <ArrowRight className="size-4 shrink-0 text-muted-foreground" />
+          </button>
+        ) : null}
 
         {/* One filter control where seven tabs used to be. Notion's search
             overlay narrows the same way — a control, not a mode — which is what
@@ -785,52 +1003,56 @@ export function SearchDialog({
           {showsResultsWithoutQuery || hasQuery ? (
             <div>
               {visibleError ? (
-                <div className="mb-3 rounded-lg border border-rejected/35 bg-rejected/17 px-3 py-2 text-rejected-strong text-sm">
-                  {visibleError}
+                <div className="mb-3 flex items-center justify-between gap-3 rounded-lg border border-rejected/35 bg-rejected/17 px-3 py-2 text-rejected-strong text-sm">
+                  <span>{visibleError}</span>
+                  <button
+                    className="shrink-0 rounded-md px-2 py-1 font-medium hover:bg-rejected/10"
+                    onClick={retrySearch}
+                    type="button"
+                  >
+                    {messages.search.retry}
+                  </button>
                 </div>
               ) : null}
               {visibleError && visibleResults.length === 0 ? null : showLoadingIndicator ? (
                 <div className="px-1 py-10 text-center text-muted-foreground text-sm">
-                  {hasQuery ? messages.search.searching : messages.search.searchingNodes}
+                  {isSlow
+                    ? messages.search.quickSearchSlow
+                    : hasQuery
+                      ? messages.search.searching
+                      : messages.search.searchingNodes}
                 </div>
+              ) : quickSearchPending && visibleResults.length === 0 ? (
+                <div className="min-h-20" />
               ) : visibleResults.length > 0 ? (
-                <>
-                  <div className="space-y-0.5">
-                    {visibleResults.map((result, index) => {
-                      const sectionTitle = sectionTitleAt(index);
-                      return (
-                        <Fragment key={result.key}>
-                          {sectionTitle ? (
-                            <div
-                              className={cn(
-                                "px-2.5 pb-1 font-medium text-[11px] text-muted-foreground uppercase tracking-wide",
-                                index === 0 ? "pt-0.5" : "pt-3",
-                              )}
-                            >
-                              {sectionTitle}
-                            </div>
-                          ) : null}
-                          <SearchResultRow
-                            highlighted={index === highlightedIndex}
-                            onHighlight={() => setHighlightedIndex(index)}
-                            onSelect={() => select(result)}
-                            result={result}
-                          />
-                        </Fragment>
-                      );
-                    })}
-                  </div>
-                  {canLoadMore ? (
-                    <button
-                      className="mt-3 rounded-lg border bg-card px-3 py-2 font-medium text-sm transition-colors hover:bg-accent/40 disabled:opacity-60"
-                      disabled={isSearching}
-                      onClick={loadMore}
-                      type="button"
-                    >
-                      {isSearching ? messages.common.loadingPlain : messages.search.loadMore}
-                    </button>
-                  ) : null}
-                </>
+                <div className="space-y-0.5" id="busabase-search-results" role="listbox">
+                  {visibleResults.map((result, index) => {
+                    const sectionTitle = sectionTitleAt(index);
+                    return (
+                      <Fragment key={result.key}>
+                        {sectionTitle ? (
+                          <div
+                            className={cn(
+                              "px-2.5 pb-1 font-medium text-[11px] text-muted-foreground uppercase tracking-wide",
+                              index === 0 ? "pt-0.5" : "pt-3",
+                            )}
+                            role="presentation"
+                          >
+                            {sectionTitle}
+                          </div>
+                        ) : null}
+                        <SearchResultRow
+                          highlighted={index === highlightedIndex}
+                          onHighlight={() => setHighlightedIndex(index)}
+                          onSelect={() => select(result)}
+                          optionId={`busabase-search-result-${index}`}
+                          query={query}
+                          result={result}
+                        />
+                      </Fragment>
+                    );
+                  })}
+                </div>
               ) : (
                 <EmptyState body={emptyState.body} title={emptyState.title} />
               )}
@@ -854,26 +1076,6 @@ export function SearchDialog({
               <CornerDownLeft className="size-3" />
             </Kbd>
             <Kbd>Tab</Kbd>
-            {/*
-              Escalation to the full page. Only once something has been typed —
-              with an empty query the page has nothing to show, so offering it
-              would be a link to an empty state.
-
-              Carries the query across so the page opens on the same search
-              rather than making the person type it a second time.
-            */}
-            {query.trim() ? (
-              <button
-                className="text-foreground text-xs underline-offset-2 hover:underline"
-                onClick={() => {
-                  onClose();
-                  setLocation(searchPageHref({ ...EMPTY_SEARCH_PAGE_STATE, query }));
-                }}
-                type="button"
-              >
-                {messages.searchPage.seeAllResults}
-              </button>
-            ) : null}
           </div>
           <Kbd>Esc</Kbd>
         </div>
@@ -886,15 +1088,21 @@ function SearchResultRow({
   highlighted,
   onHighlight,
   onSelect,
+  optionId,
+  query,
   result,
 }: {
   highlighted?: boolean;
   onHighlight?: () => void;
   onSelect: () => void;
+  optionId: string;
+  query: string;
   result: DisplayResult;
 }) {
+  const body = result.body ? searchSnippetText(result.body) : "";
   return (
     <button
+      aria-selected={highlighted}
       className={cn(
         "group flex h-11 w-full items-center gap-3 rounded-lg px-2.5 text-left text-foreground transition-colors",
         highlighted ? "bg-muted" : "hover:bg-muted/60",
@@ -906,8 +1114,11 @@ function SearchResultRow({
       // `hasText: "Pages"` match a different node entirely.
       data-search-result={result.title}
       data-testid="search-result"
+      id={optionId}
       onClick={onSelect}
       onMouseEnter={onHighlight}
+      role="option"
+      tabIndex={-1}
       type="button"
     >
       <span className="flex size-7 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted text-muted-foreground">
@@ -916,13 +1127,13 @@ function SearchResultRow({
       <span className="flex min-w-0 flex-1 items-center gap-2.5">
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[15px] font-normal leading-tight">
-            {result.title}
+            {highlightSearchText(result.title, query)}
           </span>
-          {result.body && (
+          {body ? (
             <span className="mt-0.5 block truncate text-muted-foreground text-xs leading-tight">
-              {result.body}
+              {highlightSearchText(body, query)}
             </span>
-          )}
+          ) : null}
         </span>
         {result.eyebrow && (
           <span className="max-w-32 shrink-0 truncate text-[13px] text-muted-foreground leading-none">

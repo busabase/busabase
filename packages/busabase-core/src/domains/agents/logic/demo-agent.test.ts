@@ -259,6 +259,22 @@ describe("through the demo router", () => {
     const created = await client.agents.sessions.create({ slug: DEMO_AGENT_SLUG });
     expect((await client.agents.sessions.list()).map((s) => s.id)).toContain(created.id);
 
+    await client.agents.sessions.create({ slug: DEMO_AGENT_SLUG });
+    await client.agents.sessions.create({ slug: DEMO_AGENT_SLUG });
+    const firstPage = await client.agents.sessions.listPaged({ slug: DEMO_AGENT_SLUG, limit: 2 });
+    expect(firstPage.items).toHaveLength(2);
+    expect(firstPage.nextCursor).not.toBeNull();
+    const secondPage = await client.agents.sessions.listPaged({
+      slug: DEMO_AGENT_SLUG,
+      limit: 2,
+      cursor: firstPage.nextCursor ?? undefined,
+    });
+    expect(secondPage.items).toHaveLength(1);
+    expect(secondPage.nextCursor).toBeNull();
+    expect([...firstPage.items, ...secondPage.items].map((session) => session.id)).toContain(
+      created.id,
+    );
+
     await client.agents.sessions.prompt({ sessionId: created.id, text: "What would you change?" });
 
     const controller = new AbortController();

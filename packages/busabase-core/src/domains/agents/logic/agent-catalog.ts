@@ -136,7 +136,17 @@ function isCloudHost(): boolean {
 const CLOUD_LOCAL_AGENT_REASON =
   "Local agents run on your own machine, not on Busabase Cloud. Install the Busabase desktop app, or connect your machine via Local↔Cloud Tunnel, to use this agent.";
 
-function localBudaConfig(): { token?: string; agentId?: string } {
+/**
+ * The env-fallback path for Buda: `BUDA_API_KEY` + `BUDA_AGENT_ID` let OSS/desktop
+ * (and a tunnel-forwarded Cloud request, which runs this same code on the user's
+ * own machine — see `isCloudHost()`) reach a Buda agent with no vault row at all,
+ * e.g. a fixture-configured agent in a dedicated ACP E2E run.
+ *
+ * Exported so other agent-domain logic (`agent-connection-list.ts`) can recognize
+ * this same agent as connected without re-reading `process.env` itself — never
+ * log or forward `token` verbatim; it is a bearer credential.
+ */
+export function localBudaConfig(): { token?: string; agentId?: string } {
   return { token: process.env.BUDA_API_KEY, agentId: process.env.BUDA_AGENT_ID };
 }
 
@@ -285,7 +295,11 @@ export async function resolveLaunch(slug: string): Promise<ResolvedLaunch> {
   }
 
   const connection = await getBudaConnection(slug);
-  const localConfig = localBudaConfig();
+  // Env config is a *local* fallback only (see localBudaConfig's doc comment) —
+  // a Cloud actor must never resolve through it just because the shared server
+  // process happens to have BUDA_API_KEY/BUDA_AGENT_ID set. Same gate as
+  // isCloudHost() everywhere else in this file.
+  const localConfig = isCloudHost() ? {} : localBudaConfig();
   if (!connection && (!localConfig.token || !localConfig.agentId)) {
     throw new Error(
       isCloudHost()
@@ -295,6 +309,8 @@ export async function resolveLaunch(slug: string): Promise<ResolvedLaunch> {
   }
   const agentId = connection?.agentId ?? (localConfig.agentId as string);
   return {
+    // Keep the local environment fallback on its existing catalog identity so
+    // retained sessions and /agents/buda routes continue to resolve.
     slug: connection?.slug ?? spec.slug,
     name: connection?.agentName ?? spec.name,
     transport: spec.transport,

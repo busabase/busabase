@@ -154,9 +154,12 @@ describe("nodeCreateTask agentPrompts", () => {
     ).rejects.toThrow(/duplicate key "log-visit"/);
   });
 
-  // The CLI and the server ship separately: a current caller routinely talks to
-  // a server that predates the dedicated endpoint.
-  it("falls back to the metadata key when the server has no agent-prompts endpoint", async () => {
+  // `agent_prompts` is the only place the server reads prompts from, so a 404
+  // has to surface. This used to fall back to `metadata.agentPrompts`; that is
+  // gone — the migration adding the column backfilled the old key, so a server
+  // old enough to 404 recovers on upgrade, while a 404 from any other cause
+  // used to park the list under a key nothing reads and still report success.
+  it("fails instead of writing to metadata when the server has no agent-prompts endpoint", async () => {
     const create = vi.fn(async () => ({ materialized: true, id: "bas_1", nodeId: "nod_1" }));
     const { client, updateMetadata } = clientFor({ bases: { create } });
     (
@@ -165,18 +168,17 @@ describe("nodeCreateTask agentPrompts", () => {
       Object.assign(new Error("Not Found"), { status: 404 }),
     );
 
-    await nodeCreateTask.execute(client, {
-      type: "base",
-      slug: "visits",
-      name: "Visits",
-      fields: [],
-      agentPrompts: prompts,
-    });
+    await expect(
+      nodeCreateTask.execute(client, {
+        type: "base",
+        slug: "visits",
+        name: "Visits",
+        fields: [],
+        agentPrompts: prompts,
+      }),
+    ).rejects.toThrow(/Not Found/);
 
-    expect(updateMetadata).toHaveBeenCalledWith({
-      nodeId: "nod_1",
-      metadata: { agentPrompts: prompts },
-    });
+    expect(updateMetadata).not.toHaveBeenCalled();
   });
 
   it("does not touch the prompts endpoints when no prompts were given", async () => {

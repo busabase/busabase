@@ -20,6 +20,11 @@ export const recordSchema = z.object({
   status: z.enum(["active", "archived"]),
   createdBy: z.string(),
   createdByUser: userRefSchema.nullable().optional().default(null),
+  // People named by this record's `member` / `created_by` / `updated_by` CELLS,
+  // keyed by user id. Optional + defaulted so an older server that does not send
+  // it decodes to "resolved nobody" instead of failing output validation, and so
+  // clients have one shape to read (see `RecordVO.fieldUsers`).
+  fieldUsers: z.record(z.string(), userRefSchema).optional().default({}),
   archivedAt: z.string().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),

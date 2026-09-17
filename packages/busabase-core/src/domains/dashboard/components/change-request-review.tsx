@@ -4,6 +4,7 @@ import { Check, ChevronRight, GitMerge, Loader2, PencilLine, Sparkles, X } from 
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
+import { isPeopleFieldType } from "../../base/field-types";
 import {
   changeRequestStatusLabel,
   getChangeRequestBrief,
@@ -27,6 +28,7 @@ import { resolveSubmissionIdentity } from "../helpers/source-attribution";
 import { useIsAnonymousVisitor } from "../visitor-context";
 import { SubjectCommentThread } from "./comments";
 import { UserRefButton } from "./identity";
+import { memberUserMap, useSpaceMemberRoster } from "./member-field";
 import { OperationFieldChanges } from "./operation-diff";
 import { isChangeRequestRevisable, OperationReviseForm } from "./operation-revise";
 import {
@@ -156,6 +158,21 @@ export function OperationReviewSection({
   // An anonymous visitor may hold `submit` on a public share (enough to OPEN a
   // change request) but never enough to re-author someone else's operation.
   const canRevise = !readOnly && !isAnonymous && isChangeRequestRevisable(changeRequest);
+  // A proposed `member` value has no record behind it yet, so the diff resolves
+  // people from the REVIEWER's own roster. Fetched only when this operation's
+  // Base actually has a people-typed field and this section is open — a reviewer
+  // reading a doc rename should not trigger a member lookup. One cached call
+  // serves every operation on the page (shared query key).
+  const hasPeopleField = (changeRequest.base?.fields ?? []).some((field) =>
+    isPeopleFieldType(field.type),
+  );
+  const rosterQuery = useSpaceMemberRoster(client, {
+    enabled: open && !isAnonymous && hasPeopleField,
+  });
+  const diffFieldUsers = useMemo(
+    () => memberUserMap(undefined, rosterQuery.data),
+    [rosterQuery.data],
+  );
 
   return (
     <div className="scroll-mt-20 border-b last:border-b-0" id={`op-${operation.id}`}>
@@ -225,7 +242,11 @@ export function OperationReviewSection({
               operation={operation}
             />
           ) : (
-            <OperationFieldChanges changeRequest={changeRequest} operation={operation} />
+            <OperationFieldChanges
+              changeRequest={changeRequest}
+              fieldUsers={diffFieldUsers}
+              operation={operation}
+            />
           )}
           {!isAnonymous ? (
             <div className="mt-4">

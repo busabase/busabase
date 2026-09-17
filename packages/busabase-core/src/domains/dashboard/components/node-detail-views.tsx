@@ -25,9 +25,11 @@ import { SPALink as Link } from "openlib/ui/dashboard";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useLocation, useSearch } from "wouter";
-import { fmt, useCoreI18n } from "../../../i18n";
+import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
+import { presentCoreError } from "../../../i18n/localize-error";
 import { AirAppDetailView } from "../../airapp/components/AirAppDetailView";
 import { AirAppSidePanelPreview } from "../../airapp/components/RunPanel";
+import { buildAssetDownloadUrl } from "../../assets/utils/asset-content-url";
 import { DocEditor } from "../../doc/components";
 import { useDocImageUpload } from "../../doc/hooks/use-doc-image-upload";
 import { isBuiltinDrivePreviewSufficient } from "../../filetree/utils/preview-capability";
@@ -37,13 +39,12 @@ import {
   buildPreviewFileEmbedUrl,
   fileTreeFileName,
   fileTreeParentPath,
-  fileTreeUploadPath,
   inferFileTreeMimeType,
   resolveFileTreePreviewKind,
 } from "../helpers/file-tree-files";
+import { getFileUploadFolderSegments } from "../helpers/file-upload-task";
 import { mergeSearchIntoHref } from "../helpers/link-search";
 import { asNodeDetail } from "../helpers/node-detail";
-import { useFileTreeAssetUpload } from "../hooks/use-file-tree-asset-upload";
 import { useNodeAgentPrompts } from "../hooks/use-node-agent-prompts";
 import { useRegisterTopbarNodeActions } from "../hooks/use-register-topbar-node-actions";
 import { useReportLoadedNode } from "../hooks/use-report-loaded-node";
@@ -54,6 +55,7 @@ import { useIsAnonymousVisitor } from "../visitor-context";
 import { AgentPromptsView } from "./agent-prompts-view";
 import { AssetMediaPreview } from "./assets";
 import { MarkdownFieldPreview } from "./field-preview";
+import { FilePreviewSurface, isFileFullscreenMime } from "./file-preview-surface";
 import {
   buildFileTree,
   collectFolderPaths,
@@ -69,12 +71,14 @@ import {
   FileTreeRenameDialog,
   FileTreeUploadControl,
 } from "./file-tree-file-actions";
+import { useFileUploadTasks } from "./file-upload-tasks";
 import { NodeActionsMenu } from "./node-actions-menu";
 import { NodeAgentPromptsButton } from "./node-agent-prompts-button";
 import { resolveSpaceId } from "./node-agent-prompts-dialog";
 import { NodePinButton, nodeSidePanelTabId } from "./node-pin-button";
 import { NodeSettingsDialog } from "./node-settings-dialog";
 import { NodeShareDialog } from "./node-share-button";
+import { PreviewFullscreenButton, usePreviewFullscreen } from "./preview-fullscreen";
 import { EmptyState } from "./primitives";
 import { FileContentSkeleton, NodeDetailSkeleton } from "./skeletons";
 import { SplitSubmitButton, useWorkspacePermissionLevel } from "./split-submit-button";
@@ -130,6 +134,7 @@ export function FileTreeDetailView({
   labels,
 }: FileTreeDetailViewProps) {
   const messages = useCoreI18n();
+  const locale = useCoreLocale();
   const queryClient = useQueryClient();
   const [, rawSetLocation] = useLocation();
   const currentSearch = useSearch();
@@ -157,9 +162,6 @@ export function FileTreeDetailView({
     | null
   >(null);
   const previewRequestRef = useRef(0);
-  const uploadedAssetsRef = useRef(
-    new Map<string, { assetId: string; displayName: string; mimeType: string }>(),
-  );
   const isAnonymous = useIsAnonymousVisitor();
   const permissionLevel = useWorkspacePermissionLevel();
   const canChangeFiles =
@@ -167,7 +169,7 @@ export function FileTreeDetailView({
     !hideActions &&
     !isAnonymous &&
     hasApiKeyLevel(permissionLevel, "changeRequest");
-  const uploadAsset = useFileTreeAssetUpload(orpc);
+  const uploadTasks = useFileUploadTasks();
 
   const fileTreeQuery = useQuery({
     ...orpc.nodes.get.queryOptions({ input: { nodeId: slug ?? "", type: nodeType } }),
@@ -219,8 +221,20 @@ export function FileTreeDetailView({
     setRemoveTarget(null);
     setBuiltinPreviewPath(null);
     setRemotePreview(null);
-    uploadedAssetsRef.current.clear();
   }, [slug]);
+
+  useEffect(() => {
+    const completed = uploadTasks.lastCompleted;
+    if (!completed?.merged || completed.nodeId !== fileTree?.node.id) return;
+    if (completed.folder) {
+      setExpandedPaths((current) => {
+        const next = new Set(current);
+        for (const segment of getFileUploadFolderSegments(completed.folder)) next.add(segment);
+        return next;
+      });
+    }
+    if (completed.firstPath) setOpenPath(completed.firstPath);
+  }, [fileTree?.node.id, uploadTasks.lastCompleted]);
 
   const fileQuery = useQuery({
     ...orpc.fileTrees.readFile.queryOptions({
@@ -434,57 +448,16 @@ export function FileTreeDetailView({
     );
   };
 
-  const uploadFiles = async (files: File[], folder: string, mode: FileTreeMutationMode) => {
-    const uploaded = [] as Array<{
-      assetId: string;
-      displayName: string;
-      mimeType: string;
-      path: string;
-    }>;
-
-    for (const file of files) {
-      const cacheKey = `${file.name}:${file.size}:${file.lastModified}`;
-      let asset = uploadedAssetsRef.current.get(cacheKey);
-      if (!asset) {
-        const result = await uploadAsset(file);
-        if (!result.assetId) throw new Error(messages.nodeDetail.fileUploadMissingAsset);
-        asset = {
-          assetId: result.assetId,
-          displayName: file.name,
-          mimeType: inferFileTreeMimeType(file.name, file.type),
-        };
-        uploadedAssetsRef.current.set(cacheKey, asset);
-      }
-      uploaded.push({ ...asset, path: fileTreeUploadPath(folder, file.name) });
-    }
-
-    const merged = await submitFileOperations({
-      message:
-        uploaded.length === 1 ? `Upload ${uploaded[0]?.path}` : `Upload ${uploaded.length} files`,
+  const uploadFiles = (files: File[], folder: string, mode: FileTreeMutationMode) => {
+    if (!fileTree) return;
+    uploadTasks.enqueue({
+      files,
+      folder,
       mode,
-      nextPath: uploaded[0]?.path ?? openPath,
-      operations: uploaded.map((file) => ({
-        assetId: file.assetId,
-        displayName: file.displayName,
-        kind: "create",
-        mimeType: file.mimeType,
-        path: file.path,
-      })),
-      successMessage: messages.nodeDetail.filesUploaded.replace("{count}", String(uploaded.length)),
+      nodeId: fileTree.node.id,
+      nodeName: fileTree.node.name,
+      nodeType,
     });
-    if (merged && folder) {
-      setExpandedPaths((current) => {
-        const next = new Set(current);
-        const segments = folder.split("/");
-        for (let index = 1; index <= segments.length; index += 1) {
-          next.add(segments.slice(0, index).join("/"));
-        }
-        return next;
-      });
-    }
-    for (const file of files) {
-      uploadedAssetsRef.current.delete(`${file.name}:${file.size}:${file.lastModified}`);
-    }
   };
 
   const renameFile = async (nextName: string, mode: FileTreeMutationMode) => {
@@ -528,19 +501,20 @@ export function FileTreeDetailView({
     setRemoveTarget(null);
   };
 
-  const downloadFile = async (path: string) => {
+  const downloadFile = (path: string) => {
     try {
-      const current = await readFileForAction(path);
-      if (!current.assetUrl) throw new Error(messages.nodeDetail.fileDownloadFailed);
+      const current = filesByPath.get(path);
+      if (!current?.assetId) throw new Error(messages.nodeDetail.fileDownloadFailed);
       const anchor = document.createElement("a");
-      anchor.href = current.assetUrl;
+      anchor.href = buildAssetDownloadUrl(
+        current.assetId,
+        current.displayName ?? fileTreeFileName(path),
+      );
       anchor.download = current.displayName ?? fileTreeFileName(path);
-      anchor.rel = "noreferrer";
-      anchor.target = "_blank";
       anchor.click();
     } catch (caught) {
       toast.error(
-        caught instanceof Error ? caught.message : messages.nodeDetail.fileDownloadFailed,
+        presentCoreError(messages, locale, caught, messages.nodeDetail.fileDownloadFailed),
       );
     }
   };
@@ -608,7 +582,7 @@ export function FileTreeDetailView({
       setDraft("");
     } catch (caught) {
       setFileActionError(
-        caught instanceof Error ? caught.message : messages.nodeDetail.couldNotSave,
+        presentCoreError(messages, locale, caught, messages.nodeDetail.couldNotSave),
       );
     } finally {
       setBusy(null);
@@ -797,7 +771,7 @@ export function FileTreeDetailView({
                   className="rounded-none border-0 bg-transparent font-sans text-[13px]"
                   expanded={expandedPaths}
                   key={fileTree.node.id}
-                  onDownloadFile={(path) => void downloadFile(path)}
+                  onDownloadFile={downloadFile}
                   onRemoveFile={
                     canChangeFiles && !isEditing
                       ? (path) => setRemoveTarget(filesByPath.get(path) ?? null)
@@ -826,7 +800,7 @@ export function FileTreeDetailView({
             </div>
             {openPath && fileQuery.data && !fileQuery.isError ? (
               <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-                {fileQuery.data.assetUrl ? (
+                {fileQuery.data.assetId ? (
                   <Button
                     asChild
                     className="size-8 text-muted-foreground"
@@ -837,9 +811,10 @@ export function FileTreeDetailView({
                     <a
                       aria-label={messages.nodeDetail.downloadFile}
                       download={fileQuery.data.displayName ?? fileTreeFileName(openPath)}
-                      href={fileQuery.data.assetUrl}
-                      rel="noreferrer"
-                      target="_blank"
+                      href={buildAssetDownloadUrl(
+                        fileQuery.data.assetId,
+                        fileQuery.data.displayName ?? fileTreeFileName(openPath),
+                      )}
                     >
                       <Download aria-hidden className="size-3.5" />
                     </a>
@@ -901,9 +876,12 @@ export function FileTreeDetailView({
               <FileContentSkeleton />
             ) : fileQuery.isError ? (
               <div className="border-border/60 border-b bg-destructive/5 p-4 text-destructive text-sm">
-                {fileQuery.error instanceof Error
-                  ? fileQuery.error.message
-                  : messages.nodeDetail.couldNotReadFile}
+                {presentCoreError(
+                  messages,
+                  locale,
+                  fileQuery.error,
+                  messages.nodeDetail.couldNotReadFile,
+                )}
               </div>
             ) : isEditing ? (
               <textarea
@@ -965,9 +943,9 @@ export function FileTreeDetailView({
                 </div>
               )
             ) : fileQuery.data && fileQuery.data.encoding !== "utf8" ? (
-              <div className="p-5 text-muted-foreground text-sm">
-                {fileQuery.data.assetUrl && previewKind !== "code" ? (
-                  <div className="mb-4 grid max-h-[55vh] place-items-center overflow-hidden rounded-md border bg-muted">
+              fileQuery.data.assetUrl && previewKind !== "code" ? (
+                <div className="p-5">
+                  <div className="grid max-h-[55vh] place-items-center overflow-hidden rounded-md border bg-muted">
                     <AssetMediaPreview
                       mediaClassName="max-h-[55vh] w-full object-contain"
                       mimeType={previewMimeType}
@@ -975,54 +953,12 @@ export function FileTreeDetailView({
                       url={fileQuery.data.assetUrl}
                     />
                   </div>
-                ) : null}
-                <p className="font-medium text-foreground">
-                  {messages.nodeDetail.assetFilePreview}
-                </p>
-                <dl className="mt-4 grid gap-2 font-mono text-xs">
-                  <div className="flex gap-2">
-                    <dt className="shrink-0 text-muted-foreground">
-                      {messages.nodeDetail.fileName}
-                    </dt>
-                    <dd className="min-w-0 truncate">{fileQuery.data.displayName ?? openPath}</dd>
-                  </div>
-                  <div className="flex gap-2">
-                    <dt className="shrink-0 text-muted-foreground">
-                      {messages.nodeDetail.assetId}
-                    </dt>
-                    <dd className="min-w-0 truncate">{fileQuery.data.assetId}</dd>
-                  </div>
-                  {fileQuery.data.assetUrl ? (
-                    <div className="flex gap-2">
-                      <dt className="shrink-0 text-muted-foreground">
-                        {messages.nodeDetail.assetUrl}
-                      </dt>
-                      <dd className="min-w-0 truncate">
-                        <a
-                          className="text-primary underline-offset-2 hover:underline"
-                          href={fileQuery.data.assetUrl}
-                          rel="noreferrer"
-                          target="_blank"
-                        >
-                          {fileQuery.data.assetUrl}
-                        </a>
-                      </dd>
-                    </div>
-                  ) : null}
-                  <div className="flex gap-2">
-                    <dt className="shrink-0 text-muted-foreground">
-                      {messages.nodeDetail.mediaType}
-                    </dt>
-                    <dd className="min-w-0 truncate">{fileQuery.data.mimeType}</dd>
-                  </div>
-                  <div className="flex gap-2">
-                    <dt className="shrink-0 text-muted-foreground">
-                      {messages.nodeDetail.contentHash}
-                    </dt>
-                    <dd className="min-w-0 truncate">{fileQuery.data.contentHash}</dd>
-                  </div>
-                </dl>
-              </div>
+                </div>
+              ) : (
+                <div className="grid h-full min-h-[320px] place-items-center p-8 text-center text-muted-foreground text-sm">
+                  {messages.nodeDetail.filePreviewUnavailable}
+                </div>
+              )
             ) : previewKind === "image" && fileQuery.data?.assetUrl ? (
               // An SVG is both text and an image: it arrives with
               // `encoding: "utf8"`, so it never reaches the binary branch above
@@ -1258,6 +1194,7 @@ export function FileNodeDetailView({
 }: NodeDetailProps & { hideActions?: boolean }) {
   const messages = useCoreI18n();
   const [infoOpen, setInfoOpen] = useState(false);
+  const fullscreenState = usePreviewFullscreen({ syncWithUrl: true });
   const fileQuery = useQuery({
     ...orpc.nodes.get.queryOptions({ input: { nodeId: slug ?? "", type: "file" } }),
     enabled: Boolean(slug),
@@ -1278,6 +1215,11 @@ export function FileNodeDetailView({
           tabId={nodeSidePanelTabId("file", detail.node.id)}
           tabType="file-preview"
           title={detail.node.name}
+        />
+        <PreviewFullscreenButton
+          available={isFileFullscreenMime(detail.asset.mimeType)}
+          fullscreenState={fullscreenState}
+          label={messages.airapp.enterFullscreen}
         />
         <NodeActionsMenu
           nodeId={detail.node.id}
@@ -1310,15 +1252,22 @@ export function FileNodeDetailView({
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-background">
-      {/* Single compact toolbar (identity + info trigger, actions) replaces the
-          old stacked title-block / metadata-sidebar chrome, giving the asset
-          preview maximum space — mirrors AirAppDetailView's header pattern.
-          Description/backing-asset metadata moved into `NodeSettingsDialog`'s
-          Info tab. */}
-      <header className="flex h-12 shrink-0 items-center gap-2 border-border/60 border-b px-3 md:px-4">
-        <div className="flex min-w-0 items-center gap-2">
-          <File className="size-4 shrink-0 text-muted-foreground" />
-          <h1 className="truncate font-medium text-foreground text-sm">{node.name}</h1>
+      <header className="shrink-0 border-border/60 border-b px-4 py-5 md:px-6">
+        <div className="flex min-w-0 items-start gap-2">
+          <File className="mt-1 size-4 shrink-0 text-muted-foreground" />
+          <div className="min-w-0 flex-1">
+            <h1 className="truncate font-semibold text-foreground text-xl leading-7">
+              {node.name}
+            </h1>
+            {node.description ? (
+              <p
+                className="mt-1 line-clamp-2 text-muted-foreground text-sm leading-5 md:line-clamp-1"
+                title={node.description}
+              >
+                {node.description}
+              </p>
+            ) : null}
+          </div>
           <Button
             aria-label={messages.nodeDetail.details}
             className="shrink-0 text-muted-foreground"
@@ -1330,7 +1279,7 @@ export function FileNodeDetailView({
           >
             <Info className="size-3.5" />
           </Button>
-          {infoOpen && (
+          {infoOpen ? (
             <NodeSettingsDialog
               initialTab="info"
               nodeId={node.id}
@@ -1341,19 +1290,16 @@ export function FileNodeDetailView({
               open={infoOpen}
               orpc={orpc}
             />
-          )}
+          ) : null}
         </div>
       </header>
-
-      <div className="min-h-0 flex-1 overflow-auto p-4 md:p-6">
-        <div className="mx-auto grid h-full min-h-[320px] max-w-5xl place-items-center overflow-hidden rounded-md border bg-muted">
-          <AssetMediaPreview
-            mediaClassName="max-h-[65vh] w-full object-contain"
-            mimeType={asset.mimeType}
-            name={asset.name}
-            url={asset.url}
-          />
-        </div>
+      <div className="min-h-0 flex-1">
+        <FilePreviewSurface
+          fullscreenState={fullscreenState}
+          mimeType={asset.mimeType}
+          name={asset.name}
+          url={asset.url}
+        />
       </div>
     </div>
   );
@@ -1361,9 +1307,36 @@ export function FileNodeDetailView({
 
 registerNodeDetail("file", FileNodeDetailView);
 
-function FileSidePanelPreview({ orpc, payload }: SidePanelTabProps) {
+export function FileSidePanelPreview({ orpc, payload }: SidePanelTabProps) {
   const { nodeId } = payload as { nodeId: string };
-  return <FileNodeDetailView hideActions orpc={orpc} slug={nodeId} />;
+  const messages = useCoreI18n();
+  const fullscreenState = usePreviewFullscreen();
+  const fileQuery = useQuery({
+    ...orpc.nodes.get.queryOptions({ input: { nodeId, type: "file" } }),
+    enabled: Boolean(nodeId),
+  });
+  const detail = asNodeDetail(fileQuery.isError ? undefined : fileQuery.data, "file");
+
+  if (!detail) {
+    return fileQuery.isLoading ? (
+      <NodeDetailSkeleton variant="doc" />
+    ) : (
+      <EmptyState
+        title={messages.nodeDetail.fileNotFoundTitle}
+        body={messages.nodeDetail.selectFileNodeBody}
+      />
+    );
+  }
+
+  return (
+    <FilePreviewSurface
+      fullscreenState={fullscreenState}
+      mimeType={detail.asset.mimeType}
+      name={detail.asset.name}
+      showToolbar
+      url={detail.asset.url}
+    />
+  );
 }
 registerSidePanelTab("file-preview", FileSidePanelPreview);
 
@@ -1374,6 +1347,7 @@ export function DocDetailView({
   hideActions = false,
 }: NodeDetailProps & { hideActions?: boolean }) {
   const messages = useCoreI18n();
+  const locale = useCoreLocale();
   const [, rawSetLocation] = useLocation();
   const currentSearch = useSearch();
   const setLocation = useCallback(
@@ -1391,43 +1365,76 @@ export function DocDetailView({
   const [busy, setBusy] = useState<null | "save" | "changeRequest">(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Registered only while NOT editing — mirrors the original ternary where
-  // entering edit mode replaced Edit/Pin/Actions with Cancel/Save controls
-  // (those stay rendered in-page, right next to the editor; see below).
+  // Keep the current mode's actions in the shared topbar. The document body
+  // owns its scroll, so editing controls placed beside the title disappear on
+  // long documents exactly when the user needs to finish editing.
   useRegisterTopbarNodeActions(
-    !isEditing && doc ? (
-      <>
-        <button
-          className="rounded-button border px-3 py-1.5 text-sm hover:bg-muted"
-          onClick={() => {
-            setDraft(doc.body);
-            setError(null);
-            setIsEditing(true);
-          }}
-          type="button"
-        >
-          {messages.common.edit}
-        </button>
-        <NodeAgentPromptsButton
-          orpc={orpc}
-          nodeId={doc.node.id}
-          nodeName={doc.node.name}
-          nodeType="doc"
-        />
-        <NodePinButton
-          payload={{ nodeId: doc.node.id }}
-          tabId={nodeSidePanelTabId("doc", doc.node.id)}
-          tabType="doc-preview"
-          title={doc.node.name}
-        />
-        <NodeActionsMenu
-          nodeId={doc.node.id}
-          nodeName={doc.node.name}
-          nodeSlug={doc.node.slug}
-          nodeType="doc"
-          orpc={orpc}
-        />
-      </>
+    doc ? (
+      isEditing ? (
+        <>
+          <button
+            className="rounded-button px-3 py-1.5 text-muted-foreground text-sm hover:text-foreground disabled:opacity-40"
+            disabled={busy !== null}
+            onClick={() => {
+              setIsEditing(false);
+              setError(null);
+            }}
+            type="button"
+          >
+            {messages.common.cancel}
+          </button>
+          <SplitSubmitButton
+            changeRequestAction={{
+              label: messages.nodeDetail.saveAsChangeRequest,
+              loadingLabel: messages.nodeDetail.saving,
+              onSubmit: saveAsChangeRequest,
+              isLoading: busy === "changeRequest",
+            }}
+            disabled={busy !== null}
+            dropdownPosition="below"
+            hint={messages.common.mergeImmediatelyHint}
+            immediateAction={{
+              label: messages.nodeDetail.save,
+              loadingLabel: messages.nodeDetail.saving,
+              onSubmit: save,
+              isLoading: busy === "save",
+            }}
+          />
+        </>
+      ) : (
+        <>
+          <button
+            className="rounded-button border px-3 py-1.5 text-sm hover:bg-muted"
+            onClick={() => {
+              setDraft(doc.body);
+              setError(null);
+              setIsEditing(true);
+            }}
+            type="button"
+          >
+            {messages.common.edit}
+          </button>
+          <NodeAgentPromptsButton
+            orpc={orpc}
+            nodeId={doc.node.id}
+            nodeName={doc.node.name}
+            nodeType="doc"
+          />
+          <NodePinButton
+            payload={{ nodeId: doc.node.id }}
+            tabId={nodeSidePanelTabId("doc", doc.node.id)}
+            tabType="doc-preview"
+            title={doc.node.name}
+          />
+          <NodeActionsMenu
+            nodeId={doc.node.id}
+            nodeName={doc.node.name}
+            nodeSlug={doc.node.slug}
+            nodeType="doc"
+            orpc={orpc}
+          />
+        </>
+      )
     ) : null,
     !hideActions,
   );
@@ -1461,7 +1468,8 @@ export function DocDetailView({
   // Direct Save: one request. `nodes.updateContent` approves and merges inside the
   // same call when the actor may write, so this used to pay for two extra round
   // trips that re-approved an already-merged change request.
-  const save = async () => {
+  async function save() {
+    if (!doc) return;
     setBusy("save");
     setError(null);
     try {
@@ -1473,14 +1481,15 @@ export function DocDetailView({
       await docQuery.refetch();
       setIsEditing(false);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : messages.nodeDetail.couldNotSave);
+      setError(presentCoreError(messages, locale, caught, messages.nodeDetail.couldNotSave));
     } finally {
       setBusy(null);
     }
-  };
+  }
 
   // Save as Change Request: propose only, then open it for review.
-  const saveAsChangeRequest = async () => {
+  async function saveAsChangeRequest() {
+    if (!doc) return;
     setBusy("changeRequest");
     setError(null);
     try {
@@ -1491,11 +1500,11 @@ export function DocDetailView({
       setLocation(`/inbox/${changeRequest.id}`);
     } catch (caught) {
       setError(
-        caught instanceof Error ? caught.message : messages.nodeDetail.couldNotCreateChangeRequest,
+        presentCoreError(messages, locale, caught, messages.nodeDetail.couldNotCreateChangeRequest),
       );
       setBusy(null);
     }
-  };
+  }
 
   return (
     // Left padding is wider than the right: the Milkdown block-handle (drag/+
@@ -1505,46 +1514,12 @@ export function DocDetailView({
       className="mx-auto flex h-full min-h-0 w-full min-w-0 max-w-5xl flex-col overflow-auto py-10 pr-6 pl-24"
       data-dashboard-scroll="doc-detail"
     >
-      <div className="mb-5 flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <h1 className="truncate font-semibold text-3xl text-foreground tracking-tight">
-            {doc.node.name}
-          </h1>
-          {doc.node.description ? (
-            <p className="mt-1 text-muted-foreground text-sm">{doc.node.description}</p>
-          ) : null}
-        </div>
-        {!hideActions && isEditing ? (
-          <div className="flex shrink-0 items-center gap-2">
-            <button
-              className="rounded-button px-3 py-1.5 text-muted-foreground text-sm hover:text-foreground disabled:opacity-40"
-              disabled={busy !== null}
-              onClick={() => {
-                setIsEditing(false);
-                setError(null);
-              }}
-              type="button"
-            >
-              {messages.common.cancel}
-            </button>
-            <SplitSubmitButton
-              changeRequestAction={{
-                label: messages.nodeDetail.saveAsChangeRequest,
-                loadingLabel: messages.nodeDetail.saving,
-                onSubmit: saveAsChangeRequest,
-                isLoading: busy === "changeRequest",
-              }}
-              disabled={busy !== null}
-              dropdownPosition="below"
-              hint={messages.common.mergeImmediatelyHint}
-              immediateAction={{
-                label: messages.nodeDetail.save,
-                loadingLabel: messages.nodeDetail.saving,
-                onSubmit: save,
-                isLoading: busy === "save",
-              }}
-            />
-          </div>
+      <div className="mb-5 min-w-0">
+        <h1 className="truncate font-semibold text-3xl text-foreground tracking-tight">
+          {doc.node.name}
+        </h1>
+        {doc.node.description ? (
+          <p className="mt-1 text-muted-foreground text-sm">{doc.node.description}</p>
         ) : null}
       </div>
       {error ? <p className="mb-3 text-destructive text-sm">{error}</p> : null}
@@ -1723,6 +1698,7 @@ function FormShareButton({
   orpc: BusabaseQueryUtils;
 }) {
   const messages = useCoreI18n();
+  const locale = useCoreLocale();
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const nodeShareQuery = useQuery(
@@ -1754,13 +1730,14 @@ function FormShareButton({
       ]);
       setOpen(true);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : messages.share.failed);
+      toast.error(presentCoreError(messages, locale, error, messages.share.failed));
     }
   };
 
   return (
     <>
       <Button
+        aria-label={messages.share.title}
         className="h-8 gap-1.5"
         disabled={busy}
         onClick={openShare}
@@ -1768,7 +1745,7 @@ function FormShareButton({
         variant="outline"
       >
         <Share2 className="size-3.5" />
-        {messages.share.title}
+        <span className="hidden sm:inline">{messages.share.title}</span>
       </Button>
       <NodeShareDialog
         nodeId={node.id}
@@ -1784,7 +1761,9 @@ function FormShareButton({
 }
 
 function FormNodeDetailView({ nodes = [], onNodeLoaded, orpc, slug }: NodeDetailProps) {
+  const messages = useCoreI18n();
   const isAnonymous = useIsAnonymousVisitor();
+  const fullscreenState = usePreviewFullscreen({ syncWithUrl: true });
   const nodeQuery = useQuery({
     ...orpc.nodes.get.queryOptions({ input: { nodeId: slug ?? "", type: "form" } }),
     enabled: Boolean(slug && !isAnonymous),
@@ -1809,13 +1788,18 @@ function FormNodeDetailView({ nodes = [], onNodeLoaded, orpc, slug }: NodeDetail
   useRegisterTopbarNodeActions(
     node && !isAnonymous ? (
       <>
-        <NodeAgentPromptsButton orpc={orpc} nodeId={node.id} nodeName={node.name} nodeType="form" />
         <NodePinButton
           payload={{ nodeId: node.id }}
           tabId={nodeSidePanelTabId("form", node.id)}
           tabType="form-preview"
           title={node.name}
         />
+        <PreviewFullscreenButton
+          available={Boolean(form)}
+          fullscreenState={fullscreenState}
+          label={messages.airapp.enterFullscreen}
+        />
+        <NodeAgentPromptsButton orpc={orpc} nodeId={node.id} nodeName={node.name} nodeType="form" />
         {form ? <FormShareButton form={form} node={node} orpc={orpc} /> : null}
         <NodeActionsMenu
           nodeId={node.id}
@@ -1828,7 +1812,14 @@ function FormNodeDetailView({ nodes = [], onNodeLoaded, orpc, slug }: NodeDetail
     ) : null,
   );
 
-  return <FormDetailView orpc={orpc} slug={slug} />;
+  return (
+    <FormDetailView
+      fullscreenState={fullscreenState}
+      node={node ?? undefined}
+      orpc={orpc}
+      slug={slug}
+    />
+  );
 }
 
 registerNodeDetail("form", FormNodeDetailView);
@@ -1837,7 +1828,8 @@ registerNodeDetail("form", FormNodeDetailView);
 // or a slug, so the pinned payload's node id resolves the same form the page does.
 function FormSidePanelPreview({ orpc, payload }: SidePanelTabProps) {
   const { nodeId } = payload as { nodeId: string };
-  return <FormDetailView orpc={orpc} slug={nodeId} />;
+  const fullscreenState = usePreviewFullscreen();
+  return <FormDetailView fullscreenState={fullscreenState} orpc={orpc} previewOnly slug={nodeId} />;
 }
 registerSidePanelTab("form-preview", FormSidePanelPreview);
 

@@ -1,6 +1,12 @@
 import { enhanceRouter, implement, ORPCError, os } from "@orpc/server";
 import { busabaseContract } from "busabase-contract/contract/busabase";
-import { getContextSpaceId, isEmbedVisitor, isPublicVisitor, resolveActorId } from "./context";
+import {
+  getContextSpaceId,
+  isEmbedVisitor,
+  isPublicVisitor,
+  resolveActorId,
+  resolveMemberRoster,
+} from "./context";
 import { getDb } from "./db";
 import { agentsRouter } from "./domains/agents/router";
 import { airappRouter } from "./domains/airapp/router";
@@ -43,6 +49,7 @@ import { readNodeLines } from "./logic/node-content";
 import { getNodeDetail, listNodeAncestorIds } from "./logic/node-detail";
 import { resolveNodeRouteState } from "./logic/node-route-state";
 import { disableNodeShare, getNodeShare, setNodeShare } from "./logic/node-share";
+import { recordSearchInteraction } from "./logic/search-metrics";
 import {
   closeChangeRequest,
   countChangeRequests,
@@ -110,7 +117,15 @@ const busabaseRouterImpl = busabase.router({
   auth: {
     verify: busabase.auth.verify.handler(async () => getAuthInfo()),
   },
+  spaces: {
+    // The roster a `member` field's picker offers. Delegates straight to the
+    // host seam — this engine has no member table of its own.
+    members: busabase.spaces.members.handler(async () => resolveMemberRoster()),
+  },
   search: busabase.search.handler(async ({ input }) => searchBusabase(input)),
+  searchMetrics: {
+    report: busabase.searchMetrics.report.handler(({ input }) => recordSearchInteraction(input)),
+  },
   grep: busabase.grep.handler(async ({ input }) => grepUnified(input)),
   embedLinks: embedLinksRouter,
   nodes: {

@@ -1,32 +1,35 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import type { ApiKeyPermissionLevel } from "busabase-contract/access-control/api-key-level";
+import {
+  type ApiKeyPermissionLevel,
+  hasApiKeyLevel,
+} from "busabase-contract/access-control/api-key-level";
 import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import { type CreatableNodeType, listNodeTypes } from "busabase-contract/domains";
 import { Button } from "kui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "kui/dialog";
+import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "kui/dialog";
 import { Input } from "kui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "kui/tabs";
 import { ArrowRight } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useLocation } from "wouter";
 import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
+import { presentCoreError } from "../../../i18n/localize-error";
 import type { CoreI18nMessages } from "../../../i18n/messages";
+import {
+  FormBaseBindingPicker,
+  type FormBindingDraft,
+  toFormBindings,
+} from "../../form/components/form-base-binding-picker";
 import { TemplateGrid } from "../../templates/components/template-grid";
 import { buildCreateNodePrompts } from "../helpers/node-agent-prompts";
 import { nodeIconForId } from "../helpers/node-icons";
 import { useAttachmentUpload } from "../hooks/use-attachment-upload";
 import type { AgentIntegrationTarget } from "./agent-install-panel";
 import { AgentPromptsView } from "./agent-prompts-view";
+import { DialogContent } from "./localized-dialog-content";
 import { resolveSpaceId } from "./node-agent-prompts-dialog";
 import { SplitSubmitButton } from "./split-submit-button";
 
@@ -179,15 +182,36 @@ export function CreateNodeModal({
   const [slugEdited, setSlugEdited] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // A Form has no meaning without the Base it writes into — `target_base_id` is
+  // NOT NULL — so the tile collects it here and `materializeFormNode` writes the
+  // config row inside the merge. Collecting it was the precondition for the Form
+  // type being offered at all; without it the tile opened to a dead end.
+  const [formBinding, setFormBinding] = useState<FormBindingDraft>({
+    targetBaseId: "",
+    fieldSlugs: [],
+  });
+  // Binding a Form to a Base opens an inbound write funnel into it, so the merge
+  // asserts `manage` on the TARGET Base. Gating only the submit (and not this
+  // hint) would let a cloud `member` fill the whole dialog in and meet a 403.
+  const canBindForm = hasApiKeyLevel(submitPermissionLevel, "manage");
 
   const activeType =
     CREATABLE_TYPES.find((entry) => entry.type === selectedType) ?? CREATABLE_TYPES[0];
   const typeCopy = useTypeCopy();
   const activeTypeName = activeType ? typeCopy(activeType.type).name : messages.nodeDetail.item;
-  // Expanded when the current selection lives in the "More" group, so reopening
-  // the dialog after picking (say) a Whiteboard never hides what is selected.
   const [showAllTypes, setShowAllTypes] = useState(false);
-  const typesExpanded = showAllTypes || UNCOMMON_TYPES.some((entry) => entry.type === selectedType);
+  const selectedUncommonType = UNCOMMON_TYPES.find((entry) => entry.type === selectedType);
+  // A collapsed picker still shows the active uncommon tile, so "Fewer types"
+  // can actually reduce the list without making the current choice disappear.
+  // The selection and its type-specific form stay mounted and untouched.
+  const visibleTypes = showAllTypes
+    ? ORDERED_TYPES
+    : selectedUncommonType
+      ? [...COMMON_TYPES, selectedUncommonType]
+      : COMMON_TYPES;
+  const hiddenUncommonTypeCount = showAllTypes
+    ? 0
+    : UNCOMMON_TYPES.length - (selectedUncommonType ? 1 : 0);
   const uploadAttachment = useAttachmentUpload(apiClient);
 
   // Deliberately NOT filtered by `selectedType`: someone on this tab is here
@@ -229,6 +253,7 @@ export function CreateNodeModal({
     setSlug("");
     setDescription("");
     setSelectedFile(null);
+    setFormBinding({ targetBaseId: "", fieldSlugs: [] });
     setSlugEdited(false);
     setError(null);
   };
@@ -276,6 +301,35 @@ export function CreateNodeModal({
     return { assetId: uploaded.assetId };
   };
 
+  /**
+   * Type-specific CREATE INPUT carried on the `node_create` operation's
+   * `metadata` bag and consumed by that type's materializer at merge time.
+   *
+   * Deliberately part of the one change request rather than a second call the
+   * client chains afterwards: a Form's config row and its node are created in
+   * the same transaction, so a Form proposed for review is configured exactly
+   * like one merged immediately, and a failure can never leave an orphan node
+   * behind.
+   */
+  const buildTypeMetadata = async (): Promise<Record<string, unknown> | undefined> => {
+    if (selectedType === "file") {
+      return uploadFileNodeAsset();
+    }
+    if (selectedType === "form") {
+      if (!formBinding.targetBaseId) {
+        throw new Error(messages.form.targetBaseRequired);
+      }
+      if (formBinding.fieldSlugs.length === 0) {
+        throw new Error(messages.form.collectFieldsRequired);
+      }
+      return {
+        targetBaseId: formBinding.targetBaseId,
+        formBindings: toFormBindings(formBinding),
+      };
+    }
+    return undefined;
+  };
+
   const submitAsChangeRequest = async () => {
     const trimmedName = name.trim();
     const finalSlug = (slugEdited ? slug : toSlug(trimmedName, selectedType)).trim();
@@ -292,7 +346,7 @@ export function CreateNodeModal({
     setSubmitting(true);
     setError(null);
     try {
-      const metadata = await uploadFileNodeAsset();
+      const metadata = await buildTypeMetadata();
       // Explicit `autoMerge: false`: this is the dedicated "propose for review"
       // action — it must always queue a pending CR regardless of the actor's
       // own permission, unlike `submitAndMerge` below.
@@ -308,7 +362,7 @@ export function CreateNodeModal({
       onOpenChange(false);
       onCreated(changeRequest.id, "change-request");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : messages.createNode.couldNotCreate);
+      setError(presentCoreError(messages, locale, caught, messages.createNode.couldNotCreate));
     } finally {
       setSubmitting(false);
     }
@@ -330,7 +384,7 @@ export function CreateNodeModal({
     setSubmitting(true);
     setError(null);
     try {
-      const metadata = await uploadFileNodeAsset();
+      const metadata = await buildTypeMetadata();
       const changeRequest = await apiClient.createNodeChangeRequest({
         autoMerge: true,
         message: fmt(messages.createNode.message, {
@@ -343,14 +397,20 @@ export function CreateNodeModal({
       onOpenChange(false);
       onCreated(changeRequest.id, "merged");
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : messages.createNode.couldNotCreate);
+      setError(presentCoreError(messages, locale, caught, messages.createNode.couldNotCreate));
     } finally {
       setSubmitting(false);
     }
   };
 
   const isDisabled =
-    submitting || name.trim().length === 0 || (selectedType === "file" && !selectedFile);
+    submitting ||
+    name.trim().length === 0 ||
+    (selectedType === "file" && !selectedFile) ||
+    // Same shape as `file`'s "no asset, no submit": a Form node with no target
+    // Base is exactly the dead end this dialog used to hide the type to avoid.
+    (selectedType === "form" &&
+      (!canBindForm || !orpc || !formBinding.targetBaseId || formBinding.fieldSlugs.length === 0));
 
   return (
     <Dialog
@@ -362,7 +422,11 @@ export function CreateNodeModal({
         onOpenChange(next);
       }}
     >
-      <DialogContent className="sm:max-w-3xl">
+      {/* Capped height with the body scrolling inside it. Without this the
+          dialog grows past a 900px-tall viewport once the full type list is
+          expanded — and since Radix scroll-locks the page behind it, the
+          footer becomes genuinely unreachable rather than merely clipped. */}
+      <DialogContent className="grid max-h-[calc(100dvh-2rem)] w-[calc(100vw-2rem)] min-w-0 max-w-[calc(100vw-2rem)] grid-rows-[auto_minmax(0,1fr)] overflow-hidden p-4 sm:w-full sm:max-w-3xl sm:p-6">
         <DialogHeader>
           <DialogTitle>
             {fmt(messages.createNode.title, {
@@ -371,140 +435,178 @@ export function CreateNodeModal({
           </DialogTitle>
         </DialogHeader>
 
-        <Tabs className="flex min-h-0 flex-col gap-3" defaultValue="manual">
-          <TabsList className="self-start">
-            <TabsTrigger value="manual">{messages.createNode.manualTab}</TabsTrigger>
-            <TabsTrigger value="agent">{messages.createNode.agentTab}</TabsTrigger>
-            <TabsTrigger value="template">{messages.createNode.templateTab}</TabsTrigger>
-          </TabsList>
+        <Tabs className="flex min-h-0 min-w-0 flex-col gap-3" defaultValue="manual">
+          <div className="min-w-0 max-w-full overflow-x-auto pb-1" data-create-node-tabs-scroll>
+            <TabsList className="w-max min-w-full justify-start">
+              <TabsTrigger value="manual">{messages.createNode.manualTab}</TabsTrigger>
+              <TabsTrigger value="agent">{messages.createNode.agentTab}</TabsTrigger>
+              <TabsTrigger value="template">{messages.createNode.templateTab}</TabsTrigger>
+            </TabsList>
+          </div>
 
-          <TabsContent className="mt-0 flex flex-col gap-3" value="manual">
-            <DialogDescription>
-              {parent
-                ? fmt(messages.createNode.descriptionInParent, { name: parent.name })
-                : messages.createNode.description}
-            </DialogDescription>
-            {/* Two columns, not six: each tile now carries a sentence, and six
+          <TabsContent className="mt-0 flex min-h-0 min-w-0 flex-col gap-3" value="manual">
+            <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto pr-1">
+              <DialogDescription className="max-w-full break-words" data-create-node-description>
+                {parent
+                  ? fmt(messages.createNode.descriptionInParent, { name: parent.name })
+                  : messages.createNode.description}
+              </DialogDescription>
+              {/* Two columns, not six: each tile now carries a sentence, and six
                 across left no room for one. The trade is deliberate — a wider
                 tile a user can read beats a denser grid they cannot. */}
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              {(typesExpanded ? ORDERED_TYPES : COMMON_TYPES).map((entry) => {
-                const Icon = entry.icon;
-                const isSelected = entry.type === selectedType;
-                const { name: typeName, hint } = typeCopy(entry.type);
-                return (
-                  <button
-                    className={`flex min-w-0 items-start gap-2.5 rounded-md border px-3 py-2.5 text-left transition-colors ${
-                      isSelected ? "border-primary bg-primary/10" : "border-border hover:bg-muted"
-                    }`}
-                    key={entry.type}
-                    onClick={() => {
-                      setSelectedType(entry.type);
-                      setError(null);
-                    }}
-                    type="button"
-                  >
-                    <Icon
-                      className={`mt-0.5 size-5 shrink-0 ${
-                        isSelected ? "text-foreground" : "text-muted-foreground"
+              <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
+                {visibleTypes.map((entry) => {
+                  const Icon = entry.icon;
+                  const isSelected = entry.type === selectedType;
+                  const { name: typeName, hint } = typeCopy(entry.type);
+                  return (
+                    <button
+                      aria-pressed={isSelected}
+                      className={`flex w-full min-w-0 max-w-full items-start gap-2.5 overflow-hidden rounded-md border px-3 py-2.5 text-left transition-colors ${
+                        isSelected ? "border-primary bg-primary/10" : "border-border hover:bg-muted"
                       }`}
-                    />
-                    <span className="flex min-w-0 flex-col gap-0.5">
-                      <span className="font-medium text-foreground text-sm">{typeName}</span>
-                      {hint ? (
-                        <span className="text-muted-foreground text-xs leading-4">{hint}</span>
-                      ) : null}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-            {UNCOMMON_TYPES.length > 0 ? (
-              <button
-                aria-expanded={typesExpanded}
-                className="self-start rounded-md px-1 py-0.5 text-muted-foreground text-xs transition-colors hover:text-foreground disabled:opacity-50"
-                // Collapsing is disabled while the selection lives in the
-                // expanded group — hiding what is currently selected would be a
-                // worse state than an over-long list.
-                disabled={typesExpanded && !showAllTypes}
-                onClick={() => setShowAllTypes((current) => !current)}
-                type="button"
-              >
-                {typesExpanded
-                  ? messages.createNode.fewerTypes
-                  : fmt(messages.createNode.moreTypes, { count: UNCOMMON_TYPES.length })}
-              </button>
-            ) : null}
-
-            <div className="flex flex-col gap-1.5 text-sm">
-              <span className="text-muted-foreground">{messages.common.name}</span>
-              <Input
-                autoFocus
-                onChange={(event) => {
-                  setName(event.target.value);
-                  if (!slugEdited) {
-                    setSlug(toSlug(event.target.value, selectedType));
-                  }
-                }}
-                placeholder={fmt(messages.createNode.itemNamePlaceholder, {
-                  type: activeTypeName,
+                      key={entry.type}
+                      onClick={() => {
+                        setSelectedType(entry.type);
+                        setError(null);
+                      }}
+                      type="button"
+                    >
+                      <Icon
+                        className={`mt-0.5 size-5 shrink-0 ${
+                          isSelected ? "text-foreground" : "text-muted-foreground"
+                        }`}
+                      />
+                      <span className="flex min-w-0 flex-1 flex-col gap-0.5 whitespace-normal break-words">
+                        <span className="font-medium text-foreground text-sm break-words">
+                          {typeName}
+                        </span>
+                        {hint ? (
+                          <span className="text-muted-foreground text-xs leading-4 break-words">
+                            {hint}
+                          </span>
+                        ) : null}
+                      </span>
+                    </button>
+                  );
                 })}
-                value={name}
-              />
-            </div>
-            {selectedType === "file" ? (
+              </div>
+              {UNCOMMON_TYPES.length > 0 ? (
+                <button
+                  aria-expanded={showAllTypes}
+                  className="self-start rounded-md px-1 py-0.5 text-muted-foreground text-xs transition-colors hover:text-foreground"
+                  onClick={() => setShowAllTypes((current) => !current)}
+                  type="button"
+                >
+                  {showAllTypes
+                    ? messages.createNode.fewerTypes
+                    : fmt(messages.createNode.moreTypes, { count: hiddenUncommonTypeCount })}
+                </button>
+              ) : null}
+
               <div className="flex flex-col gap-1.5 text-sm">
-                <span className="text-muted-foreground">{messages.createNode.file}</span>
+                <span className="text-muted-foreground">{messages.common.name}</span>
                 <Input
-                  accept="*/*"
+                  autoFocus
                   onChange={(event) => {
-                    const file = event.currentTarget.files?.[0] ?? null;
-                    setSelectedFile(file);
-                    if (file && !name.trim()) {
-                      setName(file.name);
-                      if (!slugEdited) {
-                        setSlug(toSlug(file.name, selectedType));
-                      }
+                    setName(event.target.value);
+                    if (!slugEdited) {
+                      setSlug(toSlug(event.target.value, selectedType));
                     }
                   }}
-                  type="file"
+                  placeholder={fmt(messages.createNode.itemNamePlaceholder, {
+                    type: activeTypeName,
+                  })}
+                  value={name}
                 />
-                {selectedFile ? (
-                  <span className="text-muted-foreground text-xs">
-                    {selectedFile.type || "application/octet-stream"} · {selectedFile.size} B
-                  </span>
-                ) : (
-                  <span className="text-muted-foreground text-xs">
-                    {messages.createNode.fileRequired}
-                  </span>
-                )}
               </div>
-            ) : null}
-            <div className="flex flex-col gap-1.5 text-sm">
-              <span className="text-muted-foreground">{messages.common.slug}</span>
-              <Input
-                onChange={(event) => {
-                  setSlugEdited(true);
-                  setSlug(toSlugInput(event.target.value));
-                }}
-                placeholder={messages.createNode.slugPlaceholder}
-                value={slug}
-              />
+              {selectedType === "file" ? (
+                <div className="flex flex-col gap-1.5 text-sm">
+                  <span className="text-muted-foreground">{messages.createNode.file}</span>
+                  <Input
+                    accept="*/*"
+                    onChange={(event) => {
+                      const file = event.currentTarget.files?.[0] ?? null;
+                      setSelectedFile(file);
+                      if (file && !name.trim()) {
+                        setName(file.name);
+                        if (!slugEdited) {
+                          setSlug(toSlug(file.name, selectedType));
+                        }
+                      }
+                    }}
+                    type="file"
+                  />
+                  {selectedFile ? (
+                    <span className="text-muted-foreground text-xs">
+                      {selectedFile.type || "application/octet-stream"} · {selectedFile.size} B
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground text-xs">
+                      {messages.createNode.fileRequired}
+                    </span>
+                  )}
+                </div>
+              ) : null}
+              {selectedType === "form" ? (
+                canBindForm ? (
+                  orpc ? (
+                    <FormBaseBindingPicker
+                      disabled={submitting}
+                      idPrefix="create-node-form"
+                      onChange={(next) => {
+                        setFormBinding(next);
+                        setError(null);
+                      }}
+                      orpc={orpc}
+                      value={formBinding}
+                    />
+                  ) : (
+                    // No oRPC client (a host that passes only `apiClient`), so the
+                    // Bases can't be listed and the target can't be chosen. Say so
+                    // rather than offering a submit that would create an orphan.
+                    <p className="text-muted-foreground text-sm">
+                      {messages.form.needsWorkspaceConnection}
+                    </p>
+                  )
+                ) : (
+                  <p className="text-muted-foreground text-sm">{messages.form.setUpNeedsManage}</p>
+                )
+              ) : null}
+              <div className="flex flex-col gap-1.5 text-sm">
+                <span className="text-muted-foreground">{messages.common.slug}</span>
+                <Input
+                  onChange={(event) => {
+                    setSlugEdited(true);
+                    setSlug(toSlugInput(event.target.value));
+                  }}
+                  placeholder={messages.createNode.slugPlaceholder}
+                  value={slug}
+                />
+              </div>
+              <div className="flex flex-col gap-1.5 text-sm">
+                <span className="text-muted-foreground">
+                  {messages.createNode.descriptionOptional}
+                </span>
+                <Input
+                  onChange={(event) => setDescription(event.target.value)}
+                  placeholder={messages.createNode.descriptionPlaceholder}
+                  value={description}
+                />
+              </div>
+              {error ? <p className="text-destructive text-sm">{error}</p> : null}
             </div>
-            <div className="flex flex-col gap-1.5 text-sm">
-              <span className="text-muted-foreground">
-                {messages.createNode.descriptionOptional}
-              </span>
-              <Input
-                onChange={(event) => setDescription(event.target.value)}
-                placeholder={messages.createNode.descriptionPlaceholder}
-                value={description}
-              />
-            </div>
-            {error ? <p className="text-destructive text-sm">{error}</p> : null}
 
-            <DialogFooter className="flex-col sm:flex-row gap-2">
-              <Button disabled={submitting} onClick={() => onOpenChange(false)} variant="outline">
+            <DialogFooter
+              className="flex-row items-center justify-end gap-2 space-x-0 sm:space-x-0"
+              data-create-node-footer
+            >
+              <Button
+                disabled={submitting}
+                onClick={() => onOpenChange(false)}
+                size="sm"
+                variant="outline"
+              >
                 {messages.common.cancel}
               </Button>
               <SplitSubmitButton
@@ -529,15 +631,18 @@ export function CreateNodeModal({
             </DialogFooter>
           </TabsContent>
 
-          <TabsContent className="mt-0 flex flex-col gap-3" value="agent">
+          <TabsContent className="mt-0 flex min-h-0 flex-1 flex-col gap-3" value="agent">
             <p className="text-muted-foreground text-sm">{messages.createNode.agentTabHint}</p>
-            <AgentPromptsView
-              agentIntegration={agentIntegration}
-              askAgent={orpc ? { orpc, sessionScopeId: askAgentScopeId } : null}
-              capabilities={createPrompts.capabilities}
-              onHandedOff={() => onOpenChange(false)}
-              scenarios={createPrompts.scenarios}
-            />
+            {/* Keep the expanded target picker reachable on narrow viewports. */}
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              <AgentPromptsView
+                agentIntegration={agentIntegration}
+                askAgent={orpc ? { orpc, sessionScopeId: askAgentScopeId } : null}
+                capabilities={createPrompts.capabilities}
+                onHandedOff={() => onOpenChange(false)}
+                scenarios={createPrompts.scenarios}
+              />
+            </div>
           </TabsContent>
 
           <TabsContent className="mt-0 flex min-h-0 flex-col gap-3" value="template">

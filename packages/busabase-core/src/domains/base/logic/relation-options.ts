@@ -60,10 +60,14 @@ export const resolveRelationFieldOptions = async <T extends Record<string, unkno
   return resolved as T;
 };
 
+/** Field types for which `options.multiple` is a real, READ switch. */
+const MULTIPLE_AWARE_TYPES = new Set(["relation", "member"]);
+
 /**
- * `options.multiple` is a RELATION-only switch — it decides whether a relation cell holds
- * one record id or a list (see the relation editor in `record-views.tsx`, the only reader).
- * Nothing reads it for any other field type.
+ * `options.multiple` decides whether a cell holds one id or a list. Two field types read
+ * it — `relation` (one linked record or many) and `member` (one person or many, the
+ * "Owner vs Reviewers" distinction) — and they are the two whose editors in
+ * `record-views.tsx` branch on it. Nothing reads it for any other field type.
  *
  * The field `options` bag is shared across every field type, so before this guard a
  * `select` happily accepted, persisted, and then ignored `multiple: true`: the schema read
@@ -74,18 +78,48 @@ export const resolveRelationFieldOptions = async <T extends Record<string, unkno
  * Rejects the key's PRESENCE, not just `true`: `multiple: false` on a `select` is equally
  * meaningless, and one rule is easier to reason about than two.
  */
+/**
+ * Refuse a multi→single flip that would silently truncate existing cells.
+ *
+ * `options.multiple` is only a schema flag; nothing rewrites the stored values
+ * when it changes. So a column that already holds three ids keeps holding three
+ * after the flip — and the next person to open and save that record writes back
+ * `ids[0]` alone (see `getEditorFieldValue`), losing the other two with no
+ * error, no prompt and no undo. The loss is attributed to whoever touched the
+ * record, not to whoever changed the schema.
+ *
+ * Rejecting is deliberately blunter than migrating: truncating on the user's
+ * behalf is still destroying data, just sooner. This way the person who wants
+ * one owner per row decides which owner, on the rows that actually have several.
+ *
+ * Applies to `relation` as well as `member` — same storage shape, same silent
+ * loss, and it has always been reachable there.
+ */
+export const assertNoMultiValueTruncationOrThrow = (slug: string, rowsWithSeveral: number) => {
+  if (rowsWithSeveral === 0) {
+    return;
+  }
+  throw new ORPCError("BAD_REQUEST", {
+    message:
+      `Field "${slug}": ${rowsWithSeveral} record${rowsWithSeveral === 1 ? "" : "s"} ` +
+      "still hold more than one value, and switching to single-value would drop all but " +
+      "the first the next time each record is saved. Reduce those records to one value first.",
+    data: { slug, rowsWithSeveral },
+  });
+};
+
 export const assertRelationOnlyOptionsOrThrow = (
   type: string,
   slug: string,
   options: Record<string, unknown> | null | undefined,
 ) => {
-  if (!options || type === "relation" || !("multiple" in options)) {
+  if (!options || MULTIPLE_AWARE_TYPES.has(type) || !("multiple" in options)) {
     return;
   }
   const useMultiselect =
     type === "select" ? ' For a multi-value choice field use type "multiselect".' : "";
   throw new ORPCError("BAD_REQUEST", {
-    message: `Field "${slug}": options.multiple only applies to relation fields, not "${type}".${useMultiselect}`,
+    message: `Field "${slug}": options.multiple only applies to relation and member fields, not "${type}".${useMultiselect}`,
     data: { slug, type },
   });
 };

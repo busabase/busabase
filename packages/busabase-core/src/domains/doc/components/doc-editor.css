@@ -45,6 +45,37 @@
   line-height: 1.75rem;
 }
 
+/* Crepe's default One Dark colors were drawn on a near-white surface in light
+ * mode. The Doc now follows the host's light/dark CodeMirror highlight style;
+ * its card surface, foreground and gutters continue to use host theme tokens. */
+.milkdown .milkdown-code-block {
+  --crepe-color-surface: var(--card);
+  --crepe-color-surface-low: var(--muted);
+  --doc-code-text: var(--foreground);
+  --doc-code-gutter: color-mix(in srgb, var(--foreground) 55%, var(--muted-foreground));
+
+  color: var(--doc-code-text);
+  border: 1px solid var(--border);
+}
+
+.dark .milkdown .milkdown-code-block {
+  --crepe-color-surface: color-mix(in srgb, var(--background) 82%, var(--foreground));
+  --crepe-color-surface-low: color-mix(in srgb, var(--background) 75%, var(--foreground));
+}
+
+.milkdown .milkdown-code-block .cm-editor {
+  color: var(--doc-code-text);
+}
+
+.milkdown .milkdown-code-block .cm-gutters {
+  color: var(--doc-code-gutter);
+}
+
+.milkdown .milkdown-code-block .cm-activeLine,
+.milkdown .milkdown-code-block .cm-activeLineGutter {
+  background-color: var(--crepe-color-surface-low);
+}
+
 /* Crepe's shipped themes assume the editor owns the page canvas and bakes in
  * a 60px/120px padding for that (see @milkdown/crepe/theme/common/reset.css).
  * DocDetailView already supplies its own page padding, so left unchanged this

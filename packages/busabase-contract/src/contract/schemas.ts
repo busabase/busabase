@@ -656,6 +656,45 @@ const searchResponseSchema = z.object({
   contentTruncated: z.boolean().default(false),
 });
 
+/**
+ * Payload-free interaction events for search quality measurement.
+ *
+ * Every object is strict on purpose: accepting and stripping an accidental
+ * `query` property would make the transport look privacy-safe while callers
+ * were still sending search text over the wire.
+ */
+const searchInteractionInputSchema = z.discriminatedUnion("event", [
+  z
+    .object({
+      event: z.literal("result_click"),
+      sessionId: z.string().uuid(),
+      surface: z.enum(["quick", "advanced"]),
+      position: z.number().int().min(1).max(100),
+      resultKind: z.enum(["record", "change_request", "base", "file", "node"]),
+    })
+    .strict(),
+  z
+    .object({
+      event: z.literal("quick_to_advanced"),
+      sessionId: z.string().uuid(),
+      surface: z.literal("quick"),
+      resultCount: z.number().int().min(0).max(100),
+    })
+    .strict(),
+  z
+    .object({
+      event: z.literal("results_shown"),
+      sessionId: z.string().uuid(),
+      surface: z.enum(["quick", "advanced"]),
+      resultCount: z.number().int().min(0).max(100),
+      durationMs: z.number().int().min(0).max(120_000),
+      hasMore: z.boolean(),
+    })
+    .strict(),
+]);
+
+const searchInteractionResponseSchema = z.object({ accepted: z.literal(true) });
+
 const liveEventSchema = z.object({
   kind: z.enum([
     "change_request.created",
@@ -1100,6 +1139,19 @@ export type SearchSort = (typeof SEARCH_SORTS)[number];
 
 const searchInputSchema = z.object({
   query: z.string().default("").describe("Full-text query. An empty string matches nothing."),
+  mode: z
+    .enum(["quick", "full"])
+    .optional()
+    .default("full")
+    .describe(
+      "Search depth. `quick` skips live file-body scans for typeahead; `full` preserves complete search behavior.",
+    ),
+  surface: z
+    .enum(["quick", "advanced"])
+    .optional()
+    .describe(
+      "Optional first-party UI surface for aggregate quality metrics. API/CLI callers should omit it.",
+    ),
   limit: z.coerce
     .number()
     .int()
@@ -1259,6 +1311,10 @@ const authInfoSchema = z.object({
   createdSpace: z.boolean().optional(),
   /** Cloud only: this auto-created Space still needs its idempotent starter initialization. */
   bootstrapRequired: z.boolean().optional(),
+  /** Cloud only: effective permission ceiling of the credential used for this request. */
+  credentialPermissionLevel: z.enum(["read", "changeRequest", "write", "manage"]).optional(),
+  /** Cloud only: credential ceiling capped by the selected Space membership role. */
+  effectivePermissionLevel: z.enum(["read", "changeRequest", "write", "manage"]).optional(),
 });
 
 export type AuthInfo = z.infer<typeof authInfoSchema>;
@@ -1305,6 +1361,8 @@ export {
   agentTaskSchema,
   searchResultSchema,
   searchResponseSchema,
+  searchInteractionInputSchema,
+  searchInteractionResponseSchema,
   liveEventSchema,
   auditActionSchema,
   auditEventSchema,

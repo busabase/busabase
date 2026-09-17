@@ -2,7 +2,7 @@ import type { BaseFieldVO, BaseVO, GanttScale, RecordVO, ViewVO } from "busabase
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { useEffect, useState } from "react";
 import { useSearch } from "wouter";
-import { useCoreI18n } from "../../../i18n";
+import { useCoreI18n, useCoreLocale } from "../../../i18n";
 import { getRecordTitle } from "../helpers/change-request";
 import { mergeSearchIntoHref } from "../helpers/link-search";
 
@@ -69,6 +69,7 @@ export function BusaBaseGantt({
   onPatchRecord?: (record: RecordVO, patch: Record<string, unknown>) => Promise<void>;
 }) {
   const messages = useCoreI18n();
+  const locale = useCoreLocale();
   const currentSearch = useSearch();
   const [drag, setDrag] = useState<DragState | null>(null);
   // Seeds from the view's saved scale; the toolbar toggle overrides it locally.
@@ -140,7 +141,7 @@ export function BusaBaseGantt({
     const monthEnd = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0);
     const clippedEnd = monthEnd > rangeEnd ? rangeEnd : monthEnd;
     months.push({
-      label: monthStart.toLocaleDateString(undefined, { year: "numeric", month: "short" }),
+      label: monthStart.toLocaleDateString(locale, { year: "numeric", month: "short" }),
       left: daysBetween(rangeStart, monthStart) * dayPx,
       width: (daysBetween(monthStart, clippedEnd) + 1) * dayPx,
     });

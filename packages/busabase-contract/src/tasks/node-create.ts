@@ -169,13 +169,13 @@ const writeAgentPrompts = async (
       },
     };
   }
-  try {
-    await client.nodes.updateAgentPrompts({ nodeId, agentPrompts });
-  } catch (error) {
-    const status = isRecord(error) ? error.status : undefined;
-    if (status !== 404) throw error;
-    await client.nodes.updateMetadata({ nodeId, metadata: { agentPrompts } });
-  }
+  // Write only where the server reads from — the `agent_prompts` column.
+  // The former 404 fallback to `metadata.agentPrompts` is gone: the migration
+  // that added the column backfilled the old key, so a server old enough to
+  // 404 recovers its prompts on upgrade anyway, while a 404 from any other
+  // cause used to park the list under a key nothing reads and still report
+  // `written: true`. See the same note in `busabase-cli`'s set-agent-prompts.
+  await client.nodes.updateAgentPrompts({ nodeId, agentPrompts });
   return {
     ...(isRecord(result) ? result : { result }),
     agentPromptsWrite: { written: true, nodeId, count: agentPrompts.length },

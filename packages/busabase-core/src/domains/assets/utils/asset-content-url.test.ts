@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildAssetContentUrl,
+  buildAssetDownloadUrl,
   extractAssetContentIds,
   rewriteAssetContentIds,
 } from "./asset-content-url";
@@ -8,6 +9,12 @@ import {
 describe("asset content URL", () => {
   it("builds the stable route for an asset id", () => {
     expect(buildAssetContentUrl("astabc123")).toBe("/api/assets/astabc123/raw");
+  });
+
+  it("builds a same-origin attachment URL with an encoded display name", () => {
+    expect(buildAssetDownloadUrl("ast/a", "季度 报告.pdf")).toBe(
+      "/api/assets/ast%2Fa/raw?download=1&filename=%E5%AD%A3%E5%BA%A6+%E6%8A%A5%E5%91%8A.pdf",
+    );
   });
 
   it("extracts ids from markdown image embeds", () => {

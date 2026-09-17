@@ -629,6 +629,38 @@ Keep this doc in sync through change requests whenever a Base schema changes.
   ],
   files: [
     {
+      nodeId: "nod_file_visual_preview_map",
+      slug: "visual-preview-map",
+      name: "Visual Preview Map",
+      description: "A visual SVG File node for inspecting native media previews.",
+      fileName: "visual-preview-map.svg",
+      mimeType: "image/svg+xml",
+      attachmentId: "att_seed_visual_preview_map",
+      assetId: "ast_seed_visual_preview_map",
+      storageKey: "attachments/blobs/seed/visual-preview-map.svg",
+      position: 0,
+      body: `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720">
+  <rect width="1200" height="720" fill="#f8fafc"/>
+  <rect x="72" y="72" width="1056" height="576" rx="28" fill="#ffffff" stroke="#cbd5e1" stroke-width="4"/>
+  <text x="120" y="160" fill="#0f172a" font-family="system-ui, sans-serif" font-size="48" font-weight="700">Visual Preview Map</text>
+  <text x="120" y="210" fill="#64748b" font-family="system-ui, sans-serif" font-size="22">A native SVG asset inside the Files folder</text>
+  <g font-family="system-ui, sans-serif" font-size="24" font-weight="600" text-anchor="middle">
+    <rect x="120" y="290" width="260" height="180" rx="18" fill="#dcfce7" stroke="#16a34a" stroke-width="3"/>
+    <text x="250" y="388" fill="#166534">Main preview</text>
+    <path d="M400 380h110" stroke="#64748b" stroke-width="8" stroke-linecap="round"/>
+    <path d="m490 355 30 25-30 25" fill="none" stroke="#64748b" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="540" y="290" width="260" height="180" rx="18" fill="#dbeafe" stroke="#2563eb" stroke-width="3"/>
+    <text x="670" y="388" fill="#1e40af">Fullscreen</text>
+    <path d="M820 380h110" stroke="#64748b" stroke-width="8" stroke-linecap="round"/>
+    <path d="m910 355 30 25-30 25" fill="none" stroke="#64748b" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="960" y="290" width="120" height="180" rx="18" fill="#fef3c7" stroke="#d97706" stroke-width="3"/>
+    <text x="1020" y="370" fill="#92400e" font-size="20">Side</text>
+    <text x="1020" y="400" fill="#92400e" font-size="20">Panel</text>
+  </g>
+  <text x="120" y="570" fill="#475569" font-family="system-ui, sans-serif" font-size="24">Pin it, navigate away, and expand the same preview.</text>
+</svg>`,
+    },
+    {
       nodeId: "nod_file_product_brief",
       slug: "product-brief",
       name: "Product Brief",
@@ -638,7 +670,7 @@ Keep this doc in sync through change requests whenever a Base schema changes.
       attachmentId: "att_seed_product_brief",
       assetId: "ast_seed_product_brief",
       storageKey: "attachments/blobs/seed/product-brief.md",
-      position: 0,
+      position: 1,
       body: `# Product Brief
 
 Busabase is the workspace AI agents build in: every write is a change request
@@ -660,7 +692,7 @@ one editable source of truth without stepping on each other.
       attachmentId: "att_seed_q3_metrics",
       assetId: "ast_seed_q3_metrics",
       storageKey: "attachments/blobs/seed/q3-metrics.csv",
-      position: 1,
+      position: 2,
       body: `metric,q2,q3,delta
 weekly_active_agents,820,1240,+51%
 change_requests_merged,3110,4870,+57%
@@ -677,7 +709,7 @@ avg_review_minutes,42,28,-33%
       attachmentId: "att_seed_brand_palette",
       assetId: "ast_seed_brand_palette",
       storageKey: "attachments/blobs/seed/brand-palette.json",
-      position: 2,
+      position: 3,
       body: `{
   "name": "Busabase",
   "colors": {

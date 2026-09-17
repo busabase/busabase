@@ -6,10 +6,13 @@ import {
   AgentSessionEventVOSchema,
   AgentSessionIdInputSchema,
   AgentSessionStatusSchema,
+  AgentSessionsPageVOSchema,
   AgentSessionVOSchema,
   CreateAgentSessionInputSchema,
+  DeleteAgentHistoryInputSchema,
   DisconnectAgentInputSchema,
   ListAgentConnectionsInputSchema,
+  ListAgentSessionsPagedInputSchema,
   PromptAgentSessionInputSchema,
   RespondToAgentPermissionInputSchema,
   SetAgentSessionConfigOptionInputSchema,
@@ -30,6 +33,13 @@ export const agentsContract = {
   disconnect: oc.input(DisconnectAgentInputSchema).output(
     z.object({
       ok: z.boolean(),
+      endedSessionCount: z.number().int().nonnegative(),
+    }),
+  ),
+
+  deleteHistory: oc.input(DeleteAgentHistoryInputSchema).output(
+    z.object({
+      ok: z.boolean(),
       deletedSessionCount: z.number().int().nonnegative(),
     }),
   ),
@@ -42,12 +52,17 @@ export const agentsContract = {
   sessions: {
     list: oc.output(AgentSessionVOSchema.array()),
 
+    listPaged: oc.input(ListAgentSessionsPagedInputSchema).output(AgentSessionsPageVOSchema),
+
     create: oc.input(CreateAgentSessionInputSchema).output(AgentSessionVOSchema),
 
     /**
-     * Send a message. A terminal session returns `accepted: false` instead of
-     * relying on error text; `promptRecorded` tells the caller whether automatic
-     * continuation can resend without duplicating a server echo.
+     * Accept a message for asynchronous execution. `accepted: true` means the
+     * prompt is durable and the turn slot is owned; progress and completion
+     * arrive through `subscribe`, so this RPC never spans the whole agent run.
+     * A terminal session returns `accepted: false` instead of relying on error
+     * text; `promptRecorded` tells the caller whether automatic continuation
+     * can resend without duplicating a server echo.
      */
     prompt: oc.input(PromptAgentSessionInputSchema).output(
       z.discriminatedUnion("accepted", [

@@ -65,6 +65,7 @@ import { useContext, useState } from "react";
 import { useLocation } from "wouter";
 import { useCoreI18n } from "../../../i18n";
 import { useIsAnonymousVisitor } from "../visitor-context";
+import { useCanManageEmbedLinks } from "./embed-link-section";
 import { NodeDeleteDialog } from "./file-tree-browser";
 import { NodeSettingsDialog, type NodeSettingsTab } from "./node-settings-dialog";
 import { NodeSettingsPermissionsSlotContext } from "./node-settings-permissions-slot";
@@ -127,6 +128,11 @@ export function NodeActionsMenu({
   // visitor never sees the trigger at all, same self-gate every individual
   // action button in this domain uses.
   const isAnon = useIsAnonymousVisitor();
+  // Whether the Share dialog's embed half would have anything to offer. This
+  // toolbar renders INSIDE `BusabaseDashboard`'s `SubmitPermissionProvider`,
+  // so the level here is the host's real one — a Cloud viewer/editor correctly
+  // gets `false` and never sees Share on an embed-only type.
+  const canEmbedLink = useCanManageEmbedLinks({ type: "node", typeId: nodeId, nodeType });
   if (isAnon) {
     return null;
   }
@@ -139,7 +145,13 @@ export function NodeActionsMenu({
   // NodeShareDialog requires a real slug (it builds the public URL from it);
   // this prop is optional here only because Rename can invalidate its
   // caller's query without one. Every current call site does pass it.
-  const canShare = Boolean(nodeSlug) && publicAccessOf(nodeType) !== "no";
+  // Share now opens a dialog with TWO independent halves — share-to-web and
+  // embed links — so the menu item has to appear when EITHER is available.
+  // AirApp / Drive / Skill declare `publicAccess: "no"` (no working anonymous
+  // detail route) yet are fully embeddable, and before this they had no Share
+  // affordance anywhere in the product even though the server has supported
+  // minting an embed link for them all along.
+  const canShare = Boolean(nodeSlug) && (publicAccessOf(nodeType) !== "no" || canEmbedLink);
   // The routed activity sub-page (`/base/:slug/activity` or
   // `/{type}/:slug/activity`, see routes.tsx + use-dashboard-routes.ts) keys
   // off the same slug-or-id every other detail route uses.

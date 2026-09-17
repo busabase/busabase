@@ -13,9 +13,12 @@ import {
   type NodeProps,
   Position,
   ReactFlow,
+  type ReactFlowProps,
   ReactFlowProvider,
   useEdgesState,
   useNodesState,
+  useReactFlow,
+  type Viewport,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { useQuery } from "@tanstack/react-query";
@@ -43,12 +46,20 @@ import {
   Workflow,
   Zap,
 } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
-import { useCoreI18n } from "../../../i18n";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type CoreI18nMessages, fmt, useCoreI18n } from "../../../i18n";
+import { getGraphAriaLabels } from "../../../i18n/graph-aria";
+import {
+  FullscreenPreviewSurface,
+  PreviewFullscreenButton,
+  type PreviewFullscreenState,
+  usePreviewFullscreen,
+} from "../../dashboard/components/preview-fullscreen";
 import { NodeDetailSkeleton } from "../../dashboard/components/skeletons";
 import { asNodeDetail } from "../../dashboard/helpers/node-detail";
 import { useReportLoadedNode } from "../../dashboard/hooks/use-report-loaded-node";
 import type { NodeDetailProps } from "../../dashboard/node-detail-registry";
+import type { SidePanelTabProps } from "../../dashboard/side-panel-registry";
 import { useIsAnonymousVisitor } from "../../dashboard/visitor-context";
 import {
   RichNodeNotFound,
@@ -100,28 +111,33 @@ const WORKFLOW_NODE_KINDS: WorkflowNodeKind[] = [
   "end",
 ];
 
-const workflowNodeSummary = (data: WorkflowNodeData): string => {
+const workflowNodeSummary = (data: WorkflowNodeData, messages: CoreI18nMessages): string => {
   switch (data.kind) {
     case "trigger":
-      return data.eventName || "Manual";
+      return data.eventName && data.eventName !== "manual"
+        ? data.eventName
+        : messages.richNodes.manual;
     case "webhook":
-      return `${data.method} ${data.url || "Webhook"}`;
+      return `${data.method} ${data.url || messages.richNodes.webhook}`;
     case "function":
-      return data.functionName || data.webhookRuleId || "Function";
+      return data.functionName || data.webhookRuleId || messages.richNodes.function;
     case "condition":
-      return data.expression || data.description || "Condition";
+      return data.expression || data.description || messages.richNodes.condition;
     case "wait":
-      return `${data.duration} ${data.unit}`;
+      return `${data.duration} ${messages.richNodes[data.unit]}`;
     case "approval":
-      return data.approver || "Approval";
+      return data.approver || messages.richNodes.approval;
     case "action":
-      return data.actionName || data.description || "Action";
+      return data.actionName || data.description || messages.richNodes.action;
     case "end":
-      return data.outcome || "Completed";
+      return data.outcome && data.outcome !== "completed"
+        ? data.outcome
+        : messages.richNodes.completed;
   }
 };
 
 function WorkflowStepNode({ data, selected }: NodeProps<WorkflowFlowNode>) {
+  const messages = useCoreI18n();
   const Icon = workflowIcon[data.kind];
   return (
     <div
@@ -139,10 +155,10 @@ function WorkflowStepNode({ data, selected }: NodeProps<WorkflowFlowNode>) {
         <span className="min-w-0 flex-1 truncate font-medium text-card-foreground text-xs">
           {data.label}
         </span>
-        <span className="text-[10px] text-muted-foreground uppercase">{data.kind}</span>
+        <span className="text-[10px] text-muted-foreground">{messages.richNodes[data.kind]}</span>
       </div>
       <div className="min-h-9 truncate px-3 py-2 text-muted-foreground text-xs">
-        {workflowNodeSummary(data)}
+        {workflowNodeSummary(data, messages)}
       </div>
       <Handle
         className="!size-2.5 !border-background !bg-primary"
@@ -154,6 +170,53 @@ function WorkflowStepNode({ data, selected }: NodeProps<WorkflowFlowNode>) {
 }
 
 const nodeTypes = { workflowStep: WorkflowStepNode };
+
+type WorkflowCanvasCallbacks = Pick<
+  ReactFlowProps<WorkflowFlowNode, Edge>,
+  "onConnect" | "onEdgeClick" | "onEdgesChange" | "onNodeClick" | "onNodesChange" | "onPaneClick"
+>;
+
+function WorkflowCanvas({
+  edges,
+  nodes,
+  readOnly,
+  ...callbacks
+}: WorkflowCanvasCallbacks & {
+  edges: Edge[];
+  nodes: WorkflowFlowNode[];
+  readOnly: boolean;
+}) {
+  const messages = useCoreI18n();
+  return (
+    <div
+      className="h-full min-h-0 bg-muted/20"
+      data-read-only={readOnly ? "true" : "false"}
+      data-workflow-canvas=""
+    >
+      <ReactFlow
+        ariaLabelConfig={getGraphAriaLabels(messages)}
+        colorMode="system"
+        connectOnClick={!readOnly}
+        deleteKeyCode={readOnly ? null : ["Backspace", "Delete"]}
+        edges={edges}
+        edgesReconnectable={!readOnly}
+        elementsSelectable
+        fitView
+        maxZoom={1.8}
+        minZoom={readOnly ? 0.4 : 0.2}
+        nodesConnectable={!readOnly}
+        nodesDraggable={!readOnly}
+        nodeTypes={nodeTypes}
+        nodes={nodes}
+        proOptions={{ hideAttribution: true }}
+        {...callbacks}
+      >
+        <Background gap={20} size={1} variant={BackgroundVariant.Dots} />
+        <Controls showInteractive={false} />
+      </ReactFlow>
+    </div>
+  );
+}
 
 const newId = (prefix: string) =>
   `${prefix}-${typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : Date.now()}`;
@@ -196,12 +259,15 @@ const workflowNodeData = (node: WorkflowNode): WorkflowNodeData => ({
   outcome: node.kind === "end" ? node.outcome : "completed",
 });
 
-const persistedWorkflowNode = (entry: WorkflowFlowNode): WorkflowNode => {
+const persistedWorkflowNode = (
+  entry: WorkflowFlowNode,
+  messages: CoreI18nMessages,
+): WorkflowNode => {
   const data = entry.data;
   const base = {
     id: entry.id,
     position: entry.position,
-    label: data.label.trim() || "Untitled step",
+    label: data.label.trim() || messages.richNodes.untitledStep,
     description: data.description,
   };
   switch (data.kind) {
@@ -238,6 +304,7 @@ interface GraphEditorProps {
 function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProps) {
   const messages = useCoreI18n();
   const isAnonymous = useIsAnonymousVisitor();
+  const fullscreenState = usePreviewFullscreen({ syncWithUrl: true });
   const initialNodes = useMemo<WorkflowFlowNode[]>(
     () =>
       workflowDocument.nodes.map((workflowNode) => ({
@@ -282,7 +349,7 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
     },
     getLocalDocument: () => ({
       version: 2 as const,
-      nodes: nodes.map(persistedWorkflowNode),
+      nodes: nodes.map((entry) => persistedWorkflowNode(entry, messages)),
       edges: persistedWorkflowEdges(edges),
       settings: workflowSettings,
     }),
@@ -319,7 +386,7 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
       position,
       data: {
         kind: "webhook",
-        label: `Step ${nodes.length + 1}`,
+        label: fmt(messages.richNodes.stepNumber, { number: nodes.length + 1 }),
         description: "",
         eventName: "manual",
         method: "POST",
@@ -418,7 +485,7 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
   const saveGraph = () => {
     const document: WorkflowDocument = {
       version: 2,
-      nodes: nodes.map(persistedWorkflowNode),
+      nodes: nodes.map((entry) => persistedWorkflowNode(entry, messages)),
       edges: persistedWorkflowEdges(edges),
       settings: workflowSettings,
     };
@@ -431,9 +498,9 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
         <>
           <Button
             aria-label={messages.richNodes.addStep}
-            className="gap-1.5"
+            className="size-7 gap-1.5 sm:size-8"
             onClick={addNode}
-            size="sm"
+            size="icon"
             title={messages.richNodes.addStep}
             type="button"
             variant="outline"
@@ -443,9 +510,10 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
           </Button>
           <Button
             aria-label={messages.richNodes.deleteSelection}
+            className="size-7 sm:size-8"
             disabled={!selectedId && !selectedEdgeId}
             onClick={deleteSelected}
-            size="icon-sm"
+            size="icon"
             title={messages.richNodes.deleteSelection}
             type="button"
             variant="ghost"
@@ -455,6 +523,7 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
         </>
       }
       error={error}
+      fullscreenState={fullscreenState}
       icon={Workflow}
       node={node}
       nodeType="workflow"
@@ -464,54 +533,40 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
     >
       <div
         className={
-          isAnonymous
+          isAnonymous || fullscreenState.fullscreen
             ? "grid h-full min-h-0 grid-cols-1"
             : "grid h-full min-h-0 grid-cols-[minmax(0,1fr)_17rem] max-md:grid-cols-1 max-md:grid-rows-[minmax(18rem,1fr)_auto]"
         }
       >
-        <div className="min-h-0 bg-muted/20">
-          <ReactFlow
-            colorMode="system"
-            edges={edges}
-            fitView
-            maxZoom={1.8}
-            minZoom={0.2}
-            nodesConnectable={!isAnonymous}
-            nodesDraggable={!isAnonymous}
-            nodeTypes={nodeTypes}
-            nodes={nodes}
-            onConnect={(connection) => {
-              setEdges((current) =>
-                addEdge(
-                  { ...connection, type: "smoothstep", data: { outcome: "default" } },
-                  current,
-                ),
-              );
-              markDirty();
-            }}
-            onEdgeClick={(_, selected) => {
-              setSelectedEdgeId(selected.id);
-              setSelectedId(null);
-            }}
-            onEdgesChange={onEdgesChange}
-            onNodeClick={(_, selected) => {
-              setSelectedId(selected.id);
-              setSelectedEdgeId(null);
-            }}
-            onNodesChange={onNodesChange}
-            onPaneClick={() => {
-              setSelectedId(null);
-              setSelectedEdgeId(null);
-            }}
-            proOptions={{ hideAttribution: true }}
-          >
-            <Background gap={20} size={1} variant={BackgroundVariant.Dots} />
-            <Controls showInteractive={false} />
-          </ReactFlow>
-        </div>
+        <WorkflowCanvas
+          edges={edges}
+          nodes={nodes}
+          onConnect={(connection) => {
+            setEdges((current) =>
+              addEdge({ ...connection, type: "smoothstep", data: { outcome: "default" } }, current),
+            );
+            markDirty();
+          }}
+          onEdgeClick={(_, selected) => {
+            setSelectedEdgeId(selected.id);
+            setSelectedId(null);
+          }}
+          onEdgesChange={onEdgesChange}
+          onNodeClick={(_, selected) => {
+            setSelectedId(selected.id);
+            setSelectedEdgeId(null);
+          }}
+          onNodesChange={onNodesChange}
+          onPaneClick={() => {
+            setSelectedId(null);
+            setSelectedEdgeId(null);
+          }}
+          readOnly={isAnonymous}
+        />
         <aside
+          data-workflow-configuration=""
           className={
-            isAnonymous
+            isAnonymous || fullscreenState.fullscreen
               ? "hidden"
               : "min-h-0 overflow-y-auto border-border/60 border-l bg-background p-3 max-md:max-h-64 max-md:border-l-0 max-md:border-t"
           }
@@ -539,8 +594,15 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
                 {messages.richNodes.edgeOutcome}
                 <Input
                   id="rich-edge-outcome"
-                  onChange={(event) => updateSelectedEdge({ outcome: event.target.value })}
-                  value={String(selectedEdge.data?.outcome ?? "default")}
+                  onChange={(event) =>
+                    updateSelectedEdge({ outcome: event.target.value || "default" })
+                  }
+                  placeholder={messages.richNodes.defaultOutcome}
+                  value={
+                    selectedEdge.data?.outcome === "default"
+                      ? ""
+                      : String(selectedEdge.data?.outcome ?? "")
+                  }
                 />
               </label>
             </div>
@@ -631,9 +693,15 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
                   {messages.richNodes.eventName}
                   <Input
                     id="rich-node-event-name"
-                    onChange={(event) => updateSelected({ eventName: event.target.value })}
-                    placeholder="record.created"
-                    value={String(selectedNode.data.eventName)}
+                    onChange={(event) =>
+                      updateSelected({ eventName: event.target.value || "manual" })
+                    }
+                    placeholder={messages.richNodes.manual}
+                    value={
+                      selectedNode.data.eventName === "manual"
+                        ? ""
+                        : String(selectedNode.data.eventName)
+                    }
                   />
                 </label>
               ) : null}
@@ -749,8 +817,15 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
                   {messages.richNodes.outcome}
                   <Input
                     id="rich-node-outcome"
-                    onChange={(event) => updateSelected({ outcome: event.target.value })}
-                    value={String(selectedNode.data.outcome)}
+                    onChange={(event) =>
+                      updateSelected({ outcome: event.target.value || "completed" })
+                    }
+                    placeholder={messages.richNodes.completed}
+                    value={
+                      selectedNode.data.outcome === "completed"
+                        ? ""
+                        : String(selectedNode.data.outcome)
+                    }
                   />
                 </label>
               ) : null}
@@ -845,6 +920,7 @@ interface GraphDetailViewProps {
 }
 
 export function WorkflowDetailView({ orpc, slug, onNodeLoaded }: GraphDetailViewProps) {
+  const messages = useCoreI18n();
   const detailQuery = useQuery({
     ...orpc.nodes.get.queryOptions({ input: { nodeId: slug ?? "", type: "workflow" } }),
     enabled: Boolean(slug),
@@ -852,11 +928,111 @@ export function WorkflowDetailView({ orpc, slug, onNodeLoaded }: GraphDetailView
   const detail = asNodeDetail(detailQuery.isError ? undefined : detailQuery.data, "workflow");
   useReportLoadedNode(detail?.node, onNodeLoaded);
   if (!detail) {
-    return detailQuery.isLoading ? <NodeDetailSkeleton /> : <RichNodeNotFound type="Workflow" />;
+    return detailQuery.isLoading ? (
+      <NodeDetailSkeleton />
+    ) : (
+      <RichNodeNotFound type={messages.nodeDetail.workflow} />
+    );
   }
   return (
     <ReactFlowProvider>
       <GraphEditor document={detail.document} key={detail.node.id} node={detail.node} orpc={orpc} />
+    </ReactFlowProvider>
+  );
+}
+
+function WorkflowSidePanelCanvas({
+  document,
+  fullscreenState,
+  name,
+}: {
+  document: WorkflowDocument;
+  fullscreenState: PreviewFullscreenState;
+  name: string;
+}) {
+  const messages = useCoreI18n();
+  const { fitView, getViewport, setViewport } = useReactFlow<WorkflowFlowNode, Edge>();
+  const splitViewportRef = useRef<Viewport | null>(null);
+  const wasFullscreenRef = useRef(false);
+  const [nodes, , applyNodeChanges] = useNodesState<WorkflowFlowNode>(
+    document.nodes.map((workflowNode) => ({
+      id: workflowNode.id,
+      type: "workflowStep" as const,
+      position: workflowNode.position,
+      data: workflowNodeData(workflowNode),
+    })),
+  );
+  const [edges, , applyEdgeChanges] = useEdgesState(toWorkflowEdges(document.edges));
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      if (fullscreenState.fullscreen) {
+        splitViewportRef.current = getViewport();
+        void fitView({ duration: 0, maxZoom: 1, minZoom: 0.4, padding: 0.12 });
+      } else if (wasFullscreenRef.current && splitViewportRef.current) {
+        void setViewport(splitViewportRef.current, { duration: 0 });
+      }
+      wasFullscreenRef.current = fullscreenState.fullscreen;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [fitView, fullscreenState.fullscreen, getViewport, setViewport]);
+
+  return (
+    <FullscreenPreviewSurface
+      aria-label={name}
+      data-visual-node-preview="workflow"
+      exitLabel={messages.airapp.exitFullscreen}
+      fullscreenState={fullscreenState}
+      toolbar={
+        <div className="flex min-h-11 items-center justify-between gap-2 border-border/60 border-b px-4 py-2">
+          <span className="font-medium text-muted-foreground text-xs uppercase">
+            {messages.nodeDetail.workflow}
+          </span>
+          <PreviewFullscreenButton
+            fullscreenState={fullscreenState}
+            label={messages.airapp.enterFullscreen}
+          />
+        </div>
+      }
+    >
+      <WorkflowCanvas
+        edges={edges}
+        nodes={nodes}
+        onEdgesChange={applyEdgeChanges}
+        onNodesChange={applyNodeChanges}
+        readOnly
+      />
+    </FullscreenPreviewSurface>
+  );
+}
+
+/** Read-only React Flow preview kept mounted by the Side Panel tab host. */
+export function WorkflowSidePanelPreview({ orpc, payload }: SidePanelTabProps) {
+  const messages = useCoreI18n();
+  const { nodeId } = payload as { nodeId: string };
+  const fullscreenState = usePreviewFullscreen();
+  const detailQuery = useQuery({
+    ...orpc.nodes.get.queryOptions({ input: { nodeId, type: "workflow" } }),
+    enabled: Boolean(nodeId),
+  });
+  const detail = asNodeDetail(detailQuery.isError ? undefined : detailQuery.data, "workflow");
+
+  if (!detail) {
+    return detailQuery.isLoading ? (
+      <NodeDetailSkeleton />
+    ) : (
+      <RichNodeNotFound type={messages.nodeDetail.workflow} />
+    );
+  }
+
+  return (
+    <ReactFlowProvider>
+      <WorkflowSidePanelCanvas
+        document={detail.document}
+        fullscreenState={fullscreenState}
+        key={detail.node.id}
+        name={detail.node.name}
+      />
     </ReactFlowProvider>
   );
 }

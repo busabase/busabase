@@ -1,5 +1,5 @@
 import type { AgentSessionStatus, AgentTransport } from "busabase-contract/domains/agents/types";
-import { index, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { bigint, index, jsonb, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 import { spaceIdColumn } from "../../../db/space-column";
 
 /**
@@ -39,6 +39,34 @@ export const busabaseAgentSessions = pgTable(
     createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
     lastActivityAt: timestamp("last_activity_at", { mode: "date" }).defaultNow().notNull(),
     endedAt: timestamp("ended_at", { mode: "date" }),
+    /**
+     * Cross-worker turn ownership (PUL-223 follow-up). `leaseOwnerId` is null
+     * and `leaseExpiresAt` is null when no worker holds an active turn; both
+     * are set atomically with `status: "busy"` by `acquireSessionLease`.
+     *
+     * `leaseFencingToken` is never reset, only ever incremented — a write
+     * carrying a token that is not the row's *current* value is from a
+     * worker that has since been superseded (crashed, or simply outlasted by
+     * a takeover after its lease expired) and must be rejected. This is what
+     * makes takeover after a crash safe: the old owner's in-flight writes
+     * cannot silently corrupt state, even though ACP v1 gives us no way to
+     * ask the agent to resend/discard that abandoned turn.
+     */
+    leaseOwnerId: text("lease_owner_id"),
+    leaseFencingToken: bigint("lease_fencing_token", { mode: "number" }).notNull().default(0),
+    leaseExpiresAt: timestamp("lease_expires_at", { mode: "date" }),
+    /**
+     * Durable mirror of `LiveSession.modelOption` (PUL-246), for
+     * `remote-websocket` sessions only. `remote-websocket` agents outlive the
+     * request and can be reattached from ANY worker (PUL-223), so the model
+     * selector must not live only in one worker's in-memory map — a list
+     * request served by a non-owning worker would otherwise see the same
+     * durable row with no selector at all. Untyped `jsonb` at rest: this
+     * column is read back through `AgentSessionModelOptionVOSchema.safeParse`
+     * (see `agent-session-store.ts#toVO`), never trusted verbatim, so a
+     * malformed or stale shape degrades to `null` instead of throwing.
+     */
+    modelOption: jsonb("model_option"),
   },
   (table) => [
     // Every read is "this space's sessions, newest first" (the List and Detail

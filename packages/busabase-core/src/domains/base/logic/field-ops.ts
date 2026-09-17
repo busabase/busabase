@@ -40,11 +40,15 @@ import { isSystemFieldType } from "../field-types";
 import { FormulaError } from "../formula";
 import { isRollupCompatible, rollupPreservesTargetUnit } from "../lookup/rollup";
 import { busabaseFieldValues } from "../schema";
-import { convertFieldValue } from "../utils/field-conversion";
+import { convertFieldValue, isUnconvertibleFieldType } from "../utils/field-conversion";
 import { isPrimaryField, PRIMARY_FIELD_DELETE_MESSAGE } from "../utils/primary-field";
 import { baseNotFound } from "./errors";
 import { getBase } from "./queries";
-import { assertRelationOnlyOptionsOrThrow, resolveRelationFieldOptions } from "./relation-options";
+import {
+  assertNoMultiValueTruncationOrThrow,
+  assertRelationOnlyOptionsOrThrow,
+  resolveRelationFieldOptions,
+} from "./relation-options";
 
 export {
   convertFieldChangeRequestInputSchema,
@@ -504,6 +508,28 @@ export const createUpdateFieldChangeRequest = async (
   const timestamp = now();
   if (patch.options !== undefined) {
     assertRelationOnlyOptionsOrThrow(field.type, field.slug, patch.options);
+    // Turning a multi-value id column into a single-value one does not rewrite
+    // the rows that already hold several, so the truncation lands silently on
+    // whoever next saves each record. Count them here and refuse instead.
+    const wasMulti = (field.options as { multiple?: boolean } | null)?.multiple !== false;
+    const becomesSingle = (patch.options as { multiple?: boolean }).multiple === false;
+    if (wasMulti && becomesSingle && (field.type === "member" || field.type === "relation")) {
+      const rows = await db
+        .select({ valueJson: busabaseFieldValues.valueJson })
+        .from(busabaseFieldValues)
+        .where(
+          and(
+            eq(busabaseFieldValues.baseId, base.id),
+            eq(busabaseFieldValues.fieldId, field.id),
+            isNull(busabaseFieldValues.changeRequestId),
+            isNull(busabaseFieldValues.deletedAt),
+          ),
+        );
+      const rowsWithSeveral = rows.filter(
+        (row) => Array.isArray(row.valueJson) && row.valueJson.length > 1,
+      ).length;
+      assertNoMultiValueTruncationOrThrow(field.slug, rowsWithSeveral);
+    }
   }
   let options =
     patch.options !== undefined
@@ -617,10 +643,15 @@ export const previewFieldConversion = async (
       message: `Cannot convert system field: ${field.slug}`,
     });
   }
-  if (field.type === "relation" || field.type === "attachment") {
+  // Ask the converter which types it refuses rather than keeping a second list
+  // here. The hardcoded copy these two lines used to carry missed `member` when
+  // it was added, so a member→text conversion sailed past this gate and the
+  // merge's `catch { converted = null }` nulled every assignment in the column —
+  // no error, no undo.
+  if (isUnconvertibleFieldType(field.type)) {
     throw conversionNotSupported(field.type, newType);
   }
-  if (isSystemFieldType(newType) || newType === "relation" || newType === "attachment") {
+  if (isSystemFieldType(newType) || isUnconvertibleFieldType(newType)) {
     throw conversionNotSupported(field.type, newType);
   }
 
@@ -761,10 +792,15 @@ export const createConvertFieldChangeRequest = async (
       message: `Cannot convert system field: ${field.slug}`,
     });
   }
-  if (field.type === "relation" || field.type === "attachment") {
+  // Ask the converter which types it refuses rather than keeping a second list
+  // here. The hardcoded copy these two lines used to carry missed `member` when
+  // it was added, so a member→text conversion sailed past this gate and the
+  // merge's `catch { converted = null }` nulled every assignment in the column —
+  // no error, no undo.
+  if (isUnconvertibleFieldType(field.type)) {
     throw conversionNotSupported(field.type, newType);
   }
-  if (isSystemFieldType(newType) || newType === "relation" || newType === "attachment") {
+  if (isSystemFieldType(newType) || isUnconvertibleFieldType(newType)) {
     throw conversionNotSupported(field.type, newType);
   }
 

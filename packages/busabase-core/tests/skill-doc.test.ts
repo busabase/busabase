@@ -33,6 +33,14 @@ const desktopDispatcher = buildSkillMarkdown("https://busabase.com", {
   stage: "bootstrap",
 });
 
+/** Cloud bootstrap doc for an identity with no dashboard-preselected Space. */
+const cloudWithoutPreselectedSpace = () =>
+  buildSkillMarkdown("https://busabase.com", {
+    mode: "cloud",
+    stage: "bootstrap",
+    editionConfirmed: true,
+  });
+
 const setupDescription =
   "Guide users through choosing and connecting to Busabase, authorizing Busabase Cloud when needed, and installing the Busabase Agent Skills for ongoing use.";
 
@@ -195,9 +203,9 @@ describe("generated Cloud onboarding", () => {
       editionConfirmed: true,
     });
 
-    expect(cloudWithoutPreselectedSpace).toContain("### 0b. Confirm the target Space");
+    expect(cloudWithoutPreselectedSpace).toContain("### 0c. Confirm the target Space");
     expect(cloudWithoutPreselectedSpace).toContain(
-      "- **One** → nothing to choose. Continue with the `bootstrapRequired` branch from 0a.",
+      "- **One** → nothing to choose. Continue with the `bootstrapRequired` branch from 0b.",
     );
     expect(cloudWithoutPreselectedSpace).toContain(
       "- **More than one** → ask once, a lettered choice in the user's language",
@@ -207,10 +215,10 @@ describe("generated Cloud onboarding", () => {
       "Offer Spaces, never commands — switching is your job,\n  so never tell the user to run anything",
     );
     expect(cloudWithoutPreselectedSpace).toContain(
-      "re-decide the 0a branch from the new `bootstrapRequired`",
+      "re-decide the 0b branch from the new `bootstrapRequired`",
     );
     // A dashboard-preselected Space is locked, so there is no confirmation question at all.
-    expect(cloudBootstrap).not.toContain("### 0b. Confirm the target Space");
+    expect(cloudBootstrap).not.toContain("### 0c. Confirm the target Space");
     expect(cloudBootstrap).toContain("never ask the user to pick one");
   });
 
@@ -323,7 +331,9 @@ describe("bootstrap edition confirmation", () => {
     expect(cloudBootstrap).toContain(
       "If `resume_code` has expired or authorization failed, explain what happened; if the user still wants\nto continue, start over from the `--no-wait` command above once.",
     );
-    expect(cloudBootstrap).toContain("| 1 | 🔌 **Connect** | Step 0 | device login");
+    expect(cloudBootstrap).toContain(
+      "| 1 | 🔌 **Connect** | Step 0 | a verified MCP integration, or device login",
+    );
     expect(localBootstrap).toContain(
       "## Step 1 — Install & start (pick the execution mode that fits this machine)",
     );
@@ -348,29 +358,206 @@ describe("bootstrap edition confirmation", () => {
   });
 
   it("ends Cloud congratulations with a real-space Dashboard link only", () => {
-    expect(cloudBootstrap).toContain("clickable Markdown link labeled **Open Busabase Dashboard**");
-    expect(cloudBootstrap).toContain(
-      "> 🔗 [Open Busabase Dashboard](https://busabase.com/dashboard/spc_x/home)",
-    );
-    expect(cloudBootstrap).toContain(
-      "Step 0 locked the Space ID used below; before replying, verify login confirmed that same Space.",
-    );
-    expect(cloudBootstrap).toContain(
-      "Never show `$BUSABASE_SPACE_ID`, `{space_id}`, `YOUR_SPACE_ID`, or any other placeholder",
-    );
     const cloudWithoutPreselectedSpace = buildSkillMarkdown("https://busabase.com", {
       mode: "cloud",
       stage: "bootstrap",
       editionConfirmed: true,
     });
+
+    for (const doc of [cloudBootstrap, cloudWithoutPreselectedSpace]) {
+      expect(doc).not.toMatch(/^\s*}\s*$/m);
+    }
+
+    expect(cloudBootstrap).toContain("clickable Markdown link labeled **Open Busabase Dashboard**");
+    expect(cloudBootstrap).toContain(
+      "> 🔗 [Open Busabase Dashboard](https://busabase.com/dashboard/spc_x/home)",
+    );
+    expect(cloudBootstrap).toContain(
+      "Step 0 locked the Space ID used below; verify whichever path you connected through confirmed",
+    );
+    expect(cloudBootstrap).toContain(
+      "Never show `$BUSABASE_SPACE_ID`, `{space_id}`, `YOUR_SPACE_ID`, or any other placeholder",
+    );
     expect(cloudWithoutPreselectedSpace).toContain(
       "> 🔗 [Open Busabase Dashboard](https://busabase.com/dashboard/{space_id}/home)",
     );
     expect(cloudWithoutPreselectedSpace).toContain(
-      "Replace `{space_id}` with the real Space ID that Step 0 confirmed and saved as\n`BUSABASE_SPACE_ID` before replying.",
+      "Replace `{space_id}` with the real selected Space ID — whichever path you connected",
     );
     expect(localBootstrap).not.toContain("Open Busabase Dashboard");
     expect(localBootstrap).not.toContain("/dashboard/{space_id}/home");
+  });
+});
+
+describe("Cloud setup prefers a connected Busabase MCP integration over CLI login", () => {
+  it("keeps the MCP-aware additions within the setup context budget", () => {
+    expect(Buffer.byteLength(cloudBootstrap, "utf8")).toBeLessThan(19_500);
+    expect(Buffer.byteLength(cloudWithoutPreselectedSpace(), "utf8")).toBeLessThan(20_000);
+  });
+
+  it("puts the MCP check before any CLI login command, in document order", () => {
+    const mcpCheckIndex = cloudBootstrap.indexOf("### 0a. MCP first");
+    const cliLoginIndex = cloudBootstrap.indexOf("### 0b. CLI fallback");
+    const firstLoginCommandIndex = cloudBootstrap.indexOf(
+      "npx --yes busabase-cli@latest login --no-wait",
+    );
+
+    expect(mcpCheckIndex).toBeGreaterThan(-1);
+    expect(cliLoginIndex).toBeGreaterThan(mcpCheckIndex);
+    expect(firstLoginCommandIndex).toBeGreaterThan(cliLoginIndex);
+  });
+
+  it("never hardcodes MCP tool names — the host discovers and invokes its own tools", () => {
+    const hardcodedToolNames = [
+      "auth_verify",
+      "bases_list",
+      "nodes_list",
+      "nodes_create_change_request",
+      "bases_create_bulk_change_request",
+      "onboarding_complete_bootstrap",
+      "node_create",
+      "node_files_change_request",
+      "view_change_request",
+      "record_query",
+      "users_me",
+    ];
+    for (const doc of [cloudBootstrap, cloudWithoutPreselectedSpace()]) {
+      for (const toolName of hardcodedToolNames) {
+        expect(doc).not.toContain(`\`${toolName}\``);
+      }
+      expect(doc).toContain("assume tool names");
+      expect(doc).toContain("reconnect it first if configured but disconnected");
+      expect(doc).toContain("If verification succeeds, skip **0b** and keep MCP for this run");
+    }
+  });
+
+  it("resolves the preselected Space through the connected integration without guessing", () => {
+    expect(cloudBootstrap).toContain(
+      "Target the Dashboard-selected Space `spc_x` in that first check",
+    );
+    expect(cloudBootstrap).toContain("ask the user to switch or reconnect accounts");
+    expect(cloudBootstrap).toContain("never choose or create another Space");
+  });
+
+  it("treats bootstrapRequired on a fresh identity as expected, not a probe failure", () => {
+    const doc = cloudWithoutPreselectedSpace();
+    expect(doc).toContain("With no preselected Space, use the only result");
+    expect(doc).toContain("accept a new\npersonal Space when the identity has no memberships");
+  });
+
+  it("falls back to CLI sign-in only when no MCP integration is available or it fails", () => {
+    expect(cloudBootstrap).toContain("Otherwise use the CLI fallback");
+    expect(cloudBootstrap).toContain("If verification succeeds, skip **0b** and keep MCP");
+  });
+});
+
+describe("Cloud setup resolves the target Space the same way on either transport", () => {
+  it("asks the user to confirm the Space only when the account has more than one, on either path", () => {
+    const doc = cloudWithoutPreselectedSpace();
+    expect(doc).toContain("### 0c. Confirm the target Space");
+    expect(doc).toContain(
+      "- **One** → nothing to choose. Continue with the `bootstrapRequired` branch from 0b.",
+    );
+    expect(doc).toContain(
+      "- **More than one** → ask once, a lettered choice in the user's language",
+    );
+    expect(doc).toContain("On MCP, resolve the target Space from the verification result");
+    expect(doc).toContain("use one result; ask the user when there are several");
+  });
+
+  it("confirms the preselected Space agrees on the MCP path too", () => {
+    expect(cloudBootstrap).toContain("it must match `spc_x`");
+  });
+
+  it("branches from the resolved MCP Space without sending the agent back through CLI", () => {
+    for (const doc of [cloudBootstrap, cloudWithoutPreselectedSpace()]) {
+      expect(doc).toContain(
+        "follow `bootstrapRequired`: `false` goes to Step 3 with no writes; `true` goes to\nStep 1",
+      );
+    }
+  });
+});
+
+describe("Cloud setup routes the rest of the document by whichever path connected", () => {
+  it("commits to one transport for the rest of the session, without naming specific tools", () => {
+    expect(cloudBootstrap).toContain("Keep the same transport for the rest of the run");
+  });
+
+  it("requires write access in the target Space to complete setup, on either transport", () => {
+    expect(cloudBootstrap).toContain("Before the first write, require write access");
+    expect(cloudBootstrap).toContain(
+      "If anything is missing, stop before writing; ask the user to reconnect\nwith more access or approve CLI fallback",
+    );
+  });
+
+  it("preflights semantic setup capabilities before the first MCP write", () => {
+    expect(cloudBootstrap).toContain(
+      "Before the first write, require write access plus capabilities to inspect, propose, read\nback, and complete bootstrap",
+    );
+  });
+
+  it("routes Step 2 initialization by transport without naming specific MCP tools", () => {
+    expect(cloudBootstrap).toContain("**MCP path:** skip the shell examples");
+    expect(cloudBootstrap).toContain("seed with stable idempotency keys");
+    expect(cloudBootstrap).toContain(
+      "Require merged structure/records and `materialized: true` views",
+    );
+    expect(cloudBootstrap).toContain(
+      "otherwise stop for\napproval and resume only after a canonical View read confirms materialization",
+    );
+  });
+
+  it("preserves the CLI path's existing curl/busabase-cli examples exactly, unconditionally", () => {
+    expect(cloudBootstrap).toContain(
+      'curl -X POST "$BUSABASE_BASE_URL/api/v1/nodes/change-requests"',
+    );
+    expect(cloudBootstrap).toContain('curl -X POST "$BUSABASE_BASE_URL/api/v1/bases"');
+    expect(cloudBootstrap).toContain("/api/v1/onboarding/bootstrap-complete");
+  });
+});
+
+describe("Cloud setup's final handoff installs skills without changing transport", () => {
+  it("installs both permanent skills on the MCP path too", () => {
+    expect(cloudBootstrap).toContain(
+      "Have the Harness install both skills into its persistent skill store",
+    );
+    expect(cloudBootstrap).toMatch(
+      /^npx skills add busabase\/skills --skill busabase busabase-app-creator$/m,
+    );
+    expect(cloudBootstrap).toContain("MCP remains the transport when it connected successfully");
+    expect(cloudBootstrap).toContain("installing skills does not require CLI\ncredentials");
+    expect(cloudBootstrap).toContain(
+      "Finish only after both skills are available in future sessions",
+    );
+  });
+
+  it("never claims 'connected' before Step 0 resolves, on either transport", () => {
+    expect(cloudBootstrap).toContain(
+      "Don't claim \"you're connected / all set\" before this point",
+    );
+    expect(cloudBootstrap).toContain(
+      "- ✅ **connected** — the host responds (you proved it in Step 0)",
+    );
+  });
+
+  it("builds the final dashboard link regardless of which transport resolved the Space", () => {
+    expect(cloudBootstrap).toContain("verify whichever path you connected through confirmed");
+
+    const doc = cloudWithoutPreselectedSpace();
+    expect(doc).toContain(
+      "Replace `{space_id}` with the real selected Space ID — whichever path you connected",
+    );
+  });
+
+  it("does not alter Personal Desktop's unconditional skills-install handoff", () => {
+    expect(localBootstrap).not.toContain("MCP");
+    expect(localBootstrap).not.toContain("CLI path");
+    expect(localBootstrap).toMatch(
+      /^npx skills add busabase\/skills --skill busabase busabase-app-creator$/m,
+    );
+    expect(localBootstrap).toContain(
+      "One step left before everyday use. Install both permanent skills",
+    );
   });
 });
 

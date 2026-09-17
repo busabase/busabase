@@ -84,8 +84,13 @@ describe("Asset-backed file search — content vs metadata", () => {
     expect(result?.body).toContain("ZEBRAWIDGET");
   });
 
+  it("does not scan file bodies in quick-search mode", async () => {
+    const search = await client.search({ query: "ZEBRAWIDGET", limit: 10, mode: "quick" });
+    expect(search.results.some((result) => result.href === "/file/quarterly")).toBe(false);
+  });
+
   it("finds a file by its filename without depending on content", async () => {
-    const search = await client.search({ query: "quarterly.txt", limit: 10 });
+    const search = await client.search({ query: "quarterly.txt", limit: 10, mode: "quick" });
     expect(search.results.some((result) => result.href === "/file/quarterly")).toBe(true);
   });
 

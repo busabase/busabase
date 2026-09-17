@@ -12,6 +12,7 @@ import "@milkdown/crepe/theme/frame.css";
 import { Milkdown, MilkdownProvider, useEditor } from "@milkdown/react";
 import { useEffect, useRef } from "react";
 import { useCoreI18n } from "../../../i18n";
+import { createDocCodeTheme } from "./doc-code-theme";
 import { docVideoLinkPlugin, docVideoPlugin } from "./doc-video";
 import "./doc-editor.css";
 
@@ -75,6 +76,7 @@ function DocEditorInner({
           inputPlaceholder: messages.docEditor.linkPlaceholder,
         },
         [Crepe.Feature.CodeMirror]: {
+          theme: createDocCodeTheme(),
           searchPlaceholder: messages.docEditor.codeSearchPlaceholder,
           noResultText: messages.docEditor.codeNoResult,
           copyText: messages.docEditor.codeCopy,

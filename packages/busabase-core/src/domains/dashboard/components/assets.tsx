@@ -1,14 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { hasApiKeyLevel } from "busabase-contract/access-control/api-key-level";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { AssetTextStatus } from "busabase-contract/types";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "kui/dialog";
+import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "kui/dialog";
 import { Skeleton } from "kui/skeleton";
 import {
   AlertTriangle,
@@ -19,15 +13,22 @@ import {
   Film,
   Image as ImageIcon,
   Music,
+  Pencil,
+  Plus,
   RefreshCw,
   Trash2,
   Upload,
 } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { fmt, useCoreI18n } from "../../../i18n";
+import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
+import { presentCoreError } from "../../../i18n/localize-error";
 import { INLINE_ASSET_TEXT_MAX_BYTES, isTxtFile, utf8ByteLength } from "../helpers/asset-text-grep";
+import { useIsAnonymousVisitor } from "../visitor-context";
+import { AssetMetadataEditorDialog } from "./asset-metadata-editor";
+import { DialogContent } from "./localized-dialog-content";
 import { ConfirmActionDialog, EmptyState } from "./primitives";
+import { useWorkspacePermissionLevel } from "./split-submit-button";
 
 export const assetSizeUnits = ["B", "KB", "MB", "GB"];
 export function formatAssetSize(bytes: number): string {
@@ -80,7 +81,9 @@ export function AssetMediaPreview({ mimeType, url, name, mediaClassName }: Asset
     return <audio className="w-full px-4" controls src={url} />;
   }
   if (mimeType === "application/pdf") {
-    return <iframe className="h-[70vh] w-full border-0" src={url} title={name} />;
+    return (
+      <iframe className={`h-[70vh] w-full border-0 ${mediaClassName}`} src={url} title={name} />
+    );
   }
   const Icon = assetKindIcon(mimeType);
   return (
@@ -146,31 +149,113 @@ export function AssetTextStatusChip({ status }: { status: AssetTextStatus }) {
   );
 }
 
+/**
+ * The agent-readable notes attached to a file.
+ *
+ * Read-only by default. `editable` is opt-in per call site and MUST stay off
+ * for the copy mounted inside `node-settings-dialog`, where the editor's KUI
+ * dialog would nest inside another one and hit that focus-trap problem.
+ */
 export function AssetMetadataBlock({
   metadata,
   framed = false,
   compact = false,
+  editable = false,
+  assetId,
+  orpc,
+  onPersisted,
 }: {
   metadata: Record<string, unknown> | null | undefined;
   framed?: boolean;
   compact?: boolean;
+  /** Opt-in write affordance. Requires `assetId`, `orpc` and `onPersisted`. */
+  editable?: boolean;
+  assetId?: string;
+  orpc?: BusabaseQueryUtils;
+  onPersisted?: () => Promise<void>;
 }) {
   const messages = useCoreI18n();
+  const isAnonymous = useIsAnonymousVisitor();
+  const permissionLevel = useWorkspacePermissionLevel();
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editSession, setEditSession] = useState(0);
+  const [startWithBlankRow, setStartWithBlankRow] = useState(false);
+
+  // Both halves of the gate are load-bearing. The cloud's public share view
+  // renders the dashboard WITHOUT a permission level, so an anonymous visitor
+  // inherits the `"manage"` default — a level-only gate would offer them Edit.
+  // (The server refuses either way; this keeps the UI from lying about it.)
+  const canEdit =
+    editable &&
+    Boolean(assetId) &&
+    Boolean(orpc) &&
+    Boolean(onPersisted) &&
+    !isAnonymous &&
+    hasApiKeyLevel(permissionLevel, "write");
+
+  const openEditor = (blankRow: boolean) => {
+    setStartWithBlankRow(blankRow);
+    setEditSession((current) => current + 1);
+    setEditorOpen(true);
+  };
+
+  const hasMetadata = hasAssetMetadata(metadata);
   const content = (
     <>
       <div className="mb-2 flex items-center justify-between gap-2">
         <h2 className="font-medium text-sm">{messages.assets.metadata}</h2>
-        {hasAssetMetadata(metadata) ? (
-          <span className="rounded-md border bg-muted px-2 py-0.5 text-muted-foreground text-[10px] uppercase">
-            {messages.assets.metadataJson}
-          </span>
-        ) : null}
+        <div className="flex items-center gap-2">
+          {hasMetadata ? (
+            <span className="rounded-md border bg-muted px-2 py-0.5 text-muted-foreground text-[10px] uppercase">
+              {messages.assets.metadataJson}
+            </span>
+          ) : null}
+          {canEdit ? (
+            <button
+              className="inline-flex items-center gap-1.5 rounded-md border bg-card px-2.5 py-1 text-muted-foreground text-xs hover:bg-muted hover:text-foreground"
+              onClick={() => openEditor(false)}
+              type="button"
+            >
+              <Pencil className="size-3" />
+              {messages.assets.metadataEdit}
+            </button>
+          ) : null}
+        </div>
       </div>
-      <pre
-        className={`overflow-auto whitespace-pre-wrap break-words rounded-md border bg-muted/40 p-3 font-mono text-[11px] leading-5 ${compact ? "max-h-48" : "max-h-72"}`}
-      >
-        {formatAssetMetadata(metadata)}
-      </pre>
+      {canEdit && !hasMetadata ? (
+        <div className="rounded-md border border-dashed bg-muted/20 p-3">
+          <p className="font-medium text-sm">{messages.assets.metadataEmpty}</p>
+          <p className="mt-1 text-muted-foreground text-xs leading-5">
+            {messages.assets.metadataEmptyHint}
+          </p>
+          <button
+            className="mt-2 inline-flex items-center gap-1.5 rounded-md border bg-card px-2.5 py-1.5 text-muted-foreground text-xs hover:bg-muted hover:text-foreground"
+            onClick={() => openEditor(true)}
+            type="button"
+          >
+            <Plus className="size-3.5" />
+            {messages.assets.metadataAddField}
+          </button>
+        </div>
+      ) : (
+        <pre
+          className={`overflow-auto whitespace-pre-wrap break-words rounded-md border bg-muted/40 p-3 font-mono text-[11px] leading-5 ${compact ? "max-h-48" : "max-h-72"}`}
+        >
+          {formatAssetMetadata(metadata)}
+        </pre>
+      )}
+      {canEdit && assetId && orpc && onPersisted ? (
+        <AssetMetadataEditorDialog
+          assetId={assetId}
+          metadata={metadata}
+          onOpenChange={setEditorOpen}
+          onPersisted={onPersisted}
+          open={editorOpen}
+          orpc={orpc}
+          sessionKey={editSession}
+          startWithBlankRow={startWithBlankRow}
+        />
+      ) : null}
     </>
   );
 
@@ -204,6 +289,7 @@ export function AssetTextPreviewPanel({
   textStatus: AssetTextStatus;
 }) {
   const messages = useCoreI18n();
+  const locale = useCoreLocale();
   const [isExpanded, setIsExpanded] = useState(false);
   const [lines, setLines] = useState<string[]>([]);
   const [loadedThrough, setLoadedThrough] = useState(0);
@@ -271,9 +357,12 @@ export function AssetTextPreviewPanel({
 
           {textLinesQuery.isError ? (
             <p className="rounded-md border border-destructive/40 bg-destructive/10 px-2.5 py-1.5 text-destructive text-xs">
-              {textLinesQuery.error instanceof Error
-                ? textLinesQuery.error.message
-                : messages.assets.textPreviewFailed}
+              {presentCoreError(
+                messages,
+                locale,
+                textLinesQuery.error,
+                messages.assets.textPreviewFailed,
+              )}
             </p>
           ) : null}
 
@@ -417,6 +506,7 @@ export function AssetLibraryView({
   emptyGuide?: ReactNode;
 }) {
   const messages = useCoreI18n();
+  const locale = useCoreLocale();
   const listQuery = useQuery(orpc.assets.list.queryOptions({}));
   const [unusedOnly, setUnusedOnly] = useState(false);
   const allAssets = listQuery.data ?? [];
@@ -434,9 +524,7 @@ export function AssetLibraryView({
       <div className="w-full p-4 md:p-6">
         <AssetsHeader count={0} />
         <EmptyState
-          body={
-            listQuery.error instanceof Error ? listQuery.error.message : messages.assets.failedBody
-          }
+          body={presentCoreError(messages, locale, listQuery.error, messages.assets.failedBody)}
           title={messages.assets.failedTitle}
         />
       </div>
@@ -882,6 +970,7 @@ export function AssetDetailView({
   onOpenNode: (nodeType: string, nodeSlug: string) => void;
 }) {
   const messages = useCoreI18n();
+  const locale = useCoreLocale();
   const detailQuery = useQuery(orpc.assets.get.queryOptions({ input: { assetId } }));
   const queryClient = useQueryClient();
   const [textRevision, setTextRevision] = useState(0);
@@ -893,7 +982,7 @@ export function AssetDetailView({
       onBack();
     },
     onError: (error) => {
-      toast.error(error instanceof Error ? error.message : messages.assets.deleteFailed);
+      toast.error(presentCoreError(messages, locale, error, messages.assets.deleteFailed));
     },
   });
   const detail = detailQuery.data ?? null;
@@ -907,6 +996,18 @@ export function AssetDetailView({
       queryClient.invalidateQueries({ queryKey: orpc.assets.readTextLines.key() }),
     ]);
     setTextRevision((current) => current + 1);
+  };
+
+  // The list query matters as much as the detail one: the grid card's "meta"
+  // badge is driven by `hasAssetMetadata`, so adding the first key has to flip
+  // that badge without a reload.
+  const refreshAssetMetadata = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({
+        queryKey: orpc.assets.get.queryOptions({ input: { assetId } }).queryKey,
+      }),
+      queryClient.invalidateQueries({ queryKey: orpc.assets.list.queryOptions({}).queryKey }),
+    ]);
   };
 
   if (!detail) {
@@ -1005,7 +1106,14 @@ export function AssetDetailView({
             textStatus={asset.textStatus}
           />
 
-          <AssetMetadataBlock framed metadata={asset.metadata} />
+          <AssetMetadataBlock
+            assetId={asset.id}
+            editable
+            framed
+            metadata={asset.metadata}
+            onPersisted={refreshAssetMetadata}
+            orpc={orpc}
+          />
 
           <div className="rounded-xl border bg-card p-4">
             <h2 className="mb-2 font-medium text-sm">{messages.assets.whereUsed}</h2>

@@ -157,7 +157,7 @@ export function resolveSandockConfig(env: NodeJS.ProcessEnv = process.env): Sand
  * Found by running against a real Sandock — the recording stand-in in the unit
  * tests never sees a URL, so it could not have caught this.
  *
- * This is the same published `sandock` SDK `apps/buda` already depends on —
+ * This is the same published `sandock` SDK Buda already depends on —
  * not `sandock-contract`, which is an internal oRPC contract package meant for
  * Sandock's own three apps (`sandock-core`, `apps/sandock`, `apps/sandock-cloud`)
  * and reaches into `@orpc/*` types that never belonged in a published surface.

@@ -5,10 +5,11 @@ import type { AcpUiEvent } from "@acp-ui/core/reduce";
 import type { AcpSessionPort } from "@acp-ui/core/session";
 import { useAcpSession } from "@acp-ui/core/session";
 import { consumeEventIterator } from "@orpc/client";
-import { useQueryClient } from "@tanstack/react-query";
+import { type InfiniteData, type QueryKey, useQueryClient } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type {
   AgentSessionEventVO,
+  AgentSessionsPageVO,
   AgentSessionVO,
   PromptAttachmentInput,
 } from "busabase-contract/domains/agents/types";
@@ -127,7 +128,11 @@ function translate(event: AgentSessionEventVO): AcpUiEvent[] {
  * Sessions here are created explicitly by the user, so `start` adopts the one
  * already selected rather than opening a new one.
  */
-export function useAgentSession(orpc: BusabaseQueryUtils, sessionId: string | null) {
+export function useAgentSession(
+  orpc: BusabaseQueryUtils,
+  sessionId: string | null,
+  pagedSessionQueryKey?: QueryKey,
+) {
   const queryClient = useQueryClient();
   const port = useMemo<AcpSessionPort>(
     () => ({
@@ -148,22 +153,35 @@ export function useAgentSession(orpc: BusabaseQueryUtils, sessionId: string | nu
                 if (cancelled) return;
                 lastSeq = Math.max(lastSeq, event.seq);
                 if (event.kind === "status" && event.status) {
+                  const applyStatus = (session: AgentSessionVO) =>
+                    session.id === id
+                      ? {
+                          ...session,
+                          status: event.status as AgentSessionVO["status"],
+                          lastActivityAt: event.at,
+                          ...(event.status === "failed" && event.message
+                            ? { error: event.message }
+                            : {}),
+                        }
+                      : session;
                   queryClient.setQueryData(
                     orpc.agents.sessions.list.queryKey(),
-                    (previous: AgentSessionVO[] | undefined) =>
-                      previous?.map((session) =>
-                        session.id === id
-                          ? {
-                              ...session,
-                              status: event.status as AgentSessionVO["status"],
-                              lastActivityAt: event.at,
-                              ...(event.status === "failed" && event.message
-                                ? { error: event.message }
-                                : {}),
-                            }
-                          : session,
-                      ),
+                    (previous: AgentSessionVO[] | undefined) => previous?.map(applyStatus),
                   );
+                  if (pagedSessionQueryKey)
+                    queryClient.setQueryData<InfiniteData<AgentSessionsPageVO>>(
+                      pagedSessionQueryKey,
+                      (previous) =>
+                        previous
+                          ? {
+                              ...previous,
+                              pages: previous.pages.map((page) => ({
+                                ...page,
+                                items: page.items.map(applyStatus),
+                              })),
+                            }
+                          : previous,
+                    );
                 }
                 const update = event.acpUpdate as { sessionUpdate?: unknown } | undefined;
                 if (
@@ -173,6 +191,9 @@ export function useAgentSession(orpc: BusabaseQueryUtils, sessionId: string | nu
                   void queryClient.invalidateQueries({
                     queryKey: orpc.agents.sessions.list.queryKey(),
                   });
+                  if (pagedSessionQueryKey) {
+                    void queryClient.invalidateQueries({ queryKey: pagedSessionQueryKey });
+                  }
                 }
                 for (const translated of translate(event)) onEvent(translated);
               },
@@ -226,8 +247,18 @@ export function useAgentSession(orpc: BusabaseQueryUtils, sessionId: string | nu
       // The server echoes the prompt back as a `user_message` event, so the
       // core must not append it too — that would show it twice.
       serverEchoesPrompt: true,
+
+      // `end` is deliberately NOT implemented, even though the backend has a
+      // working close path and the slot is right here. `useAcpSession` calls
+      // `port.end?.()` from an effect cleanup keyed on the session id, so
+      // implementing it would end the previous conversation every time the
+      // user clicks another session in the rail, closes the side-panel tab,
+      // navigates away from /agents, or React StrictMode double-mounts in dev.
+      // That slot was written for acprouter's ephemeral sessions; busabase's
+      // are durable and user-created. Ending one is an explicit act, wired to
+      // the explicit "End session" button in `agent-detail-view.tsx`.
     }),
-    [orpc, queryClient, sessionId],
+    [orpc, pagedSessionQueryKey, queryClient, sessionId],
   );
 
   return useAcpSession(port, sessionId);

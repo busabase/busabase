@@ -766,13 +766,29 @@ function buildBootstrapMarkdown(origin: string, ctx?: SkillMarkdownContext): str
   const step0 = isCloud
     ? `## Step 0 — Connect to Busabase Cloud
 
+### 0a. MCP first
+
+Ask the Harness to discover and use an existing Busabase MCP integration before CLI. Use  Call "list_integration_tools" with "providerKey: busabase-cloud-mcp" to find the Busabase integration, if the tool exists. Verify it with
+a read-only identity and Space check; reconnect it first if configured but disconnected, and do not
+assume tool names.
+${
+  preselectedSpaceId
+    ? `Target the Dashboard-selected Space \`${preselectedSpaceId}\` in that first check. If access
+fails, ask the user to switch or reconnect accounts; never choose or create another Space.`
+    : `With no preselected Space, use the only result, ask when there are several, and accept a new
+personal Space when the identity has no memberships.`
+}
+If verification succeeds, skip **0b** and keep MCP for this run. Otherwise use the CLI fallback.
+
+### 0b. CLI fallback
+
 ${
   preselectedSpaceId
     ? `One move: sign in. The dashboard already chose the Space, so there is nothing to confirm
 afterwards.`
     : `Two moves: sign in, then confirm the Space you landed in.
 
-### 0a. Sign in`
+#### Sign in`
 }
 
 Sign-in is two commands, one per conversational turn. The first returns immediately, so the user
@@ -816,14 +832,14 @@ ${
   preselectedSpaceId
     ? ""
     : `
-### 0b. Confirm the target Space
+### 0c. Confirm the target Space
 
 Login never asks which Space to use: it takes the server default (the Space the user was most
 recently active in) and lists the rest in \`availableSpaces\`. The user has not seen that choice yet.
 
 Always tell the user which Space was selected (name + id). Then, by \`availableSpaces\` length:
 
-- **One** → nothing to choose. Continue with the \`bootstrapRequired\` branch from 0a.
+- **One** → nothing to choose. Continue with the \`bootstrapRequired\` branch from 0b.
 - **More than one** → ask once, a lettered choice in the user's language: \`A\` keeps the current
   Space, then one letter per remaining entry. Offer Spaces, never commands — switching is your job,
   so never tell the user to run anything.
@@ -831,14 +847,23 @@ Always tell the user which Space was selected (name + id). Then, by \`availableS
   > 📂 You're in **{space.name}** (the Space you used most recently). Keep it, or switch?
   > **A.** Keep **{space.name}**   **B.** {otherSpace1.name}   **C.** {otherSpace2.name}
 
-  On a switch, run both and re-decide the 0a branch from the new \`bootstrapRequired\` — the old one
+  On a switch, run both and re-decide the 0b branch from the new \`bootstrapRequired\` — the old one
   belonged to the previous Space:
 
   \`\`\`bash
   ${BUSABASE_CLI} space use <id>
   ${BUSABASE_CLI} whoami --output json
   \`\`\``
-}`
+}
+
+On MCP, resolve the target Space from the verification result: ${
+        preselectedSpaceId
+          ? `it must match \`${preselectedSpaceId}\`.`
+          : `use one result; ask the user when there are several.`
+      } Then follow \`bootstrapRequired\`: \`false\` goes to Step 3 with no writes; \`true\` goes to
+Step 1. Before the first write, require write access plus capabilities to inspect, propose, read
+back, and complete bootstrap. If anything is missing, stop before writing; ask the user to reconnect
+with more access or approve CLI fallback. Keep the same transport for the rest of the run.`
     : `## Step 0 — Connect to Busabase Personal Desktop
 
 Everything runs locally — no account, no API key. The user has already confirmed this edition, so
@@ -981,7 +1006,18 @@ until curl -fsS ${local}/api/v1/bases >/dev/null 2>&1; do sleep 2; done && echo 
 
   const step4 = `## Step ${isCloud ? 3 : 4} — The last setup step: install the permanent skills
 
-One step left before everyday use. Install both permanent skills so any agent on this machine can
+${
+  isCloud
+    ? `Have the Harness install both skills into its persistent skill store. Prefer its native
+installer; otherwise run:
+
+\`\`\`bash
+npx skills add busabase/skills --skill busabase busabase-app-creator
+\`\`\`
+
+MCP remains the transport when it connected successfully; installing skills does not require CLI
+credentials. Finish only after both skills are available in future sessions.`
+    : `One step left before everyday use. Install both permanent skills so any agent on this machine can
 drive this workspace with **busabase** and create complete workspace apps with
 **busabase-app-creator** every session — no re-pasting this onboarding doc:
 
@@ -991,7 +1027,9 @@ npx skills add busabase/skills --skill busabase busabase-app-creator
 
 The skills are self-describing. \`busabase\` reads \`~/.busabase/.env\` (set up above) and becomes
 the reference for the everyday loop and full API; \`busabase-app-creator\` builds on it when the
-user wants a complete workspace app. This onboarding doc has now done its job.
+user wants a complete workspace app.`
+}
+This onboarding doc has now done its job.
 
 ## 🎉 You're set up — congratulations!
 
@@ -1008,7 +1046,8 @@ Tell them so, and close the journey with the tracker fully checked — e.g.:
 
 > ✅ Connect · ✅ Initialize (new Spaces only) · ✅ Verify · ✅ Skills
 > 🎉 *You're all set — Busabase is connected, your first workspace is live, and both skills are
-> installed. From here it's everyday use: you ask, I write, and every change keeps a message, an
+> installed.
+> From here it's everyday use: you ask, I write, and every change keeps a message, an
 > author and a history you can undo — and I can build a complete workspace app when you need one.*
 ${
   isCloud
@@ -1016,9 +1055,10 @@ ${
 Finish the congratulations with a clickable Markdown link labeled **Open Busabase Dashboard**.
 ${
   preselectedSpaceId
-    ? `Step 0 locked the Space ID used below; before replying, verify login confirmed that same Space.`
-    : `Replace \`{space_id}\` with the real Space ID that Step 0 confirmed and saved as
-\`BUSABASE_SPACE_ID\` before replying.`
+    ? `Step 0 locked the Space ID used below; verify whichever path you connected through confirmed
+that same Space before replying.`
+    : `Replace \`{space_id}\` with the real selected Space ID — whichever path you connected
+through resolved and confirmed it — before replying.`
 }
 Never show \`$BUSABASE_SPACE_ID\`, \`{space_id}\`, \`YOUR_SPACE_ID\`, or any other placeholder
 literally to the user. The user's final line must be:
@@ -1050,10 +1090,10 @@ You are guiding the user through four milestones. Existing users skip initializa
 
 | # | Milestone | Covered by | Done when |
 | - | --------- | ---------- | --------- |
-| 1 | 🔌 **Connect** | ${isCloud ? "Step 0" : "Step 0 + Step 1"} | ${isCloud ? "device login returns the selected Space" : "the local API responds and the connection is saved"} |
+| 1 | 🔌 **Connect** | ${isCloud ? "Step 0" : "Step 0 + Step 1"} | ${isCloud ? "a verified MCP integration, or device login, returns the selected Space" : "the local API responds and the connection is saved"} |
 | 2 | 🏗️ **Initialize if required** | ${isCloud ? "Step 1 + Step 2" : "Step 2 + Step 3"} | version-0 Space gets starter data |
 | 3 | ✅ **Verify** | Step ${isCloud ? 2 : 3} | starter records read back and marker becomes version 1 |
-| 4 | 🎓 **Skills installed** | Step ${isCloud ? 3 : 4} | both skills selected by \`npx skills add\`, 🎉 |
+| 4 | 🎓 **Skills installed** | Step ${isCloud ? 3 : 4} | both skills available in the agent's persistent skill store, 🎉 |
 
 **Conduct rules — these create the step-by-step feel; follow them at every turn:**
 
@@ -1124,7 +1164,19 @@ types (\`auto_number\`, \`created_time\`, \`ai_summary\`, \`ai_tags\`, …).
 This is the everyday write loop, not an exception to it: the user has write access to their own
 new Space, so structure and sample rows land immediately. They already chose this starter — do not
 ask them to approve it, and do not force a review by passing \`autoMerge: false\`. Every write carries system provenance and stable
-identity so retries cannot duplicate data. Briefly show what is being built:
+identity so retries cannot duplicate data.
+
+${
+  isCloud
+    ? `**MCP path:** skip the shell examples and have the Harness run the same sequence: inspect,
+create missing structure/views, seed with stable idempotency keys, read back, then complete
+bootstrap. Require merged structure/records and \`materialized: true\` views; otherwise stop for
+approval and resume only after a canonical View read confirms materialization. The shell examples
+below are for CLI only.
+
+`
+    : ""
+}Briefly show what is being built:
 
 \`\`\`txt
 📁 CRM
@@ -1249,7 +1301,11 @@ curl -X POST "${api}/api/v1/onboarding/bootstrap-complete"${H}
 \`\`\`
 
 The completion call is idempotent and changes \`agentBootstrapVersion\` from 0 to 1 while preserving
-the rest of the Space onboarding state. Re-run \`whoami\`; \`bootstrapRequired\` must now be false.
+the rest of the Space onboarding state. ${
+    isCloud
+      ? `Recheck through the active transport; \`bootstrapRequired\` must now be false.`
+      : `Re-run \`whoami\`; \`bootstrapRequired\` must now be false.`
+  }
 
 ### Custom blueprint (any scenario — this is what keeps it general)
 

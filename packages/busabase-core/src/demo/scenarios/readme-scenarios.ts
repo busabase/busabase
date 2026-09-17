@@ -1404,7 +1404,7 @@ const records: SeedRecordDef[] = [
     fields: {
       question: "What is a Change Request in Busabase?",
       expected_answer:
-        "A Change Request is a proposed set of record operations submitted for human review before they are committed to the database. Each CR contains one or more operations (create, update, delete) and must be approved or rejected by an authorized reviewer.",
+        "A Change Request is a set of record operations recorded with what changed, who proposed it, and when; depending on the submitter's permission level it is committed straight away or held for human review. Each CR contains one or more operations (create, update, delete) and must be approved or rejected by an authorized reviewer.",
       difficulty: "easy",
       domain: "product",
       quality_score: 4.8,

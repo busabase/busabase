@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { SearchResultVO } from "busabase-contract/types";
 import {
@@ -11,11 +11,11 @@ import {
 } from "kui/dropdown-menu";
 import { Check, ChevronDown, Search, X } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useSearch } from "wouter";
 import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
 import { formatListTime } from "../helpers/format";
-import { searchKindIcon } from "../helpers/search";
+import { highlightSearchText, searchKindIcon, searchSnippetText } from "../helpers/search";
 import {
   clearNarrowing,
   DATE_PRESETS,
@@ -68,26 +68,37 @@ function FilterMenu({
 
 function ResultRow({
   result,
+  query,
   locale,
   onFilterByAuthor,
+  onSelect,
   unknownAuthor,
 }: {
   result: SearchResultVO;
+  query: string;
   locale: string;
   onFilterByAuthor: (actorId: string) => void;
+  onSelect: () => void;
   unknownAuthor: string;
 }) {
+  const body = result.body ? searchSnippetText(result.body) : "";
   return (
     <div className="group flex items-start gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-muted">
       <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
         {searchKindIcon[result.kind]}
       </span>
       <div className="min-w-0 flex-1">
-        <Link className="block truncate font-medium text-foreground text-sm" href={result.href}>
-          {result.title}
+        <Link
+          className="block truncate font-medium text-foreground text-sm"
+          href={result.href}
+          onClick={onSelect}
+        >
+          {highlightSearchText(result.title, query)}
         </Link>
-        {result.body ? (
-          <p className="mt-0.5 line-clamp-2 text-muted-foreground text-xs">{result.body}</p>
+        {body ? (
+          <p className="mt-0.5 line-clamp-2 text-muted-foreground text-xs">
+            {highlightSearchText(body, query)}
+          </p>
         ) : null}
         <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
           {result.eyebrow ? <span className="truncate">{result.eyebrow}</span> : null}
@@ -121,6 +132,27 @@ export function SearchView({ orpc }: { orpc: BusabaseQueryUtils }) {
   const t = messages.searchPage;
   const search = useSearch();
   const [, navigate] = useLocation();
+  const reportSearchMetric = useMutation({
+    ...orpc.searchMetrics.report.mutationOptions(),
+    onError: () => undefined,
+  });
+  const searchSessionRef = useRef<{
+    key: string;
+    id: string;
+    startedAt: number;
+    reported: boolean;
+  } | null>(null);
+  const ensureSearchSession = useCallback(() => {
+    if (searchSessionRef.current?.key !== search) {
+      searchSessionRef.current = {
+        key: search,
+        id: globalThis.crypto.randomUUID(),
+        startedAt: Date.now(),
+        reported: false,
+      };
+    }
+    return searchSessionRef.current;
+  }, [search]);
 
   const urlState = useMemo(() => parseSearchPageParams(search), [search]);
   // The input is local so typing stays responsive; the URL is updated on submit
@@ -153,10 +185,19 @@ export function SearchView({ orpc }: { orpc: BusabaseQueryUtils }) {
   );
 
   const enabled = urlState.query.trim().length > 0;
+  useEffect(() => {
+    if (!enabled) {
+      searchSessionRef.current = null;
+      return;
+    }
+    ensureSearchSession();
+  }, [enabled, ensureSearchSession]);
   const results = useQuery({
     ...orpc.search.queryOptions({
       input: {
         query: urlState.query,
+        mode: "full",
+        surface: "advanced",
         limit: PAGE_SIZE * pages,
         sources: urlState.sources.length > 0 ? urlState.sources : undefined,
         sort: urlState.sort,
@@ -191,6 +232,21 @@ export function SearchView({ orpc }: { orpc: BusabaseQueryUtils }) {
   const rows = results.data?.results ?? [];
   const hasMore = results.data?.hasMore ?? false;
   const narrowed = hasActiveNarrowing(urlState);
+
+  useEffect(() => {
+    if (!enabled || !results.isSuccess) return;
+    const session = ensureSearchSession();
+    if (session.reported) return;
+    session.reported = true;
+    reportSearchMetric.mutate({
+      event: "results_shown",
+      sessionId: session.id,
+      surface: "advanced",
+      resultCount: rows.length,
+      durationMs: Math.min(120_000, Date.now() - session.startedAt),
+      hasMore,
+    });
+  }, [enabled, results.isSuccess, ensureSearchSession, reportSearchMetric, rows.length, hasMore]);
 
   return (
     // `h-full` and `min-h-0`: the dashboard mounts a view into a block slot, so
@@ -284,12 +340,32 @@ export function SearchView({ orpc }: { orpc: BusabaseQueryUtils }) {
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
+        <div aria-atomic="true" aria-live="polite" className="sr-only">
+          {results.isPending
+            ? t.loading
+            : results.isError
+              ? t.failed
+              : rows.length > 0
+                ? fmt(t.resultCount, { count: String(rows.length) })
+                : enabled
+                  ? t.noMatchesTitle
+                  : ""}
+        </div>
         {!enabled ? (
           <EmptyState body={t.emptyBody} title={t.emptyTitle} hint={t.appsElsewhere} />
         ) : results.isPending ? (
           <p className="px-3 py-6 text-muted-foreground text-sm">{t.loading}</p>
         ) : results.isError ? (
-          <p className="px-3 py-6 text-destructive text-sm">{t.failed}</p>
+          <div className="px-3 py-6 text-destructive text-sm">
+            <p>{t.failed}</p>
+            <button
+              className="mt-3 rounded-md border border-border px-3 py-1.5 text-foreground transition-colors hover:bg-muted"
+              onClick={() => results.refetch()}
+              type="button"
+            >
+              {messages.search.retry}
+            </button>
+          </div>
         ) : rows.length === 0 ? (
           <EmptyState
             body={narrowed ? t.noMatchesWithFilters : t.noMatchesBody}
@@ -302,11 +378,21 @@ export function SearchView({ orpc }: { orpc: BusabaseQueryUtils }) {
               {fmt(t.resultCount, { count: String(rows.length) })}
             </p>
             <div className="space-y-0.5">
-              {rows.map((result) => (
+              {rows.map((result, index) => (
                 <ResultRow
                   key={`${result.kind}-${result.id}`}
                   locale={locale}
                   onFilterByAuthor={(actorId) => apply({ ...urlState, createdBy: actorId })}
+                  onSelect={() =>
+                    reportSearchMetric.mutate({
+                      event: "result_click",
+                      sessionId: ensureSearchSession().id,
+                      surface: "advanced",
+                      position: index + 1,
+                      resultKind: result.kind,
+                    })
+                  }
+                  query={urlState.query}
                   result={result}
                   unknownAuthor={t.authorUnknown}
                 />

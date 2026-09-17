@@ -6,12 +6,21 @@ import type { NodeContentInput } from "busabase-contract/contract/node-content-s
 import type { NodeVO } from "busabase-contract/types";
 import { Button } from "kui/button";
 import type { LucideIcon } from "lucide-react";
-import { Save } from "lucide-react";
+import { Info, Save } from "lucide-react";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { fmt, useCoreI18n } from "../../../i18n";
+import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
+import { presentCoreError } from "../../../i18n/localize-error";
 import { NodeActionsMenu } from "../../dashboard/components/node-actions-menu";
 import { NodeAgentPromptsButton } from "../../dashboard/components/node-agent-prompts-button";
+import { NodePinButton, nodeSidePanelTabId } from "../../dashboard/components/node-pin-button";
+import { NodeSettingsDialog } from "../../dashboard/components/node-settings-dialog";
+import {
+  FullscreenPreviewSurface,
+  PreviewFullscreenButton,
+  type PreviewFullscreenState,
+} from "../../dashboard/components/preview-fullscreen";
+import { useRegisterTopbarNodeActions } from "../../dashboard/hooks/use-register-topbar-node-actions";
 import { useIsAnonymousVisitor } from "../../dashboard/visitor-context";
 import { stableStringify } from "../utils/stable-json";
 
@@ -23,6 +32,7 @@ export function useNodeContentSave(
   kind: "whiteboard" | "workflow" | "html",
 ) {
   const messages = useCoreI18n();
+  const locale = useCoreLocale();
   const queryClient = useQueryClient();
   const mutation = useMutation(orpc.nodes.updateContent.mutationOptions());
   const [status, setStatus] = useState<SaveStatus>("saved");
@@ -55,11 +65,11 @@ export function useNodeContentSave(
         return true;
       } catch (caught) {
         setStatus("error");
-        setError(caught instanceof Error ? caught.message : messages.richNodes.saveFailed);
+        setError(presentCoreError(messages, locale, caught, messages.richNodes.saveFailed));
         return false;
       }
     },
-    [messages.richNodes.saveFailed, kind, mutation, node, orpc, queryClient],
+    [messages, locale, kind, mutation, node, orpc, queryClient],
   );
 
   return { error, markDirty, save, status };
@@ -145,6 +155,7 @@ interface RichNodeShellProps {
   onSave: () => void;
   children: ReactNode;
   actions?: ReactNode;
+  fullscreenState: PreviewFullscreenState;
 }
 
 export function RichNodeShell({
@@ -157,9 +168,11 @@ export function RichNodeShell({
   onSave,
   children,
   actions,
+  fullscreenState,
 }: RichNodeShellProps) {
   const messages = useCoreI18n();
   const isAnonymous = useIsAnonymousVisitor();
+  const [infoOpen, setInfoOpen] = useState(false);
   const statusLabel =
     status === "saving"
       ? messages.richNodes.saving
@@ -167,11 +180,9 @@ export function RichNodeShell({
         ? messages.richNodes.saved
         : messages.richNodes.unsaved;
 
-  return (
-    <div className="flex h-full min-h-0 w-full flex-col bg-background">
-      <header className="flex h-12 shrink-0 items-center gap-2 border-border/60 border-b px-3 md:px-4">
-        <Icon className="size-4 shrink-0 text-muted-foreground" />
-        <h1 className="min-w-0 flex-1 truncate font-medium text-foreground text-sm">{node.name}</h1>
+  useRegisterTopbarNodeActions(
+    isAnonymous ? null : (
+      <>
         {!isAnonymous && (
           <span
             className={
@@ -185,6 +196,16 @@ export function RichNodeShell({
           </span>
         )}
         {!isAnonymous && actions}
+        <NodePinButton
+          payload={{ nodeId: node.id }}
+          tabId={nodeSidePanelTabId(nodeType, node.id)}
+          tabType={`${nodeType}-preview`}
+          title={node.name}
+        />
+        <PreviewFullscreenButton
+          fullscreenState={fullscreenState}
+          label={messages.airapp.enterFullscreen}
+        />
         {!isAnonymous && (
           <NodeAgentPromptsButton
             orpc={orpc}
@@ -222,8 +243,62 @@ export function RichNodeShell({
             </Button>
           </>
         )}
+      </>
+    ),
+  );
+
+  return (
+    <div className="flex h-full min-h-0 w-full flex-col bg-background">
+      <header className="shrink-0 border-border/60 border-b px-4 py-4 md:px-6 md:py-5">
+        <div className="flex min-w-0 items-start gap-2">
+          <Icon className="mt-1 size-4 shrink-0 text-muted-foreground" />
+          <div className="min-w-0 flex-1">
+            <h1 className="truncate font-semibold text-foreground text-xl leading-7">
+              {node.name}
+            </h1>
+            {node.description ? (
+              <p
+                className="mt-1 line-clamp-2 text-muted-foreground text-sm leading-5 md:line-clamp-1"
+                title={node.description}
+              >
+                {node.description}
+              </p>
+            ) : null}
+          </div>
+          <Button
+            aria-label={messages.nodeDetail.details}
+            className="shrink-0 text-muted-foreground"
+            onClick={() => setInfoOpen(true)}
+            size="icon-sm"
+            title={messages.nodeDetail.details}
+            type="button"
+            variant="ghost"
+          >
+            <Info className="size-3.5" />
+          </Button>
+          {infoOpen ? (
+            <NodeSettingsDialog
+              initialTab="info"
+              nodeId={node.id}
+              nodeName={node.name}
+              nodeSlug={node.slug}
+              nodeType={nodeType}
+              onOpenChange={setInfoOpen}
+              open
+              orpc={orpc}
+            />
+          ) : null}
+        </div>
       </header>
-      <div className="min-h-0 flex-1">{children}</div>
+      <div className="min-h-0 flex-1">
+        <FullscreenPreviewSurface
+          data-visual-node-preview={nodeType}
+          exitLabel={messages.airapp.exitFullscreen}
+          fullscreenState={fullscreenState}
+        >
+          {children}
+        </FullscreenPreviewSurface>
+      </div>
     </div>
   );
 }

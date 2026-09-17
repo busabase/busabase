@@ -5,7 +5,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { useEffect, useState } from "react";
 import { useSearch } from "wouter";
-import { useCoreI18n } from "../../../i18n";
+import { useCoreI18n, useCoreLocale } from "../../../i18n";
 import { getRecordTitle } from "../helpers/change-request";
 import { mergeSearchIntoHref } from "../helpers/link-search";
 
@@ -55,6 +55,7 @@ export function BusaBaseCalendar({
   fields: BaseFieldVO[];
 }) {
   const messages = useCoreI18n();
+  const locale = useCoreLocale();
   const currentSearch = useSearch();
   const dateField = resolveDateField(base, fields, activeView?.config.dateFieldSlug);
   const baseId = base?.id ?? "";
@@ -148,7 +149,7 @@ export function BusaBaseCalendar({
     days.push(d);
   }
 
-  const monthLabel = firstOfMonth.toLocaleDateString(undefined, { year: "numeric", month: "long" });
+  const monthLabel = firstOfMonth.toLocaleDateString(locale, { year: "numeric", month: "long" });
   const todayKey = dayKey(today);
   const weekdays = messages.base.calendarWeekdays;
 
