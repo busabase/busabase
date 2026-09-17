@@ -3,6 +3,7 @@ import type { InstallPlanVO, InstallResultVO } from "busabase-contract/domains/i
 import { useState } from "react";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { useI18n } from "~/i18n";
+import { type InstallClient, runInstall } from "../utils/run-install";
 
 interface PlanOverrides {
   intoFolder?: string;
@@ -22,6 +23,8 @@ export function useInstallFromGithub() {
   const [rename, setRename] = useState(false);
   const [autoMerge, setAutoMerge] = useState(false);
   const [result, setResult] = useState<InstallResultVO | null>(null);
+  /** The install's latest server-side progress line; null when not installing. */
+  const [installProgress, setInstallProgress] = useState<string | null>(null);
 
   const refreshWorkspace = () => {
     if (!buda) return;
@@ -51,16 +54,23 @@ export function useInstallFromGithub() {
   const installMutation = useMutation<InstallResultVO, Error, void>({
     mutationFn: async () => {
       if (!buda) throw new Error(t.common.notConnected);
+      setInstallProgress(null);
       const trimmedFolder = intoFolder.trim();
-      return buda.client.install.fromGithub({
+      const input = {
         repoUrl: repoUrl.trim(),
         ...(trimmedFolder ? { intoFolder: trimmedFolder } : {}),
         rename,
         autoMerge,
+      };
+
+      return runInstall(buda.client.install as unknown as InstallClient, input, {
+        onProgress: setInstallProgress,
+        incompleteMessage: t.install.installFailed,
       });
     },
     onSuccess: (installed) => {
       setResult(installed);
+      setInstallProgress(null);
       refreshWorkspace();
     },
   });
@@ -77,6 +87,7 @@ export function useInstallFromGithub() {
     setRename(false);
     setAutoMerge(false);
     setResult(null);
+    setInstallProgress(null);
     resetErrors();
   };
 
@@ -118,6 +129,7 @@ export function useInstallFromGithub() {
     canInstall,
     error,
     installing,
+    installProgress,
     intoFolder,
     plan,
     planning,

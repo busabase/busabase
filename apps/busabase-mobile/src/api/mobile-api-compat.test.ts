@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { createMobileCompatibilityFetch, normalizeLegacyCommitPayloads } from "./mobile-api-compat";
+import {
+  createMobileCompatibilityFetch,
+  isMissingRouteError,
+  normalizeLegacyCommitPayloads,
+} from "./mobile-api-compat";
 
 const legacyCommit = {
   id: "cmt_legacy",
@@ -65,5 +69,38 @@ describe("normalizeLegacyCommitPayloads", () => {
     await expect(response.json()).resolves.toMatchObject({
       headCommit: { payload: { title: "Legacy response" } },
     });
+  });
+});
+
+describe("isMissingRouteError", () => {
+  it.each([
+    ["the oRPC code", { code: "NOT_FOUND", message: "Not Found" }],
+    ["a bare 404 status", { status: 404, message: "" }],
+  ])("reads %s as a server that predates the route", (_label, caught) => {
+    expect(isMissingRouteError(caught)).toBe(true);
+  });
+
+  it.each([
+    ["a refusal the server meant", { code: "FORBIDDEN", status: 403 }],
+    ["a transport failure", new Error("Network request failed")],
+    ["a validation error", { code: "BAD_REQUEST", status: 400 }],
+    ["a gateway timeout", { code: "TIMEOUT", status: 504 }],
+    ["a bare string", "NOT_FOUND"],
+  ])("does not read %s as a missing route", (_label, caught) => {
+    expect(isMissingRouteError(caught)).toBe(false);
+  });
+
+  it("does not mistake a real install failure that merely says 404", () => {
+    // Observed against a running server: installing a repo that does not exist
+    // answers BAD_REQUEST/400 with a message reading "GitHub repo or ref not
+    // found: acme/thing (HTTP 404)". Matching on wording would send the caller
+    // to replay it on the legacy route.
+    expect(
+      isMissingRouteError({
+        code: "BAD_REQUEST",
+        status: 400,
+        message: "GitHub repo or ref not found: busabase/nope (HTTP 404).",
+      }),
+    ).toBe(false);
   });
 });

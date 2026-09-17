@@ -14,7 +14,9 @@ export function BaseRecordList({ records, onOpenRecord }: Props) {
     <NativeSection title="Records" caption={`${records.length}`}>
       {records.map((record, index) => {
         const title = getRecordTitle(record);
-        const preview = getPreview(record.headCommit.payload);
+        const preview = getPreview(record.headCommit.payload, {
+          definitions: record.base?.fields,
+        });
         const subtitle =
           preview.trim().toLowerCase() === title.trim().toLowerCase() ? undefined : preview;
         return (

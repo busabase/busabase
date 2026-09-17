@@ -1,10 +1,8 @@
-import { skipToken, useQuery } from "@tanstack/react-query";
 import {
   HOME_ACTIVITY_PREVIEW_COUNT,
   HOME_PENDING_PREVIEW_COUNT,
   HOME_RECENT_PREVIEW_COUNT,
   isHomeDigestEmpty,
-  selectPendingChangeRequests,
 } from "busabase-core/dashboard/home";
 import { useRouter } from "expo-router";
 import {
@@ -22,6 +20,7 @@ import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { NativeErrorState, NativeLoadingState, NativeRow } from "~/components/native-screen";
 import { ChangeRequestCard } from "~/domains/review/components/ChangeRequestCard";
 import { useActivityFeed } from "~/domains/review/hooks/use-activity-feed";
+import { usePendingChangeRequests } from "~/domains/review/hooks/use-pending-change-requests";
 import type { ActivityEvent, ActivityTone } from "~/domains/review/types/activity-events";
 import { ConnectionGuard } from "~/domains/workspace/components/ConnectionGuard";
 import { CreateNodeModal } from "~/domains/workspace/components/CreateNodeModal";
@@ -116,23 +115,17 @@ function HomeContent() {
   const router = useRouter();
   const tokens = useTokens();
   const { t } = useI18n();
-  const buda = useBusabaseOrpc();
+  const _buda = useBusabaseOrpc();
   const nodeCache = useKnownNodeCache();
 
-  const changeRequestsQuery = useQuery(
-    buda
-      ? buda.orpc.changeRequests.list.queryOptions({
-          input: { limit: 100 },
-          select: (page) => page.changeRequests,
-        })
-      : { queryKey: ["no-connection", "changeRequests", "list"], queryFn: skipToken },
-  );
+  // The count comes from the server; only the four preview cards come from a
+  // page. This used to fetch `limit: 100` and count the rows in hand, so a space
+  // with more open requests than that reported the page size as the total —
+  // "100 pending" against a real 116.
+  const pendingQuery = usePendingChangeRequests();
   const activityQuery = useActivityFeed(HOME_ACTIVITY_PREVIEW_COUNT);
 
-  const pending = useMemo(
-    () => selectPendingChangeRequests(changeRequestsQuery.data ?? []),
-    [changeRequestsQuery.data],
-  );
+  const pending = pendingQuery.preview;
 
   // The same store the search screen reads — visiting a node anywhere in the app
   // already records it, so this feed needs no tracking of its own.
@@ -172,7 +165,7 @@ function HomeContent() {
   const isEverythingEmpty = isHomeDigestEmpty({
     activityCount: activityEvents.length,
     isActivityLoaded: !activityQuery.isPending,
-    pendingCount: pending.length,
+    pendingCount: pendingQuery.count,
     recentCount: recent.length,
   });
 
@@ -197,7 +190,7 @@ function HomeContent() {
   };
 
   const refetchAll = () => {
-    void changeRequestsQuery.refetch();
+    pendingQuery.refetch();
     void activityQuery.refetch();
   };
 
@@ -205,14 +198,11 @@ function HomeContent() {
     <DrawerScaffold
       title={t.home.title}
       contentWidth="readable"
-      refreshing={changeRequestsQuery.isRefetching || activityQuery.isRefetching}
+      refreshing={pendingQuery.refreshing || activityQuery.isRefetching}
       onRefresh={refetchAll}
     >
-      {changeRequestsQuery.error ? (
-        <NativeErrorState
-          message={changeRequestsQuery.error.message}
-          onRetry={() => void changeRequestsQuery.refetch()}
-        />
+      {pendingQuery.error ? (
+        <NativeErrorState message={pendingQuery.error.message} onRetry={pendingQuery.refetch} />
       ) : null}
 
       {isEverythingEmpty ? (
@@ -225,7 +215,7 @@ function HomeContent() {
           {pending.length > 0 ? (
             <HomeSection
               title={t.home.pendingTitle}
-              actionLabel={fmt(t.home.pendingCount, { count: pending.length })}
+              actionLabel={fmt(t.home.pendingCount, { count: pendingQuery.count })}
               actionAccessibilityLabel={t.home.pendingViewAll}
               onAction={() => router.push("/drawer/inbox")}
             >

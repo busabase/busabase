@@ -16,6 +16,15 @@ describe("canEmbedAirAppInWebView", () => {
     },
   );
 
+  it.each([
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://127.42.0.8:3000",
+    "http://[::1]:3000",
+  ])("embeds an iOS loopback host for local development: %s", (serverUrl) => {
+    expect(canEmbedAirAppInWebView({ platform: "ios", serverUrl })).toBe(true);
+  });
+
   it("keeps AirApps embedded on Android", () => {
     expect(
       canEmbedAirAppInWebView({

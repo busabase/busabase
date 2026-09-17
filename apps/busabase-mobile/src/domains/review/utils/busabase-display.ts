@@ -1,5 +1,6 @@
 import { OPERATION_META } from "busabase-contract/domains";
 import type { BaseFieldVO, ChangeRequestVO, OperationVO } from "busabase-contract/types";
+import { isPeopleFieldType } from "busabase-core/base/field-types";
 import { getChangeRequestReviewMessage } from "busabase-core/dashboard/change-request";
 import { iStringParse } from "openlib/i18n/i-string";
 
@@ -16,6 +17,8 @@ const previewCandidateSlugs = [...titleSlugs, ...bodySlugs, "text", "value", "la
 interface PreviewOptions {
   maxLength?: number;
   fallback?: string;
+  /** The Base's field definitions, so people-typed cells can be skipped. */
+  definitions?: ReadonlyArray<BaseFieldVO>;
 }
 
 export function stringifyFieldValue(value: unknown): string {
@@ -80,8 +83,24 @@ export function getPreview(fields: Record<string, unknown>, options: PreviewOpti
     }
   }
 
-  const firstText = Object.values(fields)
-    .map((value) => toDisplayText(value))
+  // ID-shaped cells are never a useful row summary. `member` / `created_by` /
+  // `updated_by` hold user ids and `relation` holds record ids; all of them
+  // stringify long enough to win the "first text over 18 chars" race below, so
+  // a row's subtitle ends up reading "local-producer, local-viewer" or
+  // "rec_seed_crm_company_northwind". A resolved NAME would be fine here — an id
+  // is noise, and this helper has no resolver for either kind.
+  //
+  // `definitions` is optional, so a caller that does not pass it keeps the old
+  // behaviour rather than silently losing its previews.
+  const idShapedSlugs = new Set(
+    (options.definitions ?? [])
+      .filter((definition) => isPeopleFieldType(definition.type) || definition.type === "relation")
+      .map((definition) => definition.slug),
+  );
+
+  const firstText = Object.entries(fields)
+    .filter(([slug]) => !idShapedSlugs.has(slug))
+    .map(([, value]) => toDisplayText(value))
     .find((value) => value.length > 18);
 
   return firstText

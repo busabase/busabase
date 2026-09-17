@@ -31,7 +31,8 @@ interface DrawerNavigationPanelProps {
   insets: { top: number; bottom: number };
   pathname: string;
   t: CoreMessages;
-  pendingCount: number;
+  /** Undefined when the server cannot count the space — renders no badge at all. */
+  pendingCount: number | undefined;
   contextualDestination: DrawerDestination | null;
   favoriteNodes: NodeVO[];
   treeNodes: NodeVO[];
@@ -39,6 +40,8 @@ interface DrawerNavigationPanelProps {
   nodesError: boolean;
   expandedIds: ReadonlySet<string>;
   onDismiss: () => void;
+  /** Present the install sheet above the drawer, not inside it. */
+  onRequestInstall: () => void;
   onNavigate: (href: string) => void;
   onNavigateNode: (node: NodeVO) => void;
   onOpenActions: (node: NodeVO, allowCreateChild: boolean) => void;
@@ -59,6 +62,7 @@ export function DrawerNavigationPanel({
   nodesError,
   expandedIds,
   onDismiss,
+  onRequestInstall,
   onNavigate,
   onNavigateNode,
   onOpenActions,
@@ -84,7 +88,11 @@ export function DrawerNavigationPanel({
       ]}
     >
       <View style={[styles.spaceWrap, { borderColor: tokens.border }]}>
-        <SpaceSelector presentation="popover" onDismissContainer={onDismiss} />
+        <SpaceSelector
+          presentation="popover"
+          onDismissContainer={onDismiss}
+          onRequestInstall={onRequestInstall}
+        />
       </View>
 
       <ScrollView

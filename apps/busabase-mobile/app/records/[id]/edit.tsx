@@ -15,12 +15,14 @@ import {
 } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
 import { RecordForm } from "~/domains/base/components/RecordForm";
+import { pendingChangeRequestId } from "~/domains/base/utils/change-request-result";
 import {
   buildInitialFormValues,
   normalizeFormValues,
   type RecordFormValue,
   recordFormValuesEqual,
 } from "~/domains/base/utils/record-form";
+import { SUBMITTED_BY } from "~/domains/review/utils/submitted-by";
 import { ConnectionGuard } from "~/domains/workspace/components/ConnectionGuard";
 import { DrawerScaffold } from "~/domains/workspace/components/DrawerScaffold";
 import { shortId } from "~/lib/format";
@@ -60,11 +62,19 @@ function EditRecordContent() {
         recordId: record.id,
         fields: normalizeFormValues(record.base.fields, values),
         message: `Update ${getRecordTitle(record)}`,
-        author: "mobile-editor",
+        author: SUBMITTED_BY,
       });
     },
-    onSuccess: (changeRequest) => {
-      router.replace({ pathname: "/change-requests/[id]", params: { id: changeRequest.id } });
+    onSuccess: (outcome) => {
+      const reviewId = pendingChangeRequestId(outcome);
+      // Merged immediately (the write-capable case): `outcome.id` is the RECORD,
+      // so send the user back to it rather than to a review page that does not
+      // exist. Only a genuinely pending proposal has somewhere to review.
+      router.replace(
+        reviewId
+          ? { pathname: "/change-requests/[id]", params: { id: reviewId } }
+          : { pathname: "/records/[id]", params: { id: outcome.id } },
+      );
     },
   });
 

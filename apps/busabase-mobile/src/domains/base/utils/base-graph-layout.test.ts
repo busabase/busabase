@@ -16,7 +16,6 @@ const makeBase = (index: number): BaseVO =>
     reviewPolicy: { kind: "single", requiredApprovals: 1 },
     createdAt: "2026-07-28T00:00:00.000Z",
     fields: [],
-    metadata: {},
   }) satisfies BaseVO;
 
 describe("buildBaseGraphLayout", () => {

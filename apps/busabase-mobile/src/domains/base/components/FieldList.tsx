@@ -1,4 +1,4 @@
-import type { BaseFieldVO } from "busabase-contract/types";
+import type { BaseFieldVO, UserRefVO } from "busabase-contract/types";
 import { iStringParse } from "openlib/i18n/i-string";
 import { StyleSheet, Text, View } from "react-native";
 import { NativeRow } from "~/components/native-screen";
@@ -10,6 +10,8 @@ import { FieldValue } from "./FieldValue";
 interface FieldListProps {
   fields: Record<string, unknown>;
   definitions?: BaseFieldVO[];
+  /** `RecordVO.fieldUsers` — lets people-typed cells render names, not ids. */
+  fieldUsers?: Record<string, UserRefVO>;
   /** Highlight values as proposed (new) values in a change request diff. */
   highlight?: boolean;
   interactive?: boolean;
@@ -20,6 +22,7 @@ interface FieldListProps {
 export function FieldList({
   fields,
   definitions = [],
+  fieldUsers,
   highlight,
   interactive = true,
   limitToDefinitions,
@@ -64,6 +67,7 @@ export function FieldList({
               <View style={styles.compactValue}>
                 <FieldValue
                   field={field}
+                  fieldUsers={fieldUsers}
                   value={fields[slug]}
                   highlight={highlight}
                   interactive={interactive}
@@ -102,6 +106,7 @@ export function FieldList({
               </Text>
               <FieldValue
                 field={field}
+                fieldUsers={fieldUsers}
                 value={fields[slug]}
                 highlight={highlight}
                 interactive={interactive}
@@ -129,6 +134,7 @@ export function FieldList({
           >
             <FieldValue
               field={field}
+              fieldUsers={fieldUsers}
               value={fields[slug]}
               highlight={highlight}
               interactive={interactive}

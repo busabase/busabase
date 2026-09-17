@@ -1,71 +1,67 @@
-import type { SearchResultVO } from "busabase-contract/types";
 import { describe, expect, it } from "vitest";
-import { filterSearchResults, getSearchTabOptions, normalizeSearchText } from "./search-results";
-
-const results: SearchResultVO[] = [
-  {
-    id: "record-1",
-    kind: "record",
-    title: "Ada",
-    body: "",
-    eyebrow: "People",
-    href: "/records/1",
-    updatedAt: null,
-    createdBy: null,
-  },
-  {
-    id: "base-1",
-    kind: "base",
-    title: "People",
-    body: "",
-    eyebrow: "",
-    href: "/base/people",
-    updatedAt: null,
-    createdBy: null,
-  },
-  {
-    id: "file-1",
-    kind: "file",
-    title: "Notes",
-    body: "",
-    eyebrow: "",
-    href: "/doc/notes",
-    updatedAt: null,
-    createdBy: null,
-  },
-  {
-    id: "cr-1",
-    kind: "change_request",
-    title: "Update Ada",
-    body: "",
-    eyebrow: "",
-    href: "/change-requests/cr-1",
-    updatedAt: null,
-    createdBy: null,
-  },
-];
+import { getSearchTabOptions, normalizeSearchText } from "./search-results";
 
 describe("search result presentation", () => {
   it("normalizes queries for debounce freshness checks", () => {
     expect(normalizeSearchText("  Ada LOVELACE  ")).toBe("ada lovelace");
   });
 
-  it("keeps change requests out of All while retaining their dedicated tab", () => {
-    expect(filterSearchResults(results, "all").map(({ kind }) => kind)).toEqual([
-      "record",
-      "base",
-      "file",
+  it("numbers only the tab it actually fetched", () => {
+    // The bug this replaces: every badge was derived from ONE shared page, so
+    // the Files badge read 0 whenever records filled that page — against a
+    // workspace that had matching files. Each tab is its own scoped request
+    // now, so the inactive ones have genuinely not been asked and must not
+    // claim a number.
+    const options = getSearchTabOptions({
+      activeTab: "files",
+      count: 3,
+      hasMore: false,
+      recentCount: 2,
+    });
+
+    expect(options).toEqual([
+      { value: "recent", label: "Recent", meta: 2 },
+      { value: "all", label: "All" },
+      { value: "records", label: "Records" },
+      { value: "files", label: "Files", meta: "3" },
+      { value: "change_requests", label: "Change requests" },
     ]);
-    expect(filterSearchResults(results, "change_requests")).toEqual([results[3]]);
   });
 
-  it("counts the visible result kinds and the separate recent cache", () => {
-    expect(getSearchTabOptions(results, 2)).toEqual([
-      { value: "recent", label: "Recent", meta: 2 },
-      { value: "all", label: "All", meta: 3 },
-      { value: "records", label: "Records", meta: 1 },
-      { value: "files", label: "Files", meta: 1 },
-      { value: "change_requests", label: "Change requests", meta: 1 },
-    ]);
+  it("renders a full page as a floor, not as a total", () => {
+    // A badge is read as a total. When the server says there is another page,
+    // the honest rendering of 20 fetched rows is "20+".
+    const [, , , files] = getSearchTabOptions({
+      activeTab: "files",
+      count: 20,
+      hasMore: true,
+      recentCount: 0,
+    });
+
+    expect(files?.meta).toBe("20+");
+  });
+
+  it("shows no badge for a tab with nothing in it", () => {
+    const options = getSearchTabOptions({
+      activeTab: "files",
+      count: 0,
+      hasMore: false,
+      recentCount: 0,
+    });
+
+    expect(options.every((option) => option.meta === undefined)).toBe(true);
+  });
+
+  it("keeps the Recent badge, which is a complete local count", () => {
+    // Recent is the visited-node cache on this device — not a page of a larger
+    // server-side set — so its number is a total and stays a plain one.
+    const [recent] = getSearchTabOptions({
+      activeTab: "all",
+      count: 0,
+      hasMore: true,
+      recentCount: 5,
+    });
+
+    expect(recent?.meta).toBe(5);
   });
 });
