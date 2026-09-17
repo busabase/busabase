@@ -15,7 +15,7 @@ import { CoreI18nProvider } from "busabase-core/i18n";
 import { Skeleton } from "kui/skeleton";
 import { useRouter, useSearchParams } from "next/navigation";
 import { detectBrowserLocale, type Locale } from "openlib/i18n";
-import { addDemoParam } from "openlib/ui/dashboard";
+import { addDemoParam, resolveDemoMode } from "openlib/ui/dashboard";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation } from "wouter";
 import { BusabaseDashboardShell } from "~/components/dashboard/busabase-dashboard-shell";
@@ -54,20 +54,19 @@ const AGENT_INTEGRATION = {
   defaultOrigin: "http://localhost:15419",
 } as const;
 
-const DASHBOARD_SKELETON_NAV_ITEMS = [
-  { id: "shell-nav-1", width: "70%" },
-  { id: "shell-nav-2", width: "55%" },
-  { id: "shell-nav-3", width: "62%" },
-  { id: "shell-nav-4", width: "48%" },
-  { id: "shell-nav-5", width: "66%" },
+const INITIAL_SIDEBAR_NODE_ROWS = [
+  { id: "initial-sidebar-node-1", width: "w-3/5" },
+  { id: "initial-sidebar-node-2", width: "w-1/2" },
+  { id: "initial-sidebar-node-3", width: "w-2/3" },
+  { id: "initial-sidebar-node-4", width: "w-5/12" },
+  { id: "initial-sidebar-node-5", width: "w-7/12" },
 ];
 
-const DASHBOARD_SKELETON_CONTENT_ROWS = [
-  "shell-content-row-1",
-  "shell-content-row-2",
-  "shell-content-row-3",
-  "shell-content-row-4",
-];
+const DASHBOARD_SKELETON_ACTIVITY_ROWS = [
+  "dashboard-activity-row-1",
+  "dashboard-activity-row-2",
+  "dashboard-activity-row-3",
+] as const;
 
 const isInboxLocation = (location: string): boolean =>
   /^\/inbox(?:\/|$)/.test(location.split("?")[0] ?? "");
@@ -88,40 +87,85 @@ function DashboardRouteObserver({
 }
 
 /**
- * Placeholder shown while the four parallel queries that seed the whole
- * workbench (nodes/bases/changeRequests/auditEvents) are still in flight —
- * before `SPARouteRenderer` has anything to render. Every route renders the
- * same `BusabaseDashboard` element (see busabase-core's routes.tsx), so this
- * can't know which specific view (inbox/base/node) will land; it approximates
- * the shared shell shape instead — a nav rail plus a content pane — so the
- * switch from this to the real layout doesn't jump.
- *
- * `chromeless` (the WebView embed path) omits the fake nav rail entirely —
- * showing a sidebar-shaped skeleton, even a fake one, would violate the "no
- * sidebar at all" contract while the real content is still loading.
+ * Route-agnostic content placeholder shown inside the real dashboard shell
+ * while its initial data is loading. It deliberately contains no nav rail: the
+ * shared shell beside it already owns the sidebar and its Workspace skeleton.
  */
-function DashboardShellSkeleton({ chromeless = false }: { chromeless?: boolean }) {
+function DashboardContentSkeleton() {
   return (
-    <div className="flex min-h-0 flex-1" aria-hidden>
-      {chromeless ? null : (
-        <div className="hidden w-56 shrink-0 flex-col gap-1.5 border-border/60 border-r p-3 md:flex">
-          {DASHBOARD_SKELETON_NAV_ITEMS.map((item) => (
-            <div className="flex items-center gap-2 px-1 py-1.5" key={item.id}>
-              <Skeleton className="size-4 shrink-0 rounded" />
-              <Skeleton className="h-3.5" style={{ width: item.width }} />
+    <div
+      className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background"
+      data-dashboard-content-loading
+      aria-hidden
+    >
+      <div className="flex h-10 shrink-0 items-center gap-3 border-border/60 border-b px-4 md:h-12">
+        <Skeleton className="size-5 shrink-0 rounded" />
+        <Skeleton className="h-3.5 w-24" />
+        <Skeleton className="ml-auto size-7 rounded-md" />
+      </div>
+      <div className="min-h-0 flex-1 overflow-hidden px-4 py-4 sm:px-5">
+        <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
+          <section>
+            <Skeleton className="mb-2 h-3 w-28" />
+            <div className="grid gap-2 sm:grid-cols-2">
+              <Skeleton className="h-10 w-full rounded-md" />
+              <Skeleton className="h-10 w-full rounded-md" />
+              <Skeleton className="h-10 w-full rounded-md" />
+              <Skeleton className="h-10 w-full rounded-md" />
             </div>
-          ))}
-        </div>
-      )}
-      <div className="flex min-h-0 flex-1 flex-col p-6">
-        <Skeleton className="h-6 w-40" />
-        <Skeleton className="mt-2 h-4 w-72 max-w-full" />
-        <div className="mt-6 space-y-3">
-          {DASHBOARD_SKELETON_CONTENT_ROWS.map((id) => (
-            <Skeleton className="h-16 w-full rounded-lg" key={id} />
-          ))}
+          </section>
+          <section>
+            <div className="mb-2 flex items-center justify-between gap-4">
+              <Skeleton className="h-3 w-24" />
+              <Skeleton className="h-3 w-12" />
+            </div>
+            <div className="divide-y divide-border/50">
+              {DASHBOARD_SKELETON_ACTIVITY_ROWS.map((id) => (
+                <div className="flex h-10 items-center gap-3 px-1" key={id}>
+                  <Skeleton className="size-2 shrink-0 rounded-full" />
+                  <Skeleton className="h-3.5 w-2/5" />
+                  <Skeleton className="ml-auto h-3 w-16" />
+                </div>
+              ))}
+            </div>
+          </section>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Full-shell fallback used only before the SPA/dashboard shell itself mounts. */
+function DashboardInitialShellSkeleton({ chromeless = false }: { chromeless?: boolean }) {
+  if (chromeless) return <DashboardContentSkeleton />;
+
+  return (
+    <div className="flex min-h-0 flex-1" aria-hidden data-dashboard-initial-shell-loading>
+      <aside className="hidden w-64 shrink-0 flex-col border-border/60 border-r bg-sidebar p-2 md:flex">
+        <div className="flex h-12 items-center gap-2 px-2">
+          <Skeleton className="size-8 shrink-0 rounded-lg" />
+          <div className="min-w-0 flex-1 space-y-1.5">
+            <Skeleton className="h-3.5 w-24" />
+            <Skeleton className="h-3 w-16" />
+          </div>
+        </div>
+        <div className="mt-1 space-y-1 px-2">
+          <Skeleton className="h-8 w-full rounded-md" />
+          <Skeleton className="h-8 w-full rounded-md" />
+        </div>
+        <div className="mt-3 px-2">
+          <Skeleton className="mb-2 h-3 w-20" />
+          <div className="space-y-1">
+            {INITIAL_SIDEBAR_NODE_ROWS.map((row) => (
+              <div className="flex h-8 items-center gap-2 px-2" key={row.id}>
+                <Skeleton className="size-4 shrink-0 rounded" />
+                <Skeleton className={`h-3.5 ${row.width}`} />
+              </div>
+            ))}
+          </div>
+        </div>
+      </aside>
+      <DashboardContentSkeleton />
     </div>
   );
 }
@@ -138,7 +182,7 @@ export function DashboardClient({
   return (
     <QueryClientProvider client={queryClient}>
       {/* useSearchParams (for ?chromeless=1) requires a Suspense boundary. */}
-      <Suspense fallback={<DashboardShellSkeleton chromeless={chromeless} />}>
+      <Suspense fallback={<DashboardInitialShellSkeleton chromeless={chromeless} />}>
         <DashboardClientContent
           availableAirAppEngines={availableAirAppEngines}
           initialPath={initialPath}
@@ -192,9 +236,9 @@ function DashboardClientContent({
   // space id to both; only this app had the halves out of step.
   const orpc = useMemo(() => createBusabaseQueryUtils("/api/rpc", {}, CACHE_SPACE_KEY), []);
   // Local single-tenant app: persist the chosen UI language preference in
-  // localStorage. The default is "auto" — follow the browser language, the same
-  // way Busabase Cloud does via `detectBrowserLocale`. A concrete choice
-  // (e.g. "zh-CN") overrides it. The cloud app injects its `[lang]` locale instead.
+  // localStorage. "auto" follows the demo dataset's ?lang (including its
+  // English default) in demo mode, a valid ?lang for non-demo deep links, or
+  // the browser language otherwise. A saved concrete choice always wins.
   // Hoisted above the node-tree wiring below (rather than its original spot
   // further down) only because `useNodeTree`'s `onMoveError` needs `LL` —
   // this block is otherwise self-contained and unrelated to `orpc`/nodes.
@@ -213,8 +257,16 @@ function DashboardClientContent({
     }
     setDetectedLocale(normalizeBusabaseAppLocale(detectBrowserLocale(appLocaleCodes)) ?? "en");
   }, [appLocaleCodes]);
+  const demoMode = resolveDemoMode(searchParams);
   const locale =
-    languagePref === "auto" ? detectedLocale : (normalizeBusabaseAppLocale(languagePref) ?? "en");
+    languagePref === "auto"
+      ? ((demoMode.useCase
+          ? demoMode.locale
+          : normalizeBusabaseAppLocale(searchParams.get("lang") ?? undefined)) ?? detectedLocale)
+      : (normalizeBusabaseAppLocale(languagePref) ?? "en");
+  useEffect(() => {
+    document.documentElement.lang = locale;
+  }, [locale]);
   const LL = useMemo(() => getBusabaseAppLL(locale), [locale]);
   // The node tree — depth-bounded prefetch, per-folder lazy expansion, the
   // move/"Move to…" mutation, and the cycle-rejection check — is the SAME
@@ -247,11 +299,9 @@ function DashboardClientContent({
   const isLoadingDashboardData =
     nodesQuery.isPending || basesQuery.isPending || auditEventsQuery.isPending;
   const coreMessages = useMemo(() => getBusabaseMessages(locale), [locale]);
-  const loadErrorMessage = loadError
-    ? loadError instanceof Error
-      ? loadError.message
-      : LL.shell.failedToLoadDashboard()
-    : null;
+  // RPC errors can contain unlocalized server messages. Surface one useful,
+  // translated recovery message and retain the underlying error in the query.
+  const loadErrorMessage = loadError ? LL.shell.failedToLoadDashboard() : null;
   const changeLocale = useCallback((next: string) => {
     setLanguagePref(next);
     window.localStorage.setItem("busabaseLocale", next);
@@ -313,11 +363,11 @@ function DashboardClientContent({
       {loadErrorMessage}
     </div>
   ) : isLoadingDashboardData ? (
-    <DashboardShellSkeleton chromeless={chromeless} />
+    <DashboardContentSkeleton />
   ) : (
     <BusabaseDashboardRouteRenderer
       NotFoundComponent={DashboardNotFound}
-      className="flex min-h-0 flex-1 flex-col"
+      className="flex min-h-0 flex-1 flex-col animate-in fade-in-0 duration-200 motion-reduce:animate-none"
       routes={routes}
     />
   );
@@ -386,6 +436,7 @@ function DashboardClientContent({
             languagePref={languagePref}
             onLocaleChange={changeLocale}
             loadingNodeIds={loadingNodeIds}
+            nodesLoading={nodesQuery.isPending}
             onExpandNode={onExpandNode}
             checkIsDescendant={checkIsDescendant}
           >

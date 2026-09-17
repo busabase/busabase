@@ -83,17 +83,17 @@ test("a new user tours the approval-first knowledge base", async ({ page }) => {
     // Addressed by ROLE, not by placeholder: the placeholder is marketing copy
     // and renaming it (to "Search apps, skills, records, bases, change
     // requests…") broke this line with a 60s timeout that named a locator
-    // rather than the copy change that caused it. The searchbox role is what
+    // rather than the copy change that caused it. The combobox role is what
     // this step actually depends on.
-    await page.getByRole("dialog").getByRole("searchbox").fill("agent");
+    await page.getByRole("dialog").getByRole("combobox", { name: "Search" }).fill("agent");
     // No tab assertion here on purpose — see busabase-smoke.spec.ts. The dialog
     // moved from tabs to sections, so `getByRole("tab", …)` addresses something
     // that no longer exists; the result assertion below is the substance.
-    // Scoped to the dialog and NOT anchored — see busabase-smoke.spec.ts: a result's
-    // accessible name is "<emoji> <name> <slug>", so an anchored match breaks
-    // whenever icons or slugs are added to the row.
+    // Addressed by `data-search-result` — see busabase-smoke.spec.ts: the row
+    // carries an explicit role="option", so no `getByRole("button")` can match
+    // it, and its accessible name ("<emoji> <name> <slug>") is decoration.
     await expect(
-      page.getByRole("dialog").getByRole("button", { name: /Agent Integrations/ }),
+      page.getByRole("dialog").locator('[data-search-result="Agent Integrations"]'),
     ).toBeVisible();
     await page.keyboard.press("Escape");
   });

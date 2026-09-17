@@ -16,7 +16,7 @@ test("switching language inside the settings dialog updates the UI", async ({ pa
   await page.reload();
   await openSettingsDialog(page);
   await page.getByRole("button", { name: "简体中文" }).click();
-  await page.getByRole("button", { name: "Close" }).click();
+  await page.getByRole("button", { name: "关闭" }).click();
   await expect(page.getByRole("dialog")).not.toBeVisible();
   await expect(page.getByRole("link", { name: "收件箱" })).toBeVisible();
 });

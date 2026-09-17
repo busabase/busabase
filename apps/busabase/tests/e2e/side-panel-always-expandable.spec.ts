@@ -26,6 +26,15 @@ const openDashboard = async (page: import("@playwright/test").Page) => {
   await expect(page.locator("[data-dashboard-topbar]")).toBeVisible({ timeout: RENDER_TIMEOUT });
 };
 
+// Demo Agent sessions live in the Next server process and intentionally survive
+// page contexts. Establish the empty-state precondition explicitly so an earlier
+// Agent journey cannot turn these two stories into the connected-agent picker.
+const mockNoConnectedAgents = async (page: import("@playwright/test").Page) => {
+  await page.route("**/api/rpc/agents/connections/list", (route) =>
+    route.fulfill({ json: { json: [] } }),
+  );
+};
+
 test("the toggle opens the panel when nothing is pinned", async ({ page }) => {
   await openDashboard(page);
 
@@ -79,4 +88,59 @@ test("collapsing still works from an empty panel", async ({ page }) => {
   // collapse is now the only way to dismiss it — it must survive being empty.
   await panel.getByRole("button", { name: "Collapse side panel" }).click();
   await expect(page.getByRole("button", { name: "Open side panel" })).toBeVisible();
+});
+
+/**
+ * PUL-232: the Agents launcher card used to navigate the main canvas away to
+ * `/agents`, leaving the panel itself empty. It now stays put and drills into
+ * a connected-agent picker in place — these pin that contract down from the
+ * user's side: the card announces the extra step, picking it keeps you in
+ * the panel, and there is always a way back to the original launcher.
+ */
+test("the Agents card announces a next step and stays inside the panel", async ({ page }) => {
+  await mockNoConnectedAgents(page);
+  await openDashboard(page);
+  await page.getByRole("button", { name: "Open side panel" }).click();
+
+  const panel = page.getByRole("region", { name: "Side panel" });
+  await expect(panel).toBeVisible({ timeout: RENDER_TIMEOUT });
+
+  const agentsCard = panel.getByRole("button", { name: /Agents/ });
+  await expect(agentsCard).toBeVisible();
+  // The forward chevron visually distinguishes this drill-in card from the
+  // Pin and Search cards, which act immediately.
+  await expect(agentsCard.locator(".lucide-chevron-right")).toBeVisible();
+
+  await agentsCard.click();
+
+  // Still the same region — no navigation away from the panel happened.
+  await expect(panel).toBeVisible();
+  await expect(page.getByRole("button", { name: "Back" })).toBeVisible();
+  await expect(page).not.toHaveURL(/\/agents$/);
+
+  // The demo router seeds no connected agents until a session exists, so the
+  // deterministic first-visit state is the connect-agent fallback.
+  await expect(panel.getByText("No agents connected yet.")).toBeVisible({
+    timeout: RENDER_TIMEOUT,
+  });
+  await expect(panel.getByRole("button", { name: "Connect an agent" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Back" }).click();
+  await expect(panel.getByText("Nothing pinned")).toBeVisible();
+  await expect(panel.getByRole("button", { name: /Agents/ })).toBeVisible();
+});
+
+test("the connect-agent fallback routes to setting up an agent", async ({ page }) => {
+  await mockNoConnectedAgents(page);
+  await openDashboard(page);
+  await page.getByRole("button", { name: "Open side panel" }).click();
+
+  const panel = page.getByRole("region", { name: "Side panel" });
+  await panel.getByRole("button", { name: /Agents/ }).click();
+
+  await panel.getByRole("button", { name: "Connect an agent" }).click();
+
+  // This is the one case where leaving the panel is correct: there is nothing
+  // connected yet to chat with, so the fallback takes the user to set one up.
+  await expect(page).toHaveURL(/\/agents\/new/);
 });

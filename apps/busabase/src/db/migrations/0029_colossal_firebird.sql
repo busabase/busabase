@@ -1,0 +1,1 @@
+ALTER TABLE "busabase_agent_sessions" ADD COLUMN "model_option" jsonb;

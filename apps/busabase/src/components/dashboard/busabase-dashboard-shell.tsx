@@ -14,10 +14,10 @@ import type { MoveNodePayload } from "busabase-core/dashboard/use-move-node";
 import { useCoreI18n } from "busabase-core/i18n";
 import { DropdownMenuItem, DropdownMenuSeparator } from "kui/dropdown-menu";
 import { Activity, Archive, Bot, Images, Inbox, LayoutGrid, Network, Shapes } from "lucide-react";
-import { useAddDemoParam } from "openlib/ui/dashboard";
+import { mergeSearchIntoHref, useAddDemoParam } from "openlib/ui/dashboard";
 import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
-import { useLocation } from "wouter";
+import { useLocation, useSearch } from "wouter";
 import { useSPA } from "~/components/spa/spa-context";
 import { SettingsDialog } from "~/domains/settings/components/settings-dialog";
 import { useAppBranding } from "~/domains/settings/hooks/use-app-branding";
@@ -49,6 +49,8 @@ interface BusabaseDashboardShellProps {
   onLocaleChange: (locale: string) => void;
   /** Ids of nodes whose children are currently being lazy-fetched. */
   loadingNodeIds?: Set<string>;
+  /** True while the initial workspace node tree is loading. */
+  nodesLoading?: boolean;
   /** Fired when a depth-boundary folder is expanded for the first time. */
   onExpandNode?: (nodeId: string) => void;
   /** Server-authoritative descendant check, gates cross-branch drag-and-drop drops. */
@@ -81,13 +83,17 @@ export function BusabaseDashboardShell({
   languagePref,
   onLocaleChange,
   loadingNodeIds,
+  nodesLoading,
   onExpandNode,
   checkIsDescendant,
   agentIntegration,
 }: BusabaseDashboardShellProps) {
   const { activeSpace, spaces, unreadCount, user } = useSPA();
   const [location, navigate] = useLocation();
+  const currentSearch = useSearch();
   const addDemoParam = useAddDemoParam();
+  const navigateInWorkspace = (path: string) =>
+    navigate(addDemoParam(mergeSearchIntoHref(path, currentSearch)));
   const LL = useMemo(() => getBusabaseAppLL(locale), [locale]);
   const coreMessages = useCoreI18n();
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
@@ -151,49 +157,49 @@ export function BusabaseDashboardShell({
     spaceSelectorExtraMenuItems: (
       <>
         <DropdownMenuItem
-          onSelect={() => navigate(addDemoParam("/inbox"))}
+          onSelect={() => navigateInWorkspace("/inbox")}
           className={currentPath.startsWith("/inbox") ? "bg-accent" : undefined}
         >
           <Inbox />
           <span>{coreMessages.nav.inbox}</span>
         </DropdownMenuItem>
         <DropdownMenuItem
-          onSelect={() => navigate(addDemoParam("/activity"))}
+          onSelect={() => navigateInWorkspace("/activity")}
           className={currentPath === "/activity" ? "bg-accent" : undefined}
         >
           <Activity />
           <span>{coreMessages.nav.activity}</span>
         </DropdownMenuItem>
         <DropdownMenuItem
-          onSelect={() => navigate(addDemoParam("/archived"))}
+          onSelect={() => navigateInWorkspace("/archived")}
           className={currentPath === "/archived" ? "bg-accent" : undefined}
         >
           <Archive />
           <span>{coreMessages.nav.archive}</span>
         </DropdownMenuItem>
         <DropdownMenuItem
-          onSelect={() => navigate(addDemoParam("/assets"))}
+          onSelect={() => navigateInWorkspace("/assets")}
           className={currentPath.startsWith("/assets") ? "bg-accent" : undefined}
         >
           <Images />
           <span>{coreMessages.nav.assets}</span>
         </DropdownMenuItem>
         <DropdownMenuItem
-          onSelect={() => navigate(addDemoParam("/agents"))}
+          onSelect={() => navigateInWorkspace("/agents")}
           className={currentPath.startsWith("/agents") ? "bg-accent" : undefined}
         >
           <Bot />
           <span>{coreMessages.nav.agents}</span>
         </DropdownMenuItem>
         <DropdownMenuItem
-          onSelect={() => navigate(addDemoParam("/apps"))}
+          onSelect={() => navigateInWorkspace("/apps")}
           className={currentPath.startsWith("/apps") ? "bg-accent" : undefined}
         >
           <LayoutGrid />
           <span>{coreMessages.nav.apps}</span>
         </DropdownMenuItem>
         <DropdownMenuItem
-          onSelect={() => navigate(addDemoParam("/templates"))}
+          onSelect={() => navigateInWorkspace("/templates")}
           className={currentPath.startsWith("/templates") ? "bg-accent" : undefined}
         >
           <Shapes />
@@ -206,7 +212,7 @@ export function BusabaseDashboardShell({
           </DropdownMenuItem>
         ) : null}
         <DropdownMenuItem
-          onSelect={() => navigate(addDemoParam("/graph"))}
+          onSelect={() => navigateInWorkspace("/graph")}
           className={currentPath === "/graph" ? "bg-accent" : undefined}
         >
           <Network />
@@ -240,6 +246,7 @@ export function BusabaseDashboardShell({
         onMoveNode={onMoveNode}
         onSearchClick={onSearchClick}
         loadingNodeIds={loadingNodeIds}
+        nodesLoading={nodesLoading}
         onExpandNode={onExpandNode}
         checkIsDescendant={checkIsDescendant}
       >
@@ -247,6 +254,7 @@ export function BusabaseDashboardShell({
       </CoreDashboardShell>
       <SettingsDialog
         labels={LL.settingsDialog}
+        locale={locale}
         vaultLabels={LL.vaultSettings}
         webhookLabels={LL.webhookSettings}
         cloudConnectLabels={LL.cloudConnect}

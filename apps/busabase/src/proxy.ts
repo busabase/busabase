@@ -15,6 +15,7 @@ import {
 } from "busabase-core/domains/embed-links/logic";
 import { type NextRequest, NextResponse } from "next/server";
 import { DEMO_LOCALE_HEADER, resolveDemoMode } from "openlib/ui/dashboard/demo";
+import { normalizeBusabaseAppLocale } from "~/i18n/app-locale";
 import { getLegacyDashboardRedirect } from "~/lib/dashboard-routes";
 
 /** A page query param from the request's own URL or, for SPA calls, the `Referer`. */
@@ -114,7 +115,15 @@ export async function proxy(request: NextRequest) {
   headers.delete(DEMO_LOCALE_HEADER);
   if (useCase) {
     headers.set("x-demo-mode", useCase);
-    if (locale === "zh-CN") headers.set(DEMO_LOCALE_HEADER, locale);
+    headers.set(DEMO_LOCALE_HEADER, locale);
+  } else if (
+    request.nextUrl.pathname === "/dashboard" ||
+    request.nextUrl.pathname.startsWith("/dashboard/")
+  ) {
+    const explicitLocale = normalizeBusabaseAppLocale(
+      request.nextUrl.searchParams.get("lang") ?? undefined,
+    );
+    if (explicitLocale) headers.set(DEMO_LOCALE_HEADER, explicitLocale);
   }
 
   return NextResponse.next({ request: { headers } });
