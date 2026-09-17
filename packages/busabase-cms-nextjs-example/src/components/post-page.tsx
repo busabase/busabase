@@ -5,7 +5,15 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 
-import { getLinkedTaxonomies, taxonomyArchivePath } from "@/lib/content";
+import {
+  availableLocalesForPath,
+  cmsAlternates,
+  getLinkedTaxonomies,
+  listBlogPosts,
+  parseContentPath,
+  taxonomyArchivePath,
+} from "@/lib/content";
+import { siteName } from "@/lib/site";
 
 const formatFileSize = (size: number) => {
   if (size < 1024) return `${size} B`;
@@ -20,13 +28,46 @@ const formatFileSize = (size: number) => {
   return `${new Intl.NumberFormat("en", { maximumFractionDigits: 1 }).format(value)} ${unit}`;
 };
 
-export const generatePostMetadata = (post: PostVO): Metadata => {
+/**
+ * Metadata for a Blog Post — the same rules as `generateCmsPageMetadata`, see the long
+ * comment there. In short: absolute canonical for the locale that owns the content,
+ * hreflang restricted to the locales that really have it, and the site identity spelled
+ * out because Next replaces `openGraph`/`twitter` wholesale instead of merging.
+ */
+export const generatePostMetadata = async (post: PostVO): Promise<Metadata> => {
   const coverImageUrl = post.coverImage ? getSafeCmsExternalUrl(post.coverImage.url) : null;
+  const parsed = parseContentPath(post.path);
+  if (!parsed) return {};
+
+  const available = availableLocalesForPath(await listBlogPosts(), parsed.pathWithoutLocale);
+  const availableLocales = available.includes(parsed.locale) ? available : [parsed.locale];
+  const alternates = cmsAlternates(parsed.pathWithoutLocale, parsed.locale, availableLocales);
+  const title = post.seoTitle ?? post.title;
+  const description = post.seoDescription ?? post.description ?? undefined;
+
   return {
-    title: post.seoTitle ?? post.title,
-    description: post.seoDescription ?? post.description,
-    alternates: { canonical: post.path },
-    openGraph: coverImageUrl ? { images: [coverImageUrl] } : undefined,
+    title: post.seoTitle ? { absolute: post.seoTitle } : title,
+    description,
+    alternates: post.canonicalUrl
+      ? { canonical: post.canonicalUrl }
+      : (alternates ?? { canonical: post.path }),
+    openGraph: {
+      type: "article",
+      title,
+      description,
+      url: alternates?.canonical,
+      siteName,
+      locale: parsed.locale.replace(/-/g, "_"),
+      publishedTime: post.publishedAt ?? undefined,
+      modifiedTime: post.updatedAt,
+      ...(coverImageUrl ? { images: [coverImageUrl] } : {}),
+    },
+    twitter: {
+      card: coverImageUrl ? "summary_large_image" : "summary",
+      title,
+      description,
+      ...(coverImageUrl ? { images: [coverImageUrl] } : {}),
+    },
   };
 };
 

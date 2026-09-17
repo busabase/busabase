@@ -129,6 +129,76 @@ export const createCmsPathHelpers = (options: CmsCanonicalPathOptions): CmsPathH
     buildCmsTaxonomyArchivePath(kind, taxonomy, options),
 });
 
+// ── Locale alternates (hreflang) ───────────────────────────────────────────────
+
+export interface CmsAlternateLinks {
+  /** Absolute canonical URL for the locale that owns the content. */
+  canonical: string;
+  /** hreflang code -> absolute URL, including `x-default` when the default locale exists. */
+  languages: Record<string, string>;
+}
+
+/**
+ * Absolute URLs for every locale that really has this content, plus `x-default`.
+ *
+ * The input MUST be the locales that actually exist, not the app's supported list.
+ * Advertising `hreflang="ja"` for a page that has no Japanese version, while that
+ * URL's canonical points back at the English original, gives Google contradictory
+ * annotations and it discards the whole cluster — so the untranslated locales gain
+ * nothing and the real one loses its annotation too.
+ *
+ * Lives here so the page `<head>`, the sitemap, and any external consumer of this
+ * SDK all derive alternates from one implementation instead of three.
+ */
+export const buildCmsAlternateLanguages = (
+  helpers: CmsPathHelpers,
+  baseUrl: string,
+  pathWithoutLocale: string,
+  availableLocales: readonly string[],
+): Record<string, string> => {
+  const { supportedLocales, defaultLocale = "en" } = helpers.options;
+  const available = new Set(availableLocales);
+  const contentPath = pathWithoutLocale.replace(/^\/+/, "");
+  const languages: Record<string, string> = {};
+
+  for (const locale of supportedLocales) {
+    if (!available.has(locale)) continue;
+    const localePath = helpers.buildPath(locale, contentPath);
+    if (localePath) languages[locale] = `${baseUrl}${localePath}`;
+  }
+
+  // x-default names the fallback for unmatched languages, so it only means something
+  // when the default locale is one of the versions that exists.
+  if (available.has(defaultLocale)) {
+    const defaultPath = helpers.buildPath(defaultLocale, contentPath);
+    if (defaultPath) languages["x-default"] = `${baseUrl}${defaultPath}`;
+  }
+
+  return languages;
+};
+
+/**
+ * `{ canonical, languages }` for one piece of CMS content, ready to drop into a
+ * Next.js `alternates` block. `contentLocale` is the locale that OWNS the content —
+ * on a locale fallback that is the original, not the requested locale, because the
+ * canonical must point at the page that exists.
+ */
+export const buildCmsAlternates = (
+  helpers: CmsPathHelpers,
+  baseUrl: string,
+  pathWithoutLocale: string,
+  contentLocale: string,
+  availableLocales: readonly string[],
+): CmsAlternateLinks | null => {
+  const canonicalPath = helpers.buildPath(contentLocale, pathWithoutLocale.replace(/^\/+/, ""));
+  if (!canonicalPath) return null;
+
+  return {
+    canonical: `${baseUrl}${canonicalPath}`,
+    languages: buildCmsAlternateLanguages(helpers, baseUrl, pathWithoutLocale, availableLocales),
+  };
+};
+
 /** Select Posts related to one taxonomy record without mixing locales. */
 export const filterCmsPostsByTaxonomy = <
   T extends { locale: string; categoryIds: readonly string[]; tagIds: readonly string[] },

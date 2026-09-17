@@ -7,6 +7,7 @@ export type BusabaseCmsFieldType =
   | "html"
   | "attachment"
   | "relation"
+  | "member"
   | "number"
   | "date"
   | "checkbox"
