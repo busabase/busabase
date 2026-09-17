@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { flushStdio } from "./flush-stdio.js";
 import { pkgVersion, runCli } from "./run.js";
 import { checkForUpdate } from "./update-check.js";
 
@@ -10,4 +11,5 @@ const exitCode = await runCli(process.argv.slice(2));
 const notice = await checkForUpdate("busabase-cli", pkgVersion());
 if (notice) console.error(notice);
 
+await flushStdio();
 process.exit(exitCode);
