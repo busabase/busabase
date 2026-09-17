@@ -61,7 +61,7 @@ export interface SettingsDialogShellProps<T extends string = string> {
   backLabel?: string;
   /** Optional trigger element rendered inside the Dialog */
   trigger?: React.ReactNode;
-  /** Fixed height on desktop in px. Defaults to 640. */
+  /** Target height on desktop in px, capped by the live viewport. Defaults to 640. */
   desktopHeight?: number;
   /**
    * Tab groups shown in the sidebar.
@@ -435,7 +435,12 @@ export function SettingsDialogShell<T extends string = string>({
       {trigger && <DialogTrigger asChild>{trigger}</DialogTrigger>}
       <DialogContent
         showCloseButton={false}
-        className="w-[min(96vw,1020px)] sm:max-w-[1020px] flex flex-col p-0 gap-0 overflow-hidden rounded-2xl h-[80vh] sm:h-auto"
+        className="flex h-[80vh] max-h-[calc(100dvh-2rem)] w-[min(96vw,1020px)] flex-col gap-0 overflow-hidden rounded-2xl p-0 sm:h-[min(var(--settings-dialog-desktop-height),calc(100dvh-2rem))] sm:max-w-[1020px]"
+        style={
+          {
+            "--settings-dialog-desktop-height": `${desktopHeight}px`,
+          } as React.CSSProperties
+        }
       >
         <DialogTitle className="sr-only">{title}</DialogTitle>
         <DialogDescription className="sr-only">{title}</DialogDescription>
@@ -491,8 +496,7 @@ export function SettingsDialogShell<T extends string = string>({
             {/* Desktop: vertical sidebar */}
             <div
               data-settings-viewport="desktop"
-              className="hidden w-52 shrink-0 flex-col overflow-hidden border-r bg-muted/20 p-3 sm:flex lg:w-56"
-              style={{ height: `${desktopHeight}px` }}
+              className="hidden w-52 shrink-0 flex-col overflow-hidden border-r bg-muted/20 p-3 sm:flex sm:h-full lg:w-56"
             >
               <TooltipProvider delayDuration={300}>
                 <div
@@ -510,20 +514,14 @@ export function SettingsDialogShell<T extends string = string>({
               )}
             </div>
 
-            {/* Content
-             *  max-height (not height) is used here so overflow-y-auto activates
-             *  regardless of the flex container's own height. Using `height` alone
-             *  was insufficient because align-items:stretch on the row flex parent
-             *  overrides a child's height when the parent is unconstrained (sm:h-auto
-             *  on DialogContent), causing tall tabs like Security to expand the dialog
-             *  instead of scrolling within it.
-             */}
+            {/* Content inherits the viewport-capped shell height. `min-h-0` and
+                `sm:max-h-full` keep tall tabs scrolling inside this column
+                instead of expanding the dialog beyond the viewport. */}
             <div
               className={cn(
-                "min-h-0 min-w-0 flex-1 flex-col sm:flex",
+                "min-h-0 min-w-0 flex-1 flex-col sm:flex sm:max-h-full",
                 mobileDetailOpen ? "flex" : "hidden",
               )}
-              style={{ maxHeight: `${desktopHeight}px` }}
             >
               {isFullBleed ? (
                 <>

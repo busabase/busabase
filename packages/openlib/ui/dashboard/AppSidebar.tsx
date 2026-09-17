@@ -1,5 +1,6 @@
 "use client";
 
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "kui/sheet";
 import {
   Sidebar,
   SidebarContent,
@@ -8,6 +9,7 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  useSidebar,
 } from "kui/sidebar";
 import { Skeleton } from "kui/skeleton";
 import Image from "next/image";
@@ -15,10 +17,20 @@ import type * as React from "react";
 import { NavMain } from "./NavMain";
 import { NavUser } from "./NavUser";
 import { SpaceSelector } from "./SpaceSelector";
-import type { AppBranding, NavGroup, NavUserLabels, Space, UserData, UserMenuItem } from "./types";
+import type {
+  AppBranding,
+  NavGroup,
+  NavMainLabels,
+  NavUserLabels,
+  Space,
+  UserData,
+  UserMenuItem,
+} from "./types";
 
 interface AppSidebarProps extends React.ComponentProps<typeof Sidebar> {
   navMain?: NavGroup[];
+  navMainLabels?: NavMainLabels;
+  mobileSidebarLabels?: { title: string; description: string };
   spaces?: Space[];
   activeSpace?: Space;
   onSpaceChange?: (space: Space) => void;
@@ -92,8 +104,42 @@ interface AppSidebarProps extends React.ComponentProps<typeof Sidebar> {
   sidebarHeader?: React.ReactNode;
 }
 
+// KUI's mobile Sidebar fixes its accessible title and description in English.
+function SidebarFrame({
+  children,
+  mobileSidebarLabels,
+  ...props
+}: React.ComponentProps<typeof Sidebar> & {
+  mobileSidebarLabels?: { title: string; description: string };
+}) {
+  const { isMobile, openMobile, setOpenMobile } = useSidebar();
+  if (!isMobile || !mobileSidebarLabels) {
+    return <Sidebar {...props}>{children}</Sidebar>;
+  }
+
+  return (
+    <Sheet open={openMobile} onOpenChange={setOpenMobile}>
+      <SheetContent
+        data-sidebar="sidebar"
+        data-mobile="true"
+        className="w-(--sidebar-width) bg-sidebar p-0 text-sidebar-foreground [&>button]:hidden"
+        side={props.side ?? "left"}
+        style={{ "--sidebar-width": "18rem" } as React.CSSProperties}
+      >
+        <SheetHeader className="sr-only">
+          <SheetTitle>{mobileSidebarLabels.title}</SheetTitle>
+          <SheetDescription>{mobileSidebarLabels.description}</SheetDescription>
+        </SheetHeader>
+        <div className="flex h-full w-full flex-col">{children}</div>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
 export function AppSidebar({
   navMain,
+  navMainLabels,
+  mobileSidebarLabels,
   spaces,
   activeSpace,
   onSpaceChange,
@@ -127,7 +173,7 @@ export function AppSidebar({
   const hasSpaces = spaces && spaces.length > 0;
 
   return (
-    <Sidebar collapsible="icon" {...props}>
+    <SidebarFrame collapsible="icon" mobileSidebarLabels={mobileSidebarLabels} {...props}>
       <SidebarHeader className="py-2">
         {sidebarHeader ? (
           sidebarHeader
@@ -191,6 +237,7 @@ export function AppSidebar({
         {navMain && (
           <NavMain
             items={navMain}
+            labels={navMainLabels}
             onHeaderActionClick={onHeaderActionClick}
             onNavItemAction={onNavItemAction}
             isTaskListExpanded={isTaskListExpanded}
@@ -215,6 +262,6 @@ export function AppSidebar({
           )}
         </SidebarFooter>
       )}
-    </Sidebar>
+    </SidebarFrame>
   );
 }

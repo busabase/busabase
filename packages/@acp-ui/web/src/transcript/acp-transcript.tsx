@@ -9,12 +9,23 @@ import {
   ConversationScrollButton,
 } from "kui/ai-elements/conversation";
 import { Response } from "kui/ai-elements/response";
+import type { ToolPart } from "kui/ai-elements/tool";
+import type { ReactNode } from "react";
 import { AcpMessageView } from "./message-view";
 import { AcpNoteView } from "./note-view";
 import { AcpPermissionView } from "./permission-view";
-import type { AcpTranscriptSlots } from "./slots";
+import type { AcpReasoningLabels, AcpTranscriptSlots } from "./slots";
 import { AcpToolCallView } from "./tool-call-view";
-import { AcpToolRunView } from "./tool-run-view";
+import { type AcpToolRunLabels, AcpToolRunView } from "./tool-run-view";
+
+export interface AcpTranscriptLabels {
+  permissionAnswered?: string;
+  permissionTimeout?: (count: number) => string;
+  permissionTimingOut?: string;
+  tools?: AcpToolRunLabels;
+  reasoning?: AcpReasoningLabels;
+  toolStatuses?: Partial<Record<ToolPart["state"], string>>;
+}
 
 export interface AcpTranscriptProps {
   blocks: readonly AcpBlock[];
@@ -24,6 +35,7 @@ export interface AcpTranscriptProps {
   streaming?: boolean;
   slots?: AcpTranscriptSlots;
   className?: string;
+  labels?: AcpTranscriptLabels;
 }
 
 /**
@@ -40,6 +52,7 @@ export function AcpTranscript({
   streaming = false,
   slots = {},
   className,
+  labels,
 }: AcpTranscriptProps) {
   const Markdown = slots.Markdown ?? Response;
   const MessageView = slots.Message ?? AcpMessageView;
@@ -59,15 +72,26 @@ export function AcpTranscript({
     const isTail = streaming && block === tail;
     switch (block.kind) {
       case "message":
-        return <MessageView key={block.id} block={block} streaming={isTail} Markdown={Markdown} />;
+        return (
+          <MessageView
+            key={block.id}
+            block={block}
+            streaming={isTail}
+            Markdown={Markdown}
+            reasoningLabel={labels?.reasoning}
+          />
+        );
       case "tool_call":
-        return <ToolCallView key={block.id} block={block} />;
+        return <ToolCallView key={block.id} block={block} statusLabels={labels?.toolStatuses} />;
       case "permission":
         return (
           <PermissionView
             key={block.id}
             block={block}
             onAnswer={(optionId) => onAnswerPermission(block, optionId)}
+            answeredLabel={labels?.permissionAnswered}
+            timeoutLabel={labels?.permissionTimeout}
+            timingOutLabel={labels?.permissionTimingOut}
           />
         );
       case "note":
@@ -88,7 +112,12 @@ export function AcpTranscript({
     <div className={className}>
       {groupConsecutiveToolCalls(blocks).map((group) =>
         group.kind === "run" ? (
-          <ToolRunView blocks={group.blocks} key={group.blocks.map((b) => b.id).join(":")} />
+          <ToolRunView
+            blocks={group.blocks}
+            key={group.blocks.map((b) => b.id).join(":")}
+            labels={labels?.tools}
+            statusLabels={labels?.toolStatuses}
+          />
         ) : (
           renderSingle(group.block)
         ),
@@ -100,6 +129,8 @@ export function AcpTranscript({
 export interface AcpConversationProps extends AcpTranscriptProps {
   emptyTitle?: string;
   emptyDescription?: string;
+  /** Host-owned activity rendered after the transcript, inside the scroll surface. */
+  activity?: ReactNode;
 }
 
 /**
@@ -110,18 +141,24 @@ export interface AcpConversationProps extends AcpTranscriptProps {
 export function AcpConversation({
   emptyTitle,
   emptyDescription,
+  activity,
   className,
   ...props
 }: AcpConversationProps) {
   return (
     <Conversation className={className}>
       <ConversationContent>
-        {props.blocks.length === 0 ? (
+        {props.blocks.length === 0 && !activity ? (
           (props.slots?.empty ?? (
             <ConversationEmptyState title={emptyTitle} description={emptyDescription} />
           ))
         ) : (
-          <AcpTranscript {...props} className="flex flex-col gap-4" />
+          <div className="flex flex-col gap-4">
+            {props.blocks.length > 0 ? (
+              <AcpTranscript {...props} className="flex flex-col gap-4" />
+            ) : null}
+            {activity}
+          </div>
         )}
       </ConversationContent>
       <ConversationScrollButton />
