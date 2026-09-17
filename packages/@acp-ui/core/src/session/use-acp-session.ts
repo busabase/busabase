@@ -242,9 +242,12 @@ export function useAcpSession(port: AcpSessionPort, key: string | null): AcpSess
 
   const cancel = useCallback(async () => {
     const id = sessionIdRef.current;
-    // Nothing to cancel once the turn has already finished — guards a stray
-    // click on a stop button that hasn't yet noticed `sending` flipped false.
-    if (!id || !sending) return;
+    // The host decides when a stop action is available. Do not gate this on
+    // this hook's local `sending`: a host may submit through a continuation or
+    // retry wrapper while using an authoritative remote status to render the
+    // same conversation (Busabase does exactly that). In that case the turn is
+    // genuinely active even though this hook did not initiate it itself.
+    if (!id) return;
     try {
       await portRef.current.cancel?.(id);
     } catch {
@@ -253,7 +256,7 @@ export function useAcpSession(port: AcpSessionPort, key: string | null): AcpSess
       // with SOME stop reason, whether or not this notify actually landed —
       // there is nothing actionable to surface to the user here.
     }
-  }, [sending]);
+  }, []);
 
   return {
     sessionId,

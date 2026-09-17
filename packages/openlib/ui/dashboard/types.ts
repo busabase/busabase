@@ -159,6 +159,17 @@ export interface NavGroup {
   draggable?: boolean;
 }
 
+/** Labels for the built-in sidebar actions; omitted labels retain English defaults. */
+export interface NavMainLabels {
+  dragToReorder?: string;
+  new?: string;
+  delete?: string;
+  more?: string;
+  toggle?: string;
+  expand?: string;
+  collapse?: string;
+}
+
 export interface Space {
   name: string;
   logo: LucideIcon | string; // Support both icon components and custom image URLs

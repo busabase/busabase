@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createDevUploadRoute } from "./dev-routes";
+import { createDevAttachmentRoute, createDevUploadRoute } from "./dev-routes";
 import { resetStorage } from "./factory";
 import { LocalStorage } from "./local";
 
@@ -17,8 +17,10 @@ import { LocalStorage } from "./local";
  */
 describe("createDevUploadRoute", () => {
   let dir: string;
+  let originalPublicBaseUrl: string | undefined;
 
   beforeEach(() => {
+    originalPublicBaseUrl = process.env.STORAGE_PUBLIC_BASE_URL;
     dir = mkdtempSync(join(tmpdir(), "dev-upload-route-"));
     process.env.STORAGE_URL = `local:${dir}?base_url=/api/test/storage`;
     process.env.NODE_ENV = "test";
@@ -26,6 +28,11 @@ describe("createDevUploadRoute", () => {
   });
 
   afterEach(() => {
+    if (originalPublicBaseUrl === undefined) {
+      delete process.env.STORAGE_PUBLIC_BASE_URL;
+    } else {
+      process.env.STORAGE_PUBLIC_BASE_URL = originalPublicBaseUrl;
+    }
     resetStorage();
     rmSync(dir, { recursive: true, force: true });
   });
@@ -124,5 +131,29 @@ describe("createDevUploadRoute", () => {
     );
     expect(res.status).toBe(200);
     expect(bytesOnDisk("prod/ok.txt").toString()).toBe("prod bytes");
+  });
+
+  it("can read from the upload adapter despite a stale public base URL", async () => {
+    const key = "attachments/community/post.png";
+    const body = Buffer.from("community image bytes");
+    const { PUT } = createDevUploadRoute();
+    const upload = await PUT(
+      new Request(`http://localhost/api/dev/upload?key=${encodeURIComponent(key)}`, {
+        method: "PUT",
+        headers: { "content-type": "image/png" },
+        body,
+      }),
+    );
+    expect(upload.status).toBe(200);
+
+    process.env.STORAGE_PUBLIC_BASE_URL = "http://127.0.0.1:1/wrong-bucket";
+    const { GET } = createDevAttachmentRoute({ preferStorageAdapter: true });
+    const response = await GET(new Request(`http://localhost/api/dev/attachment/${key}`), {
+      params: Promise.resolve({ key: key.split("/") }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("image/png");
+    expect(Buffer.from(await response.arrayBuffer())).toEqual(body);
   });
 });

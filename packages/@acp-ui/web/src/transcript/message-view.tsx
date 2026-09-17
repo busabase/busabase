@@ -9,6 +9,7 @@ import {
 } from "kui/ai-elements/attachments";
 import { Message, MessageContent } from "kui/ai-elements/message";
 import { Reasoning, ReasoningContent, ReasoningTrigger } from "kui/ai-elements/reasoning";
+import { Shimmer } from "kui/ai-elements/shimmer";
 import type { AcpMessageViewProps } from "./slots";
 
 /**
@@ -81,11 +82,29 @@ function AcpAttachmentsView({
  * `Reasoning` gives them the collapsed-by-default, "Thought for N seconds"
  * treatment instead of an italic paragraph the user cannot dismiss.
  */
-export function AcpMessageView({ block, streaming = false, Markdown }: AcpMessageViewProps) {
+export function AcpMessageView({
+  block,
+  streaming = false,
+  Markdown,
+  reasoningLabel,
+}: AcpMessageViewProps) {
   if (block.variant === "thought") {
     return (
       <Reasoning isStreaming={streaming} data-testid="acp-thought">
-        <ReasoningTrigger />
+        <ReasoningTrigger
+          getThinkingMessage={
+            reasoningLabel
+              ? (isStreaming, duration) => {
+                  if (isStreaming || duration === 0) {
+                    return <Shimmer duration={1}>{reasoningLabel.thinking}</Shimmer>;
+                  }
+                  return duration === undefined
+                    ? reasoningLabel.brief
+                    : reasoningLabel.duration(duration);
+                }
+              : undefined
+          }
+        />
         <ReasoningContent>{block.text}</ReasoningContent>
       </Reasoning>
     );

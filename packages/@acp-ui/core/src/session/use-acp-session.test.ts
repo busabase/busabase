@@ -408,7 +408,7 @@ describe("cancel", () => {
     });
   });
 
-  it("does nothing when no turn is in flight", async () => {
+  it("lets the host cancel an externally-started turn", async () => {
     const { port, calls } = makePort();
     const { seen } = mount(port);
     await waitFor(() => expect(seen.current?.sessionId).toBe("s1"));
@@ -417,7 +417,7 @@ describe("cancel", () => {
     await act(async () => {
       await seen.current?.cancel();
     });
-    expect(calls.cancel).toEqual([]);
+    expect(calls.cancel).toEqual(["s1"]);
   });
 
   // The port's `cancel` is optional (see AcpSessionPort's doc comment) — a

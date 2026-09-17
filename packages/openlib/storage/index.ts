@@ -29,6 +29,7 @@ export {
   parseStorageUrl,
   S3Storage,
 } from "./s3";
+export { isSafeStorageKey } from "./storage-key";
 export type {
   IStorage,
   MultipartPart,

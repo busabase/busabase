@@ -2,7 +2,14 @@ import type { AcpBlock, AcpPermissionBlock } from "@acp-ui/core/reduce";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { AcpTranscript } from "./acp-transcript";
+import { AcpConversation, AcpTranscript } from "./acp-transcript";
+
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObserver;
 
 const noop = () => undefined;
 
@@ -45,6 +52,54 @@ describe("messages", () => {
     renderBlocks([message({ variant: "thought", text: "let me think" })]);
     expect(screen.getByTestId("acp-thought")).toBeInTheDocument();
     expect(screen.queryByTestId("acp-message-agent")).not.toBeInTheDocument();
+  });
+
+  it("localizes the reasoning label supplied by a host", () => {
+    renderBlocks([message({ variant: "thought", text: "考え中" })], noop, {
+      labels: {
+        reasoning: {
+          thinking: "考え中…",
+          brief: "少し考えました",
+          duration: (seconds) => `${seconds} 秒考えました`,
+        },
+      },
+    });
+    expect(screen.getByTestId("acp-thought")).toHaveTextContent("少し考えました");
+  });
+});
+
+describe("conversation activity", () => {
+  it("replaces the empty state with host activity inside the scroll surface", () => {
+    render(
+      <AcpConversation
+        activity={<div data-testid="activity">Connecting</div>}
+        blocks={[]}
+        emptyTitle="Connected"
+        onAnswerPermission={noop}
+      />,
+    );
+
+    expect(screen.getByTestId("activity")).toHaveTextContent("Connecting");
+    expect(screen.queryByText("Connected")).not.toBeInTheDocument();
+  });
+
+  it("preserves transcript spacing when activity is appended", () => {
+    render(
+      <AcpConversation
+        activity={<div data-testid="activity">Working</div>}
+        blocks={[
+          message({ id: "a1", text: "First reply" }),
+          message({ id: "a2", text: "Second reply" }),
+        ]}
+        onAnswerPermission={noop}
+      />,
+    );
+
+    const transcript = screen.getAllByTestId("acp-message-agent")[0].parentElement;
+    const activityContainer = screen.getByTestId("activity").parentElement;
+
+    expect(transcript).toHaveClass("flex", "flex-col", "gap-4");
+    expect(activityContainer).toHaveClass("flex", "flex-col", "gap-4");
   });
 });
 
@@ -152,6 +207,25 @@ describe("tool calls", () => {
     expect(screen.getByTestId("acp-tool-call")).toHaveTextContent("Read package.json");
   });
 
+  it("localizes the visible state badge on an individual tool call", () => {
+    renderBlocks([tool("completed")], noop, {
+      labels: { toolStatuses: { "output-available": "已完成" } },
+    });
+    expect(screen.getByTestId("acp-tool-call")).toHaveTextContent("已完成");
+    expect(screen.getByTestId("acp-tool-call")).not.toHaveTextContent("Completed");
+  });
+
+  it("distinguishes pending from running in a host-provided status catalog", () => {
+    const labels = {
+      toolStatuses: { "input-streaming": "等待中", "input-available": "运行中" },
+    } as const;
+    const pending = renderBlocks([tool("pending")], noop, { labels });
+    expect(screen.getByTestId("acp-tool-call")).toHaveTextContent("等待中");
+    pending.unmount();
+    renderBlocks([tool("in_progress")], noop, { labels });
+    expect(screen.getByTestId("acp-tool-call")).toHaveTextContent("运行中");
+  });
+
   // The structural fix carried through from the core: one call is one row, no
   // matter how many `tool_call_update`s it received.
   it("renders one row per tool call", () => {
@@ -165,6 +239,21 @@ describe("tool calls", () => {
     renderBlocks([tool("completed"), tool("completed")]);
     expect(screen.getAllByTestId("acp-tool-run")).toHaveLength(1);
     expect(screen.queryByTestId("acp-tool-call")).not.toBeInTheDocument();
+  });
+
+  it("uses the host's tool-run labels", () => {
+    renderBlocks([tool("completed"), tool("completed")], noop, {
+      labels: {
+        tools: {
+          explored: (count) => `探索 ${count} 文件`,
+          searched: (count) => `搜索 ${count} 次`,
+          edited: (count) => `编辑 ${count} 文件`,
+          ran: (count) => `执行 ${count} 命令`,
+          usedTools: (count) => `使用 ${count} 工具`,
+        },
+      },
+    });
+    expect(screen.getByTestId("acp-tool-run")).toHaveTextContent("探索 2 文件");
   });
 
   it("does not merge tool calls separated by a message", () => {
@@ -224,6 +313,13 @@ describe("permission", () => {
     expect(screen.queryByRole("button", { name: "Allow once" })).not.toBeInTheDocument();
   });
 
+  it("uses translated permission status copy without changing the agent's options", () => {
+    renderBlocks([permission({ resolution: { optionId: "always" } })], noop, {
+      labels: { permissionAnswered: "已回答：" },
+    });
+    expect(screen.getByTestId("acp-permission-answer")).toHaveTextContent("已回答： Always allow");
+  });
+
   it("shows no countdown when the host set no deadline (busabase)", () => {
     renderBlocks([permission()]);
     expect(screen.queryByTestId("acp-permission-countdown")).not.toBeInTheDocument();
@@ -233,6 +329,14 @@ describe("permission", () => {
     const timeoutAt = new Date(Date.now() + 90_000).toISOString();
     renderBlocks([permission({ timeoutAt })]);
     expect(screen.getByTestId("acp-permission-countdown")).toHaveTextContent(/Times out in 9\ds/);
+  });
+
+  it("localizes a countdown when the host provides deadline copy", () => {
+    const timeoutAt = new Date(Date.now() + 60_000).toISOString();
+    renderBlocks([permission({ timeoutAt })], noop, {
+      labels: { permissionTimeout: (count) => `剩余 ${count} 秒` },
+    });
+    expect(screen.getByTestId("acp-permission-countdown")).toHaveTextContent(/剩余 \d+ 秒/);
   });
 });
 

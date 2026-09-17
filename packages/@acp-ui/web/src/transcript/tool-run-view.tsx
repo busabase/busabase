@@ -2,6 +2,7 @@
 
 import { hasActiveToolCall, summarizeToolRun } from "@acp-ui/core/group";
 import type { AcpToolCallBlock } from "@acp-ui/core/reduce";
+import type { ToolPart } from "kui/ai-elements/tool";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "kui/collapsible";
 import { CheckIcon, ChevronDownIcon, Loader2Icon } from "lucide-react";
 import { AcpToolCallView } from "./tool-call-view";
@@ -10,7 +11,7 @@ import { AcpToolCallView } from "./tool-call-view";
  * The strings a tool-run summary is built from — English defaults, matching
  * buda's exact wording, so both chats read the same way. Overridable because
  * this package has no i18n system of its own to plug localized strings into;
- * a host that does (buda's chat gets this from `typesafe-i18n`) passes its own.
+ * a host with a typed translation catalog passes its own.
  */
 export interface AcpToolRunLabels {
   explored: (count: number) => string;
@@ -50,6 +51,7 @@ function formatToolRunTitle(blocks: readonly AcpToolCallBlock[], labels: AcpTool
 export interface AcpToolRunViewProps {
   blocks: AcpToolCallBlock[];
   labels?: AcpToolRunLabels;
+  statusLabels?: Partial<Record<ToolPart["state"], string>>;
 }
 
 /**
@@ -57,7 +59,11 @@ export interface AcpToolRunViewProps {
  * for Ns" pattern. A single tool call never reaches this component; the
  * transcript renders it as itself (see `groupConsecutiveToolCalls`).
  */
-export function AcpToolRunView({ blocks, labels = defaultLabels }: AcpToolRunViewProps) {
+export function AcpToolRunView({
+  blocks,
+  labels = defaultLabels,
+  statusLabels,
+}: AcpToolRunViewProps) {
   const isRunning = hasActiveToolCall(blocks);
   const title = formatToolRunTitle(blocks, labels);
 
@@ -79,7 +85,7 @@ export function AcpToolRunView({ blocks, labels = defaultLabels }: AcpToolRunVie
       </CollapsibleTrigger>
       <CollapsibleContent className="mt-1 space-y-1 py-1 pl-1">
         {blocks.map((block) => (
-          <AcpToolCallView block={block} key={block.id} />
+          <AcpToolCallView block={block} key={block.id} statusLabels={statusLabels} />
         ))}
       </CollapsibleContent>
     </Collapsible>
