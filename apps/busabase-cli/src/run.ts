@@ -107,8 +107,11 @@ import {
   sampleEndpointId,
 } from "./schema-command.js";
 import {
+  buildPointerStub,
   buildRuntimeSkillDoc,
   installSkillDoc,
+  linkSkillDoc,
+  parseSkillIdentity,
   parseSkillTopic,
   resolveSkillDocument,
   resolveSkillMode,
@@ -573,30 +576,6 @@ type Handler = (
 ) => Promise<unknown>;
 
 /** Wrap a leaf-command handler: resolve config, build the client, render the result. */
-/**
- * Is this a 404 — either "this server has no such route" or "no such node"?
- *
- * Duck-typed rather than an `instanceof ORPCError` check, because this package
- * deliberately depends on no `@orpc/*` package; the SDK builds the error and
- * only its `status` is needed here.
- *
- * Not distinguishing the two 404s is safe for the one thing this gates: a
- * version fallback whose other branch targets the SAME node. An old server
- * answers 404 because the route is missing and the fallback then succeeds; a
- * current server answers 404 because the node does not exist, the fallback
- * asks about the same missing node and 404s too, and the caller still sees a
- * "not found" error. The cost of guessing wrong is one extra request, not a
- * write landing somewhere unintended.
- */
-function isNotFound(error: unknown): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "status" in error &&
-    (error as { status?: unknown }).status === 404
-  );
-}
-
 function runAction(state: CliState, handler: Handler) {
   return async (_opts: OptionValues, cmd: Command): Promise<void> => {
     const opts = cmd.optsWithGlobals();
@@ -1651,6 +1630,74 @@ Default target when neither is present: ${skillsDirDefaultHint()}`,
       );
     });
 
+  addGlobalFlags(skill.command("link"))
+    .argument("[dir]", `skills directory; default: ./.agents/skills, else ./.claude/skills`)
+    .description("Point this repo at a Skill node hosted in a workspace, without copying it")
+    .requiredOption("--node-id <id>", "the Skill node whose body stays canonical")
+    .addOption(new Option("--dir <path>", "same as the positional argument"))
+    .addOption(new Option("--force", "replace an existing skill of the same name"))
+    .addHelpText(
+      "after",
+      `
+\`install\` writes a COPY. \`link\` writes a POINTER: a short SKILL.md holding only the
+hosted skill's own name and description plus the command to fetch its body, so the
+body itself never lands on disk here.
+
+Use it when one skill has to serve several repositories. Vendoring a copy into each
+one means copies that drift; a pointer means every repository reads the one body, and
+an edit to it — reviewed once, through a Change Request — is live for all of them at
+the same moment.
+
+  busabase-cli skill link --node-id nodmtv5rwuofuhaqwl
+
+Writes <dir>/<the skill's own name>/SKILL.md. The name comes from the hosted
+frontmatter, not from you, because that name is how an agent resolves "read the
+crm-visits skill in this folder".
+
+A pointer names a specific node in a specific space, so: everyone who uses it needs
+read access to that space, and it must never be published as a template — a template
+materializes fresh resources in the installer's space, while these ids name yours.
+Default target when neither is present: ${skillsDirDefaultHint()}`,
+    )
+    .action(async (dir: string | undefined, _opts: OptionValues, cmd: Command) => {
+      const opts = cmd.optsWithGlobals();
+      const config = resolveConfig(opts);
+      state.config = config;
+      const nodeId = String(opts.nodeId);
+      const client = createBusabaseClient(config);
+      const file = await client.fileTrees.readFile({ nodeId, type: "skill", filePath: "SKILL.md" });
+      const identity = parseSkillIdentity(String(file.content ?? ""));
+      const target = resolveSkillsDir({
+        explicit: dir ?? (opts.dir as string | undefined),
+        cwd: process.cwd(),
+        home: homedir(),
+        exists: existsSync,
+      });
+      const result = linkSkillDoc({
+        dir: target,
+        name: identity.name,
+        content: buildPointerStub({
+          ...identity,
+          nodeId,
+          spaceId: config.spaceId,
+        }),
+        force: Boolean(opts.force),
+      });
+      if (!result.written) {
+        throw new CliOutcomeError("CONFLICT", `Not linked: ${result.path} — ${result.reason}`);
+      }
+      if (config.output === "json") {
+        console.log(render({ path: result.path, name: identity.name, nodeId }, "json"));
+        return;
+      }
+      console.log(`Linked the \`${identity.name}\` skill to node ${nodeId} at:`);
+      console.log(`  ${result.path}`);
+      console.error(
+        "\n[busabase-cli] this is a pointer, not a copy — the body stays in the workspace " +
+          "and is fetched on use. Everyone using it needs read access to that space.",
+      );
+    });
+
   // `setup-skill` is the name people reach for after seeing the /SETUP_SKILL.md URL,
   // so it exists as a real command rather than being something to discover.
   addGlobalFlags(program.command("setup-skill"))
@@ -2119,27 +2166,20 @@ Examples:
           );
         }
         const nodeId = opts.nodeId as string;
-        // Prefer the dedicated endpoint; fall back to the metadata key it
-        // replaced when the server does not have it yet.
+        // The `agent_prompts` column is the only place the server reads these
+        // from, so it is the only place worth writing them.
         //
-        // The CLI and the server ship separately, so a current CLI routinely
-        // talks to an older server. Calling only the new route would make this
-        // command fail outright against every server not yet upgraded — which
-        // is precisely how a previous change took a working command to zero
-        // results in production. The fallback writes where an older server
-        // still reads from, so the command keeps working either way.
-        try {
-          return await client.nodes.updateAgentPrompts({
-            nodeId,
-            agentPrompts: parsed.data,
-          });
-        } catch (error) {
-          if (!isNotFound(error)) throw error;
-          return await client.nodes.updateMetadata({
-            nodeId,
-            metadata: { agentPrompts: parsed.data },
-          });
-        }
+        // This used to fall back to `metadata.agentPrompts` on a 404, for
+        // servers predating the dedicated endpoint. That window has closed: the
+        // migration that introduced the column also backfilled every existing
+        // `metadata.agentPrompts` array into it, so any server old enough to
+        // 404 here moves its data over as soon as it is upgraded. Meanwhile a
+        // 404 from any *other* cause sent the write to a key nothing reads and
+        // still reported success. Failing outright is the honest answer.
+        return await client.nodes.updateAgentPrompts({
+          nodeId,
+          agentPrompts: parsed.data,
+        });
       }),
     );
 
