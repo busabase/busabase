@@ -3,6 +3,7 @@ import type { BaseVO, FieldType, ViewVO } from "busabase-contract/types";
 import { useRouter } from "expo-router";
 import { useMemo, useState } from "react";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
+import { SUBMITTED_BY } from "~/domains/review/utils/submitted-by";
 import { buildChoiceFieldOptions, isChoiceFieldType, toBaseDesignSlug } from "../utils/base-design";
 
 export function useBaseDesignController(slug: string) {
@@ -85,7 +86,7 @@ export function useBaseDesignController(slug: string) {
         baseId: base.id,
         name,
         slug: toBaseDesignSlug(name),
-        submittedBy: "mobile-editor",
+        submittedBy: SUBMITTED_BY,
         autoMerge: false,
       });
     },
@@ -102,7 +103,7 @@ export function useBaseDesignController(slug: string) {
       return buda.client.views.changeRequest({
         operation: "delete",
         viewId: view.id,
-        submittedBy: "mobile-editor",
+        submittedBy: SUBMITTED_BY,
         autoMerge: false,
       });
     },

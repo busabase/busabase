@@ -45,7 +45,13 @@ export function InstallPlanStep({ flow }: { flow: InstallFromGithubFlow }) {
       </Text>
 
       {flow.planning ? <NativeLoadingState label={t.install.previewing} /> : null}
-      {flow.installing ? <NativeLoadingState label={t.install.installingHint} /> : null}
+      {/* The server's own progress line while it streams, so a long install is
+          visibly alive rather than a spinner that could mean anything. Falls
+          back to the static hint before the first event arrives, and on an
+          older server that has no streaming route at all. */}
+      {flow.installing ? (
+        <NativeLoadingState label={flow.installProgress ?? t.install.installingHint} />
+      ) : null}
 
       {plan && !flow.installing ? (
         <>

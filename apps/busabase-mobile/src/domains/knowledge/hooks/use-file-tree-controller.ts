@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { SUBMITTED_BY } from "~/domains/review/utils/submitted-by";
 import type {
   FileEditorMode,
   FileTreeChangeRequestOperation,
@@ -19,8 +20,6 @@ import {
   resolveMessage,
   sortFilesForMobile,
 } from "../utils/file-tree";
-
-const SUBMITTED_BY = "mobile-editor";
 
 type UseFileTreeControllerOptions = Pick<
   FileTreeScreenProps,

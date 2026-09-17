@@ -16,6 +16,9 @@ export const CREATABLE_FIELD_TYPES: readonly FieldType[] = [
   "email",
   "phone",
   "attachment",
+  // No configuration to fill in (unlike `relation`, which needs a target Base),
+  // so a member column can be created straight from the phone.
+  "member",
   "auto_number",
 ];
 

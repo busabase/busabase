@@ -16,13 +16,12 @@ import {
 } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
 import { TextInput } from "~/components/ui/TextInput";
+import { SUBMITTED_BY } from "~/domains/review/utils/submitted-by";
 import { ConnectionGuard } from "~/domains/workspace/components/ConnectionGuard";
 import { DrawerScaffold } from "~/domains/workspace/components/DrawerScaffold";
 import { useI18n } from "~/i18n";
 import { mobile, radius, spacing } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
-
-const SUBMITTED_BY = "mobile-editor";
 
 function countLines(value: string) {
   return value.length === 0 ? 0 : value.split(/\r\n|\r|\n/).length;

@@ -10,11 +10,21 @@ import { getSpaceSelectorPresentation } from "../utils/space-selector-presentati
 interface UseSpaceSelectorControllerOptions {
   presentation: "sheet" | "popover";
   onDismissContainer?: () => void;
+  /**
+   * Present the install sheet somewhere ELSE in the tree.
+   *
+   * When this selector lives inside the drawer, the drawer is a `Modal` and
+   * dismissing it unmounts everything under it — including the install sheet
+   * and the `installOpen` state that was just set. The owner passes this so the
+   * sheet is rendered outside that Modal and survives the dismissal.
+   */
+  onRequestInstall?: () => void;
 }
 
 export const useSpaceSelectorController = ({
   presentation,
   onDismissContainer,
+  onRequestInstall,
 }: UseSpaceSelectorControllerOptions) => {
   const router = useRouter();
   const pathname = usePathname();
@@ -66,11 +76,21 @@ export const useSpaceSelectorController = ({
     [onDismissContainer, router],
   );
   // Install is a separate modal. Close both menu layers before presenting it.
+  //
+  // Who renders the sheet decides where the state lives: with an
+  // `onRequestInstall` owner it is hoisted out of the drawer's Modal (otherwise
+  // dismissing the drawer unmounts the sheet along with this state, and the
+  // button does nothing at all on a narrow window). Without one — the Settings
+  // screen, which is not inside a Modal — this component still owns it.
   const openInstallSheet = useCallback(() => {
     setOpen(false);
     onDismissContainer?.();
+    if (onRequestInstall) {
+      onRequestInstall();
+      return;
+    }
     setInstallOpen(true);
-  }, [onDismissContainer]);
+  }, [onDismissContainer, onRequestInstall]);
   const closeInstallSheet = useCallback(() => setInstallOpen(false), []);
   // Installation invalidates workspace queries before this action is offered.
   const reviewChangeRequests = useCallback(() => {

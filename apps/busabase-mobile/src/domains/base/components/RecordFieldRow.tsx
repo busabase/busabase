@@ -7,6 +7,7 @@ import { useTokens } from "~/theme/use-tokens";
 import type { RecordFormValue } from "../utils/record-form";
 import { RecordAttachmentField } from "./RecordAttachmentField";
 import { RecordChoiceField } from "./RecordChoiceField";
+import { RecordMemberField } from "./RecordMemberField";
 
 interface RecordFieldRowProps {
   field: BaseFieldVO;
@@ -47,6 +48,15 @@ export function RecordFieldRow({ field, value, onChange, last, layout }: RecordF
           trackColor={{ true: tokens.primary }}
           onValueChange={(next) => onChange(next)}
         />
+      </View>
+    );
+  }
+
+  if (field.type === "member") {
+    return (
+      <View style={rowStyle}>
+        {label}
+        <RecordMemberField field={field} value={value} onChange={onChange} />
       </View>
     );
   }

@@ -63,6 +63,7 @@ export function BaseRecordTable({ fields, records, onOpenRecord }: Props) {
                 <View key={field.id} style={styles.cell}>
                   <FieldValue
                     field={field}
+                    fieldUsers={record.fieldUsers}
                     value={record.headCommit.payload[field.slug]}
                     interactive={false}
                   />

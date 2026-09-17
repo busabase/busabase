@@ -12,6 +12,14 @@ interface SpaceSelectorProps {
   presentation?: "sheet" | "popover";
   /** Close the containing drawer after a route or workspace change. */
   onDismissContainer?: () => void;
+  /**
+   * Render the install sheet outside this component.
+   *
+   * Required whenever this selector sits inside a `Modal` (the compact
+   * drawer): dismissing that Modal unmounts this subtree, so a sheet rendered
+   * here would be torn down in the same tick it was opened.
+   */
+  onRequestInstall?: () => void;
 }
 
 /**
@@ -22,9 +30,14 @@ export function SpaceSelector({
   compact = false,
   presentation = "sheet",
   onDismissContainer,
+  onRequestInstall,
 }: SpaceSelectorProps) {
   const { t } = useI18n();
-  const controller = useSpaceSelectorController({ presentation, onDismissContainer });
+  const controller = useSpaceSelectorController({
+    presentation,
+    onDismissContainer,
+    onRequestInstall,
+  });
   const isPopover = presentation === "popover";
   const selectorContent = (
     <SpaceSelectorMenuContent
@@ -87,11 +100,13 @@ export function SpaceSelector({
         </NativeBottomSheet>
       ) : null}
 
-      <InstallFromGithubSheet
-        visible={controller.installOpen}
-        onClose={controller.closeInstallSheet}
-        onReviewChangeRequests={controller.reviewChangeRequests}
-      />
+      {onRequestInstall ? null : (
+        <InstallFromGithubSheet
+          visible={controller.installOpen}
+          onClose={controller.closeInstallSheet}
+          onReviewChangeRequests={controller.reviewChangeRequests}
+        />
+      )}
     </>
   );
 }
