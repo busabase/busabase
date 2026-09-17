@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { coreMessagesEn } from "../src/i18n";
 import { dashboardJa } from "../src/i18n/ja";
-import { localizeCoreErrorMessage } from "../src/i18n/localize-error";
+import { localizeCoreErrorMessage, presentCoreError } from "../src/i18n/localize-error";
 import { dashboardZhCN } from "../src/i18n/zh-CN";
 import { dashboardZhTW } from "../src/i18n/zh-TW";
 
@@ -47,5 +47,31 @@ describe("localizeCoreErrorMessage", () => {
     expect(localizeCoreErrorMessage(dashboardZhTW, message)).toBe(
       "表單分頁連結無效，請重新整理後再試。",
     );
+  });
+});
+
+describe("presentCoreError", () => {
+  it("keeps English diagnostics while translated screens show a local fallback", () => {
+    const error = new Error("Failed to fetch: internal trace id 42");
+    expect(presentCoreError(coreMessagesEn, "en", error, coreMessagesEn.form.submitFailed)).toBe(
+      error.message,
+    );
+    expect(presentCoreError(dashboardZhCN, "zh-CN", error, dashboardZhCN.form.submitFailed)).toBe(
+      dashboardZhCN.form.submitFailed,
+    );
+    expect(presentCoreError(dashboardJa, "ja", error, dashboardJa.form.submitFailed)).toBe(
+      dashboardJa.form.submitFailed,
+    );
+  });
+
+  it("uses specific translated errors where the message has a known mapping", () => {
+    expect(
+      presentCoreError(
+        dashboardZhCN,
+        "zh-CN",
+        new Error("Requires read access on this node"),
+        dashboardZhCN.form.submitFailed,
+      ),
+    ).toBe(dashboardZhCN.permissions.requiresReadOnNode);
   });
 });

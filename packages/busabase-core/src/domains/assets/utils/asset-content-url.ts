@@ -49,6 +49,13 @@ const ASSET_CONTENT_URL_PATTERN = new RegExp(
 export const buildAssetContentUrl = (assetId: string): string =>
   `${ASSET_CONTENT_ROUTE_PREFIX}/${encodeURIComponent(assetId)}/${ASSET_CONTENT_ROUTE_SUFFIX}`;
 
+/** Same-origin URL that asks the raw-content route for an attachment response. */
+export const buildAssetDownloadUrl = (assetId: string, fileName?: string | null): string => {
+  const query = new URLSearchParams({ download: "1" });
+  if (fileName) query.set("filename", fileName);
+  return `${buildAssetContentUrl(assetId)}?${query.toString()}`;
+};
+
 /** Every asset id referenced by a text body, in first-seen order, deduped. */
 export const extractAssetContentIds = (body: string): string[] => {
   const ids = new Set<string>();

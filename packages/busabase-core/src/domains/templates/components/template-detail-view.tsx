@@ -3,7 +3,7 @@
 import type { TemplateCardVO } from "busabase-contract/domains/templates/types";
 import { Button } from "kui/button";
 import { ArrowLeft } from "lucide-react";
-import { useCoreLocale } from "../../../i18n";
+import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
 import { TemplateDetailContent } from "./template-detail-content";
 
 interface TemplateDetailViewProps {
@@ -31,6 +31,14 @@ export function TemplateDetailView({
   canInstall,
 }: TemplateDetailViewProps) {
   const locale = useCoreLocale();
+  const messages = useCoreI18n();
+  const labels = {
+    ...messages.templates,
+    screenshot: (index: number) =>
+      index === 0
+        ? messages.templates.screenshotGallery
+        : fmt(messages.templates.screenshot, { number: index }),
+  };
   return (
     // Same scroll shell as the gallery, `h-full` included — see the note there
     // for why that class is the one doing the work. This page is the taller of
@@ -41,21 +49,22 @@ export function TemplateDetailView({
         <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 p-6">
           <Button variant="ghost" size="sm" className="w-fit" onClick={onBack}>
             <ArrowLeft className="size-4" />
-            Templates
+            {messages.templates.title}
           </Button>
 
           <TemplateDetailContent
             template={template}
             descriptionLocale={locale}
+            preferEnglishFallback
+            labels={labels}
             actions={
               <div className="flex flex-col items-end gap-1">
                 <Button onClick={onInstall} disabled={!canInstall}>
-                  Install
+                  {messages.templates.install}
                 </Button>
                 {!canInstall ? (
                   <span className="max-w-56 text-right text-[11px] text-muted-foreground">
-                    Space owners and admins only — a template can carry an app and a skill, which is
-                    code this space's agents will run.
+                    {messages.templates.installRestricted}
                   </span>
                 ) : null}
               </div>

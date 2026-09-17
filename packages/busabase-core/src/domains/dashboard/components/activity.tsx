@@ -17,7 +17,7 @@ import {
   type ActivityEventTone,
   buildActivityEventFromItem,
 } from "../helpers/activity-events";
-import { formatDetailTime, formatListTime } from "../helpers/format";
+import { formatListDateTime } from "../helpers/format";
 import { InboxListSkeleton } from "./skeletons";
 import { SourceAttributionInline } from "./source-attribution";
 
@@ -129,7 +129,7 @@ export function ActivityRow({ event }: { event: ActivityEvent }) {
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-1 pt-0.5 font-mono text-muted-foreground text-xs">
-              <span>{formatListTime(event.timestamp, locale)}</span>
+              <span>{formatListDateTime(event.timestamp, locale)}</span>
               <ChevronRight
                 aria-hidden="true"
                 className="shrink-0 transition-colors group-hover:text-foreground"
@@ -144,15 +144,11 @@ export function ActivityRow({ event }: { event: ActivityEvent }) {
             </p>
           ) : null}
           <ActivityProvenanceByline event={event} />
-          <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground text-xs">
-            {event.sourceLabel ? (
-              <>
-                <span className="min-w-0 truncate">{event.sourceLabel}</span>
-                <span aria-hidden="true">·</span>
-              </>
-            ) : null}
-            <span className="font-mono">{formatDetailTime(event.timestamp, locale)}</span>
-          </div>
+          {event.sourceLabel ? (
+            <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-muted-foreground text-xs">
+              <span className="min-w-0 truncate">{event.sourceLabel}</span>
+            </div>
+          ) : null}
         </div>
       </div>
     </Link>

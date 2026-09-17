@@ -5,7 +5,7 @@ import type {
   UserRefVO,
 } from "busabase-contract/types";
 import { fmt } from "../../../i18n/fmt";
-import type { CoreI18nMessages } from "../../../i18n/messages";
+import { type CoreI18nMessages, coreMessagesEn } from "../../../i18n/messages";
 import {
   getChangeRequestScopeName,
   getChangeRequestSummary,
@@ -127,23 +127,38 @@ const getAuditActionLabel = (event: AuditEventVO, messages?: CoreI18nMessages) =
   return messages?.activity.recordedAuditEvent ?? "recorded an audit event";
 };
 
-export const getAuditEventTitle = (event: AuditEventVO) => {
-  if (event.action === "record.viewed") {
-    return `Record viewed: ${String(event.metadata.title ?? shortIdentifier(event.recordId))}`;
+const directAuditActionKeys = {
+  "base.created": "baseCreated",
+  "field.created": "fieldCreated",
+  "doc.created": "docCreated",
+  "doc.updated": "docUpdated",
+  "file.created": "fileCreated",
+  "skill.created": "skillCreated",
+  "drive.created": "driveCreated",
+  "airapp.created": "airappCreated",
+  "asset.deleted": "assetDeleted",
+  "asset.metadata_updated": "assetMetadataUpdated",
+  "asset.text_written": "assetTextWritten",
+  "asset.text_marked_none": "assetTextMarkedNone",
+  "node.metadata_updated": "nodeMetadataUpdated",
+  "node.settings_updated": "nodeSettingsUpdated",
+  "node.agent_prompts_updated": "nodeAgentPromptsUpdated",
+  "node.purged": "nodePurged",
+} as const satisfies Partial<
+  Record<AuditEventVO["action"], keyof CoreI18nMessages["activity"]["auditActions"]>
+>;
+
+const getReviewVerdictLabel = (verdict: unknown, messages: CoreI18nMessages): string => {
+  switch (verdict) {
+    case "approved":
+      return messages.activity.verdictApproved;
+    case "changes_requested":
+      return messages.activity.verdictChangesRequested;
+    case "rejected":
+      return messages.activity.verdictRejected;
+    default:
+      return messages.activity.verdictReviewed;
   }
-  if (event.action === "change_request.created") {
-    return "Create change request opened";
-  }
-  if (event.action === "change_request.updated") {
-    return "Update change request opened";
-  }
-  if (event.action === "change_request.deleted") {
-    return "Delete change request opened";
-  }
-  if (event.action === "change_request.reviewed") {
-    return `Change request reviewed: ${String(event.metadata.verdict ?? "reviewed")}`;
-  }
-  return "Change request merged";
 };
 
 export const getLocalizedAuditEventTitle = (event: AuditEventVO, messages: CoreI18nMessages) => {
@@ -163,11 +178,18 @@ export const getLocalizedAuditEventTitle = (event: AuditEventVO, messages: CoreI
   }
   if (event.action === "change_request.reviewed") {
     return fmt(messages.activity.changeRequestReviewed, {
-      verdict: String(event.metadata.verdict ?? "reviewed"),
+      verdict: getReviewVerdictLabel(event.metadata.verdict, messages),
     });
   }
-  return messages.activity.changeRequestMerged;
+  if (event.action === "change_request.merged") return messages.activity.changeRequestMerged;
+  const actionKey = directAuditActionKeys[event.action as keyof typeof directAuditActionKeys];
+  return actionKey
+    ? messages.activity.auditActions[actionKey]
+    : messages.activity.recordedAuditEvent;
 };
+
+export const getAuditEventTitle = (event: AuditEventVO) =>
+  getLocalizedAuditEventTitle(event, coreMessagesEn);
 
 /**
  * Format ONE server-paginated activity descriptor into a renderable ActivityEvent
@@ -279,7 +301,7 @@ export const buildActivityEventFromItem = (
     actionLabel: getAuditActionLabel(event, messages),
     actorImage: actor.image,
     actorName: actor.name,
-    body: event.action,
+    body: "",
     href: event.recordId
       ? `/base/${item.record?.base.slug ?? "unknown"}/${event.recordId}`
       : event.changeRequestId

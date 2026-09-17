@@ -6,10 +6,13 @@ import {
   AgentSessionEventVOSchema,
   AgentSessionIdInputSchema,
   AgentSessionStatusSchema,
+  AgentSessionsPageVOSchema,
   AgentSessionVOSchema,
   CreateAgentSessionInputSchema,
+  DeleteAgentHistoryInputSchema,
   DisconnectAgentInputSchema,
   ListAgentConnectionsInputSchema,
+  ListAgentSessionsPagedInputSchema,
   PromptAgentSessionInputSchema,
   RespondToAgentPermissionInputSchema,
   SetAgentSessionConfigOptionInputSchema,
@@ -30,6 +33,13 @@ export const agentsContract = {
   disconnect: oc.input(DisconnectAgentInputSchema).output(
     z.object({
       ok: z.boolean(),
+      endedSessionCount: z.number().int().nonnegative(),
+    }),
+  ),
+
+  deleteHistory: oc.input(DeleteAgentHistoryInputSchema).output(
+    z.object({
+      ok: z.boolean(),
       deletedSessionCount: z.number().int().nonnegative(),
     }),
   ),
@@ -41,6 +51,8 @@ export const agentsContract = {
 
   sessions: {
     list: oc.output(AgentSessionVOSchema.array()),
+
+    listPaged: oc.input(ListAgentSessionsPagedInputSchema).output(AgentSessionsPageVOSchema),
 
     create: oc.input(CreateAgentSessionInputSchema).output(AgentSessionVOSchema),
 

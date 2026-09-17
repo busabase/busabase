@@ -5,6 +5,7 @@ export type FieldType =
   | "html"
   | "attachment"
   | "relation"
+  | "member"
   | "number"
   | "date"
   | "checkbox"

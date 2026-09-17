@@ -29,3 +29,15 @@ export function localizeCoreErrorMessage(messages: CoreI18nMessages, message: st
 
   return message;
 }
+
+/** Preserve detailed diagnostics in English, but never leak an unknown English error into translated UI. */
+export function presentCoreError(
+  messages: CoreI18nMessages,
+  locale: string,
+  error: unknown,
+  fallback: string,
+): string {
+  if (!(error instanceof Error)) return fallback;
+  const localized = localizeCoreErrorMessage(messages, error.message);
+  return locale === "en" || localized !== error.message ? localized : fallback;
+}

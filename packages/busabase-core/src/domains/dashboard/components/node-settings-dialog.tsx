@@ -16,7 +16,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { NodeDetailVO } from "busabase-contract/contract/node-detail-schemas";
 import type { NodeIcon } from "busabase-contract/types";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "kui/dialog";
+import { Dialog, DialogDescription, DialogHeader, DialogTitle } from "kui/dialog";
 import { Input } from "kui/input";
 import { Label } from "kui/label";
 import type { LucideIcon } from "lucide-react";
@@ -38,6 +38,7 @@ import {
 } from "../../airapp/utils/airapp-runtime-descriptor";
 import { getNodePropertyItems } from "../helpers/node-property-items";
 import { AssetMetadataBlock } from "./assets";
+import { DialogContent } from "./localized-dialog-content";
 import { NodeIconPicker } from "./node-icon-picker";
 import { NodeSettingsPermissionsSlotContext } from "./node-settings-permissions-slot";
 import { EmptyState } from "./primitives";

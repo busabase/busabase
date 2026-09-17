@@ -30,6 +30,7 @@ const VALID_INPUT_KINDS = new Set([
   "select",
   "multiselect",
   "relation",
+  "member",
   "attachment",
   "tags",
   "whiteboard",
@@ -37,8 +38,10 @@ const VALID_INPUT_KINDS = new Set([
 ]);
 
 describe("FIELD_TYPES registry — complete & well-formed for every field type", () => {
-  it("has exactly 28 field types", () => {
-    expect(ALL_FIELD_TYPES).toHaveLength(28);
+  it("has exactly 29 field types", () => {
+    // 28 → 29 when `member` landed (the person-picker field; see
+    // content/spec/member-field.md).
+    expect(ALL_FIELD_TYPES).toHaveLength(29);
   });
 
   it("structured text fields validate their syntax and reuse code display", () => {
@@ -147,6 +150,7 @@ describe("FIELD_TYPES registry — complete & well-formed for every field type",
       "chips",
       "attachment",
       "relation",
+      "member",
       "markdown",
       "html",
       "code",
@@ -167,6 +171,13 @@ describe("FIELD_TYPES registry — complete & well-formed for every field type",
     expect(["url", "email", "phone"].map(fieldDisplayKind)).toEqual(["link", "link", "link"]);
     expect(fieldDisplayKind("embed")).toBe("embed");
     expect(fieldDisplayKind("text")).toBe("plain");
+    // All three people-typed fields share one display (an avatar + name chip),
+    // so a `created_by` cell names the real person instead of prettifying its id.
+    expect(["member", "created_by", "updated_by"].map(fieldDisplayKind)).toEqual([
+      "member",
+      "member",
+      "member",
+    ]);
   });
 
   it("link fields carry the right href prefix", () => {

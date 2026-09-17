@@ -6,6 +6,7 @@ import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-quer
 import type { InstallResultVO } from "busabase-contract/domains/install/types";
 import type { TemplateCardVO } from "busabase-contract/domains/templates/types";
 import { useState } from "react";
+import { fmt, useCoreI18n } from "../../../i18n";
 import type { AgentIntegrationTarget } from "../../dashboard/components/agent-install-panel";
 import { InstallFromGithubModal } from "../../dashboard/components/install-from-github-modal";
 import { NodeDetailSkeleton } from "../../dashboard/components/skeletons";
@@ -55,6 +56,7 @@ export function TemplateCenter({
   agentIntegration,
   onCreateNode,
 }: TemplateCenterProps) {
+  const messages = useCoreI18n();
   const [installing, setInstalling] = useState<TemplateCardVO | null>(null);
 
   // Installing is a space owner/admin action and the server enforces it. With
@@ -88,14 +90,14 @@ export function TemplateCenter({
         ) : (
           <div className="mx-auto flex w-full max-w-4xl flex-col gap-3 p-6">
             <p className="text-muted-foreground text-sm">
-              {`No template named “${selectedName}” in this catalog.`}
+              {fmt(messages.templates.missingTemplate, { name: selectedName })}
             </p>
             <button
               type="button"
               onClick={onBack}
               className="w-fit text-sm underline underline-offset-4"
             >
-              Back to Templates
+              {messages.templates.backToTemplates}
             </button>
           </div>
         )

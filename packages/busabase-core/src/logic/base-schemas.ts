@@ -13,6 +13,7 @@ const fieldTypeSchema = z.enum([
   "html",
   "attachment",
   "relation",
+  "member",
   "number",
   "date",
   "checkbox",

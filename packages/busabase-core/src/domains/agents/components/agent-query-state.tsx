@@ -1,4 +1,8 @@
+"use client";
+
 import { Button } from "kui/button";
+import { useCoreI18n, useCoreLocale } from "../../../i18n";
+import { presentCoreError } from "../../../i18n/localize-error";
 import { NodeDetailSkeleton } from "../../dashboard/components/skeletons";
 
 export function AgentLoadingState() {
@@ -14,15 +18,17 @@ export function AgentQueryErrorState({
   onRetry: () => void;
   title: string;
 }) {
+  const messages = useCoreI18n();
+  const locale = useCoreLocale();
   return (
     <div className="flex flex-1 items-center justify-center p-8 text-center">
       <div className="max-w-sm">
         <h2 className="font-medium">{title}</h2>
         <p className="mt-1 text-muted-foreground text-sm">
-          {error instanceof Error ? error.message : "Please try again."}
+          {presentCoreError(messages, locale, error, messages.agents.queryFallbackError)}
         </p>
         <Button className="mt-3" onClick={onRetry} size="sm" type="button" variant="outline">
-          Retry
+          {messages.agents.queryRetry}
         </Button>
       </div>
     </div>

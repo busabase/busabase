@@ -22,7 +22,7 @@ import {
   useSidePanelStore,
 } from "../store/side-panel-store";
 import { SidePanelAddTab } from "./side-panel-add-tab";
-import { SidePanelEmptyState } from "./side-panel-empty-state";
+import { SidePanelAgentPicker, SidePanelEmptyState } from "./side-panel-empty-state";
 import type { PinnableNode } from "./side-panel-sources";
 
 /**
@@ -131,6 +131,13 @@ export function SidePanel({
   // Suppressed during drag-resize and maximize/restore so those feel 1:1 /
   // instant instead of fighting the open-close transition.
   const [animateTransitions, setAnimateTransitions] = useState(true);
+  // Whether the empty state's "Agents" card has drilled into the connected-
+  // agent picker. Local, not store state: it is a transient step on the way
+  // to opening a tab, not something worth persisting or surviving a reload.
+  // Picking an agent opens a tab and temporarily hides this branch. Keeping the
+  // flag lets the chat's Back action return to this picker; the picker's own
+  // Back action then returns to the launcher.
+  const [showAgentPicker, setShowAgentPicker] = useState(false);
 
   const commitResizeFrame = useCallback(() => {
     resizeFrameRef.current = null;
@@ -188,6 +195,7 @@ export function SidePanel({
             : "relative max-w-full translate-x-0 border-border/60 border-l opacity-100"
       }`}
       data-layout={layout}
+      data-preview-fullscreen-container
       ref={panelRef}
       role="region"
       style={
@@ -384,12 +392,20 @@ export function SidePanel({
       </div>
       <div className="min-h-0 flex-1 overflow-hidden">
         {tabs.length === 0 ? (
-          <SidePanelEmptyState
-            currentNode={currentNode}
-            nodeCache={nodeCache}
-            onOpenAgents={() => onNavigate("/agents")}
-            onOpenSearch={onOpenSearch}
-          />
+          showAgentPicker ? (
+            <SidePanelAgentPicker
+              onBack={() => setShowAgentPicker(false)}
+              onNavigate={onNavigate}
+              orpc={orpc}
+            />
+          ) : (
+            <SidePanelEmptyState
+              currentNode={currentNode}
+              nodeCache={nodeCache}
+              onOpenAgents={() => setShowAgentPicker(true)}
+              onOpenSearch={onOpenSearch}
+            />
+          )
         ) : (
           tabs.map((tab) => {
             const Renderer = getSidePanelTab(tab.type);

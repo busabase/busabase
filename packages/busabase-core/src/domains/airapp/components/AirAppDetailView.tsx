@@ -6,7 +6,8 @@ import { Button } from "kui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "kui/tabs";
 import { Files, Info, MonitorPlay, Terminal } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { fmt, useCoreI18n } from "../../../i18n";
+import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
+import { presentCoreError } from "../../../i18n/localize-error";
 import { AssetMediaPreview, isPreviewableAssetMime } from "../../dashboard/components/assets";
 import {
   buildFileTree,
@@ -18,6 +19,10 @@ import {
 import { NodeActionsMenu } from "../../dashboard/components/node-actions-menu";
 import { NodeAgentPromptsButton } from "../../dashboard/components/node-agent-prompts-button";
 import { NodeSettingsDialog } from "../../dashboard/components/node-settings-dialog";
+import {
+  PREVIEW_DETAIL_TAB_LIST_CLASS,
+  PREVIEW_DETAIL_TAB_TRIGGER_CLASS,
+} from "../../dashboard/components/preview-fullscreen";
 import { EmptyState } from "../../dashboard/components/primitives";
 import { FileContentSkeleton, NodeDetailSkeleton } from "../../dashboard/components/skeletons";
 import { asNodeDetail } from "../../dashboard/helpers/node-detail";
@@ -55,6 +60,7 @@ const TAB_CONTENT_CLASS =
  */
 export function AirAppDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) {
   const messages = useCoreI18n();
+  const locale = useCoreLocale();
   const keepAliveScopeKey = useAirAppKeepAliveScope();
   const isKeepAliveActive = useAirAppKeepAliveActive();
   const [openPath, setOpenPath] = useState<string | null>(null);
@@ -219,25 +225,16 @@ export function AirAppDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) 
             )}
           </div>
 
-          <TabsList className="mt-3 h-8 shrink-0 gap-1 bg-transparent p-0">
-            <TabsTrigger
-              className="h-7 gap-1.5 rounded-lg bg-transparent px-2.5 text-muted-foreground shadow-none transition-colors hover:bg-muted/40 hover:text-foreground data-[state=active]:bg-muted data-[state=active]:text-foreground data-[state=active]:shadow-none"
-              value="app"
-            >
+          <TabsList className={PREVIEW_DETAIL_TAB_LIST_CLASS}>
+            <TabsTrigger className={PREVIEW_DETAIL_TAB_TRIGGER_CLASS} value="app">
               <MonitorPlay className="size-3.5" />
               {messages.airapp.tabPreview}
             </TabsTrigger>
-            <TabsTrigger
-              className="h-7 gap-1.5 rounded-lg bg-transparent px-2.5 text-muted-foreground shadow-none transition-colors hover:bg-muted/40 hover:text-foreground data-[state=active]:bg-muted data-[state=active]:text-foreground data-[state=active]:shadow-none"
-              value="files"
-            >
+            <TabsTrigger className={PREVIEW_DETAIL_TAB_TRIGGER_CLASS} value="files">
               <Files className="size-3.5" />
               {messages.airapp.tabFiles}
             </TabsTrigger>
-            <TabsTrigger
-              className="h-7 gap-1.5 rounded-lg bg-transparent px-2.5 text-muted-foreground shadow-none transition-colors hover:bg-muted/40 hover:text-foreground data-[state=active]:bg-muted data-[state=active]:text-foreground data-[state=active]:shadow-none"
-              value="logs"
-            >
+            <TabsTrigger className={PREVIEW_DETAIL_TAB_TRIGGER_CLASS} value="logs">
               <Terminal className="size-3.5" />
               {messages.airapp.tabLogs}
             </TabsTrigger>
@@ -300,9 +297,12 @@ export function AirAppDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) 
                   <FileContentSkeleton />
                 ) : fileQuery.isError ? (
                   <div className="border-border/60 border-b bg-destructive/5 p-4 text-destructive text-sm">
-                    {fileQuery.error instanceof Error
-                      ? fileQuery.error.message
-                      : messages.nodeDetail.couldNotReadFile}
+                    {presentCoreError(
+                      messages,
+                      locale,
+                      fileQuery.error,
+                      messages.nodeDetail.couldNotReadFile,
+                    )}
                   </div>
                 ) : fileQuery.data &&
                   fileQuery.data.encoding !== "utf8" &&

@@ -47,9 +47,10 @@ const roadmapFields: SeedFieldDef[] = [
     id: "bsf_road_owner",
     slug: "owner",
     name: "负责人",
-    type: "text",
+    // 路线图条目的负责人是具体的人（DRI），不是邮件组。
+    type: "member",
     required: false,
-    options: {},
+    options: { multiple: false },
   },
 ];
 
@@ -81,7 +82,7 @@ const rows: RoadmapRow[] = [
       start_date: "2026-05-04",
       end_date: "2026-06-12",
       status: "shipped",
-      owner: "platform@busabase.local",
+      owner: "local-editor",
     },
   },
   {
@@ -92,7 +93,7 @@ const rows: RoadmapRow[] = [
       start_date: "2026-06-01",
       end_date: "2026-07-15",
       status: "in-progress",
-      owner: "product@busabase.local",
+      owner: "local-producer",
     },
   },
   {
@@ -103,7 +104,7 @@ const rows: RoadmapRow[] = [
       start_date: "2026-07-07",
       end_date: "2026-08-08",
       status: "in-progress",
-      owner: "product@busabase.local",
+      owner: "local-producer",
     },
   },
   {
@@ -114,7 +115,7 @@ const rows: RoadmapRow[] = [
       start_date: "2026-08-11",
       end_date: "2026-09-19",
       status: "planned",
-      owner: "product@busabase.local",
+      owner: "local-producer",
     },
   },
   {
@@ -125,7 +126,7 @@ const rows: RoadmapRow[] = [
       start_date: "2026-08-25",
       end_date: "2026-10-10",
       status: "planned",
-      owner: "mobile@busabase.local",
+      owner: "local-viewer",
     },
   },
   {
@@ -136,7 +137,7 @@ const rows: RoadmapRow[] = [
       start_date: "2026-09-14",
       end_date: "2026-10-24",
       status: "planned",
-      owner: "platform@busabase.local",
+      owner: "local-editor",
     },
   },
 ];

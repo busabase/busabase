@@ -3,7 +3,7 @@ import { busabaseContract } from "busabase-contract/contract/busabase";
 import { getContextSpaceId } from "../../context";
 import { assertWorkspacePermission } from "../../logic/node-acl";
 import { listCatalog } from "./logic/agent-catalog";
-import { disconnectAgentConnection } from "./logic/agent-connection";
+import { deleteAgentHistory, disconnectAgentConnection } from "./logic/agent-connection";
 import { listAgentConnections } from "./logic/agent-connection-list";
 import {
   AgentSessionTerminalError,
@@ -11,6 +11,7 @@ import {
   closeAgentSession,
   createAgentSession,
   listAgentSessions,
+  listAgentSessionsPaged,
   promptAgentSession,
   respondToAgentPermission,
   setAgentSessionConfigOption,
@@ -82,8 +83,24 @@ const agentsRouterImpl = {
     }
   }),
 
+  deleteHistory: os.agents.deleteHistory.handler(async ({ input }) => {
+    try {
+      return await deleteAgentHistory(input.slug);
+    } catch (error) {
+      return fail(error);
+    }
+  }),
+
   sessions: {
     list: os.agents.sessions.list.handler(() => listAgentSessions()),
+
+    listPaged: os.agents.sessions.listPaged.handler(async ({ input }) => {
+      try {
+        return await listAgentSessionsPaged(input);
+      } catch (error) {
+        return fail(error);
+      }
+    }),
 
     create: os.agents.sessions.create.handler(async ({ input }) => {
       try {
@@ -120,18 +137,18 @@ const agentsRouterImpl = {
       }
     }),
 
-    close: os.agents.sessions.close.handler(({ input }) => {
+    close: os.agents.sessions.close.handler(async ({ input }) => {
       try {
-        closeAgentSession(input.sessionId);
+        await closeAgentSession(input.sessionId);
         return { ok: true };
       } catch (error) {
         return fail(error);
       }
     }),
 
-    respondToPermission: os.agents.sessions.respondToPermission.handler(({ input }) => {
+    respondToPermission: os.agents.sessions.respondToPermission.handler(async ({ input }) => {
       try {
-        respondToAgentPermission(input.sessionId, input.requestId, input.optionId);
+        await respondToAgentPermission(input.sessionId, input.requestId, input.optionId);
         return { ok: true };
       } catch (error) {
         return fail(error);

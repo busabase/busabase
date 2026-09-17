@@ -96,7 +96,7 @@ function GalleryCard({
     coverUrl != null ? (
       <img
         alt={title}
-        className={`h-full w-full ${coverFit === "fit" ? "object-contain" : "object-cover"}`}
+        className={`h-full w-full transition-transform duration-150 ease-out motion-reduce:transition-none motion-safe:pointer-fine:group-hover:scale-105 ${coverFit === "fit" ? "object-contain" : "object-cover"}`}
         src={coverUrl}
       />
     ) : (

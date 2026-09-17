@@ -1,11 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { NodeVO } from "busabase-contract/types";
+import type { NavItemAction } from "openlib/ui/dashboard";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { Router } from "wouter";
 import { useCoreI18n } from "../../../i18n";
-import { BusabaseDashboardShell } from "./dashboard-shell";
+import { BusabaseDashboardShell, buildNodeMenuActions } from "./dashboard-shell";
 import { BusabaseTopbarBreadcrumb } from "./topbar";
 
 Object.assign(globalThis, { React });
@@ -64,7 +65,7 @@ const nodeVO = (
   ...overrides,
 });
 
-const renderShellWithNodes = (nodes: NodeVO[]) =>
+const renderShellWithNodes = (nodes: NodeVO[], nodesLoading = false) =>
   renderToStaticMarkup(
     <QueryClientProvider client={new QueryClient()}>
       <Router hook={useStaticLocation} searchHook={useStaticSearch}>
@@ -77,6 +78,7 @@ const renderShellWithNodes = (nodes: NodeVO[]) =>
           }}
           locale="zh-CN"
           nodes={nodes}
+          nodesLoading={nodesLoading}
           onCreateClick={() => undefined}
           onSearchClick={() => undefined}
         >
@@ -85,6 +87,92 @@ const renderShellWithNodes = (nodes: NodeVO[]) =>
       </Router>
     </QueryClientProvider>,
   );
+
+const menuAction = (title: string, overrides: Partial<NavItemAction> = {}): NavItemAction => ({
+  title,
+  ...overrides,
+});
+
+describe("sidebar node menu action priority", () => {
+  it("keeps Open first and places Agent prompts second in a folder menu", () => {
+    const actions = buildNodeMenuActions({
+      openAction: menuAction("Open", { url: "/folder/research" }),
+      agentPromptsAction: menuAction("Agent prompts"),
+      managementActions: [
+        menuAction("Settings"),
+        menuAction("Rename"),
+        menuAction("Permissions"),
+        null,
+        menuAction("Move to…"),
+        menuAction("Share"),
+      ],
+      deleteAction: menuAction("Delete", {
+        separatorBefore: true,
+        variant: "destructive",
+      }),
+    });
+
+    expect(actions.map((action) => action.title)).toEqual([
+      "Open",
+      "Agent prompts",
+      "Settings",
+      "Rename",
+      "Permissions",
+      "Move to…",
+      "Share",
+      "Delete",
+    ]);
+    expect(actions.map((action) => action.separatorBefore ?? false)).toEqual([
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+    ]);
+    expect(actions.at(-1)?.variant).toBe("destructive");
+  });
+
+  it("places Agent prompts first in a leaf menu and separates management actions", () => {
+    const actions = buildNodeMenuActions({
+      agentPromptsAction: menuAction("Agent prompts"),
+      managementActions: [
+        menuAction("Settings"),
+        menuAction("Rename"),
+        null,
+        menuAction("Add to Favorites"),
+        menuAction("Move to…"),
+        menuAction("Share"),
+      ],
+      deleteAction: menuAction("Delete", {
+        separatorBefore: true,
+        variant: "destructive",
+      }),
+    });
+
+    expect(actions.map((action) => action.title)).toEqual([
+      "Agent prompts",
+      "Settings",
+      "Rename",
+      "Add to Favorites",
+      "Move to…",
+      "Share",
+      "Delete",
+    ]);
+    expect(actions.map((action) => action.separatorBefore ?? false)).toEqual([
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+    ]);
+    expect(actions.at(-1)?.variant).toBe("destructive");
+  });
+});
 
 describe("BusabaseDashboardShell shared marker", () => {
   // The point of the marker is that it is readable WITHOUT hovering — an admin
@@ -133,6 +221,26 @@ describe("BusabaseDashboardShell shared marker", () => {
 
     expect(markup).toContain("Plain Doc");
     expect(markup).not.toContain("已公开分享");
+  });
+});
+
+describe("BusabaseDashboardShell initial node loading", () => {
+  it("renders five placeholders inside the real Workspace group", () => {
+    const markup = renderShellWithNodes([], true);
+
+    expect(markup).toContain('data-workspace-nodes-loading="true"');
+    expect(markup.split("data-workspace-node-skeleton-row").length - 1).toBe(5);
+    expect(markup).toContain("工作区");
+  });
+
+  it("removes the placeholders once nodes are available", () => {
+    const markup = renderShellWithNodes(
+      [nodeVO({ id: "nd_doc", name: "Loaded Doc", slug: "loaded-doc", type: "doc" })],
+      false,
+    );
+
+    expect(markup).not.toContain("data-workspace-nodes-loading");
+    expect(markup).toContain("Loaded Doc");
   });
 });
 

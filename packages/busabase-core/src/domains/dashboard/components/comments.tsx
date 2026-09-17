@@ -9,6 +9,7 @@ import type {
 import { AlertTriangle, Bot, Reply, Sparkles } from "lucide-react";
 import { Fragment, useMemo, useRef, useState } from "react";
 import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
+import { presentCoreError } from "../../../i18n/localize-error";
 import { trimmedSubmission } from "../../../logic/comment-mentions";
 import { normalizeAgentTargets } from "../../agents/utils/agent-targets";
 import { formatFullTime, formatUserRefLabel } from "../helpers/format";
@@ -304,6 +305,7 @@ export function SubjectCommentThread({
   subjectType: CommentSubjectType;
 }) {
   const messages = useCoreI18n();
+  const locale = useCoreLocale();
   const queryClient = useQueryClient();
   const queryKey = ["busabase", "comments", subjectType, subjectId];
   const commentsQuery = useQuery({
@@ -316,7 +318,7 @@ export function SubjectCommentThread({
     mutationFn: (payload: Parameters<BusabaseDashboardApiClient["createComment"]>[0]) =>
       client.createComment(payload),
     onError: (mutationError) =>
-      setError(mutationError instanceof Error ? mutationError.message : messages.comments.failed),
+      setError(presentCoreError(messages, locale, mutationError, messages.comments.failed)),
     onSuccess: () => {
       composer.reset();
       setError(null);

@@ -8,7 +8,6 @@ import { Button } from "kui/button";
 import {
   Dialog,
   DialogClose,
-  DialogContent,
   DialogDescription,
   DialogFooter,
   DialogHeader,
@@ -22,6 +21,13 @@ import { Check, Copy, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useCoreI18n } from "../../../i18n";
+import {
+  EmbedLinkSection,
+  EmbedLinkStillLiveNotice,
+  useActiveEmbedLinkCount,
+  useCanManageEmbedLinks,
+} from "./embed-link-section";
+import { DialogContent } from "./localized-dialog-content";
 
 type NodeShareCapability = "read" | "submit";
 
@@ -62,9 +68,33 @@ export function NodeShareDialog({
   const t = messages.share;
   const queryClient = useQueryClient();
 
-  const shareQuery = useQuery(orpc.nodes.share.get.queryOptions({ input: { nodeId } }));
+  // The two halves of this dialog are governed by two INDEPENDENT gates, and
+  // most node types qualify for only one of them. A Form can be shared to the
+  // web but never embedded; an AirApp / Drive / Skill is the reverse (their
+  // registry definitions declare `publicAccess: "no"` because an anonymous
+  // detail route wouldn't work, yet `embedLinks.create` accepts all three and
+  // the `/embed/[publicId]` route tree serves them). So neither gate may hide
+  // the other's section — and the dialog only disappears when BOTH say no.
+  const canShareToWeb = publicAccessOf(nodeType) !== "no";
+  const embedTarget = useMemo(
+    () => ({ type: "node" as const, typeId: nodeId, nodeType }),
+    [nodeId, nodeType],
+  );
+  const canEmbed = useCanManageEmbedLinks(embedTarget);
+
+  const shareQuery = useQuery({
+    ...orpc.nodes.share.get.queryOptions({ input: { nodeId } }),
+    // Don't ask about public-share settings for a type that can't have them —
+    // this dialog now opens for AirApp/Drive/Skill purely for the embed half.
+    enabled: canShareToWeb,
+  });
   const share = shareQuery.data ?? null;
   const isPublic = share?.scope === "public";
+
+  // Feeds the "turning the switch off does not revoke these" notice below. Same
+  // query key as the embed section's own list, so React Query serves both from
+  // a single request.
+  const activeEmbedLinkCount = useActiveEmbedLinkCount(orpc, embedTarget, canEmbed && open);
 
   const setShare = useMutation(orpc.nodes.share.set.mutationOptions());
   const disableShare = useMutation(orpc.nodes.share.disable.mutationOptions());
@@ -207,12 +237,20 @@ export function NodeShareDialog({
 
   // Keep direct call sites fail-closed too. Menus apply the same capability
   // before opening this dialog, but the dialog is a public component and must
-  // never mint a dead link for an unsupported node type on its own.
-  if (publicAccessOf(nodeType) === "no") return null;
+  // never mint a dead link for an unsupported node type on its own. Nothing to
+  // offer at all = render nothing, rather than an empty shell.
+  if (!canShareToWeb && !canEmbed) return null;
 
   return (
     <Dialog onOpenChange={onOpenChange} open={open}>
-      <DialogContent className="max-w-lg" data-testid="node-share-dialog" showCloseButton={false}>
+      {/* The embed half roughly doubles this dialog's height on a node that
+          already has links, so it has to be able to scroll — same treatment
+          every other tall dialog in this folder gets. */}
+      <DialogContent
+        className="max-h-[85vh] max-w-lg overflow-y-auto"
+        data-testid="node-share-dialog"
+        showCloseButton={false}
+      >
         <DialogClose
           aria-label={t.close}
           className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground"
@@ -227,24 +265,34 @@ export function NodeShareDialog({
 
         <div className="space-y-5">
           {/* Share-to-web toggle */}
-          <div className="flex items-start justify-between gap-3">
-            <Label className="flex flex-col gap-1" htmlFor="node-share-public">
-              <span className="font-medium text-sm">{t.shareToWeb}</span>
-              <span className="text-muted-foreground text-xs">
-                {/* An AirApp is a program, so "anyone with the link can open
+          {canShareToWeb && (
+            <div className="flex items-start justify-between gap-3">
+              <Label className="flex flex-col gap-1" htmlFor="node-share-public">
+                <span className="font-medium text-sm">{t.shareToWeb}</span>
+                <span className="text-muted-foreground text-xs">
+                  {/* An AirApp is a program, so "anyone with the link can open
                     this" understates what sharing does: the visitor's browser
                     downloads and RUNS its files. Say so where the decision is
                     made, not in a doc nobody reads. */}
-                {nodeType === "airapp" ? t.shareToWebAirAppHint : t.shareToWebHint}
-              </span>
-            </Label>
-            <Switch
-              checked={isPublic}
-              disabled={busy}
-              id="node-share-public"
-              onCheckedChange={handleToggle}
-            />
-          </div>
+                  {nodeType === "airapp" ? t.shareToWebAirAppHint : t.shareToWebHint}
+                </span>
+              </Label>
+              <Switch
+                checked={isPublic}
+                disabled={busy}
+                id="node-share-public"
+                onCheckedChange={handleToggle}
+              />
+            </div>
+          )}
+
+          {/* THE MENTAL-MODEL FIX. The switch above is the only kill switch a
+              human can see, and it does not touch `busabase_embed_links` — an
+              agent may have minted a capability URL through MCP hours ago, and
+              it stays live. Saying nothing here means the product teaches that
+              "share is off" equals "nobody outside can see this", which is
+              false. Only shown when there is actually something still live. */}
+          {canShareToWeb && !isPublic && <EmbedLinkStillLiveNotice count={activeEmbedLinkCount} />}
 
           {isPublic && (
             <div className="space-y-4 border-border/60 border-t pt-4">
@@ -364,6 +412,16 @@ export function NodeShareDialog({
               )}
             </div>
           )}
+
+          {/* "Embed on another site" — the capability-URL half. Gates itself
+              (anonymous visitor / non-manager / non-embeddable type all render
+              nothing), so there is no second copy of that policy here. */}
+          <EmbedLinkSection
+            divider={canShareToWeb}
+            enabled={open}
+            orpc={orpc}
+            target={embedTarget}
+          />
         </div>
 
         <DialogFooter>

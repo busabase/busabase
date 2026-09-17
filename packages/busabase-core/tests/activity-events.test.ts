@@ -1,6 +1,7 @@
 import type { ActivityItemVO, RecordVO } from "busabase-contract/types";
 import { describe, expect, it } from "vitest";
 import { buildActivityEventFromItem } from "../src/domains/dashboard/helpers/activity-events";
+import { coreMessagesByLocale } from "../src/i18n";
 
 /**
  * `buildActivityEventFromItem` renders one server-paginated activity descriptor
@@ -51,6 +52,43 @@ const auditItem = (
   }) as unknown as ActivityItemVO;
 
 describe("buildActivityEventFromItem", () => {
+  it("translates direct audit actions instead of displaying their raw enum", () => {
+    const messages = coreMessagesByLocale["zh-CN"];
+    const audit = auditItem("a0", null, null);
+    if (audit.kind !== "audit") throw new Error("Expected audit event");
+
+    const event = buildActivityEventFromItem(
+      { ...audit, auditEvent: { ...audit.auditEvent, action: "node.purged" } },
+      messages,
+    );
+
+    expect(event?.title).toBe(messages.activity.auditActions.nodePurged);
+    expect(event?.body).toBe("");
+    expect(event?.title).not.toContain("node.purged");
+    expect(event?.title).not.toBe(messages.activity.changeRequestMerged);
+  });
+
+  it("translates review verdicts while preserving user-authored record titles", () => {
+    const messages = coreMessagesByLocale.ja;
+    const audit = auditItem("a-review", null, null);
+    if (audit.kind !== "audit") throw new Error("Expected audit event");
+
+    const event = buildActivityEventFromItem(
+      {
+        ...audit,
+        auditEvent: {
+          ...audit.auditEvent,
+          action: "change_request.reviewed",
+          metadata: { verdict: "approved" },
+        },
+      },
+      messages,
+    );
+
+    expect(event?.title).toContain(messages.activity.verdictApproved);
+    expect(event?.title).not.toContain("approved");
+  });
+
   it("resolves an audit row's href from the descriptor's record", () => {
     const event = buildActivityEventFromItem(auditItem("a1", "rec1", makeRecord("rec1", "mybase")));
     expect(event?.id).toBe("audit:a1");

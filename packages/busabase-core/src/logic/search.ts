@@ -55,6 +55,7 @@ import {
 } from "./node-acl";
 import { isSearchableNodeType, reindexNodeContent, SEARCHABLE_NODE_TYPES } from "./node-content";
 import { collectSubtreeIds } from "./nodes";
+import { recordSearchRequest } from "./search-metrics";
 import { ensureReady } from "./seed";
 import { toBaseVO } from "./vo";
 
@@ -82,6 +83,8 @@ export type SearchSort = (typeof SEARCH_SORTS)[number];
 // Schema defined locally to avoid circular deps with store.ts
 export const searchInputSchema = z.object({
   query: z.string().default(""),
+  mode: z.enum(["quick", "full"]).optional().default("full"),
+  surface: z.enum(["quick", "advanced"]).optional(),
   limit: z.number().int().min(1).max(100).optional().default(20),
   offset: z.number().int().min(0).optional().default(0),
   /**
@@ -785,6 +788,7 @@ const searchAssetBackedFiles = async (
   query: string,
   limit: number,
   narrow: SearchNarrowing,
+  scanContent: boolean,
 ): Promise<{ results: SortableResult[]; truncated: boolean }> => {
   const db = await getDb();
   const spaceId = getContextSpaceId();
@@ -818,6 +822,13 @@ const searchAssetBackedFiles = async (
     return { results: identityResults, truncated: false };
   }
 
+  // Typeahead must stay bounded and predictable. File identities are indexed
+  // SQL comparisons; body search can scan up to 1,000 files for five seconds
+  // and belongs on the durable full-search page.
+  if (!scanContent) {
+    return { results: identityResults, truncated: false };
+  }
+
   const identityMatchedKeys = new Set(identityRows.map(rowResultKey));
   const { results: contentResults, scannedAllEligible } = await scanFileContents(
     db,
@@ -844,12 +855,13 @@ const searchAssetBackedFiles = async (
 export const searchBusabase = async (
   input?: z.input<typeof searchInputSchema>,
 ): Promise<SearchResponseVO> => {
+  const startedAt = Date.now();
   await ensureReady();
   const db = await getDb();
   const parsed = searchInputSchema.parse(input);
   const query = parsed.query.trim();
   if (!query) {
-    return {
+    const response = {
       contentTruncated: false,
       hasMore: false,
       limit: parsed.limit,
@@ -857,9 +869,26 @@ export const searchBusabase = async (
       query,
       results: [],
     };
+    recordSearchRequest({
+      name: "search.request.completed",
+      durationMs: Date.now() - startedAt,
+      mode: parsed.mode,
+      surface: parsed.surface ?? "api",
+      resultCount: 0,
+      emptyPage: true,
+      hasMore: false,
+      offset: parsed.offset,
+      sourceCount: parsed.sources ? new Set(parsed.sources).size : SEARCH_SOURCES.length,
+    });
+    return response;
   }
 
-  const pageSize = parsed.limit + 1;
+  // Every source contributes the same prefix needed to answer this GLOBAL
+  // page. Paging one source in SQL and replaying the others on page 2 either
+  // duplicates them or drops them entirely. Taking offset + limit + 1 from
+  // each source is sufficient: no item below that prefix can enter this page
+  // after the source lists are merged, and the extra row answers `hasMore`.
+  const candidateWindow = parsed.offset + parsed.limit + 1;
   const pattern = `%${query}%`;
   const spaceId = getContextSpaceId();
   const textSearch = sql`to_tsvector('simple', coalesce(${busabaseFieldValues.valueText}, '')) @@ plainto_tsquery('simple', ${query})`;
@@ -909,6 +938,24 @@ export const searchBusabase = async (
               textSearch,
               ilike(busabaseFieldValues.valueText, pattern),
               ilike(busabaseFieldValues.fieldSlug, pattern),
+            ),
+            // Canonical record projections can outlive an archived record.
+            // Exclude those rows BEFORE LIMIT so they cannot consume the
+            // candidate window and make a page short after hydration. Change
+            // request projections remain searchable regardless of status.
+            or(
+              isNotNull(busabaseFieldValues.changeRequestId),
+              exists(
+                db
+                  .select({ one: sql`1` })
+                  .from(busabaseRecords)
+                  .where(
+                    and(
+                      eq(busabaseRecords.id, busabaseFieldValues.recordId),
+                      eq(busabaseRecords.status, "active"),
+                    ),
+                  ),
+              ),
             ),
             // "A field value edited inside the window" — filtered before the
             // GROUP BY, so it reads as "this record was touched then" rather
@@ -987,8 +1034,7 @@ export const searchBusabase = async (
                       : asc(sql`min(${busabaseFieldValues.createdAt})`),
               ]),
         )
-        .limit(pageSize)
-        .offset(parsed.offset)
+        .limit(candidateWindow)
     : [];
 
   const recordIds = projectionRows
@@ -998,7 +1044,7 @@ export const searchBusabase = async (
     .map((row) => row.changeRequestId)
     .filter((changeRequestId): changeRequestId is string => Boolean(changeRequestId));
 
-  const [recordRows, changeRequestRows, baseRows, fieldRows] = await Promise.all([
+  const [recordRows, changeRequestRows, baseRows] = await Promise.all([
     recordIds.length > 0
       ? db
           .select()
@@ -1011,7 +1057,7 @@ export const searchBusabase = async (
           .from(busabaseChangeRequests)
           .where(inArray(busabaseChangeRequests.id, changeRequestIds))
       : Promise.resolve([]),
-    wantsNames && parsed.offset === 0
+    wantsNames
       ? db
           // `getTableColumns` keeps the row FLAT. A bare `.select()` with a
           // join returns `{ busabase_bases: {...}, busabase_nodes: {...} }`,
@@ -1051,6 +1097,21 @@ export const searchBusabase = async (
                 ilike(busabaseBases.name, pattern),
                 ilike(busabaseBases.description, pattern),
                 ilike(busabaseBases.slug, pattern),
+                exists(
+                  db
+                    .select({ one: sql`1` })
+                    .from(busabaseBaseFields)
+                    .where(
+                      and(
+                        eq(busabaseBaseFields.baseId, busabaseBases.id),
+                        eq(busabaseBaseFields.spaceId, spaceId),
+                        or(
+                          ilike(busabaseBaseFields.name, pattern),
+                          ilike(busabaseBaseFields.slug, pattern),
+                        ),
+                      ),
+                    ),
+                ),
               ),
             ),
           )
@@ -1061,65 +1122,11 @@ export const searchBusabase = async (
               desc(busabaseNodes.updatedAt),
             ),
           )
-      : Promise.resolve([]),
-    wantsNames && parsed.offset === 0
-      ? db
-          .select()
-          .from(busabaseBaseFields)
-          .where(
-            and(
-              eq(busabaseBaseFields.spaceId, spaceId),
-              buildBaseVisibilityExists(db, busabaseBaseFields.baseId),
-              // A field has no timestamps or creator of its own; it inherits
-              // its Base's node, same as the Base query above.
-              narrowing.updatedAfter || narrowing.updatedBefore || subtreeIds
-                ? exists(
-                    db
-                      .select({ one: sql`1` })
-                      .from(busabaseBases)
-                      .innerJoin(busabaseNodes, eq(busabaseNodes.id, busabaseBases.nodeId))
-                      .where(
-                        and(
-                          eq(busabaseBases.id, busabaseBaseFields.baseId),
-                          dateRangeCondition(busabaseNodes.updatedAt, narrowing),
-                          createdByCondition(busabaseNodes.createdBy, narrowing),
-                          subtreeIds ? inArray(busabaseBases.nodeId, subtreeIds) : undefined,
-                        ),
-                      ),
-                  )
-                : undefined,
-              or(ilike(busabaseBaseFields.name, pattern), ilike(busabaseBaseFields.slug, pattern)),
-            ),
-          )
+          .limit(candidateWindow)
       : Promise.resolve([]),
   ]);
 
-  const baseIdsFromFields = fieldRows.map((field) => field.baseId);
-  const extraBaseRows =
-    baseIdsFromFields.length > 0
-      ? await db
-          // Same shape as the name-match branch above, node join included. The
-          // two are merged by id into one map, so a Base reached through a FIELD
-          // name has to carry the same timestamps as one reached through its own
-          // name — otherwise it has no sort key, and every explicit sort order
-          // quietly parks it at the bottom of the list.
-          .select({
-            ...getTableColumns(busabaseBases),
-            nodeCreatedAt: busabaseNodes.createdAt,
-            nodeUpdatedAt: busabaseNodes.updatedAt,
-            nodeCreatedBy: busabaseNodes.createdBy,
-          })
-          .from(busabaseBases)
-          .innerJoin(busabaseNodes, eq(busabaseNodes.id, busabaseBases.nodeId))
-          .where(
-            and(
-              inArray(busabaseBases.id, baseIdsFromFields),
-              eq(busabaseBases.spaceId, spaceId),
-              isNull(busabaseBases.archivedAt),
-            ),
-          )
-      : [];
-  const baseRowsById = new Map([...baseRows, ...extraBaseRows].map((base) => [base.id, base]));
+  const baseRowsById = new Map(baseRows.map((base) => [base.id, base]));
   const allBaseIds = [...new Set([...baseRowsById.keys()])];
   const allBaseFields =
     allBaseIds.length > 0
@@ -1135,7 +1142,7 @@ export const searchBusabase = async (
   );
   const [projectionResults, fileSearch] = await Promise.all([
     Promise.all(
-      projectionRows.slice(0, parsed.limit).flatMap((row) => {
+      projectionRows.flatMap((row) => {
         if (row.recordId) {
           const record = recordsById.get(row.recordId);
           return record
@@ -1162,30 +1169,19 @@ export const searchBusabase = async (
       }),
     ),
     wantsFiles
-      ? searchAssetBackedFiles(query, parsed.limit, narrowing)
+      ? searchAssetBackedFiles(query, candidateWindow, narrowing, parsed.mode === "full")
       : Promise.resolve({ results: [] as SortableResult[], truncated: false }),
   ]);
 
-  // Node CONTENT. Only on the first page: like `names`, these are not part of
-  // the `projectionRows` pagination cursor, so emitting them again on every
-  // page would duplicate them.
-  const nodeContent =
-    wantsNodes && parsed.offset === 0
-      ? await searchNodeContent(db, spaceId, query, parsed.limit, narrowing)
-      : { results: [] as SortableResult[], truncated: false };
+  const nodeContent = wantsNodes
+    ? await searchNodeContent(db, spaceId, query, candidateWindow, narrowing)
+    : { results: [] as SortableResult[], truncated: false };
 
   const baseResults = [...baseRowsById.values()].map((base) => ({
     result: toBaseSearchResult(
       toBaseVO(
         base,
         allBaseFields.filter((field) => field.baseId === base.id),
-        // `{}` is deliberate, not a shortcut: this VO only feeds
-        // `toBaseSearchResult` below, which never reads `.metadata`. The two
-        // queries this Base row can come from (`name`/`description`/`slug`
-        // match and the field-name match) are two separate fan-out branches
-        // merged by id into `baseRowsById`; both join `busabaseNodes` so the row
-        // carries the timestamps `sortKey` below needs.
-        {},
       ),
       base.nodeCreatedBy ?? null,
     ),
@@ -1211,19 +1207,32 @@ export const searchBusabase = async (
   // Merge FIRST, slice second. Slicing per-source order and then sorting the
   // survivors would return whichever 20 happened to be concatenated first,
   // re-ordered — an answer that looks sorted and is simply the wrong 20.
-  const results = mergeBySort([[...dedupedResults.values()]], parsed.sort).slice(0, parsed.limit);
+  const mergedResults = mergeBySort([[...dedupedResults.values()]], parsed.sort);
+  const results = mergedResults.slice(parsed.offset, parsed.offset + parsed.limit);
 
-  return {
+  const response = {
     // Reported even when this page has hits: it says the ANSWER may be
     // incomplete, which is exactly what a caller needs in order to describe an
     // empty or thin result honestly (spec D2b). ORed across every source that
     // can be capped — node content and file content are two independent ways
     // the same promise can break.
     contentTruncated: nodeContent.truncated || fileSearch.truncated,
-    hasMore: projectionRows.length > parsed.limit,
+    hasMore: mergedResults.length > parsed.offset + parsed.limit,
     limit: parsed.limit,
     offset: parsed.offset,
     query,
     results,
   };
+  recordSearchRequest({
+    name: "search.request.completed",
+    durationMs: Date.now() - startedAt,
+    mode: parsed.mode,
+    surface: parsed.surface ?? "api",
+    resultCount: results.length,
+    emptyPage: results.length === 0,
+    hasMore: response.hasMore,
+    offset: parsed.offset,
+    sourceCount: parsed.sources ? new Set(parsed.sources).size : SEARCH_SOURCES.length,
+  });
+  return response;
 };

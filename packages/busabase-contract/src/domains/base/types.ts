@@ -79,16 +79,6 @@ export interface BaseVO {
   };
   createdAt: string;
   fields: BaseFieldVO[];
-  /**
-   * The owning node's own `metadata` (from `busabase_nodes.metadata`, NOT a
-   * `busabase_bases` column) — carried here so a Base-only caller (e.g. the
-   * Agent Prompts dialog reached from `BaseDetailHeader`, which only has a
-   * `BaseVO` on hand) can read `metadata.agentPrompts` the same way every
-   * other node type's `NodeVO.metadata` already does. Kept as
-   * `Record<string, unknown>` to match `NodeVO.metadata` and
-   * `NodePromptContext.metadata` rather than inventing a narrower type.
-   */
-  metadata: Record<string, unknown>;
 }
 
 export type ViewFilterOperator =
@@ -166,6 +156,21 @@ export interface RecordVO {
   status: "active" | "archived";
   createdBy: string;
   createdByUser?: UserRefVO | null;
+  /**
+   * Everyone named by this record's PEOPLE-typed CELLS — `member` field values
+   * plus the `created_by` / `updated_by` system fields — keyed by user id.
+   *
+   * Resolved at read time rather than stored on the commit, for the same reason
+   * `lookup` is: a display name or avatar can change without this record ever
+   * being written, so a name baked into the commit goes stale silently.
+   *
+   * An id with no entry here is a person this viewer cannot resolve — a former
+   * member, an agent actor, or an anonymous visitor on a public surface (the
+   * host deliberately withholds identity there). Clients must fall back to the
+   * id, never to an empty cell: "who did this work" is a fact worth keeping
+   * even when the name is gone.
+   */
+  fieldUsers?: Record<string, UserRefVO>;
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string;

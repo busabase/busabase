@@ -9,15 +9,19 @@ import type {
   RecordVO,
   ViewVO,
 } from "busabase-contract/types";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "kui/dialog";
-import { Pencil, Plus, RotateCcw, Star } from "lucide-react";
+import { Dialog, DialogDescription, DialogHeader, DialogTitle } from "kui/dialog";
+import { Pencil, Plus, RotateCcw, Star, Trash2 } from "lucide-react";
 import { type iString, iStringIsEmpty, iStringParse, iStringTrim } from "openlib/i18n/i-string";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { useRef, useState } from "react";
 import { useSearch } from "wouter";
 import { fmt, useCoreI18n, useCoreLocale, useIString } from "../../../i18n";
+import { localizeCoreErrorMessage, presentCoreError } from "../../../i18n/localize-error";
+import { isSystemFieldType } from "../../base/field-types";
 import { isRollupCompatible, LOOKUP_ROLLUPS } from "../../base/lookup/rollup";
+import { isUnconvertibleFieldType } from "../../base/utils/field-conversion";
 import { getPrimaryField } from "../../base/utils/primary-field";
+import { FormsForBasePanel } from "../../form/components/forms-for-base-panel";
 import { isDerivedFieldSlug } from "../helpers/change-request";
 import { createDefaultFieldOptions } from "../helpers/field";
 import { fieldTypeOptions } from "../helpers/field-type-options";
@@ -34,7 +38,9 @@ import { useRegisterTopbarNodeActions } from "../hooks/use-register-topbar-node-
 import { registerSidePanelTab, type SidePanelTabProps } from "../side-panel-registry";
 import { useIsAnonymousVisitor } from "../visitor-context";
 import { applyViewConfigToRecords, BusaBaseTable } from "./base-table";
+import { FieldValuePreview } from "./field-preview";
 import { IStringNameInput } from "./i-string-input";
+import { DialogContent } from "./localized-dialog-content";
 import { NodeActionsMenu } from "./node-actions-menu";
 import { NodeAgentPromptsButton } from "./node-agent-prompts-button";
 import { NodePinButton, nodeSidePanelTabId } from "./node-pin-button";
@@ -58,6 +64,8 @@ export function BaseDetailView({
   onCreateView,
   onDeleteView,
   onDeleteRecords,
+  onImportRecords,
+  onUpdateRecords,
   onRestoreView,
   onRestoreRecord,
   onMoveRecord,
@@ -91,6 +99,19 @@ export function BaseDetailView({
     records: RecordVO[],
     options?: RecordSubmitOptions,
   ) => Promise<{ ok: number; failed: number }>;
+  /** Patch every selected record in one atomic change request. */
+  onUpdateRecords?: (
+    base: BaseVO,
+    records: RecordVO[],
+    fields: Record<string, unknown>,
+    options?: RecordSubmitOptions,
+  ) => Promise<void>;
+  /** Create N records from pasted rows, as one change request. */
+  onImportRecords?: (
+    base: BaseVO,
+    rows: Array<Record<string, unknown>>,
+    options?: RecordSubmitOptions,
+  ) => Promise<void>;
   onRestoreView?: (view: ViewVO) => Promise<void>;
   onRestoreRecord?: (record: RecordVO) => Promise<void>;
   onMoveRecord?: (record: RecordVO, fieldSlug: string, value: string | null) => Promise<void>;
@@ -133,6 +154,8 @@ export function BaseDetailView({
             onCreateView={onCreateView}
             onDeleteView={onDeleteView}
             onDeleteRecords={onDeleteRecords}
+            onImportRecords={onImportRecords}
+            onUpdateRecords={onUpdateRecords}
             onRestoreView={onRestoreView}
             onRestoreRecord={onRestoreRecord}
             onMoveRecord={onMoveRecord}
@@ -150,12 +173,189 @@ export function BaseDetailView({
   );
 }
 
+interface ConversionPreview {
+  totalCount: number;
+  convertibleCount: number;
+  nullCount: number;
+  conflicts: Array<{ recordId: string; currentValue: unknown }>;
+}
+
+/**
+ * The type selector plus the dry run behind it.
+ *
+ * The preview is not decoration — it is the feature. A convert drops every value
+ * that cannot be re-expressed in the new type, and those values are NOT
+ * recoverable from the change request. So the number the user reads first is how
+ * many values will be CLEARED, derived from the exact counts rather than counted
+ * off the `conflicts` array (which the server caps at 100 — reading its length
+ * would under-report the damage on any Base with more affected rows than that).
+ */
+function FieldTypeConversionPanel({
+  choiceMode,
+  field,
+  onChoiceModeChange,
+  onTargetTypeChange,
+  preview,
+  targetType,
+}: {
+  choiceMode: "auto_create" | "null_on_missing";
+  field: BaseFieldVO;
+  onChoiceModeChange: (mode: "auto_create" | "null_on_missing") => void;
+  onTargetTypeChange: (type: FieldType | null) => void;
+  preview: {
+    data?: ConversionPreview;
+    error: unknown;
+    isPending: boolean;
+  };
+  targetType: FieldType | null;
+}) {
+  const messages = useCoreI18n();
+  // Ask the same two predicates the server gate asks, never a third hardcoded
+  // list: a stale duplicate of exactly this set is what once let `member → text`
+  // through and nulled a whole column with no error and no undo.
+  const sourceUnconvertible = isSystemFieldType(field.type) || isUnconvertibleFieldType(field.type);
+  const convertibleTargets = fieldTypeOptions.filter(
+    (type) => !isSystemFieldType(type) && !isUnconvertibleFieldType(type),
+  );
+  const wantsChoiceMode = targetType === "select" || targetType === "multiselect";
+  const conflictCount = preview.data
+    ? Math.max(preview.data.totalCount - preview.data.convertibleCount - preview.data.nullCount, 0)
+    : 0;
+
+  return (
+    <div className="mt-4 border-border/50 border-t pt-4">
+      {/** biome-ignore lint/a11y/noLabelWithoutControl: the select below is the control */}
+      <label className="block font-medium text-muted-foreground text-xs">
+        {messages.base.fieldTypeChange}
+      </label>
+      <select
+        className="mt-1 h-8 w-full rounded-md border border-border/70 bg-card px-2.5 text-sm outline-none transition-colors focus:border-primary disabled:opacity-50"
+        disabled={sourceUnconvertible}
+        onChange={(event) => {
+          const next = event.target.value as FieldType;
+          onTargetTypeChange(next === field.type ? null : next);
+        }}
+        value={targetType ?? field.type}
+      >
+        <option value={field.type}>{messages.fieldTypes[field.type]}</option>
+        {convertibleTargets
+          .filter((type) => type !== field.type)
+          .map((type) => (
+            <option key={type} value={type}>
+              {messages.fieldTypes[type]}
+            </option>
+          ))}
+      </select>
+      {sourceUnconvertible ? (
+        <p className="mt-1 text-muted-foreground text-xs">
+          {messages.base.fieldTypeChangeUnavailable}
+        </p>
+      ) : null}
+
+      {targetType && wantsChoiceMode ? (
+        <fieldset className="mt-3">
+          <legend className="font-medium text-muted-foreground text-xs">
+            {messages.base.conversionChoiceModeLegend}
+          </legend>
+          {(["null_on_missing", "auto_create"] as const).map((mode) => (
+            <label className="mt-1.5 flex items-start gap-2 text-sm" key={mode}>
+              <input
+                checked={choiceMode === mode}
+                className="mt-0.5"
+                name="select-choice-mode"
+                onChange={() => onChoiceModeChange(mode)}
+                type="radio"
+                value={mode}
+              />
+              <span>
+                {mode === "auto_create"
+                  ? messages.base.conversionChoiceModeAutoCreate
+                  : messages.base.conversionChoiceModeNullOnMissing}
+                <span className="block text-muted-foreground text-xs">
+                  {mode === "auto_create"
+                    ? messages.base.conversionChoiceModeAutoCreateHint
+                    : messages.base.conversionChoiceModeNullOnMissingHint}
+                </span>
+              </span>
+            </label>
+          ))}
+        </fieldset>
+      ) : null}
+
+      {targetType ? (
+        <div className="mt-3 rounded-md border border-border/60 bg-muted/30 p-3">
+          <div className="font-medium text-xs">{messages.base.conversionPreviewTitle}</div>
+          {preview.isPending ? (
+            <p className="mt-1 text-muted-foreground text-xs">
+              {messages.base.conversionPreviewLoading}
+            </p>
+          ) : preview.error ? (
+            <p className="mt-1 text-rejected-strong text-xs">
+              {localizeCoreErrorMessage(
+                messages,
+                preview.error instanceof Error
+                  ? preview.error.message
+                  : messages.base.conversionPreviewFailed,
+              )}
+            </p>
+          ) : preview.data ? (
+            <>
+              <p
+                className={`mt-1 font-medium text-sm ${
+                  conflictCount > 0 ? "text-rejected-strong" : "text-muted-foreground"
+                }`}
+                data-testid="conversion-conflict-count"
+              >
+                {conflictCount > 0
+                  ? fmt(messages.base.conversionConflicts, {
+                      count: conflictCount,
+                      plural: conflictCount === 1 ? "" : "s",
+                    })
+                  : messages.base.conversionNoConflicts}
+              </p>
+              <p className="mt-1 text-muted-foreground text-xs">
+                {fmt(messages.base.conversionTotals, {
+                  total: preview.data.totalCount,
+                  convertible: preview.data.convertibleCount,
+                  nulls: preview.data.nullCount,
+                })}
+              </p>
+              {conflictCount > 0 ? (
+                <>
+                  <ul className="mt-2 space-y-1">
+                    {preview.data.conflicts.slice(0, 10).map((conflict) => (
+                      <li className="truncate text-xs" key={conflict.recordId}>
+                        <FieldValuePreview field={field} value={conflict.currentValue} />
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="mt-1 text-muted-foreground text-xs">
+                    {fmt(messages.base.conversionConflictSampleNote, {
+                      shown: Math.min(preview.data.conflicts.length, 10),
+                      count: conflictCount,
+                    })}
+                  </p>
+                  <p className="mt-1 text-rejected-strong text-xs">
+                    {messages.base.conversionIrreversible}
+                  </p>
+                </>
+              ) : null}
+            </>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function BaseSetupView({
   base,
   bases,
   deletedFields = [],
   orpc,
+  onConvertFieldType,
   onCreateField,
+  onDeleteField,
   onRestoreField,
   onSetPrimaryField,
   onUpdateFieldName,
@@ -166,9 +366,27 @@ export function BaseSetupView({
   /** Wired through to the header's "•••" menu (NodeActionsMenu) AND the
    *  read-only "Base Info" card's "Edit" button (opens `NodeSettingsDialog`). */
   orpc: BusabaseQueryUtils;
+  /**
+   * Change a field's TYPE. Its own callback, never folded into
+   * `onUpdateFieldName`: the update endpoint rejects `type` outright, so a
+   * bundled rename+retype would silently drop the retype and report success.
+   */
+  onConvertFieldType?: (
+    base: BaseVO,
+    fieldId: string,
+    newType: FieldType,
+    selectChoiceMode: "auto_create" | "null_on_missing",
+    options?: { mergeImmediately?: boolean },
+  ) => Promise<void>;
   onCreateField: (
     base: BaseVO,
     payload: CreateBaseFieldPayload,
+    options?: { mergeImmediately?: boolean },
+  ) => Promise<void>;
+  /** Soft-delete a field. The undo is `onRestoreField`, which already shipped. */
+  onDeleteField?: (
+    base: BaseVO,
+    fieldId: string,
     options?: { mergeImmediately?: boolean },
   ) => Promise<void>;
   onRestoreField?: (base: BaseVO, fieldId: string) => Promise<void>;
@@ -247,6 +465,67 @@ export function BaseSetupView({
   const [recordTitleFieldId, setRecordTitleFieldId] = useState<string | null>(null);
   const [isRecordTitleSaving, setIsRecordTitleSaving] = useState(false);
   const [recordTitleError, setRecordTitleError] = useState<string | null>(null);
+  // Type conversion lives in the SAME dialog as rename, but is submitted as its
+  // own change request — see `onConvertFieldType`.
+  const [editingFieldType, setEditingFieldType] = useState<FieldType | null>(null);
+  const [selectChoiceMode, setSelectChoiceMode] = useState<"auto_create" | "null_on_missing">(
+    "null_on_missing",
+  );
+  const [isFieldConvertSaving, setIsFieldConvertSaving] = useState(false);
+  const [deletingFieldId, setDeletingFieldId] = useState<string | null>(null);
+  const [isFieldDeleteSaving, setIsFieldDeleteSaving] = useState(false);
+  const [fieldDeleteError, setFieldDeleteError] = useState<string | null>(null);
+
+  const editingFieldForQuery = base?.fields.find((field) => field.id === editingFieldId) ?? null;
+  const conversionTargetType =
+    editingFieldType && editingFieldType !== editingFieldForQuery?.type ? editingFieldType : null;
+  /**
+   * The dry run. Runs only once a DIFFERENT type is picked, so merely renaming a
+   * field never touches the wire. `selectChoiceMode` is part of the input on
+   * purpose: it changes the answer (under `auto_create` a value with no matching
+   * choice mints one; under `null_on_missing` the same value is dropped), so
+   * flipping the radio must refetch rather than reuse a stale preview.
+   */
+  const conversionPreviewQuery = useQuery({
+    ...orpc.bases.previewFieldConversion.queryOptions({
+      input: {
+        baseId: base?.id ?? "",
+        fieldId: editingFieldId ?? "",
+        newType: conversionTargetType ?? "text",
+        selectChoiceMode,
+      },
+    }),
+    enabled: Boolean(base?.id && editingFieldId && conversionTargetType),
+    retry: false,
+  });
+
+  const pendingDeleteField = base?.fields.find((field) => field.id === deletingFieldId) ?? null;
+  /**
+   * How many records actually carry a value in the column about to be deleted.
+   * `records.count` is exact on every path, and `fieldType` is the same pushdown
+   * hint the dashboard already sends for view filters. Fetched only while the
+   * confirmation is open.
+   */
+  const deleteImpactQuery = useQuery({
+    ...orpc.records.count.queryOptions({
+      input: {
+        baseId: base?.id ?? "",
+        ...(pendingDeleteField
+          ? {
+              filters: [
+                {
+                  fieldSlug: pendingDeleteField.slug,
+                  fieldType: pendingDeleteField.type,
+                  operator: "not_empty" as const,
+                },
+              ],
+            }
+          : {}),
+      },
+    }),
+    enabled: Boolean(base?.id && pendingDeleteField),
+    retry: false,
+  });
 
   if (!base) {
     return (
@@ -331,7 +610,7 @@ export function BaseSetupView({
       resetAddFieldForm();
       setIsAddFieldOpen(false);
     } catch (error) {
-      const msg = error instanceof Error ? error.message : messages.base.failedAddField;
+      const msg = presentCoreError(messages, locale, error, messages.base.failedAddField);
       setFormError(msg);
       // Surface structured error detail if the server returned record/choice ids.
       if (error && typeof error === "object" && "data" in error) {
@@ -348,12 +627,50 @@ export function BaseSetupView({
   const resetFieldRenameForm = () => {
     setEditingFieldId(null);
     setEditingFieldName("");
+    setEditingFieldType(null);
+    setSelectChoiceMode("null_on_missing");
     setFieldRenameError(null);
   };
 
   const closeFieldRenameDialog = () => {
-    if (isFieldRenameSaving) return;
+    if (isFieldRenameSaving || isFieldConvertSaving) return;
     resetFieldRenameForm();
+  };
+
+  const submitFieldConvert = async (fieldId: string, options?: { mergeImmediately?: boolean }) => {
+    if (!base || !onConvertFieldType || !conversionTargetType) return;
+    setIsFieldConvertSaving(true);
+    setFieldRenameError(null);
+    try {
+      await onConvertFieldType(base, fieldId, conversionTargetType, selectChoiceMode, options);
+      resetFieldRenameForm();
+    } catch (error) {
+      setFieldRenameError(
+        error instanceof Error
+          ? localizeCoreErrorMessage(messages, error.message)
+          : messages.base.failedConvertField,
+      );
+    } finally {
+      setIsFieldConvertSaving(false);
+    }
+  };
+
+  const submitFieldDelete = async (fieldId: string, options?: { mergeImmediately?: boolean }) => {
+    if (!base || !onDeleteField) return;
+    setIsFieldDeleteSaving(true);
+    setFieldDeleteError(null);
+    try {
+      await onDeleteField(base, fieldId, options);
+      setDeletingFieldId(null);
+    } catch (error) {
+      setFieldDeleteError(
+        error instanceof Error
+          ? localizeCoreErrorMessage(messages, error.message)
+          : messages.base.failedDeleteField,
+      );
+    } finally {
+      setIsFieldDeleteSaving(false);
+    }
   };
 
   const submitFieldRename = async (fieldId: string, options?: { mergeImmediately?: boolean }) => {
@@ -369,7 +686,9 @@ export function BaseSetupView({
       await onUpdateFieldName(base, fieldId, name, options);
       resetFieldRenameForm();
     } catch (error) {
-      setFieldRenameError(error instanceof Error ? error.message : messages.base.failedRenameField);
+      setFieldRenameError(
+        presentCoreError(messages, locale, error, messages.base.failedRenameField),
+      );
     } finally {
       setIsFieldRenameSaving(false);
     }
@@ -393,7 +712,9 @@ export function BaseSetupView({
       await onSetPrimaryField(base, fieldId, options);
       setRecordTitleFieldId(null);
     } catch (error) {
-      setRecordTitleError(error instanceof Error ? error.message : messages.shell.operationFailed);
+      setRecordTitleError(
+        presentCoreError(messages, locale, error, messages.shell.operationFailed),
+      );
     } finally {
       setIsRecordTitleSaving(false);
     }
@@ -537,6 +858,28 @@ export function BaseSetupView({
                           <Star size={13} />
                         </button>
                       ) : null}
+                      {/* The record-title field and system fields are refused
+                          server-side, so the affordance is absent rather than
+                          offered-then-rejected. */}
+                      {onDeleteField &&
+                      field.id !== primaryField?.id &&
+                      !isSystemFieldType(field.type) ? (
+                        <button
+                          aria-label={fmt(messages.base.deleteFieldAria, {
+                            name: resolveIString(field.name),
+                          })}
+                          className="shrink-0 rounded p-1 text-muted-foreground opacity-100 transition-opacity hover:bg-rejected-strong/10 hover:text-rejected-strong sm:opacity-0 sm:focus:opacity-100 sm:group-hover:opacity-100"
+                          data-testid={`delete-field-${field.id}`}
+                          onClick={() => {
+                            setDeletingFieldId(field.id);
+                            setFieldDeleteError(null);
+                          }}
+                          title={messages.base.deleteField}
+                          type="button"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      ) : null}
                     </div>
                     <div className="hidden sm:block">
                       <span className="inline-flex max-w-full truncate rounded-md bg-muted/65 px-2 py-0.5 text-muted-foreground text-xs">
@@ -626,16 +969,16 @@ export function BaseSetupView({
               <DialogContent
                 className="max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-lg grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden p-0"
                 onEscapeKeyDown={(event) => {
-                  if (isFieldRenameSaving) event.preventDefault();
+                  if (isFieldRenameSaving || isFieldConvertSaving) event.preventDefault();
                 }}
                 onPointerDownOutside={(event) => {
-                  if (isFieldRenameSaving) event.preventDefault();
+                  if (isFieldRenameSaving || isFieldConvertSaving) event.preventDefault();
                 }}
-                showCloseButton={!isFieldRenameSaving}
+                showCloseButton={!isFieldRenameSaving && !isFieldConvertSaving}
               >
                 <DialogHeader className="border-border/60 border-b px-5 py-4 pr-12 text-left">
                   <DialogTitle>
-                    {messages.base.renameField}:{" "}
+                    {onConvertFieldType ? messages.base.editFieldTitle : messages.base.renameField}:{" "}
                     {editingField ? resolveIString(editingField.name) : ""}
                   </DialogTitle>
                   <DialogDescription className="sr-only">
@@ -644,34 +987,155 @@ export function BaseSetupView({
                 </DialogHeader>
                 <div className="min-h-0 overflow-y-auto px-5 py-4">
                   <IStringNameInput onChange={setEditingFieldName} value={editingFieldName} />
+                  {onConvertFieldType && editingField ? (
+                    <FieldTypeConversionPanel
+                      choiceMode={selectChoiceMode}
+                      field={editingField}
+                      onChoiceModeChange={setSelectChoiceMode}
+                      onTargetTypeChange={setEditingFieldType}
+                      preview={conversionPreviewQuery}
+                      targetType={conversionTargetType}
+                    />
+                  ) : null}
                   {fieldRenameError ? (
                     <div className="mt-3 text-rejected-strong text-sm">{fieldRenameError}</div>
                   ) : null}
                   <div className="mt-4 flex flex-wrap items-center justify-end gap-3 border-border/50 border-t pt-4">
                     <button
                       className="rounded-md border border-border/70 bg-card px-3 py-1.5 font-medium text-xs transition-colors hover:bg-accent disabled:opacity-50"
-                      disabled={isFieldRenameSaving}
+                      disabled={isFieldRenameSaving || isFieldConvertSaving}
                       onClick={closeFieldRenameDialog}
+                      type="button"
+                    >
+                      {messages.common.cancel}
+                    </button>
+                    {conversionTargetType ? (
+                      /* A convert is the one write on this screen where "propose
+                         it" is the right main button — the contract says so
+                         itself, because values that do not fit the new type are
+                         dropped and are NOT recoverable from the change request.
+                         Submit stays disabled until the dry run has answered. */
+                      <SplitSubmitButton
+                        changeRequestAction={{
+                          label: messages.base.requestConvert,
+                          loadingLabel: messages.common.submitting,
+                          onSubmit: () => editingField && submitFieldConvert(editingField.id),
+                          isLoading: isFieldConvertSaving,
+                        }}
+                        defaultAction="changeRequest"
+                        disabled={
+                          isFieldConvertSaving ||
+                          !editingField ||
+                          conversionPreviewQuery.isPending ||
+                          Boolean(conversionPreviewQuery.error)
+                        }
+                        hint={messages.base.conversionHint}
+                        immediateAction={{
+                          label: messages.base.convertNow,
+                          loadingLabel: messages.base.converting,
+                          onSubmit: () =>
+                            editingField &&
+                            submitFieldConvert(editingField.id, { mergeImmediately: true }),
+                          isLoading: isFieldConvertSaving,
+                        }}
+                      />
+                    ) : (
+                      <SplitSubmitButton
+                        changeRequestAction={{
+                          label: messages.base.requestRename,
+                          loadingLabel: messages.common.submitting,
+                          onSubmit: () => editingField && submitFieldRename(editingField.id),
+                          isLoading: isFieldRenameSaving,
+                        }}
+                        disabled={isFieldRenameSaving || !editingField}
+                        hint={messages.common.requestReviewHint}
+                        immediateAction={{
+                          label: messages.base.renameNow,
+                          loadingLabel: messages.base.renaming,
+                          onSubmit: () =>
+                            editingField &&
+                            submitFieldRename(editingField.id, { mergeImmediately: true }),
+                          isLoading: isFieldRenameSaving,
+                        }}
+                      />
+                    )}
+                  </div>
+                </div>
+              </DialogContent>
+            </Dialog>
+
+            <Dialog
+              onOpenChange={(open) => {
+                if (!open && !isFieldDeleteSaving) setDeletingFieldId(null);
+              }}
+              open={Boolean(pendingDeleteField)}
+            >
+              <DialogContent
+                className="w-[calc(100%-2rem)] max-w-lg gap-0 p-0"
+                onEscapeKeyDown={(event) => {
+                  if (isFieldDeleteSaving) event.preventDefault();
+                }}
+                onPointerDownOutside={(event) => {
+                  if (isFieldDeleteSaving) event.preventDefault();
+                }}
+                showCloseButton={!isFieldDeleteSaving}
+              >
+                <DialogHeader className="border-border/60 border-b px-5 py-4 pr-12 text-left">
+                  <DialogTitle>
+                    {messages.base.deleteField}:{" "}
+                    {pendingDeleteField ? resolveIString(pendingDeleteField.name) : ""}
+                  </DialogTitle>
+                  <DialogDescription className="sr-only">
+                    {messages.base.deleteFieldReversible}
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="px-5 py-4">
+                  {/* Lead with the real blast radius, then say plainly that it is
+                      reversible — burying reversibility in a tooltip is what
+                      makes people avoid a safe action. */}
+                  <p className="text-sm">
+                    {deleteImpactQuery.isPending
+                      ? messages.base.deleteFieldCounting
+                      : deleteImpactQuery.error
+                        ? messages.base.deleteFieldCountUnavailable
+                        : fmt(messages.base.deleteFieldImpact, {
+                            count: deleteImpactQuery.data?.total ?? 0,
+                            plural: (deleteImpactQuery.data?.total ?? 0) === 1 ? "" : "s",
+                          })}
+                  </p>
+                  <p className="mt-2 text-muted-foreground text-xs">
+                    {messages.base.deleteFieldReversible}
+                  </p>
+                  {fieldDeleteError ? (
+                    <div className="mt-3 text-rejected-strong text-sm">{fieldDeleteError}</div>
+                  ) : null}
+                  <div className="mt-4 flex flex-wrap items-center justify-end gap-3 border-border/50 border-t pt-4">
+                    <button
+                      className="rounded-md border border-border/70 bg-card px-3 py-1.5 font-medium text-xs transition-colors hover:bg-accent disabled:opacity-50"
+                      disabled={isFieldDeleteSaving}
+                      onClick={() => setDeletingFieldId(null)}
                       type="button"
                     >
                       {messages.common.cancel}
                     </button>
                     <SplitSubmitButton
                       changeRequestAction={{
-                        label: messages.base.requestRename,
+                        label: messages.base.requestDeleteField,
                         loadingLabel: messages.common.submitting,
-                        onSubmit: () => editingField && submitFieldRename(editingField.id),
-                        isLoading: isFieldRenameSaving,
-                      }}
-                      disabled={isFieldRenameSaving || !editingField}
-                      hint={messages.common.requestReviewHint}
-                      immediateAction={{
-                        label: messages.base.renameNow,
-                        loadingLabel: messages.base.renaming,
                         onSubmit: () =>
-                          editingField &&
-                          submitFieldRename(editingField.id, { mergeImmediately: true }),
-                        isLoading: isFieldRenameSaving,
+                          pendingDeleteField && submitFieldDelete(pendingDeleteField.id),
+                        isLoading: isFieldDeleteSaving,
+                      }}
+                      defaultAction="changeRequest"
+                      disabled={isFieldDeleteSaving || !pendingDeleteField}
+                      hint={messages.base.deleteFieldHint}
+                      immediateAction={{
+                        label: messages.base.deleteFieldNow,
+                        loadingLabel: messages.common.deleting,
+                        onSubmit: () =>
+                          pendingDeleteField &&
+                          submitFieldDelete(pendingDeleteField.id, { mergeImmediately: true }),
+                        isLoading: isFieldDeleteSaving,
                       }}
                     />
                   </div>
@@ -1083,6 +1547,11 @@ export function BaseSetupView({
                 value={formatFullTime(base.createdAt, locale)}
               />
             </SidebarPanel>
+            {/* Provenance: a public form with anonymous submit queues record
+                creates against THIS Base, and until now nothing on screen said
+                so. Lives on the Design tab because that is where the Base's
+                shape — and everything allowed to write into it — belongs. */}
+            <FormsForBasePanel baseId={base.id} orpc={orpc} />
           </aside>
         </div>
       </section>

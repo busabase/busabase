@@ -31,6 +31,7 @@ export const busabaseFieldTypeEnum = pgEnum("busabase_field_type", [
   "html",
   "attachment",
   "relation",
+  "member",
   "number",
   "date",
   "checkbox",

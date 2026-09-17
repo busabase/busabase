@@ -26,6 +26,19 @@ export const EmbedNodeTypeSchema = z.enum([
 ]);
 export type EmbedNodeType = z.infer<typeof EmbedNodeTypeSchema>;
 
+/**
+ * Can a node of this type back an embed link at all?
+ *
+ * `createEmbedLink` rejects everything outside `EmbedNodeTypeSchema` with
+ * BAD_REQUEST "Unsupported node type", so every UI affordance that offers to
+ * mint one has to ask the same question the server will. Exported from here —
+ * next to the enum it reads — so the Share dialog, the node "•••" menu and the
+ * sidebar row all share ONE definition instead of three drifting copies of the
+ * same list.
+ */
+export const isEmbeddableNodeType = (type: string | null | undefined): type is EmbedNodeType =>
+  EmbedNodeTypeSchema.safeParse(type).success;
+
 export const EmbedTargetTypeSchema = z.enum(["node", "change-request", "record-detail"]);
 export type EmbedTargetType = z.infer<typeof EmbedTargetTypeSchema>;
 

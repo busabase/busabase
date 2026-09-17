@@ -3,6 +3,7 @@ import "server-only";
 import { ORPCError } from "@orpc/server";
 import type {
   CreateFormDTO,
+  FormFieldBindingVO,
   FormShareVO,
   FormVO,
   ListFormsDTO,
@@ -19,7 +20,9 @@ import {
   busabaseForms,
   busabaseNodes,
 } from "../../../db/schema";
+import type { MergeCtx } from "../../../logic/cr-lifecycle";
 import { id, now } from "../../../logic/kernel";
+import { type MaterializeArgs, registerMaterializer } from "../../../logic/materialize";
 import {
   assertNodePermission,
   buildNodeVisibilityCondition,
@@ -433,6 +436,142 @@ export const submitForm = async (
       }
     : { changeRequestId: result.id, status: "pending_review" as const };
 };
+
+// ── node_create materialization ──────────────────────────────────────────────
+
+/**
+ * Metadata keys the generic New-item flow carries on a `form` node_create
+ * operation. They are CREATE INPUT, not node state: once this materializer has
+ * written the `busabase_forms` row, that row IS the binding contract, so the
+ * keys are stripped from `busabase_nodes.metadata` rather than kept as a
+ * second, drifting copy of the same fact (`materializeFileNode` strips
+ * `metadata.assetId` for exactly this reason).
+ */
+const FORM_CREATE_TARGET_BASE_KEY = "targetBaseId";
+const FORM_CREATE_BINDINGS_KEY = "formBindings";
+
+/**
+ * Narrow one untrusted entry of `metadata.formBindings` to a binding.
+ *
+ * Hand-rolled rather than reusing `FormFieldBindingSchema`: `busabase-contract`
+ * re-exports the form module's TYPES only, and the alternative — reaching past
+ * the package's public surface for the zod value — would couple the merge
+ * kernel to the contract package's internal file layout.
+ */
+const toFormBinding = (value: unknown): FormFieldBindingVO | null => {
+  if (!value || typeof value !== "object") return null;
+  const candidate = value as Record<string, unknown>;
+  const inputName = typeof candidate.inputName === "string" ? candidate.inputName.trim() : "";
+  const fieldSlug = typeof candidate.fieldSlug === "string" ? candidate.fieldSlug.trim() : "";
+  if (!inputName || !fieldSlug) return null;
+  return {
+    inputName,
+    fieldSlug,
+    ...(typeof candidate.required === "boolean" ? { required: candidate.required } : {}),
+    ...(typeof candidate.label === "string" ? { label: candidate.label } : {}),
+    ...(typeof candidate.help === "string" ? { help: candidate.help } : {}),
+  };
+};
+
+/**
+ * Materialize a Form node AND the `busabase_forms` config row it is meaningless
+ * without, in the merge transaction, from one `node_create` operation.
+ *
+ * This is what lets a human create a Form at all. `busabase_forms.target_base_id`
+ * is NOT NULL and the node row alone carries no binding contract, so before this
+ * existed a Form built through the New-item flow opened to "Form not set up yet"
+ * with nothing behind it — which is why the node type was `hidden` from every
+ * create surface and only an agent calling `forms.create` could produce a
+ * working one.
+ *
+ * Both create paths land here, which is the point: "Create now" (auto-merged)
+ * and "propose for review" (merged later by an approver) run the SAME
+ * materializer, so a Form born through review is configured exactly like one
+ * born immediately. Chaining a second `forms.create` call from the client would
+ * have covered only the first path, and non-atomically — a failed second call
+ * leaves an orphan node.
+ *
+ * Permission: binding a Form to a Base is what opens an inbound write funnel
+ * into it (a public form's submissions become record-create change requests on
+ * the target Base), so it takes `manage` on the TARGET Base's node — the same
+ * bar `createForm` applies. Checked against the merging actor, because the merge
+ * is the act that makes the binding real. Failing closed here means the merge
+ * itself fails with a readable reason instead of quietly producing a Form node
+ * bound to a Base its creator may not administer.
+ */
+export const materializeFormNode = async (
+  ctx: MergeCtx,
+  args: MaterializeArgs,
+): Promise<string> => {
+  const { db, timestamp } = ctx;
+  const { parentNode, fields } = args;
+  const {
+    [FORM_CREATE_TARGET_BASE_KEY]: rawTargetBaseId,
+    [FORM_CREATE_BINDINGS_KEY]: rawBindings,
+    ...metadata
+  } = fields.metadata ?? {};
+
+  const nodeId = id("nod");
+  await db.insert(busabaseNodes).values({
+    id: nodeId,
+    parentId: parentNode.id,
+    type: "form",
+    slug: fields.slug as string,
+    name: fields.name as string,
+    description: fields.description ?? "",
+    metadata,
+    position: 0,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  });
+
+  const targetBaseId = typeof rawTargetBaseId === "string" ? rawTargetBaseId.trim() : "";
+  if (!targetBaseId) {
+    // No target Base was asked for (an API/mobile caller that only sent the
+    // generic node fields). The node still exists and the Form detail view's
+    // empty state can bind it in place, so this degrades to "not set up yet"
+    // instead of failing someone else's change request.
+    return nodeId;
+  }
+
+  const [targetBase] = await db
+    .select({ id: busabaseBases.id, nodeId: busabaseBases.nodeId })
+    .from(busabaseBases)
+    .where(and(eq(busabaseBases.id, targetBaseId), eq(busabaseBases.spaceId, getContextSpaceId())))
+    .limit(1);
+  if (!targetBase) {
+    throw new ORPCError("NOT_FOUND", { message: `Base not found: ${targetBaseId}` });
+  }
+  await assertNodePermission(targetBase.nodeId, "manage", ctx.actorId, db);
+
+  const bindings = Array.isArray(rawBindings)
+    ? rawBindings.flatMap((entry) => {
+        const binding = toFormBinding(entry);
+        return binding ? [binding] : [];
+      })
+    : [];
+
+  await db.insert(busabaseForms).values({
+    id: id("fom"),
+    spaceId: getContextSpaceId(),
+    nodeId,
+    targetBaseId: targetBase.id,
+    name: (fields.name as string) ?? "",
+    description: fields.description ?? "",
+    bindings,
+    page: {},
+    share: { ...DEFAULT_SHARE },
+    status: "active",
+    createdBy: ctx.actorId,
+    archivedAt: null,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  });
+
+  return nodeId;
+};
+
+registerMaterializer("form", materializeFormNode);
 
 // A Form's typed detail is just the node row — its bindings/page/share live on
 // `busabase_forms` and are read through the Form endpoints. Explicit opt-in, not

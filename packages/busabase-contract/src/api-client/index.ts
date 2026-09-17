@@ -46,6 +46,7 @@ import type {
   SearchResponseVO,
   SkillReadFileVO,
   SkillVO,
+  UserRefVO,
   ViewConfigVO,
   ViewType,
   ViewVO,
@@ -118,6 +119,13 @@ export interface BusabaseDashboardApiClient {
    * `normalizeAgentTargets` rather than reading `connectedAgents` alone.
    */
   listAgentCatalog: () => Promise<AgentCatalogEntryVO[]>;
+  /**
+   * The space's member roster — who a `member` field's picker may offer. Host
+   * resolved (this engine has no member table), so it is empty-but-successful
+   * on a host that models no membership, and unreachable for anonymous/Embed
+   * visitors (default-deny; they read people through `RecordVO.fieldUsers`).
+   */
+  listSpaceMembers: () => Promise<UserRefVO[]>;
   createComment: (payload: {
     authorId?: string;
     body: string;
@@ -358,6 +366,44 @@ export interface BusabaseDashboardApiClient {
       autoMerge?: boolean;
     },
   ) => Promise<ChangeRequestVO>;
+  /**
+   * Soft-delete a field, with its stored values. The undo is
+   * `createRestoreFieldChangeRequest`, which the dashboard already offers — this
+   * is the half that was missing, so a user could restore a field they had no
+   * way to delete.
+   */
+  createDeleteFieldChangeRequest: (
+    baseId: string,
+    payload: {
+      fieldId: string;
+      message?: string;
+      submittedBy?: string;
+      autoMerge?: boolean;
+    },
+  ) => Promise<ChangeRequestVO>;
+  /**
+   * Change a field's TYPE. Separate from `createUpdateFieldChangeRequest` because
+   * `update`'s patch rejects `type` outright (`z.never()`): a bundled `{ type }`
+   * used to be stripped silently and report success. Call
+   * `previewFieldConversion` first — values that do not fit the new type are
+   * dropped by the merge and are not recoverable from the change request.
+   */
+  createConvertFieldChangeRequest: (
+    baseId: string,
+    payload: {
+      fieldId: string;
+      newType: BaseVO["fields"][number]["type"];
+      /**
+       * Only meaningful when converting INTO select/multiselect. `auto_create`
+       * mints a choice for a value that has none; `null_on_missing` drops it.
+       * Must match whatever the preview was run with, or the preview is a lie.
+       */
+      selectChoiceMode?: "auto_create" | "null_on_missing";
+      message?: string;
+      submittedBy?: string;
+      autoMerge?: boolean;
+    },
+  ) => Promise<ChangeRequestVO>;
   // These used to type `autoMerge` as `false` and promise a plain ChangeRequestVO
   // — honest only on the review-first branch — which forced the "create the view
   // now" affordance to approve + merge in two extra round trips. They take the
@@ -433,6 +479,51 @@ export interface BusabaseDashboardApiClient {
   mergeChangeRequest: (
     changeRequestId: string,
   ) => Promise<{ changeRequest: ChangeRequestVO; record: RecordVO | null; view: ViewVO | null }>;
+  /**
+   * Propose N new records as ONE change request — one review, one merge, one
+   * atomic write. The alternative the dashboard used before this existed was N
+   * serial single-record calls, which can (and does) fail halfway and leave the
+   * import half-applied.
+   *
+   * `idempotencyKey` is scoped per base + submitter: retrying with the same key
+   * returns the first call's change request instead of duplicating the rows.
+   */
+  createBulkRecordChangeRequest: (
+    baseId: string,
+    payload: {
+      records: Array<Record<string, unknown>>;
+      message?: string;
+      submittedBy?: string;
+      idempotencyKey?: string;
+      autoMerge?: boolean;
+    },
+  ) => Promise<ChangeRequestVO>;
+  /**
+   * Patch N existing records as ONE atomic change request. Each `fields` object
+   * is a PARTIAL patch — an omitted key keeps its current value, an explicit
+   * `null` clears it — so a bulk edit only has to carry the fields the user
+   * actually touched.
+   *
+   * Pin `baseCommitId` per row (it is on `RecordVO.headCommitId`). It turns the
+   * merge into a real three-way merge: a concurrent edit to a DIFFERENT field
+   * merges cleanly, and a genuinely conflicting one is refused by name instead
+   * of being blindly overwritten.
+   */
+  createBulkUpdateRecordChangeRequest: (
+    baseId: string,
+    payload: {
+      updates: Array<{
+        recordId: string;
+        fields: Record<string, unknown>;
+        baseCommitId?: string;
+        message?: string;
+      }>;
+      message?: string;
+      submittedBy?: string;
+      idempotencyKey?: string;
+      autoMerge?: boolean;
+    },
+  ) => Promise<ChangeRequestVO>;
   createAssetUploadUrl: (input: RequestUploadUrlDTO) => Promise<RequestUploadUrlVO>;
   confirmAsset: (input: ConfirmUploadDTO) => Promise<ConfirmUploadVO>;
   updateAssetMetadata: (input: {
@@ -588,6 +679,7 @@ export const createBusabaseRestApiClient = (
     listComments: (subject) => client.comments.list(subject),
     listAgentTasks: () => client.agent.listTasks({}),
     listAgentCatalog: () => client.agents.catalog({}),
+    listSpaceMembers: () => client.spaces.members({}),
     createComment: (payload) => client.comments.create(payload),
     listNodes: () => client.nodes.list(),
     listNodeChildren: (parentId, depth) => client.nodes.list({ parentId, depth }),
@@ -635,6 +727,13 @@ export const createBusabaseRestApiClient = (
       client.bases.fieldChangeRequest({ baseId, operation: "update", ...payload }),
     createReorderFieldsChangeRequest: (baseId, payload) =>
       client.bases.fieldChangeRequest({ baseId, operation: "reorder", ...payload }),
+    createDeleteFieldChangeRequest: (baseId, payload) =>
+      client.bases.fieldChangeRequest({ baseId, operation: "delete", ...payload }),
+    // `convert` is its own operation, never folded into `update`: the update
+    // patch declares `type` as `z.never()` precisely so a bundled type change
+    // can no longer be stripped silently and reported as success.
+    createConvertFieldChangeRequest: (baseId, payload) =>
+      client.bases.fieldChangeRequest({ baseId, operation: "convert", ...payload }),
     // create/update forward the caller's intent and return the union; only
     // `createDeleteViewChangeRequest` below still pins `autoMerge: false`, and
     // that one is deliberate — deleting a view has no "do it now" affordance in
@@ -711,6 +810,10 @@ export const createBusabaseRestApiClient = (
         view: result.view,
       };
     },
+    createBulkRecordChangeRequest: (baseId, payload) =>
+      client.bases.createBulkChangeRequest({ baseId, ...payload }),
+    createBulkUpdateRecordChangeRequest: (baseId, payload) =>
+      client.bases.createBulkUpdateChangeRequest({ baseId, ...payload }),
     createAssetUploadUrl: (input) => client.assets.createUploadUrl(input),
     confirmAsset: (input) => client.assets.confirm(input),
     updateAssetMetadata: (input) => client.assets.updateMetadata(input),

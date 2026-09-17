@@ -1,3 +1,4 @@
+import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
 import type {
   BaseFieldVO,
   FieldType,
@@ -5,7 +6,7 @@ import type {
   ViewFilterOperator,
   ViewVO,
 } from "busabase-contract/types";
-import { Dialog, DialogContent, DialogTitle } from "kui/dialog";
+import { Dialog, DialogTitle } from "kui/dialog";
 import {
   AlignLeft,
   ArrowDown,
@@ -40,11 +41,13 @@ import {
   Trash2,
   Type,
   UserRound,
+  Users,
   X,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { fmt, useCoreI18n, useIString } from "../../../i18n";
 import { getPrimaryField } from "../../base/utils/primary-field";
+import { formatUserRefLabel } from "../helpers/format";
 import {
   addViewFilter,
   addViewSort,
@@ -65,6 +68,8 @@ import {
   updateViewSortAt,
 } from "../helpers/view-config";
 import type { ViewSubmitOptions } from "../helpers/view-types";
+import { DialogContent } from "./localized-dialog-content";
+import { useSpaceMemberRoster } from "./member-field";
 import { RecordTitleBadge } from "./record-title-badge";
 import { SplitSubmitButton } from "./split-submit-button";
 import { ACTIVE_VIEW_CONTROL_CLASS_NAME } from "./view-control-styles";
@@ -98,6 +103,7 @@ export const FIELD_TYPE_ICONS: Record<FieldType, LucideIcon> = {
   select: CircleDot,
   multiselect: ListChecks,
   relation: GitBranch,
+  member: Users,
   lookup: Binoculars,
   attachment: Paperclip,
   ai_summary: Sparkles,
@@ -364,6 +370,12 @@ export function ViewFieldsEditor({ config, fields, onChange, testId }: ViewField
 }
 
 interface ViewConfigEditorDialogProps {
+  /**
+   * Only needed to offer a member PICKER as a `member` filter's value. Optional:
+   * a host that renders this without an API client (the chromeless mobile view)
+   * degrades to the plain text input, where the value is a raw user id.
+   */
+  client?: Pick<BusabaseDashboardApiClient, "listSpaceMembers">;
   fields: BaseFieldVO[];
   onClose: () => void;
   onSubmit: (config: ViewConfigVO, options?: ViewSubmitOptions) => Promise<void>;
@@ -400,6 +412,7 @@ const hasInvalidFilters = (config: ViewConfigVO) =>
   );
 
 export function ViewConfigEditorDialog({
+  client,
   fields,
   onClose,
   onSubmit,
@@ -552,6 +565,7 @@ export function ViewConfigEditorDialog({
             />
           ) : section === "filters" ? (
             <ViewFiltersEditor
+              client={client}
               config={draft}
               fields={fields}
               focusedFieldId={request.focusedFieldId}
@@ -602,6 +616,7 @@ export function ViewConfigEditorDialog({
 }
 
 interface SectionEditorProps {
+  client?: Pick<BusabaseDashboardApiClient, "listSpaceMembers">;
   config: ViewConfigVO;
   fields: BaseFieldVO[];
   focusedFieldId?: string;
@@ -613,7 +628,13 @@ const findField = (fields: BaseFieldVO[], condition: { fieldId?: string; fieldSl
     condition.fieldId ? field.id === condition.fieldId : field.slug === condition.fieldSlug,
   );
 
-function ViewFiltersEditor({ config, fields, focusedFieldId, onChange }: SectionEditorProps) {
+function ViewFiltersEditor({
+  client,
+  config,
+  fields,
+  focusedFieldId,
+  onChange,
+}: SectionEditorProps) {
   const messages = useCoreI18n();
   const resolveIString = useIString();
   const visibleSet = new Set(getVisibleViewFieldSlugs(config, fields));
@@ -739,6 +760,7 @@ function ViewFiltersEditor({ config, fields, focusedFieldId, onChange }: Section
                 {viewFilterOperatorNeedsValue(operator) ? (
                   <div className="sm:col-span-3">
                     <FilterValueControl
+                      client={client}
                       field={field}
                       index={index}
                       onChange={(value) =>
@@ -764,12 +786,53 @@ function ViewFiltersEditor({ config, fields, focusedFieldId, onChange }: Section
   );
 }
 
+function MemberFilterValueControl({
+  client,
+  label,
+  onChange,
+  value,
+}: {
+  client: Pick<BusabaseDashboardApiClient, "listSpaceMembers">;
+  label: string;
+  onChange: (value: string) => void;
+  value: unknown;
+}) {
+  const messages = useCoreI18n();
+  const rosterQuery = useSpaceMemberRoster(client);
+  const selected = typeof value === "string" ? value : "";
+  const roster = rosterQuery.data ?? [];
+  // A filter can outlive the person it names. Keep the current value selectable
+  // so opening the editor does not silently rewrite the saved filter to "".
+  const hasSelected = !selected || roster.some((user) => user.id === selected);
+
+  return (
+    <select
+      aria-label={label}
+      className="h-8 w-full rounded-md border border-border/70 bg-card px-2 text-xs"
+      onChange={(event) => onChange(event.target.value)}
+      value={selected}
+    >
+      <option value="">{messages.base.chooseFilterValue}</option>
+      {hasSelected ? null : (
+        <option value={selected}>{formatUserRefLabel(undefined, selected, messages)}</option>
+      )}
+      {roster.map((user) => (
+        <option key={user.id} value={user.id}>
+          {formatUserRefLabel(user, user.id, messages)}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 function FilterValueControl({
+  client,
   field,
   index,
   onChange,
   value,
 }: {
+  client?: Pick<BusabaseDashboardApiClient, "listSpaceMembers">;
   field: BaseFieldVO;
   index: number;
   onChange: (value: string) => void;
@@ -777,6 +840,14 @@ function FilterValueControl({
 }) {
   const messages = useCoreI18n();
   const label = fmt(messages.base.filterValueAt, { index: index + 1 });
+  // A `member` filter's value is a USER ID, because that is what the record
+  // stores and what `getViewFieldPreviewText` compares on both sides. Typing an
+  // id by hand is not a thing a user can do, so this is a picker or nothing.
+  if (field.type === "member" && client) {
+    return (
+      <MemberFilterValueControl client={client} label={label} onChange={onChange} value={value} />
+    );
+  }
   if (field.type === "select" || field.type === "multiselect") {
     return (
       <select

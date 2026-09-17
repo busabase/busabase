@@ -13,6 +13,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { AgentSessionVO } from "busabase-contract/domains/agents/types";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCoreI18n, useCoreLocale } from "../../../i18n";
+import { presentCoreError } from "../../../i18n/localize-error";
 import { openAgentChatTab } from "../../dashboard/components/side-panel-sources";
 import { type AgentTarget, chooseAgentTarget, normalizeAgentTargets } from "../utils/agent-targets";
 import { lookupNodeAgentSession, rememberNodeAgentSession } from "../utils/node-agent-sessions";
@@ -35,18 +37,23 @@ export interface UseAskAgentOptions {
 }
 
 export function useAskAgent({ orpc, nodeId, onHandedOff, onNoAgents }: UseAskAgentOptions) {
+  const messages = useCoreI18n();
+  const locale = useCoreLocale();
   const queryClient = useQueryClient();
   // The prompt body the user asked about, held from the click until a target is
   // resolved. Non-null is also what "the flow is running" means — the catalog
   // is only fetched from here, so merely opening the prompts dialog to copy
   // some text never probes the machine for agent binaries.
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
+  const [pendingTarget, setPendingTarget] = useState<AgentTarget | null>(null);
   const [targets, setTargets] = useState<AgentTarget[] | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
+  const [retryVersion, setRetryVersion] = useState(0);
   const started = useRef(false);
 
   const enabled = pendingPrompt !== null;
-  const catalog = useQuery({ ...orpc.agents.catalog.queryOptions(), enabled });
+  const needsCatalog = enabled && pendingTarget === null;
+  const catalog = useQuery({ ...orpc.agents.catalog.queryOptions(), enabled: needsCatalog });
   const sessions = useQuery({ ...orpc.agents.sessions.list.queryOptions(), enabled });
   const createSession = useMutation(orpc.agents.sessions.create.mutationOptions());
 
@@ -58,6 +65,7 @@ export function useAskAgent({ orpc, nodeId, onHandedOff, onNoAgents }: UseAskAge
   const reset = useCallback(() => {
     started.current = false;
     setPendingPrompt(null);
+    setPendingTarget(null);
     setTargets(null);
     setStartError(null);
   }, []);
@@ -85,7 +93,9 @@ export function useAskAgent({ orpc, nodeId, onHandedOff, onNoAgents }: UseAskAge
           // Stays in the dialog with the prompt still selected: the cause is
           // usually fixable (agent not installed, Buda signed out) and the
           // retry should not cost the user their place.
-          setStartError(error instanceof Error ? error.message : String(error));
+          setStartError(
+            presentCoreError(messages, locale, error, messages.agentPrompts.askAgentLoadFailed),
+          );
           started.current = false;
           return;
         }
@@ -104,7 +114,7 @@ export function useAskAgent({ orpc, nodeId, onHandedOff, onNoAgents }: UseAskAge
       reset();
       onHandedOff();
     },
-    [createSession, nodeId, onHandedOff, orpc, queryClient, reset, sessions.data],
+    [createSession, locale, messages, nodeId, onHandedOff, orpc, queryClient, reset, sessions.data],
   );
 
   /**
@@ -119,8 +129,13 @@ export function useAskAgent({ orpc, nodeId, onHandedOff, onNoAgents }: UseAskAge
   // biome-ignore lint/correctness/useExhaustiveDependencies: `handOff` is stable per render inputs; adding it re-runs the effect mid-flight.
   useEffect(() => {
     if (pendingPrompt === null || started.current) return;
-    if (catalog.isPending || sessions.isPending) return;
-    if (catalog.isError || sessions.isError) return;
+    if (sessions.isPending || sessions.isError) return;
+    if (pendingTarget) {
+      started.current = true;
+      void handOff(pendingTarget, pendingPrompt);
+      return;
+    }
+    if (catalog.isPending || catalog.isError) return;
 
     started.current = true;
     const choice = chooseAgentTarget(launchable);
@@ -140,7 +155,9 @@ export function useAskAgent({ orpc, nodeId, onHandedOff, onNoAgents }: UseAskAge
     launchable,
     onNoAgents,
     pendingPrompt,
+    pendingTarget,
     reset,
+    retryVersion,
     sessions.isError,
     sessions.isPending,
   ]);
@@ -150,15 +167,26 @@ export function useAskAgent({ orpc, nodeId, onHandedOff, onNoAgents }: UseAskAge
     started.current = false;
     setStartError(null);
     setTargets(null);
+    setPendingTarget(null);
+    setPendingPrompt(promptBody);
+  }, []);
+
+  /** Hand the prompt to a target already chosen by a caller-owned connection list. */
+  const askTarget = useCallback((promptBody: string, target: AgentTarget) => {
+    started.current = false;
+    setStartError(null);
+    setTargets(null);
+    setPendingTarget(target);
     setPendingPrompt(promptBody);
   }, []);
 
   const retry = useCallback(() => {
     started.current = false;
     setStartError(null);
-    void catalog.refetch();
+    setRetryVersion((version) => version + 1);
+    if (pendingTarget === null) void catalog.refetch();
     void sessions.refetch();
-  }, [catalog, sessions]);
+  }, [catalog, pendingTarget, sessions]);
 
   const pickTarget = useCallback(
     (target: AgentTarget) => {
@@ -170,14 +198,16 @@ export function useAskAgent({ orpc, nodeId, onHandedOff, onNoAgents }: UseAskAge
 
   return {
     ask,
+    askTarget,
     /** Non-null while the user has more than one launchable target to pick from. */
     targets,
     pickTarget,
     retry,
     reset,
-    isLoading: enabled && (catalog.isPending || sessions.isPending),
+    isActive: enabled,
+    isLoading: enabled && (sessions.isPending || (pendingTarget === null && catalog.isPending)),
     /** Catalog/session lookup failed. Distinct from "no agents" — never routes away. */
-    loadError: enabled && (catalog.isError || sessions.isError),
+    loadError: enabled && (sessions.isError || (pendingTarget === null && catalog.isError)),
     /** The session could not be created. Keeps the dialog and the selection alive. */
     startError,
     isStarting: createSession.isPending,

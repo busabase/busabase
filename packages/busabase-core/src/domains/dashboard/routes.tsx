@@ -20,6 +20,20 @@ export const getBusabaseDashboardRoutes = (
   dashboard: ReactNode,
   messages?: CoreI18nMessages,
 ): BusabaseRouteConfig[] => {
+  const translatedNodeLabels: Record<string, string> | undefined = messages
+    ? {
+        airapp: messages.nodeDetail.airapp,
+        doc: messages.nodeDetail.doc,
+        drive: messages.nodeDetail.drive,
+        file: messages.nodeDetail.file,
+        folder: messages.nodeDetail.folder,
+        form: messages.nodeDetail.form,
+        html: messages.nodeDetail.html,
+        skill: messages.nodeDetail.skill,
+        whiteboard: messages.nodeDetail.whiteboard,
+        workflow: messages.nodeDetail.workflow,
+      }
+    : undefined;
   // Detail routes for simple node types (skill, doc, …) come from the node-type
   // registry: any `hasDetail` type gets `/{type}/:slug`. `base` is excluded — it
   // owns the bespoke sub-routes (design / new / view / record) below.
@@ -38,8 +52,8 @@ export const getBusabaseDashboardRoutes = (
       {
         path: `/${nodeType.type}/:slug`,
         component: dashboard,
-        breadcrumb: nodeType.label,
-        title: nodeType.label,
+        breadcrumb: translatedNodeLabels?.[nodeType.type] ?? nodeType.label,
+        title: translatedNodeLabels?.[nodeType.type] ?? nodeType.label,
       },
     ]);
 
@@ -107,14 +121,14 @@ export const getBusabaseDashboardRoutes = (
     {
       path: "/agents",
       component: dashboard,
-      breadcrumb: "Agents",
-      title: "Agents",
+      breadcrumb: messages?.nav.agents ?? "Agents",
+      title: messages?.nav.agents ?? "Agents",
     },
     {
       path: "/templates",
       component: dashboard,
-      breadcrumb: "Templates",
-      title: "Templates",
+      breadcrumb: messages?.nav.templates ?? "Templates",
+      title: messages?.nav.templates ?? "Templates",
     },
     {
       // One template, addressed by its NAME rather than its catalog id: the id
@@ -123,8 +137,8 @@ export const getBusabaseDashboardRoutes = (
       // catalog, so it round-trips cleanly and the URL stays readable.
       path: "/templates/:templateName",
       component: dashboard,
-      breadcrumb: "Template",
-      title: "Template",
+      breadcrumb: messages?.routes.template ?? "Template",
+      title: messages?.routes.template ?? "Template",
     },
     {
       path: "/apps",
@@ -137,14 +151,14 @@ export const getBusabaseDashboardRoutes = (
       // route lookups use `Array.find`, first match wins.
       path: "/agents/new",
       component: dashboard,
-      breadcrumb: "Add agent",
-      title: "Add agent",
+      breadcrumb: messages?.agents.addAgent ?? "Add agent",
+      title: messages?.agents.addAgent ?? "Add agent",
     },
     {
       path: "/agents/:agentSlug",
       component: dashboard,
-      breadcrumb: "Agent",
-      title: "Agent",
+      breadcrumb: messages?.actor.agent ?? "Agent",
+      title: messages?.actor.agent ?? "Agent",
     },
     {
       path: "/assets",

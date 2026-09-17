@@ -50,3 +50,40 @@ describe("AgentIntegrationPluginCards", () => {
     expect(copyPromptClasses).not.toContain("border-input");
   });
 });
+
+describe("AgentIntegrationContent onboarding copy", () => {
+  it.each([
+    {
+      locale: "en" as const,
+      expected:
+        "It reuses a connected Busabase MCP integration when available; otherwise it signs in. It then installs the permanent Busabase skills.",
+      excluded: "CLI-based agents",
+    },
+    {
+      locale: "zh-CN" as const,
+      expected:
+        "它会优先复用已连接的 Busabase MCP 集成，否则先登录；连接后再安装常驻的 Busabase 技能。",
+      excluded: "CLI 代理",
+    },
+    {
+      locale: "ja" as const,
+      expected:
+        "接続済みの Busabase MCP があれば再利用し、なければログインします。接続後、常設の Busabase スキルをインストールします。",
+      excluded: "CLI エージェント",
+    },
+  ])("keeps $locale onboarding agent-neutral", ({ locale, expected, excluded }) => {
+    const markup = renderToStaticMarkup(
+      <CoreI18nProvider locale={locale}>
+        <AgentIntegrationContent
+          defaultOrigin="https://app.busabase.com"
+          edition="cloud"
+          editionConfirmed
+          targetSpaceId="space_cloud"
+        />
+      </CoreI18nProvider>,
+    );
+
+    expect(markup).toContain(expected);
+    expect(markup).not.toContain(excluded);
+  });
+});

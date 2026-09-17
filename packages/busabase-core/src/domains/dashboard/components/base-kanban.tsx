@@ -5,10 +5,12 @@ import { SPALink as Link } from "openlib/ui/dashboard";
 import { useState } from "react";
 import { useSearch } from "wouter";
 import { useCoreI18n, useIString } from "../../../i18n";
+import { getMemberIds, isPeopleFieldType } from "../../base/field-types";
 import { getPrimaryField } from "../../base/utils/primary-field";
 import { getRecordTitle } from "../helpers/change-request";
 import { getFieldPreviewText } from "../helpers/field";
 import { mergeSearchIntoHref } from "../helpers/link-search";
+import { MemberChips } from "./member-field";
 
 type Choice = { id: string; name: string; color?: string };
 
@@ -82,7 +84,19 @@ function KanbanCard({
         {title}
       </Link>
       {bodyFields.slice(0, 3).map((field) => {
-        const preview = getFieldPreviewText(field, record.headCommit.payload[field.slug], messages);
+        const rawValue = record.headCommit.payload[field.slug];
+        // A card is scanned, not read — the whole point of a board is
+        // recognising an owner at a glance, which a joined list of user ids does
+        // not do. People render as avatar chips here, not as preview text.
+        if (isPeopleFieldType(field.type)) {
+          const memberIds = getMemberIds(rawValue);
+          return memberIds.length === 0 ? null : (
+            <div className="mt-1.5 flex min-w-0" key={field.id}>
+              <MemberChips users={record.fieldUsers} value={rawValue} />
+            </div>
+          );
+        }
+        const preview = getFieldPreviewText(field, rawValue, messages);
         if (!preview || preview === "-") {
           return null;
         }

@@ -16,9 +16,10 @@ import { busabaseAgentSessions } from "./agent-sessions";
  * granularity — one measured turn produced 26 events for a three-line haiku,
  * 15 of them single-token `agent_message_chunk`s — so writing one row per
  * `emit()` would be an INSERT per token against an embedded PGLite on the
- * desktop build. Chunks are coalesced at the turn boundary before they land
- * here (spec §7.5); `seq` therefore stays gap-free per session but does not
- * correspond 1:1 to the in-memory counter.
+ * desktop build. Local-subprocess chunks are coalesced at the turn boundary.
+ * Remote chunks retain their original sequence because non-owner workers must
+ * follow an in-progress turn without replaying a partial message. Persisted
+ * sequences are therefore monotonic but not necessarily gap-free.
  */
 export const busabaseAgentSessionEvents = pgTable(
   "busabase_agent_session_events",

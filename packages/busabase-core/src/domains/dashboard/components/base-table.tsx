@@ -12,7 +12,7 @@ import type {
   ViewVO,
 } from "busabase-contract/types";
 import { VIEW_FIELD_MIN_WIDTH } from "busabase-contract/types";
-import { Dialog, DialogContent, DialogTitle } from "kui/dialog";
+import { Dialog, DialogTitle } from "kui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "kui/popover";
 import { Skeleton } from "kui/skeleton";
 import {
@@ -41,6 +41,7 @@ import {
   Sparkles,
   Table2,
   Trash2,
+  Upload,
   X,
 } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
@@ -57,7 +58,8 @@ import {
   useState,
 } from "react";
 import { useSearch } from "wouter";
-import { fmt, useCoreI18n, useIString } from "../../../i18n";
+import { fmt, useCoreI18n, useCoreLocale, useIString } from "../../../i18n";
+import { presentCoreError } from "../../../i18n/localize-error";
 import {
   fieldColumnWidth,
   fieldDisplayKind,
@@ -98,7 +100,11 @@ import { BusaBaseCalendar } from "./base-calendar";
 import { BusaBaseGallery } from "./base-gallery";
 import { BusaBaseGantt } from "./base-gantt";
 import { BusaBaseKanban } from "./base-kanban";
+import { BulkEditRecordsDialog } from "./bulk-edit-records-dialog";
 import { FieldBadge, WhiteboardThumbnail } from "./field-preview";
+import { ImportRecordsDialog } from "./import-records-dialog";
+import { DialogContent } from "./localized-dialog-content";
+import { MemberChips } from "./member-field";
 import { NodeAgentPromptsDialog } from "./node-agent-prompts-dialog";
 import { ConfirmActionDialog } from "./primitives";
 import { RecordsPaginationBar } from "./records-pagination-bar";
@@ -770,6 +776,8 @@ export function BusaBaseTable({
   onCreateView,
   onDeleteView,
   onDeleteRecords,
+  onImportRecords,
+  onUpdateRecords,
   onRestoreView,
   onRestoreRecord,
   onMoveRecord,
@@ -804,6 +812,24 @@ export function BusaBaseTable({
     records: RecordVO[],
     options?: RecordSubmitOptions,
   ) => Promise<{ ok: number; failed: number }>;
+  /**
+   * Patch every selected record in ONE atomic change request. Unlike
+   * `onDeleteRecords` (which loops single-record calls because no batch delete
+   * endpoint exists) this is a single call that either lands entirely or not at
+   * all, so it throws rather than returning a partial tally.
+   */
+  onUpdateRecords?: (
+    base: BaseVO,
+    records: RecordVO[],
+    fields: Record<string, unknown>,
+    options?: RecordSubmitOptions,
+  ) => Promise<void>;
+  /** Create N records from pasted rows, as one change request. */
+  onImportRecords?: (
+    base: BaseVO,
+    rows: Array<Record<string, unknown>>,
+    options?: RecordSubmitOptions,
+  ) => Promise<void>;
   onRestoreView?: (view: ViewVO) => Promise<void>;
   onRestoreRecord?: (record: RecordVO) => Promise<void>;
   /** Kanban drag-to-move: set one field on a record and auto-merge, no navigation. */
@@ -824,6 +850,7 @@ export function BusaBaseTable({
   const messages = useCoreI18n();
   const currentSearch = useSearch();
   const resolveIString = useIString();
+  const locale = useCoreLocale();
   const [editingViewMode, setEditingViewMode] = useState<"create" | "edit" | null>(null);
   const [isDeletingView, setIsDeletingView] = useState(false);
   const [confirmDeleteView, setConfirmDeleteView] = useState<ViewVO | null>(null);
@@ -843,6 +870,8 @@ export function BusaBaseTable({
   const [selectedRecordIds, setSelectedRecordIds] = useState<Set<string>>(new Set());
   const [isBulkDeleting, setIsBulkDeleting] = useState<"immediate" | "changeRequest" | null>(null);
   const [bulkDeleteError, setBulkDeleteError] = useState<string | null>(null);
+  const [isBulkEditOpen, setIsBulkEditOpen] = useState(false);
+  const [isImportOpen, setIsImportOpen] = useState(false);
   // A public read-only visitor gets no "New record" affordance — the create
   // route/mutation isn't on the anonymous allowlist, so it could only ever fail.
   const isAnon = useIsAnonymousVisitor();
@@ -918,7 +947,7 @@ export function BusaBaseTable({
       await onDeleteRecords(selectedRecords, { mergeImmediately });
       setSelectedRecordIds(new Set());
     } catch (error) {
-      setBulkDeleteError(error instanceof Error ? error.message : messages.shell.operationFailed);
+      setBulkDeleteError(presentCoreError(messages, locale, error, messages.shell.operationFailed));
     } finally {
       setIsBulkDeleting(null);
     }
@@ -943,7 +972,7 @@ export function BusaBaseTable({
       return true;
     } catch (error) {
       setViewActionError(
-        error instanceof Error ? error.message : messages.base.failedQuickViewUpdate,
+        presentCoreError(messages, locale, error, messages.base.failedQuickViewUpdate),
       );
       return false;
     } finally {
@@ -1154,6 +1183,18 @@ export function BusaBaseTable({
                 </div>
               </details>
             ) : null}
+            {base && !isAnon && onImportRecords ? (
+              /* Secondary (bordered, not filled) so "New record" stays primary. */
+              <button
+                className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-border/70 bg-card px-2.5 font-medium text-xs transition-colors hover:bg-accent"
+                data-testid="import-records"
+                onClick={() => setIsImportOpen(true)}
+                type="button"
+              >
+                <Upload size={13} />
+                {messages.base.importRecords}
+              </button>
+            ) : null}
             {base && !isAnon ? (
               <Link
                 className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-foreground px-2.5 font-medium text-background text-xs transition-colors hover:bg-foreground/85"
@@ -1184,6 +1225,7 @@ export function BusaBaseTable({
         </div>
       ) : null}
       <ViewConfigEditorDialog
+        client={client}
         fields={allFields}
         onClose={() => setViewEditorRequest(null)}
         onSubmit={submitViewControls}
@@ -1221,7 +1263,9 @@ export function BusaBaseTable({
           onDeleteView(confirmDeleteView)
             .then(() => setConfirmDeleteView(null))
             .catch((error) => {
-              setViewActionError(error instanceof Error ? error.message : messages.base.deleteView);
+              setViewActionError(
+                presentCoreError(messages, locale, error, messages.base.deleteView),
+              );
             })
             .finally(() => setIsDeletingView(false));
         }}
@@ -1321,7 +1365,19 @@ export function BusaBaseTable({
               >
                 {messages.base.clearSelection}
               </button>
-              <div className="ml-auto">
+              {/* Edit sits LEFT of delete so the destructive action stays
+                  rightmost, matching how the node menu keeps Delete last. */}
+              {onUpdateRecords && base ? (
+                <button
+                  className="ml-auto rounded-md border border-border/70 bg-card px-2.5 py-1 font-medium text-xs transition-colors hover:bg-accent"
+                  data-testid="bulk-edit-selected"
+                  onClick={() => setIsBulkEditOpen(true)}
+                  type="button"
+                >
+                  {messages.base.editSelectedRecords}
+                </button>
+              ) : null}
+              <div className={onUpdateRecords && base ? "" : "ml-auto"}>
                 <SplitSubmitButton
                   changeRequestAction={{
                     label: fmt(messages.base.submitDeleteRecordsRequest, {
@@ -1346,6 +1402,24 @@ export function BusaBaseTable({
           ) : null}
           {bulkDeleteError ? (
             <div className="mb-2 text-rejected-strong text-xs">{bulkDeleteError}</div>
+          ) : null}
+          {onUpdateRecords && base ? (
+            <BulkEditRecordsDialog
+              base={base}
+              client={client}
+              onOpenChange={setIsBulkEditOpen}
+              onSubmit={onUpdateRecords}
+              open={isBulkEditOpen}
+              records={selectedRecords}
+            />
+          ) : null}
+          {onImportRecords && base ? (
+            <ImportRecordsDialog
+              base={base}
+              onOpenChange={setIsImportOpen}
+              onSubmit={onImportRecords}
+              open={isImportOpen}
+            />
           ) : null}
           <div
             aria-colcount={fields.length + (selectionEnabled ? 1 : 0)}
@@ -1715,6 +1789,7 @@ function ViewChangeRequestForm({
   view,
 }: ViewChangeRequestFormProps) {
   const messages = useCoreI18n();
+  const locale = useCoreLocale();
   const resolveIString = useIString();
   const attachmentFields = base.fields.filter((field) => field.type === "attachment");
   const selectFields = base.fields.filter((field) => field.type === "select");
@@ -1828,7 +1903,7 @@ function ViewChangeRequestForm({
       }
       onSubmitted();
     } catch (error) {
-      setFormError(error instanceof Error ? error.message : messages.base.failedSubmitView);
+      setFormError(presentCoreError(messages, locale, error, messages.base.failedSubmitView));
     } finally {
       setIsSaving(false);
     }
@@ -2178,6 +2253,16 @@ function RecordTableCellContent({
         >
           {checked ? <Check size={12} /> : null}
         </span>
+      </Link>
+    );
+  }
+
+  if (kind === "member") {
+    // Wrapped in the row `Link` like every other cell — `MemberChips` renders
+    // only spans, so it never nests an interactive element inside the link.
+    return (
+      <Link className="flex min-w-0 items-center py-1" href={currentRecordHref}>
+        <MemberChips users={record.fieldUsers} value={rawValue} />
       </Link>
     );
   }

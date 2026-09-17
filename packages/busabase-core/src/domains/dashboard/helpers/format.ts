@@ -42,6 +42,20 @@ const formatListTime = (value: string, locale: Intl.LocalesArgument) =>
     day: "numeric",
   });
 
+/**
+ * The activity feed's own timestamp. Unlike `formatListTime` (date only) it
+ * keeps the clock time down to the second: an activity row is a log entry, and
+ * "Jul 30" alone cannot tell two events of the same day apart.
+ */
+const formatListDateTime = (value: string, locale: Intl.LocalesArgument) =>
+  new Date(value).toLocaleString(locale, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+
 const formatDetailTime = (value: string, locale: Intl.LocalesArgument) =>
   new Date(value).toLocaleString(locale, {
     month: "short",
@@ -137,6 +151,28 @@ const formatUserRefLabel = (
   return messages?.identity.unknownUser ?? "Unknown user";
 };
 
+/**
+ * The label on a people-typed CELL's chip (`member`, `created_by`, `updated_by`).
+ *
+ * Two fallbacks on purpose:
+ * - A person the server RESOLVED gets their own name/email.
+ * - An id nothing resolved goes through `formatOpaqueUserId`, which is what
+ *   `created_by` cells have always used. That keeps a human-readable actor id
+ *   like `field-type-agent` reading as "Field Type Agent" instead of
+ *   "Unknown user field-type" — the regression that appeared the moment
+ *   `created_by` started rendering as a chip.
+ *
+ * NOT the same as `formatUserRefLabel`, and deliberately so: that one backs
+ * comment authors and CR reviewers, where "Unknown user" is the right wording
+ * for someone who genuinely cannot be resolved.
+ */
+const formatMemberChipLabel = (
+  user: UserRefVO | null | undefined,
+  id: string,
+  messages?: CoreI18nMessages,
+): string =>
+  user?.name?.trim() ? formatUserRefLabel(user, id, messages) : formatOpaqueUserId(id, messages);
+
 const formatUserRefSubtitle = (user: UserRefVO | null | undefined) => {
   if (user?.email?.trim() && user.email !== user.name) {
     return user.email;
@@ -152,10 +188,12 @@ export {
   formatNumberField,
   shortIdentifier,
   formatListTime,
+  formatListDateTime,
   formatDetailTime,
   formatFullTime,
   formatAttachmentSize,
   KNOWN_ACTOR_LABELS,
+  formatMemberChipLabel,
   formatOpaqueUserId,
   formatUserRefLabel,
   formatUserRefSubtitle,
