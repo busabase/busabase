@@ -1,8 +1,7 @@
 import { createLanguageOptions } from "openlib/i18n";
+import { type Locale, SUPPORTED_LOCALES } from "./app-locale";
 
-export const SUPPORTED_LOCALES = ["en", "zh-CN", "ja"] as const;
-
-export type Locale = (typeof SUPPORTED_LOCALES)[number];
+export { type Locale, SUPPORTED_LOCALES } from "./app-locale";
 
 export const LOCALE_DISPLAY_NAMES: Record<Locale, string> = {
   en: "English",

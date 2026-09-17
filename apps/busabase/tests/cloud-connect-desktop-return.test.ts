@@ -3,9 +3,12 @@ import {
   DESKTOP_CLOUD_CONNECT_RETURNED,
   isDesktopCloudConnectReturn,
 } from "busabase-core/domains/settings/desktop-shell";
+import { NextRequest } from "next/server";
 import { describe, expect, it } from "vitest";
+import { GET as cloudConnectCallback } from "../src/app/api/cloud-connect/callback/route";
 import {
   beginCloudConnectAuthorize,
+  getCloudConnectFlowLocale,
   isDesktopCloudConnectFlow,
 } from "../src/domains/settings/logic/cloud-connect-oauth";
 
@@ -53,6 +56,28 @@ describe("isDesktopCloudConnectFlow", () => {
     expect(isDesktopCloudConnectFlow(null)).toBe(false);
     expect(isDesktopCloudConnectFlow("")).toBe(false);
     expect(isDesktopCloudConnectFlow("never-issued")).toBe(false);
+  });
+});
+
+describe("getCloudConnectFlowLocale", () => {
+  it("retains the selected UI locale for a callback opened in another browser", () => {
+    const { authorizeUrl } = beginCloudConnectAuthorize({ ...flowInput, locale: "ja" });
+    expect(getCloudConnectFlowLocale(stateOf(authorizeUrl))).toBe("ja");
+    expect(getCloudConnectFlowLocale("unknown-state")).toBeUndefined();
+  });
+
+  it("renders the initiating locale on an OAuth failure, regardless of the browser locale", async () => {
+    const { authorizeUrl } = beginCloudConnectAuthorize({ ...flowInput, locale: "ja" });
+    const state = stateOf(authorizeUrl);
+    const request = new NextRequest(
+      `http://127.0.0.1:15419/api/cloud-connect/callback?error=access_denied&state=${state}`,
+      { headers: { "accept-language": "en" } },
+    );
+    const response = await cloudConnectCallback(request);
+    expect(response.status).toBe(400);
+    const html = await response.text();
+    expect(html).toContain('<html lang="ja">');
+    expect(html).toContain("サインインに失敗しました");
   });
 });
 

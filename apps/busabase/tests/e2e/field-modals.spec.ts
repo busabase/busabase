@@ -48,7 +48,7 @@ test("Add Field opens in a responsive modal and cancel preserves the design page
   await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
 });
 
-test("Rename Field opens in a modal without expanding the field list", async ({ page }) => {
+test("Edit Field opens in a modal without expanding the field list", async ({ page }) => {
   await page.goto(designUrl);
 
   const fields = page.locator("[data-base-fields]");
@@ -61,7 +61,7 @@ test("Rename Field opens in a modal without expanding the field list", async ({ 
 
   await renameButton.click();
 
-  const dialog = page.getByRole("dialog", { name: /Rename field: Title/i });
+  const dialog = page.getByRole("dialog", { name: /Edit field: Title/i });
   await expect(dialog).toBeVisible();
   await expect(page).toHaveURL(initialUrl);
   await expect

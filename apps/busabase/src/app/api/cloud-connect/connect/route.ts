@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { getDb } from "~/db";
 import { beginCloudConnectAuthorize } from "~/domains/settings/logic/cloud-connect-oauth";
 import { ensureCloudConnectRow, setCloudUrl } from "~/domains/settings/logic/cloud-connect-store";
+import { normalizeBusabaseAppLocale } from "~/lib/i18n";
 
 function normalizeCloudUrl(value: string): string | null {
   try {
@@ -23,6 +24,7 @@ function normalizeCloudUrl(value: string): string | null {
 export async function POST(request: NextRequest) {
   const body = (await request.json().catch(() => ({}))) as {
     cloudUrl?: unknown;
+    locale?: unknown;
     returnToDesktop?: unknown;
   };
   const db = await getDb();
@@ -42,6 +44,7 @@ export async function POST(request: NextRequest) {
     cloudUrl,
     tunnelId: row.tunnelId,
     redirectUri,
+    locale: normalizeBusabaseAppLocale(typeof body.locale === "string" ? body.locale : undefined),
     // The caller could not open an in-app popup, which inside the Busabase
     // Desktop shell means the OS browser will run the sign-in — so the callback
     // page has to deep link the user back. See the shared Busabase desktop-shell protocol.

@@ -3,6 +3,7 @@ import "server-only";
 import { ORPCError } from "@orpc/server";
 import { runWithBusabaseContext } from "busabase-core/context";
 import { resolveAssetContent } from "busabase-core/domains/assets/asset-content-logic";
+import { createAssetDownloadResponse } from "busabase-core/domains/assets/asset-download-response";
 import { getLocalUserName } from "~/lib/local-user";
 import { resolveRelayPermissionContext } from "~/lib/relay-permission";
 
@@ -26,12 +27,14 @@ export const dynamic = "force-dynamic";
  * is the JSON *description* of the same bytes (`{ downloadUrl, mimeType, … }`);
  * both go through the same `resolveAssetContent` gate.
  *
- * **Redirect, not proxy.** A 302 to the resolved location keeps bytes off the
- * app server (no buffering, no streaming bugs, no double egress) and is the
- * only shape that works when the backend hands out presigned S3 URLs. The
- * `Location` may be root-relative (`/api/storage/…` on local disk) — RFC 7231
- * resolves it against the request URI, which is exactly the same-origin fetch
- * the browser would have made before.
+ * **Preview redirects; explicit downloads stream.** Ordinary requests return a
+ * 302 to keep preview bytes off the app server. `?download=1` instead streams
+ * bounded storage chunks with `Content-Disposition: attachment`; otherwise a
+ * redirect to cross-origin storage makes browsers ignore the HTML `download`
+ * attribute and open a new tab. The `Location` for preview requests may be
+ * root-relative (`/api/storage/…` on local disk) — RFC 7231 resolves it against
+ * the request URI, which is exactly the same-origin fetch the browser would
+ * have made before.
  *
  * **Access control.** `resolveAssetContent` applies the standard asset ACL
  * first: a read requires one usage the caller can see, and a Doc-embedded image
@@ -42,7 +45,7 @@ export const dynamic = "force-dynamic";
  * DOES inject an actor (an API-key ceiling relayed from Cloud, an anonymous
  * public-share visitor).
  *
- * **Caching.** The bytes keep coming from wherever they came from before — the
+ * **Preview caching.** Preview bytes keep coming from wherever they came from before — the
  * redirect target IS the CDN/S3/local URL — so the only new cost this route adds
  * is one small round-trip per image to learn that target. Cache policy exists to
  * make that cost approach zero on repeat views.
@@ -91,6 +94,10 @@ export const GET = async (
       },
       () => resolveAssetContent(assetId),
     );
+    const url = new URL(request.url);
+    if (url.searchParams.get("download") === "1") {
+      return createAssetDownloadResponse(content, url.searchParams.get("filename"));
+    }
     return new Response(null, {
       status: 302,
       headers: {

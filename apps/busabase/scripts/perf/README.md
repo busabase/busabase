@@ -31,6 +31,44 @@ tune `perf:suite`; `WORKERS`/`DURATION` tune `perf:writes`; `SEED_TOTAL`
 tunes `perf:seed` (batched in groups of 1000 — the bulk-change-request API
 cap). `BUSABASE_URL` overrides the target server for all three scripts.
 
+## Search quality evaluation
+
+This is an offline regression evaluation, not synthetic production analytics.
+It runs 20 seed-validated ground-truth queries (records, Bases, Docs, and file
+body content) repeatedly through the real quick/full HTTP paths and writes a
+JSON report. The default is 500 sequential sessions.
+
+Use one file-backed PGLite database and one storage directory for both seed and
+server. Reusing the database with a different storage directory makes file-body
+results look absent even though their metadata rows still exist.
+
+```bash
+export PG_DATABASE_URL=pglite://.data/search-eval
+export STORAGE_URL=local:.data/search-eval-assets
+
+# Seed the real English default workspace, then serve that exact DB + storage.
+pnpm --filter ./apps/busabase db:seed:all
+pnpm --filter ./apps/busabase exec next dev --webpack -p 15425
+
+# In another terminal:
+SEARCH_EVAL_URL=http://127.0.0.1:15425 \
+  pnpm --filter ./apps/busabase perf:search-quality
+```
+
+Controls:
+
+- `SEARCH_EVAL_SESSIONS` defaults to `500`.
+- `SEARCH_EVAL_OUTPUT` defaults to `/tmp/busabase-search-quality-eval.json`.
+- `SEARCH_EVAL_URL` defaults to `http://127.0.0.1:15419`.
+- Remote targets are refused by default. `SEARCH_EVAL_ALLOW_REMOTE=1` is an
+  explicit acknowledgement that the run will generate real traffic and
+  ordinary request-level telemetry.
+
+The evaluator never calls `searchMetrics.report`; its no-click result is a
+proxy based on whether the ground-truth target appears in quick rank 1-6 or
+advanced rank 1-20. It also omits the browser-local Recently visited cache, so
+quick coverage is conservative for targets a person has already opened.
+
 ## Test PGLite vs Postgres
 
 Both backends are worth checking — PGLite is the default "zero setup" mode,

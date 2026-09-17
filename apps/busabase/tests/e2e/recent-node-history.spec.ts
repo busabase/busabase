@@ -102,7 +102,7 @@ test("a cold direct URL records a deep node omitted from the sidebar prefetch", 
 
     await page.getByRole("button", { name: "Search", exact: true }).click();
     const dialog = page.getByRole("dialog");
-    await expect(dialog.getByRole("button").filter({ hasText: docName })).toBeVisible();
+    await expect(dialog.locator(`[data-search-result="${docName}"]`)).toBeVisible();
   } finally {
     if (rootNodeId) {
       const cleanupResponse = await request.post("/api/v1/nodes/change-requests", {

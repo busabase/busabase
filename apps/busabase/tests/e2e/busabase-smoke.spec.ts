@@ -76,9 +76,9 @@ test("dashboard routes render the review-first seeded experience", async ({ page
   // Addressed by ROLE, not by placeholder: the placeholder is marketing copy
   // and renaming it (to "Search apps, skills, records, bases, change
   // requests…") broke this line with a 60s timeout that named a locator
-  // rather than the copy change that caused it. The searchbox role is what
+  // rather than the copy change that caused it. The combobox role is what
   // this step actually depends on.
-  await page.getByRole("dialog").getByRole("searchbox").fill("agent");
+  await page.getByRole("dialog").getByRole("combobox", { name: "Search" }).fill("agent");
   // No tab assertion here on purpose. This line used to be
   // `getByRole("tab", { name: /Recent/ })` with aria-selected, which stopped
   // existing the moment the dialog moved from tabs to sections — the sections

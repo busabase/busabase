@@ -6,6 +6,7 @@ import type { NextRequest } from "next/server";
 import { getDb } from "~/db";
 import {
   completeCloudConnectAuthorize,
+  getCloudConnectFlowLocale,
   isDesktopCloudConnectFlow,
 } from "~/domains/settings/logic/cloud-connect-oauth";
 import {
@@ -13,6 +14,7 @@ import {
   saveCloudConnectCredential,
 } from "~/domains/settings/logic/cloud-connect-store";
 import { startCloudTunnel } from "~/domains/settings/logic/cloud-tunnel-client";
+import { getBusabaseAppLL, getBusabaseLocaleFromAcceptLanguage } from "~/lib/i18n";
 
 /**
  * OAuth redirect target for the Cloud Connect flow. This route IS the
@@ -38,6 +40,8 @@ import { startCloudTunnel } from "~/domains/settings/logic/cloud-tunnel-client";
 function htmlPage(
   title: string,
   body: string,
+  lang: string,
+  openDesktopLabel: string,
   status = 200,
   returnToDesktop: DesktopCloudConnectReturnStatus | null = null,
 ): Response {
@@ -45,6 +49,7 @@ function htmlPage(
   // to interpolate into both the href and the inline script below.
   const deepLink = returnToDesktop ? buildDesktopCloudConnectReturnUrl(returnToDesktop) : null;
   const html = `<!doctype html>
+<html lang="${lang}">
 <meta charset="utf-8" />
 <title>${title} — Busabase</title>
 <body style="font-family:system-ui,sans-serif;max-width:28rem;margin:4rem auto;text-align:center;color:#1a1a1a">
@@ -52,35 +57,43 @@ function htmlPage(
   <p>${body}</p>
 ${
   deepLink
-    ? `  <p><a href="${deepLink}">Open Busabase Desktop</a></p>
+    ? `  <p><a href="${deepLink}">${openDesktopLabel}</a></p>
   <script>try { window.location.href = ${JSON.stringify(deepLink)}; } catch (e) {}</script>`
     : `  <script>try { window.close(); } catch (e) {}</script>`
 }
-</body>`;
+</body>
+</html>`;
   return new Response(html, { status, headers: { "content-type": "text/html; charset=utf-8" } });
 }
-
-const FAILED_TITLE = "Sign-in failed";
-const CLOSE_HINT = "You can close this window and return to Busabase.";
-const DESKTOP_RETURN_HINT = "Returning you to Busabase Desktop…";
 
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
   const state = searchParams.get("state");
+  const locale =
+    getCloudConnectFlowLocale(state) ??
+    getBusabaseLocaleFromAcceptLanguage(request.headers.get("accept-language"));
+  const LL = getBusabaseAppLL(locale).cloudConnect;
   // Read this BEFORE `completeCloudConnectAuthorize` consumes the pending flow.
   const isDesktop = isDesktopCloudConnectFlow(state);
-  const hint = isDesktop ? DESKTOP_RETURN_HINT : CLOSE_HINT;
-  const failureReturn = isDesktop ? "error" : null;
+  const hint = isDesktop ? LL.callbackReturnHint() : LL.callbackCloseHint();
+  const failureReturn: DesktopCloudConnectReturnStatus | null = isDesktop ? "error" : null;
+  const callbackPage = (
+    title: string,
+    body: string,
+    status: number,
+    returnStatus: DesktopCloudConnectReturnStatus | null = failureReturn,
+  ) => htmlPage(title, `${body} ${hint}`, locale, LL.callbackOpenDesktop(), status, returnStatus);
 
   const oauthError = searchParams.get("error");
   if (oauthError) {
-    return htmlPage(FAILED_TITLE, `Cloud reported: ${oauthError}. ${hint}`, 400, failureReturn);
+    console.warn("[cloud-connect] sign-in rejected:", oauthError);
+    return callbackPage(LL.callbackFailedTitle(), LL.callbackCloudError(), 400);
   }
 
   const code = searchParams.get("code");
   const issuer = searchParams.get("iss");
   if (!code || !state || !issuer) {
-    return htmlPage(FAILED_TITLE, `Missing authorization code. ${hint}`, 400, failureReturn);
+    return callbackPage(LL.callbackFailedTitle(), LL.callbackMissingCode(), 400);
   }
 
   try {
@@ -105,15 +118,15 @@ export async function GET(request: NextRequest) {
       ossOrigin,
     });
 
-    return htmlPage(
-      "Connected",
-      `Busabase Cloud is now connected. ${hint}`,
+    return callbackPage(
+      LL.callbackConnectedTitle(),
+      LL.callbackConnectedBody(),
       200,
       isDesktop ? "ok" : null,
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error.";
     console.error("[cloud-connect] callback failed", message);
-    return htmlPage(FAILED_TITLE, `${message} ${hint}`, 500, failureReturn);
+    return callbackPage(LL.callbackFailedTitle(), LL.callbackUnknownError(), 500);
   }
 }

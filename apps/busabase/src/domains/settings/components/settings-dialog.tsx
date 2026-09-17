@@ -1,8 +1,15 @@
 "use client";
 
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "kui/dialog";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "kui/dialog";
 import type { LucideIcon } from "lucide-react";
-import { Check, Cloud, FileSearch, Languages, Palette, Vault, Webhook } from "lucide-react";
+import { Check, Cloud, FileSearch, Languages, Palette, Vault, Webhook, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { AppBrandingSettingsLabels } from "~/domains/settings/components/app-branding-settings-tab";
 import { AppBrandingSettingsTab } from "~/domains/settings/components/app-branding-settings-tab";
@@ -28,6 +35,7 @@ type SettingsTab = "language" | "branding" | "filePreview" | "vault" | "webhook"
 
 interface Props {
   labels: SettingsDialogLabels;
+  locale: string;
   vaultLabels: VaultSettingsLabels;
   webhookLabels: WebhookSettingsLabels;
   cloudConnectLabels: CloudConnectSettingsLabels;
@@ -77,6 +85,7 @@ function LanguageTabContent({
 
 export function SettingsDialog({
   labels,
+  locale,
   vaultLabels,
   webhookLabels,
   cloudConnectLabels,
@@ -110,7 +119,10 @@ export function SettingsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[85vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl">
+      <DialogContent
+        className="flex max-h-[85vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl"
+        showCloseButton={false}
+      >
         <DialogHeader className="border-b px-6 py-4">
           <DialogTitle>{labels.title()}</DialogTitle>
           <DialogDescription>{labels.description()}</DialogDescription>
@@ -161,11 +173,19 @@ export function SettingsDialog({
             {activeTab === "cloudConnect" ? (
               <CloudConnectSettingsTab
                 labels={cloudConnectLabels}
+                locale={locale}
                 active={activeTab === "cloudConnect"}
               />
             ) : null}
           </div>
         </div>
+        <DialogClose
+          aria-label={labels.close()}
+          className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:bg-accent focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none"
+          title={labels.close()}
+        >
+          <X aria-hidden="true" className="h-4 w-4" />
+        </DialogClose>
       </DialogContent>
     </Dialog>
   );

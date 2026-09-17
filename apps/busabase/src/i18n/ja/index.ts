@@ -22,6 +22,9 @@ const ja = {
     nodeMoveFailed: "移動に失敗しました。もう一度お試しください。",
     routeNotFoundTitle: "ダッシュボードのルートが見つかりません",
     routeNotFoundBody: "サイドバーから受信トレイ、アクティビティ、またはベースを開いてください。",
+    pageNotFoundTitle: "ページが見つかりません",
+    pageNotFoundBody: "このページは移動したか、利用できなくなった可能性があります。",
+    pageNotFoundHome: "ホームに戻る",
     localSpaceName: "ローカル Busabase",
     localReviewerName: "ローカルレビュアー",
     localPlan: "ローカル",
@@ -44,6 +47,7 @@ const ja = {
   },
   settingsDialog: {
     title: "設定",
+    close: "閉じる",
     description: "この Busabase ワークスペースの環境設定です。",
     languageLabel: "言語",
     languageTab: "言語",
@@ -131,10 +135,10 @@ const ja = {
   },
   vaultSettings: {
     ...zhCN.vaultSettings,
-    title: "Vault",
+    title: "保管庫",
     description:
       "このBusabaseインスタンスを呼び出すエージェント、MCPサーバー、APIツール向けのシークレットと変数を保存します。",
-    openButton: "Vault",
+    openButton: "保管庫",
     secretsTab: "シークレット",
     variablesTab: "変数",
     nameLabel: "名前",
@@ -243,9 +247,20 @@ const ja = {
     connectButton: "Busabase Cloud に接続",
     disconnectButton: "接続を解除",
     connectFailed: "クラウド接続フローの開始に失敗しました。もう一度お試しください。",
+    invalidCloudUrl: "有効な Busabase Cloud の URL を入力してください。",
     disconnectFailed: "接続の解除に失敗しました。もう一度お試しください。",
     statusRefreshFailed: "接続状態は変更されましたが、最新の状態を読み込めませんでした。",
-    statusDiagnostic: "接続診断：{error}",
+    statusDiagnostic: "接続中にエラーが発生しました。接続を解除してから再試行してください。",
+    callbackFailedTitle: "サインインに失敗しました",
+    callbackCloudError:
+      "Busabase Cloud でサインインを完了できませんでした。もう一度お試しください。",
+    callbackMissingCode: "サインインの応答が不完全です。もう一度お試しください。",
+    callbackUnknownError: "サインインを完了できませんでした。もう一度お試しください。",
+    callbackConnectedTitle: "接続済み",
+    callbackConnectedBody: "Busabase Cloud に接続しました。",
+    callbackCloseHint: "このウィンドウを閉じて Busabase に戻れます。",
+    callbackReturnHint: "Busabase デスクトップ版に戻ります…",
+    callbackOpenDesktop: "Busabase デスクトップ版を開く",
     popupBlocked:
       "ブラウザがサインインのポップアップをブロックしました。ポップアップを許可してから再試行してください。",
     signInInBrowser:
