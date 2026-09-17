@@ -1,7 +1,7 @@
 {
   "name": "busabase-core",
   "description": "Shared Busabase open-core protocol, local store, API helpers, and dashboard components.",
-  "version": "0.60.0",
+  "version": "0.61.0",
   "private": true,
   "type": "module",
   "exports": {
@@ -108,6 +108,10 @@
     "./domains/assets/asset-content-logic": {
       "types": "./src/domains/assets/logic/asset-content-logic.ts",
       "default": "./src/domains/assets/logic/asset-content-logic.ts"
+    },
+    "./domains/assets/asset-download-response": {
+      "types": "./src/domains/assets/logic/asset-download-response.ts",
+      "default": "./src/domains/assets/logic/asset-download-response.ts"
     },
     "./domains/assets/asset-content-url": {
       "types": "./src/domains/assets/utils/asset-content-url.ts",
@@ -281,6 +285,14 @@
       "types": "./src/domains/dashboard/helpers/change-request.ts",
       "default": "./src/domains/dashboard/helpers/change-request.ts"
     },
+    "./dashboard/format": {
+      "types": "./src/domains/dashboard/helpers/format.ts",
+      "default": "./src/domains/dashboard/helpers/format.ts"
+    },
+    "./base/field-types": {
+      "types": "./src/domains/base/field-types.ts",
+      "default": "./src/domains/base/field-types.ts"
+    },
     "./dashboard/activity-events": {
       "types": "./src/domains/dashboard/helpers/activity-events.ts",
       "default": "./src/domains/dashboard/helpers/activity-events.ts"
@@ -390,6 +402,11 @@
     "@acp-ui/core": "workspace:*",
     "@acp-ui/web": "workspace:*",
     "@agentclientprotocol/sdk": "1.3.0",
+    "@codemirror/language": "^6.12.3",
+    "@codemirror/state": "^6.6.0",
+    "@codemirror/theme-one-dark": "^6.1.3",
+    "@codemirror/view": "^6.41.1",
+    "@lezer/highlight": "^1.2.3",
     "@electric-sql/pglite": "^0.3.15",
     "@excalidraw/excalidraw": "^0.18.1",
     "@milkdown/crepe": "^7.21.3",
@@ -412,6 +429,7 @@
     "drizzle-orm": "^0.45.1",
     "elkjs": "^0.9.3",
     "framer-motion": "^12.33.0",
+    "frimousse": "^0.3.0",
     "ignore": "^7.0.5",
     "kui": "workspace:*",
     "lucide-react": "^1.34.0",

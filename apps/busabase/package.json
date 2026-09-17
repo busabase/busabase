@@ -18,7 +18,7 @@
     "pglite",
     "cli"
   ],
-  "version": "0.60.0",
+  "version": "0.61.0",
   "private": false,
   "license": "MIT",
   "homepage": "https://github.com/busabase/busabase/tree/main/apps/busabase",
@@ -78,6 +78,7 @@
     "db:seed:all:zh-CN": "NODE_OPTIONS='--conditions react-server' tsx src/db/seed/seed-zh-cn.ts",
     "db:seed:all:zh-CN:prod": "node dist/seed/seed-zh-cn.cjs",
     "perf:seed": "node scripts/perf/bulk-seed.mjs",
+    "perf:search-quality": "NODE_OPTIONS='--conditions react-server' tsx scripts/perf/search-quality-eval.mts",
     "perf:suite": "node scripts/perf/run-suite.mjs",
     "perf:writes": "node scripts/perf/run-concurrent-writes.mjs"
   },
