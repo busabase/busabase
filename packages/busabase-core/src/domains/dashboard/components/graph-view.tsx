@@ -26,6 +26,7 @@ import { Folder, Network } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useLocation, useSearch } from "wouter";
 import { type CoreLocale, fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
+import { getGraphAriaLabels } from "../../../i18n/graph-aria";
 import { fieldDisplayName, fieldLabel } from "../../base/field-types";
 import { mergeSearchIntoHref } from "../helpers/link-search";
 
@@ -453,6 +454,7 @@ function GraphInner({ bases, nodes: nodeTree }: BaseGraphViewProps) {
       )}
 
       <ReactFlow
+        ariaLabelConfig={getGraphAriaLabels(messages)}
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}

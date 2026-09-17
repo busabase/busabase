@@ -289,6 +289,20 @@ export const DEMO_FOLDERS: SeedFolderDef[] = [
   },
 ];
 
+/**
+ * The people the seeded Bases assign work to.
+ *
+ * Deliberately the LOCAL identities (`resolveMemberRoster`'s no-host fallback)
+ * rather than invented `usr_…` ids: these are the only ones that resolve to a
+ * real name in BOTH demo mode and a freshly seeded local workspace, so every
+ * seeded member chip renders as a person instead of "Unknown user".
+ * `local-admin` is left out on purpose — it renders as the operator's own
+ * configured name, so using it for a teammate would read as "everything is
+ * assigned to me".
+ */
+const SEED_MEMBERS = ["local-editor", "local-producer", "local-viewer"] as const;
+const seedMember = (i: number) => SEED_MEMBERS[i % SEED_MEMBERS.length];
+
 const blogFields: SeedFieldDef[] = [
   { id: "bsf_blog_title", slug: "title", name: "Title", type: "text", required: true, options: {} },
   {
@@ -420,6 +434,14 @@ const blogFields: SeedFieldDef[] = [
     type: "created_time",
     required: false,
     options: {},
+  },
+  {
+    id: "bsf_blog_owner",
+    slug: "owner",
+    name: "Owner",
+    type: "member",
+    required: false,
+    options: { multiple: false },
   },
   {
     id: "bsf_blog_related_social",
@@ -671,6 +693,22 @@ const fieldTypeLabFields: SeedFieldDef[] = [
     type: "relation",
     required: false,
     options: { multiple: false, targetBaseId: DEMO_CRM_COMPANIES_BASE_ID },
+  },
+  {
+    id: "bsf_lab_member",
+    slug: "member",
+    name: "Member (multi)",
+    type: "member",
+    required: false,
+    options: { multiple: true },
+  },
+  {
+    id: "bsf_lab_member_one",
+    slug: "member_one",
+    name: "Member (single · owner)",
+    type: "member",
+    required: false,
+    options: { multiple: false },
   },
   {
     id: "bsf_lab_relation_self",
@@ -999,9 +1037,12 @@ const dealFields: SeedFieldDef[] = [
     id: "bsf_deal_owner",
     slug: "owner",
     name: "Owner",
-    type: "text",
+    // Was `text` holding a role string ("sales-rep"). A deal owner is a person,
+    // and this demo used to model it the way the member field exists to stop:
+    // a name in a text box that nothing can resolve, filter, or re-assign.
+    type: "member",
     required: false,
-    options: {},
+    options: { multiple: false },
   },
 ];
 
@@ -1437,7 +1478,11 @@ const DEAL_TEMPLATES = [
   "onboarding package",
   "enterprise upgrade",
 ];
-const DEAL_OWNERS = ["sales-rep", "account-manager", "growth-rep"];
+// Deal owners come from the LOCAL roster (`resolveMemberRoster`'s fallback), not
+// invented ids: those are the only identities that resolve to a name both in demo
+// mode and in a freshly seeded local workspace. An invented `usr_…` would render
+// as "Unknown user" in both.
+const DEAL_OWNERS = ["local-editor", "local-producer", "local-viewer"];
 
 const BULK_DEALS: SeedRecordDef[] = Array.from({ length: 28 }, (_, i) => {
   const companyIndex = i % BULK_COMPANY_SOURCE.length;
@@ -1675,6 +1720,7 @@ const BULK_BLOGS: SeedRecordDef[] = BULK_BLOG_SOURCE.map((b, i) => {
       source_url: `https://example.com/ai/${i}`,
       status,
       tags: b.tags,
+      owner: seedMember(i),
     },
     message: `Seed blog backlog: ${b.title}`,
     author: "seed-editor",
@@ -1990,6 +2036,7 @@ export const DEMO_RECORDS: SeedRecordDef[] = [
       priority: 1,
       publish_date: "2026-06-10",
       ready: true,
+      owner: "local-editor",
       related_social: [SOCIAL_THREAD_RECORD_ID],
       source_url: "https://example.com/ai-agent-workflows",
       status: "published",
@@ -2026,6 +2073,7 @@ export const DEMO_RECORDS: SeedRecordDef[] = [
       priority: 2,
       publish_date: "2026-06-11",
       ready: false,
+      owner: "local-producer",
       source_url: "https://example.com/ai-video-distribution",
       status: "drafting",
       tags: ["video"],
@@ -2193,6 +2241,8 @@ export const DEMO_RECORDS: SeedRecordDef[] = [
       number: 42.5,
       phone: "+1-555-0188",
       relation: [BLOG_APPROVAL_RECORD_ID, BLOG_PRIVATE_RECORD_ID],
+      member: ["local-editor", "local-viewer"],
+      member_one: "local-admin",
       select: "in-review",
       text: "All field types coverage",
       updated_by: "field-type-agent",
@@ -2242,6 +2292,8 @@ export const DEMO_RECORDS: SeedRecordDef[] = [
       number: 7,
       phone: "+1-555-0199",
       relation: [BLOG_PRIVATE_RECORD_ID],
+      member: ["local-producer"],
+      member_one: "local-editor",
       select: "queued",
       text: "Draft entry awaiting review",
       updated_by: "field-type-agent",
@@ -2291,6 +2343,8 @@ export const DEMO_RECORDS: SeedRecordDef[] = [
       number: 99.99,
       phone: "+1-555-0177",
       relation: [BLOG_APPROVAL_RECORD_ID],
+      member: ["local-admin", "local-editor", "local-producer"],
+      member_one: "local-viewer",
       select: "approved",
       text: "Approved entry, merged into the trusted set",
       updated_by: DEMO_ACTOR_ID,
@@ -2435,7 +2489,7 @@ export const DEMO_RECORDS: SeedRecordDef[] = [
       close_date: "2026-07-15",
       company: [CRM_COMPANY_ACME_ID],
       contacts: [CRM_CONTACT_ALICE_ID, CRM_CONTACT_DAN_ID],
-      owner: "sales-rep",
+      owner: "local-editor",
     },
     message: "Seed CRM deal Acme expansion",
     author: "seed-crm",
@@ -2453,7 +2507,7 @@ export const DEMO_RECORDS: SeedRecordDef[] = [
       close_date: "2026-08-01",
       company: [CRM_COMPANY_NORTHWIND_ID],
       contacts: [CRM_CONTACT_BOB_ID],
-      owner: "sales-rep",
+      owner: "local-editor",
     },
     message: "Seed CRM deal Northwind pilot",
     author: "seed-crm",
@@ -2471,7 +2525,7 @@ export const DEMO_RECORDS: SeedRecordDef[] = [
       close_date: "2026-06-30",
       company: [CRM_COMPANY_GLOBEX_ID],
       contacts: [CRM_CONTACT_CAROL_ID],
-      owner: "account-manager",
+      owner: "local-producer",
     },
     message: "Seed CRM deal Globex renewal",
     author: "seed-crm",
@@ -2512,6 +2566,7 @@ export const DEMO_VIEWS: SeedViewDef[] = [
         "title",
         "cover_image",
         "status",
+        "owner",
         "tags",
         "priority",
         "publish_date",
@@ -2569,6 +2624,8 @@ export const DEMO_VIEWS: SeedViewDef[] = [
         "code",
         "attachment",
         "relation",
+        "member",
+        "member_one",
         "number",
         "date",
         "checkbox",
@@ -3158,7 +3215,7 @@ export const DEMO_CHANGE_REQUESTS: SeedChangeRequestDef[] = [
           company: [CRM_COMPANY_ACME_ID],
           contacts: [CRM_CONTACT_ALICE_ID, CRM_CONTACT_DAN_ID],
           name: "Acme platform expansion",
-          owner: "sales-rep",
+          owner: "local-editor",
           stage: "proposal",
         },
         fields: {
@@ -3167,7 +3224,7 @@ export const DEMO_CHANGE_REQUESTS: SeedChangeRequestDef[] = [
           company: [CRM_COMPANY_ACME_ID],
           contacts: [CRM_CONTACT_ALICE_ID, CRM_CONTACT_DAN_ID],
           name: "Acme platform expansion",
-          owner: "account-manager",
+          owner: "local-producer",
           stage: "proposal",
         },
         message: "Reconcile updated expansion amount and owner",
@@ -3237,10 +3294,6 @@ const buildBaseVO = (base: SeedBaseDef, anchor: Date): BaseVO => ({
   reviewPolicy: REVIEW_POLICY,
   createdAt: iso(anchor, 200),
   fields: base.fields.map((field, index) => toBaseFieldVO(base.id, field, index)),
-  // `SeedBaseDef` (unlike `SeedFolderDef`) has no `metadata` field yet — the
-  // in-memory demo dataset has no real `busabase_nodes` row behind it to read
-  // one from. Custom Agent Prompts for a demo Base is out of scope here.
-  metadata: {},
 });
 
 /**
@@ -3924,7 +3977,7 @@ export const englishScenario: SeedScenario = withSeedNodeIcons(
         slug: "guest-post-form",
         name: "Submit a Guest Post",
         description:
-          "An agent-authored public form. Submissions land in the Blog Posts base as a pending ChangeRequest for the editors to review — nothing is published directly.",
+          "An agent-authored public form. A submission is written into the Blog Posts base through the same ChangeRequest path as every other write, so whether a draft goes live straight away or waits in the editors' review queue is the workspace's permission decision, not the form's.",
         position: 9,
         formId: "frm_guest_post",
         targetBaseId: DEMO_BLOG_BASE_ID,

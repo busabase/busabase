@@ -89,9 +89,35 @@ export interface BusabaseFilePreviewPerformanceMetric {
   upstreamStatusClass?: "2xx" | "4xx" | "5xx" | "network";
 }
 
+export interface BusabaseSearchRequestMetric {
+  name: "search.request.completed";
+  durationMs: number;
+  mode: "quick" | "full";
+  surface: "quick" | "advanced" | "api";
+  resultCount: number;
+  emptyPage: boolean;
+  hasMore: boolean;
+  offset: number;
+  sourceCount: number;
+}
+
+export interface BusabaseSearchInteractionMetric {
+  name: "search.interaction";
+  durationMs: number;
+  event: "result_click" | "quick_to_advanced" | "results_shown";
+  sessionId: string;
+  surface: "quick" | "advanced";
+  position?: number;
+  resultKind?: "record" | "change_request" | "base" | "file" | "node";
+  resultCount?: number;
+  hasMore?: boolean;
+}
+
 export type BusabasePerformanceMetric =
   | BusabaseInboxPerformanceMetric
-  | BusabaseFilePreviewPerformanceMetric;
+  | BusabaseFilePreviewPerformanceMetric
+  | BusabaseSearchRequestMetric
+  | BusabaseSearchInteractionMetric;
 
 export interface FilePreviewRuntimeConfig {
   provider: "builtin" | "previewfile";
@@ -125,6 +151,21 @@ export interface BusabaseContext {
   /** Server-only Drive preview configuration. The API key must never cross a contract boundary. */
   filePreview?: FilePreviewRuntimeConfig;
   resolveUsers?: (userIds: string[]) => Promise<Map<string, UserRefVO>>;
+  /**
+   * The people who can be PICKED for a `member` field — the space's member
+   * roster, in display order.
+   *
+   * Host-provided for the same reason `resolveUsers` is: workspace membership
+   * lives in the host (Cloud's `members` + `users` tables), and this package is
+   * the single-space engine with no member table of its own. Left unset by the
+   * local/OSS host and by anonymous public access, where `resolveMemberRoster`
+   * falls back to the local operator identities.
+   *
+   * Distinct from `resolveUsers`, which answers "who is THIS id" for ids already
+   * present in the data. This one answers "who may I name", which is a
+   * membership question the data cannot answer.
+   */
+  listMembers?: () => Promise<UserRefVO[]>;
   /**
    * Host-owned validation for the creator credential behind a public Embed
    * Link. Cloud checks account, membership, API-key, and workspace ACL state;
@@ -255,6 +296,22 @@ export const LOCAL_SPACE_ID = "local";
 const storage = new AsyncLocalStorage<BusabaseContext>();
 
 const LOCAL_OPERATOR_IDS = new Set(["local-admin", "local-user"]);
+
+/**
+ * The local identities offered as a `member` roster when no host provides one.
+ * A subset of `LOCAL_USER_LABELS`: the HUMAN local roles, in the order a picker
+ * should list them.
+ *
+ * Two deliberate exclusions:
+ * - `agent` / bare `producer` are actor identities that show up in `created_by`,
+ *   not people you assign work to.
+ * - `local-user` is the SAME operator as `local-admin` (both are in
+ *   `LOCAL_OPERATOR_IDS`, so both render as the configured local user name) — one
+ *   person must appear once in a picker. Listing both showed "Kelly" twice with
+ *   nothing to tell them apart. Resolving an existing `local-user` VALUE is
+ *   unaffected; that goes through `resolveUserRefs`, which still knows it.
+ */
+const LOCAL_ROSTER_IDS = ["local-admin", "local-editor", "local-producer", "local-viewer"];
 
 const LOCAL_USER_LABELS: Record<string, Omit<UserRefVO, "id">> = {
   "local-admin": {
@@ -599,6 +656,36 @@ export async function resolveUserRefs(userIds: Iterable<string | null | undefine
       ];
     }),
   );
+}
+
+/**
+ * The member roster offered to a `member` field's picker. Delegates to the
+ * host's `listMembers` when present; otherwise returns the local operator
+ * identities, which is the honest answer for the single-user OSS/Desktop host —
+ * an empty list would read in the UI as "this workspace has no members."
+ *
+ * Deliberately NOT a permission check: the caller (`spaces.members`) is already
+ * gated as a workspace read, and an anonymous visitor never reaches it.
+ */
+export async function resolveMemberRoster(): Promise<UserRefVO[]> {
+  const store = storage.getStore();
+  if (store?.listMembers) {
+    return store.listMembers();
+  }
+  const localName = store?.localUserName?.trim();
+  return LOCAL_ROSTER_IDS.map((id) => {
+    const label = LOCAL_USER_LABELS[id];
+    return {
+      id,
+      // Only the operator identities carry the user's configured display name;
+      // the other local roles are fixed labels (same rule as
+      // `getOpenSourceLocalUserLabel`, which this mirrors for the roster).
+      name: (LOCAL_OPERATOR_IDS.has(id) ? localName : "") || label?.name || id,
+      email: label?.email ?? null,
+      image: label?.image ?? null,
+      role: label?.role ?? null,
+    };
+  });
 }
 
 export async function resolveEmbedActorState(input: {

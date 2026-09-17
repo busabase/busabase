@@ -17,7 +17,7 @@ export function BusabaseTopbarBreadcrumb({ items }: { items: BusabaseBreadcrumbI
   const visibleItems = items.length > 0 ? items : [{ label: messages.inbox.title }];
 
   return (
-    <Breadcrumb className="min-w-0 flex-1">
+    <Breadcrumb aria-label={messages.shell.breadcrumb} className="min-w-0 flex-1">
       <BreadcrumbList className="flex-nowrap gap-1.5 overflow-hidden text-xs sm:gap-2">
         {visibleItems.map((item, index) => {
           const isLast = index === visibleItems.length - 1;

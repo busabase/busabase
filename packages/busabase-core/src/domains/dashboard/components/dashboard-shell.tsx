@@ -2,8 +2,17 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
+import { isEmbeddableNodeType } from "busabase-contract/contract/embed-link-schemas";
 import { hasCapability, publicAccessOf } from "busabase-contract/domains";
 import type { NodeVO } from "busabase-contract/types";
+import {
+  SidebarGroup,
+  SidebarGroupAction,
+  SidebarGroupLabel,
+  SidebarMenu,
+  SidebarMenuItem,
+} from "kui/sidebar";
+import { Skeleton } from "kui/skeleton";
 import { Toaster } from "kui/sonner";
 import {
   Activity,
@@ -64,6 +73,14 @@ const DISABLED_ANCESTORS_QUERY = {
   queryFn: async () => ({ ancestorIds: [] as string[] }),
   enabled: false,
 };
+
+const WORKSPACE_SKELETON_ROWS = [
+  { id: "workspace-node-skeleton-1", width: "w-3/5" },
+  { id: "workspace-node-skeleton-2", width: "w-1/2" },
+  { id: "workspace-node-skeleton-3", width: "w-2/3" },
+  { id: "workspace-node-skeleton-4", width: "w-5/12" },
+  { id: "workspace-node-skeleton-5", width: "w-7/12" },
+] as const;
 
 const isCoreLocale = (locale: string | undefined): locale is keyof typeof coreMessagesByLocale =>
   locale !== undefined && locale in coreMessagesByLocale;
@@ -202,6 +219,12 @@ interface BusabaseDashboardShellProps {
    */
   loadingNodeIds?: Set<string>;
   /**
+   * True only while the host is fetching the initial node tree. Keeps the real
+   * Workspace group in place and fills it with row-shaped placeholders, rather
+   * than leaving a blank section or drawing a second sidebar inside the page.
+   */
+  nodesLoading?: boolean;
+  /**
    * Fired when a depth-boundary folder (`node.hasChildren` but no loaded
    * `node.children`) is expanded for the first time. The host owns fetching
    * + caching that folder's children (e.g. via `nodes.list({ parentId,
@@ -251,6 +274,7 @@ export function BusabaseDashboardShell({
   availableAirAppEngines,
   onMoveNode,
   loadingNodeIds,
+  nodesLoading = false,
   onExpandNode,
   checkIsDescendant,
   agentIntegration,
@@ -419,6 +443,15 @@ export function BusabaseDashboardShell({
 
   const messages = isCoreLocale(locale) ? coreMessagesByLocale[locale] : coreMessagesByLocale.en;
   const nav = messages.nav;
+  const navMainLabels = {
+    dragToReorder: messages.shell.dragToReorder,
+    new: nav.new,
+    delete: messages.nodeDetail.delete,
+    more: messages.shell.more,
+    toggle: messages.shell.toggle,
+    expand: messages.shell.expand,
+    collapse: messages.shell.collapse,
+  };
   // The "Workspace" group label doubles as the header-action key, so reuse one value.
   const workspaceLabel = nav.workspace;
   const assetsLabel = nav.assets;
@@ -699,7 +732,7 @@ export function BusabaseDashboardShell({
       case "assets":
         return { title: assetsLabel, url: "/assets", icon: Images };
       case "agents":
-        return { title: "Agents", url: "/agents", icon: Bot };
+        return { title: nav.agents, url: "/agents", icon: Bot };
       case "apps":
         return { title: nav.apps, url: "/apps", icon: LayoutGrid };
       case "templates":
@@ -712,6 +745,7 @@ export function BusabaseDashboardShell({
     nav.inbox,
     nav.activity,
     nav.archive,
+    nav.agents,
     nav.apps,
     nav.templates,
     assetsLabel,
@@ -743,7 +777,7 @@ export function BusabaseDashboardShell({
 
   // Scrollable nav (everything below the pinned header): the contextual row (when
   // any) + Favorites (only when non-empty) + Workspace node tree.
-  const scrollNav: NavGroup[] = [
+  const scrollNavBeforeWorkspace: NavGroup[] = [
     ...(contextualNavItem
       ? [
           {
@@ -768,19 +802,20 @@ export function BusabaseDashboardShell({
           },
         ]
       : []),
-    {
-      label: workspaceLabel,
-      items: baseNavItems,
-      headerAction: Plus,
-      headerActionTitle: nav.new,
-      className: "group-data-[collapsible=icon]:hidden",
-      // The canonical node tree, and the ONLY group whose rows may be dragged.
-      // Favorites above renders the very same node ids (see `buildFavoriteItems`);
-      // letting it register them too gave one dnd-kit id two DOM rows, which lit
-      // the drop indicator on both at once.
-      draggable: true,
-    },
   ];
+  const workspaceNavGroup: NavGroup = {
+    label: workspaceLabel,
+    items: baseNavItems,
+    headerAction: Plus,
+    headerActionTitle: nav.new,
+    className: "group-data-[collapsible=icon]:hidden",
+    // The canonical node tree, and the ONLY group whose rows may be dragged.
+    // Favorites above renders the very same node ids (see `buildFavoriteItems`);
+    // letting it register them too gave one dnd-kit id two DOM rows, which lit
+    // the drop indicator on both at once.
+    draggable: true,
+  };
+  const scrollNav: NavGroup[] = [...scrollNavBeforeWorkspace, workspaceNavGroup];
 
   const handleHeaderActionClick = (groupLabel: string) => {
     if (groupLabel === workspaceLabel) {
@@ -811,13 +846,20 @@ export function BusabaseDashboardShell({
           className="h-full min-h-0"
           defaultOpen
           navMain={pinnedNav}
+          navMainLabels={navMainLabels}
+          mobileSidebarLabels={{
+            title: messages.shell.mobileSidebarTitle,
+            description: messages.shell.mobileSidebarDescription,
+          }}
+          resizeSidebarLabel={messages.shell.resizeSidebar}
           sidebarExtra={
             <div
               className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden group-data-[collapsible=icon]:overflow-hidden"
               data-busabase-sidebar-nav
             >
               <NavMain
-                items={scrollNav}
+                items={nodesLoading ? scrollNavBeforeWorkspace : scrollNav}
+                labels={navMainLabels}
                 onHeaderActionClick={handleHeaderActionClick}
                 onNavItemAction={handleNavItemAction}
                 onNodeDrop={onMoveNode ? handleNodeDrop : undefined}
@@ -825,6 +867,37 @@ export function BusabaseDashboardShell({
                 onExpand={onExpandNode ? (item) => item.id && onExpandNode(item.id) : undefined}
                 activeAncestorIds={activeAncestorIds}
               />
+              {nodesLoading ? (
+                <SidebarGroup
+                  aria-busy="true"
+                  className="relative group-data-[collapsible=icon]:hidden"
+                  data-workspace-nodes-loading="true"
+                >
+                  <div className="flex shrink-0 items-center px-2">
+                    <SidebarGroupLabel className="flex h-6 flex-1 items-center text-[11px] font-medium uppercase tracking-wider text-sidebar-foreground/50">
+                      <span>{workspaceLabel}</span>
+                    </SidebarGroupLabel>
+                  </div>
+                  <SidebarGroupAction
+                    className="top-2"
+                    onClick={() => onCreateClick()}
+                    title={nav.new}
+                  >
+                    <Plus className="size-4" />
+                    <span className="sr-only">{nav.new}</span>
+                  </SidebarGroupAction>
+                  <SidebarMenu aria-hidden="true" className="gap-1">
+                    {WORKSPACE_SKELETON_ROWS.map((row) => (
+                      <SidebarMenuItem data-workspace-node-skeleton-row key={row.id}>
+                        <div className="flex h-8 min-w-0 items-center gap-2 overflow-hidden rounded-md px-2">
+                          <Skeleton className="size-4 shrink-0 rounded" />
+                          <Skeleton className={`h-3.5 ${row.width}`} />
+                        </div>
+                      </SidebarMenuItem>
+                    ))}
+                  </SidebarMenu>
+                </SidebarGroup>
+              ) : null}
             </div>
           }
           onHeaderActionClick={handleHeaderActionClick}
@@ -988,6 +1061,48 @@ interface NavItemContext {
   onOpenDelete?: (node: NodeVO) => void;
 }
 
+interface NodeMenuActions {
+  /** Only containers expose Open inside the context menu. */
+  openAction?: NavItemAction | null;
+  agentPromptsAction?: NavItemAction | null;
+  managementActions: Array<NavItemAction | null>;
+  deleteAction?: NavItemAction | null;
+}
+
+/**
+ * Keeps the agent-facing action at the top of every node menu without losing
+ * the familiar Open-first convention for containers. Management actions form
+ * a separate group below it, while Delete remains independently fenced off at
+ * the end by its own `separatorBefore` flag.
+ *
+ * Exported for the focused ordering tests; this is not part of the package's
+ * public exports map.
+ */
+export function buildNodeMenuActions({
+  openAction,
+  agentPromptsAction,
+  managementActions,
+  deleteAction,
+}: NodeMenuActions): NavItemAction[] {
+  const visibleManagementActions = managementActions.filter(
+    (action): action is NavItemAction => action !== null,
+  );
+
+  if (agentPromptsAction && visibleManagementActions.length > 0) {
+    visibleManagementActions[0] = {
+      ...visibleManagementActions[0],
+      separatorBefore: true,
+    };
+  }
+
+  return [
+    ...(openAction ? [openAction] : []),
+    ...(agentPromptsAction ? [agentPromptsAction] : []),
+    ...visibleManagementActions,
+    ...(deleteAction ? [deleteAction] : []),
+  ];
+}
+
 /**
  * Build the NavItem(s) for a single node — a collapsible folder row (with its
  * own recursively-built `items`) if the node is a container, otherwise a plain
@@ -1094,10 +1209,15 @@ function buildNavItem(node: NodeVO, ctx: NavItemContext): NavItem[] {
         onSelect: () => onOpenAgentPrompts(node),
       }
     : null;
-  // The "•••" Share action — only types whose registry definition opts into a
-  // working anonymous detail route may produce a public link.
+  // The "•••" Share action — offered when EITHER half of the Share dialog has
+  // something to offer: a public link (types whose registry definition opts
+  // into a working anonymous detail route) or an embed link (AirApp / Drive /
+  // Skill qualify for this one and only this one). Same predicate as
+  // `NodeActionsMenu`'s `canShare`; the dialog re-checks both itself.
   const shareAction: NavItemAction | null =
-    onOpenShare && node.slug && publicAccessOf(node.type) !== "no"
+    onOpenShare &&
+    node.slug &&
+    (publicAccessOf(node.type) !== "no" || isEmbeddableNodeType(node.type))
       ? {
           title: labels.shareLabel,
           icon: Globe,
@@ -1139,31 +1259,35 @@ function buildNavItem(node: NodeVO, ctx: NavItemContext): NavItem[] {
         isLoadingChildren: loadingNodeIds?.has(node.id) ?? false,
         onAddChild: () => onCreateChild(node),
         addChildTitle: labels.newLabel,
-        actions: [
-          ...(url ? [{ title: labels.openLabel, url, icon: FolderOpen }] : []),
-          ...(settingsAction ? [settingsAction] : []),
-          ...(renameAction ? [renameAction] : []),
-          ...(permissionsAction ? [permissionsAction] : []),
-          ...(favoriteAction ? [favoriteAction] : []),
-          ...(moveAction ? [moveAction] : []),
-          ...(agentPromptsAction ? [agentPromptsAction] : []),
-          ...(shareAction ? [shareAction] : []),
-          ...(deleteAction ? [deleteAction] : []),
-        ],
+        actions: buildNodeMenuActions({
+          openAction: url ? { title: labels.openLabel, url, icon: FolderOpen } : null,
+          agentPromptsAction,
+          managementActions: [
+            settingsAction,
+            renameAction,
+            permissionsAction,
+            favoriteAction,
+            moveAction,
+            shareAction,
+          ],
+          deleteAction,
+        }),
       },
     ];
   }
   const url = nodeHref(node);
-  const leafActions = [
-    ...(settingsAction ? [settingsAction] : []),
-    ...(renameAction ? [renameAction] : []),
-    ...(permissionsAction ? [permissionsAction] : []),
-    ...(favoriteAction ? [favoriteAction] : []),
-    ...(moveAction ? [moveAction] : []),
-    ...(agentPromptsAction ? [agentPromptsAction] : []),
-    ...(shareAction ? [shareAction] : []),
-    ...(deleteAction ? [deleteAction] : []),
-  ];
+  const leafActions = buildNodeMenuActions({
+    agentPromptsAction,
+    managementActions: [
+      settingsAction,
+      renameAction,
+      permissionsAction,
+      favoriteAction,
+      moveAction,
+      shareAction,
+    ],
+    deleteAction,
+  });
   return url
     ? [
         {

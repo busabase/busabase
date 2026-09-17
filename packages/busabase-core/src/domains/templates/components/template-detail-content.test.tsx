@@ -2,6 +2,9 @@ import type { TemplateCardVO } from "busabase-contract/domains/templates/types";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { fmt } from "../../../i18n/fmt";
+import { dashboardZhCN } from "../../../i18n/zh-CN";
+import { TemplateCardSummary } from "./template-card-summary";
 import { TemplateDetailContent } from "./template-detail-content";
 
 Object.assign(globalThis, { React });
@@ -75,6 +78,62 @@ describe("TemplateDetailContent", () => {
 
     const en = renderToStaticMarkup(<TemplateDetailContent template={localized} />);
     expect(en).toContain("Email operations workspace");
+
+    const ja = renderToStaticMarkup(
+      <TemplateDetailContent template={localized} descriptionLocale="ja" preferEnglishFallback />,
+    );
+    expect(ja).toContain("Email operations workspace");
+    expect(ja).not.toContain("邮件运营工作台");
+
+    const publicJa = renderToStaticMarkup(
+      <TemplateDetailContent template={localized} descriptionLocale="ja" />,
+    );
+    expect(publicJa).toContain("邮件运营工作台");
+  });
+
+  it("uses caller-provided UI labels in a server-rendered template detail", () => {
+    const labels = {
+      ...dashboardZhCN.templates,
+      screenshot: (number: number) => fmt(dashboardZhCN.templates.screenshot, { number }),
+    };
+    const localized: TemplateCardVO = {
+      ...template,
+      tags: ["customer-ops"],
+      screenshots: ["https://cdn.example/cover.webp"],
+      video: "https://cdn.example/demo.mp4",
+    };
+    const markup = renderToStaticMarkup(
+      <TemplateDetailContent template={localized} labels={labels} descriptionLocale="zh-CN" />,
+    );
+
+    expect(markup).toContain(dashboardZhCN.templates.promptsTitle);
+    expect(markup).toContain(dashboardZhCN.templates.contentsTitle);
+    expect(markup).toContain(`>${dashboardZhCN.templates.bases}</dt>`);
+    expect(markup).toContain(dashboardZhCN.templates.playVideo);
+    expect(markup).toContain(`aria-label="${dashboardZhCN.templates.tags}"`);
+    expect(markup).not.toContain("What installing this creates");
+  });
+
+  it("uses localized stat labels without changing the public card's English defaults", () => {
+    const localized = renderToStaticMarkup(
+      <TemplateCardSummary
+        template={template}
+        screenshotAlt=""
+        statLabels={{
+          bases: (count) => fmt(dashboardZhCN.templates.cardBases, { count }),
+          airapps: (count) => fmt(dashboardZhCN.templates.cardApps, { count }),
+          docs: (count) => fmt(dashboardZhCN.templates.cardDocs, { count }),
+          records: (count) => fmt(dashboardZhCN.templates.cardRows, { count }),
+        }}
+      />,
+    );
+    const english = renderToStaticMarkup(
+      <TemplateCardSummary template={template} screenshotAlt="" />,
+    );
+
+    expect(localized).toContain("2 张表格");
+    expect(localized).toContain("3 行示例数据");
+    expect(english).toContain("2 tables");
   });
 
   it("falls back to name when the template declares no displayName", () => {
@@ -96,6 +155,22 @@ describe("TemplateDetailContent", () => {
 
     const en = renderToStaticMarkup(<TemplateDetailContent template={withDisplayName} />);
     expect(en).toContain(">Busa Email</h1>");
+
+    const ja = renderToStaticMarkup(
+      <TemplateCardSummary
+        template={withDisplayName}
+        screenshotAlt=""
+        descriptionLocale="ja"
+        preferEnglishFallback
+      />,
+    );
+    expect(ja).toContain(">Busa Email</h3>");
+    expect(ja).not.toContain("Busa 邮件");
+
+    const publicJa = renderToStaticMarkup(
+      <TemplateCardSummary template={withDisplayName} screenshotAlt="" descriptionLocale="ja" />,
+    );
+    expect(publicJa).toContain("Busa 邮件");
   });
 });
 

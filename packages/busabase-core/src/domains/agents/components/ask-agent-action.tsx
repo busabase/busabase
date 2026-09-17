@@ -4,9 +4,8 @@
  * "Ask Agent" — the same prompt the Copy button hands to the clipboard, handed
  * to an agent instead.
  *
- * Sits next to Copy rather than replacing it: copying is still the right move
- * when the agent lives in a terminal outside Busabase, and this feature is for
- * the agents Busabase can already talk to.
+ * It is the primary footer action. Copy remains a compact preview utility for
+ * agents running in a terminal outside Busabase.
  *
  * Lives in the agents domain rather than in the prompts dialog it was written
  * for, because none of it is about prompts — it is catalog → target → session →
@@ -16,7 +15,7 @@
 
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import { Loader2, Sparkles } from "lucide-react";
-import { useCallback } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useLocation } from "wouter";
 import { useCoreI18n } from "../../../i18n";
 import { useAskAgent } from "../hooks/use-ask-agent";
@@ -54,6 +53,9 @@ export function AskAgentAction({
 }) {
   const messages = useCoreI18n();
   const [, setLocation] = useLocation();
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const wasHandoffActiveRef = useRef(false);
+  const [startingTargetName, setStartingTargetName] = useState<string | null>(null);
 
   const onNoAgents = useCallback(() => {
     // Only reached on a *successful* empty catalog (see `use-ask-agent`) —
@@ -64,46 +66,120 @@ export function AskAgentAction({
   }, [onClose, setLocation]);
 
   const ask = useAskAgent({ nodeId: sessionScopeId, onHandedOff: onClose, onNoAgents, orpc });
+  const handoffActive = ask.isActive || ask.isLoading || ask.loadError || ask.targets !== null;
+  const promptTextRef = useRef(promptText);
+
+  useEffect(() => {
+    if (handoffActive) {
+      wasHandoffActiveRef.current = true;
+      return;
+    }
+    if (wasHandoffActiveRef.current) {
+      wasHandoffActiveRef.current = false;
+      triggerRef.current?.focus();
+    }
+  }, [handoffActive]);
+
+  const resetHandoff = () => {
+    setStartingTargetName(null);
+    ask.reset();
+  };
+
+  // Invalidate before useAskAgent's passive resolver can hand off a stale prompt.
+  // Keep the old marker while starting so a failed start resets once targets
+  // become interactive again; a successful in-flight handoff is left alone.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `resetHandoff` is a fresh closure per render; adding it re-runs this on every render.
+  useLayoutEffect(() => {
+    if (ask.isStarting) return;
+    const changed = promptTextRef.current !== promptText;
+    promptTextRef.current = promptText;
+    if (changed && handoffActive) resetHandoff();
+  }, [promptText, handoffActive, ask.isStarting]);
+
+  // Catalog/session lookup is in flight for a click the user already made —
+  // show that something is happening rather than leaving the button's own
+  // spinner as the only sign of life once the picker's container has mounted.
+  if (ask.isLoading) {
+    return (
+      <div className="flex min-w-0 flex-1 items-center justify-between gap-2 text-xs">
+        <div
+          aria-live="polite"
+          className="flex min-w-0 items-center gap-2 text-muted-foreground"
+          role="status"
+        >
+          <Loader2 aria-hidden className="size-4 shrink-0 animate-spin" />
+          {messages.agentPrompts.askAgentLoading}
+        </div>
+        <BackButton onClick={resetHandoff} />
+      </div>
+    );
+  }
 
   if (ask.targets) {
     return (
       <div className="flex min-w-0 flex-1 flex-col gap-2">
-        <p className="text-muted-foreground text-xs">{messages.agentPrompts.pickAgent}</p>
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-muted-foreground text-xs" id="ask-agent-pick-label">
+            {messages.agentPrompts.pickAgent}
+          </p>
+          <button
+            className="shrink-0 text-muted-foreground text-xs underline underline-offset-2 hover:text-foreground disabled:pointer-events-none disabled:opacity-60"
+            disabled={ask.isStarting}
+            onClick={resetHandoff}
+            type="button"
+          >
+            {messages.agentPrompts.askAgentCancel}
+          </button>
+        </div>
         <AgentTargetPicker
+          autoFocus
           disabled={ask.isStarting}
           emptyLabel={messages.agentPrompts.noAgents}
-          onSelect={ask.pickTarget}
+          label={messages.agentPrompts.pickAgent}
+          onSelect={(target) => {
+            setStartingTargetName(target.name);
+            ask.pickTarget(target);
+          }}
           targets={ask.targets}
         />
-        {ask.startError ? <AskAgentError message={ask.startError} onRetry={ask.reset} /> : null}
+        {ask.isStarting ? (
+          <p aria-live="polite" className="text-muted-foreground text-xs" role="status">
+            {startingTargetName ? `${startingTargetName} — ` : null}
+            {messages.agentPrompts.askAgentStarting}
+          </p>
+        ) : null}
+        {ask.startError ? <AskAgentError message={ask.startError} onRetry={resetHandoff} /> : null}
       </div>
     );
   }
 
   if (ask.loadError) {
-    return <AskAgentError message={messages.agentPrompts.askAgentLoadFailed} onRetry={ask.retry} />;
+    return (
+      <AskAgentError
+        message={messages.agentPrompts.askAgentLoadFailed}
+        onBack={resetHandoff}
+        onRetry={ask.retry}
+      />
+    );
   }
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col items-start gap-2">
+    <div className="flex min-w-0 flex-1 flex-col items-end gap-2">
       <button
         className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:pointer-events-none disabled:opacity-60"
-        disabled={!promptText || ask.isLoading || ask.isStarting}
+        disabled={!promptText || ask.isStarting}
         onClick={() => promptText && ask.ask(promptText)}
+        ref={triggerRef}
         type="button"
       >
-        {ask.isLoading || ask.isStarting ? (
-          <Loader2 className="size-4 animate-spin" />
+        {ask.isStarting ? (
+          <Loader2 aria-hidden className="size-4 animate-spin" />
         ) : (
-          <Sparkles className="size-4" />
+          <Sparkles aria-hidden className="size-4" />
         )}
-        {ask.isStarting
-          ? messages.agentPrompts.askAgentStarting
-          : ask.isLoading
-            ? messages.agentPrompts.askAgentLoading
-            : messages.agentPrompts.askAgent}
+        {ask.isStarting ? messages.agentPrompts.askAgentStarting : messages.agentPrompts.askAgent}
       </button>
-      {ask.startError ? <AskAgentError message={ask.startError} onRetry={ask.reset} /> : null}
+      {ask.startError ? <AskAgentError message={ask.startError} onRetry={resetHandoff} /> : null}
     </div>
   );
 }
@@ -113,7 +189,15 @@ export function AskAgentAction({
  * they were. The whole point: a network blip must not cost the user the prompt
  * they had chosen, nor be mistaken for "you have no agents".
  */
-function AskAgentError({ message, onRetry }: { message: string; onRetry: () => void }) {
+function AskAgentError({
+  message,
+  onRetry,
+  onBack,
+}: {
+  message: string;
+  onRetry: () => void;
+  onBack?: () => void;
+}) {
   const messages = useCoreI18n();
   return (
     <div className="flex min-w-0 flex-1 items-center gap-2 text-destructive text-xs">
@@ -127,6 +211,20 @@ function AskAgentError({ message, onRetry }: { message: string; onRetry: () => v
       >
         {messages.agentPrompts.askAgentRetry}
       </button>
+      {onBack ? <BackButton onClick={onBack} /> : null}
     </div>
+  );
+}
+
+function BackButton({ onClick }: { onClick: () => void }) {
+  const messages = useCoreI18n();
+  return (
+    <button
+      className="shrink-0 rounded border px-2 py-1 font-medium text-foreground hover:bg-muted"
+      onClick={onClick}
+      type="button"
+    >
+      {messages.agentPrompts.askAgentBack}
+    </button>
   );
 }

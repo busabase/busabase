@@ -2,7 +2,7 @@
 
 import type { FileTreeFileVO } from "busabase-contract/types";
 import { Button } from "kui/button";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "kui/dialog";
+import { Dialog, DialogDescription, DialogHeader, DialogTitle } from "kui/dialog";
 import { Input } from "kui/input";
 import { Label } from "kui/label";
 import {
@@ -18,7 +18,8 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { useCoreI18n } from "../../../i18n";
+import { useCoreI18n, useCoreLocale } from "../../../i18n";
+import { presentCoreError } from "../../../i18n/localize-error";
 import {
   fileTreeFileName,
   fileTreeUploadPath,
@@ -28,6 +29,7 @@ import {
   validateFileTreeName,
   validateFileTreePath,
 } from "../helpers/file-tree-files";
+import { DialogContent } from "./localized-dialog-content";
 import { SplitSubmitButton, type SubmitActionKind } from "./split-submit-button";
 
 export type FileTreeMutationMode = SubmitActionKind;
@@ -41,9 +43,10 @@ export function FileTreeUploadControl({
   availableFolders: string[];
   defaultFolder: string;
   existingPaths: Set<string>;
-  onSubmit: (files: File[], folder: string, mode: FileTreeMutationMode) => Promise<void>;
+  onSubmit: (files: File[], folder: string, mode: FileTreeMutationMode) => void | Promise<void>;
 }) {
   const messages = useCoreI18n();
+  const locale = useCoreLocale();
   const inputRef = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
@@ -110,7 +113,7 @@ export function FileTreeUploadControl({
       setOpen(false);
       reset();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : messages.nodeDetail.fileUploadFailed);
+      setError(presentCoreError(messages, locale, caught, messages.nodeDetail.fileUploadFailed));
     } finally {
       setBusy(null);
     }
@@ -408,6 +411,7 @@ export function FileTreeRenameDialog({
   open: boolean;
 }) {
   const messages = useCoreI18n();
+  const locale = useCoreLocale();
   const [name, setName] = useState("");
   const [busy, setBusy] = useState<FileTreeMutationMode | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -444,7 +448,7 @@ export function FileTreeRenameDialog({
       setName("");
       setError(null);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : messages.nodeDetail.fileRenameFailed);
+      setError(presentCoreError(messages, locale, caught, messages.nodeDetail.fileRenameFailed));
     } finally {
       setBusy(null);
     }
@@ -520,6 +524,7 @@ export function FileTreeRemoveDialog({
   open: boolean;
 }) {
   const messages = useCoreI18n();
+  const locale = useCoreLocale();
   const [busy, setBusy] = useState<FileTreeMutationMode | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -539,7 +544,7 @@ export function FileTreeRemoveDialog({
       onOpenChange(false);
       setError(null);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : messages.nodeDetail.fileRemoveFailed);
+      setError(presentCoreError(messages, locale, caught, messages.nodeDetail.fileRemoveFailed));
     } finally {
       setBusy(null);
     }

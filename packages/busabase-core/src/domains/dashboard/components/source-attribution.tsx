@@ -1,5 +1,6 @@
 import { Cable, KeyRound, UserRound } from "lucide-react";
 import type { ReactNode } from "react";
+import { useCoreI18n, useCoreLocale } from "../../../i18n";
 
 const sameLabel = (left: string | null | undefined, right: string | null | undefined) =>
   Boolean(left && right && left.toLocaleLowerCase() === right.toLocaleLowerCase());
@@ -36,21 +37,27 @@ export function SourceAttributionInline({
   owner?: ReactNode;
   showChannel?: boolean;
 }) {
+  const messages = useCoreI18n();
+  const locale = useCoreLocale();
   const sourceLabel = credentialLabel || channelLabel;
   const sourceKind = credentialLabel ? "credential" : "channel";
   const distinctChannel =
     showChannel && credentialLabel && channelLabel && !sameLabel(credentialLabel, channelLabel)
       ? channelLabel
       : null;
+  const via =
+    (owner || leadingVia) && sourceLabel ? (
+      <span aria-hidden="true">{messages.activity.via}</span>
+    ) : null;
 
   return (
     <span
       className={`inline-flex min-w-0 max-w-full flex-wrap items-center gap-x-1.5 gap-y-1 ${className}`}
     >
       {owner ? <AttributionValue kind="owner">{owner}</AttributionValue> : null}
-      {owner && sourceLabel ? <span aria-hidden="true">via</span> : null}
-      {!owner && leadingVia && sourceLabel ? <span aria-hidden="true">via</span> : null}
+      {locale !== "ja" ? via : null}
       {sourceLabel ? <AttributionValue kind={sourceKind}>{sourceLabel}</AttributionValue> : null}
+      {locale === "ja" ? via : null}
       {distinctChannel ? (
         <>
           <span aria-hidden="true">·</span>

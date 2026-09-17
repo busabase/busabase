@@ -119,6 +119,19 @@ export const AgentSessionVOSchema = z.object({
 });
 export type AgentSessionVO = z.infer<typeof AgentSessionVOSchema>;
 
+export const ListAgentSessionsPagedInputSchema = z.object({
+  slug: z.string().min(1),
+  limit: z.number().int().min(1).max(50).default(20),
+  cursor: z.string().min(1).optional(),
+});
+export type ListAgentSessionsPagedInput = z.infer<typeof ListAgentSessionsPagedInputSchema>;
+
+export const AgentSessionsPageVOSchema = z.object({
+  items: AgentSessionVOSchema.array(),
+  nextCursor: z.string().nullable(),
+});
+export type AgentSessionsPageVO = z.infer<typeof AgentSessionsPageVOSchema>;
+
 /** One connected agent backend visible in the requested workspace scope. */
 export const AgentConnectionVOSchema = z.object({
   slug: z.string(),
@@ -126,6 +139,8 @@ export const AgentConnectionVOSchema = z.object({
   transport: AgentTransportSchema,
   sessionCount: z.number().int().nonnegative(),
   latest: AgentSessionVOSchema.nullable(),
+  /** Whether Busabase can start another conversation with this agent right now. */
+  connected: z.boolean(),
   /** Controls owner-only actions such as deleting the saved OAuth grant. */
   ownedByCurrentUser: z.boolean(),
 });
@@ -182,6 +197,12 @@ export const DisconnectAgentInputSchema = z.object({
   slug: z.string().min(1),
 });
 export type DisconnectAgentInput = z.infer<typeof DisconnectAgentInputSchema>;
+
+export const DeleteAgentHistoryInputSchema = z.object({
+  /** Deletes only the current actor's sessions for this agent in the active space. */
+  slug: z.string().min(1),
+});
+export type DeleteAgentHistoryInput = z.infer<typeof DeleteAgentHistoryInputSchema>;
 
 /**
  * A base64 payload the browser attached.

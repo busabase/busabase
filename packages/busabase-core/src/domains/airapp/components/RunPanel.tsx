@@ -4,10 +4,15 @@ import { useQuery } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { AirAppVO } from "busabase-contract/types";
 import { Button } from "kui/button";
-import { CircleStop, Loader2, Maximize, Minimize, Pin, Play, RotateCcw } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useLocation, useSearch } from "wouter";
+import { CircleStop, Loader2, Pin, Play, RotateCcw } from "lucide-react";
+import { useCallback, useEffect, useRef } from "react";
 import { fmt, useCoreI18n } from "../../../i18n";
+import {
+  FullscreenPreviewSurface,
+  PreviewFullscreenButton,
+  type PreviewFullscreenState,
+  usePreviewFullscreen,
+} from "../../dashboard/components/preview-fullscreen";
 import { EmptyState } from "../../dashboard/components/primitives";
 import { NodeDetailSkeleton } from "../../dashboard/components/skeletons";
 import { asNodeDetail } from "../../dashboard/helpers/node-detail";
@@ -26,7 +31,6 @@ import {
   resolveEngine,
   resolveRunPlan,
 } from "../utils/airapp-runtime-descriptor";
-import { isAirAppFullscreenSearch, updateAirAppFullscreenSearch } from "../utils/fullscreen-query";
 import { NodepodServiceWorkerError } from "../utils/nodepod-service-worker";
 import { AIRAPP_PREVIEW_IFRAME_SANDBOX } from "../utils/preview-sandbox";
 import { useAirAppEngineAvailability } from "./engine-availability-context";
@@ -406,10 +410,7 @@ export function useAirAppRunner({
 
 export type AirAppRunnerState = ReturnType<typeof useAirAppRunner>;
 
-export interface AirAppFullscreenState {
-  fullscreen: boolean;
-  setFullscreen: (fullscreen: boolean) => void;
-}
+export type AirAppFullscreenState = PreviewFullscreenState;
 
 /**
  * Owns the "maximize the preview" toggle for one AirApp surface.
@@ -427,44 +428,7 @@ export function useAirAppFullscreen({
 }: {
   syncWithUrl?: boolean;
 } = {}): AirAppFullscreenState {
-  const [localFullscreen, setLocalFullscreen] = useState(false);
-  const [location, setLocation] = useLocation();
-  const currentSearch = useSearch();
-  const fullscreen = syncWithUrl ? isAirAppFullscreenSearch(currentSearch) : localFullscreen;
-
-  const setFullscreen = useCallback(
-    (nextFullscreen: boolean) => {
-      if (!syncWithUrl) {
-        setLocalFullscreen(nextFullscreen);
-        return;
-      }
-
-      const nextSearch = updateAirAppFullscreenSearch(currentSearch, nextFullscreen);
-      setLocation(nextSearch ? `${location}?${nextSearch}` : location, { replace: true });
-    },
-    [currentSearch, location, setLocation, syncWithUrl],
-  );
-
-  useEffect(() => {
-    if (!fullscreen) {
-      return;
-    }
-
-    const previousOverflow = document.body.style.overflow;
-    const exitOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setFullscreen(false);
-      }
-    };
-    document.body.style.overflow = "hidden";
-    window.addEventListener("keydown", exitOnEscape);
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      window.removeEventListener("keydown", exitOnEscape);
-    };
-  }, [fullscreen, setFullscreen]);
-
-  return { fullscreen, setFullscreen };
+  return usePreviewFullscreen({ syncWithUrl });
 }
 
 interface AirAppRunControlsProps {
@@ -491,7 +455,6 @@ export function AirAppRunControls({
 }: AirAppRunControlsProps) {
   const messages = useCoreI18n();
   const { status, previewUrl, run, stop, isBusy, isLive } = runner;
-  const { fullscreen, setFullscreen } = fullscreenState;
 
   const statusLabel: Record<AirAppRunStatus, string> = {
     idle: messages.airapp.statusIdle,
@@ -535,18 +498,11 @@ export function AirAppRunControls({
           <Pin className="size-3.5" />
         </Button>
       ) : null}
-      {previewUrl && !fullscreen ? (
-        <Button
-          aria-label={messages.airapp.enterFullscreen}
-          onClick={() => setFullscreen(true)}
-          size="icon-sm"
-          title={messages.airapp.enterFullscreen}
-          type="button"
-          variant="outline"
-        >
-          <Maximize className="size-3.5" />
-        </Button>
-      ) : null}
+      <PreviewFullscreenButton
+        available={Boolean(previewUrl)}
+        fullscreenState={fullscreenState}
+        label={messages.airapp.enterFullscreen}
+      />
       {isLive ? (
         <Button
           aria-label={messages.airapp.stop}
@@ -658,65 +614,47 @@ export function AirAppRunPreview({
   const { status, previewUrl, error } = runner;
   const ownFullscreen = useAirAppFullscreen();
   const activeFullscreen = fullscreenState ?? ownFullscreen;
-  const { fullscreen, setFullscreen } = activeFullscreen;
 
   return (
-    <section
+    <FullscreenPreviewSurface
       aria-label={airapp?.node.name ?? messages.airapp.previewTitle}
-      className={
-        fullscreen
-          ? "fixed inset-0 z-[100] flex h-full min-h-0 flex-col bg-background"
-          : "flex h-full min-h-0 flex-col"
-      }
-      data-airapp-fullscreen={fullscreen ? "true" : "false"}
+      banner={error ? <AirAppRunError error={error} /> : null}
+      data-airapp-fullscreen={activeFullscreen.fullscreen ? "true" : "false"}
       data-airapp-preview=""
-    >
-      {showToolbar ? (
-        <div className="flex min-h-11 items-center justify-between gap-2 border-border/60 border-b px-4 py-2">
-          <span className="font-medium text-muted-foreground text-xs uppercase">
-            {messages.airapp.runPanelTitle}
-          </span>
-          <AirAppRunControls
-            airapp={airapp}
-            fullscreenState={activeFullscreen}
-            runner={runner}
-            showPinToSidePanel={false}
-          />
-        </div>
-      ) : null}
-
-      {error ? <AirAppRunError error={error} /> : null}
-
-      <div className="relative min-h-0 flex-1">
-        {previewUrl && fullscreen ? (
-          <Button
-            aria-label={messages.airapp.exitFullscreen}
-            className="absolute top-3 right-3 z-10 bg-background/90 shadow-lg backdrop-blur-sm"
-            onClick={() => setFullscreen(false)}
-            size="icon"
-            title={messages.airapp.exitFullscreen}
-            type="button"
-            variant="outline"
-          >
-            <Minimize className="size-4" />
-          </Button>
-        ) : null}
-        {previewUrl ? (
-          <iframe
-            className="h-full w-full border-0 bg-white"
-            sandbox={AIRAPP_PREVIEW_IFRAME_SANDBOX}
-            src={previewUrl}
-            title={messages.airapp.previewTitle}
-          />
-        ) : status === "idle" || status === "error" ? (
-          <div className="grid h-full min-h-[160px] place-items-center p-6 text-center text-muted-foreground text-sm">
-            {status === "idle" ? messages.airapp.previewEmpty : messages.airapp.previewFailed}
+      exitLabel={messages.airapp.exitFullscreen}
+      fullscreenAvailable={Boolean(previewUrl)}
+      fullscreenState={activeFullscreen}
+      toolbar={
+        showToolbar ? (
+          <div className="flex min-h-11 items-center justify-between gap-2 border-border/60 border-b px-4 py-2">
+            <span className="font-medium text-muted-foreground text-xs uppercase">
+              {messages.airapp.runPanelTitle}
+            </span>
+            <AirAppRunControls
+              airapp={airapp}
+              fullscreenState={activeFullscreen}
+              runner={runner}
+              showPinToSidePanel={false}
+            />
           </div>
-        ) : (
-          <AirAppPreviewPending status={status} />
-        )}
-      </div>
-    </section>
+        ) : null
+      }
+    >
+      {previewUrl ? (
+        <iframe
+          className="h-full w-full border-0 bg-white"
+          sandbox={AIRAPP_PREVIEW_IFRAME_SANDBOX}
+          src={previewUrl}
+          title={messages.airapp.previewTitle}
+        />
+      ) : status === "idle" || status === "error" ? (
+        <div className="grid h-full min-h-[160px] place-items-center p-6 text-center text-muted-foreground text-sm">
+          {status === "idle" ? messages.airapp.previewEmpty : messages.airapp.previewFailed}
+        </div>
+      ) : (
+        <AirAppPreviewPending status={status} />
+      )}
+    </FullscreenPreviewSurface>
   );
 }
 

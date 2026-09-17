@@ -86,7 +86,7 @@ describe("field options — `multiple` is relation-only", () => {
         required: false,
         options: { choices: CHOICES, multiple: true },
       }),
-    ).rejects.toThrow(/only applies to relation fields/);
+    ).rejects.toThrow(/only applies to relation and member fields/);
   });
 
   it("rejects `multiple: false` too — the key is meaningless either way", async () => {
@@ -99,7 +99,7 @@ describe("field options — `multiple` is relation-only", () => {
         required: false,
         options: { choices: CHOICES, multiple: false },
       }),
-    ).rejects.toThrow(/only applies to relation fields/);
+    ).rejects.toThrow(/only applies to relation and member fields/);
   });
 
   it("still accepts `multiple` on a relation field", async () => {
@@ -120,6 +120,20 @@ describe("field options — `multiple` is relation-only", () => {
     const created = field.fields.find((f) => f.slug === "links");
     expect(created?.type).toBe("relation");
     expect(created?.options?.multiple).toBe(true);
+  });
+
+  it("also accepts `multiple` on a member field — one owner vs many reviewers", async () => {
+    const field = await client.bases.createField({
+      baseId,
+      slug: "owner",
+      name: "Owner",
+      type: "member",
+      required: false,
+      options: { multiple: false },
+    });
+    const created = field.fields.find((f) => f.slug === "owner");
+    expect(created?.type).toBe("member");
+    expect(created?.options?.multiple).toBe(false);
   });
 
   it("accepts a select whose options carry no `multiple`", async () => {

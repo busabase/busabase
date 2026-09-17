@@ -15,17 +15,30 @@ export const formNodeType = {
   label: "Form",
   icon: "form",
   /**
-   * `hidden` until a Form can be created from a create surface at all.
+   * No longer `hidden`. The two conditions that hid it are both met:
    *
-   * `busabase_forms.target_base_id` is NOT NULL and `form` registers no
-   * `node_create` materializer, so a Form built through the generic New-item
-   * flow (which only collects name/slug/description) is a node row with no form
-   * config behind it — it opens to a dead end, every time, for everyone. The
-   * type stays fully `creatable` so `forms.create` (which does take a target
-   * Base) and the REST/MCP surface are untouched; it just no longer offers an
-   * entry point that cannot succeed. Drop this once the New-item flow asks for
-   * the target Base and a materializer writes the config row.
+   * 1. The New-item flow ASKS FOR THE TARGET BASE — `create-node-modal.tsx`
+   *    renders a "Writes into" Base picker (plus the field checklist) whenever
+   *    `form` is the selected type, and keeps its submit disabled until one is
+   *    chosen, the same way it already does for `file` and its asset.
+   * 2. A MATERIALIZER WRITES THE CONFIG ROW — `materializeFormNode`
+   *    (busabase-core `domains/form/logic/form-ops.ts`) inserts the
+   *    `busabase_forms` row inside the merge transaction, from the
+   *    `node_create` operation's `metadata.targetBaseId` / `metadata.formBindings`.
+   *    Both create paths run it, so a Form merged after review is configured
+   *    exactly like one created immediately.
+   *
+   * A Form that still arrives unconfigured (an API caller that sent only the
+   * generic node fields) is no longer a dead end either: the detail view's
+   * "not set up yet" state now carries a "Connect this form to a Base" action.
+   *
+   * `hidden` is read by THREE create surfaces — web's `create-node-modal.tsx`,
+   * `node-agent-prompts.ts`, and React Native's
+   * `apps/busabase-mobile/.../CreateNodeModal.tsx`. Mobile has no Base picker,
+   * so it names `form` in its own `UNSUPPORTED_TYPES` set (alongside `file`,
+   * which is excluded there for the same "can't collect the required input"
+   * reason) rather than re-creating the dead end on another platform.
    */
-  capabilities: { hasDetail: true, creatable: true, publicAccess: "submit", hidden: true },
+  capabilities: { hasDetail: true, creatable: true, publicAccess: "submit" },
   operations: [],
 } as const satisfies NodeTypeDefinition;

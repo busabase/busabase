@@ -12,23 +12,18 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "kui/alert";
 import { Button } from "kui/button";
 import { Checkbox } from "kui/checkbox";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "kui/dialog";
+import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "kui/dialog";
 import { Input } from "kui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "kui/tabs";
 import { CircleCheck, LoaderCircle, Sparkles, TriangleAlert } from "lucide-react";
 import { iStringParse } from "openlib/i18n/i-string";
 import { useEffect, useRef, useState } from "react";
 import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
+import { presentCoreError } from "../../../i18n/localize-error";
 import { GithubIcon } from "../helpers/brand-icons";
 import { nodeIconForType } from "../helpers/node-icons";
 import { AgentInstallPanel, type AgentIntegrationTarget } from "./agent-install-panel";
+import { DialogContent } from "./localized-dialog-content";
 
 /**
  * "Install from GitHub" — the web face of spec §15.6.
@@ -84,6 +79,11 @@ const buildPlanTree = (nodes: readonly InstallPlanNodeVO[]): PlanTreeNode[] => {
   }
   return roots;
 };
+
+const errorDetailFor = (caught: unknown, primary: string): string | null =>
+  caught instanceof Error && caught.message.trim() && caught.message !== primary
+    ? caught.message
+    : null;
 
 function PlanTree({
   nodes,
@@ -177,6 +177,7 @@ export function InstallFromGithubModal({
   onCreateNode,
 }: InstallFromGithubModalProps) {
   const messages = useCoreI18n();
+  const locale = useCoreLocale();
   const [repoUrl, setRepoUrl] = useState(initialRepoUrl ?? "");
   const [plan, setPlan] = useState<InstallPlanVO | null>(null);
   const [planning, setPlanning] = useState(false);
@@ -193,6 +194,7 @@ export function InstallFromGithubModal({
   const [installProgress, setInstallProgress] = useState<string | null>(null);
   const [result, setResult] = useState<InstallResultVO | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
   /**
    * Set when an install failed AFTER creating something. Structure is created
    * immediately, so a failure partway through leaves a real folder and real
@@ -228,6 +230,7 @@ export function InstallFromGithubModal({
     setInstallProgress(null);
     setResult(null);
     setError(null);
+    setErrorDetail(null);
     setWorkspaceTouchedByFailure(false);
     setTab("agent");
     setAgentAfterInstall(false);
@@ -251,6 +254,7 @@ export function InstallFromGithubModal({
     const nextRename = overrides?.rename ?? rename;
     setPlanning(true);
     setError(null);
+    setErrorDetail(null);
     try {
       const next = await apiClient.planInstallFromGithub({
         repoUrl: trimmedUrl,
@@ -273,11 +277,9 @@ export function InstallFromGithubModal({
       // manifest name) the first time; afterwards the user's value wins.
       setIntoFolder(nextFolder || next.targetFolderSlug);
     } catch (caught) {
-      // The server's messages are written to be read by a person — "Not a
-      // Busabase package — expected busabase.json at …", "Your role does not
-      // have access", the SSRF/allowlist refusal. Show them as-is; a generic
-      // "something went wrong" would throw away the only useful part.
-      setError(caught instanceof Error ? caught.message : messages.install.previewFailed);
+      const primary = presentCoreError(messages, locale, caught, messages.install.previewFailed);
+      setError(primary);
+      setErrorDetail(errorDetailFor(caught, primary));
       setPlan(null);
     } finally {
       setPlanning(false);
@@ -309,6 +311,7 @@ export function InstallFromGithubModal({
     const trimmedFolder = intoFolder.trim();
     setInstalling(true);
     setError(null);
+    setErrorDetail(null);
     setWorkspaceTouchedByFailure(false);
     setInstallProgress(null);
     try {
@@ -324,13 +327,16 @@ export function InstallFromGithubModal({
       });
       let installed: InstallResultVO | null = null;
       for await (const event of events) {
-        if (event.kind === "progress") setInstallProgress(event.message);
-        else installed = event.result;
+        if (event.kind === "progress") {
+          setInstallProgress(event.message);
+        } else installed = event.result;
       }
       if (!installed) throw new Error(messages.install.installFailed);
       setResult(installed);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : messages.install.installFailed);
+      const primary = presentCoreError(messages, locale, caught, messages.install.installFailed);
+      setError(primary);
+      setErrorDetail(errorDetailFor(caught, primary));
       // The server reports a PARTIAL install as structured `data` beside the
       // message (`InstallFailureVOSchema`). Parsed rather than trusted: this
       // crossed the network, and a collision or a validation refusal — which
@@ -478,6 +484,7 @@ export function InstallFromGithubModal({
                       // rather than let it look like an answer for this one.
                       setPlan(null);
                       setError(null);
+                      setErrorDetail(null);
                     }}
                     onKeyDown={(event) => {
                       if (event.key === "Enter" && !plan) {
@@ -664,17 +671,31 @@ export function InstallFromGithubModal({
                 </>
               ) : null}
 
-              {error ? <p className="text-destructive text-sm">{error}</p> : null}
+              {error ? (
+                <div className="flex flex-col gap-1">
+                  <p className="text-destructive text-sm">{error}</p>
+                  {errorDetail ? (
+                    <p className="break-words text-muted-foreground text-xs">{errorDetail}</p>
+                  ) : null}
+                </div>
+              ) : null}
               {plan && tab === "ui" ? (
-                <p
+                <div
                   aria-hidden={!installing}
-                  className={`flex min-h-10 items-center gap-2 text-muted-foreground text-sm sm:min-h-5 ${
+                  className={`min-h-10 text-muted-foreground text-sm sm:min-h-5 ${
                     installing ? "visible" : "invisible"
                   }`}
                 >
-                  <LoaderCircle className={installing ? "size-4 animate-spin" : "size-4"} />
-                  {installProgress ?? messages.install.installingHint}
-                </p>
+                  <div className="flex items-center gap-2">
+                    <LoaderCircle className={installing ? "size-4 animate-spin" : "size-4"} />
+                    {locale === "en"
+                      ? (installProgress ?? messages.install.installingHint)
+                      : messages.install.installingHint}
+                  </div>
+                  {locale !== "en" && installProgress ? (
+                    <p className="ml-6 break-words text-xs">{installProgress}</p>
+                  ) : null}
+                </div>
               ) : null}
             </>
           )}

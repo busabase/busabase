@@ -1,7 +1,7 @@
 "use client";
 
 import { Button } from "kui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "kui/dialog";
+import { Dialog, DialogHeader, DialogTitle } from "kui/dialog";
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "kui/sidebar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "kui/tabs";
 import { Check, Copy, ExternalLink, Sparkles } from "lucide-react";
@@ -28,6 +28,7 @@ import {
   type McpGuideEdition,
   normalizeMcpBaseUrl,
 } from "./agent-mcp-guides";
+import { DialogContent } from "./localized-dialog-content";
 
 interface BusabaseAgentSkillButtonProps {
   /**

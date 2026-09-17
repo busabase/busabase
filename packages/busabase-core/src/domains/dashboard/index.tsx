@@ -24,21 +24,31 @@ import type {
   AuditEventVO,
   BaseVO,
   ChangeRequestVO,
+  FieldType,
   NodeVO,
   RecordVO,
   ViewVO,
 } from "busabase-contract/types";
-import { SidebarTrigger } from "kui/sidebar";
+import { SidebarTrigger, useSidebar } from "kui/sidebar";
 // Demo-aware navigation (the shared `openlib/ui/dashboard` helpers):
 // `SPALink` appends `?demo=1` on <Link> clicks; `useAddDemoParam` wraps
 // programmatic `setLocation` targets — together they keep the demo across all
 // navigation (the proxy reads `?demo` via Referer and keeps serving the demo router).
 import { type iString, iStringParse } from "openlib/i18n/i-string";
 import { useAddDemoParam } from "openlib/ui/dashboard";
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type ComponentProps,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { toast } from "sonner";
 import { useLocation, useSearch } from "wouter";
-import { CoreI18nProvider, fmt, useCoreI18n } from "../../i18n";
+import { CoreI18nProvider, fmt, useCoreI18n, useCoreLocale } from "../../i18n";
+import { presentCoreError } from "../../i18n/localize-error";
 import { AgentDetailView } from "../agents/components/agent-detail-view";
 import { AgentsAddView } from "../agents/components/agents-add-view";
 import { AgentsListView } from "../agents/components/agents-list-view";
@@ -55,6 +65,7 @@ import {
   type ReviewAction,
   ReviewConflictPanel,
 } from "./components/change-request-review";
+import { decodeAgentRouteSlug } from "./helpers/agent-route-slug";
 import {
   getChangeRequestReviewMessage,
   getChangeRequestTitle,
@@ -68,6 +79,7 @@ import "../rich-node/components/register";
 import { AirAppEngineAvailabilityProvider } from "../airapp/components/engine-availability-context";
 import { AgentIntegrationProvider } from "./agent-integration-context";
 import { NodeActivityView, RecordActivityView } from "./components/activity";
+import { FileUploadTaskProvider } from "./components/file-upload-tasks";
 import { BaseGraphView } from "./components/graph-view";
 import { HomeView } from "./components/home";
 import { ActivityView, InboxView } from "./components/inbox";
@@ -142,6 +154,19 @@ type RestorableNode = Pick<NodeVO, "id" | "name" | "type">;
 // Field types whose sort can be pushed to the DB (their typed value column orders
 // the same way the client would). Others keep the client-side locale sort.
 const SERVER_SORTABLE_FIELD_TYPES = new Set(["number", "auto_number", "date"]);
+
+function SidebarAwareSearchDialog({
+  open,
+  ...props
+}: Omit<ComponentProps<typeof SearchDialog>, "focusReady">) {
+  const { isMobile, openMobile, setOpenMobile } = useSidebar();
+
+  useEffect(() => {
+    if (open && isMobile && openMobile) setOpenMobile(false);
+  }, [open, isMobile, openMobile, setOpenMobile]);
+
+  return <SearchDialog {...props} focusReady={!openMobile} open={open} />;
+}
 
 interface BusabaseDashboardProps {
   nodes: NodeVO[];
@@ -295,6 +320,7 @@ function BusabaseDashboardContent({
   visitorKind = "member",
 }: BusabaseDashboardProps) {
   const messages = useCoreI18n();
+  const locale = useCoreLocale();
   // An anonymous (public-link) visitor may reach ONLY the single shared node and
   // only the reads on busabase-core's anonymous allowlist. Every space-wide query
   // below is gated off in that mode: the server refuses them regardless (see
@@ -395,6 +421,12 @@ function BusabaseDashboardContent({
       recordsPage: orpc.records.listPage.key() as QueryKey,
       recordsCount: orpc.records.count.key() as QueryKey,
       bases: orpc.bases.list.queryOptions({ input: {} }).queryKey as QueryKey,
+      // Partial key, so one invalidation covers every Base's deleted-field list.
+      // It was missing entirely, which meant `refresh()` never touched it: a
+      // restored field stayed in BOTH lists, and — now that a field can be
+      // deleted from the UI — the row would leave Fields while "Deleted fields"
+      // stayed stale, hiding the very undo the delete flow promises.
+      deletedFields: orpc.bases.listDeletedFields.key() as QueryKey,
       nodes: orpc.nodes.list.queryOptions({}).queryKey as QueryKey,
       // Partial key so a single invalidation covers `nodes.get` for every
       // nodeId — the rich-node editors (whiteboard/workflow/html) fetch their
@@ -738,9 +770,7 @@ function BusabaseDashboardContent({
       isLoading: recordsPageQuery.isLoading,
       isFetching: recordsPageQuery.isFetching,
       error: recordsPageQuery.error
-        ? recordsPageQuery.error instanceof Error
-          ? recordsPageQuery.error.message
-          : messages.shell.operationFailed
+        ? presentCoreError(messages, locale, recordsPageQuery.error, messages.shell.operationFailed)
         : null,
       onPageChange: changePage,
       onPageSizeChange: (pageSize: 25 | 50 | 100) => {
@@ -760,7 +790,8 @@ function BusabaseDashboardContent({
     };
   }, [
     locationPath,
-    messages.shell.operationFailed,
+    locale,
+    messages,
     recordPaginationUrl.page,
     recordPaginationUrl.pageSize,
     recordsPageQuery.data,
@@ -1077,7 +1108,7 @@ function BusabaseDashboardContent({
     }
 
     if (locationPath === "/agents/new") {
-      return [{ href: "/agents", label: messages.nav.agents }, { label: "Add agent" }];
+      return [{ href: "/agents", label: messages.nav.agents }, { label: messages.agents.addAgent }];
     }
 
     if (isAgentDetailRoute) {
@@ -1228,6 +1259,7 @@ function BusabaseDashboardContent({
       queryClient.invalidateQueries({ queryKey: listKeys.recordsPage }),
       queryClient.invalidateQueries({ queryKey: listKeys.recordsCount }),
       queryClient.invalidateQueries({ queryKey: listKeys.bases }),
+      queryClient.invalidateQueries({ queryKey: listKeys.deletedFields }),
       queryClient.invalidateQueries({ queryKey: listKeys.nodes }),
       queryClient.invalidateQueries({ queryKey: listKeys.archivedNodes }),
       queryClient.invalidateQueries({ queryKey: listKeys.archivedBases }),
@@ -1278,9 +1310,7 @@ function BusabaseDashboardContent({
     },
     onMutate: () => setError(null),
     onError: (mutationError) =>
-      setError(
-        mutationError instanceof Error ? mutationError.message : messages.shell.operationFailed,
-      ),
+      setError(presentCoreError(messages, locale, mutationError, messages.shell.operationFailed)),
     onSuccess: (result) => {
       if (!result) {
         return;
@@ -1370,9 +1400,7 @@ function BusabaseDashboardContent({
     },
     onMutate: () => setError(null),
     onError: (mutationError) =>
-      setError(
-        mutationError instanceof Error ? mutationError.message : messages.shell.operationFailed,
-      ),
+      setError(presentCoreError(messages, locale, mutationError, messages.shell.operationFailed)),
     onSuccess: (result) => {
       const ok = result.results.filter((item) => item.ok).length;
       const failed = result.results.length - ok;
@@ -1533,7 +1561,7 @@ function BusabaseDashboardContent({
       return { ok, failed, materialized };
     },
     onMutate: () => setError(null),
-    onSuccess: (result, variables) => {
+    onSuccess: (result) => {
       // The tally means something different depending on what actually happened:
       // materialized records are really gone, the rest are only Change Requests
       // waiting for review — the rows are still there until someone approves.
@@ -1555,15 +1583,96 @@ function BusabaseDashboardContent({
       }
     },
     onError: (mutationError) =>
-      setError(
-        mutationError instanceof Error ? mutationError.message : messages.shell.operationFailed,
-      ),
+      setError(presentCoreError(messages, locale, mutationError, messages.shell.operationFailed)),
     onSettled: () => refresh(),
   });
   const submitDeleteRecords = useCallback(
     (recordsToDelete: RecordVO[], options?: RecordSubmitOptions) =>
       bulkDeleteRecordsMutation.mutateAsync({ records: recordsToDelete, options }),
     [bulkDeleteRecordsMutation],
+  );
+
+  /**
+   * Bulk edit — ONE call, not the N-call loop above. `bases.createBulkUpdateChangeRequest`
+   * is atomic (a single stale or archived row refuses the whole batch), so unlike
+   * `submitDeleteRecords` there is no partial tally to report: it either happened
+   * or it threw.
+   */
+  const submitUpdateRecords = useCallback(
+    async (
+      base: BaseVO,
+      recordsToUpdate: RecordVO[],
+      fields: Record<string, unknown>,
+      options?: RecordSubmitOptions,
+    ) => {
+      setError(null);
+      const changeRequest = await client.createBulkUpdateRecordChangeRequest(base.id, {
+        updates: recordsToUpdate.map((record) => ({
+          recordId: record.id,
+          fields,
+          // Pinning the commit the user was looking at turns the merge into a
+          // real three-way merge: a concurrent edit to a DIFFERENT field merges
+          // cleanly, and a genuinely conflicting one is refused by name instead
+          // of being blindly overwritten.
+          baseCommitId: record.headCommitId,
+        })),
+        submittedBy: "local-editor",
+        autoMerge: options?.mergeImmediately === true,
+      });
+      await refresh();
+      if (changeRequest.status === "merged") {
+        toast.success(
+          fmt(messages.base.bulkUpdateResult, {
+            count: recordsToUpdate.length,
+            plural: recordsToUpdate.length === 1 ? "" : "s",
+          }),
+        );
+        return;
+      }
+      toast.success(messages.base.bulkUpdateRequestResult);
+      setLocation(`/inbox/${changeRequest.id}`);
+    },
+    [
+      client,
+      messages.base.bulkUpdateRequestResult,
+      messages.base.bulkUpdateResult,
+      refresh,
+      setLocation,
+    ],
+  );
+
+  const submitImportRecords = useCallback(
+    async (base: BaseVO, rows: Array<Record<string, unknown>>, options?: RecordSubmitOptions) => {
+      setError(null);
+      const changeRequest = await client.createBulkRecordChangeRequest(base.id, {
+        records: rows,
+        submittedBy: "local-editor",
+        message: fmt(messages.base.importMerged, {
+          count: rows.length,
+          plural: rows.length === 1 ? "" : "s",
+        }),
+        autoMerge: options?.mergeImmediately === true,
+      });
+      await refresh();
+      if (changeRequest.status === "merged") {
+        toast.success(
+          fmt(messages.base.importMerged, {
+            count: rows.length,
+            plural: rows.length === 1 ? "" : "s",
+          }),
+        );
+        return;
+      }
+      toast.success(messages.base.importRequestSubmitted);
+      setLocation(`/inbox/${changeRequest.id}`);
+    },
+    [
+      client,
+      messages.base.importMerged,
+      messages.base.importRequestSubmitted,
+      refresh,
+      setLocation,
+    ],
   );
 
   const submitCreateBaseField = useCallback(
@@ -1663,6 +1772,81 @@ function BusabaseDashboardContent({
       messages.base.recordTitleRequestSubmitted,
       messages.base.recordTitleUpdated,
       messages.base.setRecordTitleMessage,
+      refresh,
+      setLocation,
+    ],
+  );
+
+  const submitConvertFieldType = useCallback(
+    async (
+      base: BaseVO,
+      fieldId: string,
+      newType: FieldType,
+      selectChoiceMode: "auto_create" | "null_on_missing",
+      options?: { mergeImmediately?: boolean },
+    ) => {
+      setError(null);
+      const field = base.fields.find((candidate) => candidate.id === fieldId);
+      // Its own change request, never bundled with a rename: `update`'s patch
+      // declares `type` as `z.never()` precisely because a bundled type change
+      // used to be stripped silently and still report success.
+      const changeRequest = await client.createConvertFieldChangeRequest(base.id, {
+        fieldId,
+        newType,
+        selectChoiceMode,
+        submittedBy: "local-editor",
+        message: fmt(messages.base.convertFieldMessage, {
+          field: field ? iStringParse(field.name) : fieldId,
+          type: messages.fieldTypes[newType],
+        }),
+        autoMerge: options?.mergeImmediately === true,
+      });
+      await refresh();
+      // Keyed on the OUTCOME, not on the mode that was asked for: an actor
+      // without write who pressed "Change type now" gets a pending request back.
+      if (changeRequest.status === "merged") {
+        toast.success(messages.base.fieldTypeChanged);
+        return;
+      }
+      toast.success(messages.base.convertRequestSubmitted);
+      setLocation(`/inbox/${changeRequest.id}`);
+    },
+    [
+      client,
+      messages.base.convertFieldMessage,
+      messages.base.convertRequestSubmitted,
+      messages.base.fieldTypeChanged,
+      messages.fieldTypes,
+      refresh,
+      setLocation,
+    ],
+  );
+
+  const submitDeleteField = useCallback(
+    async (base: BaseVO, fieldId: string, options?: { mergeImmediately?: boolean }) => {
+      setError(null);
+      const field = base.fields.find((candidate) => candidate.id === fieldId);
+      const changeRequest = await client.createDeleteFieldChangeRequest(base.id, {
+        fieldId,
+        submittedBy: "local-editor",
+        message: fmt(messages.base.deleteFieldMessage, {
+          field: field ? iStringParse(field.name) : fieldId,
+        }),
+        autoMerge: options?.mergeImmediately === true,
+      });
+      await refresh();
+      if (changeRequest.status === "merged") {
+        toast.success(messages.base.fieldDeleted);
+        return;
+      }
+      toast.success(messages.base.deleteFieldRequestSubmitted);
+      setLocation(`/inbox/${changeRequest.id}`);
+    },
+    [
+      client,
+      messages.base.deleteFieldMessage,
+      messages.base.deleteFieldRequestSubmitted,
+      messages.base.fieldDeleted,
       refresh,
       setLocation,
     ],
@@ -2219,13 +2403,15 @@ function BusabaseDashboardContent({
       return (
         <AgentDetailView
           orpc={orpc}
-          agentSlug={agentDetailParams?.agentSlug ?? ""}
+          agentSlug={decodeAgentRouteSlug(agentDetailParams?.agentSlug ?? "")}
           onBack={() => setLocation("/agents")}
           // Moving the conversation to the panel means leaving this page — the
           // point is to have it beside something else — so this navigates away
           // rather than leaving the same chat mounted twice on screen.
           onOpenInSidePanel={(sessionId, agentName) => {
-            openAgentChatTab(agentDetailParams?.agentSlug ?? "", agentName, { sessionId });
+            openAgentChatTab(decodeAgentRouteSlug(agentDetailParams?.agentSlug ?? ""), agentName, {
+              sessionId,
+            });
             setLocation("/home");
           }}
         />
@@ -2309,7 +2495,9 @@ function BusabaseDashboardContent({
           bases={bases}
           deletedFields={deletedFields}
           orpc={orpc}
+          onConvertFieldType={submitConvertFieldType}
           onCreateField={submitCreateBaseField}
+          onDeleteField={submitDeleteField}
           onRestoreField={submitRestoreField}
           onSetPrimaryField={submitSetPrimaryField}
           onUpdateFieldName={submitUpdateFieldName}
@@ -2410,6 +2598,8 @@ function BusabaseDashboardContent({
           onCreateView={submitCreateView}
           onDeleteView={submitDeleteView}
           onDeleteRecords={submitDeleteRecords}
+          onImportRecords={submitImportRecords}
+          onUpdateRecords={submitUpdateRecords}
           onRestoreView={submitRestoreView}
           onRestoreRecord={submitRestoreRecord}
           onMoveRecord={submitMoveRecord}
@@ -2542,6 +2732,10 @@ function BusabaseDashboardContent({
     usesPagePagination,
     baseRecords,
     submitDeleteRecords,
+    submitUpdateRecords,
+    submitImportRecords,
+    submitConvertFieldType,
+    submitDeleteField,
     allChangeRequests,
     nodeCache,
     openSearch,
@@ -2596,7 +2790,11 @@ function BusabaseDashboardContent({
           className="flex h-10 shrink-0 items-center gap-2 border-b bg-background/80 px-4 py-1.5 backdrop-blur-sm md:h-12"
           data-dashboard-topbar
         >
-          <SidebarTrigger className="h-8 w-8 shrink-0" />
+          <SidebarTrigger
+            aria-label={messages.shell.toggleSidebar}
+            className="h-8 w-8 shrink-0"
+            title={messages.shell.toggleSidebar}
+          />
           <BusabaseTopbarBreadcrumb items={breadcrumbItems} />
           {titlebar.badge ? <div className="ml-1 shrink-0">{titlebar.badge}</div> : null}
           {topbarActions ? <div className="shrink-0">{topbarActions}</div> : null}
@@ -2624,7 +2822,7 @@ function BusabaseDashboardContent({
         onOpenSearch={openSearchToPin}
         orpc={orpc}
       />
-      <SearchDialog
+      <SidebarAwareSearchDialog
         nodeCache={nodeCache}
         onClose={closeSearchAndClearMode}
         onSelect={
@@ -2656,12 +2854,14 @@ function BusabaseDashboardContent({
   // side-panel tab at once — which is what the leaf-level Ask Agent action needs.
   const provided = (
     <DashboardOrpcProvider orpc={orpc}>
-      {/* Same reach, same reason as the orpc provider above: the Agent-prompts
-          dialog hangs off node toolbars nine components down, and it needs to
-          know which edition/space to point an agent at. */}
-      <AgentIntegrationProvider agentIntegration={agentIntegration}>
-        {content}
-      </AgentIntegrationProvider>
+      <FileUploadTaskProvider orpc={orpc}>
+        {/* Same reach, same reason as the orpc provider above: the Agent-prompts
+            dialog hangs off node toolbars nine components down, and it needs to
+            know which edition/space to point an agent at. */}
+        <AgentIntegrationProvider agentIntegration={agentIntegration}>
+          {content}
+        </AgentIntegrationProvider>
+      </FileUploadTaskProvider>
     </DashboardOrpcProvider>
   );
 

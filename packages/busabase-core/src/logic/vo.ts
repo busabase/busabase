@@ -65,7 +65,17 @@ export const VALUE_TEXT_INDEX_LIMIT = 8_000;
 // `whiteboard` stores a structured { scene, previewSvg } composite (not
 // prose) — same treatment as json/attachment/relation: no full-text index,
 // stored verbatim in valueJson.
-const JSON_LIKE_FIELD_TYPES = new Set<FieldType>(["json", "attachment", "relation", "whiteboard"]);
+// `member` joins them: its value is user ids, which are opaque to a human
+// searching by name. Indexing the ids would add noise; indexing resolved names
+// would put a denormalised copy of the member directory in the search index and
+// turn a display-name change into a data migration.
+const JSON_LIKE_FIELD_TYPES = new Set<FieldType>([
+  "json",
+  "attachment",
+  "relation",
+  "member",
+  "whiteboard",
+]);
 const DATE_FIELD_TYPES = new Set<FieldType>(["date", "created_time", "updated_time"]);
 
 const trimIndexText = (value: string) =>
@@ -133,18 +143,7 @@ export const toFieldVO = (field: BaseFieldPO): BaseFieldVO => ({
   options: field.options ?? {},
 });
 
-/**
- * `nodeMetadata` is `busabase_nodes.metadata` for this base's OWN node row —
- * not a `busabase_bases` column, so every caller must fetch it itself (join
- * `busabaseNodes` on `base.nodeId`, or pass `{}` when the value is provably
- * discarded downstream, e.g. a search-result projection). Required (not
- * defaulted to `{}`) so a new call site can't silently drop it.
- */
-export const toBaseVO = (
-  base: BasePO,
-  fields: BaseFieldPO[],
-  nodeMetadata: Record<string, unknown>,
-): BaseVO => ({
+export const toBaseVO = (base: BasePO, fields: BaseFieldPO[]): BaseVO => ({
   id: base.id,
   nodeId: base.nodeId,
   slug: base.slug,
@@ -153,7 +152,6 @@ export const toBaseVO = (
   reviewPolicy: base.reviewPolicy,
   createdAt: base.createdAt.toISOString(),
   fields: fields.sort((a, b) => a.position - b.position).map(toFieldVO),
-  metadata: nodeMetadata,
 });
 
 // `view.type` is a free-text DB column; map it to a known ViewType, defaulting

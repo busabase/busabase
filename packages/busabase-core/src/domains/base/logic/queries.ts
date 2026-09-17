@@ -39,7 +39,6 @@ import {
   busabaseBases,
   busabaseCommits,
   busabaseFieldValues,
-  busabaseNodes,
   busabaseRecordLinks,
   busabaseRecords,
   busabaseViews,
@@ -75,9 +74,8 @@ export const listBases = async () => {
   const db = await getDb();
   const spaceId = getContextSpaceId();
   const baseRows = await db
-    .select({ base: busabaseBases, nodeMetadata: busabaseNodes.metadata })
+    .select({ base: busabaseBases })
     .from(busabaseBases)
-    .innerJoin(busabaseNodes, eq(busabaseNodes.id, busabaseBases.nodeId))
     .where(
       and(
         eq(busabaseBases.spaceId, spaceId),
@@ -91,11 +89,10 @@ export const listBases = async () => {
     .from(busabaseBaseFields)
     .where(and(eq(busabaseBaseFields.spaceId, spaceId), isNull(busabaseBaseFields.deletedAt)))
     .orderBy(asc(busabaseBaseFields.position));
-  return baseRows.map(({ base, nodeMetadata }) =>
+  return baseRows.map(({ base }) =>
     toBaseVO(
       base,
       fieldRows.filter((field) => field.baseId === base.id),
-      nodeMetadata,
     ),
   );
 };
@@ -117,9 +114,8 @@ export const getBase = async (baseId: string) => {
   // indistinguishable from a base that doesn't exist.
   const visible = buildNodeVisibilityExists(db, busabaseBases.nodeId);
   const [bySlug] = await db
-    .select({ base: busabaseBases, nodeMetadata: busabaseNodes.metadata })
+    .select({ base: busabaseBases })
     .from(busabaseBases)
-    .innerJoin(busabaseNodes, eq(busabaseNodes.id, busabaseBases.nodeId))
     .where(
       and(
         eq(busabaseBases.slug, baseId),
@@ -132,9 +128,8 @@ export const getBase = async (baseId: string) => {
   const [row] = bySlug
     ? [bySlug]
     : await db
-        .select({ base: busabaseBases, nodeMetadata: busabaseNodes.metadata })
+        .select({ base: busabaseBases })
         .from(busabaseBases)
-        .innerJoin(busabaseNodes, eq(busabaseNodes.id, busabaseBases.nodeId))
         .where(
           and(
             or(eq(busabaseBases.id, baseId), eq(busabaseBases.nodeId, baseId)),
@@ -152,7 +147,7 @@ export const getBase = async (baseId: string) => {
     .from(busabaseBaseFields)
     .where(and(eq(busabaseBaseFields.baseId, row.base.id), isNull(busabaseBaseFields.deletedAt)))
     .orderBy(asc(busabaseBaseFields.position));
-  return toBaseVO(row.base, fields, row.nodeMetadata);
+  return toBaseVO(row.base, fields);
 };
 
 export const listViews = async (baseId?: string) => {
@@ -1877,9 +1872,8 @@ export const listArchivedBases = async () => {
   const db = await getDb();
   const spaceId = getContextSpaceId();
   const baseRows = await db
-    .select({ base: busabaseBases, nodeMetadata: busabaseNodes.metadata })
+    .select({ base: busabaseBases })
     .from(busabaseBases)
-    .innerJoin(busabaseNodes, eq(busabaseNodes.id, busabaseBases.nodeId))
     .where(
       and(
         eq(busabaseBases.spaceId, spaceId),
@@ -1896,11 +1890,10 @@ export const listArchivedBases = async () => {
     .from(busabaseBaseFields)
     .where(and(eq(busabaseBaseFields.spaceId, spaceId), isNull(busabaseBaseFields.deletedAt)))
     .orderBy(asc(busabaseBaseFields.position));
-  return baseRows.map(({ base, nodeMetadata }) =>
+  return baseRows.map(({ base }) =>
     toBaseVO(
       base,
       fieldRows.filter((field) => field.baseId === base.id),
-      nodeMetadata,
     ),
   );
 };

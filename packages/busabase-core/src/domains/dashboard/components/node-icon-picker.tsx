@@ -9,14 +9,15 @@
 
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { NodeIcon } from "busabase-contract/types";
-import { EmojiPicker, EmojiPickerContent, EmojiPickerSearch } from "kui/emoji-picker";
+import { EmojiPicker, EmojiPickerSearch } from "kui/emoji-picker";
 import { Popover, PopoverContent, PopoverTrigger } from "kui/popover";
 import { cn } from "kui/utils";
 import { ImageUp, Loader2 } from "lucide-react";
 import { useState } from "react";
-import { useCoreI18n } from "../../../i18n";
+import { useCoreI18n, useCoreLocale } from "../../../i18n";
 import { resolveNodeIcon } from "../helpers/node-icons";
 import { useNodeIconCropUpload } from "../hooks/use-node-icon-crop-upload";
+import { LocalizedEmojiContent } from "./localized-emoji-content";
 
 interface NodeIconPickerProps {
   orpc: BusabaseQueryUtils;
@@ -28,6 +29,7 @@ interface NodeIconPickerProps {
 
 export function NodeIconPicker({ orpc, nodeId, nodeType, icon, onChange }: NodeIconPickerProps) {
   const messages = useCoreI18n();
+  const locale = useCoreLocale();
   const t = messages.nodeSettings;
   const [open, setOpen] = useState(false);
   const { openWithIcon, openEmpty, dialog, isUploading, uploadingPreview } = useNodeIconCropUpload({
@@ -72,6 +74,7 @@ export function NodeIconPicker({ orpc, nodeId, nodeType, icon, onChange }: NodeI
         <PopoverContent align="start" className="w-fit p-0">
           <div className="flex w-[272px] flex-col">
             <EmojiPicker
+              locale={locale === "zh-CN" ? "zh" : locale === "zh-TW" ? "zh-hant" : locale}
               className={cn(
                 "h-[220px] w-full rounded-none border-0 bg-transparent",
                 "[&_[data-slot=emoji-picker-row]]:px-3",
@@ -93,8 +96,8 @@ export function NodeIconPicker({ orpc, nodeId, nodeType, icon, onChange }: NodeI
                 setOpen(false);
               }}
             >
-              <EmojiPickerSearch />
-              <EmojiPickerContent />
+              <EmojiPickerSearch placeholder={t.emojiSearchPlaceholder} />
+              <LocalizedEmojiContent emptyLabel={t.emojiEmpty} />
             </EmojiPicker>
 
             <button

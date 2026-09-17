@@ -8,6 +8,37 @@ import {
 import { coreMessagesByLocale, coreMessagesEn, fmt } from "../src/i18n";
 
 describe("shared dashboard translations", () => {
+  it("keeps interpolation parameters aligned across every locale", () => {
+    const flatten = (value: unknown, prefix = ""): Record<string, string> => {
+      if (!value || typeof value !== "object") return {};
+      return Object.fromEntries(
+        Object.entries(value).flatMap(([key, child]) => {
+          const path = prefix ? `${prefix}.${key}` : key;
+          return typeof child === "string" ? [[path, child]] : Object.entries(flatten(child, path));
+        }),
+      );
+    };
+    const placeholders = (value: string) =>
+      [...value.matchAll(/\{([A-Za-z][A-Za-z0-9_]*)\}/g)]
+        .map((match) => match[1])
+        // English plural suffixes are intentionally omitted in CJK translations.
+        .filter((name) => name !== "plural")
+        .sort();
+    const english = flatten(coreMessagesEn);
+
+    for (const [locale, messages] of Object.entries(coreMessagesByLocale)) {
+      const translated = flatten(messages);
+      expect(Object.keys(translated).sort(), `${locale} key coverage`).toEqual(
+        Object.keys(english).sort(),
+      );
+      for (const [key, value] of Object.entries(english)) {
+        expect(placeholders(translated[key]), `${locale}.${key} parameters`).toEqual(
+          placeholders(value),
+        );
+      }
+    }
+  });
+
   it("defines a localized label for every field type", () => {
     for (const messages of Object.values(coreMessagesByLocale)) {
       expect(Object.keys(messages.fieldTypes).sort()).toEqual([...FIELD_TYPE_ORDER].sort());

@@ -9,6 +9,7 @@ import { ChevronDown, Loader2 } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
+import { presentCoreError } from "../../../i18n/localize-error";
 import { type ActivityEvent, buildActivityEventFromItem } from "../helpers/activity-events";
 import {
   changeRequestStatusLabel,
@@ -634,6 +635,7 @@ export function ActivityView({
   emptyGuide?: ReactNode;
 }) {
   const messages = useCoreI18n();
+  const locale = useCoreLocale();
   // Keyset-paginated feed (activity.listPaged) — the whole CR/record/audit tables
   // are no longer pulled into the browser; each page is rendered from descriptors.
   const listQuery = useInfiniteQuery({
@@ -667,8 +669,12 @@ export function ActivityView({
       title: messages.activity.earlier,
     },
   ].filter((group) => group.count > 0);
-  const loadError =
-    listQuery.error instanceof Error ? listQuery.error.message : messages.inbox.loadFailedBody;
+  const loadError = presentCoreError(
+    messages,
+    locale,
+    listQuery.error,
+    messages.inbox.loadFailedBody,
+  );
 
   return (
     <section className="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden">

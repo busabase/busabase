@@ -31,6 +31,8 @@ import type {
   CommentVO,
   FileNodeVO,
   FormVO,
+  ListFormsDTO,
+  ListFormsVO,
   NodeSearchResultVO,
   NodeVO,
   OperationKind,
@@ -125,6 +127,27 @@ export const demoGetForm = (nodeIdOrSlug: string): FormVO | null => {
     updatedAt: timestamp,
   };
 };
+
+/**
+ * The Forms writing INTO one Base, from the seeded scenario.
+ *
+ * A real implementation rather than `demoUnsupported`, because the surface that
+ * reads this is a safety panel on the Base ("which inbound surfaces does this
+ * Base have, and is any of them open to the world?"). A red "List forms is not
+ * available in demo" block there would land on a public marketing tour and read
+ * as a broken product, not as a disabled write.
+ */
+export const demoListForms = (input: ListFormsDTO): ListFormsVO => ({
+  forms: (currentScenario().forms ?? [])
+    .filter((form) => form.targetBaseId === input.targetBaseId)
+    .flatMap((form) => {
+      const vo = demoGetForm(form.nodeId);
+      return vo ? [vo] : [];
+    }),
+  // The seeded scenarios hold a handful of forms in total, so a page always
+  // holds all of them and there is never a cursor to hand back.
+  nextCursor: null,
+});
 
 /**
  * A demo Form submission: the stateless demo can't materialize a real pending

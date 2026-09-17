@@ -309,6 +309,10 @@ export const loadEmbedNodeDetail = async (
           records: page.records.map((record) => ({
             ...record,
             createdByUser: record.createdByUser ?? null,
+            // Resolved by `hydrateRecords`; for an Embed Link visitor the host
+            // leaves `resolveUsers` unset, so this is normally `{}` and the
+            // client falls back to ids (see `public-access.ts`).
+            fieldUsers: record.fieldUsers ?? {},
             headCommit: {
               ...record.headCommit,
               authorUser: record.headCommit.authorUser ?? null,

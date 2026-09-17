@@ -15,14 +15,7 @@ import {
   type CustomPromptIntent,
 } from "busabase-contract/contract/node-agent-prompt-schemas";
 import { Button } from "kui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "kui/dialog";
+import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "kui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -37,14 +30,24 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "kui/to
 import { cn } from "kui/utils";
 import { Check, Copy, MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
 import { type iString, iStringParse } from "openlib/i18n/i-string";
-import { type ReactNode, useMemo, useState } from "react";
+import {
+  type KeyboardEvent,
+  type ReactNode,
+  type RefObject,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
-import { AskAgentAction } from "../../agents/components/ask-agent-action";
+import { presentCoreError } from "../../../i18n/localize-error";
 import { useAgentIntegrationTarget } from "../agent-integration-context";
 import { renderPromptForDispatch } from "../helpers/agent-prompt-dispatch";
 import type { NodePrompt, NodePromptSource } from "../helpers/node-agent-prompts";
 import type { AgentIntegrationTarget } from "./agent-install-panel";
+import { AgentPromptAskAction } from "./agent-prompt-ask-action";
 import { createSetupSkillUrl } from "./agent-skill-button";
+import { DialogContent } from "./localized-dialog-content";
 import { ConfirmActionDialog } from "./primitives";
 import { useWorkspacePermissionLevel } from "./split-submit-button";
 
@@ -100,11 +103,14 @@ export const buildPromptSections = (
   ];
 };
 
+export const flattenPromptSections = (sections: PromptSection[]): NodePrompt[] =>
+  sections.flatMap((section) => section.items);
+
 export const resolveActivePrompt = (
   sections: PromptSection[],
   selected: string | null,
 ): NodePrompt | undefined => {
-  const prompts = sections.flatMap((section) => section.items);
+  const prompts = flattenPromptSections(sections);
   return prompts.find((prompt) => prompt.key === selected) ?? prompts[0];
 };
 
@@ -169,6 +175,7 @@ export function AgentPromptsView({
   askAgent,
   onHandedOff,
   management = null,
+  compact = false,
 }: {
   scenarios: NodePrompt[];
   capabilities: NodePrompt[];
@@ -193,17 +200,33 @@ export function AgentPromptsView({
   askAgent: { sessionScopeId: string; orpc: BusabaseQueryUtils } | null;
   onHandedOff: () => void;
   management?: AgentPromptsManagement | null;
+  /** Use the denser dimensions of the standalone Agent prompts dialog. */
+  compact?: boolean;
 }) {
   const messages = useCoreI18n();
   const agentIntegrationFromContext = useAgentIntegrationTarget();
   const locale = useCoreLocale();
   const [selected, setSelected] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState(false);
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [saveAttempted, setSaveAttempted] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<CustomPromptDef | null>(null);
+  const copyAttemptRef = useRef(0);
+  const copyResetTimeoutRef = useRef<number | null>(null);
+  const snippetRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(
+    () => () => {
+      copyAttemptRef.current += 1;
+      if (copyResetTimeoutRef.current !== null) {
+        window.clearTimeout(copyResetTimeoutRef.current);
+      }
+    },
+    [],
+  );
 
   const permissionLevel = useWorkspacePermissionLevel();
   const canAskAgent = hasApiKeyLevel(permissionLevel, "manage");
@@ -254,9 +277,28 @@ export function AgentPromptsView({
 
   const copy = async () => {
     if (!active) return;
-    await navigator.clipboard.writeText(dispatchText(active));
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1800);
+    const attempt = copyAttemptRef.current + 1;
+    copyAttemptRef.current = attempt;
+    if (copyResetTimeoutRef.current !== null) {
+      window.clearTimeout(copyResetTimeoutRef.current);
+      copyResetTimeoutRef.current = null;
+    }
+    setCopied(false);
+    setCopyError(false);
+    try {
+      await navigator.clipboard.writeText(dispatchText(active));
+      if (copyAttemptRef.current !== attempt) return;
+      setCopied(true);
+      copyResetTimeoutRef.current = window.setTimeout(() => {
+        if (copyAttemptRef.current === attempt) setCopied(false);
+        copyResetTimeoutRef.current = null;
+      }, 1800);
+    } catch {
+      if (copyAttemptRef.current !== attempt) return;
+      setCopied(false);
+      setCopyError(true);
+      snippetRef.current?.focus();
+    }
   };
 
   const beginCreate = () => {
@@ -324,7 +366,7 @@ export function AgentPromptsView({
       setSelected(`custom:${nextPrompt.key}`);
       setEditor(null);
     } catch (caught) {
-      setSaveError(caught instanceof Error ? caught.message : messages.agentPrompts.saveFailed);
+      setSaveError(presentCoreError(messages, locale, caught, messages.agentPrompts.saveFailed));
     }
   };
 
@@ -338,7 +380,7 @@ export function AgentPromptsView({
       }
       setDeleteTarget(null);
     } catch (caught) {
-      setActionError(caught instanceof Error ? caught.message : messages.agentPrompts.saveFailed);
+      setActionError(presentCoreError(messages, locale, caught, messages.agentPrompts.saveFailed));
       setDeleteTarget(null);
     }
   };
@@ -360,8 +402,8 @@ export function AgentPromptsView({
         active={active}
         askAgentSlot={
           askAgent && canAskAgent ? (
-            <AskAgentAction
-              onClose={onHandedOff}
+            <AgentPromptAskAction
+              onHandedOff={onHandedOff}
               orpc={askAgent.orpc}
               promptText={active ? dispatchText(active) : undefined}
               sessionScopeId={askAgent.sessionScopeId}
@@ -369,8 +411,9 @@ export function AgentPromptsView({
           ) : null
         }
         canManage={canManage}
+        compact={compact}
         copied={copied}
-        dispatchNote={edition ? messages.agentPrompts.connectionCheckNote : undefined}
+        copyError={copyError}
         management={management}
         managementError={actionError}
         onCopy={() => void copy()}
@@ -379,9 +422,17 @@ export function AgentPromptsView({
         onEdit={beginEdit}
         onSelect={(key) => {
           setActionError(null);
+          copyAttemptRef.current += 1;
+          if (copyResetTimeoutRef.current !== null) {
+            window.clearTimeout(copyResetTimeoutRef.current);
+            copyResetTimeoutRef.current = null;
+          }
+          setCopied(false);
+          setCopyError(false);
           setSelected(key);
         }}
         sections={sections}
+        snippetRef={snippetRef}
       />
 
       <CustomPromptDialog
@@ -419,39 +470,82 @@ function PromptPanel({
   onSelect,
   onCopy,
   copied,
+  copyError,
   askAgentSlot,
-  dispatchNote,
   canManage,
+  compact,
   management,
   managementError,
   onCreate,
   onEdit,
   onDelete,
+  snippetRef,
 }: {
   sections: PromptSection[];
   active?: NodePrompt;
   onSelect: (key: string) => void;
   onCopy: () => void;
   copied: boolean;
+  /** Clipboard write failed (permission or non-secure origin) — see `copy` in `AgentPromptsView`. */
+  copyError: boolean;
   askAgentSlot?: ReactNode;
-  /**
-   * One line under the preview saying the connection check rides along, or
-   * `undefined` when nothing will be appended. The preview deliberately does not
-   * show that paragraph, so without this the box would be quietly lying about
-   * what the Copy button produces.
-   */
-  dispatchNote?: string;
   canManage: boolean;
+  compact: boolean;
   management: AgentPromptsManagement | null;
   managementError: string | null;
   onCreate: () => void;
   onEdit: (prompt: CustomPromptDef) => void;
   onDelete: (prompt: CustomPromptDef) => void;
+  snippetRef: RefObject<HTMLTextAreaElement | null>;
 }) {
   const messages = useCoreI18n();
+
+  // Flat, ordered list of prompt keys backing arrow-key navigation — the
+  // sections above are a purely visual grouping, so a prompt's neighbor for
+  // ArrowUp/ArrowDown purposes crosses section boundaries the same way Tab
+  // would if every button were reachable in document order.
+  const orderedKeys = useMemo(
+    () => flattenPromptSections(sections).map((prompt) => prompt.key),
+    [sections],
+  );
+  const buttonRefs = useRef(new Map<string, HTMLButtonElement>());
+  const activeCustom = active?.customKey
+    ? management?.customPrompts.find((prompt) => prompt.key === active.customKey)
+    : undefined;
+
+  const focusPrompt = (key: string) => {
+    onSelect(key);
+    const node = buttonRefs.current.get(key);
+    node?.focus();
+    // jsdom (unit tests) has no scrollIntoView; guard rather than pull in a polyfill.
+    node?.scrollIntoView?.({ block: "nearest" });
+  };
+
+  const handlePromptKeyDown = (event: KeyboardEvent<HTMLButtonElement>, currentKey: string) => {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    if (orderedKeys.length === 0) return;
+    event.preventDefault();
+    const currentIndex = orderedKeys.indexOf(currentKey);
+    const step = event.key === "ArrowDown" ? 1 : -1;
+    const nextIndex =
+      currentIndex === -1 ? 0 : (currentIndex + step + orderedKeys.length) % orderedKeys.length;
+    const nextKey = orderedKeys[nextIndex];
+    if (nextKey) focusPrompt(nextKey);
+  };
+
   return (
-    <div className="grid min-h-0 gap-3 sm:grid-cols-[minmax(0,19.5rem)_minmax(0,1fr)]">
-      <div className="max-h-[28vh] overflow-y-auto rounded-md border p-1 sm:max-h-[46vh]">
+    <div
+      className={cn(
+        "grid min-h-0 gap-3 sm:h-full sm:grid-cols-[minmax(0,19.5rem)_minmax(0,1fr)]",
+        compact && "gap-2 sm:h-auto sm:grid-cols-[minmax(0,14rem)_minmax(0,1fr)]",
+      )}
+    >
+      <div
+        className={cn(
+          "max-h-[28vh] overflow-y-auto rounded-md border p-1 sm:max-h-full",
+          compact && "max-h-[20vh] sm:h-80 sm:max-h-none",
+        )}
+      >
         {sections.map((section) => {
           const isCustom = section.source === "custom-scenario";
           return (
@@ -481,59 +575,36 @@ function PromptPanel({
               {isCustom && canManage && section.items.length === 0 ? (
                 <div className="px-1 pb-1">
                   <button
-                    className="flex min-h-20 w-full flex-col items-center justify-center gap-1.5 rounded-md border border-border border-dashed px-3 py-3 text-center text-muted-foreground text-xs transition-colors hover:border-foreground/40 hover:bg-muted/40 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="flex min-h-9 w-full items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-border border-dashed px-3 py-2 text-center text-muted-foreground text-xs transition-colors hover:border-foreground/40 hover:bg-muted/40 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     onClick={onCreate}
                     type="button"
                   >
-                    <Plus aria-hidden className="size-4" />
+                    <Plus aria-hidden className="size-4 shrink-0" />
                     <span>{messages.agentPrompts.addPrompt}</span>
                   </button>
                 </div>
               ) : null}
               {section.items.map((prompt) => {
                 const isActive = active?.key === prompt.key;
-                const custom = prompt.customKey
-                  ? management?.customPrompts.find((item) => item.key === prompt.customKey)
-                  : undefined;
                 return (
-                  <div className="group flex items-center" key={prompt.key}>
+                  <div className="flex items-center" key={prompt.key}>
                     <button
+                      aria-current={isActive ? "true" : undefined}
                       className={cn(
-                        "min-w-0 flex-1 truncate rounded px-2 py-1.5 text-left text-sm",
+                        "min-w-0 flex-1 truncate rounded px-2 py-1.5 text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                         isActive ? "bg-muted font-medium text-foreground" : "hover:bg-muted/60",
                       )}
                       onClick={() => onSelect(prompt.key)}
+                      onKeyDown={(event) => handlePromptKeyDown(event, prompt.key)}
+                      ref={(node) => {
+                        if (node) buttonRefs.current.set(prompt.key, node);
+                        else buttonRefs.current.delete(prompt.key);
+                      }}
                       title={prompt.label}
                       type="button"
                     >
                       {prompt.label}
                     </button>
-                    {custom && canManage ? (
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <button
-                            aria-label={fmt(messages.agentPrompts.scenarioActions, {
-                              name: prompt.label,
-                            })}
-                            className="grid size-7 shrink-0 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
-                            type="button"
-                          >
-                            <MoreHorizontal aria-hidden className="size-4" />
-                          </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onSelect={() => onEdit(custom)}>
-                            <Pencil aria-hidden />
-                            {messages.common.edit}
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem onSelect={() => onDelete(custom)} variant="destructive">
-                            <Trash2 aria-hidden />
-                            {messages.agentPrompts.deleteScenario}
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    ) : null}
                   </div>
                 );
               })}
@@ -542,16 +613,59 @@ function PromptPanel({
         })}
       </div>
 
-      <div className="relative min-h-[24vh] overflow-hidden rounded-md border bg-muted/30 sm:min-h-[46vh]">
-        <textarea
-          className="h-full min-h-[24vh] w-full resize-none border-0 bg-transparent p-3 pb-32 font-mono text-xs leading-relaxed text-foreground outline-none sm:min-h-[46vh] sm:pb-24"
-          readOnly
-          value={active?.body ?? ""}
-        />
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex flex-col gap-2 bg-gradient-to-t from-background via-background/95 to-transparent px-3 pt-8 pb-3 sm:flex-row sm:items-end sm:justify-between">
-          <div className="pointer-events-auto min-w-0 flex-1">
-            {dispatchNote ? (
-              <p className="text-muted-foreground text-xs leading-5">{dispatchNote}</p>
+      <div
+        className={cn(
+          "flex min-h-[24vh] flex-col overflow-hidden rounded-md border bg-muted/30 sm:min-h-0",
+          compact && "h-64 min-h-0 sm:h-80",
+        )}
+      >
+        <div className="flex min-w-0 items-center border-b bg-card/60 p-1">
+          <div
+            className="min-w-0 flex-1 truncate px-2 font-medium text-foreground text-sm"
+            data-testid="agent-prompts-active-title"
+            title={active?.label}
+          >
+            {active?.label}
+          </div>
+          <div className="flex shrink-0 items-center" data-testid="agent-prompts-toolbar-actions">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  aria-label={messages.common.moreActions}
+                  className="grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  type="button"
+                >
+                  <MoreHorizontal aria-hidden className="size-4" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem disabled={!active} onSelect={onCopy}>
+                  {copied ? <Check aria-hidden /> : <Copy aria-hidden />}
+                  {copied ? messages.agentPrompts.copied : messages.agentPrompts.copy}
+                </DropdownMenuItem>
+                {activeCustom && canManage ? (
+                  <>
+                    <DropdownMenuItem onSelect={() => onEdit(activeCustom)}>
+                      <Pencil aria-hidden />
+                      {messages.agentPrompts.editScenario}
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onSelect={() => onDelete(activeCustom)} variant="destructive">
+                      <Trash2 aria-hidden />
+                      {messages.agentPrompts.deleteScenario}
+                    </DropdownMenuItem>
+                  </>
+                ) : null}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
+        {managementError || copyError ? (
+          <div className="flex flex-col gap-1 border-b bg-card/30 px-3 py-1.5">
+            {copyError ? (
+              <p aria-live="polite" className="text-destructive text-xs">
+                {messages.agentPrompts.copyFailed}
+              </p>
             ) : null}
             {managementError ? (
               <p aria-live="polite" className="text-destructive text-xs">
@@ -559,18 +673,32 @@ function PromptPanel({
               </p>
             ) : null}
           </div>
-          <div className="pointer-events-auto flex flex-wrap items-center justify-end gap-2">
-            {askAgentSlot}
-            <button
-              className="inline-flex h-9 shrink-0 items-center gap-2 rounded-md border bg-card px-3 text-sm font-medium hover:bg-muted"
-              disabled={!active}
-              onClick={onCopy}
-              type="button"
-            >
-              {copied ? <Check size={16} /> : <Copy size={16} />}
-              {copied ? messages.agentPrompts.copied : messages.agentPrompts.copy}
-            </button>
-          </div>
+        ) : null}
+        <textarea
+          aria-label={active?.label}
+          className="min-h-[18vh] w-full flex-1 resize-none border-0 bg-transparent p-3 font-mono text-xs leading-relaxed text-foreground outline-none sm:min-h-0"
+          readOnly
+          ref={snippetRef}
+          value={active?.body ?? ""}
+        />
+        <div
+          className="flex min-w-0 items-start justify-end gap-2 border-t bg-card/60 p-2"
+          data-testid="agent-prompts-primary-action"
+        >
+          {askAgentSlot}
+          <Button
+            aria-label={copied ? messages.agentPrompts.copied : messages.agentPrompts.copyShort}
+            className="h-7 gap-1.5 px-2.5 text-xs"
+            data-testid="agent-prompts-copy-button"
+            disabled={!active}
+            onClick={onCopy}
+            size="sm"
+            title={messages.agentPrompts.copy}
+            type="button"
+          >
+            {copied ? <Check aria-hidden /> : <Copy aria-hidden />}
+            {copied ? messages.agentPrompts.copied : messages.agentPrompts.copyShort}
+          </Button>
         </div>
       </div>
     </div>

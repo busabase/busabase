@@ -1,23 +1,24 @@
-import type {
-  AgentSessionEventVO,
-  AgentSessionStatus,
-  AgentSessionVO,
+import {
+  type AgentSessionEventVO,
+  type AgentSessionModelOptionVO,
+  AgentSessionModelOptionVOSchema,
+  type AgentSessionStatus,
+  type AgentSessionVO,
 } from "busabase-contract/domains/agents/types";
-import { and, asc, desc, eq, gt, inArray, isNull, lt } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, lt, lte, notInArray, or, sql } from "drizzle-orm";
 import { getContextActorId, getContextSpaceId } from "../../../context";
 import { getDb } from "../../../db";
 import { busabaseAgentSessionEvents } from "../schema/agent-session-events";
 import { busabaseAgentSessions } from "../schema/agent-sessions";
+import type { AgentSessionCursor } from "../utils/agent-session-pagination";
 
 /**
  * Persistence for agent sessions — the only place in this domain that touches
  * the database.
  *
- * Every function here is best-effort by design: a failed write must never take
- * down a live agent turn. Losing a transcript row is a cosmetic loss; killing
- * the conversation the user is having because the disk hiccuped is not. So the
- * writers swallow and log rather than throw, and the in-memory session stays
- * the source of truth for anything currently running.
+ * Session identity is strict: a process/socket must never exist without its
+ * durable, tenant-scoped row. Transcript and later state writes remain
+ * best-effort so a temporary storage failure cannot interrupt an active turn.
  */
 
 /**
@@ -35,33 +36,250 @@ function warn(what: string, error: unknown) {
   console.warn(`[agents] ${what} failed: ${error instanceof Error ? error.message : error}`);
 }
 
-export async function persistSessionCreated(session: AgentSessionVO): Promise<void> {
+export interface AgentSessionScope {
+  spaceId: string;
+  actorId: string | null;
+}
+
+const currentScope = (): AgentSessionScope => ({
+  spaceId: getContextSpaceId(),
+  actorId: getContextActorId() ?? null,
+});
+
+const scopeCondition = (scope: AgentSessionScope) =>
+  and(
+    eq(busabaseAgentSessions.spaceId, scope.spaceId),
+    scope.actorId
+      ? eq(busabaseAgentSessions.actorId, scope.actorId)
+      : isNull(busabaseAgentSessions.actorId),
+  );
+
+export async function persistSessionCreated(
+  session: AgentSessionVO,
+  scope: AgentSessionScope = currentScope(),
+): Promise<void> {
+  const database = await db();
+  await database.insert(busabaseAgentSessions).values({
+    id: session.id,
+    spaceId: scope.spaceId,
+    actorId: scope.actorId,
+    slug: session.slug,
+    agentName: session.agentName,
+    transport: session.transport,
+    status: session.status,
+    error: session.error,
+    createdAt: new Date(session.createdAt),
+    lastActivityAt: new Date(session.lastActivityAt),
+  });
+}
+
+/** Persist the inner id without overwriting an in-flight prompt reservation. */
+export async function persistSessionAcpIdentity(
+  sessionId: string,
+  acpSessionId: string,
+  scope: AgentSessionScope = currentScope(),
+): Promise<void> {
+  const database = await db();
+  await database
+    .update(busabaseAgentSessions)
+    .set({ acpSessionId, lastActivityAt: new Date() })
+    .where(and(eq(busabaseAgentSessions.id, sessionId), scopeCondition(scope)));
+}
+
+/**
+ * Cross-worker turn ownership. An acquire is one atomic UPDATE that both
+ * claims the lease (owner UUID + a strictly-increasing fencing token) and
+ * flips status to busy, conditioned on either no one holding the lease or the
+ * previous holder's lease having expired by the DATABASE's clock (`now()`,
+ * never app-side `Date.now()` — workers can have skewed clocks, the row
+ * cannot).
+ *
+ * A crashed worker's lease simply expires; the next prompt attempt from any
+ * worker (including a fresh one) can then acquire it and gets a higher token
+ * than the crashed worker held. That crashed worker's writes, if it somehow
+ * resumes, carry its old token and are rejected by every fenced write below
+ * — this is what makes takeover safe without ever needing to know *why* the
+ * previous owner stopped responding.
+ */
+export interface AgentSessionLease {
+  sessionId: string;
+  ownerId: string;
+  fencingToken: number;
+  expiresAt: string;
+}
+
+export const DEFAULT_SESSION_LEASE_TTL_SECONDS = 45;
+
+export function sessionLeaseTtlSeconds(): number {
+  const raw = process.env.BUSABASE_AGENT_SESSION_LEASE_TTL_SECONDS?.trim();
+  if (!raw) return DEFAULT_SESSION_LEASE_TTL_SECONDS;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_SESSION_LEASE_TTL_SECONDS;
+}
+
+/** Acquire the turn lease and flip status → busy. Only one worker can succeed per turn. */
+export async function acquireSessionLease(
+  sessionId: string,
+  ownerId: string,
+  ttlSeconds: number = sessionLeaseTtlSeconds(),
+  scope: AgentSessionScope = currentScope(),
+): Promise<AgentSessionLease | null> {
+  const database = await db();
+  const [claimed] = await database
+    .update(busabaseAgentSessions)
+    .set({
+      status: "busy",
+      lastActivityAt: new Date(),
+      leaseOwnerId: ownerId,
+      leaseFencingToken: sql`coalesce(${busabaseAgentSessions.leaseFencingToken}, 0) + 1`,
+      leaseExpiresAt: sql`now() + (${ttlSeconds} * interval '1 second')`,
+    })
+    .where(
+      and(
+        eq(busabaseAgentSessions.id, sessionId),
+        scopeCondition(scope),
+        eq(busabaseAgentSessions.transport, "remote-websocket"),
+        inArray(busabaseAgentSessions.status, LIVE_STATUSES),
+        or(
+          isNull(busabaseAgentSessions.leaseOwnerId),
+          isNull(busabaseAgentSessions.leaseExpiresAt),
+          lte(busabaseAgentSessions.leaseExpiresAt, sql`now()`),
+        ),
+      ),
+    )
+    .returning();
+  if (!claimed || claimed.leaseOwnerId !== ownerId || claimed.leaseExpiresAt === null) return null;
+  return {
+    sessionId,
+    ownerId,
+    fencingToken: claimed.leaseFencingToken,
+    expiresAt: claimed.leaseExpiresAt.toISOString(),
+  };
+}
+
+/**
+ * Best-effort expiry extension for the current occupant. `false` means this
+ * caller's fence is already stale — its turn keeps running locally, but it
+ * must treat any subsequent write rejection as ownership loss, not a
+ * transient error.
+ */
+export async function renewSessionLease(
+  sessionId: string,
+  ownerId: string,
+  fencingToken: number,
+  ttlSeconds: number = sessionLeaseTtlSeconds(),
+  scope: AgentSessionScope = currentScope(),
+): Promise<boolean> {
   const database = await db();
   try {
-    await database.insert(busabaseAgentSessions).values({
-      id: session.id,
-      actorId: getContextActorId() ?? null,
-      slug: session.slug,
-      agentName: session.agentName,
-      transport: session.transport,
-      status: session.status,
-      error: session.error,
-      createdAt: new Date(session.createdAt),
-      lastActivityAt: new Date(session.lastActivityAt),
-    });
+    const renewed = await database
+      .update(busabaseAgentSessions)
+      .set({ leaseExpiresAt: sql`now() + (${ttlSeconds} * interval '1 second')` })
+      .where(
+        and(
+          eq(busabaseAgentSessions.id, sessionId),
+          scopeCondition(scope),
+          eq(busabaseAgentSessions.leaseOwnerId, ownerId),
+          eq(busabaseAgentSessions.leaseFencingToken, fencingToken),
+          gt(busabaseAgentSessions.leaseExpiresAt, sql`now()`),
+        ),
+      )
+      .returning();
+    return renewed.length === 1;
   } catch (error) {
-    warn("persisting a new agent session", error);
+    warn("renewing agent session lease", error);
+    return false;
   }
 }
+
+/** Release a held turn only for the exact owner+token that acquired it; terminal states always win. */
+export async function releaseSessionLease(
+  sessionId: string,
+  ownerId: string,
+  fencingToken: number,
+  scope: AgentSessionScope = currentScope(),
+): Promise<boolean> {
+  const database = await db();
+  const released = await database
+    .update(busabaseAgentSessions)
+    .set({
+      status: "idle",
+      lastActivityAt: new Date(),
+      leaseOwnerId: null,
+      leaseExpiresAt: null,
+    })
+    .where(
+      and(
+        eq(busabaseAgentSessions.id, sessionId),
+        scopeCondition(scope),
+        eq(busabaseAgentSessions.status, "busy"),
+        eq(busabaseAgentSessions.leaseOwnerId, ownerId),
+        eq(busabaseAgentSessions.leaseFencingToken, fencingToken),
+        gt(busabaseAgentSessions.leaseExpiresAt, sql`now()`),
+      ),
+    )
+    .returning();
+  return released.length === 1;
+}
+
+/** End an unowned or expired remote session without requiring its original socket. */
+export async function endRemoteSession(
+  sessionId: string,
+  scope: AgentSessionScope = currentScope(),
+): Promise<boolean> {
+  const database = await db();
+  const ended = await database
+    .update(busabaseAgentSessions)
+    .set({
+      status: "ended",
+      endedAt: new Date(),
+      lastActivityAt: new Date(),
+      leaseOwnerId: null,
+      leaseExpiresAt: null,
+    })
+    .where(
+      and(
+        eq(busabaseAgentSessions.id, sessionId),
+        scopeCondition(scope),
+        eq(busabaseAgentSessions.transport, "remote-websocket"),
+        notInArray(busabaseAgentSessions.status, ["ended", "failed"]),
+        or(
+          isNull(busabaseAgentSessions.leaseOwnerId),
+          isNull(busabaseAgentSessions.leaseExpiresAt),
+          lte(busabaseAgentSessions.leaseExpiresAt, sql`now()`),
+        ),
+      ),
+    )
+    .returning();
+  return ended.length === 1;
+}
+
+/** Fences a durable write to the exact lease occupant that produced it. */
+export interface LeaseFence {
+  ownerId: string;
+  fencingToken: number;
+}
+
+const fenceCondition = (fence: LeaseFence | undefined) =>
+  fence
+    ? and(
+        eq(busabaseAgentSessions.leaseOwnerId, fence.ownerId),
+        eq(busabaseAgentSessions.leaseFencingToken, fence.fencingToken),
+        gt(busabaseAgentSessions.leaseExpiresAt, sql`now()`),
+      )
+    : undefined;
 
 export async function persistSessionState(
   session: Pick<AgentSessionVO, "id" | "status" | "error" | "lastActivityAt">,
   acpSessionId?: string | null,
-): Promise<void> {
+  options?: { expectedStatuses?: AgentSessionStatus[] },
+  scope: AgentSessionScope = currentScope(),
+  fence?: LeaseFence,
+): Promise<boolean> {
   const database = await db();
   const ended = session.status === "ended" || session.status === "failed";
   try {
-    await database
+    const updated = await database
       .update(busabaseAgentSessions)
       .set({
         status: session.status,
@@ -69,42 +287,164 @@ export async function persistSessionState(
         lastActivityAt: new Date(session.lastActivityAt),
         ...(acpSessionId === undefined ? {} : { acpSessionId }),
         ...(ended ? { endedAt: new Date() } : {}),
+        ...(fence && session.status !== "busy" ? { leaseOwnerId: null, leaseExpiresAt: null } : {}),
       })
-      .where(eq(busabaseAgentSessions.id, session.id));
+      .where(
+        and(
+          eq(busabaseAgentSessions.id, session.id),
+          scopeCondition(scope),
+          notInArray(busabaseAgentSessions.status, ["ended", "failed"]),
+          options?.expectedStatuses
+            ? inArray(busabaseAgentSessions.status, options.expectedStatuses)
+            : undefined,
+          fenceCondition(fence),
+        ),
+      )
+      .returning();
+    return updated.length === 1;
   } catch (error) {
     warn("persisting agent session state", error);
+    return false;
   }
 }
 
 /**
- * Append transcript rows. Callers pass an already-coalesced batch (see the
- * schema's note on why a row is not one emitted event), so this is one
- * multi-row insert per turn rather than one per token.
+ * Durable mirror of `LiveSession.modelOption` (PUL-246) — the one write path
+ * every discovery/update site funnels through, so the shape landing in
+ * `jsonb` always matches what `parseStoredModelOption` will read back.
+ *
+ * Called for `remote-websocket` sessions only, from the three moments the
+ * live value itself changes: initial discovery on `session/new`/
+ * `session/load`, an agent-pushed `config_option_update`, and the response to
+ * a user-triggered `session/set_config_option`. Best-effort like the rest of
+ * this domain's non-turn-critical writes (`warn`, swallow, return `false`) —
+ * a transient failure here must not interrupt an otherwise-healthy turn; the
+ * next discovery/update call gets another chance to land the same value.
+ *
+ * Initial discovery and idle agent notifications can write only while no
+ * worker owns a live lease. During a prompt or user-triggered config change,
+ * the caller supplies that operation's fence so a retained socket on another
+ * worker cannot overwrite the in-flight owner's snapshot.
  */
-export async function persistSessionEvents(events: AgentSessionEventVO[]): Promise<void> {
-  if (events.length === 0) return;
+export async function persistSessionModelOption(
+  sessionId: string,
+  modelOption: AgentSessionModelOptionVO | null,
+  scope: AgentSessionScope = currentScope(),
+  fence?: LeaseFence,
+): Promise<boolean> {
   const database = await db();
   try {
-    await database.insert(busabaseAgentSessionEvents).values(
-      events.map((event) => ({
-        id: `agev_${event.sessionId}_${event.seq}`,
-        sessionId: event.sessionId,
-        seq: event.seq,
-        kind: event.kind,
-        payload: {
-          acpUpdate: event.acpUpdate,
-          status: event.status,
-          message: event.message,
-          permissionRequest: event.permissionRequest,
-          permissionRequestId: event.permissionRequestId,
-          permissionOptionId: event.permissionOptionId,
-        } as Record<string, unknown>,
-        at: new Date(event.at),
-      })),
-    );
+    const updated = await database
+      .update(busabaseAgentSessions)
+      .set({ modelOption })
+      .where(
+        and(
+          eq(busabaseAgentSessions.id, sessionId),
+          scopeCondition(scope),
+          eq(busabaseAgentSessions.transport, "remote-websocket"),
+          notInArray(busabaseAgentSessions.status, ["ended", "failed"]),
+          fence
+            ? fenceCondition(fence)
+            : or(
+                isNull(busabaseAgentSessions.leaseOwnerId),
+                isNull(busabaseAgentSessions.leaseExpiresAt),
+                lte(busabaseAgentSessions.leaseExpiresAt, sql`now()`),
+              ),
+        ),
+      )
+      .returning();
+    return updated.length === 1;
+  } catch (error) {
+    warn("persisting agent session model option", error);
+    return false;
+  }
+}
+
+/**
+ * Append transcript rows. Local callers may pass coalesced turn batches;
+ * remote callers retain original event sequences for cross-worker streaming.
+ *
+ * When `fence` is given, the whole batch is written inside one transaction
+ * gated on a fenced no-op update of the owning session row: if the caller's
+ * owner+token is no longer the row's current lease occupant, the update
+ * matches zero rows, the transaction rolls back, and NONE of the batch is
+ * written — a superseded worker can never land a partial transcript.
+ */
+export async function persistSessionEvents(
+  events: AgentSessionEventVO[],
+  fence?: LeaseFence,
+): Promise<boolean> {
+  if (events.length === 0) return true;
+  const sessionId = events[0]?.sessionId;
+  if (!sessionId || events.some((event) => event.sessionId !== sessionId)) return false;
+  const database = await db();
+  const rows = events.map((event) => ({
+    id: `agev_${event.sessionId}_${event.seq}`,
+    sessionId: event.sessionId,
+    seq: event.seq,
+    kind: event.kind,
+    payload: {
+      acpUpdate: event.acpUpdate,
+      status: event.status,
+      message: event.message,
+      permissionRequest: event.permissionRequest,
+      permissionRequestId: event.permissionRequestId,
+      permissionOptionId: event.permissionOptionId,
+    } as Record<string, unknown>,
+    at: new Date(event.at),
+  }));
+  try {
+    if (!fence) {
+      await database.insert(busabaseAgentSessionEvents).values(rows);
+      return true;
+    }
+    let fenced = true;
+    await database.transaction(async (tx) => {
+      const stillOwned = await tx
+        .update(busabaseAgentSessions)
+        .set({ lastActivityAt: new Date() })
+        .where(
+          and(
+            eq(busabaseAgentSessions.id, sessionId),
+            scopeCondition(currentScope()),
+            fenceCondition(fence),
+          ),
+        )
+        .returning();
+      if (stillOwned.length !== 1) {
+        fenced = false;
+        return;
+      }
+      await tx.insert(busabaseAgentSessionEvents).values(rows);
+    });
+    return fenced;
   } catch (error) {
     warn("persisting agent session events", error);
+    return false;
   }
+}
+
+/**
+ * Boundary validation for the durable mirror of `LiveSession.modelOption`
+ * (PUL-246): a raw `jsonb` column is never trusted verbatim, so a value that
+ * fails the contract's own VO shape — an old shape, a partial write, a `{}`
+ * left by some future migration — degrades to `null` instead of surfacing a
+ * malformed picker or throwing during a list read.
+ *
+ * Only `remote-websocket` rows may carry a durable value at all:
+ * `local-subprocess` has no process left once the row is loaded from history,
+ * so persisting anything for it would just be a value nothing can ever act
+ * on. And a terminal session (`ended`/`failed`) never advertises a picker —
+ * there is no running turn to send `session/set_config_option` to — even if
+ * an older write left a value behind.
+ */
+function parseStoredModelOption(
+  row: Pick<typeof busabaseAgentSessions.$inferSelect, "modelOption" | "status" | "transport">,
+): AgentSessionModelOptionVO | null {
+  if (row.transport !== "remote-websocket") return null;
+  if (row.status === "ended" || row.status === "failed") return null;
+  const parsed = AgentSessionModelOptionVOSchema.nullable().safeParse(row.modelOption ?? null);
+  return parsed.success ? parsed.data : null;
 }
 
 const toVO = (row: typeof busabaseAgentSessions.$inferSelect): AgentSessionVO => ({
@@ -116,10 +456,48 @@ const toVO = (row: typeof busabaseAgentSessions.$inferSelect): AgentSessionVO =>
   createdAt: row.createdAt.toISOString(),
   lastActivityAt: row.lastActivityAt.toISOString(),
   error: row.error,
-  // Live-only (see LiveSession.modelOption): a row loaded from the database
-  // has no running process to send session/set_config_option to.
-  modelOption: null,
+  modelOption: parseStoredModelOption(row),
 });
+
+export interface AgentSessionRuntimeRecord {
+  session: AgentSessionVO;
+  /** Agent-owned ACP id. Kept server-side; never crosses the VO boundary. */
+  acpSessionId: string | null;
+  /** Lets a reattached worker continue the outer session's event sequence. */
+  lastEventSeq: number;
+}
+
+/** Load one session's durable runtime identity within the current space and actor. */
+export async function loadSessionRuntime(
+  sessionId: string,
+  scope: AgentSessionScope = currentScope(),
+): Promise<AgentSessionRuntimeRecord | null> {
+  const database = await db();
+  try {
+    const [row] = await database
+      .select()
+      .from(busabaseAgentSessions)
+      .where(and(eq(busabaseAgentSessions.id, sessionId), scopeCondition(scope)))
+      .limit(1);
+    if (!row) return null;
+
+    const [latestEvent] = await database
+      .select({ seq: busabaseAgentSessionEvents.seq })
+      .from(busabaseAgentSessionEvents)
+      .where(eq(busabaseAgentSessionEvents.sessionId, sessionId))
+      .orderBy(desc(busabaseAgentSessionEvents.seq))
+      .limit(1);
+
+    return {
+      session: toVO(row),
+      acpSessionId: row.acpSessionId,
+      lastEventSeq: latestEvent?.seq ?? 0,
+    };
+  } catch (error) {
+    warn("loading agent session runtime", error);
+    return null;
+  }
+}
 
 /**
  * Sessions for the current space, newest first.
@@ -133,19 +511,12 @@ const toVO = (row: typeof busabaseAgentSessions.$inferSelect): AgentSessionVO =>
  */
 export async function loadSessions(): Promise<AgentSessionVO[]> {
   const database = await db();
-  const actorId = getContextActorId();
+  const scope = currentScope();
   try {
     const rows = await database
       .select()
       .from(busabaseAgentSessions)
-      .where(
-        and(
-          eq(busabaseAgentSessions.spaceId, getContextSpaceId()),
-          actorId
-            ? eq(busabaseAgentSessions.actorId, actorId)
-            : isNull(busabaseAgentSessions.actorId),
-        ),
-      )
+      .where(scopeCondition(scope))
       .orderBy(desc(busabaseAgentSessions.lastActivityAt));
     return rows.map(toVO);
   } catch (error) {
@@ -154,23 +525,113 @@ export async function loadSessions(): Promise<AgentSessionVO[]> {
   }
 }
 
+/** One session only when it belongs to the current request's space and actor. */
+export async function loadScopedSession(sessionId: string): Promise<AgentSessionVO | null> {
+  const database = await db();
+  const rows = await database
+    .select()
+    .from(busabaseAgentSessions)
+    .where(and(eq(busabaseAgentSessions.id, sessionId), scopeCondition(currentScope())))
+    .limit(1);
+  return rows[0] ? toVO(rows[0]) : null;
+}
+
+export async function loadSessionPageCandidates(input: {
+  slug: string;
+  limit: number;
+  cursor: AgentSessionCursor | null;
+}): Promise<AgentSessionVO[]> {
+  const database = await db();
+  const actorId = getContextActorId();
+  const cursorTime = input.cursor ? new Date(input.cursor.lastActivityAt) : null;
+  try {
+    const rows = await database
+      .select()
+      .from(busabaseAgentSessions)
+      .where(
+        and(
+          eq(busabaseAgentSessions.spaceId, getContextSpaceId()),
+          eq(busabaseAgentSessions.slug, input.slug),
+          actorId
+            ? eq(busabaseAgentSessions.actorId, actorId)
+            : isNull(busabaseAgentSessions.actorId),
+          input.cursor && cursorTime
+            ? or(
+                lt(busabaseAgentSessions.lastActivityAt, cursorTime),
+                and(
+                  eq(busabaseAgentSessions.lastActivityAt, cursorTime),
+                  lt(busabaseAgentSessions.id, input.cursor.id),
+                ),
+              )
+            : undefined,
+        ),
+      )
+      .orderBy(desc(busabaseAgentSessions.lastActivityAt), desc(busabaseAgentSessions.id))
+      .limit(input.limit);
+    return rows.map(toVO);
+  } catch (error) {
+    warn("loading an agent session page", error);
+    return [];
+  }
+}
+
 /** Delete every persisted session (and cascaded transcript event) for one connected agent. */
 export async function deleteSessionsBySlug(slug: string): Promise<number> {
   const database = await db();
-  const actorId = getContextActorId();
   const deleted = await database
     .delete(busabaseAgentSessions)
+    .where(and(scopeCondition(currentScope()), eq(busabaseAgentSessions.slug, slug)))
+    .returning();
+  return deleted.length;
+}
+
+/**
+ * Distributed disconnect tombstone. Other server instances must honor this
+ * terminal row even if they still own a stale in-memory ACP connection.
+ */
+export async function endSessionsBySlug(slug: string): Promise<string[]> {
+  const database = await db();
+  const ended = await database
+    .update(busabaseAgentSessions)
+    .set({ status: "ended", endedAt: new Date(), lastActivityAt: new Date() })
     .where(
       and(
-        eq(busabaseAgentSessions.spaceId, getContextSpaceId()),
+        scopeCondition(currentScope()),
         eq(busabaseAgentSessions.slug, slug),
-        actorId
-          ? eq(busabaseAgentSessions.actorId, actorId)
-          : isNull(busabaseAgentSessions.actorId),
+        notInArray(busabaseAgentSessions.status, ["ended", "failed"]),
       ),
     )
     .returning();
-  return deleted.length;
+  return ended.map((row) => row.id);
+}
+
+/** Tombstone one user-ended session before its local process is closed. */
+export async function endSessionById(sessionId: string): Promise<boolean> {
+  const database = await db();
+  const ended = await database
+    .update(busabaseAgentSessions)
+    .set({ status: "ended", endedAt: new Date(), lastActivityAt: new Date() })
+    .where(
+      and(
+        eq(busabaseAgentSessions.id, sessionId),
+        scopeCondition(currentScope()),
+        notInArray(busabaseAgentSessions.status, ["ended", "failed"]),
+      ),
+    )
+    .returning();
+  return ended.length > 0;
+}
+
+/** Assign the old single-Buda slug to the credential's durable agent identity. */
+export async function normalizeLegacyBudaSessions(canonicalSlug: string): Promise<number> {
+  if (!canonicalSlug.startsWith("buda:")) return 0;
+  const database = await db();
+  const updated = await database
+    .update(busabaseAgentSessions)
+    .set({ slug: canonicalSlug })
+    .where(and(scopeCondition(currentScope()), eq(busabaseAgentSessions.slug, "buda")))
+    .returning();
+  return updated.length;
 }
 
 /** Replay a persisted transcript — what a client sees for a session that outlived its process. */
@@ -181,16 +642,21 @@ export async function loadSessionEvents(
   const database = await db();
   try {
     const rows = await database
-      .select()
+      .select({ event: busabaseAgentSessionEvents })
       .from(busabaseAgentSessionEvents)
+      .innerJoin(
+        busabaseAgentSessions,
+        eq(busabaseAgentSessionEvents.sessionId, busabaseAgentSessions.id),
+      )
       .where(
         and(
           eq(busabaseAgentSessionEvents.sessionId, sessionId),
           gt(busabaseAgentSessionEvents.seq, afterSeq),
+          scopeCondition(currentScope()),
         ),
       )
       .orderBy(asc(busabaseAgentSessionEvents.seq));
-    return rows.map((row) => {
+    return rows.map(({ event: row }) => {
       const payload = row.payload as Partial<AgentSessionEventVO>;
       return {
         sessionId: row.sessionId,
@@ -278,7 +744,7 @@ export async function pruneExpiredSessions(): Promise<number> {
  * can never answer again.
  *
  * Remote sessions are deliberately left alone: their agent outlives us and
- * `session/load` can reattach, which is a separate, not-yet-built path.
+ * `session/load` can reattach, which is what `loadSessionRuntime` powers.
  */
 export async function endOrphanedLocalSessions(): Promise<number> {
   const database = await db();

@@ -24,6 +24,9 @@ const inert = (key: string) => ({
 });
 const orpc = {
   search: inert("search"),
+  searchMetrics: {
+    report: { mutationOptions: () => ({ mutationFn: async () => ({ accepted: true }) }) },
+  },
   nodes: { list: inert("nodes.list"), searchByName: inert("nodes.searchByName") },
 } as unknown as BusabaseQueryUtils;
 

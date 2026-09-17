@@ -1,6 +1,6 @@
-import type { BaseFieldVO, RecordVO } from "busabase-contract/types";
+import type { BaseFieldVO, RecordVO, UserRefVO } from "busabase-contract/types";
 import { CodeBlock } from "kui/ai-elements/code-block";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "kui/dialog";
+import { Dialog, DialogHeader, DialogTitle } from "kui/dialog";
 import { ExternalLink, FileText, Film, Maximize2, Music, PlaySquare } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { type ComponentProps, type ReactNode, useState } from "react";
@@ -30,6 +30,8 @@ import {
 } from "../helpers/html";
 import { mergeSearchIntoHref } from "../helpers/link-search";
 import type { FieldChip } from "../helpers/view-types";
+import { DialogContent } from "./localized-dialog-content";
+import { MemberChips } from "./member-field";
 import { CheckboxBadge } from "./primitives";
 
 export type SkillCodeLanguage = ComponentProps<typeof CodeBlock>["language"];
@@ -391,11 +393,18 @@ export function WhiteboardFieldPreview({
 export function FieldValuePreview({
   className = "",
   field,
+  fieldUsers,
   records = [],
   value,
 }: {
   className?: string;
   field?: BaseFieldVO;
+  /**
+   * People named by this record's people-typed cells (`RecordVO.fieldUsers`),
+   * for `member` / `created_by` / `updated_by`. Absent → those cells fall back
+   * to an id-based label, which is what a public surface shows by design.
+   */
+  fieldUsers?: Record<string, UserRefVO>;
   records?: RecordVO[];
   value: unknown;
 }) {
@@ -407,6 +416,10 @@ export function FieldValuePreview({
 
   if (kind === "checkbox") {
     return <CheckboxBadge checked={value === true || value === "true"} />;
+  }
+
+  if (kind === "member") {
+    return <MemberChips className={className} users={fieldUsers} value={value} />;
   }
 
   const chips = field ? getFieldChipEntries(field, value) : [];

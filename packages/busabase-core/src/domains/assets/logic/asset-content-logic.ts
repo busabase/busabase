@@ -19,6 +19,8 @@ import { assertAssetPermission } from "./asset-permissions";
  */
 export interface AssetContentLocation {
   assetId: string;
+  /** Internal storage address used by ACL-protected download routes. */
+  storageKey: string;
   /** Resolved via `storage.getPublicUrl(storageKey)` — valid for this request only. */
   url: string;
   fileName: string;
@@ -103,6 +105,7 @@ export const resolveAssetContent = async (assetId: string): Promise<AssetContent
 
   return {
     assetId: row.id,
+    storageKey: row.storageKey,
     url: storage.getPublicUrl(row.storageKey),
     fileName: row.fileName,
     mimeType: row.mimeType,

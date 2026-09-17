@@ -1,6 +1,6 @@
 import { implement, ORPCError } from "@orpc/server";
 import { busabaseContract } from "busabase-contract/contract/busabase";
-import { getContextDemoLocale } from "./context";
+import { getContextDemoLocale, resolveMemberRoster } from "./context";
 import {
   cancelDemoAgentSession,
   closeDemoAgentSession,
@@ -12,6 +12,7 @@ import {
   respondToDemoAgentPermission,
   subscribeDemoAgentSession,
 } from "./domains/agents/logic/demo-agent";
+import { paginateAgentSessions } from "./domains/agents/utils/agent-session-pagination";
 import {
   applyViewConfigToRecords,
   DATE_RANGE_FIELD_TYPES,
@@ -44,6 +45,7 @@ import {
   demoListBases,
   demoListChangeRequests,
   demoListComments,
+  demoListForms,
   demoListMentionInbox,
   demoListNodeSummaries,
   demoListNodes,
@@ -141,7 +143,17 @@ export const busabaseDemoRouter = os.router({
   auth: {
     verify: os.auth.verify.handler(() => demoGetAuthInfo()),
   },
+  spaces: {
+    // Demo mode has no host, so this returns the same local roster
+    // `resolveMemberRoster` falls back to — which is exactly who the demo
+    // dataset's `member` cells name, so the picker and the cells agree.
+    members: os.spaces.members.handler(() => resolveMemberRoster()),
+  },
   search: os.search.handler(({ input }) => demoSearch(input)),
+  searchMetrics: {
+    // Demo traffic is synthetic and must not pollute product search metrics.
+    report: os.searchMetrics.report.handler(() => ({ accepted: true as const })),
+  },
   // Unified Grep needs real per-source storage (Drive text slots + Doc bodies)
   // the stateless in-memory demo dataset doesn't have.
   grep: os.grep.handler(() => {
@@ -506,9 +518,10 @@ export const busabaseDemoRouter = os.router({
     // scenario). Config edits still require a persistent instance; a submit is
     // acknowledged with a synthetic pending id so the approval-first flow reads
     // correctly, but nothing is stored.
-    list: os.forms.list.handler(() => {
-      throw demoUnsupported("List forms");
-    }),
+    // Reading which forms write into a Base is provenance, not a write — and the
+    // surface that asks is a safety panel on the Base, so it gets a real demo
+    // implementation off the seeded scenario rather than an error block.
+    list: os.forms.list.handler(({ input }) => demoListForms(input)),
     getByNode: os.forms.getByNode.handler(({ input }) => {
       const form = demoGetForm(input.nodeId);
       if (!form) {
@@ -626,16 +639,23 @@ export const busabaseDemoRouter = os.router({
             transport: "local-subprocess" as const,
             sessionCount: sessions.length,
             latest,
+            connected: true,
             ownedByCurrentUser: true,
           },
         ];
       }),
     },
     disconnect: os.agents.disconnect.handler(() => {
-      throw demoUnsupported("Delete an agent connection");
+      throw demoUnsupported("Disconnect an agent");
+    }),
+    deleteHistory: os.agents.deleteHistory.handler(() => {
+      throw demoUnsupported("Delete agent conversation history");
     }),
     sessions: {
       list: os.agents.sessions.list.handler(() => listDemoAgentSessions()),
+      listPaged: os.agents.sessions.listPaged.handler(({ input }) =>
+        paginateAgentSessions(listDemoAgentSessions(), input),
+      ),
       create: os.agents.sessions.create.handler(({ input }) => {
         try {
           return createDemoAgentSession(input.slug);

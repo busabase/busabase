@@ -74,6 +74,7 @@ export type FieldInputKind =
   | "select"
   | "multiselect"
   | "relation"
+  | "member"
   | "attachment"
   | "tags"
   | "whiteboard"
@@ -608,6 +609,23 @@ export const FIELD_TYPES: Record<FieldType, FieldTypeSpec> = {
         ? null
         : `${fieldDisplayName(def)} must be a record id or a list of record ids`,
   },
+  member: {
+    type: "member",
+    // A person picker over the workspace's members, not a free-text name. Same
+    // value shape as `relation` (`options.multiple === false` → a scalar id),
+    // because both store "ids of things that live outside this cell".
+    label: "member",
+    input: "member",
+    columnWidth: "minmax(160px,240px)",
+    // Shape only — deliberately NOT a membership check. A person who leaves the
+    // workspace must not retroactively invalidate every record that names them,
+    // and an unresolvable id renders as an unknown-person chip rather than
+    // blocking the write (same call `relation` makes about its target records).
+    validate: (value, def) =>
+      typeof value === "string" || isStringArray(value)
+        ? null
+        : `${fieldDisplayName(def)} must be a member id or a list of member ids`,
+  },
   attachment: {
     type: "attachment",
     label: "file",
@@ -695,6 +713,7 @@ export const FIELD_TYPE_ORDER: FieldType[] = [
   "whiteboard",
   "attachment",
   "relation",
+  "member",
   "lookup",
   "number",
   "formula",
@@ -751,6 +770,7 @@ export type FieldDisplayKind =
   | "chips"
   | "attachment"
   | "relation"
+  | "member"
   | "markdown"
   | "html"
   | "code"
@@ -766,6 +786,13 @@ const DISPLAY_KIND: Partial<Record<FieldType, FieldDisplayKind>> = {
   ai_tags: "chips",
   attachment: "attachment",
   relation: "relation",
+  // All three people-typed fields share ONE display: an avatar + name chip fed
+  // by `RecordVO.fieldUsers`. `created_by` / `updated_by` used to render a
+  // prettified id ("User kelly.cha"), even though the server already resolved
+  // the real person for the comment authors on the same screen.
+  member: "member",
+  created_by: "member",
+  updated_by: "member",
   markdown: "markdown",
   html: "html",
   code: "code",
@@ -790,6 +817,59 @@ const LINK_PREFIX: Partial<Record<FieldType, string>> = {
 };
 
 export const fieldLinkPrefix = (type: FieldType): string => LINK_PREFIX[type] ?? "";
+
+/**
+ * Field types whose CELL VALUE is a user id (or a list of them): `member` is the
+ * one a human fills, `created_by` / `updated_by` are the server-computed pair.
+ * All three resolve to a person at READ time (see `RecordVO.fieldUsers`) rather
+ * than storing a name, so a renamed user never leaves a stale label behind.
+ */
+export const PEOPLE_FIELD_TYPES: ReadonlySet<FieldType> = new Set([
+  "member",
+  "created_by",
+  "updated_by",
+]);
+
+export const isPeopleFieldType = (type: FieldType): boolean => PEOPLE_FIELD_TYPES.has(type);
+
+/**
+ * The user ids in ONE people-typed cell: a scalar when `options.multiple ===
+ * false` (and for `created_by` / `updated_by`, which are always scalar), an
+ * array otherwise. Blanks and non-strings are dropped.
+ */
+export const getMemberIds = (value: unknown): string[] => {
+  if (typeof value === "string") {
+    return value.trim() ? [value.trim()] : [];
+  }
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter((item): item is string => typeof item === "string" && item.trim() !== "");
+};
+
+/**
+ * The user ids one record's people-typed cells name, deduped and in field order.
+ * Shared by the live read path (`hydrateRecords`) and the demo dataset so both
+ * resolve exactly the same set.
+ */
+export const collectPeopleFieldIds = (
+  fields: ReadonlyArray<{ slug: string; type: FieldType }>,
+  payload: Record<string, unknown>,
+): string[] => {
+  const ids = new Set<string>();
+  for (const field of fields) {
+    if (!PEOPLE_FIELD_TYPES.has(field.type)) continue;
+    const value = payload[field.slug];
+    // `member` holds a scalar id when `options.multiple === false` and an array
+    // otherwise (mirroring `relation`); the system pair is always scalar.
+    for (const candidate of Array.isArray(value) ? value : [value]) {
+      if (typeof candidate === "string" && candidate.trim()) {
+        ids.add(candidate.trim());
+      }
+    }
+  }
+  return [...ids];
+};
 
 /** The set of server-managed (computed) field types. */
 export const SYSTEM_FIELD_TYPES: ReadonlySet<FieldType> = new Set(

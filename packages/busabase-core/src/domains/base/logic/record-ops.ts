@@ -365,9 +365,8 @@ const getFormSubmissionBase = async (formNodeId: string, baseId: string) => {
   const db = await getDb();
   const spaceId = getContextSpaceId();
   const [row] = await db
-    .select({ base: busabaseBases, nodeMetadata: busabaseNodes.metadata })
+    .select({ base: busabaseBases })
     .from(busabaseBases)
-    .innerJoin(busabaseNodes, eq(busabaseNodes.id, busabaseBases.nodeId))
     .innerJoin(
       busabaseForms,
       and(eq(busabaseForms.targetBaseId, busabaseBases.id), eq(busabaseForms.nodeId, formNodeId)),
@@ -389,7 +388,7 @@ const getFormSubmissionBase = async (formNodeId: string, baseId: string) => {
     .select()
     .from(busabaseBaseFields)
     .where(and(eq(busabaseBaseFields.baseId, row.base.id), isNull(busabaseBaseFields.deletedAt)));
-  return toBaseVO(row.base, fields, row.nodeMetadata);
+  return toBaseVO(row.base, fields);
 };
 
 /** Load a CR just created through the Form-authorized path without widening

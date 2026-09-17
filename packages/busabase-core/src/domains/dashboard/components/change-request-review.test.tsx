@@ -82,7 +82,6 @@ const changeRequest = {
     reviewPolicy: { kind: "single", requiredApprovals: 1 },
     createdAt: timestamp,
     fields: [],
-    metadata: {},
   },
   node: null,
   operations: [operation],

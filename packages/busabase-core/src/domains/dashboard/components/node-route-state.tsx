@@ -5,7 +5,8 @@ import { Button } from "kui/button";
 import { ArchiveRestore, House, RotateCcw, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
-import { useCoreI18n } from "../../../i18n";
+import { useCoreI18n, useCoreLocale } from "../../../i18n";
+import { presentCoreError } from "../../../i18n/localize-error";
 
 interface NodeRouteStateViewProps {
   state: Extract<NodeRouteStateVO, { status: "archived" | "unavailable" }>;
@@ -15,6 +16,7 @@ interface NodeRouteStateViewProps {
 
 export function NodeRouteStateView({ state, onNavigate, onRestore }: NodeRouteStateViewProps) {
   const messages = useCoreI18n();
+  const locale = useCoreLocale();
   const [restoring, setRestoring] = useState(false);
   const archived = state.status === "archived";
 
@@ -24,7 +26,7 @@ export function NodeRouteStateView({ state, onNavigate, onRestore }: NodeRouteSt
     try {
       await onRestore();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : messages.shell.operationFailed);
+      toast.error(presentCoreError(messages, locale, error, messages.shell.operationFailed));
     } finally {
       setRestoring(false);
     }

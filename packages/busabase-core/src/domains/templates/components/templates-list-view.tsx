@@ -8,6 +8,7 @@ import { Input } from "kui/input";
 import { ExternalLink, RefreshCw } from "lucide-react";
 import { iStringConcat } from "openlib/i18n/i-string";
 import { useMemo, useState } from "react";
+import { fmt, useCoreI18n } from "../../../i18n";
 import { TemplateGrid } from "./template-grid";
 
 interface TemplatesListViewProps {
@@ -29,6 +30,7 @@ interface TemplatesListViewProps {
  * not the other is a bug users experience as "the docs lied".
  */
 export function TemplatesListView({ orpc, onOpenTemplate, canInstall }: TemplatesListViewProps) {
+  const messages = useCoreI18n();
   const [search, setSearch] = useState("");
   /**
    * The refresh button has to reach past the SERVER's hour-long cache, not just
@@ -82,22 +84,25 @@ export function TemplatesListView({ orpc, onOpenTemplate, canInstall }: Template
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 p-6">
           <div className="flex flex-col gap-1">
-            <h1 className="font-serif text-2xl">Templates</h1>
-            <p className="text-muted-foreground text-sm">
-              Complete apps — tables, an interface, and the manual an agent reads before it touches
-              your data. Installing one fills in its tables, and proposes the app itself for your
-              review.
-            </p>
+            <h1 className="font-serif text-2xl">{messages.templates.title}</h1>
+            <p className="text-muted-foreground text-sm">{messages.templates.overview}</p>
           </div>
 
           <div className="flex items-center gap-2">
             <Input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search templates…"
+              placeholder={messages.templates.search}
               className="max-w-xs"
             />
-            <Button variant="ghost" size="sm" onClick={refresh} disabled={catalog.isFetching}>
+            <Button
+              aria-label={messages.templates.refresh}
+              title={messages.templates.refresh}
+              variant="ghost"
+              size="sm"
+              onClick={refresh}
+              disabled={catalog.isFetching}
+            >
               <RefreshCw className={catalog.isFetching ? "size-4 animate-spin" : "size-4"} />
             </Button>
             {catalog.data?.repo ? (
@@ -115,14 +120,15 @@ export function TemplatesListView({ orpc, onOpenTemplate, canInstall }: Template
 
           {!canInstall ? (
             <p className="rounded-md border border-border bg-muted/40 p-3 text-muted-foreground text-xs">
-              Browsing is open to everyone. Installing a template is a space owner or admin action —
-              it can carry an app and a skill, which is code this space's agents will run.
+              {messages.templates.browseOnly}
             </p>
           ) : null}
 
           <TemplateGrid
             emptyLabel={
-              search ? `Nothing matches “${search}”.` : "This catalog has no templates yet."
+              search
+                ? fmt(messages.templates.searchEmpty, { search })
+                : messages.templates.catalogEmpty
             }
             error={catalog.data?.error}
             isPending={catalog.isPending}

@@ -91,6 +91,17 @@ const previewText = (value: unknown, type?: FieldType): string => {
   if (type === "created_by" || type === "updated_by") {
     return formatOpaqueUserId(value);
   }
+  // `member` compares by USER ID, not by display name, and deliberately so:
+  // this function is shared with the authoritative server-side filter, which is
+  // pure and has no user map to resolve names with. The filter editor therefore
+  // offers a member PICKER whose value is the id, so both sides of the
+  // comparison are ids and they match — the same trick select/multiselect use
+  // with `choice.id`. Resolving one side to a name and not the other is exactly
+  // the bug that made multiselect filters never match (see the note on
+  // `getViewFieldPreviewText`).
+  if (type === "member") {
+    return Array.isArray(value) ? value.filter(Boolean).join(", ") : fieldValueToString(value);
+  }
   if (type === "date" && typeof value === "string") {
     const date = new Date(value);
     return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString();

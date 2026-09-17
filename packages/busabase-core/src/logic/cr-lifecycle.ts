@@ -65,6 +65,7 @@ import {
   busabaseViews,
 } from "../db/schema";
 import { deleteNodeIconByUrl } from "../domains/attachments/logic/attachments-logic";
+import { collectPeopleFieldIds } from "../domains/base/field-types";
 import {
   mergeBaseAddField,
   mergeBaseArchive,
@@ -1234,9 +1235,20 @@ export const hydrateRecords = async (records: RecordPO[]): Promise<RecordVO[]> =
     .from(busabaseCommits)
     .where(inArray(busabaseCommits.id, headCommitIds));
   const commitsById = new Map(commitRows.map((commit) => [commit.id, commit]));
+  // Ids named by people-typed CELLS (`member`, `created_by`, `updated_by`),
+  // computed once per record so the resolve below stays a single batched call
+  // rather than one per record.
+  const peopleIdsByRecord = new Map<string, string[]>(
+    records.map((record) => {
+      const fields = baseMap.get(record.baseId)?.fields ?? [];
+      const payload = commitsById.get(record.headCommitId)?.payload ?? {};
+      return [record.id, collectPeopleFieldIds(fields, payload as Record<string, unknown>)];
+    }),
+  );
   const users = await resolveUserRefs([
     ...records.map((record) => record.createdBy),
     ...commitRows.map((commit) => commit.author),
+    ...[...peopleIdsByRecord.values()].flat(),
   ]);
   // `lookup` fields are the one computed type NOT baked into the commit — they
   // derive from other records, so they're resolved here, on read. No-ops (and
@@ -1260,6 +1272,14 @@ export const hydrateRecords = async (records: RecordPO[]): Promise<RecordVO[]> =
       status: record.status === "archived" ? "archived" : "active",
       createdBy: record.createdBy,
       createdByUser: users.get(record.createdBy) ?? null,
+      // Only the people THIS record names — not the whole resolved batch, which
+      // would hand every record the union of its page's collaborators.
+      fieldUsers: Object.fromEntries(
+        (peopleIdsByRecord.get(record.id) ?? []).flatMap((id) => {
+          const user = users.get(id);
+          return user ? [[id, user] as const] : [];
+        }),
+      ),
       archivedAt: toIso(record.archivedAt),
       createdAt: record.createdAt.toISOString(),
       updatedAt: record.updatedAt.toISOString(),

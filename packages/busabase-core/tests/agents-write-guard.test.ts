@@ -27,6 +27,7 @@ const CALLS: [string, () => Promise<unknown>][] = [
   ["connections.list", () => client.connections.list({ scope: "mine" })],
   ["disconnect", () => client.disconnect({ slug: "claude-acp" })],
   ["sessions.list", () => client.sessions.list()],
+  ["sessions.listPaged", () => client.sessions.listPaged({ slug: "buda", limit: 20 })],
   ["sessions.create", () => client.sessions.create({ slug: "claude-acp" })],
   ["sessions.prompt", () => client.sessions.prompt({ sessionId: "s1", text: "hi" })],
   ["sessions.cancel", () => client.sessions.cancel({ sessionId: "s1" })],

@@ -1,6 +1,6 @@
 import type { NonDeletedExcalidrawElement } from "@excalidraw/excalidraw/element/types";
 import type { AppState, ExcalidrawInitialDataState } from "@excalidraw/excalidraw/types";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
 import type { WhiteboardDocument } from "busabase-contract/domains/rich-node/types";
 import type {
@@ -8,10 +8,10 @@ import type {
   BaseFieldVO,
   BaseVO,
   ChangeRequestVO,
-  FieldType,
   RecordVO,
+  UserRefVO,
 } from "busabase-contract/types";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "kui/dialog";
+import { Dialog, DialogHeader, DialogTitle } from "kui/dialog";
 import {
   Box,
   Check,
@@ -30,19 +30,18 @@ import { SPALink as Link } from "openlib/ui/dashboard";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useSearch } from "wouter";
 import { fmt, useCoreI18n, useCoreLocale, useIString } from "../../../i18n";
-import { localizeCoreErrorMessage } from "../../../i18n/localize-error";
+import { localizeCoreErrorMessage, presentCoreError } from "../../../i18n/localize-error";
 import { validateRecordFields } from "../../base/field-rules";
 import {
   fieldDisplayKind,
   fieldInputKind,
+  getMemberIds,
   isHiddenOnCreate,
+  isPeopleFieldType,
   isSystemFieldType,
 } from "../../base/field-types";
 import { getPrimaryField } from "../../base/utils/primary-field";
-import {
-  EMPTY_WHITEBOARD_FIELD_VALUE,
-  parseWhiteboardFieldValue,
-} from "../../base/utils/whiteboard-value";
+import { parseWhiteboardFieldValue } from "../../base/utils/whiteboard-value";
 import {
   getChangeRequestTitle,
   getOperationLabel,
@@ -51,7 +50,9 @@ import {
   operationMeta,
 } from "../helpers/change-request";
 import {
+  defaultNewFieldValue,
   getAttachmentRefs,
+  getEditorFieldValue,
   getFieldChipEntries,
   getRelationRecordIds,
   getSafeAttachmentUrl,
@@ -67,6 +68,7 @@ import {
 } from "../helpers/format";
 import { mergeSearchIntoHref, useHrefWithCurrentSearch } from "../helpers/link-search";
 import type { RecordSubmitOptions } from "../helpers/view-types";
+import { registerSidePanelTab, type SidePanelTabProps } from "../side-panel-registry";
 import { useIsAnonymousVisitor } from "../visitor-context";
 import { renderMentionedText } from "./comments";
 import {
@@ -76,8 +78,11 @@ import {
   MarkdownFieldPreview,
 } from "./field-preview";
 import { UserRefButton } from "./identity";
+import { DialogContent } from "./localized-dialog-content";
+import { MemberChips, MemberFieldEditor } from "./member-field";
 import { NodeAgentPromptsButton } from "./node-agent-prompts-button";
 import { NodeAgentPromptsDialog } from "./node-agent-prompts-dialog";
+import { NodePinButton, nodeSidePanelTabId } from "./node-pin-button";
 import {
   BusabaseSidePanel,
   ConfirmActionDialog,
@@ -108,16 +113,18 @@ export function RecordTopbarActions({
 }) {
   const messages = useCoreI18n();
   const currentSearch = useSearch();
+  const isAnon = useIsAnonymousVisitor();
   return (
     <div className="flex items-center gap-2">
       {/* Record-scoped Agent prompts. The View/Edit switch next to it is the
           record's whole toolbar, so this is the only place a per-record "ask my
-          agent to fix THIS row" entry point can live. No `metadata` prop: a
-          node's custom scenario prompts (node-agent-prompts-v2.md §7.3) only
-          ever extend the WHOLE-NODE dialog's scenario tier, never a
-          record/cell-scoped one (see `buildNodeAgentPrompts`'s `scope.kind`
-          check) — passing it here would be inert even if `BaseVO` carried
-          metadata, which it doesn't. */}
+          agent to fix THIS row" entry point can live. A node's custom scenario
+          prompts only ever replace the WHOLE-NODE dialog's scenario tier, never
+          a record/cell-scoped one (see `buildNodeAgentPrompts`'s `scope.kind`
+          check), so the dialog's scope gate skips that fetch. The chevron's
+          "Ask Agent directly" dropdown and the dialog's existing handoff are
+          unrelated to scope, so `NodeAgentPromptsButton` resolves them from the
+          `DashboardOrpcProvider` shared by every node-detail toolbar. */}
       <NodeAgentPromptsButton
         orpc={null}
         nodeId={base.nodeId}
@@ -129,6 +136,14 @@ export function RecordTopbarActions({
           recordTitle: record ? getRecordTitle(record, messages) : undefined,
         }}
       />
+      {record && !isAnon ? (
+        <NodePinButton
+          payload={{ recordId }}
+          tabId={nodeSidePanelTabId("record", recordId)}
+          tabType="record-preview"
+          title={getRecordTitle(record, messages)}
+        />
+      ) : null}
       <nav className="flex rounded-md bg-muted/60 p-0.5 text-xs">
         <Link
           className={`rounded px-2.5 py-1.5 font-medium transition-colors ${
@@ -154,6 +169,102 @@ export function RecordTopbarActions({
     </div>
   );
 }
+
+/**
+ * A pinned Record deliberately renders a compact, canonical snapshot instead
+ * of nesting the full Record Detail route inside the side panel. The full page
+ * includes comments, destructive actions, and its own metadata rail; none of
+ * those belong in a narrow persistent preview.
+ */
+function RecordSidePanelPreview({ orpc, payload }: SidePanelTabProps) {
+  const messages = useCoreI18n();
+  const resolveIString = useIString();
+  const recordId =
+    typeof payload === "object" &&
+    payload !== null &&
+    "recordId" in payload &&
+    typeof payload.recordId === "string"
+      ? payload.recordId
+      : "";
+  const recordQuery = useQuery({
+    ...orpc.records.get.queryOptions({ input: { recordId } }),
+    enabled: Boolean(recordId),
+  });
+  const record = recordQuery.data ?? null;
+  const relationRecordIds = record
+    ? [
+        ...new Set(
+          record.base.fields
+            .filter((field) => field.type === "relation")
+            .flatMap((field) => getRelationRecordIds(record.headCommit.payload[field.slug])),
+        ),
+      ].filter((id) => id !== record.id)
+    : [];
+  const relationQueries = useQueries({
+    queries: relationRecordIds.map((id) =>
+      orpc.records.get.queryOptions({ input: { recordId: id } }),
+    ),
+  });
+
+  if (!record) {
+    return recordQuery.isLoading ? (
+      <div
+        aria-label={messages.common.loading}
+        className="flex h-full flex-col gap-4 overflow-hidden p-4"
+        data-record-side-panel-loading
+        role="status"
+      >
+        <Skeleton className="h-3 w-24" />
+        <Skeleton className="h-6 w-4/5" />
+        <div className="mt-2 space-y-4">
+          <Skeleton className="h-12 w-full" />
+          <Skeleton className="h-12 w-full" />
+          <Skeleton className="h-12 w-full" />
+        </div>
+      </div>
+    ) : (
+      <EmptyState
+        body={messages.recordView.recordNotFoundBody}
+        title={messages.recordView.recordNotFoundTitle}
+      />
+    );
+  }
+
+  const relatedRecords = relationQueries.flatMap((query) => (query.data ? [query.data] : []));
+  const previewRecords = [record, ...relatedRecords];
+
+  return (
+    <div
+      className="flex h-full min-h-0 flex-col overflow-auto p-4"
+      data-record-side-panel-preview={record.id}
+    >
+      <header className="border-border/60 border-b pb-3">
+        <p className="truncate text-muted-foreground text-xs">{record.base.name}</p>
+        <h2 className="mt-1 break-words font-semibold text-base leading-6">
+          {getRecordTitle(record, messages)}
+        </h2>
+      </header>
+      <div className="divide-y divide-border/50">
+        {record.base.fields.slice(1).map((field) => (
+          <section className="min-w-0 py-3" key={field.id}>
+            <div className="mb-1.5 truncate font-medium text-muted-foreground text-xs">
+              {resolveIString(field.name)}
+            </div>
+            <div className="min-w-0 break-words text-sm leading-5">
+              <FieldValuePreview
+                className="max-w-full whitespace-pre-wrap"
+                field={field}
+                records={previewRecords}
+                value={record.headCommit.payload[field.slug]}
+              />
+            </div>
+          </section>
+        ))}
+      </div>
+    </div>
+  );
+}
+registerSidePanelTab("record-preview", RecordSidePanelPreview);
 
 export function RecordDetailView({
   baseSlug,
@@ -192,9 +303,7 @@ export function RecordDetailView({
   });
   const historyChangeRequests = historyQuery.data ?? [];
   const historyError = historyQuery.error
-    ? historyQuery.error instanceof Error
-      ? historyQuery.error.message
-      : messages.recordView.failedLoadHistory
+    ? presentCoreError(messages, locale, historyQuery.error, messages.recordView.failedLoadHistory)
     : null;
   const isHistoryLoading = historyQuery.isLoading;
 
@@ -590,6 +699,7 @@ export function RecordEditorView({
                   editorInstanceKey={mode === "edit" && record ? record.id : "new"}
                   field={field}
                   key={field.id}
+                  memberUsers={record?.fieldUsers}
                   onChange={(value) =>
                     setFields((current) => ({ ...current, [field.slug]: value }))
                   }
@@ -767,10 +877,11 @@ function RelationFieldEditor({
   );
 }
 
-function RecordFieldInput({
+export function RecordFieldInput({
   client,
   editorInstanceKey,
   field,
+  memberUsers,
   onChange,
   onUploadAttachment,
   records,
@@ -787,6 +898,9 @@ function RecordFieldInput({
    */
   editorInstanceKey: string;
   field: BaseFieldVO;
+  /** The edited record's already-resolved people, so a set member keeps its name
+   *  even when they have since left the space (the roster no longer has them). */
+  memberUsers?: Record<string, UserRefVO>;
   onChange: (value: unknown) => void;
   onUploadAttachment?: (file: File) => Promise<AssetAttachmentRef>;
   records: RecordVO[];
@@ -834,8 +948,15 @@ function RecordFieldInput({
           className="flex min-h-9 items-center rounded-md border border-border/40 bg-muted/40 px-2.5 py-1.5 text-muted-foreground text-sm"
           id={inputId}
         >
-          {fieldValueToString(value) || (
-            <span className="italic opacity-70">{messages.common.autoGenerated}</span>
+          {isPeopleFieldType(field.type) && getMemberIds(value).length > 0 ? (
+            // `created_by` / `updated_by` are read-only here, but they still name
+            // a PERSON — the grid renders them as a chip, so this box must too
+            // rather than printing the raw actor id next to it.
+            <MemberChips users={memberUsers} value={value} />
+          ) : (
+            fieldValueToString(value) || (
+              <span className="italic opacity-70">{messages.common.autoGenerated}</span>
+            )
           )}
         </div>
       ) : kind === "attachment" ? (
@@ -855,6 +976,16 @@ function RecordFieldInput({
           loadedRecords={targetRecords}
           onChange={onChange}
           value={relationValue}
+        />
+      ) : kind === "member" ? (
+        <MemberFieldEditor
+          client={client}
+          field={field}
+          fieldName={fieldName}
+          inputId={inputId}
+          onChange={onChange}
+          users={memberUsers}
+          value={value}
         />
       ) : kind === "select" ? (
         <select
@@ -1163,13 +1294,15 @@ function WhiteboardFieldEditor({
       })
       .catch((caught: unknown) => {
         if (active) {
-          setEditorError(caught instanceof Error ? caught.message : messages.inbox.loadFailedTitle);
+          setEditorError(
+            presentCoreError(messages, locale, caught, messages.inbox.loadFailedTitle),
+          );
         }
       });
     return () => {
       active = false;
     };
-  }, [messages.inbox.loadFailedTitle]);
+  }, [locale, messages]);
 
   useEffect(
     () => () => {
@@ -1305,6 +1438,7 @@ function AttachmentFieldEditor({
   const messages = useCoreI18n();
   const resolveIString = useIString();
   const fieldName = resolveIString(field.name);
+  const locale = useCoreLocale();
   const attachments = getAttachmentRefs(value);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -1326,7 +1460,7 @@ function AttachmentFieldEditor({
       const next = multiple ? [...attachments, ...uploaded] : uploaded.slice(-1);
       onChange(options.maxFiles && options.maxFiles > 0 ? next.slice(-options.maxFiles) : next);
     } catch (error) {
-      setUploadError(error instanceof Error ? error.message : messages.recordView.uploadFailed);
+      setUploadError(presentCoreError(messages, locale, error, messages.recordView.uploadFailed));
     } finally {
       setIsUploading(false);
     }
@@ -1402,33 +1536,39 @@ function AttachmentFieldEditor({
   );
 }
 
-/** Default value for a field that's never had a value entered — used on the create form. */
-const defaultNewFieldValue = (fieldType: FieldType): unknown => {
-  if (fieldType === "relation") return [];
-  if (fieldType === "whiteboard") return structuredClone(EMPTY_WHITEBOARD_FIELD_VALUE);
-  return "";
-};
-
-const getEditorFieldValue = (field: BaseFieldVO, value: unknown) => {
+/**
+ * Coerce ONE editor value into the shape the server stores for that field type.
+ *
+ * Exported per-field (rather than only as the whole-record `normalizeEditorFields`
+ * below) because a bulk edit patches a SUBSET of fields: running the whole-record
+ * version there would fill every untouched field with its default and overwrite
+ * data the user never looked at.
+ */
+export const normalizeEditorFieldValue = (field: BaseFieldVO, value: unknown): unknown => {
   if (field.type === "attachment") {
     return getAttachmentRefs(value);
   }
-  if (field.type === "relation") {
-    const relationIds = getRelationRecordIds(value);
-    return field.options.multiple === false ? (relationIds[0] ?? "") : relationIds;
-  }
-  if (field.type === "multiselect" || field.type === "ai_tags") {
-    return Array.isArray(value)
-      ? value.filter((item): item is string => typeof item === "string")
-      : [];
+  if (field.type === "number") {
+    const numberValue = typeof value === "number" ? value : Number(value);
+    return Number.isFinite(numberValue) ? numberValue : null;
   }
   if (field.type === "checkbox") {
     return value === true || value === "true";
   }
+  if (field.type === "multiselect" || field.type === "relation" || field.type === "ai_tags") {
+    return Array.isArray(value)
+      ? value.filter((item): item is string => typeof item === "string" && item.length > 0)
+      : typeof value === "string" && value
+        ? [value]
+        : [];
+  }
   if (field.type === "whiteboard") {
+    // Re-validate/reshape defensively at submit time, same spirit as the
+    // other structured types above — guarantees the server always
+    // receives a well-formed { scene, previewSvg } value.
     return parseWhiteboardFieldValue(value);
   }
-  return fieldValueToString(value);
+  return value ?? "";
 };
 
 const normalizeEditorFields = (base: BaseVO, fields: Record<string, unknown>) =>
@@ -1436,36 +1576,7 @@ const normalizeEditorFields = (base: BaseVO, fields: Record<string, unknown>) =>
     base.fields
       // System fields are computed server-side; never send them from the editor.
       .filter((field) => !isSystemFieldType(field.type))
-      .map((field) => {
-        const value = fields[field.slug];
-        if (field.type === "attachment") {
-          return [field.slug, getAttachmentRefs(value)];
-        }
-        if (field.type === "number") {
-          const numberValue = typeof value === "number" ? value : Number(value);
-          return [field.slug, Number.isFinite(numberValue) ? numberValue : null];
-        }
-        if (field.type === "checkbox") {
-          return [field.slug, value === true || value === "true"];
-        }
-        if (field.type === "multiselect" || field.type === "relation" || field.type === "ai_tags") {
-          return [
-            field.slug,
-            Array.isArray(value)
-              ? value.filter((item): item is string => typeof item === "string" && item.length > 0)
-              : typeof value === "string" && value
-                ? [value]
-                : [],
-          ];
-        }
-        if (field.type === "whiteboard") {
-          // Re-validate/reshape defensively at submit time, same spirit as the
-          // other structured types above — guarantees the server always
-          // receives a well-formed { scene, previewSvg } value.
-          return [field.slug, parseWhiteboardFieldValue(value)];
-        }
-        return [field.slug, value ?? ""];
-      }),
+      .map((field) => [field.slug, normalizeEditorFieldValue(field, fields[field.slug])]),
   );
 
 function RecordFieldPanel({ record, records }: { record: RecordVO; records: RecordVO[] }) {
@@ -1506,6 +1617,7 @@ function RecordFieldPanel({ record, records }: { record: RecordVO; records: Reco
                         : "whitespace-pre-wrap text-foreground/95"
                     }
                     field={field}
+                    fieldUsers={record.fieldUsers}
                     records={records}
                     value={value}
                   />
@@ -1654,6 +1766,7 @@ function RecordPropertyItem({
         <FieldValuePreview
           className="inline text-sm leading-5"
           field={field}
+          fieldUsers={record.fieldUsers}
           records={records}
           value={value}
         />
@@ -1755,7 +1868,7 @@ function RecordCommentsPanel({
         subjectType: "record",
       }),
     onError: (mutationError) =>
-      setError(mutationError instanceof Error ? mutationError.message : messages.comments.failed),
+      setError(presentCoreError(messages, locale, mutationError, messages.comments.failed)),
     onSuccess: () => {
       setBody("");
       setError(null);

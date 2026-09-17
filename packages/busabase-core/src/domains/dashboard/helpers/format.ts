@@ -42,6 +42,35 @@ const formatListTime = (value: string, locale: Intl.LocalesArgument) =>
     day: "numeric",
   });
 
+/**
+ * The activity feed's own timestamp. Unlike `formatListTime` (date only) it
+ * keeps the clock time down to the second: an activity row is a log entry, and
+ * "Jul 30" alone cannot tell two events of the same day apart.
+ *
+ * The year appears only when the event did NOT happen in the current calendar
+ * year — the rule Gmail, X and `ls -l` all follow, so the common case keeps the
+ * column narrow. Calendar year rather than "older than 365 days" is deliberate:
+ * a rolling window prints a February 2026 event as a bare "Feb 10" when it is
+ * read in January 2027, and every reader takes that for *this* year.
+ *
+ * `now` is injectable so the rule can be tested without waiting for New Year.
+ */
+const formatListDateTime = (
+  value: string,
+  locale: Intl.LocalesArgument,
+  now: Date = new Date(),
+) => {
+  const date = new Date(value);
+  return date.toLocaleString(locale, {
+    ...(date.getFullYear() === now.getFullYear() ? {} : { year: "numeric" }),
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+};
+
 const formatDetailTime = (value: string, locale: Intl.LocalesArgument) =>
   new Date(value).toLocaleString(locale, {
     month: "short",
@@ -137,6 +166,28 @@ const formatUserRefLabel = (
   return messages?.identity.unknownUser ?? "Unknown user";
 };
 
+/**
+ * The label on a people-typed CELL's chip (`member`, `created_by`, `updated_by`).
+ *
+ * Two fallbacks on purpose:
+ * - A person the server RESOLVED gets their own name/email.
+ * - An id nothing resolved goes through `formatOpaqueUserId`, which is what
+ *   `created_by` cells have always used. That keeps a human-readable actor id
+ *   like `field-type-agent` reading as "Field Type Agent" instead of
+ *   "Unknown user field-type" — the regression that appeared the moment
+ *   `created_by` started rendering as a chip.
+ *
+ * NOT the same as `formatUserRefLabel`, and deliberately so: that one backs
+ * comment authors and CR reviewers, where "Unknown user" is the right wording
+ * for someone who genuinely cannot be resolved.
+ */
+const formatMemberChipLabel = (
+  user: UserRefVO | null | undefined,
+  id: string,
+  messages?: CoreI18nMessages,
+): string =>
+  user?.name?.trim() ? formatUserRefLabel(user, id, messages) : formatOpaqueUserId(id, messages);
+
 const formatUserRefSubtitle = (user: UserRefVO | null | undefined) => {
   if (user?.email?.trim() && user.email !== user.name) {
     return user.email;
@@ -152,10 +203,12 @@ export {
   formatNumberField,
   shortIdentifier,
   formatListTime,
+  formatListDateTime,
   formatDetailTime,
   formatFullTime,
   formatAttachmentSize,
   KNOWN_ACTOR_LABELS,
+  formatMemberChipLabel,
   formatOpaqueUserId,
   formatUserRefLabel,
   formatUserRefSubtitle,

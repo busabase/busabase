@@ -41,6 +41,7 @@ vi.mock("../../../db", () => ({
 import {
   disconnectBuda,
   getBudaConnection,
+  getOwnedBudaConnectionIdentity,
   listBudaConnections,
   saveBudaConnection,
 } from "./buda-connection";
@@ -79,12 +80,14 @@ describe("Buda connection storage", () => {
         agentId: "agent-1",
         agentName: "Rex",
         ownedByCurrentUser: true,
+        legacy: false,
       },
       {
         slug: "buda:agent-2",
         agentId: "agent-2",
         agentName: "Ada",
         ownedByCurrentUser: true,
+        legacy: false,
       },
     ]);
     expect(mocks.rows).toEqual([
@@ -111,6 +114,7 @@ describe("Buda connection storage", () => {
         agentId: "agent-1",
         agentName: "Rex",
         ownedByCurrentUser: true,
+        legacy: false,
       },
     ]);
     await expect(listBudaConnections("space")).resolves.toEqual([
@@ -119,12 +123,14 @@ describe("Buda connection storage", () => {
         agentId: "agent-1",
         agentName: "Rex",
         ownedByCurrentUser: true,
+        legacy: false,
       },
       {
         slug: "buda:agent-2",
         agentId: "agent-2",
         agentName: "Ada",
         ownedByCurrentUser: false,
+        legacy: false,
       },
     ]);
     await expect(getBudaConnection("buda:agent-2")).resolves.toMatchObject({
@@ -163,6 +169,7 @@ describe("Buda connection storage", () => {
         agentId: "agent-1",
         agentName: "Nimbus",
         ownedByCurrentUser: true,
+        legacy: false,
       },
     ]);
 
@@ -193,6 +200,7 @@ describe("Buda connection storage", () => {
         agentId: "agent-1",
         agentName: "Nimbus",
         ownedByCurrentUser: false,
+        legacy: false,
       },
     ]);
   });
@@ -229,5 +237,34 @@ describe("Buda connection storage", () => {
     );
 
     expect(mocks.deleteCount).toBe(0);
+  });
+
+  it("resolves a legacy vault key to the canonical agent identity", async () => {
+    mocks.rows.push({
+      id: "legacy-row",
+      userId: "actor-1",
+      key: "BUDA_ACP_CONNECTION",
+      valuePayload: { value: JSON.stringify(storedConnection("legacy-agent", "Legacy")) },
+      scopeType: "workspace",
+      scopeId: "space-1",
+    });
+
+    await expect(listBudaConnections()).resolves.toEqual([
+      {
+        slug: "buda:legacy-agent",
+        agentId: "legacy-agent",
+        agentName: "Legacy",
+        ownedByCurrentUser: true,
+        legacy: true,
+      },
+    ]);
+    await expect(getBudaConnection("buda:legacy-agent")).resolves.toMatchObject({
+      slug: "buda:legacy-agent",
+      agentId: "legacy-agent",
+    });
+    await expect(getOwnedBudaConnectionIdentity("buda:legacy-agent")).resolves.toEqual({
+      canonicalSlug: "buda:legacy-agent",
+      legacy: true,
+    });
   });
 });

@@ -9,6 +9,7 @@ import type {
   BaseFieldVO,
   ChangeRequestVO,
   OperationVO,
+  UserRefVO,
   ViewConfigVO,
 } from "busabase-contract/types";
 import { ArrowRight, Minus, Plus } from "lucide-react";
@@ -285,16 +286,24 @@ export function ChangeStatusBadge({
 export function FieldValueDiff({
   change,
   field,
+  fieldUsers,
   messages,
 }: {
   change: OperationFieldChange;
   field?: BaseFieldVO;
+  /**
+   * People the diff may need to name — a `member` value proposed by a Change
+   * Request has no record behind it yet, so `RecordVO.fieldUsers` cannot cover
+   * it and the reviewer's own roster answers instead. Absent → the diff shows
+   * an id-based label rather than a name.
+   */
+  fieldUsers?: Record<string, UserRefVO>;
   messages: CoreI18nMessages;
 }) {
   if (change.status === "added") {
     return (
       <div className="text-sm">
-        <FieldValuePreview field={field} value={change.afterValue} />
+        <FieldValuePreview field={field} fieldUsers={fieldUsers} value={change.afterValue} />
       </div>
     );
   }
@@ -305,13 +314,13 @@ export function FieldValueDiff({
           <div className="mb-1 font-medium text-[11px] text-rejected-strong no-underline dark:text-rejected-soft">
             {messages.operationDiff.before}
           </div>
-          <FieldValuePreview field={field} value={change.beforeValue} />
+          <FieldValuePreview field={field} fieldUsers={fieldUsers} value={change.beforeValue} />
         </div>
         <div className="rounded-md border border-merged/35 bg-merged/17 px-3 py-2 text-sm">
           <div className="mb-1 font-medium text-[11px] text-merged-strong dark:text-merged-soft">
             {messages.operationDiff.after}
           </div>
-          <FieldValuePreview field={field} value={change.afterValue} />
+          <FieldValuePreview field={field} fieldUsers={fieldUsers} value={change.afterValue} />
         </div>
       </div>
     );
@@ -319,11 +328,11 @@ export function FieldValueDiff({
   return (
     <div className="flex flex-wrap items-center gap-2 text-sm">
       <span className="rounded-md bg-rejected/17 px-2 py-0.5 text-rejected-strong line-through dark:text-rejected-soft">
-        <FieldValuePreview field={field} value={change.beforeValue} />
+        <FieldValuePreview field={field} fieldUsers={fieldUsers} value={change.beforeValue} />
       </span>
       <ArrowRight className="shrink-0 text-muted-foreground" size={14} />
       <span className="rounded-md bg-merged/17 px-2 py-0.5 text-merged-strong dark:text-merged-soft">
-        <FieldValuePreview field={field} value={change.afterValue} />
+        <FieldValuePreview field={field} fieldUsers={fieldUsers} value={change.afterValue} />
       </span>
     </div>
   );
@@ -332,10 +341,18 @@ export function FieldValueDiff({
 export function OperationFieldChangeRow({
   change,
   changeRequest,
+  fieldUsers,
   operation,
 }: {
   change: OperationFieldChange;
   changeRequest: ChangeRequestVO;
+  /**
+   * People the diff may need to name — a `member` value proposed by a Change
+   * Request has no record behind it yet, so `RecordVO.fieldUsers` cannot cover
+   * it and the reviewer's own roster answers instead. Absent → the diff shows
+   * an id-based label rather than a name.
+   */
+  fieldUsers?: Record<string, UserRefVO>;
   operation: OperationVO;
 }) {
   const messages = useCoreI18n();
@@ -365,7 +382,12 @@ export function OperationFieldChangeRow({
             />
           )
         ) : (
-          <FieldValueDiff change={change} field={baseField} messages={messages} />
+          <FieldValueDiff
+            change={change}
+            field={baseField}
+            fieldUsers={fieldUsers}
+            messages={messages}
+          />
         )}
       </div>
     </div>
@@ -503,9 +525,17 @@ export function FieldOrderDiff({
 
 export function OperationFieldChanges({
   changeRequest,
+  fieldUsers,
   operation,
 }: {
   changeRequest: ChangeRequestVO;
+  /**
+   * People the diff may need to name — a `member` value proposed by a Change
+   * Request has no record behind it yet, so `RecordVO.fieldUsers` cannot cover
+   * it and the reviewer's own roster answers instead. Absent → the diff shows
+   * an id-based label rather than a name.
+   */
+  fieldUsers?: Record<string, UserRefVO>;
   operation: OperationVO;
 }) {
   const messages = useCoreI18n();
@@ -527,6 +557,7 @@ export function OperationFieldChanges({
         <OperationFieldChangeRow
           change={change}
           changeRequest={changeRequest}
+          fieldUsers={fieldUsers}
           key={change.slug}
           operation={operation}
         />

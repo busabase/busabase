@@ -1978,9 +1978,8 @@ export const loadBasesByIds = async (baseIds: string[]): Promise<Map<string, Bas
   }
 
   const baseRows = await db
-    .select({ base: busabaseBases, nodeMetadata: busabaseNodes.metadata })
+    .select({ base: busabaseBases })
     .from(busabaseBases)
-    .innerJoin(busabaseNodes, eq(busabaseNodes.id, busabaseBases.nodeId))
     .where(inArray(busabaseBases.id, baseIds));
   // Soft-deleted fields must NOT reach the VO — `getBase` has always filtered
   // them and this path did not, so the same Base described two different
@@ -1995,12 +1994,11 @@ export const loadBasesByIds = async (baseIds: string[]): Promise<Map<string, Bas
     .from(busabaseBaseFields)
     .where(and(inArray(busabaseBaseFields.baseId, baseIds), isNull(busabaseBaseFields.deletedAt)));
   return new Map(
-    baseRows.map(({ base, nodeMetadata }) => [
+    baseRows.map(({ base }) => [
       base.id,
       toBaseVO(
         base,
         fieldRows.filter((field) => field.baseId === base.id),
-        nodeMetadata,
       ),
     ]),
   );

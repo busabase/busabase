@@ -19,7 +19,8 @@
 
 import type { TemplateCardVO } from "busabase-contract/domains/templates/types";
 import type { ReactNode } from "react";
-import { useCoreLocale } from "../../../i18n";
+import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
+import { presentCoreError } from "../../../i18n/localize-error";
 import { ShimmerSkeleton as Skeleton } from "../../dashboard/components/shimmer-skeleton";
 import { TemplateCardSummary, type TemplateStatLabels } from "./template-card-summary";
 
@@ -44,6 +45,13 @@ export function TemplateCard({
   statLabels?: TemplateStatLabels;
 }) {
   const locale = useCoreLocale();
+  const messages = useCoreI18n();
+  const localizedStatLabels: TemplateStatLabels = {
+    bases: (count) => fmt(messages.templates.cardBases, { count, plural: count === 1 ? "" : "s" }),
+    airapps: (count) => fmt(messages.templates.cardApps, { count, plural: count === 1 ? "" : "s" }),
+    docs: (count) => fmt(messages.templates.cardDocs, { count, plural: count === 1 ? "" : "s" }),
+    records: (count) => fmt(messages.templates.cardRows, { count, plural: count === 1 ? "" : "s" }),
+  };
   return (
     <button
       className="group flex flex-col overflow-hidden rounded-lg border border-border bg-card text-left transition-colors hover:border-primary/50"
@@ -53,8 +61,9 @@ export function TemplateCard({
       <TemplateCardSummary
         density={density}
         descriptionLocale={locale}
+        preferEnglishFallback
         screenshotAlt=""
-        statLabels={statLabels}
+        statLabels={statLabels ?? localizedStatLabels}
         template={template}
       />
     </button>
@@ -109,6 +118,8 @@ export function TemplateGrid({
   gapClassName?: string;
   skeletonCount?: number;
 }) {
+  const messages = useCoreI18n();
+  const locale = useCoreLocale();
   if (isPending) {
     return (
       <div aria-hidden className={`grid ${gapClassName} ${columnsClassName}`}>
@@ -132,7 +143,7 @@ export function TemplateGrid({
   if (error) {
     return (
       <p className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-destructive text-xs">
-        {error}
+        {presentCoreError(messages, locale, new Error(error), messages.templates.catalogFailed)}
       </p>
     );
   }

@@ -2,14 +2,7 @@
 
 import type { NodeVO } from "busabase-contract/types";
 import { Button } from "kui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "kui/dialog";
+import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "kui/dialog";
 import { cn } from "kui/utils";
 import { Folder, FolderTree } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -17,6 +10,7 @@ import { toast } from "sonner";
 import { useCoreI18n } from "../../../i18n";
 import { flattenMoveTargets } from "../helpers/node-move-targets";
 import type { MoveNodePayload } from "../hooks/use-move-node";
+import { DialogContent } from "./localized-dialog-content";
 
 /**
  * Sidebar "•••" → "Move to…" dialog: an indented folder picker built from the
