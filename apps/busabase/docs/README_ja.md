@@ -8,7 +8,7 @@
 <h1>Busabase</h1>
 
 <p><b>AI エージェントのためのデータベース＆ワークスペース</b><br/>
-Claude Code、Codex、Cursor、OpenClaw、独自エージェントに、構造化データ、永続的な知識、再利用可能な Skill、実行可能なアプリ、人によるレビューを一つの場所で提供します。</p>
+Claude Code、Codex、Cursor、OpenClaw、独自エージェントに、構造化データ、永続的な知識、再利用可能な Skill、実行可能なアプリ、そしてすべての変更をたどれる履歴を一つの場所で提供します。</p>
 
 <p>
 <a href="../README.md">English</a> &nbsp;·&nbsp; <a href="./README_zh-CN.md">中文</a> &nbsp;·&nbsp; <b>日本語</b> &nbsp;·&nbsp; <a href="./README_ko.md">한국어</a>
@@ -18,6 +18,7 @@ Claude Code、Codex、Cursor、OpenClaw、独自エージェントに、構造�
 <a href="https://www.npmjs.com/package/busabase"><img src="https://img.shields.io/npm/v/busabase?logo=npm&label=busabase&color=3fb950" alt="npm busabase" /></a>
 <a href="https://hub.docker.com/r/busabase/busabase"><img src="https://img.shields.io/docker/image-size/busabase/busabase/latest?logo=docker&label=docker" alt="Docker image" /></a>
 <a href="https://busabase.com/download"><img src="https://img.shields.io/badge/Desktop-Download-1f6feb?logo=tauri&logoColor=white" alt="Busabase Desktop" /></a>
+<a href="https://glama.ai/mcp/connectors/com.busabase/busabase"><img src="https://glama.ai/mcp/connectors/com.busabase/busabase/badges/score.svg" alt="Glama MCP connector score" /></a>
 <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>
 <a href="https://github.com/busabase/busabase/stargazers"><img src="https://img.shields.io/github/stars/busabase/busabase?style=social" alt="GitHub stars" /></a>
 </p>
@@ -28,6 +29,8 @@ Claude Code、Codex、Cursor、OpenClaw、独自エージェントに、構造�
 
 </div>
 
+> Busabase は AI エージェントのためのオープンソースのデータベース＆ワークスペースです。エージェントと人が同じ構造化データ、ドキュメント、スキル、アプリを共有し、重要な書き込みはレビューを経て信頼できる記録になります。
+
 AI エージェントはコードを書き、成果物を生成できます。しかし有用な結果はチャット、ファイル、データベース、SaaS に散らばりがちです。次のセッションでは文脈を探し直し、書き戻した変更も人から見えにくくなります。
 
 **Busabase は、もう一つのチャット画面ではなく、エージェントが実際に働くためのワークスペースです。**
@@ -37,9 +40,9 @@ AI エージェントはコードを書き、成果物を生成できます。�
 - **エージェントのワークスペース**：Skill、AirApp、Whiteboard、Workflow、Agents、共有アクティビティ。
 - **エージェント作業の信頼レイヤー**：Change Request、フィールド単位の diff、コメント、承認、commit、監査ログ。
 
-エージェントは人と同じワークスペースを読み、知識や Skill を使い、データ上にアプリを作り、改善案を書き戻せます。重要な変更は Change Request になり、人が確認してから正式データになります。
+エージェントは人と同じワークスペースを読み、知識や Skill を使い、データ上にアプリを作り、改善を書き戻せます。すべての書き込みは Change Request として行われ、メッセージ、diff、作成者、完全な履歴を伴います。そのまま merge されるか、Inbox でレビューを待つかは、あなたのワークスペース権限が決めます。
 
-**無料・オープンソース。ローカルファースト。エージェントネイティブ。レビュー可能。**
+**無料・オープンソース。ローカルファースト。エージェントネイティブ。すべての変更をたどれる。**
 
 ## クイックスタート
 
@@ -91,10 +94,20 @@ Busabase は「AI ボタン付きデータベース」ではありません。�
 | **File / Drive** | ファイル、添付、プロジェクトツリー | エージェント作業の根拠を一か所に集約 |
 | **Skill** | 指示、参考資料、例、スクリプト | ワークスペース文脈とともに再利用できる能力 |
 | **AirApp** | ワークスペースのデータと API を使うアプリ | 新しいデータサイロを作らない専用 UI |
-| **Whiteboard / Workflow** | 視覚的な文脈と実行可能なプロセス | エージェントも理解・改善できる共有計画 |
+| **Whiteboard / Workflow** | 視覚的な文脈と、エージェントが読めるプロセス定義 | エージェントも理解・改善できる共有計画 |
 | **Inbox / Activity** | 提案された変更とイベント | 人による制御、復旧性、監査証跡 |
 
 現在のノードタイプは Folder、Base、Doc、File、Drive、Skill、AirApp、Form、HTML、Whiteboard、Workflow です。詳細は **[Node Types](./node-types.md)** を参照してください。
+
+### テンプレートから始める
+
+テンプレートはワークスペースアプリ一式をまとめてインストールします。Base、ビュー、Doc、サンプルデータ、AirApp、そしてそのアプリの使い方をエージェントに伝える Skill マニュアルが一緒に入ります。
+
+```bash
+busabase-cli install https://github.com/busabase/templates/tree/main/templates/busa-crm
+```
+
+カタログは **[busabase.com/templates](https://busabase.com/templates)** にあります。任意の GitHub URL やローカルディレクトリからも Busabase package をインストールできます。`--dry-run` はインストール計画だけを表示し、`--require-review` は package のレコードと Doc を merge せず change request として残します。
 
 ## ワークスペースの画面
 
@@ -109,7 +122,7 @@ Busabase は「AI ボタン付きデータベース」ではありません。�
 | ![プロダクト公開 Whiteboard](../public/assets/readme/busabase-whiteboard.webp) | ![リード受付 Workflow](../public/assets/readme/busabase-workflow.webp) |
 | **Whiteboards**：人とエージェントの視覚的な文脈 | **Workflows**：データや知識と並ぶプロセス |
 | ![エージェント提案のフィールド diff](../public/assets/readme/busabase-agent-output-preview.webp) | ![レコード履歴と監査証跡](../public/assets/readme/busabase-record-detail-audit.webp) |
-| **Review**：merge 前に変更内容を確認 | **Provenance**：出所、reviewer、commit、履歴を保持 |
+| **Review**：エージェントが何を変えたかを正確に確認 | **Provenance**：出所、reviewer、commit、履歴を保持 |
 
 ## エージェントを接続
 
@@ -122,7 +135,7 @@ Busabase はモデルを内蔵しません。Claude Code、Codex、Cursor、Gemi
 Busabase Agent Skill を読み、唯一の操作ルールとして従ってください：
 http://localhost:15419/SETUP_SKILL.md
 
-onboarding に従ってこのワークスペースへ接続してください。重要な変更は ChangeRequest として提案し、私の承認なしに merge しないでください。日本語で返答してください。
+onboarding に従ってこのワークスペースへ接続してください。私が明示的に指示しない限り、merge の方針を自分で決めないでください。変更を送信すれば、今 merge するかレビューを待つかは Busabase が私の権限に従って判断します。日本語で返答してください。
 ```
 
 </details>
@@ -136,19 +149,25 @@ onboarding に従ってこのワークスペースへ接続してください。
 | **OpenAPI / CLI** | アプリ、スクリプト、自動化、独自 agent |
 | **Agents view (ACP)** | ツール操作と権限確認を表示する対話セッション |
 
+Busabase の MCP サーバーは [Glama の MCP コネクタディレクトリ](https://glama.ai/mcp/connectors/com.busabase/busabase)にも、リアルタイムのコネクタスコア付きで掲載されています。
+
 ## 信頼できる結果になるまで
+
+Busabase の答えは、すべての書き込みを人待ちにすることではなく、すべての書き込みを**説明できる**状態にすることです。
 
 ```text
 Agent がワークスペースの文脈を読む
         ↓
-データ、Doc、Skill、App の変更を提案
+データ、Doc、Skill、App を変更する — 必ず Change Request として
         ↓
-Change Request が diff、出所、影響を表示
+Change Request が diff、メッセージ、作成者、影響を示す
         ↓
-人が承認、修正依頼、却下
+あなたの権限が決める：その場で merge か、Inbox でレビュー待ちか
         ↓
-merge された結果が正式なワークスペース知識になる
+どちらでも、その変更は確認でき、誰の変更かが分かり、元に戻せる
 ```
+
+レビューは通行料ではなく、選べる機能です。権限を `changeRequest` に制限した資格情報は提案しかできず、個別の呼び出しは `autoMerge: false` でレビューに回せ、`busabase-cli install … --require-review` は package の内容を承認待ちにします。それ以外で書き込み権限があるものはそのまま書き込み、それでも diff と履歴は残ります。
 
 Change Request は Busabase のカテゴリそのものではなく、エージェント・ワークスペースを信頼できるものにする仕組みです。
 

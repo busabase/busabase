@@ -1,19 +1,28 @@
 # Busabase Node Types
 
-Busabase organizes trusted knowledge as nodes. Every node appears in the left navigation and can be changed through the same Change Request review flow.
+Busabase organizes trusted knowledge as nodes. Every node appears in the left navigation and every change to one travels the same Change Request path — so it carries a message, a diff, an author, and a history, whether it merges on the spot or waits for review.
 
 ![Create node menu showing Folder, Base, Skill, Drive, and Doc](../public/assets/docs/busabase-create-node-menu.png)
 
 ## Current Types
 
-| Type | Use it for | Review behavior |
+Whether a change merges immediately or waits in the Inbox is decided by permissions
+(`shouldAutoMerge(requested, hasWrite)`), not by the node type — the column below describes
+*how* a type's changes are expressed, not whether someone must approve them.
+
+| Type | Use it for | How changes are expressed |
 | --- | --- | --- |
 | Folder | Navigation groups for related nodes | Rename, move, create, delete, and restore through node operations |
-| Base | Structured records with typed fields | Field, view, record, and schema changes go through review |
-| Skill | Agent-readable file trees | Files and metadata are stored in object storage and changed through file-tree operations |
+| Base | Structured records with typed fields | Field, view, record, and schema operations |
+| Doc | Single Markdown document pages | The body lives in object storage; updates arrive as document operations |
+| File | One stored file (an asset) as its own node | Created against an existing `assetId`; listed via `GET /nodes?types=file` |
 | Drive | Plain file collections | Files are stored in object storage with a seeded `README.md`; no `SKILL.md` or `skill.json` |
-| AirApp | Agent-authored, human-runnable web apps | Files are stored the same way as Skill/Drive; the node detail view adds a Run panel that executes the app in-browser |
-| Doc | Single approved document pages | Document updates are reviewed before merge |
+| Skill | Agent-readable file trees | Files and metadata are stored in object storage and changed through file-tree operations |
+| AirApp | Agent-authored, human-runnable web apps | Files are stored the same way as Skill/Drive; the node detail view adds a Run panel that executes the app |
+| Form | A public intake page bound to a target Base | Submissions create records on the target Base through the normal Change Request path; anonymous submitters resolve no permission on that Base, so their submissions always queue |
+| HTML | A single agent-authored HTML page | Stored as raw `index.html` (not JSON-wrapped), so search matches real HTML |
+| Whiteboard | Visual context shared with agents | Stored as `scene.json` |
+| Workflow | A process definition drawn as a graph | Stored as `graph.json`. Busabase **renders and stores** the definition; it does not execute it |
 
 ## Drive
 
@@ -83,8 +92,8 @@ Running always reflects the node's current (merged/HEAD) file tree — previewin
 
 **Run requires a secure context.** Service Workers — what Nodepod uses to intercept preview/virtual-server requests — only register in a browser "secure context": `https:`, or the literal hostname `localhost`/`127.0.0.1`/`[::1]`. Accessing the dashboard over plain HTTP through any other hostname (a LAN IP, a custom DNS name mapped to your machine, a tunnel domain) is **not** a secure context even though it resolves to the same server, so the service worker silently fails to register and clicking Run 404s. Use `https://` or `http://localhost:<port>` for local development.
 
-## Review Flow
+## Review
 
-Node changes, file changes, and metadata changes all land in the Inbox as reviewable operations. Reviewers can inspect the proposed change, request edits, approve it, and merge it into the trusted tree.
+Node changes, file changes, and metadata changes are all expressed as Change Request operations, so every one of them is inspectable, attributable, and reversible. Whether a given change stops in the Inbox first is a permission question: a caller with write access on the target merges in the same call, while a caller without it — or one that explicitly passes `autoMerge: false`, or a credential capped at `changeRequest` level — leaves a pending Change Request for a reviewer to inspect, request edits on, approve, or reject.
 
 ![Inbox review list with node and file operations](../public/assets/docs/busabase-inbox-review.png)
