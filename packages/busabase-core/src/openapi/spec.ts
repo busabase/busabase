@@ -1,20 +1,11 @@
 import { type OpenAPI, OpenAPIGenerator } from "@orpc/openapi";
 import { ZodToJsonSchemaConverter } from "@orpc/zod/zod4";
 import { busabaseContract } from "busabase-contract/contract/busabase";
+import { isRpcOnly } from "openlib/openapi";
 
 const openApiGenerator = new OpenAPIGenerator({
   schemaConverters: [new ZodToJsonSchemaConverter()],
 });
-
-/**
- * A procedure with no `.route({ path })` is RPC-only by convention — long-lived
- * Event Iterators (`live.subscribe`, `airapps.runLocal`) that are typed for
- * `/api/rpc` but are not REST-shaped. Without this the generator invents a path
- * for them from the procedure name and they surface as REST endpoints (and, in
- * turn, as MCP tools) that no client can meaningfully call.
- */
-const isRpcOnly = (contract: unknown) =>
-  !(contract as { "~orpc"?: { route?: { path?: string } } })?.["~orpc"]?.route?.path;
 
 export async function getBusabaseOpenApiSpec(): Promise<OpenAPI.Document> {
   const spec = await openApiGenerator.generate(busabaseContract, {
