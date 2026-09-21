@@ -37,6 +37,10 @@
       "types": "./nanoid/index.ts",
       "default": "./nanoid/index.ts"
     },
+    "./openapi": {
+      "types": "./openapi/index.ts",
+      "default": "./openapi/index.ts"
+    },
     "./realtime": {
       "types": "./realtime/index.ts",
       "default": "./realtime/index.ts"
