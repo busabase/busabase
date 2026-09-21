@@ -31,7 +31,7 @@ import { useKnownNodeCache } from "~/domains/workspace/hooks/use-known-node-cach
 import type { KnownNode } from "~/domains/workspace/utils/known-node-cache";
 import { getMobileNodeDestination } from "~/domains/workspace/utils/node-navigation";
 import { fmt, useI18n } from "~/i18n";
-import { formatListTime } from "~/lib/format";
+import { formatListDateTime } from "~/lib/format";
 import { mobile, radius, spacing, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 
@@ -304,7 +304,7 @@ function HomeContent() {
                     <NativeRow
                       key={event.id}
                       title={event.title}
-                      meta={formatListTime(event.timestamp)}
+                      subtitle={formatListDateTime(event.timestamp)}
                       leading={<Icon size={18} color={tokens.mutedForeground} />}
                       onPress={event.target.kind === "none" ? undefined : () => openEvent(event)}
                       last={index === activityEvents.length - 1}

@@ -21,7 +21,7 @@ import { useInfiniteActivityFeed } from "~/domains/review/hooks/use-activity-fee
 import type { ActivityEvent, ActivityTone } from "~/domains/review/types/activity-events";
 import { ConnectionGuard } from "~/domains/workspace/components/ConnectionGuard";
 import { DrawerScaffold } from "~/domains/workspace/components/DrawerScaffold";
-import { formatListTime } from "~/lib/format";
+import { formatListDateTime } from "~/lib/format";
 import { useTokens } from "~/theme/use-tokens";
 
 const ACTIVITY_PAGE_SIZE = 25;
@@ -68,7 +68,7 @@ function ActivityContent() {
       <NativeRow
         key={event.id}
         title={event.title}
-        meta={formatListTime(event.timestamp)}
+        subtitle={formatListDateTime(event.timestamp)}
         leading={<Icon size={18} color={tokens.mutedForeground} />}
         onPress={event.target.kind === "none" ? undefined : () => openEvent(event)}
         last={index === total - 1}
