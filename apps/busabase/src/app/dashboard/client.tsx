@@ -439,6 +439,11 @@ function DashboardClientContent({
             nodesLoading={nodesQuery.isPending}
             onExpandNode={onExpandNode}
             checkIsDescendant={checkIsDescendant}
+            // Same scope the dashboard above gets, so the sidebar's "Recent"
+            // filter reads the cache the dashboard writes. No `currentUserId`
+            // on either side here: self-hosted Busabase has no signed-in user,
+            // and both therefore resolve to the `"anonymous"` suffix.
+            cacheSpaceKey={CACHE_SPACE_KEY}
           >
             {routedContent}
           </BusabaseDashboardShell>

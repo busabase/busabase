@@ -13,7 +13,17 @@ import {
 import type { MoveNodePayload } from "busabase-core/dashboard/use-move-node";
 import { useCoreI18n } from "busabase-core/i18n";
 import { DropdownMenuItem, DropdownMenuSeparator } from "kui/dropdown-menu";
-import { Activity, Archive, Bot, Images, Inbox, LayoutGrid, Network, Shapes } from "lucide-react";
+import {
+  Activity,
+  Archive,
+  Bot,
+  Globe,
+  Images,
+  Inbox,
+  LayoutGrid,
+  Network,
+  Shapes,
+} from "lucide-react";
 import { mergeSearchIntoHref, useAddDemoParam } from "openlib/ui/dashboard";
 import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
@@ -61,6 +71,14 @@ interface BusabaseDashboardShellProps {
    * dialog all name the same edition and origin.
    */
   agentIntegration?: AgentIntegrationTarget;
+  /**
+   * Known-node cache scope, forwarded to the core shell so its sidebar
+   * "Recent" filter reads the very cache `BusabaseDashboard` writes. Must be
+   * the same value this app passes the dashboard (`CACHE_SPACE_KEY`).
+   */
+  cacheSpaceKey?: string;
+  /** Viewer half of that scope. Omitted here — this app has no signed-in user. */
+  currentUserId?: string | null;
 }
 
 /**
@@ -87,6 +105,8 @@ export function BusabaseDashboardShell({
   onExpandNode,
   checkIsDescendant,
   agentIntegration,
+  cacheSpaceKey,
+  currentUserId,
 }: BusabaseDashboardShellProps) {
   const { activeSpace, spaces, unreadCount, user } = useSPA();
   const [location, navigate] = useLocation();
@@ -184,6 +204,16 @@ export function BusabaseDashboardShell({
           <Images />
           <span>{coreMessages.nav.assets}</span>
         </DropdownMenuItem>
+        {/* Space-level public-share audit. Ungated here, unlike the cloud
+            host: this single-tenant install has one owner, and busabase-core's
+            own permission seam defaults them to `manage`. */}
+        <DropdownMenuItem
+          onSelect={() => navigateInWorkspace("/shared")}
+          className={currentPath === "/shared" ? "bg-accent" : undefined}
+        >
+          <Globe />
+          <span>{coreMessages.nav.shared}</span>
+        </DropdownMenuItem>
         <DropdownMenuItem
           onSelect={() => navigateInWorkspace("/agents")}
           className={currentPath.startsWith("/agents") ? "bg-accent" : undefined}
@@ -249,6 +279,8 @@ export function BusabaseDashboardShell({
         nodesLoading={nodesLoading}
         onExpandNode={onExpandNode}
         checkIsDescendant={checkIsDescendant}
+        cacheSpaceKey={cacheSpaceKey}
+        currentUserId={currentUserId}
       >
         {children}
       </CoreDashboardShell>
