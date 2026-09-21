@@ -806,8 +806,9 @@ export function PackageSummary({
  * What actually happened. The pending-change-request pointer is the important
  * half: structure is materialized immediately (a pending Base has no id to hang a
  * view or a record on), so the tree already changed — but the package's *content*
- * is only proposed, and saying so plainly is what keeps the approval-first
- * promise legible.
+ * may still be waiting (`--require-review`, or a credential that cannot write),
+ * and saying so plainly is what keeps the result honest — hence the branch on
+ * `pendingChangeRequests > 0`.
  */
 function ResultStep({
   messages,

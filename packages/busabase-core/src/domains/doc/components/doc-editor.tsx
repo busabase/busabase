@@ -1,9 +1,11 @@
 "use client";
 
 import { type ComponentType, useEffect, useState } from "react";
-import type { DocEditorCrepeProps } from "./doc-editor-crepe";
+import { DocContentSkeleton } from "../../dashboard/components/skeletons";
+import type { DocEditorCrepeProps, DocOutlineItem } from "./doc-editor-crepe";
 
 export type DocEditorProps = DocEditorCrepeProps;
+export type { DocOutlineItem };
 
 /**
  * Public entry point for the Doc node's Markdown editor. Defers loading the
@@ -23,6 +25,9 @@ export function DocEditor(props: DocEditorProps) {
     };
   }, []);
 
-  if (!Impl) return null;
+  // Shimmer, not `null`, while the chunk is in flight: the doc's title is
+  // already rendered above this, so an empty body here reads exactly like a
+  // document that has no content (see DocContentSkeleton).
+  if (!Impl) return <DocContentSkeleton className={props.className} />;
   return <Impl {...props} />;
 }

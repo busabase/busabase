@@ -91,6 +91,7 @@ import {
   searchInteractionResponseSchema,
   searchNodesByNameInputSchema,
   searchResponseSchema,
+  sharedNodeSchema,
   updateNodeAgentPromptsInputSchema,
   updateNodeMetadataInputSchema,
   updateNodeSettingsInputSchema,
@@ -482,6 +483,27 @@ export const busabaseContractRoutes = {
         .output(z.object({ removed: z.boolean() })),
     },
     share: {
+      // The SPACE-level listing, deliberately on its own collection path
+      // rather than under `/nodes/...`: the three procedures below address one
+      // node (`/nodes/{nodeId}/share`), while this one answers a question that
+      // has no node in it at all — "what in this workspace is public?". Nesting
+      // it as `/nodes/share` would also put a literal segment where `{nodeId}`
+      // is expected, the same prefix clash `/nodes/search` and
+      // `/nodes/favorites` already have to be ordered around.
+      list: oc
+        .route({
+          method: "GET",
+          path: "/node-shares",
+          tags: ["Nodes", "Sharing"],
+          summary: "List every node in the space carrying its own live public share",
+          successDescription:
+            'One row per node that someone explicitly published and that is still live — `scope: "public"` and unexpired — joined to just enough of the node (name, slug, type, icon) to render and open it. Rows the caller cannot see are omitted (same node-visibility ACL as `nodes.list`), and the stored share password is never returned, only a `hasPassword` flag. Deliberately does NOT include nodes that are merely reachable because an ANCESTOR is shared: this is the list of grants a person made, each revocable on its own with `nodes.share.disable`, which is the same set the workbench sidebar marks with a globe (`NodeVO.shared`).',
+        })
+        // No `.input()` at all, not `z.object({})`: this endpoint genuinely
+        // takes nothing, and an empty input schema is not the same thing —
+        // it publishes a parameter object with no parameters into OpenAPI and
+        // MCP. `auth.verify` above is the existing shape for this.
+        .output(z.array(sharedNodeSchema)),
       get: oc
         .route({
           method: "GET",

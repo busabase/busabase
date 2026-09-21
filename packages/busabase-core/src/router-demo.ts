@@ -250,6 +250,12 @@ export const busabaseDemoRouter = os.router({
       // The demo dataset is stateless — nothing is ever shared, and there is no
       // db to persist a share against. `get` returns null (truthful: unshared);
       // the mutations are refused just like the other demo writes above.
+      //
+      // `list` returns `[]` for the same reason `get` returns null, and it is
+      // truthful rather than an error: the `/shared` audit screen and the
+      // sidebar's "Shared" filter then render their reassuring "nothing is
+      // publicly shared" state, which is the correct answer for this dataset.
+      list: os.nodes.share.list.handler(() => []),
       get: os.nodes.share.get.handler(() => null),
       set: os.nodes.share.set.handler(() => {
         throw demoUnsupported("Node sharing");
@@ -516,8 +522,10 @@ export const busabaseDemoRouter = os.router({
   forms: {
     // A seeded demo Form renders its agent-authored page (read from the demo
     // scenario). Config edits still require a persistent instance; a submit is
-    // acknowledged with a synthetic pending id so the approval-first flow reads
-    // correctly, but nothing is stored.
+    // acknowledged with a synthetic pending id so the review flow reads
+    // correctly, but nothing is stored. (A real submit is permission-aware and
+    // usually merges on the spot; the stateless demo can only fake the queued
+    // half.)
     // Reading which forms write into a Base is provenance, not a write — and the
     // surface that asks is a safety panel on the Base, so it gets a real demo
     // implementation off the seeded scenario rather than an error block.

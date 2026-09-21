@@ -1,0 +1,303 @@
+.doc-reading-viewport {
+  container-type: inline-size;
+}
+
+.doc-reading-toc {
+  --doc-reading-toc-drawer-width: 16rem;
+  --doc-reading-toc-rail-width: 1.5rem;
+
+  position: absolute;
+  top: 2.5rem;
+  right: 0.5rem;
+  z-index: 10;
+  display: none;
+  width: var(--doc-reading-toc-drawer-width);
+  max-height: calc(100% - 5rem);
+  overflow-x: hidden;
+  overflow-y: hidden;
+  border: 1px solid transparent;
+  border-radius: 0;
+  background: transparent;
+  clip-path: inset(0 0 0 calc(100% - var(--doc-reading-toc-rail-width)));
+  transition:
+    clip-path 180ms ease,
+    background-color 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.doc-reading-toc-heading {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1rem;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.doc-reading-toc-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0 0 0.25rem;
+  padding: 0;
+  list-style: none;
+}
+
+.doc-reading-toc-item {
+  --doc-reading-toc-item-indent: 0.75rem;
+
+  position: relative;
+  display: block;
+  width: 100%;
+  min-height: 1rem;
+  padding: 0 0.75rem 0 var(--doc-reading-toc-item-indent);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  text-align: left;
+  transition:
+    color 120ms ease,
+    background-color 120ms ease;
+}
+
+.doc-reading-toc-label {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 0.875rem;
+  line-height: 1rem;
+  opacity: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: opacity 120ms ease;
+}
+
+.doc-reading-toc-marker {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  height: 0.125rem;
+  border-radius: 999px;
+  background-color: color-mix(in srgb, var(--muted-foreground) 45%, transparent);
+  transform: translateY(-50%);
+  transition:
+    background-color 160ms ease,
+    opacity 120ms ease;
+}
+
+.doc-reading-toc-item[data-level="1"] {
+  --doc-reading-toc-item-indent: 0.75rem;
+}
+
+.doc-reading-toc-item[data-level="2"] {
+  --doc-reading-toc-item-indent: 1.5rem;
+}
+
+.doc-reading-toc-item[data-level="3"] {
+  --doc-reading-toc-item-indent: 2.25rem;
+}
+
+.doc-reading-toc-item[data-level="1"] .doc-reading-toc-marker {
+  width: 1.25rem;
+}
+
+.doc-reading-toc-item[data-level="2"] .doc-reading-toc-marker {
+  width: 0.875rem;
+}
+
+.doc-reading-toc-item[data-level="3"] .doc-reading-toc-marker {
+  width: 0.5rem;
+}
+
+.doc-reading-toc-item:hover .doc-reading-toc-marker {
+  background-color: var(--muted-foreground);
+}
+
+.doc-reading-toc-item:hover .doc-reading-toc-label {
+  color: var(--foreground);
+}
+
+.doc-reading-toc-item[aria-current="location"] .doc-reading-toc-marker {
+  height: 0.1875rem;
+  background-color: var(--primary);
+}
+
+.doc-reading-toc-item[aria-current="location"] .doc-reading-toc-label {
+  color: var(--foreground);
+  font-weight: 500;
+}
+
+.doc-reading-toc-item:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+
+.doc-reading-toc:hover,
+.doc-reading-toc:has(.doc-reading-toc-item:focus-visible) {
+  overflow-y: auto;
+  border-color: var(--border);
+  background-color: var(--popover);
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--foreground) 10%, transparent);
+  clip-path: inset(0 0 0 0);
+}
+
+.doc-reading-toc:hover .doc-reading-toc-item,
+.doc-reading-toc:has(.doc-reading-toc-item:focus-visible) .doc-reading-toc-item {
+  min-height: 1.75rem;
+  padding-top: 0.375rem;
+  padding-bottom: 0.375rem;
+}
+
+.doc-reading-toc:hover .doc-reading-toc-marker,
+.doc-reading-toc:has(.doc-reading-toc-item:focus-visible) .doc-reading-toc-marker {
+  opacity: 0;
+}
+
+.doc-reading-toc:hover .doc-reading-toc-heading,
+.doc-reading-toc:has(.doc-reading-toc-item:focus-visible) .doc-reading-toc-heading {
+  opacity: 1;
+}
+
+.doc-reading-toc:hover .doc-reading-toc-label,
+.doc-reading-toc:has(.doc-reading-toc-item:focus-visible) .doc-reading-toc-label {
+  opacity: 1;
+}
+
+@container (min-width: 1120px) {
+  .doc-reading-toc {
+    display: block;
+  }
+}
+
+@container (min-width: 1552px) {
+  .doc-reading-toc {
+    right: auto;
+    left: calc(50% + 33.5rem);
+    width: clamp(14rem, calc((100cqw - 64rem) / 2 - 2.5rem), 15.75rem);
+    padding: 0.25rem 0.5rem;
+    overflow-y: auto;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    clip-path: none;
+  }
+
+  .doc-reading-toc-heading {
+    margin-bottom: 0.5rem;
+    padding: 0 0.75rem;
+    opacity: 1;
+  }
+
+  .doc-reading-toc-list {
+    gap: 0.125rem;
+    margin: 0;
+  }
+
+  .doc-reading-toc-item {
+    min-height: 2rem;
+    padding: 0.375rem 0.75rem 0.375rem var(--doc-reading-toc-item-indent);
+    border-left: 2px solid transparent;
+    transition:
+      color 120ms ease,
+      border-color 120ms ease;
+  }
+
+  .doc-reading-toc-item:hover {
+    border-left-color: var(--border);
+  }
+
+  .doc-reading-toc-item[aria-current="location"] {
+    border-left-color: var(--primary);
+  }
+
+  .doc-reading-toc-marker {
+    display: none;
+  }
+
+  .doc-reading-toc-label {
+    line-height: 1.25rem;
+    opacity: 1;
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+  }
+
+  .doc-reading-toc:hover,
+  .doc-reading-toc:has(.doc-reading-toc-item:focus-visible) {
+    overflow-y: auto;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    clip-path: none;
+  }
+
+  .doc-reading-toc:hover .doc-reading-toc-item,
+  .doc-reading-toc:has(.doc-reading-toc-item:focus-visible) .doc-reading-toc-item {
+    min-height: 2rem;
+    padding: 0.375rem 0.75rem 0.375rem var(--doc-reading-toc-item-indent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .doc-reading-toc,
+  .doc-reading-toc-heading,
+  .doc-reading-toc-item,
+  .doc-reading-toc-marker {
+    transition: none;
+  }
+}
+
+/* Keep the Doc reader's scrollbar hidden until the reading surface is hovered,
+ * while reserving its track so the text column never shifts. Scope this to the
+ * one scrolling element instead of changing the global scrollbar behavior. */
+[data-dashboard-scroll="doc-detail"] {
+  scrollbar-color: transparent transparent;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+}
+
+@supports not selector(::-webkit-scrollbar) {
+  [data-dashboard-scroll="doc-detail"]:hover {
+    scrollbar-color: color-mix(in srgb, var(--muted-foreground) 35%, transparent) transparent;
+  }
+}
+
+/* Chromium ignores the pseudo-elements while `scrollbar-color` has a non-auto
+ * computed value. Keep the 8px thumb stable across interaction states so the
+ * reader never gains native scrollbar buttons or shifts its text column. */
+@supports selector(::-webkit-scrollbar) {
+  [data-dashboard-scroll="doc-detail"] {
+    scrollbar-width: auto;
+    scrollbar-color: auto;
+  }
+
+  [data-dashboard-scroll="doc-detail"]::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  [data-dashboard-scroll="doc-detail"]::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  [data-dashboard-scroll="doc-detail"]::-webkit-scrollbar-button {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+
+  [data-dashboard-scroll="doc-detail"]::-webkit-scrollbar-thumb {
+    background-color: transparent;
+    border-radius: 999px;
+  }
+
+  [data-dashboard-scroll="doc-detail"]:hover::-webkit-scrollbar-thumb {
+    background-color: color-mix(in srgb, var(--muted-foreground) 35%, transparent);
+  }
+}

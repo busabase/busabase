@@ -1,3 +1,4 @@
+import type { LucideIcon } from "lucide-react";
 import {
   ArrowLeft,
   Check,
@@ -9,6 +10,7 @@ import {
 } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import type { ReactNode } from "react";
+import { useId } from "react";
 import { useCoreI18n } from "../../../i18n";
 import { changeRequestStatusLabel, statusTone } from "../helpers/change-request";
 import { useHrefWithCurrentSearch } from "../helpers/link-search";
@@ -140,6 +142,7 @@ export function ConfirmActionDialog({
   title: string;
 }) {
   const messages = useCoreI18n();
+  const titleId = useId();
 
   if (!open) {
     return null;
@@ -147,8 +150,19 @@ export function ConfirmActionDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 px-4 backdrop-blur-sm">
-      <section className="w-full max-w-sm rounded-lg border bg-card p-4 shadow-xl">
-        <div className="font-semibold text-base">{title}</div>
+      {/* This is a modal, so it says so. Without the role it is an anonymous
+          <div> to a screen reader — and to any test trying to assert that a
+          destructive action asked first, which is exactly what a confirm
+          dialog exists to prove. */}
+      <section
+        aria-labelledby={titleId}
+        aria-modal="true"
+        className="w-full max-w-sm rounded-lg border bg-card p-4 shadow-xl"
+        role="dialog"
+      >
+        <div className="font-semibold text-base" id={titleId}>
+          {title}
+        </div>
         <p className="mt-2 text-muted-foreground text-sm leading-6">{body}</p>
         <div className="mt-4 flex justify-end gap-2">
           <button
@@ -214,17 +228,27 @@ export function StatusBadge({ status }: { status: string }) {
 export function EmptyState({
   action,
   body,
+  icon: Icon = PenLine,
   title,
 }: {
   action?: ReactNode;
   body: string;
+  /**
+   * The glyph above the title. Defaults to `PenLine` — "there is nothing here,
+   * go write something" — which is right for the authoring surfaces this
+   * started on and wrong everywhere the empty state is not an invitation to
+   * create. A governance screen reporting "nothing is publicly shared" is
+   * reporting GOOD news, and a pencil there reads as a prompt to go and share
+   * something. Optional so every existing caller keeps the pen.
+   */
+  icon?: LucideIcon;
   title: string;
 }) {
   return (
     <div className="grid min-h-[460px] place-items-center p-10 text-center">
       <div>
         <div className="mx-auto grid size-14 place-items-center rounded-xl border bg-card">
-          <PenLine size={24} />
+          <Icon size={24} />
         </div>
         <h2 className="mt-4 font-semibold text-2xl">{title}</h2>
         <p className="mt-2 text-muted-foreground">{body}</p>

@@ -194,6 +194,16 @@ export const coreMessagesEn = {
     uploadTaskFilesProgress: "{completed} of {count} files",
     uploadTaskFileProgress: "{name} upload {progress}% complete",
     fileActionsFor: "Actions for {name}",
+    folderActionsFor: "Actions for folder {name}",
+    selectDriveFiles: "Select Drive files",
+    selectDriveItem: "Select {name}",
+    driveFileSelected: "{count} file selected",
+    driveFilesSelected: "{count} files selected",
+    selectedDriveFiles: "Selected Drive files",
+    selectAllDriveFiles: "Select all",
+    clearDriveSelection: "Clear",
+    downloadSelectedFiles: "Download selected files",
+    removeSelectedFiles: "Remove selected files",
     renameFile: "Rename file",
     newFileName: "New file name",
     invalidFileName: "Enter a valid file name.",
@@ -204,20 +214,43 @@ export const coreMessagesEn = {
     fileRenamed: "File renamed",
     downloadFile: "Download file",
     fileDownloadFailed: "Could not download the file",
+    downloadFolder: "Download folder",
+    filesDownloaded: "Downloaded {count} files",
+    filesDownloadFailed: "Could not download the selected files",
+    renameFolder: "Rename folder",
+    renameFolderDescription: 'Rename "{folder}" and keep all {count} files and subfolders.',
+    renameFolderAsChangeRequest: "Request folder rename",
+    renamingFolder: "Renaming folder…",
+    renameFolderNow: "Rename folder now",
+    folderRenameFailed: "Could not rename the folder",
+    folderRenameConflict: 'Cannot rename because a file already exists at "{path}".',
+    folderNameUnchanged: "Enter a different folder name.",
+    folderEmpty: "This folder has no files to rename.",
+    folderRenamed: "Folder renamed with {count} files",
     removeFromDrive: "Remove from Drive",
+    removeFolder: "Remove folder",
+    removeDriveFiles: "Remove files from Drive?",
+    removeDriveFileDescription:
+      "This removes {count} file from this Drive after the change is merged.",
+    removeDriveFilesDescription:
+      "This removes {count} files from this Drive after the change is merged.",
     removeFileDescription: "This removes the file from this Drive after the change is merged.",
     removeFileAssetHint: "The underlying Asset remains available in the Assets library.",
     removeAsChangeRequest: "Request removal",
     removingFile: "Removing…",
+    removingFiles: "Removing files…",
     removeNow: "Remove now",
     fileRemoveFailed: "Could not remove the file",
     fileRemoved: "File removed from Drive",
+    filesRemoveFailed: "Could not remove the files",
+    filesRemoved: "Removed {count} files from Drive",
     saveAsChangeRequest: "Save as Change Request",
     save: "Save Now",
     saving: "Saving…",
     couldNotSave: "Could not save",
     couldNotCreateChangeRequest: "Could not create change request",
     docBody: "Doc body",
+    tableOfContents: "On this page",
     writePlaceholder: "Write…",
     emptyDoc: "This document is empty. Click Edit to start writing.",
     emptyFolderTitle: "Empty folder",
@@ -333,6 +366,57 @@ export const coreMessagesEn = {
     updated: "Share settings updated",
     failed: "Something went wrong",
     close: "Close",
+  },
+  /**
+   * The `/shared` audit screen — the space-level counterpart to the per-node
+   * Share dialog above.
+   *
+   * Its own block rather than more keys under `share`, for the same reason
+   * `embedLinks` is its own: `share.*` is the copy of a dialog you opened ON a
+   * node you already had in hand, while this is a governance table read with
+   * no node in mind at all. The two answer different questions and must be
+   * translatable apart — `share.title` ("Share", a verb) and `nav.shared`
+   * ("Public shares", a place) are already different words in every locale.
+   */
+  sharedAccess: {
+    title: "Public shares",
+    description:
+      "Everything in this workspace that anyone with the link can open. Each row is one grant somebody made, and can be revoked on its own.",
+    // Why the table can look "incomplete" to someone who expected a page
+    // inside a shared folder to be listed. Stated on the screen rather than
+    // left to be discovered, because the difference decides what the Stop
+    // sharing button can actually do.
+    ownGrantsHint:
+      "Only nodes published directly. A page inside a shared folder is reachable through the folder, and is revoked by revoking the folder.",
+    columnTarget: "Target",
+    columnCapability: "Access",
+    columnPassword: "Password",
+    columnExpires: "Expires",
+    columnActions: "Actions",
+    capabilityRead: "View only",
+    capabilitySubmit: "Can submit",
+    passwordSet: "Set",
+    passwordNone: "None",
+    neverExpires: "Never",
+    sharedSince: "First shared {time}",
+    count: "{count} shared publicly",
+    revoke: "Stop sharing",
+    revokeConfirmTitle: "Stop sharing this?",
+    revokeConfirmBody:
+      "“{target}” will stop opening for anyone using its public link. Members of this workspace keep their access, and you can share it again later at the same address.",
+    revoked: "Public sharing stopped",
+    revokeFailed: "Could not stop sharing",
+    // Good news on a governance screen, and worded as such: nothing is
+    // exposed. Not "no results".
+    emptyTitle: "Nothing is shared publicly",
+    emptyBody:
+      "No node in this workspace is open to the internet right now. Share one from its ••• menu when you want someone outside to see it.",
+    permissionTitle: "You cannot review public shares",
+    permissionBody:
+      "Only a workspace manager can see every public link and revoke it. Ask one of yours if something needs to be taken down.",
+    failedTitle: "Could not load public shares",
+    failedBody: "The list did not come back. Try again — nothing has changed.",
+    retry: "Retry",
   },
   /**
    * "Embed on another site" — the capability-URL half of sharing.
@@ -463,6 +547,16 @@ export const coreMessagesEn = {
       SW_CONTROL_TIMEOUT:
         "AirApp preview's Service Worker could not take control of this page. Try running the AirApp again.",
     },
+    // Shown instead of the generic `swError` banner specifically for
+    // `SERVICE_WORKER_UNAVAILABLE` — e.g. iOS in-app browsers (WeCom, etc.)
+    // that expose no `navigator.serviceWorker` at all, where no retry or
+    // in-app fix is possible. The only way forward is the system browser.
+    swUnsupportedTitle: "This browser can't run AirApp previews",
+    swUnsupportedBody:
+      "This in-app browser doesn't support the Service Worker AirApp previews need. Copy the link below, then open it in Safari or Chrome.",
+    swUnsupportedCopyLink: "Copy link",
+    swUnsupportedLinkCopied: "Link copied",
+    swUnsupportedCopyFailed: "Couldn't copy the link. Select and copy it manually:",
   },
   agents: {
     addAgent: "Add agent",
@@ -734,6 +828,9 @@ export const coreMessagesEn = {
     // just Bases. Named for the scope it covers ("everything in this space"),
     // not for a node type, so adding a node type never dates the label.
     workspace: "Workspace",
+    // The `/shared` public-share audit screen. Distinct from `share.title`
+    // ("Share", the per-node action) — this one names a PLACE.
+    shared: "Public shares",
     base: "Base",
     blogPosts: "Blog Posts",
     review: "Review",
@@ -741,6 +838,23 @@ export const coreMessagesEn = {
     favorites: "Favorites",
     templates: "Templates",
     installFromGithub: "Install from GitHub…",
+  },
+  /**
+   * The Workspace group's dropdown filter. Its own block rather than more keys
+   * under `nav`, because `nav.apps` already means something else entirely (the
+   * "App Launcher" PAGE) and overloading it would make the two impossible to
+   * translate independently.
+   */
+  sidebarFilter: {
+    trigger: "Filter workspace contents",
+    workspace: "Workspace",
+    recent: "Recent",
+    // Nodes carrying their OWN live public link — the same set the tree marks
+    // with a globe, never the ones merely inherited from a shared ancestor.
+    shared: "Public shares",
+    airapp: "Apps",
+    skill: "Skills",
+    empty: "Nothing here yet",
   },
   shell: {
     breadcrumb: "Breadcrumb",
@@ -841,6 +955,7 @@ export const coreMessagesEn = {
     view: "View",
     editRecord: "Edit Record",
     record: "Record",
+    shared: "Public shares",
   },
   home: {
     title: "Home",
@@ -1773,9 +1888,10 @@ export const coreMessagesEn = {
   },
   emptyGuide: {
     title: "Let an agent help fill this workspace",
-    body: "Busabase can stay manual, but it is designed so agents open Change Requests and humans approve what becomes canonical.",
+    body: "Busabase can stay manual, but it is designed for agents to write into — every change they make carries a message, a diff, and a full history you can review or roll back.",
     itemStructuredData: "Create structured data and seed useful examples",
-    itemChangeRequests: "Open Change Requests for review instead of writing directly",
+    itemChangeRequests:
+      "Write through Change Requests, so every change is explained and reversible",
     itemAgentDatabase: "Add records, update fields, and evolve a Database with an AI agent",
     startFromTemplate: "Start from a template",
     startFromTemplateHint:

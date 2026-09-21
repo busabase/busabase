@@ -8,7 +8,7 @@ import "server-only";
 // record ever being written — so a stored value would go stale silently and
 // there is no commit to attach the refresh to. Storing it would also mean
 // fabricating commits for records nobody edited, which is exactly the thing
-// Busabase's approval-first history is not supposed to contain.
+// Busabase's commit history is not supposed to contain.
 //
 // Vika/APITable made the same call (lazy `getCellValue`, never materialized);
 // bika materializes via a full-column `reloadCells()` sweep, which only works

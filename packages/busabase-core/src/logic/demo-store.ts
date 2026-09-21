@@ -152,7 +152,8 @@ export const demoListForms = (input: ListFormsDTO): ListFormsVO => ({
 /**
  * A demo Form submission: the stateless demo can't materialize a real pending
  * ChangeRequest, so acknowledge the submit with a synthetic id. The page's
- * success state still shows, so the approval-first flow reads correctly in demo.
+ * success state still shows, so the review flow reads correctly in demo — note
+ * a real submit is permission-aware and usually merges instead of queuing.
  */
 export const demoSubmitForm = (): { changeRequestId: string; status: "pending_review" } => ({
   changeRequestId: demoId("cr"),

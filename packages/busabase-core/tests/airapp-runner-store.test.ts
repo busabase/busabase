@@ -51,4 +51,33 @@ describe("airapp runner store", () => {
       runner: currentRunner,
     });
   });
+
+  it("tracks a Service Worker capability error and clears it before the next run", () => {
+    const nodeId = "airapp-service-worker";
+    const failedRunner = createRunner();
+    const retryRunner = createRunner();
+    const store = useAirAppRunnerStore.getState();
+
+    store.beginRun(nodeId, failedRunner, "browser");
+    store.setError(
+      nodeId,
+      failedRunner,
+      "Service Worker unavailable",
+      "SERVICE_WORKER_UNAVAILABLE",
+    );
+
+    expect(useAirAppRunnerStore.getState().entries[nodeId]).toMatchObject({
+      status: "error",
+      errorCode: "SERVICE_WORKER_UNAVAILABLE",
+    });
+
+    store.beginRun(nodeId, retryRunner, "browser");
+
+    expect(useAirAppRunnerStore.getState().entries[nodeId]).toMatchObject({
+      status: "loading-files",
+      error: null,
+      errorCode: null,
+      runner: retryRunner,
+    });
+  });
 });

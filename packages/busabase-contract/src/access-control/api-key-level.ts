@@ -240,6 +240,13 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   "embedLinks.create": workspace("manage"),
   "embedLinks.list": workspace("manage"),
   "embedLinks.revoke": workspace("manage"),
+  // The space-wide "what is publicly shared" listing. `workspace`, not `node`,
+  // and deliberately the same posture as `embedLinks.list` right above it:
+  // both answer "what access has been handed out across this whole space",
+  // which is a governance question about the workspace rather than a read of
+  // any one node. The per-node `nodes.share.*` trio below stays node-scoped
+  // because each of those IS about one node the caller already named.
+  "nodes.share.list": workspace("manage"),
 
   "nodes.listFavorites": node("read"),
   "auditEvents.list": node("read"),

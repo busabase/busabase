@@ -154,6 +154,53 @@ const nodeShareSchema = z.object({
   updatedAt: z.string(),
 });
 
+// One row of the SPACE-LEVEL "what is publicly shared right now" listing
+// (`nodes.share.list`). Same security rule as `nodeShareSchema` above —
+// `hasPassword` only, never the stored hash — but a different question, which
+// is why it is a different VO rather than `nodeShareSchema` with extra fields:
+//
+//   * `nodeShareSchema` answers "what are THIS node's settings", read by a
+//     dialog that already has the node in hand, so it needs no node identity
+//     beyond the id it was asked about, and it can legitimately describe a
+//     revoked share (`scope: "none"`).
+//   * this one is read with NO node in hand — it is the audit table and the
+//     sidebar's "Shared" filter — so the node identity has to travel with each
+//     row, and a revoked or expired share is simply not a row at all.
+//
+// Deliberately only nodes carrying their OWN live public share row, never the
+// inherited `busabase_nodes.effective_public_scope`: this is the list of
+// GRANTS A PERSON MADE, each individually revocable through
+// `nodes.share.disable`, and it is the same 口径 as the globe marker the
+// sidebar tree already renders (`NodeVO.shared`). A Doc inside a shared folder
+// is reachable, but nobody published the Doc — revoking "it" would mean
+// revoking the folder, which is not what a row here promises.
+const sharedNodeSchema = z.object({
+  nodeId: z.string(),
+  // Enough node identity to render a row and navigate to it (`/{type}/{slug}`)
+  // without a second round trip per row.
+  name: z.string(),
+  slug: z.string(),
+  type: z.enum(NODE_TYPES),
+  icon: NodeIconSchema.nullable().default(null),
+  capability: z.enum(["read", "submit"]),
+  // Derived from `passwordHash != null` — the hash itself is never serialized.
+  hasPassword: z.boolean(),
+  // ISO 8601, or null for "never expires". Every row here is live as of the
+  // response: an already-expired share is filtered out server-side.
+  expiresAt: z.string().nullable(),
+  /**
+   * When this share ROW was first created — NOT "public continuously since".
+   * `disableNodeShare` flips `scope` to `"none"` and keeps the row, so a node
+   * that was shared, revoked, and shared again still reports the original
+   * date. There is no column recording when `scope` last became `"public"`,
+   * so the UI says "first shared {time}" rather than claiming an exposure
+   * window the data cannot support. Adding that column is the follow-up.
+   */
+  createdAt: z.string(),
+});
+
+export type SharedNodeVO = z.infer<typeof sharedNodeSchema>;
+
 // Depth-bounded tree fetch (sidebar lazy-load). `parentId` omitted/null starts
 // from the space root (same envelope `nodes.list()` always returned: a single
 // wrapped root node); an explicit `parentId` starts from that node's CHILDREN
@@ -1330,6 +1377,7 @@ export {
   nodeSchema,
   nodePrincipalSchema,
   nodeShareSchema,
+  sharedNodeSchema,
   listNodesInputSchema,
   isDescendantInputSchema,
   isDescendantOutputSchema,
