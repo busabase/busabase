@@ -45,6 +45,7 @@ import {
   type AppResourceOwnership,
   type AppRootOwnership,
 } from "busabase-contract/domains/package/template";
+import { uploadAsset } from "./asset-upload.js";
 import type { BusabaseClient } from "./client.js";
 
 type NodeChangeRequestInput = Parameters<BusabaseClient["nodes"]["createChangeRequest"]>[0];
@@ -892,14 +893,29 @@ export function provisionDeclaredResources(
 
 /** The client surface `publishAirApp` needs, on top of provisioning. */
 export type AirAppPublishClient = AirAppProvisioningClient &
-  Pick<BusabaseClient, "fileTrees" | "changeRequests">;
+  // `assets` joined the list when bundles gained binary files: a file tree
+  // references images by assetId, so publishing one means uploading it first.
+  Pick<BusabaseClient, "fileTrees" | "changeRequests" | "assets">;
 
-/** One file of the app's built AirApp bundle, as `publishAirApp` receives it. */
-export interface AirAppFileInput {
-  path: string;
-  content: string;
-  mimeType?: string;
-}
+/**
+ * One file of the app's built AirApp bundle, as `publishAirApp` receives it.
+ *
+ * A file tree holds text inline but binaries as Assets — the server never
+ * stores image bytes in a file operation, it stores an `assetId` pointing at
+ * the Asset library. So a bundle that ships a favicon or an empty-state
+ * illustration needs a shape that can say "these are bytes", and until now
+ * this type could only say `content: string`. Callers did the only thing that
+ * type allowed: read the PNG as UTF-8 and publish the mojibake. That fails
+ * silently — the publish succeeds and the image is simply broken.
+ *
+ * `bytes` is resolved to an `assetId` by `resolveAirAppFileAssets`, which
+ * `publishAirApp` calls for you.
+ */
+export type AirAppFileInput = { path: string; mimeType?: string } & (
+  | { content: string; bytes?: never; assetId?: never }
+  | { bytes: Uint8Array; content?: never; assetId?: never }
+  | { assetId: string; content?: never; bytes?: never }
+);
 
 /**
  * What one publish did. `merged` is the question a caller actually has — did
@@ -930,15 +946,67 @@ export function buildAirAppFileOperations(
   deployedPaths: Iterable<string>,
 ): FileTreeCreateOrUpdateOperation[] {
   const deployed = new Set(deployedPaths);
-  return localFiles.map(
-    (file) =>
-      ({
-        kind: deployed.has(file.path) ? "update" : "create",
-        path: file.path,
-        content: file.content,
-        ...(file.mimeType ? { mimeType: file.mimeType } : {}),
-      }) as FileTreeCreateOrUpdateOperation,
-  );
+  return localFiles.map((file) => {
+    if (file.bytes) {
+      // Staying pure is the point of this function, and uploading is I/O.
+      // Rather than silently dropping the file (the failure mode this whole
+      // change exists to remove), say which call was skipped.
+      throw new Error(
+        `buildAirAppFileOperations: ${file.path} carries bytes — run resolveAirAppFileAssets first to turn them into an assetId`,
+      );
+    }
+    return {
+      kind: deployed.has(file.path) ? "update" : "create",
+      path: file.path,
+      ...(file.assetId ? { assetId: file.assetId } : { content: file.content }),
+      ...(file.mimeType ? { mimeType: file.mimeType } : {}),
+    } as FileTreeCreateOrUpdateOperation;
+  });
+}
+
+/**
+ * Upload every `bytes` file in a bundle and hand back the same list with
+ * `assetId` in their place. Text files pass through untouched — a bundle with
+ * no binaries makes no upload calls at all.
+ *
+ * Separate from `buildAirAppFileOperations` so that function can stay pure and
+ * directly testable; separate from `publishAirApp` so a caller assembling its
+ * own file operations (a Skill or Drive sync, say) can reuse it.
+ */
+export async function resolveAirAppFileAssets(
+  client: AirAppPublishClient,
+  files: AirAppFileInput[],
+  fetchImpl?: typeof fetch,
+): Promise<AirAppFileInput[]> {
+  const resolved: AirAppFileInput[] = [];
+  for (const file of files) {
+    if (!file.bytes) {
+      resolved.push(file);
+      continue;
+    }
+    const mimeType = file.mimeType ?? "application/octet-stream";
+    const asset = await uploadAsset(
+      client,
+      file.bytes,
+      { fileName: basenameOf(file.path), mimeType },
+      fetchImpl,
+    );
+    if (!asset.assetId) {
+      // A host with no Asset library cannot back a file-tree entry. Say so
+      // here rather than letting the server reject an operation with no id.
+      throw new Error(
+        `resolveAirAppFileAssets: ${file.path} uploaded but this host returned no assetId, so no file can reference it`,
+      );
+    }
+    resolved.push({ path: file.path, assetId: asset.assetId, mimeType });
+  }
+  return resolved;
+}
+
+/** Last path segment — file trees always use POSIX separators. */
+function basenameOf(filePath: string): string {
+  const segments = filePath.split("/");
+  return segments[segments.length - 1] || filePath;
 }
 
 /**
@@ -1016,6 +1084,10 @@ export async function publishAirApp(
     );
   }
 
+  // Before either path: bytes become assetIds. A text-only bundle — which is
+  // every bundle that exists today — makes no upload calls here.
+  const resolvedFiles = await resolveAirAppFileAssets(client, files);
+
   if (!current.airApp) {
     // The node does not exist yet, but a previous call may already have
     // proposed creating it and be awaiting review — `inspectProvisionedResources`
@@ -1032,7 +1104,7 @@ export async function publishAirApp(
       slug: airApp.slug,
       name: airApp.name,
       description: airApp.description ?? "",
-      files: files as FileTreeCreateInput["files"],
+      files: resolvedFiles as FileTreeCreateInput["files"],
       mergeMode: "replace",
       // `autoMerge` deliberately omitted — permission-aware, like every other
       // write. An app whose credential can write to the Folder publishes
@@ -1049,7 +1121,7 @@ export async function publishAirApp(
     type: "airapp",
   });
   const operations = buildAirAppFileOperations(
-    files,
+    resolvedFiles,
     deployedFiles.map((file) => file.path),
   );
   const changeRequest = await client.fileTrees.createChangeRequest({
