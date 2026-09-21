@@ -1,6 +1,6 @@
 {
   "name": "busabase",
-  "description": "Open-source database & workspace for AI agents: structured data, durable knowledge, reusable skills, runnable apps, and human-reviewed changes. Local-first and self-hostable. Run it with `npx busabase server`.",
+  "description": "Open-source database & workspace for AI agents: structured data, durable knowledge, reusable skills, runnable apps, and human review on the writes that matter. Local-first and self-hostable. Run it with `npx busabase server`.",
   "keywords": [
     "agent-workspace",
     "ai-agents",
@@ -18,7 +18,7 @@
     "pglite",
     "cli"
   ],
-  "version": "0.70.0",
+  "version": "0.71.0",
   "private": false,
   "license": "MIT",
   "homepage": "https://github.com/busabase/busabase/tree/main/apps/busabase",
