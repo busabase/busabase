@@ -289,6 +289,16 @@ test("node side-panel chat stops an active turn and reuses the same session", as
   await expect(completedReply).toBeVisible();
   await expect(composer).toBeEnabled();
   await capture(page, testInfo, "12-node-side-panel-follow-up-complete");
+
+  // PUL-262: the tool call row stays collapsed by default, but its rawInput/
+  // rawOutput must be discoverable — click the header and check the result.
+  const toolCall = detail.getByTestId("acp-tool-call").filter({
+    hasText: `Inspect context for: ${secondTurn}`,
+  });
+  await toolCall.click();
+  await expect(toolCall.getByTestId("acp-tool-input")).toContainText(secondTurn);
+  await expect(toolCall.getByTestId("acp-tool-output")).toContainText("false");
+  await capture(page, testInfo, "13-node-side-panel-tool-result-expanded");
 });
 
 test("wide layout: the session rail lists every session and marks the active one", async ({

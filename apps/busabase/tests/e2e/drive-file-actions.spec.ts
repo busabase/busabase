@@ -85,11 +85,11 @@ test("Drive file names line up with sibling folder names and nest to the right",
 }) => {
   await page.goto("/dashboard/local/drive/team-files");
   await expect(page.getByRole("treeitem", { name: "README.md", exact: true })).toBeVisible();
-  await page
-    .getByRole("treeitem", { name: /onboarding/ })
-    .first()
-    .click();
-  await expect(page.getByRole("treeitem", { name: "first-week.md", exact: true })).toBeVisible();
+  const nestedFileRow = page.getByRole("treeitem", { name: "first-week.md", exact: true });
+  if (!(await nestedFileRow.isVisible())) {
+    await page.getByRole("treeitem", { name: "onboarding", exact: true }).click();
+  }
+  await expect(nestedFileRow).toBeVisible();
 
   // Read each row's own label position. A folder treeitem is a wrapper whose
   // first <button> is its row; a file treeitem is the button itself. Scoping to
@@ -105,7 +105,7 @@ test("Drive file names line up with sibling folder names and nest to the right",
     });
 
   const [rootFolder, rootFile, nestedFile] = await Promise.all([
-    labelX(page.getByRole("treeitem", { name: /onboarding/ }).first()),
+    labelX(page.getByRole("treeitem", { name: "onboarding", exact: true })),
     labelX(page.getByRole("treeitem", { name: "README.md", exact: true })),
     labelX(page.getByRole("treeitem", { name: "first-week.md", exact: true })),
   ]);

@@ -104,6 +104,7 @@ const sendProgress = (promptText: string, prepared: PreparedPrompt) => {
             title: `Inspect context for: ${promptText}`,
             kind: "read",
             status: "in_progress",
+            rawInput: { query: promptText },
           },
         },
       }),
@@ -127,6 +128,9 @@ const sendReply = (promptText: string, prepared: PreparedPrompt) => {
             sessionUpdate: "tool_call_update",
             toolCallId: prepared.toolCallId,
             status: "completed",
+            // PUL-262 follow-up: false is a valid ACP raw result, not an
+            // absent result. The browser test must prove it stays visible.
+            rawOutput: false,
           },
         },
       }),

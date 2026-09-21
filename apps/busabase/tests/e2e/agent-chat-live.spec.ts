@@ -51,6 +51,39 @@ test("real ACP: node action opens chat and completes two turns", async ({
   }
 });
 
+test("real ACP: expands a Buda tool result", async ({ page }, info) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/dashboard/local/agents", { waitUntil: "commit" });
+  const heading = page.getByRole("heading", { name: "Agents", exact: true });
+  await expect(heading).toBeVisible();
+  await heading
+    .locator("xpath=ancestor::header")
+    .getByRole("button", { name: "Add agent", exact: true })
+    .click();
+  const agentCard = page.getByTestId("agent-catalog-card").filter({ hasText: "Buda AI Agent" });
+  await agentCard.getByRole("button", { name: "Connect", exact: true }).click();
+
+  const detail = page.getByTestId("agent-detail-view");
+  const composer = detail.getByPlaceholder("Message Buda AI Agent…");
+  const marker = `PUL262_TOOL_RESULT_ACK_${Date.now()}`;
+  await composer.fill(
+    "This is a harmless UI acceptance test. Use only your read tool to inspect package.json in " +
+      `the current workspace. Do not edit files, run commands, or make network requests. After the read completes, reply with exactly ${marker}.`,
+  );
+  await composer.locator("xpath=ancestor::form").locator('button[type="submit"]').click();
+
+  await expect(detail.locator(".is-assistant").filter({ hasText: marker }).last()).toBeVisible({
+    timeout: 120_000,
+  });
+  await expect(detail.getByTestId("agent-activity-indicator")).toBeHidden();
+
+  const toolCall = detail.getByTestId("acp-tool-call").last();
+  await expect(toolCall).toBeVisible();
+  await toolCall.click();
+  await expect(toolCall.getByTestId("acp-tool-output")).toBeVisible({ timeout: 30_000 });
+  await page.screenshot({ path: info.outputPath("real-buda-tool-result-expanded.png") });
+});
+
 test("real ACP: stops a streaming turn and keeps the session usable", async ({ page }, info) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto("/dashboard/local/agents", { waitUntil: "commit" });
