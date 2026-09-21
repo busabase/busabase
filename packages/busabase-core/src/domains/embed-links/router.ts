@@ -7,5 +7,6 @@ const os = implement(busabaseContract);
 export const embedLinksRouter = {
   create: os.embedLinks.create.handler(async ({ input }) => logic.createEmbedLink(input)),
   list: os.embedLinks.list.handler(async ({ input }) => logic.listEmbedLinks(input)),
+  listPaged: os.embedLinks.listPaged.handler(async ({ input }) => logic.listEmbedLinksPaged(input)),
   revoke: os.embedLinks.revoke.handler(async ({ input }) => logic.revokeEmbedLink(input.id)),
 };

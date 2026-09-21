@@ -635,6 +635,16 @@ export function AssetSearchableTextPanel({
   const [error, setError] = useState<string | null>(null);
   const [confirmReplace, setConfirmReplace] = useState(false);
   const [confirmNone, setConfirmNone] = useState(false);
+  const isAnonymous = useIsAnonymousVisitor();
+  const permissionLevel = useWorkspacePermissionLevel();
+  // Same gate as `AssetMetadataBlock` above — the other write affordance in
+  // this same card stack — and both halves are load-bearing for the same
+  // reason: the cloud's public share view renders the dashboard WITHOUT a
+  // permission level, so an anonymous visitor inherits the `"manage"` default
+  // and a level-only gate would offer them the writer. (`assets.putText` is
+  // not in the anonymous allowlist, so the server refuses either way; this
+  // stops the UI promising something the server will deny.)
+  const canWrite = !isAnonymous && hasApiKeyLevel(permissionLevel, "write");
   const putTextMutation = useMutation(orpc.assets.putText.mutationOptions());
   const createUploadMutation = useMutation(orpc.assets.createTextUploadUrl.mutationOptions());
   const byteCount = utf8ByteLength(text);
@@ -760,175 +770,181 @@ export function AssetSearchableTextPanel({
         </div>
         <AssetTextStatusChip status={status} />
       </div>
-      <div className="mt-3 flex flex-wrap gap-2">
-        <button
-          className="inline-flex items-center gap-1.5 rounded-md bg-foreground px-2.5 py-1.5 font-medium text-background text-xs hover:bg-foreground/85"
-          onClick={() => setOpen(true)}
-          type="button"
-        >
-          <RefreshCw className="size-3.5" />
-          {actionLabel}
-        </button>
-        {status !== "none" ? (
-          <button
-            className="rounded-md border bg-card px-2.5 py-1.5 text-muted-foreground text-xs hover:bg-muted hover:text-foreground"
-            onClick={() => setConfirmNone(true)}
-            type="button"
-          >
-            {messages.assets.textMarkNone}
-          </button>
-        ) : null}
-      </div>
-      {error && !open ? (
-        <div className="mt-3 rounded-md border border-destructive/40 bg-destructive/10 px-2.5 py-2 text-destructive text-xs">
-          {error}
-        </div>
-      ) : null}
-
-      <Dialog
-        open={open}
-        onOpenChange={(nextOpen) => {
-          if (isBusy) return;
-          setOpen(nextOpen);
-          if (!nextOpen) resetWriteState();
-        }}
-      >
-        <DialogContent className="sm:max-w-xl">
-          <DialogHeader>
-            <DialogTitle>{actionLabel}</DialogTitle>
-            <DialogDescription>{messages.assets.textWriteDescription}</DialogDescription>
-          </DialogHeader>
-
-          <div className="flex rounded-md border bg-muted p-1" role="tablist">
-            {(["paste", "upload"] as const).map((writeMode) => (
+      {canWrite ? (
+        <>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              className="inline-flex items-center gap-1.5 rounded-md bg-foreground px-2.5 py-1.5 font-medium text-background text-xs hover:bg-foreground/85"
+              onClick={() => setOpen(true)}
+              type="button"
+            >
+              <RefreshCw className="size-3.5" />
+              {actionLabel}
+            </button>
+            {status !== "none" ? (
               <button
-                aria-selected={mode === writeMode}
-                className={`flex-1 rounded-sm px-3 py-1.5 font-medium text-sm ${
-                  mode === writeMode ? "bg-card text-foreground" : "text-muted-foreground"
-                }`}
-                disabled={isBusy}
-                key={writeMode}
-                onClick={() => {
-                  setMode(writeMode);
-                  setError(null);
-                }}
-                role="tab"
+                className="rounded-md border bg-card px-2.5 py-1.5 text-muted-foreground text-xs hover:bg-muted hover:text-foreground"
+                onClick={() => setConfirmNone(true)}
                 type="button"
               >
-                {writeMode === "paste" ? messages.assets.textPaste : messages.assets.textUpload}
+                {messages.assets.textMarkNone}
               </button>
-            ))}
+            ) : null}
           </div>
-
-          {mode === "paste" ? (
-            <div>
-              <label className="font-medium text-sm" htmlFor="asset-searchable-text">
-                {messages.assets.textPasteLabel}
-              </label>
-              <textarea
-                className="mt-2 min-h-48 w-full resize-y rounded-md border bg-card px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
-                disabled={isBusy}
-                id="asset-searchable-text"
-                onChange={(event) => setText(event.target.value)}
-                placeholder={messages.assets.textPastePlaceholder}
-                value={text}
-              />
-              <div
-                className={`mt-1 text-xs ${pasteTooLarge ? "text-destructive" : "text-muted-foreground"}`}
-              >
-                {fmt(messages.assets.textByteCount, {
-                  count: byteCount,
-                  limit: INLINE_ASSET_TEXT_MAX_BYTES,
-                })}
-                {pasteTooLarge ? ` ${messages.assets.textPasteTooLarge}` : ""}
-              </div>
-            </div>
-          ) : (
-            <div>
-              <label className="font-medium text-sm" htmlFor="asset-searchable-text-file">
-                {messages.assets.textUploadLabel}
-              </label>
-              <input
-                accept=".txt,text/plain"
-                className="mt-2 block w-full rounded-md border bg-background px-3 py-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-muted file:px-2.5 file:py-1 file:text-foreground file:text-xs"
-                disabled={isBusy}
-                id="asset-searchable-text-file"
-                onChange={(event) => {
-                  setFile(event.target.files?.[0] ?? null);
-                  setPendingStorageKey(null);
-                  setError(null);
-                }}
-                type="file"
-              />
-              <p className="mt-1 text-muted-foreground text-xs">{messages.assets.textUploadHint}</p>
-            </div>
-          )}
-
-          {error ? (
-            <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-destructive text-sm">
+          {error && !open ? (
+            <div className="mt-3 rounded-md border border-destructive/40 bg-destructive/10 px-2.5 py-2 text-destructive text-xs">
               {error}
             </div>
           ) : null}
-          {isBusy ? (
-            <p aria-live="polite" className="text-muted-foreground text-sm">
-              {phase === "requesting"
-                ? messages.assets.textUploadPreparing
-                : phase === "uploading"
-                  ? messages.assets.textUploading
-                  : phase === "binding"
-                    ? messages.assets.textUploadBinding
-                    : messages.assets.textSaving}
-            </p>
-          ) : null}
 
-          <DialogFooter>
-            <button
-              className="rounded-md border bg-card px-3 py-1.5 font-medium text-sm hover:bg-muted"
-              disabled={isBusy}
-              onClick={() => setOpen(false)}
-              type="button"
-            >
-              {messages.common.cancel}
-            </button>
-            <button
-              className="inline-flex items-center gap-1.5 rounded-md bg-foreground px-3 py-1.5 font-medium text-background text-sm hover:bg-foreground/85 disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={submitDisabled}
-              onClick={requestWrite}
-              type="button"
-            >
-              <Upload className="size-4" />
-              {isBusy ? messages.common.working : actionLabel}
-            </button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          <Dialog
+            open={open}
+            onOpenChange={(nextOpen) => {
+              if (isBusy) return;
+              setOpen(nextOpen);
+              if (!nextOpen) resetWriteState();
+            }}
+          >
+            <DialogContent className="sm:max-w-xl">
+              <DialogHeader>
+                <DialogTitle>{actionLabel}</DialogTitle>
+                <DialogDescription>{messages.assets.textWriteDescription}</DialogDescription>
+              </DialogHeader>
 
-      <ConfirmActionDialog
-        body={messages.assets.textReplaceConfirmBody}
-        confirmLabel={messages.assets.textReplaceConfirm}
-        destructive={false}
-        onCancel={() => {
-          setConfirmReplace(false);
-          setOpen(true);
-        }}
-        onConfirm={() => {
-          setConfirmReplace(false);
-          void executeWrite();
-        }}
-        open={confirmReplace}
-        pending={isBusy}
-        title={messages.assets.textReplaceConfirmTitle}
-      />
-      <ConfirmActionDialog
-        body={messages.assets.textMarkNoneConfirmBody}
-        confirmLabel={messages.assets.textMarkNoneConfirm}
-        destructive={false}
-        onCancel={() => setConfirmNone(false)}
-        onConfirm={() => void markNone()}
-        open={confirmNone}
-        pending={isBusy}
-        title={messages.assets.textMarkNoneConfirmTitle}
-      />
+              <div className="flex rounded-md border bg-muted p-1" role="tablist">
+                {(["paste", "upload"] as const).map((writeMode) => (
+                  <button
+                    aria-selected={mode === writeMode}
+                    className={`flex-1 rounded-sm px-3 py-1.5 font-medium text-sm ${
+                      mode === writeMode ? "bg-card text-foreground" : "text-muted-foreground"
+                    }`}
+                    disabled={isBusy}
+                    key={writeMode}
+                    onClick={() => {
+                      setMode(writeMode);
+                      setError(null);
+                    }}
+                    role="tab"
+                    type="button"
+                  >
+                    {writeMode === "paste" ? messages.assets.textPaste : messages.assets.textUpload}
+                  </button>
+                ))}
+              </div>
+
+              {mode === "paste" ? (
+                <div>
+                  <label className="font-medium text-sm" htmlFor="asset-searchable-text">
+                    {messages.assets.textPasteLabel}
+                  </label>
+                  <textarea
+                    className="mt-2 min-h-48 w-full resize-y rounded-md border bg-card px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                    disabled={isBusy}
+                    id="asset-searchable-text"
+                    onChange={(event) => setText(event.target.value)}
+                    placeholder={messages.assets.textPastePlaceholder}
+                    value={text}
+                  />
+                  <div
+                    className={`mt-1 text-xs ${pasteTooLarge ? "text-destructive" : "text-muted-foreground"}`}
+                  >
+                    {fmt(messages.assets.textByteCount, {
+                      count: byteCount,
+                      limit: INLINE_ASSET_TEXT_MAX_BYTES,
+                    })}
+                    {pasteTooLarge ? ` ${messages.assets.textPasteTooLarge}` : ""}
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <label className="font-medium text-sm" htmlFor="asset-searchable-text-file">
+                    {messages.assets.textUploadLabel}
+                  </label>
+                  <input
+                    accept=".txt,text/plain"
+                    className="mt-2 block w-full rounded-md border bg-background px-3 py-2 text-sm file:mr-3 file:rounded-md file:border-0 file:bg-muted file:px-2.5 file:py-1 file:text-foreground file:text-xs"
+                    disabled={isBusy}
+                    id="asset-searchable-text-file"
+                    onChange={(event) => {
+                      setFile(event.target.files?.[0] ?? null);
+                      setPendingStorageKey(null);
+                      setError(null);
+                    }}
+                    type="file"
+                  />
+                  <p className="mt-1 text-muted-foreground text-xs">
+                    {messages.assets.textUploadHint}
+                  </p>
+                </div>
+              )}
+
+              {error ? (
+                <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-destructive text-sm">
+                  {error}
+                </div>
+              ) : null}
+              {isBusy ? (
+                <p aria-live="polite" className="text-muted-foreground text-sm">
+                  {phase === "requesting"
+                    ? messages.assets.textUploadPreparing
+                    : phase === "uploading"
+                      ? messages.assets.textUploading
+                      : phase === "binding"
+                        ? messages.assets.textUploadBinding
+                        : messages.assets.textSaving}
+                </p>
+              ) : null}
+
+              <DialogFooter>
+                <button
+                  className="rounded-md border bg-card px-3 py-1.5 font-medium text-sm hover:bg-muted"
+                  disabled={isBusy}
+                  onClick={() => setOpen(false)}
+                  type="button"
+                >
+                  {messages.common.cancel}
+                </button>
+                <button
+                  className="inline-flex items-center gap-1.5 rounded-md bg-foreground px-3 py-1.5 font-medium text-background text-sm hover:bg-foreground/85 disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={submitDisabled}
+                  onClick={requestWrite}
+                  type="button"
+                >
+                  <Upload className="size-4" />
+                  {isBusy ? messages.common.working : actionLabel}
+                </button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          <ConfirmActionDialog
+            body={messages.assets.textReplaceConfirmBody}
+            confirmLabel={messages.assets.textReplaceConfirm}
+            destructive={false}
+            onCancel={() => {
+              setConfirmReplace(false);
+              setOpen(true);
+            }}
+            onConfirm={() => {
+              setConfirmReplace(false);
+              void executeWrite();
+            }}
+            open={confirmReplace}
+            pending={isBusy}
+            title={messages.assets.textReplaceConfirmTitle}
+          />
+          <ConfirmActionDialog
+            body={messages.assets.textMarkNoneConfirmBody}
+            confirmLabel={messages.assets.textMarkNoneConfirm}
+            destructive={false}
+            onCancel={() => setConfirmNone(false)}
+            onConfirm={() => void markNone()}
+            open={confirmNone}
+            pending={isBusy}
+            title={messages.assets.textMarkNoneConfirmTitle}
+          />
+        </>
+      ) : null}
     </div>
   );
 }
@@ -971,6 +987,13 @@ export function AssetDetailView({
 }) {
   const messages = useCoreI18n();
   const locale = useCoreLocale();
+  // The same gate the two cards below this one use. `assets.delete` is
+  // `node("write")`, like `putText` and `updateMetadata` — so a viewer was being
+  // shown a destructive button that could only ever 403. It merely LOOKED safe,
+  // because it is also disabled while the asset is still referenced somewhere.
+  const isAnonymous = useIsAnonymousVisitor();
+  const permissionLevel = useWorkspacePermissionLevel();
+  const canWrite = !isAnonymous && hasApiKeyLevel(permissionLevel, "write");
   const detailQuery = useQuery(orpc.assets.get.queryOptions({ input: { assetId } }));
   const queryClient = useQueryClient();
   const [textRevision, setTextRevision] = useState(0);
@@ -1066,30 +1089,34 @@ export function AssetDetailView({
                 {asset.contentHash}
               </p>
             ) : null}
-            <div className="mt-3 border-t pt-3">
-              <button
-                className="inline-flex items-center gap-1.5 rounded-md border border-destructive/40 px-2.5 py-1 text-destructive text-xs hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={usages.length > 0 || deleteMutation.isPending}
-                onClick={() => deleteMutation.mutate({ assetId: asset.id })}
-                title={
-                  usages.length > 0
-                    ? messages.assets.deleteBlockedTitle
-                    : messages.assets.deleteTitle
-                }
-                type="button"
-              >
-                <Trash2 className="size-3.5" />
-                {deleteMutation.isPending ? messages.common.deleting : messages.assets.deleteAsset}
-              </button>
-              {usages.length > 0 ? (
-                <p className="mt-1.5 text-muted-foreground text-xs">
-                  {fmt(messages.assets.stillUsed, {
-                    count: usages.length,
-                    plural: usages.length === 1 ? "" : "s",
-                  })}
-                </p>
-              ) : null}
-            </div>
+            {canWrite ? (
+              <div className="mt-3 border-t pt-3">
+                <button
+                  className="inline-flex items-center gap-1.5 rounded-md border border-destructive/40 px-2.5 py-1 text-destructive text-xs hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={usages.length > 0 || deleteMutation.isPending}
+                  onClick={() => deleteMutation.mutate({ assetId: asset.id })}
+                  title={
+                    usages.length > 0
+                      ? messages.assets.deleteBlockedTitle
+                      : messages.assets.deleteTitle
+                  }
+                  type="button"
+                >
+                  <Trash2 className="size-3.5" />
+                  {deleteMutation.isPending
+                    ? messages.common.deleting
+                    : messages.assets.deleteAsset}
+                </button>
+                {usages.length > 0 ? (
+                  <p className="mt-1.5 text-muted-foreground text-xs">
+                    {fmt(messages.assets.stillUsed, {
+                      count: usages.length,
+                      plural: usages.length === 1 ? "" : "s",
+                    })}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
           </div>
 
           <AssetSearchableTextPanel

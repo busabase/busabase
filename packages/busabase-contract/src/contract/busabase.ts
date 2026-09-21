@@ -32,8 +32,10 @@ import {
 import {
   CreatedEmbedLinkVOSchema,
   CreateEmbedLinkInputSchema,
+  EmbedLinksPageVOSchema,
   EmbedLinkVOSchema,
   ListEmbedLinksInputSchema,
+  ListEmbedLinksPagedInputSchema,
   RevokeEmbedLinkInputSchema,
   RevokeEmbedLinkVOSchema,
 } from "./embed-link-schemas";
@@ -212,6 +214,18 @@ export const busabaseContractRoutes = {
       .errors(embedLinkErrors)
       .input(ListEmbedLinksInputSchema)
       .output(z.array(EmbedLinkVOSchema)),
+    listPaged: oc
+      .route({
+        method: "GET",
+        path: "/embed-links/paged",
+        tags: ["Embed Links"],
+        summary: "Audit workspace embed links with status filtering and keyset pagination",
+        successDescription:
+          "A bounded page of manageable embed-link metadata without capability secrets.",
+      })
+      .errors(embedLinkErrors)
+      .input(ListEmbedLinksPagedInputSchema)
+      .output(EmbedLinksPageVOSchema),
     revoke: oc
       .route({
         method: "DELETE",

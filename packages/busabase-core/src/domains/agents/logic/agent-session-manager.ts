@@ -1798,13 +1798,9 @@ export function respondToAgentPermission(
  * End one session on behalf of the current request: release the process or
  * socket, keep the persisted transcript.
  *
- * Ownership is checked with the same predicate `listAgentSessionsPaged` uses,
- * so a session id belonging to another member (or another space) cannot be
- * closed by anyone who merely knows the id — the family's `write` gate is
- * about *whether* you may end sessions, not *whose*. Deliberately reported
- * with the same "Unknown agent session" wording `requireSession` throws:
- * someone else's session must be indistinguishable from one that never
- * existed, or the error itself becomes an id oracle.
+ * The persisted row is scoped to the current actor and space. Local live
+ * sessions get the same check via `requireLocalSession`; a foreign id always
+ * looks like an unknown id, even when its socket lives on this worker.
  *
  * `closeAgentSessions` (plural) stays unchecked on purpose — it is the
  * server's own restart/orphan cleanup, which runs with no request context at

@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /**
- * Embed Links CRUD (create/list/revoke) DTO + VO schemas — the single source of truth for
+ * Embed Links CRUD + workspace audit DTO/VO schemas — the single source of truth for
  * both the real absolute-path OpenAPI surface the Busabase Cloud host serves at
  * `/api/v1/embed-links` and the relative-path twin registered in `cloudContract` below (the
  * CLI/SDK client's contract, `/embed-links` + the shared `/api/v1` prefix). Two independent route
@@ -9,7 +9,7 @@ import { z } from "zod";
  *
  * Runtime/internal embed schemas that are NOT part of this CLI/SDK CRUD surface (node-detail
  * rendering for the embed viewer, AirApp embed runtime files, etc.) stay private to that host —
- * only the shapes `create` / `list` / `revoke` actually send or return live here.
+ * only the shapes `create` / `list` / `listPaged` / `revoke` actually send or return live here.
  */
 
 export const EMBED_LINK_DEFAULT_MINUTES = 15;
@@ -143,6 +143,31 @@ export const ListEmbedLinksInputSchema = z
   .default({});
 export type ListEmbedLinksDTO = z.infer<typeof ListEmbedLinksInputSchema>;
 
+export const EmbedLinkAuditStatusSchema = z.enum(["active", "expired", "revoked", "all"]);
+export type EmbedLinkAuditStatus = z.infer<typeof EmbedLinkAuditStatusSchema>;
+
+export const ListEmbedLinksPagedInputSchema = z.object({
+  status: EmbedLinkAuditStatusSchema.optional()
+    .default("active")
+    .describe("Filter the workspace audit to active, expired, revoked, or all embed links."),
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(100)
+    .optional()
+    .default(50)
+    .describe("Embed links per page. Capped at 100; continue with `cursor`."),
+  cursor: z
+    .string()
+    .optional()
+    .describe(
+      "Opaque page cursor: pass back the `nextCursor` from the previous response. " +
+        "Do not construct or parse it.",
+    ),
+});
+export type ListEmbedLinksPagedDTO = z.infer<typeof ListEmbedLinksPagedInputSchema>;
+
 export const RevokeEmbedLinkInputSchema = z.object({ id: z.string().min(1) });
 export type RevokeEmbedLinkDTO = z.infer<typeof RevokeEmbedLinkInputSchema>;
 
@@ -159,6 +184,12 @@ export const EmbedLinkVOSchema = z.object({
   framePolicy: EmbedFramePolicyVOSchema,
 });
 export type EmbedLinkVO = z.infer<typeof EmbedLinkVOSchema>;
+
+export const EmbedLinksPageVOSchema = z.object({
+  items: z.array(EmbedLinkVOSchema),
+  nextCursor: z.string().nullable(),
+});
+export type EmbedLinksPageVO = z.infer<typeof EmbedLinksPageVOSchema>;
 
 export const CreatedEmbedLinkVOSchema = EmbedLinkVOSchema.extend({
   url: z.string().url(),

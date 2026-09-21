@@ -1,13 +1,16 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
+import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { AuditEventVO, ChangeRequestVO } from "busabase-contract/types";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { Router } from "wouter";
 import { CoreI18nProvider } from "../../../i18n";
+import { DashboardOrpcProvider } from "../orpc-context";
 import { type DashboardVisitorKind, DashboardVisitorProvider } from "../visitor-context";
-import { ChangeRequestReviewLayout } from "./change-request-review";
+import { ChangeRequestReviewLayout, reviewConversionPreviewState } from "./change-request-review";
+import { FieldConversionPreview } from "./field-conversion-preview";
 
 Object.assign(globalThis, { React });
 
@@ -103,26 +106,32 @@ const useStaticSearch = () => "";
 const renderReview = (
   readOnly: boolean,
   visitorKind: DashboardVisitorKind = "member",
-  overrides: { auditEvents?: AuditEventVO[]; changeRequest?: ChangeRequestVO } = {},
+  overrides: {
+    auditEvents?: AuditEventVO[];
+    changeRequest?: ChangeRequestVO;
+    orpc?: BusabaseQueryUtils;
+  } = {},
 ) =>
   renderToStaticMarkup(
     <QueryClientProvider client={new QueryClient()}>
       <Router hook={useStaticLocation} searchHook={useStaticSearch}>
         <CoreI18nProvider locale="en">
-          <DashboardVisitorProvider visitorKind={visitorKind}>
-            <ChangeRequestReviewLayout
-              auditEvents={overrides.auditEvents ?? []}
-              changeRequest={overrides.changeRequest ?? changeRequest}
-              client={client}
-              focusOperationId={null}
-              onApprove={() => undefined}
-              onClose={() => undefined}
-              onMerge={() => undefined}
-              onReject={() => undefined}
-              pendingAction={null}
-              readOnly={readOnly}
-            />
-          </DashboardVisitorProvider>
+          <DashboardOrpcProvider orpc={overrides.orpc}>
+            <DashboardVisitorProvider visitorKind={visitorKind}>
+              <ChangeRequestReviewLayout
+                auditEvents={overrides.auditEvents ?? []}
+                changeRequest={overrides.changeRequest ?? changeRequest}
+                client={client}
+                focusOperationId={null}
+                onApprove={() => undefined}
+                onClose={() => undefined}
+                onMerge={() => undefined}
+                onReject={() => undefined}
+                pendingAction={null}
+                readOnly={readOnly}
+              />
+            </DashboardVisitorProvider>
+          </DashboardOrpcProvider>
         </CoreI18nProvider>
       </Router>
     </QueryClientProvider>,
@@ -218,5 +227,201 @@ describe("Revision timeline", () => {
     });
 
     expect(markup).not.toContain("revised this change request");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Convert-field impact, re-checked at review time.
+//
+// Nothing locks the column between submit and merge, so the approver must read a
+// FRESH dry run rather than whatever the submitter saw. The two things that make
+// it honest: the headline count is derived (`total - convertible - null`), never
+// `conflicts.length` — the server caps that sample at 100 — and the dry run is
+// run with the operation's own `selectChoiceMode`, which changes the answer.
+// ---------------------------------------------------------------------------
+
+const stageField = {
+  id: "fld_stage",
+  baseId: "bas_customers",
+  slug: "stage",
+  name: "Stage",
+  type: "text",
+  required: false,
+  position: 0,
+  options: {},
+} satisfies NonNullable<ChangeRequestVO["base"]>["fields"][number];
+
+const convertOperation = {
+  ...operation,
+  id: "opr_convert",
+  operation: "base_convert_field",
+  targetRecordId: null,
+  baseFields: null,
+  headCommit: {
+    ...operation.headCommit,
+    id: "cmt_convert",
+    operationId: "opr_convert",
+    operation: "base_convert_field",
+    payload: {
+      fieldId: "fld_stage",
+      slug: "stage",
+      fromType: "text",
+      newType: "select",
+      selectChoiceMode: "auto_create",
+      choices: [],
+    },
+    message: "Convert field stage from text to select",
+  },
+} satisfies ChangeRequestVO["operations"][number];
+
+const convertChangeRequest = {
+  ...changeRequest,
+  operations: [convertOperation],
+  primaryOperation: convertOperation,
+  base: { ...changeRequest.base, fields: [stageField] },
+} satisfies ChangeRequestVO;
+
+/** 500 rows, 300 convert, 0 empty → 200 cleared, while the sample stops at 100. */
+const cappedPreview = {
+  totalCount: 500,
+  convertibleCount: 300,
+  nullCount: 0,
+  conflicts: Array.from({ length: 100 }, (_, index) => ({
+    recordId: `rec_${index}`,
+    currentValue: `unmatched-${index}`,
+  })),
+};
+
+const stubOrpc = (data: unknown, calls: Array<Record<string, unknown>> = []) =>
+  ({
+    bases: {
+      previewFieldConversion: {
+        queryOptions: ({ input }: { input: Record<string, unknown> }) => {
+          calls.push(input);
+          return {
+            queryKey: ["preview", input],
+            queryFn: async () => data,
+            initialData: data,
+          };
+        },
+      },
+    },
+  }) as unknown as BusabaseQueryUtils;
+
+describe("Convert-field impact on the review page", () => {
+  it("does not present cached counts as fresh while the review-time refetch is running", () => {
+    const markup = renderReview(false, "member", {
+      changeRequest: convertChangeRequest,
+      orpc: stubOrpc(cappedPreview),
+    });
+
+    expect(markup).toContain("Checking every value");
+    expect(markup).not.toContain("200 values will be cleared");
+    expect(markup).not.toContain("Checked just now against the column");
+  });
+
+  it("runs the dry run with the operation's own selectChoiceMode", () => {
+    const calls: Array<Record<string, unknown>> = [];
+    renderReview(false, "member", {
+      changeRequest: convertChangeRequest,
+      orpc: stubOrpc(cappedPreview, calls),
+    });
+
+    expect(calls[0]).toEqual({
+      baseId: "bas_customers",
+      fieldId: "fld_stage",
+      newType: "select",
+      selectChoiceMode: "auto_create",
+    });
+  });
+
+  it("labels only a settled successful result as computed now", () => {
+    const refreshing = reviewConversionPreviewState({
+      data: cappedPreview,
+      error: null,
+      isFetching: true,
+      isPending: false,
+    });
+    expect(refreshing.preview.data).toBeUndefined();
+    expect(refreshing.preview.isPending).toBe(true);
+    expect(refreshing.checkedNow).toBe(false);
+
+    const settled = reviewConversionPreviewState({
+      data: cappedPreview,
+      error: null,
+      isFetching: false,
+      isPending: false,
+    });
+    expect(settled.preview.data).toBe(cappedPreview);
+    expect(settled.preview.isPending).toBe(false);
+    expect(settled.checkedNow).toBe(true);
+
+    const failed = reviewConversionPreviewState({
+      data: cappedPreview,
+      error: new Error("refresh failed"),
+      isFetching: false,
+      isPending: false,
+    });
+    expect(failed.checkedNow).toBe(false);
+    expect(failed.preview.error).toEqual(new Error("refresh failed"));
+  });
+
+  it.each(["merged", "rejected", "abandoned"])(
+    "skips the dry run once the change request is %s",
+    (status) => {
+      const calls: Array<Record<string, unknown>> = [];
+      const markup = renderReview(false, "member", {
+        changeRequest: { ...convertChangeRequest, status } as ChangeRequestVO,
+        orpc: stubOrpc(cappedPreview, calls),
+      });
+
+      expect(markup).not.toContain('data-testid="convert-field-impact"');
+      expect(markup).not.toContain("values will be cleared");
+      expect(calls).toEqual([]);
+    },
+  );
+
+  it("leaves a non-convert operation alone", () => {
+    const markup = renderReview(false, "member", { orpc: stubOrpc(cappedPreview) });
+
+    expect(markup).not.toContain('data-testid="convert-field-impact"');
+  });
+
+  it("degrades to the stored operation when no host wired orpc", () => {
+    const markup = renderReview(false, "member", { changeRequest: convertChangeRequest });
+
+    expect(markup).not.toContain('data-testid="convert-field-impact"');
+  });
+});
+
+describe("Failed dry run", () => {
+  const renderPanel = (preview: Parameters<typeof FieldConversionPreview>[0]["preview"]) =>
+    renderToStaticMarkup(
+      <Router hook={useStaticLocation} searchHook={useStaticSearch}>
+        <CoreI18nProvider locale="en">
+          <FieldConversionPreview field={stageField} preview={preview} />
+        </CoreI18nProvider>
+      </Router>,
+    );
+
+  it("says the check failed rather than showing an empty, reassuring panel", () => {
+    const markup = renderPanel({
+      data: undefined,
+      error: new Error("Field not found: fld_stage"),
+      isPending: false,
+    });
+
+    expect(markup).toContain("Field not found: fld_stage");
+    expect(markup).not.toContain("Every value survives this change.");
+    expect(markup).not.toContain("values will be cleared");
+  });
+
+  it("still renders the counts on a successful check", () => {
+    const markup = renderPanel({ data: cappedPreview, error: null, isPending: false });
+
+    expect(markup).toContain("200 values will be cleared");
+    expect(markup).not.toContain("100 values will be cleared");
+    expect(markup).toContain("500 values · 300 convert · 0 already empty");
+    expect(markup).toContain("Showing 10 of 200.");
   });
 });

@@ -12,8 +12,9 @@
 // `NavMain` (a detail page's topbar isn't a sidebar row, so it can't reuse
 // `NavMain`'s internal JSX — but it reuses every actual *behavior*: the same
 // dialogs, the same mutation calls, the same permission-aware rename
-// semantics). Share is omitted only when the caller couldn't supply a
-// `nodeSlug` (see `canShare`).
+// semantics). Share is omitted when the caller couldn't supply a `nodeSlug`,
+// when the node has no sharing capability, or when the current workspace role
+// cannot call the manage-level share procedures (see `canShare`).
 //
 // "Settings" and "Rename" are deliberately BOTH here even though they open
 // the same dialog on the same General tab. `NodeSettingsDialog` absorbed the
@@ -50,6 +51,7 @@
 // available to a lone detail page, and Favorites was never part of the
 // original ask for this button.
 
+import { hasApiKeyLevel } from "busabase-contract/access-control/api-key-level";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import { publicAccessOf } from "busabase-contract/domains";
 import { Button } from "kui/button";
@@ -70,6 +72,7 @@ import { NodeDeleteDialog } from "./file-tree-browser";
 import { NodeSettingsDialog, type NodeSettingsTab } from "./node-settings-dialog";
 import { NodeSettingsPermissionsSlotContext } from "./node-settings-permissions-slot";
 import { NodeShareDialog } from "./node-share-button";
+import { useWorkspacePermissionLevel } from "./split-submit-button";
 
 export function NodeActionsMenu({
   orpc,
@@ -128,6 +131,8 @@ export function NodeActionsMenu({
   // visitor never sees the trigger at all, same self-gate every individual
   // action button in this domain uses.
   const isAnon = useIsAnonymousVisitor();
+  const permissionLevel = useWorkspacePermissionLevel();
+  const canManageShareSettings = !isAnon && hasApiKeyLevel(permissionLevel, "manage");
   // Whether the Share dialog's embed half would have anything to offer. This
   // toolbar renders INSIDE `BusabaseDashboard`'s `SubmitPermissionProvider`,
   // so the level here is the host's real one — a Cloud viewer/editor correctly
@@ -145,13 +150,18 @@ export function NodeActionsMenu({
   // NodeShareDialog requires a real slug (it builds the public URL from it);
   // this prop is optional here only because Rename can invalidate its
   // caller's query without one. Every current call site does pass it.
-  // Share now opens a dialog with TWO independent halves — share-to-web and
-  // embed links — so the menu item has to appear when EITHER is available.
+  // Share now opens a dialog with TWO independent capability halves —
+  // share-to-web and embed links — so a manager sees it when EITHER is
+  // available. Both procedure families require manage, so node capability
+  // never grants a lower workspace role a management entry point.
   // AirApp / Drive / Skill declare `publicAccess: "no"` (no working anonymous
   // detail route) yet are fully embeddable, and before this they had no Share
   // affordance anywhere in the product even though the server has supported
   // minting an embed link for them all along.
-  const canShare = Boolean(nodeSlug) && (publicAccessOf(nodeType) !== "no" || canEmbedLink);
+  const canShare =
+    Boolean(nodeSlug) &&
+    canManageShareSettings &&
+    (publicAccessOf(nodeType) !== "no" || canEmbedLink);
   // The routed activity sub-page (`/base/:slug/activity` or
   // `/{type}/:slug/activity`, see routes.tsx + use-dashboard-routes.ts) keys
   // off the same slug-or-id every other detail route uses.

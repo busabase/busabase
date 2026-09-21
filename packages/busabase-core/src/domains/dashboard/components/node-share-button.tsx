@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { hasApiKeyLevel } from "busabase-contract/access-control/api-key-level";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import { publicAccessOf } from "busabase-contract/domains";
 import { nodeWebUrl } from "busabase-contract/node-web-url";
@@ -21,6 +22,7 @@ import { Check, Copy, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { useCoreI18n } from "../../../i18n";
+import { useIsAnonymousVisitor } from "../visitor-context";
 import {
   EmbedLinkSection,
   EmbedLinkStillLiveNotice,
@@ -28,6 +30,7 @@ import {
   useCanManageEmbedLinks,
 } from "./embed-link-section";
 import { DialogContent } from "./localized-dialog-content";
+import { useWorkspacePermissionLevel } from "./split-submit-button";
 
 type NodeShareCapability = "read" | "submit";
 
@@ -68,14 +71,19 @@ export function NodeShareDialog({
   const t = messages.share;
   const queryClient = useQueryClient();
 
-  // The two halves of this dialog are governed by two INDEPENDENT gates, and
+  // The two halves of this dialog have independent NODE-CAPABILITY gates, and
   // most node types qualify for only one of them. A Form can be shared to the
   // web but never embedded; an AirApp / Drive / Skill is the reverse (their
   // registry definitions declare `publicAccess: "no"` because an anonymous
   // detail route wouldn't work, yet `embedLinks.create` accepts all three and
   // the `/embed/[publicId]` route tree serves them). So neither gate may hide
-  // the other's section — and the dialog only disappears when BOTH say no.
-  const canShareToWeb = publicAccessOf(nodeType) !== "no";
+  // the other's section. Both procedure families still require workspace
+  // manage, so the dialog disappears when the viewer cannot manage sharing or
+  // when both node-capability gates say no.
+  const isAnonymous = useIsAnonymousVisitor();
+  const permissionLevel = useWorkspacePermissionLevel();
+  const canManageShareSettings = !isAnonymous && hasApiKeyLevel(permissionLevel, "manage");
+  const canShareToWeb = canManageShareSettings && publicAccessOf(nodeType) !== "no";
   const embedTarget = useMemo(
     () => ({ type: "node" as const, typeId: nodeId, nodeType }),
     [nodeId, nodeType],

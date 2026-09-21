@@ -1,7 +1,10 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { hasApiKeyLevel } from "busabase-contract/access-control/api-key-level";
+import {
+  type ApiKeyPermissionLevel,
+  hasApiKeyLevel,
+} from "busabase-contract/access-control/api-key-level";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import { isEmbeddableNodeType } from "busabase-contract/contract/embed-link-schemas";
 import type { SharedNodeVO } from "busabase-contract/contract/schemas";
@@ -27,6 +30,7 @@ import {
   Images,
   Inbox,
   LayoutGrid,
+  Link2,
   Pencil,
   Plus,
   Search,
@@ -72,7 +76,7 @@ import { NodeSettingsDialog, type NodeSettingsTab } from "./node-settings-dialog
 import { NodeSettingsPermissionsSlotContext } from "./node-settings-permissions-slot";
 import { NodeShareDialog } from "./node-share-button";
 import { SidebarWorkspaceFilterMenu } from "./sidebar-workspace-filter-menu";
-import { useWorkspacePermissionLevel } from "./split-submit-button";
+import { SubmitPermissionProvider, useWorkspacePermissionLevel } from "./split-submit-button";
 import "./busabase-sidebar-nav.css";
 
 /** Stable, always-disabled query used in place of `orpc.nodes.listFavorites.queryOptions({})`
@@ -166,6 +170,7 @@ type ContextualNavKey =
   | "activity"
   | "archived"
   | "assets"
+  | "embed-links"
   | "shared"
   | "agents"
   | "apps"
@@ -178,6 +183,7 @@ const contextualNavKeyForPath = (location: string): ContextualNavKey | null => {
   if (path === "/activity") return "activity";
   if (path === "/archived") return "archived";
   if (path === "/assets" || path.startsWith("/assets/")) return "assets";
+  if (path === "/embed-links") return "embed-links";
   if (path === "/shared") return "shared";
   if (path === "/agents" || path.startsWith("/agents/")) return "agents";
   if (path === "/apps" || path.startsWith("/apps/")) return "apps";
@@ -201,6 +207,7 @@ const isContextualNavKey = (value: string | null): value is ContextualNavKey =>
   value === "activity" ||
   value === "archived" ||
   value === "assets" ||
+  value === "embed-links" ||
   value === "shared" ||
   value === "agents" ||
   value === "apps" ||
@@ -324,6 +331,23 @@ interface BusabaseDashboardShellProps {
    */
   agentIntegration?: AgentIntegrationTarget;
   /**
+   * What THIS viewer may do in this space, resolved by the host (the cloud maps
+   * the active space role through `permissionLevelForSpaceRole`; the
+   * open-source single-owner install leaves the `"manage"` default).
+   *
+   * This shell is the chrome AROUND `BusabaseDashboard`, so it used to sit
+   * outside the `SubmitPermissionProvider` that the dashboard mounts over its
+   * own children: every `useWorkspacePermissionLevel()` reader in the sidebar
+   * and in the dialogs the sidebar opens read the context DEFAULT (`"manage"`)
+   * no matter who was looking — which is how a Cloud viewer got a sidebar
+   * "•••" → Share entry on an embed-only node that could only ever open an
+   * empty dialog. The value given here is provided to this whole subtree,
+   * `children` included, so it is the ONE place a host states the level: a
+   * nested `BusabaseDashboard` inherits it unless that host deliberately
+   * overrides it (e.g. a chromeless render with no shell above it at all).
+   */
+  submitPermissionLevel?: ApiKeyPermissionLevel;
+  /**
    * Which workspace the client-side known-node cache is scoped to — the SAME
    * value the host passes `BusabaseDashboard`. The sidebar's "Recent" filter
    * reads that cache, and the dashboard is what writes it.
@@ -364,8 +388,26 @@ interface BusabaseDashboardShellProps {
  * Builds the nav from the space's node tree and renders sharelib's
  * `DashboardLayout`; the host passes its `chrome` (real session in the cloud,
  * local stubs in the open-source app).
+ *
+ * Thin permission wrapper over `DashboardShellInner`: the provider has to be
+ * mounted by a component ABOVE the one that reads it, and the shell body itself
+ * is a reader now (the sidebar row's Share action is manage-gated). Splitting
+ * it here means every dialog the sidebar opens — Share above all — resolves the
+ * host's real level through the ordinary `useWorkspacePermissionLevel()`
+ * context instead of a second, parallel prop chain that could disagree with it.
  */
 export function BusabaseDashboardShell({
+  submitPermissionLevel = "manage",
+  ...props
+}: BusabaseDashboardShellProps) {
+  return (
+    <SubmitPermissionProvider permissionLevel={submitPermissionLevel}>
+      <DashboardShellInner {...props} />
+    </SubmitPermissionProvider>
+  );
+}
+
+function DashboardShellInner({
   children,
   nodes,
   activeChangeRequestCount,
@@ -394,25 +436,28 @@ export function BusabaseDashboardShell({
   // replaces all three. Neither Settings nor Rename is ever set for a Base
   // node — `buildNavItem` omits both actions for those.
   const [location] = useLocation();
-  // What this viewer may do in this space. The "Shared" filter and the
-  // `/shared` audit row both read `nodes.share.list`, which is
-  // `workspace("manage")` — see `PROCEDURE_PERMISSION_POLICY`.
+  // Read back from the provider our own wrapper mounts below, so there is
+  // exactly one resolved level in play for this subtree — the sidebar rows and
+  // the dialogs they open answer from the same context rather than from
+  // independently-threaded props that can disagree.
   //
-  // Three sources, in descending order of authority.
-  //
-  // 1. `canManageShares` from the host, when given. This shell is the chrome
-  //    AROUND `BusabaseDashboard`, so the permission context the dashboard
-  //    mounts does not reach up here — the host is the only thing that knows.
-  //    The cloud passes the same `usePermissions().canManage` it already uses
-  //    to gate the `/shared` menu entry, so one capability has one gate.
-  // 2. Otherwise the context hook, which outside that provider resolves to its
-  //    `"manage"` default — correct for the single-owner open-source install,
-  //    where the only user there is may do everything.
-  // 3. And regardless of either, the server's own "no" (see
-  //    `sharedFilterDenied` below) still withdraws the option. Defense in
-  //    depth, not the primary gate: a host that forgets to pass the prop
-  //    degrades to one rejected request rather than to a dead menu entry.
+  // NOTE for the `canManageShares` fallback below: develop's version of this
+  // comment said the hook "outside that provider resolves to its `manage`
+  // default". That was true when the shell sat outside the provider; this
+  // branch is what moved the provider UP to wrap the shell, so the hook now
+  // returns the host-stated level here too. The fallback is therefore no
+  // longer a default-to-manage — it is the real level — which makes it
+  // correct for a Cloud viewer as well, not only for the single-owner install.
   const permissionLevel = useWorkspacePermissionLevel();
+  // All three `embedLinks.*` procedures are `workspace("manage")` — same
+  // predicate `NodeActionsMenu` applies to the node-detail toolbar's Share
+  // entry, so the sidebar row and the toolbar agree about a given node.
+  const canManageShareSettings = hasApiKeyLevel(permissionLevel, "manage");
+  // `nodes.share.list` behind the "Shared" filter and the `/shared` audit page
+  // is `workspace("manage")` too, but it stays its OWN boolean: an explicit
+  // host prop still wins, and the two are separate capabilities that merely
+  // happen to require the same level today. The server's own "no"
+  // (`sharedFilterDenied` below) remains the backstop either way.
   const canManageShares = canManageSharesProp ?? hasApiKeyLevel(permissionLevel, "manage");
   const [settingsTarget, setSettingsTarget] = useState<{
     id: string;
@@ -827,6 +872,7 @@ export function BusabaseDashboardShell({
         ? (node) =>
             setShareTarget({ id: node.id, name: node.name, slug: node.slug, type: node.type })
         : undefined,
+      canManageShareSettings,
       onOpenDelete: orpc
         ? (node) =>
             setDeleteTarget({
@@ -858,6 +904,7 @@ export function BusabaseDashboardShell({
       favoriteNodeIds,
       handleToggleFavorite,
       onMoveNode,
+      canManageShareSettings,
     ],
   );
 
@@ -990,6 +1037,10 @@ export function BusabaseDashboardShell({
         return { title: nav.archive, url: "/archived", icon: Archive };
       case "assets":
         return { title: assetsLabel, url: "/assets", icon: Images };
+      case "embed-links":
+        return canManageShareSettings
+          ? { title: nav.embedLinks, url: "/embed-links", icon: Link2 }
+          : null;
       case "shared":
         // Gated like the filter above it: `/shared` is a manage-level audit
         // screen, so the lingering row is not offered to someone who would
@@ -1009,12 +1060,14 @@ export function BusabaseDashboardShell({
     nav.inbox,
     nav.activity,
     nav.archive,
+    nav.embedLinks,
     nav.shared,
     nav.agents,
     nav.apps,
     nav.templates,
     assetsLabel,
     activeChangeRequestCount,
+    canManageShareSettings,
     canUseSharedFilter,
   ]);
 
@@ -1422,6 +1475,13 @@ interface NavItemContext {
   onOpenAgentPrompts?: (node: NodeVO) => void;
   onOpenShare?: (node: NodeVO) => void;
   onOpenDelete?: (node: NodeVO) => void;
+  /**
+   * May this viewer manage either sharing family (`nodes.share.*` and
+   * `embedLinks.*` are both `manage`)? Passed down as a resolved boolean
+   * because this build runs outside React, and because the shell body is the
+   * one place that reads permission context for the whole sidebar.
+   */
+  canManageShareSettings: boolean;
 }
 
 interface NodeMenuActions {
@@ -1497,6 +1557,7 @@ function buildNavItem(node: NodeVO, ctx: NavItemContext): NavItem[] {
     onOpenAgentPrompts,
     onOpenShare,
     onOpenDelete,
+    canManageShareSettings,
   } = ctx;
   if (hasCapability(node.type, "hidden")) return [];
   const icon = nodeIconGlyph(resolveNodeIcon(node));
@@ -1577,9 +1638,15 @@ function buildNavItem(node: NodeVO, ctx: NavItemContext): NavItem[] {
   // into a working anonymous detail route) or an embed link (AirApp / Drive /
   // Skill qualify for this one and only this one). Same predicate as
   // `NodeActionsMenu`'s `canShare`; the dialog re-checks both itself.
+  //
+  // Both halves also ask WHO is looking. `nodes.share.*` and `embedLinks.*`
+  // are all manage-level procedures, so a Cloud viewer/member has nothing
+  // actionable behind this entry even when the node type supports a public
+  // page. Keep the management affordance absent rather than opening onto 403s.
   const shareAction: NavItemAction | null =
     onOpenShare &&
     node.slug &&
+    canManageShareSettings &&
     (publicAccessOf(node.type) !== "no" || isEmbeddableNodeType(node.type))
       ? {
           title: labels.shareLabel,

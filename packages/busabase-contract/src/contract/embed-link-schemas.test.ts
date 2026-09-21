@@ -4,10 +4,11 @@ import {
   CreateEmbedLinkInputSchema,
   EmbedFramePolicyVOSchema,
   EmbedNodeTypeSchema,
+  ListEmbedLinksPagedInputSchema,
 } from "./embed-link-schemas";
 
 describe("embed frame policy input", () => {
-  it("publishes embed-link CRUD on the shared Desktop and tunnel contract", () => {
+  it("publishes embed-link CRUD and audit routes on the shared Desktop and tunnel contract", () => {
     expect(busabaseContractRoutes.embedLinks.create["~orpc"].route).toMatchObject({
       method: "POST",
       path: "/embed-links",
@@ -16,10 +17,25 @@ describe("embed frame policy input", () => {
       method: "GET",
       path: "/embed-links",
     });
+    expect(busabaseContractRoutes.embedLinks.listPaged["~orpc"].route).toMatchObject({
+      method: "GET",
+      path: "/embed-links/paged",
+    });
     expect(busabaseContractRoutes.embedLinks.revoke["~orpc"].route).toMatchObject({
       method: "DELETE",
       path: "/embed-links/{id}",
     });
+  });
+
+  it("defaults the audit page to active links and keeps its limit bounded", () => {
+    expect(ListEmbedLinksPagedInputSchema.parse({})).toEqual({ status: "active", limit: 50 });
+    expect(ListEmbedLinksPagedInputSchema.parse({ status: "all", limit: "100" })).toEqual({
+      status: "all",
+      limit: 100,
+    });
+    expect(ListEmbedLinksPagedInputSchema.safeParse({ status: "all", limit: 101 }).success).toBe(
+      false,
+    );
   });
 
   it("accepts AirApps as embeddable nodes", () => {

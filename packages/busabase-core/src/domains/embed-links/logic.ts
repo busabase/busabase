@@ -6,9 +6,11 @@ import type {
   CreatedEmbedLinkVO,
   CreateEmbedLinkDTO,
   EmbedFramePolicyVO,
+  EmbedLinksPageVO,
   EmbedLinkVO,
   EmbedTargetType,
   ListEmbedLinksDTO,
+  ListEmbedLinksPagedDTO,
 } from "busabase-contract/contract/embed-link-schemas";
 import {
   EmbedFramePolicyVOSchema,
@@ -16,7 +18,7 @@ import {
   EmbedTargetTypeSchema,
 } from "busabase-contract/contract/embed-link-schemas";
 import type { FileTreeReadFileVO } from "busabase-contract/types";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq, gt, isNotNull, isNull, lt, lte, or, type SQL } from "drizzle-orm";
 import {
   getContextEmbedOrigin,
   getContextSourceProvenance,
@@ -44,6 +46,7 @@ export { EMBED_PUBLIC_ID_PATTERN, EMBED_SECRET_PATTERN } from "./capability";
 const EMBED_LINK_ID_PREFIX = "emb_";
 const EMBED_SECRET_BYTES = 32;
 const LOCAL_API_KEY_ID = "local";
+const EMBED_LINK_AUDIT_MAX_CANDIDATES = 400;
 
 export const hashEmbedSecret = (secret: string): string =>
   createHash("sha256").update(secret, "utf8").digest("hex");
@@ -252,6 +255,139 @@ export const listEmbedLinks = async (input: ListEmbedLinksDTO): Promise<EmbedLin
     if (target) visible.push(toEmbedLinkVO({ ...row, ...target }));
   }
   return visible;
+};
+
+interface EmbedLinkAuditCursor {
+  createdAt: Date;
+  id: string;
+}
+
+const encodeEmbedLinkAuditCursor = (cursor: EmbedLinkAuditCursor): string =>
+  Buffer.from(
+    JSON.stringify({ createdAt: cursor.createdAt.toISOString(), id: cursor.id }),
+    "utf8",
+  ).toString("base64url");
+
+const decodeEmbedLinkAuditCursor = (cursor: string): EmbedLinkAuditCursor => {
+  try {
+    const value = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as unknown;
+    if (
+      typeof value !== "object" ||
+      value === null ||
+      typeof (value as { createdAt?: unknown }).createdAt !== "string" ||
+      typeof (value as { id?: unknown }).id !== "string" ||
+      !(value as { id: string }).id
+    ) {
+      throw new Error("invalid shape");
+    }
+    const createdAt = new Date((value as { createdAt: string }).createdAt);
+    if (Number.isNaN(createdAt.getTime())) throw new Error("invalid timestamp");
+    return { createdAt, id: (value as { id: string }).id };
+  } catch {
+    throw new ORPCError("BAD_REQUEST", {
+      message: "Invalid embed-link cursor. Refresh and try again.",
+    });
+  }
+};
+
+type EmbedLinkAuditRow = {
+  id: string;
+  type: EmbedTargetType;
+  typeId: string;
+  createdAt: Date;
+  expiresAt: Date;
+  revokedAt: Date | null;
+  frameMode: string;
+  allowedOrigins: string[];
+};
+
+const embedLinkAuditStatusFilter = (
+  status: ListEmbedLinksPagedDTO["status"],
+  now: Date,
+): SQL | undefined => {
+  if (status === "active") {
+    return and(isNull(busabaseEmbedLinks.revokedAt), gt(busabaseEmbedLinks.expiresAt, now));
+  }
+  if (status === "expired") {
+    return and(isNull(busabaseEmbedLinks.revokedAt), lte(busabaseEmbedLinks.expiresAt, now));
+  }
+  if (status === "revoked") return isNotNull(busabaseEmbedLinks.revokedAt);
+  return undefined;
+};
+
+/**
+ * Workspace audit listing. Unlike the target-scoped legacy `list`, this path
+ * never loads the whole history: it scans at most four pages of SQL candidates
+ * (capped at 400) and carries the last scanned key forward when ACL filtering
+ * produces a short page.
+ */
+export const listEmbedLinksPaged = async (
+  input: ListEmbedLinksPagedDTO,
+): Promise<EmbedLinksPageVO> => {
+  const db = await getDb();
+  const now = new Date();
+  const cursor = input.cursor ? decodeEmbedLinkAuditCursor(input.cursor) : null;
+  const candidateLimit = Math.min(
+    EMBED_LINK_AUDIT_MAX_CANDIDATES,
+    Math.max(input.limit + 1, input.limit * 4),
+  );
+  const cursorFilter = cursor
+    ? or(
+        lt(busabaseEmbedLinks.createdAt, cursor.createdAt),
+        and(
+          eq(busabaseEmbedLinks.createdAt, cursor.createdAt),
+          lt(busabaseEmbedLinks.id, cursor.id),
+        ),
+      )
+    : undefined;
+  const rows: EmbedLinkAuditRow[] = await db
+    .select({
+      id: busabaseEmbedLinks.id,
+      type: busabaseEmbedLinks.type,
+      typeId: busabaseEmbedLinks.typeId,
+      createdAt: busabaseEmbedLinks.createdAt,
+      expiresAt: busabaseEmbedLinks.expiresAt,
+      revokedAt: busabaseEmbedLinks.revokedAt,
+      frameMode: busabaseEmbedLinks.frameMode,
+      allowedOrigins: busabaseEmbedLinks.allowedOrigins,
+    })
+    .from(busabaseEmbedLinks)
+    .where(
+      and(
+        eq(busabaseEmbedLinks.spaceId, getContextSpaceId()),
+        embedLinkAuditStatusFilter(input.status, now),
+        cursorFilter,
+      ),
+    )
+    .orderBy(desc(busabaseEmbedLinks.createdAt), desc(busabaseEmbedLinks.id))
+    .limit(candidateLimit + 1);
+
+  const candidates = rows.slice(0, candidateLimit);
+  const targets = new Map<string, EmbedTargetMetadata | null>();
+  const visible: Array<{ row: EmbedLinkAuditRow; vo: EmbedLinkVO }> = [];
+  let lastScanned: EmbedLinkAuditRow | undefined;
+  for (const row of candidates) {
+    lastScanned = row;
+    const targetKey = `${row.type}:${row.typeId}`;
+    let target = targets.get(targetKey);
+    if (target === undefined && !targets.has(targetKey)) {
+      target = await resolveEmbedTargetMetadata(row.type, row.typeId);
+      targets.set(targetKey, target);
+    }
+    if (target) visible.push({ row, vo: toEmbedLinkVO({ ...row, ...target }) });
+    if (visible.length > input.limit) break;
+  }
+
+  const page = visible.slice(0, input.limit);
+  const hasVisibleMore = visible.length > input.limit;
+  const scanWindowHasMore = rows.length > candidateLimit;
+  const continuationRow = hasVisibleMore ? page.at(-1)?.row : lastScanned;
+  const nextCursor =
+    continuationRow && (hasVisibleMore || scanWindowHasMore)
+      ? encodeEmbedLinkAuditCursor(continuationRow)
+      : null;
+
+  return { items: page.map(({ vo }) => vo), nextCursor };
 };
 
 export const revokeEmbedLink = async (id: string): Promise<{ revoked: true }> => {
