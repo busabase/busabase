@@ -90,11 +90,16 @@ const connectRedis = (url: string): Promise<RedisCommandClient> => {
         disableOfflineQueue: true,
         socket: {
           connectTimeout: positiveInteger(process.env.BETTER_AUTH_REDIS_CONNECT_TIMEOUT_MS, 1_500),
-          reconnectStrategy: false,
+          // A dropped connection must self-heal — `reconnectStrategy: false` left this
+          // client permanently dead after a single blip until the process restarted,
+          // which meant every request on that replica kept failing `consume()` (see
+          // the fail-open note below) until a redeploy. Same backoff shape as
+          // `openlib/cache/redis-client.ts`.
+          reconnectStrategy: (retries: number) => Math.min(retries * 100, 3_000),
         },
       }) as unknown as RedisCommandClient;
-      client.on("error", () => {
-        // Commands reject to the caller. The listener prevents an unhandled EventEmitter error.
+      client.on("error", (error: unknown) => {
+        console.warn("[Better Auth Rate Limit] Redis connection error:", error);
       });
       client.on("end", () => {
         if (connections.get(url) === connection) connections.delete(url);
@@ -165,11 +170,25 @@ export function createBetterAuthRedisRateLimitStorage(
   const clientFor = options.getClient ?? (() => connectRedis(redisUrl as string));
   const namespacedKey = (key: string) => `better-auth:${namespace}:rate-limit:${key}`;
 
-  const run = async <T>(operation: (client: RedisCommandClient) => Promise<T>): Promise<T> => {
+  // better-auth's `onRequestRateLimit` calls `storage.consume()` with no try/catch
+  // of its own — an exception here isn't "deny this request", it's "crash this
+  // Better Auth request", including plain `getSession()` reads. A rate limiter is
+  // an abuse guard, not the thing authentication should depend on for its own
+  // liveness: fail OPEN (log + let the request through) on Redis errors rather than
+  // fail closed, or a Redis blip locks every real, already-authenticated user out
+  // app-wide until the connection recovers.
+  const run = async <T>(
+    operation: (client: RedisCommandClient) => Promise<T>,
+    fallback: T,
+  ): Promise<T> => {
     try {
       return await operation(await clientFor());
     } catch (cause) {
-      throw new Error(`Better Auth Redis rate limiting failed for ${namespace}`, { cause });
+      console.warn(
+        `[Better Auth Rate Limit] Redis storage failed for ${namespace}, failing open:`,
+        cause,
+      );
+      return fallback;
     }
   };
 
@@ -187,30 +206,33 @@ export function createBetterAuthRedisRateLimitStorage(
           count: Number(parsed.count),
           lastRequest: Number(parsed.lastRequest),
         };
-      }),
+      }, null),
     set: (key, value, update = false) =>
       run(async (client) => {
         await client.eval(UPDATE_SCRIPT, {
           keys: [namespacedKey(key)],
           arguments: [JSON.stringify({ ...value, key }), update ? "1" : "0", String(defaultWindow)],
         });
-      }),
+      }, undefined),
     consume: (key, rule) =>
-      run(async (client) => {
-        const result = await client.eval(CONSUME_SCRIPT, {
-          keys: [namespacedKey(key)],
-          arguments: [String(Date.now()), String(rule.window), String(rule.max), key],
-        });
-        if (!Array.isArray(result) || result.length < 2) {
-          throw new Error("Invalid Better Auth rate-limit response from Redis");
-        }
-        const allowed = Number(result[0]) === 1;
-        return {
-          allowed,
-          retryAfter: allowed ? null : Math.max(Number(result[1]) || 1, 1),
-        };
-      }),
-    delete: (key) => run(async (client) => void (await client.del(namespacedKey(key)))),
+      run(
+        async (client) => {
+          const result = await client.eval(CONSUME_SCRIPT, {
+            keys: [namespacedKey(key)],
+            arguments: [String(Date.now()), String(rule.window), String(rule.max), key],
+          });
+          if (!Array.isArray(result) || result.length < 2) {
+            throw new Error("Invalid Better Auth rate-limit response from Redis");
+          }
+          const allowed = Number(result[0]) === 1;
+          return {
+            allowed,
+            retryAfter: allowed ? null : Math.max(Number(result[1]) || 1, 1),
+          };
+        },
+        { allowed: true, retryAfter: null },
+      ),
+    delete: (key) => run(async (client) => void (await client.del(namespacedKey(key))), undefined),
   };
 }
 

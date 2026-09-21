@@ -1,4 +1,5 @@
 import type { LucideIcon } from "lucide-react";
+import type { ReactNode } from "react";
 
 export interface NavItemAction {
   title: string;
@@ -157,6 +158,13 @@ export interface NavGroup {
    * Only the group that owns the canonical tree should set this.
    */
   draggable?: boolean;
+  /**
+   * Replaces the plain text inside this group's `SidebarGroupLabel` with custom
+   * content — e.g. a dropdown that filters the group. Purely presentational:
+   * `label` is still required and is still both the React key and the argument
+   * handed to `onHeaderActionClick`, so the group's `+` action keeps working.
+   */
+  labelSlot?: ReactNode;
 }
 
 /** Labels for the built-in sidebar actions; omitted labels retain English defaults. */

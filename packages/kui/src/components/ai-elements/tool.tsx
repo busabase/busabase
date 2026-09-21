@@ -125,31 +125,43 @@ export type ToolOutputProps = ComponentProps<"div"> & {
 };
 
 export const ToolOutput = ({ className, output, errorText, ...props }: ToolOutputProps) => {
-  if (!(output || errorText)) {
+  const hasOutput = output !== undefined;
+  const hasError = errorText !== undefined;
+  if (!hasOutput && !hasError) {
     return null;
   }
 
   let Output = <div>{output as ReactNode}</div>;
 
-  if (typeof output === "object" && !isValidElement(output)) {
+  if (output === null) {
+    // `null` is a present value distinct from an absent `output`; render it
+    // visibly rather than as an empty child.
+    Output = <CodeBlock code="null" language="json" />;
+  } else if (typeof output === "object" && !isValidElement(output)) {
     Output = <CodeBlock code={JSON.stringify(output, null, 2)} language="json" />;
   } else if (typeof output === "string") {
-    Output = <CodeBlock code={output} language="json" />;
+    // An empty string has no visible characters on its own; represent it as
+    // the JSON literal `""` so a present-but-empty output is still legible.
+    Output = <CodeBlock code={output === "" ? '""' : output} language="json" />;
+  } else if (typeof output === "boolean" || typeof output === "number") {
+    // `false` and `0` render as nothing under React's default child rules;
+    // stringify so a present falsy output is still visible.
+    Output = <CodeBlock code={JSON.stringify(output)} language="json" />;
   }
 
   return (
     <div className={cn("space-y-2", className)} {...props}>
       <h4 className="font-medium text-muted-foreground text-xs uppercase tracking-wide">
-        {errorText ? "Error" : "Result"}
+        {hasError ? "Error" : "Result"}
       </h4>
       <div
         className={cn(
           "overflow-x-auto rounded-md text-xs [&_table]:w-full",
-          errorText ? "bg-destructive/10 text-destructive" : "bg-muted/50 text-foreground",
+          hasError ? "bg-destructive/10 text-destructive" : "bg-muted/50 text-foreground",
         )}
       >
-        {errorText && <div>{errorText}</div>}
-        {Output}
+        {hasError && <div>{errorText === "" ? '""' : errorText}</div>}
+        {hasOutput && Output}
       </div>
     </div>
   );

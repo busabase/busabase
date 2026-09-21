@@ -83,6 +83,15 @@ export interface AcpToolCallBlock {
   title: string;
   toolKind: ToolKind | null;
   status: ToolCallStatus;
+  /**
+   * The tool's raw parameters/result, verbatim from ACP's `rawInput`/`rawOutput`.
+   * Absent (not `undefined`-valued but genuinely missing) until an event that
+   * carries one arrives — `tool_call`/`tool_call_update` are patch updates, so a
+   * field's absence must leave a previously-seen value untouched, while ACP
+   * sending an explicit `null` is a real replacement. See `reduce-acp-event.ts`.
+   */
+  rawInput?: unknown;
+  rawOutput?: unknown;
 }
 
 export interface AcpPermissionOption {

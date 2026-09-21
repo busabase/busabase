@@ -359,8 +359,14 @@ export function AcpComposer({
         <PromptInputSubmit
           aria-label={sending ? (labels?.stopPrompt ?? "Stop") : (labels?.submitPrompt ?? "Submit")}
           disabled={submitDisabled}
+          className={
+            sending
+              ? "border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+              : undefined
+          }
           onStop={onStop}
           status={sending ? "streaming" : undefined}
+          variant={sending ? "outline" : "default"}
         />
       </PromptInputFooter>
     </PromptInput>
