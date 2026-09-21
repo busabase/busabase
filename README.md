@@ -8,7 +8,7 @@
 <h1>Busabase</h1>
 
 <p><b>Database &amp; Workspace for AI Agents</b><br/>
-Give Claude Code, Codex, Cursor, OpenClaw, and your own agents one place for structured data, durable knowledge, reusable skills, runnable apps, and human review.</p>
+Give Claude Code, Codex, Cursor, OpenClaw, and your own agents one place for structured data, durable knowledge, reusable skills, runnable apps, and a reviewable history of every change.</p>
 
 <p>
 <a href="./apps/busabase/docs/README_zh-CN.md">中文</a> &nbsp;·&nbsp;
@@ -22,6 +22,7 @@ Give Claude Code, Codex, Cursor, OpenClaw, and your own agents one place for str
 <a href="https://hub.docker.com/r/busabase/busabase"><img src="https://img.shields.io/docker/image-size/busabase/busabase/latest?logo=docker&label=docker" alt="Docker image" /></a>
 <a href="https://github.com/busabase/busabase/tree/main/packages/busabase-core/tests"><img src="./apps/busabase/public/assets/readme/coverage.svg" alt="Test coverage (busabase-core engine)" /></a>
 <a href="https://busabase.com/download"><img src="https://img.shields.io/badge/Desktop-Download-1f6feb?logo=tauri&logoColor=white" alt="Download Busabase Desktop" /></a>
+<a href="https://glama.ai/mcp/connectors/com.busabase/busabase"><img src="https://glama.ai/mcp/connectors/com.busabase/busabase/badges/score.svg" alt="Glama MCP connector score" /></a>
 <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License MIT" /></a>
 <a href="https://github.com/busabase/busabase/stargazers"><img src="https://img.shields.io/github/stars/busabase/busabase?style=social" alt="GitHub stars" /></a>
 </p>
@@ -40,6 +41,8 @@ Give Claude Code, Codex, Cursor, OpenClaw, and your own agents one place for str
 
 </div>
 
+> Busabase is an open-source database and workspace for AI agents — agents and people share the same structured data, docs, skills, and apps, and writes that matter become reviewed, trusted records.
+
 AI agents can write code and generate output, but their useful work usually ends up scattered across chats, files, databases, and SaaS tools. On the next run, the agent has to rediscover the context. When it writes back, humans often cannot see what changed or why.
 
 **Busabase gives agents an operational workspace, not another chat window.**
@@ -49,9 +52,9 @@ AI agents can write code and generate output, but their useful work usually ends
 - **Workspace for agents** — Skills, AirApps, Whiteboards, Workflows, Agents, and shared activity.
 - **Trust layer for agent work** — Change Requests, field-level diffs, comments, approvals, commits, and audit trails.
 
-Agents can read the same workspace you see, use its knowledge and skills, build apps on its data, and propose improvements back into it. Material writes arrive as Change Requests so you can inspect them before they become canonical.
+Agents can read the same workspace you see, use its knowledge and skills, build apps on its data, and write improvements back into it. Every write travels as a Change Request, so it carries a message, a diff, an author, and a full history — and your workspace permissions decide whether it merges on the spot or waits in the Inbox for review.
 
-**Free and open source. Local-first. Agent-native. Reviewable by design.**
+**Free and open source. Local-first. Agent-native. Every change accounted for.**
 
 ## Quick Start
 
@@ -113,10 +116,20 @@ Busabase is not a database with a few AI buttons. Every building block is a firs
 | **File & Drive** | Files, attachments, and project trees | One place for the artifacts behind agent work |
 | **Skill** | Reusable instructions, references, examples, and scripts | Capabilities that travel with the workspace context |
 | **AirApp** | Runnable apps backed by workspace data and APIs | Purpose-built interfaces without creating another silo |
-| **Whiteboard & Workflow** | Visual context and executable process definitions | Shared plans and processes agents can inspect and improve |
+| **Whiteboard & Workflow** | Visual context and process definitions agents can read | Shared plans and processes agents can inspect and improve |
 | **Inbox & Activity** | Proposed changes and workspace events | Human control, recovery, and a complete audit trail |
 
 Current node types include Folder, Base, Doc, File, Drive, Skill, AirApp, Form, HTML, Whiteboard, and Workflow. See **[Node Types](./apps/busabase/docs/node-types.md)** for the detailed model.
+
+### Start from a template
+
+A template installs a whole workspace app at once — its Bases, views, Docs, sample rows, AirApps, and the Skill manual that tells an agent how the app is meant to be used.
+
+```bash
+busabase-cli install https://github.com/busabase/templates/tree/main/templates/busa-crm
+```
+
+Browse the catalog at **[busabase.com/templates](https://busabase.com/templates)**, or install any Busabase package from a GitHub URL or a local directory. `--dry-run` prints the plan first, and `--require-review` leaves the package's records and docs as change requests instead of merging them.
 
 ## Inside the Workspace
 
@@ -131,7 +144,7 @@ Current node types include Folder, Base, Doc, File, Drive, Skill, AirApp, Form, 
 | ![Product launch Whiteboard](./apps/busabase/public/assets/readme/busabase-whiteboard.webp) | ![Lead intake Workflow](./apps/busabase/public/assets/readme/busabase-workflow.webp) |
 | **Whiteboards** — visual context shared with agents | **Workflows** — processes kept beside their data and knowledge |
 | ![Agent-proposed field diff](./apps/busabase/public/assets/readme/busabase-agent-output-preview.webp) | ![Record history and audit trail](./apps/busabase/public/assets/readme/busabase-record-detail-audit.webp) |
-| **Review** — inspect agent changes before merge | **Provenance** — see the source, reviewer, commit, and history |
+| **Review** — see exactly what an agent changed | **Provenance** — see the source, reviewer, commit, and history |
 
 ### On mobile
 
@@ -174,23 +187,27 @@ Agents can connect in four ways:
 
 Open **Agent Skills** in the sidebar to get the current setup instructions, MCP endpoint, and OpenAPI specification for your running instance.
 
+Busabase's MCP server is also listed on [Glama's MCP connector directory](https://glama.ai/mcp/connectors/com.busabase/busabase), including its live connector score.
+
 ## The Trust Loop
 
-Agents need write access to be useful. They also make mistakes. Busabase separates **working** from **becoming trusted**:
+Agents need write access to be useful. They also make mistakes. Busabase's answer is not to make every write wait for a human — it is to make every write **accountable**:
 
 ```text
 Agent reads workspace context
         ↓
-Agent proposes data, docs, skills, or app changes
+Agent writes data, docs, skills, or app changes — always as a Change Request
         ↓
-Change Request shows the exact diff, source, and impact
+The Change Request carries the diff, the message, the author, and the impact
         ↓
-Human approves, requests changes, or rejects
+Your permissions decide: it merges on the spot, or it waits in the Inbox
         ↓
-Merged work becomes canonical workspace knowledge
+Either way the change stays inspectable, attributable, and reversible
 ```
 
-This review layer applies across the workspace. A record update, Doc edit, Skill file, schema change, or AirApp package can all keep the same proposal, review, merge, and audit history.
+Review is a capability, not a toll booth. A credential capped at `changeRequest` level can only ever propose; a single call can opt in with `autoMerge: false`; `busabase-cli install … --require-review` holds a package's content back for approval. Anything else that is allowed to write, writes — and still leaves a diff and a history behind.
+
+This path applies across the workspace. A record update, Doc edit, Skill file, schema change, or AirApp package all carry the same message, diff, merge, and audit history.
 
 ## What Agents Can Build Here
 
@@ -215,13 +232,13 @@ Busabase overlaps with databases and knowledge tools, but it is designed around 
 | Human knowledge tools (Notion, Confluence, Obsidian) | People write and organize pages | Structured agent operations across data, files, tools, and review |
 | Databases (Postgres) | Applications read and write storage | A workspace UI, knowledge model, review loop, and provenance |
 | Agent runtimes and chat tools | Agents execute tasks and produce output | A durable system of record shared across agents and future sessions |
-| **Busabase** | Agents and humans build one workspace together | Database + knowledge + skills + apps, with review before trust |
+| **Busabase** | Agents and humans build one workspace together | Database + knowledge + skills + apps — output that accumulates instead of evaporating |
 
 Change Requests are not the category; they are the mechanism that makes an agent workspace dependable.
 
 ## Personal Desktop and Cloud
 
-Both editions use the same Busabase core and review model.
+Both editions use the same Busabase core and change model.
 
 | Personal Desktop / local | Busabase Cloud |
 | --- | --- |
