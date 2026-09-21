@@ -91,6 +91,7 @@ function reduceSessionUpdate(blocks: readonly AcpBlock[], update: SessionUpdate)
         title: update.title,
         toolKind: update.kind ?? null,
         status: update.status ?? "pending",
+        ...rawFields(update),
       };
       // A `tool_call` for an id we've already seen is a re-announcement, not a
       // second call — merge rather than duplicate.
@@ -114,6 +115,7 @@ function reduceSessionUpdate(blocks: readonly AcpBlock[], update: SessionUpdate)
           title: update.title ?? update.toolCallId,
           toolKind: update.kind ?? null,
           status: update.status ?? "pending",
+          ...rawFields(update),
         };
         return [...blocks, block];
       }
@@ -125,6 +127,7 @@ function reduceSessionUpdate(blocks: readonly AcpBlock[], update: SessionUpdate)
         title: update.title ?? prev.title,
         toolKind: update.kind ?? prev.toolKind,
         status: update.status ?? prev.status,
+        ...rawFields(update),
       });
     }
 
@@ -255,6 +258,24 @@ function updatePermission(
   const index = blocks.findIndex((b) => b.kind === "permission" && b.id === requestId);
   if (index === -1) return blocks as AcpBlock[];
   return replaceAt(blocks, index, update(blocks[index] as AcpPermissionBlock));
+}
+
+/**
+ * Picks `rawInput`/`rawOutput` off a `tool_call`/`tool_call_update` by
+ * property presence, not truthiness — both are patch updates, so a field
+ * that's absent must leave whatever the block already has untouched, while
+ * ACP sending an explicit `null` (a real "clear this") must still overwrite
+ * it. `in` is what tells those two cases apart; `??`/spreading `undefined`
+ * cannot.
+ */
+function rawFields(update: {
+  rawInput?: unknown;
+  rawOutput?: unknown;
+}): Pick<AcpToolCallBlock, "rawInput" | "rawOutput"> {
+  const fields: Pick<AcpToolCallBlock, "rawInput" | "rawOutput"> = {};
+  if ("rawInput" in update) fields.rawInput = update.rawInput;
+  if ("rawOutput" in update) fields.rawOutput = update.rawOutput;
+  return fields;
 }
 
 function replaceAt(blocks: readonly AcpBlock[], index: number, block: AcpBlock): AcpBlock[] {

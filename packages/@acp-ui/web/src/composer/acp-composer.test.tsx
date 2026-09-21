@@ -109,6 +109,20 @@ describe("stopping mid-stream", () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
+  it("uses a restrained destructive treatment for Stop only", () => {
+    const { rerender } = render(
+      <AcpComposer disabled={true} onSend={vi.fn()} onStop={vi.fn()} sending={true} />,
+    );
+    expect(submitButton()).toHaveClass(
+      "border-destructive/40",
+      "text-destructive",
+      "hover:bg-destructive/10",
+    );
+
+    rerender(<AcpComposer disabled={false} onSend={vi.fn()} onStop={vi.fn()} sending={false} />);
+    expect(submitButton()).not.toHaveClass("border-destructive/40", "text-destructive");
+  });
+
   // Without onStop, behavior is exactly what it was before this existed:
   // the button simply stays disabled while sending.
   it("stays disabled while sending when no onStop is supplied", () => {

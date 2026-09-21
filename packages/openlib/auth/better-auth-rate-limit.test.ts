@@ -88,15 +88,25 @@ describe("Redis rate-limit storage", () => {
     expect(client.del).toHaveBeenCalledWith(expected);
   });
 
-  it("fails closed when Redis rejects a command", async () => {
+  it("fails open when Redis rejects a command, instead of taking down auth", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     client.eval.mockRejectedValue(new Error("Redis unavailable"));
     const storage = createBetterAuthRedisRateLimitStorage({
       appName: "productready",
       getClient: async () => client as never,
     });
 
-    await expect(storage?.consume("key", { window: 60, max: 5 })).rejects.toThrow(
-      "Better Auth Redis rate limiting failed",
+    // better-auth's rate-limit hook has no try/catch of its own around `consume()`,
+    // so a throw here would crash every Better Auth request (including getSession)
+    // on a Redis blip. Must resolve `allowed: true` instead.
+    await expect(storage?.consume("key", { window: 60, max: 5 })).resolves.toEqual({
+      allowed: true,
+      retryAfter: null,
+    });
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("Redis storage failed for productready, failing open"),
+      expect.any(Error),
     );
+    warn.mockRestore();
   });
 });

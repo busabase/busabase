@@ -287,6 +287,77 @@ describe("tool calls", () => {
     const blocks = fold([toolCall("t1"), toolCall("t2")]);
     expect(blocks).toHaveLength(2);
   });
+
+  // PUL-262: buda emits `rawInput` on `tool_call` and `rawOutput` on the
+  // `tool_call_update` that follows. Both are patch fields the reducer used
+  // to drop entirely — this pins that they now survive onto the block.
+  describe("raw input/output (PUL-262)", () => {
+    it("captures rawInput from the initial tool_call", () => {
+      const blocks = fold([toolCall("t1", { rawInput: { path: "README.md" } })]);
+      expect((blocks[0] as { rawInput: unknown }).rawInput).toEqual({ path: "README.md" });
+    });
+
+    it("captures rawOutput from a later tool_call_update without losing rawInput", () => {
+      const blocks = fold([
+        toolCall("t1", { rawInput: { path: "README.md" } }),
+        toolCallUpdate("t1", { status: "completed", rawOutput: { content: "# hi" } }),
+      ]);
+      expect(blocks[0]).toMatchObject({
+        rawInput: { path: "README.md" },
+        rawOutput: { content: "# hi" },
+      });
+    });
+
+    it("does not erase a previously-seen rawOutput when a later update omits the field", () => {
+      const blocks = fold([
+        toolCall("t1", { rawInput: { path: "README.md" } }),
+        toolCallUpdate("t1", { status: "completed", rawOutput: "done" }),
+        // A trailing update (e.g. a status-only ping) carries neither raw
+        // field — absence must not be read as "clear it".
+        toolCallUpdate("t1", { status: "completed" }),
+      ]);
+      expect(blocks[0]).toMatchObject({ rawInput: { path: "README.md" }, rawOutput: "done" });
+    });
+
+    it("treats an explicitly-sent null as a real replacement, not an omission", () => {
+      const blocks = fold([
+        toolCall("t1", { rawOutput: "first" }),
+        toolCallUpdate("t1", { rawOutput: null }),
+      ]);
+      expect((blocks[0] as { rawOutput: unknown }).rawOutput).toBeNull();
+    });
+
+    it("has no rawInput/rawOutput keys at all when neither was ever sent", () => {
+      const blocks = fold([toolCall("t1"), toolCallUpdate("t1", { status: "completed" })]);
+      expect(blocks[0]).not.toHaveProperty("rawInput");
+      expect(blocks[0]).not.toHaveProperty("rawOutput");
+    });
+
+    it("carries rawOutput for a failed call as the error payload", () => {
+      const blocks = fold([
+        toolCall("t1", { rawInput: { cmd: "rm -rf build" } }),
+        toolCallUpdate("t1", { status: "failed", rawOutput: "permission denied" }),
+      ]);
+      expect(blocks[0]).toMatchObject({ status: "failed", rawOutput: "permission denied" });
+    });
+
+    it("captures raw fields for an update joined mid-turn", () => {
+      const blocks = fold([
+        toolCallUpdate("t9", { status: "completed", rawInput: { q: "x" }, rawOutput: { n: 1 } }),
+      ]);
+      expect(blocks[0]).toMatchObject({ rawInput: { q: "x" }, rawOutput: { n: 1 } });
+    });
+
+    it("live feeding and replay folding still agree with raw fields present", () => {
+      const script: AcpUiEvent[] = [
+        toolCall("t1", { rawInput: { path: "a.ts" } }),
+        toolCallUpdate("t1", { status: "completed", rawOutput: { ok: true } }),
+      ];
+      const live = script.reduce<AcpBlock[]>((acc, e) => reduceAcpEvent(acc, e), []);
+      const replayed = reduceAcpEvents([], script);
+      expect(replayed).toEqual(live);
+    });
+  });
 });
 
 describe("permissions", () => {

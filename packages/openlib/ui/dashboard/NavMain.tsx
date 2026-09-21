@@ -1246,8 +1246,17 @@ function NavMainComponent({
                   </button>
                 ) : (
                   <SidebarGroupLabel className="flex-1 flex items-center gap-1.5 text-sidebar-foreground/50 text-[11px] uppercase tracking-wider font-medium h-6">
-                    {GroupIcon && <GroupIcon className="size-3" />}
-                    <span>{group.label}</span>
+                    {/* `labelSlot` swaps the label's CONTENT only — the
+                        `SidebarGroupLabel` wrapper and its typography stay
+                        put, so a custom control (e.g. a filter dropdown)
+                        inherits the exact same size/weight/colour as the
+                        plain text it replaces instead of re-declaring it. */}
+                    {group.labelSlot ?? (
+                      <>
+                        {GroupIcon && <GroupIcon className="size-3" />}
+                        <span>{group.label}</span>
+                      </>
+                    )}
                   </SidebarGroupLabel>
                 )}
               </div>

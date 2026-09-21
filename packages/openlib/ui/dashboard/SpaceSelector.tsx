@@ -191,6 +191,7 @@ export function SpaceSelector({
 
   // Control dropdown open state
   const [isOpen, setIsOpen] = React.useState(false);
+  const [isHydrated, setIsHydrated] = React.useState(false);
   const [scrollRegion, setScrollRegion] = React.useState<HTMLDivElement | null>(null);
   const scrollContentRef = React.useRef<HTMLDivElement>(null);
   const activeSpaceItemRef = React.useRef<HTMLDivElement>(null);
@@ -199,6 +200,12 @@ export function SpaceSelector({
 
   const currentSpace = activeSpace || internalActiveSpace;
   const logoSrc = currentSpace?.logo || appLogo;
+
+  // Streaming SSR can expose this button before React attaches the dropdown
+  // handler. Keep it disabled until hydration so an early click is not lost.
+  React.useEffect(() => {
+    setIsHydrated(true);
+  }, []);
 
   const updateScrollAffordances = React.useCallback(() => {
     if (!scrollRegion) return;
@@ -301,6 +308,7 @@ export function SpaceSelector({
         <DropdownMenu open={isOpen} onOpenChange={setIsOpen}>
           <DropdownMenuTrigger asChild>
             <SidebarMenuButton
+              disabled={!isHydrated}
               size={compact ? "default" : "lg"}
               className={cn(
                 "data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground",
