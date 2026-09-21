@@ -12,21 +12,33 @@ import {
 } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
 import { ChangeRequestCard } from "~/domains/review/components/ChangeRequestCard";
+import { MentionCard } from "~/domains/review/components/MentionCard";
 import { useInboxChangeRequests } from "~/domains/review/hooks/use-inbox-change-requests";
+import { useMentions, useMentionUnreadCount } from "~/domains/review/hooks/use-mentions";
 import type { InboxMode } from "~/domains/review/utils/inbox-paging";
+import { mentionDestination } from "~/domains/review/utils/mention-destination";
 import { ConnectionGuard } from "~/domains/workspace/components/ConnectionGuard";
 import { DrawerScaffold } from "~/domains/workspace/components/DrawerScaffold";
+
+/**
+ * Mentions is a fourth tab rather than a screen of its own: it answers the same
+ * question the others do — "what needs me?" — and the phone should not make
+ * someone remember a second place to look for it.
+ */
+type InboxTab = InboxMode | "mentions";
 
 const modes = [
   { key: "review", label: "Review" },
   { key: "mine", label: "Mine" },
   { key: "done", label: "Done" },
-] as const satisfies readonly { key: InboxMode; label: string }[];
+  { key: "mentions", label: "Mentions" },
+] as const satisfies readonly { key: InboxTab; label: string }[];
 
-const emptyCopy: Record<InboxMode, string> = {
+const emptyCopy: Record<InboxTab, string> = {
   review: "Inbox is clear",
   mine: "Nothing created yet",
   done: "No completed reviews",
+  mentions: "No one has mentioned you",
 };
 
 const isRecentChangeRequest = (changeRequest: ChangeRequestVO) => {
@@ -39,23 +51,51 @@ const isRecentChangeRequest = (changeRequest: ChangeRequestVO) => {
 
 function InboxContent() {
   const router = useRouter();
-  const [activeMode, setActiveMode] = useState<InboxMode>("review");
+  const [activeMode, setActiveMode] = useState<InboxTab>("review");
+  const showingMentions = activeMode === "mentions";
   // Each tab is its own server-side query: the filtering that used to happen
   // here, over a single capped page, could only ever be right for a workspace
   // small enough to fit in it.
-  const inbox = useInboxChangeRequests(activeMode);
+  const inbox = useInboxChangeRequests(showingMentions ? "review" : activeMode, {
+    enabled: !showingMentions,
+  });
+  const mentions = useMentions({ enabled: showingMentions });
+  // Fetched on every tab, unlike the change-request counts: see the hook — this
+  // badge is a notification, not a summary of the tab you are looking at.
+  const mentionUnread = useMentionUnreadCount();
 
   // Refresh whenever the app returns to the foreground.
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (nextState) => {
       if (nextState === "active") {
-        inbox.refetch();
+        if (showingMentions) mentions.refetch();
+        else inbox.refetch();
       }
     });
     return () => subscription.remove();
-  }, [inbox.refetch]);
+  }, [inbox.refetch, mentions.refetch, showingMentions]);
 
   const changeRequests = inbox.changeRequests;
+  const active = showingMentions ? mentions : inbox;
+  const openMention = (item: (typeof mentions.items)[number]) => {
+    // Stamped on open regardless of where it goes — the person has seen it.
+    mentions.markRead(item.commentId);
+    const destination = mentionDestination(item.href);
+    if (destination.kind === "change-request") {
+      router.push({
+        pathname: "/change-requests/[id]",
+        params: { id: destination.changeRequestId },
+      });
+    } else if (destination.kind === "operation") {
+      router.push({
+        pathname: "/change-requests/[id]/operations/[operationId]",
+        params: { id: destination.changeRequestId, operationId: destination.operationId },
+      });
+    } else if (destination.kind === "record") {
+      router.push({ pathname: "/records/[id]", params: { id: destination.recordId } });
+    }
+    // `none`: the card does not offer a press at all, so there is nothing here.
+  };
 
   // Grouping is presentation over the rows already fetched, not filtering:
   // every row here already belongs to this tab.
@@ -113,51 +153,76 @@ function InboxContent() {
   };
 
   return (
-    <DrawerScaffold title="Inbox" refreshing={inbox.refreshing} onRefresh={inbox.refetch}>
+    <DrawerScaffold title="Inbox" refreshing={active.refreshing} onRefresh={active.refetch}>
       <View style={styles.segmentWrap}>
         <NativeSegmentedControl
           value={activeMode}
           options={modes.map((mode) => ({
             value: mode.key,
             label: mode.label,
-            // Absent on a server that cannot count the whole space, which
-            // renders no badge — better than a number taken from one page,
-            // which reads as a total and silently understates it.
-            meta: inbox.counts?.[mode.key],
+            // Mentions shows its UNREAD count on every tab: it is a
+            // notification and has to reach someone who is not looking for it.
+            // The change-request tabs number only what the server counted —
+            // absent when it cannot, since a number taken from one page reads
+            // as a total and silently understates it.
+            meta:
+              mode.key === "mentions"
+                ? mentionUnread || undefined
+                : inbox.counts?.[mode.key as InboxMode],
           }))}
           onChange={setActiveMode}
         />
       </View>
 
-      {inbox.loading ? <NativeLoadingState label="Loading change requests" /> : null}
-      {inbox.error ? (
-        <NativeErrorState message={inbox.error.message} onRetry={inbox.refetch} />
+      {active.loading ? (
+        <NativeLoadingState
+          label={showingMentions ? "Loading mentions" : "Loading change requests"}
+        />
       ) : null}
-      {!inbox.loading && !inbox.error && changeRequests.length === 0 ? (
+      {active.error ? (
+        <NativeErrorState message={active.error.message} onRetry={active.refetch} />
+      ) : null}
+      {!active.loading &&
+      !active.error &&
+      (showingMentions ? mentions.items.length === 0 : changeRequests.length === 0) ? (
         <NativeEmptyState title={emptyCopy[activeMode]} />
       ) : null}
-      {showGroups
-        ? (groups ?? []).map(renderGroup)
-        : changeRequests.length > 0 && (
-            <NativeSection title={activeLabel} caption={`${changeRequests.length}`}>
-              {changeRequests.map((changeRequest, index) => (
-                <ChangeRequestCard
-                  key={changeRequest.id}
-                  changeRequest={changeRequest}
-                  last={index === changeRequests.length - 1}
-                  onPress={() => openChangeRequest(changeRequest)}
+
+      {showingMentions
+        ? mentions.items.length > 0 && (
+            <NativeSection title="Mentions" caption={`${mentions.items.length}`}>
+              {mentions.items.map((item, index) => (
+                <MentionCard
+                  key={item.commentId}
+                  item={item}
+                  last={index === mentions.items.length - 1}
+                  onPress={() => openMention(item)}
                 />
               ))}
             </NativeSection>
-          )}
-      {inbox.hasMore ? (
+          )
+        : showGroups
+          ? (groups ?? []).map(renderGroup)
+          : changeRequests.length > 0 && (
+              <NativeSection title={activeLabel} caption={`${changeRequests.length}`}>
+                {changeRequests.map((changeRequest, index) => (
+                  <ChangeRequestCard
+                    key={changeRequest.id}
+                    changeRequest={changeRequest}
+                    last={index === changeRequests.length - 1}
+                    onPress={() => openChangeRequest(changeRequest)}
+                  />
+                ))}
+              </NativeSection>
+            )}
+      {active.hasMore ? (
         <View style={styles.loadMoreWrap}>
           <NativeActionBar>
             <Button
-              label={inbox.loadingMore ? "Loading…" : "Load more"}
+              label={active.loadingMore ? "Loading…" : "Load more"}
               variant="secondary"
-              disabled={inbox.loadingMore}
-              onPress={inbox.loadMore}
+              disabled={active.loadingMore}
+              onPress={active.loadMore}
             />
           </NativeActionBar>
         </View>

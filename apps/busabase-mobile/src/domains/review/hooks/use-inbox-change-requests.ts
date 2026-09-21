@@ -19,13 +19,13 @@ import {
  * page is fetched, whether the counts can be trusted — lives in
  * `utils/inbox-paging`, where it is testable without a renderer.
  */
-export function useInboxChangeRequests(mode: InboxMode) {
+export function useInboxChangeRequests(mode: InboxMode, { enabled = true } = {}) {
   const buda = useBusabaseOrpc();
   const filter = inboxModeFilter(mode);
 
   const query = useInfiniteQuery<InboxPage, Error, InboxPage[], unknown[], InboxPageParam>({
     queryKey: ["inbox", buda?.spaceScope ?? "no-connection", mode],
-    enabled: buda !== null,
+    enabled: enabled && buda !== null,
     initialPageParam: FIRST_INBOX_PAGE,
     queryFn: ({ pageParam }) => {
       if (!buda) throw new Error("Not connected");
