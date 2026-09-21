@@ -31,6 +31,7 @@ describe("AirApp embed data policy", () => {
     ["systemAdmin.list", "GET"],
     ["apiKeys.list", "GET"],
     ["embedLinks.list", "GET"],
+    ["embedLinks.listPaged", "GET"],
     ["nodes.createChangeRequest", "POST"],
     ["records.changeRequest", "POST"],
     ["grep", "POST"],

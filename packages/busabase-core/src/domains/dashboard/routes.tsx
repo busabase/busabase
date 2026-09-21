@@ -167,6 +167,12 @@ export const getBusabaseDashboardRoutes = (
       title: messages?.routes.assets ?? "Assets",
     },
     {
+      path: "/embed-links",
+      component: dashboard,
+      breadcrumb: messages?.routes.embedLinks ?? "Embed links",
+      title: messages?.routes.embedLinks ?? "Embed links",
+    },
+    {
       path: "/assets/:assetId",
       component: dashboard,
       breadcrumb: messages?.routes.asset ?? "Asset",

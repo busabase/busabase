@@ -38,7 +38,7 @@ import { useRegisterTopbarNodeActions } from "../hooks/use-register-topbar-node-
 import { registerSidePanelTab, type SidePanelTabProps } from "../side-panel-registry";
 import { useIsAnonymousVisitor } from "../visitor-context";
 import { applyViewConfigToRecords, BusaBaseTable } from "./base-table";
-import { FieldValuePreview } from "./field-preview";
+import { type ConversionPreview, FieldConversionPreview } from "./field-conversion-preview";
 import { IStringNameInput } from "./i-string-input";
 import { DialogContent } from "./localized-dialog-content";
 import { NodeActionsMenu } from "./node-actions-menu";
@@ -173,22 +173,15 @@ export function BaseDetailView({
   );
 }
 
-interface ConversionPreview {
-  totalCount: number;
-  convertibleCount: number;
-  nullCount: number;
-  conflicts: Array<{ recordId: string; currentValue: unknown }>;
-}
-
 /**
  * The type selector plus the dry run behind it.
  *
  * The preview is not decoration — it is the feature. A convert drops every value
  * that cannot be re-expressed in the new type, and those values are NOT
- * recoverable from the change request. So the number the user reads first is how
- * many values will be CLEARED, derived from the exact counts rather than counted
- * off the `conflicts` array (which the server caps at 100 — reading its length
- * would under-report the damage on any Base with more affected rows than that).
+ * recoverable from the change request. The panel itself lives in
+ * `./field-conversion-preview` because the approver reading the change request
+ * needs the exact same sentence (see `ConvertFieldImpact` in
+ * `change-request-review.tsx`) — including its derived "will be cleared" count.
  */
 function FieldTypeConversionPanel({
   choiceMode,
@@ -218,9 +211,6 @@ function FieldTypeConversionPanel({
     (type) => !isSystemFieldType(type) && !isUnconvertibleFieldType(type),
   );
   const wantsChoiceMode = targetType === "select" || targetType === "multiselect";
-  const conflictCount = preview.data
-    ? Math.max(preview.data.totalCount - preview.data.convertibleCount - preview.data.nullCount, 0)
-    : 0;
 
   return (
     <div className="mt-4 border-border/50 border-t pt-4">
@@ -282,68 +272,7 @@ function FieldTypeConversionPanel({
         </fieldset>
       ) : null}
 
-      {targetType ? (
-        <div className="mt-3 rounded-md border border-border/60 bg-muted/30 p-3">
-          <div className="font-medium text-xs">{messages.base.conversionPreviewTitle}</div>
-          {preview.isPending ? (
-            <p className="mt-1 text-muted-foreground text-xs">
-              {messages.base.conversionPreviewLoading}
-            </p>
-          ) : preview.error ? (
-            <p className="mt-1 text-rejected-strong text-xs">
-              {localizeCoreErrorMessage(
-                messages,
-                preview.error instanceof Error
-                  ? preview.error.message
-                  : messages.base.conversionPreviewFailed,
-              )}
-            </p>
-          ) : preview.data ? (
-            <>
-              <p
-                className={`mt-1 font-medium text-sm ${
-                  conflictCount > 0 ? "text-rejected-strong" : "text-muted-foreground"
-                }`}
-                data-testid="conversion-conflict-count"
-              >
-                {conflictCount > 0
-                  ? fmt(messages.base.conversionConflicts, {
-                      count: conflictCount,
-                      plural: conflictCount === 1 ? "" : "s",
-                    })
-                  : messages.base.conversionNoConflicts}
-              </p>
-              <p className="mt-1 text-muted-foreground text-xs">
-                {fmt(messages.base.conversionTotals, {
-                  total: preview.data.totalCount,
-                  convertible: preview.data.convertibleCount,
-                  nulls: preview.data.nullCount,
-                })}
-              </p>
-              {conflictCount > 0 ? (
-                <>
-                  <ul className="mt-2 space-y-1">
-                    {preview.data.conflicts.slice(0, 10).map((conflict) => (
-                      <li className="truncate text-xs" key={conflict.recordId}>
-                        <FieldValuePreview field={field} value={conflict.currentValue} />
-                      </li>
-                    ))}
-                  </ul>
-                  <p className="mt-1 text-muted-foreground text-xs">
-                    {fmt(messages.base.conversionConflictSampleNote, {
-                      shown: Math.min(preview.data.conflicts.length, 10),
-                      count: conflictCount,
-                    })}
-                  </p>
-                  <p className="mt-1 text-rejected-strong text-xs">
-                    {messages.base.conversionIrreversible}
-                  </p>
-                </>
-              ) : null}
-            </>
-          ) : null}
-        </div>
-      ) : null}
+      {targetType ? <FieldConversionPreview field={field} preview={preview} /> : null}
     </div>
   );
 }

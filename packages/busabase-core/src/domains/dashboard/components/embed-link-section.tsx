@@ -113,7 +113,7 @@ export function useActiveEmbedLinkCount(
   return (query.data ?? []).filter((link) => link.active).length;
 }
 
-const statusOf = (link: EmbedLinkVO): "active" | "revoked" | "expired" => {
+export const getEmbedLinkStatus = (link: EmbedLinkVO): "active" | "revoked" | "expired" => {
   if (link.revokedAt) return "revoked";
   // `active` is computed server-side against the server's clock. Do NOT
   // recompute expiry from `expiresAt` here — a skewed client would disagree
@@ -192,7 +192,7 @@ function EmbedLinkRow({
   const messages = useCoreI18n();
   const t = messages.embedLinks;
   const locale = useCoreLocale();
-  const status = statusOf(link);
+  const status = getEmbedLinkStatus(link);
   const statusLabel =
     status === "active" ? t.statusActive : status === "revoked" ? t.statusRevoked : t.statusExpired;
   const frameLabel: Record<EmbedFrameMode, string> = {
@@ -354,14 +354,16 @@ export function EmbedLinkSection({
   if (!canManage) return null;
   // Second, authoritative gate: the SERVER said no.
   //
-  // `useWorkspacePermissionLevel` is a React context, and the sidebar chrome
-  // (`BusabaseDashboardShell`) mounts its copy of the Share dialog OUTSIDE the
-  // `SubmitPermissionProvider` that `BusabaseDashboard` installs — so on that
-  // path the level reads as the context default (`"manage"`) even for a Cloud
-  // viewer. Rather than duplicate the host's permission plumbing, follow the
-  // one source that is never wrong: if `embedLinks.list` was refused, there is
-  // nothing here this viewer may do, so show nothing instead of a Create button
-  // that can only produce a 403 toast.
+  // `canManage` above is a React context read, and a context is only ever as
+  // right as the host that fed it — the sidebar chrome
+  // (`BusabaseDashboardShell`) used to mount its copy of the Share dialog
+  // OUTSIDE any `SubmitPermissionProvider`, so on that path the level read as
+  // the context default (`"manage"`) even for a Cloud viewer. The shell now
+  // provides the host-resolved level to its own subtree, so that particular
+  // hole is closed; this stays as the second, authoritative gate for every
+  // other way this component can be mounted: if `embedLinks.list` was refused,
+  // there is nothing here this viewer may do, so show nothing instead of a
+  // Create button that can only produce a 403 toast.
   if (listQuery.isError) return null;
 
   const links = listQuery.data ?? [];

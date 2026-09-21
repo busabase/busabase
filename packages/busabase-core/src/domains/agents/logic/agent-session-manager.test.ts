@@ -94,8 +94,8 @@ vi.mock("@agentclientprotocol/sdk/experimental/ws-client", () => ({
 }));
 
 const {
-  cancelAgentSession,
   AgentSessionTerminalError,
+  cancelAgentSession,
   createAgentSession,
   closeAgentSession,
   closeAgentSessions,
@@ -910,6 +910,75 @@ describe("agent session manager — live-session ownership", () => {
     );
     await expect(listIdsFor("alice")).resolves.toEqual([]);
   });
+
+  it("refuses prompt / cancel / set-config / permission-answer on another actor's live session", async () => {
+    const [clientSide, agentSide] = linkedStreams();
+    mocks.createWebSocketStream.mockReturnValueOnce(clientSide);
+    const agent = serveFakeAgent(agentSide, [MODEL_CONFIG]);
+    const alices = await runWithBusabaseContext({ spaceId: "space-a", actorId: "alice" }, () =>
+      createAgentSession({ slug: "test-agent", spaceId: "space-a" }),
+    );
+    await runWithBusabaseContext({ spaceId: "space-a", actorId: "alice" }, () =>
+      waitUntilSettled(alices.id),
+    );
+
+    // Every request-path operation, not just `close`: knowing the id must not
+    // let Bob drive, interrupt, reconfigure, or answer a permission prompt on
+    // Alice's agent. All four report the id as unknown — indistinguishable
+    // from one that never existed, so the error is not an id oracle.
+    const unknown = `Unknown agent session: ${alices.id}`;
+    const asBob = <T>(run: () => Promise<T> | T) =>
+      runWithBusabaseContext({ spaceId: "space-a", actorId: "bob" }, async () => run());
+
+    await expect(
+      asBob(() => promptAgentSession(alices.id, "drive someone else's agent")),
+    ).rejects.toThrow(unknown);
+    await expect(asBob(() => cancelAgentSession(alices.id))).rejects.toThrow(unknown);
+    await expect(
+      asBob(() => setAgentSessionConfigOption(alices.id, "model", "fast")),
+    ).rejects.toThrow(unknown);
+    await expect(
+      asBob(() => respondToAgentPermission(alices.id, "req-1", "allow")),
+    ).rejects.toThrow(unknown);
+
+    // Nothing reached the agent, and Alice's session is unchanged.
+    expect(agent.promptTexts()).toEqual([]);
+    expect(agent.setConfigCallCount()).toBe(0);
+    const [asAlice] = await runWithBusabaseContext(
+      { spaceId: "space-a", actorId: "alice" },
+      async () => listAgentSessions(),
+    );
+    expect(asAlice?.id).toBe(alices.id);
+    expect(asAlice?.status).not.toBe("ended");
+    expect(asAlice?.modelOption?.currentValue).toBe("auto");
+
+    // The owner is not blocked by the same guard.
+    const updated = await runWithBusabaseContext(
+      { spaceId: "space-a", actorId: "alice" },
+      async () => setAgentSessionConfigOption(alices.id, "model", "fast"),
+    );
+    expect(updated.modelOption?.currentValue).toBe("fast");
+
+    await closeAgentSessions([alices.id]);
+  });
+
+  it("refuses another actor's persisted remote session when this worker has no live copy", async () => {
+    const session = runtimeRecord().session;
+    mocks.storedSessions.push(session);
+    mocks.storedScopes.set(session.id, { spaceId: "space-a", actorId: "alice" });
+
+    const asBob = <T>(run: () => Promise<T> | T) =>
+      runWithBusabaseContext({ spaceId: "space-a", actorId: "bob" }, async () => run());
+    const unknown = `Unknown agent session: ${session.id}`;
+    await expect(asBob(() => promptAgentSession(session.id, "hello"))).rejects.toThrow(unknown);
+    await expect(
+      asBob(() => setAgentSessionConfigOption(session.id, "model", "fast")),
+    ).rejects.toThrow(unknown);
+    await expect(asBob(() => closeAgentSession(session.id))).rejects.toThrow(unknown);
+    expect(mocks.acquireSessionLease).not.toHaveBeenCalled();
+    expect(mocks.endRemoteSession).not.toHaveBeenCalled();
+    expect(session.status).toBe("idle");
+  });
 });
 
 describe("promptAgentSession", () => {
@@ -932,6 +1001,9 @@ describe("promptAgentSession", () => {
     const listener = vi.fn();
     const session = {
       id: "session-1",
+      // Hand-built `LiveSession`s go straight into the map, so they must carry
+      // the same ownership fields `createAgentSession` stamps on — the default
+      // context's space and its null actor — or `requireLocalSession` rejects them.
       spaceId: LOCAL_SPACE_ID,
       actorId: null,
       slug: "claude",

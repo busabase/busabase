@@ -239,6 +239,7 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   "nodes.share.disable": node("manage"),
   "embedLinks.create": workspace("manage"),
   "embedLinks.list": workspace("manage"),
+  "embedLinks.listPaged": workspace("manage"),
   "embedLinks.revoke": workspace("manage"),
   // The space-wide "what is publicly shared" listing. `workspace`, not `node`,
   // and deliberately the same posture as `embedLinks.list` right above it:

@@ -79,6 +79,7 @@ import "../rich-node/components/register";
 import { AirAppEngineAvailabilityProvider } from "../airapp/components/engine-availability-context";
 import { AgentIntegrationProvider } from "./agent-integration-context";
 import { NodeActivityView, RecordActivityView } from "./components/activity";
+import { EmbedLinksAuditView } from "./components/embed-links-audit-view";
 import { FileUploadTaskProvider } from "./components/file-upload-tasks";
 import { BaseGraphView } from "./components/graph-view";
 import { HomeView } from "./components/home";
@@ -95,7 +96,10 @@ import {
   pinNodeToSidePanel,
 } from "./components/side-panel-sources";
 import { BaseTableSkeleton, NodeDetailSkeleton } from "./components/skeletons";
-import { SubmitPermissionProvider } from "./components/split-submit-button";
+import {
+  SubmitPermissionProvider,
+  useWorkspacePermissionLevel,
+} from "./components/split-submit-button";
 import { BusabaseTopbarBreadcrumb, TopbarNodeActionsSlot } from "./components/topbar";
 import { getNodeDetailBreadcrumbItems } from "./helpers/breadcrumbs";
 import { shouldQueryGlobalChangeRequests } from "./helpers/change-request-data-source";
@@ -264,7 +268,17 @@ interface BusabaseDashboardProps {
    * Defaults to `"member"` so every existing consumer is untouched.
    */
   visitorKind?: DashboardVisitorKind;
-  /** Host-resolved workspace permission; local/open-source defaults to manage. */
+  /**
+   * Host-resolved workspace permission for this render.
+   *
+   * Omit it and the dashboard INHERITS whatever level is already in scope —
+   * normally the one `BusabaseDashboardShell` provides around it — falling back
+   * to `"manage"` when nothing does (the open-source single-owner install, and
+   * every standalone/embedded consumer that has no shell above it). It used to
+   * default to a hard `"manage"`, which meant a dashboard nested inside a
+   * correctly-gated shell would silently reset the level back to manager for
+   * all of its own content.
+   */
   submitPermissionLevel?: ApiKeyPermissionLevel;
 }
 
@@ -275,12 +289,16 @@ export function BusabaseDashboard({
   locale,
   provideQueryClient = true,
   visitorKind = "member",
-  submitPermissionLevel = "manage",
+  submitPermissionLevel,
   ...props
 }: BusabaseDashboardProps) {
   const queryClient = useMemo(() => new QueryClient(), []);
+  // No host-stated level = inherit the surrounding one (the shell's) instead of
+  // asserting `manage` over it; `useWorkspacePermissionLevel`'s own default
+  // covers the case where there is no provider above us at all.
+  const inheritedPermissionLevel = useWorkspacePermissionLevel();
   const content = (
-    <SubmitPermissionProvider permissionLevel={submitPermissionLevel}>
+    <SubmitPermissionProvider permissionLevel={submitPermissionLevel ?? inheritedPermissionLevel}>
       <CoreI18nProvider locale={locale}>
         {/* Descendants (node-detail views, headers) read this to drop editing and
             permission affordances a session-less visitor can neither use nor be
@@ -1021,6 +1039,10 @@ function BusabaseDashboardContent({
       return { badge: null, title: messages.nav.assets };
     }
 
+    if (locationPath === "/embed-links") {
+      return { badge: null, title: messages.nav.embedLinks };
+    }
+
     if (isAssetDetailRoute) {
       return { badge: null, title: messages.nav.assets };
     }
@@ -1146,6 +1168,10 @@ function BusabaseDashboardContent({
 
     if (locationPath === "/assets") {
       return [{ label: messages.nav.assets }];
+    }
+
+    if (locationPath === "/embed-links") {
+      return [{ label: messages.nav.embedLinks }];
     }
 
     if (isAssetDetailRoute) {
@@ -2366,6 +2392,10 @@ function BusabaseDashboardContent({
 
     if (locationPath === "/activity") {
       return <ActivityView orpc={orpc} emptyGuide={emptyGuide} />;
+    }
+
+    if (locationPath === "/embed-links") {
+      return <EmbedLinksAuditView orpc={orpc} />;
     }
 
     if (locationPath === "/agents") {

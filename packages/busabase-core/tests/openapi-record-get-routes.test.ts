@@ -182,7 +182,8 @@ describe("Busabase OpenAPI record get route", () => {
     // The dashboard route-state guard adds one lightweight read (+1 -> 116).
     // File Preview adds config, prepare, and OSS credential management
     // operations (+3 -> 119). All three keep the API key server-side.
-    // `GET /node-shares` adds the space-level public-share listing (+1 -> 120).
+    // Workspace embed-link audit adds one bounded paged read (+1 -> 120).
+    // `GET /node-shares` adds the space-level public-share listing (+1 -> 121).
     // A collection of its own rather than a fourth `/nodes/{nodeId}/share`
     // route, because it is the one share question asked with NO node in hand:
     // "what in this workspace can anyone on the internet open?". Published
@@ -190,6 +191,10 @@ describe("Busabase OpenAPI record get route", () => {
     // a script that audits its own workspace's exposure is exactly the kind of
     // thing an API key should be able to do. `workspace("manage")`, matching
     // `embedLinks.list`, and it returns `hasPassword` rather than any hash.
-    expect(operationCount).toBe(120);
+    //
+    // NOTE: this branch and develop each added ONE endpoint and each bumped
+    // this to 120 independently. The merge has to be 121 — a ledger like this
+    // is exactly what a "clean" automerge gets silently wrong.
+    expect(operationCount).toBe(121);
   });
 });

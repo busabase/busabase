@@ -1,5 +1,12 @@
+import { useQuery } from "@tanstack/react-query";
 import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
-import type { AuditEventVO, ChangeRequestVO, OperationVO, ReviewVO } from "busabase-contract/types";
+import type {
+  AuditEventVO,
+  ChangeRequestVO,
+  FieldType,
+  OperationVO,
+  ReviewVO,
+} from "busabase-contract/types";
 import { Check, ChevronRight, GitMerge, Loader2, PencilLine, Sparkles, X } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { Fragment, useEffect, useMemo, useState } from "react";
@@ -25,8 +32,10 @@ import {
 } from "../helpers/change-request";
 import { formatDetailTime } from "../helpers/format";
 import { resolveSubmissionIdentity } from "../helpers/source-attribution";
+import { useDashboardOrpc } from "../orpc-context";
 import { useIsAnonymousVisitor } from "../visitor-context";
 import { SubjectCommentThread } from "./comments";
+import { FieldConversionPreview } from "./field-conversion-preview";
 import { UserRefButton } from "./identity";
 import { memberUserMap, useSpaceMemberRoster } from "./member-field";
 import { OperationFieldChanges } from "./operation-diff";
@@ -132,6 +141,133 @@ export const operationChangedSinceReview = (
   const reviewedHead = latest.visibleOperationHeads[operation.id];
   return Boolean(reviewedHead) && reviewedHead !== operation.headCommitId;
 };
+
+/**
+ * Statuses where a merge can still happen, and therefore where a fresh dry run
+ * still means something. `approved` is in the list on purpose: approving does
+ * not merge, so the Merge button is still there, and that gap is exactly where
+ * the column can move underneath the approver. On a merged/rejected/abandoned
+ * change request a re-run would either describe a conversion that already
+ * happened or fail outright, so the stored operation is shown alone instead.
+ */
+const CONVERT_PREVIEW_STATUSES: readonly string[] = [
+  "in_review",
+  "changes_requested",
+  "approved",
+  "conflict",
+];
+
+interface ReviewConversionQueryState {
+  data?: Parameters<typeof FieldConversionPreview>[0]["preview"]["data"];
+  error: unknown;
+  isFetching: boolean;
+  isPending: boolean;
+}
+
+/**
+ * Never present cached conversion damage as the review-time answer while the
+ * mandatory refetch is still running. TanStack keeps old `data` during a
+ * refetch, so checking only `isPending` would render that old count with a
+ * "checked just now" label until the network response arrived.
+ */
+export const reviewConversionPreviewState = (query: ReviewConversionQueryState) => {
+  const isRefreshing = query.isPending || query.isFetching;
+  return {
+    preview: {
+      data: isRefreshing ? undefined : query.data,
+      error: isRefreshing ? null : query.error,
+      isPending: isRefreshing,
+    },
+    checkedNow: !isRefreshing && !query.error && Boolean(query.data),
+  };
+};
+
+/**
+ * What the pending convert will do to the stored values — computed NOW, not at
+ * submit time.
+ *
+ * Nothing locks the column between submit and merge: another member or an agent
+ * can keep writing to it while the change request waits in the inbox. So the
+ * approver gets the same sentence the submitter read ("N values will be
+ * cleared") re-derived against today's data, from the operation's OWN
+ * `selectChoiceMode` — under `auto_create` a value with no matching choice mints
+ * one, under `null_on_missing` the same value is dropped, and guessing the
+ * default would model a conversion that is not the one about to merge.
+ */
+function ConvertFieldImpact({
+  changeRequest,
+  operation,
+}: {
+  changeRequest: ChangeRequestVO;
+  operation: OperationVO;
+}) {
+  const messages = useCoreI18n();
+  const isAnonymous = useIsAnonymousVisitor();
+  // A host that never wired `orpc` (mobile WebView, SSR) simply does not offer
+  // the dry run, the same graceful degradation the shell's other orpc-gated
+  // actions use.
+  const orpc = useDashboardOrpc();
+  const payload = operation.headCommit.payload as {
+    fieldId?: unknown;
+    newType?: unknown;
+    selectChoiceMode?: unknown;
+    slug?: unknown;
+  };
+  const baseId = changeRequest.baseId ?? operation.baseId ?? "";
+  const fieldId = typeof payload.fieldId === "string" ? payload.fieldId : "";
+  const newType = typeof payload.newType === "string" ? (payload.newType as FieldType) : null;
+  const selectChoiceMode =
+    payload.selectChoiceMode === "auto_create" ? "auto_create" : "null_on_missing";
+  const enabled = Boolean(
+    orpc &&
+      !isAnonymous &&
+      baseId &&
+      fieldId &&
+      newType &&
+      CONVERT_PREVIEW_STATUSES.includes(changeRequest.status),
+  );
+  // Built only when the dry run is actually wanted — a merged/rejected change
+  // request must not even describe a query, let alone run one. The inert branch
+  // keeps the hook order stable (this is still a hook call either way).
+  const previewOptions =
+    orpc && enabled
+      ? orpc.bases.previewFieldConversion.queryOptions({
+          input: { baseId, fieldId, newType: newType ?? "text", selectChoiceMode },
+        })
+      : { queryKey: ["busabase", "field-conversion-preview", "disabled"], queryFn: () => null };
+  const previewQuery = useQuery({
+    ...previewOptions,
+    enabled,
+    // `refetchOnMount: "always"` is the whole point of this panel: a cached
+    // answer from when the change request was submitted is precisely the stale
+    // number the approver must not be shown. `retry: false` keeps a genuine
+    // failure (field already converted, deleted, no longer convertible) visible
+    // instead of spinning — an empty panel reading "0 values" is the dangerous
+    // way to fail here.
+    refetchOnMount: "always",
+    retry: false,
+  });
+  const freshPreview = reviewConversionPreviewState(previewQuery);
+
+  if (!enabled) {
+    return null;
+  }
+
+  const field = (changeRequest.base?.fields ?? []).find(
+    (candidate) => candidate.id === fieldId || candidate.slug === payload.slug,
+  );
+
+  return (
+    <div className="mt-4" data-testid="convert-field-impact">
+      <FieldConversionPreview field={field} preview={freshPreview.preview} />
+      {freshPreview.checkedNow ? (
+        <p className="mt-1.5 text-muted-foreground text-xs">
+          {messages.review.conversionCheckedNow}
+        </p>
+      ) : null}
+    </div>
+  );
+}
 
 export function OperationReviewSection({
   changeRequest,
@@ -242,11 +378,21 @@ export function OperationReviewSection({
               operation={operation}
             />
           ) : (
-            <OperationFieldChanges
-              changeRequest={changeRequest}
-              fieldUsers={diffFieldUsers}
-              operation={operation}
-            />
+            <>
+              {/* ABOVE the payload, not below it. The Approve button lives in a
+                  sticky rail that is visible without scrolling, so a loss count
+                  parked under seven rows of stored payload is one a hurried
+                  approver never reads — which is the exact failure this panel
+                  exists to prevent. */}
+              {operation.operation === "base_convert_field" ? (
+                <ConvertFieldImpact changeRequest={changeRequest} operation={operation} />
+              ) : null}
+              <OperationFieldChanges
+                changeRequest={changeRequest}
+                fieldUsers={diffFieldUsers}
+                operation={operation}
+              />
+            </>
           )}
           {!isAnonymous ? (
             <div className="mt-4">

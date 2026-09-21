@@ -164,6 +164,7 @@ export const busabaseDemoRouter = os.router({
       throw demoUnsupported("Create embed link");
     }),
     list: os.embedLinks.list.handler(() => []),
+    listPaged: os.embedLinks.listPaged.handler(() => ({ items: [], nextCursor: null })),
     revoke: os.embedLinks.revoke.handler(() => {
       throw demoUnsupported("Revoke embed link");
     }),
