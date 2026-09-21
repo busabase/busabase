@@ -85,6 +85,12 @@
   padding: 24px 0;
 }
 
+/* The Doc scroller owns scrolling; keep a small offset when the TOC jumps to
+ * a heading so the heading does not sit flush against the viewport edge. */
+.milkdown .ProseMirror :is(h1, h2, h3) {
+  scroll-margin-top: 2.5rem;
+}
+
 /* Crepe's shipped reset.css sizes headings for a full-page document canvas
  * (h1 42px/50px line-height down to h6 18px, all weight 400 except a bolded
  * h6) — oversized and under-weighted for content sitting inside a dashboard

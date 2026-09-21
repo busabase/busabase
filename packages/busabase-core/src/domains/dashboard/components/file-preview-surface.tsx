@@ -55,7 +55,6 @@ export function FilePreviewSurface({
       data-file-fullscreen={effectiveFullscreenState.fullscreen ? "true" : "false"}
       data-file-preview=""
       exitLabel={messages.airapp.exitFullscreen}
-      fullscreenAvailable={fullscreenAvailable}
       fullscreenState={effectiveFullscreenState}
       toolbar={
         showToolbar ? (

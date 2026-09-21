@@ -1616,17 +1616,106 @@ export async function startAgentSessionPrompt(
   await started;
 }
 
+/**
+ * Send `session/cancel` for a remote session owned by another worker.
+ *
+ * This deliberately does not call `reattachRemoteSession`: reattachment runs
+ * `session/load`, which may wait behind the in-flight turn we are trying to
+ * stop. ACP cancellation only needs an initialized connection and the
+ * durable ACP session id, so a short-lived connection can deliver the
+ * notification immediately without replaying history or claiming the turn's
+ * lease.
+ */
+async function cancelRemoteAgentSession(record: AgentSessionRuntimeRecord): Promise<void> {
+  const launch = await resolveLaunch(record.session.slug);
+  const acpSessionId = record.acpSessionId;
+  if (launch.transport !== "remote-websocket" || !launch.url || !acpSessionId) {
+    throw new Error(`Unknown agent session: ${record.session.id}`);
+  }
+
+  const connectionId = createAcpConnectionId();
+  const endpointDiagnostics = describeAcpEndpoint(launch.url);
+  const stream = createWebSocketStream(launch.url, {
+    headers: {
+      [ACP_CONNECTION_ID_HEADER]: connectionId,
+      ...(launch.authHeader ? { Authorization: launch.authHeader } : {}),
+    },
+    WebSocket: WebSocket as unknown as never,
+  });
+
+  logAcpConnection("info", "cancel_connection_started", {
+    connectionId,
+    sessionId: record.session.id,
+    acpSessionId,
+    slug: launch.slug,
+    transport: launch.transport,
+    ...endpointDiagnostics,
+  });
+
+  try {
+    await acp.client({ name: "busabase" }).connectWith(stream, async (ctx) => {
+      await ctx.request(acp.methods.agent.initialize, {
+        protocolVersion: acp.PROTOCOL_VERSION,
+        clientCapabilities: {},
+      });
+      await ctx.notify(acp.methods.agent.session.cancel, {
+        sessionId: acpSessionId,
+      });
+    });
+    logAcpConnection("info", "cancel_sent", {
+      connectionId,
+      sessionId: record.session.id,
+      acpSessionId,
+      slug: launch.slug,
+      transport: launch.transport,
+      ...endpointDiagnostics,
+    });
+  } catch (error) {
+    logAcpConnection("warn", "cancel_failed", {
+      connectionId,
+      sessionId: record.session.id,
+      acpSessionId,
+      slug: launch.slug,
+      transport: launch.transport,
+      ...endpointDiagnostics,
+      ...describeAcpError(error),
+    });
+    throw error;
+  }
+}
+
 export async function cancelAgentSession(sessionId: string): Promise<void> {
-  const s = requireLocalSession(sessionId);
-  startingPromptControllers
-    .get(s)
-    ?.abort(new DOMException("Agent turn cancelled during startup", "AbortError"));
-  // Before session/new/session.load there is no ACP session id a protocol
-  // cancellation could name. Aborting the startup waiter above settles the
-  // prompt RPC without ending this durable conversation; initialization keeps
-  // running so a later prompt can reuse the same session.
-  if (s.acpSessionId === null) return;
-  await s.cancel();
+  const candidate = sessions().get(sessionId);
+  const local =
+    candidate && isLiveSessionVisibleToCurrentRequest(candidate) ? candidate : undefined;
+  if (local) {
+    startingPromptControllers
+      .get(local)
+      ?.abort(new DOMException("Agent turn cancelled during startup", "AbortError"));
+    // Before session/new/session.load there is no ACP session id a protocol
+    // cancellation could name. Aborting the startup waiter above settles the
+    // prompt RPC without ending this durable conversation; initialization keeps
+    // running so a later prompt can reuse the same session.
+    if (local.acpSessionId === null) return;
+    await local.cancel();
+    return;
+  }
+
+  const record = await waitForRemoteSessionIdentity(sessionId);
+  if (!record || record.session.transport !== "remote-websocket") {
+    throw new Error(`Unknown agent session: ${sessionId}`);
+  }
+  if (record.session.status === "failed" || record.session.status === "ended") {
+    throw new AgentSessionTerminalError(
+      record.session.status,
+      false,
+      record.session.error ?? `This session has ${record.session.status}.`,
+    );
+  }
+  if (!record.acpSessionId) {
+    throw new Error("This remote agent session is still starting. Try again shortly.");
+  }
+  await cancelRemoteAgentSession(record);
 }
 
 /**

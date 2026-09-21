@@ -320,9 +320,11 @@ export const updateForm = async (nodeId: string, input: UpdateFormDTO): Promise<
 /**
  * Submit a filled-in form. Translates `{inputName: value}` to `{fieldSlug: value}`
  * via the binding contract, applies per-form required overrides, then delegates
- * to the base's `createChangeRequest` — so the submission becomes an
- * approval-first record-create ChangeRequest (validated by validateRecordFields)
- * rather than a direct write.
+ * to the base's `createChangeRequest` — so the submission becomes a
+ * record-create ChangeRequest (validated by validateRecordFields) rather than a
+ * raw write. Whether it merges immediately is the ordinary permission question
+ * (`shouldAutoMerge`): a submitter who can write the target Base lands the
+ * record, an anonymous one resolves no level on it and always queues.
  *
  * Access is gated on the form's own `share` settings — there is no shareToken:
  *   private                        → caller must be a space member

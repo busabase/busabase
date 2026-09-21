@@ -1,8 +1,10 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { hasApiKeyLevel } from "busabase-contract/access-control/api-key-level";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import { isEmbeddableNodeType } from "busabase-contract/contract/embed-link-schemas";
+import type { SharedNodeVO } from "busabase-contract/contract/schemas";
 import { hasCapability, publicAccessOf } from "busabase-contract/domains";
 import type { NodeVO } from "busabase-contract/types";
 import {
@@ -38,13 +40,26 @@ import {
 import type { NavDropPosition, NavItemAction, NavNodeDropParams } from "openlib/ui/dashboard";
 import { DashboardLayout, type NavGroup, type NavItem, NavMain } from "openlib/ui/dashboard";
 import type { ComponentProps, ReactNode } from "react";
-import { useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
 import { CoreI18nProvider, coreMessagesByLocale } from "../../../i18n";
 import { AirAppEngineAvailabilityProvider } from "../../airapp/components/engine-availability-context";
 import type { AirAppRunnerKind } from "../../airapp/components/runners/types";
+import {
+  createKnownNodeCache,
+  type KnownNode,
+  knownNodeCacheScope,
+} from "../helpers/known-node-cache";
 import { nodeIconGlyph, resolveNodeIcon } from "../helpers/node-icons";
+import {
+  DEFAULT_WORKSPACE_FILTER,
+  nodeTypesForWorkspaceFilter,
+  readStoredWorkspaceFilter,
+  WORKSPACE_FILTERS,
+  type WorkspaceFilterKey,
+  writeStoredWorkspaceFilter,
+} from "../helpers/sidebar-workspace-filter";
 import type { MoveNodePayload } from "../hooks/use-move-node";
 import { DashboardOrpcProvider } from "../orpc-context";
 import { parseNodeDetailRoute } from "../utils/node-route";
@@ -56,6 +71,8 @@ import { NodeMoveDialog } from "./node-move-dialog";
 import { NodeSettingsDialog, type NodeSettingsTab } from "./node-settings-dialog";
 import { NodeSettingsPermissionsSlotContext } from "./node-settings-permissions-slot";
 import { NodeShareDialog } from "./node-share-button";
+import { SidebarWorkspaceFilterMenu } from "./sidebar-workspace-filter-menu";
+import { useWorkspacePermissionLevel } from "./split-submit-button";
 import "./busabase-sidebar-nav.css";
 
 /** Stable, always-disabled query used in place of `orpc.nodes.listFavorites.queryOptions({})`
@@ -73,6 +90,55 @@ const DISABLED_ANCESTORS_QUERY = {
   queryFn: async () => ({ ancestorIds: [] as string[] }),
   enabled: false,
 };
+
+/**
+ * Same always-disabled stand-in, for the sidebar's `orpc.nodes.list({ types })`
+ * filter. Swapped in whenever the active filter is NOT a type query (the
+ * workspace tree, or Recent), so looking at the tree never quietly fetches the
+ * Apps list behind it.
+ */
+const DISABLED_NODE_TYPE_LIST_QUERY = {
+  queryKey: ["busabase-dashboard-shell", "node-type-list-disabled"],
+  queryFn: async () => [] as NodeVO[],
+  enabled: false,
+};
+
+/**
+ * Same always-disabled stand-in, for the sidebar's `orpc.nodes.share.list`
+ * ("Shared") filter. Swapped in outside that one mode, and also whenever this
+ * viewer may not read the listing at all — the endpoint is `workspace("manage")`,
+ * and firing a request that can only 403 is not a way to find that out.
+ */
+const DISABLED_SHARED_LIST_QUERY = {
+  queryKey: ["busabase-dashboard-shell", "shared-list-disabled"],
+  queryFn: async () => [] as SharedNodeVO[],
+  enabled: false,
+};
+
+/**
+ * Does this error mean "you are not allowed", as opposed to "it broke"?
+ *
+ * Duck-typed rather than `instanceof ORPCError`: the value TanStack Query hands
+ * back has crossed the oRPC client boundary, and every host in this repo throws
+ * `ORPCError("FORBIDDEN")` (see busabase-cloud's `openapi/router.ts`) which
+ * arrives carrying `code`, while a plain HTTP failure carries `status`. Both
+ * spellings are accepted so a transport change cannot silently turn "denied"
+ * into "broken", which would leave a dead menu entry behind.
+ */
+const isPermissionDeniedError = (error: unknown): boolean => {
+  if (!error || typeof error !== "object") return false;
+  const { code, status } = error as { code?: unknown; status?: unknown };
+  return code === "FORBIDDEN" || code === "UNAUTHORIZED" || status === 403 || status === 401;
+};
+
+/**
+ * How many rows "Recent" shows. The known-node cache holds up to 1000 entries
+ * (see `known-node-cache.ts`), which is a search index, not a sidebar section —
+ * past roughly a screenful the list stops being "where was I" and becomes
+ * another thing to scroll past, inside a sidebar that already has a tree below
+ * it.
+ */
+const MAX_RECENT_SIDEBAR_ITEMS = 30;
 
 const WORKSPACE_SKELETON_ROWS = [
   { id: "workspace-node-skeleton-1", width: "w-3/5" },
@@ -100,6 +166,7 @@ type ContextualNavKey =
   | "activity"
   | "archived"
   | "assets"
+  | "shared"
   | "agents"
   | "apps"
   | "templates";
@@ -111,6 +178,7 @@ const contextualNavKeyForPath = (location: string): ContextualNavKey | null => {
   if (path === "/activity") return "activity";
   if (path === "/archived") return "archived";
   if (path === "/assets" || path.startsWith("/assets/")) return "assets";
+  if (path === "/shared") return "shared";
   if (path === "/agents" || path.startsWith("/agents/")) return "agents";
   if (path === "/apps" || path.startsWith("/apps/")) return "apps";
   if (path === "/templates" || path.startsWith("/templates/")) return "templates";
@@ -133,6 +201,7 @@ const isContextualNavKey = (value: string | null): value is ContextualNavKey =>
   value === "activity" ||
   value === "archived" ||
   value === "assets" ||
+  value === "shared" ||
   value === "agents" ||
   value === "apps" ||
   value === "templates";
@@ -254,6 +323,40 @@ interface BusabaseDashboardShellProps {
    * no connection check.
    */
   agentIntegration?: AgentIntegrationTarget;
+  /**
+   * Which workspace the client-side known-node cache is scoped to — the SAME
+   * value the host passes `BusabaseDashboard`. The sidebar's "Recent" filter
+   * reads that cache, and the dashboard is what writes it.
+   *
+   * Needed as a prop for the same reason `agentIntegration` is: this shell is
+   * chrome AROUND `BusabaseDashboard`, so it cannot read the dashboard's
+   * context. Get it wrong and nothing errors — "Recent" simply stays empty
+   * forever, because it is reading a different scope than the one being
+   * written.
+   */
+  cacheSpaceKey?: string;
+  /**
+   * The viewer half of that same cache scope (see `cacheSpaceKey`). Omit it on
+   * a single-tenant host that omits it for `BusabaseDashboard` too — both
+   * resolve to the same `"anonymous"` suffix, which is what keeps the two
+   * scopes identical.
+   */
+  currentUserId?: string | null;
+  /**
+   * Whether THIS viewer may manage workspace-level sharing — the gate on the
+   * "Shared" filter and the `/shared` audit page, both of which sit behind the
+   * manage-level `nodes.share.list`.
+   *
+   * A prop for the same reason `agentIntegration` and `cacheSpaceKey` are: the
+   * shell is chrome AROUND `BusabaseDashboard`, so the permission context the
+   * dashboard mounts does not reach up here, and the hook below resolves to its
+   * `"manage"` default for everyone. The cloud already computes this exact
+   * boolean (`usePermissions().canManage`) to gate the `/shared` menu entry — so
+   * passing it keeps ONE capability behind ONE gate instead of two that can
+   * disagree. Omit it on a single-owner host (open source), where manage is the
+   * correct answer for the only user there is.
+   */
+  canManageShares?: boolean;
 }
 
 /**
@@ -278,6 +381,9 @@ export function BusabaseDashboardShell({
   onExpandNode,
   checkIsDescendant,
   agentIntegration,
+  cacheSpaceKey = "local",
+  currentUserId,
+  canManageShares: canManageSharesProp,
 }: BusabaseDashboardShellProps) {
   // The node targeted by the sidebar "•••" → Settings/Rename/Permissions
   // actions; drives the one shared `NodeSettingsDialog` rendered below (only
@@ -288,6 +394,26 @@ export function BusabaseDashboardShell({
   // replaces all three. Neither Settings nor Rename is ever set for a Base
   // node — `buildNavItem` omits both actions for those.
   const [location] = useLocation();
+  // What this viewer may do in this space. The "Shared" filter and the
+  // `/shared` audit row both read `nodes.share.list`, which is
+  // `workspace("manage")` — see `PROCEDURE_PERMISSION_POLICY`.
+  //
+  // Three sources, in descending order of authority.
+  //
+  // 1. `canManageShares` from the host, when given. This shell is the chrome
+  //    AROUND `BusabaseDashboard`, so the permission context the dashboard
+  //    mounts does not reach up here — the host is the only thing that knows.
+  //    The cloud passes the same `usePermissions().canManage` it already uses
+  //    to gate the `/shared` menu entry, so one capability has one gate.
+  // 2. Otherwise the context hook, which outside that provider resolves to its
+  //    `"manage"` default — correct for the single-owner open-source install,
+  //    where the only user there is may do everything.
+  // 3. And regardless of either, the server's own "no" (see
+  //    `sharedFilterDenied` below) still withdraws the option. Defense in
+  //    depth, not the primary gate: a host that forgets to pass the prop
+  //    degrades to one rejected request rather than to a dead menu entry.
+  const permissionLevel = useWorkspacePermissionLevel();
+  const canManageShares = canManageSharesProp ?? hasApiKeyLevel(permissionLevel, "manage");
   const [settingsTarget, setSettingsTarget] = useState<{
     id: string;
     name: string;
@@ -482,6 +608,49 @@ export function BusabaseDashboardShell({
       // Storage unavailable — the in-memory state above still carries the row.
     }
   }, [activeContextualKey]);
+
+  // Which view the Workspace group is currently showing — the node tree
+  // (default), or one of the flat lists that REPLACE it. Seeded with the
+  // default rather than read from storage: this component server-renders, and
+  // a storage read during init would produce HTML the server never emitted.
+  // Restored in the mount effect below instead — the exact same shape as
+  // `lastContextualKey` above, for the exact same reason.
+  const [workspaceFilter, setWorkspaceFilter] = useState<WorkspaceFilterKey>("workspace");
+  // Set once the server has actually refused `nodes.share.list` for this
+  // viewer. See `DISABLED_SHARED_LIST_QUERY` / `isPermissionDeniedError`: on a
+  // host that has not yet stated a permission level above this shell, a real
+  // 403 is the only honest evidence available, so the option is offered, tried
+  // once, and then withdrawn for the session rather than left as a dead entry.
+  const [sharedFilterDenied, setSharedFilterDenied] = useState(false);
+  // "Shared" is the one filter that can be unavailable: its endpoint is
+  // manage-level, so a viewer/member has nothing behind it. Hidden rather than
+  // disabled — a greyed row that explains nothing is worse than a menu that
+  // only offers what this person can actually do.
+  const canUseSharedFilter = canManageShares && !sharedFilterDenied;
+  useEffect(() => {
+    setWorkspaceFilter(readStoredWorkspaceFilter());
+  }, []);
+  const handleWorkspaceFilterChange = useCallback((next: WorkspaceFilterKey) => {
+    setWorkspaceFilter(next);
+    writeStoredWorkspaceFilter(next);
+  }, []);
+
+  // The known-node cache backing the "Recent" filter. Scoped through the shared
+  // `knownNodeCacheScope` formula so this shell and the `BusabaseDashboard` it
+  // wraps (which is what WRITES the cache) can never end up on two scopes.
+  const nodeCache = useMemo(
+    () => createKnownNodeCache(knownNodeCacheScope(cacheSpaceKey, currentUserId)),
+    [cacheSpaceKey, currentUserId],
+  );
+  // `getServerSnapshot` is the same function as the client one on purpose: the
+  // cache degrades to "empty" without `localStorage` (see `known-node-cache.ts`),
+  // so on the server it returns an empty snapshot rather than throwing, and the
+  // first client render matches it.
+  const nodeCacheSnapshot = useSyncExternalStore(
+    nodeCache.subscribe,
+    nodeCache.getSnapshot,
+    nodeCache.getSnapshot,
+  );
 
   // Notion-style Favorites: the current actor's favorited nodes, kept in their
   // own TanStack Query entry (invalidated after every toggle below) — never
@@ -701,6 +870,96 @@ export function BusabaseDashboardShell({
     [nodes, navItemContext],
   );
 
+  // The `nodes.list({ types })` narrowing for the active filter, or null when
+  // the filter isn't a server type query at all. Drives both the query below
+  // and "is this a flat mode" everywhere else in this component.
+  //
+  // Memoized because it returns a fresh array literal per call, and it is a
+  // dependency of `typeFilterNavItems` below — unmemoized, that `useMemo` would
+  // see a new identity on every render and rebuild a `NavItem` (actions array,
+  // closures and all) for every app in the space each time the shell re-renders
+  // for an unrelated reason, which is exactly the work the memo exists to skip.
+  const workspaceFilterTypes = useMemo(
+    () => nodeTypesForWorkspaceFilter(workspaceFilter),
+    [workspaceFilter],
+  );
+  // Flat, ACL-filtered summaries for the Apps / Skills filters. Deliberately
+  // swapped for the always-disabled stand-in outside those two modes — the
+  // sidebar must not fetch the Apps list while someone is looking at the tree.
+  const typeFilterQuery = useQuery(
+    orpc && workspaceFilterTypes
+      ? orpc.nodes.list.queryOptions({ input: { types: workspaceFilterTypes } })
+      : DISABLED_NODE_TYPE_LIST_QUERY,
+  );
+
+  // Apps / Skills rows. `nodes.list({ types })` returns full `NodeVO`s (the
+  // contract's own `nodeSchema`, just with `children: []` and
+  // `hasChildren: false`), so these go through the SAME `buildNavItem` every
+  // tree row does and keep their "•••" menu — then get flattened, exactly like
+  // Favorites, because a flat list has no subtree to expand into.
+  //
+  // Sorted by name: the server orders by `position`, which is a tree-ordering
+  // concept and reads as random once the tree is gone. Locale-aware so CJK
+  // names don't sort by code point.
+  const typeFilterNavItems = useMemo(() => {
+    if (!workspaceFilterTypes) return [];
+    const rows = [...(typeFilterQuery.data ?? [])].sort((a, b) =>
+      a.name.localeCompare(b.name, locale),
+    );
+    return rows.flatMap((node) =>
+      buildNavItem(node, { ...navItemContext, onCreateChild: () => undefined }).map(toFlatNavItem),
+    );
+  }, [workspaceFilterTypes, typeFilterQuery.data, navItemContext, locale]);
+
+  // "Shared" rows: every node in the space carrying its OWN live public share.
+  // A dedicated endpoint rather than a `nodes.list({ types })` narrowing,
+  // because "published" is not a node type — and NOT `NodeVO.shared` either,
+  // which `listNodeSummaries` deliberately leaves unset on type-filtered
+  // listings (it passes no 5th argument to `toNodeVO`, so the key is absent,
+  // which is "unresolved", not "false").
+  //
+  // Same always-disabled stand-in discipline as the type filters: looking at
+  // the tree must not fetch this list behind it.
+  const sharedListQuery = useQuery(
+    orpc && workspaceFilter === "shared" && canUseSharedFilter
+      ? orpc.nodes.share.list.queryOptions({ input: {} })
+      : DISABLED_SHARED_LIST_QUERY,
+  );
+  // Latch the server's "no" for the rest of the session. Without the latch the
+  // entry would reappear the moment the failed query is swapped back out for
+  // the disabled stand-in (different query key, so no cached error), and a
+  // viewer could click it again, and again.
+  useEffect(() => {
+    if (isPermissionDeniedError(sharedListQuery.error)) setSharedFilterDenied(true);
+  }, [sharedListQuery.error]);
+
+  // Rows for the "Shared" filter. A dedicated builder, for the same reason
+  // `buildRecentNavItems` is one: a `SharedNodeVO` is not a `NodeVO`. It has no
+  // `children`, no `parentId`, no `settings` — all of which `buildNavItem`
+  // reads to decide the "•••" menu and the folder chrome — so synthesizing one
+  // would mean inventing answers. These rows navigate, and carry the marker
+  // that is the whole reason they are here.
+  //
+  // Order is the server's: newest grant first, the order a manager scans.
+  const sharedNavItems = useMemo(
+    () =>
+      workspaceFilter === "shared"
+        ? buildSharedNavItems(sharedListQuery.data ?? [], messages.share.sharedMarker)
+        : [],
+    [workspaceFilter, sharedListQuery.data, messages.share.sharedMarker],
+  );
+
+  // "Recent" rows, newest-first — `snapshot.visited` is ALREADY sorted by
+  // `lastVisitedAt` DESC, so this must not re-sort it (unlike the type filters
+  // above, where name order is the only sensible one).
+  const recentNavItems = useMemo(
+    () =>
+      workspaceFilter === "recent"
+        ? buildRecentNavItems(nodeCacheSnapshot.visited.slice(0, MAX_RECENT_SIDEBAR_ITEMS))
+        : [],
+    [workspaceFilter, nodeCacheSnapshot.visited],
+  );
+
   // Favorites nav group: a FLAT list of the actor's favorited nodes (already
   // fully resolved `NodeVO`s from `nodes.listFavorites`, not a tree to walk),
   // built via the same `buildNavItem` every Bases-tree row uses — see
@@ -731,6 +990,11 @@ export function BusabaseDashboardShell({
         return { title: nav.archive, url: "/archived", icon: Archive };
       case "assets":
         return { title: assetsLabel, url: "/assets", icon: Images };
+      case "shared":
+        // Gated like the filter above it: `/shared` is a manage-level audit
+        // screen, so the lingering row is not offered to someone who would
+        // only land on its insufficient-permission state.
+        return canUseSharedFilter ? { title: nav.shared, url: "/shared", icon: Globe } : null;
       case "agents":
         return { title: nav.agents, url: "/agents", icon: Bot };
       case "apps":
@@ -745,11 +1009,13 @@ export function BusabaseDashboardShell({
     nav.inbox,
     nav.activity,
     nav.archive,
+    nav.shared,
     nav.agents,
     nav.apps,
     nav.templates,
     assetsLabel,
     activeChangeRequestCount,
+    canUseSharedFilter,
   ]);
 
   // Pinned nav (fixed at the top, never scrolls): Home + Search only. Home is
@@ -803,9 +1069,74 @@ export function BusabaseDashboardShell({
         ]
       : []),
   ];
+  const filterLabels = useMemo(
+    () => ({
+      trigger: messages.sidebarFilter.trigger,
+      options: {
+        workspace: messages.sidebarFilter.workspace,
+        recent: messages.sidebarFilter.recent,
+        shared: messages.sidebarFilter.shared,
+        airapp: messages.sidebarFilter.airapp,
+        skill: messages.sidebarFilter.skill,
+      },
+    }),
+    [messages.sidebarFilter],
+  );
+  const availableFilters = useMemo(
+    () =>
+      canUseSharedFilter ? WORKSPACE_FILTERS : WORKSPACE_FILTERS.filter((key) => key !== "shared"),
+    [canUseSharedFilter],
+  );
+  // A stored (or just-denied) "shared" must not strand someone on a section
+  // with no rows and no entry in the menu to get back out of.
+  useEffect(() => {
+    if (workspaceFilter === "shared" && !canUseSharedFilter) {
+      setWorkspaceFilter(DEFAULT_WORKSPACE_FILTER);
+      writeStoredWorkspaceFilter(DEFAULT_WORKSPACE_FILTER);
+    }
+  }, [workspaceFilter, canUseSharedFilter]);
+  const workspaceFilterMenu = (
+    <SidebarWorkspaceFilterMenu
+      filters={availableFilters}
+      labels={filterLabels}
+      onChange={handleWorkspaceFilterChange}
+      value={workspaceFilter}
+    />
+  );
+  // Which rows the group renders right now. Only `workspace` reads the tree;
+  // the other three REPLACE it with a flat list.
+  const workspaceGroupItems =
+    workspaceFilter === "workspace"
+      ? baseNavItems
+      : workspaceFilter === "recent"
+        ? recentNavItems
+        : workspaceFilter === "shared"
+          ? sharedNavItems
+          : typeFilterNavItems;
+  // Show the existing row skeleton rather than an empty group in BOTH loading
+  // cases — the host's initial tree fetch, and a type filter's own query —
+  // so switching to "Apps" doesn't flash an empty section first.
+  //
+  // Three cases now, not two: `workspaceFilterTypes === null` used to mean
+  // "tree or Recent", and Recent is the only one of those that never loads.
+  // "Shared" is a third thing — `null` types, but a real query of its own.
+  const showWorkspaceSkeleton = workspaceFilterTypes
+    ? typeFilterQuery.isPending && typeFilterQuery.fetchStatus !== "idle"
+    : workspaceFilter === "shared"
+      ? sharedListQuery.isPending && sharedListQuery.fetchStatus !== "idle"
+      : workspaceFilter === "workspace" && nodesLoading;
+  // A filter that genuinely resolved to nothing. Kept distinct from "still
+  // loading" above: "Nothing here yet" is an answer, and showing it while the
+  // answer is still in flight would be a lie that corrects itself.
+  const showWorkspaceEmpty =
+    workspaceFilter !== "workspace" && !showWorkspaceSkeleton && workspaceGroupItems.length === 0;
   const workspaceNavGroup: NavGroup = {
+    // Still the plain string: it remains this group's React key AND the
+    // argument `onHeaderActionClick` matches on, so the `+` action keeps
+    // working no matter what the dropdown is showing.
     label: workspaceLabel,
-    items: baseNavItems,
+    labelSlot: workspaceFilterMenu,
+    items: workspaceGroupItems,
     headerAction: Plus,
     headerActionTitle: nav.new,
     className: "group-data-[collapsible=icon]:hidden",
@@ -813,7 +1144,14 @@ export function BusabaseDashboardShell({
     // Favorites above renders the very same node ids (see `buildFavoriteItems`);
     // letting it register them too gave one dnd-kit id two DOM rows, which lit
     // the drop indicator on both at once.
-    draggable: true,
+    //
+    // Off in every FILTERED mode, for an additional and different reason: a
+    // flat list carries no parent/sibling context, so a drop would compute a
+    // `{ parentNodeId, position }` from whichever row happened to be rendered
+    // next to it — silently reparenting or reordering something the user never
+    // pointed at. There is no correct answer to "where did you drop it" when
+    // the structure isn't on screen, so the gesture is simply not offered.
+    draggable: workspaceFilter === "workspace",
   };
   const scrollNav: NavGroup[] = [...scrollNavBeforeWorkspace, workspaceNavGroup];
 
@@ -858,7 +1196,7 @@ export function BusabaseDashboardShell({
               data-busabase-sidebar-nav
             >
               <NavMain
-                items={nodesLoading ? scrollNavBeforeWorkspace : scrollNav}
+                items={showWorkspaceSkeleton ? scrollNavBeforeWorkspace : scrollNav}
                 labels={navMainLabels}
                 onHeaderActionClick={handleHeaderActionClick}
                 onNavItemAction={handleNavItemAction}
@@ -867,7 +1205,7 @@ export function BusabaseDashboardShell({
                 onExpand={onExpandNode ? (item) => item.id && onExpandNode(item.id) : undefined}
                 activeAncestorIds={activeAncestorIds}
               />
-              {nodesLoading ? (
+              {showWorkspaceSkeleton ? (
                 <SidebarGroup
                   aria-busy="true"
                   className="relative group-data-[collapsible=icon]:hidden"
@@ -875,7 +1213,13 @@ export function BusabaseDashboardShell({
                 >
                   <div className="flex shrink-0 items-center px-2">
                     <SidebarGroupLabel className="flex h-6 flex-1 items-center text-[11px] font-medium uppercase tracking-wider text-sidebar-foreground/50">
-                      <span>{workspaceLabel}</span>
+                      {/* This skeleton stands in for the whole group while it
+                          loads, label included — so it renders the SAME filter
+                          control, not a dead copy of the word "Workspace".
+                          Otherwise the dropdown would vanish and reappear on
+                          every switch into Apps/Skills, which is exactly when
+                          someone is most likely to want to switch again. */}
+                      {workspaceFilterMenu}
                     </SidebarGroupLabel>
                   </div>
                   <SidebarGroupAction
@@ -897,6 +1241,20 @@ export function BusabaseDashboardShell({
                     ))}
                   </SidebarMenu>
                 </SidebarGroup>
+              ) : null}
+              {showWorkspaceEmpty ? (
+                // A plain muted line rather than a `NavItem`: `NavItem` has no
+                // disabled/non-interactive variant, and every row it renders is
+                // a link. Faking one with an empty `url` would put a clickable,
+                // focusable dead row in the tab order. The Workspace group is
+                // always last in `scrollNav`, so rendering this straight after
+                // `<NavMain>` lands it exactly where the missing rows would be.
+                <div
+                  className="px-4 py-1 text-sidebar-foreground/50 text-xs"
+                  data-workspace-filter-empty="true"
+                >
+                  {messages.sidebarFilter.empty}
+                </div>
               ) : null}
             </div>
           }
@@ -998,7 +1356,12 @@ export function BusabaseDashboardShell({
 
 // Resolve a node's dashboard URL (null if it has no detail screen).
 // Base nodes carry their own slug — no need to cross-reference the bases list.
-function nodeHref(node: NodeVO): string | null {
+//
+// Takes the two fields it actually reads rather than a whole `NodeVO`, so the
+// flat listings that are NOT NodeVOs (the "Shared" filter's `SharedNodeVO`)
+// resolve their route through this one function instead of re-spelling the
+// Base special case somewhere it could drift.
+function nodeHref(node: { type: string; slug: string }): string | null {
   if (node.type === "base") {
     return node.slug ? `/base/${node.slug}` : null;
   }
@@ -1324,13 +1687,15 @@ function buildKnowledgeBaseItems(nodes: NodeVO[], ctx: NavItemContext): NavItem[
   return getSidebarTopLevelNodes(nodes).flatMap((node) => buildNavItem(node, ctx));
 }
 
-// A favorited node's own NavItem stripped of every container-only field
+// A node's own NavItem stripped of every container-only field
 // (`items`/`hasChildren`/`isLoadingChildren`/`onAddChild`/`addChildTitle`) —
 // every node type the sidebar renders has its own detail-page url (see
 // `nodeHref`), so this never loses navigability, only the (here meaningless,
-// since a favorited NodeVO carries no live `children`) folder chrome a
-// container-type favorite would otherwise render.
-function toFlatFavoriteNavItem(item: NavItem): NavItem {
+// since these NodeVOs carry no live `children`) folder chrome a container-type
+// row would otherwise render.
+//
+// Used by every FLAT group: Favorites, and the Apps/Skills workspace filters.
+function toFlatNavItem(item: NavItem): NavItem {
   const {
     items: _items,
     hasChildren: _hasChildren,
@@ -1358,6 +1723,70 @@ function buildFavoriteItems(favoriteNodes: NodeVO[], ctx: NavItemContext): NavIt
   // out rather than threaded through — everything else is the Bases tree's
   // exact context, which is what keeps the two menus identical.
   return favoriteNodes.flatMap((node) =>
-    buildNavItem(node, { ...ctx, onCreateChild: () => undefined }).map(toFlatFavoriteNavItem),
+    buildNavItem(node, { ...ctx, onCreateChild: () => undefined }).map(toFlatNavItem),
   );
+}
+
+/**
+ * Build the sidebar's "Shared" rows from `nodes.share.list`.
+ *
+ * A dedicated builder rather than `buildNavItem`, for the same reason
+ * `buildRecentNavItems` below is one: a `SharedNodeVO` is not a `NodeVO`. It
+ * deliberately carries only what an audit row needs (identity + the grant
+ * facts) and has no `children`, `parentId`, `description` or `settings` — all
+ * of which `buildNavItem` reads to build the "•••" menu and the folder chrome.
+ * Faking them would mean inventing answers (a Delete action reporting zero
+ * children for a folder that has twenty).
+ *
+ * The marker is the point of the group, so unlike Recent these rows DO carry
+ * one — and it is the same globe, with the same label, the tree already shows
+ * (`share.sharedMarker`), because it means exactly the same thing here: this
+ * node has its own live public link. Every row in this list is shared, so the
+ * marker is not distinguishing rows from each other; it is what ties the list
+ * back to the marks scattered through the tree, so the two never read as two
+ * different features.
+ */
+function buildSharedNavItems(sharedNodes: SharedNodeVO[], sharedMarkerLabel: string): NavItem[] {
+  return sharedNodes.flatMap((node) => {
+    const url = nodeHref(node);
+    return url
+      ? [
+          {
+            title: node.name,
+            url,
+            icon: nodeIconGlyph(resolveNodeIcon(node)),
+            id: node.nodeId,
+            statusIcon: Globe,
+            statusIconTitle: sharedMarkerLabel,
+          },
+        ]
+      : [];
+  });
+}
+
+/**
+ * Build the sidebar's "Recent" rows from the client-side known-node cache.
+ *
+ * A DEDICATED builder rather than `buildNavItem`, because a `KnownNode` is not
+ * a `NodeVO` and the difference is not cosmetic: the cache stores only
+ * `id`/`type`/`name`/`slug`/`path`/`icon`/`lastVisitedAt`. It has no
+ * `children`, no `parentId`, no `shared`, no `description`, no `settings` — all
+ * of which `buildNavItem` reads to decide the "•••" menu, the published marker
+ * and the folder chrome. Synthesizing them would mean inventing answers (a
+ * "not shared" marker for a node that IS shared; a Delete action reporting a
+ * child count of zero for a folder that has twenty), so these rows are plain
+ * navigation links and nothing more. The tree, or the node's own page, is
+ * where those actions live.
+ *
+ * Order is the caller's: `snapshot.visited` is already newest-first.
+ */
+function buildRecentNavItems(recentNodes: KnownNode[]): NavItem[] {
+  return recentNodes.map((node) => ({
+    title: node.name,
+    // The cache stores the node's route path at write time (`nodeRoutePath`),
+    // so there is nothing to re-derive here.
+    url: node.path,
+    icon: nodeIconGlyph(resolveNodeIcon(node)),
+    id: node.id,
+  }));
 }

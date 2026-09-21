@@ -34,6 +34,7 @@ export default defineConfig({
       "src/domains/dashboard/*.test.tsx",
       "src/domains/dashboard/utils/**/*.test.ts",
       "src/domains/dashboard/components/**/*.test.tsx",
+      "src/domains/doc/components/**/*.test.tsx",
       "src/domains/embed-links/**/*.test.ts",
       "src/domains/filetree/utils/**/*.test.ts",
       "src/domains/form/components/**/*.test.tsx",

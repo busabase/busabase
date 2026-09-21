@@ -379,8 +379,9 @@ export const busabaseNodeShares = pgTable(
     scope: text("scope").$type<"none" | "public">().notNull().default("none"),
     /**
      * What an anonymous visitor may do. Tops out at `submit` — opening a
-     * ChangeRequest — because approval-first means there is no public tier that
-     * writes directly. (Feishu's equivalent ceiling is "can edit".)
+     * ChangeRequest — because a public visitor resolves no write level on the
+     * target, so there is no public tier that writes directly. (Feishu's
+     * equivalent ceiling is "can edit".)
      */
     capability: text("capability").$type<"read" | "submit">().notNull().default("read"),
     /** Hashed, never plaintext. Only meaningful while `scope = "public"`. */

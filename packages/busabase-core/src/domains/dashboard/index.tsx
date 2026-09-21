@@ -87,6 +87,7 @@ import { NodeRouteStateView } from "./components/node-route-state";
 import { RecordDetailView, RecordEditorView, RecordTopbarActions } from "./components/record-views";
 import { SearchDialog } from "./components/search-dialog";
 import { SearchView } from "./components/search-view";
+import { SharedAccessView } from "./components/shared-access-view";
 import { SidePanel, SidePanelToggle } from "./components/side-panel";
 import {
   isPinnableNode,
@@ -101,7 +102,12 @@ import { shouldQueryGlobalChangeRequests } from "./helpers/change-request-data-s
 import { createChangeRequestQueryKeys } from "./helpers/change-request-query-keys";
 import { getRelationRecordIds } from "./helpers/field";
 import { getLocationPath, readInboxView } from "./helpers/inbox";
-import { createKnownNodeCache, type KnownNode, nodeRoutePath } from "./helpers/known-node-cache";
+import {
+  createKnownNodeCache,
+  type KnownNode,
+  knownNodeCacheScope,
+  nodeRoutePath,
+} from "./helpers/known-node-cache";
 import { mergeSearchIntoHref } from "./helpers/link-search";
 import {
   shouldMountResidentAirApp,
@@ -342,7 +348,7 @@ function BusabaseDashboardContent({
   const search = useSearch();
   const locationPath = getLocationPath(location);
   const nodeCache = useMemo(
-    () => createKnownNodeCache(`${cacheSpaceKey}:${currentUserId ?? "anonymous"}`),
+    () => createKnownNodeCache(knownNodeCacheScope(cacheSpaceKey, currentUserId)),
     [cacheSpaceKey, currentUserId],
   );
   const setCurrentNode = useCurrentNodeStore((state) => state.setNode);
@@ -1019,6 +1025,10 @@ function BusabaseDashboardContent({
       return { badge: null, title: messages.nav.assets };
     }
 
+    if (locationPath === "/shared") {
+      return { badge: null, title: messages.nav.shared };
+    }
+
     // Catch-all: name the landing page, not one particular feature page. (This
     // used to say "Reviews" back when Inbox was where an unqualified visit landed.)
     return {
@@ -1140,6 +1150,10 @@ function BusabaseDashboardContent({
 
     if (isAssetDetailRoute) {
       return [{ href: "/assets", label: messages.nav.assets }, { label: messages.nav.assets }];
+    }
+
+    if (locationPath === "/shared") {
+      return [{ label: messages.nav.shared }];
     }
 
     const nodeDetailBreadcrumbItems = getNodeDetailBreadcrumbItems(
@@ -2416,6 +2430,10 @@ function BusabaseDashboardContent({
           }}
         />
       );
+    }
+
+    if (locationPath === "/shared") {
+      return <SharedAccessView orpc={orpc} />;
     }
 
     if (locationPath === "/assets" || locationPath.startsWith("/assets/")) {

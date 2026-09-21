@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { BlobReader, BlobWriter, ZipWriter } from "@zip.js/zip.js";
 import { hasApiKeyLevel } from "busabase-contract/access-control/api-key-level";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { FilePreviewVO, FileTreeFileVO, FormVO, NodeVO } from "busabase-contract/types";
@@ -16,10 +17,13 @@ import {
   Form,
   HardDrive,
   Info,
+  ListChecks,
   RefreshCw,
   Share2,
   Sparkles,
   Table2,
+  Trash2,
+  X,
 } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -30,10 +34,25 @@ import { presentCoreError } from "../../../i18n/localize-error";
 import { AirAppDetailView } from "../../airapp/components/AirAppDetailView";
 import { AirAppSidePanelPreview } from "../../airapp/components/RunPanel";
 import { buildAssetDownloadUrl } from "../../assets/utils/asset-content-url";
-import { DocEditor } from "../../doc/components";
+import {
+  areDocOutlinesEqual,
+  DocEditor,
+  type DocOutlineItem,
+  DocTableOfContents,
+  scrollToDocHeading,
+  selectDocTocItems,
+} from "../../doc/components";
 import { useDocImageUpload } from "../../doc/hooks/use-doc-image-upload";
 import { isBuiltinDrivePreviewSufficient } from "../../filetree/utils/preview-capability";
 import { FormDetailView } from "../../form/components/form-detail-view";
+import {
+  buildFileTreeFolderRenamePlan,
+  type FileTreeSelectionKey,
+  type FileTreeSelectionKind,
+  fileTreeSelectionKey,
+  fileTreeZipEntryPath,
+  resolveFileTreeSelectedPaths,
+} from "../helpers/file-tree-bulk-actions";
 import {
   buildFileTreeRenameOperations,
   buildPreviewFileEmbedUrl,
@@ -66,6 +85,8 @@ import {
   type SkillTreeNode,
 } from "./file-tree-browser";
 import {
+  FileTreeBulkRemoveDialog,
+  FileTreeFolderRenameDialog,
   type FileTreeMutationMode,
   FileTreeRemoveDialog,
   FileTreeRenameDialog,
@@ -151,6 +172,12 @@ export function FileTreeDetailView({
   const [infoOpen, setInfoOpen] = useState(false);
   const [renameTarget, setRenameTarget] = useState<FileTreeFileVO | null>(null);
   const [removeTarget, setRemoveTarget] = useState<FileTreeFileVO | null>(null);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedKeys, setSelectedKeys] = useState<Set<FileTreeSelectionKey>>(new Set());
+  const [bulkRemoveOpen, setBulkRemoveOpen] = useState(false);
+  const [folderRemoveTarget, setFolderRemoveTarget] = useState<string | null>(null);
+  const [folderRenameTarget, setFolderRenameTarget] = useState<string | null>(null);
+  const [zipBusy, setZipBusy] = useState(false);
   const [builtinPreviewPath, setBuiltinPreviewPath] = useState<string | null>(null);
   const [previewAttempt, setPreviewAttempt] = useState(0);
   const [remotePreview, setRemotePreview] = useState<
@@ -169,6 +196,8 @@ export function FileTreeDetailView({
     !hideActions &&
     !isAnonymous &&
     hasApiKeyLevel(permissionLevel, "changeRequest");
+  const canSelectDrive =
+    nodeType === "drive" && !hideActions && !isAnonymous && hasApiKeyLevel(permissionLevel, "read");
   const uploadTasks = useFileUploadTasks();
 
   const fileTreeQuery = useQuery({
@@ -219,6 +248,11 @@ export function FileTreeDetailView({
     setFileActionError(null);
     setRenameTarget(null);
     setRemoveTarget(null);
+    setSelectionMode(false);
+    setSelectedKeys(new Set());
+    setBulkRemoveOpen(false);
+    setFolderRemoveTarget(null);
+    setFolderRenameTarget(null);
     setBuiltinPreviewPath(null);
     setRemotePreview(null);
   }, [slug]);
@@ -332,6 +366,41 @@ export function FileTreeDetailView({
     () => new Map((fileTree?.files ?? []).map((file) => [file.path, file])),
     [fileTree?.files],
   );
+  const selectedFilePaths = useMemo(
+    () => resolveFileTreeSelectedPaths(selectedKeys, fileTree?.files ?? []),
+    [fileTree?.files, selectedKeys],
+  );
+  const allFilesSelected =
+    Boolean(fileTree?.files.length) && selectedFilePaths.length === fileTree?.files.length;
+
+  const toggleSelection = useCallback((kind: FileTreeSelectionKind, path: string) => {
+    const key = fileTreeSelectionKey(kind, path);
+    setSelectedKeys((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
+  const clearSelection = useCallback(() => setSelectedKeys(new Set()), []);
+
+  const selectAllFiles = useCallback(() => {
+    setSelectedKeys(
+      new Set((fileTree?.files ?? []).map((file) => fileTreeSelectionKey("file", file.path))),
+    );
+  }, [fileTree?.files]);
+
+  useEffect(() => {
+    const validKeys = new Set<FileTreeSelectionKey>([
+      ...(fileTree?.files ?? []).map((file) => fileTreeSelectionKey("file", file.path)),
+      ...collectFolderPaths(tree).map((path) => fileTreeSelectionKey("folder", path)),
+    ]);
+    setSelectedKeys((current) => {
+      const next = new Set([...current].filter((key) => validKeys.has(key)));
+      return next.size === current.size ? current : next;
+    });
+  }, [fileTree?.files, tree]);
   useEffect(() => {
     if (!fileTree || openPath) {
       return;
@@ -517,6 +586,141 @@ export function FileTreeDetailView({
         presentCoreError(messages, locale, caught, messages.nodeDetail.fileDownloadFailed),
       );
     }
+  };
+
+  const downloadFileTreePaths = async (paths: string[], archiveName: string) => {
+    if (paths.length === 0 || zipBusy) return;
+    setZipBusy(true);
+    let zipWriter: ZipWriter<Blob> | null = null;
+    let writerClosed = false;
+    try {
+      zipWriter = new ZipWriter(new BlobWriter("application/zip"));
+      for (const path of paths) {
+        const current = await readFileForAction(path);
+        const blob = current.assetUrl
+          ? await fetch(current.assetUrl).then((response) => {
+              if (!response.ok) throw new Error(messages.nodeDetail.filesDownloadFailed);
+              return response.blob();
+            })
+          : new Blob([current.content], { type: current.mimeType });
+        await zipWriter.add(fileTreeZipEntryPath(path), new BlobReader(blob));
+      }
+      const archive = await zipWriter.close();
+      writerClosed = true;
+      const url = URL.createObjectURL(archive);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `${archiveName.replace(/[^a-z0-9._-]+/gi, "-") || "drive-files"}.zip`;
+      document.body.append(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      toast.success(
+        fmt(messages.nodeDetail.filesDownloaded, {
+          count: paths.length,
+        }),
+      );
+    } catch (caught) {
+      if (zipWriter && !writerClosed) {
+        await zipWriter.close().catch(() => undefined);
+      }
+      toast.error(
+        presentCoreError(messages, locale, caught, messages.nodeDetail.filesDownloadFailed),
+      );
+    } finally {
+      setZipBusy(false);
+    }
+  };
+
+  const buildDeleteOperations = async (paths: string[]): Promise<FileMutationOperation[]> => {
+    const currentFiles = await Promise.all(paths.map((path) => readFileForAction(path)));
+    return currentFiles.map((current, index) => ({
+      kind: "delete",
+      path: paths[index] as string,
+      ...(current.contentHash ? { baseContentHash: current.contentHash } : {}),
+    }));
+  };
+
+  const removeDrivePaths = async (paths: string[], mode: FileTreeMutationMode, message: string) => {
+    if (paths.length === 0) return;
+    const pathSet = new Set(paths);
+    const nextFile = fileTree?.files.find((file) => !pathSet.has(file.path));
+    const operations = await buildDeleteOperations(paths);
+    await submitFileOperations({
+      message,
+      mode,
+      nextPath: nextFile?.path ?? null,
+      operations,
+      successMessage: fmt(messages.nodeDetail.filesRemoved, { count: paths.length }),
+    });
+    clearSelection();
+    setFolderRemoveTarget(null);
+  };
+
+  const folderFilePaths = (folderPath: string): string[] =>
+    (fileTree?.files ?? [])
+      .filter((file) => file.path.startsWith(`${folderPath}/`))
+      .map((file) => file.path);
+
+  const renameFolder = async (nextName: string, mode: FileTreeMutationMode) => {
+    if (!folderRenameTarget || !fileTree) return;
+    const currentFolderPath = folderRenameTarget;
+    const initialPlan = buildFileTreeFolderRenamePlan({
+      existingPaths: filePaths,
+      files: fileTree.files,
+      folderPath: currentFolderPath,
+      nextName,
+    });
+    if (!initialPlan.ok) {
+      throw new Error(
+        initialPlan.reason === "collision"
+          ? messages.nodeDetail.folderRenameConflict.replace("{path}", initialPlan.paths[0] ?? "")
+          : messages.nodeDetail.folderRenameFailed,
+      );
+    }
+    const currentFiles = await Promise.all(
+      initialPlan.plan.sourcePaths.map((path) => readFileForAction(path)),
+    );
+    const contentHashes = new Map(
+      currentFiles.map((file) => [file.path, file.contentHash] as const),
+    );
+    const result = buildFileTreeFolderRenamePlan({
+      contentHashes,
+      existingPaths: filePaths,
+      files: fileTree.files,
+      folderPath: currentFolderPath,
+      nextName,
+    });
+    if (!result.ok) throw new Error(messages.nodeDetail.folderRenameFailed);
+    const mappedOpenPath =
+      openPath?.startsWith(`${currentFolderPath}/`) === true
+        ? `${result.plan.nextFolderPath}/${openPath.slice(currentFolderPath.length + 1)}`
+        : (result.plan.targetPaths[0] ?? null);
+    const merged = await submitFileOperations({
+      message: `Rename folder ${currentFolderPath} to ${result.plan.nextFolderPath}`,
+      mode,
+      nextPath: mappedOpenPath,
+      operations: result.plan.operations,
+      successMessage: fmt(messages.nodeDetail.folderRenamed, {
+        count: result.plan.sourcePaths.length,
+      }),
+    });
+    if (merged) {
+      setExpandedPaths((current) => {
+        const next = new Set<string>();
+        for (const path of current) {
+          next.add(
+            path === currentFolderPath || path.startsWith(`${currentFolderPath}/`)
+              ? `${result.plan.nextFolderPath}${path.slice(currentFolderPath.length)}`
+              : path,
+          );
+        }
+        next.add(result.plan.nextFolderPath);
+        return next;
+      });
+    }
+    setFolderRenameTarget(null);
+    clearSelection();
   };
 
   const startEditingFile = () => {
@@ -748,6 +952,27 @@ export function FileTreeDetailView({
                 {messages.nodeDetail.files}
               </div>
               <div className="flex items-center gap-1">
+                {canSelectDrive ? (
+                  <Button
+                    aria-label={messages.nodeDetail.selectDriveFiles}
+                    className={cn(
+                      "size-8 shrink-0 text-muted-foreground",
+                      selectionMode && "bg-muted text-foreground",
+                    )}
+                    onClick={() => {
+                      setSelectionMode((current) => {
+                        if (current) clearSelection();
+                        return !current;
+                      });
+                    }}
+                    size="icon-sm"
+                    title={messages.nodeDetail.selectDriveFiles}
+                    type="button"
+                    variant="ghost"
+                  >
+                    <ListChecks aria-hidden className="size-3.5" />
+                  </Button>
+                ) : null}
                 {canChangeFiles ? (
                   <FileTreeUploadControl
                     availableFolders={collectFolderPaths(tree)}
@@ -761,6 +986,70 @@ export function FileTreeDetailView({
                 </div>
               </div>
             </div>
+            {selectionMode && canSelectDrive ? (
+              <div className="flex min-h-11 flex-wrap items-center gap-2 border-border/50 border-b bg-muted/30 px-3 py-2">
+                <span
+                  aria-live="polite"
+                  className="mr-auto font-medium text-foreground text-xs tabular-nums"
+                >
+                  {fmt(
+                    selectedFilePaths.length === 1
+                      ? messages.nodeDetail.driveFileSelected
+                      : messages.nodeDetail.driveFilesSelected,
+                    { count: selectedFilePaths.length },
+                  )}
+                </span>
+                <Button
+                  className="h-7 px-2 text-xs"
+                  disabled={allFilesSelected}
+                  onClick={selectAllFiles}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  {messages.nodeDetail.selectAllDriveFiles}
+                </Button>
+                <Button
+                  className="h-7 px-2 text-xs"
+                  disabled={selectedFilePaths.length === 0}
+                  onClick={clearSelection}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  <X aria-hidden className="size-3.5" />
+                  {messages.nodeDetail.clearDriveSelection}
+                </Button>
+                <Button
+                  aria-label={messages.nodeDetail.downloadSelectedFiles}
+                  className="size-7"
+                  disabled={selectedFilePaths.length === 0 || zipBusy}
+                  onClick={() =>
+                    void downloadFileTreePaths(selectedFilePaths, `${fileTree.node.name}-files`)
+                  }
+                  size="icon-sm"
+                  title={messages.nodeDetail.downloadSelectedFiles}
+                  type="button"
+                  variant="outline"
+                >
+                  <Download aria-hidden className="size-3.5" />
+                </Button>
+                {canChangeFiles ? (
+                  <Button
+                    aria-label={messages.nodeDetail.removeSelectedFiles}
+                    className="size-7 text-rejected-strong dark:text-rejected-soft"
+                    disabled={selectedFilePaths.length === 0 || isEditing}
+                    onClick={() => setBulkRemoveOpen(true)}
+                    size="icon-sm"
+                    title={messages.nodeDetail.removeSelectedFiles}
+                    type="button"
+                    variant="outline"
+                  >
+                    <Trash2 aria-hidden className="size-3.5" />
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
             <div className="min-h-0 flex-1 overflow-auto p-2">
               {fileTree.files.length === 0 ? (
                 <div className="px-2 py-3 text-muted-foreground text-sm">
@@ -772,6 +1061,13 @@ export function FileTreeDetailView({
                   expanded={expandedPaths}
                   key={fileTree.node.id}
                   onDownloadFile={downloadFile}
+                  onDownloadFolder={
+                    canSelectDrive
+                      ? (path) =>
+                          void downloadFileTreePaths(folderFilePaths(path), fileTreeFileName(path))
+                      : undefined
+                  }
+                  onRemoveFolder={canChangeFiles && !isEditing ? setFolderRemoveTarget : undefined}
                   onRemoveFile={
                     canChangeFiles && !isEditing
                       ? (path) => setRemoveTarget(filesByPath.get(path) ?? null)
@@ -782,9 +1078,13 @@ export function FileTreeDetailView({
                       ? (path) => setRenameTarget(filesByPath.get(path) ?? null)
                       : undefined
                   }
+                  onRenameFolder={canChangeFiles && !isEditing ? setFolderRenameTarget : undefined}
                   onExpandedChange={setExpandedPaths}
                   onSelect={selectFile}
+                  onToggleSelection={toggleSelection}
+                  selectedKeys={selectedKeys}
                   selectedPath={openPath ?? undefined}
+                  selectionMode={selectionMode}
                 >
                   {renderFileTree(tree)}
                 </DriveFileTree>
@@ -1005,6 +1305,44 @@ export function FileTreeDetailView({
         }}
         onSubmit={removeFile}
         open={removeTarget !== null}
+      />
+      <FileTreeBulkRemoveDialog
+        fileCount={selectedFilePaths.length}
+        label={messages.nodeDetail.selectedDriveFiles}
+        onOpenChange={setBulkRemoveOpen}
+        onSubmit={(mode) =>
+          removeDrivePaths(
+            selectedFilePaths,
+            mode,
+            `Remove ${selectedFilePaths.length} selected files from ${nodeType}`,
+          )
+        }
+        open={bulkRemoveOpen}
+      />
+      <FileTreeBulkRemoveDialog
+        fileCount={folderRemoveTarget ? folderFilePaths(folderRemoveTarget).length : 0}
+        label={folderRemoveTarget ?? ""}
+        onOpenChange={(open) => {
+          if (!open) setFolderRemoveTarget(null);
+        }}
+        onSubmit={(mode) =>
+          removeDrivePaths(
+            folderRemoveTarget ? folderFilePaths(folderRemoveTarget) : [],
+            mode,
+            `Remove folder ${folderRemoveTarget ?? ""} from ${nodeType}`,
+          )
+        }
+        open={folderRemoveTarget !== null}
+      />
+      <FileTreeFolderRenameDialog
+        existingPaths={filePaths}
+        files={fileTree.files}
+        folderPath={folderRenameTarget}
+        onOpenChange={(open) => {
+          if (!open) setFolderRenameTarget(null);
+        }}
+        onSubmit={renameFolder}
+        open={folderRenameTarget !== null}
       />
     </Frame>
   );
@@ -1364,6 +1702,26 @@ export function DocDetailView({
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState<null | "save" | "changeRequest">(null);
   const [error, setError] = useState<string | null>(null);
+  const [outline, setOutline] = useState<DocOutlineItem[]>([]);
+  const [activeHeadingId, setActiveHeadingId] = useState<string | null>(null);
+  const activeHeadingIdRef = useRef<string | null>(null);
+  const docScrollRef = useRef<HTMLDivElement>(null);
+  const tocItems = useMemo(() => selectDocTocItems(outline), [outline]);
+  const handleOutlineChange = useCallback((next: DocOutlineItem[]) => {
+    setOutline((current) => (areDocOutlinesEqual(current, next) ? current : next));
+  }, []);
+  const setActiveHeading = useCallback((headingId: string | null) => {
+    activeHeadingIdRef.current = headingId;
+    setActiveHeadingId(headingId);
+  }, []);
+  const handleTocSelect = useCallback(
+    (headingId: string) => {
+      setActiveHeading(headingId);
+      const scrollContainer = docScrollRef.current;
+      if (scrollContainer) scrollToDocHeading(scrollContainer, headingId);
+    },
+    [setActiveHeading],
+  );
 
   // Keep the current mode's actions in the shared topbar. The document body
   // owns its scroll, so editing controls placed beside the title disappear on
@@ -1445,7 +1803,52 @@ export function DocDetailView({
     setIsEditing(false);
     setDraft("");
     setError(null);
-  }, [slug]);
+    setOutline([]);
+    setActiveHeading(null);
+  }, [setActiveHeading, slug]);
+
+  useEffect(() => {
+    const scrollContainer = docScrollRef.current;
+    if (
+      isEditing ||
+      tocItems.length === 0 ||
+      !scrollContainer ||
+      typeof IntersectionObserver === "undefined"
+    ) {
+      setActiveHeading(null);
+      return;
+    }
+
+    const headingIds = new Set(tocItems.map((item) => item.id));
+    const headings = Array.from(
+      scrollContainer.querySelectorAll<HTMLElement>("h1[id], h2[id], h3[id]"),
+    ).filter((heading) => headingIds.has(heading.id));
+    if (headings.length === 0) return;
+
+    const visibleHeadings = new Map<string, number>();
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!headingIds.has(entry.target.id)) continue;
+          if (entry.isIntersecting) {
+            visibleHeadings.set(entry.target.id, entry.boundingClientRect.top);
+          } else {
+            visibleHeadings.delete(entry.target.id);
+          }
+        }
+        const currentActive = activeHeadingIdRef.current;
+        if (currentActive && visibleHeadings.has(currentActive)) return;
+
+        const nextActive = Array.from(visibleHeadings.entries()).sort(
+          (left, right) => left[1] - right[1],
+        )[0]?.[0];
+        if (nextActive) setActiveHeading(nextActive);
+      },
+      { root: scrollContainer, threshold: 0 },
+    );
+    for (const heading of headings) observer.observe(heading);
+    return () => observer.disconnect();
+  }, [isEditing, setActiveHeading, tocItems]);
 
   const createCr = useMutation(orpc.nodes.updateContent.mutationOptions());
   const uploadImage = useDocImageUpload(orpc);
@@ -1507,34 +1910,50 @@ export function DocDetailView({
   }
 
   return (
-    // Left padding is wider than the right: the Milkdown block-handle (drag/+
-    // button, see doc-editor.css) renders to the left of the hovered block and
-    // needs that room, or it gets clipped by this container's own overflow-auto.
     <div
-      className="mx-auto flex h-full min-h-0 w-full min-w-0 max-w-5xl flex-col overflow-auto py-10 pr-6 pl-24"
-      data-dashboard-scroll="doc-detail"
+      className="doc-reading-viewport relative h-full min-h-0 w-full min-w-0 overflow-hidden bg-background"
+      data-doc-reading-viewport
     >
-      <div className="mb-5 min-w-0">
-        <h1 className="truncate font-semibold text-3xl text-foreground tracking-tight">
-          {doc.node.name}
-        </h1>
-        {doc.node.description ? (
-          <p className="mt-1 text-muted-foreground text-sm">{doc.node.description}</p>
-        ) : null}
-      </div>
-      {error ? <p className="mb-3 text-destructive text-sm">{error}</p> : null}
-      {isEditing || doc.body.trim() ? (
-        <DocEditor
-          key={`${doc.node.id}:${isEditing}`}
-          className="min-h-[60vh] flex-1"
-          content={isEditing ? draft : doc.body}
-          editable={isEditing}
-          onChange={setDraft}
-          onImageUpload={uploadImage}
+      {!isEditing && tocItems.length > 0 ? (
+        <DocTableOfContents
+          activeId={activeHeadingId}
+          items={tocItems}
+          label={messages.nodeDetail.tableOfContents}
+          onSelect={handleTocSelect}
         />
-      ) : (
-        <div className="flex-1 text-muted-foreground text-sm">{messages.nodeDetail.emptyDoc}</div>
-      )}
+      ) : null}
+      {/* Keep the reading column capped at 1024px. Left padding is wider than the
+       * right because Milkdown's block handle renders to the left of the hovered
+       * block and would otherwise be clipped by this scroll container. */}
+      <div
+        className="mx-auto flex h-full min-h-0 w-full min-w-0 max-w-5xl flex-col overflow-auto border-border border-x bg-card py-10 pr-6 pl-24"
+        data-dashboard-scroll="doc-detail"
+        data-doc-reading-surface
+        ref={docScrollRef}
+      >
+        <div className="mb-5 min-w-0">
+          <h1 className="truncate font-semibold text-3xl text-foreground tracking-tight">
+            {doc.node.name}
+          </h1>
+          {doc.node.description ? (
+            <p className="mt-1 text-muted-foreground text-sm">{doc.node.description}</p>
+          ) : null}
+        </div>
+        {error ? <p className="mb-3 text-destructive text-sm">{error}</p> : null}
+        {isEditing || doc.body.trim() ? (
+          <DocEditor
+            key={`${doc.node.id}:${isEditing}`}
+            className="min-h-[60vh] flex-1"
+            content={isEditing ? draft : doc.body}
+            editable={isEditing}
+            onChange={setDraft}
+            onImageUpload={uploadImage}
+            onOutlineChange={handleOutlineChange}
+          />
+        ) : (
+          <div className="flex-1 text-muted-foreground text-sm">{messages.nodeDetail.emptyDoc}</div>
+        )}
+      </div>
     </div>
   );
 }

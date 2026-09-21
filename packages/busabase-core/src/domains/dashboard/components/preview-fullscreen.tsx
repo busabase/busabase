@@ -101,7 +101,6 @@ interface FullscreenPreviewSurfaceProps extends Omit<ComponentProps<"section">, 
   bodyClassName?: string;
   children: ReactNode;
   exitLabel: string;
-  fullscreenAvailable?: boolean;
   fullscreenState: PreviewFullscreenState;
   toolbar?: ReactNode;
 }
@@ -117,7 +116,6 @@ export function FullscreenPreviewSurface({
   children,
   className,
   exitLabel,
-  fullscreenAvailable = true,
   fullscreenState,
   toolbar,
   ...sectionProps
@@ -192,7 +190,13 @@ export function FullscreenPreviewSurface({
       {toolbar}
       {banner}
       <div className={cn("relative min-h-0 flex-1", bodyClassName)} data-preview-fullscreen-body>
-        {fullscreen && fullscreenAvailable ? (
+        {/* Gated on `fullscreen` alone, deliberately. Whether a preview is
+            *ready* decides if the user may enter fullscreen — never whether
+            they may leave it. `?fullscreen=1` restores the fullscreen overlay
+            on reload long before the AirApp runner has a preview URL (and
+            forever, if that run fails), so any readiness condition here traps
+            the user behind a full-viewport surface with no way out but Esc. */}
+        {fullscreen ? (
           <Button
             aria-label={exitLabel}
             className="absolute top-3 right-3 z-10 bg-background/90 shadow-lg backdrop-blur-sm"

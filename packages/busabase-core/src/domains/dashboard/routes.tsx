@@ -172,6 +172,15 @@ export const getBusabaseDashboardRoutes = (
       breadcrumb: messages?.routes.asset ?? "Asset",
       title: messages?.routes.asset ?? "Asset",
     },
+    {
+      // Space-level public-share audit. Needs an entry HERE as well as a
+      // branch in the dashboard's `activeView` — this table is what the SPA
+      // router matches against.
+      path: "/shared",
+      component: dashboard,
+      breadcrumb: messages?.routes.shared ?? "Public shares",
+      title: messages?.routes.shared ?? "Public shares",
+    },
     ...detailTypeRoutes,
     {
       path: "/base/:slug",

@@ -17,6 +17,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { FileTreeNodeVO } from "busabase-contract/types";
+import { Checkbox } from "kui/checkbox";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "kui/collapsible";
 import {
   DropdownMenu,
@@ -56,6 +57,11 @@ import {
 import { toast } from "sonner";
 import { useLocation, useSearch } from "wouter";
 import { fmt, useCoreI18n } from "../../../i18n";
+import {
+  type FileTreeSelectionKey,
+  type FileTreeSelectionKind,
+  fileTreeSelectionKey,
+} from "../helpers/file-tree-bulk-actions";
 import { mergeSearchIntoHref } from "../helpers/link-search";
 import { useIsAnonymousVisitor } from "../visitor-context";
 import type { SkillCodeLanguage } from "./field-preview";
@@ -331,10 +337,16 @@ interface DriveFileTreeContextType {
   expandedPaths: Set<string>;
   togglePath: (path: string) => void;
   selectedPath?: string;
+  selectionMode: boolean;
+  selectedKeys: ReadonlySet<FileTreeSelectionKey>;
+  onToggleSelection?: (kind: FileTreeSelectionKind, path: string) => void;
   onSelect?: (path: string) => void;
   onDownloadFile?: (path: string) => void;
+  onDownloadFolder?: (path: string) => void;
   onRemoveFile?: (path: string) => void;
+  onRemoveFolder?: (path: string) => void;
   onRenameFile?: (path: string) => void;
+  onRenameFolder?: (path: string) => void;
 }
 
 // oxlint-disable-next-line eslint(no-empty-function)
@@ -343,18 +355,28 @@ const noopTogglePath = () => {};
 const DriveFileTreeContext = createContext<DriveFileTreeContextType>({
   // oxlint-disable-next-line eslint-plugin-unicorn(no-new-builtin)
   expandedPaths: new Set(),
+  selectionMode: false,
+  // oxlint-disable-next-line eslint-plugin-unicorn(no-new-builtin)
+  selectedKeys: new Set(),
   togglePath: noopTogglePath,
 });
+const EMPTY_FILE_TREE_SELECTION: ReadonlySet<FileTreeSelectionKey> = new Set();
 
 export interface DriveFileTreeProps {
   className?: string;
   expanded?: Set<string>;
   defaultExpanded?: Set<string>;
   selectedPath?: string;
+  selectionMode?: boolean;
+  selectedKeys?: ReadonlySet<FileTreeSelectionKey>;
+  onToggleSelection?: (kind: FileTreeSelectionKind, path: string) => void;
   onSelect?: (path: string) => void;
   onDownloadFile?: (path: string) => void;
+  onDownloadFolder?: (path: string) => void;
   onRemoveFile?: (path: string) => void;
+  onRemoveFolder?: (path: string) => void;
   onRenameFile?: (path: string) => void;
+  onRenameFolder?: (path: string) => void;
   onExpandedChange?: (expanded: Set<string>) => void;
   children?: ReactNode;
 }
@@ -365,10 +387,16 @@ export function DriveFileTree({
   expanded: controlledExpanded,
   defaultExpanded,
   selectedPath,
+  selectionMode = false,
+  selectedKeys = EMPTY_FILE_TREE_SELECTION,
+  onToggleSelection,
   onSelect,
   onDownloadFile,
+  onDownloadFolder,
   onRemoveFile,
+  onRemoveFolder,
   onRenameFile,
+  onRenameFolder,
   onExpandedChange,
   className,
   children,
@@ -396,13 +424,33 @@ export function DriveFileTree({
     () => ({
       expandedPaths,
       onDownloadFile,
+      onDownloadFolder,
       onRemoveFile,
+      onRemoveFolder,
       onRenameFile,
+      onRenameFolder,
       onSelect,
+      onToggleSelection,
+      selectedKeys,
       selectedPath,
+      selectionMode,
       togglePath,
     }),
-    [expandedPaths, onDownloadFile, onRemoveFile, onRenameFile, onSelect, selectedPath, togglePath],
+    [
+      expandedPaths,
+      onDownloadFile,
+      onDownloadFolder,
+      onRemoveFile,
+      onRemoveFolder,
+      onRenameFile,
+      onRenameFolder,
+      onSelect,
+      onToggleSelection,
+      selectedKeys,
+      selectedPath,
+      selectionMode,
+      togglePath,
+    ],
   );
 
   return (
@@ -444,22 +492,49 @@ export interface DriveFileTreeFolderProps {
 }
 
 export function DriveFileTreeFolder({ path, name, depth = 0, children }: DriveFileTreeFolderProps) {
-  const { expandedPaths, togglePath, selectedPath, onSelect } = useContext(DriveFileTreeContext);
+  const messages = useCoreI18n();
+  const {
+    expandedPaths,
+    togglePath,
+    selectedPath,
+    selectionMode,
+    selectedKeys,
+    onToggleSelection,
+    onSelect,
+    onDownloadFolder,
+    onRemoveFolder,
+    onRenameFolder,
+  } = useContext(DriveFileTreeContext);
   const isExpanded = expandedPaths.has(path);
   const isSelected = selectedPath === path;
+  const isChecked = selectedKeys.has(fileTreeSelectionKey("folder", path));
+  const hasActions = Boolean(onDownloadFolder || onRemoveFolder || onRenameFolder);
   const FolderGlyph = isExpanded ? FolderOpenIcon : FolderIcon;
 
   return (
     <Collapsible onOpenChange={() => togglePath(path)} open={isExpanded}>
-      <div role="treeitem" tabIndex={0}>
+      <div
+        className={cn(
+          "group/folder-row flex min-h-8 items-center rounded transition-colors duration-150 hover:bg-muted/50 focus-within:bg-muted/50",
+          isSelected && "bg-muted",
+        )}
+        style={driveFileTreeRowStyle(depth)}
+      >
+        {selectionMode ? (
+          <Checkbox
+            aria-label={fmt(messages.nodeDetail.selectDriveItem, { name })}
+            checked={isChecked}
+            className="mr-1"
+            onCheckedChange={() => onToggleSelection?.("folder", path)}
+            onClick={(event) => event.stopPropagation()}
+          />
+        ) : null}
         <CollapsibleTrigger asChild>
           <button
-            className={cn(
-              "flex w-full items-center gap-1.5 rounded px-2 py-1 text-left transition-colors hover:bg-muted/50",
-              isSelected && "bg-muted",
-            )}
+            className="flex min-w-0 flex-1 items-center gap-1.5 rounded py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
             onClick={() => onSelect?.(path)}
-            style={driveFileTreeRowStyle(depth)}
+            role="treeitem"
+            tabIndex={0}
             type="button"
           >
             <ChevronRightIcon
@@ -479,6 +554,43 @@ export function DriveFileTreeFolder({ path, name, depth = 0, children }: DriveFi
             </span>
           </button>
         </CollapsibleTrigger>
+        {hasActions ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                aria-label={fmt(messages.nodeDetail.folderActionsFor, { name })}
+                className="mr-1 flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground opacity-0 outline-none transition-[opacity,color,background-color,transform] duration-150 hover:bg-background/70 hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.96] group-hover/folder-row:opacity-100 data-[state=open]:bg-background/70 data-[state=open]:text-foreground data-[state=open]:opacity-100"
+                onClick={(event) => event.stopPropagation()}
+                type="button"
+              >
+                <MoreHorizontal aria-hidden className="size-3.5" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-40">
+              {onRenameFolder ? (
+                <DropdownMenuItem onSelect={() => onRenameFolder(path)}>
+                  <Pencil aria-hidden />
+                  {messages.nodeDetail.renameFolder}
+                </DropdownMenuItem>
+              ) : null}
+              {onDownloadFolder ? (
+                <DropdownMenuItem onSelect={() => onDownloadFolder(path)}>
+                  <Download aria-hidden />
+                  {messages.nodeDetail.downloadFolder}
+                </DropdownMenuItem>
+              ) : null}
+              {onRemoveFolder ? <DropdownMenuSeparator /> : null}
+              {onRemoveFolder ? (
+                <DropdownMenuItem onSelect={() => onRemoveFolder(path)} variant="destructive">
+                  <Trash2 aria-hidden />
+                  {messages.nodeDetail.removeFolder}
+                </DropdownMenuItem>
+              ) : null}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null}
+      </div>
+      <div>
         <CollapsibleContent>{children}</CollapsibleContent>
       </div>
     </Collapsible>
@@ -500,9 +612,18 @@ export function DriveFileTreeFile({
   alignWithFolders = false,
 }: DriveFileTreeFileProps) {
   const messages = useCoreI18n();
-  const { selectedPath, onSelect, onDownloadFile, onRemoveFile, onRenameFile } =
-    useContext(DriveFileTreeContext);
+  const {
+    selectedPath,
+    selectionMode,
+    selectedKeys,
+    onToggleSelection,
+    onSelect,
+    onDownloadFile,
+    onRemoveFile,
+    onRenameFile,
+  } = useContext(DriveFileTreeContext);
   const isSelected = selectedPath === path;
+  const isChecked = selectedKeys.has(fileTreeSelectionKey("file", path));
   const FileGlyph = guessFileTreeIcon(path);
   const hasActions = Boolean(onDownloadFile || onRemoveFile || onRenameFile);
 
@@ -514,6 +635,15 @@ export function DriveFileTreeFile({
       )}
       style={driveFileTreeFileRowStyle(depth)}
     >
+      {selectionMode ? (
+        <Checkbox
+          aria-label={fmt(messages.nodeDetail.selectDriveItem, { name })}
+          checked={isChecked}
+          className="ml-2"
+          onCheckedChange={() => onToggleSelection?.("file", path)}
+          onClick={(event) => event.stopPropagation()}
+        />
+      ) : null}
       <button
         className="flex min-w-0 flex-1 items-center gap-1.5 rounded px-2 py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
         onClick={() => onSelect?.(path)}

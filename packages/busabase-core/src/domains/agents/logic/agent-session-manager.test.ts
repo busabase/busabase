@@ -284,6 +284,7 @@ function serveFakeAgent(
   },
 ) {
   let configOptions = initialConfigOptions;
+  let initializeCalls = 0;
   let newSessionCalls = 0;
   let setConfigCalls = 0;
   const loadedSessionIds: string[] = [];
@@ -297,6 +298,7 @@ function serveFakeAgent(
     acp
       .agent()
       .onRequest(acp.methods.agent.initialize, async () => {
+        initializeCalls += 1;
         await options?.initializeGate;
         return {
           protocolVersion: acp.PROTOCOL_VERSION,
@@ -388,6 +390,7 @@ function serveFakeAgent(
   });
 
   return {
+    initializeCallCount: () => initializeCalls,
     loadedSessionIds: () => loadedSessionIds,
     newSessionCallCount: () => newSessionCalls,
     promptSessionIds: () => promptSessionIds,
@@ -1671,6 +1674,60 @@ describe("remote session worker handoff", () => {
 
     await closeAgentSession(record.session.id);
     expect(mocks.endRemoteSession).toHaveBeenCalledWith(record.session.id);
+  });
+
+  it(
+    "reaches session/cancel for a remote-websocket session with no live copy on this " +
+      "worker, without claiming the operation lease (PUL-256)",
+    async () => {
+      // A record marked "busy" simulates the ordinary shape of an in-flight
+      // turn that another worker's process is actually awaiting — this
+      // worker never touched `sessions()` for it at all, which is exactly
+      // what "the worker serving Stop isn't the worker holding the prompt"
+      // looks like from here. `requireLocalSession` alone would reject this
+      // immediately; `cancelAgentSession` must instead open a lightweight ACP
+      // connection using the durable inner session id.
+      const record = runtimeRecord({ status: "busy" });
+      mocks.loadSessionRuntime.mockResolvedValue(record);
+      const [clientSide, agentSide] = linkedStreams();
+      mocks.createWebSocketStream.mockReturnValue(clientSide);
+      const agent = serveFakeAgent(agentSide, []);
+
+      await cancelAgentSession(record.session.id);
+
+      // The cancel notify reached the agent without `session/load`. Loading
+      // may wait behind the active prompt and defeat the whole point of Stop;
+      // ACP cancellation only needs the durable session id.
+      expect(agent.initializeCallCount()).toBe(1);
+      expect(agent.loadedSessionIds()).toEqual([]);
+      expect(agent.cancelledSessionIds()).toEqual([record.acpSessionId]);
+      // Cancel is not a new operation competing for the single-turn slot —
+      // it must never take the durable lease the way `promptAgentSession`
+      // does, or it would race the worker that is genuinely mid-prompt.
+      expect(mocks.acquireSessionLease).not.toHaveBeenCalled();
+      expect(mocks.releaseSessionLease).not.toHaveBeenCalled();
+
+      // The lightweight connection opened only to deliver the cancel must
+      // never create a LiveSession in this worker's map.
+      expect(
+        (
+          globalThis as typeof globalThis & { __busabaseAgentSessions?: Map<string, unknown> }
+        ).__busabaseAgentSessions?.has(record.session.id),
+      ).toBe(false);
+    },
+  );
+
+  it("rejects a terminal remote session without opening a cancel connection", async () => {
+    const record = runtimeRecord({ id: "ags-ended-cancel", status: "ended" }, null);
+    mocks.loadSessionRuntime.mockResolvedValue(record);
+
+    await expect(cancelAgentSession(record.session.id)).rejects.toMatchObject({
+      name: AgentSessionTerminalError.name,
+      status: "ended",
+      promptRecorded: false,
+    });
+    expect(mocks.createWebSocketStream).not.toHaveBeenCalled();
+    expect(mocks.acquireSessionLease).not.toHaveBeenCalled();
   });
 
   it("shares one in-process reattachment across concurrent prompt requests", async () => {

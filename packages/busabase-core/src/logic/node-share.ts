@@ -3,12 +3,13 @@ import "server-only";
 import { randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import { ORPCError } from "@orpc/server";
-import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import type { NodeIcon } from "busabase-contract/types";
+import { and, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { getContextSpaceId, resolveActorId } from "../context";
 import { getDb } from "../db";
-import { busabaseNodeShares, busabaseNodes } from "../db/schema";
+import { type BusabaseNodeType, busabaseNodeShares, busabaseNodes } from "../db/schema";
 import { id, now } from "./kernel";
-import { assertNodePermission } from "./node-acl";
+import { assertNodePermission, buildNodeVisibilityCondition } from "./node-acl";
 
 /**
  * Public link sharing (see `busabase_node_shares`). The second, orthogonal axis
@@ -109,6 +110,119 @@ export async function listOwnLiveShareNodeIds(): Promise<Set<string>> {
   // predicate every other read uses — an expired share must not show a marker
   // saying the node is published when the link no longer opens.
   return new Set(rows.filter(isShareLive).map((row) => row.nodeId));
+}
+
+/**
+ * One row of the space-level public-share listing. The share facts plus just
+ * enough of the node to render a governance row and open it — nothing that
+ * would need a second query per row, and above all NOT `passwordHash`.
+ */
+export interface OwnLiveShareSummary {
+  nodeId: string;
+  name: string;
+  slug: string;
+  type: BusabaseNodeType;
+  icon: NodeIcon | null;
+  capability: NodeShareCapability;
+  hasPassword: boolean;
+  expiresAt: Date | null;
+  createdAt: Date;
+}
+
+/**
+ * Every node in the space carrying its OWN live public share, with the grant
+ * facts attached — the read behind `nodes.share.list` (the `/shared` audit
+ * table and the sidebar's "Shared" filter).
+ *
+ * Same "own, not inherited" rule as `listOwnLiveShareNodeIds` above, for the
+ * same reason: this is the list of GRANTS SOMEONE MADE, each revocable on its
+ * own with `disableNodeShare`. A Doc under a shared folder is reachable but
+ * was never published — showing it here would offer a revoke button that can
+ * only close the folder, i.e. something other than the row the user pointed at.
+ *
+ * Two queries, never N+1 (contrast `resolveEmbedTargetMetadata`, which
+ * re-resolves an ACL per row and is the shape this deliberately avoids):
+ *   1. every `public` share row in the space, expiry filtered in JS through
+ *      the shared `isShareLive` predicate, so "live" means the same thing here
+ *      as on every other read path;
+ *   2. ONE batched node lookup for those ids, carrying the node-visibility ACL
+ *      — a share row whose node the caller cannot see must not leak the node's
+ *      name, so the intersection happens in SQL rather than after the fact.
+ *
+ * Unlike `getNodeShare` there is no per-node `assertNodePermission`: the
+ * transport already gates this at `workspace("manage")` (see
+ * `PROCEDURE_PERMISSION_POLICY`), and step 2's ACL condition is what keeps an
+ * individual invisible node out of the result.
+ */
+export async function listOwnLiveShares(): Promise<OwnLiveShareSummary[]> {
+  const db = await getDb();
+  const spaceId = getContextSpaceId();
+
+  const shares = await db
+    .select({
+      nodeId: busabaseNodeShares.nodeId,
+      scope: busabaseNodeShares.scope,
+      capability: busabaseNodeShares.capability,
+      passwordHash: busabaseNodeShares.passwordHash,
+      expiresAt: busabaseNodeShares.expiresAt,
+      createdAt: busabaseNodeShares.createdAt,
+    })
+    .from(busabaseNodeShares)
+    .where(and(eq(busabaseNodeShares.spaceId, spaceId), eq(busabaseNodeShares.scope, "public")))
+    // Newest grant first: the audit screen is read top-down as "what was opened
+    // up lately", which is the question a manager arrives with.
+    .orderBy(desc(busabaseNodeShares.createdAt));
+  const liveShares = shares.filter(isShareLive);
+  if (liveShares.length === 0) return [];
+
+  const nodes = await db
+    .select({
+      id: busabaseNodes.id,
+      name: busabaseNodes.name,
+      slug: busabaseNodes.slug,
+      type: busabaseNodes.type,
+      icon: busabaseNodes.icon,
+    })
+    .from(busabaseNodes)
+    .where(
+      and(
+        eq(busabaseNodes.spaceId, spaceId),
+        inArray(
+          busabaseNodes.id,
+          liveShares.map((share) => share.nodeId),
+        ),
+        // A node in the Trash (or purged) keeps its share row — revoking is not
+        // part of archiving — but it is not something anyone can open, so it is
+        // not something this screen should invite a manager to act on.
+        isNull(busabaseNodes.archivedAt),
+        isNull(busabaseNodes.deletedAt),
+        buildNodeVisibilityCondition(db),
+      ),
+    );
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+
+  // Driven by the SHARE order (already newest-first above), filtered by what
+  // the node lookup returned — so an ACL-invisible node simply drops out
+  // instead of appearing with a blank name.
+  return liveShares.flatMap((share) => {
+    const node = nodeById.get(share.nodeId);
+    if (!node) return [];
+    return [
+      {
+        nodeId: share.nodeId,
+        name: node.name,
+        slug: node.slug,
+        type: node.type,
+        icon: node.icon ?? null,
+        capability: share.capability,
+        // SECURITY: the hash is read only to answer "is a password in the
+        // way?" and never travels any further than this boolean.
+        hasPassword: share.passwordHash != null,
+        expiresAt: share.expiresAt,
+        createdAt: share.createdAt,
+      },
+    ];
+  });
 }
 
 /**

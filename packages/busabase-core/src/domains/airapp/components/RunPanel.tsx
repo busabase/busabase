@@ -4,8 +4,9 @@ import { useQuery } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { AirAppVO } from "busabase-contract/types";
 import { Button } from "kui/button";
-import { CircleStop, Loader2, Pin, Play, RotateCcw } from "lucide-react";
-import { useCallback, useEffect, useRef } from "react";
+import { Check, CircleStop, Copy, Loader2, Pin, Play, RotateCcw } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { fmt, useCoreI18n } from "../../../i18n";
 import {
   FullscreenPreviewSurface,
@@ -144,7 +145,7 @@ export function useAirAppRunner({
     [nodeId],
   );
   const entry = useAirAppRunnerStore(selectEntry);
-  const { status, logLines, previewUrl, error } = entry;
+  const { status, logLines, previewUrl, error, errorCode } = entry;
   const selectionsHydrated = useAirAppRunnerStore((state) => state.selectionsHydrated);
   const availableEngines = useAirAppEngineAvailability();
 
@@ -336,6 +337,7 @@ export function useAirAppRunner({
             : caught instanceof Error
               ? caught.message
               : messages.airapp.runFailed,
+          swError?.code,
         );
     }
   }, [messages, airapp, orpc, availableEngines]);
@@ -401,6 +403,7 @@ export function useAirAppRunner({
     logLines,
     previewUrl,
     error,
+    errorCode,
     run,
     stop,
     isBusy,
@@ -454,7 +457,8 @@ export function AirAppRunControls({
   fullscreenState,
 }: AirAppRunControlsProps) {
   const messages = useCoreI18n();
-  const { status, previewUrl, run, stop, isBusy, isLive } = runner;
+  const { status, previewUrl, errorCode, run, stop, isBusy, isLive } = runner;
+  const isUnsupportedBrowser = errorCode === "SERVICE_WORKER_UNAVAILABLE";
 
   const statusLabel: Record<AirAppRunStatus, string> = {
     idle: messages.airapp.statusIdle,
@@ -515,22 +519,26 @@ export function AirAppRunControls({
           <CircleStop className="size-3.5" />
         </Button>
       ) : null}
-      <Button
-        disabled={isBusy}
-        onClick={() => void run()}
-        size="sm"
-        type="button"
-        variant={status === "ready" ? "outline" : "default"}
-      >
-        {isBusy ? (
-          <Loader2 className="size-3.5 animate-spin" />
-        ) : status === "ready" || status === "error" ? (
-          <RotateCcw className="size-3.5" />
-        ) : (
-          <Play className="size-3.5" />
-        )}
-        {status === "ready" || status === "error" ? messages.airapp.runAgain : messages.airapp.run}
-      </Button>
+      {isUnsupportedBrowser ? null : (
+        <Button
+          disabled={isBusy}
+          onClick={() => void run()}
+          size="sm"
+          type="button"
+          variant={status === "ready" ? "outline" : "default"}
+        >
+          {isBusy ? (
+            <Loader2 className="size-3.5 animate-spin" />
+          ) : status === "ready" || status === "error" ? (
+            <RotateCcw className="size-3.5" />
+          ) : (
+            <Play className="size-3.5" />
+          )}
+          {status === "ready" || status === "error"
+            ? messages.airapp.runAgain
+            : messages.airapp.run}
+        </Button>
+      )}
     </div>
   );
 }
@@ -598,6 +606,83 @@ export function AirAppRunError({ error }: { error: string }) {
   );
 }
 
+/**
+ * Dedicated recovery state for `SERVICE_WORKER_UNAVAILABLE` — e.g. iOS in-app
+ * browsers (WeCom, and other WKWebView-based hosts) that expose no
+ * `navigator.serviceWorker` at all. Nodepod cannot run without a controlling
+ * Service Worker there, and no in-app retry or fix is possible: unlike the
+ * other `swError` codes (registration/activation/control timeouts, which are
+ * transient and recover with "run again"), this one is a hard capability gap
+ * that only the system browser can cross. So it replaces the generic dead-end
+ * banner with actionable guidance instead of leaving the user stuck.
+ *
+ * Copy-link, not a forced redirect: no in-app browser can be reliably driven
+ * to open Safari/Chrome from pure JS, but `window.location.href` at the
+ * moment of failure is always the exact page the user was trying to reach —
+ * copying it is the one action that reliably survives the hop to a real
+ * browser on iOS.
+ */
+export function AirAppServiceWorkerUnsupported() {
+  const messages = useCoreI18n();
+  const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
+  const linkInputRef = useRef<HTMLInputElement | null>(null);
+  const currentUrl = typeof window === "undefined" ? "" : window.location.href;
+
+  useEffect(() => {
+    if (!copyFailed) return;
+    linkInputRef.current?.focus();
+    linkInputRef.current?.select();
+  }, [copyFailed]);
+
+  const handleCopyLink = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(currentUrl);
+      setCopyFailed(false);
+      setCopied(true);
+      toast.success(messages.airapp.swUnsupportedLinkCopied);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Clipboard access can be blocked inside an in-app browser. Fall back to
+      // a selectable input so the user can still copy the link by hand.
+      setCopyFailed(true);
+    }
+  }, [currentUrl, messages.airapp.swUnsupportedLinkCopied]);
+
+  return (
+    <div
+      aria-live="polite"
+      className="grid h-full min-h-[160px] place-items-center p-6"
+      data-airapp-sw-unsupported=""
+      role="alert"
+    >
+      <div className="flex max-w-sm flex-col items-center gap-3 text-center">
+        <p className="font-medium text-foreground text-sm">{messages.airapp.swUnsupportedTitle}</p>
+        <p className="text-muted-foreground text-xs">{messages.airapp.swUnsupportedBody}</p>
+        <Button className="gap-1.5" onClick={() => void handleCopyLink()} size="sm" type="button">
+          {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+          {messages.airapp.swUnsupportedCopyLink}
+        </Button>
+        {copyFailed ? (
+          <div className="flex w-full flex-col items-center gap-1">
+            <p className="text-muted-foreground text-xs">
+              {messages.airapp.swUnsupportedCopyFailed}
+            </p>
+            <input
+              aria-label={messages.airapp.swUnsupportedCopyLink}
+              className="w-full rounded-md border border-border bg-background px-2 py-1 text-center text-foreground text-xs"
+              onFocus={(event) => event.currentTarget.select()}
+              readOnly
+              ref={linkInputRef}
+              value={currentUrl}
+            />
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 /** "App" tab content: the live preview iframe, optionally topped by a local
  *  run toolbar (see `showToolbar`).
  *
@@ -611,18 +696,21 @@ export function AirAppRunPreview({
   fullscreenState,
 }: AirAppRunPreviewProps) {
   const messages = useCoreI18n();
-  const { status, previewUrl, error } = runner;
+  const { status, previewUrl, error, errorCode } = runner;
   const ownFullscreen = useAirAppFullscreen();
   const activeFullscreen = fullscreenState ?? ownFullscreen;
+  // `SERVICE_WORKER_UNAVAILABLE` gets its own full recovery state below
+  // instead of the generic top banner + dead-end "previewFailed" text: unlike
+  // every other run failure, there is no retry that can fix it in-app.
+  const isUnsupportedBrowser = errorCode === "SERVICE_WORKER_UNAVAILABLE";
 
   return (
     <FullscreenPreviewSurface
       aria-label={airapp?.node.name ?? messages.airapp.previewTitle}
-      banner={error ? <AirAppRunError error={error} /> : null}
+      banner={error && !isUnsupportedBrowser ? <AirAppRunError error={error} /> : null}
       data-airapp-fullscreen={activeFullscreen.fullscreen ? "true" : "false"}
       data-airapp-preview=""
       exitLabel={messages.airapp.exitFullscreen}
-      fullscreenAvailable={Boolean(previewUrl)}
       fullscreenState={activeFullscreen}
       toolbar={
         showToolbar ? (
@@ -640,7 +728,9 @@ export function AirAppRunPreview({
         ) : null
       }
     >
-      {previewUrl ? (
+      {isUnsupportedBrowser ? (
+        <AirAppServiceWorkerUnsupported />
+      ) : previewUrl ? (
         <iframe
           className="h-full w-full border-0 bg-white"
           sandbox={AIRAPP_PREVIEW_IFRAME_SANDBOX}

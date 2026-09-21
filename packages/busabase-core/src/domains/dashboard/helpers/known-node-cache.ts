@@ -364,6 +364,15 @@ export interface KnownNodeCache {
 }
 
 /**
+ * The cache scope string for one space + viewer. The formula lives here so the
+ * dashboard and the shell that wraps it can never drift onto two scopes — they
+ * are separate components with separate props, and a mismatch is silent: the
+ * second reader just sees a permanently empty cache, with no error anywhere.
+ */
+export const knownNodeCacheScope = (cacheSpaceKey: string, currentUserId?: string | null): string =>
+  `${cacheSpaceKey}:${currentUserId ?? "anonymous"}`;
+
+/**
  * Creates a cache facade isolated to one workspace/user scope. Cloud callers
  * must include both identifiers so local hits never reveal another account's
  * node names or bypass the current workspace's ACL boundary.

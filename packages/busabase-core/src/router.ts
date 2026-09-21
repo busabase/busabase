@@ -1,5 +1,6 @@
 import { enhanceRouter, implement, ORPCError, os } from "@orpc/server";
 import { busabaseContract } from "busabase-contract/contract/busabase";
+import type { SharedNodeVO } from "busabase-contract/contract/schemas";
 import {
   getContextSpaceId,
   isEmbedVisitor,
@@ -48,7 +49,13 @@ import { listNodeActivity, listRecordActivity } from "./logic/node-activity";
 import { readNodeLines } from "./logic/node-content";
 import { getNodeDetail, listNodeAncestorIds } from "./logic/node-detail";
 import { resolveNodeRouteState } from "./logic/node-route-state";
-import { disableNodeShare, getNodeShare, setNodeShare } from "./logic/node-share";
+import {
+  disableNodeShare,
+  getNodeShare,
+  listOwnLiveShares,
+  type OwnLiveShareSummary,
+  setNodeShare,
+} from "./logic/node-share";
 import { recordSearchInteraction } from "./logic/search-metrics";
 import {
   closeChangeRequest,
@@ -112,6 +119,24 @@ const toNodeShareVO = (
         expiresAt: row.expiresAt ? row.expiresAt.toISOString() : null,
         updatedAt: row.updatedAt.toISOString(),
       };
+
+/**
+ * PO → VO for one row of the space-level share listing. Same SECURITY rule as
+ * `toNodeShareVO`: the logic layer already reduced the stored hash to a
+ * boolean, and nothing here can put it back. Dates become ISO strings at the
+ * transport boundary, as everywhere else.
+ */
+const toSharedNodeVO = (row: OwnLiveShareSummary): SharedNodeVO => ({
+  nodeId: row.nodeId,
+  name: row.name,
+  slug: row.slug,
+  type: row.type,
+  icon: row.icon,
+  capability: row.capability,
+  hasPassword: row.hasPassword,
+  expiresAt: row.expiresAt ? row.expiresAt.toISOString() : null,
+  createdAt: row.createdAt.toISOString(),
+});
 
 const busabaseRouterImpl = busabase.router({
   auth: {
@@ -226,6 +251,12 @@ const busabaseRouterImpl = busabase.router({
       }),
     },
     share: {
+      // Space-level listing (the `/shared` audit table + the sidebar's
+      // "Shared" filter). Thin, like its siblings: the logic layer owns the
+      // query, the ACL and the hash→boolean reduction.
+      list: busabase.nodes.share.list.handler(async () =>
+        (await listOwnLiveShares()).map(toSharedNodeVO),
+      ),
       get: busabase.nodes.share.get.handler(async ({ input }) =>
         toNodeShareVO(await getNodeShare(input.nodeId)),
       ),

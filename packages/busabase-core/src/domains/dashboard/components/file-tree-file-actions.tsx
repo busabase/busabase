@@ -20,6 +20,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { useCoreI18n, useCoreLocale } from "../../../i18n";
 import { presentCoreError } from "../../../i18n/localize-error";
+import { buildFileTreeFolderRenamePlan } from "../helpers/file-tree-bulk-actions";
 import {
   fileTreeFileName,
   fileTreeUploadPath,
@@ -586,6 +587,221 @@ export function FileTreeRemoveDialog({
             immediateAction={{
               label: messages.nodeDetail.removeNow,
               loadingLabel: messages.nodeDetail.removingFile,
+              isLoading: busy === "immediate",
+              onSubmit: () => void submit("immediate"),
+            }}
+          />
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+export function FileTreeFolderRenameDialog({
+  existingPaths,
+  files,
+  folderPath,
+  onOpenChange,
+  onSubmit,
+  open,
+}: {
+  existingPaths: Set<string>;
+  files: FileTreeFileVO[];
+  folderPath: string | null;
+  onOpenChange: (open: boolean) => void;
+  onSubmit: (nextName: string, mode: FileTreeMutationMode) => Promise<void>;
+  open: boolean;
+}) {
+  const messages = useCoreI18n();
+  const locale = useCoreLocale();
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState<FileTreeMutationMode | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const currentName = folderPath ? fileTreeFileName(folderPath) : "";
+  const result = folderPath
+    ? buildFileTreeFolderRenamePlan({ existingPaths, files, folderPath, nextName: name })
+    : null;
+  const fileCount = result?.ok
+    ? result.plan.sourcePaths.length
+    : files.filter((file) => folderPath && file.path.startsWith(`${folderPath}/`)).length;
+  const disabled = !result?.ok;
+
+  useEffect(() => {
+    if (open && folderPath) {
+      setName(currentName);
+      setError(null);
+    }
+  }, [currentName, folderPath, open]);
+
+  const close = () => {
+    if (busy) return;
+    onOpenChange(false);
+    setName("");
+    setError(null);
+  };
+
+  const submit = async (mode: FileTreeMutationMode) => {
+    if (disabled) return;
+    setBusy(mode);
+    setError(null);
+    try {
+      await onSubmit(name.trim(), mode);
+      setBusy(null);
+      onOpenChange(false);
+      setName("");
+      setError(null);
+    } catch (caught) {
+      setError(presentCoreError(messages, locale, caught, messages.nodeDetail.folderRenameFailed));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const validationMessage =
+    result && !result.ok
+      ? result.reason === "collision"
+        ? messages.nodeDetail.folderRenameConflict.replace("{path}", result.paths[0] ?? "")
+        : result.reason === "invalidName"
+          ? messages.nodeDetail.invalidFolderName
+          : result.reason === "sameName"
+            ? messages.nodeDetail.folderNameUnchanged
+            : messages.nodeDetail.folderEmpty
+      : null;
+
+  return (
+    <Dialog onOpenChange={(next) => (!next ? close() : onOpenChange(true))} open={open}>
+      <DialogContent className="p-0 sm:max-w-md">
+        <DialogHeader className="border-border/60 border-b px-5 py-4">
+          <DialogTitle className="text-base">{messages.nodeDetail.renameFolder}</DialogTitle>
+          <DialogDescription>
+            {folderPath
+              ? messages.nodeDetail.renameFolderDescription
+                  .replace("{folder}", folderPath)
+                  .replace("{count}", String(fileCount))
+              : ""}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3 px-5 py-4">
+          <Label htmlFor="file-tree-rename-folder-name">{messages.nodeDetail.newFolderName}</Label>
+          <Input
+            autoFocus
+            className="h-9"
+            disabled={busy !== null}
+            id="file-tree-rename-folder-name"
+            onChange={(event) => setName(event.target.value)}
+            value={name}
+          />
+          {validationMessage || error ? (
+            <p aria-live="polite" className="text-rejected-strong text-sm dark:text-rejected-soft">
+              {error ?? validationMessage}
+            </p>
+          ) : null}
+        </div>
+        <div className="flex justify-end border-border/60 border-t bg-muted/20 px-5 py-3">
+          <SplitSubmitButton
+            changeRequestAction={{
+              label: messages.nodeDetail.renameFolderAsChangeRequest,
+              loadingLabel: messages.nodeDetail.renamingFolder,
+              isLoading: busy === "changeRequest",
+              onSubmit: () => void submit("changeRequest"),
+            }}
+            disabled={disabled}
+            dropdownPosition="above"
+            hint={messages.common.mergeImmediatelyHint}
+            immediateAction={{
+              label: messages.nodeDetail.renameFolderNow,
+              loadingLabel: messages.nodeDetail.renamingFolder,
+              isLoading: busy === "immediate",
+              onSubmit: () => void submit("immediate"),
+            }}
+          />
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+export function FileTreeBulkRemoveDialog({
+  fileCount,
+  label,
+  onOpenChange,
+  onSubmit,
+  open,
+}: {
+  fileCount: number;
+  label: string;
+  onOpenChange: (open: boolean) => void;
+  onSubmit: (mode: FileTreeMutationMode) => Promise<void>;
+  open: boolean;
+}) {
+  const messages = useCoreI18n();
+  const locale = useCoreLocale();
+  const [busy, setBusy] = useState<FileTreeMutationMode | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const close = () => {
+    if (busy) return;
+    onOpenChange(false);
+    setError(null);
+  };
+
+  const submit = async (mode: FileTreeMutationMode) => {
+    if (fileCount === 0) return;
+    setBusy(mode);
+    setError(null);
+    try {
+      await onSubmit(mode);
+      setBusy(null);
+      onOpenChange(false);
+      setError(null);
+    } catch (caught) {
+      setError(presentCoreError(messages, locale, caught, messages.nodeDetail.filesRemoveFailed));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <Dialog onOpenChange={(next) => (!next ? close() : onOpenChange(true))} open={open}>
+      <DialogContent className="p-0 sm:max-w-md">
+        <DialogHeader className="border-border/60 border-b px-5 py-4">
+          <DialogTitle className="flex items-center gap-2 text-base">
+            <Trash2 aria-hidden className="size-4 text-rejected-strong dark:text-rejected-soft" />
+            {messages.nodeDetail.removeDriveFiles}
+          </DialogTitle>
+          <DialogDescription>{label}</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3 px-5 py-4">
+          <p className="text-sm leading-6">
+            {(fileCount === 1
+              ? messages.nodeDetail.removeDriveFileDescription
+              : messages.nodeDetail.removeDriveFilesDescription
+            ).replace("{count}", String(fileCount))}
+          </p>
+          <p className="text-muted-foreground text-xs leading-5">
+            {messages.nodeDetail.removeFileAssetHint}
+          </p>
+          {error ? (
+            <p aria-live="polite" className="text-rejected-strong text-sm dark:text-rejected-soft">
+              {error}
+            </p>
+          ) : null}
+        </div>
+        <div className="flex items-center justify-between gap-3 border-border/60 border-t bg-muted/20 px-5 py-3">
+          <Button disabled={busy !== null} onClick={close} size="sm" type="button" variant="ghost">
+            {messages.common.cancel}
+          </Button>
+          <SplitSubmitButton
+            changeRequestAction={{
+              label: messages.nodeDetail.removeAsChangeRequest,
+              loadingLabel: messages.nodeDetail.removingFiles,
+              isLoading: busy === "changeRequest",
+              onSubmit: () => void submit("changeRequest"),
+            }}
+            dropdownPosition="above"
+            immediateAction={{
+              label: messages.nodeDetail.removeNow,
+              loadingLabel: messages.nodeDetail.removingFiles,
               isLoading: busy === "immediate",
               onSubmit: () => void submit("immediate"),
             }}

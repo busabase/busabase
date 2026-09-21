@@ -1,10 +1,16 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { CoreI18nProvider, coreMessagesByLocale, coreMessagesEn } from "../../../i18n";
+import {
+  CoreI18nProvider,
+  type CoreLocale,
+  coreMessagesByLocale,
+  coreMessagesEn,
+} from "../../../i18n";
 import type { AirAppRunStatus } from "../store/airapp-runner-store";
 import {
   AirAppPreviewPending,
   AirAppRunError,
+  AirAppServiceWorkerUnsupported,
   airAppAutoRunDelay,
   createEligibleAirAppRunner,
   noEligibleAirAppEngineMessage,
@@ -14,6 +20,13 @@ const renderPending = (status: AirAppRunStatus, locale: "en" | "zh-CN") =>
   renderToStaticMarkup(
     <CoreI18nProvider locale={locale}>
       <AirAppPreviewPending status={status} />
+    </CoreI18nProvider>,
+  );
+
+const renderUnsupported = (locale: CoreLocale) =>
+  renderToStaticMarkup(
+    <CoreI18nProvider locale={locale}>
+      <AirAppServiceWorkerUnsupported />
     </CoreI18nProvider>,
   );
 
@@ -194,4 +207,23 @@ describe("AirApp runtime engine eligibility", () => {
       "この AirApp にはリモートマシンが必要ですが、このデプロイでは Sandock が設定されていません。",
     );
   });
+});
+
+describe("AirAppServiceWorkerUnsupported", () => {
+  it.each([
+    ["en", "This browser can&#x27;t run AirApp previews", "Copy link"],
+    ["zh-CN", "当前浏览器无法运行 AirApp 预览", "复制链接"],
+    ["zh-TW", "目前瀏覽器無法執行 AirApp 預覽", "複製連結"],
+    ["ja", "このブラウザでは AirApp プレビューを実行できません", "リンクをコピー"],
+  ] satisfies [CoreLocale, string, string][])(
+    "renders accessible unsupported-browser guidance in %s",
+    (locale, title, copyLabel) => {
+      const markup = renderUnsupported(locale);
+
+      expect(markup).toContain('role="alert"');
+      expect(markup).toContain('aria-live="polite"');
+      expect(markup).toContain(title);
+      expect(markup).toContain(copyLabel);
+    },
+  );
 });

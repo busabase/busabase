@@ -9,9 +9,12 @@
 import { Crepe } from "@milkdown/crepe";
 import "@milkdown/crepe/theme/common/style.css";
 import "@milkdown/crepe/theme/frame.css";
+import type { Ctx } from "@milkdown/kit/ctx";
+import { outline } from "@milkdown/kit/utils";
 import { Milkdown, MilkdownProvider, useEditor } from "@milkdown/react";
 import { useEffect, useRef } from "react";
 import { useCoreI18n } from "../../../i18n";
+import { DocContentSkeleton } from "../../dashboard/components/skeletons";
 import { createDocCodeTheme } from "./doc-code-theme";
 import { docVideoLinkPlugin, docVideoPlugin } from "./doc-video";
 import "./doc-editor.css";
@@ -24,7 +27,15 @@ export interface DocEditorCrepeProps {
   /** @default true */
   editable?: boolean;
   onImageUpload?: (file: File) => Promise<string>;
+  /** Called after the editor mounts and whenever the heading structure changes. */
+  onOutlineChange?: (outline: DocOutlineItem[]) => void;
   className?: string;
+}
+
+export interface DocOutlineItem {
+  id: string;
+  level: number;
+  text: string;
 }
 
 function DocEditorInner({
@@ -32,6 +43,7 @@ function DocEditorInner({
   onChange,
   editable = true,
   onImageUpload,
+  onOutlineChange,
   className,
 }: DocEditorCrepeProps) {
   const messages = useCoreI18n();
@@ -39,9 +51,17 @@ function DocEditorInner({
   onChangeRef.current = onChange;
   const onImageUploadRef = useRef(onImageUpload);
   onImageUploadRef.current = onImageUpload;
+  const onOutlineChangeRef = useRef(onOutlineChange);
+  onOutlineChangeRef.current = onOutlineChange;
   const crepeRef = useRef<Crepe | null>(null);
 
-  useEditor((root) => {
+  const announceOutline = (ctx: Ctx) => {
+    onOutlineChangeRef.current?.(
+      outline()(ctx).map((item) => ({ id: item.id, level: item.level, text: item.text })),
+    );
+  };
+
+  const { loading } = useEditor((root) => {
     const crepe = new Crepe({
       root,
       defaultValue: content,
@@ -118,6 +138,8 @@ function DocEditorInner({
     crepe.editor.use(docVideoPlugin).use(docVideoLinkPlugin);
     crepe.setReadonly(!editable);
     crepe.on((listener) => {
+      listener.mounted(announceOutline);
+      listener.updated(announceOutline);
       listener.markdownUpdated((_ctx, markdown) => onChangeRef.current(markdown));
     });
     crepeRef.current = crepe;
@@ -131,9 +153,20 @@ function DocEditorInner({
     crepeRef.current?.setReadonly(!editable);
   }, [editable]);
 
+  // `useEditor` resolves asynchronously, and until it does `<Milkdown />` is an
+  // empty container. Keep it mounted (ProseMirror needs the DOM node) but
+  // hidden, and shimmer over it — otherwise this second gap, right after the
+  // chunk finishes downloading, looks the same as an empty document.
   return (
-    <div className={className}>
-      <Milkdown />
+    <div className={className ? `relative ${className}` : "relative"}>
+      {loading ? (
+        <div className="absolute inset-0 overflow-hidden">
+          <DocContentSkeleton />
+        </div>
+      ) : null}
+      <div className={loading ? "invisible" : undefined}>
+        <Milkdown />
+      </div>
     </div>
   );
 }

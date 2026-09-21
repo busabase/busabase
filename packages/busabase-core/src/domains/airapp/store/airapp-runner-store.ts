@@ -3,6 +3,7 @@
 import { create } from "zustand";
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
 import type { AirAppRunner, AirAppRunnerKind } from "../components/runners/types";
+import type { NodepodServiceWorkerErrorCode } from "../utils/nodepod-service-worker";
 
 export const DEFAULT_RUNNER_KIND: AirAppRunnerKind = "browser";
 const RUNNER_SELECTION_STORAGE_KEY = "busabase-airapp-runner-selections.v1";
@@ -91,6 +92,11 @@ export interface AirAppRunEntry {
   logLines: string[];
   previewUrl: string | null;
   error: string | null;
+  /** Set only when `error` came from a {@link NodepodServiceWorkerError},
+   *  so the panel can tell a `SERVICE_WORKER_UNAVAILABLE` capability gap
+   *  apart from a generic run failure and render its dedicated recovery UI
+   *  instead of the plain error banner. */
+  errorCode: NodepodServiceWorkerErrorCode | null;
   runner: AirAppRunner | null;
   /** Which engine `runner` was built with — kept alongside `runner` so the
    *  engine picker can show the running/last-used engine even though
@@ -105,6 +111,7 @@ export const IDLE_ENTRY: AirAppRunEntry = {
   logLines: [],
   previewUrl: null,
   error: null,
+  errorCode: null,
   runner: null,
   runnerKind: DEFAULT_RUNNER_KIND,
 };
@@ -155,7 +162,12 @@ interface AirAppRunnerStoreState {
   ) => void;
   appendLog: (nodeId: string, runner: AirAppRunner, chunk: string) => void;
   setPreviewUrl: (nodeId: string, runner: AirAppRunner, url: string) => void;
-  setError: (nodeId: string, runner: AirAppRunner, message: string) => void;
+  setError: (
+    nodeId: string,
+    runner: AirAppRunner,
+    message: string,
+    errorCode?: NodepodServiceWorkerErrorCode,
+  ) => void;
   /** Records a failure that happened BEFORE a runner could be constructed —
    *  e.g. a malformed `airapp.json`, or no engine on this deployment able to
    *  run the app's runtime. Distinct from `setError` because that one
@@ -191,6 +203,7 @@ export const useAirAppRunnerStore = create<AirAppRunnerStoreState>()(
               logLines: [],
               previewUrl: null,
               error: null,
+              errorCode: null,
               runner,
               runnerKind,
             },
@@ -245,7 +258,7 @@ export const useAirAppRunnerStore = create<AirAppRunnerStoreState>()(
           };
         }),
 
-      setError: (nodeId, runner, message) =>
+      setError: (nodeId, runner, message, errorCode) =>
         set((state) => {
           const current = state.entries[nodeId];
           if (current?.runner !== runner) {
@@ -254,7 +267,12 @@ export const useAirAppRunnerStore = create<AirAppRunnerStoreState>()(
           return {
             entries: {
               ...state.entries,
-              [nodeId]: { ...current, error: message, status: "error" },
+              [nodeId]: {
+                ...current,
+                error: message,
+                errorCode: errorCode ?? null,
+                status: "error",
+              },
             },
           };
         }),
@@ -269,6 +287,7 @@ export const useAirAppRunnerStore = create<AirAppRunnerStoreState>()(
               logLines: [],
               previewUrl: null,
               error: message,
+              errorCode: null,
               runner: null,
               runnerKind,
             },

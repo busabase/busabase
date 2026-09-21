@@ -1,3 +1,4 @@
+import { cn } from "kui/utils";
 import { ShimmerSkeleton as Skeleton } from "./shimmer-skeleton";
 
 /**
@@ -157,6 +158,26 @@ export function NodeDetailSkeleton({
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Body-only placeholder for the Doc node's editor area, used while the heavy
+ * Crepe/Milkdown module is being fetched and mounted (see
+ * `domains/doc/components/doc-editor.tsx`). The doc's own title and description
+ * are already on screen by then, so this shimmers only the content below them.
+ *
+ * Without it that area renders as nothing at all, which is indistinguishable
+ * from the `emptyDoc` state — the reader can't tell whether the document is
+ * still loading or genuinely has no content.
+ */
+export function DocContentSkeleton({ className }: { className?: string }) {
+  return (
+    <div className={cn("space-y-3 pt-6", className)} aria-hidden>
+      {DOC_LINES.map((line) => (
+        <Skeleton className="h-4" style={{ width: line.width }} key={line.id} />
+      ))}
     </div>
   );
 }
