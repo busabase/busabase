@@ -2,6 +2,15 @@ import { nodeWebUrl } from "busabase-contract/node-web-url";
 import type { ChangeRequestVO, RecordVO, ViewVO } from "busabase-contract/types";
 import { type BusabaseAssetsClient, grepAssets } from "./asset-grep.js";
 import {
+  type BusabaseUploadedAsset,
+  type UploadAssetOptions,
+  uploadAsset,
+} from "./asset-upload.js";
+
+export type { BusabaseUploadedAsset, UploadAssetOptions } from "./asset-upload.js";
+export { hashBytes, uploadAsset } from "./asset-upload.js";
+
+import {
   type BusabaseClient,
   type BusabaseConfig,
   createBusabaseClient,
@@ -326,6 +335,28 @@ export class Busabase {
       );
     }
     return this.client.assets.putText({ assetId, storageKey: upload.storageKey });
+  }
+
+  /**
+   * Put a file into this Space's Asset library in one call, and get back every
+   * id the rest of the SDK asks for: `assetId` for a file-tree entry,
+   * `attachmentId` for a record's attachment cell, `url` to embed in Markdown.
+   *
+   * Hides the three-step flow (`assets.createUploadUrl` → PUT →
+   * `assets.confirm`) and its dedup short-circuit, the same way `putText`
+   * does for text slots.
+   *
+   * @example
+   * ```ts
+   * const shot = await bb.uploadAsset(png, {
+   *   fileName: "user-journey.png",
+   *   mimeType: "image/png",
+   * });
+   * body += `![user journey](${shot.url})`;
+   * ```
+   */
+  uploadAsset(bytes: Uint8Array, options: UploadAssetOptions): Promise<BusabaseUploadedAsset> {
+    return uploadAsset(this.client, bytes, options, this.config.fetch ?? fetch);
   }
 
   /** Service health — reaches the server without requiring auth. */

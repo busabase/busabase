@@ -8,6 +8,7 @@ import {
   inspectProvisionedResources,
   provisionDeclaredResources,
   publishAirApp,
+  resolveAirAppFileAssets,
   resolveProvisionedFolder,
 } from "./airapp.js";
 
@@ -904,5 +905,86 @@ describe("AirAppFieldDeclaration accepts a hand-authored plain-JS declaration", 
     };
     const result = resolveProvisionedFolder(null, declaredConfig);
     expect(result.missing).toHaveLength(1);
+  });
+});
+
+describe("binary files in a bundle", () => {
+  const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+  const assetsClient = () => ({
+    assets: {
+      createUploadUrl: vi.fn(async () => ({
+        uploadUrl: "https://upload.example/put",
+        storageKey: "key-1",
+        publicUrl: "https://cdn.example/icon.png",
+        expiresIn: 600,
+      })),
+      confirm: vi.fn(async () => ({
+        success: true,
+        attachmentId: "att-1",
+        assetId: "ast-1",
+        storageKey: "key-1",
+        publicUrl: "https://cdn.example/icon.png",
+      })),
+    },
+  });
+
+  it("turns bytes into an assetId and leaves text files alone", async () => {
+    const client = assetsClient();
+    const fetchImpl = vi.fn(async () => new Response(null, { status: 200 }));
+    const resolved = await resolveAirAppFileAssets(
+      client as never,
+      [
+        { path: "app/index.html", content: "<html>" },
+        { path: "app/icon.png", bytes: PNG, mimeType: "image/png" },
+      ],
+      fetchImpl as never,
+    );
+
+    expect(resolved[0]).toEqual({ path: "app/index.html", content: "<html>" });
+    expect(resolved[1]).toEqual({ path: "app/icon.png", assetId: "ast-1", mimeType: "image/png" });
+    // The file name the Asset library records is the file's own name, not the
+    // whole bundle-relative path.
+    expect(client.assets.createUploadUrl).toHaveBeenCalledWith(
+      expect.objectContaining({ fileName: "icon.png", mimeType: "image/png" }),
+    );
+  });
+
+  it("makes no upload calls for a bundle that is all text", async () => {
+    const client = assetsClient();
+    await resolveAirAppFileAssets(client as never, [{ path: "app/a.js", content: "x" }]);
+    expect(client.assets.createUploadUrl).not.toHaveBeenCalled();
+  });
+
+  it("builds an assetId operation, not a content one", () => {
+    const ops = buildAirAppFileOperations(
+      [{ path: "app/icon.png", assetId: "ast-1", mimeType: "image/png" }],
+      ["app/icon.png"],
+    );
+    expect(ops).toEqual([
+      { kind: "update", path: "app/icon.png", assetId: "ast-1", mimeType: "image/png" },
+    ]);
+  });
+
+  it("refuses to silently drop a file whose bytes were never resolved", () => {
+    expect(() => buildAirAppFileOperations([{ path: "app/icon.png", bytes: PNG }], [])).toThrow(
+      /resolveAirAppFileAssets first/,
+    );
+  });
+
+  it("says so when the host has no Asset library to back the file", async () => {
+    const client = assetsClient();
+    client.assets.confirm = vi.fn(async () => ({
+      success: true,
+      attachmentId: "att-1",
+      storageKey: "key-1",
+      publicUrl: "https://cdn.example/icon.png",
+    })) as never;
+    await expect(
+      resolveAirAppFileAssets(
+        client as never,
+        [{ path: "app/icon.png", bytes: PNG, mimeType: "image/png" }],
+        (async () => new Response(null, { status: 200 })) as never,
+      ),
+    ).rejects.toThrow(/no assetId/);
   });
 });
