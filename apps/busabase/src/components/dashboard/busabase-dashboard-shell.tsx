@@ -21,6 +21,7 @@ import {
   Images,
   Inbox,
   LayoutGrid,
+  Link2,
   Network,
   Shapes,
 } from "lucide-react";
@@ -213,6 +214,13 @@ export function BusabaseDashboardShell({
         >
           <Globe />
           <span>{coreMessages.nav.shared}</span>
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onSelect={() => navigateInWorkspace("/embed-links")}
+          className={currentPath === "/embed-links" ? "bg-accent" : undefined}
+        >
+          <Link2 />
+          <span>{coreMessages.nav.embedLinks}</span>
         </DropdownMenuItem>
         <DropdownMenuItem
           onSelect={() => navigateInWorkspace("/agents")}
