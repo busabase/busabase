@@ -1,0 +1,1 @@
+CREATE INDEX "busabase_operations_space_created_idx" ON "busabase_operations" USING btree ("space_id","created_at");

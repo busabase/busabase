@@ -13,15 +13,18 @@ import {
 import type { MoveNodePayload } from "busabase-core/dashboard/use-move-node";
 import { useCoreI18n } from "busabase-core/i18n";
 import { DropdownMenuItem, DropdownMenuSeparator } from "kui/dropdown-menu";
+import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "kui/sidebar";
 import {
   Activity,
   Archive,
   Bot,
+  ExternalLink,
   Globe,
   Images,
   Inbox,
   LayoutGrid,
   Link2,
+  MessagesSquare,
   Network,
   Shapes,
 } from "lucide-react";
@@ -36,6 +39,13 @@ import { getLanguageOptions } from "~/i18n/config";
 import { getBusabaseAppLL } from "~/lib/i18n";
 
 const BUSABASE_LOGO = "/icon.svg";
+
+/**
+ * The hosted forum. Absolute on purpose: a self-hosted instance has no
+ * /community route of its own, so a relative link would 404 exactly where the
+ * user needed help.
+ */
+const COMMUNITY_FORUM_URL = "https://busabase.com/community";
 
 interface BusabaseDashboardShellProps {
   children: ReactNode;
@@ -152,11 +162,27 @@ export function BusabaseDashboardShell({
     },
     appLogo: brandedLogo,
     footerExtra: (
-      <BusabaseAgentSkillButton
-        defaultOrigin="http://localhost:15419"
-        edition="desktop"
-        lang={locale}
-      />
+      <>
+        <BusabaseAgentSkillButton
+          defaultOrigin="http://localhost:15419"
+          edition="desktop"
+          lang={locale}
+        />
+        {/* There is no account menu in the open-source app (`hideUserMenu`), so
+            the sidebar footer is the only place a self-hosted user can be told
+            where to ask a question and read what others already answered. */}
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton asChild tooltip={LL.shell.communityForum()}>
+              <a href={COMMUNITY_FORUM_URL} target="_blank" rel="noopener noreferrer">
+                <MessagesSquare />
+                <span>{LL.shell.communityForum()}</span>
+                <ExternalLink className="ml-auto size-3 opacity-50" />
+              </a>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </>
     ),
     hideUserMenu: true,
     isLoadingSpaces: false,

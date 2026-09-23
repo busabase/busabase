@@ -211,6 +211,13 @@
       "when": 1789546384362,
       "tag": "0029_colossal_firebird",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1790100733477,
+      "tag": "0030_striped_anita_blake",
+      "breakpoints": true
     }
   ]
 }

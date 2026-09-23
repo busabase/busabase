@@ -93,6 +93,38 @@ const fullscreenPreview = (page: Page) => page.locator('[data-airapp-fullscreen=
 const visiblePreviewIframes = (page: Page) =>
   page.locator('iframe[title="AirApp preview"]:visible');
 
+/** Models Edge/Chromium translation replacing text nodes, while honoring the
+ * standard and compatibility opt-outs used by the AirApp host UI. */
+const emulateBrowserTranslation = (page: Page) =>
+  page.locator("[data-dashboard-airapp-view]:visible").evaluate((root) => {
+    const boundarySelector = '[translate="no"], .notranslate';
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    const candidates: Text[] = [];
+    let current = walker.nextNode();
+    while (current) {
+      if (current instanceof Text && current.data.trim()) candidates.push(current);
+      current = walker.nextNode();
+    }
+
+    let protectedCount = 0;
+    let translatedCount = 0;
+    for (const textNode of candidates) {
+      const parent = textNode.parentElement;
+      if (!parent) continue;
+      if (parent.closest(boundarySelector)) {
+        protectedCount += 1;
+        continue;
+      }
+      const translatedText = document.createElement("font");
+      translatedText.dataset.edgeTranslationSimulation = "true";
+      translatedText.textContent = textNode.data;
+      parent.replaceChild(translatedText, textNode);
+      translatedCount += 1;
+    }
+
+    return { protectedCount, translatedCount };
+  });
+
 test("AirApp run panel: auto-run, restart, watermark, nav persistence, fullscreen, side panel", async ({
   page,
   request,
@@ -124,6 +156,47 @@ test("AirApp run panel: auto-run, restart, watermark, nav persistence, fullscree
     await expect(page).toHaveURL(new RegExp(`/dashboard/local/airapp/${appA.slug}$`));
     appASrc = (await iframe.getAttribute("src")) ?? "";
     expect(appASrc.length).toBeGreaterThan(0);
+  });
+
+  await test.step("translated direct deep link reaches ready and survives client navigation", async () => {
+    const domMutationErrors: string[] = [];
+    const recordDomMutationError = (error: Error) => {
+      if (/insertBefore|removeChild|not a child/i.test(error.message)) {
+        domMutationErrors.push(error.message);
+      }
+    };
+    page.on("pageerror", recordDomMutationError);
+
+    try {
+      await page.goto(`/dashboard/local/airapp/${appA.slug}`);
+      await expect(page.getByRole("heading", { name: appA.name })).toBeVisible();
+
+      const controls = page.locator("[data-airapp-run-status]:visible").first();
+      await expect(controls).toHaveAttribute("translate", "no");
+      await expect(controls).toHaveClass(/notranslate/);
+
+      const translation = await emulateBrowserTranslation(page);
+      expect(translation.translatedCount).toBeGreaterThan(0);
+      expect(translation.protectedCount).toBeGreaterThan(0);
+
+      await expectRunning(page, appA.nodeId);
+      const iframe = mainPreview(page);
+      await expect(iframe).toBeVisible();
+      expect(
+        await iframe.evaluate((node) => node.closest('[translate="no"], .notranslate') === null),
+      ).toBe(true);
+
+      await sidebarLink(page, "Home").click();
+      await expect(page).toHaveURL(/\/dashboard\/local\/home$/);
+      await sidebarLink(page, appA.name).click();
+      await expect(page).toHaveURL(new RegExp(`/dashboard/local/airapp/${appA.slug}$`));
+      await expectRunning(page, appA.nodeId);
+      await expect(mainPreview(page)).toBeVisible();
+    } finally {
+      page.off("pageerror", recordDomMutationError);
+    }
+
+    expect(domMutationErrors).toEqual([]);
   });
 
   await test.step("shared fullscreen URL still auto-runs and reuses one preview iframe", async () => {
