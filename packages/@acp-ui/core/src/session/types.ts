@@ -1,4 +1,11 @@
-import type { AcpAttachment, AcpBlock, AcpPermissionBlock, AcpUiEvent, AcpUsage } from "../reduce";
+import type {
+  AcpAttachment,
+  AcpAvailableCommand,
+  AcpBlock,
+  AcpPermissionBlock,
+  AcpUiEvent,
+  AcpUsage,
+} from "../reduce";
 
 /**
  * What a host must supply to drive a conversation. The *transport* stays in the
@@ -116,6 +123,8 @@ export interface AcpSessionState {
    * makes sense (a footer, a badge), the way `sending`/`ended` already are.
    */
   usage: AcpUsage | null;
+  /** The latest full command list the agent advertised for this session. */
+  availableCommands: AcpAvailableCommand[];
   sendPrompt: (text: string, attachments?: readonly AcpAttachment[]) => Promise<void>;
   answerPermission: (block: AcpPermissionBlock, optionId: string) => Promise<void>;
   /** No-op when the port supplied no `cancel`, or before a session exists. */

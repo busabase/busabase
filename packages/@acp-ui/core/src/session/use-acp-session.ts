@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { attachmentToContentBlock } from "../prompt/attachment-media";
-import type { AcpAttachment, AcpBlock, AcpPermissionBlock, AcpUiEvent, AcpUsage } from "../reduce";
+import type {
+  AcpAttachment,
+  AcpAvailableCommand,
+  AcpBlock,
+  AcpPermissionBlock,
+  AcpUiEvent,
+  AcpUsage,
+} from "../reduce";
 import {
+  availableCommandsOf,
+  foldAvailableCommands,
   foldSessionTitle,
   foldUsage,
   reduceAcpEvent,
@@ -34,6 +43,10 @@ export function useAcpSession(port: AcpSessionPort, key: string | null): AcpSess
   const [error, setError] = useState<string | null>(null);
   const [title, setTitle] = useState<string | null>(null);
   const [usage, setUsage] = useState<AcpUsage | null>(null);
+  const [availableCommands, setAvailableCommands] = useState<{
+    key: string;
+    commands: AcpAvailableCommand[];
+  } | null>(null);
 
   // `port` is typically an object literal rebuilt every render. Holding it in a
   // ref keeps it out of the effect's dependencies, so a re-render cannot tear
@@ -70,6 +83,7 @@ export function useAcpSession(port: AcpSessionPort, key: string | null): AcpSess
       setError(null);
       setTitle(null);
       setUsage(null);
+      setAvailableCommands(null);
       return;
     }
     const controller = new AbortController();
@@ -103,6 +117,12 @@ export function useAcpSession(port: AcpSessionPort, key: string | null): AcpSess
           setUsage((prev) => prev ?? pastUsage);
           const pastTitle = foldSessionTitle(past);
           setTitle((prev) => (prev !== null ? prev : pastTitle));
+          const pastCommands = foldAvailableCommands(past);
+          if (pastCommands !== undefined) {
+            setAvailableCommands((prev) =>
+              prev?.key === key ? prev : { key, commands: pastCommands },
+            );
+          }
         } catch {
           // History is an enhancement; failing to load it must not stop the
           // live conversation from working.
@@ -120,6 +140,8 @@ export function useAcpSession(port: AcpSessionPort, key: string | null): AcpSess
           if (eventUsage) setUsage(eventUsage);
           const eventTitle = sessionTitleOf(event);
           if (eventTitle !== undefined) setTitle(eventTitle);
+          const eventCommands = availableCommandsOf(event);
+          if (eventCommands !== undefined) setAvailableCommands({ key, commands: eventCommands });
         },
         controller.signal,
       );
@@ -138,6 +160,7 @@ export function useAcpSession(port: AcpSessionPort, key: string | null): AcpSess
       setError(null);
       setTitle(null);
       setUsage(null);
+      setAvailableCommands(null);
       startPromiseRef.current = portRef.current.start(controller.signal).then((id) => {
         sessionIdRef.current = id;
         return id;
@@ -266,6 +289,9 @@ export function useAcpSession(port: AcpSessionPort, key: string | null): AcpSess
     error,
     title,
     usage,
+    // Effects clear state after render. Associate session-scoped data with its
+    // owner so an A -> B key switch cannot expose A's commands for one frame.
+    availableCommands: availableCommands?.key === key ? availableCommands.commands : [],
     sendPrompt,
     answerPermission,
     cancel,

@@ -244,6 +244,14 @@ export interface UserMenuItem {
   icon?: React.ComponentType<{ className?: string }>;
   external?: boolean;
   onClick?: () => void;
+  /**
+   * Draw a separator above this item, so it reads as the head of its own
+   * section rather than one more line in a long list. Use it for the few
+   * entries that must not be scanned past — a support channel buried tenth in
+   * an undifferentiated list is effectively invisible. Ignored on the first
+   * item (the group already has a separator above it).
+   */
+  startsSection?: boolean;
 }
 
 export interface AppBranding {

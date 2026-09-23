@@ -1,7 +1,13 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { AcpComposer, mergeDraft, toAttachments } from "./acp-composer";
+import {
+  AcpComposer,
+  getCommandQuery,
+  insertCommand,
+  mergeDraft,
+  toAttachments,
+} from "./acp-composer";
 
 const submitButton = () => screen.getByRole("button", { name: /Submit|Stop/ });
 const attachButton = () => screen.getByRole("button", { name: "Attach a file" });
@@ -50,6 +56,156 @@ describe("sending", () => {
     expect(button).toBeEnabled();
     await userEvent.click(button);
     expect(onSend).toHaveBeenCalledWith("hi", undefined);
+  });
+});
+
+describe("ACP slash commands", () => {
+  const commands = [
+    { name: "compact", description: "Compact the conversation" },
+    { name: "plan", description: "Create a plan", input: { hint: "what to plan" } },
+  ];
+
+  it("recognizes only a trailing slash token", () => {
+    expect(getCommandQuery("/")).toBe("");
+    expect(getCommandQuery("please /pl")).toBe("pl");
+    expect(getCommandQuery("/plan with context")).toBeNull();
+  });
+
+  it("inserts a selected command and leaves argument commands ready for typing", () => {
+    expect(
+      insertCommand("please /pl", {
+        name: "plan",
+        description: "Create a plan",
+        input: { hint: "what to plan" },
+      }),
+    ).toBe("please /plan ");
+    expect(insertCommand("/co", { name: "compact", description: "Compact the conversation" })).toBe(
+      "/compact",
+    );
+  });
+
+  it("filters advertised commands and inserts the selected command with Enter", async () => {
+    render(<AcpComposer availableCommands={commands} disabled={false} onSend={vi.fn()} />);
+    const box = screen.getByRole("textbox");
+    await userEvent.type(box, "/pl");
+    expect(screen.getByRole("listbox", { name: "Available commands" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /\/plan.*Create a plan/i })).toBeInTheDocument();
+    await userEvent.keyboard("{Enter}");
+    expect(box).toHaveValue("/plan ");
+    expect(screen.queryByRole("listbox", { name: "Available commands" })).not.toBeInTheDocument();
+  });
+
+  it("navigates commands with arrows and dismisses the palette with Escape", async () => {
+    render(<AcpComposer availableCommands={commands} disabled={false} onSend={vi.fn()} />);
+    const box = screen.getByRole("textbox");
+    await userEvent.type(box, "/");
+    await userEvent.keyboard("{ArrowDown}{Enter}");
+    expect(box).toHaveValue("/plan ");
+    await userEvent.clear(box);
+    await userEvent.type(box, "/");
+    await userEvent.keyboard("{Escape}");
+    expect(screen.queryByRole("listbox", { name: "Available commands" })).not.toBeInTheDocument();
+    expect(box).toHaveValue("/");
+  });
+
+  it("connects the textarea to the active listbox option without a combobox role", async () => {
+    render(<AcpComposer availableCommands={commands} disabled={false} onSend={vi.fn()} />);
+    const box = screen.getByRole("textbox");
+    await userEvent.type(box, "/");
+    const listbox = screen.getByRole("listbox", { name: "Available commands" });
+    const option = screen.getAllByRole("option")[0];
+    expect(box).toHaveAttribute("aria-controls", listbox.id);
+    expect(box).toHaveAttribute("aria-autocomplete", "list");
+    expect(box).toHaveAttribute("aria-activedescendant", option.id);
+    expect(option).toHaveAttribute("aria-selected", "true");
+    expect(box).not.toHaveAttribute("role", "combobox");
+  });
+
+  it("keeps the active command valid when commands reorder or shrink", async () => {
+    const { rerender } = render(
+      <AcpComposer availableCommands={commands} disabled={false} onSend={vi.fn()} />,
+    );
+    const box = screen.getByRole("textbox");
+    await userEvent.type(box, "/");
+    await userEvent.keyboard("{ArrowDown}");
+    rerender(
+      <AcpComposer
+        availableCommands={[commands[1], commands[0]]}
+        disabled={false}
+        onSend={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("option", { name: /\/plan/ })).toHaveAttribute("aria-selected", "true");
+    await userEvent.keyboard("{Enter}");
+    expect(box).toHaveValue("/plan ");
+
+    await userEvent.clear(box);
+    await userEvent.type(box, "/");
+    await userEvent.keyboard("{ArrowDown}");
+    rerender(<AcpComposer availableCommands={[commands[1]]} disabled={false} onSend={vi.fn()} />);
+    const remaining = screen.getByRole("option", { name: /\/plan/ });
+    expect(remaining).toHaveAttribute("aria-selected", "true");
+    expect(box).toHaveAttribute("aria-activedescendant", remaining.id);
+  });
+
+  it.each(["ArrowUp", "ArrowDown", "Enter", "Tab", "Escape"])(
+    "does not handle %s for the slash palette during IME composition",
+    async (key) => {
+      const onSend = vi.fn();
+      render(<AcpComposer availableCommands={commands} disabled={false} onSend={onSend} />);
+      const box = screen.getByRole("textbox");
+      await userEvent.type(box, "/");
+      const activeId = box.getAttribute("aria-activedescendant");
+      fireEvent.keyDown(box, { key, isComposing: true });
+      expect(box).toHaveValue("/");
+      expect(box).toHaveAttribute("aria-activedescendant", activeId);
+      expect(screen.getByRole("listbox", { name: "Available commands" })).toBeInTheDocument();
+      expect(onSend).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["ArrowUp", "ArrowDown", "Enter", "Tab", "Escape"])(
+    "leaves legacy keyCode 229 native for %s during active IME composition",
+    async (key) => {
+      const onSend = vi.fn();
+      render(<AcpComposer availableCommands={commands} disabled={false} onSend={onSend} />);
+      const box = screen.getByRole("textbox");
+      await userEvent.type(box, "/");
+      const activeId = box.getAttribute("aria-activedescendant");
+      fireEvent.compositionStart(box);
+      const event = new KeyboardEvent("keydown", {
+        bubbles: true,
+        cancelable: true,
+        key,
+      });
+      Object.defineProperty(event, "keyCode", { value: 229 });
+      box.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(false);
+      expect(box).toHaveValue("/");
+      expect(box).toHaveAttribute("aria-activedescendant", activeId);
+      expect(screen.getByRole("listbox", { name: "Available commands" })).toBeInTheDocument();
+      expect(onSend).not.toHaveBeenCalled();
+    },
+  );
+
+  it("blocks a trailing legacy Enter/229 after composition ends without an open palette", async () => {
+    const onSend = vi.fn();
+    render(<AcpComposer availableCommands={[]} disabled={false} onSend={onSend} />);
+    const box = screen.getByRole("textbox");
+    await userEvent.type(box, "/");
+    expect(screen.queryByRole("listbox", { name: "Available commands" })).not.toBeInTheDocument();
+    fireEvent.compositionStart(box);
+    fireEvent.compositionEnd(box);
+    const event = new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      key: "Enter",
+    });
+    Object.defineProperty(event, "keyCode", { value: 229 });
+    box.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(box).toHaveValue("/");
+    expect(onSend).not.toHaveBeenCalled();
   });
 });
 

@@ -67,7 +67,11 @@ function mount(port: AcpSessionPort, key: string | null = "agent-1", strict = fa
   }
   const element = createElement(Probe, { sessionKey: key });
   const utils = render(strict ? createElement(StrictMode, null, element) : element);
-  return { seen, ...utils };
+  const rerenderKey = (sessionKey: string | null) => {
+    const next = createElement(Probe, { sessionKey });
+    utils.rerender(strict ? createElement(StrictMode, null, next) : next);
+  };
+  return { seen, rerenderKey, ...utils };
 }
 
 const agentChunk = (text: string): AcpUiEvent => ({
@@ -375,6 +379,49 @@ describe("usage and title", () => {
     await waitFor(() => expect(seen.current?.title).toBe("First title"));
     act(() => emit.current?.(sessionInfoUpdate(null)));
     await waitFor(() => expect(seen.current?.title).toBeNull());
+  });
+});
+
+describe("available commands", () => {
+  const commandsUpdate = (commands: Array<Record<string, unknown>>): AcpUiEvent => ({
+    type: "session_update",
+    update: { sessionUpdate: "available_commands_update", availableCommands: commands } as never,
+  });
+
+  it("exposes the latest live command list and accepts an explicit clear", async () => {
+    const { port, emit } = makePort();
+    const { seen } = mount(port);
+    await waitFor(() => expect(emit.current).toBeTruthy());
+    act(() =>
+      emit.current?.(commandsUpdate([{ name: "help", description: "Show available commands" }])),
+    );
+    await waitFor(() => expect(seen.current?.availableCommands).toHaveLength(1));
+    act(() => emit.current?.(commandsUpdate([])));
+    await waitFor(() => expect(seen.current?.availableCommands).toEqual([]));
+  });
+
+  it("restores commands from persisted history", async () => {
+    const { port } = makePort({
+      history: async () => [commandsUpdate([{ name: "plan", description: "Make a plan" }])],
+    });
+    const { seen } = mount(port);
+    await waitFor(() =>
+      expect(seen.current?.availableCommands).toEqual([
+        { name: "plan", description: "Make a plan" },
+      ]),
+    );
+  });
+
+  it("does not expose commands from the previous key during a key switch", async () => {
+    const { port, emit } = makePort();
+    const { seen, rerenderKey } = mount(port, "agent-a");
+    await waitFor(() => expect(emit.current).toBeTruthy());
+    act(() => emit.current?.(commandsUpdate([{ name: "old", description: "Old command" }])));
+    await waitFor(() => expect(seen.current?.availableCommands).toHaveLength(1));
+
+    rerenderKey("agent-b");
+
+    expect(seen.current?.availableCommands).toEqual([]);
   });
 });
 

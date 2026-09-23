@@ -1,5 +1,46 @@
 import type { AcpUiEvent } from "./types";
 
+/** A slash command advertised by an ACP agent for one conversation. */
+export interface AcpAvailableCommand {
+  name: string;
+  description: string;
+  input?: { hint?: string };
+}
+
+/**
+ * The complete command list from an ACP `available_commands_update`.
+ *
+ * The update replaces (rather than patches) the session's command list, so an
+ * empty array deliberately clears commands that are no longer relevant.
+ */
+export function availableCommandsOf(event: AcpUiEvent): AcpAvailableCommand[] | undefined {
+  if (
+    event.type !== "session_update" ||
+    event.update.sessionUpdate !== "available_commands_update"
+  ) {
+    return undefined;
+  }
+  return event.update.availableCommands.map((command) => ({
+    name: command.name,
+    description: command.description,
+    ...(command.input
+      ? { input: { ...(command.input.hint ? { hint: command.input.hint } : {}) } }
+      : {}),
+  }));
+}
+
+/** The latest advertised command list in a replayed event sequence. */
+export function foldAvailableCommands(
+  events: readonly AcpUiEvent[],
+): AcpAvailableCommand[] | undefined {
+  let result: AcpAvailableCommand[] | undefined;
+  for (const event of events) {
+    const commands = availableCommandsOf(event);
+    if (commands !== undefined) result = commands;
+  }
+  return result;
+}
+
 /**
  * `usage_update` and `session_info_update` — 2 of the 8 `sessionUpdate` kinds
  * this core previously dropped entirely. The other 6
