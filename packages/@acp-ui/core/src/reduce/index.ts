@@ -1,6 +1,8 @@
 export { reduceAcpEvent, reduceAcpEvents } from "./reduce-acp-event";
-export type { AcpUsage } from "./session-info";
+export type { AcpAvailableCommand, AcpUsage } from "./session-info";
 export {
+  availableCommandsOf,
+  foldAvailableCommands,
   foldSessionTitle,
   foldUsage,
   sessionTitleOf,

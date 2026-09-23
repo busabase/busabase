@@ -1,6 +1,6 @@
 "use client";
 
-import type { AcpAttachment } from "@acp-ui/core/reduce";
+import type { AcpAttachment, AcpAvailableCommand } from "@acp-ui/core/reduce";
 import {
   Attachment,
   AttachmentInfo,
@@ -20,7 +20,17 @@ import {
   usePromptInputAttachments,
 } from "kui/ai-elements/prompt-input";
 import { PaperclipIcon } from "lucide-react";
-import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
+import {
+  type ChangeEvent,
+  type FormEvent,
+  type KeyboardEvent,
+  type ReactNode,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 /** 10 MB. Base64 inflates a payload by a third, and the whole prompt travels
  * as one JSON-RPC message — a cap here is what keeps a stray 200 MB video
@@ -63,6 +73,18 @@ export const mergeDraft = (existing: string, addition: string): string => {
   if (existing.trim() === "") return addition;
   return `${existing.replace(/\s+$/, "")}\n${addition}`;
 };
+
+/** A trailing slash token is a command query; slash text in earlier prose is not. */
+export const getCommandQuery = (text: string): string | null => {
+  const match = text.match(/(?:^|\s)\/([^\s]*)$/);
+  return match ? match[1] : null;
+};
+
+export const insertCommand = (text: string, command: AcpAvailableCommand): string =>
+  text.replace(/(?:^|\s)\/([^\s]*)$/, (match) => {
+    const prefix = match.startsWith("/") ? "" : match.slice(0, 1);
+    return `${prefix}/${command.name}${command.input ? " " : ""}`;
+  });
 
 export interface AcpComposerProps {
   /** Called with the trimmed text, and any attachments, once the user submits. */
@@ -116,6 +138,8 @@ export interface AcpComposerProps {
   headerControls?: ReactNode;
   /** The host's UI copy; omitted to keep the existing English defaults. */
   labels?: Partial<AcpComposerLabels>;
+  /** Per-session ACP commands, updated dynamically by `available_commands_update`. */
+  availableCommands?: readonly AcpAvailableCommand[];
 }
 
 /** Images and audio have dedicated ACP content blocks; everything else is a file. */
@@ -277,6 +301,7 @@ export function AcpComposer({
   footerControls,
   headerControls,
   labels,
+  availableCommands = [],
 }: AcpComposerProps) {
   const [attachError, setAttachError] = useState<string | null>(null);
   // The field is uncontrolled (kui's `PromptInput` reads it out of the form on
@@ -285,6 +310,25 @@ export function AcpComposer({
   // this cannot be done from outside the composer without reaching through it.
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const appliedDraftId = useRef<string | null>(null);
+  const commandImeComposingRef = useRef(false);
+  const [commandQuery, setCommandQuery] = useState<string | null>(null);
+  const [activeCommandName, setActiveCommandName] = useState<string | null>(null);
+  const commandListId = useId();
+  const filteredCommands = useMemo(() => {
+    if (commandQuery === null) return [];
+    const query = commandQuery.toLowerCase();
+    return availableCommands.filter(
+      (command) =>
+        command.name.toLowerCase().includes(query) ||
+        command.description.toLowerCase().includes(query),
+    );
+  }, [availableCommands, commandQuery]);
+  const showCommandPalette = commandQuery !== null && filteredCommands.length > 0;
+  const activeCommand =
+    filteredCommands.find((command) => command.name === activeCommandName) ?? filteredCommands[0];
+  const activeCommandIndex = activeCommand ? filteredCommands.indexOf(activeCommand) : -1;
+  const commandOptionId = (command: AcpAvailableCommand) =>
+    `${commandListId}-option-${encodeURIComponent(command.name)}`;
 
   useEffect(() => {
     const field = textareaRef.current;
@@ -305,6 +349,48 @@ export function AcpComposer({
     if ((!text && attachments.length === 0) || disabled) return;
     setAttachError(null);
     onSend(text, attachments.length > 0 ? attachments : undefined);
+  };
+
+  const applyCommand = (command: AcpAvailableCommand) => {
+    const field = textareaRef.current;
+    if (!field) return;
+    field.value = insertCommand(field.value, command);
+    field.focus();
+    field.setSelectionRange(field.value.length, field.value.length);
+    setCommandQuery(null);
+  };
+
+  const handleTextareaChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
+    setCommandQuery(getCommandQuery(event.currentTarget.value));
+    setActiveCommandName(null);
+  };
+
+  const handleTextareaKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.nativeEvent.isComposing || commandImeComposingRef.current) return;
+    if (event.nativeEvent.keyCode === 229) {
+      event.preventDefault();
+      return;
+    }
+    if (!showCommandPalette || !activeCommand) return;
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setActiveCommandName(
+        filteredCommands[(activeCommandIndex + 1) % filteredCommands.length].name,
+      );
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setActiveCommandName(
+        filteredCommands[
+          (activeCommandIndex - 1 + filteredCommands.length) % filteredCommands.length
+        ].name,
+      );
+    } else if (event.key === "Enter" || event.key === "Tab") {
+      event.preventDefault();
+      applyCommand(activeCommand);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      setCommandQuery(null);
+    }
   };
 
   // `disabled` is usually true DURING a send (both hosts fold `sending` into
@@ -348,7 +434,58 @@ export function AcpComposer({
         </p>
       ) : null}
       <PromptInputBody>
-        <PromptInputTextarea disabled={disabled} placeholder={placeholder} ref={textareaRef} />
+        <div className="relative w-full">
+          {showCommandPalette ? (
+            <div
+              aria-label="Available commands"
+              className="absolute bottom-full left-3 z-10 mb-2 max-h-56 w-[min(28rem,calc(100%-1.5rem))] overflow-y-auto rounded-md border bg-popover p-1 shadow-md"
+              id={commandListId}
+              role="listbox"
+            >
+              {filteredCommands.map((command, index) => (
+                <button
+                  aria-selected={index === activeCommandIndex}
+                  className={`flex w-full items-start gap-2 rounded-sm px-2 py-1.5 text-left text-sm ${
+                    index === activeCommandIndex
+                      ? "bg-accent text-accent-foreground"
+                      : "hover:bg-accent/70"
+                  }`}
+                  id={commandOptionId(command)}
+                  key={command.name}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => applyCommand(command)}
+                  onMouseEnter={() => setActiveCommandName(command.name)}
+                  role="option"
+                  type="button"
+                >
+                  <span className="shrink-0 font-medium">/{command.name}</span>
+                  <span className="min-w-0 text-muted-foreground">
+                    {command.description}
+                    {command.input?.hint ? ` - ${command.input.hint}` : ""}
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : null}
+          <PromptInputTextarea
+            aria-activedescendant={
+              showCommandPalette && activeCommand ? commandOptionId(activeCommand) : undefined
+            }
+            aria-autocomplete="list"
+            aria-controls={showCommandPalette ? commandListId : undefined}
+            disabled={disabled}
+            onChange={handleTextareaChange}
+            onCompositionEndCapture={() => {
+              commandImeComposingRef.current = false;
+            }}
+            onCompositionStartCapture={() => {
+              commandImeComposingRef.current = true;
+            }}
+            onKeyDown={handleTextareaKeyDown}
+            placeholder={placeholder}
+            ref={textareaRef}
+          />
+        </div>
       </PromptInputBody>
       <PromptInputFooter>
         <AttachButton

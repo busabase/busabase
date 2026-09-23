@@ -21,6 +21,7 @@ import {
   Plus,
   Users,
 } from "lucide-react";
+import { Fragment } from "react";
 import { AvatarLogo } from "../avatar-logo";
 import { useAccountSwitcherContext } from "./account-switcher-context";
 import type { NavUserLabels, SwitchableAccountView, UserData, UserMenuItem } from "./types";
@@ -213,37 +214,39 @@ export function NavUser({
               <>
                 <DropdownMenuSeparator />
                 <DropdownMenuGroup>
-                  {extraMenuItems.map((item) => {
+                  {extraMenuItems.map((item, index) => {
                     const shouldRenderLink = Boolean(item.href && !item.onClick);
+                    // The group already carries a separator above it, so a
+                    // leading item asking for one would draw a double rule.
+                    const opensSection = item.startsSection && index > 0;
 
                     return (
-                      <DropdownMenuItem
-                        key={item.href ?? item.label}
-                        asChild={shouldRenderLink}
-                        onClick={item.onClick}
-                      >
-                        {shouldRenderLink ? (
-                          <a
-                            href={item.href}
-                            target={item.external ? "_blank" : undefined}
-                            rel={item.external ? "noopener noreferrer" : undefined}
-                          >
-                            {item.icon && <item.icon className="size-4" />}
-                            {item.label}
-                            {item.external && (
-                              <ExternalLink className="ml-auto size-3 opacity-50" />
-                            )}
-                          </a>
-                        ) : (
-                          <>
-                            {item.icon && <item.icon className="size-4" />}
-                            {item.label}
-                            {item.external && (
-                              <ExternalLink className="ml-auto size-3 opacity-50" />
-                            )}
-                          </>
-                        )}
-                      </DropdownMenuItem>
+                      <Fragment key={item.href ?? item.label}>
+                        {opensSection && <DropdownMenuSeparator />}
+                        <DropdownMenuItem asChild={shouldRenderLink} onClick={item.onClick}>
+                          {shouldRenderLink ? (
+                            <a
+                              href={item.href}
+                              target={item.external ? "_blank" : undefined}
+                              rel={item.external ? "noopener noreferrer" : undefined}
+                            >
+                              {item.icon && <item.icon className="size-4" />}
+                              {item.label}
+                              {item.external && (
+                                <ExternalLink className="ml-auto size-3 opacity-50" />
+                              )}
+                            </a>
+                          ) : (
+                            <>
+                              {item.icon && <item.icon className="size-4" />}
+                              {item.label}
+                              {item.external && (
+                                <ExternalLink className="ml-auto size-3 opacity-50" />
+                              )}
+                            </>
+                          )}
+                        </DropdownMenuItem>
+                      </Fragment>
                     );
                   })}
                 </DropdownMenuGroup>

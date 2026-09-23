@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { foldSessionTitle, foldUsage, sessionTitleOf, usageOf } from "./session-info";
+import {
+  availableCommandsOf,
+  foldAvailableCommands,
+  foldSessionTitle,
+  foldUsage,
+  sessionTitleOf,
+  usageOf,
+} from "./session-info";
 import type { AcpUiEvent } from "./types";
 
 const usageUpdate = (used: number, extra: Record<string, unknown> = {}): AcpUiEvent => ({
@@ -10,6 +17,11 @@ const usageUpdate = (used: number, extra: Record<string, unknown> = {}): AcpUiEv
 const sessionInfoUpdate = (fields: Record<string, unknown>): AcpUiEvent => ({
   type: "session_update",
   update: { sessionUpdate: "session_info_update", ...fields } as never,
+});
+
+const availableCommandsUpdate = (commands: Array<Record<string, unknown>>): AcpUiEvent => ({
+  type: "session_update",
+  update: { sessionUpdate: "available_commands_update", availableCommands: commands } as never,
 });
 
 const messageChunk: AcpUiEvent = {
@@ -118,5 +130,45 @@ describe("foldSessionTitle", () => {
 
   it("is null for a batch with no session_info_update at all", () => {
     expect(foldSessionTitle([messageChunk])).toBeNull();
+  });
+});
+
+describe("availableCommandsOf", () => {
+  it("extracts agent-advertised commands, including optional input hints", () => {
+    expect(
+      availableCommandsOf(
+        availableCommandsUpdate([
+          { name: "compact", description: "Compact this conversation" },
+          {
+            name: "plan",
+            description: "Create a plan",
+            input: { type: "text", hint: "what to plan" },
+          },
+        ]),
+      ),
+    ).toEqual([
+      { name: "compact", description: "Compact this conversation" },
+      { name: "plan", description: "Create a plan", input: { hint: "what to plan" } },
+    ]);
+  });
+
+  it("returns undefined for unrelated updates", () => {
+    expect(availableCommandsOf(messageChunk)).toBeUndefined();
+  });
+});
+
+describe("foldAvailableCommands", () => {
+  it("keeps the latest complete list, including an explicit empty clear", () => {
+    expect(
+      foldAvailableCommands([
+        availableCommandsUpdate([{ name: "help", description: "Show help" }]),
+        messageChunk,
+        availableCommandsUpdate([]),
+      ]),
+    ).toEqual([]);
+  });
+
+  it("returns undefined when the session has never advertised commands", () => {
+    expect(foldAvailableCommands([messageChunk])).toBeUndefined();
   });
 });
