@@ -3,7 +3,7 @@
     "name": "Busabase",
     "slug": "busabase-mobile",
     "scheme": "busabase",
-    "version": "0.72.0",
+    "version": "0.80.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -17,7 +17,16 @@
       "supportsTablet": true,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "WKAppBoundDomains": ["busabase.com", "demo.busabase.com"],
+        "WKAppBoundDomains": [
+          "busabase.com",
+          "demo.busabase.com",
+          "book.bika.ai",
+          "kellychan.im",
+          "buda.im",
+          "pub-5d59c786708441b3a80620d87e7dee2b.r2.dev",
+          "moonrouter.dev",
+          "space.bilibili.com"
+        ],
         "NSAppTransportSecurity": {
           "NSAllowsLocalNetworking": true
         }
