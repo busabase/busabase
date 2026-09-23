@@ -4,24 +4,26 @@
 #
 # `ci-ok` is the ONLY required status check on `main`. Requiring the individual
 # jobs instead would mean editing branch protection every time a job is added or
-# renamed, and — more importantly — it would deadlock the badge commit below.
+# renamed.
 #
-# `paths-ignore` pairs with ci-badge.yml: a PR that is *only* the coverage
-# badge (nothing else in its diff against `main`) skips this workflow and is
-# waved through by ci-badge.yml's `push`-triggered version instead. GitHub
-# never reports a required check for a workflow skipped by a path filter, so a
-# same-named `ci-ok` job has to exist on the other side or such a PR would sit
-# "Expected — waiting for status" forever. Note `pull_request` path filters
-# match the PR's cumulative diff against `main`, not a single push, so once a
-# release branch has any real changes this condition never re-triggers a skip
-# — which is correct: every later push should get the full suite.
+# The coverage job refreshes the badge on a `release/*` branch and commits it,
+# which makes that commit the PR's new HEAD — and branch protection evaluates
+# required checks against HEAD. That push is made with GITHUB_TOKEN, and GitHub
+# never starts a workflow run for those, so nothing reports `ci-ok` on it and
+# the PR sits "Expected — waiting for status" forever. The `ci-ok` job below
+# therefore reports the check on that commit itself, once every job in the
+# suite has actually succeeded.
+#
+# There is deliberately no `paths-ignore` here. Anything that excuses this
+# workflow from running also excuses it from reporting the required check —
+# GitHub reports nothing at all for a path-filtered skip — so a badge-only PR
+# would deadlock exactly the way the bot commit used to. Running the full
+# suite for an SVG is the cheaper mistake.
 name: CI (pull request)
 
 on:
   pull_request:
     branches: [main]
-    paths-ignore:
-      - "apps/busabase/public/assets/readme/coverage.svg"
 
 concurrency:
   group: ci-pr-${{ github.ref }}
@@ -40,6 +42,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     needs: [checks]
+    permissions:
+      # To report `ci-ok` on the coverage-badge commit (see below).
+      statuses: write
     # `always()` so a failed dependency still reports a (failing) result rather
     # than leaving the required check unreported and the PR stuck.
     if: always()
@@ -49,3 +54,20 @@ jobs:
           result='${{ needs.checks.result }}'
           echo "checks: $result"
           [ "$result" = "success" ]
+      # Only reachable once the step above passed, which is the whole point:
+      # the badge commit inherits `ci-ok` from a parent whose suite is green,
+      # and its only delta is a generated SVG. Waving it through earlier — from
+      # a `push`-triggered workflow racing the suite — would let a release
+      # merge, and publish to npm, while e2e was still running.
+      - name: Report ci-ok on the coverage-badge commit
+        if: needs.checks.outputs.badge-sha != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BADGE_SHA: ${{ needs.checks.outputs.badge-sha }}
+        run: |
+          echo "Reporting ci-ok on $BADGE_SHA"
+          gh api "repos/${GITHUB_REPOSITORY}/statuses/${BADGE_SHA}" \
+            -f state=success \
+            -f context=ci-ok \
+            -f description="Inherited from the verified parent; delta is the generated badge." \
+            -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"

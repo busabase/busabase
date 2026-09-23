@@ -11,6 +11,15 @@ on:
         description: Run the benchmark job (slow; post-merge only).
         type: boolean
         default: false
+    outputs:
+      badge-sha:
+        description: >-
+          SHA of the coverage-badge commit this run pushed onto the release
+          branch, or empty if it pushed none. A push made with GITHUB_TOKEN
+          never triggers a workflow, so nothing reports a required check on
+          that commit by itself -- the caller has to do it, and only after
+          this suite has actually passed.
+        value: ${{ jobs.coverage.outputs.badge-sha }}
 
 env:
   NODE_VERSION: 24.18.0
@@ -88,6 +97,8 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: write
+    outputs:
+      badge-sha: ${{ steps.badge-commit.outputs.sha }}
     steps:
       # On `pull_request` the default checkout is a detached merge ref, which
       # cannot be pushed back to. Check out the PR's head branch so the badge
@@ -114,6 +125,7 @@ jobs:
       # 26 of main's first 144 commits -- carrying no information the release
       # commit could not have carried itself.
       - name: Commit updated badge (release pull requests only)
+        id: badge-commit
         if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/')
         run: |
           # Coverage % is not perfectly deterministic run-to-run (observed
@@ -134,14 +146,19 @@ jobs:
           git config user.name "busabase-bot"
           git config user.email "bot@busabase.com"
           git add apps/busabase/public/assets/readme/coverage.svg
-          # No [skip ci]: this commit becomes the PR's HEAD, and branch
-          # protection evaluates required checks against HEAD. Skipping CI here
-          # would leave every required check "expected but never reported" and
-          # auto-merge would wait forever. The re-run is bounded to at most one
-          # extra cycle by the guard above, which stops a second bot commit
-          # even if coverage still differs.
+          # [skip ci] would be redundant: a GITHUB_TOKEN push does not start
+          # a run in the first place. See the note under `git push` below for
+          # what reports the required check on this commit instead.
           git commit -m "chore: update coverage badge"
           git push
+          # This commit is now the PR's HEAD, and branch protection evaluates
+          # required checks against HEAD -- but the push above used
+          # GITHUB_TOKEN, and GitHub deliberately does not start a workflow run
+          # for those (it would recurse). So no `pull_request` synchronize run
+          # starts here, and no check ever reports on this SHA on its own.
+          # Hand the SHA to the caller, which reports `ci-ok` on it *after*
+          # every job in this suite has succeeded.
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
   e2e:
     runs-on: ubuntu-latest
