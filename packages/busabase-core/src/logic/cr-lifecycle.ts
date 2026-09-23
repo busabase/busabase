@@ -2167,48 +2167,62 @@ export const filterVisibleChangeRequestRows = async <T extends { id: string }>(
   if (rows.length === 0 || getContextIsSpaceManager()) return rows;
   const db = await getDb();
   const changeRequestIds = rows.map((row) => row.id);
-  const operations = await db
+  const directNodeId = sql<string | null>`coalesce(
+    ${busabaseOperations.nodeId},
+    ${busabaseBases.nodeId}
+  )`;
+  // Keep these as two narrow queries. On PostgreSQL, DISTINCT direct scopes plus
+  // a separately filtered unresolved scan is substantially cheaper than a
+  // per-change-request array/json aggregate, while still collapsing a bulk
+  // proposal's repeated Base target before anything reaches Node.
+  const directScopeRows = await db
+    .selectDistinct({
+      changeRequestId: busabaseOperations.changeRequestId,
+      nodeId: directNodeId.as("node_id"),
+    })
+    .from(busabaseOperations)
+    .leftJoin(
+      busabaseBases,
+      and(
+        eq(busabaseBases.id, busabaseOperations.baseId),
+        eq(busabaseBases.spaceId, getContextSpaceId()),
+      ),
+    )
+    .where(
+      and(
+        eq(busabaseOperations.spaceId, getContextSpaceId()),
+        inArray(busabaseOperations.changeRequestId, changeRequestIds),
+        sql`${directNodeId} is not null`,
+      ),
+    );
+  const unresolvedOperations = await db
     .select({
       changeRequestId: busabaseOperations.changeRequestId,
-      nodeId: busabaseOperations.nodeId,
       baseId: busabaseOperations.baseId,
       headCommitId: busabaseOperations.headCommitId,
       operation: busabaseOperations.operation,
       position: busabaseOperations.position,
     })
     .from(busabaseOperations)
+    .leftJoin(
+      busabaseBases,
+      and(
+        eq(busabaseBases.id, busabaseOperations.baseId),
+        eq(busabaseBases.spaceId, getContextSpaceId()),
+      ),
+    )
     .where(
       and(
         eq(busabaseOperations.spaceId, getContextSpaceId()),
         inArray(busabaseOperations.changeRequestId, changeRequestIds),
+        sql`${directNodeId} is null`,
       ),
     )
     .orderBy(asc(busabaseOperations.changeRequestId), asc(busabaseOperations.position));
-  const baseIds = [
-    ...new Set(operations.flatMap((operation) => (operation.baseId ? [operation.baseId] : []))),
-  ];
-  const baseRows =
-    baseIds.length > 0
-      ? await db
-          .select({ id: busabaseBases.id, nodeId: busabaseBases.nodeId })
-          .from(busabaseBases)
-          .where(
-            and(eq(busabaseBases.spaceId, getContextSpaceId()), inArray(busabaseBases.id, baseIds)),
-          )
-      : [];
-  const baseNodeById = new Map(baseRows.map((base) => [base.id, base.nodeId]));
-  // Most operations already resolve through nodeId or baseId. Only unresolved
-  // operations (normally pending node creates) need scope hints from the head
-  // commit. Keeping this as a second query prevents record/file payloads from
-  // being joined, detoasted and inspected during every inbox ACL pass.
+  // Only unresolved operations (normally pending node creates) need scope
+  // hints from the head commit. Base-backed bulk payloads remain untouched.
   const scopeCommitIds = [
-    ...new Set(
-      operations.flatMap((operation) => {
-        const directNodeId =
-          operation.nodeId ?? (operation.baseId ? baseNodeById.get(operation.baseId) : undefined);
-        return directNodeId ? [] : [operation.headCommitId];
-      }),
-    ),
+    ...new Set(unresolvedOperations.map((operation) => operation.headCommitId)),
   ];
   const scopeHintRows: ChangeRequestScopeHint[] = [];
   for (
@@ -2248,22 +2262,21 @@ export const filterVisibleChangeRequestRows = async <T extends { id: string }>(
   const scopeHintsByCommitId = new Map(scopeHintRows.map((row) => [row.id, row]));
   const scopes = new Map<string, Set<string>>();
   const unresolved = new Set<string>();
+  for (const row of directScopeRows) {
+    const scope = scopes.get(row.changeRequestId) ?? new Set<string>();
+    if (row.nodeId) scope.add(row.nodeId);
+    scopes.set(row.changeRequestId, scope);
+  }
   const refsByChangeRequest = new Map<string, Set<string>>();
-  for (const operation of operations) {
+  for (const operation of unresolvedOperations) {
     const scope = scopes.get(operation.changeRequestId) ?? new Set<string>();
     const refs = refsByChangeRequest.get(operation.changeRequestId) ?? new Set<string>();
     const scopeHints = scopeHintsByCommitId.get(operation.headCommitId);
-    const nodeId =
-      operation.nodeId ??
-      (operation.baseId ? baseNodeById.get(operation.baseId) : undefined) ??
-      scopeHints?.parentNodeId ??
-      undefined;
-    if (nodeId) scope.add(nodeId);
+    if (scopeHints?.parentNodeId) scope.add(scopeHints.parentNodeId);
     else if (scopeHints?.parentNodeRef && refs.has(scopeHints.parentNodeRef)) {
       // The earlier declaration's existing parent already anchors this new subtree.
     } else if (
       operation.operation === "node_create" &&
-      !operation.nodeId &&
       !operation.baseId &&
       !scopeHints?.parentNodeRef
     ) {

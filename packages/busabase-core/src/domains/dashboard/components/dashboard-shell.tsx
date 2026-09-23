@@ -31,6 +31,7 @@ import {
   Inbox,
   LayoutGrid,
   Link2,
+  Lock,
   Pencil,
   Plus,
   Search,
@@ -806,6 +807,7 @@ function DashboardShellInner({
         agentPromptsLabel: messages.agentPrompts.title,
         shareLabel: messages.share.title,
         sharedMarkerLabel: messages.share.sharedMarker,
+        restrictedMarkerLabel: messages.share.restrictedMarker,
         deleteLabel: messages.nodeDetail.delete,
       },
       loadingNodeIds,
@@ -897,6 +899,7 @@ function DashboardShellInner({
       messages.agentPrompts.title,
       messages.share.title,
       messages.share.sharedMarker,
+      messages.share.restrictedMarker,
       messages.nodeDetail.delete,
       loadingNodeIds,
       orpc,
@@ -1434,6 +1437,8 @@ interface NavItemLabels {
   shareLabel: string;
   /** Tooltip on the always-visible "this node is published" sidebar marker. */
   sharedMarkerLabel: string;
+  /** Tooltip on the always-visible "this node's access is restricted" marker. */
+  restrictedMarkerLabel: string;
   deleteLabel: string;
 }
 
@@ -1672,9 +1677,21 @@ function buildNavItem(node: NodeVO, ctx: NavItemContext): NavItem[] {
   // "•••" → Share dialog, which was the only way to find out before. A node
   // that is merely reachable because an ANCESTOR is shared carries no marker —
   // `shared` is the node's own share row, not the inherited scope.
+  // …and the same treatment for the opposite state: a node whose access is
+  // explicitly restricted (`NodeVO.explicitVisibility === "private"`). Same
+  // argument as the globe — before this, the only way to learn that a node was
+  // locked down was to open its "•••" → 权限 dialog, one node at a time.
+  //
+  // `statusIcon` holds exactly one icon, so the two markers have to be ordered.
+  // The globe wins: a node that is BOTH private to the space AND carrying a
+  // live public link is the genuinely alarming combination (you believe it is
+  // locked, anonymous visitors can read it), and the marker that must survive
+  // is the one announcing the exposure, not the one announcing the intent.
   const sharedMarker = node.shared
     ? { statusIcon: Globe, statusIconTitle: labels.sharedMarkerLabel }
-    : {};
+    : node.explicitVisibility === "private"
+      ? { statusIcon: Lock, statusIconTitle: labels.restrictedMarkerLabel }
+      : {};
   if (hasCapability(node.type, "container")) {
     const url = nodeHref(node) ?? "";
     return [

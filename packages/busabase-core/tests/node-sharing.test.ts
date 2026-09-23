@@ -8,9 +8,13 @@ import { DEMO_BASES, DEMO_FOLDERS } from "../src/demo/dataset";
 import { getEffectiveNodeLevel, getPublicScopeOf } from "../src/logic/node-acl";
 import {
   disableNodeShare,
+  expireElapsedNodeShares,
   hashSharePassword,
+  hasNodeShareHistory,
   isShareLive,
   setNodeShare,
+  unlockPublicShare,
+  validatePublicShareUnlockProofs,
   verifySharePassword,
 } from "../src/logic/node-share";
 import { seedScenario } from "../src/logic/seed";
@@ -138,6 +142,9 @@ describe("public node sharing", () => {
     await runWithAnonymousContext({}, async () => {
       expect(await getEffectiveNodeLevel(folderNodeId)).toBeNull();
       expect(await getEffectiveNodeLevel(childNodeId)).toBeNull();
+      expect(await hasNodeShareHistory("folder", "share-root")).toBe(true);
+      expect(await hasNodeShareHistory("folder", "share-child")).toBe(true);
+      expect(await hasNodeShareHistory("folder", "never-shared-path")).toBe(false);
     });
 
     // Re-enabling works on the same row — no new id, so the URL is unchanged.
@@ -157,11 +164,60 @@ describe("public node sharing", () => {
     expect(isShareLive({ scope: "none", expiresAt: null })).toBe(false);
   });
 
+  it("closes a future-dated share on the first anonymous request after expiry", async () => {
+    await runWithBusabaseContext({}, () =>
+      setNodeShare(folderNodeId, {
+        scope: "public",
+        capability: "read",
+        expiresAt: new Date(Date.now() + 25),
+      }),
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await runWithAnonymousContext({}, async () => {
+      expect(await expireElapsedNodeShares()).toBe(1);
+      expect(await getEffectiveNodeLevel(folderNodeId)).toBeNull();
+      expect(await getEffectiveNodeLevel(childNodeId)).toBeNull();
+      expect(await hasNodeShareHistory("folder", "share-root")).toBe(true);
+      expect(await expireElapsedNodeShares()).toBe(0);
+    });
+  });
+
   it("refuses a password on a non-public share", async () => {
     await runWithBusabaseContext({}, async () => {
       await expect(
         setNodeShare(folderNodeId, { scope: "none", password: "hunter2" }),
       ).rejects.toThrow(/publicly shared/i);
+    });
+  });
+
+  it("invalidates an existing unlock proof as soon as the share password changes", async () => {
+    await runWithBusabaseContext({}, () =>
+      setNodeShare(folderNodeId, {
+        scope: "public",
+        password: "old-password",
+        expiresAt: null,
+      }),
+    );
+    const unlocked = await runWithAnonymousContext({}, () =>
+      unlockPublicShare(folderNodeId, "old-password", "folder"),
+    );
+    expect(unlocked?.passwordVersion).toBeTruthy();
+    const oldProof = {
+      nodeId: folderNodeId,
+      passwordVersion: unlocked?.passwordVersion ?? "",
+    };
+    await runWithAnonymousContext({}, async () => {
+      expect(await validatePublicShareUnlockProofs([oldProof])).toEqual([folderNodeId]);
+    });
+
+    await runWithBusabaseContext({}, () =>
+      setNodeShare(folderNodeId, { scope: "public", password: "new-password" }),
+    );
+    await runWithAnonymousContext({}, async () => {
+      expect(await validatePublicShareUnlockProofs([oldProof])).toEqual([]);
+      expect(await unlockPublicShare(folderNodeId, "old-password", "folder")).toBeNull();
+      expect(await unlockPublicShare(folderNodeId, "new-password", "folder")).not.toBeNull();
     });
   });
 

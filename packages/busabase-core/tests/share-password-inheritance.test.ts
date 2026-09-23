@@ -128,6 +128,7 @@ describe("share password inheritance", () => {
     expect(await asVisitor(() => unlockPublicShare(childSlug, "wrong"))).toBeNull();
     expect(await asVisitor(() => unlockPublicShare(childSlug, PASSWORD))).toEqual({
       nodeId: childNodeId,
+      passwordVersion: expect.any(String),
     });
   });
 
