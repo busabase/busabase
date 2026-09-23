@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import type { BusabaseORPCClient } from "busabase-contract/api-client/react-query";
 import type { SearchTab } from "../types/search";
+import { type SearchFilters, searchFilterInput } from "../utils/search-filters";
 import {
   mergeTabResults,
   type SearchGroupResponse,
@@ -19,6 +20,7 @@ interface UseTabSearchOptions {
   tab: SearchTab;
   limit: number;
   enabled: boolean;
+  filters: SearchFilters;
 }
 
 /**
@@ -36,17 +38,31 @@ export function useTabSearch({
   tab,
   limit,
   enabled,
+  filters,
 }: UseTabSearchOptions) {
   const groups = sourceGroupsForTab(tab);
 
   const search = useQuery({
-    queryKey: ["tab-search", spaceScope ?? "no-connection", tab, query, limit],
+    // The filters are part of the key: two searches that differ only by sort
+    // are different results, and sharing a cache entry would show the previous
+    // ordering under the new label.
+    queryKey: ["tab-search", spaceScope ?? "no-connection", tab, query, limit, filters],
     enabled: enabled && !!client && groups.length > 0 && query.length > 0,
     queryFn: async (): Promise<TabResults> => {
       if (!client) throw new Error("Not connected");
+      // Resolved once per request, not once per group: a date preset must mean
+      // the same instant for every source, or the groups would be filtered
+      // against clocks a few milliseconds apart.
+      const filterInput = searchFilterInput(filters, new Date());
       const responses = await Promise.all(
         groups.map(async (sources: SearchSource[]): Promise<SearchGroupResponse> => {
-          const response = await client.search({ query, limit, offset: 0, sources });
+          const response = await client.search({
+            query,
+            limit,
+            offset: 0,
+            sources,
+            ...filterInput,
+          });
           return {
             results: response.results,
             hasMore: response.hasMore,

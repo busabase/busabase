@@ -5,6 +5,7 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SUBMITTED_BY } from "~/domains/review/utils/submitted-by";
+import type { ReadFileResult } from "../types/file-tree";
 import { useFileTreeController } from "./use-file-tree-controller";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT =
@@ -26,6 +27,25 @@ const fileTree = {
     },
   ],
 } as unknown as FileTreeNodeVO;
+
+/**
+ * The full shape `fileTrees.readFile` returns.
+ *
+ * Mocks used to be `{ content, contentHash }`, which is exactly how `encoding`
+ * stayed invisible to this app while the server had been sending it all along.
+ */
+const readResult = (overrides: Partial<ReadFileResult> = {}): ReadFileResult => ({
+  nodeId: "node_1",
+  path: "README.md",
+  encoding: "utf8",
+  content: "",
+  mimeType: "text/markdown",
+  assetId: "asset_1",
+  displayName: null,
+  assetUrl: null,
+  contentHash: `sha256:${"a".repeat(64)}`,
+  ...overrides,
+});
 
 const roots: Root[] = [];
 
@@ -66,7 +86,7 @@ const deferred = <T>() => {
 const createOptions = (overrides: Partial<Parameters<typeof useFileTreeController>[0]> = {}) => ({
   entityLabel: "Drive" as const,
   fileTree,
-  onReadFile: vi.fn(async () => ({ content: "# Readme", contentHash: "hash-1" })),
+  onReadFile: vi.fn(async () => readResult({ content: "# Readme", contentHash: "hash-1" })),
   onCreateChangeRequest: vi.fn(async () => ({ id: "cr-1" })),
   onChangeRequestCreated: vi.fn(),
   ...overrides,
@@ -74,7 +94,7 @@ const createOptions = (overrides: Partial<Parameters<typeof useFileTreeControlle
 
 describe("useFileTreeController", () => {
   it("keeps the content hash through file loading and update submission", async () => {
-    const read = deferred<{ content: string; contentHash: string }>();
+    const read = deferred<ReadFileResult>();
     const create = deferred<{ id: string }>();
     const onReadFile = vi.fn(() => read.promise);
     const onCreateChangeRequest = vi.fn(() => create.promise);
@@ -96,7 +116,7 @@ describe("useFileTreeController", () => {
     expect(result.current.openFile).toMatchObject({ path: "README.md", loading: true });
 
     await act(async () => {
-      read.resolve({ content: "# Original", contentHash: "hash-original" });
+      read.resolve(readResult({ content: "# Original", contentHash: "hash-original" }));
       await openPromise;
     });
     expect(result.current.openFile).toMatchObject({
@@ -194,5 +214,42 @@ describe("useFileTreeController", () => {
     expect(result.current.discardMetadataOpen).toBe(false);
     expect(result.current.metadataDraft).toBeNull();
     expect(result.current.metadataChangeMessage).toBe("");
+  });
+
+  it("refuses to send a text update for an asset-backed file", async () => {
+    // The bug: opening an image showed the editor's "Empty file." state, and
+    // saving from there sent a TEXT update for that path. Confirmed against a
+    // running server — a real PNG accepted `content: "oops"` with HTTP 200 and
+    // came back `encoding: "utf8"`. The image was gone.
+    const onReadFile = vi.fn(async () =>
+      readResult({
+        path: "logo.png",
+        encoding: "url",
+        mimeType: "image/png",
+        content: "",
+        assetUrl: "/api/test/storage/logo.png",
+      }),
+    );
+    const onCreateChangeRequest = vi.fn(async () => ({ id: "cr-1" }));
+    const { result } = renderHook(() =>
+      useFileTreeController(createOptions({ onReadFile, onCreateChangeRequest })),
+    );
+
+    const file = result.current.fileItems[0];
+    if (!file) throw new Error("Expected a file fixture");
+    await act(async () => {
+      await result.current.openFileForPreview(file);
+    });
+
+    // Something typed into the box the old build would have shown.
+    act(() => {
+      result.current.updateFileContent("oops");
+    });
+    await act(async () => {
+      result.current.submitOpenFile();
+    });
+
+    expect(onCreateChangeRequest).not.toHaveBeenCalled();
+    expect(result.current.actionError).toMatch(/attachment/i);
   });
 });

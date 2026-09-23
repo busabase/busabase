@@ -1,3 +1,5 @@
+import { SlidersHorizontal } from "lucide-react-native";
+import { useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { NativeActionBar, NativeInlineError } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
@@ -7,12 +9,16 @@ import { DrawerScaffold } from "~/domains/workspace/components/DrawerScaffold";
 import { spacing, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 import { useSearchController } from "../hooks/use-search-controller";
+import { activeFilterCount } from "../utils/search-filters";
+import { SearchFilterSheet } from "./SearchFilterSheet";
 import { SearchResultsList } from "./SearchResultsList";
 import { SearchTabs } from "./SearchTabs";
 
 function SearchContent() {
   const search = useSearchController();
   const tokens = useTokens();
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const filterCount = activeFilterCount(search.filters);
 
   return (
     <DrawerScaffold title="Search">
@@ -28,6 +34,26 @@ function SearchContent() {
       </View>
 
       <SearchTabs options={search.tabOptions} selected={search.tab} onSelect={search.setTab} />
+
+      {/* Only offered once there is something to narrow. Filtering an empty
+          result set is a control that cannot do anything. */}
+      {search.hasQuery && search.tab !== "recent" ? (
+        <View style={styles.filterBar}>
+          <Button
+            label={filterCount > 0 ? `Filters · ${filterCount}` : "Filters"}
+            variant="secondary"
+            leadingIcon={<SlidersHorizontal size={18} color={tokens.foreground} />}
+            onPress={() => setFiltersOpen(true)}
+          />
+          {search.filters.createdBy ? (
+            <Button
+              label={`By ${search.filters.createdBy} ✕`}
+              variant="secondary"
+              onPress={() => search.setFilters({ ...search.filters, createdBy: "" })}
+            />
+          ) : null}
+        </View>
+      ) : null}
 
       {search.displayedError ? (
         <View style={styles.message}>
@@ -49,6 +75,8 @@ function SearchContent() {
 
       <SearchResultsList
         contentResults={search.contentResults}
+        createdByFilter={search.filters.createdBy}
+        onFilterByAuthor={(actorId) => search.setFilters({ ...search.filters, createdBy: actorId })}
         displayedError={search.displayedError}
         hasQuery={search.hasQuery}
         recentResults={search.recentResults}
@@ -73,6 +101,12 @@ function SearchContent() {
           </NativeActionBar>
         </View>
       ) : null}
+      <SearchFilterSheet
+        visible={filtersOpen}
+        filters={search.filters}
+        onChange={search.setFilters}
+        onClose={() => setFiltersOpen(false)}
+      />
     </DrawerScaffold>
   );
 }
@@ -86,6 +120,13 @@ export function SearchScreen() {
 }
 
 const styles = StyleSheet.create({
+  filterBar: {
+    flexDirection: "row",
+    gap: spacing[2],
+    marginHorizontal: spacing[5],
+    marginBottom: spacing[2],
+    flexWrap: "wrap",
+  },
   searchBox: { marginHorizontal: spacing[5], marginBottom: spacing[2] },
   message: { marginHorizontal: spacing[5], marginBottom: spacing[2] },
   loadMore: { marginHorizontal: spacing[5], marginTop: spacing[1] },

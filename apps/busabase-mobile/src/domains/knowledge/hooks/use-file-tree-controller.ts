@@ -9,6 +9,7 @@ import type {
   NewFileDraft,
   OpenFile,
 } from "../types/file-tree";
+import { isReadOnlyAsset } from "../utils/file-content-kind";
 import {
   buildFileTreeListItems,
   formatCount,
@@ -78,9 +79,16 @@ export const useFileTreeController = ({
   const fileEditorSummary = newFile
     ? formatTextStats(newFile.content)
     : openFile && !openFile.loading && !openFile.error
-      ? fileEditorMode === "edit"
-        ? formatTextChangeSummary(openFile.original, openFile.content)
-        : formatTextStats(openFile.content)
+      ? // "0 lines · 0 characters" is a measurement of text, and an asset's
+        // `content` is empty because its bytes are elsewhere — so for a PNG it
+        // read as a true-sounding fact about a file that has neither lines nor
+        // characters in the sense implied. The sheet already names the type and
+        // says it is stored as an attachment; no subtitle beats a wrong one.
+        isReadOnlyAsset(openFile)
+        ? undefined
+        : fileEditorMode === "edit"
+          ? formatTextChangeSummary(openFile.original, openFile.content)
+          : formatTextStats(openFile.content)
       : undefined;
   const metadataMessagePlaceholder = `Update ${entityLabel.toLowerCase()} settings`;
 
@@ -101,6 +109,9 @@ export const useFileTreeController = ({
         contentHash: result.contentHash,
         loading: false,
         error: null,
+        encoding: result.encoding,
+        mimeType: result.mimeType,
+        assetUrl: result.assetUrl,
       });
     } catch (readError) {
       setOpenFile({
@@ -148,6 +159,15 @@ export const useFileTreeController = ({
 
   const submitOpenFile = () => {
     if (!openFile || openFile.content === openFile.original) {
+      return;
+    }
+    // Refuse outright for an asset-backed file. The UI already withholds the
+    // edit affordance, but this operation REPLACES the file with whatever text
+    // it carries and the server accepts it: a real PNG came back as utf8
+    // content "oops" after one such request. A guard at the only place that can
+    // send it is worth more than a disabled button.
+    if (isReadOnlyAsset(openFile)) {
+      setActionError("This file is stored as an attachment and cannot be edited as text.");
       return;
     }
     void submitOperations(resolveMessage(fileChangeMessage, `Update ${openFile.path}`), [

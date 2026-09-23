@@ -11,6 +11,7 @@ import {
 } from "~/domains/workspace/utils/known-node-cache";
 import { getMobileNodeDestination } from "~/domains/workspace/utils/node-navigation";
 import type { SearchTab } from "../types/search";
+import { EMPTY_SEARCH_FILTERS, type SearchFilters } from "../utils/search-filters";
 import {
   getSearchTabOptions,
   normalizeSearchText,
@@ -28,6 +29,7 @@ export const useSearchController = () => {
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [tab, setTab] = useState<SearchTab>("recent");
   const [limit, setLimit] = useState(SEARCH_PAGE_SIZE);
+  const [filters, setFilters] = useState<SearchFilters>(EMPTY_SEARCH_FILTERS);
   const [error, setError] = useState<string | null>(null);
   const normalizedQuery = normalizeSearchText(query);
   const hasQuery = normalizedQuery.length > 0;
@@ -52,6 +54,7 @@ export const useSearchController = () => {
     tab,
     limit,
     enabled: tab !== "recent" && normalizedDebouncedQuery.length > 0,
+    filters,
   });
   const recent = useRecentNodeResults({
     buda,
@@ -152,7 +155,17 @@ export const useSearchController = () => {
   }, [recent.refetch, searchErrorMessage, searchQuery.refetch, tab]);
   const searching = tab === "recent" ? recent.searching : searchQuery.searching;
 
+  // Narrowing changes which results exist, so page 1 is the honest place to
+  // start again — keeping the old limit would show a page count borrowed from
+  // a different result set.
+  const applyFilters = useCallback((next: SearchFilters) => {
+    setFilters(next);
+    setLimit(SEARCH_PAGE_SIZE);
+  }, []);
+
   return {
+    filters,
+    setFilters: applyFilters,
     contentResults,
     displayedError,
     contentTruncated: searchQuery.contentTruncated,

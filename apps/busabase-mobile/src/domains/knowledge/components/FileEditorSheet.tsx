@@ -1,5 +1,5 @@
-import { MoreHorizontal, Pencil } from "lucide-react-native";
-import { Platform, ScrollView, StyleSheet, Text, View } from "react-native";
+import { ExternalLink, FileQuestion, MoreHorizontal, Pencil } from "lucide-react-native";
+import { Image, Linking, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
 import {
   NativeActionBar,
   NativeBottomSheet,
@@ -9,9 +9,12 @@ import {
 } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
 import { TextInput } from "~/components/ui/TextInput";
+import { useConnection } from "~/connection/connection-store";
+import { resolveAttachmentUrl } from "~/lib/attachment";
 import { radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 import type { FileEditorMode, NewFileDraft, OpenFile } from "../types/file-tree";
+import { fileContentKind } from "../utils/file-content-kind";
 
 interface FileEditorSheetProps {
   visible: boolean;
@@ -57,7 +60,13 @@ export function FileEditorSheet({
   onOpenActions,
 }: FileEditorSheetProps) {
   const tokens = useTokens();
+  const { state } = useConnection();
+  const serverUrl = state.status === "connected" ? state.connection.serverUrl : null;
   const fileReady = !openFile?.loading && !openFile?.error;
+  const contentKind = fileContentKind(openFile);
+  // The server hands back a path relative to the instance; the phone needs it
+  // absolute to hand to <Image> or the system browser.
+  const assetUrl = openFile?.assetUrl ? resolveAttachmentUrl(serverUrl, openFile.assetUrl) : null;
 
   return (
     <NativeBottomSheet
@@ -96,14 +105,19 @@ export function FileEditorSheet({
               </>
             ) : (
               <>
-                <Button
-                  label="Edit file"
-                  variant="secondary"
-                  disabled={saving || !openFile || openFile.loading}
-                  fullWidth
-                  leadingIcon={<Pencil size={18} color={tokens.foreground} />}
-                  onPress={onEdit}
-                />
+                {/* Never offered for an asset: this editor's save path sends a
+                    TEXT update for the path, which the server accepts — a real
+                    PNG came back as utf8 content "oops" after one. */}
+                {contentKind.kind === "text" ? (
+                  <Button
+                    label="Edit file"
+                    variant="secondary"
+                    disabled={saving || !openFile || openFile.loading}
+                    fullWidth
+                    leadingIcon={<Pencil size={18} color={tokens.foreground} />}
+                    onPress={onEdit}
+                  />
+                ) : null}
                 <FileActionsButton saving={saving} openFile={openFile} onPress={onOpenActions} />
               </>
             )}
@@ -117,11 +131,45 @@ export function FileEditorSheet({
         <NativeErrorState message={openFile.error} />
       ) : openFile && mode === "preview" && !newFile ? (
         <ScrollView style={styles.modalBody} contentContainerStyle={styles.modalBodyContent}>
-          <View style={[styles.previewBody, { backgroundColor: tokens.muted }]}>
-            <Text selectable style={[typography.body, styles.code, { color: tokens.foreground }]}>
-              {openFile.content || "Empty file."}
-            </Text>
-          </View>
+          {contentKind.kind === "text" ? (
+            <View style={[styles.previewBody, { backgroundColor: tokens.muted }]}>
+              <Text selectable style={[typography.body, styles.code, { color: tokens.foreground }]}>
+                {openFile.content || "Empty file."}
+              </Text>
+            </View>
+          ) : (
+            // An asset-backed file: its bytes are in storage and `content` is
+            // empty. Rendering that emptiness as "Empty file." was a statement
+            // about the file, and a false one.
+            <View style={[styles.assetBody, { backgroundColor: tokens.muted }]}>
+              {contentKind.kind === "image" && assetUrl ? (
+                <Image
+                  source={{ uri: assetUrl }}
+                  resizeMode="contain"
+                  style={styles.assetImage}
+                  accessibilityLabel={openFile.path}
+                />
+              ) : (
+                <FileQuestion size={28} color={tokens.mutedForeground} />
+              )}
+              <Text style={[typography.small, { color: tokens.mutedForeground }]}>
+                {openFile.mimeType ?? "Binary file"} · stored as an attachment
+              </Text>
+              <Text
+                style={[typography.caption, styles.assetNote, { color: tokens.mutedForeground }]}
+              >
+                This file is not text, so it cannot be edited here.
+              </Text>
+              {assetUrl ? (
+                <Button
+                  label="Open file"
+                  variant="secondary"
+                  leadingIcon={<ExternalLink size={18} color={tokens.foreground} />}
+                  onPress={() => void Linking.openURL(assetUrl).catch(() => undefined)}
+                />
+              ) : null}
+            </View>
+          )}
         </ScrollView>
       ) : (
         <ScrollView style={styles.modalBody} contentContainerStyle={styles.modalBodyContent}>
@@ -176,6 +224,9 @@ function FileActionsButton({ saving, openFile, onPress }: FileActionsButtonProps
 }
 
 const styles = StyleSheet.create({
+  assetBody: { borderRadius: radius.md, padding: 16, gap: 10, alignItems: "center" },
+  assetImage: { width: "100%", height: 200, borderRadius: radius.sm },
+  assetNote: { textAlign: "center" },
   modalBody: { marginHorizontal: -2 },
   modalBodyContent: { paddingBottom: 12, gap: 12 },
   previewBody: {

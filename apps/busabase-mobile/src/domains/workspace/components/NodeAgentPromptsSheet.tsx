@@ -12,6 +12,7 @@ import { useI18n } from "~/i18n";
 import { copyToClipboard } from "~/lib/clipboard";
 import { radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
+import { useNodeCustomPrompts } from "../hooks/use-node-custom-prompts";
 import { buildNodeAgentPrompts, type NodePrompt } from "../utils/node-agent-prompts";
 
 type Tab = "scenarios" | "capabilities";
@@ -53,6 +54,10 @@ export function NodeAgentPromptsSheet({
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
 
+  // Only while the sheet is open: these belong to one node, and a closed sheet
+  // has no reason to hold a request for it.
+  const customPrompts = useNodeCustomPrompts({ nodeId: node.id, enabled: visible });
+
   const { scenarios, capabilities } = useMemo(
     () =>
       buildNodeAgentPrompts(
@@ -62,10 +67,15 @@ export function NodeAgentPromptsSheet({
           nodeId: node.id,
           spaceId: spaceId ?? undefined,
           spaceName: spaceName ?? undefined,
+          // Appended after the type's built-in scenarios by the shared builder,
+          // so a product update never displaces what someone configured — and
+          // an absent value renders exactly the built-ins, which is what this
+          // sheet showed before.
+          customPrompts,
         },
         locale,
       ),
-    [node.type, node.name, node.id, spaceId, spaceName, locale],
+    [node.type, node.name, node.id, spaceId, spaceName, locale, customPrompts],
   );
 
   // Open on Scenarios when the type has any, else straight to Capabilities.

@@ -8,9 +8,11 @@ import {
   Search,
   Table2,
 } from "lucide-react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { NativeRow, NativeSection } from "~/components/native-screen";
 import { nodeIconForType } from "~/domains/workspace/components/node-icons";
 import type { KnownNode } from "~/domains/workspace/utils/known-node-cache";
+import { mobile, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 import type { SearchTab } from "../types/search";
 
@@ -38,6 +40,10 @@ const getResultMeta = (result: SearchResultVO) => {
 
 interface SearchResultsListProps {
   contentResults: SearchResultVO[];
+  /** The author filter currently applied, so the active row can show as such. */
+  createdByFilter: string;
+  /** Tapping an author narrows to them — see below for why there is no toggle. */
+  onFilterByAuthor: (actorId: string) => void;
   displayedError: string | null;
   hasQuery: boolean;
   recentResults: KnownNode[];
@@ -49,6 +55,8 @@ interface SearchResultsListProps {
 
 export function SearchResultsList({
   contentResults,
+  createdByFilter,
+  onFilterByAuthor,
   displayedError,
   hasQuery,
   recentResults,
@@ -94,16 +102,52 @@ export function SearchResultsList({
             const meta = getResultMeta(result);
             const Icon = meta.icon;
             return (
-              <NativeRow
-                key={`${result.kind}-${result.id}`}
-                title={result.title}
-                meta={result.eyebrow || undefined}
-                leading={<Icon size={18} color={tokens.mutedForeground} />}
-                onPress={() => onOpenResult(result)}
-                last={index === contentResults.length - 1}
-              />
+              <View key={`${result.kind}-${result.id}`}>
+                <NativeRow
+                  title={result.title}
+                  meta={result.eyebrow || undefined}
+                  leading={<Icon size={18} color={tokens.mutedForeground} />}
+                  onPress={() => onOpenResult(result)}
+                  last={index === contentResults.length - 1}
+                />
+                {/* The author, and the only way to filter by one.
+                    `createdBy` is a free-form actor id — an agent or an API key
+                    can be the creator — so it cannot be typed into a box or
+                    derived from the signed-in user. Showing it on the row means
+                    the filter can only ever be driven by a creator this person
+                    can actually see. A null author renders nothing: "this row
+                    cannot say who made it" must not read as "nobody did". */}
+                {result.createdBy ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`Filter by ${result.createdBy}`}
+                    hitSlop={mobile.hitSlop}
+                    style={({ pressed }) => [styles.authorRow, { opacity: pressed ? 0.72 : 1 }]}
+                    onPress={() => onFilterByAuthor(result.createdBy as string)}
+                  >
+                    <Text
+                      numberOfLines={1}
+                      style={[
+                        typography.caption,
+                        {
+                          color:
+                            createdByFilter === result.createdBy
+                              ? tokens.primary
+                              : tokens.mutedForeground,
+                        },
+                      ]}
+                    >
+                      {result.createdBy}
+                    </Text>
+                  </Pressable>
+                ) : null}
+              </View>
             );
           })}
     </NativeSection>
   );
 }
+
+const styles = StyleSheet.create({
+  authorRow: { paddingHorizontal: 14, paddingBottom: 8, marginTop: -6 },
+});

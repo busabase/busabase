@@ -100,4 +100,45 @@ describe("buildNodeAgentPrompts", () => {
     expect(seen[0]).toBe("Records");
     expect(seen.at(-1)).toBe("General");
   });
+
+  it("appends a node's configured prompts after its type's built-in ones", () => {
+    // The bug this covers: the sheet built its context WITHOUT `customPrompts`,
+    // so a node with prompts configured on the web rendered only its type's
+    // five stock scenarios — the configured ones were invisible on the phone,
+    // with nothing to say they existed. Verified against a running server:
+    // two saved prompts, zero of them on screen.
+    const builtIn = buildNodeAgentPrompts(context, "en").scenarios.map((p) => p.key);
+
+    const withCustom = buildNodeAgentPrompts(
+      {
+        ...context,
+        customPrompts: [
+          {
+            key: "weekly-pipeline",
+            label: { en: "Weekly pipeline review" },
+            body: { en: "Summarise every deal that changed stage this week." },
+            intent: "read-only",
+          },
+        ],
+      },
+      "en",
+    ).scenarios.map((p) => p.key);
+
+    // Built-ins survive, in order, and the configured one follows them.
+    expect(withCustom.slice(0, builtIn.length)).toEqual(builtIn);
+    expect(withCustom).toHaveLength(builtIn.length + 1);
+    expect(withCustom.at(-1)).toContain("weekly-pipeline");
+  });
+
+  it("renders exactly the built-ins when no prompts are configured", () => {
+    // Also the in-flight and could-not-load states: the caller passes
+    // undefined, and the sheet must look like it did before this feature.
+    const base = buildNodeAgentPrompts(context, "en").scenarios.map((p) => p.key);
+    const explicit = buildNodeAgentPrompts(
+      { ...context, customPrompts: undefined },
+      "en",
+    ).scenarios.map((p) => p.key);
+
+    expect(explicit).toEqual(base);
+  });
 });
