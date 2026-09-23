@@ -1,10 +1,10 @@
 import "server-only";
 
-import { randomBytes, scrypt, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import { ORPCError } from "@orpc/server";
 import type { NodeIcon } from "busabase-contract/types";
-import { and, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, lte } from "drizzle-orm";
 import { getContextSpaceId, resolveActorId } from "../context";
 import { getDb } from "../db";
 import { type BusabaseNodeType, busabaseNodeShares, busabaseNodes } from "../db/schema";
@@ -25,6 +25,9 @@ export type NodeShareScope = "none" | "public";
 export type NodeShareCapability = "read" | "submit";
 
 const scryptAsync = promisify(scrypt);
+
+const passwordVersionOf = (passwordHash: string): string =>
+  createHash("sha256").update(passwordHash).digest("base64url");
 
 /** scrypt with a per-password salt; stored as `salt:hash`. */
 export async function hashSharePassword(password: string): Promise<string> {
@@ -331,6 +334,38 @@ export async function recomputeEffectivePublicScope(rootNodeId: string): Promise
   }
 }
 
+/**
+ * Close public shares whose wall-clock expiry has elapsed, then refresh the
+ * materialized scope for each affected subtree.
+ *
+ * Future expiries cannot update `effective_public_scope` by themselves. Hosts
+ * call this before admitting an anonymous request so the first request after
+ * the deadline performs the one-time transition and every subsequent ACL read
+ * sees the closed state.
+ */
+export async function expireElapsedNodeShares(at = now()): Promise<number> {
+  const db = await getDb();
+  const spaceId = getContextSpaceId();
+  const elapsed = await db
+    .update(busabaseNodeShares)
+    .set({ scope: "none" })
+    .where(
+      and(
+        eq(busabaseNodeShares.spaceId, spaceId),
+        eq(busabaseNodeShares.scope, "public"),
+        isNotNull(busabaseNodeShares.expiresAt),
+        lte(busabaseNodeShares.expiresAt, at),
+      ),
+    )
+    .returning();
+  if (elapsed.length === 0) return 0;
+
+  for (const nodeId of new Set(elapsed.map((share) => share.nodeId))) {
+    await recomputeEffectivePublicScope(nodeId);
+  }
+  return elapsed.length;
+}
+
 /** The little a public landing page needs to know about the node it renders. */
 export interface PubliclySharedNode {
   id: string;
@@ -416,6 +451,61 @@ export async function findPubliclySharedNode(
 }
 
 /**
+ * Whether this URL target, or one of its ancestors, has ever carried a public
+ * share grant. This deliberately returns only a boolean: hosts use it to show
+ * an expired/revoked-link state without exposing private node metadata.
+ *
+ * Unlike `findPubliclySharedNode`, this lookup includes archived/deleted nodes
+ * and revoked rows. A link should explain that it is no longer available after
+ * any of those transitions, while a path that was never shared remains
+ * indistinguishable from an unknown private path.
+ */
+export async function hasNodeShareHistory(type: string, nodeRef: string): Promise<boolean> {
+  const db = await getDb();
+  const spaceId = getContextSpaceId();
+  const columns = { id: busabaseNodes.id, parentId: busabaseNodes.parentId };
+  const targetConditions = [
+    eq(busabaseNodes.spaceId, spaceId),
+    eq(busabaseNodes.type, type),
+  ] as const;
+
+  const [byId] = await db
+    .select(columns)
+    .from(busabaseNodes)
+    .where(and(...targetConditions, eq(busabaseNodes.id, nodeRef)))
+    .limit(1);
+  const slugMatches = byId
+    ? []
+    : await db
+        .select(columns)
+        .from(busabaseNodes)
+        .where(and(...targetConditions, eq(busabaseNodes.slug, nodeRef)))
+        .limit(2);
+  const target = byId ?? (slugMatches.length === 1 ? slugMatches[0] : null);
+  if (!target) return false;
+
+  let cursor: { id: string; parentId: string | null } | null = target;
+  const visited = new Set<string>();
+  while (cursor && !visited.has(cursor.id)) {
+    visited.add(cursor.id);
+    const [share] = await db
+      .select({ id: busabaseNodeShares.id })
+      .from(busabaseNodeShares)
+      .where(and(eq(busabaseNodeShares.spaceId, spaceId), eq(busabaseNodeShares.nodeId, cursor.id)))
+      .limit(1);
+    if (share) return true;
+    if (!cursor.parentId) return false;
+    const [parent]: Array<{ id: string; parentId: string | null }> = await db
+      .select(columns)
+      .from(busabaseNodes)
+      .where(and(eq(busabaseNodes.spaceId, spaceId), eq(busabaseNodes.id, cursor.parentId)))
+      .limit(1);
+    cursor = parent ?? null;
+  }
+  return false;
+}
+
+/**
  * The live share row that actually gates `nodeId` — its own, or the nearest one
  * up the ancestor chain. Mirrors `recomputeEffectivePublicScope`'s `resolve`,
  * but for a single node at request time, so the password check consults the very
@@ -451,11 +541,11 @@ const resolveGatingShare = async (nodeId: string) => {
 /**
  * Check a plaintext share password against the share gating a public node.
  *
- * Returns the node id on success — the host stores that (in a signed cookie, in
- * busabase-cloud's case) and replays it as `unlockedShareNodeIds` on subsequent
- * requests. Returns null for a wrong password, an unknown node, and a node that
- * isn't publicly shared at all, so a failed attempt can't be used to enumerate
- * which of those it was.
+ * Returns the node id and a non-reversible password version on success. The
+ * host stores both in a signed cookie and revalidates that version on later
+ * requests, so changing the password invalidates old browser unlocks. Returns
+ * null for a wrong password, an unknown node, and a node that isn't publicly
+ * shared at all, so a failed attempt can't enumerate which of those it was.
  *
  * A node with no password on its gating share unlocks trivially: callers may
  * treat "unlock succeeded" as the single condition to proceed, without
@@ -468,7 +558,7 @@ export async function unlockPublicShare(
   nodeIdOrSlug: string,
   password: string,
   nodeType?: string,
-): Promise<{ nodeId: string } | null> {
+): Promise<{ nodeId: string; passwordVersion: string | null } | null> {
   const db = await getDb();
   const spaceId = getContextSpaceId();
   const activePublicConditions = [
@@ -506,8 +596,33 @@ export async function unlockPublicShare(
 
   const share = await resolveGatingShare(node.id);
   if (!share) return null;
-  if (!share.passwordHash) return { nodeId: node.id };
-  return (await verifySharePassword(password, share.passwordHash)) ? { nodeId: node.id } : null;
+  if (!share.passwordHash) return { nodeId: node.id, passwordVersion: null };
+  return (await verifySharePassword(password, share.passwordHash))
+    ? { nodeId: node.id, passwordVersion: passwordVersionOf(share.passwordHash) }
+    : null;
+}
+
+/**
+ * Keep only unlock proofs bound to the password that currently gates each
+ * node. Changing a password creates a fresh salted hash, so every previously
+ * issued proof stops matching immediately, including proofs inherited from a
+ * shared ancestor.
+ */
+export async function validatePublicShareUnlockProofs(
+  proofs: readonly { nodeId: string; passwordVersion: string }[],
+): Promise<string[]> {
+  const valid: string[] = [];
+  for (const proof of proofs) {
+    const share = await resolveGatingShare(proof.nodeId);
+    if (
+      share?.passwordHash &&
+      passwordVersionOf(share.passwordHash) === proof.passwordVersion &&
+      !valid.includes(proof.nodeId)
+    ) {
+      valid.push(proof.nodeId);
+    }
+  }
+  return valid;
 }
 
 /**

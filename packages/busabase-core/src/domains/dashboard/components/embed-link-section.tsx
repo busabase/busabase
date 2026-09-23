@@ -34,16 +34,18 @@ import {
 } from "busabase-contract/contract/embed-link-schemas";
 import { Badge } from "kui/badge";
 import { Button } from "kui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "kui/collapsible";
 import { Input } from "kui/input";
 import { Label } from "kui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "kui/select";
 import { Textarea } from "kui/textarea";
-import { Check, Copy } from "lucide-react";
+import { Check, ChevronDown, Copy } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
 import { localizeCoreErrorMessage } from "../../../i18n/localize-error";
 import { formatDetailTime } from "../helpers/format";
+import { partitionEmbedLinks } from "../utils/share-dialog-utils";
 import { useIsAnonymousVisitor } from "../visitor-context";
 import { ConfirmActionDialog } from "./primitives";
 import { useWorkspacePermissionLevel } from "./split-submit-button";
@@ -131,12 +133,14 @@ function CopyableValue({
   copyLabel,
   value,
   testId,
+  onCopied,
 }: {
   label: string;
   multiline?: boolean;
   copyLabel: string;
   value: string;
   testId: string;
+  onCopied: () => void;
 }) {
   const messages = useCoreI18n();
   const [copied, setCopied] = useState(false);
@@ -145,6 +149,7 @@ function CopyableValue({
     try {
       await navigator.clipboard.writeText(value);
       setCopied(true);
+      onCopied();
       toast.success(messages.embedLinks.copied);
       setTimeout(() => setCopied(false), 1500);
     } catch (err) {
@@ -265,6 +270,7 @@ export function EmbedLinkSection({
   target,
   enabled = true,
   divider = true,
+  onUncopiedSecretChange,
 }: {
   orpc: BusabaseQueryUtils;
   target: EmbedTarget;
@@ -272,6 +278,8 @@ export function EmbedLinkSection({
   enabled?: boolean;
   /** Off when this is the first thing in its container (no rule above it). */
   divider?: boolean;
+  /** Lets a dialog host protect a one-time secret from accidental dismissal. */
+  onUncopiedSecretChange?: (hasUncopiedSecret: boolean) => void;
 }) {
   const messages = useCoreI18n();
   const t = messages.embedLinks;
@@ -279,12 +287,14 @@ export function EmbedLinkSection({
   const canManage = useCanManageEmbedLinks(target);
 
   const [expiresInMinutes, setExpiresInMinutes] = useState(EMBED_LINK_DEFAULT_MINUTES);
-  const [frameMode, setFrameMode] = useState<EmbedFrameMode>("anywhere");
+  const [frameMode, setFrameMode] = useState<EmbedFrameMode>("origins");
   const [originsDraft, setOriginsDraft] = useState("");
   // The one-time reveal. Never cached, never logged; the Share dialog drops the
   // whole component when it closes, which is what clears it.
   const [created, setCreated] = useState<CreatedEmbedLinkVO | null>(null);
+  const [copiedCreatedValue, setCopiedCreatedValue] = useState<"link" | "iframe" | null>(null);
   const [revokeTarget, setRevokeTarget] = useState<EmbedLinkVO | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   // Drop the revealed capability the moment the host hides this section. The
   // Share dialog already unmounts us on close (Radix portals away the content),
@@ -294,7 +304,10 @@ export function EmbedLinkSection({
   const [wasEnabled, setWasEnabled] = useState(enabled);
   if (wasEnabled !== enabled) {
     setWasEnabled(enabled);
-    if (!enabled && created) setCreated(null);
+    if (!enabled && created) {
+      setCreated(null);
+      setCopiedCreatedValue(null);
+    }
   }
 
   const listQuery = useQuery({
@@ -326,6 +339,8 @@ export function EmbedLinkSection({
             : { mode: frameMode, allowedOrigins: [] },
       });
       setCreated(result);
+      setCopiedCreatedValue(null);
+      onUncopiedSecretChange?.(true);
       await invalidate();
       toast.success(t.created);
     } catch (err) {
@@ -367,7 +382,13 @@ export function EmbedLinkSection({
   if (listQuery.isError) return null;
 
   const links = listQuery.data ?? [];
+  const groupedLinks = partitionEmbedLinks(links);
   const busy = createLink.isPending;
+
+  const markCreatedValueCopied = (value: "link" | "iframe") => {
+    setCopiedCreatedValue(value);
+    onUncopiedSecretChange?.(false);
+  };
 
   return (
     <div
@@ -471,6 +492,7 @@ export function EmbedLinkSection({
           <CopyableValue
             copyLabel={t.copyLink}
             label={t.linkLabel}
+            onCopied={() => markCreatedValueCopied("link")}
             testId="embed-link-created-url"
             value={created.url}
           />
@@ -478,26 +500,33 @@ export function EmbedLinkSection({
             copyLabel={t.copyIframe}
             label={t.iframeLabel}
             multiline
+            onCopied={() => markCreatedValueCopied("iframe")}
             testId="embed-link-created-iframe"
             value={iframeSnippet(created.iframeUrl)}
           />
-          <p className="text-muted-foreground text-xs">{t.createdOnceHint}</p>
+          <p className="text-muted-foreground text-xs">
+            {copiedCreatedValue ? t.createdCopiedHint : t.createdOnceHint}
+          </p>
         </div>
       )}
 
       <div className="space-y-2">
         <div className="font-medium text-sm">{t.listTitle}</div>
-        {links.length === 0 ? (
+        {listQuery.isPending ? (
+          <div aria-live="polite" className="text-muted-foreground text-sm" role="status">
+            {t.loading}
+          </div>
+        ) : groupedLinks.active.length === 0 ? (
           /* Not `EmptyState` from ./primitives — that one is a full-page
              placeholder with a 460px floor, which inside a dialog would push
              every control off-screen. Same tokens, dialog-sized. */
           <div className="rounded-md border border-border/60 border-dashed p-3 text-center">
-            <div className="font-medium text-sm">{t.listEmptyTitle}</div>
-            <p className="mt-1 text-muted-foreground text-xs">{t.listEmptyBody}</p>
+            <div className="font-medium text-sm">{t.activeEmptyTitle}</div>
+            <p className="mt-1 text-muted-foreground text-xs">{t.activeEmptyBody}</p>
           </div>
         ) : (
           <div className="space-y-2">
-            {links.map((link) => (
+            {groupedLinks.active.map((link) => (
               <EmbedLinkRow
                 key={link.id}
                 link={link}
@@ -508,6 +537,35 @@ export function EmbedLinkSection({
           </div>
         )}
       </div>
+
+      {groupedLinks.history.length > 0 && (
+        <Collapsible onOpenChange={setHistoryOpen} open={historyOpen}>
+          <CollapsibleTrigger asChild>
+            <Button
+              aria-expanded={historyOpen}
+              className="w-full justify-between"
+              type="button"
+              variant="ghost"
+            >
+              <span>{fmt(t.historyTitle, { count: groupedLinks.history.length })}</span>
+              <ChevronDown
+                aria-hidden="true"
+                className={`size-4 transition-transform ${historyOpen ? "rotate-180" : ""}`}
+              />
+            </Button>
+          </CollapsibleTrigger>
+          <CollapsibleContent className="space-y-2 pt-2" data-testid="embed-link-history">
+            {groupedLinks.history.map((link) => (
+              <EmbedLinkRow
+                key={link.id}
+                link={link}
+                onRevoke={setRevokeTarget}
+                pending={revokeLink.isPending}
+              />
+            ))}
+          </CollapsibleContent>
+        </Collapsible>
+      )}
 
       <ConfirmActionDialog
         body={fmt(t.revokeConfirmBody, { target: revokeTarget?.targetName ?? "" })}

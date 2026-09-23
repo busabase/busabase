@@ -125,7 +125,7 @@ describe("share password gate", () => {
 
   it("the right password unlocks exactly that node, and nothing else", async () => {
     const unlocked = await asVisitor(() => unlockPublicShare(lockedSlug, PASSWORD));
-    expect(unlocked).toEqual({ nodeId: lockedNodeId });
+    expect(unlocked).toEqual({ nodeId: lockedNodeId, passwordVersion: expect.any(String) });
 
     const base = await asUnlockedVisitor([lockedNodeId], () =>
       client.bases.get({ baseId: lockedSlug } as never),
@@ -201,6 +201,7 @@ describe("share password gate", () => {
     expect(await asVisitor(() => unlockPublicShare(lockedSlug, PASSWORD))).toBeNull();
     expect(await asVisitor(() => unlockPublicShare(lockedSlug, PASSWORD, "base"))).toEqual({
       nodeId: lockedNodeId,
+      passwordVersion: expect.any(String),
     });
   });
 
@@ -232,6 +233,7 @@ describe("share password gate", () => {
     // never the decoy that merely borrowed the id as its slug.
     expect(await asVisitor(() => unlockPublicShare(openNodeId, "decoy-password", "base"))).toEqual({
       nodeId: openNodeId,
+      passwordVersion: null,
     });
 
     // The decoy is still reachable by its own id.

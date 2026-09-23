@@ -128,6 +128,23 @@ describe("resolveRequiredLevel", () => {
     expect(hasApiKeyLevel("write", level)).toBe(true);
   });
 
+  it("lets a member install, because install writes nothing a member cannot write by hand", () => {
+    // Every procedure the five-pass apply calls tops out at `write`, and both
+    // code-carrying node types (`skill`, `airapp`) are creatable file trees —
+    // so gating install above `write` only removed the one-step path, never the
+    // ability to end up with the same nodes.
+    for (const proc of ["fromGithub", "fromGithubStream"]) {
+      const level = resolveRequiredLevel(["workbench", "install", proc], "POST");
+      expect(level).toBe("write");
+      expect(hasApiKeyLevel(permissionLevelForSpaceRole("member"), level)).toBe(true);
+      expect(hasApiKeyLevel(permissionLevelForSpaceRole("viewer"), level)).toBe(false);
+    }
+
+    // Planning stays a read: a dry run creates nothing, and the plan is what
+    // discloses how many skills/airapps the payload carries.
+    expect(resolveRequiredLevel(["workbench", "install", "planFromGithub"], "POST")).toBe("read");
+  });
+
   it("an unclassified new mutation path defaults to manage (fail-closed)", () => {
     expect(resolveRequiredLevel(["workbench", "someFutureDomain", "doSomething"], "POST")).toBe(
       "manage",

@@ -30,6 +30,32 @@ export const API_KEY_LEVEL_ORDER: Record<ApiKeyPermissionLevel, number> = {
 };
 
 /**
+ * What a NEW credential is pre-filled with, everywhere a human is asked to
+ * issue one (the OAuth consent screen and the API-keys settings dialog).
+ *
+ * Both surfaces used to default to `manage` + never-expires, which is the
+ * widest grant the system can express and the exact opposite of the minimum-
+ * privilege story the product tells everywhere else. A default is what most
+ * keys end up carrying, because most people accept it — so the default has to
+ * be the safe one and the wide grant has to be a deliberate act.
+ *
+ * `changeRequest` is the level an agent needs to be useful without being
+ * dangerous: it can read, and it can propose changes that a human merges. It
+ * cannot write directly, merge, delete, export, or change permissions.
+ *
+ * This is ONLY the pre-fill for new keys. It is deliberately NOT a fallback
+ * for reading existing keys: a stored `permissions` of `null` means "no
+ * restriction" (see `apiKeyPermissionsSchema` below and the `?? "manage"` in
+ * `node-acl.ts`), so a key without a level really does have manage rights and
+ * the UI must keep showing `manage` for it. Narrowing that display would tell
+ * the operator their key is weaker than it is.
+ */
+export const DEFAULT_NEW_API_KEY_LEVEL: ApiKeyPermissionLevel = "changeRequest";
+
+/** 30 days, in seconds — matches the `days30` option both pickers already offer. */
+export const DEFAULT_NEW_API_KEY_EXPIRY_SECONDS = 30 * 24 * 60 * 60;
+
+/**
  * Internal relay metadata set by Busabase Cloud after authenticating a public
  * API caller. User-supplied copies are stripped before Cloud injects its own
  * value, so OSS can safely apply the credential ceiling without receiving the
@@ -295,15 +321,41 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   "assets.readTextLines": node("read"),
 
   "install.planFromGithub": workspace("read"),
-  "install.fromGithub": workspace("manage"),
+  /*
+   * `write`, not `manage`: installing performs no operation the caller could
+   * not already perform by hand, one call at a time.
+   *
+   * Every procedure the five-pass apply calls tops out at `write` —
+   * `bases.create`, `bases.createField`, `docs.create`, `fileTrees.create`,
+   * `files.create`, `nodes.updateMetadata`, `nodes.updateAgentPrompts`,
+   * `changeRequests.review`/`merge`, with the record and view passes sitting
+   * lower still at `changeRequest`. That includes the parts that carry CODE:
+   * `skill` and `airapp` are file-tree node types (`makeFileTreeNodeType` sets
+   * `creatable: true`), so a member can already create either one and write a
+   * Node/Hono project or a `SKILL.md` into it through the ordinary
+   * ChangeRequest flow.
+   *
+   * So the `manage` bar never prevented code from entering a space — it only
+   * prevented doing it in one step from a GitHub URL, while leaving the same
+   * result reachable by hand. That is a gate on convenience, not on
+   * capability, and it cost every `member` the self-serve install path.
+   *
+   * What install does carry that hand-authoring does not is PROVENANCE: the
+   * payload comes from a repository the installer may not have read. That is a
+   * supply-chain concern, and a permission tier is the wrong instrument for it
+   * — it stops the careful member and not the careless admin. The answer there
+   * is disclosure at the point of install (`InstallPlanCountsVO` already
+   * reports `skills` and `airapps` separately, and `planFromGithub` is a
+   * `read`), not a role check.
+   */
+  "install.fromGithub": workspace("write"),
   // Same act, same gate: streaming only changes how the result is delivered, so
-  // classifying it any lower would make the stream a way around the manage bar.
-  "install.fromGithubStream": workspace("manage"),
+  // classifying it any differently would make the stream a way around the bar.
+  "install.fromGithubStream": workspace("write"),
   // The Template Center's catalog. Sits at the floor rather than beside
   // `install.fromGithub` because it reads a public repository's index and
   // returns nothing about this workspace — a key that may read anything at all
-  // is not told less by being shown what exists to install. Installing is the
-  // privileged act, and it is classified as such one line above.
+  // is not told less by being shown what exists to install.
   "templates.list": workspace("read"),
 
   // The operating manual. Static documents about how Busabase works, carrying

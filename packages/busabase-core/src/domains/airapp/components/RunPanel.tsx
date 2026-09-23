@@ -481,11 +481,15 @@ export function AirAppRunControls({
     });
   };
 
+  // Browser translators replace live text nodes. This cluster changes on every
+  // runner phase, so keep translation out of the host controls without placing
+  // the guest iframe under the same boundary.
   return (
     <div
-      className="flex items-center gap-1.5"
+      className="notranslate flex items-center gap-1.5"
       data-airapp-node-id={airapp?.node.id}
       data-airapp-run-status={status}
+      translate="no"
     >
       <span className="hidden text-muted-foreground/70 text-xs sm:inline">
         {statusLabel[status]}
@@ -570,7 +574,7 @@ export function AirAppPreviewPending({ status }: { status: AirAppRunStatus }) {
   };
 
   return (
-    <div className="grid h-full min-h-[160px] place-items-center p-6">
+    <div className="notranslate grid h-full min-h-[160px] place-items-center p-6" translate="no">
       <div
         aria-atomic="true"
         aria-live="polite"
@@ -600,7 +604,10 @@ export function AirAppPreviewPending({ status }: { status: AirAppRunStatus }) {
 
 export function AirAppRunError({ error }: { error: string }) {
   return (
-    <div className="border-border/60 border-b bg-destructive/5 px-4 py-2 text-destructive text-xs">
+    <div
+      className="notranslate border-border/60 border-b bg-destructive/5 px-4 py-2 text-destructive text-xs"
+      translate="no"
+    >
       {error}
     </div>
   );
@@ -652,9 +659,10 @@ export function AirAppServiceWorkerUnsupported() {
   return (
     <div
       aria-live="polite"
-      className="grid h-full min-h-[160px] place-items-center p-6"
+      className="notranslate grid h-full min-h-[160px] place-items-center p-6"
       data-airapp-sw-unsupported=""
       role="alert"
+      translate="no"
     >
       <div className="flex max-w-sm flex-col items-center gap-3 text-center">
         <p className="font-medium text-foreground text-sm">{messages.airapp.swUnsupportedTitle}</p>
@@ -738,7 +746,10 @@ export function AirAppRunPreview({
           title={messages.airapp.previewTitle}
         />
       ) : status === "idle" || status === "error" ? (
-        <div className="grid h-full min-h-[160px] place-items-center p-6 text-center text-muted-foreground text-sm">
+        <div
+          className="notranslate grid h-full min-h-[160px] place-items-center p-6 text-center text-muted-foreground text-sm"
+          translate="no"
+        >
           {status === "idle" ? messages.airapp.previewEmpty : messages.airapp.previewFailed}
         </div>
       ) : (
@@ -766,8 +777,9 @@ export function AirAppRunLogs({ runner }: { runner: AirAppRunnerState }) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <pre
-        className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words bg-muted/20 p-3 font-mono text-[11px] text-foreground/80 leading-5"
+        className="notranslate min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words bg-muted/20 p-3 font-mono text-[11px] text-foreground/80 leading-5"
         ref={logRef}
+        translate="no"
       >
         {logLines.length === 0 ? messages.airapp.logsEmpty : logLines.join("")}
       </pre>

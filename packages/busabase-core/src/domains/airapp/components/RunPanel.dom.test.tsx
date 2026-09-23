@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CoreI18nProvider, type CoreLocale } from "../../../i18n";
 import {
+  AirAppRunLogs,
   type AirAppRunnerState,
   AirAppRunPreview,
   AirAppServiceWorkerUnsupported,
@@ -129,6 +130,108 @@ const notReadyRunner = (
   stop: vi.fn(),
   isBusy: status === "installing" || status === "starting",
   isLive: false,
+});
+
+const translationBoundary = (element: Element) => element.closest('[translate="no"].notranslate');
+
+/**
+ * Edge/Chromium translation replaces text nodes with its own elements. Model
+ * that behavior while respecting the same opt-out signals as the browser.
+ */
+const emulateBrowserTranslation = (root: HTMLElement): number => {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const candidates: Text[] = [];
+  let current = walker.nextNode();
+  while (current) {
+    if (current instanceof Text && current.data.trim()) candidates.push(current);
+    current = walker.nextNode();
+  }
+
+  let translated = 0;
+  for (const textNode of candidates) {
+    const parent = textNode.parentElement;
+    if (!parent || translationBoundary(parent)) continue;
+    const translatedText = document.createElement("font");
+    translatedText.dataset.browserTranslation = "true";
+    translatedText.textContent = textNode.data;
+    parent.replaceChild(translatedText, textNode);
+    translated += 1;
+  }
+  return translated;
+};
+
+describe("AirApp browser-translation boundaries", () => {
+  it("protects changing host UI while leaving the guest iframe translatable", () => {
+    const installing = notReadyRunner("installing");
+    const ready: AirAppRunnerState = {
+      ...notReadyRunner("ready"),
+      previewUrl: "https://example.test/airapp",
+      isLive: true,
+    };
+    const view = render(
+      <CoreI18nProvider locale="en">
+        <AirAppRunPreview airapp={null} runner={installing} showToolbar />
+        <AirAppRunLogs runner={installing} />
+      </CoreI18nProvider>,
+    );
+
+    const controls = view.container.querySelector('[data-airapp-run-status="installing"]');
+    const pending = view.container.querySelector('[data-airapp-preview-status="installing"]');
+    const logs = screen.getByText("Install and start output streams here while the AirApp runs.");
+    expect(controls && translationBoundary(controls)).toBeTruthy();
+    expect(pending && translationBoundary(pending)).toBeTruthy();
+    expect(translationBoundary(logs)).toBeTruthy();
+
+    // The harness really changes ordinary host text, while the live runner
+    // regions above stay untouched because they opt out of browser translation.
+    expect(emulateBrowserTranslation(view.container)).toBeGreaterThan(0);
+
+    expect(() =>
+      view.rerender(
+        <CoreI18nProvider locale="en">
+          <AirAppRunPreview airapp={null} runner={ready} showToolbar />
+          <AirAppRunLogs runner={ready} />
+        </CoreI18nProvider>,
+      ),
+    ).not.toThrow();
+
+    const iframe = view.container.querySelector('iframe[title="AirApp preview"]');
+    expect(iframe).toBeTruthy();
+    expect(iframe?.closest('[translate="no"], .notranslate')).toBeNull();
+  });
+
+  it("protects error, idle and unsupported-browser states", () => {
+    const failed = notReadyRunner("error", "runner failed");
+    const view = render(
+      <CoreI18nProvider locale="en">
+        <AirAppRunPreview airapp={null} runner={failed} showToolbar={false} />
+      </CoreI18nProvider>,
+    );
+
+    expect(translationBoundary(screen.getByText("runner failed"))).toBeTruthy();
+    expect(
+      translationBoundary(screen.getByText("The AirApp failed to start. Check the logs below.")),
+    ).toBeTruthy();
+
+    view.rerender(
+      <CoreI18nProvider locale="en">
+        <AirAppRunPreview airapp={null} runner={notReadyRunner("idle")} showToolbar={false} />
+      </CoreI18nProvider>,
+    );
+    expect(
+      translationBoundary(
+        screen.getByText("This AirApp starts automatically — the live preview appears here."),
+      ),
+    ).toBeTruthy();
+
+    view.rerender(
+      <CoreI18nProvider locale="en">
+        <AirAppServiceWorkerUnsupported />
+      </CoreI18nProvider>,
+    );
+    const unsupported = view.container.querySelector("[data-airapp-sw-unsupported]");
+    expect(unsupported && translationBoundary(unsupported)).toBeTruthy();
+  });
 });
 
 /** Mirrors AirAppDetailView's URL-backed wiring (`syncWithUrl: true`). */

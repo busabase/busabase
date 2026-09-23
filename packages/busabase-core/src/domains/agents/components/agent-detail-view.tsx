@@ -1047,6 +1047,7 @@ export function AgentDetailView({
                 // conversation, so every active composer state has a real Stop.
                 onStop={chat.cancel}
                 sending={promptActivity.active}
+                availableCommands={chat.availableCommands}
               />
             </>
           ) : (
