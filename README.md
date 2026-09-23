@@ -298,7 +298,7 @@ Bug reports, feature ideas, docs, and pull requests are welcome in [Issues](http
 
 - [Busabase website](https://busabase.com)
 - [Documentation](https://busabase.com/docs)
-- [Discord](https://discord.gg/3hARhfyedJ)
+- [Community Forum](https://busabase.com/community)
 - [GitHub Discussions](https://github.com/busabase/busabase/discussions)
 
 ## Star History
