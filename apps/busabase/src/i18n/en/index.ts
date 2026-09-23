@@ -27,6 +27,7 @@ const en = {
     localSpaceName: "Local Busabase",
     localReviewerName: "Local Reviewer",
     localPlan: "Local",
+    communityForum: "Community Forum",
     approvalFirstKb: "Trusted Intelligent Database",
     addWorkspace: "Add workspace",
     inviteMembers: "Invite members",

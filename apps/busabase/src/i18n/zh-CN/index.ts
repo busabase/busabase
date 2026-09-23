@@ -27,6 +27,7 @@ const zhCN = {
     localSpaceName: "本地 Busabase",
     localReviewerName: "本地评审员",
     localPlan: "本地",
+    communityForum: "社区论坛",
     approvalFirstKb: "可信赖的智能数据库",
     addWorkspace: "添加工作区",
     inviteMembers: "邀请成员",

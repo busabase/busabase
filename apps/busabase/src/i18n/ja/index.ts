@@ -28,6 +28,7 @@ const ja = {
     localSpaceName: "ローカル Busabase",
     localReviewerName: "ローカルレビュアー",
     localPlan: "ローカル",
+    communityForum: "コミュニティフォーラム",
     approvalFirstKb: "信頼できるインテリジェントデータベース",
     addWorkspace: "ワークスペースを追加",
     inviteMembers: "メンバーを招待",
