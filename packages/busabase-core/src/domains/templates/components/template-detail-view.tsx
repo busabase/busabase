@@ -55,7 +55,6 @@ export function TemplateDetailView({
           <TemplateDetailContent
             template={template}
             descriptionLocale={locale}
-            preferEnglishFallback
             labels={labels}
             actions={
               <div className="flex flex-col items-end gap-1">

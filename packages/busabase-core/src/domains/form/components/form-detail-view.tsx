@@ -3,19 +3,13 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { hasApiKeyLevel } from "busabase-contract/access-control/api-key-level";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
-import type {
-  FormFieldBindingVO,
-  FormSubmitResultVO,
-  FormVO,
-  NodeVO,
-} from "busabase-contract/types";
+import type { FormFieldBindingVO, FormSubmitResultVO, FormVO } from "busabase-contract/types";
 import { Button } from "kui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "kui/tabs";
-import { CheckCircle2, Code2, Eye, FileInput, Globe, Info, Lock } from "lucide-react";
+import { CheckCircle2, Code2, Eye, Globe, Lock } from "lucide-react";
 import { type Dispatch, type SetStateAction, useCallback, useEffect, useState } from "react";
 import { useCoreI18n, useCoreLocale, useIString } from "../../../i18n";
 import { presentCoreError } from "../../../i18n/localize-error";
-import { NodeSettingsDialog } from "../../dashboard/components/node-settings-dialog";
 import {
   FullscreenPreviewSurface,
   PREVIEW_DETAIL_TAB_LIST_CLASS,
@@ -181,7 +175,6 @@ function FormPreviewSurface({
 
 interface FormDetailViewProps {
   fullscreenState: PreviewFullscreenState;
-  node?: NodeVO;
   orpc: BusabaseQueryUtils;
   previewOnly?: boolean;
   slug: string | null;
@@ -190,7 +183,6 @@ interface FormDetailViewProps {
 /** Form detail editor, or a preview-only instance when hosted in the Side Panel. */
 export function FormDetailView({
   fullscreenState,
-  node,
   orpc,
   previewOnly = false,
   slug,
@@ -207,7 +199,6 @@ export function FormDetailView({
   const submit = useMutation(orpc.forms.submit.mutationOptions());
   const [values, setValues] = useState<Record<string, unknown>>({});
   const [tab, setTab] = useState<"form" | "code">("form");
-  const [infoOpen, setInfoOpen] = useState(false);
   const [isSetUpOpen, setIsSetUpOpen] = useState(false);
 
   useEffect(() => {
@@ -300,60 +291,10 @@ export function FormDetailView({
         onValueChange={(value) => setTab(value as "form" | "code")}
         value={fullscreenState.fullscreen ? "form" : tab}
       >
-        <header className="shrink-0 border-border/60 border-b px-4 pt-5 pb-2 md:px-6">
-          <div className="flex min-w-0 items-start gap-2">
-            <FileInput className="mt-1 size-4 shrink-0 text-muted-foreground" />
-            <div className="min-w-0 flex-1">
-              <div className="flex min-w-0 flex-wrap items-center gap-2">
-                <h1 className="truncate font-semibold text-foreground text-xl leading-7">
-                  {form.name}
-                </h1>
-                <span className="inline-flex shrink-0 items-center gap-1 rounded-md bg-muted/60 px-2 py-0.5 text-muted-foreground text-xs">
-                  {form.share.isPublic ? <Globe size={11} /> : <Lock size={11} />}
-                  {form.share.isPublic
-                    ? form.share.anonymousSubmit
-                      ? messages.form.publicAnonymous
-                      : messages.form.publicLogin
-                    : messages.form.private}
-                </span>
-              </div>
-              {form.description ? (
-                <p
-                  className="mt-1 line-clamp-2 text-muted-foreground text-sm leading-5 md:line-clamp-1"
-                  title={form.description}
-                >
-                  {form.description}
-                </p>
-              ) : null}
-            </div>
-            {node ? (
-              <>
-                <Button
-                  aria-label={messages.nodeDetail.details}
-                  className="shrink-0 text-muted-foreground"
-                  onClick={() => setInfoOpen(true)}
-                  size="icon-sm"
-                  title={messages.nodeDetail.details}
-                  type="button"
-                  variant="ghost"
-                >
-                  <Info className="size-3.5" />
-                </Button>
-                {infoOpen ? (
-                  <NodeSettingsDialog
-                    initialTab="info"
-                    nodeId={node.id}
-                    nodeName={node.name}
-                    nodeSlug={node.slug}
-                    nodeType="form"
-                    onOpenChange={setInfoOpen}
-                    open
-                    orpc={orpc}
-                  />
-                ) : null}
-              </>
-            ) : null}
-          </div>
+        {/* Identity moved to the topbar; what is left here is the local view
+            switcher plus the one fact a Form owner needs at a glance and
+            cannot read off the node name — who may see and submit it. */}
+        <header className="flex shrink-0 items-center gap-2 border-border/60 border-b px-4 py-2 md:px-6">
           <TabsList className={PREVIEW_DETAIL_TAB_LIST_CLASS}>
             <TabsTrigger className={PREVIEW_DETAIL_TAB_TRIGGER_CLASS} value="form">
               <Eye className="size-3.5" />
@@ -364,6 +305,14 @@ export function FormDetailView({
               {messages.form.tabCode}
             </TabsTrigger>
           </TabsList>
+          <span className="inline-flex shrink-0 items-center gap-1 rounded-md bg-muted/60 px-2 py-0.5 text-muted-foreground text-xs">
+            {form.share.isPublic ? <Globe size={11} /> : <Lock size={11} />}
+            {form.share.isPublic
+              ? form.share.anonymousSubmit
+                ? messages.form.publicAnonymous
+                : messages.form.publicLogin
+              : messages.form.private}
+          </span>
         </header>
         <TabsContent
           className="m-0 min-h-0 flex-1 data-[state=inactive]:hidden"

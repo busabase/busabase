@@ -1085,6 +1085,7 @@ function BusabaseDashboardContent({
       return [
         { href: "/home", label: messages.nav.workspace },
         {
+          isNode: true,
           label:
             nodeRouteState?.status === "archived"
               ? nodeRouteState.name
@@ -1194,6 +1195,7 @@ function BusabaseDashboardContent({
         { label: messages.nav.workspace },
         {
           href: activeBase ? `/base/${activeBase.slug}` : undefined,
+          isNode: true,
           label: activeBase?.name ?? messages.nav.base,
         },
         { label: messages.base.designTab },
@@ -1205,6 +1207,7 @@ function BusabaseDashboardContent({
         { label: messages.nav.workspace },
         {
           href: activeBase ? `/base/${activeBase.slug}` : undefined,
+          isNode: true,
           label: activeBase?.name ?? messages.nav.base,
         },
         { label: messages.base.newRecord },
@@ -1220,6 +1223,7 @@ function BusabaseDashboardContent({
             : activeBase
               ? `/base/${activeBase.slug}`
               : undefined,
+          isNode: true,
           label: activeBase?.name ?? activeRecord?.base.name ?? messages.nav.base,
         },
         {
@@ -1239,6 +1243,7 @@ function BusabaseDashboardContent({
             : activeBase
               ? `/base/${activeBase.slug}`
               : undefined,
+          isNode: true,
           label: activeBase?.name ?? activeRecord?.base.name ?? messages.nav.base,
         },
         { label: activeRecord ? getRecordTitle(activeRecord, messages) : messages.common.record },
@@ -1250,6 +1255,7 @@ function BusabaseDashboardContent({
         { label: messages.nav.workspace },
         {
           href: activeBase ? `/base/${activeBase.slug}` : undefined,
+          isNode: true,
           label: activeBase?.name ?? messages.nav.base,
         },
         { label: selectedBaseView?.name ?? messages.recordView.view },
@@ -1257,7 +1263,10 @@ function BusabaseDashboardContent({
     }
 
     if (locationPath.startsWith("/base/")) {
-      return [{ label: messages.nav.workspace }, { label: activeBase?.name ?? messages.nav.base }];
+      return [
+        { label: messages.nav.workspace },
+        { isNode: true, label: activeBase?.name ?? messages.nav.base },
+      ];
     }
 
     // Catch-all, same reasoning as the page-title fallback above.
@@ -2831,6 +2840,11 @@ function BusabaseDashboardContent({
     );
   }
 
+  // One guard for both per-node topbar slots (the breadcrumb's Info button and
+  // the action cluster): a still-mounted view must not advertise a node whose
+  // route has gone archived/unavailable.
+  const showNodeTopbarSlots = !(routeNodeRef && nodeRouteState?.status !== "active");
+
   const content = (
     <div className="flex h-full min-h-0 bg-background">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -2843,10 +2857,10 @@ function BusabaseDashboardContent({
             className="h-8 w-8 shrink-0"
             title={messages.shell.toggleSidebar}
           />
-          <BusabaseTopbarBreadcrumb items={breadcrumbItems} />
+          <BusabaseTopbarBreadcrumb items={breadcrumbItems} showNodeInfo={showNodeTopbarSlots} />
           {titlebar.badge ? <div className="ml-1 shrink-0">{titlebar.badge}</div> : null}
           {topbarActions ? <div className="shrink-0">{topbarActions}</div> : null}
-          {routeNodeRef && nodeRouteState?.status !== "active" ? null : <TopbarNodeActionsSlot />}
+          {showNodeTopbarSlots ? <TopbarNodeActionsSlot /> : null}
           <SidePanelToggle />
         </div>
         {error ? (

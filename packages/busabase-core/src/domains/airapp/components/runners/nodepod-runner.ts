@@ -10,6 +10,53 @@ import { beginPodHeartbeat, ensureRegistered } from "../../utils/nodepod-service
 import type { AirAppMountedFile, AirAppRunner } from "./types";
 
 /**
+ * Same-origin paths that belong to the Busabase host and must never be served
+ * by a pod. Handed to Nodepod's official `reservedHostPaths` boot option
+ * (`NodepodOptions.reservedHostPaths`, added upstream in 1.10.x) so the host
+ * no longer needs hand-written guards in the Service Worker for them.
+ *
+ * A running pod claims a broad path — usually `/` — so without this
+ * declaration a live (or stale, post-teardown) claim captures these host
+ * routes. Upstream honours a reserved path in two directions: the path itself
+ * is never routed to a pod, and requests issued by a document *at* a reserved
+ * path bypass pod routing as well.
+ *
+ * Entries ending in `/` are prefix matches, the rest are exact — so a route
+ * that needs both forms is deliberately listed twice.
+ *
+ * - `/api/airapp-embed-bridge/` — the AirApp Embed runtime's own
+ *   capability-scoped relay. Always fetched by the trusted parent/host page
+ *   (its postMessage bridge and its `_status` heartbeat), never from inside a
+ *   pod, and it re-authorizes from a capability header rather than a cookie.
+ * - `/api/airapp-preview` + `/api/airapp-preview/` — Busabase's authenticated
+ *   reverse proxy in front of Sandock. A stopped pod's leftover `/` claim
+ *   would otherwise capture the next Sandock iframe navigation.
+ * - `/embed/` — the public AirApp Embed host document, its frame navigations
+ *   and its subresources (its `_next` chunks and fonts).
+ *
+ * DELIBERATELY ABSENT: `/api/v1`. Busabase's public REST surface is handled
+ * end-to-end by the `[busabase patch]` guard in
+ * `patches/@scelar__nodepod@1.10.1.patch`, which does something
+ * `reservedHostPaths` cannot — it answers **403** while an embed pod is alive,
+ * so a request that bypassed the embed runtime's injected fetch override (a
+ * raw `XMLHttpRequest`, say) can never reach the backend carrying the viewer's
+ * session. Only when no embed pod is involved does it fall through to the same
+ * plain host bypass a reserved path would have produced.
+ *
+ * That guard has to run BEFORE upstream's `isReservedHostPath` early exits, so
+ * listing `/api/v1` here would be dead config: the early exit would return
+ * first and the 403 would never fire. Worse, it would make the patch look
+ * redundant to whoever does the next upgrade — and deleting it silently
+ * removes a session-leak defence. Leave `/api/v1` out.
+ */
+export const NODEPOD_RESERVED_HOST_PATHS: readonly string[] = [
+  "/api/airapp-embed-bridge/",
+  "/api/airapp-preview",
+  "/api/airapp-preview/",
+  "/embed/",
+];
+
+/**
  * `AirAppRunner` implementation backed by the `@scelar/nodepod` in-browser
  * Node.js runtime (github.com/R1ck404/Nodepod, published to npm as
  * `@scelar/nodepod`). Only ever loaded via a dynamic `import()` inside these
@@ -31,6 +78,8 @@ import type { AirAppMountedFile, AirAppRunner } from "./types";
  * runner can implement the same interface.
  */
 export class NodepodRunner implements AirAppRunner {
+  private static readonly START_READY_TIMEOUT_MS = 60_000;
+
   private nodepod: NodepodInstance | null = null;
   private installProcess: NodepodProcess | null = null;
   private devProcess: NodepodProcess | null = null;
@@ -82,6 +131,68 @@ export class NodepodRunner implements AirAppRunner {
     }
   }
 
+  private scheduleReady(previewPath: string): void {
+    if (this.readyTimer) clearTimeout(this.readyTimer);
+    const nodepod = this.nodepod;
+    this.readyTimer = setTimeout(() => {
+      this.readyTimer = null;
+      if (this.nodepod === nodepod) this.emitReady(previewPath);
+    }, 100);
+  }
+
+  private recoverReadyFromActivePorts(): void {
+    const nodepod = this.nodepod;
+    if (!nodepod || this.lastReadyUrl) return;
+
+    for (const port of nodepod.proxy.activePorts(nodepod.instanceId)) {
+      const url = nodepod.port(port);
+      if (url) {
+        this.scheduleReady(url);
+        return;
+      }
+    }
+  }
+
+  private async waitForReadyOrExit(proc: NodepodProcess): Promise<void> {
+    if (this.lastReadyUrl) return;
+
+    await new Promise<void>((resolve, reject) => {
+      let settled = false;
+      const finish = (error?: Error) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        this.readyCallbacks = this.readyCallbacks.filter((callback) => callback !== onReady);
+        if (error) reject(error);
+        else resolve();
+      };
+      const onReady = () => finish();
+      const timeout = setTimeout(
+        () => finish(new Error("Dev server did not expose a preview port within 60 seconds")),
+        NodepodRunner.START_READY_TIMEOUT_MS,
+      );
+
+      this.readyCallbacks.push(onReady);
+      if (this.lastReadyUrl) {
+        finish();
+        return;
+      }
+
+      void proc.completion.then(({ exitCode, stderr }) => {
+        if (this.lastReadyUrl) {
+          finish();
+          return;
+        }
+        const detail = stderr.trim().slice(-500);
+        finish(
+          new Error(
+            `Dev server exited with code ${exitCode} before opening a preview port${detail ? `: ${detail}` : ""}`,
+          ),
+        );
+      });
+    });
+  }
+
   // `Nodepod.boot({ files })` is typed `Record<string, string | Uint8Array>`
   // upstream, so binary entries need no encoding hop here — they go straight
   // into the pod's virtual filesystem as bytes.
@@ -115,6 +226,10 @@ export class NodepodRunner implements AirAppRunner {
       // NOT merge the boot env into spawned processes.
       env: airAppRuntimeEnv(this.runtimeKind),
       watermark: false,
+      // Host routes a pod must never serve — see NODEPOD_RESERVED_HOST_PATHS
+      // above for the full list and for why `/api/v1` is deliberately not in
+      // it. Spread because upstream types the option as a mutable `string[]`.
+      reservedHostPaths: [...NODEPOD_RESERVED_HOST_PATHS],
       // Start fetching + compiling esbuild-wasm (~10MB) during boot so it
       // overlaps the npm install instead of stalling the first build step.
       preloadEsbuild: true,
@@ -133,21 +248,36 @@ export class NodepodRunner implements AirAppRunner {
     this.proxy = this.nodepod.proxy;
     // Explicit re-assertion, redundant with the `watermark: false` boot option
     // above. On @scelar/nodepod 1.9.20 that option alone stopped reliably
-    // suppressing the SW-injected branding badge (confirmed via
+    // suppressing the SW-injected branding badge (confirmed at the time via
     // tests/e2e/airapp.spec.ts's watermark regression check) — this calls the
     // same public RequestProxy API nodepod's own boot() should already be
     // calling, as a defensive backstop against whatever timing changed
     // upstream. Safe no-op if boot() already got it right.
+    //
+    // Re-checked on the 1.10.1 upgrade. Static analysis of the bundle first:
+    //   * boot() still forwards the option the same way 1.9.20 did. The guard
+    //     is byte-for-byte the same expression:
+    //     `(headless && watermark !== true || watermark === false) &&
+    //      proxy.setWatermark(false)`.
+    //   * `setWatermark()` still delivers to the SW via
+    //     `navigator.serviceWorker.controller.postMessage(...)` with NO pending
+    //     queue, so the message is silently dropped whenever the page is not
+    //     controlled yet. 1.10.1 only adds a second delivery hop to preview
+    //     bridges; it did not make the SW hop reliable.
+    // boot() makes its call from inside `configureInstance`, mid-boot, i.e.
+    // exactly inside that uncontrolled window. This line runs after boot()
+    // resolved, so it is the call that can actually land. That is the same
+    // failure shape observed on 1.9.20, and nothing upstream fixed it — keep
+    // the backstop. It costs one idempotent call and cannot regress anything.
+    //
+    // Then re-verified for real: tests/e2e/airapp.spec.ts's watermark
+    // regression check (`toHaveCount(0)` on the Nodepod GitHub badge anchor)
+    // passed on 1.10.1, in a real browser, against a real dev-server pod.
     this.proxy.setWatermark(false);
     this.proxyListener = (port: number) => {
       const url = this.nodepod?.port(port);
       if (url) {
-        if (this.readyTimer) clearTimeout(this.readyTimer);
-        const nodepod = this.nodepod;
-        this.readyTimer = setTimeout(() => {
-          this.readyTimer = null;
-          if (this.nodepod === nodepod) this.emitReady(url);
-        }, 100);
+        this.scheduleReady(url);
       }
     };
     this.proxy.on("server-ready", this.proxyListener);
@@ -196,6 +326,13 @@ export class NodepodRunner implements AirAppRunner {
       this.emitLog(`\n[dev server exited with code ${code}]\n`);
       for (const cb of this.exitCallbacks) cb(code);
     });
+    // The process can bind its port before spawn() resolves. Normally the
+    // proxy event above catches that, but controller changes during an AirApp
+    // restart can drop the one-shot notification. The registry is the source
+    // of truth, so recover an already-listening port instead of retaining a
+    // preview URL for a pod that was already torn down.
+    this.recoverReadyFromActivePorts();
+    await this.waitForReadyOrExit(proc);
   }
 
   onLog(cb: (line: string) => void): void {

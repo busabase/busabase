@@ -51,17 +51,39 @@ describe("localizeCoreErrorMessage", () => {
 });
 
 describe("presentCoreError", () => {
-  it("keeps English diagnostics while translated screens show a local fallback", () => {
+  it("shows the real server reason in every locale", () => {
     const error = new Error("Failed to fetch: internal trace id 42");
     expect(presentCoreError(coreMessagesEn, "en", error, coreMessagesEn.form.submitFailed)).toBe(
       error.message,
     );
     expect(presentCoreError(dashboardZhCN, "zh-CN", error, dashboardZhCN.form.submitFailed)).toBe(
-      dashboardZhCN.form.submitFailed,
+      error.message,
     );
     expect(presentCoreError(dashboardJa, "ja", error, dashboardJa.form.submitFailed)).toBe(
-      dashboardJa.form.submitFailed,
+      error.message,
     );
+  });
+
+  it("trims and truncates long server reasons to 300 Unicode characters", () => {
+    const message = `  ${"错".repeat(305)}  `;
+    const presented = presentCoreError(
+      dashboardZhCN,
+      "zh-CN",
+      new Error(message),
+      dashboardZhCN.form.submitFailed,
+    );
+
+    expect(Array.from(presented)).toHaveLength(300);
+    expect(presented).toBe(`${"错".repeat(299)}…`);
+  });
+
+  it("uses the fallback when no real reason is available", () => {
+    expect(
+      presentCoreError(dashboardZhCN, "zh-CN", new Error("  "), dashboardZhCN.form.submitFailed),
+    ).toBe(dashboardZhCN.form.submitFailed);
+    expect(
+      presentCoreError(dashboardZhCN, "zh-CN", "not an error", dashboardZhCN.form.submitFailed),
+    ).toBe(dashboardZhCN.form.submitFailed);
   });
 
   it("uses specific translated errors where the message has a known mapping", () => {
@@ -73,5 +95,20 @@ describe("presentCoreError", () => {
         dashboardZhCN.form.submitFailed,
       ),
     ).toBe(dashboardZhCN.permissions.requiresReadOnNode);
+  });
+
+  it("shows the archived-agent server reason instead of the generic translated fallback", () => {
+    const error = new Error(
+      "This agent is archived. Restore it from Space Settings to use it again.",
+    );
+
+    expect(
+      presentCoreError(
+        dashboardZhCN,
+        "zh-CN",
+        error,
+        dashboardZhCN.agents.continueConversationFailed,
+      ),
+    ).toBe(error.message);
   });
 });

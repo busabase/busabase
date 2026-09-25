@@ -3,7 +3,11 @@ import type { FileTreeFileVO } from "busabase-contract/types";
 export type FileTreePreviewKind = "markdown" | "image" | "video" | "audio" | "pdf" | "code";
 
 const MIME_BY_EXTENSION: Record<string, string> = {
+  apng: "image/apng",
+  avif: "image/avif",
+  bmp: "image/bmp",
   gif: "image/gif",
+  ico: "image/vnd.microsoft.icon",
   jpeg: "image/jpeg",
   jpg: "image/jpeg",
   md: "text/markdown",

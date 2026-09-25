@@ -8,6 +8,7 @@ import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-quer
 import type { AgentSessionVO } from "busabase-contract/domains/agents/types";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { CoreI18nProvider } from "../../../i18n";
 import { SubmitPermissionProvider } from "../../dashboard/components/split-submit-button";
 import type { LoadedNode } from "../../dashboard/node-detail-registry";
 
@@ -148,6 +149,7 @@ function renderView(options: {
   permissionLevel?: ApiKeyPermissionLevel;
   compactSessionNavigation?: boolean;
   contextNode?: LoadedNode | null;
+  locale?: string;
 }) {
   const close = options.close ?? vi.fn(async () => ({ ok: true }));
   const sessions = options.sessions;
@@ -168,15 +170,17 @@ function renderView(options: {
     );
   const view = () => (
     <QueryClientProvider client={client}>
-      {wrap(
-        <AgentDetailView
-          agentSlug="test-agent"
-          compactSessionNavigation={options.compactSessionNavigation}
-          contextNode={options.contextNode}
-          onBack={() => {}}
-          orpc={stubOrpc(getItems, close, create, prompt, options.listPage)}
-        />,
-      )}
+      <CoreI18nProvider locale={options.locale}>
+        {wrap(
+          <AgentDetailView
+            agentSlug="test-agent"
+            compactSessionNavigation={options.compactSessionNavigation}
+            contextNode={options.contextNode}
+            onBack={() => {}}
+            orpc={stubOrpc(getItems, close, create, prompt, options.listPage)}
+          />,
+        )}
+      </CoreI18nProvider>
     </QueryClientProvider>
   );
   const result = render(view());
@@ -333,6 +337,23 @@ describe("AgentDetailView — end session", () => {
     expect((await screen.findByRole("alert")).textContent).toContain(
       "Session A lost its connection",
     );
+  });
+
+  it("shows the real archived-agent reason returned by the prompt API", async () => {
+    const message = "This agent is archived. Restore it from Space Settings to use it again.";
+    const prompt = vi.fn(async () => ({
+      accepted: false as const,
+      sessionId: SESSION.id,
+      status: "failed" as const,
+      promptRecorded: false,
+      message,
+    }));
+    renderView({ locale: "zh-CN", prompt });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Send test prompt" }));
+
+    expect((await screen.findByRole("alert")).textContent).toContain(message);
+    expect(screen.queryByText("无法继续此会话。")).toBeNull();
   });
 
   it("retracts an ambiguous send error when subscribed status proves the turn was accepted", async () => {

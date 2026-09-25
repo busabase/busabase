@@ -40,9 +40,8 @@ export interface AirAppRunner {
   mount(files: Record<string, AirAppMountedFile>): Promise<void>;
   /** Install the project's declared dependencies (e.g. `npm install`). */
   install(): Promise<void>;
-  /** Start the dev server (e.g. `npm run dev`). Resolves once the process has
-   *  been launched — NOT once it exits (a dev server runs indefinitely). Use
-   *  `onReady` to know when the preview is actually servable. */
+  /** Start the dev server (e.g. `npm run dev`). Resolves once a preview port is
+   *  ready and rejects if the process exits or times out before then. */
   start(): Promise<void>;
   /** Subscribe to combined stdout/stderr lines from install + start. */
   onLog(cb: (line: string) => void): void;

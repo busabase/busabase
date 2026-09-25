@@ -11,7 +11,9 @@ import {
   updatePreviewFullscreenSearch,
 } from "../utils/fullscreen-query";
 
-export const PREVIEW_DETAIL_TAB_LIST_CLASS = "mt-3 h-8 shrink-0 gap-1 bg-transparent p-0";
+// No top margin: every detail header that uses this list is now just the tab
+// strip — the node title that used to sit above it moved into the topbar.
+export const PREVIEW_DETAIL_TAB_LIST_CLASS = "h-8 shrink-0 gap-1 bg-transparent p-0";
 export const PREVIEW_DETAIL_TAB_TRIGGER_CLASS =
   "h-7 gap-1.5 rounded-lg bg-transparent px-2.5 text-muted-foreground text-xs shadow-none transition-colors hover:bg-muted/40 hover:text-foreground data-[state=active]:bg-muted data-[state=active]:text-foreground data-[state=active]:shadow-none";
 

@@ -42,6 +42,13 @@ const CONNECTION: AgentConnectionVO = {
   ownedByCurrentUser: true,
 };
 
+const CODEX_CONNECTION: AgentConnectionVO = {
+  ...CONNECTION,
+  slug: "codex-acp",
+  agentName: "Codex CLI",
+  latest: { ...SESSION, id: "sess-2", slug: "codex-acp", agentName: "Codex CLI" },
+};
+
 type SlugMutation = (input: { slug: string }) => Promise<{ ok: true }>;
 
 function stubOrpc(options: {
@@ -147,6 +154,26 @@ describe("AgentsListView", () => {
     expect(listConnections).toHaveBeenCalledWith("space");
   });
 
+  it("disables Add agent after both local agent types have been added", async () => {
+    const { onAddAgent } = renderView({
+      listConnections: async () => [CONNECTION, CODEX_CONNECTION],
+    });
+
+    const addAgent = await screen.findByRole("button", { name: "Add agent" });
+    await waitFor(() => expect((addAgent as HTMLButtonElement).disabled).toBe(true));
+    fireEvent.click(addAgent);
+    expect(onAddAgent).not.toHaveBeenCalled();
+  });
+
+  it("keeps Add agent enabled while one local agent type is still missing", async () => {
+    const { onAddAgent } = renderView({ listConnections: async () => [CONNECTION] });
+
+    const addAgent = await screen.findByRole("button", { name: "Add agent" });
+    expect((addAgent as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(addAgent);
+    expect(onAddAgent).toHaveBeenCalledOnce();
+  });
+
   it("uses a localized alert dialog and success feedback for history deletion", async () => {
     const { deleteHistory } = renderView({ locale: "zh-CN" });
 
@@ -161,7 +188,7 @@ describe("AgentsListView", () => {
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith("对话历史已删除。"));
   });
 
-  it("localizes history deletion failures and leaves the confirmation open for retry", async () => {
+  it("shows the history deletion reason and leaves the confirmation open for retry", async () => {
     const deleteHistory = vi.fn(async (_input: { slug: string }) => {
       throw new Error("Unexpected server failure");
     });
@@ -171,7 +198,7 @@ describe("AgentsListView", () => {
     fireEvent.click(await screen.findByRole("menuitem", { name: "删除对话历史" }));
     fireEvent.click(await screen.findByRole("button", { name: "删除对话历史" }));
 
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("无法删除对话历史。"));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Unexpected server failure"));
     expect(screen.getByRole("alertdialog", { name: "删除对话历史？" })).toBeTruthy();
   });
 });

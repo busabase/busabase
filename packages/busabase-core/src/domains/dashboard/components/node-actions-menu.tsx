@@ -154,10 +154,12 @@ export function NodeActionsMenu({
   // share-to-web and embed links — so a manager sees it when EITHER is
   // available. Both procedure families require manage, so node capability
   // never grants a lower workspace role a management entry point.
-  // AirApp / Drive / Skill declare `publicAccess: "no"` (no working anonymous
-  // detail route) yet are fully embeddable, and before this they had no Share
-  // affordance anywhere in the product even though the server has supported
-  // minting an embed link for them all along.
+  // Drive / Skill declare `publicAccess: "no"` (no working anonymous detail
+  // route) yet are fully embeddable, and before the embed half existed they had
+  // no Share affordance anywhere in the product even though the server has
+  // supported minting an embed link for them all along. An AirApp gets Share
+  // through BOTH halves: `publicAccess: "runtime"` for the public link, and
+  // `canEmbedLink` for embeds.
   const canShare =
     Boolean(nodeSlug) &&
     canManageShareSettings &&

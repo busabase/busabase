@@ -74,11 +74,14 @@ export function NodeShareDialog({
 
   // The two halves of this dialog have independent NODE-CAPABILITY gates, and
   // most node types qualify for only one of them. A Form can be shared to the
-  // web but never embedded; an AirApp / Drive / Skill is the reverse (their
-  // registry definitions declare `publicAccess: "no"` because an anonymous
-  // detail route wouldn't work, yet `embedLinks.create` accepts all three and
-  // the `/embed/[publicId]` route tree serves them). So neither gate may hide
-  // the other's section. Both procedure families still require workspace
+  // web but never embedded; a Drive / Skill is the reverse (their registry
+  // definitions declare `publicAccess: "no"` because an anonymous detail route
+  // wouldn't work, yet `embedLinks.create` accepts both and the
+  // `/embed/[publicId]` route tree serves them). An AirApp qualifies for BOTH:
+  // its `publicAccess: "runtime"` resolves a public link through the relayed
+  // runtime rather than an anonymous detail route (see the history note on
+  // `airappNodeType`), and it is embeddable too. So neither gate may hide the
+  // other's section. Both procedure families still require workspace
   // manage, so the dialog disappears when the viewer cannot manage sharing or
   // when both node-capability gates say no.
   const isAnonymous = useIsAnonymousVisitor();
@@ -94,7 +97,7 @@ export function NodeShareDialog({
   const shareQuery = useQuery({
     ...orpc.nodes.share.get.queryOptions({ input: { nodeId } }),
     // Don't ask about public-share settings for a type that can't have them —
-    // this dialog now opens for AirApp/Drive/Skill purely for the embed half.
+    // this dialog opens for Drive/Skill purely for the embed half.
     enabled: canShareToWeb,
   });
   const share = shareQuery.data ?? null;

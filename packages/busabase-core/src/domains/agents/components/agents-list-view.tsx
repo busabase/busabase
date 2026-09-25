@@ -46,6 +46,8 @@ const statusLabel = (
     failed: messages.agents.statusFailed,
   })[status];
 
+const LOCAL_AGENT_SLUGS = ["claude-acp", "codex-acp"] as const;
+
 interface AgentsListViewProps {
   orpc: BusabaseQueryUtils;
   onSelectAgent: (slug: string) => void;
@@ -168,6 +170,8 @@ export function AgentsListView({ orpc, onSelectAgent, onAddAgent }: AgentsListVi
   });
 
   const connectionItems = connections.data ?? [];
+  const addedAgentSlugs = new Set(connectionItems.map((connection) => connection.slug));
+  const hasAllLocalAgents = LOCAL_AGENT_SLUGS.every((slug) => addedAgentSlugs.has(slug));
   const emptyTitle =
     scope === "mine" ? messages.agents.mineEmptyTitle : messages.agents.spaceEmptyTitle;
   const emptyBody =
@@ -182,6 +186,7 @@ export function AgentsListView({ orpc, onSelectAgent, onAddAgent }: AgentsListVi
         </div>
         <Button
           className="min-h-11 self-start sm:min-h-9 sm:self-auto"
+          disabled={hasAllLocalAgents}
           onClick={onAddAgent}
           size="sm"
         >

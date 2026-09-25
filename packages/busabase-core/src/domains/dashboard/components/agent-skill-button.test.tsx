@@ -63,7 +63,7 @@ describe("AgentIntegrationContent onboarding copy", () => {
       locale: "zh-CN" as const,
       expected:
         "它会优先复用已连接的 Busabase MCP 集成，否则先登录；连接后再安装常驻的 Busabase 技能。",
-      excluded: "CLI 代理",
+      excluded: "CLI 智能体",
     },
     {
       locale: "ja" as const,

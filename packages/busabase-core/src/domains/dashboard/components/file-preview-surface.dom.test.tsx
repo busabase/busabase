@@ -76,6 +76,66 @@ describe("FilePreviewSurface", () => {
     expect(container.querySelector("[data-file-media-frame]")).not.toBeNull();
   });
 
+  it("renders the inline PDF edge-to-edge without a viewport height cap", () => {
+    const state: PreviewFullscreenState = { fullscreen: false, setFullscreen: () => undefined };
+    const { container } = render(
+      <Providers>
+        <FilePreviewSurface
+          fullscreenState={state}
+          mimeType="application/pdf"
+          name="report.pdf"
+          url="/report.pdf"
+        />
+      </Providers>,
+    );
+
+    const body = container.querySelector<HTMLElement>("[data-preview-fullscreen-body]");
+    const frame = container.querySelector<HTMLElement>("[data-file-media-frame]");
+    const pdf = container.querySelector<HTMLIFrameElement>('[data-asset-preview="pdf"]');
+
+    expect(body?.classList.contains("p-0")).toBe(true);
+    expect(body?.classList.contains("p-4")).toBe(false);
+    expect(body?.classList.contains("md:p-6")).toBe(false);
+    expect(frame?.classList.contains("h-full")).toBe(true);
+    expect(frame?.classList.contains("min-h-0")).toBe(true);
+    expect(frame?.classList.contains("w-full")).toBe(true);
+    expect(frame?.classList.contains("rounded-md")).toBe(false);
+    expect(frame?.classList.contains("border")).toBe(false);
+    expect(frame?.classList.contains("max-w-5xl")).toBe(false);
+    expect(pdf?.classList.contains("h-full")).toBe(true);
+    expect(pdf?.classList.contains("max-h-full")).toBe(true);
+    expect(pdf?.className).not.toContain("vh");
+  });
+
+  it.each([
+    ["image/svg+xml", "img"],
+    ["video/mp4", "video"],
+  ])("keeps inline %s media contained within the existing viewport cap", (mimeType, selector) => {
+    const state: PreviewFullscreenState = { fullscreen: false, setFullscreen: () => undefined };
+    const { container } = render(
+      <Providers>
+        <FilePreviewSurface
+          fullscreenState={state}
+          mimeType={mimeType}
+          name="contained-preview"
+          url="/contained-preview"
+        />
+      </Providers>,
+    );
+
+    const body = container.querySelector<HTMLElement>("[data-preview-fullscreen-body]");
+    const frame = container.querySelector<HTMLElement>("[data-file-media-frame]");
+    const media = container.querySelector<HTMLElement>(selector);
+    expect(body?.classList.contains("p-4")).toBe(true);
+    expect(body?.classList.contains("md:p-6")).toBe(true);
+    expect(frame?.classList.contains("min-h-[320px]")).toBe(true);
+    expect(frame?.classList.contains("max-w-5xl")).toBe(true);
+    expect(frame?.classList.contains("rounded-md")).toBe(true);
+    expect(frame?.classList.contains("border")).toBe(true);
+    expect(media?.classList.contains("max-h-[65vh]")).toBe(true);
+    expect(media?.classList.contains("object-contain")).toBe(true);
+  });
+
   it("keeps the same main video and playback position through URL fullscreen", async () => {
     window.history.replaceState(null, "", "/dashboard/file?demo=node-types");
     const { container } = render(<UrlFullscreenHarness mimeType="video/mp4" />);

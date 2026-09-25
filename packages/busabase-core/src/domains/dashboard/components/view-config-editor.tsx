@@ -1,3 +1,22 @@
+import type { Announcements, DragEndEvent, UniqueIdentifier } from "@dnd-kit/core";
+import {
+  closestCenter,
+  DndContext,
+  DragOverlay,
+  KeyboardSensor,
+  MouseSensor,
+  pointerWithin,
+  TouchSensor,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
 import type {
   BaseFieldVO,
@@ -6,7 +25,9 @@ import type {
   ViewFilterOperator,
   ViewVO,
 } from "busabase-contract/types";
+import { useReducedMotion } from "framer-motion";
 import { Dialog, DialogTitle } from "kui/dialog";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "kui/tooltip";
 import {
   AlignLeft,
   ArrowDown,
@@ -23,6 +44,7 @@ import {
   FileText,
   Filter,
   GitBranch,
+  GripVertical,
   Hash,
   Link2,
   ListChecks,
@@ -44,7 +66,8 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { fmt, useCoreI18n, useIString } from "../../../i18n";
 import { getPrimaryField } from "../../base/utils/primary-field";
 import { formatUserRefLabel } from "../helpers/format";
@@ -215,9 +238,167 @@ interface ViewFieldsEditorProps {
   testId: string;
 }
 
+interface ViewFieldRowProps {
+  config: ViewConfigVO;
+  field: BaseFieldVO;
+  fields: BaseFieldVO[];
+  isPrimary: boolean;
+  isVisible: boolean;
+  onChange: (config: ViewConfigVO) => void;
+  resolveIString: ReturnType<typeof useIString>;
+  visibleSlugs: string[];
+}
+
+function ViewFieldRowContent({
+  config,
+  field,
+  fields,
+  isPrimary,
+  isVisible,
+  onChange,
+  resolveIString,
+  visibleSlugs,
+  dragHandle,
+}: ViewFieldRowProps & { dragHandle?: ReactNode }) {
+  const messages = useCoreI18n();
+  const hasFilter = config.filters.some((filter) => matchesViewField(filter, field));
+  const hasSort = config.sorts.some((sort) => matchesViewField(sort, field));
+
+  return (
+    <>
+      {dragHandle ?? <span aria-hidden="true" className="size-7 shrink-0" />}
+      <input
+        aria-label={fmt(messages.base.showFieldAria, { name: resolveIString(field.name) })}
+        checked={isVisible}
+        disabled={isPrimary || (isVisible && visibleSlugs.length <= 1)}
+        onChange={(event) =>
+          onChange(
+            event.target.checked
+              ? showViewField(config, field, fields)
+              : hideViewField(config, field, fields),
+          )
+        }
+        type="checkbox"
+      />
+      <FieldTypeIcon className="size-3.5 shrink-0 text-muted-foreground" field={field} />
+      <span className="min-w-0 truncate text-xs">{resolveIString(field.name)}</span>
+      {isPrimary ? (
+        <RecordTitleBadge
+          testId={`view-record-title-${field.id}`}
+          tooltip={messages.base.recordTitleViewTooltip}
+        />
+      ) : null}
+      <span className="min-w-0 flex-1" />
+      {!isVisible ? (
+        <span className="inline-flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground">
+          <EyeOff className="size-3" />
+          {messages.base.hiddenField}
+        </span>
+      ) : null}
+      {hasFilter ? (
+        <Filter
+          aria-label={messages.base.fieldFilterActive}
+          className="size-3.5 shrink-0 text-primary"
+        />
+      ) : null}
+      {hasSort ? (
+        <ArrowUpDown
+          aria-label={messages.base.fieldSortActive}
+          className="size-3.5 shrink-0 text-primary"
+        />
+      ) : null}
+      {config.fieldWidths?.[field.slug] !== undefined ? (
+        <button
+          aria-label={fmt(messages.base.resetFieldWidthAria, {
+            name: resolveIString(field.name),
+          })}
+          className="inline-flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          onClick={() => onChange(resetViewFieldWidth(config, field.slug))}
+          title={messages.base.resetFieldWidth}
+          type="button"
+        >
+          <RotateCcw className="size-3" />
+        </button>
+      ) : null}
+    </>
+  );
+}
+
+function SortableViewFieldRow(props: ViewFieldRowProps) {
+  const messages = useCoreI18n();
+  const reduceMotion = useReducedMotion();
+  const name = props.resolveIString(props.field.name);
+  const {
+    attributes,
+    isDragging,
+    isOver,
+    listeners,
+    setActivatorNodeRef,
+    setNodeRef,
+    transform,
+    transition,
+  } = useSortable({ id: props.field.slug });
+
+  return (
+    <div
+      className={`flex min-h-10 items-center gap-2 px-3 py-1 ${
+        isDragging ? "opacity-0" : ""
+      } ${isOver && !isDragging ? "ring-2 ring-inset ring-primary/60" : ""}`}
+      data-dragging={isDragging ? "true" : undefined}
+      data-reorder-target={isOver && !isDragging ? "true" : undefined}
+      data-view-field-slug={props.field.slug}
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition: reduceMotion ? undefined : transition,
+      }}
+    >
+      <ViewFieldRowContent
+        {...props}
+        dragHandle={
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                {...attributes}
+                {...listeners}
+                aria-label={fmt(messages.base.dragFieldAria, { name })}
+                className="inline-flex size-7 shrink-0 cursor-grab touch-none items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing"
+                data-testid={`view-field-drag-handle-${props.field.slug}`}
+                ref={setActivatorNodeRef}
+                type="button"
+              >
+                <GripVertical aria-hidden="true" className="size-4" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="left">{messages.shell.dragToReorder}</TooltipContent>
+          </Tooltip>
+        }
+      />
+    </div>
+  );
+}
+
+function StaticViewFieldRow(props: ViewFieldRowProps) {
+  return (
+    <div
+      className="flex min-h-10 items-center gap-2 px-3 py-1"
+      data-view-field-slug={props.field.slug}
+    >
+      <ViewFieldRowContent {...props} />
+    </div>
+  );
+}
+
 export function ViewFieldsEditor({ config, fields, onChange, testId }: ViewFieldsEditorProps) {
   const messages = useCoreI18n();
   const resolveIString = useIString();
+  const reduceMotion = useReducedMotion();
+  const [activeSlug, setActiveSlug] = useState<string | null>(null);
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
   const visibleSlugs = getVisibleViewFieldSlugs(config, fields);
   const visibleSet = new Set(visibleSlugs);
   const hiddenCount = Math.max(0, fields.length - visibleSlugs.length);
@@ -231,6 +412,60 @@ export function ViewFieldsEditor({ config, fields, onChange, testId }: ViewField
     ...fields.filter((field) => !visibleSet.has(field.slug)),
   ];
   const primaryField = getPrimaryField({ fields });
+  const sortableSlugs = visibleSlugs.filter((slug) => slug !== primaryField?.slug);
+  const activeField = activeSlug ? fields.find((field) => field.slug === activeSlug) : undefined;
+  const getFieldName = (id: UniqueIdentifier) => {
+    const field = fields.find((item) => item.slug === String(id));
+    return field ? resolveIString(field.name) : String(id);
+  };
+  const getPosition = (id: UniqueIdentifier) => visibleSlugs.indexOf(String(id)) + 1;
+  const announcements: Announcements = {
+    onDragStart({ active }) {
+      return fmt(messages.base.viewFieldDragStarted, {
+        count: visibleSlugs.length,
+        name: getFieldName(active.id),
+        position: getPosition(active.id),
+      });
+    },
+    onDragOver({ active, over }) {
+      if (!over) return messages.base.viewFieldDragOutside;
+      return fmt(messages.base.viewFieldDragMoved, {
+        count: visibleSlugs.length,
+        name: getFieldName(active.id),
+        position: getPosition(over.id),
+      });
+    },
+    onDragEnd({ active, over }) {
+      if (!over) {
+        return fmt(messages.base.viewFieldDragCancelled, { name: getFieldName(active.id) });
+      }
+      return fmt(messages.base.viewFieldDragDropped, {
+        count: visibleSlugs.length,
+        name: getFieldName(active.id),
+        position: getPosition(over.id),
+      });
+    },
+    onDragCancel({ active }) {
+      return fmt(messages.base.viewFieldDragCancelled, { name: getFieldName(active.id) });
+    },
+  };
+
+  const handleDragEnd = ({ active, over }: DragEndEvent) => {
+    setActiveSlug(null);
+    if (!over || active.id === over.id) return;
+    const sourceIndex = visibleSlugs.indexOf(String(active.id));
+    const targetIndex = visibleSlugs.indexOf(String(over.id));
+    if (sourceIndex < 0 || targetIndex < 0) return;
+    onChange(
+      moveViewField(
+        config,
+        fields,
+        String(active.id),
+        String(over.id),
+        sourceIndex < targetIndex ? "after" : "before",
+      ),
+    );
+  };
 
   return (
     <div data-testid={testId}>
@@ -257,114 +492,68 @@ export function ViewFieldsEditor({ config, fields, onChange, testId }: ViewField
           </button>
         </div>
       </div>
-      <div className="divide-y divide-border/40">
-        {orderedFields.map((field) => {
-          const isPrimary = field.id === primaryField?.id;
-          const isVisible = visibleSet.has(field.slug);
-          const visibleIndex = visibleSlugs.indexOf(field.slug);
-          const hasFilter = config.filters.some((filter) => matchesViewField(filter, field));
-          const hasSort = config.sorts.some((sort) => matchesViewField(sort, field));
-          return (
-            <div
-              className="flex min-h-10 items-center gap-2 px-3 py-1"
-              data-view-field-slug={field.slug}
-              key={field.id}
-            >
-              <input
-                aria-label={fmt(messages.base.showFieldAria, { name: resolveIString(field.name) })}
-                checked={isVisible}
-                disabled={isPrimary || (isVisible && visibleSlugs.length <= 1)}
-                onChange={(event) =>
-                  onChange(
-                    event.target.checked
-                      ? showViewField(config, field, fields)
-                      : hideViewField(config, field, fields),
-                  )
-                }
-                type="checkbox"
-              />
-              <FieldTypeIcon className="size-3.5 shrink-0 text-muted-foreground" field={field} />
-              <span className="min-w-0 truncate text-xs">{resolveIString(field.name)}</span>
-              {isPrimary ? (
-                <RecordTitleBadge
-                  testId={`view-record-title-${field.id}`}
-                  tooltip={messages.base.recordTitleViewTooltip}
-                />
-              ) : null}
-              <span className="min-w-0 flex-1" />
-              {!isVisible ? (
-                <span className="inline-flex shrink-0 items-center gap-1 text-muted-foreground text-[10px]">
-                  <EyeOff className="size-3" />
-                  {messages.base.hiddenField}
-                </span>
-              ) : null}
-              {hasFilter ? (
-                <Filter
-                  aria-label={messages.base.fieldFilterActive}
-                  className="size-3.5 shrink-0 text-primary"
-                />
-              ) : null}
-              {hasSort ? (
-                <ArrowUpDown
-                  aria-label={messages.base.fieldSortActive}
-                  className="size-3.5 shrink-0 text-primary"
-                />
-              ) : null}
-              {config.fieldWidths?.[field.slug] !== undefined ? (
-                <button
-                  aria-label={fmt(messages.base.resetFieldWidthAria, {
-                    name: resolveIString(field.name),
-                  })}
-                  className="inline-flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                  onClick={() => onChange(resetViewFieldWidth(config, field.slug))}
-                  title={messages.base.resetFieldWidth}
-                  type="button"
-                >
-                  <RotateCcw className="size-3" />
-                </button>
-              ) : null}
-              <div className="flex w-14 shrink-0 items-center justify-end">
-                <button
-                  aria-label={fmt(messages.base.moveFieldUpAria, {
-                    name: resolveIString(field.name),
-                  })}
-                  className="inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-30"
-                  disabled={
-                    isPrimary || !isVisible || visibleIndex <= (primaryField === null ? 0 : 1)
-                  }
-                  onClick={() => {
-                    const target = visibleSlugs[visibleIndex - 1];
-                    if (target) {
-                      onChange(moveViewField(config, fields, field.slug, target, "before"));
-                    }
-                  }}
-                  title={messages.base.moveFieldUp}
-                  type="button"
-                >
-                  <ArrowUp className="size-3.5" />
-                </button>
-                <button
-                  aria-label={fmt(messages.base.moveFieldDownAria, {
-                    name: resolveIString(field.name),
-                  })}
-                  className="inline-flex size-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-30"
-                  disabled={isPrimary || !isVisible || visibleIndex >= visibleSlugs.length - 1}
-                  onClick={() => {
-                    const target = visibleSlugs[visibleIndex + 1];
-                    if (target) {
-                      onChange(moveViewField(config, fields, field.slug, target, "after"));
-                    }
-                  }}
-                  title={messages.base.moveFieldDown}
-                  type="button"
-                >
-                  <ArrowDown className="size-3.5" />
-                </button>
-              </div>
+      <DndContext
+        accessibility={{
+          announcements,
+          screenReaderInstructions: { draggable: messages.base.viewFieldDragInstructions },
+        }}
+        collisionDetection={(args) => {
+          const pointerCollisions = pointerWithin(args);
+          return pointerCollisions.length > 0 ? pointerCollisions : closestCenter(args);
+        }}
+        onDragCancel={() => setActiveSlug(null)}
+        onDragEnd={handleDragEnd}
+        onDragStart={({ active }) => setActiveSlug(String(active.id))}
+        sensors={sensors}
+      >
+        <TooltipProvider delayDuration={250}>
+          <SortableContext items={sortableSlugs} strategy={verticalListSortingStrategy}>
+            <div className="divide-y divide-border/40">
+              {orderedFields.map((field) => {
+                const rowProps: ViewFieldRowProps = {
+                  config,
+                  field,
+                  fields,
+                  isPrimary: field.id === primaryField?.id,
+                  isVisible: visibleSet.has(field.slug),
+                  onChange,
+                  resolveIString,
+                  visibleSlugs,
+                };
+                return rowProps.isVisible && !rowProps.isPrimary ? (
+                  <SortableViewFieldRow {...rowProps} key={field.id} />
+                ) : (
+                  <StaticViewFieldRow {...rowProps} key={field.id} />
+                );
+              })}
             </div>
-          );
-        })}
-      </div>
+          </SortableContext>
+        </TooltipProvider>
+        {typeof document === "undefined"
+          ? null
+          : createPortal(
+              <DragOverlay adjustScale={false} dropAnimation={reduceMotion ? null : undefined}>
+                {activeField ? (
+                  <div
+                    className="flex min-h-10 items-center gap-2 rounded border border-border bg-popover px-3 py-1 text-popover-foreground shadow-md"
+                    data-testid="view-field-drag-overlay"
+                  >
+                    <span className="inline-flex size-7 shrink-0 items-center justify-center">
+                      <GripVertical aria-hidden="true" className="size-4 text-muted-foreground" />
+                    </span>
+                    <FieldTypeIcon
+                      className="size-3.5 shrink-0 text-muted-foreground"
+                      field={activeField}
+                    />
+                    <span className="min-w-0 truncate text-xs">
+                      {resolveIString(activeField.name)}
+                    </span>
+                  </div>
+                ) : null}
+              </DragOverlay>,
+              document.body,
+            )}
+      </DndContext>
     </div>
   );
 }

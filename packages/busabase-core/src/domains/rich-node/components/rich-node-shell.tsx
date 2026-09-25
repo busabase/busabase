@@ -5,8 +5,7 @@ import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-quer
 import type { NodeContentInput } from "busabase-contract/contract/node-content-schemas";
 import type { NodeVO } from "busabase-contract/types";
 import { Button } from "kui/button";
-import type { LucideIcon } from "lucide-react";
-import { Info, Save } from "lucide-react";
+import { Save } from "lucide-react";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
@@ -14,13 +13,13 @@ import { presentCoreError } from "../../../i18n/localize-error";
 import { NodeActionsMenu } from "../../dashboard/components/node-actions-menu";
 import { NodeAgentPromptsButton } from "../../dashboard/components/node-agent-prompts-button";
 import { NodePinButton, nodeSidePanelTabId } from "../../dashboard/components/node-pin-button";
-import { NodeSettingsDialog } from "../../dashboard/components/node-settings-dialog";
 import {
   FullscreenPreviewSurface,
   PreviewFullscreenButton,
   type PreviewFullscreenState,
 } from "../../dashboard/components/preview-fullscreen";
 import { useRegisterTopbarNodeActions } from "../../dashboard/hooks/use-register-topbar-node-actions";
+import { useRegisterTopbarNodeInfo } from "../../dashboard/hooks/use-register-topbar-node-info";
 import { useIsAnonymousVisitor } from "../../dashboard/visitor-context";
 import { stableStringify } from "../utils/stable-json";
 
@@ -148,7 +147,6 @@ export function useServerDocumentSync<TDocument>({
 interface RichNodeShellProps {
   node: NodeVO;
   nodeType: string;
-  icon: LucideIcon;
   orpc: BusabaseQueryUtils;
   status: SaveStatus;
   error?: string | null;
@@ -161,7 +159,6 @@ interface RichNodeShellProps {
 export function RichNodeShell({
   node,
   nodeType,
-  icon: Icon,
   orpc,
   status,
   error,
@@ -172,7 +169,6 @@ export function RichNodeShell({
 }: RichNodeShellProps) {
   const messages = useCoreI18n();
   const isAnonymous = useIsAnonymousVisitor();
-  const [infoOpen, setInfoOpen] = useState(false);
   const statusLabel =
     status === "saving"
       ? messages.richNodes.saving
@@ -246,50 +242,17 @@ export function RichNodeShell({
       </>
     ),
   );
+  useRegisterTopbarNodeInfo({
+    description: node.description,
+    nodeId: node.id,
+    nodeName: node.name,
+    nodeSlug: node.slug,
+    nodeType,
+    orpc,
+  });
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-background">
-      <header className="shrink-0 border-border/60 border-b px-4 py-4 md:px-6 md:py-5">
-        <div className="flex min-w-0 items-start gap-2">
-          <Icon className="mt-1 size-4 shrink-0 text-muted-foreground" />
-          <div className="min-w-0 flex-1">
-            <h1 className="truncate font-semibold text-foreground text-xl leading-7">
-              {node.name}
-            </h1>
-            {node.description ? (
-              <p
-                className="mt-1 line-clamp-2 text-muted-foreground text-sm leading-5 md:line-clamp-1"
-                title={node.description}
-              >
-                {node.description}
-              </p>
-            ) : null}
-          </div>
-          <Button
-            aria-label={messages.nodeDetail.details}
-            className="shrink-0 text-muted-foreground"
-            onClick={() => setInfoOpen(true)}
-            size="icon-sm"
-            title={messages.nodeDetail.details}
-            type="button"
-            variant="ghost"
-          >
-            <Info className="size-3.5" />
-          </Button>
-          {infoOpen ? (
-            <NodeSettingsDialog
-              initialTab="info"
-              nodeId={node.id}
-              nodeName={node.name}
-              nodeSlug={node.slug}
-              nodeType={nodeType}
-              onOpenChange={setInfoOpen}
-              open
-              orpc={orpc}
-            />
-          ) : null}
-        </div>
-      </header>
       <div className="min-h-0 flex-1">
         <FullscreenPreviewSurface
           data-visual-node-preview={nodeType}

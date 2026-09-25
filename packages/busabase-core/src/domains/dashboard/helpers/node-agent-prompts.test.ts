@@ -1,8 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { CoreLocale } from "../../../i18n";
+import { dashboardDe } from "../../../i18n/de";
+import { dashboardEs } from "../../../i18n/es";
+import { dashboardFr } from "../../../i18n/fr";
 import { dashboardJa } from "../../../i18n/ja";
+import { dashboardKo } from "../../../i18n/ko";
 import type { CoreI18nMessages } from "../../../i18n/messages";
 import { coreMessagesEn } from "../../../i18n/messages";
+import { dashboardPt } from "../../../i18n/pt";
+import { dashboardVi } from "../../../i18n/vi";
 import { dashboardZhCN } from "../../../i18n/zh-CN";
 import { dashboardZhTW } from "../../../i18n/zh-TW";
 import { buildNodeAgentPrompts, type NodePromptContext } from "./node-agent-prompts";
@@ -254,6 +260,67 @@ const LOCALE_EXPECTATIONS: Record<
     replyLanguage: "日本語で返信してください",
     approvalInstruction: "変更は ChangeRequest として提出し",
     contentGroup: "コンテンツ",
+  },
+  ko: {
+    messages: dashboardKo,
+    label: "문서 읽기",
+    readInFull: "이 문서의 현재 내용을 처음부터 끝까지 읽고",
+    readOnly: "문서를 수정하거나 ChangeRequest를 만들거나 무언가를 병합하지 마세요",
+    ready: "준비되었음을 간단히 알려 주세요",
+    replyLanguage: "한국어로 답변해 주세요",
+    approvalInstruction: "변경 사항을 제출하고",
+    contentGroup: "콘텐츠",
+  },
+  es: {
+    messages: dashboardEs,
+    label: "Leer documento",
+    readInFull: "Lee el contenido actual de este documento completo",
+    readOnly: "no modifiques el documento, no crees ninguna ChangeRequest ni fusiones nada",
+    ready: "confirma brevemente que estás listo",
+    replyLanguage: "Responde en español",
+    approvalInstruction: "Envía el cambio y deja que",
+    contentGroup: "Contenido",
+  },
+  pt: {
+    messages: dashboardPt,
+    label: "Ler documento",
+    readInFull: "Leia o conteúdo atual deste documento por completo",
+    readOnly: "não modifique o documento, não crie nenhuma ChangeRequest nem mescle nada",
+    ready: "confirme brevemente que você está pronto",
+    replyLanguage: "Responda em português",
+    approvalInstruction: "Envie a alteração e deixe",
+    contentGroup: "Conteúdo",
+  },
+  vi: {
+    messages: dashboardVi,
+    label: "Đọc tài liệu",
+    readInFull: "đọc toàn bộ nội dung hiện tại của tài liệu này",
+    readOnly: "đừng sửa tài liệu, đừng tạo ChangeRequest và đừng hợp nhất bất cứ thứ gì",
+    ready: "xác nhận ngắn gọn là bạn đã sẵn sàng",
+    replyLanguage: "Hãy trả lời tôi bằng tiếng Việt",
+    approvalInstruction: "Hãy gửi thay đổi và để Busabase",
+    contentGroup: "Nội dung",
+  },
+  fr: {
+    messages: dashboardFr,
+    label: "Lire le document",
+    readInFull: "Lisez en entier le contenu actuel de ce document",
+    readOnly: "ne modifiez pas le document, ne créez pas de ChangeRequest et ne fusionnez rien",
+    ready: "confirmez brièvement que vous êtes prêt",
+    replyLanguage: "Répondez-moi en français",
+    approvalInstruction: "Soumettez la modification et laissez",
+    contentGroup: "Contenu",
+  },
+  de: {
+    messages: dashboardDe,
+    label: "Dokument lesen",
+    readInFull: "Lesen Sie den aktuellen Inhalt dieses Dokuments vollständig",
+    readOnly:
+      "Ändern Sie das Dokument nicht, erstellen Sie keine ChangeRequest und führen Sie nichts zusammen",
+    ready: "Bestätigen Sie nach dem Lesen kurz, dass Sie bereit sind",
+    replyLanguage: "Antworten Sie mir auf Deutsch",
+    approvalInstruction: "Reichen Sie die Änderung ein",
+    contentGroup: "Inhalt",
   },
 };
 

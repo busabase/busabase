@@ -4,6 +4,7 @@ import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-quer
 import type { AssetTextStatus } from "busabase-contract/types";
 import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "kui/dialog";
 import { Skeleton } from "kui/skeleton";
+import { cn } from "kui/utils";
 import {
   AlertTriangle,
   ArrowLeft,
@@ -82,7 +83,12 @@ export function AssetMediaPreview({ mimeType, url, name, mediaClassName }: Asset
   }
   if (mimeType === "application/pdf") {
     return (
-      <iframe className={`h-[70vh] w-full border-0 ${mediaClassName}`} src={url} title={name} />
+      <iframe
+        className={cn("h-[70vh] w-full border-0", mediaClassName)}
+        data-asset-preview="pdf"
+        src={url}
+        title={name}
+      />
     );
   }
   const Icon = assetKindIcon(mimeType);

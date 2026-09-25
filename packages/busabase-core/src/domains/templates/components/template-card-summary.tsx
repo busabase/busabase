@@ -36,7 +36,6 @@ interface TemplateCardSummaryProps {
    * one outright.
    */
   descriptionLocale?: LocaleType;
-  preferEnglishFallback?: boolean;
 }
 
 /**
@@ -55,11 +54,10 @@ export function TemplateCardSummary({
   headingHref,
   children,
   descriptionLocale = "en",
-  preferEnglishFallback = false,
 }: TemplateCardSummaryProps) {
   const [screenshot] = template.screenshots;
   const title = template.displayName
-    ? templateTextForLocale(template.displayName, descriptionLocale, preferEnglishFallback)
+    ? templateTextForLocale(template.displayName, descriptionLocale)
     : template.name;
   const Heading = headingLevel;
   const stats = [
@@ -108,7 +106,7 @@ export function TemplateCardSummary({
               : "line-clamp-2 flex-1 text-xs text-muted-foreground"
           }
         >
-          {templateTextForLocale(template.description, descriptionLocale, preferEnglishFallback)}
+          {templateTextForLocale(template.description, descriptionLocale)}
         </p>
 
         {stats.length > 0 ? (

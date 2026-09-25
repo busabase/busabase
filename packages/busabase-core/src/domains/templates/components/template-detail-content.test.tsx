@@ -79,16 +79,13 @@ describe("TemplateDetailContent", () => {
     const en = renderToStaticMarkup(<TemplateDetailContent template={localized} />);
     expect(en).toContain("Email operations workspace");
 
+    // A locale the catalog has no entry for shows English — never another
+    // language that merely happens to be listed first.
     const ja = renderToStaticMarkup(
-      <TemplateDetailContent template={localized} descriptionLocale="ja" preferEnglishFallback />,
+      <TemplateDetailContent template={localized} descriptionLocale="ja" />,
     );
     expect(ja).toContain("Email operations workspace");
     expect(ja).not.toContain("邮件运营工作台");
-
-    const publicJa = renderToStaticMarkup(
-      <TemplateDetailContent template={localized} descriptionLocale="ja" />,
-    );
-    expect(publicJa).toContain("邮件运营工作台");
   });
 
   it("uses caller-provided UI labels in a server-rendered template detail", () => {
@@ -157,20 +154,10 @@ describe("TemplateDetailContent", () => {
     expect(en).toContain(">Busa Email</h1>");
 
     const ja = renderToStaticMarkup(
-      <TemplateCardSummary
-        template={withDisplayName}
-        screenshotAlt=""
-        descriptionLocale="ja"
-        preferEnglishFallback
-      />,
+      <TemplateCardSummary template={withDisplayName} screenshotAlt="" descriptionLocale="ja" />,
     );
     expect(ja).toContain(">Busa Email</h3>");
     expect(ja).not.toContain("Busa 邮件");
-
-    const publicJa = renderToStaticMarkup(
-      <TemplateCardSummary template={withDisplayName} screenshotAlt="" descriptionLocale="ja" />,
-    );
-    expect(publicJa).toContain("Busa 邮件");
   });
 });
 

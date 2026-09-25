@@ -22,7 +22,7 @@ describe("AgentQueryErrorState", () => {
     expect(markup).toContain(">Retry</button>");
   });
 
-  it("uses the localized retry label and fallback for unknown English server errors", () => {
+  it("uses localized controls while preserving the real server error", () => {
     const markup = renderToStaticMarkup(
       <CoreI18nProvider locale="zh-CN">
         <AgentQueryErrorState
@@ -34,8 +34,8 @@ describe("AgentQueryErrorState", () => {
     );
 
     expect(markup).toContain("无法加载 Agent 目录");
-    expect(markup).toContain("请重试。");
+    expect(markup).toContain("Connection timed out");
     expect(markup).toContain(">重试</button>");
-    expect(markup).not.toContain("Connection timed out");
+    expect(markup).not.toContain("请重试。");
   });
 });

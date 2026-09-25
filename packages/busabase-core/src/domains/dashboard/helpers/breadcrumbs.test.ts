@@ -20,7 +20,10 @@ describe("getNodeDetailBreadcrumbItems", () => {
 
       expect(items, definition.type).toEqual([
         { href: "/home", label: "Workspace" },
-        { label: definition.label },
+        // `isNode` marks the crumb the topbar hangs the node's emphasis and
+        // Info button on — here it is the last one, but on a Base view/record
+        // route it is not, which is why the flag exists at all.
+        { isNode: true, label: definition.label },
       ]);
     }
   });
@@ -37,13 +40,19 @@ describe("getNodeDetailBreadcrumbItems", () => {
         },
         coreMessagesEn,
       ),
-    ).toEqual([{ href: "/home", label: "Workspace" }, { label: "Quarterly Report" }]);
+    ).toEqual([
+      { href: "/home", label: "Workspace" },
+      { isNode: true, label: "Quarterly Report" },
+    ]);
   });
 
   it("keeps the type fallback localized while a direct link loads", () => {
     expect(
       getNodeDetailBreadcrumbItems({ slug: "quarterly-report", type: "doc" }, null, dashboardZhCN),
-    ).toEqual([{ href: "/home", label: "工作区" }, { label: "文档" }]);
+    ).toEqual([
+      { href: "/home", label: "工作区" },
+      { isNode: true, label: "文档" },
+    ]);
   });
 
   it("ignores stale loaded-node state from a previous route", () => {
@@ -53,7 +62,7 @@ describe("getNodeDetailBreadcrumbItems", () => {
       coreMessagesEn,
     );
 
-    expect(items?.at(-1)).toEqual({ label: "Doc" });
+    expect(items?.at(-1)).toEqual({ isNode: true, label: "Doc" });
   });
 
   it("leaves Base and unknown routes to their dedicated fallbacks", () => {
