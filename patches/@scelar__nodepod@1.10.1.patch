@@ -1,0 +1,148 @@
+diff --git a/dist/__sw__.js b/dist/__sw__.js
+index f8f637919cdb6e9792d0b91d079402be751f2734..d78101f6c85df974ab11dd7d10a95fbde56c8b04 100644
+--- a/dist/__sw__.js
++++ b/dist/__sw__.js
+@@ -650,6 +650,24 @@ self.addEventListener("message", (event) => {
+   const data = event.data;
+   if (!data) return;
+ 
++  // [busabase patch] The dashboard host can have an active registration while
++  // its current document is still uncontrolled (notably on the first AirApp
++  // visit or after a reload that bypassed the worker). Let the trusted host ask
++  // this already-active worker to claim the page before Nodepod boots. This is
++  // deliberately separate from `init`: it creates no MessagePort or pod state.
++  //
++  // NOT covered by any upstream API, including 1.10.x's `reservedHostPaths`.
++  // Upstream 1.10.x does call `self.clients.claim()`, but only inside the
++  // `init` branch below, which requires a MessagePort and registers pod state
++  // for the tab. Our host must be able to claim BEFORE `Nodepod.boot()` runs
++  // (see registerActivateAndClaim() in
++  // packages/busabase-core/src/domains/airapp/utils/nodepod-service-worker.ts,
++  // constant NODEPOD_HOST_CLAIM_MESSAGE) — the two are not interchangeable.
++  if (data.type === "busabase-host-claim") {
++    event.waitUntil(self.clients.claim());
++    return;
++  }
++
+   // register a new tab's MessagePort. if the same tab reinits (same token,
+   // new channel from controllerchange) drop the old port first so stale
+   // entries don't accumulate. RequestProxy resends claim-instance after.
+@@ -1040,6 +1058,64 @@ self.addEventListener("fetch", (event) => {
+     return;
+   }
+ 
++  // [busabase patch] `/api/v1/*` is Busabase's own public REST surface — a real
++  // host route, never something a pod serves. Pass it through to the network
++  // instead of answering it from the sandboxed virtual server, so an AirApp
++  // reaches Busabase with the exact same code whether it runs here, under the
++  // Local Node engine, or on a plain `pnpm dev` server. A plain `return` is
++  // enough: the browser performs its own same-origin fetch, so the user's
++  // (possibly httpOnly) session cookie rides along automatically.
++  //
++  // Session safety is unchanged and still fails closed. A pod booted WITH a
++  // preview script (currently only the public AirApp Embed runtime) must never
++  // reach the real backend as the viewer: its injected fetch override already
++  // rewrites these calls onto the capability-scoped embed relay, and this guard
++  // is what stops a request that bypasses the override (e.g. raw
++  // XMLHttpRequest). When an embed pod is alive and the request cannot be
++  // positively attributed to a non-embed client, we refuse rather than risk
++  // handing out the session — a visible 403 beats a silent leak.
++  //
++  // WHY UPSTREAM `reservedHostPaths` DOES NOT COVER THIS, AND WHY THIS BLOCK
++  // MUST STAY WHERE IT IS — read before deleting or moving it:
++  //   * `reservedHostPaths` only ever BYPASSES a path to the host. It has no
++  //     notion of "an embed pod is alive, so refuse instead". The 403 half of
++  //     this guard has no upstream equivalent in 1.10.1; removing this block
++  //     silently removes a defence against leaking the viewer's session.
++  //   * For that reason `/api/v1` is deliberately NOT listed in the host's
++  //     reserveHostPaths() call (see NODEPOD_RESERVED_HOST_PATHS in
++  //     packages/busabase-core/src/domains/airapp/components/runners/nodepod-runner.ts).
++  //     If it were, the upstream `isReservedHostPath(url.pathname)` early exit
++  //     immediately below would return first and this 403 would never fire.
++  //   * This block must therefore stay AHEAD of BOTH upstream
++  //     `isReservedHostPath` early exits: the url-based one directly below, and
++  //     the referrer-based one further down (which WOULD swallow an /api/v1
++  //     request issued by the reserved `/embed/*` host document).
++  if (url.pathname === "/api/v1" || url.pathname.startsWith("/api/v1/")) {
++    const podFromReferrer = () => {
++      if (!request.referrer) return null;
++      let refPath;
++      try {
++        const ref = new URL(request.referrer);
++        if (ref.origin !== self.location.origin) return null;
++        refPath = ref.pathname;
++      } catch {
++        return null;
++      }
++      const hit =
++        matchPreviewOrVirtualPath(refPath, "preview") ||
++        matchPreviewOrVirtualPath(refPath, "virtual");
++      if (hit) return { instanceId: hit.instanceId, serverPort: hit.port };
++      return lookupPodForClaimedPath(stripPreviewPrefix(refPath));
++    };
++    const pod = (clientId ? previewClients.get(clientId) : null) || podFromReferrer();
++    const isEmbedPod = pod ? previewScripts.has(pod.instanceId) : previewScripts.size > 0;
++    if (isEmbedPod) {
++      event.respondWith(new Response(null, { status: 403 }));
++      return;
++    }
++    return;
++  }
++
+   // Host-reserved infrastructure documents are always served by the host.
+   if (url.origin === self.location.origin && isReservedHostPath(url.pathname)) {
+     return;
+@@ -1101,6 +1177,31 @@ self.addEventListener("fetch", (event) => {
+     } catch {}
+   }
+ 
++  // [busabase patch] A frame navigation initiated by a document on a DIFFERENT
++  // origin targets the real host, not a Nodepod preview. A pod can legitimately
++  // claim "/" while it is running; without this guard, reassigning that outer
++  // iframe to a host route lets the stale root claim capture the navigation and
++  // proxy it to a pod that is already being torn down. Explicit /__virtual__/
++  // and /__preview__/ URLs were handled above and remain routable.
++  //
++  // Upstream `reservedHostPaths` cannot replace this: its own referrer check
++  // only fires for SAME-origin referrers that are themselves reserved paths
++  // (see the block just above), and reserving a path is per-path anyway — this
++  // guard is about the navigation's INITIATOR being cross-origin, whatever the
++  // target path is, so it also protects host routes we never reserve.
++  const isFrameNavigation =
++    request.mode === "navigate" &&
++    (request.destination === "iframe" || request.destination === "frame");
++  const hasCrossOriginReferrer = (() => {
++    if (!request.referrer) return false;
++    try {
++      return new URL(request.referrer).origin !== self.location.origin;
++    } catch {
++      return false;
++    }
++  })();
++  if (isFrameNavigation && hasCrossOriginReferrer) return;
++
+   // 2. only same-origin (and localhost-alias) URLs can belong to a pod;
+   //    cross-origin (fonts, CDNs) always passes through
+   const sameOrigin =
+@@ -1184,6 +1285,21 @@ self.addEventListener("fetch", (event) => {
+           if (!pod && client && client.url) {
+             try {
+               const clientPath = stripPreviewPrefix(new URL(client.url).pathname);
++              // [busabase patch] Upstream's reserved-path referrer check (near
++              // the top of this handler) only fires when `request.referrer` is
++              // set. Our embed bootstrap page ships `referrer-policy:
++              // no-referrer` (see
++              // the Busabase Cloud mobile-embed-token route),
++              // so its subresources arrive with NO referrer and fall straight
++              // into THIS client-URL recovery, which upstream leaves unguarded.
++              // A client whose document lives on a reserved host path is the
++              // host page itself — its chunks/fonts must go to the network, not
++              // be walked up into a pod's broad "/" claim. Deliberately reuses
++              // upstream's own isReservedHostPath() so this stays in lockstep
++              // with whatever the host passed to reserveHostPaths().
++              if (isReservedHostPath(clientPath)) {
++                return fetch(request);
++              }
+               pod = lookupPodForClaimedPath(clientPath);
+             } catch {
+               pod = null;
