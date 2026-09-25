@@ -15,6 +15,8 @@ describe("file tree file helpers", () => {
   it("recognizes files by extension when an agent stored a generic MIME type", () => {
     expect(inferFileTreeMimeType("PHOTO.JPG", "application/octet-stream")).toBe("image/jpeg");
     expect(resolveFileTreePreviewKind("PHOTO.JPG", "application/octet-stream")).toBe("image");
+    expect(inferFileTreeMimeType("photo.avif", "application/octet-stream")).toBe("image/avif");
+    expect(resolveFileTreePreviewKind("photo.avif", "application/octet-stream")).toBe("image");
     expect(resolveFileTreePreviewKind("README.md", "text/plain; charset=utf-8")).toBe("markdown");
   });
 

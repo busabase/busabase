@@ -174,25 +174,43 @@ describe("node type picker copy", () => {
  * test passes, and it renders as garbage to exactly the users the string was
  * written for. The signature is a run of characters in the Latin-1 Supplement
  * block, which no genuine CJK or English UI string produces.
+ *
+ * Accented Latin-script languages (es, pt, fr, de, vi) legitimately contain
+ * adjacent accented letters ("ção", "é"…), so for those the signature is the
+ * corrupted byte pattern itself: a UTF-8 lead byte decoded as "Ã"/"Â" followed by
+ * a continuation byte, or a C1 control character — neither occurs in real text.
  */
 describe("translation catalog encoding", () => {
-  const MOJIBAKE = /[À-ÿ]{2,}/;
+  const LATIN_SCRIPT_LOCALES = new Set(["es", "pt", "fr", "de", "vi"]);
+  const MOJIBAKE_CJK_OR_ENGLISH = /[À-ÿ]{2,}/;
+  const MOJIBAKE_LATIN = /[\u0080-\u009F]|[ÂÃ][\u0080-\u00BF]/;
+  const patternFor = (locale: string) =>
+    LATIN_SCRIPT_LOCALES.has(locale) ? MOJIBAKE_LATIN : MOJIBAKE_CJK_OR_ENGLISH;
 
-  const walk = (value: unknown, path: string, hits: string[]) => {
+  const walk = (value: unknown, path: string, pattern: RegExp, hits: string[]) => {
     if (typeof value === "string") {
-      if (MOJIBAKE.test(value)) hits.push(`${path}: ${value}`);
+      if (pattern.test(value)) hits.push(`${path}: ${value}`);
       return;
     }
     if (value && typeof value === "object") {
-      for (const [key, child] of Object.entries(value)) walk(child, `${path}.${key}`, hits);
+      for (const [key, child] of Object.entries(value)) {
+        walk(child, `${path}.${key}`, pattern, hits);
+      }
     }
   };
 
   it("has no mojibake in any locale", () => {
     for (const [locale, messages] of Object.entries(coreMessagesByLocale)) {
       const hits: string[] = [];
-      walk(messages, locale, hits);
+      walk(messages, locale, patternFor(locale), hits);
       expect(hits, `corrupted strings in ${locale}`).toEqual([]);
     }
+  });
+
+  it("still recognises real corruption, and not legitimate accents", () => {
+    expect(MOJIBAKE_LATIN.test("pré-visualização")).toBe(false);
+    expect(MOJIBAKE_LATIN.test("¿Dónde está? ¡Listo!")).toBe(false);
+    expect(MOJIBAKE_LATIN.test("PrÃ©-visualizaÃ§Ã£o")).toBe(true);
+    expect(MOJIBAKE_CJK_OR_ENGLISH.test("åè¡¨æ ¼ä¸æ ·å¡«")).toBe(true);
   });
 });

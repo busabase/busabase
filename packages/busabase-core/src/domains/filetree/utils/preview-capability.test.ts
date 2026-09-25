@@ -1,5 +1,40 @@
 import { describe, expect, it } from "vitest";
-import { isBuiltinDrivePreviewSufficient, shouldEscalateDrivePreview } from "./preview-capability";
+import {
+  isBrowserNativeNewTabPreviewMimeType,
+  isBuiltinDrivePreviewSufficient,
+  shouldEscalateDrivePreview,
+} from "./preview-capability";
+
+describe("isBrowserNativeNewTabPreviewMimeType", () => {
+  it.each([
+    ["PDF", "application/pdf"],
+    ["PDF with parameters", "Application/PDF; charset=binary"],
+    ["PNG", "image/png"],
+    ["JPEG", "image/jpeg"],
+    ["WebP", "image/webp"],
+    ["GIF", "image/gif"],
+    ["AVIF", "image/avif"],
+    ["video", "video/mp4"],
+    ["audio", "audio/mpeg"],
+  ])("allows %s", (_label, mimeType) => {
+    expect(isBrowserNativeNewTabPreviewMimeType(mimeType)).toBe(true);
+  });
+
+  it.each([
+    ["SVG", "image/svg+xml"],
+    ["HTML", "text/html"],
+    ["plain text", "text/plain"],
+    ["Markdown", "text/markdown"],
+    ["PSD", "image/vnd.adobe.photoshop"],
+    ["TIFF", "image/tiff"],
+    ["DOCX", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
+    ["ZIP", "application/zip"],
+    ["unknown binary", "application/octet-stream"],
+    ["missing MIME type", ""],
+  ])("rejects %s", (_label, mimeType) => {
+    expect(isBrowserNativeNewTabPreviewMimeType(mimeType)).toBe(false);
+  });
+});
 
 describe("shouldEscalateDrivePreview", () => {
   it.each([

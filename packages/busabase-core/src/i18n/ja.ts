@@ -202,6 +202,7 @@ export const dashboardJa: CoreI18nMessages = {
     fileRenameFailed: "ファイル名を変更できませんでした",
     fileRenamed: "ファイル名を変更しました",
     downloadFile: "ファイルをダウンロード",
+    openFileInNewTab: "新しいタブで開く",
     fileDownloadFailed: "ファイルをダウンロードできませんでした",
     downloadFolder: "フォルダーをダウンロード",
     filesDownloaded: "{count} 件のファイルをダウンロードしました",
@@ -527,7 +528,6 @@ export const dashboardJa: CoreI18nMessages = {
     runFailed: "この AirApp の実行に失敗しました",
     enterFullscreen: "全画面表示",
     exitFullscreen: "全画面表示を終了",
-    details: "AirApp の詳細",
     engineLabel: "エンジン",
     engineFollowApp: "アプリに従う",
     engineFollowAppNamed: "アプリに従う（{engine}）",
@@ -638,6 +638,21 @@ export const dashboardJa: CoreI18nMessages = {
     connectAnotherBuda: "別の Buda エージェントを接続",
     signInBuda: "Buda にサインイン",
     connect: "接続",
+    codexInstallTitle: "Codex ACP をインストールしますか？",
+    codexInstallBody:
+      "Busabase Desktop は npm レジストリから @agentclientprotocol/codex-acp@1.1.14 をアプリ専用領域にダウンロードします。Desktop 同梱の Node と npm を使用します。Codex CLI のインストールとログインは別途必要です。",
+    codexInstallAction: "インストールして接続",
+    codexInstalling: "Codex ACP をインストール中…",
+    codexInstallRetry: "インストールを再試行",
+    codexCliMissing: "Codex CLI が見つかりません。インストール後に接続を再試行してください。",
+    codexLoginRequired: "`codex login` で Codex CLI にログインしてから接続を再試行してください。",
+    codexInstallCancel: "キャンセル",
+    claudeInstallTitle: "Claude Code ACP をインストールしますか？",
+    claudeInstallBody:
+      "Busabase Desktop は npm レジストリから @agentclientprotocol/claude-agent-acp@0.66.0 と Claude Agent SDK のネイティブ実行ファイルをアプリ専用領域にダウンロードします。同梱の Node と npm を使用します。Claude へのログインは別途必要です。",
+    claudeInstalling: "Claude Code ACP をインストール中…",
+    claudeLoginRequired:
+      "ターミナルで `claude auth login` を実行して Claude Code にログインし、接続を再試行してください。",
     connectBuda: "Buda に接続",
     budaConnectHint: "サインインして Busabase と会話できるエージェントを選択してください。",
     budaConnectDescription:
@@ -1410,6 +1425,14 @@ export const dashboardJa: CoreI18nMessages = {
     moveFieldDown: "下へ移動",
     moveFieldUpAria: "{name} を上へ移動",
     moveFieldDownAria: "{name} を下へ移動",
+    viewFieldDragInstructions:
+      "スペースキーまたは Enter キーでフィールドを持ち上げます。ドラッグ中は矢印キーで移動し、もう一度スペースキーまたは Enter キーで配置します。Escape キーでキャンセルできます。",
+    viewFieldDragStarted: "{name} を持ち上げました。{count} 件中 {position} 番目です。",
+    viewFieldDragMoved: "{name} を {count} 件中 {position} 番目に移動しました。",
+    viewFieldDragDropped: "{name} を {count} 件中 {position} 番目に配置しました。",
+    viewFieldDragCancelled: "並べ替えをキャンセルしました。{name} は元の位置に戻りました。",
+    viewFieldDragOutside:
+      "フィールドは並べ替え領域の外にあります。ドロップするとキャンセルします。",
     noViewFilters: "このビューにフィルターはありません。",
     noViewSorts: "このビューに並べ替えはありません。",
     viewFilterCount: "{count} 件のフィルター",

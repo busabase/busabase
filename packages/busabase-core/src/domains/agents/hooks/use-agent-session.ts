@@ -22,7 +22,7 @@ import { shouldRenderAgentMessage } from "../utils/agent-visible-message";
  * deliberately the same set the previous `buildAgentTimeline` ignored. More
  * than one only for a `user_message` that carries attachments — see below.
  */
-function translate(event: AgentSessionEventVO): AcpUiEvent[] {
+export function translateAgentSessionEvent(event: AgentSessionEventVO): AcpUiEvent[] {
   if (event.kind === "permissionRequest" && event.permissionRequest) {
     return [
       {
@@ -78,20 +78,22 @@ function translate(event: AgentSessionEventVO): AcpUiEvent[] {
   // Left untranslated it would be dropped by the ACP-native reducer and the
   // user's own words (and pictures) would vanish from a replayed session.
   //
-  // One `user_message_chunk` for the text, one more per attachment — no
-  // `messageId` on any of them, so the core's reducer merges them into a
-  // single block by (role, variant) adjacency, same as the real ACP chunks
-  // it already knows how to fold.
+  // One `user_message_chunk` for the text, one more per attachment. All chunks
+  // from this event share a stable id so they become one message, while the
+  // next persisted user event starts a new message even when a cancelled turn
+  // produced no intervening agent chunk.
   if (tag === "user_message" && typeof update.text === "string") {
     const attachments = Array.isArray(update.attachments)
       ? (update.attachments as PromptAttachmentInput[])
       : [];
+    const messageId = `busabase-user:${event.sessionId}:${event.seq}`;
     return [
       {
         type: "session_update",
         update: {
           sessionUpdate: "user_message_chunk",
           content: { type: "text", text: update.text },
+          messageId,
         } as never,
       },
       // Built through the same helper the send path uses, rather than
@@ -106,6 +108,7 @@ function translate(event: AgentSessionEventVO): AcpUiEvent[] {
           update: {
             sessionUpdate: "user_message_chunk",
             content: attachmentToContentBlock(attachment),
+            messageId,
           },
         }),
       ),
@@ -195,7 +198,7 @@ export function useAgentSession(
                     void queryClient.invalidateQueries({ queryKey: pagedSessionQueryKey });
                   }
                 }
-                for (const translated of translate(event)) onEvent(translated);
+                for (const translated of translateAgentSessionEvent(event)) onEvent(translated);
               },
               onError: () => {
                 // The server ends the stream when a session ends, which arrives

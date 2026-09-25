@@ -6,13 +6,12 @@ import type { HtmlDocument } from "busabase-contract/domains/rich-node/types";
 import type { NodeVO } from "busabase-contract/types";
 import { Button } from "kui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "kui/tabs";
-import { CodeXml, Eye, FileCode2, Info, Save } from "lucide-react";
+import { Eye, FileCode2, Save } from "lucide-react";
 import { useState } from "react";
 import { fmt, useCoreI18n } from "../../../i18n";
 import { NodeActionsMenu } from "../../dashboard/components/node-actions-menu";
 import { NodeAgentPromptsButton } from "../../dashboard/components/node-agent-prompts-button";
 import { NodePinButton, nodeSidePanelTabId } from "../../dashboard/components/node-pin-button";
-import { NodeSettingsDialog } from "../../dashboard/components/node-settings-dialog";
 import {
   FullscreenPreviewSurface,
   PREVIEW_DETAIL_TAB_LIST_CLASS,
@@ -24,6 +23,7 @@ import {
 import { NodeDetailSkeleton } from "../../dashboard/components/skeletons";
 import { asNodeDetail } from "../../dashboard/helpers/node-detail";
 import { useRegisterTopbarNodeActions } from "../../dashboard/hooks/use-register-topbar-node-actions";
+import { useRegisterTopbarNodeInfo } from "../../dashboard/hooks/use-register-topbar-node-info";
 import { useReportLoadedNode } from "../../dashboard/hooks/use-report-loaded-node";
 import type { NodeDetailProps } from "../../dashboard/node-detail-registry";
 import type { SidePanelTabProps } from "../../dashboard/side-panel-registry";
@@ -92,7 +92,6 @@ function HtmlEditor({ document: htmlDocument, node, orpc }: HtmlEditorProps) {
   const isAnonymous = useIsAnonymousVisitor();
   const [source, setSource] = useState(htmlDocument.source);
   const [selectedTab, setSelectedTab] = useState("preview");
-  const [infoOpen, setInfoOpen] = useState(false);
   const fullscreenState = usePreviewFullscreen({ syncWithUrl: true });
   const { error, markDirty, save, status } = useNodeContentSave(orpc, node, "html");
   // Seed only after the real node document loads, then reconcile later updates
@@ -158,6 +157,14 @@ function HtmlEditor({ document: htmlDocument, node, orpc }: HtmlEditorProps) {
       </>
     ),
   );
+  useRegisterTopbarNodeInfo({
+    description: node.description,
+    nodeId: node.id,
+    nodeName: node.name,
+    nodeSlug: node.slug,
+    nodeType: "html",
+    orpc,
+  });
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-background">
@@ -166,46 +173,7 @@ function HtmlEditor({ document: htmlDocument, node, orpc }: HtmlEditorProps) {
         onValueChange={setSelectedTab}
         value={fullscreenState.fullscreen ? "preview" : selectedTab}
       >
-        <header className="shrink-0 border-border/60 border-b px-4 pt-5 pb-2 md:px-6">
-          <div className="flex min-w-0 items-start gap-2">
-            <CodeXml className="mt-1 size-4 shrink-0 text-muted-foreground" />
-            <div className="min-w-0 flex-1">
-              <h1 className="truncate font-semibold text-foreground text-xl leading-7">
-                {node.name}
-              </h1>
-              {node.description ? (
-                <p
-                  className="mt-1 line-clamp-2 text-muted-foreground text-sm leading-5 md:line-clamp-1"
-                  title={node.description}
-                >
-                  {node.description}
-                </p>
-              ) : null}
-            </div>
-            <Button
-              aria-label={messages.nodeDetail.details}
-              className="shrink-0 text-muted-foreground"
-              onClick={() => setInfoOpen(true)}
-              size="icon-sm"
-              title={messages.nodeDetail.details}
-              type="button"
-              variant="ghost"
-            >
-              <Info className="size-3.5" />
-            </Button>
-            {infoOpen ? (
-              <NodeSettingsDialog
-                initialTab="info"
-                nodeId={node.id}
-                nodeName={node.name}
-                nodeSlug={node.slug}
-                nodeType="html"
-                onOpenChange={setInfoOpen}
-                open
-                orpc={orpc}
-              />
-            ) : null}
-          </div>
+        <header className="shrink-0 border-border/60 border-b px-4 py-2 md:px-6">
           <TabsList className={PREVIEW_DETAIL_TAB_LIST_CLASS}>
             <TabsTrigger className={PREVIEW_DETAIL_TAB_TRIGGER_CLASS} value="preview">
               <Eye className="size-3.5" />

@@ -47,5 +47,8 @@ export const getNodeDetailBreadcrumbItems = (
       ? loadedNode.name
       : getLocalizedNodeTypeLabel(messages, route.type);
 
-  return [{ href: "/home", label: messages.nav.workspace }, { label: nodeName }];
+  return [
+    { href: "/home", label: messages.nav.workspace },
+    { isNode: true, label: nodeName },
+  ];
 };

@@ -43,7 +43,6 @@ import {
   Trash2,
   UserCheck,
   Webhook,
-  Workflow,
   Zap,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -524,7 +523,6 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
       }
       error={error}
       fullscreenState={fullscreenState}
-      icon={Workflow}
       node={node}
       nodeType="workflow"
       onSave={saveGraph}

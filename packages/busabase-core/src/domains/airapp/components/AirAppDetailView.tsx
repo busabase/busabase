@@ -2,9 +2,8 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { CodeBlock } from "kui/ai-elements/code-block";
-import { Button } from "kui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "kui/tabs";
-import { Files, Info, MonitorPlay, Terminal } from "lucide-react";
+import { Files, MonitorPlay, Terminal } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
 import { presentCoreError } from "../../../i18n/localize-error";
@@ -18,7 +17,6 @@ import {
 } from "../../dashboard/components/file-tree-browser";
 import { NodeActionsMenu } from "../../dashboard/components/node-actions-menu";
 import { NodeAgentPromptsButton } from "../../dashboard/components/node-agent-prompts-button";
-import { NodeSettingsDialog } from "../../dashboard/components/node-settings-dialog";
 import {
   PREVIEW_DETAIL_TAB_LIST_CLASS,
   PREVIEW_DETAIL_TAB_TRIGGER_CLASS,
@@ -27,6 +25,7 @@ import { EmptyState } from "../../dashboard/components/primitives";
 import { FileContentSkeleton, NodeDetailSkeleton } from "../../dashboard/components/skeletons";
 import { asNodeDetail } from "../../dashboard/helpers/node-detail";
 import { useRegisterTopbarNodeActions } from "../../dashboard/hooks/use-register-topbar-node-actions";
+import { useRegisterTopbarNodeInfo } from "../../dashboard/hooks/use-register-topbar-node-info";
 import { useReportLoadedNode } from "../../dashboard/hooks/use-report-loaded-node";
 import type { NodeDetailProps } from "../../dashboard/node-detail-registry";
 import { disposeDeletedAirAppSession } from "../store/airapp-session-cleanup";
@@ -65,7 +64,6 @@ export function AirAppDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) 
   const isKeepAliveActive = useAirAppKeepAliveActive();
   const [openPath, setOpenPath] = useState<string | null>(null);
   const [selectedTab, setSelectedTab] = useState("app");
-  const [infoOpen, setInfoOpen] = useState(false);
   const fullscreenState = useAirAppFullscreen({ syncWithUrl: isKeepAliveActive });
 
   const airappQuery = useQuery({
@@ -154,6 +152,19 @@ export function AirAppDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) 
     ) : null,
     isKeepAliveActive,
   );
+  useRegisterTopbarNodeInfo(
+    airapp
+      ? {
+          description: airapp.node.description,
+          nodeId: airapp.node.id,
+          nodeName: airapp.node.name,
+          nodeSlug: airapp.node.slug,
+          nodeType: "airapp",
+          orpc,
+        }
+      : null,
+    isKeepAliveActive,
+  );
 
   if (!airapp) {
     return airappQuery.isLoading ? (
@@ -174,9 +185,8 @@ export function AirAppDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) 
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-background">
-      {/* The Tabs root wraps the page header so identity, description, and the
-          local view switcher stay together while all operational actions live
-          in the shared topbar. */}
+      {/* Node identity (name, description, Info dialog) lives in the shared
+          topbar; this header carries only the local view switcher. */}
       {/* Controlled so entering fullscreen can force the "App" panel active:
           inactive panels are CSS-hidden, and the preview iframe we grow to
           fill the viewport lives inside that panel. */}
@@ -185,46 +195,7 @@ export function AirAppDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) 
         onValueChange={setSelectedTab}
         value={fullscreenState.fullscreen ? "app" : selectedTab}
       >
-        <header className="shrink-0 border-border/60 border-b px-4 pt-5 pb-2 md:px-6">
-          <div className="flex min-w-0 items-start gap-2">
-            <div className="min-w-0 flex-1">
-              <h1 className="truncate font-semibold text-foreground text-xl leading-7">
-                {airapp.node.name}
-              </h1>
-              {airapp.node.description ? (
-                <p
-                  className="mt-1 line-clamp-2 text-muted-foreground text-sm leading-5 md:line-clamp-1"
-                  title={airapp.node.description}
-                >
-                  {airapp.node.description}
-                </p>
-              ) : null}
-            </div>
-            <Button
-              aria-label={messages.airapp.details}
-              className="shrink-0 text-muted-foreground"
-              onClick={() => setInfoOpen(true)}
-              size="icon-sm"
-              title={messages.airapp.details}
-              type="button"
-              variant="ghost"
-            >
-              <Info className="size-3.5" />
-            </Button>
-            {infoOpen && (
-              <NodeSettingsDialog
-                initialTab="info"
-                nodeId={airapp.node.id}
-                nodeName={airapp.node.name}
-                nodeSlug={airapp.node.slug}
-                nodeType="airapp"
-                onOpenChange={setInfoOpen}
-                open={infoOpen}
-                orpc={orpc}
-              />
-            )}
-          </div>
-
+        <header className="shrink-0 border-border/60 border-b px-4 py-2 md:px-6">
           <TabsList className={PREVIEW_DETAIL_TAB_LIST_CLASS}>
             <TabsTrigger className={PREVIEW_DETAIL_TAB_TRIGGER_CLASS} value="app">
               <MonitorPlay className="size-3.5" />

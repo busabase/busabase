@@ -14,7 +14,6 @@ import {
   EMPTY_WHITEBOARD_DOCUMENT,
   type WhiteboardDocument,
 } from "busabase-contract/domains/rich-node/types";
-import { PenTool } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
 import { presentCoreError } from "../../../i18n/localize-error";
@@ -235,7 +234,6 @@ export function WhiteboardDetailView({ orpc, slug, onNodeLoaded }: WhiteboardDet
     <RichNodeShell
       error={error ?? editorError}
       fullscreenState={fullscreenState}
-      icon={PenTool}
       node={detail.node}
       nodeType="whiteboard"
       onSave={saveScene}

@@ -18,6 +18,11 @@ import {
 } from "../../../i18n";
 import { presentCoreError } from "../../../i18n/localize-error";
 import { DialogContent } from "../../dashboard/components/localized-dialog-content";
+import {
+  type DesktopAgentSlug,
+  type DesktopAgentStatus,
+  requestDesktopAgent,
+} from "../utils/desktop-codex";
 import { AgentLoadingState, AgentQueryErrorState } from "./agent-query-state";
 import { TransportBadge } from "./transport-badge";
 
@@ -85,11 +90,92 @@ export function AgentsAddView({ orpc, onBack, onConnected, spaceId }: AgentsAddV
   const locale = useCoreLocale();
   const queryClient = useQueryClient();
   const catalog = useQuery(orpc.agents.catalog.queryOptions());
+  const connections = useQuery(
+    orpc.agents.connections.list.queryOptions({ input: { scope: "mine" } }),
+  );
   const [showBudaConnect, setShowBudaConnect] = useState(false);
   const [budaError, setBudaError] = useState<string | null>(null);
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [sessionErrorEntrySlug, setSessionErrorEntrySlug] = useState<string | null>(null);
+  const [desktopAgents, setDesktopAgents] = useState<
+    Partial<Record<DesktopAgentSlug, DesktopAgentStatus>>
+  >({});
+  const [installSlug, setInstallSlug] = useState<DesktopAgentSlug | null>(null);
+  const [agentInstalling, setAgentInstalling] = useState(false);
   const budaTriggerRef = useRef<HTMLElement | null>(null);
+  const addedAgentSlugs = new Set((connections.data ?? []).map((connection) => connection.slug));
+
+  useEffect(() => {
+    let active = true;
+    for (const slug of ["codex-acp", "claude-acp"] as const) {
+      void requestDesktopAgent(slug, "status")
+        .then((status) => {
+          if (active && status) setDesktopAgents((previous) => ({ ...previous, [slug]: status }));
+        })
+        .catch(() => undefined);
+    }
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const connectDesktopAgent = async (slug: DesktopAgentSlug) => {
+    setSessionErrorEntrySlug(slug);
+    setSessionError(null);
+    try {
+      const status = await requestDesktopAgent(slug, "status");
+      if (!status) return;
+      setDesktopAgents((previous) => ({ ...previous, [slug]: status }));
+      if (!status.installed) {
+        setInstallSlug(slug);
+      } else if (status.auth !== "ready") {
+        setSessionError(
+          slug === "claude-acp"
+            ? messages.agents.claudeLoginRequired
+            : status.auth === "missing"
+              ? messages.agents.codexCliMissing
+              : messages.agents.codexLoginRequired,
+        );
+      } else {
+        createSession.mutate({ slug });
+      }
+    } catch (error) {
+      setSessionError(
+        presentCoreError(messages, locale, error, messages.agents.sessionCreateFailed),
+      );
+    }
+  };
+
+  const installDesktopAgent = async () => {
+    if (agentInstalling || !installSlug) return;
+    const slug = installSlug;
+    setAgentInstalling(true);
+    setSessionError(null);
+    try {
+      const status = await requestDesktopAgent(slug, "install");
+      if (!status?.installed) throw new Error("ACP installation did not complete.");
+      setDesktopAgents((previous) => ({ ...previous, [slug]: status }));
+      setInstallSlug(null);
+      void queryClient.invalidateQueries({ queryKey: orpc.agents.catalog.queryKey() });
+      if (status.auth !== "ready") {
+        setSessionError(
+          slug === "claude-acp"
+            ? messages.agents.claudeLoginRequired
+            : status.auth === "missing"
+              ? messages.agents.codexCliMissing
+              : messages.agents.codexLoginRequired,
+        );
+      } else {
+        createSession.mutate({ slug });
+      }
+    } catch (error) {
+      setSessionError(
+        presentCoreError(messages, locale, error, messages.agents.sessionCreateFailed),
+      );
+    } finally {
+      setAgentInstalling(false);
+    }
+  };
 
   const openBudaConnect = () => {
     if (!showBudaConnect && document.activeElement instanceof HTMLElement) {
@@ -216,12 +302,21 @@ export function AgentsAddView({ orpc, onBack, onConnected, spaceId }: AgentsAddV
                 const pendingSlug = createSession.isPending
                   ? createSession.variables?.slug
                   : undefined;
+                const desktopAgentEntry =
+                  (entry.slug === "codex-acp" || entry.slug === "claude-acp") &&
+                  desktopAgents[entry.slug] !== undefined;
+                const isAlreadyAdded =
+                  (entry.slug === "codex-acp" || entry.slug === "claude-acp") &&
+                  addedAgentSlugs.has(entry.slug);
                 const isUnavailable =
-                  !entry.available && !entry.connectionRequired && !entry.comingSoon;
+                  !entry.available &&
+                  !entry.connectionRequired &&
+                  !entry.comingSoon &&
+                  !desktopAgentEntry;
                 return (
                   <div
                     className={`flex h-full flex-col gap-3 rounded-lg border p-4 ${
-                      isUnavailable
+                      isUnavailable || isAlreadyAdded
                         ? "opacity-50 bg-muted/40 grayscale-[50%] transition-opacity hover:opacity-70"
                         : ""
                     }`}
@@ -261,14 +356,16 @@ export function AgentsAddView({ orpc, onBack, onConnected, spaceId }: AgentsAddV
                         <Button className="min-h-11 sm:min-h-9" onClick={openBudaConnect} size="sm">
                           {messages.agents.connectBuda}
                         </Button>
-                      ) : entry.available ? (
+                      ) : entry.available || desktopAgentEntry ? (
                         <Button
                           className="min-h-11 sm:min-h-9"
-                          disabled={createSession.isPending}
+                          disabled={createSession.isPending || isAlreadyAdded}
                           onClick={() => {
                             setSessionError(null);
                             setSessionErrorEntrySlug(entry.slug);
-                            createSession.mutate({ slug: entry.slug });
+                            if (desktopAgentEntry)
+                              void connectDesktopAgent(entry.slug as DesktopAgentSlug);
+                            else createSession.mutate({ slug: entry.slug });
                           }}
                           size="sm"
                         >
@@ -304,6 +401,51 @@ export function AgentsAddView({ orpc, onBack, onConnected, spaceId }: AgentsAddV
           )}
         </div>
       </div>
+
+      <Dialog
+        open={installSlug !== null}
+        onOpenChange={(open) => {
+          if (!agentInstalling && !open) setInstallSlug(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-[440px]">
+          <DialogHeader>
+            <DialogTitle>
+              {installSlug === "claude-acp"
+                ? messages.agents.claudeInstallTitle
+                : messages.agents.codexInstallTitle}
+            </DialogTitle>
+            <DialogDescription>
+              {installSlug === "claude-acp"
+                ? messages.agents.claudeInstallBody
+                : messages.agents.codexInstallBody}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              disabled={agentInstalling}
+              onClick={() => setInstallSlug(null)}
+            >
+              {messages.agents.codexInstallCancel}
+            </Button>
+            <Button disabled={agentInstalling} onClick={() => void installDesktopAgent()}>
+              {agentInstalling
+                ? installSlug === "claude-acp"
+                  ? messages.agents.claudeInstalling
+                  : messages.agents.codexInstalling
+                : sessionError
+                  ? messages.agents.codexInstallRetry
+                  : messages.agents.codexInstallAction}
+            </Button>
+          </div>
+          {installSlug && sessionError && (
+            <p className="text-destructive text-xs" role="alert">
+              {sessionError}
+            </p>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         onOpenChange={(open) => {

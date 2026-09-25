@@ -7,7 +7,7 @@ import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CoreI18nProvider, coreMessagesByLocale } from "../../../i18n";
 import { isPinnableNode } from "../../dashboard/components/side-panel-sources";
-import { TopbarNodeActionsSlot } from "../../dashboard/components/topbar";
+import { TopbarNodeActionsSlot, TopbarNodeInfoButton } from "../../dashboard/components/topbar";
 import { DashboardVisitorProvider } from "../../dashboard/visitor-context";
 import { WorkflowDetailView, WorkflowSidePanelPreview } from "./graph-detail-view";
 import "./register";
@@ -197,6 +197,7 @@ describe("visual node preview parity", () => {
     const { container } = render(
       <Providers>
         <WhiteboardDetailView orpc={orpc} slug={whiteboardDetail.node.id} />
+        <TopbarNodeInfoButton />
         <TopbarNodeActionsSlot />
       </Providers>,
     );
@@ -204,7 +205,9 @@ describe("visual node preview parity", () => {
     const editor = await screen.findByTestId("excalidraw-editor");
     const identity = editor.getAttribute("data-editor-identity");
     expect(editor.getAttribute("data-view-mode")).toBe("false");
-    expect(screen.getByRole("heading", { name: whiteboardDetail.node.name })).not.toBeNull();
+    // Identity is no longer drawn in the view: the shell registers it and the
+    // topbar renders the one Info button for every node type.
+    expect(screen.queryByRole("heading", { name: whiteboardDetail.node.name })).toBeNull();
     expect(screen.getByRole("button", { name: messages.nodeDetail.details })).not.toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: messages.airapp.enterFullscreen }));

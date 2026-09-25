@@ -42,7 +42,7 @@ describe("AgentsAddView catalog localization", () => {
       localizeUnavailableReason(coreMessagesEn.agents.budaEnvRequired, dashboardJa, "ja"),
     ).toContain("BUDA_AGENT_ID");
     expect(localizeUnavailableReason("Registry error", dashboardZhCN, "zh-CN")).toBe(
-      dashboardZhCN.agents.unavailableFallback,
+      "Registry error",
     );
   });
 

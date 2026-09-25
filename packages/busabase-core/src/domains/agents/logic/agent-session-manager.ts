@@ -441,12 +441,30 @@ async function flushPendingEvents(session: LiveSession): Promise<void> {
 function spawnAgentProcess(launch: ResolvedLaunch, cwd: string): ChildProcess {
   const command = launch.command as string;
   const args = launch.args ?? [];
+  if (launch.direct) {
+    return spawn(command, args, {
+      cwd,
+      env: launch.env,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+  }
   if (process.platform === "win32") {
-    return spawn(command, args, { cwd, stdio: ["pipe", "pipe", "pipe"], shell: true });
+    return spawn(command, args, {
+      cwd,
+      env: launch.env,
+      stdio: ["pipe", "pipe", "pipe"],
+      shell: true,
+    });
   }
   const shell = process.env.SHELL || "/bin/sh";
   const line = [command, ...args].map((a) => `'${a.replaceAll("'", `'\\''`)}'`).join(" ");
-  return spawn(shell, ["-l", "-c", line], { cwd, stdio: ["pipe", "pipe", "pipe"] });
+  const path = launch.env?.BUSABASE_DESKTOP_CODEX_SYSTEM_PATH;
+  const effectiveLine = path ? `export PATH='${path.replaceAll("'", `'\\''`)}'; ${line}` : line;
+  return spawn(shell, ["-l", "-c", effectiveLine], {
+    cwd,
+    env: launch.env,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
 }
 
 export interface CreateSessionArgs {

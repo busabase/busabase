@@ -3,9 +3,18 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
-import type { AgentCatalogEntryVO, AgentSessionVO } from "busabase-contract/domains/agents/types";
+import type {
+  AgentCatalogEntryVO,
+  AgentConnectionVO,
+  AgentSessionVO,
+} from "busabase-contract/domains/agents/types";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentsAddView } from "./agents-add-view";
+
+const desktop = vi.hoisted(() => ({
+  request: vi.fn(async (_slug: string, _action: string) => null as unknown),
+}));
+vi.mock("../utils/desktop-codex", () => ({ requestDesktopAgent: desktop.request }));
 
 /**
  * The Add Agent shell (Back + title) must stay mounted through loading, error,
@@ -69,13 +78,25 @@ const SESSION: AgentSessionVO = {
   modelOption: null,
 };
 
+const CLAUDE_CONNECTION: AgentConnectionVO = {
+  slug: "claude-acp",
+  agentName: "Claude Code",
+  transport: "local-subprocess",
+  sessionCount: 1,
+  latest: SESSION,
+  connected: true,
+  ownedByCurrentUser: true,
+};
+
 type CreateSession = (input: { slug: string }) => Promise<AgentSessionVO>;
 
 function stubOrpc(options: {
   catalog?: () => Promise<AgentCatalogEntryVO[]>;
+  connections?: () => Promise<AgentConnectionVO[]>;
   create?: ReturnType<typeof vi.fn<CreateSession>>;
 }) {
   const catalogFn = options.catalog ?? (async () => [CLAUDE_ENTRY]);
+  const connections = options.connections ?? (async () => []);
   const create = options.create ?? vi.fn(async (_input: { slug: string }) => SESSION);
   return {
     agents: {
@@ -85,6 +106,10 @@ function stubOrpc(options: {
       },
       connections: {
         list: {
+          queryOptions: () => ({
+            queryKey: ["agents", "connections", "mine"],
+            queryFn: connections,
+          }),
           queryKey: ({ input }: { input: { scope: string } }) => [
             "agents",
             "connections",
@@ -102,6 +127,7 @@ function stubOrpc(options: {
 
 function renderView(options: {
   catalog?: () => Promise<AgentCatalogEntryVO[]>;
+  connections?: () => Promise<AgentConnectionVO[]>;
   create?: ReturnType<typeof vi.fn<CreateSession>>;
   onBack?: () => void;
   onConnected?: (slug: string) => void;
@@ -125,7 +151,11 @@ function renderView(options: {
 }
 
 describe("AgentsAddView — persistent shell", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    desktop.request.mockReset();
+    desktop.request.mockResolvedValue(null);
+  });
 
   it("keeps Back and the title visible while the catalog loads", async () => {
     renderView({ catalog: () => new Promise(() => {}) });
@@ -173,7 +203,11 @@ describe("AgentsAddView — persistent shell", () => {
 });
 
 describe("AgentsAddView — session creation feedback", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    desktop.request.mockReset();
+    desktop.request.mockResolvedValue(null);
+  });
 
   it("continues to Agent Detail when Connect succeeds", async () => {
     const create = vi.fn(async (_input: { slug: string }) => SESSION);
@@ -184,6 +218,20 @@ describe("AgentsAddView — session creation feedback", () => {
 
     await waitFor(() => expect(create.mock.calls[0]?.[0]).toEqual({ slug: "claude-acp" }));
     await waitFor(() => expect(onConnected).toHaveBeenCalledWith("claude-acp"));
+  });
+
+  it("disables a local agent that has already been added", async () => {
+    const create = vi.fn(async (_input: { slug: string }) => SESSION);
+    renderView({ connections: async () => [CLAUDE_CONNECTION], create });
+
+    await screen.findByText("Claude Code");
+    const connect = await screen.findByRole("button", { name: "Connect" });
+    expect((connect as HTMLButtonElement).disabled).toBe(true);
+    expect(document.querySelector('[data-agent-slug="claude-acp"]')?.className).toContain(
+      "opacity-50",
+    );
+    fireEvent.click(connect);
+    expect(create).not.toHaveBeenCalled();
   });
 
   it("surfaces a localized error on the entry that failed and allows retry", async () => {
@@ -206,7 +254,11 @@ describe("AgentsAddView — session creation feedback", () => {
 });
 
 describe("AgentsAddView — unavailable local agent styling", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    desktop.request.mockReset();
+    desktop.request.mockResolvedValue(null);
+  });
 
   it("applies the disabled-card treatment to a local agent unavailable on this host", async () => {
     renderView({ catalog: async () => [UNAVAILABLE_LOCAL_ENTRY] });
@@ -234,6 +286,81 @@ describe("AgentsAddView — unavailable local agent styling", () => {
     const card = document.querySelector('[data-agent-slug="buda"]');
     expect(card).toBeTruthy();
     expect(card?.className).not.toContain("opacity-50");
+  });
+});
+
+describe("AgentsAddView — Desktop Codex installation", () => {
+  afterEach(() => {
+    cleanup();
+    desktop.request.mockReset();
+    desktop.request.mockResolvedValue(null);
+  });
+
+  it("asks for confirmation before installing and does not create a session when CLI is missing", async () => {
+    desktop.request.mockResolvedValue({
+      source: "managed",
+      installed: false,
+      codex: "missing",
+      auth: "unknown",
+    });
+    const create = vi.fn(async (_input: { slug: string }) => SESSION);
+    renderView({ catalog: async () => [UNAVAILABLE_LOCAL_ENTRY], create });
+    fireEvent.click(await screen.findByRole("button", { name: "Connect" }));
+    expect(await screen.findByRole("dialog", { name: "Install Codex ACP?" })).toBeTruthy();
+    expect(desktop.request).not.toHaveBeenCalledWith("codex-acp", "install");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("installs after confirmation and shows CLI guidance without a false session", async () => {
+    desktop.request.mockImplementation(async (_slug: string, action: string) =>
+      action === "install"
+        ? { source: "managed", installed: true, codex: "login_required", auth: "login_required" }
+        : { source: "managed", installed: false, codex: "missing", auth: "unknown" },
+    );
+    const create = vi.fn(async (_input: { slug: string }) => SESSION);
+    renderView({ catalog: async () => [UNAVAILABLE_LOCAL_ENTRY], create });
+    fireEvent.click(await screen.findByRole("button", { name: "Connect" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Install and connect" }));
+    await screen.findByText(/codex login/);
+    expect(desktop.request).toHaveBeenCalledWith("codex-acp", "install");
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("confirms Claude installation, then offers terminal login without creating a session", async () => {
+    desktop.request.mockImplementation(async (_slug: string, action: string) =>
+      action === "install"
+        ? { source: "managed", installed: true, auth: "login_required" }
+        : { source: "managed", installed: false, auth: "unknown" },
+    );
+    const create = vi.fn(async (_input: { slug: string }) => SESSION);
+    renderView({ catalog: async () => [CLAUDE_ENTRY], create });
+    fireEvent.click(await screen.findByRole("button", { name: "Connect" }));
+    expect(await screen.findByRole("dialog", { name: "Install Claude Code ACP?" })).toBeTruthy();
+    expect(desktop.request).not.toHaveBeenCalledWith("claude-acp", "install");
+    fireEvent.click(screen.getByRole("button", { name: "Install and connect" }));
+    await screen.findByText(/claude.*login/i);
+    expect(desktop.request).toHaveBeenCalledWith("claude-acp", "install");
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("retries a failed Claude installation", async () => {
+    let attempts = 0;
+    desktop.request.mockImplementation(async (_slug: string, action: string) => {
+      if (action === "status") return { source: "managed", installed: false, auth: "unknown" };
+      attempts++;
+      if (attempts === 1) throw new Error("Download interrupted");
+      return { source: "managed", installed: true, auth: "ready" };
+    });
+    const create = vi.fn(async (_input: { slug: string }) => SESSION);
+    const { onConnected } = renderView({ catalog: async () => [CLAUDE_ENTRY], create });
+    fireEvent.click(await screen.findByRole("button", { name: "Connect" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Install and connect" }));
+    await waitFor(() => expect(screen.getAllByText("Download interrupted")).toHaveLength(2));
+    expect(create).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Retry installation" }));
+    await waitFor(() => expect(onConnected).toHaveBeenCalledWith("claude-acp"));
+    expect(attempts).toBe(2);
   });
 });
 

@@ -5,6 +5,16 @@ import type { ReactNode } from "react";
 export interface BusabaseBreadcrumbItem {
   href?: string;
   label: string;
+  /**
+   * Marks the crumb that names the NODE this route belongs to, which is not
+   * always the last one: a Base's view/record/design routes append the view
+   * name, the record title or "Design" after it. The topbar hangs the node's
+   * emphasis and its Info button on this crumb, so the Info tooltip/dialog
+   * always sits against the node it actually describes. Unset on routes that
+   * have no node (Inbox, Agents, …), where the topbar falls back to the last
+   * crumb.
+   */
+  isNode?: boolean;
 }
 
 export interface BusabaseListGroup {

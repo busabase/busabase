@@ -6,17 +6,18 @@ import type { FilePreviewVO, FileTreeFileVO, FormVO, NodeVO } from "busabase-con
 import { CodeBlock } from "kui/ai-elements/code-block";
 import { Button } from "kui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "kui/tabs";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "kui/tooltip";
 import { cn } from "kui/utils";
 import {
   AppWindow,
   Download,
+  ExternalLink,
   File,
   Files,
   FileText,
   Folder,
   Form,
   HardDrive,
-  Info,
   ListChecks,
   RefreshCw,
   Share2,
@@ -43,7 +44,10 @@ import {
   selectDocTocItems,
 } from "../../doc/components";
 import { useDocImageUpload } from "../../doc/hooks/use-doc-image-upload";
-import { isBuiltinDrivePreviewSufficient } from "../../filetree/utils/preview-capability";
+import {
+  isBrowserNativeNewTabPreviewMimeType,
+  isBuiltinDrivePreviewSufficient,
+} from "../../filetree/utils/preview-capability";
 import { FormDetailView } from "../../form/components/form-detail-view";
 import {
   buildFileTreeFolderRenamePlan,
@@ -66,6 +70,7 @@ import { mergeSearchIntoHref } from "../helpers/link-search";
 import { asNodeDetail } from "../helpers/node-detail";
 import { useNodeAgentPrompts } from "../hooks/use-node-agent-prompts";
 import { useRegisterTopbarNodeActions } from "../hooks/use-register-topbar-node-actions";
+import { useRegisterTopbarNodeInfo } from "../hooks/use-register-topbar-node-info";
 import { useReportLoadedNode } from "../hooks/use-report-loaded-node";
 import type { LoadedNode } from "../node-detail-registry";
 import { type NodeDetailProps, registerNodeDetail } from "../node-detail-registry";
@@ -97,7 +102,6 @@ import { NodeActionsMenu } from "./node-actions-menu";
 import { NodeAgentPromptsButton } from "./node-agent-prompts-button";
 import { resolveSpaceId } from "./node-agent-prompts-dialog";
 import { NodePinButton, nodeSidePanelTabId } from "./node-pin-button";
-import { NodeSettingsDialog } from "./node-settings-dialog";
 import { NodeShareDialog } from "./node-share-button";
 import { PreviewFullscreenButton, usePreviewFullscreen } from "./preview-fullscreen";
 import { EmptyState } from "./primitives";
@@ -169,7 +173,6 @@ export function FileTreeDetailView({
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState<null | "save" | "changeRequest">(null);
   const [fileActionError, setFileActionError] = useState<string | null>(null);
-  const [infoOpen, setInfoOpen] = useState(false);
   const [renameTarget, setRenameTarget] = useState<FileTreeFileVO | null>(null);
   const [removeTarget, setRemoveTarget] = useState<FileTreeFileVO | null>(null);
   const [selectionMode, setSelectionMode] = useState(false);
@@ -236,6 +239,19 @@ export function FileTreeDetailView({
         />
       </>
     ) : null,
+    !hideActions,
+  );
+  useRegisterTopbarNodeInfo(
+    fileTree
+      ? {
+          description: fileTree.node.description,
+          nodeId: fileTree.node.id,
+          nodeName: fileTree.node.name,
+          nodeSlug: fileTree.node.slug,
+          nodeType,
+          orpc,
+        }
+      : null,
     !hideActions,
   );
 
@@ -805,9 +821,6 @@ export function FileTreeDetailView({
   }
 
   const fileCount = fileTree.files.length;
-  const NodeIcon = nodeType === "drive" ? HardDrive : Sparkles;
-  const nodeTypeLabel =
-    nodeType === "drive" ? messages.nodeDetail.drive : messages.nodeDetail.skill;
   const previewKind = fileQuery.data
     ? resolveFileTreePreviewKind(openPath ?? "", fileQuery.data.mimeType)
     : "code";
@@ -841,99 +854,19 @@ export function FileTreeDetailView({
   return (
     <Frame>
       {agentPromptsTab ? (
-        <header className="shrink-0 border-border/60 border-b">
-          <div className="flex min-w-0 items-start gap-2 px-3 pt-3 pb-2 md:px-4">
-            <span className="flex h-5 shrink-0 items-center" title={nodeTypeLabel}>
-              <NodeIcon className="size-4 translate-y-px text-muted-foreground" />
-            </span>
-            <div className="min-w-0 flex-1">
-              <div className="flex min-w-0 items-center gap-1">
-                <h1 className="truncate font-medium text-foreground text-sm">
-                  {fileTree.node.name}
-                </h1>
-                <Button
-                  aria-label={messages.nodeDetail.details}
-                  className="shrink-0 text-muted-foreground"
-                  onClick={() => setInfoOpen(true)}
-                  size="icon-sm"
-                  title={messages.nodeDetail.details}
-                  type="button"
-                  variant="ghost"
-                >
-                  <Info className="size-3.5" />
-                </Button>
-              </div>
-              {fileTree.node.description ? (
-                <p className="mt-1 text-muted-foreground text-sm leading-relaxed">
-                  {fileTree.node.description}
-                </p>
-              ) : null}
-            </div>
-          </div>
-          <div className="flex min-h-10 items-center px-3 md:px-4">
-            <TabsList className="h-8 shrink-0 gap-1 bg-transparent p-0">
-              <TabsTrigger className={FILE_TREE_TAB_TRIGGER_CLASS} value="prompts">
-                <Sparkles className="size-3.5" />
-                {messages.agentPrompts.title}
-              </TabsTrigger>
-              <TabsTrigger className={FILE_TREE_TAB_TRIGGER_CLASS} value="files">
-                <Files className="size-3.5" />
-                {messages.nodeDetail.files}
-              </TabsTrigger>
-            </TabsList>
-          </div>
+        <header className="flex min-h-10 shrink-0 items-center border-border/60 border-b px-3 md:px-4">
+          <TabsList className="h-8 shrink-0 gap-1 bg-transparent p-0">
+            <TabsTrigger className={FILE_TREE_TAB_TRIGGER_CLASS} value="prompts">
+              <Sparkles className="size-3.5" />
+              {messages.agentPrompts.title}
+            </TabsTrigger>
+            <TabsTrigger className={FILE_TREE_TAB_TRIGGER_CLASS} value="files">
+              <Files className="size-3.5" />
+              {messages.nodeDetail.files}
+            </TabsTrigger>
+          </TabsList>
         </header>
-      ) : (
-        <header className="flex h-12 shrink-0 items-center gap-2 border-border/60 border-b px-3 md:px-4">
-          <div className="flex min-w-0 items-center gap-2">
-            <span title={nodeTypeLabel}>
-              <NodeIcon className="size-4 shrink-0 text-muted-foreground" />
-            </span>
-            <h1 className="max-w-[60%] shrink-0 truncate font-medium text-foreground text-sm">
-              {fileTree.node.name}
-            </h1>
-            {fileTree.node.description ? (
-              <>
-                <span
-                  aria-hidden="true"
-                  className="hidden shrink-0 text-muted-foreground/40 text-sm lg:inline"
-                >
-                  ·
-                </span>
-                <p
-                  className="hidden min-w-0 flex-1 truncate text-muted-foreground text-sm lg:block"
-                  title={fileTree.node.description}
-                >
-                  {fileTree.node.description}
-                </p>
-              </>
-            ) : null}
-            <Button
-              aria-label={messages.nodeDetail.details}
-              className="shrink-0 text-muted-foreground"
-              onClick={() => setInfoOpen(true)}
-              size="icon-sm"
-              title={messages.nodeDetail.details}
-              type="button"
-              variant="ghost"
-            >
-              <Info className="size-3.5" />
-            </Button>
-          </div>
-        </header>
-      )}
-      {infoOpen && (
-        <NodeSettingsDialog
-          initialTab="info"
-          nodeId={fileTree.node.id}
-          nodeName={fileTree.node.name}
-          nodeSlug={fileTree.node.slug}
-          nodeType={nodeType}
-          onOpenChange={setInfoOpen}
-          open={infoOpen}
-          orpc={orpc}
-        />
-      )}
+      ) : null}
 
       {agentPromptsTab ? (
         <TabsContent
@@ -1120,6 +1053,33 @@ export function FileTreeDetailView({
                     </a>
                   </Button>
                 ) : null}
+                {isBrowserNativeNewTabPreviewMimeType(previewMimeType) &&
+                fileQuery.data.assetUrl ? (
+                  <TooltipProvider delayDuration={250}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          asChild
+                          className="size-8 text-muted-foreground"
+                          size="icon-sm"
+                          variant="ghost"
+                        >
+                          <a
+                            aria-label={messages.nodeDetail.openFileInNewTab}
+                            href={fileQuery.data.assetUrl}
+                            rel="noopener noreferrer"
+                            target="_blank"
+                          >
+                            <ExternalLink aria-hidden className="size-3.5" />
+                          </a>
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom">
+                        {messages.nodeDetail.openFileInNewTab}
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
+                ) : null}
                 {fileQuery.data.encoding === "utf8" ? (
                   isEditing ? (
                     <div className="flex shrink-0 flex-wrap items-center gap-2">
@@ -1167,7 +1127,7 @@ export function FileTreeDetailView({
               {fileActionError}
             </div>
           ) : null}
-          <div className="min-h-0 flex-1 overflow-auto">
+          <div className="min-h-0 flex-1 overflow-auto" data-file-tree-preview-region="">
             {!openPath ? (
               <div className="grid h-full min-h-[320px] place-items-center p-8 text-center text-muted-foreground text-sm">
                 {messages.nodeDetail.selectFile}
@@ -1244,10 +1204,22 @@ export function FileTreeDetailView({
               )
             ) : fileQuery.data && fileQuery.data.encoding !== "utf8" ? (
               fileQuery.data.assetUrl && previewKind !== "code" ? (
-                <div className="p-5">
-                  <div className="grid max-h-[55vh] place-items-center overflow-hidden rounded-md border bg-muted">
+                <div className={previewMimeType === "application/pdf" ? "h-full min-h-0" : "p-5"}>
+                  <div
+                    className={cn(
+                      "grid place-items-center overflow-hidden",
+                      previewMimeType === "application/pdf"
+                        ? "h-full min-h-0"
+                        : "max-h-[55vh] rounded-md border bg-muted",
+                    )}
+                    data-file-tree-media-frame=""
+                  >
                     <AssetMediaPreview
-                      mediaClassName="max-h-[55vh] w-full object-contain"
+                      mediaClassName={
+                        previewMimeType === "application/pdf"
+                          ? "h-full max-h-full w-full border-0"
+                          : "max-h-[55vh] w-full object-contain"
+                      }
                       mimeType={previewMimeType}
                       name={fileQuery.data.displayName ?? openPath}
                       url={fileQuery.data.assetUrl}
@@ -1531,7 +1503,6 @@ export function FileNodeDetailView({
   hideActions,
 }: NodeDetailProps & { hideActions?: boolean }) {
   const messages = useCoreI18n();
-  const [infoOpen, setInfoOpen] = useState(false);
   const fullscreenState = usePreviewFullscreen({ syncWithUrl: true });
   const fileQuery = useQuery({
     ...orpc.nodes.get.queryOptions({ input: { nodeId: slug ?? "", type: "file" } }),
@@ -1570,6 +1541,19 @@ export function FileNodeDetailView({
     ) : null,
     !hideActions,
   );
+  useRegisterTopbarNodeInfo(
+    detail
+      ? {
+          description: detail.node.description,
+          nodeId: detail.node.id,
+          nodeName: detail.node.name,
+          nodeSlug: detail.node.slug,
+          nodeType: "file",
+          orpc,
+        }
+      : null,
+    !hideActions,
+  );
 
   if (!detail) {
     return fileQuery.isLoading ? (
@@ -1586,51 +1570,10 @@ export function FileNodeDetailView({
     );
   }
 
-  const { node, asset } = detail;
+  const { asset } = detail;
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-background">
-      <header className="shrink-0 border-border/60 border-b px-4 py-5 md:px-6">
-        <div className="flex min-w-0 items-start gap-2">
-          <File className="mt-1 size-4 shrink-0 text-muted-foreground" />
-          <div className="min-w-0 flex-1">
-            <h1 className="truncate font-semibold text-foreground text-xl leading-7">
-              {node.name}
-            </h1>
-            {node.description ? (
-              <p
-                className="mt-1 line-clamp-2 text-muted-foreground text-sm leading-5 md:line-clamp-1"
-                title={node.description}
-              >
-                {node.description}
-              </p>
-            ) : null}
-          </div>
-          <Button
-            aria-label={messages.nodeDetail.details}
-            className="shrink-0 text-muted-foreground"
-            onClick={() => setInfoOpen(true)}
-            size="icon-sm"
-            title={messages.nodeDetail.details}
-            type="button"
-            variant="ghost"
-          >
-            <Info className="size-3.5" />
-          </Button>
-          {infoOpen ? (
-            <NodeSettingsDialog
-              initialTab="info"
-              nodeId={node.id}
-              nodeName={node.name}
-              nodeSlug={node.slug}
-              nodeType="file"
-              onOpenChange={setInfoOpen}
-              open={infoOpen}
-              orpc={orpc}
-            />
-          ) : null}
-        </div>
-      </header>
       <div className="min-h-0 flex-1">
         <FilePreviewSurface
           fullscreenState={fullscreenState}
@@ -1796,6 +1739,19 @@ export function DocDetailView({
     ) : null,
     !hideActions,
   );
+  useRegisterTopbarNodeInfo(
+    doc
+      ? {
+          description: doc.node.description,
+          nodeId: doc.node.id,
+          nodeName: doc.node.name,
+          nodeSlug: doc.node.slug,
+          nodeType: "doc",
+          orpc,
+        }
+      : null,
+    !hideActions,
+  );
 
   // Default to read-only; reset to view mode when switching docs.
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset only on slug change
@@ -1935,9 +1891,6 @@ export function DocDetailView({
           <h1 className="truncate font-semibold text-3xl text-foreground tracking-tight">
             {doc.node.name}
           </h1>
-          {doc.node.description ? (
-            <p className="mt-1 text-muted-foreground text-sm">{doc.node.description}</p>
-          ) : null}
         </div>
         {error ? <p className="mb-3 text-destructive text-sm">{error}</p> : null}
         {isEditing || doc.body.trim() ? (
@@ -2008,6 +1961,19 @@ export function FolderDetailView({
     ) : null,
     !hideActions,
   );
+  useRegisterTopbarNodeInfo(
+    folder
+      ? {
+          description: folder.node.description,
+          nodeId: folder.node.id,
+          nodeName: folder.node.name,
+          nodeSlug: folder.node.slug,
+          nodeType: "folder",
+          orpc,
+        }
+      : null,
+    !hideActions,
+  );
 
   if (!folder) {
     return folderQuery.isLoading ? (
@@ -2026,17 +1992,9 @@ export function FolderDetailView({
 
   return (
     <div
-      className="mx-auto h-full min-h-0 w-full min-w-0 max-w-5xl overflow-auto px-6 py-8"
+      className="mx-auto h-full min-h-0 w-full min-w-0 max-w-5xl overflow-auto px-6 py-5"
       data-dashboard-scroll="folder-detail"
     >
-      <div className="mb-8 flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <h1 className="font-semibold text-2xl tracking-tight">{folder.node.name}</h1>
-          {folder.node.description ? (
-            <p className="mt-2 text-muted-foreground text-sm">{folder.node.description}</p>
-          ) : null}
-        </div>
-      </div>
       {folder.children.length === 0 ? (
         <EmptyState
           title={messages.nodeDetail.emptyFolderTitle}
@@ -2230,15 +2188,23 @@ function FormNodeDetailView({ nodes = [], onNodeLoaded, orpc, slug }: NodeDetail
       </>
     ) : null,
   );
-
-  return (
-    <FormDetailView
-      fullscreenState={fullscreenState}
-      node={node ?? undefined}
-      orpc={orpc}
-      slug={slug}
-    />
+  // Registered from the page wrapper, not from `FormDetailView` itself: the
+  // side-panel instance renders that component directly (`previewOnly`) and
+  // must not take over the topbar slot.
+  useRegisterTopbarNodeInfo(
+    node
+      ? {
+          description: node.description,
+          nodeId: node.id,
+          nodeName: node.name,
+          nodeSlug: node.slug,
+          nodeType: "form",
+          orpc,
+        }
+      : null,
   );
+
+  return <FormDetailView fullscreenState={fullscreenState} orpc={orpc} slug={slug} />;
 }
 
 registerNodeDetail("form", FormNodeDetailView);

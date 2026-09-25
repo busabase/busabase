@@ -50,7 +50,9 @@ export function FilePreviewSurface({
     <FullscreenPreviewSurface
       aria-label={fmt(messages.richNodes.previewFrame, { name })}
       bodyClassName={
-        effectiveFullscreenState.fullscreen ? "bg-background p-0" : "bg-background p-4 md:p-6"
+        effectiveFullscreenState.fullscreen || mimeType === "application/pdf"
+          ? "bg-background p-0"
+          : "bg-background p-4 md:p-6"
       }
       data-file-fullscreen={effectiveFullscreenState.fullscreen ? "true" : "false"}
       data-file-preview=""
@@ -73,7 +75,7 @@ export function FilePreviewSurface({
     >
       <div
         className={
-          effectiveFullscreenState.fullscreen
+          effectiveFullscreenState.fullscreen || mimeType === "application/pdf"
             ? "grid h-full min-h-0 w-full place-items-center overflow-hidden bg-background"
             : "mx-auto grid h-full min-h-[320px] max-w-5xl place-items-center overflow-hidden rounded-md border bg-muted"
         }
@@ -82,9 +84,9 @@ export function FilePreviewSurface({
         <AssetMediaPreview
           mediaClassName={
             effectiveFullscreenState.fullscreen
-              ? "!h-full max-h-full w-full border-0 object-contain"
+              ? "h-full max-h-full w-full border-0 object-contain"
               : mimeType === "application/pdf"
-                ? "!h-[65vh] max-h-[65vh] w-full border-0"
+                ? "h-full max-h-full w-full border-0"
                 : "max-h-[65vh] w-full border-0 object-contain"
           }
           mimeType={mimeType}

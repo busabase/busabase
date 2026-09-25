@@ -35,6 +35,7 @@ import type {
   ViewSubmitOptions,
 } from "../helpers/view-types";
 import { useRegisterTopbarNodeActions } from "../hooks/use-register-topbar-node-actions";
+import { useRegisterTopbarNodeInfo } from "../hooks/use-register-topbar-node-info";
 import { registerSidePanelTab, type SidePanelTabProps } from "../side-panel-registry";
 import { useIsAnonymousVisitor } from "../visitor-context";
 import { applyViewConfigToRecords, BusaBaseTable } from "./base-table";
@@ -142,7 +143,7 @@ export function BaseDetailView({
       ref={scrollElementRef}
     >
       <section>
-        <BaseDetailHeader base={base} orpc={orpc} />
+        <BaseTopbarSlots base={base} orpc={orpc} />
         <div className="px-6 py-5">
           <BusaBaseTable
             activeView={activeView}
@@ -659,7 +660,7 @@ export function BaseSetupView({
       data-dashboard-scroll="base-design"
     >
       <section>
-        <BaseDetailHeader base={base} orpc={orpc} />
+        <BaseTopbarSlots base={base} orpc={orpc} />
         <div className="grid gap-6 px-6 py-4 xl:grid-cols-[minmax(0,1fr)_280px]">
           <div className="min-w-0 space-y-6">
             <div>
@@ -1488,8 +1489,13 @@ export function BaseSetupView({
   );
 }
 
-function BaseDetailHeader({ base, orpc }: { base: BaseVO | null; orpc: BusabaseQueryUtils }) {
-  const messages = useCoreI18n();
+/**
+ * Renders nothing: it only publishes this Base into the shared topbar's
+ * per-node slots. The in-page "big name + description" block it used to draw
+ * is gone — that identity now lives in the topbar breadcrumb, next to the Info
+ * button, like every other node type.
+ */
+function BaseTopbarSlots({ base, orpc }: { base: BaseVO | null; orpc: BusabaseQueryUtils }) {
   // A public read-only visitor gets no node-management affordances: the server
   // refuses these mutations anyway (they aren't on the anonymous allowlist), so
   // showing them would only offer buttons that can't work.
@@ -1534,22 +1540,19 @@ function BaseDetailHeader({ base, orpc }: { base: BaseVO | null; orpc: BusabaseQ
       </>
     ) : null,
   );
-  return (
-    <div className="px-6 pt-5 pb-2">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h1 className="truncate font-semibold text-xl leading-7">
-            {base?.name ?? messages.nav.base}
-          </h1>
-          {base?.description ? (
-            <p className="mt-1 truncate text-muted-foreground text-sm leading-5">
-              {base.description}
-            </p>
-          ) : null}
-        </div>
-      </div>
-    </div>
+  useRegisterTopbarNodeInfo(
+    base
+      ? {
+          description: base.description,
+          nodeId: base.nodeId,
+          nodeName: base.name,
+          nodeSlug: base.slug,
+          nodeType: "base",
+          orpc,
+        }
+      : null,
   );
+  return null;
 }
 
 /**

@@ -85,6 +85,35 @@ export interface DrivePreviewCandidate {
 }
 
 /**
+ * Formats that are safe and useful to hand directly to a browser tab.
+ *
+ * Keep raster images explicit: an `image/*` prefix would also admit SVG, PSD,
+ * and TIFF. SVG/HTML can execute active content when navigated to, while design
+ * and document formats are not consistently rendered by evergreen browsers.
+ */
+const BROWSER_NATIVE_IMAGE_MIME_TYPES: ReadonlySet<string> = new Set([
+  "image/apng",
+  "image/avif",
+  "image/bmp",
+  "image/gif",
+  "image/jpeg",
+  "image/png",
+  "image/vnd.microsoft.icon",
+  "image/webp",
+  "image/x-icon",
+]);
+
+export const isBrowserNativeNewTabPreviewMimeType = (mimeType: string): boolean => {
+  const normalized = mimeType.split(";")[0]?.trim().toLowerCase() ?? "";
+  return (
+    normalized === "application/pdf" ||
+    BROWSER_NATIVE_IMAGE_MIME_TYPES.has(normalized) ||
+    normalized.startsWith("video/") ||
+    normalized.startsWith("audio/")
+  );
+};
+
+/**
  * Whether a configured provider should take this file over from the built-in
  * preview.
  *

@@ -11,21 +11,32 @@
 
 import { type iString, iStringParse } from "openlib/i18n/i-string";
 import { createContext, type ReactNode, useCallback, useContext } from "react";
+import { dashboardDe } from "./de";
+import { dashboardEs } from "./es";
+import { dashboardFr } from "./fr";
 import { dashboardJa } from "./ja";
+import { dashboardKo } from "./ko";
 import { type CoreI18nMessages, coreMessagesEn } from "./messages";
+import { dashboardPt } from "./pt";
+import { dashboardVi } from "./vi";
 import { dashboardZhCN } from "./zh-CN";
 import { dashboardZhTW } from "./zh-TW";
 
-// Locale set: a superset of Busabase Cloud's (en, zh-CN, ja) that also ships
-// Traditional Chinese (zh-TW). A host that resolves an unsupported locale falls
-// back to English.
-export type CoreLocale = "en" | "zh-CN" | "zh-TW" | "ja";
+// Locale set shared by every host (apps/busabase, Busabase Cloud). A host that
+// resolves an unsupported locale falls back to English.
+export type CoreLocale = "en" | "zh-CN" | "zh-TW" | "ja" | "ko" | "es" | "pt" | "vi" | "fr" | "de";
 
 export const coreMessagesByLocale: Record<CoreLocale, CoreI18nMessages> = {
   en: coreMessagesEn,
   "zh-CN": dashboardZhCN,
   "zh-TW": dashboardZhTW,
   ja: dashboardJa,
+  ko: dashboardKo,
+  es: dashboardEs,
+  pt: dashboardPt,
+  vi: dashboardVi,
+  fr: dashboardFr,
+  de: dashboardDe,
 };
 
 // Display options for a language switcher, in sync with the catalog above.
@@ -34,6 +45,12 @@ export const coreLocaleOptions: { code: CoreLocale; name: string; nativeName: st
   { code: "zh-CN", name: "Simplified Chinese", nativeName: "简体中文" },
   { code: "zh-TW", name: "Traditional Chinese", nativeName: "繁體中文" },
   { code: "ja", name: "Japanese", nativeName: "日本語" },
+  { code: "ko", name: "Korean", nativeName: "한국어" },
+  { code: "es", name: "Spanish", nativeName: "Español" },
+  { code: "pt", name: "Portuguese", nativeName: "Português" },
+  { code: "vi", name: "Vietnamese", nativeName: "Tiếng Việt" },
+  { code: "fr", name: "French", nativeName: "Français" },
+  { code: "de", name: "German", nativeName: "Deutsch" },
 ];
 
 const isSupportedLocale = (locale: string | undefined): locale is CoreLocale =>
@@ -72,7 +89,7 @@ export function useCoreLocale(): CoreLocale {
 
 /**
  * Resolve an iString (e.g. a field's multilingual name) to the active locale,
- * falling back through iStringParse's chain (requested → any → en).
+ * falling back through iStringParse's chain (requested → en → any).
  */
 export function useIString(): (value: iString) => string {
   const locale = useCoreLocale();

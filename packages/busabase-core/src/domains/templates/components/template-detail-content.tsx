@@ -73,7 +73,6 @@ interface TemplateDetailContentProps {
   /** See the identical note on `TemplateCardSummaryProps` — a prop, not a
    * hook, because this renders in a Server Component tree too. */
   descriptionLocale?: LocaleType;
-  preferEnglishFallback?: boolean;
 }
 
 /**
@@ -85,11 +84,10 @@ export function TemplateDetailContent({
   labels = defaultLabels,
   actions,
   descriptionLocale = "en",
-  preferEnglishFallback = false,
 }: TemplateDetailContentProps) {
   const { stats } = template;
   const title = template.displayName
-    ? templateTextForLocale(template.displayName, descriptionLocale, preferEnglishFallback)
+    ? templateTextForLocale(template.displayName, descriptionLocale)
     : template.name;
   const contents = [
     [labels.bases, stats.bases],
@@ -118,7 +116,7 @@ export function TemplateDetailContent({
             ) : null}
           </div>
           <p className="text-sm leading-6 text-muted-foreground">
-            {templateTextForLocale(template.description, descriptionLocale, preferEnglishFallback)}
+            {templateTextForLocale(template.description, descriptionLocale)}
           </p>
           {template.tags.length > 0 ? (
             <ul className="flex flex-wrap gap-1.5" aria-label={labels.tags}>

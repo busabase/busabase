@@ -1,4 +1,7 @@
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
+import { delimiter, dirname, join } from "node:path";
 import type { AgentCatalogEntryVO, AgentTransport } from "busabase-contract/domains/agents/types";
 import { getContextActorId } from "../../../context";
 import { getBudaAcpUrl, getBudaConnection, listBudaConnections } from "./buda-connection";
@@ -105,6 +108,8 @@ export interface ResolvedLaunch {
   /** local-subprocess only. */
   command?: string;
   args?: string[];
+  env?: NodeJS.ProcessEnv;
+  direct?: boolean;
   /** remote-websocket only. */
   url?: string;
   authHeader?: string;
@@ -151,13 +156,180 @@ export function localBudaConfig(): { token?: string; agentId?: string } {
 }
 
 /** `npx --version` rather than `which`, so this works the same on Windows. */
-function binaryAvailable(bin: string): boolean {
+function binaryAvailable(bin: string, env?: NodeJS.ProcessEnv): boolean {
   try {
-    const res = spawnSync(bin, ["--version"], { stdio: "ignore", timeout: 5000, shell: true });
+    const res = spawnSync(bin, ["--version"], { stdio: "ignore", timeout: 5000, shell: true, env });
     return res.status === 0;
   } catch {
     return false;
   }
+}
+
+const CODEX_PACKAGE = "@agentclientprotocol/codex-acp";
+const CODEX_VERSION = "1.1.14";
+const CODEX_INTEGRITY =
+  "sha512-6JKLbGYH0/Gcz788U6KnljwSdNvUnXOyjJDOgsWsbwmXbxn/BXH+urF5AciACdgq13+KgAP9O96Kp6h33BgyKg==";
+const CLAUDE_PACKAGE = "@agentclientprotocol/claude-agent-acp";
+const CLAUDE_VERSION = "0.66.0";
+const CLAUDE_INTEGRITY =
+  "sha512-BwalxKsxZzHZGEs+X9hV3biErLE7PHWoao2hmyP3QBWXxvMHbc1F1tzDE95ZA47Fle+KBYf2gKpgy1MJ+ZmVlw==";
+
+function claudeNativeBinary(home: string): string | null {
+  if (process.platform !== "darwin" && process.platform !== "win32" && process.platform !== "linux")
+    return null;
+  if (process.arch !== "arm64" && process.arch !== "x64") return null;
+  const base = join(home, "node_modules", "@anthropic-ai");
+  const suffix = process.platform === "win32" ? ".exe" : "";
+  const report = process.report?.getReport() as
+    | { header?: { glibcVersionRuntime?: string } }
+    | undefined;
+  const linuxMusl = process.platform === "linux" && !report?.header?.glibcVersionRuntime;
+  const names =
+    process.platform === "linux"
+      ? linuxMusl
+        ? [`claude-agent-sdk-linux-${process.arch}-musl`, `claude-agent-sdk-linux-${process.arch}`]
+        : [`claude-agent-sdk-linux-${process.arch}`, `claude-agent-sdk-linux-${process.arch}-musl`]
+      : [`claude-agent-sdk-${process.platform}-${process.arch}`];
+  return names.map((name) => join(base, name, `claude${suffix}`)).find(existsSync) ?? null;
+}
+
+function managedClaudeLaunch(): Pick<ResolvedLaunch, "command" | "args" | "env" | "direct"> | null {
+  if (process.env.APP_ENV !== "DESKTOP") return null;
+  const node = process.env.BUSABASE_DESKTOP_CLAUDE_NODE;
+  const home = process.env.BUSABASE_DESKTOP_CLAUDE_HOME;
+  if (!node || !home || !existsSync(node)) return null;
+  const native = claudeNativeBinary(home);
+  if (!native) return null;
+  const adapter = join(home, "node_modules", "@agentclientprotocol", "claude-agent-acp");
+  try {
+    const lock = JSON.parse(readFileSync(join(home, "package-lock.json"), "utf8"));
+    const locked = Object.entries(lock.packages ?? {}).find(
+      ([key]) =>
+        key === `node_modules/${CLAUDE_PACKAGE}` || key.endsWith(`/node_modules/${CLAUDE_PACKAGE}`),
+    )?.[1] as { version?: string; integrity?: string; resolved?: string } | undefined;
+    const nativePackage = `@anthropic-ai/${native.split(/[\\/]/).at(-2) ?? ""}`;
+    const nativeLock = Object.entries(lock.packages ?? {}).find(
+      ([key]) =>
+        key === `node_modules/${nativePackage}` || key.endsWith(`/node_modules/${nativePackage}`),
+    )?.[1] as { version?: string; integrity?: string; resolved?: string } | undefined;
+    const sdkLock = Object.entries(lock.packages ?? {}).find(
+      ([key]) =>
+        key === "node_modules/@anthropic-ai/claude-agent-sdk" ||
+        key.endsWith("/node_modules/@anthropic-ai/claude-agent-sdk"),
+    )?.[1] as { version?: string; integrity?: string; resolved?: string } | undefined;
+    if (
+      locked?.version !== CLAUDE_VERSION ||
+      locked?.integrity !== CLAUDE_INTEGRITY ||
+      locked?.resolved !==
+        "https://registry.npmjs.org/@agentclientprotocol/claude-agent-acp/-/claude-agent-acp-0.66.0.tgz"
+    )
+      return null;
+    if (
+      sdkLock?.version !== "0.3.220" ||
+      !sdkLock.integrity?.startsWith("sha512-") ||
+      sdkLock.resolved !==
+        "https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/-/claude-agent-sdk-0.3.220.tgz" ||
+      nativeLock?.version !== "0.3.220" ||
+      !nativeLock.integrity?.startsWith("sha512-") ||
+      nativeLock.resolved !==
+        `https://registry.npmjs.org/${nativePackage}/-/${nativePackage.split("/")[1]}-0.3.220.tgz`
+    )
+      return null;
+    const stamp = JSON.parse(readFileSync(join(home, "verified-install.json"), "utf8"));
+    if (
+      stamp.package !== CLAUDE_PACKAGE ||
+      stamp.version !== CLAUDE_VERSION ||
+      stamp.integrity !== CLAUDE_INTEGRITY
+    )
+      return null;
+    const manifest = JSON.parse(readFileSync(join(adapter, "package.json"), "utf8"));
+    if (
+      manifest.name !== CLAUDE_PACKAGE ||
+      manifest.version !== CLAUDE_VERSION ||
+      manifest.bin?.["claude-agent-acp"] !== "dist/index.js"
+    )
+      return null;
+    const entry = join(adapter, "dist/index.js");
+    if (
+      createHash("sha256").update(readFileSync(entry)).digest("hex") !== stamp.entrySha256 ||
+      createHash("sha256").update(readFileSync(native)).digest("hex") !== stamp.nativeSha256
+    )
+      return null;
+    return {
+      command: node,
+      args: [entry],
+      env: { ...process.env, PATH: `${dirname(node)}${delimiter}${process.env.PATH ?? ""}` },
+      direct: true,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function managedCodexLaunch(
+  codexCli = process.env.BUSABASE_DESKTOP_CODEX_CLI?.trim() || "codex",
+): Pick<ResolvedLaunch, "command" | "args" | "env" | "direct"> | null {
+  if (process.env.APP_ENV !== "DESKTOP") return null;
+  const node = process.env.BUSABASE_DESKTOP_CODEX_NODE;
+  const home = process.env.BUSABASE_DESKTOP_CODEX_HOME;
+  if (!node || !home || !existsSync(node)) return null;
+  const adapter = join(home, "node_modules", "@agentclientprotocol", "codex-acp");
+  try {
+    const lock = JSON.parse(readFileSync(join(home, "package-lock.json"), "utf8"));
+    const locked = Object.entries(lock.packages ?? {}).find(
+      ([key]) =>
+        key === "node_modules/@agentclientprotocol/codex-acp" ||
+        key.endsWith("/node_modules/@agentclientprotocol/codex-acp"),
+    )?.[1] as { version?: string; integrity?: string; resolved?: string } | undefined;
+    if (
+      locked?.version !== CODEX_VERSION ||
+      locked?.integrity !== CODEX_INTEGRITY ||
+      locked?.resolved !==
+        "https://registry.npmjs.org/@agentclientprotocol/codex-acp/-/codex-acp-1.1.14.tgz"
+    )
+      return null;
+    const stamp = JSON.parse(readFileSync(join(home, "verified-install.json"), "utf8"));
+    if (
+      stamp.package !== CODEX_PACKAGE ||
+      stamp.version !== CODEX_VERSION ||
+      stamp.integrity !== CODEX_INTEGRITY
+    )
+      return null;
+    const manifest = JSON.parse(readFileSync(join(adapter, "package.json"), "utf8"));
+    const entry = manifest.bin?.["codex-acp"];
+    if (
+      manifest.name !== CODEX_PACKAGE ||
+      manifest.version !== CODEX_VERSION ||
+      entry !== "dist/index.js"
+    )
+      return null;
+    const script = join(adapter, entry);
+    if (!existsSync(script)) return null;
+    if (createHash("sha256").update(readFileSync(script)).digest("hex") !== stamp.entrySha256)
+      return null;
+    return {
+      command: node,
+      args: [script],
+      env: {
+        ...process.env,
+        CODEX_PATH: codexCli,
+        PATH: `${dirname(node)}${delimiter}${process.env.PATH ?? ""}`,
+      },
+      direct: true,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function desktopSystemPath(): string | null {
+  const path =
+    process.env.BUSABASE_DESKTOP_CODEX_SYSTEM_PATH?.trim() || process.env.PATH?.trim() || "";
+  return path &&
+    binaryAvailable("node", { ...process.env, PATH: path }) &&
+    binaryAvailable("npx", { ...process.env, PATH: path })
+    ? path
+    : null;
 }
 
 const OFFICIAL_REGISTRY_URL =
@@ -217,6 +389,15 @@ export async function listCatalog(): Promise<AgentCatalogEntryVO[]> {
         // checking whether *Cloud's* PATH has npx, which is irrelevant to
         // whether the user's own machine can run this agent.
         unavailableReason = CLOUD_LOCAL_AGENT_REASON;
+      } else if (
+        process.env.APP_ENV === "DESKTOP" &&
+        (spec.slug === "codex-acp" || spec.slug === "claude-acp")
+      ) {
+        available =
+          desktopSystemPath() !== null ||
+          (spec.slug === "codex-acp" ? managedCodexLaunch() : managedClaudeLaunch()) !== null;
+        if (!available)
+          unavailableReason = `Install ${spec.name} ACP from Busabase Desktop to connect.`;
       } else if (binaryAvailable(spec.probeBinary ?? "npx")) {
         available = true;
       } else {
@@ -282,6 +463,58 @@ export async function resolveLaunch(slug: string): Promise<ResolvedLaunch> {
     // entirely). See isCloudHost()'s doc comment.
     if (isCloudHost()) {
       throw new Error(CLOUD_LOCAL_AGENT_REASON);
+    }
+    if (spec.slug === "claude-acp" && process.env.APP_ENV === "DESKTOP") {
+      const systemPath = desktopSystemPath();
+      if (!systemPath) {
+        const managed = managedClaudeLaunch();
+        if (!managed)
+          throw new Error("Install Claude Code ACP from Busabase Desktop before connecting.");
+        return { slug: spec.slug, name: spec.name, transport: spec.transport, ...managed };
+      }
+      return {
+        slug: spec.slug,
+        name: spec.name,
+        transport: spec.transport,
+        command: "npx",
+        args: ["--yes", spec.npxPackage as string],
+        env: { ...process.env, PATH: systemPath },
+      };
+    }
+    if (spec.slug === "codex-acp" && process.env.APP_ENV === "DESKTOP") {
+      const codexCli = process.env.BUSABASE_DESKTOP_CODEX_CLI?.trim() || "codex";
+      const systemPath = desktopSystemPath();
+      const cliPath = systemPath ?? process.env.PATH ?? "";
+      if (!binaryAvailable(codexCli, { ...process.env, PATH: cliPath })) {
+        throw new Error("Codex CLI is missing. Install Codex CLI and sign in before connecting.");
+      }
+      try {
+        if (
+          spawnSync(codexCli, ["login", "status"], {
+            stdio: "ignore",
+            timeout: 5000,
+            shell: process.platform === "win32",
+            env: { ...process.env, PATH: cliPath },
+          }).status !== 0
+        ) {
+          throw new Error("Codex CLI login is required. Run `codex login` before connecting.");
+        }
+      } catch {
+        throw new Error("Codex CLI login is required. Run `codex login` before connecting.");
+      }
+      if (!systemPath) {
+        const managed = managedCodexLaunch(codexCli);
+        if (!managed) throw new Error("Install Codex ACP from Busabase Desktop before connecting.");
+        return { slug: spec.slug, name: spec.name, transport: spec.transport, ...managed };
+      }
+      return {
+        slug: spec.slug,
+        name: spec.name,
+        transport: spec.transport,
+        command: "npx",
+        args: ["--yes", spec.npxPackage as string],
+        env: { ...process.env, PATH: systemPath },
+      };
     }
     return {
       slug: spec.slug,

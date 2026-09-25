@@ -61,7 +61,6 @@ export function TemplateCard({
       <TemplateCardSummary
         density={density}
         descriptionLocale={locale}
-        preferEnglishFallback
         screenshotAlt=""
         statLabels={statLabels ?? localizedStatLabels}
         template={template}

@@ -51,7 +51,7 @@ describe("InstallFromGithubModal diagnostic detail", () => {
   afterEach(cleanup);
 
   it.each(["zh-CN", "ja"] as const)(
-    "keeps the server's actionable preview refusal beneath the %s message",
+    "shows the server's actionable preview refusal in the %s interface",
     async (locale) => {
       const diagnostic = "Not a Busabase package: expected busabase.json at the repository root.";
       renderInstall(locale, {
@@ -59,10 +59,8 @@ describe("InstallFromGithubModal diagnostic detail", () => {
         installFromGithubStream: vi.fn(),
       });
 
-      expect(
-        await screen.findByText(coreMessagesByLocale[locale].install.previewFailed),
-      ).toBeTruthy();
-      expect(screen.getByText(diagnostic)).toBeTruthy();
+      expect(await screen.findByText(diagnostic)).toBeTruthy();
+      expect(screen.queryByText(coreMessagesByLocale[locale].install.previewFailed)).toBeNull();
     },
   );
 
@@ -95,10 +93,8 @@ describe("InstallFromGithubModal diagnostic detail", () => {
         expect(await screen.findByText(progress)).toBeTruthy();
         expect(screen.getByText(coreMessagesByLocale[locale].install.installingHint)).toBeTruthy();
         await act(async () => finishProgress());
-        expect(
-          await screen.findByText(coreMessagesByLocale[locale].install.installFailed),
-        ).toBeTruthy();
-        expect(screen.getByText(diagnostic)).toBeTruthy();
+        expect(await screen.findByText(diagnostic)).toBeTruthy();
+        expect(screen.queryByText(coreMessagesByLocale[locale].install.installFailed)).toBeNull();
       } finally {
         finishProgress();
       }
