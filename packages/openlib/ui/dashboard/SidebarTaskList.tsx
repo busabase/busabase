@@ -23,6 +23,7 @@ import {
 } from "react";
 import { useLocation } from "wouter";
 import { formatRelativeTime } from "../../utils/time";
+import { AcpSourceIcon } from "./AcpSourceIcon";
 import { TaskStatusIcon } from "./TaskStatusIcon";
 import type { NavItem } from "./types";
 
@@ -258,7 +259,12 @@ export function SidebarTaskList({
                         <TaskStatusIcon status={task.status} />
                       </div>
                       <div className="flex flex-col gap-0.5 min-w-0 w-full">
-                        <span className="font-medium truncate">{task.title}</span>
+                        <div className="flex min-w-0 items-center gap-1.5">
+                          <span className="font-medium truncate">{task.title}</span>
+                          {task.source === "acp" && (
+                            <AcpSourceIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                          )}
+                        </div>
                         {metadataText && (
                           <span className="text-xs text-muted-foreground truncate">
                             {metadataText}

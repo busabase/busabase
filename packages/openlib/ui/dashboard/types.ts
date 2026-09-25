@@ -105,6 +105,8 @@ export interface NavItem {
    * Optional status for recent task items
    */
   status?: "pending" | "in_progress" | "waiting_for_input" | "completed" | "failed" | "cancelled";
+  /** Structured creation source for recent session items. */
+  source?: "acp" | null;
 }
 
 export interface NavGroup {
