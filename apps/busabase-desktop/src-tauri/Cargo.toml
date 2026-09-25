@@ -1,6 +1,6 @@
 [package]
 name = "busabase_desktop"
-version = "0.80.0"
+version = "0.81.0"
 description = "Busabase Desktop - private local-first Busabase knowledge base shell"
 authors = ["Busabase Team"]
 edition = "2021"
@@ -16,6 +16,7 @@ tauri-build = { version = "2.0", features = [] }
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.10"
 semver = "1"
 tauri = { version = "2.0", features = [] }
 tauri-plugin-autostart = "2.0"
