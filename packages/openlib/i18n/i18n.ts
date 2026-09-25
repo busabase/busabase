@@ -2,7 +2,7 @@ import { z } from "zod";
 
 export const i18n = {
   defaultLocale: "en",
-  locales: ["en", "zh-CN", "zh-TW", "ja", "ko", "de", "fr", "es", "pt"],
+  locales: ["en", "zh-CN", "zh-TW", "ja", "ko", "de", "fr", "es", "pt", "vi"],
   extendLocales: ["en", "zh-CN", "zh-TW", "ja", "ko", "fr", "de", "es", "ru", "it", "vi", "pt"],
 } as const;
 

@@ -1,7 +1,7 @@
 import type React from "react";
 import z from "zod";
 
-export const locales = ["en", "zh-CN", "zh-TW", "ja", "ko", "de", "fr", "es", "pt"] as const;
+export const locales = ["en", "zh-CN", "zh-TW", "ja", "ko", "de", "fr", "es", "pt", "vi"] as const;
 export type Locale = (typeof locales)[number];
 
 export const LocaleSchema = z.enum(locales);

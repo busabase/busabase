@@ -1,7 +1,7 @@
 import { z } from "zod";
 export declare const i18n: {
   readonly defaultLocale: "en";
-  readonly locales: readonly ["en", "zh-CN", "zh-TW", "ja", "ko", "de", "fr", "es", "pt"];
+  readonly locales: readonly ["en", "zh-CN", "zh-TW", "ja", "ko", "de", "fr", "es", "pt", "vi"];
   readonly extendLocales: readonly [
     "en",
     "zh-CN",
@@ -27,6 +27,7 @@ export declare const LocaleSchema: z.ZodEnum<{
   ja: "ja";
   ko: "ko";
   pt: "pt";
+  vi: "vi";
   "zh-CN": "zh-CN";
   "zh-TW": "zh-TW";
 }>;

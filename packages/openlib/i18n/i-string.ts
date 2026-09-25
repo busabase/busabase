@@ -112,8 +112,14 @@ export const iStringParse = (str: iString | undefined | null, lang: LocaleType =
   }
 
   const locales = Object.keys(str || {}) as LocaleType[];
-  const fallbackLocale =
-    locales.find((locale) => locale === lang) || locales.find((locale) => locale !== "en") || "en";
+  // Requested locale, then English, then whatever locale is available. English
+  // comes before "any other locale" so a missing translation shows English,
+  // not an arbitrary other language that happens to be listed first.
+  const fallbackLocale = locales.includes(lang)
+    ? lang
+    : locales.includes("en")
+      ? "en"
+      : (locales[0] ?? "en");
   const result = str[fallbackLocale as LocaleType];
 
   if (result === undefined) {

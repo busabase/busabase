@@ -1,3 +1,4 @@
+export * from "./AcpSourceIcon";
 export * from "./account-switcher-context";
 export * from "./DashboardLayout";
 export * from "./demo";
