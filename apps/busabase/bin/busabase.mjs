@@ -6,7 +6,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url)); // <pkg>/bin
 const pkgRoot = resolve(here, "..");
@@ -210,7 +210,11 @@ async function startServer(argv) {
   process.chdir(dirname(entry));
   printSplash({ host, port, dataDir });
   await printUpdateNoticeIfAny();
-  await import(entry);
+  // `entry` is a filesystem path, and on Windows that is `C:\...` — a drive
+  // letter the ESM loader reads as an unsupported URL scheme. Every dynamic
+  // import of a PATH (as opposed to a bare package specifier) has to go through
+  // pathToFileURL; it is a no-op-shaped `file://` conversion on POSIX.
+  await import(pathToFileURL(entry).href);
 }
 
 async function runClientCli(argv) {
@@ -221,7 +225,8 @@ async function runClientCli(argv) {
     const siblingBin = resolve(pkgRoot, "../busabase-cli/bin/busabase-cli.mjs");
     if (existsSync(siblingBin)) {
       process.env.BUSABASE_CLI_DELEGATED_ARGV = JSON.stringify(argv);
-      await import(siblingBin);
+      // Same Windows drive-letter rule as the server entry above.
+      await import(pathToFileURL(siblingBin).href);
       return 0;
     }
     const message = error instanceof Error ? error.message : String(error);

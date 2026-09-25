@@ -69,8 +69,16 @@ test("Base Design changes the record title used by Gallery", async ({ page, requ
   const primaryFieldRow = page.locator('[data-view-field-slug="title"]');
   await expect(primaryFieldRow.getByRole("checkbox")).toBeChecked();
   await expect(primaryFieldRow.getByRole("checkbox")).toBeDisabled();
-  await expect(primaryFieldRow.getByRole("button", { name: "Move Title up" })).toBeDisabled();
-  await expect(primaryFieldRow.getByRole("button", { name: "Move Title down" })).toBeDisabled();
+  // Fields reorder by drag now (#7581), not by up/down buttons. The record title
+  // is fixed first, so unlike every other visible field its row has no handle.
+  await expect(
+    primaryFieldRow.getByTestId(`view-field-drag-handle-${titleField.slug}`),
+  ).toHaveCount(0);
+  await expect(
+    page
+      .locator(`[data-view-field-slug="${summaryField.slug}"]`)
+      .getByTestId(`view-field-drag-handle-${summaryField.slug}`),
+  ).toBeVisible();
   await viewRecordTitleBadge.hover();
   await expect(page.getByRole("tooltip")).toContainText(
     "This Base record title is always visible and fixed first. Change it in Base Design.",

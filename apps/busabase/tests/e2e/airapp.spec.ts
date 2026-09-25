@@ -143,7 +143,7 @@ test("AirApp run panel: auto-run, restart, watermark, nav persistence, fullscree
     // dashboard document starts uncontrolled, then the AirApp's auto-run must
     // register/activate the worker and explicitly claim this existing page.
     await sidebarLink(page, appA.name).click();
-    await expect(page.getByRole("heading", { name: appA.name })).toBeVisible();
+    await expect(page.locator("[data-topbar-current-item]")).toHaveText(appA.name);
 
     // No Run click — opening the detail view starts the app by itself.
     await expectRunning(page, appA.nodeId);
@@ -169,7 +169,7 @@ test("AirApp run panel: auto-run, restart, watermark, nav persistence, fullscree
 
     try {
       await page.goto(`/dashboard/local/airapp/${appA.slug}`);
-      await expect(page.getByRole("heading", { name: appA.name })).toBeVisible();
+      await expect(page.locator("[data-topbar-current-item]")).toHaveText(appA.name);
 
       const controls = page.locator("[data-airapp-run-status]:visible").first();
       await expect(controls).toHaveAttribute("translate", "no");
@@ -201,7 +201,7 @@ test("AirApp run panel: auto-run, restart, watermark, nav persistence, fullscree
 
   await test.step("shared fullscreen URL still auto-runs and reuses one preview iframe", async () => {
     await page.goto(`/dashboard/local/airapp/${appA.slug}?fullscreen=1`);
-    await expect(page.getByRole("heading", { name: appA.name })).toBeVisible();
+    await expect(page.locator("[data-topbar-current-item]")).toHaveText(appA.name);
     await expectRunning(page, appA.nodeId);
 
     const fullscreen = fullscreenPreview(page);
@@ -243,7 +243,7 @@ test("AirApp run panel: auto-run, restart, watermark, nav persistence, fullscree
   await test.step("three hard refreshes auto-run without exposing a query cancellation error", async () => {
     for (const refreshAttempt of [1, 2, 3]) {
       await page.reload();
-      await expect(page.getByRole("heading", { name: appA.name })).toBeVisible();
+      await expect(page.locator("[data-topbar-current-item]")).toHaveText(appA.name);
 
       // No Restart click after reload: every fresh page must recover to Running by itself.
       await expectRunning(page, appA.nodeId);
@@ -266,7 +266,7 @@ test("AirApp run panel: auto-run, restart, watermark, nav persistence, fullscree
     // trivially "lose" the zustand run state and prove nothing about the fix.
     await sidebarLink(page, appB.name).click();
     await expect(page).toHaveURL(new RegExp(`/dashboard/local/airapp/${appB.slug}$`));
-    await expect(page.getByRole("heading", { name: appB.name })).toBeVisible();
+    await expect(page.locator("[data-topbar-current-item]")).toHaveText(appB.name);
     // B auto-runs on first open too; it shares A's dependency manifest, so its
     // install restores from the IndexedDB snapshot cache. Both A and B running
     // at once also exercises the per-instance server-ready filtering — before
@@ -280,7 +280,7 @@ test("AirApp run panel: auto-run, restart, watermark, nav persistence, fullscree
 
     await sidebarLink(page, appA.name).click();
     await expect(page).toHaveURL(new RegExp(`/dashboard/local/airapp/${appA.slug}$`));
-    await expect(page.getByRole("heading", { name: appA.name })).toBeVisible();
+    await expect(page.locator("[data-topbar-current-item]")).toHaveText(appA.name);
 
     // Still ready with ITS OWN preview — not reset to idle, not B's src.
     await expect(page.getByRole("button", { name: "Restart" })).toBeVisible();

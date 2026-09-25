@@ -40,11 +40,10 @@ test("visual File preview keeps its image through main and pinned fullscreen", a
 }, testInfo) => {
   await test.step("opens a deep fullscreen link and keeps the demo query", async () => {
     await page.goto(`${FILE_PATH}&fullscreen=1`);
-    await expect(page.getByRole("heading", { name: "Visual Preview Map" })).toBeVisible();
-    await expect(
-      page.getByText("A visual SVG File node for inspecting native media previews."),
-    ).toBeVisible();
-    await expect(page.getByRole("button", { name: "Details" })).toBeVisible();
+    // Identity lives in the topbar now: the name in the breadcrumb, the
+    // description behind the Details button's tooltip (asserted below, out of
+    // fullscreen — the fullscreen surface covers the topbar).
+    await expect(page.locator("[data-topbar-current-item]")).toHaveText("Visual Preview Map");
     await expect(mainPreview(page)).toBeVisible();
     await expectFullscreenCoverage(page);
     expect(new URL(page.url()).searchParams.get("demo")).toBe("node-types");
@@ -72,6 +71,10 @@ test("visual File preview keeps its image through main and pinned fullscreen", a
     for (const name of ["Agent prompts", "Pin to side panel", "Enter fullscreen", "More actions"]) {
       await expect(topbar.getByRole("button", { name })).toBeVisible();
     }
+    await topbar.getByRole("button", { name: "Details" }).hover();
+    await expect(page.getByRole("tooltip")).toContainText(
+      "A visual SVG File node for inspecting native media previews.",
+    );
 
     const inlineShot = testInfo.outputPath("file-main-preview.png");
     await page.screenshot({ path: inlineShot });
@@ -134,11 +137,12 @@ test.describe("mobile", () => {
     page,
   }, testInfo) => {
     await page.goto(FILE_PATH);
-    const header = page.locator("[data-dashboard-active-view] header");
+    // A File node draws no in-page header any more — the topbar is the only
+    // chrome above the preview, so it is the only thing left to fit.
     const topbar = page.locator("[data-dashboard-topbar]");
-    await expect(page.getByRole("heading", { name: "Visual Preview Map" })).toBeVisible();
+    await expect(page.locator("[data-topbar-current-item]")).toHaveText("Visual Preview Map");
     await expect(mainPreview(page)).toBeVisible();
-    for (const surface of [header, topbar]) {
+    for (const surface of [topbar]) {
       const metrics = await surface.evaluate((element) => ({
         clientWidth: element.clientWidth,
         scrollWidth: element.scrollWidth,

@@ -93,7 +93,10 @@ test.describe
       expect(secondBounds?.y ?? 0).toBeGreaterThan(
         (firstBounds?.y ?? 0) + (firstBounds?.height ?? 0),
       );
-      await expect(page.getByText("此 Agent 暂不可用。").first()).toBeVisible();
+      // The server's real reason, not a translated stand-in (PUL-273).
+      await expect(
+        page.getByText("Connecting to agents is disabled in the demo.").first(),
+      ).toBeVisible();
       await expectNoHorizontalOverflow(page);
       await capture(page, testInfo, "04-mobile-zh-add-agent-catalog");
 

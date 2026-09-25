@@ -113,7 +113,14 @@ test("Agents, Templates, and graph controls use Chinese UI labels", async ({ pag
 
   await page.goto("/dashboard/local/agents/new?demo=1&lang=zh-CN");
   await expect(page.getByRole("heading", { name: "添加 Agent" })).toBeVisible();
-  await expect(page.getByText("此 Agent 暂不可用。").first()).toBeVisible();
+  // An unavailable Agent shows the server's real reason in every locale
+  // (PUL-273): the recovery instruction lives in that English sentence, and the
+  // old generic "此 Agent 暂不可用。" replaced it. So the Chinese UI carries the
+  // English demo reason on purpose, and the generic fallback must NOT stand in.
+  await expect(
+    page.getByText("Connecting to agents is disabled in the demo.").first(),
+  ).toBeVisible();
+  await expect(page.getByText("此 Agent 暂不可用。")).toHaveCount(0);
 
   await page.goto("/dashboard/local/templates?demo=1&lang=zh-CN");
   await expect(page.getByRole("heading", { name: "模板", exact: true })).toBeVisible();

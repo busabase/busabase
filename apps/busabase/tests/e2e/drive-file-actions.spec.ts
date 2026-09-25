@@ -9,9 +9,13 @@ test("Drive files can be previewed, uploaded, renamed, and removed", async ({ pa
   const folderName = `drive-ui-folder-${suffix}`;
 
   await page.goto("/dashboard/local/drive/team-files");
-  await expect(
-    page.getByRole("heading", { name: "Team Files", exact: true }).first(),
-  ).toBeVisible();
+  // A Drive's identity is topbar-only now: name in the breadcrumb, description
+  // behind the Details tooltip.
+  await expect(page.locator("[data-topbar-current-item]")).toHaveText("Team Files");
+  await page.getByRole("button", { name: "Details" }).hover();
+  await expect(page.getByRole("tooltip")).toContainText("A plain file drive for team documents");
+  // Unrelated to the topbar: this line comes from the Drive's own README.md,
+  // rendered in the file preview pane, and must still be on the page.
   await expect(page.getByText("A shared Drive for plain files", { exact: false })).toBeVisible();
 
   await page.locator('input[type="file"]').setInputFiles({
@@ -145,9 +149,7 @@ test("Drive preview and file controls remain usable on a narrow viewport", async
 test("Drive previews an uploaded SVG as an image, not as source", async ({ page }, testInfo) => {
   const name = `svg-preview-${Date.now()}.svg`;
   await page.goto("/dashboard/local/drive/team-files");
-  await expect(
-    page.getByRole("heading", { name: "Team Files", exact: true }).first(),
-  ).toBeVisible();
+  await expect(page.locator("[data-topbar-current-item]")).toHaveText("Team Files");
 
   await page.locator('input[type="file"]').setInputFiles({
     buffer: Buffer.from(

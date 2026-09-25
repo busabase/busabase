@@ -19,7 +19,7 @@ test("HTML preview keeps its iframe through fullscreen and pinned navigation", a
 }, testInfo) => {
   await test.step("opens a fullscreen deep link without losing the demo query", async () => {
     await page.goto(`${HTML_PATH}&fullscreen=1`);
-    await expect(page.getByRole("heading", { name: "Waitlist Form Prototype" })).toBeVisible();
+    await expect(page.locator("[data-topbar-current-item]")).toHaveText("Waitlist Form Prototype");
     await expect(page.getByRole("tab", { name: "Preview" })).toHaveAttribute(
       "data-state",
       "active",
@@ -172,7 +172,7 @@ test.describe("mobile", () => {
     await page.goto(HTML_PATH);
     const header = page.locator("[data-dashboard-active-view] header");
     const topbar = page.locator("[data-dashboard-topbar]");
-    await expect(page.getByRole("heading", { name: "Waitlist Form Prototype" })).toBeVisible();
+    await expect(page.locator("[data-topbar-current-item]")).toHaveText("Waitlist Form Prototype");
     await expect(page.getByRole("tab", { name: "Preview" })).toBeVisible();
     await expect(page.getByRole("tab", { name: "Source" })).toBeVisible();
     for (const surface of [header, topbar]) {

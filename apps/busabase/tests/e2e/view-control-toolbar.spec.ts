@@ -1,5 +1,5 @@
 import type { BaseVO, ChangeRequestVO, ViewVO } from "busabase-contract/types";
-import { expect, json, mergeOne, reviewOne, test } from "./_fixtures";
+import { dragSortableTo, expect, json, mergeOne, reviewOne, test } from "./_fixtures";
 
 test("staged view controls recover a hidden conditioned field with one update CR", async ({
   page,
@@ -126,7 +126,15 @@ test("staged view controls recover a hidden conditioned field with one update CR
   const hiddenFieldRow = fieldsEditor.locator(`[data-view-field-slug="${hiddenField.slug}"]`);
   await expect(hiddenFieldRow).toContainText("Hidden");
   await hiddenFieldRow.getByRole("checkbox").check();
-  await panel.getByRole("button", { name: "Reset widths" }).click();
+  await dragSortableTo(
+    page,
+    hiddenFieldRow.getByRole("button", { name: `Drag to reorder ${hiddenField.name}` }),
+    fieldsEditor.locator(`[data-view-field-slug="${visibleFields[1].slug}"]`),
+  );
+  const resetWidths = panel.getByRole("button", { exact: true, name: "Reset widths" });
+  await expect(resetWidths).toBeEnabled();
+  await resetWidths.click();
+  await expect(resetWidths).toBeDisabled();
   await page.keyboard.press("Escape");
   await expect(panel).toBeVisible();
   await expect(panel.getByTestId("view-editor-discard")).toHaveAttribute(
@@ -186,7 +194,7 @@ test("staged view controls recover a hidden conditioned field with one update CR
           fieldSlug: visibleFields[0].slug,
         },
       ],
-      visible: [...visibleFields.map((field) => field.slug), hiddenField.slug],
+      visible: [visibleFields[0].slug, hiddenField.slug, visibleFields[1].slug],
     });
 });
 
@@ -247,12 +255,15 @@ test("edit view reuses the shared fields editor and preserves unrelated config",
 
   const hiddenFieldRow = fieldsEditor.locator(`[data-view-field-slug="${hiddenField.slug}"]`);
   await hiddenFieldRow.getByRole("checkbox").check();
-  await hiddenFieldRow.getByRole("button", { name: /^Move .+ up$/ }).click();
-  await fieldsEditor
-    .locator(`[data-view-field-slug="${visibleFields[1].slug}"]`)
-    .getByRole("checkbox")
-    .uncheck();
-  await fieldsEditor.getByRole("button", { name: "Reset widths" }).click();
+  await dragSortableTo(
+    page,
+    hiddenFieldRow.getByRole("button", { name: `Drag to reorder ${hiddenField.name}` }),
+    fieldsEditor.locator(`[data-view-field-slug="${visibleFields[1].slug}"]`),
+  );
+  const resetWidths = fieldsEditor.getByRole("button", { exact: true, name: "Reset widths" });
+  await expect(resetWidths).toBeEnabled();
+  await resetWidths.click();
+  await expect(resetWidths).toBeDisabled();
 
   const workflowRequests = { merge: 0, review: 0, update: 0 };
   page.on("request", (browserRequest) => {
@@ -299,6 +310,6 @@ test("edit view reuses the shared fields editor and preserves unrelated config",
         },
       ],
       sorts: [],
-      visible: [visibleFields[0].slug, hiddenField.slug],
+      visible: [visibleFields[0].slug, hiddenField.slug, visibleFields[1].slug],
     });
 });
