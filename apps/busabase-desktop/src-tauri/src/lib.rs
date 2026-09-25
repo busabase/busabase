@@ -1,3 +1,4 @@
+mod codex_runtime;
 mod desktop_menu;
 mod platform;
 mod sidecar;
@@ -60,7 +61,9 @@ pub fn run() {
             sidecar::busabase_sidecar_status,
             platform::request_desktop_restart,
             sidecar::start_busabase_sidecar,
-            sidecar::stop_busabase_sidecar
+            sidecar::stop_busabase_sidecar,
+            codex_runtime::agent_dependency_status,
+            codex_runtime::install_agent_adapter
         ])
         .build(tauri::generate_context!())
         .expect("error while building Busabase Desktop");

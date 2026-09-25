@@ -331,6 +331,32 @@ fn build_sidecar_command(
         command
             .env("HOSTNAME", "127.0.0.1")
             .env("NODE_ENV", "production");
+        if let Some(root) = super::codex_runtime::bundled_root(app) {
+            command
+                .env(
+                    "BUSABASE_DESKTOP_CODEX_NODE",
+                    root.join(if cfg!(windows) { "node.exe" } else { "node" }),
+                )
+                .env(
+                    "BUSABASE_DESKTOP_CODEX_HOME",
+                    super::codex_runtime::managed_home_for(app, "codex-acp")?,
+                );
+            command.env(
+                "BUSABASE_DESKTOP_CLAUDE_NODE",
+                root.join(if cfg!(windows) { "node.exe" } else { "node" }),
+            );
+            command.env(
+                "BUSABASE_DESKTOP_CLAUDE_HOME",
+                super::codex_runtime::managed_home_for(app, "claude-acp")?,
+            );
+        }
+        if let Some(path) = super::codex_runtime::system_path() {
+            command.env("BUSABASE_DESKTOP_CODEX_SYSTEM_PATH", path);
+        }
+        if let Some(path) = super::codex_runtime::cli_path() {
+            command.env("BUSABASE_DESKTOP_CODEX_CLI", path);
+        }
+        command.env("APP_ENV", "DESKTOP");
         command
     } else {
         let workspace_root = resolve_workspace_root()?;
@@ -340,8 +366,27 @@ fn build_sidecar_command(
             .arg("busabase")
             .arg("dev")
             .current_dir(workspace_root);
+        command.env("APP_ENV", "DESKTOP");
+        command.env(
+            "BUSABASE_DESKTOP_CODEX_HOME",
+            super::codex_runtime::managed_home_for(app, "codex-acp")?,
+        );
+        command.env(
+            "BUSABASE_DESKTOP_CLAUDE_HOME",
+            super::codex_runtime::managed_home_for(app, "claude-acp")?,
+        );
+        if let Some(path) = super::codex_runtime::system_path() {
+            command.env("BUSABASE_DESKTOP_CODEX_SYSTEM_PATH", path);
+        }
+        if let Some(path) = super::codex_runtime::cli_path() {
+            command.env("BUSABASE_DESKTOP_CODEX_CLI", path);
+        }
         command
     };
+
+    if let Some(path) = super::codex_runtime::user_path() {
+        command.env("PATH", path);
+    }
 
     command
         .env("PORT", BUSABASE_PORT.to_string())

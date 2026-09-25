@@ -7,6 +7,7 @@
 //   - the entire `.next/standalone` output (server.js + traced node_modules)
 //   - `.next/static` and `public` copied next to the app's server.js
 //   - a bundled `node` runtime
+//   - npm CLI from the same official Node distribution (for opt-in ACP install)
 //   - a Windows `.cmd` launcher that resolves runtime paths via `%~dp0`
 //   - entry.json describing where server.js and node live (relative paths)
 //
@@ -15,8 +16,9 @@
 // that sidecar's /dashboard.
 
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { createWriteStream, constants as fsConstants } from "node:fs";
-import { access, chmod, cp, mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { access, chmod, cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { Readable } from "node:stream";
@@ -97,9 +99,9 @@ const runPnpm = async (args) => {
 // `process.execPath` is NOT portable on every host (e.g. Homebrew node is a
 // thin launcher that dynamically loads libnode via @rpath). We therefore fetch
 // the official, self-contained Node binary for the build host's platform/arch
-// (pinned to the host Node version) and bundle just its `node` executable.
-// `BUSABASE_DESKTOP_NODE` can override with a path to a known-good binary, and
-// we fall back to copying `process.execPath` if the download is unavailable.
+// (pinned to the host Node version) and bundle its node executable and npm CLI.
+// `BUSABASE_DESKTOP_NODE` can override the executable; the npm CLI still comes
+// from the official archive.
 const distArch = () => {
   const targetTriple = process.env.BUSABASE_DESKTOP_TARGET_TRIPLE?.trim();
   if (targetTriple?.startsWith("x86_64-")) return "x64";
@@ -111,11 +113,20 @@ const distArch = () => {
 };
 
 const bundleNode = async (targetPath) => {
+  const copyNpm = async (source) => {
+    const manifest = JSON.parse(await readFile(join(source, "package.json"), "utf8"));
+    if (manifest.name !== "npm" || !/^\d+\.\d+\.\d+$/.test(manifest.version)) {
+      throw new Error("The official Node distribution does not contain a valid npm CLI.");
+    }
+    await cp(source, join(resourceDir, "npm"), { recursive: true, dereference: true });
+    return manifest.version;
+  };
   const override = process.env.BUSABASE_DESKTOP_NODE?.trim();
   if (override) {
     await cp(override, targetPath, { dereference: true });
     await chmod(targetPath, 0o755).catch(() => {});
-    return `override (${override})`;
+    // The override only replaces the executable; npm still comes from the
+    // official archive below so the opt-in installer is always self-contained.
   }
 
   const version = `v${process.versions.node}`;
@@ -125,6 +136,7 @@ const bundleNode = async (targetPath) => {
   const ext = isWin ? "zip" : process.platform === "linux" ? "tar.xz" : "tar.gz";
   const base = `node-${version}-${platformTag}-${arch}`;
   const url = `https://nodejs.org/dist/${version}/${base}.${ext}`;
+  const archiveName = `${base}.${ext}`;
 
   const cacheDir = join(tmpdir(), "busabase-desktop-node-cache", `${base}`);
   const archivePath = join(cacheDir, `${base}.${ext}`);
@@ -132,8 +144,28 @@ const bundleNode = async (targetPath) => {
     ? join(cacheDir, base, "node.exe")
     : join(cacheDir, base, "bin", "node");
 
+  const npmSource = join(
+    cacheDir,
+    base,
+    ...(isWin ? ["node_modules", "npm"] : ["lib", "node_modules", "npm"]),
+  );
+  const verifyArchive = async () => {
+    const response = await fetch(`https://nodejs.org/dist/${version}/SHASUMS256.txt`);
+    if (!response.ok) throw new Error(`Could not fetch Node checksums (${response.status})`);
+    const line = (await response.text())
+      .split("\n")
+      .find((row) => row.endsWith(`  ${archiveName}`));
+    const expected = line?.split(/\s+/)[0];
+    if (!expected || !/^[0-9a-f]{64}$/.test(expected))
+      throw new Error("Node archive checksum is unavailable.");
+    const digest = createHash("sha256");
+    const { createReadStream } = await import("node:fs");
+    for await (const chunk of createReadStream(archivePath)) digest.update(chunk);
+    if (digest.digest("hex") !== expected) throw new Error("Node archive checksum mismatch.");
+  };
   try {
-    await access(extractedNode, fsConstants.X_OK);
+    await access(extractedNode, fsConstants.R_OK);
+    await access(join(npmSource, "bin", "npm-cli.js"), fsConstants.R_OK);
   } catch {
     await rm(cacheDir, { recursive: true, force: true });
     await mkdir(cacheDir, { recursive: true });
@@ -142,6 +174,7 @@ const bundleNode = async (targetPath) => {
       throw new Error(`Failed to download Node runtime: ${url} (${response.status})`);
     }
     await pipeline(Readable.fromWeb(response.body), createWriteStream(archivePath));
+    await verifyArchive();
     if (isWin) {
       await execFileAsync("unzip", ["-q", archivePath, "-d", cacheDir], {
         maxBuffer: 1024 * 1024 * 64,
@@ -155,9 +188,12 @@ const bundleNode = async (targetPath) => {
     await access(extractedNode, fsConstants.R_OK);
   }
 
-  await cp(extractedNode, targetPath, { dereference: true });
-  await chmod(targetPath, 0o755).catch(() => {});
-  return `nodejs.org ${version} ${platformTag}-${arch}`;
+  if (!override) {
+    await cp(extractedNode, targetPath, { dereference: true });
+    await chmod(targetPath, 0o755).catch(() => {});
+  }
+  const npmVersion = await copyNpm(npmSource);
+  return `${override ? `override (${override})` : `nodejs.org ${version} ${platformTag}-${arch}`} + npm ${npmVersion}`;
 };
 
 const hasMacOSNativeExtension = (path) =>
@@ -359,13 +395,7 @@ const main = async () => {
   try {
     nodeSource = await bundleNode(nodeTarget);
   } catch (error) {
-    console.warn(
-      `⚠ Could not bundle a self-contained Node runtime (${error.message}). ` +
-        "Falling back to process.execPath; the packaged app may require Node on PATH.",
-    );
-    await cp(process.execPath, nodeTarget, { dereference: true });
-    await chmod(nodeTarget, 0o755).catch(() => {});
-    nodeSource = `process.execPath (${process.execPath})`;
+    throw new Error(`Could not prepare self-contained Node and npm: ${error.message}`);
   }
 
   const launcher = await writeWindowsLauncher(appRel);

@@ -7,3 +7,8 @@ commands.allow = ["busabase_sidecar_status", "start_busabase_sidecar", "stop_bus
 identifier = "allow-request-desktop-restart"
 description = "Allows the frontend to restart Busabase Desktop after an update is installed."
 commands.allow = ["request_desktop_restart"]
+
+[[permission]]
+identifier = "allow-agent-dependencies"
+description = "Allows the Desktop main window to inspect and install pinned Codex and Claude ACP adapters."
+commands.allow = ["agent_dependency_status", "install_agent_adapter"]

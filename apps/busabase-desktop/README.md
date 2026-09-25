@@ -22,6 +22,19 @@ Environment overrides:
 - `BUSABASE_DESKTOP_WORKSPACE_ROOT` points the sidecar launcher at a specific workspace root.
 - `BUSABASE_DESKTOP_PNPM` overrides the `pnpm` executable used to launch the OSS sidecar.
 
+## Local ACP agents
+
+Codex and Claude Code use the system Node/npx when both are executable. If they are unavailable,
+click **Connect** on the agent card and confirm the download: Desktop uses its bundled Node and npm
+to install a pinned ACP adapter under its private app data directory. The two adapters have separate
+installations and are never installed into the system Node environment. The confirmation lists the
+package and npm registry source; a failed or damaged installation can be retried from the card.
+
+Codex ACP requires a separately installed and signed-in Codex CLI (`codex login`). Claude Code ACP
+includes the Claude Agent SDK native CLI, but Claude authentication remains the user's responsibility:
+sign in from a terminal (`claude auth login`) and reconnect. Desktop does not manage credentials or
+offer automatic installation in a regular browser, self-hosted OSS, or Cloud.
+
 ## Sidecar Model
 
 ```txt
