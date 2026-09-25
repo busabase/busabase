@@ -19,6 +19,7 @@
     "autostart:allow-disable",
     "autostart:allow-is-enabled",
     "allow-busabase-sidecar-control",
-    "allow-request-desktop-restart"
+    "allow-request-desktop-restart",
+    "allow-agent-dependencies"
   ]
 }
