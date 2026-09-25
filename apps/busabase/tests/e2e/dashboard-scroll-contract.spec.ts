@@ -54,7 +54,13 @@ const cases: ScrollContractCase[] = [
     name: "Folder Detail at compact height",
     route: "/dashboard/folder/docs",
     scrollOwner: "folder-detail",
-    viewport: { width: 1024, height: 320 },
+    // Shorter than the other compact cases on purpose. This contract only means
+    // something while the pane actually overflows, and a Folder's content is
+    // just its child list (~260px for `docs`) now that the in-page title block
+    // lives in the topbar. At 320px the pane is 272px tall, so nothing
+    // overflowed and there was nothing for it to own. 240px leaves ~70px of
+    // real overflow to scroll through.
+    viewport: { width: 1024, height: 240 },
   },
 ];
 

@@ -53,9 +53,7 @@ test("Drive selection deduplicates folders and children and downloads one struct
   const folder = `zip-${suffix}`;
   const first = `first-${suffix}.txt`;
   await page.goto("/dashboard/local/drive/team-files");
-  await expect(
-    page.getByRole("heading", { name: "Team Files", exact: true }).first(),
-  ).toBeVisible();
+  await expect(page.locator("[data-topbar-current-item]")).toHaveText("Team Files");
   await uploadFolder(page, folder, [first]);
 
   await page.getByRole("button", { name: "Select Drive files" }).click();

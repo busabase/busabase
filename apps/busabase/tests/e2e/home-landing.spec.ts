@@ -72,7 +72,7 @@ test("entering a workspace destination adds exactly one contextual row, which li
   // It survives wandering off into a Base: the round trip "review something →
   // go check the data → back to Inbox" must not cost another trip through the menu.
   await page.goto("/dashboard/local/base/blog");
-  await expect(page.getByRole("heading", { name: "Posts" })).toBeVisible();
+  await expect(page.locator("[data-topbar-current-item]")).toHaveText("Posts");
   await expect(page.getByRole("link", { exact: true, name: "Inbox" })).toBeVisible();
 
   // Visiting a different destination REPLACES it rather than stacking, so the
@@ -88,7 +88,7 @@ test("Recently visited fills in from nodes you open", async ({ page }) => {
   await expect(page.getByText(/Bases and documents you open will show up here/)).toBeVisible();
 
   await page.goto("/dashboard/local/base/blog");
-  await expect(page.getByRole("heading", { name: "Posts" })).toBeVisible();
+  await expect(page.locator("[data-topbar-current-item]")).toHaveText("Posts");
 
   await page.goto("/dashboard/local/home");
   await expect(page.getByText(/Bases and documents you open will show up here/)).toHaveCount(0);

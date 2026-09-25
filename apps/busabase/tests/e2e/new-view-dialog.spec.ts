@@ -1,5 +1,5 @@
 import type { BaseVO, RecordVO, ViewVO } from "busabase-contract/types";
-import { expect, json, test } from "./_fixtures";
+import { dragSortableTo, expect, json, test } from "./_fixtures";
 
 test("new view opens in a modal without navigating away from the base", async ({ page }) => {
   await page.goto("/dashboard/local/base/blog?demo=blog");
@@ -14,13 +14,33 @@ test("new view opens in a modal without navigating away from the base", async ({
   await expect(dialog).toContainText("Name");
   await expect(dialog.locator(":focus")).toBeVisible();
   await expect(dialog.getByRole("button", { name: "Add View Now" })).toBeVisible();
+  await expect(page).toHaveURL(/\/dashboard\/local\/base\/blog\?demo=blog$/);
+
+  const fieldsEditor = dialog.getByTestId("new-view-shared-fields");
+  const draggableRows = fieldsEditor.locator(
+    '[data-view-field-slug]:has([data-testid^="view-field-drag-handle-"])',
+  );
+  const firstDraggableSlug = await draggableRows.first().getAttribute("data-view-field-slug");
+  const secondDraggableSlug = await draggableRows.nth(1).getAttribute("data-view-field-slug");
+  await dragSortableTo(
+    page,
+    draggableRows.first().getByRole("button", { name: /Drag to reorder/ }),
+    draggableRows.nth(1),
+  );
+  const reorderedSlugs = await draggableRows.evaluateAll((rows) =>
+    rows.map((row) => row.getAttribute("data-view-field-slug")),
+  );
+  expect(reorderedSlugs).toEqual([
+    secondDraggableSlug,
+    firstDraggableSlug,
+    ...reorderedSlugs.slice(2),
+  ]);
+
   // "Add View Request" (review-first) lives behind the split-button dropdown —
   // "Add View Now" is the primary immediate action by default.
   await dialog.getByRole("button", { name: "More submit options" }).click();
   await expect(dialog.getByRole("button", { name: "Add View Request" })).toBeVisible();
-  await expect(page).toHaveURL(/\/dashboard\/local\/base\/blog\?demo=blog$/);
-
-  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
 });
 

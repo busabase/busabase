@@ -3,7 +3,18 @@ import type { Locales } from "./i18n-types";
 
 export const baseLocale: Locales = "en";
 
-export const locales: Locales[] = ["en", "ja", "zh-CN"];
+export const locales: Locales[] = [
+  "en",
+  "ja",
+  "zh-CN",
+  "zh-TW",
+  "es",
+  "ko",
+  "pt",
+  "vi",
+  "fr",
+  "de",
+];
 
 export const isLocale = (locale: string): locale is Locales => (locales as string[]).includes(locale);
 

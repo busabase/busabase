@@ -133,7 +133,41 @@ test("selects an ACP model before the first prompt and renders the completed rep
   await capture(page, testInfo, "03-first-prompt-reply-complete");
 });
 
-test("stops a streaming turn (PUL-244) and can prompt again in the same session", async ({
+test("shows how to restore an archived Buda Agent (PUL-273)", async ({ page }, testInfo) => {
+  await connectBudaAgent(page);
+  await page.evaluate(() => window.localStorage.setItem("busabaseLocale", "zh-CN"));
+  await page.reload();
+
+  const archivedMessage = "This agent is archived. Restore it from Space Settings to use it again.";
+  await page.route("**/api/rpc/**/agents/sessions/prompt", async (route) => {
+    const request = route.request().postDataJSON() as { json?: { sessionId?: string } };
+    await route.fulfill({
+      contentType: "application/json",
+      status: 200,
+      body: JSON.stringify({
+        json: {
+          accepted: false,
+          sessionId: request.json?.sessionId ?? "ags_archived",
+          status: "failed",
+          promptRecorded: false,
+          message: archivedMessage,
+        },
+      }),
+    });
+  });
+
+  const composer = page.getByPlaceholder("给 Buda AI Agent 发消息…");
+  await composer.fill("你好");
+  await composer.locator("xpath=ancestor::form").locator('button[type="submit"]').click();
+
+  const alert = page.getByText(archivedMessage, { exact: true });
+  await expect(alert).toBeVisible();
+  await expect(alert).toHaveAttribute("role", "alert");
+  await expect(page.getByText("无法继续此会话。", { exact: true })).toHaveCount(0);
+  await capture(page, testInfo, "pul-273-archived-agent-recovery-guidance");
+});
+
+test("stops a streaming turn and keeps the follow-up separate (PUL-244, PUL-272)", async ({
   page,
 }, testInfo) => {
   await connectBudaAgent(page);
@@ -191,6 +225,12 @@ test("stops a streaming turn (PUL-244) and can prompt again in the same session"
   await composer.fill(followUp);
   await submit.click();
   await expect(page.locator(".is-user").getByText(followUp, { exact: true })).toBeVisible();
+  const userMessages = page.locator(".is-user");
+  await expect(userMessages).toHaveCount(2);
+  await expect(userMessages.nth(0)).toContainText(stopPrompt);
+  await expect(userMessages.nth(0)).not.toContainText(followUp);
+  await expect(userMessages.nth(1)).toContainText(followUp);
+  await expect(userMessages.nth(1)).not.toContainText(stopPrompt);
   await expect(
     page
       .locator(".is-assistant")
@@ -198,10 +238,10 @@ test("stops a streaming turn (PUL-244) and can prompt again in the same session"
   ).toBeVisible();
   await expect(activity).toBeHidden();
   await expect(composer).toBeEnabled();
-  await capture(page, testInfo, "17-stop-turn-follow-up-prompt-succeeds");
+  await capture(page, testInfo, "17-stop-turn-follow-up-stays-separate");
 });
 
-test("node side-panel chat stops an active turn and reuses the same session", async ({
+test("node side-panel chat keeps a post-cancel follow-up separate (PUL-272)", async ({
   page,
   request,
 }, testInfo) => {
@@ -268,6 +308,12 @@ test("node side-panel chat stops an active turn and reuses the same session", as
   await composer.fill(secondTurn);
   await composerForm.locator('button[type="submit"]').click();
   await expect(detail.locator(".is-user").getByText(secondTurn, { exact: true })).toBeVisible();
+  const userMessages = detail.locator(".is-user");
+  await expect(userMessages).toHaveCount(2);
+  await expect(userMessages.nth(0)).toContainText(firstTurn);
+  await expect(userMessages.nth(0)).not.toContainText(secondTurn);
+  await expect(userMessages.nth(1)).toContainText(secondTurn);
+  await expect(userMessages.nth(1)).not.toContainText(firstTurn);
   await expect(activity).toContainText("replying…");
 
   await controlPrompt("release-progress", secondTurn);

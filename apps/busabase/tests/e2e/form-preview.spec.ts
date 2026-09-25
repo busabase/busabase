@@ -43,7 +43,7 @@ test("Form preview keeps its iframe through fullscreen and offers a preview-only
 }, testInfo) => {
   await test.step("opens a fullscreen deep link without dropping the demo query", async () => {
     await page.goto(`${FORM_PATH}&fullscreen=1`);
-    await expect(page.getByRole("heading", { name: "Request a Consultation" })).toBeVisible();
+    await expect(page.locator("[data-topbar-current-item]")).toHaveText("Request a Consultation");
     await expect(page.getByRole("tab", { name: "Form" })).toHaveAttribute("data-state", "active");
     await expect(page.getByRole("button", { name: "Details" })).toBeVisible();
     const fullscreen = fullscreenPreview(page);
@@ -180,7 +180,7 @@ test.describe("mobile", () => {
     await page.goto(FORM_PATH);
     const header = page.locator("[data-dashboard-active-view] header");
     const topbar = page.locator("[data-dashboard-topbar]");
-    await expect(page.getByRole("heading", { name: "Request a Consultation" })).toBeVisible();
+    await expect(page.locator("[data-topbar-current-item]")).toHaveText("Request a Consultation");
     await expect(page.getByRole("tab", { name: "Form" })).toBeVisible();
     await expect(page.getByRole("tab", { name: "Code" })).toBeVisible();
     for (const surface of [header, topbar]) {

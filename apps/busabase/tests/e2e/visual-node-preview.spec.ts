@@ -39,7 +39,7 @@ test("Whiteboard keeps one editable canvas through main and pinned fullscreen", 
   page,
 }, testInfo) => {
   await page.goto(WHITEBOARD_PATH);
-  await expect(page.getByRole("heading", { name: "Product Launch Whiteboard" })).toBeVisible();
+  await expect(page.locator("[data-topbar-current-item]")).toHaveText("Product Launch Whiteboard");
   const surface = mainSurface(page, "whiteboard");
   const canvas = surface.locator("[data-whiteboard-canvas]");
   const editor = canvas.locator(".excalidraw");
@@ -121,7 +121,7 @@ test("Workflow preserves unsaved selection while fullscreen focuses the canvas",
   page,
 }, testInfo) => {
   await page.goto(WORKFLOW_PATH);
-  await expect(page.getByRole("heading", { name: "Lead Intake Workflow" })).toBeVisible();
+  await expect(page.locator("[data-topbar-current-item]")).toHaveText("Lead Intake Workflow");
   const surface = mainSurface(page, "workflow");
   const canvas = surface.locator("[data-workflow-canvas]");
   const flow = canvas.locator(".react-flow");
@@ -204,10 +204,11 @@ test.describe("mobile", () => {
       page,
     }, testInfo) => {
       await page.goto(path);
-      await expect(page.getByRole("heading", { name: heading })).toBeVisible();
-      const header = page.locator("[data-dashboard-active-view] header");
+      await expect(page.locator("[data-topbar-current-item]")).toHaveText(heading);
+      // Whiteboard/Workflow no longer draw an in-page header at all — identity
+      // moved into the topbar, which is the only chrome left to fit.
       const topbar = page.locator("[data-dashboard-topbar]");
-      for (const region of [header, topbar]) {
+      for (const region of [topbar]) {
         const metrics = await region.evaluate((element) => ({
           clientWidth: element.clientWidth,
           scrollWidth: element.scrollWidth,

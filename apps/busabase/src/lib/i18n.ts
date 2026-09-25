@@ -19,8 +19,9 @@ export const normalizeBusabaseLocale = (locale: string | undefined): CoreLocale 
     return "zh-TW";
   }
   if (normalized === "zh" || normalized.startsWith("zh-")) return "zh-CN";
-  if (normalized === "ja" || normalized.startsWith("ja-")) return "ja";
-  if (normalized === "en" || normalized.startsWith("en-")) return "en";
+  for (const language of ["ja", "ko", "es", "pt", "vi", "fr", "de", "en"] as const) {
+    if (normalized === language || normalized.startsWith(`${language}-`)) return language;
+  }
 
   return undefined;
 };

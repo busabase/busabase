@@ -107,7 +107,7 @@ test("dashboard routes render the review-first seeded experience", async ({ page
   ).toBeVisible();
 
   await page.goto("/dashboard/local/base/blog");
-  await expect(page.getByRole("heading", { name: "Posts" })).toBeVisible();
+  await expect(page.locator("[data-topbar-current-item]")).toHaveText("Posts");
   await expect(page.getByRole("link", { exact: true, name: "All" })).toBeVisible();
   await expect(page.getByRole("link", { exact: true, name: "Ready to publish" })).toBeVisible();
   await expect(page.getByRole("link", { exact: true, name: "Drafts" })).toBeVisible();
@@ -117,11 +117,11 @@ test("dashboard routes render the review-first seeded experience", async ({ page
 
   await page.getByRole("link", { exact: true, name: "Ready to publish" }).click();
   await expect(page).toHaveURL(/\/dashboard\/local\/base\/blog\/ready-to-publish$/);
-  await expect(page.getByRole("heading", { name: "Posts" })).toBeVisible();
+  await expect(page.locator("[data-topbar-current-item]")).toHaveText("Posts");
 
   await page.getByRole("link", { exact: true, name: "Drafts" }).click();
   await expect(page).toHaveURL(/\/dashboard\/local\/base\/blog\/drafts$/);
-  await expect(page.getByRole("heading", { name: "Posts" })).toBeVisible();
+  await expect(page.locator("[data-topbar-current-item]")).toHaveText("Posts");
 
   // Create a record as a Change Request (the "Submit Request" action, which lives
   // behind the split button's "More submit options" dropdown — "Submit Now" is the

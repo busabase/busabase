@@ -52,7 +52,8 @@ test("an active base wins when an archived base has the same slug", async ({ pag
 
   await page.goto(`/dashboard/local/base/${slug}`);
 
-  await expect(page.getByRole("heading", { name: activeName })).toBeVisible({
+  // The node's name lives in the topbar breadcrumb now, not in an in-page <h1>.
+  await expect(page.locator("[data-topbar-current-item]")).toHaveText(activeName, {
     timeout: RENDER_TIMEOUT,
   });
   await expect(page.getByRole("heading", { name: ARCHIVED_HEADING })).toHaveCount(0);
@@ -74,5 +75,5 @@ test("an active base wins when an archived base has the same slug", async ({ pag
   await expect(archivedState.getByText(archivedName, { exact: true })).toBeVisible();
   // The point of reaching it by id: restoring is offered right here.
   await expect(archivedState.getByRole("button", { name: "Restore" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: activeName })).toHaveCount(0);
+  await expect(page.locator("[data-topbar-current-item]")).not.toHaveText(activeName);
 });
