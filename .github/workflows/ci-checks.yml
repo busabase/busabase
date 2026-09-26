@@ -101,11 +101,15 @@ jobs:
       badge-sha: ${{ steps.badge-commit.outputs.sha }}
     steps:
       # On `pull_request` the default checkout is a detached merge ref, which
-      # cannot be pushed back to. Check out the PR's head branch so the badge
-      # commit lands on the release branch and merges with it.
+      # cannot be pushed back to. A release PR checks out its head branch by
+      # name instead, so the badge commit lands on the release branch and
+      # merges with it. Every other run keeps the default checkout: a pull
+      # request from a fork has no branch of that name in this repository, so
+      # fetching it by name failed before a single test ran, and the check
+      # blocked every outside contribution regardless of what it changed.
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.head_ref || github.ref_name }}
+          ref: ${{ (github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/') && github.event.pull_request.head.repo.full_name == github.repository) && github.head_ref || '' }}
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -126,7 +130,7 @@ jobs:
       # commit could not have carried itself.
       - name: Commit updated badge (release pull requests only)
         id: badge-commit
-        if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/')
+        if: github.event_name == 'pull_request' && startsWith(github.head_ref, 'release/') && github.event.pull_request.head.repo.full_name == github.repository
         run: |
           # Coverage % is not perfectly deterministic run-to-run (observed
           # oscillating between adjacent tenths of a percent on an unchanged
