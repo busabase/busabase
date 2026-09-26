@@ -18,6 +18,23 @@ import { docBodyKey } from "../../doc/handlers";
 import { requireSpaceManagerForDump } from "./_guard";
 import { DUMP_TABLE_REGISTRY } from "./table-registry";
 
+const isMissingStorageObjectError = (error: unknown, key: string): boolean => {
+  if (typeof error !== "object" || error === null) return false;
+
+  const storageError = error as {
+    code?: unknown;
+    message?: unknown;
+    name?: unknown;
+  };
+
+  return (
+    storageError.code === "ENOENT" ||
+    storageError.message === `Object not found: ${key}` ||
+    storageError.name === "NoSuchKey" ||
+    storageError.name === "NotFound"
+  );
+};
+
 /**
  * Cursor-paginated raw SELECT of a dump-eligible table, scoped explicitly to
  * the caller's context space (this is a bulk table scan, not a normal
@@ -83,15 +100,20 @@ export const exportDocBodies = async (input: ExportDocBodiesInput): Promise<Expo
     );
 
   const bodies = await Promise.all(
-    owned.map(async (row) => ({
-      nodeId: row.id,
-      // A Doc with no body object yet is a legitimate state (created, never
-      // written) — read it as an empty body, the same as the Doc domain's own
-      // reader does, rather than failing the whole batch over it.
-      markdown: (await storage.getObject(docBodyKey(row.id)).catch(() => Buffer.from(""))).toString(
-        "utf8",
-      ),
-    })),
+    owned.map(async (row) => {
+      const key = docBodyKey(row.id);
+      try {
+        return { nodeId: row.id, markdown: (await storage.getObject(key)).toString("utf8") };
+      } catch (error) {
+        // Docs may legitimately have no body object. Keep that case empty, but
+        // let all other storage failures reach the CLI so it can retry/report
+        // an incomplete backup instead of archiving data loss as success.
+        if (isMissingStorageObjectError(error, key)) {
+          return { nodeId: row.id, markdown: "" };
+        }
+        throw error;
+      }
+    }),
   );
 
   return { bodies };

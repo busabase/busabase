@@ -118,8 +118,19 @@ export class LocalStorage implements IStorage {
     try {
       await stat(filePath);
       return true;
-    } catch {
-      return false;
+    } catch (error) {
+      // A missing object is an ordinary false result. Permission and I/O
+      // errors are not evidence that the object is absent, so keep them visible
+      // to callers such as full-fidelity backup.
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === "ENOENT"
+      ) {
+        return false;
+      }
+      throw error;
     }
   }
 
