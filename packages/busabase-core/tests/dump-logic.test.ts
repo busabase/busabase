@@ -1,9 +1,11 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createRouterClient } from "@orpc/server";
+import { getLocalStoragePath } from "openlib/storage";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runWithBusabaseContext } from "../src/context";
+import { docBodyKey } from "../src/domains/doc/handlers";
 import { queryInChunks } from "../src/domains/dump/logic/import-logic";
 import { rootNodeIdForSpace } from "../src/logic/kernel";
 import { busabaseRouter } from "../src/router";
@@ -477,6 +479,48 @@ describe("dump domain logic — oRPC integration", () => {
       client.dump.exportDocBodies({ nodeIds: [victimDoc.node.id] }),
     );
     expect(bodies).toEqual([]);
+  });
+
+  it("exportDocBodies returns an empty body only when its storage object is absent", async () => {
+    const spaceId = "space_dump_missing_doc_body";
+    const doc = await inSpace(spaceId, () =>
+      client.docs.create({
+        autoMerge: true,
+        slug: "missing-body",
+        name: "Missing Body",
+        body: "This body is removed to exercise a confirmed missing object.",
+      }),
+    );
+
+    const bodyPath = getLocalStoragePath(docBodyKey(doc.node.id));
+    await rm(bodyPath);
+
+    const { bodies } = await inSpace(spaceId, () =>
+      client.dump.exportDocBodies({ nodeIds: [doc.node.id] }),
+    );
+    expect(bodies).toEqual([{ nodeId: doc.node.id, markdown: "" }]);
+  });
+
+  it("exportDocBodies propagates a non-missing document-body storage read failure", async () => {
+    const spaceId = "space_dump_doc_body_read_failure";
+    const doc = await inSpace(spaceId, () =>
+      client.docs.create({
+        autoMerge: true,
+        slug: "body-read-failure",
+        name: "Body Read Failure",
+        body: "This non-empty body must not be silently replaced.\n",
+      }),
+    );
+
+    // A directory at the object's path still passes LocalStorage.objectExists,
+    // but readFile rejects it with a filesystem error rather than "not found".
+    const bodyPath = getLocalStoragePath(docBodyKey(doc.node.id));
+    await rm(bodyPath);
+    await mkdir(bodyPath);
+
+    await expect(
+      inSpace(spaceId, () => client.dump.exportDocBodies({ nodeIds: [doc.node.id] })),
+    ).rejects.toThrow();
   });
 
   // ── fieldValues FK violation surfaces a clear CONFLICT, not a raw 500 ──
