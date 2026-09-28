@@ -26,6 +26,7 @@ npx busabase-cli health
 | `--output`     | —                    | `text` (`json` for raw, `table` for aligned columns) |
 | `--profile`    | `BUSABASE_PROFILE`   | _(the active account)_   |
 | `--config`     | `BUSABASE_CONFIG`    | `~/.busabase/.env`       |
+| `--playbook`   | `BUSABASE_PLAYBOOK`  | _(none)_ — the playbook you are following, `kind:nodeId[:key]` from `playbooks search`; recorded on the change request |
 
 Config is read from flags, then env vars, then `~/.busabase/.env` (auto-loaded —
 no need to `source` it), then the default. An exported env var overrides the file.

@@ -3,6 +3,10 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, extname } from "node:path";
 import { customAgentPromptsSchema } from "busabase-contract/contract/node-agent-prompt-schemas";
+import {
+  BUSABASE_PLAYBOOK_HEADER,
+  parsePlaybookRef,
+} from "busabase-contract/contract/playbook-schemas";
 import { BUSABASE_TASKS, TASK_SUPERSEDED_MCP_TOOLS } from "busabase-contract/tasks";
 import {
   type BusabaseClient,
@@ -89,6 +93,11 @@ import { type CheckLayer, runCheck } from "./package/check.js";
 import { runExport, runIndex, runInstall } from "./package/commands.js";
 import { paginateAll } from "./paginate.js";
 import {
+  type PlaybookKindFlag,
+  PROMPTS_UNSUPPORTED,
+  playbooksSearchCommand,
+} from "./playbooks-command.js";
+import {
   QR_DEFAULT_SIZE,
   QR_DISPLAY_HINT,
   QR_MAX_SIZE,
@@ -159,7 +168,10 @@ function configuredOutput(): OutputFormat | undefined {
  * Pinning the target here — ahead of the first {@link loadDotEnvFile} — means every later
  * read *and write* in this process (including login's token rotation) lands on the same file.
  */
-function resolveConfig(opts: OptionValues): ResolvedConfig {
+function resolveConfig(
+  opts: OptionValues,
+  { strict = true }: { strict?: boolean } = {},
+): ResolvedConfig {
   setActiveCredentialTarget(
     resolveCredentialTarget({
       profile: opts.profile as string | undefined,
@@ -192,6 +204,7 @@ function resolveConfig(opts: OptionValues): ResolvedConfig {
       process.env.BUSABASE_SPACE_ID ??
       file.BUSABASE_SPACE_ID,
     sourceChannel: "cli",
+    playbook: resolvePlaybook(opts.playbook as string | undefined, strict),
     output: (opts.output as OutputFormat | undefined) ?? configuredOutput() ?? "text",
     // One wrapper serves the typed client (`createBusabaseClient` takes a
     // `fetch`) and `rawFetch`, so health / openapi / `api` retry the same way
@@ -199,6 +212,36 @@ function resolveConfig(opts: OptionValues): ResolvedConfig {
     fetch: withRetry(fetch, { retries }),
   };
 }
+
+const PLAYBOOK_FORMAT_HINT =
+  "expected `skill:<nodeId>` or `prompt:<nodeId>:<key>` (copy it from `busabase-cli playbooks search`)";
+
+/**
+ * `--playbook` beats `BUSABASE_PLAYBOOK`. The flag is already validated by its
+ * option parser; the env var is checked here so a malformed value fails loudly
+ * instead of the server silently dropping it. `strict: false` is only for the
+ * error path, which must be able to build a config for its message even when
+ * this very check is what failed.
+ */
+function resolvePlaybook(flag: string | undefined, strict: boolean): string | undefined {
+  if (flag) return flag;
+  const fromEnv = process.env.BUSABASE_PLAYBOOK?.trim();
+  if (!fromEnv) return undefined;
+  if (!parsePlaybookRef(fromEnv)) {
+    if (!strict) return undefined;
+    throw new CliOutcomeError(
+      "USAGE",
+      `Invalid BUSABASE_PLAYBOOK "${fromEnv}": ${PLAYBOOK_FORMAT_HINT}.`,
+    );
+  }
+  return fromEnv;
+}
+
+const parsePlaybookOption = (value: string): string => {
+  const trimmed = value.trim();
+  if (!parsePlaybookRef(trimmed)) throw new InvalidArgumentError(PLAYBOOK_FORMAT_HINT);
+  return trimmed;
+};
 
 /** Enough to ride out a rate limiter or a proxy blip; not enough to hide a real outage. */
 const DEFAULT_RETRIES = 2;
@@ -222,6 +265,7 @@ const GLOBAL_LONG_FLAGS = new Set([
   "--max-items",
   "--wait",
   "--wait-timeout",
+  "--playbook",
 ]);
 
 function addGlobalFlags(cmd: Command): Command {
@@ -256,7 +300,12 @@ function addGlobalFlags(cmd: Command): Command {
       "--wait",
       "after submitting a Change Request, block until a reviewer merges or rejects it",
     )
-    .option("--wait-timeout <seconds>", "budget for --wait (default 300)", parsePositiveInt);
+    .option("--wait-timeout <seconds>", "budget for --wait (default 300)", parsePositiveInt)
+    .option(
+      "--playbook <kind:nodeId[:key]>",
+      "the playbook you are following (from `playbooks search`); recorded on the change request (env BUSABASE_PLAYBOOK)",
+      parsePlaybookOption,
+    );
 }
 
 const parseNum = (value: string): number => {
@@ -425,6 +474,7 @@ async function rawFetch(
       ...(config.apiKey ? { authorization: `Bearer ${config.apiKey}` } : {}),
       ...(config.spaceId ? { "x-busabase-space": config.spaceId } : {}),
       "x-busabase-channel": "cli",
+      ...(config.playbook ? { [BUSABASE_PLAYBOOK_HEADER]: config.playbook } : {}),
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
@@ -1163,6 +1213,10 @@ function commandsSection(program: Command, showAll = false): string {
 }
 
 const HELP_FOOTER = `
+Any task: first run \`busabase-cli playbooks search --query "…"\` (2–5 phrasings of
+what the user wants) to find the skill or custom prompt this space already defines
+for it, then \`playbooks get\` the one that fits and follow it.
+
 Config is read from flags, then env vars, then ~/.busabase/.env (auto-loaded — no
 need to source it). An exported env var overrides the file.
 
@@ -2116,7 +2170,7 @@ Examples:
 
   addGlobalFlags(nodes.command("set-agent-prompts"))
     .description(
-      "Set a node's custom scenario prompts, shown in the Agent Prompts dialog instead of the node type's generic ones. Capability prompts (what the node type can actually do) are unaffected.",
+      "Set a node's custom scenario prompts. They are ADDED after the node type's built-in scenario prompts in the Agent Prompts dialog — the built-ins are always kept — and agents find them with `playbooks search`. Capability prompts (what the node type can actually do) are unaffected.",
     )
     .requiredOption("--node-id <id>", "node id to customize")
     .requiredOption(
@@ -2398,7 +2452,7 @@ Examples:
     .option("--offset <n>", "results offset", parseNum)
     .option(
       "--sources <sources...>",
-      'restrict which content to search: "records", "files", and/or "names" (default: all three)',
+      'restrict which content to search: "records", "files", "names", and/or "nodes" (node content: Doc/HTML/whiteboard/workflow text) (default: all)',
     )
     .action(
       runAction(state, (client, opts) =>
@@ -2406,20 +2460,22 @@ Examples:
           query: opts.query as string,
           limit: opts.limit as number | undefined,
           offset: opts.offset as number | undefined,
-          sources: opts.sources as ("records" | "files" | "names")[] | undefined,
+          sources: opts.sources as ("records" | "files" | "names" | "nodes")[] | undefined,
         }),
       ),
     );
 
   addGlobalFlags(program.command("grep"))
     .description(
-      "Search files, Docs, and Base records with one pattern (unified grep; use `assets grep` for files-only)",
+      "Search files, node content, Base records, and custom prompts with one pattern (unified grep; use `assets grep` for files-only)",
     )
     .requiredOption("--pattern <regex>", "literal or regex pattern")
     .option("--flags <flags>", 'RegExp flags, e.g. "i" for case-insensitive')
-    .option(
-      "--sources <sources...>",
-      'sources to scan: "files", "nodes", and/or "records" (default: all three)',
+    .addOption(
+      new Option(
+        "--sources <sources...>",
+        'sources to scan: "files", "nodes" (Doc/HTML/whiteboard/workflow content), "records", and/or "prompts" (custom agent prompts, every locale) (default: all four)',
+      ).choices(["files", "nodes", "records", "prompts"]),
     )
     .option("--asset-ids <ids...>", "files scope: specific asset ids")
     .option("--drive-path <path>", "files scope: Drive/Skill mounted path prefix")
@@ -2437,6 +2493,20 @@ Examples:
       parsePositiveInt,
     )
     .option("--context-lines <n>", "lines of before/after context (default 0, cap 10)", parseNum)
+    .addHelpText(
+      "after",
+      `
+Examples:
+  busabase-cli grep --pattern "Weekly Report" --output json
+  busabase-cli grep --pattern "refund" --flags i --sources files --drive-path "policies/"
+  busabase-cli grep --pattern "ACME" --sources records --base-slugs contracts
+
+Each file match carries \`owner\`: the skill or drive the file belongs to, with its
+folder path. Every requested source gets a fair share of --max-matches, so one
+noisy source cannot hide the rest. When the result says truncated, narrow the
+scope instead of raising --max-matches: pick --sources, then --base-slugs for
+records or --drive-path for files.`,
+    )
     .action(
       runAction(state, (client, opts) => {
         const filesScope =
@@ -2464,13 +2534,96 @@ Examples:
         return client.grep({
           pattern: opts.pattern as string,
           flags: opts.flags as string | undefined,
-          sources: opts.sources as ("files" | "nodes" | "records")[] | undefined,
+          sources: opts.sources as ("files" | "nodes" | "records" | "prompts")[] | undefined,
           scope:
             filesScope || nodesScope || recordsScope
               ? { files: filesScope, nodes: nodesScope, records: recordsScope }
               : undefined,
           maxMatches: opts.maxMatches as number | undefined,
           contextLines: opts.contextLines as number | undefined,
+        });
+      }),
+    );
+
+  const playbooks = program
+    .command("playbooks")
+    .description("Find and open the skills and custom prompts this space defines for a job");
+  addGlobalFlags(playbooks.command("search"))
+    .description(
+      "Call first on every user instruction: find the skills and custom node prompts (playbooks) this space already defines for the job",
+    )
+    .option(
+      "--query <phrasing>",
+      "one phrasing of the user's intent; repeat 2–5 times, in the user's language AND English (none = browse everything, nearest first)",
+      (value: string, previous: string[]) => [...previous, value],
+      [] as string[],
+    )
+    .addOption(
+      new Option(
+        "--kinds <kinds...>",
+        'restrict to "skill" and/or "prompt" (default: both)',
+      ).choices(["skill", "prompt"]),
+    )
+    .option("--near-node-id <id>", "the node the user is on; playbooks nearest to it rank first")
+    .option("--in-node-id <id>", "only playbooks on this node or inside its subtree")
+    .option("--limit <n>", "max items, 1–50 (default 10; browse default 30)", parsePositiveInt)
+    .option("--locale <locale>", 'locale for prompt labels, e.g. "zh-CN" (default en)')
+    .addHelpText(
+      "after",
+      `
+Examples:
+  busabase-cli playbooks search --query "记录客户拜访" --query "log customer visit" --query "visit" --output json
+  busabase-cli playbooks search --query "weekly report" --near-node-id nod_123
+
+If an item fits, \`playbooks get\` it and follow it, then name it in your reply.
+If nothing fits, do the work yourself. The user's explicit words override a
+playbook, and a playbook never authorises approving or merging a change request.
+
+Against a server older than this command, it falls back to matching skill names
+and descriptions only, warns on stderr, and reports coverage.prompts as
+"${PROMPTS_UNSUPPORTED}" — an empty result then does NOT mean there are no playbooks.`,
+    )
+    .action(
+      runAction(state, (client, opts) =>
+        playbooksSearchCommand(client, {
+          queries: (opts.query as string[] | undefined) ?? [],
+          kinds: opts.kinds as PlaybookKindFlag[] | undefined,
+          nearNodeId: opts.nearNodeId as string | undefined,
+          inNodeId: opts.inNodeId as string | undefined,
+          limit: opts.limit as number | undefined,
+          locale: opts.locale as string | undefined,
+        }),
+      ),
+    );
+  addGlobalFlags(playbooks.command("get"))
+    .description(
+      "Open one playbook: a custom prompt rendered exactly as Ask Agent sends it, or a skill's SKILL.md plus its file list",
+    )
+    .addOption(
+      new Option("--kind <kind>", "playbook kind from `playbooks search`")
+        .choices(["prompt", "skill"])
+        .makeOptionMandatory(),
+    )
+    .requiredOption("--node-id <id>", "nodeId from `playbooks search`")
+    .option("--key <key>", "prompt key from `playbooks search` (required for --kind prompt)")
+    .option("--locale <locale>", 'locale to render the prompt in, e.g. "zh-CN" (default en)')
+    .addHelpText(
+      "after",
+      `
+Examples:
+  busabase-cli playbooks get --kind prompt --node-id nod_456 --key log-visit
+  busabase-cli playbooks get --kind skill --node-id nod_789`,
+    )
+    .action(
+      runAction(state, (client, opts) => {
+        if (opts.kind === "prompt" && !opts.key) {
+          throw new CliOutcomeError("VALIDATION", "--key is required with --kind prompt");
+        }
+        return client.playbooks.get({
+          kind: opts.kind as PlaybookKindFlag,
+          nodeId: opts.nodeId as string,
+          ...(opts.key ? { key: opts.key as string } : {}),
+          ...(opts.locale ? { locale: opts.locale as string } : {}),
         });
       }),
     );
@@ -3015,7 +3168,7 @@ export async function runCli(argv: string[]): Promise<number> {
     // an agent hitting a 401 mid-task recovers without reverse-engineering the
     // stderr prose. See content/spec/cli-first-login-ux.md in apps/busabase.
     if (classified.code === "UNAUTHORIZED" || classified.code === "FORBIDDEN") {
-      const hintConfig = state.config ?? resolveConfig({});
+      const hintConfig = state.config ?? resolveConfig({}, { strict: false });
       const profile = isMultiProfile() ? activeCredentialTarget().profile : undefined;
       // The command's own contract id when it has one; otherwise resolve the last
       // request off the wire, which is the only way to name the endpoint behind a
@@ -3034,7 +3187,7 @@ export async function runCli(argv: string[]): Promise<number> {
     // `--output json` already reads from; the prose still goes to stderr, so a
     // human sees exactly what they saw before and a pipeline sees neither twice.
     if (json) console.log(JSON.stringify(errorEnvelope(classified), null, 2));
-    console.error(explainError(error, state.config ?? resolveConfig({})));
+    console.error(explainError(error, state.config ?? resolveConfig({}, { strict: false })));
     return classified.exitCode;
   }
 }

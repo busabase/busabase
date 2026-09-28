@@ -168,6 +168,30 @@ describe("createBusabaseClient request assembly", () => {
     expect(requests[0]?.headers.get("x-busabase-channel")).toBe("automation");
   });
 
+  it("sends the playbook header (trimmed) when a playbook is configured", async () => {
+    const { fetchImpl, requests } = captureFetch();
+    const client = createBusabaseClient({
+      baseUrl: "https://busabase.com",
+      fetch: fetchImpl,
+      playbook: "  prompt:nod_123:log-visit ",
+    });
+    await client.bases.list({});
+    expect(requests[0]?.headers.get("x-busabase-playbook")).toBe("prompt:nod_123:log-visit");
+  });
+
+  it("sends no playbook header when the playbook is unset or blank", async () => {
+    for (const playbook of [undefined, "", "   "]) {
+      const { fetchImpl, requests } = captureFetch();
+      const client = createBusabaseClient({
+        baseUrl: "https://busabase.com",
+        fetch: fetchImpl,
+        playbook,
+      });
+      await client.bases.list({});
+      expect(requests[0]?.headers.get("x-busabase-playbook")).toBeNull();
+    }
+  });
+
   it("sends no auth header for an open local server", async () => {
     const { fetchImpl, requests } = captureFetch();
     const client = createBusabaseClient({ baseUrl: "http://localhost:15419", fetch: fetchImpl });
