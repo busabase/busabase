@@ -127,16 +127,21 @@ describe("busabase pglite integration flow", () => {
     const updatedSkillMd = await skills.readSkillFile(skill.node.id, "SKILL.md");
     expect(updatedSkillMd.content).toContain("Review checklist");
 
+    const { records: seededRecords } = await base.listRecordsPaged({ limit: 100 });
+    expect(seededRecords.length).toBeGreaterThanOrEqual(5);
+    // Query each Base directly because a workspace-wide page can omit its records.
     const { records: socialRecords } = await base.listRecordsPaged({
       baseId: socialBase.id,
-      limit: 100,
+      limit: 1,
     });
-    expect(socialRecords.length).toBeGreaterThan(0);
+    expect(socialRecords).toHaveLength(1);
+    expect(socialRecords[0]?.base.slug).toBe("social-content");
     const { records: newsletterRecords } = await base.listRecordsPaged({
       baseId: newsletterBase.id,
-      limit: 100,
+      limit: 1,
     });
     const seededNewsletter = newsletterRecords[0];
+    expect(seededNewsletter?.base.slug).toBe("newsletter");
     expect(seededNewsletter?.base.fields.find((field) => field.slug === "body")?.type).toBe("html");
     expect(String(seededNewsletter?.headCommit.payload.body)).toContain("<article>");
 
