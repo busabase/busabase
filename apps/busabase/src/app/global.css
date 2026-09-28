@@ -4,6 +4,11 @@
 @import "fumadocs-ui/css/preset.css";
 @import "../../../../packages/openlib/shared.css";
 
+/* Fumadocs 16.14.5 applies this logical negative inset utility internally. */
+@utility -inset-s-4 {
+  inset-inline-start: calc(var(--spacing) * -4);
+}
+
 @source "../../src";
 @source "../../content";
 @source "../../../../packages/kui";

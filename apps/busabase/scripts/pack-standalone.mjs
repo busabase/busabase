@@ -75,6 +75,28 @@ for (const [from, to] of copies) {
 // (pglite data + file storage default to cwd-relative `.data/`). Never ship it.
 await rm(resolve(standaloneApp, ".data"), { recursive: true, force: true });
 
+// Next may trace dotenv files read during config evaluation into the standalone
+// tree. They are local build inputs, never runtime assets for the published CLI.
+async function removeEnvironmentFiles(root) {
+  let entries;
+  try {
+    entries = readdirSync(root, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    const full = resolve(root, entry.name);
+    if (entry.isDirectory()) {
+      await removeEnvironmentFiles(full);
+    } else if (entry.name !== ".env.example" && /^\.env(?:\..+)?$/.test(entry.name)) {
+      await rm(full, { force: true });
+      console.log(`pack-standalone: remove ${full}`);
+    }
+  }
+}
+
+await removeEnvironmentFiles(resolve(appRoot, ".next/standalone"));
+
 // --- Rewrite Turbopack's hashed external module ids -----------------------
 // Turbopack emits `serverExternalPackages` reached through `transpilePackages`
 // (e.g. @electric-sql/pglite, @aws-sdk/client-s3, shiki) as a HASHED specifier
@@ -87,9 +109,9 @@ await rm(resolve(standaloneApp, ".data"), { recursive: true, force: true });
 // name directly in the built chunk source (survives packing; bundler-agnostic).
 const standaloneRoot = resolve(appRoot, ".next/standalone");
 const nodeModules = resolve(standaloneRoot, "node_modules");
-// Matches a bare `<name>-<16hex>` token (scoped or not), with no string
-// delimiters so it also catches subpath imports like `<name>-<hash>/worker`.
-const HASH_TOKEN = /(?:@[\w.-]+\/)?[\w.-]+-[0-9a-f]{16}/g;
+// Turbopack emits these as string-literal module specifiers. Capture the package
+// separately from an optional subpath so `pkg-<hash>/worker` becomes `pkg/worker`.
+const HASH_SPECIFIER = /(["'`])((?:@[\w.-]+\/)?[\w.-]+-[0-9a-f]{16})((?:\/[^"'`]*)?)\1/g;
 const serverDir = resolve(standaloneApp, ".next/server");
 
 /** Walk every built `.js`/`.mjs` chunk under the server dir. */
@@ -110,36 +132,106 @@ function eachChunk(dir, fn) {
   }
 }
 
-// 1. Collect hashed tokens whose de-hashed package actually exists on disk.
-const rewrites = new Map();
-eachChunk(serverDir, (file) => {
-  for (const token of readFileSync(file, "utf8").matchAll(HASH_TOKEN)) {
-    const spec = token[0];
-    if (rewrites.has(spec)) continue;
-    const realName = spec.replace(/-[0-9a-f]{16}$/, "");
-    if (realName !== spec && existsSync(resolve(nodeModules, realName))) {
-      rewrites.set(spec, realName);
+/** Find every traced copy of a package, including copies nested under workspaces. */
+function findTracedPackages(root, packageName, found = []) {
+  let entries;
+  try {
+    entries = readdirSync(root, { withFileTypes: true });
+  } catch {
+    return found;
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const full = resolve(root, entry.name);
+    if (entry.name === "node_modules") {
+      const candidate = resolve(full, packageName);
+      if (existsSync(resolve(candidate, "package.json"))) found.push(candidate);
     }
+    findTracedPackages(full, packageName, found);
+  }
+  return found;
+}
+
+/** Resolve a dependency as Node would from a traced package, then fall back to any traced copy. */
+function findDependency(packageDir, packageName) {
+  let current = packageDir;
+  while (current.startsWith(standaloneRoot)) {
+    const candidate = resolve(current, "node_modules", packageName);
+    if (existsSync(resolve(candidate, "package.json"))) return candidate;
+    const parent = dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  return findTracedPackages(standaloneRoot, packageName)[0];
+}
+
+/**
+ * Promote a nested traced package into the standalone root. npm drops symlinks,
+ * so copy real files and recursively promote runtime dependencies as well.
+ */
+async function promotePackage(packageName, sourceDir, promoting = new Set()) {
+  const targetDir = resolve(nodeModules, packageName);
+  if (existsSync(resolve(targetDir, "package.json"))) return;
+  if (promoting.has(packageName)) return;
+  promoting.add(packageName);
+
+  await cp(sourceDir, targetDir, { recursive: true, dereference: true });
+  const manifest = JSON.parse(readFileSync(resolve(sourceDir, "package.json"), "utf8"));
+  const dependencies = {
+    ...manifest.dependencies,
+    ...manifest.optionalDependencies,
+  };
+  for (const dependency of Object.keys(dependencies)) {
+    if (existsSync(resolve(nodeModules, dependency, "package.json"))) continue;
+    const dependencyDir = findDependency(sourceDir, dependency);
+    if (dependencyDir) await promotePackage(dependency, dependencyDir, promoting);
+  }
+  promoting.delete(packageName);
+  console.log(`pack-standalone: promote ${packageName} from ${sourceDir}`);
+}
+
+// 1. Collect every hashed external. If Next traced the real package only into a
+// nested workspace node_modules, promote it so the rewritten bare import resolves.
+const hashedPackages = new Map();
+eachChunk(serverDir, (file) => {
+  for (const match of readFileSync(file, "utf8").matchAll(HASH_SPECIFIER)) {
+    const hashedName = match[2];
+    const realName = hashedName.replace(/-[0-9a-f]{16}$/, "");
+    if (!hashedPackages.has(hashedName)) hashedPackages.set(hashedName, realName);
   }
 });
 
-// 2. Replace every occurrence of those tokens with the real package name.
+for (const [hashedName, realName] of hashedPackages) {
+  if (!existsSync(resolve(nodeModules, realName, "package.json"))) {
+    const traced = findTracedPackages(standaloneRoot, realName)[0];
+    if (!traced) {
+      throw new Error(
+        `pack-standalone: ${hashedName} references ${realName}, but Next did not trace that package`,
+      );
+    }
+    await promotePackage(realName, traced);
+  }
+}
+
+// 2. Replace every occurrence of those hashed package names with the real name.
 let rewritten = 0;
-if (rewrites.size > 0) {
+if (hashedPackages.size > 0) {
   eachChunk(serverDir, (file) => {
     const src = readFileSync(file, "utf8");
     let out = src;
-    for (const [spec, realName] of rewrites) out = out.split(spec).join(realName);
+    for (const [hashedName, realName] of hashedPackages) {
+      out = out.split(hashedName).join(realName);
+    }
     if (out !== src) {
       writeFileSync(file, out);
       rewritten++;
     }
   });
-  for (const [spec, realName] of rewrites) {
-    console.log(`pack-standalone: rewrite ${spec} -> ${realName}`);
+  for (const [hashedName, realName] of hashedPackages) {
+    console.log(`pack-standalone: rewrite ${hashedName} -> ${realName}`);
   }
   console.log(
-    `pack-standalone: rewrote ${rewrites.size} hashed external(s) across ${rewritten} chunk(s)`,
+    `pack-standalone: rewrote ${hashedPackages.size} hashed external(s) across ${rewritten} chunk(s)`,
   );
 }
 
