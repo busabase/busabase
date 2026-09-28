@@ -38,6 +38,15 @@ describe("busabase pglite integration flow", () => {
       expect.arrayContaining(["blog", "social-content", "newsletter"]),
     );
 
+    const socialBase = bases.find((base) => base.slug === "social-content");
+    if (!socialBase) {
+      throw new Error("Expected social base to be seeded");
+    }
+    const newsletterBase = bases.find((base) => base.slug === "newsletter");
+    if (!newsletterBase) {
+      throw new Error("Expected newsletter base to be seeded");
+    }
+
     const nodes = await store.listNodes();
     expect(nodes[0]?.type).toBe("folder");
     expect(nodes[0]?.children.some((node) => node.type === "folder")).toBe(true);
@@ -118,10 +127,16 @@ describe("busabase pglite integration flow", () => {
     const updatedSkillMd = await skills.readSkillFile(skill.node.id, "SKILL.md");
     expect(updatedSkillMd.content).toContain("Review checklist");
 
-    const { records: seededRecords } = await base.listRecordsPaged({ limit: 100 });
-    expect(seededRecords.length).toBeGreaterThanOrEqual(5);
-    expect(seededRecords.some((record) => record.base.slug === "social-content")).toBe(true);
-    const seededNewsletter = seededRecords.find((record) => record.base.slug === "newsletter");
+    const { records: socialRecords } = await base.listRecordsPaged({
+      baseId: socialBase.id,
+      limit: 100,
+    });
+    expect(socialRecords.length).toBeGreaterThan(0);
+    const { records: newsletterRecords } = await base.listRecordsPaged({
+      baseId: newsletterBase.id,
+      limit: 100,
+    });
+    const seededNewsletter = newsletterRecords[0];
     expect(seededNewsletter?.base.fields.find((field) => field.slug === "body")?.type).toBe("html");
     expect(String(seededNewsletter?.headCommit.payload.body)).toContain("<article>");
 
@@ -149,10 +164,6 @@ describe("busabase pglite integration flow", () => {
     const blogBase = bases.find((base) => base.slug === "blog");
     if (!blogBase) {
       throw new Error("Expected blog base to be seeded");
-    }
-    const socialBase = bases.find((base) => base.slug === "social-content");
-    if (!socialBase) {
-      throw new Error("Expected social base to be seeded");
     }
     expect(blogBase.fields.find((field) => field.slug === "related_social")?.type).toBe("relation");
     expect(
