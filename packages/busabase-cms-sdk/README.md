@@ -143,3 +143,44 @@ and the four `BUSABASE_CMS_{POSTS,PAGES,CATEGORIES,TAGS}_BASE_SLUG` per-deploy o
 `/blog/[...slug]` routes, and `createCmsPageHelpers` resolves a Page plus its metadata. The Page
 body sanitizer stays in `busabase-cms-sdk/fumadocs` (`getSanitizedCmsPageBody`) so that consumers of
 `busabase-cms-sdk/integration` do not pull remark/rehype/sanitize-html into their bundle.
+
+### Page `<head>` metadata: one call per route
+
+hreflang must list only the locales a piece of content **really** exists in — advertising
+`hreflang="ja"` for a post that has no Japanese version (while its canonical points at the
+English original) makes Google discard the whole cluster. The SDK owns that fact, so it hands a
+route everything its `<head>` needs in one object, `CmsContentMetadataInput`:
+`title`, `description`, `absoluteTitle` (an editor-authored `seo-title` is a complete title and
+bypasses the app's title template), `path`, `lang` / `canonicalLang` / `contentLang`,
+`availableLocales`, and an optional `coverImageUrl`.
+
+```ts
+const resolver = createCmsPostResolver({
+  integration: cms,
+  localSource: blogSource,          // fumadocs loader, for bundled MDX posts
+  supportedLocales: ["en", "zh-CN", "ja"],
+  defaultLocale: "en",              // detects fumadocs' fallbackLanguage copies
+});
+
+export async function generateMetadata({ params }) {
+  const { lang, slug } = await params;
+  const input = await resolver.resolvePostMetadataInput(lang, slug.join("/"));
+  if (!input) return {};
+  // The field names match a metadata helper's options, so the object spreads straight in.
+  return myContentMetadataHelper({ ...input, type: "article" });
+}
+```
+
+- `resolvePostMetadataInput(lang, slugPath, { localeFallback })` — resolves the post (same
+  cascade and request cache as `resolvePostPage`) and probes its real locales. Pass
+  `{ localeFallback: false }` for a route that 404s untranslated URLs instead of serving English.
+- `buildCmsContentMetadataInput(...)` (root export) — the same object from content you resolved
+  yourself, e.g. with an extra non-CMS source layered on top.
+- Pages: `createCmsPageHelpers(...).generateCmsPageMetadata(page, lang)` is already the one call.
+  The injected helper is typed `(options: CmsContentPageMetadataOptions) => …`, where
+  `availableLocales` is always present, so it can be a helper that *requires* the locale set.
+- Tag/Category archives: `getCmsTaxonomyLocales(allTaxonomies, taxonomy, supportedLocales)`.
+
+The sitemap-side builders (`buildCmsAlternateLanguages`, `buildCmsAlternates`) must produce the
+same hreflang map as the app's `<head>` helper — if you keep both, test them against each other
+with identical inputs (all locales, a subset, a single non-default locale, default only).
