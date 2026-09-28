@@ -5,7 +5,7 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SUBMITTED_BY } from "~/domains/review/utils/submitted-by";
-import type { ReadFileResult } from "../types/file-tree";
+import type { CreateFileTreeChangeRequestResult, ReadFileResult } from "../types/file-tree";
 import { useFileTreeController } from "./use-file-tree-controller";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT =
@@ -47,6 +47,17 @@ const readResult = (overrides: Partial<ReadFileResult> = {}): ReadFileResult => 
   ...overrides,
 });
 
+/**
+ * A created change request, as the contract returns one.
+ *
+ * Cast rather than spelled out: the real VO carries twenty fields and these
+ * tests read exactly one of them (`id`, to assert the navigation). The cast
+ * lives in the test double only — the PROP is pinned to the contract, which is
+ * what makes a future shape change fail the build.
+ */
+const changeRequestResult = (id: string) =>
+  ({ id }) as unknown as CreateFileTreeChangeRequestResult;
+
 const roots: Root[] = [];
 
 const renderHook = <T>(hook: () => T) => {
@@ -87,7 +98,7 @@ const createOptions = (overrides: Partial<Parameters<typeof useFileTreeControlle
   entityLabel: "Drive" as const,
   fileTree,
   onReadFile: vi.fn(async () => readResult({ content: "# Readme", contentHash: "hash-1" })),
-  onCreateChangeRequest: vi.fn(async () => ({ id: "cr-1" })),
+  onCreateChangeRequest: vi.fn(async () => changeRequestResult("cr-1")),
   onChangeRequestCreated: vi.fn(),
   ...overrides,
 });
@@ -95,7 +106,7 @@ const createOptions = (overrides: Partial<Parameters<typeof useFileTreeControlle
 describe("useFileTreeController", () => {
   it("keeps the content hash through file loading and update submission", async () => {
     const read = deferred<ReadFileResult>();
-    const create = deferred<{ id: string }>();
+    const create = deferred<CreateFileTreeChangeRequestResult>();
     const onReadFile = vi.fn(() => read.promise);
     const onCreateChangeRequest = vi.fn(() => create.promise);
     const onChangeRequestCreated = vi.fn();
@@ -150,7 +161,7 @@ describe("useFileTreeController", () => {
     expect(onCreateChangeRequest).toHaveBeenCalledTimes(1);
 
     await act(async () => {
-      create.resolve({ id: "cr-update" });
+      create.resolve(changeRequestResult("cr-update"));
       await create.promise;
     });
     expect(result.current.openFile).toBeNull();
@@ -230,7 +241,7 @@ describe("useFileTreeController", () => {
         assetUrl: "/api/test/storage/logo.png",
       }),
     );
-    const onCreateChangeRequest = vi.fn(async () => ({ id: "cr-1" }));
+    const onCreateChangeRequest = vi.fn(async () => changeRequestResult("cr-1"));
     const { result } = renderHook(() =>
       useFileTreeController(createOptions({ onReadFile, onCreateChangeRequest })),
     );

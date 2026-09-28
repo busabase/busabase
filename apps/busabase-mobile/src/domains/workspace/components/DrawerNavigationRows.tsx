@@ -8,7 +8,7 @@ import { useTokens } from "~/theme/use-tokens";
 import { isMobileNodePathActive } from "../utils/node-navigation";
 import type { DrawerDestination } from "./drawer-nav-destinations";
 import { drawerScaffoldStyles as styles } from "./drawer-scaffold-styles";
-import { nodeIconForType } from "./node-icons";
+import { NodeAvatar } from "./NodeAvatar";
 
 interface DrawerNavRowProps {
   active: boolean;
@@ -53,7 +53,6 @@ export function DrawerNavRow({ active, badge, icon: Icon, label, onPress }: Draw
 
 export function nodeNavMeta(node: NodeVO) {
   return {
-    icon: nodeIconForType(node.type),
     tappable: hasCapability(node.type, "hasDetail"),
   };
 }
@@ -89,7 +88,6 @@ export function NodeNavItem({
 
   if (hasCapability(node.type, "hidden")) return null;
 
-  const Icon = meta.icon;
   const isContainer = collapsible && hasCapability(node.type, "container");
   const expanded = isContainer && expandedIds.has(node.id);
   const ChevronIcon = expanded ? ChevronDown : ChevronRight;
@@ -132,7 +130,11 @@ export function NodeNavItem({
             style={({ pressed }) => [styles.nodeMain, { opacity: pressed ? 0.6 : 1 }]}
             onPress={() => onPress(node)}
           >
-            <Icon size={18} color={active ? tokens.primary : tokens.mutedForeground} />
+            <NodeAvatar
+              node={node}
+              size={18}
+              color={active ? tokens.primary : tokens.mutedForeground}
+            />
             <Text
               numberOfLines={1}
               style={[
@@ -146,7 +148,11 @@ export function NodeNavItem({
           </Pressable>
         ) : (
           <View style={styles.nodeMain}>
-            <Icon size={18} color={active ? tokens.primary : tokens.mutedForeground} />
+            <NodeAvatar
+              node={node}
+              size={18}
+              color={active ? tokens.primary : tokens.mutedForeground}
+            />
             <Text
               numberOfLines={1}
               style={[

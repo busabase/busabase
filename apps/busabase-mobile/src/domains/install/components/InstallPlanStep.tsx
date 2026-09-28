@@ -15,7 +15,14 @@ import {
 } from "../utils/install-display";
 import { InstallCheckMark, InstallNotice, installPanelStyle } from "./InstallNotice";
 
-export function InstallPlanStep({ flow }: { flow: InstallFromGithubFlow }) {
+interface InstallPlanStepProps {
+  flow: InstallFromGithubFlow;
+  /** Set when the sheet was opened from a Template Center card — the URL is
+   * the template's, not something the user typed, so it stays read-only. */
+  urlLocked?: boolean;
+}
+
+export function InstallPlanStep({ flow, urlLocked }: InstallPlanStepProps) {
   const { t, locale } = useI18n();
   const tokens = useTokens();
   const plan = flow.plan;
@@ -33,7 +40,7 @@ export function InstallPlanStep({ flow }: { flow: InstallFromGithubFlow }) {
         keyboardType="url"
         autoCapitalize="none"
         autoCorrect={false}
-        editable={!flow.planning && !flow.installing}
+        editable={!flow.planning && !flow.installing && !urlLocked}
         returnKeyType="go"
         onSubmitEditing={() => {
           if (!plan) flow.preview();

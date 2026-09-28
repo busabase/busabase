@@ -6,6 +6,16 @@ import { useI18n } from "~/i18n";
 import { type InstallClient, runInstall } from "../utils/run-install";
 
 interface PlanOverrides {
+  /**
+   * Overrides the `repoUrl` STATE for this one call, rather than reading it —
+   * the same reason `intoFolder` below is an override. `setRepoUrl` schedules a
+   * state update; it is not applied until the next render, so a caller that
+   * calls `setRepoUrl(url)` and `preview()` back to back in the same tick (the
+   * Template Center's "Install" button, seeding both fields before the first
+   * preview) would otherwise have `preview` read the STALE, pre-update value
+   * out of its own closure and plan against an empty URL.
+   */
+  repoUrl?: string;
   intoFolder?: string;
   rename?: boolean;
 }
@@ -36,7 +46,7 @@ export function useInstallFromGithub() {
   const planMutation = useMutation<InstallPlanVO, Error, PlanOverrides>({
     mutationFn: async (overrides) => {
       if (!buda) throw new Error(t.common.notConnected);
-      const trimmedUrl = repoUrl.trim();
+      const trimmedUrl = (overrides.repoUrl ?? repoUrl).trim();
       if (!trimmedUrl) throw new Error(t.install.repoUrlRequired);
       const nextFolder = (overrides.intoFolder ?? intoFolder).trim();
       return buda.client.install.planFromGithub({

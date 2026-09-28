@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fileContentKind, isReadOnlyAsset } from "./file-content-kind";
+import { fileContentKind, isReadOnlyAsset, previewsAsMarkdown } from "./file-content-kind";
 
 describe("fileContentKind", () => {
   it("treats a utf8 file as editable text", () => {
@@ -53,5 +53,47 @@ describe("isReadOnlyAsset", () => {
   it("leaves text files editable", () => {
     expect(isReadOnlyAsset({ encoding: "utf8", mimeType: "text/plain" })).toBe(false);
     expect(isReadOnlyAsset(undefined)).toBe(false);
+  });
+});
+
+describe("previewsAsMarkdown", () => {
+  const text = (path: string, content = "# Title\n", mimeType: string | null = null) => ({
+    path,
+    content,
+    encoding: "utf8",
+    mimeType,
+  });
+
+  it("previews SKILL.md and README.md as markdown, as web does", () => {
+    expect(previewsAsMarkdown(text("SKILL.md"))).toBe(true);
+    expect(previewsAsMarkdown(text("docs/README.markdown"))).toBe(true);
+  });
+
+  it("keeps every other text file as source", () => {
+    expect(previewsAsMarkdown(text("index.ts", "export {}"))).toBe(false);
+    expect(previewsAsMarkdown(text("notes.txt", "hello"))).toBe(false);
+  });
+
+  it("never treats an asset as markdown, whatever it is named", () => {
+    // `content` of a url-encoded file is empty; its bytes are in storage.
+    expect(
+      previewsAsMarkdown({ path: "logo.md", content: "", encoding: "url", mimeType: "image/png" }),
+    ).toBe(false);
+  });
+
+  it("never treats an asset as markdown even if a server sends text for it", () => {
+    // Isolates the asset guard: the empty-content check cannot mask it here.
+    expect(
+      previewsAsMarkdown({
+        path: "guide.md",
+        content: "# not really",
+        encoding: "url",
+        mimeType: "text/markdown",
+      }),
+    ).toBe(false);
+  });
+
+  it("leaves an empty markdown file to the 'Empty file.' state", () => {
+    expect(previewsAsMarkdown(text("SKILL.md", ""))).toBe(false);
   });
 });

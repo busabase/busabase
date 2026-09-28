@@ -26,7 +26,7 @@ import { ConnectionGuard } from "~/domains/workspace/components/ConnectionGuard"
 import { CreateNodeModal } from "~/domains/workspace/components/CreateNodeModal";
 import { DrawerScaffold } from "~/domains/workspace/components/DrawerScaffold";
 import { EmptyWorkspaceGuide } from "~/domains/workspace/components/EmptyWorkspaceGuide";
-import { nodeIconForType } from "~/domains/workspace/components/node-icons";
+import { NodeAvatar } from "~/domains/workspace/components/NodeAvatar";
 import { useKnownNodeCache } from "~/domains/workspace/hooks/use-known-node-cache";
 import type { KnownNode } from "~/domains/workspace/utils/known-node-cache";
 import { getMobileNodeDestination } from "~/domains/workspace/utils/node-navigation";
@@ -248,7 +248,6 @@ function HomeContent() {
                 {recentRows.map((row) => (
                   <View key={row[0]?.id} style={styles.recentRow}>
                     {row.map((node) => {
-                      const Icon = nodeIconForType(node.type);
                       return (
                         <Pressable
                           key={node.id}
@@ -261,7 +260,7 @@ function HomeContent() {
                           ]}
                           onPress={() => openNode(node)}
                         >
-                          <Icon size={17} color={tokens.mutedForeground} />
+                          <NodeAvatar node={node} size={17} color={tokens.mutedForeground} />
                           <Text
                             numberOfLines={1}
                             style={[

@@ -3,6 +3,10 @@ import type { FileTreeFileVO, FileTreeNodeVO } from "busabase-contract/types";
 
 export type ReadFileResult = Awaited<ReturnType<BusabaseORPCClient["fileTrees"]["readFile"]>>;
 
+export type CreateFileTreeChangeRequestResult = Awaited<
+  ReturnType<BusabaseORPCClient["fileTrees"]["createChangeRequest"]>
+>;
+
 export interface OpenFile {
   path: string;
   content: string;
@@ -67,11 +71,32 @@ export interface FileTreeScreenProps {
    * compiler agree that the missing fields do not exist.
    */
   onReadFile: (filePath: string) => Promise<ReadFileResult>;
+  /**
+   * Typed off the contract, like `onReadFile` above — for READABILITY, not for
+   * protection. Be clear about which:
+   *
+   * `Promise<{ id: string }>` is the same kind of hand-written subset that hid
+   * `encoding` on the read side and cost an image its bytes. It would NOT have
+   * failed the build on its own: a subset is structurally satisfied by the full
+   * value, so the compiler stays quiet either way (checked — reverting this line
+   * produces zero errors). What the subset does is make the rest of the return
+   * INVISIBLE to anyone reading this file, which is how the read-side fields
+   * went unnoticed for so long.
+   *
+   * Worth stating plainly, because this endpoint is one field away from a real
+   * hazard: `records` / `bases` / `views` answer with a `{ materialized, ... }`
+   * discriminated union, and on the merged branch the `id` is the RECORD, not a
+   * change request — screens that navigate straight to `/change-requests/<id>`
+   * land on "not found" (see `domains/base/utils/change-request-result`).
+   * `fileTrees` does NOT do that today; it returns a plain change request. If it
+   * ever joins them, the compiler will not catch it here either, so the guard
+   * that matters is `pendingChangeRequestId`, not this type.
+   */
   onCreateChangeRequest: (input: {
     message: string;
     submittedBy: string;
     operations: FileTreeChangeRequestOperation[];
-  }) => Promise<{ id: string }>;
+  }) => Promise<CreateFileTreeChangeRequestResult>;
   onChangeRequestCreated: (changeRequestId: string) => void;
 }
 

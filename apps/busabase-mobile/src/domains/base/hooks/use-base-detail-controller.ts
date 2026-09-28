@@ -2,11 +2,14 @@ import { skipToken, useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import {
-  normalizeRecordsPage,
+  FIRST_RECORD_PAGE,
+  fetchRecordPage,
+  nextRecordPageParam,
   RECORDS_PAGE_SIZE,
-  scopeRecordsPageToBase,
+  type RecordPageParam,
+  recordsForDisplay,
+  recordTotalFromPages,
 } from "../utils/record-pagination";
-import { applyViewConfig } from "../utils/view-config";
 
 export type BaseDisplayMode = "list" | "table";
 
@@ -27,31 +30,25 @@ export function useBaseDetailController(slug: string) {
     [basesQuery.data, slug],
   );
 
+  // The active View is part of the key AND part of the request: the server
+  // filters and sorts by it before computing totals and slicing pages, so a
+  // different View is a different result set, not a narrowing of this one.
   const recordsQuery = useInfiniteQuery({
     queryKey: [
       "base-records",
       busabase?.serverUrl,
       busabase?.spaceScope,
       base?.id,
+      activeViewId,
       RECORDS_PAGE_SIZE,
     ],
     queryFn:
       busabase && base
-        ? async ({ pageParam }) =>
-            normalizeRecordsPage(
-              scopeRecordsPageToBase(
-                await busabase.client.records.list({
-                  baseId: base.id,
-                  cursor: pageParam,
-                  limit: RECORDS_PAGE_SIZE,
-                }),
-                base.id,
-              ),
-              pageParam,
-            )
+        ? ({ pageParam }: { pageParam: RecordPageParam }) =>
+            fetchRecordPage(busabase.client.records, base.id, activeViewId, pageParam)
         : skipToken,
-    initialPageParam: undefined as string | undefined,
-    getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    initialPageParam: FIRST_RECORD_PAGE,
+    getNextPageParam: nextRecordPageParam,
   });
 
   const viewsQuery = useQuery(
@@ -62,12 +59,20 @@ export function useBaseDetailController(slug: string) {
   const views = viewsQuery.data ?? [];
   const activeView = views.find((view) => view.id === activeViewId) ?? null;
   const records = useMemo(() => {
-    const baseRecords =
-      recordsQuery.data?.pages
-        .flatMap((page) => page.records)
-        .filter((record) => record.baseId === base?.id) ?? [];
-    return applyViewConfig(baseRecords, activeView?.config);
+    const pages = recordsQuery.data?.pages ?? [];
+    // Still scoped to this Base: `records.list` may span the space when the
+    // fallback path runs, and a stale page from a previous Base must not leak
+    // into this one.
+    const scoped = pages.map((page) => ({
+      ...page,
+      records: page.records.filter((record) => record.baseId === base?.id),
+    }));
+    return recordsForDisplay(scoped, activeView?.config);
   }, [recordsQuery.data, base?.id, activeView]);
+  const recordTotal = useMemo(
+    () => recordTotalFromPages(recordsQuery.data?.pages ?? []),
+    [recordsQuery.data],
+  );
   const visibleFields = useMemo(() => {
     const allFields = base?.fields ?? [];
     const visibleSlugs = activeView?.config.visibleFieldSlugs;
@@ -99,6 +104,7 @@ export function useBaseDetailController(slug: string) {
     previewFields,
     records,
     recordsQuery,
+    recordTotal,
     refresh,
     selectedViewId: activeView?.id ?? null,
     selectedViewLabel: activeView?.name ?? "All",

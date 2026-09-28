@@ -5,6 +5,7 @@ import { ChevronDown, ChevronUp, Pencil } from "lucide-react-native";
 import { useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
+import { CollapsedMarkdown } from "~/components/MarkdownView";
 import {
   NativeActionBar,
   NativeEmptyState,
@@ -92,17 +93,18 @@ function DocDetailContent() {
       {doc ? (
         <NativeSection title="Content" caption={formatDate(doc.node.updatedAt)}>
           <View style={styles.bodyWrap}>
-            <Text
-              selectable
-              numberOfLines={isLongBody && !bodyExpanded ? COLLAPSED_BODY_LINES : undefined}
-              style={[
-                typography.body,
-                styles.body,
-                { color: bodyStats?.empty ? tokens.mutedForeground : tokens.foreground },
-              ]}
-            >
-              {bodyStats?.text}
-            </Text>
+            {bodyStats?.empty ? (
+              <Text style={[typography.body, styles.body, { color: tokens.mutedForeground }]}>
+                {bodyStats.text}
+              </Text>
+            ) : (
+              <CollapsedMarkdown
+                collapsed={isLongBody && !bodyExpanded}
+                maxHeight={COLLAPSED_BODY_LINES * 22}
+              >
+                {doc.body}
+              </CollapsedMarkdown>
+            )}
           </View>
           {isLongBody ? (
             <NativeRow

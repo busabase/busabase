@@ -36,6 +36,10 @@ export const en = {
     favorites: "Favorites",
     records: "Records",
     bases: "Bases",
+    // Same labels as core's `nav.apps` / `nav.templates` — mirrored word for
+    // word because both surfaces name the identical destination.
+    apps: "App Launcher",
+    templates: "Templates",
     newBase: "New Base",
     create: "Create",
     // Space Selector sheet: the destination group above the workspace list.
@@ -356,6 +360,56 @@ export const en = {
     reviewNow: "Review them now",
     noPending: "Everything was merged — the package is live in your space.",
     done: "Done",
+  },
+  // Word for word with core's `airapp` block (`packages/busabase-core/src/i18n/messages.ts`),
+  // same reasoning as `install` above: one screen, one meaning.
+  airapp: {
+    librarySubtitle: "AirApps in this space — mini apps built on Busabase data and workflows.",
+    libraryEmptyTitle: "No AirApps yet",
+    libraryEmptyBody: "AirApps you create in this space will show up here.",
+    libraryErrorTitle: "Couldn't load AirApps",
+    libraryErrorBody: "Something went wrong loading the AirApps in this space.",
+  },
+  // Word for word with core's `templates` block — the Template Center is the
+  // same catalog, browsed and installed through the same `install.*` routes,
+  // so its copy must not drift between the two surfaces. Interaction-only
+  // strings core has for its screenshot lightbox (zoom/rotate/download) are
+  // left out: this screen does not offer that interaction.
+  templates: {
+    title: "Templates",
+    overview:
+      "Complete apps — tables, an interface, and the manual an agent reads before it touches your data. Installing one fills in its tables, and proposes the app itself for your review.",
+    search: "Search templates…",
+    refresh: "Refresh templates",
+    searchEmpty: "Nothing matches \u201c{search}\u201d.",
+    catalogEmpty: "This catalog has no templates yet.",
+    catalogFailed: "Couldn't load templates. Try again.",
+    missingTemplate: "No template named \u201c{name}\u201d in this catalog.",
+    backToTemplates: "Back to Templates",
+    install: "Install",
+    cardBases: "{count} table{plural}",
+    cardApps: "{count} app{plural}",
+    cardDocs: "{count} doc{plural}",
+    cardRows: "{count} sample row{plural}",
+    cardManual: "Agent manual",
+    promptsTitle: "What you can ask an agent, once it is installed",
+    promptsDescription:
+      "The agent can answer these because the template installs its author's manual alongside its Bases. It does not have to guess your schema.",
+    contentsTitle: "What installing this creates",
+    contentsDescription:
+      "Bases, fields, and sample rows are created straight away. App code and the agent manual are proposed as change requests for you to review first.",
+    bases: "Bases",
+    apps: "Apps",
+    documents: "Documents",
+    sampleRows: "Sample rows",
+    files: "Files",
+    folders: "Folders",
+    agentManual: "Agent manual",
+    included: "included",
+    none: "none",
+    readSource: "Read the source",
+    tags: "Tags",
+    playVideo: "Play the demo",
   },
   settings: {
     title: "Settings",

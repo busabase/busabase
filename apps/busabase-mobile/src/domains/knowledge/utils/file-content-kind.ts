@@ -1,3 +1,5 @@
+import { resolveFileTreePreviewKind } from "busabase-core/dashboard/file-tree-files";
+
 /**
  * Whether a file-tree file is text this app may edit, or an asset it may only
  * show.
@@ -51,3 +53,19 @@ export const fileContentKind = (file: FileContentSource | null | undefined): Fil
 /** True when the editor and every write action must stay closed for this file. */
 export const isReadOnlyAsset = (file: FileContentSource | null | undefined): boolean =>
   fileContentKind(file).kind !== "text";
+
+/**
+ * Whether the read-only PREVIEW of a file renders it as markdown.
+ *
+ * Presentation only, and deliberately separate from `fileContentKind`: a
+ * markdown file is still text the editor may open and write back. The rule for
+ * what counts as markdown is web's own `resolveFileTreePreviewKind`, so the
+ * phone previews exactly the files web does — `SKILL.md`, `README.md` and the
+ * rest — as formatted text instead of raw source.
+ */
+export const previewsAsMarkdown = (
+  file: (FileContentSource & { path: string; content?: string | null }) | null | undefined,
+): boolean =>
+  !!file?.content &&
+  fileContentKind(file).kind === "text" &&
+  resolveFileTreePreviewKind(file.path, file.mimeType ?? "") === "markdown";
