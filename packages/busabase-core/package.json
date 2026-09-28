@@ -1,7 +1,7 @@
 {
   "name": "busabase-core",
   "description": "Shared Busabase open-core protocol, local store, API helpers, and dashboard components.",
-  "version": "0.90.1",
+  "version": "0.90.2",
   "private": true,
   "type": "module",
   "exports": {
@@ -428,6 +428,14 @@
     "./dashboard/markdown-preview": {
       "types": "./src/domains/dashboard/helpers/markdown-preview.ts",
       "default": "./src/domains/dashboard/helpers/markdown-preview.ts"
+    },
+    "./domains/agents/utils/agent-visible-message": {
+      "types": "./src/domains/agents/utils/agent-visible-message.ts",
+      "default": "./src/domains/agents/utils/agent-visible-message.ts"
+    },
+    "./domains/agents/hooks/use-agent-session": {
+      "types": "./src/domains/agents/hooks/use-agent-session.ts",
+      "default": "./src/domains/agents/hooks/use-agent-session.ts"
     }
   },
   "dependencies": {
