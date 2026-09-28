@@ -1,5 +1,8 @@
 // Capture README screenshots from the live demo dashboard.
 // Usage: pnpm --filter busabase dev (port 15419) running, then `node scripts/capture-readme-screenshots.mjs`
+// Other locales: `CAPTURE_LANG=zh-CN node scripts/capture-readme-screenshots.mjs`, then
+// `node scripts/generate-window-frames.mjs` to frame them. `CAPTURE_ONLY=key1,key2`
+// limits the scenario pass to those scenario keys.
 
 import fs from "node:fs";
 import path from "node:path";
@@ -20,10 +23,12 @@ const BASE = process.env.BUSABASE_URL || "http://localhost:15419";
 const LANG = process.env.CAPTURE_LANG || "en";
 const langParam = LANG === "en" ? "" : `&lang=${LANG}`;
 
-// English scenario shots capture raw into scenarios-raw/, then get wrapped in
-// macOS-window chrome by generate-window-frames.mjs (written back to scenarios/).
+// Scenario shots capture raw into scenarios-raw/ (scenarios-raw/<LANG>/ for other
+// locales), then get wrapped in macOS-window chrome by generate-window-frames.mjs,
+// which writes them to scenarios/ (scenarios/<LANG>/). Every locale gets the same
+// frame, so the homepage carousel looks the same in every language.
 const SCENARIO_OUT =
-  LANG === "en" ? path.join(OUT, "scenarios-raw") : path.join(OUT, "scenarios", LANG);
+  LANG === "en" ? path.join(OUT, "scenarios-raw") : path.join(OUT, "scenarios-raw", LANG);
 
 const scenarioShots = [
   {
@@ -624,24 +629,50 @@ const gotoShot = async (url) => {
   await page.goto(url, { waitUntil: "commit", timeout: 60000 });
 };
 
+// Wait until the page has actually loaded its data: no skeleton rows left, and
+// the visible text has stopped changing. Non-English captures used to wait for
+// "main" only, which exists from the very first skeleton frame, so every
+// zh-CN scenario shot caught an empty table or a still-loading inbox.
+const waitForSettled = async () => {
+  try {
+    await page.waitForFunction(
+      () => document.querySelectorAll(".animate-pulse, [aria-busy='true']").length === 0,
+      undefined,
+      { timeout: 30000 },
+    );
+  } catch {
+    console.warn("! skeletons still visible after 30s");
+  }
+  let last = "";
+  for (let i = 0; i < 20; i++) {
+    const text = await page.evaluate(() => document.querySelector("main")?.innerText ?? "");
+    if (text && text === last) return;
+    last = text;
+    await page.waitForTimeout(500);
+  }
+};
+
 const waitForImages = async () => {
-  await page.waitForFunction(
-    () =>
-      [...document.images].every((image) => {
-        const rect = image.getBoundingClientRect();
-        const intersectsViewport =
-          rect.bottom > 0 &&
-          rect.right > 0 &&
-          rect.top < window.innerHeight &&
-          rect.left < window.innerWidth;
-        return (
-          !intersectsViewport ||
-          (image.complete && image.naturalWidth > 0 && image.naturalHeight > 0)
-        );
-      }),
-    undefined,
-    { timeout: 15000 },
-  );
+  // A single slow or broken image must not abort a 64-shot run; warn and go on.
+  await page
+    .waitForFunction(
+      () =>
+        [...document.images].every((image) => {
+          const rect = image.getBoundingClientRect();
+          const intersectsViewport =
+            rect.bottom > 0 &&
+            rect.right > 0 &&
+            rect.top < window.innerHeight &&
+            rect.left < window.innerWidth;
+          return (
+            !intersectsViewport ||
+            (image.complete && image.naturalWidth > 0 && image.naturalHeight > 0)
+          );
+        }),
+      undefined,
+      { timeout: 15000 },
+    )
+    .catch(() => console.warn("! some images in view never loaded"));
 };
 
 for (const shot of LANG === "en" ? shots : []) {
@@ -685,7 +716,9 @@ if (LANG === "en") {
   }
 }
 
-for (const scenario of scenarioShots) {
+// CAPTURE_ONLY=key1,key2 re-captures just those scenarios (e.g. after a timeout).
+const only = process.env.CAPTURE_ONLY?.split(",").map((key) => key.trim());
+for (const scenario of scenarioShots.filter((s) => !only || only.includes(s.key))) {
   for (const cell of scenario.cells) {
     const file = `${scenario.key}-${cell.kind}.png`;
     const url = routeForScenarioShot(scenario, cell.kind);
@@ -699,6 +732,7 @@ for (const scenario of scenarioShots) {
     } catch {
       console.warn(`! waitFor missed for ${file}: ${waitFor}`);
     }
+    await waitForSettled();
     await waitForImages();
     await page.waitForTimeout(1000);
     await page.screenshot({ path: path.join(SCENARIO_OUT, file) });

@@ -28,6 +28,17 @@ const jobs = [
     out: path.join(readmeDir, "scenarios"),
     titled: false,
   },
+  // Localized scenario shots (CAPTURE_LANG=<locale>): scenarios-raw/<locale>/ →
+  // scenarios/<locale>/, framed exactly like the English set.
+  ...(existsSync(path.join(readmeDir, "scenarios-raw"))
+    ? readdirSync(path.join(readmeDir, "scenarios-raw"), { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => ({
+          raw: path.join(readmeDir, "scenarios-raw", entry.name),
+          out: path.join(readmeDir, "scenarios", entry.name),
+          titled: false,
+        }))
+    : []),
 ];
 
 // Optional title shown centered in the window bar, keyed by filename.
