@@ -241,6 +241,26 @@ export class Busabase {
   get embedLinks(): BusabaseClient["embedLinks"] {
     return this.client.embedLinks;
   }
+  /**
+   * Playbooks — the skills and custom node prompts this space already defines
+   * for a job. Call `search` first on every instruction with 2–5 phrasings of
+   * the intent (the user's language and English); open a hit with `get` and
+   * follow its `content`.
+   *
+   * @example
+   * ```ts
+   * const { items } = await bb.playbooks.search({
+   *   queries: ["记录客户拜访", "log customer visit", "visit"],
+   * });
+   * const top = items[0];
+   * if (top?.kind === "prompt") {
+   *   const { content } = await bb.playbooks.get({ kind: "prompt", nodeId: top.nodeId, key: top.key });
+   * }
+   * ```
+   */
+  get playbooks(): BusabaseClient["playbooks"] {
+    return this.client.playbooks;
+  }
 
   /**
    * The canonical dashboard URL a human opens for a node — the link you hand

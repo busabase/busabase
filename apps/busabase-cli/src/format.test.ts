@@ -111,6 +111,39 @@ describe("render table", () => {
     expect(out).not.toContain("[object Object]");
   });
 
+  it("shows a grep file match's owner as type, name and folder path, not as key names", () => {
+    const grep = {
+      matches: [
+        {
+          source: "files",
+          fileName: "SKILL.md",
+          owner: {
+            nodeId: "nod_1",
+            nodeType: "skill",
+            nodeName: "Weekly Report",
+            path: ["Sales", "Reports"],
+          },
+          line: 3,
+        },
+        {
+          source: "files",
+          fileName: "notes.txt",
+          owner: { nodeId: "nod_2", nodeType: "drive", nodeName: "Team Drive", path: [] },
+          line: 1,
+        },
+        { source: "files", fileName: "staged.txt", line: 1 },
+      ],
+      coverage: { files: { scanned: 3 } },
+      truncated: false,
+    };
+    for (const output of ["text", "table"] as const) {
+      const out = render(grep, output);
+      expect(out).toContain("skill: Weekly Report (Sales / Reports)");
+      expect(out).toContain("drive: Team Drive");
+      expect(out).not.toContain("{nodeId, nodeType, nodeName");
+    }
+  });
+
   it("blanks null and undefined cells", () => {
     const out = render([{ id: "r1", note: null, extra: undefined }], "table");
     const rowLine = out.split("\n")[2];
@@ -211,5 +244,28 @@ describe("slim", () => {
   it("walks into arrays and envelopes", () => {
     const page = { records: [{ id: "rec_1", baseId: "bse_1", base: { id: "bse_1" } }] };
     expect(slim(page)).toEqual({ records: [{ id: "rec_1", baseId: "bse_1" }] });
+  });
+});
+
+describe("render result envelopes with a summary object", () => {
+  it("prints playbooks search rows and spells out coverage instead of `[N items]`", () => {
+    const out = render(
+      {
+        items: [{ kind: "prompt", nodeName: "Visits", label: "Log a customer visit" }],
+        total: 1,
+        truncated: false,
+        coverage: { skillsScanned: 2, prompts: "unsupported by this server" },
+      },
+      "text",
+    );
+    expect(out).toContain("Log a customer visit");
+    expect(out).not.toContain("[1 items]");
+    expect(out).toContain("coverage   skillsScanned=2, prompts=unsupported by this server");
+  });
+
+  it("keeps a record with object values (whoami) rendering as a record", () => {
+    const out = render({ space: { id: "s1" }, user: { id: "u1" }, spaces: [{ id: "s1" }] }, "text");
+    expect(out).toContain("spaces");
+    expect(out).toContain("[1 items]");
   });
 });

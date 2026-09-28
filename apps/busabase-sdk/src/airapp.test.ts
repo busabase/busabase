@@ -739,6 +739,37 @@ describe("publishAirApp", () => {
     expect(result).toEqual({ status: "created", merged: true, nodeId: "node-airapp" });
   });
 
+  // Regression: `fileTrees.create` accepts `metadata` for exactly this, and the
+  // server applies it on both paths — but publishAirApp never sent it. A merged
+  // create therefore produced an unstamped node, and the app only recognised
+  // it as its own after the next setup run repaired the stamp.
+  it.each([
+    ["merged", { node: { id: "node-airapp" }, materialized: true }],
+    ["proposed", { id: "cr-create", status: "in_review", materialized: false }],
+  ])("stamps ownership on the AirApp it creates (%s)", async (_path, response) => {
+    const folderNode = node({ metadata: owned("app-root") });
+    const create = vi.fn().mockResolvedValue(response);
+    const list = vi.fn().mockResolvedValue({ changeRequests: [], nextCursor: null });
+    const client = {
+      nodes: {
+        get: vi
+          .fn()
+          .mockResolvedValue(asFolder(folderNode, [baseChild({ metadata: owned("contacts") })])),
+      },
+      bases: {},
+      fileTrees: { create },
+      changeRequests: { list },
+    } as unknown as Parameters<typeof publishAirApp>[0];
+
+    await publishAirApp(
+      client,
+      airAppConfig({ folder: { ...config().folder, nodeId: "node-1" } }),
+      files,
+    );
+
+    expect(create.mock.calls[0][0].metadata).toEqual(owned("airapp"));
+  });
+
   it("reports merged:true when the server merged the update", async () => {
     const folderNode = node({ metadata: owned("app-root") });
     const listFiles = vi.fn().mockResolvedValue([{ path: "server.js" }, { path: "package.json" }]);

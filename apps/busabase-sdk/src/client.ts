@@ -2,6 +2,7 @@ import { createORPCClient, ORPCError } from "@orpc/client";
 import type { ContractRouterClient } from "@orpc/contract";
 import { OpenAPILink } from "@orpc/openapi-client/fetch";
 import { type CloudContract, cloudContract } from "busabase-contract/contract/cloud";
+import { BUSABASE_PLAYBOOK_HEADER } from "busabase-contract/contract/playbook-schemas";
 import type { BusabaseSourceChannel } from "busabase-contract/types";
 import { normalizeBaseUrl } from "./url.js";
 
@@ -52,6 +53,14 @@ export interface BusabaseConfig {
   /** Source channel recorded in Change Request and audit provenance. Defaults to `sdk`. */
   sourceChannel?: BusabaseSourceChannel;
   /**
+   * The playbook you are following, as `kind:nodeId[:key]` from
+   * `playbooks.search` (e.g. `prompt:nod_123:log-visit`). Sent as the
+   * `x-busabase-playbook` header and recorded on the change requests you
+   * create, so the person reviewing can see which playbook produced them.
+   * The server drops a malformed value rather than failing the request.
+   */
+  playbook?: string;
+  /**
    * Origin the *web app* is served from, for building human-openable links (see
    * {@link Busabase.nodeUrl}). Falls back to `BUSABASE_WEB_URL`, then to
    * `baseUrl`.
@@ -82,6 +91,7 @@ export interface ResolvedConfig {
   apiKey?: string;
   spaceId?: string;
   sourceChannel?: BusabaseSourceChannel;
+  playbook?: string;
   headers?: BusabaseConfig["headers"];
   fetch?: typeof fetch;
 }
@@ -106,6 +116,7 @@ export function resolveConfig(config: BusabaseConfig = {}): ResolvedConfig {
     apiKey: config.apiKey ?? env("BUSABASE_API_KEY"),
     spaceId: config.spaceId ?? env("BUSABASE_SPACE_ID"),
     sourceChannel: config.sourceChannel ?? "sdk",
+    playbook: config.playbook?.trim() || undefined,
     headers: config.headers,
     fetch: config.fetch,
   };
@@ -192,6 +203,7 @@ export function createBusabaseClient(config: BusabaseConfig = {}): BusabaseClien
         ...(resolved.apiKey ? { authorization: `Bearer ${resolved.apiKey}` } : {}),
         ...(resolved.spaceId ? { "x-busabase-space": resolved.spaceId } : {}),
         "x-busabase-channel": resolved.sourceChannel ?? "sdk",
+        ...(resolved.playbook ? { [BUSABASE_PLAYBOOK_HEADER]: resolved.playbook } : {}),
         ...extra,
       };
     },

@@ -38,6 +38,16 @@ export interface Envelope {
   meta: [string, unknown][];
 }
 
+/**
+ * Row keys that always mean "the results", even when an object sits beside them:
+ * `playbooks search` → `{ items, total, truncated, coverage }` and `grep` →
+ * `{ matches, coverage, truncated }`. Their `coverage` object used to fail the
+ * scalar-only test below, so the whole answer printed as `items  [3 items]`.
+ * Named rather than inferred so `whoami`'s `{ space, user, member, spaces }`
+ * keeps rendering as a record.
+ */
+const RESULT_ROW_KEYS = new Set(["items", "matches"]);
+
 export function asEnvelope(value: unknown): Envelope | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const entries = Object.entries(value as Record<string, unknown>);
@@ -47,7 +57,7 @@ export function asEnvelope(value: unknown): Envelope | undefined {
   const scalarOnly = meta.every(
     ([, item]) => item === null || item === undefined || typeof item !== "object",
   );
-  if (!scalarOnly) return undefined;
+  if (!scalarOnly && !RESULT_ROW_KEYS.has(arrays[0][0])) return undefined;
   return { key: arrays[0][0], rows: arrays[0][1], meta };
 }
 
@@ -56,14 +66,65 @@ function renderEnvelope(envelope: Envelope, renderRows: (rows: unknown[]) => str
   const meta = envelope.meta.filter(([, item]) => item !== null && item !== undefined);
   if (meta.length === 0) return body;
   const width = Math.max(...meta.map(([key]) => key.length));
-  const trailer = meta.map(([key, item]) => `${key.padEnd(width)}  ${cell(item)}`).join("\n");
+  const trailer = meta.map(([key, item]) => `${key.padEnd(width)}  ${metaCell(item)}`).join("\n");
   return `${body}\n\n${trailer}`;
+}
+
+/**
+ * A trailer value beside the rows. A flat summary object (`coverage`) shows its
+ * values — `skillsScanned=2, prompts=unsupported by this server` — because in
+ * the trailer the numbers ARE the answer; a table cell keeps {@link cell}'s
+ * key-name summary so wide rows stay readable.
+ */
+function metaCell(value: unknown): string {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const entries = Object.entries(value as Record<string, unknown>);
+    if (
+      entries.length > 0 &&
+      entries.every(([, item]) => item === null || typeof item !== "object")
+    ) {
+      return entries.map(([key, item]) => `${key}=${String(item)}`).join(", ");
+    }
+  }
+  return cell(value);
 }
 
 function cell(value: unknown): string {
   if (value === null || value === undefined) return "";
+  if (isNodeLocation(value)) return truncate(formatNodeLocation(value));
   if (typeof value === "object") return compactJson(value);
   return truncate(String(value));
+}
+
+/**
+ * A node's location as the API reports it — `grep`'s file `owner`
+ * (`{ nodeId, nodeType, nodeName, path }`). Compacting it to key names
+ * (`{nodeId, nodeType, nodeName, ...}`) would print the same text on every row
+ * and hide the one thing the column exists for: WHICH skill or drive a hit is
+ * in. Recognized by shape, not by column name, like {@link slim}.
+ */
+interface NodeLocation {
+  nodeType: string;
+  nodeName: string;
+  path: string[];
+}
+
+function isNodeLocation(value: unknown): value is NodeLocation {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const row = value as Record<string, unknown>;
+  return (
+    typeof row.nodeId === "string" &&
+    typeof row.nodeType === "string" &&
+    typeof row.nodeName === "string" &&
+    Array.isArray(row.path) &&
+    row.path.every((segment) => typeof segment === "string")
+  );
+}
+
+/** `skill: Weekly Report (Sales / Reports)` — type, name, then the readable folder path. */
+function formatNodeLocation(location: NodeLocation): string {
+  const where = location.path.length > 0 ? ` (${location.path.join(" / ")})` : "";
+  return `${location.nodeType}: ${location.nodeName}${where}`;
 }
 
 function compactJson(value: unknown): string {

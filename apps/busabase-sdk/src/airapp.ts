@@ -1106,6 +1106,11 @@ export async function publishAirApp(
       description: airApp.description ?? "",
       files: resolvedFiles as FileTreeCreateInput["files"],
       mergeMode: "replace",
+      // Stamped at birth, on both paths: the server applies `metadata` whether it
+      // materializes the node now or when a reviewer merges the proposal. Without
+      // it a merged create was an unclaimed node the app only recognised as its
+      // own after the next setup run repaired the stamp.
+      metadata: resourceMetadata(config, airApp.resourceKey),
       // `autoMerge` deliberately omitted — permission-aware, like every other
       // write. An app whose credential can write to the Folder publishes
       // straight away instead of parking its own bundle in a review queue
