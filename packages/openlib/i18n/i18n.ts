@@ -8,6 +8,20 @@ export const i18n = {
 
 export type Locale = (typeof i18n)["locales"][number];
 
+/** Each locale's name in its own language, for language pickers. */
+export const LOCALE_NATIVE_NAMES: Record<Locale, string> = {
+  en: "English",
+  "zh-CN": "简体中文",
+  "zh-TW": "繁體中文",
+  ja: "日本語",
+  ko: "한국어",
+  de: "Deutsch",
+  fr: "Français",
+  es: "Español",
+  pt: "Português",
+  vi: "Tiếng Việt",
+};
+
 // Additional locales, currently used for AIGC, these languages are not yet available in the program
 export type ExtendLocale = (typeof i18n)["extendLocales"][number];
 

@@ -266,20 +266,52 @@ Full ICU syntax (`{count, plural, one {…} other {…}}`) is **not** supported.
 
 ## Lazy-loaded locales (code splitting)
 
-Locales don't have to all be known up front. Call `loadLocale` any time before
-rendering `Provider` (or calling `getTranslations`) with that locale — useful
-for splitting locale bundles behind a dynamic `import()`:
+Give the React bindings a `loadLocale` and every locale becomes its own chunk,
+fetched only when something renders it. `Provider` (and `useTranslations`)
+suspend (Suspense) until the locale arrives — on the server that
+means SSR waits for it, on the client hydration keeps the server HTML until the
+chunk lands, so there's no flash of the wrong language:
 
-```ts
-const i18n = createTypedI18n<"en" | "zh-CN", BaseTranslation>();
+```tsx
+export const { Provider, useI18nContext, useTranslations } = createI18nReactBindings(registry, {
+  loadLocale: async (locale) => (await localeLoaders[locale]()).default,
+});
 
-async function switchTo(locale: "en" | "zh-CN") {
-  if (!i18n.isLocaleLoaded(locale)) {
-    const mod = await import(`./i18n/${locale}`);
-    i18n.loadLocale(locale, mod.default);
-  }
-}
+const localeLoaders = {
+  en: () => import("./en"),
+  ja: () => import("./ja"),
+  "zh-CN": () => import("./zh-CN"),
+};
 ```
+
+- One fetch per locale, shared by every component that asks for it.
+- A failed fetch is sticky, like `React.lazy`: it's rethrown to the nearest
+  error boundary on every render rather than refetched in a loop.
+- `useTranslations(locale)` is for components rendered outside any `Provider`
+  (a root `not-found` page, say).
+- Don't also import the locale files statically from client code — one static
+  import pulls that tree back into the main bundle.
+
+**If the server already has the tree, pass it in.** A Next.js layout that
+awaited the locale can hand it to the Provider, which registers it during
+render — so the first render, and hydration, never wait on a chunk (anything
+the user typed before hydration would otherwise be wiped when React takes
+over controlled inputs). The loader then only serves locales the client
+switches to:
+
+```tsx
+// app/[lang]/layout.tsx (Server Component)
+<Provider locale={lang} translations={await importLocaleAsync(lang)}>
+  {children}
+</Provider>
+```
+
+The same suspend-until-loaded mechanism is exported on its own as
+`createLocaleLoader(load)` → `{ read(locale), prime(locale, value) }`, for per-locale data that isn't
+a translation tree (a shared package's message catalog, say).
+
+Without a `loadLocale`, `Provider` keeps its old contract: call
+`registry.loadLocale(locale, tree)` yourself first, or it throws.
 
 ## Server Components (Next.js App Router)
 
@@ -315,7 +347,7 @@ export const { loadLocale, isLocaleLoaded, getTranslations } = registry;
 import { createI18nReactBindings } from "ts7-i18n/react";
 import { registry } from "./registry";
 
-export const { Provider, useI18nContext } = createI18nReactBindings(registry);
+export const { Provider, useI18nContext, useTranslations } = createI18nReactBindings(registry);
 ```
 
 If your app doesn't have a Server/Client Component boundary to worry about
@@ -358,9 +390,10 @@ If you'd like your own package to pick up the same TS7-friendly settings
 
 ## API
 
-- `createTypedI18n<Locale, T>(initialTranslations?)` (root import) → `{ Provider, useI18nContext, loadLocale, isLocaleLoaded, getTranslations }`
+- `createTypedI18n<Locale, T>(initialTranslations?, { loadLocale? })` (root import) → `{ Provider, useI18nContext, useTranslations, loadLocale, isLocaleLoaded, getTranslations }`
 - `ts7-i18n/registry`: `createTranslationRegistry<Locale, T>(initialTranslations?)` → `{ loadLocale, isLocaleLoaded, getTranslations }` — zero `react` import
-- `ts7-i18n/react`: `createI18nReactBindings(registry)` → `{ Provider, useI18nContext }` — `"use client"`
+- `ts7-i18n/react`: `createI18nReactBindings(registry, { loadLocale? })` → `{ Provider, useI18nContext, useTranslations }` (`Provider` takes an optional server-supplied `translations`) — `"use client"`; with `loadLocale`, unloaded locales suspend instead of throwing
+- `ts7-i18n/react`: `createLocaleLoader(load)` → `{ read(locale), prime(locale, value) }` — the suspend-until-loaded primitive on its own
 - `interpolate(template, params?, locale?)` — the substitution primitive the registry uses internally (also exported from `ts7-i18n/registry`)
 - `assertLocaleParamParity(base, locales)` / `collectParams(tree)` — the runtime param-parity check
 - Types: `LL<T>`, `Translatable<T>`, `Translator<S>`, `Params<S>`, `ParamNames<S>`

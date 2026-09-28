@@ -14,6 +14,19 @@ export interface StorageObjectMetadata {
 }
 
 /**
+ * Extra request properties to bind into a presigned upload URL.
+ *
+ * Each one becomes part of the signature where the adapter supports it, so the
+ * client must send exactly that value (S3 rejects a mismatch with 403).
+ */
+export interface UploadPresignOptions {
+  /** Exact byte length the client must upload (`Content-Length`). */
+  contentLength?: number;
+  /** Exact `Content-Disposition` the client must send and the object keeps. */
+  contentDisposition?: string;
+}
+
+/**
  * Storage provider type
  */
 export type StorageProvider = "s3" | "minio" | "r2" | "local";
@@ -97,8 +110,19 @@ export interface IStorage {
 
   /**
    * Generate presigned URL for uploading file (PUT)
+   *
+   * `options` is optional and additive: an adapter that can bind more of the
+   * request into the signature (S3) does so, one that cannot (local relay)
+   * ignores it. Callers must therefore still verify the stored object after the
+   * upload (`getObjectMetadata`) — the signature narrows what a client can send,
+   * it is not the check.
    */
-  generateUploadPresignedUrl(key: string, mimeType: string, expiresIn?: number): Promise<string>;
+  generateUploadPresignedUrl(
+    key: string,
+    mimeType: string,
+    expiresIn?: number,
+    options?: UploadPresignOptions,
+  ): Promise<string>;
 
   /**
    * Check if object exists

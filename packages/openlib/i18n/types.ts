@@ -1,7 +1,8 @@
 import type React from "react";
 import z from "zod";
+import { i18n } from "./i18n";
 
-export const locales = ["en", "zh-CN", "zh-TW", "ja", "ko", "de", "fr", "es", "pt", "vi"] as const;
+export const locales = i18n.locales;
 export type Locale = (typeof locales)[number];
 
 export const LocaleSchema = z.enum(locales);

@@ -26,17 +26,29 @@
  * (2). `generatePageMetadata` wraps it for the common case and re-asserts the
  * site-level OpenGraph/Twitter identity so pages can't fall into (3).
  *
- * ## hreflang must describe reality, not the app's locale list
+ * ## hreflang must describe reality, not the app's locale list — two entry points
  *
- * `availableLocales` defaults to every supported locale, which is right for a
- * page that exists in all of them (a statically-translated route). It is wrong
- * for CMS-driven content, where a page may exist only in English: advertising
- * `hreflang="ja"` for a URL that serves English, while that URL's canonical
- * points back at the English original, makes Google discard the whole hreflang
- * cluster (the annotation has no matching return tag) and wastes crawl budget
- * on duplicates. Callers that know which locales really have the content MUST
- * pass `availableLocales`. See `busabase-cms-sdk`'s `getAvailableCmsPageLocales`
- * for how CMS routes compute it.
+ * Which locales a page exists in is a FACT about the page, and who owns that
+ * fact decides which function a route calls:
+ *
+ *   - STATIC routes (home, pricing, legal, listing pages): the route itself is
+ *     translated into every supported locale, so the app's locale list IS the
+ *     fact. `generatePageMetadata` / `getPageAlternates` advertise all of them
+ *     and refuse an `availableLocales` argument — passing one is a type error,
+ *     which is the signal that the route is content and belongs below.
+ *   - CONTENT routes (CMS Posts/Pages, tag/category archives, MDX posts): only
+ *     the content source knows which locales exist. `generateContentPageMetadata`
+ *     / `getContentPageAlternates` REQUIRE `availableLocales`, so forgetting it
+ *     is a compile error instead of a silently wrong `<head>`.
+ *
+ * The split exists because the old single function DEFAULTED `availableLocales`
+ * to every supported locale. Content routes forgot to pass it (every app, until
+ * PR #7652) and nothing failed: a post that exists only in English advertised
+ * `hreflang="ja"` for a URL whose canonical points back at the English original,
+ * which makes Google discard the whole hreflang cluster (no matching return tag)
+ * and wastes crawl budget on duplicates. Compute the set with busabase-cms-sdk
+ * (`resolvePostMetadataInput`, `getAvailableCmsPageLocales`,
+ * `getCmsTaxonomyLocales`) or, for MDX-only apps, `getLocalPostLocales`.
  *
  * ## canonicalLang vs contentLang vs lang
  *
@@ -120,18 +132,24 @@ export interface PageUrlAndAlternates {
 
 export interface PageAlternatesHelpers {
   /**
-   * Build the canonical URL and complete `alternates` for a single locale+path.
-   * Use this directly when a page assembles its own Metadata shape (custom
-   * openGraph/twitter fields, extra keys like `keywords`/`authors`, a
+   * STATIC route: canonical URL + `alternates` advertising EVERY supported locale.
+   * Use this directly when a statically-translated page assembles its own Metadata
+   * shape (custom openGraph/twitter fields, extra keys like `keywords`/`authors`, a
    * page-specific OG image, etc.) instead of the full `generatePageMetadata`.
    *
-   * `availableLocales` restricts the hreflang set to the locales that really
-   * have this page; omit it only when the page genuinely exists in all of them.
+   * Takes no `availableLocales` on purpose — for content whose locales vary per
+   * item, use `getContentPageAlternates`. See the module doc.
    */
-  getPageAlternates(
+  getPageAlternates(locale: string, path?: string): PageUrlAndAlternates;
+  /**
+   * CONTENT route: same as `getPageAlternates`, but the hreflang set is exactly
+   * `availableLocales` — the locales that really have this item. Required, so a
+   * content route cannot fall back to "every locale" by forgetting it.
+   */
+  getContentPageAlternates(
     locale: string,
-    path?: string,
-    availableLocales?: readonly string[],
+    path: string,
+    availableLocales: readonly string[],
   ): PageUrlAndAlternates;
 }
 
@@ -189,10 +207,10 @@ export function createPageAlternatesHelpers<T extends string>(
   const { baseUrl, defaultLocale, supportedLocales } = config;
   const { getLocalizedUrl } = createCanonicalUrlHelpers({ defaultLocale, supportedLocales });
 
-  function getPageAlternates(
+  function getContentPageAlternates(
     locale: string,
-    path = "",
-    availableLocales: readonly string[] = supportedLocales,
+    path: string,
+    availableLocales: readonly string[],
   ): PageUrlAndAlternates {
     const normalizedPath = normalizeMetadataPath(path);
     const url = getLocalizedUrl(baseUrl, locale, normalizedPath);
@@ -209,7 +227,11 @@ export function createPageAlternatesHelpers<T extends string>(
     return { url, alternates: { canonical: url, languages } };
   }
 
-  return { getPageAlternates };
+  // A static route exists in every supported locale — that list IS its available set.
+  const getPageAlternates = (locale: string, path = ""): PageUrlAndAlternates =>
+    getContentPageAlternates(locale, path, supportedLocales);
+
+  return { getPageAlternates, getContentPageAlternates };
 }
 
 export interface PageMetadataConfig<T extends string> extends PageAlternatesConfig<T> {
@@ -250,11 +272,13 @@ export interface GeneratePageMetadataOptions {
    */
   contentLang?: string;
   /**
-   * The locales that really have this page. Defaults to every supported locale —
-   * correct for a fully-translated static route, wrong for CMS content. See the
-   * module doc.
+   * Not accepted here: `generatePageMetadata` is the STATIC-route entry point and
+   * always advertises every supported locale. A route that knows its item exists
+   * in only some locales is a content route — call `generateContentPageMetadata`,
+   * where this field is required. (Typed `never` so passing it is a compile error
+   * pointing at this comment, rather than being silently accepted.)
    */
-  availableLocales?: readonly string[];
+  availableLocales?: never;
   /**
    * An explicit canonical URL that overrides the computed one — a CMS
    * `canonical-url` field, or a page deliberately consolidated onto another URL.
@@ -301,15 +325,36 @@ export interface GeneratePageMetadataOptions {
   modifiedTime?: string;
 }
 
+/**
+ * Options for a CONTENT route: the static options plus a REQUIRED `availableLocales`.
+ * Structurally what busabase-cms-sdk's `resolvePostMetadataInput` returns (plus `type`),
+ * so a CMS post route is `generateContentPageMetadata({ ...input, type: "article" })`.
+ */
+export interface GenerateContentPageMetadataOptions
+  extends Omit<GeneratePageMetadataOptions, "availableLocales"> {
+  /**
+   * The locales that really have THIS item (its own CMS record or its own MDX
+   * file — never a fumadocs fallback), in any order. Drives hreflang and
+   * `og:locale:alternate`; `x-default` is added only when the default locale is
+   * among them.
+   */
+  availableLocales: readonly string[];
+}
+
 export interface PageMetadataHelpers extends PageAlternatesHelpers {
   /**
-   * Generate OpenGraph/Twitter/alternates metadata for a page. Signature-
-   * compatible with the per-app `lib/metadata-helper.ts` `generatePageMetadata`
-   * helpers this replaces
-   * — apps instantiate this once with their own config and re-export the
-   * result verbatim, so existing call sites need no changes.
+   * STATIC route: OpenGraph/Twitter/alternates metadata for a page translated into
+   * every supported locale. Apps instantiate this once with their own config and
+   * re-export it from `lib/metadata-helper.ts`.
+   *
+   * For CMS/MDX content use `generateContentPageMetadata` — see the module doc.
    */
   generatePageMetadata(options: GeneratePageMetadataOptions): PageMetadata;
+  /**
+   * CONTENT route: identical output shape, but `availableLocales` is required so
+   * the hreflang set can only come from the content source, never from a default.
+   */
+  generateContentPageMetadata(options: GenerateContentPageMetadataOptions): PageMetadata;
   /**
    * Locale → OpenGraph locale (`zh-CN` → `zh_CN`), for pages that assemble their
    * own `openGraph` block instead of calling `generatePageMetadata`.
@@ -339,7 +384,8 @@ export function createPageMetadataHelpers<T extends string>(
     buildImageTextUrl,
     ...alternatesConfig
   } = config;
-  const { getPageAlternates } = createPageAlternatesHelpers(alternatesConfig);
+  const { getPageAlternates, getContentPageAlternates } =
+    createPageAlternatesHelpers(alternatesConfig);
 
   const getOpenGraphLocale = (locale: string) => toOpenGraphLocale(locale, openGraphLocales);
 
@@ -351,14 +397,14 @@ export function createPageMetadataHelpers<T extends string>(
       .filter((candidate) => candidate !== locale)
       .map((candidate) => toOpenGraphLocale(candidate, openGraphLocales));
 
-  function generatePageMetadata({
+  function generateContentPageMetadata({
     title,
     description,
     path,
     lang,
     canonicalLang = lang,
     contentLang = lang,
-    availableLocales = alternatesConfig.supportedLocales,
+    availableLocales,
     canonicalUrl,
     type = "website",
     imageUrl,
@@ -366,10 +412,10 @@ export function createPageMetadataHelpers<T extends string>(
     absoluteTitle = false,
     keywords,
     modifiedTime,
-  }: GeneratePageMetadataOptions): PageMetadata {
+  }: GenerateContentPageMetadataOptions): PageMetadata {
     // The canonical URL follows the page that exists, not the URL that was requested;
     // the hreflang set stays keyed on the same path so every alternate agrees.
-    const computed = getPageAlternates(canonicalLang, path, availableLocales);
+    const computed = getContentPageAlternates(canonicalLang, path, availableLocales);
     const url = canonicalUrl ?? computed.url;
     const consolidatedElsewhere = Boolean(canonicalUrl) && !isSamePath(url, computed.url);
     const alternates: PageAlternates = consolidatedElsewhere
@@ -408,9 +454,18 @@ export function createPageMetadataHelpers<T extends string>(
     };
   }
 
+  // A static route exists in every supported locale — that list IS its available set.
+  const generatePageMetadata = (options: GeneratePageMetadataOptions): PageMetadata =>
+    generateContentPageMetadata({
+      ...options,
+      availableLocales: alternatesConfig.supportedLocales,
+    });
+
   return {
     getPageAlternates,
+    getContentPageAlternates,
     generatePageMetadata,
+    generateContentPageMetadata,
     getOpenGraphLocale,
     getOpenGraphAlternateLocales,
   };

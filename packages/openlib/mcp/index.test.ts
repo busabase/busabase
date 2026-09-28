@@ -153,6 +153,239 @@ describe("createOpenApiMcpHandler", () => {
   });
 });
 
+const rpc = async (
+  handler: (request: Request) => Response | Promise<Response>,
+  method: string,
+  params?: Record<string, unknown>,
+  headers: Record<string, string> = {},
+) => {
+  const request = jsonRpcRequest(method, 1, params);
+  for (const [key, value] of Object.entries(headers)) request.headers.set(key, value);
+  const response = await handler(request);
+  expect(response.status).toBe(200);
+  return (await response.json()) as {
+    result?: Record<string, unknown>;
+    error?: { code: number; message: string };
+  };
+};
+
+const initializeParams = {
+  protocolVersion: "2025-11-25",
+  capabilities: {},
+  clientInfo: { name: "test-client", version: "1.0.0" },
+};
+
+describe("createOpenApiMcpHandler documents", () => {
+  const staticDocuments = {
+    prompts: [
+      {
+        name: "setup",
+        title: "Set up",
+        description: "Static setup prompt",
+        get: () => "static setup body",
+      },
+    ],
+    resources: [
+      {
+        uri: "app://manual",
+        name: "manual",
+        description: "Static manual",
+        read: () => "static manual body",
+      },
+    ],
+  };
+
+  it("keeps a static-only server exactly as before", async () => {
+    const handler = createOpenApiMcpHandler({
+      contract: testContract,
+      createClient: () => ({}),
+      ...staticDocuments,
+    });
+
+    const init = await rpc(handler, "initialize", initializeParams);
+    expect(init.result?.capabilities).toEqual(
+      expect.objectContaining({ tools: {}, prompts: {}, resources: {} }),
+    );
+    expect((await rpc(handler, "prompts/list")).result).toEqual({
+      prompts: [{ name: "setup", title: "Set up", description: "Static setup prompt" }],
+    });
+    expect((await rpc(handler, "resources/list")).result).toEqual({
+      resources: [
+        {
+          uri: "app://manual",
+          name: "manual",
+          description: "Static manual",
+          mimeType: "text/markdown",
+        },
+      ],
+    });
+    // No template provider → the method is not registered at all, as before.
+    expect((await rpc(handler, "resources/templates/list")).error?.code).toBe(-32601);
+    expect((await rpc(handler, "prompts/get", { name: "setup" })).result).toEqual({
+      description: "Static setup prompt",
+      messages: [{ role: "user", content: { type: "text", text: "static setup body" } }],
+    });
+  });
+
+  it("declares no document capabilities for a tools-only server", async () => {
+    const handler = createOpenApiMcpHandler({ contract: testContract, createClient: () => ({}) });
+    const init = await rpc(handler, "initialize", initializeParams);
+    expect(init.result?.capabilities).not.toHaveProperty("prompts");
+    expect(init.result?.capabilities).not.toHaveProperty("resources");
+    expect((await rpc(handler, "prompts/list")).error?.code).toBe(-32601);
+  });
+
+  it("declares capabilities from dynamic providers alone", async () => {
+    const handler = createOpenApiMcpHandler({
+      contract: testContract,
+      createClient: () => ({}),
+      documentProviders: {
+        listPrompts: async () => [{ name: "dyn" }],
+        readResource: async () => undefined,
+      },
+    });
+    const init = await rpc(handler, "initialize", initializeParams);
+    expect(init.result?.capabilities).toEqual(
+      expect.objectContaining({ prompts: {}, resources: {} }),
+    );
+    expect((await rpc(handler, "prompts/list")).result).toEqual({ prompts: [{ name: "dyn" }] });
+    expect((await rpc(handler, "resources/list")).result).toEqual({ resources: [] });
+  });
+
+  it("merges per-caller prompts and resources after the static ones, in the caller's request scope", async () => {
+    const seen: unknown[] = [];
+    const handler = createOpenApiMcpHandler({
+      contract: testContract,
+      createClient: () => ({}),
+      ...staticDocuments,
+      documentProviders: {
+        listPrompts: async (extra) => {
+          seen.push(extra.requestInfo?.headers["x-workspace"]);
+          return [
+            {
+              name: "playbook__visits__log",
+              title: "Log a visit",
+              description: "custom",
+              arguments: [{ name: "locale" }],
+            },
+            // Collides with a static prompt: dropped from the listing.
+            { name: "setup", title: "Impostor" },
+          ];
+        },
+        getPrompt: async (name, args, extra) =>
+          name === "playbook__visits__log"
+            ? {
+                description: "custom",
+                text: `body ${args.locale ?? "-"} ${String(extra.requestInfo?.headers["x-workspace"])}`,
+              }
+            : undefined,
+        listResources: async () => [
+          { uri: "app://skill/1", name: "Weekly report", description: "Fridays" },
+          { uri: "app://manual", name: "impostor" },
+        ],
+        listResourceTemplates: async () => [
+          { uriTemplate: "app://skill/{id}", name: "skill", description: "A skill" },
+        ],
+        readResource: async (uri) =>
+          uri === "app://skill/1" ? { text: "# Weekly report" } : undefined,
+      },
+    });
+    const headers = { "x-workspace": "ws-1" };
+
+    expect((await rpc(handler, "prompts/list", undefined, headers)).result).toEqual({
+      prompts: [
+        { name: "setup", title: "Set up", description: "Static setup prompt" },
+        {
+          name: "playbook__visits__log",
+          title: "Log a visit",
+          description: "custom",
+          arguments: [{ name: "locale" }],
+        },
+      ],
+    });
+    expect(seen).toEqual(["ws-1"]);
+    expect(
+      (
+        await rpc(
+          handler,
+          "prompts/get",
+          { name: "playbook__visits__log", arguments: { locale: "zh-CN" } },
+          headers,
+        )
+      ).result,
+    ).toEqual({
+      description: "custom",
+      messages: [{ role: "user", content: { type: "text", text: "body zh-CN ws-1" } }],
+    });
+    // The static prompt still wins its own name.
+    expect((await rpc(handler, "prompts/get", { name: "setup" })).result?.messages).toEqual([
+      { role: "user", content: { type: "text", text: "static setup body" } },
+    ]);
+    expect((await rpc(handler, "prompts/get", { name: "nope" })).error?.message).toContain(
+      "MCP prompt not found: nope",
+    );
+
+    expect((await rpc(handler, "resources/list")).result).toEqual({
+      resources: [
+        {
+          uri: "app://manual",
+          name: "manual",
+          description: "Static manual",
+          mimeType: "text/markdown",
+        },
+        {
+          uri: "app://skill/1",
+          name: "Weekly report",
+          description: "Fridays",
+          mimeType: "text/markdown",
+        },
+      ],
+    });
+    expect((await rpc(handler, "resources/templates/list")).result).toEqual({
+      resourceTemplates: [
+        {
+          uriTemplate: "app://skill/{id}",
+          name: "skill",
+          description: "A skill",
+          mimeType: "text/markdown",
+        },
+      ],
+    });
+    expect((await rpc(handler, "resources/read", { uri: "app://skill/1" })).result).toEqual({
+      contents: [{ uri: "app://skill/1", mimeType: "text/markdown", text: "# Weekly report" }],
+    });
+    expect((await rpc(handler, "resources/read", { uri: "app://manual" })).result).toEqual({
+      contents: [{ uri: "app://manual", mimeType: "text/markdown", text: "static manual body" }],
+    });
+    expect(
+      (await rpc(handler, "resources/read", { uri: "app://skill/2" })).error?.message,
+    ).toContain("MCP resource not found: app://skill/2");
+  });
+
+  it("still lists the static documents when a dynamic listing throws", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const handler = createOpenApiMcpHandler({
+      contract: testContract,
+      createClient: () => ({}),
+      ...staticDocuments,
+      documentProviders: {
+        listPrompts: async () => {
+          throw new Error("db down");
+        },
+        listResources: async () => {
+          throw new Error("db down");
+        },
+      },
+    });
+    expect((await rpc(handler, "prompts/list")).result?.prompts).toEqual([
+      { name: "setup", title: "Set up", description: "Static setup prompt" },
+    ]);
+    expect(((await rpc(handler, "resources/list")).result?.resources as unknown[]).length).toBe(1);
+    expect(consoleError).toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+});
+
 describe("registerOpenApiMcpTools", () => {
   it("publishes converter-produced JSON schemas and empty schemas for zero-argument tools", async () => {
     const { server, listTools } = createTestServer();
@@ -179,6 +412,40 @@ describe("registerOpenApiMcpTools", () => {
       properties: {},
     });
     expect(tools.some((tool) => tool.name === "system_admin_secret")).toBe(false);
+  });
+
+  it("lists priorityToolNames first, keeps every other tool in its default order, and never changes the set", async () => {
+    const guide = {
+      name: "guide",
+      title: "Guide",
+      description: "Custom task tool",
+      inputSchema: z.object({}),
+      keyPath: ["guide"],
+      execute: vi.fn(),
+    };
+    const register = (priorityToolNames?: string[]) => {
+      const { server, listTools } = createTestServer();
+      registerOpenApiMcpTools({
+        server,
+        contract: testContract,
+        createClient: () => ({}),
+        additionalTools: [guide],
+        priorityToolNames,
+      });
+      return listTools();
+    };
+
+    const defaultNames = (await register()).map((tool) => tool.name);
+    // Default: custom tools, then contract tools in contract key order.
+    expect(defaultNames[0]).toBe("guide");
+    expect(defaultNames.indexOf("things_get")).toBeLessThan(defaultNames.indexOf("things_ping"));
+
+    const prioritized = (await register(["things_ping", "missing_tool", "things_ping"])).map(
+      (tool) => tool.name,
+    );
+    expect(prioritized[0]).toBe("things_ping");
+    expect(prioritized.slice(1)).toEqual(defaultNames.filter((name) => name !== "things_ping"));
+    expect([...prioritized].sort()).toEqual([...defaultNames].sort());
   });
 
   it("supports naming, descriptions, typed additional input, and client context", async () => {

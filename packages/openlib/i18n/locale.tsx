@@ -31,11 +31,20 @@ interface LocaleContextValue {
 
 const LocaleContext = createContext<LocaleContextValue | undefined>(undefined);
 
-export function detectBrowserLocale(supportedLocales: readonly Locale[]): Locale {
+/**
+ * The best match for the browser's languages among `supportedLocales`, else "en"
+ * (also "en" on the server, where there is no browser).
+ *
+ * Generic like `detectServerLocaleFromHeader`, so callers get their own locale
+ * type back. It used to take and return openlib's full `Locale` union, so every
+ * app cast its list in, cast the result out, and then re-checked the result
+ * against its list — a check this function already guarantees.
+ */
+export function detectBrowserLocale<L extends string>(supportedLocales: readonly L[]): L | "en" {
   if (typeof navigator === "undefined") return "en";
   const requested = navigator.languages?.length ? navigator.languages : [navigator.language];
-  const matched = localeMatch(requested, supportedLocales as string[], "en");
-  return (supportedLocales.includes(matched as Locale) ? matched : "en") as Locale;
+  const matched = localeMatch(requested, [...supportedLocales], "en");
+  return (supportedLocales as readonly string[]).includes(matched) ? (matched as L) : "en";
 }
 
 // storage helpers are re-exported above from ./storage

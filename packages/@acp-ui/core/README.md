@@ -16,7 +16,7 @@ setBlocks((prev) => reduceAcpEvent(prev, event));
 const blocks = reduceAcpEvents([], await listSessionEvents(sessionId));
 ```
 
-Both `apps/acprouter` and `apps/busabase` need **both** paths: each already streams live and
+Both ACP Router and Busabase need **both** paths: each already streams live and
 each already persists its events. One function serves both, and a test pins that they agree —
 if they diverged, replaying a stored session would look different from having watched it.
 
