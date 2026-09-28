@@ -186,6 +186,12 @@ export interface SeedFileTreeDef {
   icon?: NodeIcon;
   files: { path: string; content: string }[];
   position: number;
+  /**
+   * Seed the node inside this scenario folder instead of the shared per-type
+   * folder (Agent Skills / Drives / AirApps), so a vertical's apps sit beside
+   * its Bases. Omit it to keep the per-type folder.
+   */
+  folderNodeId?: string;
   /** Optional in-review file-update change request, to demo the node's review flow. */
   changeRequest?: SeedFileTreeChangeRequestDef;
 }

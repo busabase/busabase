@@ -71,8 +71,15 @@ describe("demo mobile read surfaces", () => {
   it("lists and reads seeded Skill and Drive files", async () => {
     const skills = await client.nodes.list({ types: ["skill"] });
     const drives = await client.nodes.list({ types: ["drive"] });
-    expect(skills[0]?.id).toBe("nod_skill_ai_research_editor");
-    expect(drives[0]?.id).toBe("nod_drive_team_files");
+    // Membership, not position: list order follows the tree, so a scenario that
+    // seeds a Skill inside its own folder lists it ahead of the shared one.
+    const skillIds = skills.map((skill) => skill.id);
+    const driveIds = drives.map((drive) => drive.id);
+    expect(skillIds).toContain("nod_skill_ai_research_editor");
+    expect(driveIds).toContain("nod_drive_team_files");
+    // Seeding a node inside a scenario folder must not hide it from type listings.
+    expect(skillIds).toContain("nod_skill_policy_renewal_assistant");
+    expect(driveIds).toContain("nod_drive_insurance_materials");
 
     const file = await client.fileTrees.readFile({
       type: "drive",

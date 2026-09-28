@@ -8,6 +8,11 @@ import type { SeedScenario } from "../seed-types";
 const DOC_GUIDE_CR_ID = "crq_seed_doc_operating_guide";
 const RICH_NODES_FOLDER_ID = "nod_visual_tools";
 
+// 与英文 scenario 同一个 Skill 节点（同 id、同 slug），内容是中文。做事手册
+// （playbooks）会把它列为技能，所以中文 demo 也要有它。
+const AI_RESEARCH_EDITOR_SKILL_MD =
+  "---\nname: ai-research-editor\ndescription: 发布前检查 Agent 研究草稿的来源质量。\n---\n\n# AI 研究编辑\n\n当 Agent 提交 AI 行业分析、简报文案或社媒长文，需要在合并前核对来源时，使用这个技能。\n\n## 工作流程\n\n1. 读一遍提交的变更请求里的每个操作。\n2. 检查每一条事实性说法是否附有来源链接，或清楚的内部记录引用。\n3. 合并前标出没有依据的说法。\n4. 修改尽量简短，保留作者的核心观点。\n";
+
 export const zhCnNodeTypesScenario: SeedScenario = {
   folders: [
     {
@@ -506,6 +511,48 @@ Busabase 是 AI Agent 干活的工作区：每一次写入都是一个带说明�
   "voice": "沉稳、精确、改动必留痕"
 }
 `,
+    },
+  ],
+  fileTreeNodes: [
+    {
+      nodeType: "skill",
+      nodeId: "nod_skill_ai_research_editor",
+      slug: "ai-research-editor",
+      name: "AI 研究编辑",
+      description: "发布前检查 Agent 研究草稿的来源质量。",
+      position: 0,
+      files: [
+        { path: "SKILL.md", content: AI_RESEARCH_EDITOR_SKILL_MD },
+        {
+          path: "skill.json",
+          content: `${JSON.stringify(
+            {
+              name: "ai-research-editor",
+              description: "发布前检查 Agent 研究草稿的来源质量。",
+              version: "0.1.0",
+            },
+            null,
+            2,
+          )}\n`,
+        },
+        {
+          path: "references/source-policy.md",
+          content:
+            "# 来源规则\n\n优先使用一手来源：官方文档、公司官方发布、注明日期的分析师报告。只引用模糊社交传言的说法一律不采纳。\n",
+        },
+      ],
+      changeRequest: {
+        id: "crq_seed_skill_research_editor",
+        operationId: "opr_seed_skill_research_editor",
+        commitId: "cmt_seed_skill_research_editor",
+        submittedBy: "skill-maintainer-agent",
+        minutesAgo: 6,
+        filePath: "SKILL.md",
+        nextContent: `${AI_RESEARCH_EDITOR_SKILL_MD}\n## 合并守则\n\n- 市场规模、政策、基准测试类说法没有来源凭据的草稿，不予通过。\n- 宁可写一段简短的评审意见，也不要重写整篇文章。\n`,
+        message: "为 AI 研究编辑技能补充合并守则",
+        scenario: "skill-file-update",
+        workflow: "skill-governance",
+      },
     },
   ],
   comments: [
