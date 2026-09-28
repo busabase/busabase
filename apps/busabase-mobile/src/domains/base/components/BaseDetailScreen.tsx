@@ -104,7 +104,11 @@ function BaseDetailContent() {
           {controller.records.length === 0 ? (
             <NativeEmptyState title="No records" />
           ) : controller.displayMode === "list" ? (
-            <BaseRecordList records={controller.records} onOpenRecord={openRecord} />
+            <BaseRecordList
+              records={controller.records}
+              total={controller.recordTotal}
+              onOpenRecord={openRecord}
+            />
           ) : (
             <BaseRecordTable
               fields={controller.previewFields}

@@ -1,5 +1,6 @@
 import { ExternalLink, FileQuestion, MoreHorizontal, Pencil } from "lucide-react-native";
 import { Image, Linking, Platform, ScrollView, StyleSheet, Text, View } from "react-native";
+import { MarkdownView } from "~/components/MarkdownView";
 import {
   NativeActionBar,
   NativeBottomSheet,
@@ -14,7 +15,7 @@ import { resolveAttachmentUrl } from "~/lib/attachment";
 import { radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 import type { FileEditorMode, NewFileDraft, OpenFile } from "../types/file-tree";
-import { fileContentKind } from "../utils/file-content-kind";
+import { fileContentKind, previewsAsMarkdown } from "../utils/file-content-kind";
 
 interface FileEditorSheetProps {
   visible: boolean;
@@ -131,7 +132,13 @@ export function FileEditorSheet({
         <NativeErrorState message={openFile.error} />
       ) : openFile && mode === "preview" && !newFile ? (
         <ScrollView style={styles.modalBody} contentContainerStyle={styles.modalBodyContent}>
-          {contentKind.kind === "text" ? (
+          {previewsAsMarkdown(openFile) ? (
+            // SKILL.md, README.md and friends read as formatted text, as web
+            // previews them — decided by web's own rule, not a local copy.
+            <View style={styles.markdownPreview}>
+              <MarkdownView>{openFile.content}</MarkdownView>
+            </View>
+          ) : contentKind.kind === "text" ? (
             <View style={[styles.previewBody, { backgroundColor: tokens.muted }]}>
               <Text selectable style={[typography.body, styles.code, { color: tokens.foreground }]}>
                 {openFile.content || "Empty file."}
@@ -229,6 +236,7 @@ const styles = StyleSheet.create({
   assetNote: { textAlign: "center" },
   modalBody: { marginHorizontal: -2 },
   modalBodyContent: { paddingBottom: 12, gap: 12 },
+  markdownPreview: { paddingHorizontal: 4, paddingVertical: 4 },
   previewBody: {
     borderRadius: radius.md,
     paddingHorizontal: 12,

@@ -1,3 +1,4 @@
+import type { NodeSearchResultVO, NodeVO } from "busabase-contract/types";
 import { describe, expect, it } from "vitest";
 import {
   type AsyncKeyValueStorage,
@@ -5,6 +6,8 @@ import {
   createKnownNodeCacheScope,
   findKnownNodeByTypeAndSlug,
   type KnownNode,
+  nodeSearchResultToKnownNode,
+  nodeToKnownNode,
 } from "./known-node-cache";
 import { getMobileNodeDestination } from "./node-navigation";
 
@@ -172,5 +175,72 @@ describe("mobile node navigation", () => {
         params: { nodeId: `${type}-id` },
       });
     }
+  });
+});
+
+describe("KnownNode cache keeps a node's own icon", () => {
+  const rocket = { type: "emoji", value: "🚀" } as const;
+
+  it("carries the icon from the tree and from search, where it used to be dropped", () => {
+    const fromTree = nodeToKnownNode({
+      id: "1",
+      type: "base",
+      name: "Deals",
+      slug: "deals",
+      icon: rocket,
+      children: [],
+    } as unknown as NodeVO);
+    expect(fromTree.icon).toEqual(rocket);
+    const fromSearch = nodeSearchResultToKnownNode({
+      id: "1",
+      type: "base",
+      name: "Deals",
+      slug: "deals",
+      path: "/base/deals",
+      updatedAt: "",
+      icon: rocket,
+    } as NodeSearchResultVO);
+    expect(fromSearch.icon).toEqual(rocket);
+  });
+
+  it("does not read a server that predates the field as 'this node has no icon'", () => {
+    const fromOldServer = nodeSearchResultToKnownNode({
+      id: "1",
+      type: "base",
+      name: "Deals",
+      slug: "deals",
+      path: "/base/deals",
+      updatedAt: "",
+    } as NodeSearchResultVO);
+    expect("icon" in fromOldServer).toBe(false);
+  });
+
+  it("survives a reload, and a later source that does not know the icon keeps it", async () => {
+    const storage = new MemoryStorage();
+    const cache = createKnownNodeCache("scope", storage);
+    await cache.merge([node("1", { icon: rocket })]);
+    await cache.merge([node("1", { name: "Renamed" })]); // e.g. an older server's search result
+    const reloaded = createKnownNodeCache("scope", storage);
+    expect(await reloaded.list()).toEqual([
+      expect.objectContaining({ id: "1", name: "Renamed", icon: rocket }),
+    ]);
+  });
+
+  it("clears it when the node's icon was explicitly removed", async () => {
+    const cache = createKnownNodeCache("scope", new MemoryStorage());
+    await cache.merge([node("1", { icon: rocket })]);
+    await cache.merge([node("1", { icon: null })]);
+    expect((await cache.list())[0]?.icon).toBeNull();
+  });
+
+  it("drops a persisted entry whose icon is not a valid icon rather than rendering it", async () => {
+    const storage = new MemoryStorage();
+    await createKnownNodeCache("scope", storage).merge([node("1")]);
+    const [key] = [...storage.values.keys()];
+    const raw = JSON.parse(storage.values.get(key) ?? "[]");
+    const entries = Array.isArray(raw) ? raw : (raw.nodes ?? raw.entries ?? Object.values(raw)[0]);
+    entries[0].icon = { type: "emoji" }; // no value
+    storage.values.set(key, JSON.stringify(raw));
+    expect(await createKnownNodeCache("scope", storage).list()).toEqual([]);
   });
 });
