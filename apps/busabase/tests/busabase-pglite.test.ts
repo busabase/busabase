@@ -38,6 +38,15 @@ describe("busabase pglite integration flow", () => {
       expect.arrayContaining(["blog", "social-content", "newsletter"]),
     );
 
+    const socialBase = bases.find((base) => base.slug === "social-content");
+    if (!socialBase) {
+      throw new Error("Expected social base to be seeded");
+    }
+    const newsletterBase = bases.find((base) => base.slug === "newsletter");
+    if (!newsletterBase) {
+      throw new Error("Expected newsletter base to be seeded");
+    }
+
     const nodes = await store.listNodes();
     expect(nodes[0]?.type).toBe("folder");
     expect(nodes[0]?.children.some((node) => node.type === "folder")).toBe(true);
@@ -120,24 +129,15 @@ describe("busabase pglite integration flow", () => {
 
     const { records: seededRecords } = await base.listRecordsPaged({ limit: 100 });
     expect(seededRecords.length).toBeGreaterThanOrEqual(5);
-    // Query each Base directly: the workspace-wide first page holds only the
-    // 100 newest records, so any new demo data sorting ahead of these Bases
-    // pushes them off it without anything actually being unseeded.
-    // An unknown slug must fail here: `baseId: undefined` would silently list
-    // the whole workspace and let the assertions below pass on any record.
-    const baseIdFor = (slug: string) => {
-      const id = bases.find((item) => item.slug === slug)?.id;
-      if (!id) throw new Error(`Expected a seeded "${slug}" Base`);
-      return id;
-    };
+    // Query each Base directly because a workspace-wide page can omit its records.
     const { records: socialRecords } = await base.listRecordsPaged({
-      baseId: baseIdFor("social-content"),
+      baseId: socialBase.id,
       limit: 1,
     });
     expect(socialRecords).toHaveLength(1);
     expect(socialRecords[0]?.base.slug).toBe("social-content");
     const { records: newsletterRecords } = await base.listRecordsPaged({
-      baseId: baseIdFor("newsletter"),
+      baseId: newsletterBase.id,
       limit: 1,
     });
     const seededNewsletter = newsletterRecords[0];
@@ -169,10 +169,6 @@ describe("busabase pglite integration flow", () => {
     const blogBase = bases.find((base) => base.slug === "blog");
     if (!blogBase) {
       throw new Error("Expected blog base to be seeded");
-    }
-    const socialBase = bases.find((base) => base.slug === "social-content");
-    if (!socialBase) {
-      throw new Error("Expected social base to be seeded");
     }
     expect(blogBase.fields.find((field) => field.slug === "related_social")?.type).toBe("relation");
     expect(
