@@ -8,6 +8,7 @@ const ko = {
   embedRuntime: {
     loading: "앱을 불러오는 중…",
     unavailable: "콘텐츠를 사용할 수 없습니다",
+    expired: "링크가 만료되었습니다",
   },
   seo: {
     title: "Busabase",

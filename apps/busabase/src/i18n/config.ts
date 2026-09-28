@@ -1,20 +1,9 @@
-import { createLanguageOptions } from "openlib/i18n";
+import { createLanguageOptions, LOCALE_NATIVE_NAMES } from "openlib/i18n";
 import { type Locale, SUPPORTED_LOCALES } from "./app-locale";
 
 export { type Locale, SUPPORTED_LOCALES } from "./app-locale";
 
-export const LOCALE_DISPLAY_NAMES: Record<Locale, string> = {
-  en: "English",
-  "zh-CN": "简体中文",
-  "zh-TW": "繁體中文",
-  ja: "日本語",
-  ko: "한국어",
-  es: "Español",
-  pt: "Português",
-  vi: "Tiếng Việt",
-  fr: "Français",
-  de: "Deutsch",
-};
+export const LOCALE_DISPLAY_NAMES: Record<Locale, string> = LOCALE_NATIVE_NAMES;
 
 export const AUTO_LABEL: Record<Locale, string> = {
   en: "Auto",

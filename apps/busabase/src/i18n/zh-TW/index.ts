@@ -8,6 +8,7 @@ const zhTW = {
   embedRuntime: {
     loading: "應用程式載入中…",
     unavailable: "內容不可用",
+    expired: "連結已過期",
   },
   seo: {
     title: "Busabase - AI 智能體的開源本機優先資料庫與應用平台",

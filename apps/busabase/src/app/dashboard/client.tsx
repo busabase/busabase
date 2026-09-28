@@ -11,21 +11,22 @@ import { InstallFromGithubModal } from "busabase-core/dashboard/install-from-git
 import { BusabaseDashboardRouteRenderer } from "busabase-core/dashboard/route-renderer";
 import { getBusabaseDashboardRoutes as getDashboardRoutes } from "busabase-core/dashboard/routes";
 import { useNodeTree } from "busabase-core/dashboard/use-node-tree";
-import { CoreI18nProvider } from "busabase-core/i18n";
+import { CoreI18nProvider, useCoreMessages } from "busabase-core/i18n";
 import { Skeleton } from "kui/skeleton";
 import { useRouter, useSearchParams } from "next/navigation";
 import { detectBrowserLocale, type Locale } from "openlib/i18n";
 import { addDemoParam, resolveDemoMode } from "openlib/ui/dashboard";
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, startTransition, useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation } from "wouter";
 import { BusabaseDashboardShell } from "~/components/dashboard/busabase-dashboard-shell";
 import { DashboardNotFound } from "~/components/spa/not-found";
 
 import { SPAWrapper } from "~/components/spa/spa-wrapper";
 import { getSecondarySidebarNav } from "~/config/navigation-nested";
+import { normalizeBusabaseAppLocale } from "~/i18n/app-locale";
 import { SUPPORTED_LOCALES } from "~/i18n/config";
+import { useBusabaseAppLL } from "~/i18n/use-app-ll";
 import { buildDashboardUrl, getDashboardBasePath } from "~/lib/dashboard-routes";
-import { getBusabaseAppLL, getBusabaseMessages, normalizeBusabaseAppLocale } from "~/lib/i18n";
 
 interface DashboardClientProps {
   /** Server-resolved; see `dashboard-page.tsx`. */
@@ -250,12 +251,16 @@ function DashboardClientContent({
     if (stored) {
       const normalizedStored =
         stored === "auto" ? "auto" : (normalizeBusabaseAppLocale(stored) ?? "auto");
-      setLanguagePref(normalizedStored);
+      // Transitions throughout: the first switch to a locale fetches its chunk,
+      // and a transition keeps the current screen up until it has loaded
+      // instead of dropping back to the Suspense skeleton.
+      startTransition(() => setLanguagePref(normalizedStored));
       if (normalizedStored !== stored) {
         window.localStorage.setItem("busabaseLocale", normalizedStored);
       }
     }
-    setDetectedLocale(normalizeBusabaseAppLocale(detectBrowserLocale(appLocaleCodes)) ?? "en");
+    const detected = normalizeBusabaseAppLocale(detectBrowserLocale(appLocaleCodes)) ?? "en";
+    startTransition(() => setDetectedLocale(detected));
   }, [appLocaleCodes]);
   const demoMode = resolveDemoMode(searchParams);
   const locale =
@@ -267,7 +272,7 @@ function DashboardClientContent({
   useEffect(() => {
     document.documentElement.lang = locale;
   }, [locale]);
-  const LL = useMemo(() => getBusabaseAppLL(locale), [locale]);
+  const LL = useBusabaseAppLL(locale);
   // The node tree — depth-bounded prefetch, per-folder lazy expansion, the
   // move/"Move to…" mutation, and the cycle-rejection check — is the SAME
   // wiring every hosted Busabase surface needs, so it lives in ONE shared hook
@@ -298,12 +303,12 @@ function DashboardClientContent({
   const loadError = nodesQuery.error ?? basesQuery.error ?? auditEventsQuery.error;
   const isLoadingDashboardData =
     nodesQuery.isPending || basesQuery.isPending || auditEventsQuery.isPending;
-  const coreMessages = useMemo(() => getBusabaseMessages(locale), [locale]);
+  const coreMessages = useCoreMessages(locale);
   // RPC errors can contain unlocalized server messages. Surface one useful,
   // translated recovery message and retain the underlying error in the query.
   const loadErrorMessage = loadError ? LL.shell.failedToLoadDashboard() : null;
   const changeLocale = useCallback((next: string) => {
-    setLanguagePref(next);
+    startTransition(() => setLanguagePref(next));
     window.localStorage.setItem("busabaseLocale", next);
   }, []);
   const dashboard = useMemo(
@@ -353,7 +358,7 @@ function DashboardClientContent({
     () => getDashboardRoutes(dashboard, coreMessages),
     [dashboard, coreMessages],
   );
-  const secondaryNavConfig = useMemo(() => getSecondarySidebarNav(locale), [locale]);
+  const secondaryNavConfig = useMemo(() => getSecondarySidebarNav(LL), [LL]);
 
   // Shared regardless of chrome mode: load error / loading skeleton / the
   // SPA-routed dashboard (every route pattern renders the same `dashboard`

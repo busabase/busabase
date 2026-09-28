@@ -29,6 +29,7 @@ describe("Desktop embed proxy", () => {
     mocks.nodepodProxy.mockResolvedValue(null);
     mocks.resolveEmbedCapabilityMetadata.mockResolvedValue({
       expiresAt: new Date("2026-08-27T14:30:00.000Z"),
+      expired: false,
       framePolicy: {
         mode: "origins",
         allowedOrigins: ["https://viewer.example"],
@@ -72,7 +73,25 @@ describe("Desktop embed proxy", () => {
     expect(response.headers.get("set-cookie")?.toLowerCase()).toContain("secure");
   });
 
-  it("does not persist an invalid or expired capability", async () => {
+  it("keeps an expired capability for this visit only, so the page can say it expired", async () => {
+    mocks.resolveEmbedCapabilityMetadata.mockResolvedValue({
+      expiresAt: new Date("2026-08-27T14:30:00.000Z"),
+      expired: true,
+      framePolicy: { mode: "origins", allowedOrigins: ["https://viewer.example"] },
+    });
+
+    const response = await proxy(
+      new NextRequest(`http://localhost:15419/embed/${publicId}?token=${secret}`),
+    );
+    const cookie = response.headers.get("set-cookie") ?? "";
+
+    expect(response.status).toBe(303);
+    expect(cookie).toContain(`busabase_embed_${publicId}=`);
+    expect(cookie.toLowerCase()).not.toContain("expires=");
+    expect(cookie.toLowerCase()).toContain("httponly");
+  });
+
+  it("does not persist an invalid or revoked capability", async () => {
     mocks.resolveEmbedCapabilityMetadata.mockResolvedValue(null);
 
     const response = await proxy(
