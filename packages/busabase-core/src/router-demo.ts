@@ -1,5 +1,9 @@
 import { implement, ORPCError } from "@orpc/server";
 import { busabaseContract } from "busabase-contract/contract/busabase";
+import {
+  PlaybookListInputSchema,
+  PlaybookSearchInputSchema,
+} from "busabase-contract/contract/playbook-schemas";
 import { getContextDemoLocale, resolveMemberRoster } from "./context";
 import {
   cancelDemoAgentSession,
@@ -20,6 +24,12 @@ import {
   groupKeyForValue,
 } from "./domains/base/utils/view-records";
 import { guidesRouter } from "./domains/guides/router";
+import {
+  assemblePlaybookList,
+  buildPlaybookCandidates,
+  kindSet,
+  rankPlaybookSearch,
+} from "./domains/playbooks/logic/playbooks";
 import { listTemplates } from "./domains/templates/logic/catalog";
 import { buildActivityItemsFromVOs } from "./logic/activity";
 import {
@@ -36,6 +46,7 @@ import {
   demoGetFileTree,
   demoGetForm,
   demoGetNodeDetail,
+  demoGetPlaybook,
   demoGetRecord,
   demoGetRecordByField,
   demoIsDescendant,
@@ -55,7 +66,10 @@ import {
   demoListViews,
   demoMarkMentionsRead,
   demoMergeChangeRequest,
+  demoNodeAgentPrompts,
   demoNodeAncestorIds,
+  demoPlaybookSource,
+  demoPlaybookUsage,
   demoReadFileTreeFile,
   demoReadNodeLines,
   demoReviewChangeRequest,
@@ -159,18 +173,31 @@ export const busabaseDemoRouter = os.router({
   grep: os.grep.handler(() => {
     throw demoUnsupported("Unified grep");
   }),
-  // Playbook discovery is not wired to the in-memory demo dataset. It answers
-  // the same explicit refusal grep does, never an empty list — an empty list
-  // would read as "this space has no playbooks", which is the one wrong answer.
+  // Playbooks are served from the seed (`demo/playbooks.ts` + the seeded Skill
+  // nodes) through the SAME builder/ranking the real store uses, so the demo's
+  // Playbooks page and its "Try it" box behave like the product.
   playbooks: {
-    search: os.playbooks.search.handler(() => {
-      throw demoUnsupported("Playbook search");
+    search: os.playbooks.search.handler(({ input }) => {
+      const parsed = PlaybookSearchInputSchema.parse(input);
+      const { rows, tree } = demoPlaybookSource();
+      return rankPlaybookSearch(
+        parsed,
+        buildPlaybookCandidates(rows, tree, {
+          kinds: kindSet(parsed.kinds),
+          locale: parsed.locale,
+          inNodeId: parsed.inNodeId,
+        }),
+      );
     }),
-    get: os.playbooks.get.handler(() => {
-      throw demoUnsupported("Playbooks");
-    }),
-    list: os.playbooks.list.handler(() => {
-      throw demoUnsupported("Playbooks");
+    get: os.playbooks.get.handler(({ input }) => demoGetPlaybook(input)),
+    list: os.playbooks.list.handler(({ input }) => {
+      const parsed = PlaybookListInputSchema.parse(input ?? {});
+      const { rows, tree } = demoPlaybookSource();
+      const { candidates } = buildPlaybookCandidates(rows, tree, {
+        kinds: kindSet(parsed.kinds),
+        locale: parsed.locale,
+      });
+      return assemblePlaybookList(candidates, demoPlaybookUsage());
     }),
   },
   embedLinks: {
@@ -227,7 +254,7 @@ export const busabaseDemoRouter = os.router({
     // into an error toast on a workspace that is meant to be browsable.
     getAgentPrompts: os.nodes.getAgentPrompts.handler(({ input }) => ({
       nodeId: input.nodeId,
-      agentPrompts: null,
+      agentPrompts: demoNodeAgentPrompts(input.nodeId),
     })),
     updateAgentPrompts: os.nodes.updateAgentPrompts.handler(() => {
       throw demoUnsupported("Update node agent prompts");

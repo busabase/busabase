@@ -1942,7 +1942,8 @@ const INSURANCE_FILE_TREE_NODES: SeedFileTreeDef[] = [
     slug: "policy-renewal-assistant",
     name: "续保助手",
     description: "为保单准备续保建议，并提交给代理人评审。",
-    position: 1,
+    folderNodeId: DEMO_INSURANCE_FOLDER_NODE_ID,
+    position: 11,
     files: [
       { path: "SKILL.md", content: RENEWAL_ASSISTANT_SKILL_MD },
       {
@@ -1993,7 +1994,8 @@ const INSURANCE_FILE_TREE_NODES: SeedFileTreeDef[] = [
     slug: "insurance-materials",
     name: "客户资料库",
     description: "发给客户的模板、必须照抄的告知话术，以及出险报案清单。",
-    position: 1,
+    folderNodeId: DEMO_INSURANCE_FOLDER_NODE_ID,
+    position: 12,
     files: [
       {
         path: "README.md",
@@ -2024,7 +2026,8 @@ const INSURANCE_FILE_TREE_NODES: SeedFileTreeDef[] = [
     name: "续保看板",
     description:
       "通过公开 REST API 实时读取本工作区「insurance-policies」数据表的看板。零 npm 依赖。",
-    position: 6,
+    folderNodeId: DEMO_INSURANCE_FOLDER_NODE_ID,
+    position: 7,
     files: [
       { path: "package.json", content: RENEWAL_BOARD_PACKAGE_JSON },
       { path: "server.js", content: RENEWAL_BOARD_SERVER_JS },
@@ -2040,7 +2043,8 @@ const INSURANCE_FILE_TREE_NODES: SeedFileTreeDef[] = [
     name: "代理人工作台",
     description:
       "顾问自己的视角：全体顾问的业绩排行，加上今天要跟进和续保的队列。实时读取「客户档案」和「续保跟进」。",
-    position: 7,
+    folderNodeId: DEMO_INSURANCE_FOLDER_NODE_ID,
+    position: 8,
     files: [
       { path: "package.json", content: RENEWAL_BOARD_PACKAGE_JSON },
       { path: "server.js", content: RENEWAL_BOARD_SERVER_JS },
@@ -2056,7 +2060,8 @@ const INSURANCE_FILE_TREE_NODES: SeedFileTreeDef[] = [
     name: "机构经营看板",
     description:
       "老板视角：在保保费、已赚佣金，以及账面集中在哪些险种和承保公司。实时读取「客户档案」和「保单台账」。",
-    position: 8,
+    folderNodeId: DEMO_INSURANCE_FOLDER_NODE_ID,
+    position: 9,
     files: [
       { path: "package.json", content: RENEWAL_BOARD_PACKAGE_JSON },
       { path: "server.js", content: RENEWAL_BOARD_SERVER_JS },
@@ -2072,7 +2077,8 @@ const INSURANCE_FILE_TREE_NODES: SeedFileTreeDef[] = [
     name: "核保出单台",
     description:
       "后勤视角：每张保单还卡在报价到生效之间的哪一步，按生效日排序，并标出缺失保单文件的。实时读取「保单台账」。",
-    position: 9,
+    folderNodeId: DEMO_INSURANCE_FOLDER_NODE_ID,
+    position: 10,
     files: [
       { path: "package.json", content: RENEWAL_BOARD_PACKAGE_JSON },
       { path: "server.js", content: RENEWAL_BOARD_SERVER_JS },

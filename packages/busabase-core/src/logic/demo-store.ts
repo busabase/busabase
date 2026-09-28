@@ -2,6 +2,12 @@ import "server-only";
 
 import { ORPCError } from "@orpc/server";
 import type { NodeDetailVO } from "busabase-contract/contract/node-detail-schemas";
+import {
+  type PlaybookGetInputDTO,
+  PlaybookGetInputSchema,
+  type PlaybookGetVO,
+  type PlaybookUsageVO,
+} from "busabase-contract/contract/playbook-schemas";
 import type { AuthInfo } from "busabase-contract/contract/schemas";
 import type {
   AssetDetailVO,
@@ -51,12 +57,15 @@ import {
   type DemoDocVO,
   englishScenario,
 } from "../demo/dataset";
+import { DEMO_NODE_AGENT_PROMPTS, DEMO_PLAYBOOK_USAGE } from "../demo/playbooks";
 import { zhCnScenario } from "../demo/scenarios/zh-cn";
 import { getPrimaryField } from "../domains/base/utils/primary-field";
 import { type DocLinesResult, sliceDocLinesRange, splitDocLines } from "../domains/doc/handlers";
+import { type PlaybookNodeRow, renderPromptPlaybook } from "../domains/playbooks/logic/playbooks";
 import { collectAncestorIds } from "./ancestor-chain";
 import { type NormalizedCommentMention, normalizeCommentMentions } from "./comment-mentions";
 import { isSearchableNodeType, NODE_CONTENT_ADAPTERS } from "./node-content";
+import { type NodeTree, nodePathOf } from "./node-tree";
 import { toPublicAuditMetadata, toPublicSourceMetadata } from "./source-attribution";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1237,4 +1246,81 @@ export const demoCreateComment = (
     createdAt,
     updatedAt: createdAt,
   };
+};
+
+// ── Playbooks (playbooks.list / search / get, nodes.getAgentPrompts) ─────────
+// The demo serves real playbooks from the seed: custom prompts from
+// `demo/playbooks.ts` plus the seeded Skill nodes. The candidate builder,
+// ranking, list sort, and prompt rendering are the SAME pure functions the real
+// store uses (`domains/playbooks/logic/playbooks.ts`), so "Try it" in the demo
+// ranks exactly like the product.
+
+/** A node's custom prompts in the demo (the Ask Agent dialog and playbooks both read these). */
+export const demoNodeAgentPrompts = (nodeId: string) => DEMO_NODE_AGENT_PROMPTS[nodeId] ?? null;
+
+/** Candidate rows + tree for the shared playbook builder. The demo actor reads everything. */
+export const demoPlaybookSource = (): { rows: PlaybookNodeRow[]; tree: NodeTree } => {
+  const nodes = flattenNodes(dataset().nodes);
+  const byId = new Map(
+    nodes.map((node) => [node.id, { id: node.id, parentId: node.parentId, name: node.name }]),
+  );
+  const rows = nodes
+    .filter((node) => node.type === "skill" || DEMO_NODE_AGENT_PROMPTS[node.id])
+    .map(
+      (node): PlaybookNodeRow => ({
+        id: node.id,
+        parentId: node.parentId,
+        type: node.type,
+        name: node.name,
+        slug: node.slug,
+        description: node.description,
+        updatedAt: new Date(node.updatedAt),
+        prompts: DEMO_NODE_AGENT_PROMPTS[node.id] ?? null,
+      }),
+    );
+  return { rows, tree: { byId, visibleIds: null } };
+};
+
+/** Sample 30-day usage, keyed like the real usage map, dated relative to now. */
+export const demoPlaybookUsage = (now: Date = new Date()): Map<string, PlaybookUsageVO> =>
+  new Map(
+    Object.entries(DEMO_PLAYBOOK_USAGE).map(([key, usage]) => [
+      key,
+      {
+        changeRequests30d: usage.changeRequests30d,
+        lastUsedAt: new Date(now.getTime() - usage.lastUsedHoursAgo * 3_600_000).toISOString(),
+      },
+    ]),
+  );
+
+/** Demo counterpart to `getPlaybook`: a seeded skill's SKILL.md, or a rendered demo prompt. */
+export const demoGetPlaybook = (input: PlaybookGetInputDTO): PlaybookGetVO => {
+  const parsed = PlaybookGetInputSchema.parse(input);
+  const { rows, tree } = demoPlaybookSource();
+  const node = rows.find((row) => row.id === parsed.nodeId);
+  if (!node) throw notFound("Playbook node", parsed.nodeId);
+  const location = {
+    nodeId: node.id,
+    nodeType: node.type,
+    nodeName: node.name,
+    nodeSlug: node.slug,
+    path: nodePathOf(tree.byId, null, node.id),
+  };
+  if (parsed.kind === "skill") {
+    if (node.type !== "skill") throw notFound("Skill", node.id);
+    const { files } = demoGetFileTree(node.id, "skill");
+    const hasEntry = files.some((file) => file.path === "SKILL.md");
+    return {
+      kind: "skill",
+      ...location,
+      name: node.name,
+      description: node.description,
+      content: hasEntry ? demoReadFileTreeFile(node.id, "SKILL.md", "skill").content : "",
+      files: files.map((file) => ({ path: file.path, size: file.size, mimeType: file.mimeType })),
+    };
+  }
+  return renderPromptPlaybook(
+    { ...location, spaceId: "local", agentPrompts: node.prompts },
+    parsed,
+  );
 };

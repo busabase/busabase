@@ -545,7 +545,11 @@ const seedFileTreeNodesIfMissing = async (createdAt: Date, defs: SeedFileTreeDef
   const db = await getDb();
   const spaceId = getContextSpaceId();
 
-  const neededFolderTypes = new Set(defs.map((def) => def.nodeType));
+  // A def with its own `folderNodeId` never needs the shared per-type folder, so
+  // only create one for a type that still has a def living in it.
+  const neededFolderTypes = new Set(
+    defs.filter((def) => !def.folderNodeId).map((def) => def.nodeType),
+  );
   const actualFolderIdByNodeType = new Map<SeedFileTreeDef["nodeType"], string>();
   for (const nodeType of neededFolderTypes) {
     const folderConfig = FILE_TREE_FOLDER_CONFIG[nodeType];
@@ -588,7 +592,10 @@ const seedFileTreeNodesIfMissing = async (createdAt: Date, defs: SeedFileTreeDef
 
   for (const def of defs) {
     const folderConfig = FILE_TREE_FOLDER_CONFIG[def.nodeType];
-    const folderNodeId = actualFolderIdByNodeType.get(def.nodeType) ?? folderConfig.folderNodeId;
+    // Same as rich nodes and forms: the scenario folder id is used as-is. The
+    // upsert below rewrites `parentId`, so re-seeding moves an existing node too.
+    const folderNodeId =
+      def.folderNodeId ?? actualFolderIdByNodeType.get(def.nodeType) ?? folderConfig.folderNodeId;
     const metadata = {
       entryFile: folderConfig.entryFile,
       visibility: "workspace" as const,

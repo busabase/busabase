@@ -2297,7 +2297,8 @@ const INSURANCE_FILE_TREE_NODES: SeedFileTreeDef[] = [
     slug: "policy-renewal-assistant",
     name: "Policy Renewal Assistant",
     description: "Prepares a renewal recommendation and proposes it for advisor review.",
-    position: 1,
+    folderNodeId: DEMO_INSURANCE_FOLDER_NODE_ID,
+    position: 11,
     files: [
       { path: "SKILL.md", content: RENEWAL_ASSISTANT_SKILL_MD },
       {
@@ -2349,7 +2350,8 @@ const INSURANCE_FILE_TREE_NODES: SeedFileTreeDef[] = [
     slug: "insurance-materials",
     name: "Client Materials",
     description: "Client-facing templates, disclosure language, and claim instructions.",
-    position: 1,
+    folderNodeId: DEMO_INSURANCE_FOLDER_NODE_ID,
+    position: 12,
     files: [
       {
         path: "README.md",
@@ -2380,7 +2382,8 @@ const INSURANCE_FILE_TREE_NODES: SeedFileTreeDef[] = [
     name: "Renewal Board",
     description:
       'A live board over this workspace\'s own "insurance-policies" Base, read through the public REST API. Zero npm dependencies.',
-    position: 6,
+    folderNodeId: DEMO_INSURANCE_FOLDER_NODE_ID,
+    position: 7,
     files: [
       { path: "package.json", content: RENEWAL_BOARD_PACKAGE_JSON },
       { path: "server.js", content: RENEWAL_BOARD_SERVER_JS },
@@ -2396,7 +2399,8 @@ const INSURANCE_FILE_TREE_NODES: SeedFileTreeDef[] = [
     name: "Agent Desk",
     description:
       "The advisor's own view: a book leaderboard across every advisor, plus today's follow-up and renewal queue. Reads the Clients and Renewal Tasks Bases live.",
-    position: 7,
+    folderNodeId: DEMO_INSURANCE_FOLDER_NODE_ID,
+    position: 8,
     files: [
       { path: "package.json", content: RENEWAL_BOARD_PACKAGE_JSON },
       { path: "server.js", content: RENEWAL_BOARD_SERVER_JS },
@@ -2412,7 +2416,8 @@ const INSURANCE_FILE_TREE_NODES: SeedFileTreeDef[] = [
     name: "Agency Scoreboard",
     description:
       "The owner's view: total premium in force, commission earned, and where the book is concentrated by product line and carrier. Reads the Clients and Policies Bases live.",
-    position: 8,
+    folderNodeId: DEMO_INSURANCE_FOLDER_NODE_ID,
+    position: 9,
     files: [
       { path: "package.json", content: RENEWAL_BOARD_PACKAGE_JSON },
       { path: "server.js", content: RENEWAL_BOARD_SERVER_JS },
@@ -2428,7 +2433,8 @@ const INSURANCE_FILE_TREE_NODES: SeedFileTreeDef[] = [
     name: "Issuance Desk",
     description:
       "The back office's view: every policy still between a quote and an in-force contract, sorted by effective date, with a missing-policy-file flag. Reads the Policies Base live.",
-    position: 9,
+    folderNodeId: DEMO_INSURANCE_FOLDER_NODE_ID,
+    position: 10,
     files: [
       { path: "package.json", content: RENEWAL_BOARD_PACKAGE_JSON },
       { path: "server.js", content: RENEWAL_BOARD_SERVER_JS },

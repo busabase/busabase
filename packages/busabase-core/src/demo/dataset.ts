@@ -3327,6 +3327,33 @@ export const buildDemoDataset = (
     siblings.push(form);
     formsByFolder.set(form.folderNodeId, siblings);
   }
+  const fileTreeNodeVO = (def: SeedFileTreeDef, parentId: string): NodeVO => ({
+    id: def.nodeId,
+    parentId,
+    type: def.nodeType,
+    slug: def.slug,
+    name: def.name,
+    description: def.description,
+    icon: seedNodeIcon({ ...def, nodeType: def.nodeType }),
+    // No `entryFile`: it is a property of the node TYPE and is read from
+    // its config, never from here. This was the last writer of a key
+    // nothing read — the seed's copy only ever shadowed the type's value
+    // with an identical one.
+    metadata: { visibility: "workspace", version: "0.1.0" },
+    position: def.position,
+    createdAt: rootCreatedAt,
+    updatedAt: rootCreatedAt,
+    explicitVisibility: null,
+    baseId: null,
+    children: [],
+  });
+  const fileTreeNodesByFolder = new Map<string, SeedFileTreeDef[]>();
+  for (const def of scenario.fileTreeNodes ?? []) {
+    if (!def.folderNodeId) continue;
+    const siblings = fileTreeNodesByFolder.get(def.folderNodeId) ?? [];
+    siblings.push(def);
+    fileTreeNodesByFolder.set(def.folderNodeId, siblings);
+  }
   // Group the (use-case-filtered) bases under their sidebar folder; only emit a
   // folder that actually has content (see `pruneEmptyFolders` below — for a
   // folder with subfolders that means content anywhere in its subtree).
@@ -3395,6 +3422,9 @@ export const buildDemoDataset = (
         baseId: null,
         children: [],
       })),
+      ...(fileTreeNodesByFolder.get(folder.nodeId) ?? []).map((def) =>
+        fileTreeNodeVO(def, folder.nodeId),
+      ),
     ],
   }));
 
@@ -3555,27 +3585,8 @@ export const buildDemoDataset = (
   for (const type of ["skill", "drive", "airapp"] as const) {
     const config = fileTreeFolderConfig[type];
     const children: NodeVO[] = (scenario.fileTreeNodes ?? [])
-      .filter((def) => def.nodeType === type)
-      .map((def) => ({
-        id: def.nodeId,
-        parentId: config.id,
-        type,
-        slug: def.slug,
-        name: def.name,
-        description: def.description,
-        icon: seedNodeIcon({ ...def, nodeType: type }),
-        // No `entryFile`: it is a property of the node TYPE and is read from
-        // its config, never from here. This was the last writer of a key
-        // nothing read — the seed's copy only ever shadowed the type's value
-        // with an identical one.
-        metadata: { visibility: "workspace", version: "0.1.0" },
-        position: def.position,
-        createdAt: rootCreatedAt,
-        updatedAt: rootCreatedAt,
-        explicitVisibility: null,
-        baseId: null,
-        children: [],
-      }));
+      .filter((def) => def.nodeType === type && !def.folderNodeId)
+      .map((def) => fileTreeNodeVO(def, config.id));
     if (children.length > 0) {
       folderNodes.push({
         id: config.id,

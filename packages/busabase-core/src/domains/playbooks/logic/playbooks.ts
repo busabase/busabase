@@ -48,7 +48,13 @@ import {
   filterVisibleChangeRequestRows,
 } from "../../../logic/cr-lifecycle";
 import { buildNodeVisibilityCondition } from "../../../logic/node-acl";
-import { ancestorsOf, loadNodeTree, nodePathOf, type TreeNode } from "../../../logic/node-tree";
+import {
+  ancestorsOf,
+  loadNodeTree,
+  type NodeTree,
+  nodePathOf,
+  type TreeNode,
+} from "../../../logic/node-tree";
 import { ensureReady } from "../../../logic/seed";
 import { buildNodeAgentPrompts } from "../../dashboard/helpers/node-agent-prompts";
 import { listSkillFiles, readSkillFile } from "../../skill/handlers";
@@ -206,54 +212,39 @@ const normalizeQueries = (queries: readonly string[]): string[] => [
 
 // ── Shared candidate load (search + list) ─────────────────────────────────────
 
-interface LoadCandidatesOptions {
+export interface LoadCandidatesOptions {
   kinds: ReadonlySet<PlaybookKind>;
   locale: string | undefined;
   /** Only playbooks on this node or inside its subtree. */
   inNodeId?: string;
 }
 
+/** One node as the candidate builder needs it; the DB query and the demo dataset both produce these. */
+export interface PlaybookNodeRow {
+  id: string;
+  parentId: string | null;
+  type: string;
+  name: string;
+  slug: string;
+  description: string;
+  updatedAt: Date;
+  /** The node's `agent_prompts` (bodies may be truncated to a preview prefix); validated here. */
+  prompts: unknown;
+}
+
 /**
- * Every playbook the caller can read, projected into a `Candidate`. Shared by
- * `search` (which scores and ranks them) and `list` (which sorts them by
- * folder), so both apply exactly the same permission, archive, and prompt
- * validation rules — a playbook the list shows is one search can find.
+ * Project node rows into search/list candidates. Pure: the real store feeds it
+ * rows from Postgres, the demo router feeds it the in-memory seed, so both
+ * apply exactly the same skill/prompt rules and the same ranking downstream.
  */
-const loadCandidates = async (db: Db, spaceId: string, options: LoadCandidatesOptions) => {
+export const buildPlaybookCandidates = (
+  rows: readonly PlaybookNodeRow[],
+  tree: NodeTree,
+  options: LoadCandidatesOptions,
+) => {
+  const { byId, visibleIds } = tree;
   const wantSkills = options.kinds.has("skill");
   const wantPrompts = options.kinds.has("prompt");
-  const typeCondition = or(
-    wantSkills ? eq(busabaseNodes.type, "skill") : undefined,
-    wantPrompts ? hasCustomPromptsSql : undefined,
-  );
-
-  // ACL in the SQL: a node the caller cannot read is never loaded, so it can
-  // neither appear in `items` nor be counted in `total`.
-  const rows = await db
-    .select({
-      id: busabaseNodes.id,
-      parentId: busabaseNodes.parentId,
-      type: busabaseNodes.type,
-      name: busabaseNodes.name,
-      slug: busabaseNodes.slug,
-      description: busabaseNodes.description,
-      updatedAt: busabaseNodes.updatedAt,
-      prompts: wantPrompts
-        ? promptPreviewSql(PLAYBOOK_SEARCH_LIMITS.bodyPrefixChars)
-        : sql<unknown>`null`,
-    })
-    .from(busabaseNodes)
-    .where(
-      and(
-        eq(busabaseNodes.spaceId, spaceId),
-        isNull(busabaseNodes.archivedAt),
-        isNull(busabaseNodes.deletedAt),
-        buildNodeVisibilityCondition(db),
-        typeCondition,
-      ),
-    );
-
-  const { byId, visibleIds } = await loadNodeTree(db, spaceId);
   const { inNodeId } = options;
   const inSubtree = (nodeId: string) =>
     inNodeId === undefined ||
@@ -317,30 +308,72 @@ const loadCandidates = async (db: Db, spaceId: string, options: LoadCandidatesOp
   return { candidates, byId, visibleIds, skillsScanned, promptNodesScanned };
 };
 
-const kindSet = (kinds: readonly PlaybookKind[] | undefined): Set<PlaybookKind> =>
+export type PlaybookCandidates = ReturnType<typeof buildPlaybookCandidates>;
+
+/**
+ * Every playbook the caller can read, projected into a `Candidate`. Shared by
+ * `search` (which scores and ranks them) and `list` (which sorts them by
+ * folder), so both apply exactly the same permission, archive, and prompt
+ * validation rules — a playbook the list shows is one search can find.
+ */
+const loadCandidates = async (
+  db: Db,
+  spaceId: string,
+  options: LoadCandidatesOptions,
+): Promise<PlaybookCandidates> => {
+  const wantSkills = options.kinds.has("skill");
+  const wantPrompts = options.kinds.has("prompt");
+  const typeCondition = or(
+    wantSkills ? eq(busabaseNodes.type, "skill") : undefined,
+    wantPrompts ? hasCustomPromptsSql : undefined,
+  );
+
+  // ACL in the SQL: a node the caller cannot read is never loaded, so it can
+  // neither appear in `items` nor be counted in `total`.
+  const rows = await db
+    .select({
+      id: busabaseNodes.id,
+      parentId: busabaseNodes.parentId,
+      type: busabaseNodes.type,
+      name: busabaseNodes.name,
+      slug: busabaseNodes.slug,
+      description: busabaseNodes.description,
+      updatedAt: busabaseNodes.updatedAt,
+      prompts: wantPrompts
+        ? promptPreviewSql(PLAYBOOK_SEARCH_LIMITS.bodyPrefixChars)
+        : sql<unknown>`null`,
+    })
+    .from(busabaseNodes)
+    .where(
+      and(
+        eq(busabaseNodes.spaceId, spaceId),
+        isNull(busabaseNodes.archivedAt),
+        isNull(busabaseNodes.deletedAt),
+        buildNodeVisibilityCondition(db),
+        typeCondition,
+      ),
+    );
+
+  return buildPlaybookCandidates(rows, await loadNodeTree(db, spaceId), options);
+};
+
+export const kindSet = (kinds: readonly PlaybookKind[] | undefined): Set<PlaybookKind> =>
   new Set(kinds && kinds.length > 0 ? kinds : ["skill", "prompt"]);
 
 // ── search ────────────────────────────────────────────────────────────────────
 
-export const searchPlaybooks = async (
-  input: PlaybookSearchInputDTO,
-): Promise<PlaybookSearchResultVO> => {
-  await ensureReady();
-  const db = await getDb();
-  const spaceId = getContextSpaceId();
-  const parsed = PlaybookSearchInputSchema.parse(input);
+/**
+ * Score, rank, and cap loaded candidates for one parsed search. Pure: the demo
+ * router ranks its seed with exactly this, so "Try it" in the demo behaves like
+ * the product.
+ */
+export const rankPlaybookSearch = (
+  parsed: ReturnType<typeof PlaybookSearchInputSchema.parse>,
+  loaded: PlaybookCandidates,
+): PlaybookSearchResultVO => {
   const queries = normalizeQueries(parsed.queries);
   const browse = queries.length === 0;
-
-  const { candidates, byId, visibleIds, skillsScanned, promptNodesScanned } = await loadCandidates(
-    db,
-    spaceId,
-    {
-      kinds: kindSet(parsed.kinds),
-      locale: parsed.locale,
-      inNodeId: parsed.inNodeId,
-    },
-  );
+  const { candidates, byId, visibleIds, skillsScanned, promptNodesScanned } = loaded;
   const proximity = proximityRanker(
     byId,
     parsed.nearNodeId && (visibleIds === null || visibleIds.has(parsed.nearNodeId))
@@ -396,6 +429,21 @@ export const searchPlaybooks = async (
   };
 };
 
+export const searchPlaybooks = async (
+  input: PlaybookSearchInputDTO,
+): Promise<PlaybookSearchResultVO> => {
+  await ensureReady();
+  const db = await getDb();
+  const spaceId = getContextSpaceId();
+  const parsed = PlaybookSearchInputSchema.parse(input);
+  const loaded = await loadCandidates(db, spaceId, {
+    kinds: kindSet(parsed.kinds),
+    locale: parsed.locale,
+    inNodeId: parsed.inNodeId,
+  });
+  return rankPlaybookSearch(parsed, loaded);
+};
+
 // ── list ──────────────────────────────────────────────────────────────────────
 
 /**
@@ -432,7 +480,7 @@ const titleOf = (item: Candidate["item"]): string =>
 // ── usage ─────────────────────────────────────────────────────────────────────
 
 /** Same identity a list row uses: `skill:<nodeId>` / `prompt:<nodeId>:<key>`. */
-const usageKeyOf = (kind: string, nodeId: string, key: string | null | undefined): string =>
+export const usageKeyOf = (kind: string, nodeId: string, key: string | null | undefined): string =>
   kind === "skill" ? `skill:${nodeId}` : `prompt:${nodeId}:${key ?? ""}`;
 
 /**
@@ -547,25 +595,14 @@ export interface ListPlaybooksOptions {
 }
 
 /**
- * The whole catalog for the dashboard's Playbooks page: every skill and custom
- * prompt the caller can read, sorted by folder path, then skills before
- * prompts, then name/label. Unranked on purpose — this answers "what exists?",
- * not "what fits this job?" (that is `searchPlaybooks`).
+ * Sort candidates into the catalog and attach usage. Pure: shared by the real
+ * store and the demo router.
  */
-export const listPlaybooks = async (
-  input: PlaybookListInputDTO,
-  options: ListPlaybooksOptions = {},
-): Promise<PlaybookListResultVO> => {
-  await ensureReady();
-  const db = await getDb();
-  const spaceId = getContextSpaceId();
-  const parsed = PlaybookListInputSchema.parse(input ?? {});
-  const { candidates } = await loadCandidates(db, spaceId, {
-    kinds: kindSet(parsed.kinds),
-    locale: parsed.locale,
-  });
-
-  const sorted = candidates.sort(
+export const assemblePlaybookList = (
+  candidates: PlaybookCandidates["candidates"],
+  usage: Map<string, PlaybookUsageVO> | null,
+): PlaybookListResultVO => {
+  const sorted = [...candidates].sort(
     (a, b) =>
       comparePaths(a.item.path, b.item.path) ||
       (a.item.kind === b.item.kind ? 0 : a.item.kind === "skill" ? -1 : 1) ||
@@ -574,7 +611,6 @@ export const listPlaybooks = async (
       (a.item.key ?? "").localeCompare(b.item.key ?? ""),
   );
 
-  const usage = options.withUsage ? await loadPlaybookUsage(db, spaceId, options.now) : null;
   const items = sorted.slice(0, PLAYBOOK_LIST_LIMITS.maxItems).map(
     ({ item, bodyPrefix }): PlaybookListItemVO => ({
       ...item,
@@ -592,6 +628,28 @@ export const listPlaybooks = async (
     }),
   );
   return { items, total: sorted.length, truncated: sorted.length > items.length };
+};
+
+/**
+ * The whole catalog for the dashboard's Playbooks page: every skill and custom
+ * prompt the caller can read, sorted by folder path, then skills before
+ * prompts, then name/label. Unranked on purpose — this answers "what exists?",
+ * not "what fits this job?" (that is `searchPlaybooks`).
+ */
+export const listPlaybooks = async (
+  input: PlaybookListInputDTO,
+  options: ListPlaybooksOptions = {},
+): Promise<PlaybookListResultVO> => {
+  await ensureReady();
+  const db = await getDb();
+  const spaceId = getContextSpaceId();
+  const parsed = PlaybookListInputSchema.parse(input ?? {});
+  const { candidates } = await loadCandidates(db, spaceId, {
+    kinds: kindSet(parsed.kinds),
+    locale: parsed.locale,
+  });
+  const usage = options.withUsage ? await loadPlaybookUsage(db, spaceId, options.now) : null;
+  return assemblePlaybookList(candidates, usage);
 };
 
 // ── get ───────────────────────────────────────────────────────────────────────
@@ -658,10 +716,33 @@ export const getPlaybook = async (input: PlaybookGetInputDTO): Promise<PlaybookG
     .from(busabaseNodes)
     .where(eq(busabaseNodes.id, node.id))
     .limit(1);
-  const validated = customAgentPromptsSchema.safeParse(row?.agentPrompts ?? null);
+  return renderPromptPlaybook(
+    { ...location, spaceId, agentPrompts: row?.agentPrompts ?? null },
+    parsed,
+  );
+};
+
+/**
+ * One custom prompt of a node, rendered exactly as an agent receives it. Pure:
+ * shared by the real store and the demo router, so the demo's prompt text is
+ * byte-identical to the product's.
+ */
+export const renderPromptPlaybook = (
+  node: {
+    nodeId: string;
+    nodeType: string;
+    nodeName: string;
+    nodeSlug: string;
+    path: string[];
+    spaceId: string;
+    agentPrompts: unknown;
+  },
+  parsed: ReturnType<typeof PlaybookGetInputSchema.parse>,
+): PlaybookGetVO => {
+  const validated = customAgentPromptsSchema.safeParse(node.agentPrompts);
   const custom = validated.success ? validated.data : [];
   const definition = custom.find((prompt) => prompt.key === parsed.key);
-  if (!definition) throw notFound(`Prompt "${parsed.key}" not found on node ${node.id}`);
+  if (!definition) throw notFound(`Prompt "${parsed.key}" not found on node ${node.nodeId}`);
 
   const locale = toCoreLocale(parsed.locale);
   // Without a locale the dashboard speaks (none given, or one it has no catalog for) the body
@@ -670,10 +751,10 @@ export const getPlaybook = async (input: PlaybookGetInputDTO): Promise<PlaybookG
   const replyLanguage = isCoreLocale(parsed.locale) ? "locale" : "user";
   const { scenarios } = buildNodeAgentPrompts(
     {
-      nodeType: node.type,
-      nodeName: node.name,
-      nodeId: node.id,
-      spaceId,
+      nodeType: node.nodeType,
+      nodeName: node.nodeName,
+      nodeId: node.nodeId,
+      spaceId: node.spaceId,
       customPrompts: custom,
     },
     locale,
@@ -683,10 +764,15 @@ export const getPlaybook = async (input: PlaybookGetInputDTO): Promise<PlaybookG
   const rendered = scenarios.find(
     (prompt) => prompt.source === "custom-scenario" && prompt.customKey === parsed.key,
   );
-  if (!rendered) throw notFound(`Prompt "${parsed.key}" not found on node ${node.id}`);
+  if (!rendered) throw notFound(`Prompt "${parsed.key}" not found on node ${node.nodeId}`);
 
   return {
-    ...location,
+    kind: "prompt",
+    nodeId: node.nodeId,
+    nodeType: node.nodeType,
+    nodeName: node.nodeName,
+    nodeSlug: node.nodeSlug,
+    path: node.path,
     key: definition.key,
     label: rendered.label,
     intent: definition.intent ?? "change",
