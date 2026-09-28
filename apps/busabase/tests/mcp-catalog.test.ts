@@ -1,9 +1,15 @@
 import { busabaseContract } from "busabase-contract/contract/busabase";
 import { AGENT_EXCLUDED_MCP_TOOLS, TASK_SUPERSEDED_MCP_TOOLS } from "busabase-contract/tasks";
 import { runWithLocalContext } from "busabase-core/context";
+import { getBusabaseMcpToolAnnotations } from "busabase-core/mcp-skill";
 import { createMcpToolsFromOpenApiContract } from "openlib/mcp";
 import { describe, expect, it } from "vitest";
-import { resolveLocalMcpBaseUrl } from "../src/app/api/mcp/handler";
+import {
+  getLocalMcpAdditionalInputSchema,
+  getLocalMcpPlaybookHeaders,
+  LOCAL_MCP_PLAYBOOK_SCHEMA,
+  resolveLocalMcpBaseUrl,
+} from "../src/app/api/mcp/handler";
 
 /**
  * What the self-hosted server actually publishes over `/api/mcp`.
@@ -14,12 +20,14 @@ import { resolveLocalMcpBaseUrl } from "../src/app/api/mcp/handler";
  */
 const withheld = new Set<string>([...TASK_SUPERSEDED_MCP_TOOLS, ...AGENT_EXCLUDED_MCP_TOOLS]);
 
-const publishedToolNames = () =>
+const publishedTools = () =>
   createMcpToolsFromOpenApiContract({
     contract: busabaseContract,
     client: {},
     exclude: (tool) => withheld.has(tool.name),
-  }).map((tool) => tool.name);
+  });
+
+const publishedToolNames = () => publishedTools().map((tool) => tool.name);
 
 describe("self-hosted MCP catalog", () => {
   it("routes internal tool calls back to the server handling the MCP request", async () => {
@@ -76,6 +84,9 @@ describe("self-hosted MCP catalog", () => {
         "auth_verify",
         "search",
         "grep",
+        // agent-playbook-discovery.md: the first call on every instruction.
+        "playbooks_search",
+        "playbooks_get",
         "nodes_list",
         "bases_list",
         "bases_get",
@@ -89,5 +100,48 @@ describe("self-hosted MCP catalog", () => {
     );
     expect(publishedToolNames()).not.toContain("assets_grep");
     expect(publishedToolNames()).not.toContain("records_get_by_field");
+  });
+
+  it("labels read-only POST tools read-only, the same way Cloud does", () => {
+    // `handler.ts` passes the shared `getBusabaseMcpToolAnnotations`. Without it the
+    // playbook search — the first call on every instruction — carried no hint at all,
+    // so a client that auto-approves reads still prompted for it.
+    const annotationFor = (name: string) => {
+      const tool = publishedTools().find((candidate) => candidate.name === name);
+      if (!tool) throw new Error(`${name} is not published`);
+      return getBusabaseMcpToolAnnotations(tool);
+    };
+    expect(annotationFor("playbooks_search")).toMatchObject({ readOnlyHint: true });
+    expect(annotationFor("grep")).toMatchObject({ readOnlyHint: true });
+    expect(annotationFor("playbooks_get")).toMatchObject({ readOnlyHint: true });
+    expect(annotationFor("nodes_update_agent_prompts")).toMatchObject({ readOnlyHint: false });
+  });
+
+  it("offers `playbook` on write tools only and maps it to the playbook header", () => {
+    const toolNamed = (name: string) => {
+      const tool = publishedTools().find((candidate) => candidate.name === name);
+      if (!tool) throw new Error(`${name} is not published`);
+      return tool;
+    };
+    expect(getLocalMcpAdditionalInputSchema(toolNamed("nodes_update_agent_prompts"))).toBe(
+      LOCAL_MCP_PLAYBOOK_SCHEMA,
+    );
+    for (const name of ["playbooks_search", "grep", "auth_verify"]) {
+      expect(getLocalMcpAdditionalInputSchema(toolNamed(name)), name).toBeUndefined();
+    }
+
+    // A malformed ref is rejected (a prompt needs its key); a good one is trimmed.
+    expect(LOCAL_MCP_PLAYBOOK_SCHEMA.safeParse({ playbook: "prompt:nod_1" }).success).toBe(false);
+    expect(LOCAL_MCP_PLAYBOOK_SCHEMA.safeParse({ playbook: " skill:nod_1 " }).data).toEqual({
+      playbook: "skill:nod_1",
+    });
+
+    const tool = toolNamed("nodes_update_agent_prompts");
+    expect(
+      getLocalMcpPlaybookHeaders({ tool, args: { playbook: " prompt:nod_123:log-visit " } }),
+    ).toEqual({ "x-busabase-playbook": "prompt:nod_123:log-visit" });
+    expect(getLocalMcpPlaybookHeaders({ tool, args: {} })).toEqual({});
+    expect(getLocalMcpPlaybookHeaders({ tool, args: { playbook: "skill:nod_1:key" } })).toEqual({});
+    expect(getLocalMcpPlaybookHeaders(undefined)).toEqual({});
   });
 });

@@ -8,6 +8,7 @@ const de = {
   embedRuntime: {
     loading: "App wird geladen…",
     unavailable: "Inhalt nicht verfügbar",
+    expired: "Link abgelaufen",
   },
   seo: {
     title: "Busabase",

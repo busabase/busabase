@@ -1,6 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 import { Activity, Inbox, Table2 } from "lucide-react";
-import { getBusabaseAppLL } from "~/lib/i18n";
+import type { TranslationFunctions } from "~/i18n/i18n-types";
 
 export interface SecondaryNavItem {
   title: string;
@@ -15,9 +15,9 @@ export interface SecondaryNavConfig {
   showHeaderAction?: boolean;
 }
 
-export const getSecondarySidebarNav = (locale?: string): Record<string, SecondaryNavConfig> => {
-  const LL = getBusabaseAppLL(locale);
-
+export const getSecondarySidebarNav = (
+  LL: TranslationFunctions,
+): Record<string, SecondaryNavConfig> => {
   return {
     Review: {
       type: "menu",

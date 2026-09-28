@@ -8,6 +8,7 @@ const zhCN = {
   embedRuntime: {
     loading: "应用加载中…",
     unavailable: "内容不可用",
+    expired: "链接已过期",
   },
   seo: {
     title: "Busabase 布沙知识仓 - AI Agent 的本地数据中台与应用中台",

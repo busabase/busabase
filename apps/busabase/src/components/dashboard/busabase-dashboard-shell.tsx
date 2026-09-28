@@ -17,6 +17,7 @@ import { SidebarMenu, SidebarMenuButton, SidebarMenuItem } from "kui/sidebar";
 import {
   Activity,
   Archive,
+  BookOpen,
   Bot,
   ExternalLink,
   Globe,
@@ -36,7 +37,7 @@ import { useSPA } from "~/components/spa/spa-context";
 import { SettingsDialog } from "~/domains/settings/components/settings-dialog";
 import { useAppBranding } from "~/domains/settings/hooks/use-app-branding";
 import { getLanguageOptions } from "~/i18n/config";
-import { getBusabaseAppLL } from "~/lib/i18n";
+import { useBusabaseAppLL } from "~/i18n/use-app-ll";
 
 const BUSABASE_LOGO = "/icon.svg";
 
@@ -125,7 +126,7 @@ export function BusabaseDashboardShell({
   const addDemoParam = useAddDemoParam();
   const navigateInWorkspace = (path: string) =>
     navigate(addDemoParam(mergeSearchIntoHref(path, currentSearch)));
-  const LL = useMemo(() => getBusabaseAppLL(locale), [locale]);
+  const LL = useBusabaseAppLL(locale);
   const coreMessages = useCoreI18n();
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
   const currentPath = location.split("?")[0];
@@ -254,6 +255,15 @@ export function BusabaseDashboardShell({
         >
           <Bot />
           <span>{coreMessages.nav.agents}</span>
+        </DropdownMenuItem>
+        {/* The skills and custom prompts agents look up first — for the person
+            writing them to see all of them and try a sentence. */}
+        <DropdownMenuItem
+          onSelect={() => navigateInWorkspace("/playbooks")}
+          className={currentPath === "/playbooks" ? "bg-accent" : undefined}
+        >
+          <BookOpen />
+          <span>{coreMessages.nav.playbooks}</span>
         </DropdownMenuItem>
         <DropdownMenuItem
           onSelect={() => navigateInWorkspace("/apps")}

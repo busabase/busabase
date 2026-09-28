@@ -9,6 +9,7 @@ const ja = {
   embedRuntime: {
     loading: "アプリを読み込み中…",
     unavailable: "コンテンツを利用できません",
+    expired: "リンクの有効期限が切れました",
   },
   seo: {
     title: "Busabase",

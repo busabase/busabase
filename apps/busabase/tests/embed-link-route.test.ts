@@ -1,10 +1,11 @@
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ resolveEmbedLink: vi.fn() }));
+const mocks = vi.hoisted(() => ({ resolveEmbedLink: vi.fn(), resolveExpiredEmbedLink: vi.fn() }));
 
 vi.mock("busabase-core/domains/embed-links/logic", () => ({
   resolveEmbedLink: mocks.resolveEmbedLink,
+  resolveExpiredEmbedLink: mocks.resolveExpiredEmbedLink,
 }));
 
 import { GET } from "../src/app/(public)/embed/[publicId]/route";
@@ -26,6 +27,55 @@ describe("Desktop embed capability route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.resolveEmbedLink.mockResolvedValue(resolved);
+    mocks.resolveExpiredEmbedLink.mockResolvedValue(null);
+  });
+
+  it("says an expired link expired, framed by the link's own policy", async () => {
+    mocks.resolveEmbedLink.mockResolvedValue(null);
+    mocks.resolveExpiredEmbedLink.mockResolvedValue({
+      type: "node",
+      framePolicy: resolved.framePolicy,
+    });
+    const response = await GET(
+      new NextRequest(`http://localhost:15419/embed/${publicId}?token=${secret}&view=iframe`),
+      { params: Promise.resolve({ publicId }) },
+    );
+    const html = await response.text();
+
+    expect(response.status).toBe(410);
+    expect(html).toContain("Link expired");
+    expect(html).not.toContain("Content unavailable");
+
+    const zh = await GET(
+      new NextRequest(`http://localhost:15419/embed/${publicId}?token=${secret}&view=iframe`, {
+        headers: { "accept-language": "zh-CN,zh;q=0.9,en;q=0.8" },
+      }),
+      { params: Promise.resolve({ publicId }) },
+    );
+    expect(await zh.text()).toContain("链接已过期");
+    expect(response.headers.get("content-security-policy")).toBe(
+      "frame-ancestors https://viewer.example",
+    );
+  });
+
+  it("keeps any other failure an anonymous 'Content unavailable'", async () => {
+    mocks.resolveEmbedLink.mockResolvedValue(null);
+    const response = await GET(
+      new NextRequest(`http://localhost:15419/embed/${publicId}?token=${secret}&view=iframe`),
+      { params: Promise.resolve({ publicId }) },
+    );
+
+    expect(response.status).toBe(404);
+    expect(await response.text()).toContain("Content unavailable");
+
+    const zh = await GET(
+      new NextRequest(`http://localhost:15419/embed/${publicId}?token=${secret}&view=iframe`, {
+        headers: { "accept-language": "zh-TW,zh;q=0.9" },
+      }),
+      { params: Promise.resolve({ publicId }) },
+    );
+    expect(await zh.text()).toContain("內容不可用");
+    expect(response.headers.get("content-security-policy")).toBe("frame-ancestors 'none'");
   });
 
   it("rejects malformed public ids before reading storage", async () => {
