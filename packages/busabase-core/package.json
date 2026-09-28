@@ -1,7 +1,7 @@
 {
   "name": "busabase-core",
   "description": "Shared Busabase open-core protocol, local store, API helpers, and dashboard components.",
-  "version": "0.81.0",
+  "version": "0.81.1",
   "private": true,
   "type": "module",
   "exports": {
@@ -60,6 +60,10 @@
     "./demo/scenarios/zh-cn": {
       "types": "./src/demo/scenarios/zh-cn.ts",
       "default": "./src/demo/scenarios/zh-cn.ts"
+    },
+    "./domains/playbooks/logic/playbook-attribution": {
+      "types": "./src/domains/playbooks/logic/playbook-attribution.ts",
+      "default": "./src/domains/playbooks/logic/playbook-attribution.ts"
     },
     "./domains/skill/handlers": {
       "types": "./src/domains/skill/handlers.ts",
@@ -365,9 +369,17 @@
       "types": "./src/mcp-skill.ts",
       "default": "./src/mcp-skill.ts"
     },
+    "./mcp-playbooks": {
+      "types": "./src/mcp-playbooks.ts",
+      "default": "./src/mcp-playbooks.ts"
+    },
     "./i18n": {
       "types": "./src/i18n/index.tsx",
       "default": "./src/i18n/index.tsx"
+    },
+    "./i18n/catalog": {
+      "types": "./src/i18n/catalog.ts",
+      "default": "./src/i18n/catalog.ts"
     },
     "./i18n/messages": {
       "types": "./src/i18n/messages.ts",
@@ -400,6 +412,22 @@
     "./domains/agents/logic/buda-connection": {
       "types": "./src/domains/agents/logic/buda-connection.ts",
       "default": "./src/domains/agents/logic/buda-connection.ts"
+    },
+    "./domains/base/utils/view-records": {
+      "types": "./src/domains/base/utils/view-records.ts",
+      "default": "./src/domains/base/utils/view-records.ts"
+    },
+    "./domains/doc/utils/video-url": {
+      "types": "./src/domains/doc/utils/video-url.ts",
+      "default": "./src/domains/doc/utils/video-url.ts"
+    },
+    "./dashboard/file-tree-files": {
+      "types": "./src/domains/dashboard/helpers/file-tree-files.ts",
+      "default": "./src/domains/dashboard/helpers/file-tree-files.ts"
+    },
+    "./dashboard/markdown-preview": {
+      "types": "./src/domains/dashboard/helpers/markdown-preview.ts",
+      "default": "./src/domains/dashboard/helpers/markdown-preview.ts"
     }
   },
   "dependencies": {
@@ -452,6 +480,7 @@
     "sandock": "^2.2.7",
     "server-only": "^0.0.1",
     "streamdown": "^2.3.0",
+    "ts7-i18n": "workspace:*",
     "wouter": "^3.9.0",
     "ws": "^8.21.0",
     "yaml": "^2.9.0",
