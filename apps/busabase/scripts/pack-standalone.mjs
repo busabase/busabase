@@ -12,7 +12,7 @@
 // standalone layout from its detected workspace root, so the relative path
 // (`apps/busabase/`) can be nested deeper (e.g. inside a git worktree).
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { cp, mkdir, rm } from "node:fs/promises";
+import { cp, rm } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -165,78 +165,28 @@ function findDependency(packageDir, packageName) {
   return findTracedPackages(standaloneRoot, packageName)[0];
 }
 
-/** Keep a compatible destination ancestor, including one currently being promoted. */
-function dependencyDestination(packageDir, packageName, version) {
-  let current = packageDir;
-  while (current.startsWith(standaloneRoot)) {
-    const modules = resolve(current, "node_modules");
-    const manifestPath = resolve(modules, packageName, "package.json");
-    if (existsSync(manifestPath)) {
-      return JSON.parse(readFileSync(manifestPath, "utf8")).version === version
-        ? modules
-        : resolve(packageDir, "node_modules");
-    }
-    const parent = dirname(current);
-    if (parent === current) break;
-    current = parent;
-  }
-  return nodeModules;
-}
-
 /**
  * Promote a nested traced package into the standalone root. npm drops symlinks,
  * so copy real files and recursively promote runtime dependencies as well.
  */
-const promoted = new Set();
-async function promotePackage(
-  packageName,
-  sourceDir,
-  targetModules = nodeModules,
-  promoting = new Set(),
-) {
-  const targetDir = resolve(targetModules, packageName);
-  if (promoted.has(targetDir) || promoting.has(targetDir)) return;
-  promoting.add(targetDir);
+async function promotePackage(packageName, sourceDir, promoting = new Set()) {
+  const targetDir = resolve(nodeModules, packageName);
+  if (existsSync(resolve(targetDir, "package.json"))) return;
+  if (promoting.has(packageName)) return;
+  promoting.add(packageName);
 
+  await cp(sourceDir, targetDir, { recursive: true, dereference: true });
   const manifest = JSON.parse(readFileSync(resolve(sourceDir, "package.json"), "utf8"));
-  await mkdir(targetDir, { recursive: true });
-  // Tracing can leave only package.json at the root. Fill missing files from
-  // matching copies, but never combine code from different package versions.
-  const copies = [sourceDir, ...findTracedPackages(standaloneRoot, packageName)];
-  for (const copy of new Set(copies)) {
-    if (copy === targetDir) continue;
-    const copyManifest = JSON.parse(readFileSync(resolve(copy, "package.json"), "utf8"));
-    if (copyManifest.version !== manifest.version) continue;
-    for (const entry of readdirSync(copy)) {
-      if (entry === "node_modules") continue;
-      await cp(resolve(copy, entry), resolve(targetDir, entry), {
-        recursive: true,
-        dereference: true,
-        force: false,
-      });
-    }
-  }
   const dependencies = {
     ...manifest.dependencies,
     ...manifest.optionalDependencies,
   };
   for (const dependency of Object.keys(dependencies)) {
+    if (existsSync(resolve(nodeModules, dependency, "package.json"))) continue;
     const dependencyDir = findDependency(sourceDir, dependency);
-    if (!dependencyDir) continue;
-    const dependencyManifest = JSON.parse(
-      readFileSync(resolve(dependencyDir, "package.json"), "utf8"),
-    );
-    // A promoted package must keep the dependency version from its original
-    // resolution scope when the standalone root contains a different version.
-    const dependencyModules = dependencyDestination(
-      targetDir,
-      dependency,
-      dependencyManifest.version,
-    );
-    await promotePackage(dependency, dependencyDir, dependencyModules, promoting);
+    if (dependencyDir) await promotePackage(dependency, dependencyDir, promoting);
   }
-  promoting.delete(targetDir);
-  promoted.add(targetDir);
+  promoting.delete(packageName);
   console.log(`pack-standalone: promote ${packageName} from ${sourceDir}`);
 }
 
@@ -252,28 +202,15 @@ eachChunk(serverDir, (file) => {
 });
 
 for (const [hashedName, realName] of hashedPackages) {
-  const rootManifest = resolve(nodeModules, realName, "package.json");
-  const rootVersion = existsSync(rootManifest)
-    ? JSON.parse(readFileSync(rootManifest, "utf8")).version
-    : undefined;
-  // Prefer a nested copy so dependencies retain their traced resolution scope.
-  const traced = findTracedPackages(standaloneRoot, realName)
-    .filter(
-      (dir) =>
-        rootVersion === undefined ||
-        JSON.parse(readFileSync(resolve(dir, "package.json"), "utf8")).version === rootVersion,
-    )
-    .sort(
-      (left, right) =>
-        Number(left === resolve(nodeModules, realName)) -
-        Number(right === resolve(nodeModules, realName)),
-    )[0];
-  if (!traced) {
-    throw new Error(
-      `pack-standalone: ${hashedName} references ${realName}, but Next did not trace that package`,
-    );
+  if (!existsSync(resolve(nodeModules, realName, "package.json"))) {
+    const traced = findTracedPackages(standaloneRoot, realName)[0];
+    if (!traced) {
+      throw new Error(
+        `pack-standalone: ${hashedName} references ${realName}, but Next did not trace that package`,
+      );
+    }
+    await promotePackage(realName, traced);
   }
-  await promotePackage(realName, traced);
 }
 
 // 2. Replace every occurrence of those hashed package names with the real name.
