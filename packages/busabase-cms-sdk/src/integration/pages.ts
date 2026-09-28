@@ -109,6 +109,16 @@ export interface CmsPageMetadataOptions {
 }
 
 /**
+ * What `generateCmsPageMetadata` actually hands the app's metadata helper: `availableLocales`
+ * is always set. Typing the injected helper against this (rather than the optional-field
+ * `CmsPageMetadataOptions`) lets an app pass a STRICT content helper — openlib's
+ * `generateContentPageMetadata`, where forgetting the locale set is a compile error.
+ */
+export interface CmsContentPageMetadataOptions extends CmsPageMetadataOptions {
+  availableLocales: readonly string[];
+}
+
+/**
  * All the locale resolver actually reads off a Page: its canonical path and its locale. Kept
  * deliberately narrower than `PageVO` so an app whose own Page VO omits SDK fields it does not
  * store (Buda drops `hero`/`features`/`faqs`) still flows through these helpers with its own
@@ -143,10 +153,12 @@ export interface CmsPageHelpersIntegration<TPage extends CmsPageIdentity = PageV
 export interface CmsPageHelpersOptions<TMetadata, TPage extends CmsPageIdentity = PageVO> {
   integration: CmsPageHelpersIntegration<TPage>;
   /**
-   * The app's own metadata helper. Injected and typed structurally so the SDK does not depend
-   * on any app's site config.
+   * The app's own CONTENT metadata helper (openlib's `generateContentPageMetadata`). Injected
+   * and typed structurally so the SDK does not depend on any app's site config. Always called
+   * with `availableLocales`, so a helper that requires it — or one that treats it as
+   * optional — both fit.
    */
-  generatePageMetadata: (options: CmsPageMetadataOptions) => TMetadata;
+  generatePageMetadata: (options: CmsContentPageMetadataOptions) => TMetadata;
   /**
    * Site identity for structured data. Supply it and `buildCmsPageJsonLd` produces the
    * page's JSON-LD nodes; omit it and that helper returns `[]`, so an app that has not

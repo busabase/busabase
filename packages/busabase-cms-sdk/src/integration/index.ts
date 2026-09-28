@@ -24,6 +24,7 @@ export {
   readCmsEnvConfig,
 } from "./config";
 export {
+  type CmsContentPageMetadataOptions,
   type CmsPageHelpers,
   type CmsPageHelpersIntegration,
   type CmsPageHelpersOptions,
@@ -46,6 +47,7 @@ export {
   type LocalPostSourceLike,
   mergeBlogCardsByPath,
   type ResolvedCmsPostPage,
+  type ResolvePostMetadataInputOptions,
 } from "./posts";
 export { type CmsTaxonomyReads, createCmsTaxonomyReads } from "./taxonomy";
 
