@@ -17,6 +17,7 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    setupFiles: ["./tests/setup-core-i18n.ts"],
     // An allowlist, so a co-located test under a directory not named here is silently never
     // run — it looks green because it never executed. Add the directory when you add the test.
     include: [

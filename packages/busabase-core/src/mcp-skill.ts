@@ -33,8 +33,9 @@ import {
   PACKAGE_SKILL_ENTRY,
   TEMPLATE_SKILL_METADATA_KEY,
 } from "busabase-contract/domains/package/template";
-import type { McpCustomTool } from "openlib/mcp";
+import type { DiscoveredOpenApiTool, McpCustomTool } from "openlib/mcp";
 import { z } from "zod";
+import { PLAYBOOK_RULE_MARKDOWN, PLAYBOOK_RULE_SECTION_TITLE } from "./playbook-rule";
 
 export const BUSABASE_MCP_SKILL_URI = "busabase://skill";
 export const BUSABASE_MCP_SETUP_PROMPT_NAME = "busabase_setup";
@@ -82,6 +83,10 @@ export const BUSABASE_MCP_CREATE_APP_PROMPT_NAME = "busabase_create_app";
  */
 export const BUSABASE_MCP_GUIDE_TOOL_NAME = "busabase_guide";
 
+/** Published names of `playbooks.search` / `playbooks.get` (`getBusabaseMcpToolName`). */
+const PLAYBOOKS_SEARCH_TOOL = "playbooks_search";
+const PLAYBOOKS_GET_TOOL = "playbooks_get";
+
 /**
  * What differs between the two deployments. Everything else in these documents is identical,
  * so they are ONE source with a flag rather than two files that drift.
@@ -108,12 +113,14 @@ const SPACE_TARGETING_SECTION = `## Start every session
 
 1. Call \`auth_verify\` before anything else. It returns the current user, the target space, and every space they belong to.
 2. If it returns more than one space, ask the user which one — list them by name, never guess, never assume the default. Pass the chosen id as \`targetSpaceId\` on every later call.
-3. If it returns exactly one space, use it and don't ask.`;
+3. If it returns exactly one space, use it and don't ask.
+4. Then call \`playbooks_search\` with the user's intent, before any other work (see "Find the playbook first" below).`;
 
 const SINGLE_WORKSPACE_SECTION = `## Start every session
 
 1. Call \`auth_verify\` before anything else. It returns the current user and workspace.
-2. This server hosts ONE local workspace, so there is nothing to choose and no space argument to pass. Every tool already acts on it.`;
+2. This server hosts ONE local workspace, so there is nothing to choose and no space argument to pass. Every tool already acts on it.
+3. Then call \`playbooks_search\` with the user's intent, before any other work (see "Find the playbook first" below).`;
 
 const GUIDE_TOPIC_BLURBS: Record<string, string> = {
   workspace: "full workflow, field types, blueprints, the revision loop",
@@ -150,7 +157,18 @@ A folder here may be an **app**: tables, an AirApp, and a Skill node holding the
 manual its author wrote for you. That manual names the tables, what each field
 means, and what the app must never do.
 
-**Before you act on any app's data, call \`${BUSABASE_MCP_GUIDE_TOOL_NAME}\` with topic \`${BUSABASE_MCP_APPS_TOPIC}\`** to see which apps this workspace has, then \`skill:<slug>\` to read one. Guessing a schema an app already documents is how records end up in the wrong Base.`;
+**Before you act on any app's data, read its manual.** \`${PLAYBOOKS_SEARCH_TOOL}\` finds it when it fits the job; to see every installed app at once, call \`${BUSABASE_MCP_GUIDE_TOOL_NAME}\` with topic \`${BUSABASE_MCP_APPS_TOPIC}\`, then \`skill:<slug>\` to read one. Guessing a schema an app already documents is how records end up in the wrong Base.`;
+
+/**
+ * The playbook rule (see `playbook-rule.ts`), followed by the two MCP calls that carry it out.
+ * Shared by the session instructions and the \`busabase://skill\` resource, so the calls
+ * are named identically in both.
+ */
+const PLAYBOOK_SECTION = `## ${PLAYBOOK_RULE_SECTION_TITLE}
+
+${PLAYBOOK_RULE_MARKDOWN}
+
+How, over MCP: \`${PLAYBOOKS_SEARCH_TOOL}\` with \`queries\` (the phrasings, up to 8), and \`nearNodeId\` when you know which node the user is on (optional: \`kinds\`, \`inNodeId\`, \`limit\`). Each item names its \`kind\`, \`nodeId\`, \`path\`, and \`matchedOn\`. Then \`${PLAYBOOKS_GET_TOOL}\` — \`{ kind: "prompt", nodeId, key }\` returns the prompt exactly as Ask Agent sends it; \`{ kind: "skill", nodeId }\` returns its \`SKILL.md\` and file list (read further files with \`node_file_read\`). Clients that show MCP prompts also list each custom prompt as a \`playbook__…\` prompt, and each skill is a resource at \`busabase://skill/{nodeId}\`.`;
 
 /**
  * Session-level instructions. Every rule here is one an agent must not get wrong even if
@@ -162,6 +180,8 @@ export const buildBusabaseMcpInstructions = ({
 }: BusabaseMcpDocOptions = {}): string => `Busabase is a workspace for AI agents — a database, knowledge base, apps library, and skills registry the user and their agents share. You write into it through change requests, so every write leaves a reviewable before/after. Whether a given write merges immediately or waits for a human is decided server-side by your key's permission level; you do not decide it and do not need to reason about it.
 
 ${spaceTargeting ? SPACE_TARGETING_SECTION : SINGLE_WORKSPACE_SECTION}
+
+${PLAYBOOK_SECTION}
 
 ## The one rule
 
@@ -182,7 +202,7 @@ If one change request bundles several operations, give each its own specific mes
 
 ## Before you act
 
-- Find where something lives first: \`grep\` searches files, Docs, and Base records in one call; \`search\` is the paginated cross-entity search. Scope down rather than listing everything.
+- \`${PLAYBOOKS_SEARCH_TOOL}\` comes first (above). Then find where something lives: \`grep\` for exact matches with line and column across files, Docs, Base records, and custom prompts; \`search\` for a ranked, paginated browse that includes pending change-request drafts. Scope down rather than listing everything.
 - Read structure with \`nodes_list\` and \`bases_list\` before proposing changes to it.
 - For records in one Base use \`record_query\` with its \`baseId\`; keep \`limit\` at 100 or below and page with the returned cursor.
 - Show the user the planned shape and get a yes before creating new structure — good practice whether or not the write ends up reviewed.
@@ -269,15 +289,18 @@ This server hosts a single local workspace. There is no space to choose and no s
 to pass — every tool already acts on it. \`auth_verify\` confirms the current user and workspace.`
 }
 
+${PLAYBOOK_SECTION}
+
 ## Everyday tools
 
 | Goal | Tool |
 | --- | --- |
+| Is there already a way to do this job (a skill or a custom prompt) — ask first | \`${PLAYBOOKS_SEARCH_TOOL}\`, then \`${PLAYBOOKS_GET_TOOL}\` |
 | Who am I, which spaces | \`auth_verify\` |
 | Structure: folders, Bases, Docs, Skills | \`nodes_list\` |
 | Tables in this workspace | \`bases_list\`, \`bases_get\` |
 | Records in one Base | \`record_query\` (pass \`baseId\`; \`limit\` <= 100, page with the cursor; \`countOnly\` for just a total) |
-| Find anything by pattern | \`grep\` (all sources, or pass \`sources: ["files"]\` / \`["nodes"]\` / \`["records"]\`; narrow node types with \`scope.nodes.types\`) |
+| Find anything by pattern | \`grep\` (all sources, or pass \`sources: ["files"]\` / \`["nodes"]\` / \`["records"]\` / \`["prompts"]\`; narrow node types with \`scope.nodes.types\`; a file match's \`owner\` names the skill/drive it is in; on \`truncated\`, narrow with \`sources\`, \`scope.records.baseSlugs\`, or \`scope.files.drivePath\`) |
 | Find anything by relevance | \`search\` |
 | Look up records by an exact field value | \`record_find_by_field\` (one named field, not a search) |
 | Read exact lines instead of whole documents | \`nodes_read_lines\`, \`assets_read_text_lines\` |
@@ -327,8 +350,9 @@ A folder here may have been installed from a template: its tables, an AirApp, an
 a **Skill node** holding the manual its author wrote for you. That manual names
 the tables, says what each field means, and states what the app must never do.
 
-Call \`${BUSABASE_MCP_GUIDE_TOOL_NAME}\` with topic \`${BUSABASE_MCP_APPS_TOPIC}\` to see which apps this
-workspace has, then \`${BUSABASE_MCP_SKILL_TOPIC_PREFIX}<slug>\` to read one **before** you act on its
+\`${PLAYBOOKS_SEARCH_TOOL}\` finds an app's manual when it fits the job, alongside hand-written
+skills and custom prompts. To list every installed app, call \`${BUSABASE_MCP_GUIDE_TOOL_NAME}\` with
+topic \`${BUSABASE_MCP_APPS_TOPIC}\`, then \`${BUSABASE_MCP_SKILL_TOPIC_PREFIX}<slug>\` to read one **before** you act on its
 data. Guessing a schema the app already documents is how records end up in the
 wrong Base.
 
@@ -903,6 +927,61 @@ export const BUSABASE_MCP_GUIDES: Record<string, GuideDefinition> = buildGuides(
  */
 export const GUIDE_SUPERSEDED_MCP_TOOLS: readonly string[] = ["guides_list", "guides_read"];
 
+/**
+ * Tools listed FIRST in `tools/list` on Cloud and self-hosted alike, in the
+ * order the instructions tell an agent to call them: confirm the space, then
+ * look for a playbook before doing the work. Without this, Cloud listed
+ * `playbooks_search` after ~20 public-app tools (its contract puts the public
+ * app surface first) — easy to miss for a client that skims or truncates the
+ * list. Order only: the catalog's contents do not change.
+ */
+export const BUSABASE_MCP_PRIORITY_TOOL_NAMES: readonly string[] = [
+  "auth_verify",
+  "playbooks_search",
+  "playbooks_get",
+];
+
+/**
+ * POST endpoints that only read. The default `readOnlyHint` follows the HTTP method,
+ * which is right for the ~60 GET tools but would mislabel these search/preview/export
+ * endpoints that use POST purely to carry a body.
+ */
+const READ_ONLY_POST_MCP_TOOLS = new Set<string>([
+  "grep",
+  "bases_preview_field_conversion",
+  // POST only to carry the phrasings list; it reads and ranks, it never writes.
+  "playbooks_search",
+]);
+
+/**
+ * Non-DELETE tools that still destroy or irreversibly publish state. DELETE tools are
+ * flagged destructive by method; these merge/close/commit/fire operations are POSTs that
+ * a client must not treat as safely retryable.
+ */
+const DESTRUCTIVE_POST_MCP_TOOLS = new Set<string>([
+  "change_requests_close",
+  "webhooks_test_fire",
+  "forms_submit",
+  "onboarding_complete_bootstrap",
+]);
+
+/**
+ * Annotations for every endpoint tool, on Cloud and self-hosted alike, derived from its HTTP
+ * method plus the two override sets above. A curated per-tool table does not scale to the full
+ * catalog and silently leaves new contract endpoints unannotated. Shared so a client that
+ * auto-approves read-only tools treats `playbooks_search` the same on both servers.
+ */
+export const getBusabaseMcpToolAnnotations = (
+  tool: DiscoveredOpenApiTool,
+): NonNullable<McpCustomTool<unknown>["annotations"]> => {
+  const method = tool.contractProcedure["~orpc"]?.route?.method?.toUpperCase() ?? "POST";
+  return {
+    readOnlyHint: method === "GET" || READ_ONLY_POST_MCP_TOOLS.has(tool.name),
+    destructiveHint: method === "DELETE" || DESTRUCTIVE_POST_MCP_TOOLS.has(tool.name),
+    openWorldHint: false,
+  };
+};
+
 export const BUSABASE_MCP_GUIDE_TOPICS = [
   ...Object.keys(BUSABASE_MCP_GUIDES),
   BUSABASE_MCP_APPS_TOPIC,
@@ -919,8 +998,11 @@ const guideToolDescription = (
 ): string =>
   [
     "Read a Busabase guide. Call this BEFORE doing unfamiliar work — it carries the conventions this workspace expects, which no tool schema can express on its own.",
+    `For a user's task, call \`${PLAYBOOKS_SEARCH_TOOL}\` first: it finds how THIS space's owners want the job done. These guides explain how Busabase itself works.`,
     "",
-    ...topics.map((topic) => `- \`${topic}\` — ${guides[topic]?.summary ?? ""}`),
+    ...topics.map(
+      (topic) => `- \`${topic}\` — ${guides[topic]?.summary ?? GUIDE_TOPIC_BLURBS[topic] ?? topic}`,
+    ),
     ...(topics.includes("airapp")
       ? [
           "",
@@ -1046,7 +1128,7 @@ const listAppsGuide = async (client: AppSkillReader) => {
               `- **${node.name}** (\`${node.slug}\`)${node.description ? ` — ${node.description}` : ""}\n  Read it: \`${BUSABASE_MCP_GUIDE_TOOL_NAME}\` with topic \`${BUSABASE_MCP_SKILL_TOPIC_PREFIX}${node.slug}\``,
           )
           .join("\n")}`
-      : "No apps are installed in this workspace yet. Folders here are ordinary content, not apps with their own manuals — read their structure with `nodes_list` and `bases_list` as usual.",
+      : "No apps are installed in this workspace yet. Folders here are ordinary content, not apps with their own manuals — read their structure with `nodes_list` and `bases_list` as usual. Hand-written skills and custom prompts are not apps: find those with `playbooks_search`.",
   };
 };
 

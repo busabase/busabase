@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { coreMessagesByLocale } from "../../i18n";
+import { coreMessagesByLocale } from "../../i18n/catalog";
 import { getBusabaseDashboardRoutes } from "./routes";
 
 describe("dashboard SPA route titles", () => {
@@ -14,6 +14,8 @@ describe("dashboard SPA route titles", () => {
     expect(title("/templates")).toBe(messages.nav.templates);
     expect(title("/templates/:templateName")).toBe(messages.routes.template);
     expect(title("/embed-links")).toBe(messages.routes.embedLinks);
+    expect(title("/playbooks")).toBe(messages.routes.playbooks);
+    expect(messages.routes.playbooks).toBe("做事手册");
     expect(title("/doc/:slug")).toBe(messages.nodeDetail.doc);
     expect(title("/workflow/:slug")).toBe(messages.nodeDetail.workflow);
   });
@@ -22,6 +24,7 @@ describe("dashboard SPA route titles", () => {
     const routes = getBusabaseDashboardRoutes(null);
     expect(routes.find((route) => route.path === "/agents")?.title).toBe("Agents");
     expect(routes.find((route) => route.path === "/embed-links")?.title).toBe("Embed links");
+    expect(routes.find((route) => route.path === "/playbooks")?.title).toBe("Playbooks");
     expect(routes.find((route) => route.path === "/doc/:slug")?.title).toBe("Doc");
   });
 });

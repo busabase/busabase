@@ -1,11 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import {
-  CoreI18nProvider,
-  type CoreLocale,
-  coreMessagesByLocale,
-  coreMessagesEn,
-} from "../../../i18n";
+import { CoreI18nProvider, type CoreLocale, coreMessagesEn } from "../../../i18n";
+import { coreMessagesByLocale } from "../../../i18n/catalog";
 import type { AirAppRunStatus } from "../store/airapp-runner-store";
 import {
   AirAppPreviewPending,

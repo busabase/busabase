@@ -1,5 +1,5 @@
 import { getNodeType } from "busabase-contract/domains";
-import type { NodeIcon } from "busabase-contract/types";
+import { type NodeIcon, resolveNodeIconSource } from "busabase-contract/types";
 import {
   AppWindow,
   CodeXml,
@@ -58,17 +58,8 @@ export const resolveNodeIcon = (node: {
   type: string;
   icon?: NodeIcon | null;
 }): ResolvedNodeIcon => {
-  if (node.icon?.type === "emoji" && node.icon.value) {
-    return { kind: "emoji", value: node.icon.value };
-  }
-  if (node.icon?.type === "attachment" && node.icon.url) {
-    return {
-      kind: "image",
-      url: node.icon.url,
-      shape: node.type === "airapp" ? "app" : "square",
-    };
-  }
-  return { kind: "type", Icon: nodeIconForType(node.type) };
+  const source = resolveNodeIconSource(node);
+  return source.kind === "type" ? { kind: "type", Icon: nodeIconForType(node.type) } : source;
 };
 
 /**

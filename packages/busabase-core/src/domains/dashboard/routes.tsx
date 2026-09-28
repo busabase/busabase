@@ -83,6 +83,14 @@ export const getBusabaseDashboardRoutes = (
       title: messages?.routes.search ?? "Search",
     },
     {
+      // Space-level Playbooks page (agent-playbook-discovery.md §11b H2). Needs
+      // an entry HERE as well as a branch in the dashboard's `activeView`.
+      path: "/playbooks",
+      component: dashboard,
+      breadcrumb: messages?.routes.playbooks ?? "Playbooks",
+      title: messages?.routes.playbooks ?? "Playbooks",
+    },
+    {
       path: "/inbox",
       component: dashboard,
       breadcrumb: messages?.routes.inbox ?? "Inbox",

@@ -1,8 +1,7 @@
 import type { TemplateCardVO } from "busabase-contract/domains/templates/types";
 import { AppWindow, Bot, FileText, Rows3, Table2 } from "lucide-react";
-import type { LocaleType } from "openlib/i18n/i-string";
+import { iStringParse, type LocaleType } from "openlib/i18n/i-string";
 import type { ReactNode } from "react";
-import { templateTextForLocale } from "../utils/template-locale";
 import { TemplateCardImage } from "./template-card-image";
 
 export interface TemplateStatLabels {
@@ -57,7 +56,7 @@ export function TemplateCardSummary({
 }: TemplateCardSummaryProps) {
   const [screenshot] = template.screenshots;
   const title = template.displayName
-    ? templateTextForLocale(template.displayName, descriptionLocale)
+    ? iStringParse(template.displayName, descriptionLocale)
     : template.name;
   const Heading = headingLevel;
   const stats = [
@@ -106,7 +105,7 @@ export function TemplateCardSummary({
               : "line-clamp-2 flex-1 text-xs text-muted-foreground"
           }
         >
-          {templateTextForLocale(template.description, descriptionLocale)}
+          {iStringParse(template.description, descriptionLocale)}
         </p>
 
         {stats.length > 0 ? (

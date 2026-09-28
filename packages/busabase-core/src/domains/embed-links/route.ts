@@ -8,8 +8,12 @@ import {
   parseEmbedIframeCapability,
   readEmbedCapabilityCookie,
 } from "./capability";
-import { renderEmbedDocument, renderUnavailableEmbedDocument } from "./embed-document";
-import { resolveEmbedLink } from "./logic";
+import {
+  renderEmbedDocument,
+  renderExpiredEmbedDocument,
+  renderUnavailableEmbedDocument,
+} from "./embed-document";
+import { resolveEmbedLink, resolveExpiredEmbedLink } from "./logic";
 
 const htmlResponse = (markup: string, status: number, headers: Record<string, string>) =>
   new Response(markup, {
@@ -17,8 +21,8 @@ const htmlResponse = (markup: string, status: number, headers: Record<string, st
     headers: { ...headers, "content-type": "text/html; charset=utf-8" },
   });
 
-const unavailable = () =>
-  htmlResponse(renderUnavailableEmbedDocument(), 404, {
+const unavailable = (request: Request) =>
+  htmlResponse(renderUnavailableEmbedDocument(request.headers.get("accept-language")), 404, {
     ...EMBED_SECURITY_HEADERS,
     "x-robots-tag": "noindex, nofollow",
   });
@@ -59,7 +63,7 @@ export const createEmbedRouteHandler = ({
     context: { params: Promise<{ publicId: string }> },
   ): Promise<Response> => {
     const { publicId } = await context.params;
-    if (!isValidEmbedPublicId(publicId)) return unavailable();
+    if (!isValidEmbedPublicId(publicId)) return unavailable(request);
 
     const url = new URL(request.url);
     const direct = parseEmbedIframeCapability(
@@ -68,10 +72,19 @@ export const createEmbedRouteHandler = ({
       url.searchParams.get("view"),
     );
     const capability = direct ?? readEmbedCapabilityCookie(request.headers.get("cookie"), publicId);
-    if (!capability) return unavailable();
+    if (!capability) return unavailable(request);
 
     const embed = await withHostContext(() => resolveEmbedLink(publicId, capability.secret));
-    if (!embed) return unavailable();
+    if (!embed) {
+      const expired = await withHostContext(() =>
+        resolveExpiredEmbedLink(publicId, capability.secret),
+      );
+      if (!expired) return unavailable(request);
+      return htmlResponse(renderExpiredEmbedDocument(request.headers.get("accept-language")), 410, {
+        ...embedSecurityHeaders(expired.framePolicy),
+        "x-robots-tag": "noindex, nofollow",
+      });
+    }
 
     // Change Requests, record details and AirApps each have a subroute that
     // renders them properly; only plain node documents are served inline.

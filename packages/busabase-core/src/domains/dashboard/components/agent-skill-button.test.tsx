@@ -1,7 +1,11 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { CoreI18nProvider } from "../../../i18n";
-import { AgentIntegrationContent, AgentIntegrationPluginCards } from "./agent-skill-button";
+import {
+  AgentIntegrationContent,
+  AgentIntegrationPluginCards,
+  createAgentSkillPrompt,
+} from "./agent-skill-button";
 
 const getButtonClasses = (markup: string, label: string) => {
   const button = [...markup.matchAll(/<button([^>]*)>([\s\S]*?)<\/button>/g)].find((match) =>
@@ -85,5 +89,25 @@ describe("AgentIntegrationContent onboarding copy", () => {
 
     expect(markup).toContain(expected);
     expect(markup).not.toContain(excluded);
+  });
+});
+
+describe("createAgentSkillPrompt", () => {
+  const locales = ["en", "zh-CN", "zh-TW", "ja", "ko", "es", "pt", "vi", "fr", "de"] as const;
+
+  it.each(locales)("keeps the URL and space id verbatim in %s", (locale) => {
+    const prompt = createAgentSkillPrompt("https://x.test/SETUP_SKILL.md", locale, "space_1");
+    expect(prompt).toContain("https://x.test/SETUP_SKILL.md");
+    expect(prompt).toContain("space_1");
+    expect(prompt).toContain("BUSABASE_SPACE_ID / x-busabase-space");
+    expect(prompt).toContain("Busabase Agent Skill");
+  });
+
+  it("gives every locale its own wording and falls back to English for unknown ones", () => {
+    const english = createAgentSkillPrompt("https://x.test/s.md", "en");
+    for (const locale of locales.filter((l) => l !== "en")) {
+      expect(createAgentSkillPrompt("https://x.test/s.md", locale)).not.toBe(english);
+    }
+    expect(createAgentSkillPrompt("https://x.test/s.md", "xx")).toBe(english);
   });
 });

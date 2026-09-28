@@ -46,6 +46,16 @@ export interface ViewSubmitOptions {
   mergeImmediately?: boolean;
 }
 
+/**
+ * What the field edit dialog can change in one update change request. `choices`
+ * is only sent for select / multiselect fields, and replaces the whole list —
+ * choice ids are the stored cell values, so a renamed choice keeps its id.
+ */
+export interface UpdateBaseFieldPatch {
+  name?: iString;
+  choices?: Array<{ color?: string; id: string; name: string }>;
+}
+
 export interface CreateBaseFieldPayload {
   name: iString;
   options?: {

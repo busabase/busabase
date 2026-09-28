@@ -51,6 +51,11 @@ interface EnqueueFileUploadInput {
   nodeId: string;
   nodeName: string;
   nodeType: "drive" | "skill";
+  /**
+   * Paths whose existing file should be overwritten, mapped to the content
+   * hash the user saw (or null when unknown). Paths absent here are created.
+   */
+  replace?: ReadonlyMap<string, string | null>;
 }
 
 interface FileUploadTaskContextValue {
@@ -270,6 +275,13 @@ export function FileUploadTaskProvider({
           queryClient.invalidateQueries({ queryKey: orpc.changeRequests.list.key() }),
           queryClient.invalidateQueries({ queryKey: orpc.changeRequests.counts.key() }),
         ];
+        if (merged && runtime.batch.files.some((item) => item.replace)) {
+          // A replace keeps the path but swaps the bytes, so an open preview
+          // would otherwise keep showing the old content and content hash.
+          invalidations.push(
+            queryClient.invalidateQueries({ queryKey: orpc.fileTrees.readFile.key() }),
+          );
+        }
         if (merged) {
           invalidations.push(
             queryClient.invalidateQueries({
@@ -315,12 +327,21 @@ export function FileUploadTaskProvider({
       const taskId = createUploadTaskId();
       const runtime: RuntimeUploadTask = {
         batch: {
-          files: input.files.map((file, index) => ({
-            asset: null,
-            file,
-            id: `${taskId}-file-${index}`,
-            path: fileTreeUploadPath(input.folder, file.name),
-          })),
+          files: input.files.map((file, index) => {
+            const path = fileTreeUploadPath(input.folder, file.name);
+            const replaceHash = input.replace?.get(path);
+            return {
+              asset: null,
+              file,
+              id: `${taskId}-file-${index}`,
+              path,
+              replace: !input.replace?.has(path)
+                ? null
+                : replaceHash
+                  ? { baseContentHash: replaceHash }
+                  : {},
+            };
+          }),
         },
         controller: new AbortController(),
         generation: 1,

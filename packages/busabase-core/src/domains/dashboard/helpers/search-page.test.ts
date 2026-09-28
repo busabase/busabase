@@ -152,7 +152,15 @@ describe("search page URL state", () => {
       expect(parseSearchPageParams("?q=x&source=names").sources).toEqual(["names"]);
     });
 
+    it("keeps `prompts` in regex mode and drops it from a text link", () => {
+      expect(parseSearchPageParams("?q=x&mode=regex&source=prompts").sources).toEqual(["prompts"]);
+      // Text search has no prompts index: a hand-edited link must not send it.
+      expect(parseSearchPageParams("?q=x&source=prompts&source=files").sources).toEqual(["files"]);
+    });
+
     it("offers only the sources each mode can actually scan", () => {
+      expect(sourcesForMode("regex")).toContain("prompts");
+      expect(sourcesForMode("text")).not.toContain("prompts");
       expect(sourcesForMode("text")).toContain("names");
       expect(sourcesForMode("regex")).not.toContain("names");
     });

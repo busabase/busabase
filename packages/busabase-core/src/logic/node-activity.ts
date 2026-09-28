@@ -12,6 +12,7 @@ import {
   busabaseNodes,
   busabaseOperations,
 } from "../db/schema";
+import { applyPlaybookAttributionVisibility } from "../domains/playbooks/logic/playbook-attribution";
 import { assertAuditSubjectPermission, isAuditVisibilityMiss } from "./audit";
 import { listInputSchema } from "./kernel";
 import { assertNodePermission } from "./node-acl";
@@ -183,11 +184,14 @@ export const listNodeActivity = async (
     }
   }
 
-  for (const event of visibleAuditRows) {
+  const auditVOs = await applyPlaybookAttributionVisibility(
+    visibleAuditRows.map((event) => toAuditEventVO(event, auditUsers)),
+  );
+  for (const auditEvent of auditVOs) {
     items.push({
       kind: "audit",
-      timestamp: event.createdAt.toISOString(),
-      auditEvent: toAuditEventVO(event, auditUsers),
+      timestamp: auditEvent.createdAt,
+      auditEvent,
       record: null,
     });
   }
@@ -314,11 +318,14 @@ export const listRecordActivity = async (
     }
   }
 
-  for (const event of visibleAuditRows) {
+  const auditVOs = await applyPlaybookAttributionVisibility(
+    visibleAuditRows.map((event) => toAuditEventVO(event, auditUsers)),
+  );
+  for (const auditEvent of auditVOs) {
     items.push({
       kind: "audit",
-      timestamp: event.createdAt.toISOString(),
-      auditEvent: toAuditEventVO(event, auditUsers),
+      timestamp: auditEvent.createdAt,
+      auditEvent,
       record: null,
     });
   }

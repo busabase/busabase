@@ -159,6 +159,20 @@ export const busabaseDemoRouter = os.router({
   grep: os.grep.handler(() => {
     throw demoUnsupported("Unified grep");
   }),
+  // Playbook discovery is not wired to the in-memory demo dataset. It answers
+  // the same explicit refusal grep does, never an empty list — an empty list
+  // would read as "this space has no playbooks", which is the one wrong answer.
+  playbooks: {
+    search: os.playbooks.search.handler(() => {
+      throw demoUnsupported("Playbook search");
+    }),
+    get: os.playbooks.get.handler(() => {
+      throw demoUnsupported("Playbooks");
+    }),
+    list: os.playbooks.list.handler(() => {
+      throw demoUnsupported("Playbooks");
+    }),
+  },
   embedLinks: {
     create: os.embedLinks.create.handler(() => {
       throw demoUnsupported("Create embed link");

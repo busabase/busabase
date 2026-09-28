@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  buildFileUploadOperation,
   canRetryFileUploadTask,
   createFileUploadAbortError,
   executeFileUploadBatch,
@@ -112,6 +113,85 @@ describe("executeFileUploadBatch", () => {
     controller.abort();
     await expect(promise).rejects.toMatchObject({ name: "AbortError" });
     expect(submit).not.toHaveBeenCalled();
+  });
+});
+
+describe("buildFileUploadOperation", () => {
+  const asset = assetFor(fakeFile("quote.pdf", 10));
+  const base = { asset, file: fakeFile("quote.pdf", 10), id: "quote", path: "docs/quote.pdf" };
+
+  it("keeps a plain upload as a create with the same keys as before", () => {
+    expect(buildFileUploadOperation(base)).toEqual({
+      assetId: "asset-quote.pdf",
+      displayName: "quote.pdf",
+      kind: "create",
+      mimeType: "text/plain",
+      path: "docs/quote.pdf",
+    });
+    expect(buildFileUploadOperation({ ...base, replace: null }).kind).toBe("create");
+  });
+
+  it("turns a replacement into an update pinned to the hash the user saw", () => {
+    expect(
+      buildFileUploadOperation({ ...base, replace: { baseContentHash: "sha256:old" } }),
+    ).toEqual({
+      assetId: "asset-quote.pdf",
+      baseContentHash: "sha256:old",
+      displayName: "quote.pdf",
+      kind: "update",
+      mimeType: "text/plain",
+      path: "docs/quote.pdf",
+    });
+  });
+
+  it("omits baseContentHash entirely when the current hash is unknown", () => {
+    const operation = buildFileUploadOperation({ ...base, replace: {} });
+    expect(operation.kind).toBe("update");
+    expect(Object.hasOwn(operation, "baseContentHash")).toBe(false);
+  });
+});
+
+describe("executeFileUploadBatch with replacements", () => {
+  it("submits replacements and new files together in one ordered batch", async () => {
+    const submit = vi.fn().mockResolvedValue({ id: "cr-1" });
+    await executeFileUploadBatch({
+      batch: {
+        files: [
+          {
+            asset: null,
+            file: fakeFile("quote.pdf", 10),
+            id: "quote",
+            path: "docs/quote.pdf",
+            replace: { baseContentHash: "sha256:old" },
+          },
+          { asset: null, file: fakeFile("new.txt", 5), id: "new", path: "docs/new.txt" },
+        ],
+      },
+      signal: new AbortController().signal,
+      uploadFile: async (file) => assetFor(file),
+      submit,
+      onFileState: vi.fn(),
+      onSubmitting: vi.fn(),
+    });
+
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(submit).toHaveBeenCalledWith([
+      {
+        assetId: "asset-quote.pdf",
+        baseContentHash: "sha256:old",
+        displayName: "quote.pdf",
+        kind: "update",
+        mimeType: "text/plain",
+        path: "docs/quote.pdf",
+      },
+      {
+        assetId: "asset-new.txt",
+        displayName: "new.txt",
+        kind: "create",
+        mimeType: "text/plain",
+        path: "docs/new.txt",
+      },
+    ]);
   });
 });
 

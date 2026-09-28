@@ -16,6 +16,7 @@ import {
 import { type NodeIcon, NodeIconSchema } from "../types/node-icon";
 import { destructiveAutoMerge } from "./auto-merge";
 import { customAgentPromptsSchema } from "./node-agent-prompt-schemas";
+import { PlaybookAttributionVOSchema } from "./playbook-schemas";
 
 /** @see nodeSettingsSchema — declared here so `NodeOutput` can reference it. */
 export type NodeSettings = { airappEngine?: "browser" | "local" | "remote" | null };
@@ -421,6 +422,8 @@ const sourceAttributionSchema = z.object({
   displayName: z.string().nullable(),
   ownerName: z.string().nullable(),
   channel: sourceChannelSchema.nullable(),
+  /** Present only when the write declared a playbook the server could validate. */
+  playbook: PlaybookAttributionVOSchema.nullable().optional(),
 });
 
 const commitSchema = z.object({

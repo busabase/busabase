@@ -36,14 +36,17 @@ export type LookupRollup = "values" | "count" | "sum" | "average" | "min" | "max
 import type { NodeType, OperationKind } from "../domains/registry";
 export type { NodeType, OperationKind };
 
+import type { PlaybookAttributionVO } from "../contract/playbook-schemas";
 // The node custom-avatar shape (emoji or cropped/uploaded image) — single
 // source of truth is `NodeIconSchema`; re-exported here so `NodeVO` below (and
 // every importer of `busabase-contract/types`) can reference the inferred type
 // without reaching into `./node-icon` directly.
 import type { NodeIcon } from "./node-icon";
 
+export type { PlaybookAttributionVO } from "../contract/playbook-schemas";
+
 export type { NodeIcon } from "./node-icon";
-export { NodeIconSchema } from "./node-icon";
+export { NodeIconSchema, type NodeIconSource, resolveNodeIconSource } from "./node-icon";
 export type ChangeRequestStatus =
   | "in_review"
   | "changes_requested"
@@ -107,6 +110,8 @@ export interface SourceAttributionVO {
   displayName: string | null;
   ownerName: string | null;
   channel: BusabaseSourceChannel | null;
+  /** Present only when the write declared a playbook the server could validate. */
+  playbook?: PlaybookAttributionVO | null;
 }
 
 /**

@@ -287,10 +287,9 @@ function reattachments(): Map<string, Promise<LiveSession>> {
 }
 
 const nowIso = () => new Date().toISOString();
-const DEFAULT_REMOTE_SESSION_READY_TIMEOUT_MS = 30_000;
 const REMOTE_SESSION_READY_POLL_MS = 100;
 const REMOTE_EVENT_POLL_MS = 500;
-const DEFAULT_AGENT_HANDSHAKE_TIMEOUT_MS = 30_000;
+const DEFAULT_AGENT_HANDSHAKE_TIMEOUT_MS = 120_000;
 const DEFAULT_PROMPT_INACTIVITY_TIMEOUT_MS = 5 * 60_000;
 
 const configuredTimeoutMs = (name: string, fallback: number): number => {
@@ -298,14 +297,13 @@ const configuredTimeoutMs = (name: string, fallback: number): number => {
   return Number.isFinite(configured) && configured > 0 ? configured : fallback;
 };
 
-const remoteSessionReadyTimeoutMs = (): number =>
-  configuredTimeoutMs(
-    "BUSABASE_AGENT_SESSION_READY_TIMEOUT_MS",
-    DEFAULT_REMOTE_SESSION_READY_TIMEOUT_MS,
-  );
-
 const agentHandshakeTimeoutMs = (): number =>
   configuredTimeoutMs("BUSABASE_AGENT_HANDSHAKE_TIMEOUT_MS", DEFAULT_AGENT_HANDSHAKE_TIMEOUT_MS);
+
+// An accepted prompt may wait for the same remote handshake. Its readiness
+// deadline must not expire before that handshake does, unless explicitly overridden.
+const remoteSessionReadyTimeoutMs = (): number =>
+  configuredTimeoutMs("BUSABASE_AGENT_SESSION_READY_TIMEOUT_MS", agentHandshakeTimeoutMs());
 
 const promptInactivityTimeoutMs = (): number =>
   configuredTimeoutMs(

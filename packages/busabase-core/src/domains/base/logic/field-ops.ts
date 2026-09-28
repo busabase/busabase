@@ -309,7 +309,7 @@ export const createFieldChangeRequest = async (
     payload: fields,
     operation: "base_add_field",
     message: parsed.message,
-    author: parsed.submittedBy,
+    author: resolveActorId(parsed.submittedBy),
     createdAt: timestamp,
   });
   await db.insert(busabaseChangeRequests).values({
@@ -418,7 +418,7 @@ export const createDeleteFieldChangeRequest = async (
     payload: fields,
     operation: "base_delete_field",
     message: message ?? "Delete field",
-    author: submittedBy,
+    author: resolveActorId(submittedBy),
     createdAt: timestamp,
   });
   await db.insert(busabaseChangeRequests).values({
@@ -556,7 +556,7 @@ export const createUpdateFieldChangeRequest = async (
     payload: fields,
     operation: "base_update_field",
     message: message ?? "Update field",
-    author: submittedBy,
+    author: resolveActorId(submittedBy),
     createdAt: timestamp,
   });
   await db.insert(busabaseChangeRequests).values({
@@ -850,7 +850,7 @@ export const createConvertFieldChangeRequest = async (
     payload: fields,
     operation: "base_convert_field",
     message: message ?? `Convert field ${field.slug} from ${field.type} to ${newType}`,
-    author: submittedBy,
+    author: resolveActorId(submittedBy),
     createdAt: timestamp,
   });
   await db.insert(busabaseChangeRequests).values({
@@ -952,7 +952,7 @@ export const createReorderFieldsChangeRequest = async (
     payload: fields,
     operation: "base_reorder_fields",
     message: message ?? "Reorder fields",
-    author: submittedBy,
+    author: resolveActorId(submittedBy),
     createdAt: timestamp,
   });
   await db.insert(busabaseChangeRequests).values({
@@ -1055,7 +1055,7 @@ export const createRestoreFieldChangeRequest = async (
     payload: fields,
     operation: "base_restore_field",
     message: message ?? "Restore field",
-    author: submittedBy,
+    author: resolveActorId(submittedBy),
     createdAt: timestamp,
   });
   await db.insert(busabaseChangeRequests).values({

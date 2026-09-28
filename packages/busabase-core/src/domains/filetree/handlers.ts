@@ -6,7 +6,7 @@ import {
   createFileTreeInputSchema,
 } from "busabase-contract/domains/filetree/contract";
 import type { ChangeRequestVO, FileTreeFileVO, FileTreeNodeVO } from "busabase-contract/types";
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { confirmUpload, requestUploadUrl } from "open-domains/attachments/logic";
 import { storage } from "openlib/storage";
 import type { z } from "zod";
@@ -855,6 +855,42 @@ export const readFileTreeFile = async (
   };
 };
 
+/**
+ * Paths in this node whose bytes live in an Asset rather than as text.
+ *
+ * Same definition `readFileTreeFile` reports as `encoding: "url"` —
+ * `contentKind !== "text"` — deliberately reusing it rather than re-deriving
+ * from the mime type or the extension, so the read and the write can never
+ * disagree about what a file is.
+ *
+ * Reads only the metadata: the guard needs to know WHICH kind a path is, not
+ * what it contains.
+ */
+const findAssetBackedPaths = async (
+  db: Awaited<ReturnType<typeof getDb>>,
+  config: FileTreeKindConfig,
+  nodeId: string,
+  paths: readonly string[],
+): Promise<Set<string>> => {
+  if (paths.length === 0) return new Set();
+  const rows = await db
+    .select({
+      path: busabaseAssetUsages.path,
+      contentKind: busabaseAssets.contentKind,
+    })
+    .from(busabaseAssetUsages)
+    .innerJoin(busabaseAssets, eq(busabaseAssetUsages.assetId, busabaseAssets.id))
+    .where(
+      and(
+        eq(busabaseAssetUsages.spaceId, getContextSpaceId()),
+        eq(busabaseAssetUsages.ownerType, usageOwnerType(config)),
+        eq(busabaseAssetUsages.nodeId, nodeId),
+        inArray(busabaseAssetUsages.path, [...paths]),
+      ),
+    );
+  return new Set(rows.filter((row) => row.contentKind !== "text").map((row) => row.path));
+};
+
 export interface DriveFilePreviewSource {
   nodeId: string;
   path: string;
@@ -927,6 +963,14 @@ export const createFileTreeChangeRequest = async (
   // to propose file edits — requires `changeRequest` level on this node.
   await assertNodePermission(node.id, "changeRequest");
   const parsed = createFileTreeChangeRequestInputSchema.parse(input);
+  // Same rule as every other change-request path (record-ops / field-ops /
+  // view-ops / node create): the HOST's authenticated actor wins, and the
+  // caller-supplied `submittedBy` is only the open-source single-user default.
+  // Writing the raw input here let a CLI/SDK push stamp any string it liked on
+  // `submitted_by` — e.g. an AirApp's `appId` — which then showed up as a
+  // person who is not a member of the space anywhere the column is rendered
+  // (Change Request lists, node history, team insights).
+  const submittedBy = resolveActorId(parsed.submittedBy);
 
   // Upload safety — same three layers as createFileTreeNode (see
   // ../../logic/upload-safety.ts), run before any DB write. A
@@ -959,6 +1003,37 @@ export const createFileTreeChangeRequest = async (
     (operation) => !hasPath(operation) || keptOperations.has(operation),
   );
 
+  // A TEXT update aimed at a path whose bytes are an Asset replaces the file
+  // with that text, and used to be accepted: a real PNG took `content: "oops"`
+  // with HTTP 200 and came back `encoding: "utf8"`, content "oops" — the image
+  // gone, while `mimeType` still claimed `image/png`.
+  //
+  // The mobile client is guarded (#7517), but this operation is reachable from
+  // the public API, the CLI, and any agent driving this procedure, none of which
+  // can know they are about to destroy a file. It is also not obviously wrong at
+  // review time: the change request reads "Update file logo.png", not "replace
+  // this image with text".
+  //
+  // Refused here rather than merged-then-regretted, the same way a field
+  // conversion refuses an unconvertible type instead of nulling the column.
+  // Replacing an asset with ANOTHER asset stays available — that is what an
+  // `assetId` operation is for — and `delete` is untouched, since it does not
+  // pretend the bytes were text.
+  const textUpdatePaths = operations
+    .filter(
+      (operation) => hasPath(operation) && operation.kind === "update" && "content" in operation,
+    )
+    .map((operation) => normalizeUsagePath((operation as { path: string }).path));
+  const assetBacked = await findAssetBackedPaths(db, config, node.id, textUpdatePaths);
+  if (assetBacked.size > 0) {
+    const names = [...assetBacked].sort().join(", ");
+    throw new ORPCError("BAD_REQUEST", {
+      message:
+        `Cannot replace ${assetBacked.size === 1 ? "an attachment-backed file" : "attachment-backed files"} with text: ${names}. ` +
+        "These files are stored as attachments, not as text — update them with an `assetId` operation, or delete them.",
+    });
+  }
+
   const changeRequestId = id("crq");
   const timestamp = now();
 
@@ -968,7 +1043,7 @@ export const createFileTreeChangeRequest = async (
     targetType: "node",
     nodeId: node.id,
     status: "in_review",
-    submittedBy: parsed.submittedBy,
+    submittedBy,
     sourceMeta: withContextSourceMeta({
       subject: config.type,
       nodeId: node.id,
@@ -1031,7 +1106,7 @@ export const createFileTreeChangeRequest = async (
       payload: fields,
       operation: operationKind,
       message: parsed.message,
-      author: parsed.submittedBy,
+      author: submittedBy,
       createdAt: timestamp,
     });
     await db.insert(busabaseOperations).values({
@@ -1061,7 +1136,7 @@ export const createFileTreeChangeRequest = async (
 
   await insertAuditEvent(db, {
     action: "change_request.created",
-    actorId: parsed.submittedBy,
+    actorId: submittedBy,
     baseId: null,
     changeRequestId,
     metadata: { operation: `${config.type}_update`, nodeId: node.id },
@@ -1070,14 +1145,16 @@ export const createFileTreeChangeRequest = async (
   // `autoMerge` default as the rest of the write surface. A batch containing a
   // `delete` used to be pinned to review and to reject `autoMerge: true` with a
   // 400; both are gone (see `busabase-contract/src/contract/auto-merge.ts`).
-  // The reviewable record is not lost by merging: the deleted file's previous
-  // bytes stay in the ChangeRequest's commit history either way, so the only
-  // thing the old rule bought was making a solo owner approve their own cleanup.
+  // Merging does not keep a version history of the file's bytes: an `update`
+  // repoints the path's existing Asset (same Asset id) at the new bytes and
+  // drops the uploaded Asset row, and the commit records only that uploaded
+  // `assetId`. A `delete` only unmounts the path — the Asset itself stays in
+  // the Assets library, so the old bytes are still recoverable from there.
   return finalizeChangeRequest({
     changeRequestId,
     nodeId: node.id,
     requestedAutoMerge: parsed.autoMerge,
-    submittedBy: parsed.submittedBy,
+    submittedBy,
     baseId: null,
     label: labelLower(config),
     kind: "structural",
@@ -1105,6 +1182,38 @@ const readCurrentContentHash = async (
     .limit(1);
   if (!row) return null;
   return row.contentHash ?? hashBuffer(await storage.getObject(row.storageKey));
+};
+
+/**
+ * The UTF-8 text of one mounted file, read inside the caller's transaction, or
+ * `null` when no file is mounted at `filePath` or it is not a text asset.
+ *
+ * For merge-time follow-ups that need the file's content before and after an
+ * operation applies (the skill merge re-reads `SKILL.md` frontmatter) — the
+ * public `readFileTreeFile` resolves the node through the caller's ACL and the
+ * ambient db, neither of which belongs inside a merge.
+ */
+export const readMountedTextFile = async (
+  node: NodePO,
+  filePath: string,
+  tx: Awaited<ReturnType<typeof getDb>>,
+): Promise<string | null> => {
+  const [row] = await tx
+    .select({ contentKind: busabaseAssets.contentKind, storageKey: attachments.storageKey })
+    .from(busabaseAssetUsages)
+    .innerJoin(busabaseAssets, eq(busabaseAssetUsages.assetId, busabaseAssets.id))
+    .innerJoin(attachments, eq(busabaseAssets.attachmentId, attachments.id))
+    .where(
+      and(
+        eq(busabaseAssetUsages.spaceId, getContextSpaceId()),
+        eq(busabaseAssetUsages.ownerType, usageOwnerType(node.type)),
+        eq(busabaseAssetUsages.nodeId, node.id),
+        eq(busabaseAssetUsages.path, normalizeUsagePath(filePath)),
+      ),
+    )
+    .limit(1);
+  if (!row || row.contentKind !== "text") return null;
+  return (await storage.getObject(row.storageKey)).toString("utf8");
 };
 
 export const mergeFileTreeFile = async (

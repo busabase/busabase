@@ -21,6 +21,7 @@ export const recordBulkUpdateTask: TaskDefinition<RecordBulkUpdateInput> = {
   cliPath: ["records", "bulk-update-change-request"],
   summary: "Propose partial updates to many records in one ChangeRequest",
   guidance:
+    "If this job may already have a playbook, call playbooks search first. " +
     "All updates must target active records in the same Base. Each recordId may appear once. " +
     "Each fields object is a partial update: omitted keys stay unchanged and null clears a field. " +
     "The batch is reviewed and merged atomically. Use baseCommitId per update when the caller " +

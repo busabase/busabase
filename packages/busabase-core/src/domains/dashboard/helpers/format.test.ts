@@ -5,6 +5,7 @@ import {
   formatListDateTime,
   formatListTime,
   formatMemberChipLabel,
+  formatRelativeTime,
   formatUserRefLabel,
 } from "./format";
 
@@ -114,5 +115,26 @@ describe("formatMemberChipLabel", () => {
     // resolved is an "Unknown user"; a cell's actor id is still worth naming.
     expect(formatUserRefLabel(undefined, "field-type-agent")).toContain("Unknown user");
     expect(formatMemberChipLabel(undefined, "field-type-agent")).toBe("Field Type Agent");
+  });
+});
+
+describe("formatRelativeTime", () => {
+  const now = new Date("2026-09-26T12:00:00.000Z");
+  const ago = (ms: number) => new Date(now.getTime() - ms).toISOString();
+  const MINUTE = 60_000;
+  const DAY = 24 * 60 * MINUTE;
+
+  it("picks the largest whole unit, in the reader's locale", () => {
+    expect(formatRelativeTime(ago(10_000), "en", now)).toBe("now");
+    expect(formatRelativeTime(ago(5 * MINUTE), "en", now)).toBe("5 minutes ago");
+    expect(formatRelativeTime(ago(3 * 60 * MINUTE), "en", now)).toBe("3 hours ago");
+    expect(formatRelativeTime(ago(DAY), "en", now)).toBe("yesterday");
+    expect(formatRelativeTime(ago(2 * DAY), "en", now)).toBe("2 days ago");
+    expect(formatRelativeTime(ago(45 * DAY), "en", now)).toBe("last month");
+    expect(formatRelativeTime(ago(2 * DAY), "zh-CN", now)).toBe("前天");
+  });
+
+  it("clamps a future time (clock skew) to now", () => {
+    expect(formatRelativeTime(ago(-5 * MINUTE), "en", now)).toBe("now");
   });
 });

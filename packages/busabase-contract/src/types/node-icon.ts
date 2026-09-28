@@ -24,3 +24,32 @@ export const NodeIconSchema = z.discriminatedUnion("type", [
   }),
 ]);
 export type NodeIcon = z.infer<typeof NodeIconSchema>;
+
+/**
+ * WHICH visual a node shows — its own emoji, its own image, or its type's
+ * default icon — decided once, for every host.
+ *
+ * Platform-neutral on purpose: web resolves `kind: "type"` to a lucide-react
+ * component, React Native to a lucide-react-native one, and neither can import
+ * the other's. Before this lived here, web kept the decision inside a module
+ * that also imported lucide-react, so mobile could not reuse it and simply
+ * never showed custom icons at all — a node given an emoji on web appeared on
+ * the phone with the generic type icon.
+ */
+export type NodeIconSource =
+  | { kind: "emoji"; value: string }
+  | { kind: "image"; url: string; shape: "app" | "square" }
+  | { kind: "type" };
+
+export const resolveNodeIconSource = (node: {
+  type: string;
+  icon?: NodeIcon | null;
+}): NodeIconSource => {
+  if (node.icon?.type === "emoji" && node.icon.value) {
+    return { kind: "emoji", value: node.icon.value };
+  }
+  if (node.icon?.type === "attachment" && node.icon.url) {
+    return { kind: "image", url: node.icon.url, shape: node.type === "airapp" ? "app" : "square" };
+  }
+  return { kind: "type" };
+};

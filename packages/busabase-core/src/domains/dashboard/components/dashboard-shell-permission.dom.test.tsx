@@ -23,9 +23,10 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import type { ApiKeyPermissionLevel } from "busabase-contract/access-control/api-key-level";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { NodeVO } from "busabase-contract/types";
+import { ChartNoAxesColumn } from "lucide-react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Router } from "wouter";
-import { BusabaseDashboardShell } from "./dashboard-shell";
+import { BusabaseDashboardShell, type HostContextualNavItem } from "./dashboard-shell";
 
 /**
  * jsdom ships neither `ResizeObserver` (the sidebar measures itself), nor
@@ -109,7 +110,11 @@ const AIRAPP = nodeVO({
 });
 const DOC = nodeVO({ id: "nd_doc", name: "Handbook", slug: "handbook", type: "doc" });
 
-function renderShell(submitPermissionLevel?: ApiKeyPermissionLevel, location = "/") {
+function renderShell(
+  submitPermissionLevel?: ApiKeyPermissionLevel,
+  location = "/",
+  hostContextualNavItems?: HostContextualNavItem[],
+) {
   const useLocation = (): [string, (path: string) => void] => [location, () => undefined];
   render(
     <QueryClientProvider
@@ -129,6 +134,7 @@ function renderShell(submitPermissionLevel?: ApiKeyPermissionLevel, location = "
           onSearchClick={() => undefined}
           orpc={stubOrpc()}
           submitPermissionLevel={submitPermissionLevel}
+          hostContextualNavItems={hostContextualNavItems}
         >
           <span />
         </BusabaseDashboardShell>
@@ -204,5 +210,37 @@ describe("BusabaseDashboardShell embed-link audit navigation", () => {
   it("surfaces the contextual audit row at manage", () => {
     renderShell("manage", "/embed-links");
     expect(screen.getByRole("link", { name: "Embed links" })).toBeTruthy();
+  });
+});
+
+describe("BusabaseDashboardShell contextual row for Space Selector destinations", () => {
+  const INSIGHTS: HostContextualNavItem = {
+    url: "/insights",
+    title: "Insights",
+    icon: ChartNoAxesColumn,
+  };
+
+  afterEach(() => window.sessionStorage.clear());
+
+  it("surfaces Graph View while on /graph", () => {
+    renderShell("manage", "/graph");
+    expect(screen.getByRole("link", { name: "Graph View" })).toBeTruthy();
+  });
+
+  it("surfaces a host-supplied destination while on it", () => {
+    renderShell("read", "/insights", [INSIGHTS]);
+    expect(screen.getByRole("link", { name: "Insights" })).toBeTruthy();
+  });
+
+  it("keeps the host row after leaving it for a node page", async () => {
+    renderShell("read", "/insights", [INSIGHTS]);
+    cleanup();
+    renderShell("read", "/", [INSIGHTS]);
+    expect(await screen.findByRole("link", { name: "Insights" })).toBeTruthy();
+  });
+
+  it("offers no row for a host route the host no longer supplies", () => {
+    renderShell("read", "/insights");
+    expect(screen.queryByRole("link", { name: "Insights" })).toBeNull();
   });
 });

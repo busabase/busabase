@@ -67,6 +67,11 @@ const MUST_STAY_DENIED = [
   "records.changeRequest",
   "search",
   "grep",
+  // Playbook discovery is a member's agent reading the space's procedures —
+  // nothing a public link or an embed should reach.
+  "playbooks.search",
+  "playbooks.get",
+  "playbooks.list",
 ];
 
 describe("anonymous allowlist (unit)", () => {

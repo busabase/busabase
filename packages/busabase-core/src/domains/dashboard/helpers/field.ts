@@ -28,13 +28,9 @@ export const createDefaultFieldOptions = (
     return undefined;
   }
   if (fieldType === "select" || fieldType === "multiselect") {
-    return {
-      choices: [
-        { id: "todo", name: "Todo", color: "slate" },
-        { id: "active", name: "Active", color: "amber" },
-        { id: "done", name: "Done", color: "emerald" },
-      ],
-    };
+    // No seeded choices: the add-field dialog collects them up front, and a
+    // hard-coded English Todo/Active/Done set was the only thing users could pick.
+    return { choices: [] };
   }
   if (fieldType === "ai_summary" || fieldType === "ai_tags") {
     return { ai: { model: "gpt-5-mini", reviewRequired: true, sourceFieldIds: [] } };

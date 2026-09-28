@@ -1,7 +1,7 @@
 import "server-only";
 
 /**
- * Unified Grep (files + node content + records) — the top-level composition
+ * Unified Grep (files + node content + records + custom prompts) — the top-level composition
  * entry point for `POST /grep`.
  * Mirrors `logic/search.ts`'s shape: a top-level, cross-domain `logic/` file
  * (NOT owned by `domains/assets/`, `domains/doc/`, or `domains/base/`) that
@@ -30,19 +30,29 @@ import "server-only";
  *   stale value that may still be sitting in `headCommit.payload`. This
  *   adapter's own batch loader filters `isNull(busabaseBaseFields.deletedAt)`
  *   explicitly, mirroring `domains/base/logic/queries.ts`'s `getBase`.
+ * - Prompts adapter: scans the custom agent prompts stored on nodes
+ *   (`busabase_nodes.agent_prompts`), label and body in every locale, after the
+ *   same `customAgentPromptsSchema` validation the Ask Agent dialog applies.
+ *
+ * Budget: one deadline for the whole call, and each requested source gets a
+ * floor of `maxMatches / sources` with unused budget rolling forward (see
+ * `sourceBudget`), so a noisy source can no longer starve the others.
  */
 import type {
   UnifiedGrepInput,
   UnifiedGrepMatchVO,
   UnifiedGrepResultVO,
 } from "busabase-contract/contract/grep-schemas";
+import { customAgentPromptsSchema } from "busabase-contract/contract/node-agent-prompt-schemas";
 import type { FieldType } from "busabase-contract/types";
 import { and, asc, desc, eq, inArray, isNull, or } from "drizzle-orm";
+import { type iString, iStringParse, type LocaleType } from "openlib/i18n/i-string";
 import { getContextSpaceId } from "../context";
 import { getDb } from "../db";
 import { busabaseCommits, busabaseNodes } from "../db/schema";
 import { grepAssets, grepTimeoutMs } from "../domains/assets/logic/asset-grep-logic";
 import { busabaseBaseFields, busabaseBases, busabaseRecords } from "../domains/base/schema";
+import { hasCustomPromptsSql } from "../domains/playbooks/logic/playbooks";
 import { buildNodeVisibilityCondition, buildNodeVisibilityExists } from "./node-acl";
 import {
   isSearchableNodeType,
@@ -72,6 +82,12 @@ const EMPTY_NODES_COVERAGE = {
 };
 
 const EMPTY_RECORDS_COVERAGE = {
+  scanned: 0,
+  errored: [] as string[],
+  notReached: 0,
+};
+
+const EMPTY_PROMPTS_COVERAGE = {
   scanned: 0,
   errored: [] as string[],
   notReached: 0,
@@ -308,219 +324,421 @@ const flattenFieldValue = (fieldType: FieldType, value: unknown): string | undef
   return JSON.stringify(value);
 };
 
-// ── grep ─────────────────────────────────────────────────────────────────────
+// ── Per-source adapters ──────────────────────────────────────────────────────
 
-export const grepUnified = async (input: UnifiedGrepInput): Promise<UnifiedGrepResultVO> => {
-  await ensureReady();
-  const db = await getDb();
-  const spaceId = getContextSpaceId();
-  // Compiled once — both adapters scan through the identical compiled regex
-  // ("one pattern language everywhere", spec's Interaction-First Principle #1).
-  const regex = compileGrepPattern(input.pattern, input.flags);
-  const sources = input.sources ?? ["files", "nodes", "records"];
+/** What one source adapter hands back to the composer. */
+interface SourceRun<TCoverage> {
+  matches: UnifiedGrepMatchVO[];
+  coverage: TCoverage;
+  truncated: boolean;
+}
 
-  // One shared wall-clock deadline for the nodes + records phases, from the
-  // SAME budget constant/env var `grepAssets` uses (`grepTimeoutMs`) — not a
-  // second timeout knob. `grepAssets` itself computes its own deadline
-  // internally (its signature takes no deadline param, and it is
-  // intentionally left unmodified — see module doc), so true single-epoch
-  // sharing across all three phases isn't structurally possible without
-  // changing that signature; reusing the identical `grepTimeoutMs()`
-  // duration for all three is the faithful within-scope approximation (the
-  // anchors differ only by the few ms between the calls).
-  const deadline = Date.now() + grepTimeoutMs();
-  const matches: UnifiedGrepMatchVO[] = [];
-  let filesCoverage = EMPTY_FILES_COVERAGE;
-  let nodesCoverage = EMPTY_NODES_COVERAGE;
-  let recordsCoverage = EMPTY_RECORDS_COVERAGE;
-  let truncated = false;
+/** Shared per-call settings every adapter scans with. */
+interface ScanBudget {
+  regex: RegExp;
+  contextLines: number;
+  /** This source's share of `maxMatches` (may be 0 when earlier sources used everything). */
+  maxMatches: number;
+  /** One wall-clock deadline for the WHOLE grep call — never restarted per source. */
+  deadline: number;
+}
 
-  // Files first (deterministic order: files, then nodes — matches the spec's
-  // API surface). Files gets its FULL requested maxMatches budget, not a
-  // pre-split share — it runs to completion before nodes even starts.
-  if (sources.includes("files")) {
-    const filesResult = await grepAssets({
+const runFiles = async (
+  input: UnifiedGrepInput,
+  budget: ScanBudget,
+): Promise<SourceRun<typeof EMPTY_FILES_COVERAGE>> => {
+  const filesResult = await grepAssets(
+    {
       pattern: input.pattern,
       flags: input.flags,
       scope: input.scope?.files,
-      maxMatches: input.maxMatches,
+      maxMatches: budget.maxMatches,
       contextLines: input.contextLines,
-    });
-    matches.push(
-      ...filesResult.matches.map((match): UnifiedGrepMatchVO => ({ source: "files", ...match })),
-    );
-    filesCoverage = {
+    },
+    { deadline: budget.deadline },
+  );
+  return {
+    matches: filesResult.matches.map(
+      (match): UnifiedGrepMatchVO => ({ source: "files", ...match }),
+    ),
+    coverage: {
       scanned: filesResult.filesScanned,
       missing: filesResult.missing,
       stale: filesResult.stale,
       unsearchable: filesResult.unsearchable,
       errored: filesResult.errored,
       notReached: filesResult.notReached,
-    };
-    if (filesResult.truncated) truncated = true;
-  }
+    },
+    truncated: filesResult.truncated,
+  };
+};
 
-  // Nodes second — whatever budget files already consumed (`matches.length`)
-  // is what's left; this is the "files' matches count against the SAME
-  // budget nodes then sees" sharing the spec calls for.
-  if (sources.includes("nodes")) {
-    const candidates = await resolveCandidateNodes(db, spaceId, input.scope);
-    let scanned = 0;
-    const errored: string[] = [];
-    let notReached = 0;
-    const concurrency = Math.max(1, nodeScanConcurrency());
+const runNodes = async (
+  db: Db,
+  spaceId: string,
+  input: UnifiedGrepInput,
+  budget: ScanBudget,
+): Promise<SourceRun<typeof EMPTY_NODES_COVERAGE>> => {
+  const candidates = await resolveCandidateNodes(db, spaceId, input.scope);
+  const matches: UnifiedGrepMatchVO[] = [];
+  let truncated = false;
+  let scanned = 0;
+  const errored: string[] = [];
+  let notReached = 0;
+  const concurrency = Math.max(1, nodeScanConcurrency());
 
-    for (let i = 0; i < candidates.length; ) {
-      // Budget check BEFORE dispatching the next batch — same gate the
-      // sequential loop applied per candidate, and the same one the files
-      // adapter applies per batch. An already-dispatched batch always runs to
-      // completion; this only stops a NEW one from starting.
-      if (Date.now() >= deadline || matches.length >= input.maxMatches) {
-        notReached = candidates.length - i;
-        truncated = true;
-        break;
+  for (let i = 0; i < candidates.length; ) {
+    // Budget check BEFORE dispatching the next batch — the same gate the files
+    // adapter applies per batch. An already-dispatched batch always runs to
+    // completion; this only stops a NEW one from starting.
+    if (Date.now() >= budget.deadline || matches.length >= budget.maxMatches) {
+      notReached = candidates.length - i;
+      truncated = true;
+      break;
+    }
+
+    const batch = candidates.slice(i, i + concurrency);
+    // Every node in the batch gets the SAME remaining-match budget, computed
+    // once per batch.
+    const batchMaxMatches = budget.maxMatches - matches.length;
+
+    const settled = await Promise.allSettled(
+      batch.map(async (candidate) => {
+        const type = candidate.type as SearchableNodeType;
+        const lines = await openNodeContentLines(type, candidate.nodeId);
+        return scanLines(lines, {
+          regex: budget.regex,
+          contextLines: budget.contextLines,
+          maxMatches: batchMaxMatches,
+          deadline: budget.deadline,
+        });
+      }),
+    );
+
+    // Fold outcomes in the batch's ORIGINAL candidate order (not completion
+    // order), so `matches` stays deterministic regardless of which node's
+    // storage read happened to finish first.
+    for (let j = 0; j < batch.length; j++) {
+      const outcome = settled[j];
+      const candidate = batch[j];
+      if (outcome.status === "fulfilled") {
+        scanned++;
+        matches.push(
+          ...outcome.value.hits.map(
+            (hit): UnifiedGrepMatchVO => ({
+              source: "nodes",
+              type: candidate.type as SearchableNodeType,
+              nodeId: candidate.nodeId,
+              slug: candidate.slug,
+              name: candidate.name,
+              ...hit,
+            }),
+          ),
+        );
+        if (outcome.value.truncated) truncated = true;
+      } else {
+        // Content read/scan failure for this node — it was NOT actually
+        // searched. Never counted as a clean "scanned, no match".
+        errored.push(candidate.nodeId);
       }
+    }
 
-      const batch = candidates.slice(i, i + concurrency);
-      // Every node in the batch gets the SAME remaining-match budget, computed
-      // once per batch — exactly what the sequential loop passed per candidate.
-      const batchMaxMatches = input.maxMatches - matches.length;
+    // A dispatched batch runs every node to completion even if an earlier one
+    // already hit the budget, so `matches` can overshoot by a bounded amount.
+    // Cap it here so this source never exceeds its share.
+    if (matches.length > budget.maxMatches) {
+      matches.length = budget.maxMatches;
+      truncated = true;
+    }
 
-      const settled = await Promise.allSettled(
-        batch.map(async (candidate) => {
-          const type = candidate.type as SearchableNodeType;
-          const lines = await openNodeContentLines(type, candidate.nodeId);
-          return scanLines(lines, {
-            regex,
-            contextLines: input.contextLines,
-            maxMatches: batchMaxMatches,
-            deadline,
-          });
-        }),
+    i += batch.length;
+  }
+  return { matches, coverage: { scanned, errored, notReached }, truncated };
+};
+
+const runRecords = async (
+  db: Db,
+  spaceId: string,
+  input: UnifiedGrepInput,
+  budget: ScanBudget,
+): Promise<SourceRun<typeof EMPTY_RECORDS_COVERAGE>> => {
+  const candidates = await resolveCandidateRecords(db, spaceId, input.scope);
+  const { commitFieldsById, fieldsByBaseId } = await loadRecordBatchData(db, candidates);
+  const matches: UnifiedGrepMatchVO[] = [];
+  let truncated = false;
+  let scanned = 0;
+  const errored: string[] = [];
+  let notReached = 0;
+
+  for (let i = 0; i < candidates.length; i++) {
+    // Budget check BEFORE dispatching the next record: `notReached` counts
+    // records never even started.
+    if (Date.now() >= budget.deadline || matches.length >= budget.maxMatches) {
+      notReached = candidates.length - i;
+      truncated = true;
+      break;
+    }
+    const candidate = candidates[i];
+    try {
+      const commitFields = commitFieldsById.get(candidate.headCommitId) ?? {};
+      const fields = fieldsByBaseId.get(candidate.baseId) ?? [];
+      // Fields are visited in Base schema (position) order. Each field is
+      // scanned as its OWN independent line-source — never concatenated
+      // with another field's text — so `before`/`after` context can never
+      // cross a field or record boundary.
+      for (const field of fields) {
+        // Budget may have been exhausted by an earlier field in THIS same
+        // record — stop scanning this record's remaining fields, but the
+        // record still counts as "scanned" below (it was genuinely
+        // dispatched), not "notReached".
+        if (matches.length >= budget.maxMatches) break;
+        const flattened = flattenFieldValue(field.type, commitFields[field.slug]);
+        if (flattened === undefined) continue;
+        const { hits, truncated: fieldTruncated } = await scanLines(linesFromText(flattened), {
+          regex: budget.regex,
+          contextLines: budget.contextLines,
+          maxMatches: budget.maxMatches - matches.length,
+          deadline: budget.deadline,
+        });
+        matches.push(
+          ...hits.map(
+            (hit): UnifiedGrepMatchVO => ({
+              source: "records",
+              baseId: candidate.baseId,
+              baseSlug: candidate.baseSlug,
+              recordId: candidate.recordId,
+              fieldSlug: field.slug,
+              ...hit,
+            }),
+          ),
+        );
+        if (fieldTruncated) truncated = true;
+      }
+      // Placed AFTER the field loop (not before): a record that hit the
+      // budget mid-way (a `break` above, not a throw) still reaches this
+      // line and counts as scanned. A record whose flattening/scanning
+      // genuinely throws never reaches this line — it falls through to
+      // the catch below and is excluded from `scanned`.
+      scanned++;
+    } catch {
+      // Read/flatten/scan failure for this record — it was NOT actually
+      // searched, e.g. a malformed `headCommit.payload` value that throws
+      // during flattening.
+      errored.push(candidate.recordId);
+    }
+  }
+  return { matches, coverage: { scanned, errored, notReached }, truncated };
+};
+
+// ── Custom prompts ───────────────────────────────────────────────────────────
+
+/**
+ * Every localized value of an iString, in stored key order: a plain string is
+ * the single `"default"` value, a locale map yields one entry per locale.
+ */
+const localizedValues = (value: iString): Array<{ locale: string; text: string }> =>
+  typeof value === "string"
+    ? [{ locale: "default", text: value }]
+    : Object.entries(value).flatMap(([locale, text]) =>
+        typeof text === "string" ? [{ locale, text }] : [],
       );
 
-      // Fold outcomes in the batch's ORIGINAL candidate order (not completion
-      // order), so `matches` stays deterministic regardless of which node's
-      // storage read happened to finish first.
-      for (let j = 0; j < batch.length; j++) {
-        const outcome = settled[j];
-        const candidate = batch[j];
-        if (outcome.status === "fulfilled") {
-          scanned++;
-          matches.push(
-            ...outcome.value.hits.map(
-              (hit): UnifiedGrepMatchVO => ({
-                source: "nodes",
-                type: candidate.type as SearchableNodeType,
-                nodeId: candidate.nodeId,
-                slug: candidate.slug,
-                name: candidate.name,
-                ...hit,
-              }),
-            ),
-          );
-          if (outcome.value.truncated) truncated = true;
-        } else {
-          // Content read/scan failure for this node — it was NOT actually
-          // searched. Same honesty the files adapter applies per candidate:
-          // never counted as a clean "scanned, no match".
-          errored.push(candidate.nodeId);
-        }
-      }
+/**
+ * Candidate listing for the prompts adapter: every non-archived, non-deleted
+ * node the caller can read whose `agent_prompts` is a non-empty list — the
+ * same node set `playbooks.search` draws its prompts from (shared
+ * `hasCustomPromptsSql`). ACL in the SQL for the same reason as the nodes
+ * adapter: coverage counts are computed from this set.
+ */
+const resolveCandidatePromptNodes = async (db: Db, spaceId: string) =>
+  db
+    .select({
+      nodeId: busabaseNodes.id,
+      name: busabaseNodes.name,
+      slug: busabaseNodes.slug,
+      type: busabaseNodes.type,
+      agentPrompts: busabaseNodes.agentPrompts,
+    })
+    .from(busabaseNodes)
+    .where(
+      and(
+        eq(busabaseNodes.spaceId, spaceId),
+        isNull(busabaseNodes.archivedAt),
+        isNull(busabaseNodes.deletedAt),
+        buildNodeVisibilityCondition(db),
+        hasCustomPromptsSql,
+      ),
+    )
+    .orderBy(asc(busabaseNodes.position), asc(busabaseNodes.createdAt));
 
-      // A dispatched batch runs every node to completion even if an earlier one
-      // already hit `maxMatches`, so `matches` can overshoot by up to
-      // `concurrency - 1` nodes' worth — bounded, never unbounded. Cap it here
-      // so the response never exceeds `maxMatches` and the next iteration's
-      // pre-dispatch check sees the true state.
-      if (matches.length > input.maxMatches) {
-        matches.length = input.maxMatches; // truncate in place — `matches` is const
-        truncated = true;
-      }
+/**
+ * Scan custom agent prompts: per node, per prompt (stored order), `label`
+ * then `body`, each locale as its OWN line-source so context never crosses
+ * from one locale's text into another's. A stored list that fails
+ * `customAgentPromptsSchema` (a manual jsonb edit, a pre-validation write) is
+ * reported in `errored` — it was not searched — rather than scanned raw:
+ * grep must see the same prompts the Ask Agent dialog and playbooks do.
+ */
+const runPrompts = async (
+  db: Db,
+  spaceId: string,
+  budget: ScanBudget,
+): Promise<SourceRun<typeof EMPTY_PROMPTS_COVERAGE>> => {
+  const candidates = await resolveCandidatePromptNodes(db, spaceId);
+  const matches: UnifiedGrepMatchVO[] = [];
+  let truncated = false;
+  let scanned = 0;
+  const errored: string[] = [];
+  let notReached = 0;
 
-      i += batch.length;
+  for (let i = 0; i < candidates.length; i++) {
+    if (Date.now() >= budget.deadline || matches.length >= budget.maxMatches) {
+      notReached = candidates.length - i;
+      truncated = true;
+      break;
     }
-    nodesCoverage = { scanned, errored, notReached };
-  }
-
-  // Records third — whatever budget files+nodes already consumed is what's
-  // left, same sharing rule as nodes' comment above.
-  if (sources.includes("records")) {
-    const candidates = await resolveCandidateRecords(db, spaceId, input.scope);
-    const { commitFieldsById, fieldsByBaseId } = await loadRecordBatchData(db, candidates);
-    let scanned = 0;
-    const errored: string[] = [];
-    let notReached = 0;
-
-    for (let i = 0; i < candidates.length; i++) {
-      // Budget check BEFORE dispatching the next record — mirrors
-      // `grepAssets`'s/docs' pre-dispatch check exactly: `notReached` counts
-      // records never even started.
-      if (Date.now() >= deadline || matches.length >= input.maxMatches) {
-        notReached = candidates.length - i;
-        truncated = true;
-        break;
-      }
-      const candidate = candidates[i];
-      try {
-        const commitFields = commitFieldsById.get(candidate.headCommitId) ?? {};
-        const fields = fieldsByBaseId.get(candidate.baseId) ?? [];
-        // Fields are visited in Base schema (position) order. Each field is
-        // scanned as its OWN independent line-source — never concatenated
-        // with another field's text — so `before`/`after` context can never
-        // cross a field or record boundary.
-        for (const field of fields) {
-          // Budget may have been exhausted by an earlier field in THIS same
-          // record — stop scanning this record's remaining fields, but the
-          // record still counts as "scanned" below (it was genuinely
-          // dispatched), not "notReached".
-          if (matches.length >= input.maxMatches) break;
-          const flattened = flattenFieldValue(field.type, commitFields[field.slug]);
-          if (flattened === undefined) continue;
-          const { hits, truncated: fieldTruncated } = await scanLines(linesFromText(flattened), {
-            regex,
-            contextLines: input.contextLines,
-            maxMatches: input.maxMatches - matches.length,
-            deadline,
+    const candidate = candidates[i];
+    const validated = customAgentPromptsSchema.safeParse(candidate.agentPrompts);
+    if (!validated.success) {
+      errored.push(candidate.nodeId);
+      continue;
+    }
+    scanning: for (const prompt of validated.data) {
+      for (const field of ["label", "body"] as const) {
+        for (const { locale, text } of localizedValues(prompt[field])) {
+          // Budget spent mid-node: stop, but the node still counts as scanned.
+          if (matches.length >= budget.maxMatches) break scanning;
+          const { hits, truncated: valueTruncated } = await scanLines(linesFromText(text), {
+            regex: budget.regex,
+            contextLines: budget.contextLines,
+            maxMatches: budget.maxMatches - matches.length,
+            deadline: budget.deadline,
           });
           matches.push(
             ...hits.map(
               (hit): UnifiedGrepMatchVO => ({
-                source: "records",
-                baseId: candidate.baseId,
-                baseSlug: candidate.baseSlug,
-                recordId: candidate.recordId,
-                fieldSlug: field.slug,
+                source: "prompts",
+                nodeId: candidate.nodeId,
+                nodeName: candidate.name,
+                nodeType: candidate.type,
+                nodeSlug: candidate.slug,
+                key: prompt.key,
+                label: iStringParse(
+                  prompt.label,
+                  (locale === "default" ? "en" : locale) as LocaleType,
+                ),
+                locale,
+                field,
                 ...hit,
               }),
             ),
           );
-          if (fieldTruncated) truncated = true;
+          if (valueTruncated) truncated = true;
         }
-        // Placed AFTER the field loop (not before): a record that hit the
-        // budget mid-way (a `break` above, not a throw) still reaches this
-        // line and counts as scanned. A record whose flattening/scanning
-        // genuinely throws never reaches this line — it falls through to
-        // the catch below and is excluded from `scanned`, same mutual
-        // exclusivity the docs adapter's `errored` has with its `scanned`.
-        scanned++;
-      } catch {
-        // Read/flatten/scan failure for this record — it was NOT actually
-        // searched. Should not normally happen (all data is already in
-        // memory from the batch load above), but guard anyway, e.g. a
-        // malformed `headCommit.payload` value that throws during
-        // flattening. Same honesty `grepAssets`/docs apply per-candidate.
-        errored.push(candidate.recordId);
       }
     }
-    recordsCoverage = { scanned, errored, notReached };
+    scanned++;
+  }
+  return { matches, coverage: { scanned, errored, notReached }, truncated };
+};
+
+// ── grep ─────────────────────────────────────────────────────────────────────
+
+/** Fixed output (and scan) order. Budget rolls forward along it, never backwards. */
+const SOURCE_ORDER = ["files", "nodes", "records", "prompts"] as const;
+
+/**
+ * This source's share of `maxMatches`: at least its floor (while any budget is
+ * left), plus whatever earlier sources left unused — but never eating into the
+ * floors still reserved for the sources after it.
+ *
+ * `floor = max(1, floor(maxMatches / sourceCount))`. With maxMatches 20 and four
+ * sources, files may use 5; if it uses all 5, nodes may use 5; if nodes found
+ * nothing, records may use 10; prompts gets what is left. The last source takes
+ * every remaining slot, so the remainder of the division is not lost.
+ */
+const sourceBudget = (opts: {
+  maxMatches: number;
+  used: number;
+  floor: number;
+  sourcesAfter: number;
+}): number => {
+  const remaining = Math.max(0, opts.maxMatches - opts.used);
+  return Math.max(Math.min(opts.floor, remaining), remaining - opts.floor * opts.sourcesAfter);
+};
+
+export const grepUnified = async (input: UnifiedGrepInput): Promise<UnifiedGrepResultVO> => {
+  await ensureReady();
+  const db = await getDb();
+  const spaceId = getContextSpaceId();
+  // Compiled once — every adapter scans through the identical compiled regex
+  // ("one pattern language everywhere", spec's Interaction-First Principle #1).
+  const regex = compileGrepPattern(input.pattern, input.flags);
+  const requested = new Set(input.sources ?? SOURCE_ORDER);
+  const sources = SOURCE_ORDER.filter((source) => requested.has(source));
+
+  // ONE wall-clock deadline for the whole call (the `grepAssets` budget
+  // constant/env var), passed into every adapter — including files, which
+  // takes it as an option instead of starting its own clock.
+  const deadline = Date.now() + grepTimeoutMs();
+  // Fair budget: no single source can use the whole `maxMatches` before the
+  // others start (200 file hits used to leave records with nothing).
+  const floor = Math.max(1, Math.floor(input.maxMatches / Math.max(1, sources.length)));
+
+  const matches: UnifiedGrepMatchVO[] = [];
+  let filesCoverage = EMPTY_FILES_COVERAGE;
+  let nodesCoverage = EMPTY_NODES_COVERAGE;
+  let recordsCoverage = EMPTY_RECORDS_COVERAGE;
+  let promptsCoverage = EMPTY_PROMPTS_COVERAGE;
+  let truncated = false;
+
+  for (const [index, source] of sources.entries()) {
+    const budget: ScanBudget = {
+      regex,
+      contextLines: input.contextLines,
+      deadline,
+      maxMatches: sourceBudget({
+        maxMatches: input.maxMatches,
+        used: matches.length,
+        floor,
+        sourcesAfter: sources.length - index - 1,
+      }),
+    };
+    if (source === "files") {
+      const run = await runFiles(input, budget);
+      matches.push(...run.matches);
+      filesCoverage = run.coverage;
+      truncated ||= run.truncated;
+    } else if (source === "nodes") {
+      const run = await runNodes(db, spaceId, input, budget);
+      matches.push(...run.matches);
+      nodesCoverage = run.coverage;
+      truncated ||= run.truncated;
+    } else if (source === "records") {
+      const run = await runRecords(db, spaceId, input, budget);
+      matches.push(...run.matches);
+      recordsCoverage = run.coverage;
+      truncated ||= run.truncated;
+    } else {
+      const run = await runPrompts(db, spaceId, budget);
+      matches.push(...run.matches);
+      promptsCoverage = run.coverage;
+      truncated ||= run.truncated;
+    }
   }
 
-  if (matches.length >= input.maxMatches) truncated = true;
+  // Each source is capped at its own share, and the shares sum to at most
+  // `maxMatches`; the slice is a belt-and-braces guard, not the budget.
+  if (matches.length > input.maxMatches) truncated = true;
 
   return {
     matches: matches.slice(0, input.maxMatches),
-    coverage: { files: filesCoverage, nodes: nodesCoverage, records: recordsCoverage },
+    coverage: {
+      files: filesCoverage,
+      nodes: nodesCoverage,
+      records: recordsCoverage,
+      prompts: promptsCoverage,
+    },
     truncated,
   };
 };

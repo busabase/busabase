@@ -394,6 +394,22 @@ const REPLY_LANGUAGE: Record<CoreLocale, string> = {
   de: "Antworten Sie mir auf Deutsch.",
 };
 
+/**
+ * The reply sentence for a caller that does not know the user's language — `playbooks.get`
+ * without a `locale`. The body is then rendered in English, but telling the agent to *reply*
+ * in English would override the language the user is actually speaking to it in.
+ */
+const REPLY_IN_USERS_LANGUAGE = "Reply in the user's language.";
+
+export interface NodeAgentPromptsOptions {
+  /**
+   * `"user"` swaps the locale's "reply to me in <language>" sentence for
+   * {@link REPLY_IN_USERS_LANGUAGE}. Defaults to `"locale"` — what the Ask Agent dialog sends,
+   * because there the user's language is the dashboard's.
+   */
+  replyLanguage?: "locale" | "user";
+}
+
 /** Capability tier: one template per locale, filled with the translated op label. */
 const CAPABILITY_TEMPLATE: Record<CoreLocale, (target: string, opLabel: string) => string> = {
   en: (target, opLabel) =>
@@ -1861,12 +1877,10 @@ const buildCuratedPrompt = (
   tier: PromptTier,
   group: string,
   source: NodePromptSource = tier === "scenario" ? "built-in-scenario" : "capability",
+  reply: string = REPLY_LANGUAGE[locale],
 ): NodePrompt => {
   const intent = prompt.intent ?? "change";
-  const footer =
-    intent === "read-only"
-      ? REPLY_LANGUAGE[locale]
-      : `${MERGE_POLICY[locale]} ${REPLY_LANGUAGE[locale]}`;
+  const footer = intent === "read-only" ? reply : `${MERGE_POLICY[locale]} ${reply}`;
 
   return {
     key: source === "custom-scenario" ? `custom:${prompt.key}` : prompt.key,
@@ -1897,7 +1911,9 @@ export function buildNodeAgentPrompts(
   context: NodePromptContext,
   locale: CoreLocale,
   messages: CoreI18nMessages,
+  options: NodeAgentPromptsOptions = {},
 ): { scenarios: NodePrompt[]; capabilities: NodePrompt[] } {
+  const reply = options.replyLanguage === "user" ? REPLY_IN_USERS_LANGUAGE : REPLY_LANGUAGE[locale];
   const definition = getNodeType(context.nodeType);
   const typeLabel = definition?.label ?? context.nodeType;
   const scope = context.scope ?? { kind: "node" };
@@ -1923,7 +1939,15 @@ export function buildNodeAgentPrompts(
 
   const scenarios = [
     ...builtInScenarioDefs.map((scenario) =>
-      buildCuratedPrompt(scenario, locale, target, "scenario", groupLabels.content),
+      buildCuratedPrompt(
+        scenario,
+        locale,
+        target,
+        "scenario",
+        groupLabels.content,
+        undefined,
+        reply,
+      ),
     ),
     ...customScenarioDefs.map((scenario) =>
       buildCuratedPrompt(
@@ -1933,6 +1957,7 @@ export function buildNodeAgentPrompts(
         "scenario",
         groupLabels.content,
         "custom-scenario",
+        reply,
       ),
     ),
   ];
@@ -1960,7 +1985,15 @@ export function buildNodeAgentPrompts(
     scope.kind === "node" ? (CONTENT_PROMPTS_BY_TYPE[context.nodeType] ?? []) : [];
   const capabilities: NodePrompt[] = [
     ...curatedContentPrompts.map((prompt) =>
-      buildCuratedPrompt(prompt, locale, target, "capability", groupLabels.content),
+      buildCuratedPrompt(
+        prompt,
+        locale,
+        target,
+        "capability",
+        groupLabels.content,
+        undefined,
+        reply,
+      ),
     ),
     ...kinds.map((kind): NodePrompt => {
       const labelKey = operationLabelKeys[kind as keyof typeof operationLabelKeys];
@@ -1977,9 +2010,7 @@ export function buildNodeAgentPrompts(
         source: "capability",
         label: opLabel,
         group: groupLabels[group],
-        body: `${CAPABILITY_TEMPLATE[locale](target, opLabel)}\n\n${MERGE_POLICY[locale]} ${
-          REPLY_LANGUAGE[locale]
-        }`,
+        body: `${CAPABILITY_TEMPLATE[locale](target, opLabel)}\n\n${MERGE_POLICY[locale]} ${reply}`,
       };
     }),
   ];

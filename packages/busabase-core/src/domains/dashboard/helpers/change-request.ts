@@ -547,6 +547,13 @@ export const getChangeRequestReviewMessage = (
   if (changeRequest.status === "merged") {
     return messages?.review.mergedIntoBase ?? "Merged into Base";
   }
+  // `conflict` had no branch here, so it fell through to "Waiting for your
+  // review" — which is the one thing a refused change request is NOT doing.
+  // Pre-existing for field conflicts too; it just became impossible to miss
+  // sitting next to a banner that says the merge was refused.
+  if (changeRequest.status === "conflict") {
+    return messages?.review.statusConflict ?? "Conflict · cannot merge";
+  }
   return messages?.review.waitingForReview ?? "Waiting for your review";
 };
 
