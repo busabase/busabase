@@ -120,8 +120,28 @@ describe("busabase pglite integration flow", () => {
 
     const { records: seededRecords } = await base.listRecordsPaged({ limit: 100 });
     expect(seededRecords.length).toBeGreaterThanOrEqual(5);
-    expect(seededRecords.some((record) => record.base.slug === "social-content")).toBe(true);
-    const seededNewsletter = seededRecords.find((record) => record.base.slug === "newsletter");
+    // Query each Base directly: the workspace-wide first page holds only the
+    // 100 newest records, so any new demo data sorting ahead of these Bases
+    // pushes them off it without anything actually being unseeded.
+    // An unknown slug must fail here: `baseId: undefined` would silently list
+    // the whole workspace and let the assertions below pass on any record.
+    const baseIdFor = (slug: string) => {
+      const id = bases.find((item) => item.slug === slug)?.id;
+      if (!id) throw new Error(`Expected a seeded "${slug}" Base`);
+      return id;
+    };
+    const { records: socialRecords } = await base.listRecordsPaged({
+      baseId: baseIdFor("social-content"),
+      limit: 1,
+    });
+    expect(socialRecords).toHaveLength(1);
+    expect(socialRecords[0]?.base.slug).toBe("social-content");
+    const { records: newsletterRecords } = await base.listRecordsPaged({
+      baseId: baseIdFor("newsletter"),
+      limit: 1,
+    });
+    const seededNewsletter = newsletterRecords[0];
+    expect(seededNewsletter?.base.slug).toBe("newsletter");
     expect(seededNewsletter?.base.fields.find((field) => field.slug === "body")?.type).toBe("html");
     expect(String(seededNewsletter?.headCommit.payload.body)).toContain("<article>");
 
