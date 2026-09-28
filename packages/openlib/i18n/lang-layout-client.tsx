@@ -27,6 +27,7 @@
  */
 
 import type { I18nProviderProps } from "fumadocs-ui/contexts/i18n";
+import type { Translations } from "fumadocs-ui/i18n";
 import { RootProvider } from "fumadocs-ui/provider/next";
 import { usePathname } from "next/navigation";
 import type React from "react";
@@ -97,3 +98,19 @@ export function LangLayoutClient<Locale extends string>({
     </RootProvider>
   );
 }
+
+/**
+ * fumadocs' docs-search labels (the trigger button and the dialog input) for one
+ * locale, to spread into that locale's `defineI18nUI` entry.
+ *
+ * fumadocs keys its UI strings by the English source text plus a context
+ * suffix, and `defineI18nUI` types them as `Record<string, string>` — so when
+ * the old `search` key was renamed, every app kept passing it, it still
+ * compiled, and the search box silently fell back to English in every locale.
+ * `satisfies` turns the next rename into a compile error here instead.
+ */
+export const docsSearchLabels = (label: string) =>
+  ({
+    "Search(search trigger)": label,
+    "Search(search dialog)": label,
+  }) satisfies Partial<Translations>;

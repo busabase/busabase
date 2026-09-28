@@ -3,7 +3,13 @@ import type {
   ListObjectsV2CommandOutput,
   S3Client as S3ClientType,
 } from "@aws-sdk/client-s3";
-import type { IStorage, MultipartPart, StorageConfig, StorageObjectMetadata } from "./types";
+import type {
+  IStorage,
+  MultipartPart,
+  StorageConfig,
+  StorageObjectMetadata,
+  UploadPresignOptions,
+} from "./types";
 
 // Lazy-load the AWS SDK. The storage factory STATICALLY imports this module (for
 // parseStorageUrl + the S3Storage class), so a top-level `import "@aws-sdk/*"`
@@ -468,6 +474,7 @@ export class S3Storage implements IStorage {
     key: string,
     mimeType: string,
     expiresIn: number = 3600,
+    options?: UploadPresignOptions,
   ): Promise<string> {
     await this.ensureBucketExists();
     await this.ensureCorsConfigured();
@@ -479,9 +486,30 @@ export class S3Storage implements IStorage {
       Bucket: this.config.bucketName,
       Key: key,
       ContentType: mimeType,
+      // Both become signed headers: S3 refuses a PUT whose body length or
+      // disposition differs from what the server agreed to hand out.
+      ...(options?.contentLength !== undefined && { ContentLength: options.contentLength }),
+      ...(options?.contentDisposition && { ContentDisposition: options.contentDisposition }),
     });
 
-    return await getSignedUrl(client, command, { expiresIn });
+    return await getSignedUrl(client, command, {
+      expiresIn,
+      // By default the presigner signs only `host` (+ length/disposition when
+      // set) and leaves `content-type` out, so a caller who asked for a bound
+      // upload also gets its MIME type bound. Calls without options keep the
+      // old, looser signature byte-for-byte.
+      ...(options?.contentLength !== undefined || options?.contentDisposition
+        ? {
+            signableHeaders: new Set(
+              [
+                "content-type",
+                options?.contentLength !== undefined ? "content-length" : null,
+                options?.contentDisposition ? "content-disposition" : null,
+              ].filter((header): header is string => header !== null),
+            ),
+          }
+        : {}),
+    });
   }
 
   /**

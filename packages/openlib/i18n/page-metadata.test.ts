@@ -15,7 +15,7 @@ const helpers = createPageMetadataHelpers({
   buildImageTextUrl: (text) => `https://example.com/og?text=${encodeURIComponent(text)}`,
 });
 
-const { generatePageMetadata, getPageAlternates } = helpers;
+const { generatePageMetadata, generateContentPageMetadata, getPageAlternates } = helpers;
 
 describe("hreflang describes reality", () => {
   it("lists every supported locale when the caller does not narrow the set", () => {
@@ -39,7 +39,7 @@ describe("hreflang describes reality", () => {
     // The bug this guards: a CMS page that exists only in English used to advertise
     // hreflang for all six locales while its canonical pointed back at the English
     // original — contradictory annotations that make Google drop the whole cluster.
-    const { alternates } = generatePageMetadata({
+    const { alternates } = generateContentPageMetadata({
       title: "T",
       description: "D",
       path: "/gpt-6-astra",
@@ -55,7 +55,7 @@ describe("hreflang describes reality", () => {
   });
 
   it("omits x-default when the default locale is not among the available ones", () => {
-    const { alternates } = generatePageMetadata({
+    const { alternates } = generateContentPageMetadata({
       title: "T",
       description: "D",
       path: "/only-japanese",
@@ -68,7 +68,7 @@ describe("hreflang describes reality", () => {
   });
 
   it("keeps every hreflang URL on the same path as the canonical", () => {
-    const { alternates } = generatePageMetadata({
+    const { alternates } = generateContentPageMetadata({
       title: "T",
       description: "D",
       path: "/guides/setup",
@@ -87,7 +87,7 @@ describe("hreflang describes reality", () => {
 
 describe("canonicalLang / contentLang on a locale fallback", () => {
   it("points the canonical at the page that exists, not at the requested URL", () => {
-    const metadata = generatePageMetadata({
+    const metadata = generateContentPageMetadata({
       title: "T",
       description: "D",
       path: "/gpt-6-astra",
@@ -102,7 +102,7 @@ describe("canonicalLang / contentLang on a locale fallback", () => {
   });
 
   it("labels og:locale with the locale the body really is", () => {
-    const metadata = generatePageMetadata({
+    const metadata = generateContentPageMetadata({
       title: "T",
       description: "D",
       path: "/gpt-6-astra",
@@ -386,7 +386,7 @@ describe("explicit canonical override", () => {
     // Editors routinely fill `canonical-url` with the page's own production URL.
     // Reading that self-canonical as a consolidation silently stripped hreflang from
     // every such page — caught on the live /gpt-6-astra during verification.
-    const metadata = generatePageMetadata({
+    const metadata = generateContentPageMetadata({
       title: "T",
       description: "D",
       path: "/gpt-6-astra",
@@ -413,7 +413,7 @@ describe("explicit canonical override", () => {
       defaultImageUrl: "http://localhost:3040/og.png",
     });
 
-    const metadata = preview.generatePageMetadata({
+    const metadata = preview.generateContentPageMetadata({
       title: "T",
       description: "D",
       path: "/gpt-6-astra",
@@ -430,7 +430,7 @@ describe("explicit canonical override", () => {
   });
 
   it("ignores a trailing-slash difference when deciding self vs consolidation", () => {
-    const metadata = generatePageMetadata({
+    const metadata = generateContentPageMetadata({
       title: "T",
       description: "D",
       path: "/gpt-6-astra",
@@ -468,5 +468,56 @@ describe("backward compatibility with the pre-upgrade call shape", () => {
     });
 
     expect(metadata.openGraph.type).toBe("article");
+  });
+});
+
+describe("static vs content entry points", () => {
+  it("static generatePageMetadata is exactly the content variant over every supported locale", () => {
+    const options = { title: "T", description: "D", path: "/pricing", lang: "ja" } as const;
+    expect(generatePageMetadata(options)).toEqual(
+      generateContentPageMetadata({ ...options, availableLocales: LOCALES }),
+    );
+  });
+
+  it("static getPageAlternates is exactly getContentPageAlternates over every supported locale", () => {
+    expect(getPageAlternates("zh-CN", "/pricing")).toEqual(
+      helpers.getContentPageAlternates("zh-CN", "/pricing", LOCALES),
+    );
+  });
+
+  it("getContentPageAlternates advertises only the locales it is given", () => {
+    expect(helpers.getContentPageAlternates("ja", "/blog/x", ["ja"]).alternates).toEqual({
+      canonical: "https://example.com/ja/blog/x",
+      languages: { ja: "https://example.com/ja/blog/x" },
+    });
+  });
+
+  // Type-level guards. `tsc --noEmit` covers this file (packages/openlib/tsconfig.json
+  // includes ./**/*.ts), so an unused @ts-expect-error — i.e. the call compiling — fails
+  // the package typecheck. The runtime assertions only keep vitest from skipping them.
+  it("makes forgetting availableLocales on a content route a compile error", () => {
+    const call = () =>
+      // @ts-expect-error — availableLocales is required for content
+      generateContentPageMetadata({ title: "T", description: "D", path: "/blog/x", lang: "en" });
+    expect(call).toThrow();
+  });
+
+  it("refuses availableLocales on the static entry point", () => {
+    const metadata = generatePageMetadata({
+      title: "T",
+      description: "D",
+      path: "/blog/x",
+      lang: "en",
+      // @ts-expect-error — a route that knows its locales is a content route
+      availableLocales: ["en"],
+    });
+    // Runtime still advertises every locale: the static path ignores the stray field.
+    expect(Object.keys(metadata.alternates.languages)).toHaveLength(LOCALES.length + 1);
+  });
+
+  it("refuses a third availableLocales argument on the static getPageAlternates", () => {
+    // @ts-expect-error — getPageAlternates takes (locale, path) only
+    const { alternates } = getPageAlternates("en", "/blog/x", ["en"]);
+    expect(Object.keys(alternates.languages)).toHaveLength(LOCALES.length + 1);
   });
 });

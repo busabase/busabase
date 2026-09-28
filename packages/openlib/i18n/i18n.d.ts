@@ -18,6 +18,7 @@ export declare const i18n: {
   ];
 };
 export type Locale = (typeof i18n)["locales"][number];
+export declare const LOCALE_NATIVE_NAMES: Record<Locale, string>;
 export type ExtendLocale = (typeof i18n)["extendLocales"][number];
 export declare const LocaleSchema: z.ZodEnum<{
   de: "de";
