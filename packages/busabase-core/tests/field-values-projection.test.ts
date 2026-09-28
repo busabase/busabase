@@ -78,6 +78,47 @@ describe("field-values projection layer", () => {
     expect(getRelationRecordIds({ nope: true })).toEqual([]);
   });
 
+  it("replaces an existing relation link even when its stored field slug is stale", async () => {
+    const createRecord = async (fields: Record<string, unknown>) => {
+      const cr = await client.bases.createChangeRequest({
+        baseId,
+        fields,
+        message: "Create projection test record",
+        autoMerge: false,
+      });
+      await client.changeRequests.review({ changeRequestIds: [cr.id], verdict: "approved" });
+      const [result] = (await client.changeRequests.merge({ changeRequestIds: [cr.id] })).results;
+      if (!result?.ok || !result.record) throw new Error("Expected a merged record");
+      return result.record;
+    };
+
+    const target = await createRecord({ title: "Target" });
+    const source = await createRecord({ title: "Source", ref: target.id });
+    const db = await getDb();
+    const { busabaseRecordLinks } = await getSchema();
+    const linkWhere = eq(busabaseRecordLinks.sourceRecordId, source.id);
+    const [initialLink] = await db.select().from(busabaseRecordLinks).where(linkWhere);
+    if (!initialLink) throw new Error("Expected the initial relation link");
+    expect(initialLink.targetRecordId).toBe(target.id);
+
+    await db
+      .update(busabaseRecordLinks)
+      .set({ fieldSlug: "ref_before_rename" })
+      .where(eq(busabaseRecordLinks.id, initialLink.id));
+
+    const { projectCommitFields } = await import("../src/logic/field-values");
+    await projectCommitFields({
+      baseId,
+      commitId: source.headCommit.id,
+      recordId: source.id,
+      fields: { title: "Source", ref: target.id },
+    });
+
+    const links = await db.select().from(busabaseRecordLinks).where(linkWhere);
+    expect(links).toHaveLength(1);
+    expect(links[0]).toMatchObject({ fieldSlug: "ref", targetRecordId: target.id });
+  });
+
   // ── archived/deleted listing queries ───────────────────────────────────────
 
   it("listDeletedFields returns soft-deleted fields; unknown base → []", async () => {
