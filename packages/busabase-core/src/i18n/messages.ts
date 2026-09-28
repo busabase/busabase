@@ -156,6 +156,9 @@ export const coreMessagesEn = {
     targetFolderHint: "Leave empty to add files at the Drive root.",
     removeSelectedFile: "Remove {name} from this upload",
     fileAlreadyExists: 'A file already exists at "{path}".',
+    replaceExistingFiles: "Replace files with the same name",
+    replaceExistingFilesHint:
+      "Files at the same path are overwritten. The previous version is not kept — download it first if you still need it.",
     duplicateUploadNames: "Two selected files would use the same Drive path.",
     invalidFilePath: "Enter a valid relative Drive folder path.",
     invalidFolderName: "Enter a folder name without slashes.",
@@ -895,6 +898,61 @@ export const coreMessagesEn = {
     agentPickerEmpty: "No agents connected yet.",
     agentPickerConnect: "Connect an agent",
   },
+  // The space-level Playbooks page (`/playbooks`, agent-playbook-discovery.md §11b H2).
+  playbooksPage: {
+    title: "Playbooks",
+    description:
+      "Skills and custom prompts in this space. Agents look here first on every instruction.",
+    tryTitle: "Try it",
+    tryLabel: "What would you tell an agent?",
+    tryPlaceholder: "e.g. log today's customer visit",
+    trySubmit: "Find",
+    tryNote:
+      "This is a literal preview — an agent also sends its own rephrasings (and English), so it may find more.",
+    tryLoading: "Searching…",
+    tryFailed: "Couldn't run the search.",
+    tryResultCount: "Showing {shown} of {total} matching playbooks",
+    tryNoMatchesTitle: "No playbook matches that sentence",
+    tryNoMatchesBody:
+      'Agents match words, not meaning. Word the label the way people actually ask — "Log a customer visit" rather than "CRM intake v2" — and include the words in every language your team uses.',
+    matchedOn: "Matched on",
+    matchName: "name",
+    matchSlug: "slug",
+    matchDescription: "description",
+    matchLabel: "label",
+    matchBody: "body",
+    catalogTitle: "All playbooks",
+    catalogCount: "{count} playbooks",
+    filterAll: "All",
+    filterSkills: "Skills",
+    filterPrompts: "Prompts",
+    kindSkill: "Skill",
+    kindPrompt: "Prompt",
+    rootGroup: "Workspace",
+    onNode: "on {node}",
+    intentReadOnly: "Read-only",
+    intentChange: "Makes changes",
+    openPrompts: "Open prompts",
+    truncated: "Showing the first {shown} of {total}.",
+    loadFailedTitle: "Couldn't load playbooks",
+    loadFailedBody: "Check your connection and try again.",
+    retry: "Retry",
+    emptyTitle: "No playbooks yet",
+    emptyBody:
+      "A playbook is a saved way of doing a job. Agents look it up before they improvise, so the work comes out the way you set it up.",
+    emptyHowSkill: "Add a Skill node and write the steps in its SKILL.md.",
+    emptyHowPrompt: "Or open any node's Agent prompts button and add a custom prompt.",
+    emptyHelp: 'See the help article "Agent Playbooks" for how to word them so agents find them.',
+    emptyFilteredTitle: "Nothing of this kind yet",
+    noDescription: "No description",
+    usageUsed: "Used {count}× in 30 days",
+    usageLast: "last used {when}",
+    usageUnused: "Not used in 30 days",
+    usageUnusedHint:
+      "No change request recorded this playbook in 30 days. Uses that wrote nothing aren't counted; if agents should be using it, check its wording in Try it.",
+    usageHint:
+      "Change requests that recorded this playbook, in any status (rejected ones too). Only ones you can see are counted. An agent that follows it without writing anything isn't counted.",
+  },
   nav: {
     home: "Home",
     inbox: "Inbox",
@@ -913,6 +971,7 @@ export const coreMessagesEn = {
     // The `/shared` public-share audit screen. Distinct from `share.title`
     // ("Share", the per-node action) — this one names a PLACE.
     shared: "Public shares",
+    playbooks: "Playbooks",
     base: "Base",
     blogPosts: "Blog Posts",
     review: "Review",
@@ -984,6 +1043,7 @@ export const coreMessagesEn = {
     sourceFiles: "Files",
     sourceNodes: "Document content",
     sourceNames: "Bases",
+    sourcePrompts: "Agent prompts",
     sortLabel: "Sort",
     sortRelevance: "Most relevant",
     sortUpdatedDesc: "Recently updated",
@@ -1055,6 +1115,7 @@ export const coreMessagesEn = {
     editRecord: "Edit Record",
     record: "Record",
     shared: "Public shares",
+    playbooks: "Playbooks",
   },
   home: {
     title: "Home",
@@ -1169,6 +1230,9 @@ export const coreMessagesEn = {
     channelWebhook: "Webhook",
     channelAutomation: "Automation",
     channelImport: "Import",
+    viaPlaybookNamed: "via playbook “{label}”",
+    viaPlaybookHidden: "via a playbook",
+    playbookChipTitle: "The playbook the agent followed to make this change",
   },
   actor: {
     localAdmin: "Local Admin",
@@ -1664,6 +1728,23 @@ export const coreMessagesEn = {
     relationTargetRequired: "Relation fields need a target Base.",
     failedAddField: "Failed to add field",
     failedRenameField: "Failed to rename field",
+    choices: "Choices",
+    addChoice: "Add choice",
+    choiceNamePlaceholder: "Choice name",
+    moveChoiceUp: "Move choice “{name}” up",
+    moveChoiceDown: "Move choice “{name}” down",
+    removeChoice: "Remove choice “{name}”",
+    choicesEmptyHint: "No choices yet. Add some and they become the options when editing a record.",
+    choiceNameRequired: "Choice name can't be empty.",
+    choiceNameDuplicate: "Choice “{name}” is listed twice.",
+    choicesRemovedHint:
+      "Removing: {names}. If any record still uses these choices, the save will be refused — move those records to another choice first.",
+    choicesStillInUse:
+      "Can't remove {names}: still used by {count} record{plural}. Move those records to another choice, then save again.",
+    requestFieldUpdate: "Request changes",
+    updateFieldNow: "Save now",
+    updatingField: "Saving…",
+    failedUpdateField: "Failed to save field",
     recordsMissingValue: "Records missing a value ({count}):",
     recordsReferencingRemovedChoices: "Records referencing removed choices ({count}):",
     andMore: "…and {count} more",
@@ -1770,6 +1851,17 @@ export const coreMessagesEn = {
     conflictingFields: "Conflicting fields:",
     conflictResolveHint:
       "Re-open the proposed change below and revise it to merge against the latest values, or close the change request to abandon it.",
+    // The other kind of conflict: not a field clash, but a row that someone
+    // archived or deleted while this was waiting. Named separately because the
+    // way out is different — revising the operation cannot help, since there is
+    // no way to drop it from the batch.
+    statusConflict: "Conflict · cannot merge",
+    staleTargetArchivedTitle: "Cannot merge — a row in this change request was archived",
+    staleTargetDeletedTitle: "Cannot merge — a row in this change request was deleted",
+    staleTargetRow: "The row:",
+    staleTargetUnknownRow: "A row that is no longer in this base.",
+    staleTargetHint:
+      "Someone archived or deleted it while this was waiting for review, so the whole batch is refused and nothing was applied. Close this change request and submit again without that row.",
     conflictComposerHint:
       "This change request conflicts with the latest record. Revise the proposed change to merge against the current values, or close it to abandon.",
     changesRequestedHint:
@@ -1990,6 +2082,9 @@ export const coreMessagesEn = {
     updateRecordMessage: "Update {record}",
     addFieldMessage: "Add field {field}",
     renameFieldMessage: "Rename field {field}",
+    updateFieldMessage: "Update field {field}",
+    fieldUpdated: "Field updated",
+    fieldUpdateRequestSubmitted: "Field change request submitted",
     fieldRenamed: "Field renamed",
     renameRequestSubmitted: "Rename request submitted",
     autoApproved: "Auto-approved on create & merge",
@@ -2317,6 +2412,8 @@ export const coreMessagesEn = {
     edgeOutcome: "Branch outcome",
     workflowSettings: "Execution settings",
     executionMode: "Execution mode",
+    notExecutedNote: "Workflows are only saved and validated for now — they don't run yet.",
+    executionModeHint: "Records how this workflow should start later. Nothing runs yet.",
     manual: "Manual",
     event: "Event",
     errorPolicy: "On error",

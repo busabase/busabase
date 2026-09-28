@@ -19,6 +19,7 @@ th, td { max-width: 20rem; padding: 0.75rem 1rem; border-bottom: 1px solid color
 th { background: color-mix(in srgb, CanvasText 5%, Canvas); color: color-mix(in srgb, CanvasText 70%, transparent); font-weight: 600; }
 td span { display: -webkit-box; overflow: hidden; overflow-wrap: anywhere; white-space: pre-wrap; -webkit-box-orient: vertical; -webkit-line-clamp: 4; }
 .empty { margin: 0; padding: 2.5rem 1rem; color: color-mix(in srgb, CanvasText 62%, transparent); text-align: center; }
+.status { display: grid; min-height: 100vh; margin: 0; padding: 1rem; place-items: center; text-align: center; }
 .markdown { max-width: 76ch; padding: 1.5rem clamp(1.25rem, 4vw, 2rem); line-height: 1.65; }
 .markdown :first-child { margin-top: 0; }
 .markdown :last-child { margin-bottom: 0; }
@@ -338,5 +339,51 @@ export const renderEmbedDocument = (
 ): string =>
   documentShell(title, renderNodeContent(detail, options.embedCapability, options.rpcBasePath));
 
-export const renderUnavailableEmbedDocument = (): string =>
-  documentShell("Content unavailable", '<p class="empty">Content unavailable</p>');
+type EmbedStatus = "unavailable" | "expired";
+
+const STATUS_MESSAGES: Record<string, Record<EmbedStatus, string>> = {
+  en: { unavailable: "Content unavailable", expired: "Link expired" },
+  "zh-cn": { unavailable: "内容不可用", expired: "链接已过期" },
+  "zh-tw": { unavailable: "內容不可用", expired: "連結已過期" },
+  ja: { unavailable: "コンテンツを利用できません", expired: "リンクの有効期限が切れました" },
+  ko: { unavailable: "콘텐츠를 사용할 수 없습니다", expired: "링크가 만료되었습니다" },
+  de: { unavailable: "Inhalt nicht verfügbar", expired: "Link abgelaufen" },
+  es: { unavailable: "Contenido no disponible", expired: "Enlace caducado" },
+  fr: { unavailable: "Contenu indisponible", expired: "Lien expiré" },
+  pt: { unavailable: "Conteúdo indisponível", expired: "Link expirado" },
+  vi: { unavailable: "Nội dung không khả dụng", expired: "Liên kết đã hết hạn" },
+};
+
+/**
+ * The status pages are all a visitor sees when an embed fails, so they follow
+ * the browser's language — this document has no app i18n to lean on. Strings
+ * mirror each host's `embedRuntime` translations.
+ */
+const statusMessages = (acceptLanguage: string | null): Record<EmbedStatus, string> => {
+  for (const part of (acceptLanguage ?? "").split(",")) {
+    const tag = part.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+    if (!tag) continue;
+    if (tag === "zh" || tag.startsWith("zh-hans") || tag === "zh-sg") {
+      return STATUS_MESSAGES["zh-cn"];
+    }
+    if (tag.startsWith("zh-hant") || tag === "zh-hk" || tag === "zh-mo") {
+      return STATUS_MESSAGES["zh-tw"];
+    }
+    const messages = STATUS_MESSAGES[tag] ?? STATUS_MESSAGES[tag.split("-", 1)[0] ?? ""];
+    if (messages) return messages;
+  }
+  return STATUS_MESSAGES.en;
+};
+
+const renderStatusDocument = (status: EmbedStatus, acceptLanguage: string | null): string => {
+  const message = statusMessages(acceptLanguage)[status];
+  // Centered like the Next-rendered status pages, so the same link reads the
+  // same whichever of the two answers it.
+  return documentShell(message, `<p class="empty status">${escapeHtml(message)}</p>`);
+};
+
+export const renderUnavailableEmbedDocument = (acceptLanguage: string | null = null): string =>
+  renderStatusDocument("unavailable", acceptLanguage);
+
+export const renderExpiredEmbedDocument = (acceptLanguage: string | null = null): string =>
+  renderStatusDocument("expired", acceptLanguage);

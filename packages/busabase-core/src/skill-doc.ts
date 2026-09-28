@@ -11,6 +11,8 @@
  */
 
 /** Where a desktop install runs its local server. The bootstrap doc targets this host. */
+import { PLAYBOOK_RULE_MARKDOWN, PLAYBOOK_RULE_SECTION_TITLE } from "./playbook-rule";
+
 export const LOCAL_RUNTIME_ORIGIN = "http://localhost:15419";
 
 const SETUP_SKILL_DESCRIPTION =
@@ -92,7 +94,7 @@ export function buildSkillMarkdown(origin: string, ctx?: SkillMarkdownContext): 
 
   return `---
 name: busabase
-description: Use Busabase as a workspace for AI agents over HTTP — database, knowledge base, apps library, and skills registry. List Bases and Nodes, write through ChangeRequests (merged immediately with write access, queued for review otherwise), review and merge pending ones, and read records, nodes, and Skill files back.
+description: Use Busabase as a workspace for AI agents over HTTP — database, knowledge base, apps library, and skills registry. Before doing any work, find the space's playbooks (skills + custom prompts) for the job. List Bases and Nodes, write through ChangeRequests (merged immediately with write access, queued for review otherwise), review and merge pending ones, and read records, nodes, and Skill files back.
 ---
 
 # Busabase Skill
@@ -118,6 +120,37 @@ ${base}
 \`\`\`
 
 Every endpoint below is relative to that base URL.
+
+## ${PLAYBOOK_RULE_SECTION_TITLE}
+
+${PLAYBOOK_RULE_MARKDOWN}
+
+Search with several phrasings (\`queries\`, up to 8), optionally \`nearNodeId\` (the node the user is
+on), \`kinds\` (\`skill\`, \`prompt\`), and \`limit\`. Each item names its \`kind\`, \`nodeId\`,
+\`path\`, and \`matchedOn\`; prompts also carry \`key\` and \`label\`, skills \`name\` and
+\`description\`:
+
+\`\`\`bash
+curl -X POST ${base}/api/v1/playbooks/search \\
+${authLine}  -H 'content-type: application/json' \\
+  --data '{ "queries": ["记录客户拜访", "log customer visit", "visit record"], "nearNodeId": "<NODE_ID>" }'
+\`\`\`
+
+Read the one that fits — a prompt by node id and key (rendered exactly as Ask Agent sends it), a
+skill by node id (its \`SKILL.md\` plus its file list):
+
+\`\`\`bash
+curl '${base}/api/v1/playbooks/prompt/<NODE_ID>?key=<KEY>'${H}
+curl ${base}/api/v1/playbooks/skill/<NODE_ID>${H}
+\`\`\`
+
+With \`busabase-cli\` the same two calls are:
+
+\`\`\`bash
+npx busabase-cli playbooks search --query "记录客户拜访" --query "log customer visit" --near-node-id <NODE_ID>
+npx busabase-cli playbooks get --kind prompt --node-id <NODE_ID> --key <KEY>
+npx busabase-cli playbooks get --kind skill --node-id <NODE_ID>
+\`\`\`
 ${
   authHeader
     ? `
@@ -171,6 +204,8 @@ Quick reference — every path is relative to the base URL above; worked example
 
 | Operation | Endpoint | Purpose |
 | --- | --- | --- |
+| Find a playbook | \`POST /api/v1/playbooks/search\` | skills + custom prompts that fit the job — call first |
+| Read a playbook | \`GET /api/v1/playbooks/:kind/:nodeId\` | a prompt (\`?key=\`) or a skill's \`SKILL.md\` |
 | List Bases | \`GET /api/v1/bases\` | tables in this workspace |
 | List Nodes | \`GET /api/v1/nodes\` | folders, Bases, Skills |
 | List ChangeRequests | \`GET /api/v1/change-requests\` | the review queue |
@@ -396,9 +431,11 @@ their text once via \`putText\` — run your own extractor, then hand the result
 curl -X POST ${base}/api/v1/grep \\
 ${authLine}  -H 'content-type: application/json' \\
   --data '{"pattern": "Termination", "sources": ["files"], "scope": {"files": {"drivePath": "contracts/"}}, "contextLines": 2}'
-# → { matches: [{ source: "files", assetId, fileName, drivePath, line, column, text, before, after }],
+# → { matches: [{ source: "files", assetId, fileName, drivePath, owner?, line, column, text, before, after }],
 #     coverage: { files: { scanned, missing: [assetId, ...], stale: [...],
-#                          unsearchable, errored, notReached }, nodes: {...}, records: {...} }, truncated }
+#                          unsearchable, errored, notReached }, nodes: {...}, records: {...}, prompts: {...} }, truncated }
+# \`owner\` = { nodeId, nodeType, nodeName, path } — the skill/drive the file is in (absent for
+# an unmounted upload), so a SKILL.md hit says WHICH skill.
 # \`missing\` names binary assets with no text yet — extract-and-supply them, don't assume
 # full coverage. \`stale\` names assets whose text was derived from a since-replaced file.
 
@@ -414,32 +451,37 @@ npx busabase-cli assets put-text --asset-id :assetId --none
 # goes through POST /assets/text/upload-urls → PUT bytes → putText({storageKey})).
 \`\`\`
 
-Search EVERYTHING in a Space — files AND Doc bodies AND Base records — through the same endpoint.
-Omit \`sources\` for all three, or pass \`sources: ["files"]\` for files-only searching with the
+Search EVERYTHING in a Space — files AND Doc bodies AND Base records AND custom agent prompts —
+through the same endpoint. Omit \`sources\` for all four, or pass \`sources: ["files"]\` for files-only searching with the
 same full \`missing\`/\`stale\`/\`unsearchable\` coverage. Same pattern language (regex, guarded
 against catastrophic backtracking),
-same \`maxMatches\`/\`contextLines\` semantics — files are scanned first, then Docs, then whatever
-budget remains goes to records, so a low \`maxMatches\` always drops the records tail first, never
-files/Docs. Records are read from the CANONICAL record commit (\`headCommit.payload\`), never the
+same \`maxMatches\`/\`contextLines\` semantics. \`maxMatches\` is shared fairly: each requested source
+gets at least \`floor(maxMatches / sources)\` and unused budget rolls forward (files → nodes →
+records → prompts), under one deadline for the whole call — a noisy source cannot starve the rest.
+When \`truncated\` is set, narrow (\`sources\`, then \`scope.records.baseSlugs\` or
+\`scope.files.drivePath\`) instead of raising \`maxMatches\`. Records are read from the CANONICAL record commit (\`headCommit.payload\`), never the
 8000-char-truncated \`search\` projection, so a match can come from deep inside a long
 \`longtext\`/\`markdown\` field that \`search\` would silently miss:
 
 \`\`\`bash
 curl -X POST ${base}/api/v1/grep \\
 ${authLine}  -H 'content-type: application/json' \\
-  --data '{"pattern": "Termination", "sources": ["files", "nodes", "records"], "contextLines": 2}'
-# → { matches: [{ source: "files", assetId, fileName, drivePath, line, column, text, before, after }
+  --data '{"pattern": "Termination", "sources": ["files", "nodes", "records", "prompts"], "contextLines": 2}'
+# → { matches: [{ source: "files", assetId, fileName, drivePath, owner?, line, column, text, before, after }
 #              | { source: "nodes", type, nodeId, slug, name, line, column, text, before, after }
-#              | { source: "records", baseId, baseSlug, recordId, fieldSlug, line, column, text, before, after },
+#              | { source: "records", baseId, baseSlug, recordId, fieldSlug, line, column, text, before, after }
+#              | { source: "prompts", nodeId, nodeName, nodeType, nodeSlug, key, locale, field, line, column, text, before, after },
 #              ...],
 #     coverage: { files: { scanned, missing, stale, unsearchable, errored, notReached },
 #                 nodes: { scanned, errored, notReached },
-#                 records: { scanned, errored, notReached } },
+#                 records: { scanned, errored, notReached },
+#                 prompts: { scanned, errored, notReached } },
 #     truncated }
-# matches are ordered files-first, then nodes, then records. Scope down to one source (and narrow
-# further — assetIds/drivePath/mimeTypes for files, nodeIds/types for nodes, baseIds/baseSlugs for
-# records — baseIds/baseSlugs are a union: either match puts a Base in scope) with
-# "sources": ["nodes"] etc.:
+# matches are ordered files-first, then nodes, then records, then prompts. A prompts match's
+# \`locale\` is "default" for a single-language prompt; \`field\` is "label" or "body".
+# Scope down to one source (and narrow further — assetIds/drivePath/mimeTypes for files,
+# nodeIds/types for nodes, baseIds/baseSlugs for records — baseIds/baseSlugs are a union:
+# either match puts a Base in scope) with "sources": ["nodes"] etc.:
 curl -X POST ${base}/api/v1/grep \\
 ${authLine}  -H 'content-type: application/json' \\
   --data '{"pattern": "ACME Corp", "sources": ["nodes"], "scope": {"nodes": {"nodeIds": ["nod_..."]}}}'
@@ -574,7 +616,8 @@ ${
 0. Confirm the target space (see **Space targeting**): \`GET /api/v1/auth\`; one space →
    use it, several → ask the user; then send \`x-busabase-space\` on every call.`
 }
-1. List Bases and Nodes before proposing changes.
+1. Look for a playbook first (**${PLAYBOOK_RULE_SECTION_TITLE}** above), then list Bases and Nodes
+   before proposing changes.
 2. Create ChangeRequests instead of mutating canonical data directly.
 3. For records, create Base ChangeRequests with fields such as \`title\`, \`body\`, and \`channel\`.
 4. For folders and Skill nodes, create node ChangeRequests.
@@ -607,7 +650,8 @@ If one ChangeRequest bundles several operations, give each operation its own spe
 
 A node you just created opens with the generic scenario list its TYPE ships ("design a schema",
 "bulk import", "summarize this Doc"). Accurate, and never the job the person actually asked you
-to build it for. A node's own prompts replace that list:
+to build it for. A node's own prompts are added after that list — and they are what agents find
+when they look for a playbook:
 
 \`\`\`bash
 # 2-5 things this person will come back and ask for, in their words:
@@ -627,9 +671,10 @@ Four rules, each of which is a way this goes wrong:
 
 1. **Write the person's job, not the operation.** "Log a customer visit" — not "Create a record in
    Visits", which is the API with a Base name pasted in and which the node type already covers.
-2. **Custom prompts REPLACE the type's defaults.** So a pair of generic ones is worse than none:
-   the user loses a usable default list and gains a vague one. If you cannot name a recurring job
-   this person will actually come back for, write nothing and keep the defaults.
+2. **Custom prompts are APPENDED after the type's built-in scenarios,** which always stay. So a
+   generic one only repeats a default the list already shows, and it becomes a vague playbook
+   agents match on. If you cannot name a recurring job this person will actually come back for,
+   write nothing — the defaults already cover the generic work.
 3. **Only write them when you know the job.** You usually do — the user just told you why they
    wanted this node. A scratch table, a one-off Doc, a folder that only groups things: no prompts.
 4. **\`{target}\` expands to a full sentence** naming the node and space, so give it its own line.
@@ -768,7 +813,7 @@ function buildBootstrapMarkdown(origin: string, ctx?: SkillMarkdownContext): str
 
 ### 0a. MCP first
 
-Ask the Harness to discover and use an existing Busabase MCP integration before CLI. Use  Call "list_integration_tools" with "providerKey: busabase-cloud-mcp" to find the Busabase integration, if the tool exists. Verify it with
+Ask the Harness to discover and use an existing Busabase MCP integration before CLI. Call "list_integration_tools" with "providerKey: busabase-cloud-mcp" to find the Busabase integration, if the tool exists. Verify it with
 a read-only identity and Space check; reconnect it first if configured but disconnected, and do not
 assume tool names.
 ${

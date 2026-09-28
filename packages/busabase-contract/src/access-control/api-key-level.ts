@@ -162,6 +162,16 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   // read them.
   "nodes.getAgentPrompts": node("read"),
   "nodes.searchByName": node("read"),
+  // Playbook discovery. Plain node reads: search returns only skills and
+  // prompts on nodes the caller can already read (ACL applied in the SQL, same
+  // as `nodes.searchByName`), and get returns a prompt `nodes.getAgentPrompts`
+  // would already return, or a SKILL.md `fileTrees.readFile` would. `search` is
+  // a POST only because it carries a body, like `grep`.
+  "playbooks.search": node("read"),
+  "playbooks.get": node("read"),
+  // The dashboard's full catalog. Same filter as `search` (ACL in the SQL), just
+  // unranked and unbounded by queries — nothing a reader couldn't already find.
+  "playbooks.list": node("read"),
   "nodes.isDescendant": node("read"),
   // The ancestor chain of one node. A `read` for the same reason
   // `nodes.isDescendant` is: it returns ids from the tree the caller can

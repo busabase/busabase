@@ -57,8 +57,15 @@ export type SearchPageMode = (typeof SEARCH_PAGE_MODES)[number];
  * silently do nothing to two of the choices, which is worse than not offering
  * them: the page would look more capable than it is.
  */
-export const SEARCH_PAGE_SOURCES = ["records", "files", "nodes", "names"] as const;
+export const SEARCH_PAGE_SOURCES = ["records", "files", "nodes", "names", "prompts"] as const;
 export type SearchPageSource = (typeof SEARCH_PAGE_SOURCES)[number];
+
+/**
+ * The sources text search can scan. `prompts` is absent: custom agent prompts
+ * are only reachable through grep (regex mode), which reads them in every
+ * locale; the ranked search index never held them.
+ */
+export const TEXT_PAGE_SOURCES = ["records", "files", "nodes", "names"] as const;
 
 /**
  * The sources `grep` can actually scan.
@@ -68,15 +75,20 @@ export type SearchPageSource = (typeof SEARCH_PAGE_SOURCES)[number];
  * it in regex mode would be the same mistake the comment above warns about:
  * a control that silently does nothing to one of its own choices.
  */
-export const GREP_PAGE_SOURCES = ["records", "files", "nodes"] as const;
+export const GREP_PAGE_SOURCES = ["records", "files", "nodes", "prompts"] as const;
 export type GrepPageSource = (typeof GREP_PAGE_SOURCES)[number];
+
+export type TextPageSource = (typeof TEXT_PAGE_SOURCES)[number];
+
+export const isTextSource = (value: SearchPageSource): value is TextPageSource =>
+  (TEXT_PAGE_SOURCES as readonly string[]).includes(value);
 
 export const isGrepSource = (value: SearchPageSource): value is GrepPageSource =>
   (GREP_PAGE_SOURCES as readonly string[]).includes(value);
 
 /** The sources a given mode may offer. */
 export const sourcesForMode = (mode: SearchPageMode): readonly SearchPageSource[] =>
-  mode === "regex" ? GREP_PAGE_SOURCES : SEARCH_PAGE_SOURCES;
+  mode === "regex" ? GREP_PAGE_SOURCES : TEXT_PAGE_SOURCES;
 
 /**
  * Which of this page's narrowing controls the mode's procedure honours.
@@ -208,8 +220,8 @@ export const parseSearchPageParams = (search: string): SearchPageState => {
     // view: a link carrying `?mode=regex&source=names` describes a search grep
     // cannot run, and silently scanning everything is a smaller lie than
     // rendering a chip for a source that is not being searched.
-    sources: [...new Set(params.getAll("source").filter(isSource))].filter(
-      (source) => mode !== "regex" || isGrepSource(source),
+    sources: [...new Set(params.getAll("source").filter(isSource))].filter((source) =>
+      sourcesForMode(mode).includes(source),
     ),
     sort: isSort(sortRaw) ? sortRaw : "relevance",
     datePreset: isPreset(presetRaw) ? presetRaw : "any",

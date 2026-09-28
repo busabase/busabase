@@ -22,6 +22,7 @@ import { type ExecFileException, execFile } from "node:child_process";
 import { ORPCError } from "@orpc/server";
 import type {
   GrepInput,
+  GrepMatchOwnerVO,
   GrepMatchVO,
   GrepResultVO,
   ReadLinesVO,
@@ -29,6 +30,7 @@ import type {
 } from "busabase-contract/domains/assets/types";
 import {
   and,
+  asc,
   eq,
   exists,
   inArray,
@@ -49,6 +51,7 @@ import {
   busabaseNodes,
 } from "../../../db/schema";
 import { buildNodeVisibilityCondition, hasWorkspacePermission } from "../../../logic/node-acl";
+import { loadNodeTree, nodePathOf } from "../../../logic/node-tree";
 import { ensureReady } from "../../../logic/seed";
 import {
   compileGrepPattern,
@@ -123,9 +126,13 @@ interface CandidateAsset {
   fallbackName: string;
 }
 
+/** The owning node of the usage a match is labelled with — `path` is filled in once, after the scan. */
+type OwnerNode = Omit<GrepMatchOwnerVO, "path">;
+
 interface DisplayInfo {
   fileName: string;
   drivePath: string;
+  owner?: OwnerNode;
 }
 
 const resolveCandidateAssets = async (
@@ -143,6 +150,13 @@ const resolveCandidateAssets = async (
   // Node ACL: assets have no node of their own, so mounted visibility derives
   // from their usages. Unmounted staging assets are visible only to their
   // creator or a workspace writer.
+  //
+  // A mounted asset is in scope only through a LIVE usage: one whose node is
+  // neither archived nor deleted. An asset whose every usage sits on an
+  // archived node (a retired skill's SKILL.md) used to come back from an
+  // unscoped grep even though its owner is gone; the `drivePath` branch below
+  // already excluded it. It is not "unmounted" either, so the staging rule
+  // (`notExists(anyNodeUsage)`) does not let it back in.
   const visibleNode = buildNodeVisibilityCondition(db);
   const stagedByActor = eq(busabaseAssets.createdBy, resolveActorId("local-producer"));
   const anyNodeUsage = db
@@ -155,31 +169,30 @@ const resolveCandidateAssets = async (
         isNotNull(busabaseAssetUsages.nodeId),
       ),
     );
-  if (visibleNode) {
-    const visibleNodeUsage = db
-      .select({ one: sql`1` })
-      .from(busabaseAssetUsages)
-      .innerJoin(busabaseNodes, eq(busabaseAssetUsages.nodeId, busabaseNodes.id))
-      .where(
-        and(
-          eq(busabaseAssetUsages.assetId, busabaseAssets.id),
-          eq(busabaseAssetUsages.spaceId, spaceId),
-          eq(busabaseNodes.spaceId, spaceId),
-          visibleNode,
-        ),
-      );
-    conditions.push(
-      (hasWorkspacePermission("manage")
-        ? or(notExists(anyNodeUsage), exists(visibleNodeUsage))
-        : or(exists(visibleNodeUsage), and(notExists(anyNodeUsage), stagedByActor))) as SQL,
+  const liveNodeUsage = db
+    .select({ one: sql`1` })
+    .from(busabaseAssetUsages)
+    .innerJoin(busabaseNodes, eq(busabaseAssetUsages.nodeId, busabaseNodes.id))
+    .where(
+      and(
+        eq(busabaseAssetUsages.assetId, busabaseAssets.id),
+        eq(busabaseAssetUsages.spaceId, spaceId),
+        eq(busabaseNodes.spaceId, spaceId),
+        isNull(busabaseNodes.archivedAt),
+        isNull(busabaseNodes.deletedAt),
+        visibleNode,
+      ),
     );
-  } else if (!hasWorkspacePermission("manage")) {
-    // A manager retains visibility of every mounted node. A scoped read key
-    // may additionally inspect only the manager's own unmounted staging assets.
-    // `manage` is what "manager" means here: a `member`'s workspace baseline is
-    // `write`, which must not open other people's unmounted staging uploads.
-    conditions.push(or(exists(anyNodeUsage), and(notExists(anyNodeUsage), stagedByActor)) as SQL);
-  }
+  // `visibleNode` undefined means the caller sees every node, so a live usage
+  // alone decides. A manager (`manage`) additionally sees every unmounted
+  // staging asset; anyone else only their own. `manage` is what "manager" means
+  // here: a `member`'s workspace baseline is `write`, which must not open other
+  // people's unmounted staging uploads.
+  conditions.push(
+    (hasWorkspacePermission("manage")
+      ? or(notExists(anyNodeUsage), exists(liveNodeUsage))
+      : or(exists(liveNodeUsage), and(notExists(anyNodeUsage), stagedByActor))) as SQL,
+  );
   const rows = await db
     .select({
       assetId: busabaseAssets.id,
@@ -215,19 +228,32 @@ const resolveCandidateAssets = async (
   return rows.filter((row) => mounted.has(row.assetId));
 };
 
-/** Best-effort display info (mounted path + display name) per asset — for match/report labeling only. */
+/**
+ * Display info per asset — mounted path, display name, and the owning node —
+ * from ONE usage row, batch-loaded for every candidate in a single query.
+ *
+ * Which usage: only usages on nodes the caller can read that are neither
+ * archived nor deleted, oldest first (deterministic). With a `drivePath` scope
+ * the first Drive/Skill usage under that prefix wins, so the path and owner
+ * describe the mount the caller asked about; otherwise the first usage.
+ */
 const loadDisplayInfo = async (
   db: Db,
   spaceId: string,
   assetIds: string[],
+  drivePath: string | undefined,
 ): Promise<Map<string, DisplayInfo>> => {
   const map = new Map<string, DisplayInfo>();
   if (assetIds.length === 0) return map;
   const rows = await db
     .select({
       assetId: busabaseAssetUsages.assetId,
+      ownerType: busabaseAssetUsages.ownerType,
       path: busabaseAssetUsages.path,
       metadata: busabaseAssetUsages.metadata,
+      nodeId: busabaseNodes.id,
+      nodeType: busabaseNodes.type,
+      nodeName: busabaseNodes.name,
     })
     .from(busabaseAssetUsages)
     .innerJoin(busabaseNodes, eq(busabaseAssetUsages.nodeId, busabaseNodes.id))
@@ -236,18 +262,59 @@ const loadDisplayInfo = async (
         eq(busabaseAssetUsages.spaceId, spaceId),
         eq(busabaseNodes.spaceId, spaceId),
         inArray(busabaseAssetUsages.assetId, assetIds),
+        isNull(busabaseNodes.archivedAt),
+        isNull(busabaseNodes.deletedAt),
         buildNodeVisibilityCondition(db),
       ),
-    );
+    )
+    .orderBy(asc(busabaseAssetUsages.createdAt), asc(busabaseAssetUsages.id));
+  const inScope = (row: (typeof rows)[number]) =>
+    drivePath !== undefined &&
+    (row.ownerType === "drive" || row.ownerType === "skill") &&
+    row.path.startsWith(drivePath);
+  const chosen = new Map<string, (typeof rows)[number]>();
   for (const row of rows) {
-    if (map.has(row.assetId)) continue; // first usage wins — good enough for display purposes
+    const current = chosen.get(row.assetId);
+    if (!current || (!inScope(current) && inScope(row))) chosen.set(row.assetId, row);
+  }
+  for (const [assetId, row] of chosen) {
     const displayName =
       typeof row.metadata?.displayName === "string"
         ? row.metadata.displayName
         : (row.path.split("/").at(-1) ?? "");
-    map.set(row.assetId, { fileName: displayName, drivePath: row.path });
+    map.set(assetId, {
+      fileName: displayName,
+      drivePath: row.path,
+      owner: { nodeId: row.nodeId, nodeType: row.nodeType, nodeName: row.nodeName },
+    });
   }
   return map;
+};
+
+/**
+ * Attach `owner` (with its readable folder path) to every match whose asset
+ * has one. The tree is loaded once per grep call, and only when some match
+ * actually has an owner — never per match.
+ */
+const attachOwners = async (
+  db: Db,
+  spaceId: string,
+  matches: GrepMatchVO[],
+  displayByAsset: Map<string, DisplayInfo>,
+): Promise<GrepMatchVO[]> => {
+  if (!matches.some((match) => displayByAsset.get(match.assetId)?.owner)) return matches;
+  const { byId, visibleIds } = await loadNodeTree(db, spaceId);
+  const pathByNode = new Map<string, string[]>();
+  return matches.map((match) => {
+    const owner = displayByAsset.get(match.assetId)?.owner;
+    if (!owner) return match;
+    let path = pathByNode.get(owner.nodeId);
+    if (!path) {
+      path = nodePathOf(byId, visibleIds, owner.nodeId);
+      pathByNode.set(owner.nodeId, path);
+    }
+    return { ...match, owner: { ...owner, path } };
+  });
 };
 
 /**
@@ -265,7 +332,7 @@ const displayFor = (
 ): DisplayInfo => {
   const info = displayByAsset.get(candidate.assetId);
   if (info?.fileName) return info;
-  return { fileName: candidate.fallbackName, drivePath: info?.drivePath ?? "" };
+  return { fileName: candidate.fallbackName, drivePath: info?.drivePath ?? "", owner: info?.owner };
 };
 
 // ── Line-by-line matching with context ──────────────────────────────────────
@@ -486,7 +553,14 @@ const scanFileWithRg = async (
 
 // ── grep ─────────────────────────────────────────────────────────────────────
 
-export const grepAssets = async (input: GrepInput): Promise<GrepResultVO> => {
+/**
+ * `options.deadline` lets unified grep run every source against ONE wall-clock
+ * deadline for the whole call; a direct caller gets its own `grepTimeoutMs()`.
+ */
+export const grepAssets = async (
+  input: GrepInput,
+  options: { deadline?: number } = {},
+): Promise<GrepResultVO> => {
   await ensureReady();
   const db = await getDb();
   const spaceId = getContextSpaceId();
@@ -494,7 +568,7 @@ export const grepAssets = async (input: GrepInput): Promise<GrepResultVO> => {
 
   const candidates = await resolveCandidateAssets(db, spaceId, input.scope);
   const assetIds = candidates.map((candidate) => candidate.assetId);
-  const displayByAsset = await loadDisplayInfo(db, spaceId, assetIds);
+  const displayByAsset = await loadDisplayInfo(db, spaceId, assetIds, input.scope?.drivePath);
 
   // Lazy self-heal: register any text-kind candidate with no row yet. Both
   // facts (`contentKind === "text"`, no existing row) are already known from
@@ -535,7 +609,7 @@ export const grepAssets = async (input: GrepInput): Promise<GrepResultVO> => {
     }
   }
 
-  const deadline = Date.now() + grepTimeoutMs();
+  const deadline = options.deadline ?? Date.now() + grepTimeoutMs();
   let matches: GrepMatchVO[] = [];
   let filesScanned = 0;
   let truncated = false;
@@ -643,7 +717,11 @@ export const grepAssets = async (input: GrepInput): Promise<GrepResultVO> => {
 
     i += batch.length;
   }
-  if (matches.length >= input.maxMatches) truncated = true;
+  // Filling the budget means there may be more. A zero budget (unified grep
+  // gave this source nothing) is not a truncation by itself — the loop above
+  // already flagged it if anything was left unreached.
+  if (input.maxMatches > 0 && matches.length >= input.maxMatches) truncated = true;
+  matches = await attachOwners(db, spaceId, matches, displayByAsset);
 
   return { matches, filesScanned, missing, stale, unsearchable, errored, notReached, truncated };
 };

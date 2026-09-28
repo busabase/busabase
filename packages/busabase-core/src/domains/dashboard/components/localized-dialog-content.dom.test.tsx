@@ -3,7 +3,8 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { Dialog, DialogTitle } from "kui/dialog";
 import * as React from "react";
 import { afterEach, describe, expect, it } from "vitest";
-import { CoreI18nProvider, coreMessagesByLocale } from "../../../i18n";
+import { CoreI18nProvider } from "../../../i18n";
+import { coreMessagesByLocale } from "../../../i18n/catalog";
 import { DialogContent } from "./localized-dialog-content";
 
 Object.assign(globalThis, { React });

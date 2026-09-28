@@ -38,6 +38,7 @@ export const recordChangeTask: TaskDefinition<RecordChangeInput> = {
   cliPath: ["records", "change-request"],
   summary: "Propose a change to an existing record (update / delete / restore)",
   guidance:
+    "If this job may already have a playbook, call playbooks search first. " +
     "Review is permission-aware for all three operations, decided server-side: the change merges " +
     "immediately when your key has write access on the Base's node and lands as a pending " +
     "ChangeRequest otherwise — check the response's `materialized` field to see which happened. " +

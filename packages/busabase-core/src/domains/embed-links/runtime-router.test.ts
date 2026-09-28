@@ -35,6 +35,10 @@ describe("AirApp embed data policy", () => {
     ["nodes.createChangeRequest", "POST"],
     ["records.changeRequest", "POST"],
     ["grep", "POST"],
+    // Spec default: AirApps/embeds do not discover playbooks.
+    ["playbooks.search", "POST"],
+    ["playbooks.get", "GET"],
+    ["playbooks.list", undefined],
     ["live.subscribe", undefined],
   ])("denies non-data or mutating procedure %s", (path, method) => {
     expect(isAirAppEmbedReadableProcedure(path.split("."), method)).toBe(false);

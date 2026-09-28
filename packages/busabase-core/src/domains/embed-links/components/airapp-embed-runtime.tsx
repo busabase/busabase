@@ -20,6 +20,7 @@ interface Props {
   labels: {
     loading: string;
     unavailable: string;
+    expired: string;
   };
   nodeId: string;
   title: string;

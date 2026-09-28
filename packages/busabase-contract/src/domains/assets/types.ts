@@ -184,12 +184,36 @@ export type GrepInputDTO = z.input<typeof GrepInputSchema>;
 /** Parsed input consumed by the files scanner. */
 export type GrepInput = z.infer<typeof GrepInputSchema>;
 
+/**
+ * The node a matched file belongs to — so a hit in `SKILL.md` says WHICH skill
+ * it is, not just "a SKILL.md somewhere". Resolved from the asset's usage rows:
+ * the usage under the requested `drivePath` when one was given, else the first
+ * usage on a node the caller can read.
+ */
+export const GrepMatchOwnerVOSchema = z.object({
+  nodeId: z.string(),
+  /** The owning node's type, e.g. `skill`, `drive`, `airapp`, `base`, `doc`, `file`. */
+  nodeType: z.string(),
+  nodeName: z.string(),
+  /**
+   * Folder names from just under the workspace root down to the owner's parent.
+   * Folders the caller cannot read are left out rather than named.
+   */
+  path: z.array(z.string()),
+});
+export type GrepMatchOwnerVO = z.infer<typeof GrepMatchOwnerVOSchema>;
+
 /** One match — real line/column numbers (1-based), so a caller can `readLines` right around it. */
 export const GrepMatchVOSchema = z.object({
   assetId: z.string(),
   fileName: z.string(),
   /** Drive/Skill mounted path, or "" when the asset isn't path-mounted (e.g. a File node). */
   drivePath: z.string(),
+  /**
+   * The node this file belongs to. Absent for an unmounted staging upload (no
+   * usage row yet) — and from servers older than owner attribution.
+   */
+  owner: GrepMatchOwnerVOSchema.optional(),
   line: z.number().int().positive(),
   /** 1-based character column (not byte offset) of the match start within the line. */
   column: z.number().int().positive(),

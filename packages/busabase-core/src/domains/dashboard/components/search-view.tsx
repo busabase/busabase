@@ -22,6 +22,7 @@ import {
   type DatePresetKey,
   hasActiveNarrowing,
   isGrepSource,
+  isTextSource,
   isValidPattern,
   parseSearchPageParams,
   patternFlags,
@@ -206,6 +207,9 @@ export function SearchView({ orpc }: { orpc: BusabaseQueryUtils }) {
     // report it as an advanced full-text search session.
     if (!isRegex) ensureSearchSession();
   }, [enabled, isRegex, ensureSearchSession]);
+  // Parsing already drops sources the active mode cannot scan; this narrows
+  // the type for the text endpoint, which has no `prompts` source.
+  const textSources = urlState.sources.filter(isTextSource);
   const results = useQuery({
     ...orpc.search.queryOptions({
       input: {
@@ -213,7 +217,7 @@ export function SearchView({ orpc }: { orpc: BusabaseQueryUtils }) {
         mode: "full",
         surface: "advanced",
         limit: PAGE_SIZE * pages,
-        sources: urlState.sources.length > 0 ? urlState.sources : undefined,
+        sources: textSources.length > 0 ? textSources : undefined,
         sort: urlState.sort,
         updatedAfter,
         inNodeId: urlState.inNodeId || undefined,
@@ -231,7 +235,7 @@ export function SearchView({ orpc }: { orpc: BusabaseQueryUtils }) {
       input: {
         pattern: urlState.query,
         flags,
-        // OMITTED means "all three" to this endpoint; an empty array means
+        // OMITTED means "every source" to this endpoint (custom prompts too); an empty array means
         // "scan nothing", which returns a confident zero with a coverage block
         // reporting everything read. Same shape the text branch uses above.
         sources: grepSources.length > 0 ? grepSources : undefined,
@@ -251,6 +255,7 @@ export function SearchView({ orpc }: { orpc: BusabaseQueryUtils }) {
     files: t.sourceFiles,
     nodes: t.sourceNodes,
     names: t.sourceNames,
+    prompts: t.sourcePrompts,
   };
   const sortLabels: Record<(typeof SEARCH_PAGE_SORTS)[number], string> = {
     relevance: t.sortRelevance,

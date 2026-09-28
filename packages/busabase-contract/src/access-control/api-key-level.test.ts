@@ -194,6 +194,22 @@ describe("procedure permission policy", () => {
   it("classifies known method mismatches by semantics", () => {
     expect(resolveProcedurePermissionPolicy(["grep"])).toEqual({ level: "read", scope: "node" });
     expect(resolveRequiredLevel(["workbench", "grep"], "POST")).toBe("read");
+    // Playbook search is a POST for the same reason grep is: it carries a body.
+    expect(resolveProcedurePermissionPolicy(["playbooks", "search"])).toEqual({
+      level: "read",
+      scope: "node",
+    });
+    expect(resolveRequiredLevel(["workbench", "playbooks", "search"], "POST")).toBe("read");
+    expect(resolveProcedurePermissionPolicy(["playbooks", "get"])).toEqual({
+      level: "read",
+      scope: "node",
+    });
+    // The dashboard's RPC-only catalog: no route, so no method — still a read.
+    expect(resolveProcedurePermissionPolicy(["playbooks", "list"])).toEqual({
+      level: "read",
+      scope: "node",
+    });
+    expect(resolveRequiredLevel(["workbench", "playbooks", "list"], undefined)).toBe("read");
     expect(resolveProcedurePermissionPolicy(["forms", "submit"]).level).toBe("changeRequest");
     expect(resolveProcedurePermissionPolicy(["bases", "createField"]).level).toBe("write");
     expect(resolveProcedurePermissionPolicy(["webhooks", "list"])).toEqual({

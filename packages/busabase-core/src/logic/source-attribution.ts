@@ -1,4 +1,8 @@
-import type { BusabaseSourceChannel, SourceAttributionVO } from "busabase-contract/types";
+import type {
+  BusabaseSourceChannel,
+  PlaybookAttributionVO,
+  SourceAttributionVO,
+} from "busabase-contract/types";
 
 const SOURCE_CHANNELS = new Set<BusabaseSourceChannel>([
   "web_ui",
@@ -67,7 +71,7 @@ const firstString = (value: Record<string, unknown> | undefined, keys: readonly 
   return null;
 };
 
-const normalizeChannel = (value: string | null): BusabaseSourceChannel | null => {
+export const normalizeSourceChannel = (value: string | null): BusabaseSourceChannel | null => {
   if (!value) return null;
   const normalized = value
     .trim()
@@ -90,6 +94,31 @@ const provenanceRecord = (sourceMeta: Record<string, unknown>) => {
   return hasStrongFlatProvenance(sourceMeta) ? sourceMeta : null;
 };
 
+/**
+ * The stored, server-validated playbook (`provenance.playbook`) as a VO.
+ * `accessible: true` here means "as stored" — the read path narrows it per
+ * reader with `applyPlaybookAttributionVisibility` before it leaves the server.
+ */
+const extractPlaybook = (provenance: Record<string, unknown>): PlaybookAttributionVO | null => {
+  const playbook = provenance.playbook;
+  if (!isRecord(playbook)) return null;
+  const kind = playbook.kind;
+  const nodeId = playbook.nodeId;
+  if ((kind !== "skill" && kind !== "prompt") || typeof nodeId !== "string" || !nodeId) {
+    return null;
+  }
+  const text = (value: unknown) => (typeof value === "string" && value ? value : null);
+  return {
+    kind,
+    accessible: true,
+    nodeId,
+    key: kind === "prompt" ? text(playbook.key) : null,
+    nodeType: text(playbook.nodeType),
+    nodeSlug: text(playbook.nodeSlug),
+    label: text(playbook.label),
+  };
+};
+
 export const extractSourceAttribution = (
   sourceMeta: Record<string, unknown>,
 ): SourceAttributionVO | null => {
@@ -108,10 +137,26 @@ export const extractSourceAttribution = (
     firstString(provenance, ["channel", "sourceChannel", "via"]) ??
     firstString(credential, ["channel"]);
 
+  const playbook = extractPlaybook(provenance);
+  // "openapi" is the default for a provenance that names a caller (an owner, a
+  // key, a channel) without saying how it came in. A provenance that carries
+  // ONLY a playbook (the open-source local host, which has no caller identity)
+  // says nothing about the channel, so it must not suddenly read "API".
+  const identifiesCaller =
+    owner !== undefined ||
+    credential !== undefined ||
+    ownerName !== null ||
+    displayName !== null ||
+    rawChannel !== null;
+  const channel =
+    normalizeSourceChannel(rawChannel) ?? (identifiesCaller || !playbook ? "openapi" : null);
+
   return {
     displayName,
     ownerName,
-    channel: normalizeChannel(rawChannel) ?? "openapi",
+    channel,
+    // Emitted only when present, so an attribution without a playbook keeps its exact old shape.
+    ...(playbook ? { playbook } : {}),
   };
 };
 

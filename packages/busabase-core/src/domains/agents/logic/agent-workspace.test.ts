@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { prepareAgentWorkspace } from "./agent-workspace";
+import { buildAgentWorkspaceGuide } from "./agent-workspace-guide";
 
 const temporaryDirectories: string[] = [];
 
@@ -35,5 +36,21 @@ describe("prepareAgentWorkspace", () => {
     await expect(readFile(join(workspace, "CLAUDE.md"), "utf8")).resolves.toContain(
       "<!-- workspace: space-123 -->",
     );
+  });
+
+  it("writes the same guide for Claude Code, Codex, and Gemini", async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), "busabase-agent-workspace-"));
+    temporaryDirectories.push(homeDir);
+
+    const workspace = await prepareAgentWorkspace("local-subprocess", "space-123", homeDir);
+    const [claude, agents, gemini] = await Promise.all(
+      ["CLAUDE.md", "AGENTS.md", "GEMINI.md"].map((file) =>
+        readFile(join(workspace, file), "utf8"),
+      ),
+    );
+
+    expect(claude).toBe(buildAgentWorkspaceGuide("space-123"));
+    expect(agents).toBe(claude);
+    expect(gemini).toBe(claude);
   });
 });

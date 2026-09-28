@@ -5,7 +5,8 @@ import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-quer
 import type { FormVO } from "busabase-contract/types";
 import { type ReactNode, useState } from "react";
 import { afterEach, describe, expect, it } from "vitest";
-import { CoreI18nProvider, coreMessagesByLocale } from "../../../i18n";
+import { CoreI18nProvider } from "../../../i18n";
+import { coreMessagesByLocale } from "../../../i18n/catalog";
 import type { PreviewFullscreenState } from "../../dashboard/components/preview-fullscreen";
 import { DashboardVisitorProvider } from "../../dashboard/visitor-context";
 import { FormDetailView } from "./form-detail-view";

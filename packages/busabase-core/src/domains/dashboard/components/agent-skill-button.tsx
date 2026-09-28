@@ -9,10 +9,11 @@ import { useEffect, useMemo, useState } from "react";
 import {
   type CoreI18nMessages,
   type CoreLocale,
-  coreMessagesByLocale,
   fmt,
-  useCoreI18n,
+  useCoreLocale,
+  useCoreMessages,
 } from "../../../i18n";
+import { isCoreLocale } from "../../../i18n/locales";
 import {
   AGENT_BRAND_LINKS,
   createMcpAgentGuides,
@@ -129,8 +130,11 @@ interface AgentIntegrationDialogProps extends AgentIntegrationContentProps {
   onOpenChange: (open: boolean) => void;
 }
 
-const resolveMessages = (lang: string | undefined, fallback: CoreI18nMessages): CoreI18nMessages =>
-  lang && lang in coreMessagesByLocale ? coreMessagesByLocale[lang as CoreLocale] : fallback;
+/** An explicit `lang` prop wins; otherwise the surrounding `CoreI18nProvider`'s locale. */
+const useLangMessages = (lang: string | undefined): CoreI18nMessages => {
+  const contextLocale = useCoreLocale();
+  return useCoreMessages(isCoreLocale(lang) ? lang : contextLocale);
+};
 
 export function createSetupSkillUrl(
   origin: string,
@@ -159,8 +163,7 @@ export function AgentIntegrationContent({
   pluginItems = [],
   onCreateNode,
 }: AgentIntegrationContentProps) {
-  const contextMessages = useCoreI18n();
-  const messages = resolveMessages(lang, contextMessages);
+  const messages = useLangMessages(lang);
   const [origin, setOrigin] = useState(defaultOrigin);
   const [copied, setCopied] = useState<string | null>(null);
   // Controlled so the chat-app panel can hand the user straight to the connector
@@ -634,8 +637,7 @@ export function AgentIntegrationDialog({
   onOpenChange,
   ...contentProps
 }: AgentIntegrationDialogProps) {
-  const contextMessages = useCoreI18n();
-  const messages = resolveMessages(contentProps.lang, contextMessages);
+  const messages = useLangMessages(contentProps.lang);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -660,8 +662,7 @@ export function BusabaseAgentSkillButton({
   targetSpaceId,
   pluginItems,
 }: BusabaseAgentSkillButtonProps = {}) {
-  const contextMessages = useCoreI18n();
-  const messages = resolveMessages(lang, contextMessages);
+  const messages = useLangMessages(lang);
   const [open, setOpen] = useState(false);
 
   return (
@@ -692,18 +693,13 @@ export function BusabaseAgentSkillButton({
   );
 }
 
-/** UI languages the copy-paste prompt is localized into (mirrors busabase-cloud's locales). */
-type PromptLang = "en" | "zh-CN" | "ja";
-
-function resolvePromptLang(lang?: string): PromptLang {
-  return lang === "zh-CN" || lang === "ja" ? lang : "en";
-}
+/** Locales with a published `/docs/mcp` guide; every other UI language links the English one. */
+const MCP_DOC_LOCALES: readonly string[] = ["zh-CN", "ja"];
 
 function getMcpGuideUrl(lang?: string): string {
-  const locale = resolvePromptLang(lang);
-  return locale === "en"
-    ? "https://busabase.com/docs/mcp"
-    : `https://busabase.com/${locale}/docs/mcp`;
+  return lang && MCP_DOC_LOCALES.includes(lang)
+    ? `https://busabase.com/${lang}/docs/mcp`
+    : "https://busabase.com/docs/mcp";
 }
 
 /**
@@ -719,37 +715,85 @@ function getMcpGuideUrl(lang?: string): string {
  * rather than that onboarding was special. Both are gone. Everything about HOW to
  * onboard — the welcome, what-it-is, and "ask what to manage first" — lives in SKILL.md.
  */
+const PROMPT_TARGET_LINE: Record<CoreLocale, (spaceId: string) => string> = {
+  en: (id) =>
+    `\nTarget the currently selected Busabase space: ${id}. Use this exact ID for BUSABASE_SPACE_ID / x-busabase-space unless I explicitly choose another space.\n`,
+  "zh-CN": (id) =>
+    `\n当前选中的 Busabase 空间是：${id}。除非我明确选择其他空间，否则请用这个 ID 作为 BUSABASE_SPACE_ID / x-busabase-space。\n`,
+  "zh-TW": (id) =>
+    `\n目前選取的 Busabase 空間是：${id}。除非我明確選擇其他空間，否則請用這個 ID 作為 BUSABASE_SPACE_ID / x-busabase-space。\n`,
+  ja: (id) =>
+    `\n現在選択されている Busabase スペース: ${id}。私が明示的に別のスペースを選ばない限り、この ID を BUSABASE_SPACE_ID / x-busabase-space に使ってください。\n`,
+  ko: (id) =>
+    `\n현재 선택된 Busabase 스페이스는 ${id}입니다. 제가 명시적으로 다른 스페이스를 선택하지 않는 한 이 ID를 BUSABASE_SPACE_ID / x-busabase-space에 사용하세요.\n`,
+  es: (id) =>
+    `\nUsa el espacio de Busabase seleccionado actualmente: ${id}. Usa exactamente este ID para BUSABASE_SPACE_ID / x-busabase-space, salvo que yo elija otro espacio de forma explícita.\n`,
+  pt: (id) =>
+    `\nUse o espaço do Busabase selecionado no momento: ${id}. Use exatamente este ID para BUSABASE_SPACE_ID / x-busabase-space, a menos que eu escolha explicitamente outro espaço.\n`,
+  vi: (id) =>
+    `\nHãy dùng không gian Busabase đang được chọn: ${id}. Dùng đúng ID này cho BUSABASE_SPACE_ID / x-busabase-space, trừ khi tôi chủ động chọn không gian khác.\n`,
+  fr: (id) =>
+    `\nCiblez l'espace Busabase actuellement sélectionné : ${id}. Utilisez exactement cet ID pour BUSABASE_SPACE_ID / x-busabase-space, sauf si je choisis explicitement un autre espace.\n`,
+  de: (id) =>
+    `\nVerwenden Sie den aktuell ausgewählten Busabase-Space: ${id}. Nutzen Sie genau diese ID für BUSABASE_SPACE_ID / x-busabase-space, es sei denn, ich wähle ausdrücklich einen anderen Space.\n`,
+};
+
+/** `intro` ends with the colon that introduces the skill URL; `body` is everything after it. */
+const PROMPT_COPY: Record<CoreLocale, { intro: string; body: string }> = {
+  en: {
+    intro: "Read and follow the Busabase Agent Skill — it is the single source of truth:",
+    body: "Follow its onboarding to set me up. Don't choose a merge policy yourself unless I ask for one — submit the change and let Busabase apply my permissions to decide whether it merges now or waits for review. Reply to me in English.",
+  },
+  "zh-CN": {
+    intro: "阅读并遵循 Busabase Agent Skill——它是唯一事实来源：",
+    body: "按它的引导帮我把工作区设置好。除非我明确要求，否则不要自己指定合并策略——提交后让 Busabase 按我的权限决定是直接合并还是排队待审。请用简体中文回复我。",
+  },
+  "zh-TW": {
+    intro: "閱讀並遵循 Busabase Agent Skill——它是唯一事實來源：",
+    body: "依照它的引導幫我把工作區設定好。除非我明確要求，否則不要自己指定合併策略——提交後讓 Busabase 依我的權限決定是直接合併還是排隊等待審核。請用繁體中文回覆我。",
+  },
+  ja: {
+    intro: "Busabase Agent Skill を読んで従ってください——これが唯一の信頼できる情報源です：",
+    body: "オンボーディングに従ってセットアップしてください。私が明示的に指示しない限り、マージ方針を自分で指定しないでください。提出後は、直ちにマージするか審査待ちにするかを私の権限に基づいて Busabase が判断します。日本語で返信してください。",
+  },
+  ko: {
+    intro: "Busabase Agent Skill을 읽고 따르세요. 이것이 유일한 기준입니다:",
+    body: "온보딩 안내에 따라 저를 위해 설정해 주세요. 제가 요청하지 않는 한 병합 정책을 직접 정하지 마세요. 변경 사항을 제출하면 Busabase가 제 권한에 따라 바로 병합할지, 리뷰를 기다릴지 결정합니다. 한국어로 답해 주세요.",
+  },
+  es: {
+    intro: "Lee y sigue la Busabase Agent Skill — es la única fuente de verdad:",
+    body: "Sigue su incorporación para configurarme todo. No elijas tú una política de fusión a menos que yo te la pida: envía el cambio y deja que Busabase aplique mis permisos para decidir si se fusiona ahora o espera revisión. Respóndeme en español.",
+  },
+  pt: {
+    intro: "Leia e siga a Busabase Agent Skill — ela é a única fonte de verdade:",
+    body: "Siga o onboarding dela para me configurar. Não escolha uma política de mesclagem por conta própria, a menos que eu peça: envie a alteração e deixe o Busabase aplicar minhas permissões para decidir se ela é mesclada agora ou aguarda revisão. Responda em português.",
+  },
+  vi: {
+    intro: "Hãy đọc và làm theo Busabase Agent Skill — đây là nguồn sự thật duy nhất:",
+    body: "Làm theo phần làm quen của nó để thiết lập cho tôi. Đừng tự chọn chính sách hợp nhất trừ khi tôi yêu cầu — hãy gửi thay đổi và để Busabase áp dụng quyền của tôi để quyết định hợp nhất ngay hay chờ duyệt. Hãy trả lời tôi bằng tiếng Việt.",
+  },
+  fr: {
+    intro: "Lisez et suivez le Busabase Agent Skill — c'est l'unique source de vérité :",
+    body: "Suivez son accueil pour me configurer. Ne choisissez pas vous-même de politique de fusion sauf si je vous le demande — soumettez la modification et laissez Busabase appliquer mes autorisations pour décider si elle est fusionnée tout de suite ou attend une revue. Répondez-moi en français.",
+  },
+  de: {
+    intro: "Lesen und befolgen Sie den Busabase Agent Skill — er ist die einzige Wahrheitsquelle:",
+    body: "Folgen Sie seinem Onboarding, um mich einzurichten. Wählen Sie nicht selbst eine Merge-Richtlinie, es sei denn, ich verlange es — reichen Sie die Änderung ein und lassen Sie Busabase anhand meiner Berechtigungen entscheiden, ob sie sofort gemergt wird oder auf Review wartet. Antworten Sie mir auf Deutsch.",
+  },
+};
+
 export function createAgentSkillPrompt(
   skillUrl: string,
   lang?: string,
   targetSpaceId?: string,
 ): string {
-  const targetLine = targetSpaceId
-    ? {
-        en: `\nTarget the currently selected Busabase space: ${targetSpaceId}. Use this exact ID for BUSABASE_SPACE_ID / x-busabase-space unless I explicitly choose another space.\n`,
-        "zh-CN": `\n当前选中的 Busabase 空间是：${targetSpaceId}。除非我明确选择其他空间，否则请用这个 ID 作为 BUSABASE_SPACE_ID / x-busabase-space。\n`,
-        ja: `\n現在選択されている Busabase スペース: ${targetSpaceId}。私が明示的に別のスペースを選ばない限り、この ID を BUSABASE_SPACE_ID / x-busabase-space に使ってください。\n`,
-      }[resolvePromptLang(lang)]
-    : "";
+  const locale: CoreLocale = isCoreLocale(lang) ? lang : "en";
+  const targetLine = targetSpaceId ? PROMPT_TARGET_LINE[locale](targetSpaceId) : "";
+  const { intro, body } = PROMPT_COPY[locale];
 
-  switch (resolvePromptLang(lang)) {
-    case "zh-CN":
-      return `阅读并遵循 Busabase Agent Skill——它是唯一事实来源：
+  return `${intro}
 ${skillUrl}
 ${targetLine}
 
-按它的引导帮我把工作区设置好。除非我明确要求，否则不要自己指定合并策略——提交后让 Busabase 按我的权限决定是直接合并还是排队待审。请用简体中文回复我。`;
-    case "ja":
-      return `Busabase Agent Skill を読んで従ってください——これが唯一の信頼できる情報源です：
-${skillUrl}
-${targetLine}
-
-オンボーディングに従ってセットアップしてください。私が明示的に指示しない限り、マージ方針を自分で指定しないでください。提出後は、直ちにマージするか審査待ちにするかを私の権限に基づいて Busabase が判断します。日本語で返信してください。`;
-    default:
-      return `Read and follow the Busabase Agent Skill — it is the single source of truth:
-${skillUrl}
-${targetLine}
-
-Follow its onboarding to set me up. Don't choose a merge policy yourself unless I ask for one — submit the change and let Busabase apply my permissions to decide whether it merges now or waits for review. Reply to me in English.`;
-  }
+${body}`;
 }

@@ -5,7 +5,7 @@ import {
   buildAgentInstallPrompt,
   skillNameForSource,
 } from "../src/domains/dashboard/helpers/agent-install-prompt";
-import { coreMessagesByLocale } from "../src/i18n";
+import { coreMessagesByLocale } from "../src/i18n/catalog";
 import { fmt } from "../src/i18n/fmt";
 import { coreMessagesEn } from "../src/i18n/messages";
 

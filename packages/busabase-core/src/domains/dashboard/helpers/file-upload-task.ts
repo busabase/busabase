@@ -54,6 +54,12 @@ export interface RuntimeFileUpload {
   file: File;
   path: string;
   asset: FileUploadAsset | null;
+  /**
+   * Set when this file overwrites the file already stored at `path`.
+   * `baseContentHash` is the hash the user saw, so the merge fails with a
+   * conflict instead of clobbering a newer edit made in the meantime.
+   */
+  replace?: { baseContentHash?: string } | null;
 }
 
 export interface RuntimeFileUploadBatch {
@@ -62,8 +68,9 @@ export interface RuntimeFileUploadBatch {
 
 export interface FileUploadOperation {
   assetId: string;
+  baseContentHash?: string;
   displayName: string;
-  kind: "create";
+  kind: "create" | "update";
   mimeType: string;
   path: string;
 }
@@ -101,6 +108,24 @@ export const isFileUploadAbortError = (error: unknown): boolean =>
 
 export const throwIfFileUploadAborted = (signal: AbortSignal): void => {
   if (signal.aborted) throw createFileUploadAbortError();
+};
+
+/**
+ * Maps one uploaded file to its Change Request operation: a replacement
+ * becomes an `update` at the same path, everything else stays a `create`.
+ */
+export const buildFileUploadOperation = (
+  item: RuntimeFileUpload & { asset: FileUploadAsset },
+): FileUploadOperation => {
+  const operation: FileUploadOperation = {
+    assetId: item.asset.assetId,
+    displayName: item.asset.displayName,
+    kind: item.replace ? "update" : "create",
+    mimeType: item.asset.mimeType,
+    path: item.path,
+  };
+  if (item.replace?.baseContentHash) operation.baseContentHash = item.replace.baseContentHash;
+  return operation;
 };
 
 /**
@@ -146,14 +171,9 @@ export async function executeFileUploadBatch<TSubmission>({
   onSubmitting();
   return submit(
     batch.files.map((item) => {
-      if (!item.asset) throw new Error(`Missing uploaded Asset for ${item.path}`);
-      return {
-        assetId: item.asset.assetId,
-        displayName: item.asset.displayName,
-        kind: "create",
-        mimeType: item.asset.mimeType,
-        path: item.path,
-      };
+      const { asset } = item;
+      if (!asset) throw new Error(`Missing uploaded Asset for ${item.path}`);
+      return buildFileUploadOperation({ ...item, asset });
     }),
   );
 }

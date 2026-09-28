@@ -39,4 +39,28 @@ describe("resolveSubmissionIdentity", () => {
       identityUnavailable: true,
     });
   });
+
+  it("treats a playbook-only attribution (no channel, no names) like no attribution", () => {
+    const playbookOnly = {
+      displayName: null,
+      ownerName: null,
+      channel: null,
+      playbook: {
+        kind: "skill" as const,
+        accessible: true,
+        nodeId: "nod_1",
+        key: null,
+        nodeType: "skill",
+        nodeSlug: "triage",
+        label: "Triage",
+      },
+    };
+    const user = { id: "usr_1", name: "Leon", email: null, image: null };
+    expect(resolveSubmissionIdentity(user, "usr_1", playbookOnly)).toEqual(
+      resolveSubmissionIdentity(user, "usr_1", null),
+    );
+    expect(resolveSubmissionIdentity(null, "Codex", playbookOnly)).toEqual(
+      resolveSubmissionIdentity(null, "Codex", null),
+    );
+  });
 });

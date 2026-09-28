@@ -6,6 +6,8 @@
  * unit-tested without spawning anything.
  */
 
+import { PLAYBOOK_RULE_MARKDOWN, PLAYBOOK_RULE_SECTION_TITLE } from "../../../playbook-rule";
+
 /**
  * The Busabase MCP endpoint this same process serves (`/api/mcp`, Streamable
  * HTTP — see `apps/busabase/src/app/api/mcp/handler.ts`).
@@ -26,7 +28,7 @@ export function resolveBusabaseMcpUrl(): string {
 }
 
 /**
- * `CLAUDE.md` seeded into the scratch workspace.
+ * The guide seeded into the scratch workspace as `CLAUDE.md`, `AGENTS.md`, and `GEMINI.md`.
  *
  * Deliberately short, and deliberately *not* a copy of the MCP server's own
  * `instructions`/`busabase://skill` (see `mcp-skill.ts`) — the agent already
@@ -59,17 +61,22 @@ user's workspace: listing nodes, reading records, searching, and proposing
 changes. That server also sends its own instructions and a full reference guide
 (the \`busabase://skill\` resource) — read them before your first write.
 
+## ${PLAYBOOK_RULE_SECTION_TITLE}
+
+${PLAYBOOK_RULE_MARKDOWN}
+
+Over the \`busabase\` MCP server that means \`playbooks_search\` (your phrasings as
+\`queries\`, plus \`nearNodeId\`), then \`playbooks_get\` for the item that fits.
+
 ## Some folders here are apps, and they came with a manual
 
 A folder in this workspace may be an **app** installed from a template: its
 tables, its interface, and a Skill node holding the manual its author wrote for
 you — which names the tables, what each field means, and what the app must never
-do.
-
-Ask the \`busabase\` MCP server's guide tool for topic \`apps\` to see which apps
-this workspace has, then \`skill:<slug>\` to read one. Do that **before** acting
-on an app's data: guessing a schema the app already documents is how records end
-up in the wrong table.
+do. \`playbooks_search\` finds that manual when it fits the job; to list every
+installed app, ask the guide tool for topic \`apps\`, then \`skill:<slug>\` to
+read one. Do that **before** acting on an app's data: guessing a schema the app
+already documents is how records end up in the wrong table.
 
 ## Writes go through Change Requests
 

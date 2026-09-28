@@ -59,6 +59,24 @@ export interface BusabaseSourceProvenance {
     name?: string | null;
   };
   channel?: BusabaseSourceChannel | string | null;
+  /**
+   * The playbook the caller declared it was following (`x-busabase-playbook`),
+   * ALREADY validated and labelled by the server (see
+   * `domains/playbooks/logic/playbook-attribution.ts`). Never set from caller
+   * input directly.
+   */
+  playbook?: BusabasePlaybookProvenance | null;
+}
+
+/** Stored shape of a validated playbook declaration (`sourceMeta.provenance.playbook`). */
+export interface BusabasePlaybookProvenance {
+  kind: "skill" | "prompt";
+  nodeId: string;
+  key: string | null;
+  nodeType: string;
+  nodeSlug: string;
+  /** Server-derived: the skill's name, or the prompt's label (English fallback). */
+  label: string;
 }
 
 export interface BusabaseEmbedActorState {
@@ -568,6 +586,28 @@ export function getContextSourceProvenance(): BusabaseSourceProvenance | undefin
   return storage.getStore()?.sourceProvenance;
 }
 
+/**
+ * Re-enter the CURRENT context with a validated playbook added to its source
+ * provenance, so every change request / audit row `fn` writes records it via
+ * `withContextSourceMeta`. Extends whatever kind of context is active (member,
+ * local…) rather than constructing a new one; outside any context it is a
+ * no-op. `extra` lets a host with no provenance of its own (the open-source
+ * local host) name the channel alongside the playbook.
+ */
+export function runWithContextPlaybook<T>(
+  playbook: BusabasePlaybookProvenance,
+  fn: () => Promise<T>,
+  extra?: Pick<BusabaseSourceProvenance, "channel">,
+): Promise<T> {
+  const store = storage.getStore();
+  if (!store) return fn();
+  const current = store.sourceProvenance;
+  const sourceProvenance: BusabaseSourceProvenance = current
+    ? { ...current, playbook }
+    : { ...(extra?.channel ? { channel: extra.channel } : {}), playbook };
+  return storage.run({ ...store, sourceProvenance }, fn);
+}
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -597,6 +637,10 @@ export function withContextSourceMeta(
   else delete mergedProvenance.owner;
   if (apiKey) mergedProvenance.apiKey = apiKey;
   else delete mergedProvenance.apiKey;
+  // A playbook is only ever the server-validated one from the context — never
+  // one carried in by an explicit sourceMeta.
+  if (isRecord(contextProvenance.playbook)) mergedProvenance.playbook = contextProvenance.playbook;
+  else delete mergedProvenance.playbook;
 
   return {
     ...sourceMeta,

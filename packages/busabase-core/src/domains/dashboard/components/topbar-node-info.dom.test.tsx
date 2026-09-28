@@ -4,7 +4,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CoreI18nProvider, coreMessagesByLocale } from "../../../i18n";
+import { CoreI18nProvider } from "../../../i18n";
+import { coreMessagesByLocale } from "../../../i18n/catalog";
 import { useRegisterTopbarNodeInfo } from "../hooks/use-register-topbar-node-info";
 import { useTopbarNodeInfoStore } from "../store/topbar-node-info-store";
 import { BusabaseTopbarBreadcrumb } from "./topbar";

@@ -2,6 +2,7 @@
 
 import type { FileTreeFileVO } from "busabase-contract/types";
 import { Button } from "kui/button";
+import { Checkbox } from "kui/checkbox";
 import { Dialog, DialogDescription, DialogHeader, DialogTitle } from "kui/dialog";
 import { Input } from "kui/input";
 import { Label } from "kui/label";
@@ -44,7 +45,13 @@ export function FileTreeUploadControl({
   availableFolders: string[];
   defaultFolder: string;
   existingPaths: Set<string>;
-  onSubmit: (files: File[], folder: string, mode: FileTreeMutationMode) => void | Promise<void>;
+  /** `replacePaths` lists the selected paths that overwrite existing files. */
+  onSubmit: (
+    files: File[],
+    folder: string,
+    mode: FileTreeMutationMode,
+    replacePaths: string[],
+  ) => void | Promise<void>;
 }) {
   const messages = useCoreI18n();
   const locale = useCoreLocale();
@@ -54,6 +61,7 @@ export function FileTreeUploadControl({
   const [selectedFolder, setSelectedFolder] = useState(defaultFolder);
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
+  const [replaceExisting, setReplaceExisting] = useState(false);
   const [busy, setBusy] = useState<FileTreeMutationMode | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -74,15 +82,19 @@ export function FileTreeUploadControl({
   const invalidUploadFileName = paths.some((path) => validateFileTreePath(path) !== null);
   const invalidPath =
     Boolean(newFolderError) || folderConflict || invalidFolderPath || invalidUploadFileName;
-  const conflictPath = paths.find((path) => existingPaths.has(path));
+  const conflictPaths = paths.filter((path) => existingPaths.has(path));
+  const conflictPath = conflictPaths[0];
+  // Opting into replacement turns same-path files into overwrites instead of
+  // a blocking conflict; every other check below still applies.
+  const blockingConflictPath = replaceExisting ? undefined : conflictPath;
   const duplicatePath = new Set(paths).size !== paths.length;
   // Each cause gets its own copy: a bad new-folder name and an unstorable
   // uploaded file name are different problems, and pointing either of them at
   // the generic "folder path" message sends the user to fix the wrong field.
   const problem =
     error ??
-    (conflictPath
-      ? messages.nodeDetail.fileAlreadyExists.replace("{path}", conflictPath)
+    (blockingConflictPath
+      ? messages.nodeDetail.fileAlreadyExists.replace("{path}", blockingConflictPath)
       : folderConflict
         ? messages.nodeDetail.folderAlreadyExists.replace("{path}", newFolderPath)
         : duplicatePath
@@ -100,17 +112,23 @@ export function FileTreeUploadControl({
     setSelectedFolder(defaultFolder);
     setCreatingFolder(false);
     setNewFolderName("");
+    setReplaceExisting(false);
     setBusy(null);
     setError(null);
     if (inputRef.current) inputRef.current.value = "";
   };
 
   const submit = async (mode: FileTreeMutationMode) => {
-    if (files.length === 0 || invalidPath || conflictPath || duplicatePath) return;
+    if (files.length === 0 || invalidPath || blockingConflictPath || duplicatePath) return;
     setBusy(mode);
     setError(null);
     try {
-      await onSubmit(files, normalizeFileTreeFolder(folder), mode);
+      await onSubmit(
+        files,
+        normalizeFileTreeFolder(folder),
+        mode,
+        replaceExisting ? conflictPaths : [],
+      );
       setOpen(false);
       reset();
     } catch (caught) {
@@ -129,6 +147,9 @@ export function FileTreeUploadControl({
           const selected = Array.from(event.target.files ?? []);
           if (selected.length === 0) return;
           setFiles(selected);
+          // A new selection must be opted into replacement again; an earlier
+          // choice never silently carries over to different files.
+          setReplaceExisting(false);
           // Only seed the destination when the dialog is opening. Re-picking
           // files from the already-open dialog ("Choose files" in the footer)
           // must keep the folder the user just chose — silently snapping it
@@ -352,6 +373,25 @@ export function FileTreeUploadControl({
               </div>
             </div>
 
+            {conflictPaths.length > 0 ? (
+              <label className="flex items-start gap-2 text-sm" htmlFor="file-tree-upload-replace">
+                <Checkbox
+                  checked={replaceExisting}
+                  disabled={busy !== null}
+                  id="file-tree-upload-replace"
+                  onCheckedChange={(checked) => setReplaceExisting(checked === true)}
+                />
+                <span className="flex flex-col gap-0.5">
+                  <span className="text-foreground">
+                    {messages.nodeDetail.replaceExistingFiles}
+                  </span>
+                  <span className="text-muted-foreground text-xs">
+                    {messages.nodeDetail.replaceExistingFilesHint}
+                  </span>
+                </span>
+              </label>
+            ) : null}
+
             {problem ? (
               <div
                 aria-live="polite"
@@ -381,7 +421,9 @@ export function FileTreeUploadControl({
                 isLoading: busy === "changeRequest",
                 onSubmit: () => void submit("changeRequest"),
               }}
-              disabled={files.length === 0 || invalidPath || Boolean(conflictPath) || duplicatePath}
+              disabled={
+                files.length === 0 || invalidPath || Boolean(blockingConflictPath) || duplicatePath
+              }
               dropdownPosition="above"
               hint={messages.common.mergeImmediatelyHint}
               immediateAction={{

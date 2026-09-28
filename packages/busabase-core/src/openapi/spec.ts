@@ -28,6 +28,11 @@ export async function getBusabaseOpenApiSpec(): Promise<OpenAPI.Document> {
           "Full-text search and unified grep (regex/literal scan across files, Docs, and Base records with one pattern and one coverage report).",
       },
       {
+        name: "Playbooks",
+        description:
+          "The skills and custom node prompts this space already defines for a job. Call `POST /playbooks/search` first on every instruction with a few phrasings of the intent; open a hit with `GET /playbooks/{kind}/{nodeId}` and follow it.",
+      },
+      {
         name: "Bases",
         description:
           "Developer-facing Base endpoints. This is the straightforward table/database API surface.",

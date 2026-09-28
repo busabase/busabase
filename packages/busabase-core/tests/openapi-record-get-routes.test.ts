@@ -195,6 +195,9 @@ describe("Busabase OpenAPI record get route", () => {
     // NOTE: this branch and develop each added ONE endpoint and each bumped
     // this to 120 independently. The merge has to be 121 — a ledger like this
     // is exactly what a "clean" automerge gets silently wrong.
-    expect(operationCount).toBe(121);
+    // +2 -> 123: `POST /playbooks/search` + `GET /playbooks/{kind}/{nodeId}`
+    // (agent-playbook-discovery.md) — node-scoped reads an agent calls first on
+    // every instruction to find the skills/custom prompts the space defines.
+    expect(operationCount).toBe(123);
   });
 });

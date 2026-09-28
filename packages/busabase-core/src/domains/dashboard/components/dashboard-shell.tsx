@@ -22,6 +22,7 @@ import { Toaster } from "kui/sonner";
 import {
   Activity,
   Archive,
+  BookOpen,
   Bot,
   FolderOpen,
   FolderTree,
@@ -32,6 +33,7 @@ import {
   LayoutGrid,
   Link2,
   Lock,
+  Network,
   Pencil,
   Plus,
   Search,
@@ -48,7 +50,7 @@ import type { ComponentProps, ReactNode } from "react";
 import { useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
-import { CoreI18nProvider, coreMessagesByLocale } from "../../../i18n";
+import { CoreI18nProvider, useCoreMessages } from "../../../i18n";
 import { AirAppEngineAvailabilityProvider } from "../../airapp/components/engine-availability-context";
 import type { AirAppRunnerKind } from "../../airapp/components/runners/types";
 import {
@@ -153,9 +155,6 @@ const WORKSPACE_SKELETON_ROWS = [
   { id: "workspace-node-skeleton-5", width: "w-7/12" },
 ] as const;
 
-const isCoreLocale = (locale: string | undefined): locale is keyof typeof coreMessagesByLocale =>
-  locale !== undefined && locale in coreMessagesByLocale;
-
 /**
  * Top-level destinations that no longer sit permanently in the sidebar — hosts
  * expose them in the Space Selector menu instead, so the resting sidebar is
@@ -173,9 +172,26 @@ type ContextualNavKey =
   | "assets"
   | "embed-links"
   | "shared"
+  | "playbooks"
   | "agents"
   | "apps"
-  | "templates";
+  | "templates"
+  | "graph";
+
+/**
+ * A host-only destination that should behave exactly like the built-in ones
+ * above — surfaced as the contextual row while on it, lingering afterwards.
+ * For routes that exist in one host alone (the cloud's `/insights`), which the
+ * shared shell cannot name itself without leaking a host feature into the
+ * open-source package. Every item a host adds to its Space Selector menu that
+ * navigates to a page belongs either in the built-in list or here.
+ */
+export interface HostContextualNavItem {
+  /** Route root, e.g. `"/insights"`. Also matches its sub-paths. Doubles as the stored key. */
+  url: string;
+  title: string;
+  icon: NonNullable<NavItem["icon"]>;
+}
 
 /** Maps a wouter location onto its contextual destination, or null for everything else. */
 const contextualNavKeyForPath = (location: string): ContextualNavKey | null => {
@@ -186,10 +202,28 @@ const contextualNavKeyForPath = (location: string): ContextualNavKey | null => {
   if (path === "/assets" || path.startsWith("/assets/")) return "assets";
   if (path === "/embed-links") return "embed-links";
   if (path === "/shared") return "shared";
+  if (path === "/playbooks") return "playbooks";
   if (path === "/agents" || path.startsWith("/agents/")) return "agents";
   if (path === "/apps" || path.startsWith("/apps/")) return "apps";
   if (path === "/templates" || path.startsWith("/templates/")) return "templates";
+  if (path === "/graph") return "graph";
   return null;
+};
+
+/**
+ * The contextual key for `location` across built-in AND host destinations. Host
+ * keys are their `url`, which can never collide with a built-in key (those
+ * carry no leading slash).
+ */
+const contextualKeyForPath = (
+  location: string,
+  hostItems: readonly HostContextualNavItem[],
+): string | null => {
+  const builtIn = contextualNavKeyForPath(location);
+  if (builtIn) return builtIn;
+  const path = location.split("?")[0] ?? location;
+  const host = hostItems.find((item) => path === item.url || path.startsWith(`${item.url}/`));
+  return host ? host.url : null;
 };
 
 /**
@@ -210,14 +244,19 @@ const isContextualNavKey = (value: string | null): value is ContextualNavKey =>
   value === "assets" ||
   value === "embed-links" ||
   value === "shared" ||
+  value === "playbooks" ||
   value === "agents" ||
   value === "apps" ||
-  value === "templates";
+  value === "templates" ||
+  value === "graph";
 
-const readStoredContextualNavKey = (): ContextualNavKey | null => {
+const readStoredContextualNavKey = (hostItems: readonly HostContextualNavItem[]): string | null => {
   try {
     const stored = window.sessionStorage.getItem(CONTEXTUAL_NAV_STORAGE_KEY);
-    return isContextualNavKey(stored) ? stored : null;
+    if (isContextualNavKey(stored)) return stored;
+    // A host key survives only while that host still offers it — a stale key
+    // from another host (or a removed route) resolves to no row at all.
+    return hostItems.some((item) => item.url === stored) ? stored : null;
   } catch {
     // Private mode / storage disabled — the row just falls back to session-only.
     return null;
@@ -382,7 +421,16 @@ interface BusabaseDashboardShellProps {
    * correct answer for the only user there is.
    */
   canManageShares?: boolean;
+  /**
+   * Host-only pages reachable from the host's Space Selector menu that should
+   * surface as the contextual sidebar row like Inbox/Activity do — see
+   * `HostContextualNavItem`. Keep it referentially stable (memoize it); it
+   * feeds the row's memo.
+   */
+  hostContextualNavItems?: readonly HostContextualNavItem[];
 }
+
+const NO_HOST_CONTEXTUAL_NAV_ITEMS: readonly HostContextualNavItem[] = [];
 
 /**
  * The Busabase workbench chrome (sidebar node tree + header), shared by every host.
@@ -427,6 +475,7 @@ function DashboardShellInner({
   cacheSpaceKey = "local",
   currentUserId,
   canManageShares: canManageSharesProp,
+  hostContextualNavItems = NO_HOST_CONTEXTUAL_NAV_ITEMS,
 }: BusabaseDashboardShellProps) {
   // The node targeted by the sidebar "•••" → Settings/Rename/Permissions
   // actions; drives the one shared `NodeSettingsDialog` rendered below (only
@@ -613,7 +662,7 @@ function DashboardShellInner({
     });
   };
 
-  const messages = isCoreLocale(locale) ? coreMessagesByLocale[locale] : coreMessagesByLocale.en;
+  const messages = useCoreMessages(locale);
   const nav = messages.nav;
   const navMainLabels = {
     dragToReorder: messages.shell.dragToReorder,
@@ -633,18 +682,16 @@ function DashboardShellInner({
   // from the server's HTML and break hydration, so the restore happens in the
   // mount effect below instead. (`location` is declared once at the top of the
   // component, shared with the node-action dialogs.)
-  const activeContextualKey = contextualNavKeyForPath(location);
-  const [lastContextualKey, setLastContextualKey] = useState<ContextualNavKey | null>(
-    activeContextualKey,
-  );
+  const activeContextualKey = contextualKeyForPath(location, hostContextualNavItems);
+  const [lastContextualKey, setLastContextualKey] = useState<string | null>(activeContextualKey);
   // Restore after a hard navigation (reload / new tab / SSR deep link), which
   // remounts the shell and would otherwise drop the row mid-review. Skipped when
   // the current route already supplies a key — that one is newer than storage.
   useEffect(() => {
     if (activeContextualKey) return;
-    const stored = readStoredContextualNavKey();
+    const stored = readStoredContextualNavKey(hostContextualNavItems);
     if (stored) setLastContextualKey(stored);
-  }, [activeContextualKey]);
+  }, [activeContextualKey, hostContextualNavItems]);
   useEffect(() => {
     if (!activeContextualKey) return;
     setLastContextualKey(activeContextualKey);
@@ -1049,25 +1096,34 @@ function DashboardShellInner({
         // screen, so the lingering row is not offered to someone who would
         // only land on its insufficient-permission state.
         return canUseSharedFilter ? { title: nav.shared, url: "/shared", icon: Globe } : null;
+      case "playbooks":
+        return { title: nav.playbooks, url: "/playbooks", icon: BookOpen };
       case "agents":
         return { title: nav.agents, url: "/agents", icon: Bot };
       case "apps":
         return { title: nav.apps, url: "/apps", icon: LayoutGrid };
       case "templates":
         return { title: nav.templates, url: "/templates", icon: Shapes };
-      default:
-        return null;
+      case "graph":
+        return { title: nav.graph, url: "/graph", icon: Network };
+      default: {
+        const host = hostContextualNavItems.find((item) => item.url === lastContextualKey);
+        return host ? { title: host.title, url: host.url, icon: host.icon } : null;
+      }
     }
   }, [
     lastContextualKey,
+    hostContextualNavItems,
     nav.inbox,
     nav.activity,
     nav.archive,
     nav.embedLinks,
     nav.shared,
+    nav.playbooks,
     nav.agents,
     nav.apps,
     nav.templates,
+    nav.graph,
     assetsLabel,
     activeChangeRequestCount,
     canManageShareSettings,

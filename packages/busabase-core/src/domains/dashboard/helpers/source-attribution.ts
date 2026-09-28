@@ -45,11 +45,17 @@ export const resolveSubmissionIdentity = (
   attribution: SourceAttributionVO | null | undefined,
   messages?: CoreI18nMessages,
 ): SubmissionIdentity => {
+  // An attribution can carry only a playbook (self-hosted writes with no
+  // credential/channel): null or blank names fall through to the user, exactly
+  // as if there were no attribution at all.
   const ownerLabel =
-    attribution?.ownerName?.trim() ??
+    attribution?.ownerName?.trim() ||
     (user ? formatUserRefLabel(user, fallbackId, messages) : legacyLabel(fallbackId));
   const channelLabel = attribution?.channel ? channelLabels(messages)[attribution.channel] : null;
-  const credentialLabel = attribution?.displayName?.trim() ?? null;
+  const credentialLabel = attribution?.displayName?.trim() || null;
+  const hasIdentity = Boolean(
+    attribution?.ownerName?.trim() || credentialLabel || attribution?.channel,
+  );
   const sourceLabel = credentialLabel ?? channelLabel;
   const viaSource = sourceLabel
     ? fmt(messages?.activity.viaChannel ?? "via {channel}", { channel: sourceLabel })
@@ -64,6 +70,6 @@ export const resolveSubmissionIdentity = (
     channelLabel,
     inboxLabel: viaSource ? `${ownerLabel} ${viaSource}` : ownerLabel,
     activityByline: [viaSource, distinctChannel].filter(Boolean).join(" · ") || null,
-    identityUnavailable: !user && !attribution && Boolean(fallbackId?.trim()),
+    identityUnavailable: !user && !hasIdentity && Boolean(fallbackId?.trim()),
   };
 };

@@ -82,6 +82,36 @@ const formatDetailTime = (value: string, locale: Intl.LocalesArgument) =>
 const formatFullTime = (value: string, locale: Intl.LocalesArgument) =>
   new Date(value).toLocaleString(locale);
 
+/**
+ * "2 days ago" / "yesterday" / "3 months ago", in the reader's locale, via
+ * `Intl.RelativeTimeFormat` (no catalog strings needed). Picks the largest
+ * unit that is at least 1; anything under a minute reads as "now". A future
+ * time (clock skew) is clamped to "now" rather than reading "in 2 minutes".
+ * `now` is injectable for tests.
+ */
+const formatRelativeTime = (
+  value: string,
+  locale: Intl.LocalesArgument,
+  now: Date = new Date(),
+): string => {
+  const seconds = Math.max(0, Math.round((now.getTime() - new Date(value).getTime()) / 1000));
+  const rtf = new Intl.RelativeTimeFormat(locale as string | string[] | undefined, {
+    numeric: "auto",
+  });
+  const units: [Intl.RelativeTimeFormatUnit, number][] = [
+    ["year", 365 * 24 * 60 * 60],
+    ["month", 30 * 24 * 60 * 60],
+    ["week", 7 * 24 * 60 * 60],
+    ["day", 24 * 60 * 60],
+    ["hour", 60 * 60],
+    ["minute", 60],
+  ];
+  for (const [unit, size] of units) {
+    if (seconds >= size) return rtf.format(-Math.floor(seconds / size), unit);
+  }
+  return rtf.format(0, "second");
+};
+
 const formatAttachmentSize = (bytes: number) => {
   if (!Number.isFinite(bytes) || bytes <= 0) {
     return "";
@@ -206,6 +236,7 @@ export {
   formatListDateTime,
   formatDetailTime,
   formatFullTime,
+  formatRelativeTime,
   formatAttachmentSize,
   KNOWN_ACTOR_LABELS,
   formatMemberChipLabel,

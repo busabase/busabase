@@ -140,7 +140,7 @@ export const createViewChangeRequest = async (
     payload: fields,
     operation: "view_create",
     message: parsed.message,
-    author: parsed.submittedBy,
+    author: resolveActorId(parsed.submittedBy),
     createdAt: timestamp,
   });
   await db.insert(busabaseChangeRequests).values({
@@ -238,7 +238,7 @@ export const createUpdateViewChangeRequest = async (
     payload: fields,
     operation: "view_update",
     message: parsed.message,
-    author: parsed.submittedBy,
+    author: resolveActorId(parsed.submittedBy),
     createdAt: timestamp,
   });
   await db.insert(busabaseChangeRequests).values({
@@ -334,7 +334,7 @@ export const createDeleteViewChangeRequest = async (
     payload: fields,
     operation: "view_delete",
     message: parsed.message,
-    author: parsed.submittedBy,
+    author: resolveActorId(parsed.submittedBy),
     createdAt: timestamp,
   });
   await db.insert(busabaseChangeRequests).values({
@@ -433,7 +433,7 @@ export const createRestoreViewChangeRequest = async (
     payload: fields,
     operation: "view_restore",
     message: parsed.message,
-    author: parsed.submittedBy,
+    author: resolveActorId(parsed.submittedBy),
     createdAt: timestamp,
   });
   await db.insert(busabaseChangeRequests).values({

@@ -34,7 +34,7 @@ import { SidebarTrigger, useSidebar } from "kui/sidebar";
 // `SPALink` appends `?demo=1` on <Link> clicks; `useAddDemoParam` wraps
 // programmatic `setLocation` targets — together they keep the demo across all
 // navigation (the proxy reads `?demo` via Referer and keeps serving the demo router).
-import { type iString, iStringParse } from "openlib/i18n/i-string";
+import { iStringParse } from "openlib/i18n/i-string";
 import { useAddDemoParam } from "openlib/ui/dashboard";
 import {
   type ComponentProps,
@@ -85,6 +85,7 @@ import { BaseGraphView } from "./components/graph-view";
 import { HomeView } from "./components/home";
 import { ActivityView, InboxView } from "./components/inbox";
 import { NodeRouteStateView } from "./components/node-route-state";
+import { PlaybooksView } from "./components/playbooks-view";
 import { RecordDetailView, RecordEditorView, RecordTopbarActions } from "./components/record-views";
 import { SearchDialog } from "./components/search-dialog";
 import { SearchView } from "./components/search-view";
@@ -124,6 +125,7 @@ import type {
   BusabaseBreadcrumbItem,
   CreateBaseFieldPayload,
   RecordSubmitOptions,
+  UpdateBaseFieldPatch,
   ViewFormPayload,
   ViewSubmitOptions,
 } from "./helpers/view-types";
@@ -1051,6 +1053,10 @@ function BusabaseDashboardContent({
       return { badge: null, title: messages.nav.shared };
     }
 
+    if (locationPath === "/playbooks") {
+      return { badge: null, title: messages.nav.playbooks };
+    }
+
     // Catch-all: name the landing page, not one particular feature page. (This
     // used to say "Reviews" back when Inbox was where an unqualified visit landed.)
     return {
@@ -1181,6 +1187,10 @@ function BusabaseDashboardContent({
 
     if (locationPath === "/shared") {
       return [{ label: messages.nav.shared }];
+    }
+
+    if (locationPath === "/playbooks") {
+      return [{ label: messages.nav.playbooks }];
     }
 
     const nodeDetailBreadcrumbItems = getNodeDetailBreadcrumbItems(
@@ -1749,39 +1759,62 @@ function BusabaseDashboardContent({
     [client, messages.createNode.addFieldMessage, refresh, setLocation],
   );
 
-  const submitUpdateFieldName = useCallback(
+  const submitUpdateField = useCallback(
     async (
       base: BaseVO,
       fieldId: string,
-      name: iString,
+      patch: UpdateBaseFieldPatch,
       options?: { mergeImmediately?: boolean },
     ) => {
       setError(null);
+      const field = base.fields.find((item) => item.id === fieldId);
+      // A choices edit rides in the same update as a rename, so both land (or
+      // wait for review) together. `options` replaces the stored object, so
+      // keep whatever else a select field carries alongside `choices`.
+      const nextOptions =
+        patch.choices !== undefined ? { ...field?.options, choices: patch.choices } : undefined;
+      const renameOnly = patch.choices === undefined;
+      const displayName = iStringParse(patch.name ?? field?.name ?? fieldId);
       // `autoMerge` was not being sent at all, so the endpoint's permission-aware
       // default applied to BOTH modes: a write-capable user pressing "submit for
       // review" got the rename merged and was then told a request was waiting.
       // Send the intent, and report what actually happened.
       const changeRequest = await client.createUpdateFieldChangeRequest(base.id, {
         fieldId,
-        patch: { name },
-        message: fmt(messages.createNode.renameFieldMessage, {
-          field: iStringParse(name),
-        }),
+        patch: {
+          ...(patch.name !== undefined ? { name: patch.name } : {}),
+          ...(nextOptions ? { options: nextOptions } : {}),
+        },
+        message: fmt(
+          renameOnly
+            ? messages.createNode.renameFieldMessage
+            : messages.createNode.updateFieldMessage,
+          { field: displayName },
+        ),
         autoMerge: options?.mergeImmediately === true,
       });
       await refresh();
       if (changeRequest.status === "merged") {
-        toast.success(messages.createNode.fieldRenamed);
+        toast.success(
+          renameOnly ? messages.createNode.fieldRenamed : messages.createNode.fieldUpdated,
+        );
         return;
       }
-      toast.success(messages.createNode.renameRequestSubmitted);
+      toast.success(
+        renameOnly
+          ? messages.createNode.renameRequestSubmitted
+          : messages.createNode.fieldUpdateRequestSubmitted,
+      );
       setLocation(`/inbox/${changeRequest.id}`);
     },
     [
       client,
       messages.createNode.fieldRenamed,
+      messages.createNode.fieldUpdated,
+      messages.createNode.fieldUpdateRequestSubmitted,
       messages.createNode.renameFieldMessage,
       messages.createNode.renameRequestSubmitted,
+      messages.createNode.updateFieldMessage,
       refresh,
       setLocation,
     ],
@@ -2475,6 +2508,10 @@ function BusabaseDashboardContent({
       return <SharedAccessView orpc={orpc} />;
     }
 
+    if (locationPath === "/playbooks") {
+      return <PlaybooksView orpc={orpc} />;
+    }
+
     if (locationPath === "/assets" || locationPath.startsWith("/assets/")) {
       const assetId = locationPath.startsWith("/assets/")
         ? locationPath.slice("/assets/".length)
@@ -2557,7 +2594,7 @@ function BusabaseDashboardContent({
           onDeleteField={submitDeleteField}
           onRestoreField={submitRestoreField}
           onSetPrimaryField={submitSetPrimaryField}
-          onUpdateFieldName={submitUpdateFieldName}
+          onUpdateField={submitUpdateField}
         />
       );
     }
@@ -2770,7 +2807,7 @@ function BusabaseDashboardContent({
     submitRestoreRecord,
     submitMoveRecord,
     submitPatchRecord,
-    submitUpdateFieldName,
+    submitUpdateField,
     submitUpdateRecord,
     submitUpdateView,
     uploadAttachment,

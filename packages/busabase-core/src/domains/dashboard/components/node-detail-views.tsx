@@ -533,8 +533,19 @@ export function FileTreeDetailView({
     );
   };
 
-  const uploadFiles = (files: File[], folder: string, mode: FileTreeMutationMode) => {
+  const uploadFiles = async (
+    files: File[],
+    folder: string,
+    mode: FileTreeMutationMode,
+    replacePaths: string[],
+  ) => {
     if (!fileTree) return;
+    // Pin each replaced file to the hash we read now, so the merge rejects the
+    // overwrite if someone else changed that file in the meantime.
+    const currentFiles = await Promise.all(replacePaths.map((path) => readFileForAction(path)));
+    const replace = new Map<string, string | null>(
+      replacePaths.map((path, index) => [path, currentFiles[index]?.contentHash || null]),
+    );
     uploadTasks.enqueue({
       files,
       folder,
@@ -542,6 +553,7 @@ export function FileTreeDetailView({
       nodeId: fileTree.node.id,
       nodeName: fileTree.node.name,
       nodeType,
+      ...(replace.size > 0 ? { replace } : {}),
     });
   };
 

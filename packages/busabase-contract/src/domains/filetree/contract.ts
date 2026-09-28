@@ -165,7 +165,13 @@ export const createFileTreeChangeRequestInputSchema = z.object({
     .describe(
       'Explanation shown to the human reviewer. Write a conventional-commit style subject — imperative verb + what + why, e.g. "Rewrite README.md quickstart for the new auth flow".',
     ),
-  submittedBy: z.string().optional().default("local-producer"),
+  submittedBy: z
+    .string()
+    .optional()
+    .default("local-producer")
+    .describe(
+      "Producer label for hosts with no authentication (the open-source single-user build). A host that authenticates the caller — Busabase Cloud — attributes the proposal to that account and ignores this value.",
+    ),
   operations: z.array(fileTreeFileOperationInputSchema).min(1),
   // Permission-aware for every operation kind, deletes included. A batch
   // containing a `delete` used to be pinned review-first regardless of this

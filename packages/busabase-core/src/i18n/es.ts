@@ -148,6 +148,9 @@ export const dashboardEs: CoreI18nMessages = {
     targetFolderHint: "Déjalo vacío para añadir los archivos en la raíz del Drive.",
     removeSelectedFile: "Quitar {name} de esta subida",
     fileAlreadyExists: 'Ya existe un archivo en "{path}".',
+    replaceExistingFiles: "Reemplazar archivos con el mismo nombre",
+    replaceExistingFilesHint:
+      "Los archivos en la misma ruta se sobrescriben. La versión anterior no se conserva: descárgala antes si todavía la necesitas.",
     duplicateUploadNames: "Dos de los archivos seleccionados usarían la misma ruta del Drive.",
     invalidFilePath: "Introduce una ruta de carpeta relativa del Drive válida.",
     invalidFolderName: "Introduce un nombre de carpeta sin barras.",
@@ -854,6 +857,63 @@ export const dashboardEs: CoreI18nMessages = {
     agentPickerEmpty: "Aún no hay agentes conectados.",
     agentPickerConnect: "Conectar un agente",
   },
+  // The space-level Playbooks page (`/playbooks`, agent-playbook-discovery.md §11b H2).
+  playbooksPage: {
+    title: "Playbooks",
+    description:
+      "Las skills y prompts personalizados de este espacio. Los agentes miran aquí primero ante cada instrucción.",
+    tryTitle: "Pruébalo",
+    tryLabel: "¿Qué le dirías a un agente?",
+    tryPlaceholder: "p. ej.: registrar la visita al cliente de hoy",
+    trySubmit: "Buscar",
+    tryNote:
+      "Es una vista previa literal: un agente también envía sus propias reformulaciones (y en inglés), así que puede encontrar más.",
+    tryLoading: "Buscando…",
+    tryFailed: "No se pudo realizar la búsqueda.",
+    tryResultCount: "Mostrando {shown} de {total} playbooks coincidentes",
+    tryNoMatchesTitle: "Ningún playbook coincide con esa frase",
+    tryNoMatchesBody:
+      "Los agentes comparan palabras, no significados. Redacta la etiqueta como la gente pregunta de verdad —«Registrar una visita a cliente» en lugar de «Alta CRM v2»— e incluye las palabras en cada idioma que usa tu equipo.",
+    matchedOn: "Coincide en",
+    matchName: "nombre",
+    matchSlug: "slug",
+    matchDescription: "descripción",
+    matchLabel: "etiqueta",
+    matchBody: "cuerpo",
+    catalogTitle: "Todos los playbooks",
+    catalogCount: "{count} playbooks",
+    filterAll: "Todos",
+    filterSkills: "Skills",
+    filterPrompts: "Prompts",
+    kindSkill: "Skill",
+    kindPrompt: "Prompt",
+    rootGroup: "Espacio de trabajo",
+    onNode: "en {node}",
+    intentReadOnly: "Solo lectura",
+    intentChange: "Hace cambios",
+    openPrompts: "Abrir prompts",
+    truncated: "Mostrando los primeros {shown} de {total}.",
+    loadFailedTitle: "No se pudieron cargar los playbooks",
+    loadFailedBody: "Revisa tu conexión e inténtalo de nuevo.",
+    retry: "Reintentar",
+    emptyTitle: "Aún no hay playbooks",
+    emptyBody:
+      "Un playbook es una forma guardada de hacer un trabajo. Los agentes lo consultan antes de improvisar, así el resultado sale como lo configuraste.",
+    emptyHowSkill: "Añade un nodo Skill y escribe los pasos en su SKILL.md.",
+    emptyHowPrompt:
+      "O abre el botón «Prompts de agente» de cualquier nodo y añade un prompt personalizado.",
+    emptyHelp:
+      "Consulta el artículo de ayuda «Agent Playbooks» para redactarlos de forma que los agentes los encuentren.",
+    emptyFilteredTitle: "Todavía no hay nada de este tipo",
+    noDescription: "Sin descripción",
+    usageUsed: "Usado {count}× en 30 días",
+    usageLast: "último uso {when}",
+    usageUnused: "Sin uso en 30 días",
+    usageUnusedHint:
+      "Ninguna solicitud de cambio ha registrado este playbook en 30 días. Los usos que no escriben nada no cuentan; si los agentes deberían usarlo, revisa su redacción en «Pruébalo».",
+    usageHint:
+      "Solicitudes de cambio que registraron este playbook, en cualquier estado (también las rechazadas). Solo se cuentan las que puedes ver. Un agente que lo sigue sin escribir nada no se cuenta.",
+  },
   nav: {
     home: "Inicio",
     inbox: "Bandeja de entrada",
@@ -867,6 +927,7 @@ export const dashboardEs: CoreI18nMessages = {
     graph: "Vista de grafo",
     workspace: "Espacio de trabajo",
     shared: "Compartidos públicamente",
+    playbooks: "Playbooks",
     base: "Base",
     blogPosts: "Entradas del blog",
     review: "Revisión",
@@ -924,6 +985,7 @@ export const dashboardEs: CoreI18nMessages = {
     sourceFiles: "Archivos",
     sourceNodes: "Contenido de documentos",
     sourceNames: "Bases",
+    sourcePrompts: "Prompts de agente",
     sortLabel: "Ordenar",
     sortRelevance: "Más relevantes",
     sortUpdatedDesc: "Actualizados recientemente",
@@ -990,6 +1052,7 @@ export const dashboardEs: CoreI18nMessages = {
     editRecord: "Editar registro",
     record: "Registro",
     shared: "Compartidos públicamente",
+    playbooks: "Playbooks",
   },
   home: {
     title: "Inicio",
@@ -1104,6 +1167,9 @@ export const dashboardEs: CoreI18nMessages = {
     channelWebhook: "Webhook",
     channelAutomation: "Automatización",
     channelImport: "Importación",
+    viaPlaybookNamed: "vía el playbook «{label}»",
+    viaPlaybookHidden: "vía un playbook",
+    playbookChipTitle: "El playbook que siguió el agente para este cambio",
   },
   actor: {
     localAdmin: "Administrador local",
@@ -1566,6 +1632,24 @@ export const dashboardEs: CoreI18nMessages = {
     relationTargetRequired: "Los campos de relación necesitan una Base de destino.",
     failedAddField: "No se pudo añadir el campo",
     failedRenameField: "No se pudo cambiar el nombre del campo",
+    choices: "Opciones",
+    addChoice: "Añadir opción",
+    choiceNamePlaceholder: "Nombre de la opción",
+    moveChoiceUp: "Subir la opción «{name}»",
+    moveChoiceDown: "Bajar la opción «{name}»",
+    removeChoice: "Eliminar la opción «{name}»",
+    choicesEmptyHint:
+      "Aún no hay opciones. Añade algunas y podrás elegirlas al editar un registro.",
+    choiceNameRequired: "El nombre de la opción no puede estar vacío.",
+    choiceNameDuplicate: "La opción «{name}» está repetida.",
+    choicesRemovedHint:
+      "Se eliminará: {names}. Si algún registro todavía usa estas opciones, se rechazará el guardado; primero cambia esos registros a otra opción.",
+    choicesStillInUse:
+      "No se puede eliminar {names}: todavía lo usan {count} registro{plural}. Cambia esos registros a otra opción y vuelve a guardar.",
+    requestFieldUpdate: "Solicitar cambios",
+    updateFieldNow: "Guardar ahora",
+    updatingField: "Guardando…",
+    failedUpdateField: "No se pudo guardar el campo",
     recordsMissingValue: "Registros sin valor ({count}):",
     recordsReferencingRemovedChoices:
       "Registros que hacen referencia a opciones eliminadas ({count}):",
@@ -1678,6 +1762,15 @@ export const dashboardEs: CoreI18nMessages = {
     conflictingFields: "Campos en conflicto:",
     conflictResolveHint:
       "Vuelve a abrir el cambio propuesto más abajo y modifícalo para fusionarlo con los valores más recientes, o cierra la solicitud de cambio para descartarla.",
+    statusConflict: "Conflicto · no se puede fusionar",
+    staleTargetArchivedTitle:
+      "No se puede fusionar — una fila de esta solicitud de cambio fue archivada",
+    staleTargetDeletedTitle:
+      "No se puede fusionar — una fila de esta solicitud de cambio fue eliminada",
+    staleTargetRow: "La fila:",
+    staleTargetUnknownRow: "Una fila que ya no está en esta base.",
+    staleTargetHint:
+      "Alguien la archivó o eliminó mientras esto esperaba revisión, así que se rechaza todo el lote y no se aplicó nada. Cierra esta solicitud de cambio y vuelve a enviarla sin esa fila.",
     conflictComposerHint:
       "Esta solicitud de cambio entra en conflicto con el registro más reciente. Modifica el cambio propuesto para fusionarlo con los valores actuales, o ciérrala para descartarla.",
     changesRequestedHint:
@@ -1900,6 +1993,9 @@ export const dashboardEs: CoreI18nMessages = {
     updateRecordMessage: "Actualizar {record}",
     addFieldMessage: "Añadir campo {field}",
     renameFieldMessage: "Renombrar campo {field}",
+    updateFieldMessage: "Actualizar campo {field}",
+    fieldUpdated: "Campo actualizado",
+    fieldUpdateRequestSubmitted: "Solicitud de cambio del campo enviada",
     fieldRenamed: "Campo renombrado",
     renameRequestSubmitted: "Solicitud de cambio de nombre enviada",
     autoApproved: "Aprobado automáticamente al crear y fusionar",
@@ -2233,6 +2329,10 @@ export const dashboardEs: CoreI18nMessages = {
     edgeOutcome: "Resultado de la rama",
     workflowSettings: "Ajustes de ejecución",
     executionMode: "Modo de ejecución",
+    notExecutedNote:
+      "Por ahora, los flujos de trabajo solo se guardan y validan; todavía no se ejecutan.",
+    executionModeHint:
+      "Solo registra cómo se iniciará el flujo más adelante; por ahora no se ejecuta.",
     manual: "Manual",
     event: "Evento",
     errorPolicy: "En caso de error",

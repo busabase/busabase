@@ -161,11 +161,48 @@ describe("agent-specific MCP guides", () => {
       mcpUrl: "https://busabase.com/api/mcp",
     })[0];
 
-    expect(resolveMcpGuideLang("fr")).toBe("en");
+    expect(resolveMcpGuideLang("xx")).toBe("en");
+    expect(resolveMcpGuideLang(undefined)).toBe("en");
+    expect(resolveMcpGuideLang("fr")).toBe("fr");
     expect(zhGuide.connection).toContain("不需要登录");
     expect(zhGuide.verification).toContain("只读");
     expect(jaGuide.connection).toContain("OAuth");
     expect(jaGuide.verification).toContain("auth_verify");
+  });
+});
+
+describe("guide copy covers every locale", () => {
+  const locales = ["en", "zh-CN", "zh-TW", "ja", "ko", "es", "pt", "vi", "fr", "de"] as const;
+
+  it.each(locales)("%s resolves to itself and keeps commands intact", (locale) => {
+    expect(resolveMcpGuideLang(locale)).toBe(locale);
+    for (const mode of ["local", "cloud"] as const) {
+      const guides = createMcpAgentGuides({
+        mode,
+        lang: locale,
+        mcpUrl: "https://busabase.com/api/mcp",
+        targetSpaceId: "space_x",
+      });
+      for (const guide of guides) {
+        expect(guide.connection.length).toBeGreaterThan(0);
+        expect(guide.verification).toContain("bases_list");
+      }
+      const budaGuide = guides.find((guide) => guide.id === "buda-agent");
+      expect(budaGuide?.setup).toContain("Buda");
+    }
+  });
+
+  it("translates non-English locales instead of falling back to English", () => {
+    const en = createMcpAgentGuides({ mode: "cloud", lang: "en", mcpUrl: "https://x/api/mcp" });
+    for (const locale of locales.filter((l) => l !== "en")) {
+      const localized = createMcpAgentGuides({
+        mode: "cloud",
+        lang: locale,
+        mcpUrl: "https://x/api/mcp",
+      });
+      expect(localized[0].connection).not.toBe(en[0].connection);
+      expect(localized[0].verification).not.toBe(en[0].verification);
+    }
   });
 });
 
