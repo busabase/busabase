@@ -4,6 +4,7 @@ import { DRAWER_DESTINATIONS, isDrawerAction, isDrawerItemActive } from "./drawe
 vi.mock("lucide-react-native", () => ({
   Activity: () => null,
   Archive: () => null,
+  Bot: () => null,
   FileText: () => null,
   Github: () => null,
   Images: () => null,
@@ -54,5 +55,20 @@ describe("App Launcher / Templates navigation", () => {
     expect(isDrawerItemActive("/drawer/templates", templatesDestination)).toBe(true);
     expect(isDrawerItemActive("/templates/crm-starter", templatesDestination)).toBe(true);
     expect(isDrawerItemActive("/drawer/apps", templatesDestination)).toBe(false);
+  });
+});
+
+const agentsDestination = DRAWER_DESTINATIONS.find(
+  (destination) => !isDrawerAction(destination) && destination.key === "agents",
+);
+
+describe("Agents navigation", () => {
+  it("keeps Agents active on a connection's session list and chat routes, not just the connections list", () => {
+    expect(agentsDestination).toBeDefined();
+    if (!agentsDestination) return;
+    expect(isDrawerItemActive("/drawer/agents", agentsDestination)).toBe(true);
+    expect(isDrawerItemActive("/agents/buda", agentsDestination)).toBe(true);
+    expect(isDrawerItemActive("/agents/buda/ses_123", agentsDestination)).toBe(true);
+    expect(isDrawerItemActive("/drawer/apps", agentsDestination)).toBe(false);
   });
 });
