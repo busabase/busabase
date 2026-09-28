@@ -8,6 +8,7 @@ const vi = {
   embedRuntime: {
     loading: "Đang tải ứng dụng…",
     unavailable: "Nội dung không khả dụng",
+    expired: "Liên kết đã hết hạn",
   },
   seo: {
     title: "Busabase",

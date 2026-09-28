@@ -22,6 +22,7 @@ import {
   busabaseOperations,
   busabaseRecords,
 } from "../db/schema";
+import { applyPlaybookAttributionVisibility } from "../domains/playbooks/logic/playbook-attribution";
 import { type AuditSubjectRef, assertAuditSubjectPermission, isAuditVisibilityMiss } from "./audit";
 import { ensureReady } from "./seed";
 import { toAuditEventVO } from "./vo";
@@ -389,7 +390,10 @@ export const listActivityPaged = async (
   );
   const recordById = new Map(recordVOs.map((record) => [record.id, record]));
   const auditUsers = await resolveUserRefs(auditPOs.map((event) => event.actorId));
-  const auditById = new Map(auditPOs.map((event) => [event.id, toAuditEventVO(event, auditUsers)]));
+  const auditVOs = await applyPlaybookAttributionVisibility(
+    auditPOs.map((event) => toAuditEventVO(event, auditUsers)),
+  );
+  const auditById = new Map(auditVOs.map((event) => [event.id, event]));
 
   const items: ActivityItem[] = [];
   for (const event of page) {

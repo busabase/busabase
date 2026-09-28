@@ -60,10 +60,9 @@ describe("createDefaultFieldOptions", () => {
     });
   });
 
-  it("select / multiselect → seeded choices", () => {
+  it("select / multiselect → empty choices (the dialog collects them)", () => {
     for (const type of ["select", "multiselect"] as FieldType[]) {
-      const options = createDefaultFieldOptions(type, "bse_x", false);
-      expect(options?.choices?.map((choice) => choice.id)).toEqual(["todo", "active", "done"]);
+      expect(createDefaultFieldOptions(type, "bse_x", false)).toEqual({ choices: [] });
     }
   });
 

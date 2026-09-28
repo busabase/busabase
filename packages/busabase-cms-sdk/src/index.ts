@@ -23,6 +23,7 @@ export { BusabaseCmsError, BusabaseCmsSchemaDriftError, BusabaseCmsSetupError } 
 export * from "./fallback";
 export * from "./jsonld";
 export * from "./links";
+export * from "./metadata";
 export type { BusabaseCmsSchemaConfig } from "./provision";
 export * from "./routing";
 export type {

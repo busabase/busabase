@@ -2,10 +2,10 @@ import { Schema } from "@milkdown/kit/prose/model";
 import { describe, expect, it } from "vitest";
 import {
   collectDocLinkEmbeds,
-  isPlayableVideoUrl,
   parseYouTubeVideo,
   resolveDocLinkEmbed,
 } from "../src/domains/doc/components/doc-video";
+import { isPlayableVideoUrl } from "../src/domains/doc/utils/video-url";
 
 describe("isPlayableVideoUrl", () => {
   it("accepts the video extensions a Doc can carry", () => {

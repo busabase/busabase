@@ -71,6 +71,25 @@ describe("Busabase namespaces", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  it("routes bb.playbooks.search/get to the read-only playbook endpoints", async () => {
+    const { fetchImpl, requests } = okFetch();
+    const bb = new Busabase({ baseUrl: "http://localhost:15419", fetch: fetchImpl });
+
+    await bb.playbooks.search({ queries: ["log customer visit", "拜访"], nearNodeId: "nod_1" });
+    await bb.playbooks.get({ kind: "prompt", nodeId: "nod_2", key: "log-visit" });
+
+    expect(requests[0]?.method).toBe("POST");
+    expect(new URL(requests[0]?.url ?? "").pathname).toBe("/api/v1/playbooks/search");
+    expect(await requests[0]?.json()).toEqual({
+      queries: ["log customer visit", "拜访"],
+      nearNodeId: "nod_1",
+    });
+    expect(requests[1]?.method).toBe("GET");
+    const getUrl = new URL(requests[1]?.url ?? "");
+    expect(getUrl.pathname).toBe("/api/v1/playbooks/prompt/nod_2");
+    expect(getUrl.searchParams.get("key")).toBe("log-visit");
+  });
+
   it("lists and reads any node type through the unified bb.nodes surface", async () => {
     const { fetchImpl, requests } = okFetch();
     const bb = new Busabase({ baseUrl: "http://localhost:15419", fetch: fetchImpl });

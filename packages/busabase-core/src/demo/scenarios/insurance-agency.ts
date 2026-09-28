@@ -51,6 +51,8 @@ export const INSURANCE_CLIENT_BUSINESS_OWNER_ID = "rec_seed_ins_client_business_
 export const INSURANCE_CLIENT_FLEET_MANAGER_ID = "rec_seed_ins_client_fleet_manager";
 export const INSURANCE_CLIENT_PRE_RETIREE_ID = "rec_seed_ins_client_pre_retiree";
 export const INSURANCE_CLIENT_EXPAT_ID = "rec_seed_ins_client_expat";
+export const INSURANCE_CLIENT_FAMILY_OFFICE_ID = "rec_seed_ins_client_family_office";
+export const INSURANCE_CLIENT_CORPORATE_GROUP_ID = "rec_seed_ins_client_corporate_group";
 
 export const INSURANCE_POLICY_TERM_LIFE_ID = "rec_seed_ins_policy_term_life";
 export const INSURANCE_POLICY_CRITICAL_ILLNESS_ID = "rec_seed_ins_policy_critical_illness";
@@ -58,17 +60,23 @@ export const INSURANCE_POLICY_KEYMAN_ID = "rec_seed_ins_policy_keyman";
 export const INSURANCE_POLICY_FLEET_AUTO_ID = "rec_seed_ins_policy_fleet_auto";
 export const INSURANCE_POLICY_SENIOR_HEALTH_ID = "rec_seed_ins_policy_senior_health";
 export const INSURANCE_POLICY_TRAVEL_ID = "rec_seed_ins_policy_travel";
+export const INSURANCE_POLICY_ESTATE_UL_ID = "rec_seed_ins_policy_estate_ul";
+export const INSURANCE_POLICY_GROUP_TERM_ID = "rec_seed_ins_policy_group_term";
 
 export const INSURANCE_RENEWAL_FLEET_ID = "rec_seed_ins_renewal_fleet";
 export const INSURANCE_RENEWAL_SENIOR_HEALTH_ID = "rec_seed_ins_renewal_senior_health";
 export const INSURANCE_RENEWAL_TRAVEL_ID = "rec_seed_ins_renewal_travel";
 export const INSURANCE_RENEWAL_KEYMAN_ID = "rec_seed_ins_renewal_keyman";
+export const INSURANCE_RENEWAL_ESTATE_ID = "rec_seed_ins_renewal_estate";
+export const INSURANCE_RENEWAL_GROUP_ID = "rec_seed_ins_renewal_group";
 
 export const INSURANCE_CLIENT_NEW_PARENTS_COMMIT_ID = "cmt_seed_ins_client_new_parents";
 export const INSURANCE_CLIENT_BUSINESS_OWNER_COMMIT_ID = "cmt_seed_ins_client_business_owner";
 export const INSURANCE_CLIENT_FLEET_MANAGER_COMMIT_ID = "cmt_seed_ins_client_fleet_manager";
 export const INSURANCE_CLIENT_PRE_RETIREE_COMMIT_ID = "cmt_seed_ins_client_pre_retiree";
 export const INSURANCE_CLIENT_EXPAT_COMMIT_ID = "cmt_seed_ins_client_expat";
+export const INSURANCE_CLIENT_FAMILY_OFFICE_COMMIT_ID = "cmt_seed_ins_client_family_office";
+export const INSURANCE_CLIENT_CORPORATE_GROUP_COMMIT_ID = "cmt_seed_ins_client_corporate_group";
 
 export const INSURANCE_POLICY_TERM_LIFE_COMMIT_ID = "cmt_seed_ins_policy_term_life";
 export const INSURANCE_POLICY_CRITICAL_ILLNESS_COMMIT_ID = "cmt_seed_ins_policy_critical_illness";
@@ -76,11 +84,15 @@ export const INSURANCE_POLICY_KEYMAN_COMMIT_ID = "cmt_seed_ins_policy_keyman";
 export const INSURANCE_POLICY_FLEET_AUTO_COMMIT_ID = "cmt_seed_ins_policy_fleet_auto";
 export const INSURANCE_POLICY_SENIOR_HEALTH_COMMIT_ID = "cmt_seed_ins_policy_senior_health";
 export const INSURANCE_POLICY_TRAVEL_COMMIT_ID = "cmt_seed_ins_policy_travel";
+export const INSURANCE_POLICY_ESTATE_UL_COMMIT_ID = "cmt_seed_ins_policy_estate_ul";
+export const INSURANCE_POLICY_GROUP_TERM_COMMIT_ID = "cmt_seed_ins_policy_group_term";
 
 export const INSURANCE_RENEWAL_FLEET_COMMIT_ID = "cmt_seed_ins_renewal_fleet";
 export const INSURANCE_RENEWAL_SENIOR_HEALTH_COMMIT_ID = "cmt_seed_ins_renewal_senior_health";
 export const INSURANCE_RENEWAL_TRAVEL_COMMIT_ID = "cmt_seed_ins_renewal_travel";
 export const INSURANCE_RENEWAL_KEYMAN_COMMIT_ID = "cmt_seed_ins_renewal_keyman";
+export const INSURANCE_RENEWAL_ESTATE_COMMIT_ID = "cmt_seed_ins_renewal_estate";
+export const INSURANCE_RENEWAL_GROUP_COMMIT_ID = "cmt_seed_ins_renewal_group";
 
 export const INSURANCE_REQUOTE_CR_ID = "crq_seed_ins_fleet_requote";
 export const INSURANCE_INTAKE_CR_ID = "crq_seed_ins_client_intake";
@@ -94,6 +106,9 @@ export const INSURANCE_UNDERWRITING_FILE_NODE_ID = "nod_file_insurance_underwrit
 export const INSURANCE_SKILL_NODE_ID = "nod_skill_policy_renewal_assistant";
 export const INSURANCE_DRIVE_NODE_ID = "nod_drive_insurance_materials";
 export const INSURANCE_AIRAPP_NODE_ID = "nod_airapp_insurance_renewal_board";
+export const INSURANCE_AGENT_DESK_NODE_ID = "nod_airapp_insurance_agent_desk";
+export const INSURANCE_AGENCY_SCOREBOARD_NODE_ID = "nod_airapp_insurance_agency_scoreboard";
+export const INSURANCE_ISSUANCE_DESK_NODE_ID = "nod_airapp_insurance_issuance_desk";
 export const INSURANCE_WHITEBOARD_NODE_ID = "nod_whiteboard_insurance_book";
 export const INSURANCE_WORKFLOW_NODE_ID = "nod_workflow_insurance_renewal";
 export const INSURANCE_HTML_NODE_ID = "nod_html_insurance_proposal";
@@ -710,6 +725,56 @@ const INSURANCE_RECORDS: SeedRecordDef[] = [
     minutesAgo: 190,
     useCases: ["insurance"],
   },
+  {
+    id: INSURANCE_CLIENT_FAMILY_OFFICE_ID,
+    baseId: DEMO_INSURANCE_CLIENTS_BASE_ID,
+    commitId: INSURANCE_CLIENT_FAMILY_OFFICE_COMMIT_ID,
+    fields: {
+      advisor: "dana.reyes@busabase.local",
+      ai_summary:
+        "Family office funding a large estate-tax liability through universal life — coordinated with outside counsel, not a standalone sale.",
+      annual_budget: 150000,
+      client_name: "Elliot Kessler (Kessler Family Office)",
+      email: "elliot.kessler@kesslerfo.example.com",
+      next_follow_up: "2026-09-19",
+      notes:
+        "Multi-generational family office restructuring the estate plan ahead of a liquidity event. The universal life policy funds the estate tax liability without forcing a sale of the operating business. Coordinating with their outside counsel on the ILIT structure.",
+      phone: "+1-212-555-0199",
+      policies: [INSURANCE_POLICY_ESTATE_UL_ID],
+      protection_focus: ["life", "property", "retirement"],
+      source: "referral",
+      stage: "insured",
+    },
+    message: "Seed family office with estate-planning cover",
+    author: "seed-insurance",
+    minutesAgo: 188,
+    useCases: ["insurance"],
+  },
+  {
+    id: INSURANCE_CLIENT_CORPORATE_GROUP_ID,
+    baseId: DEMO_INSURANCE_CLIENTS_BASE_ID,
+    commitId: INSURANCE_CLIENT_CORPORATE_GROUP_COMMIT_ID,
+    fields: {
+      advisor: "marco.silva@busabase.local",
+      ai_summary:
+        "Fast-growing group account — renewal timing lines up with headcount growth, so the AD&D face amount needs to move too.",
+      annual_budget: 210000,
+      client_name: "Vantage Robotics (People Team)",
+      email: "benefits@vantagerobotics.example.com",
+      next_follow_up: "2026-09-20",
+      notes:
+        "Series C robotics company, 128 employees after the fall hiring push. Group term life and AD&D renews every October; the People team wants a wellness rider quoted alongside this year's renewal.",
+      phone: "+1-650-555-0173",
+      policies: [INSURANCE_POLICY_GROUP_TERM_ID],
+      protection_focus: ["life", "health"],
+      source: "referral",
+      stage: "insured",
+    },
+    message: "Seed corporate group benefits account",
+    author: "seed-insurance",
+    minutesAgo: 187,
+    useCases: ["insurance"],
+  },
 
   {
     id: INSURANCE_POLICY_TERM_LIFE_ID,
@@ -838,6 +903,54 @@ const INSURANCE_RECORDS: SeedRecordDef[] = [
     minutesAgo: 180,
     useCases: ["insurance"],
   },
+  {
+    id: INSURANCE_POLICY_ESTATE_UL_ID,
+    baseId: DEMO_INSURANCE_POLICIES_BASE_ID,
+    commitId: INSURANCE_POLICY_ESTATE_UL_COMMIT_ID,
+    fields: withComputedCommission({
+      client: [INSURANCE_CLIENT_FAMILY_OFFICE_ID],
+      commission_rate: 6,
+      effective_date: "2026-03-01",
+      insurer: "Sovereign Trust Life",
+      notes:
+        "Indexed UL funding the estate tax liability. Annual review timed to the family office's own audit cycle, not a standard renewal conversation.",
+      policy_number: "POL-UL-2026-0301",
+      premium: 92000,
+      product: "Estate Protection Universal Life",
+      product_line: "life",
+      renewal_date: "2027-03-01",
+      status: "active",
+      sum_insured: 10000000,
+    }),
+    message: "Seed estate-planning universal life policy",
+    author: "seed-insurance",
+    minutesAgo: 179,
+    useCases: ["insurance"],
+  },
+  {
+    id: INSURANCE_POLICY_GROUP_TERM_ID,
+    baseId: DEMO_INSURANCE_POLICIES_BASE_ID,
+    commitId: INSURANCE_POLICY_GROUP_TERM_COMMIT_ID,
+    fields: withComputedCommission({
+      client: [INSURANCE_CLIENT_CORPORATE_GROUP_ID],
+      commission_rate: 5,
+      effective_date: "2025-10-01",
+      insurer: "Continental Group Benefits",
+      notes:
+        "Face amount is a per-employee salary multiple, so headcount growth alone can move the total sum insured materially. Reconcile the census before quoting the October renewal.",
+      policy_number: "POL-GRP-2025-1001",
+      premium: 148000,
+      product: "Group Term Life & AD&D (128 lives)",
+      product_line: "life",
+      renewal_date: "2026-10-01",
+      status: "active",
+      sum_insured: 64000000,
+    }),
+    message: "Seed corporate group term life & AD&D policy",
+    author: "seed-insurance",
+    minutesAgo: 178,
+    useCases: ["insurance"],
+  },
 
   {
     id: INSURANCE_RENEWAL_FLEET_ID,
@@ -912,6 +1025,43 @@ const INSURANCE_RECORDS: SeedRecordDef[] = [
     message: "Seed deferred key-person review",
     author: "seed-insurance",
     minutesAgo: 90,
+    useCases: ["insurance"],
+  },
+  {
+    id: INSURANCE_RENEWAL_ESTATE_ID,
+    baseId: DEMO_INSURANCE_RENEWALS_BASE_ID,
+    commitId: INSURANCE_RENEWAL_ESTATE_COMMIT_ID,
+    fields: {
+      channel: "in-person",
+      due_date: "2026-11-15",
+      outcome: "",
+      owner: "dana.reyes@busabase.local",
+      policy: [INSURANCE_POLICY_ESTATE_UL_ID],
+      status: "todo",
+      task: "Coordinate the estate policy review with the family office's outside counsel",
+    },
+    message: "Seed pending estate policy review",
+    author: "seed-insurance",
+    minutesAgo: 88,
+    useCases: ["insurance"],
+  },
+  {
+    id: INSURANCE_RENEWAL_GROUP_ID,
+    baseId: DEMO_INSURANCE_RENEWALS_BASE_ID,
+    commitId: INSURANCE_RENEWAL_GROUP_COMMIT_ID,
+    fields: {
+      channel: "email",
+      due_date: "2026-09-30",
+      outcome:
+        "Sent the census template to their People team; waiting on the updated employee list before quoting the AD&D face amount.",
+      owner: "marco.silva@busabase.local",
+      policy: [INSURANCE_POLICY_GROUP_TERM_ID],
+      status: "in-progress",
+      task: "Reconcile the Vantage Robotics census before the October renewal",
+    },
+    message: "Seed in-progress group census reconciliation",
+    author: "seed-insurance",
+    minutesAgo: 86,
     useCases: ["insurance"],
   },
 ];
@@ -1178,6 +1328,18 @@ Which carrier to lead with per line, and the honest caveat for each.
 
 - **Northwind Casualty** — annual multi-trip with a winter-sports rider included, 90-day trip cap.
 
+## Estate & wealth transfer
+
+- **Sovereign Trust Life** — the only carrier here comfortable underwriting eight-figure
+  sums insured for a family office without a syndication. Slow to issue (20+ business days)
+  but the illustration desk will work directly with outside counsel on ILIT structuring.
+
+## Group benefits
+
+- **Continental Group Benefits** — the group term life and AD&D carrier for anything
+  from 25 to a few hundred lives. Renewal pricing is census-driven, so a stale headcount
+  is the single most common reason a group quote comes back wrong.
+
 Keep this doc current through change requests — a stale matrix is how a client
 ends up quoted with the wrong carrier.
 `,
@@ -1343,6 +1505,34 @@ header .badge {
 header h1 { margin: 0.5rem 0 0.25rem; font-size: 1.4rem; }
 header p { margin: 0; color: #64748b; font-size: 0.85rem; }
 
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 1rem;
+  padding: 1.25rem 2rem 0;
+}
+
+.stat {
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.75rem;
+  padding: 0.9rem 1.1rem;
+}
+
+.stat .label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #64748b;
+}
+
+.stat .value {
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: #0f172a;
+  margin-top: 0.15rem;
+}
+
 #board {
   display: grid;
   grid-auto-flow: column;
@@ -1392,6 +1582,126 @@ header p { margin: 0; color: #64748b; font-size: 0.85rem; }
   font-size: 0.9rem;
   max-width: 32rem;
 }
+
+/* Shared across every insurance AirApp (Agent Desk, Agency Scoreboard, Issuance
+   Desk) so the four dashboards read as one product, not four demos glued together. */
+
+.kicker {
+  margin: 2rem 2rem 0.6rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #64748b;
+}
+
+.panel {
+  margin: 0 2rem 1.5rem;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.75rem;
+  padding: 1.1rem 1.4rem;
+}
+
+.bar-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.45rem 0;
+  font-size: 0.85rem;
+}
+
+.bar-row .bar-label {
+  width: 9rem;
+  flex-shrink: 0;
+  color: #334155;
+}
+
+.bar-row .bar-track {
+  flex: 1;
+  height: 0.55rem;
+  background: #f1f5f9;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.bar-row .bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: #059669;
+}
+
+.bar-row .bar-value {
+  width: 7rem;
+  flex-shrink: 0;
+  text-align: right;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+table.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+table.data-table th,
+table.data-table td {
+  text-align: left;
+  padding: 0.55rem 0.6rem;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+table.data-table th {
+  color: #64748b;
+  font-weight: 600;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.rank {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 999px;
+  background: #f1f5f9;
+  font-weight: 700;
+  font-size: 0.75rem;
+  color: #334155;
+  margin-right: 0.5rem;
+}
+
+.pill {
+  display: inline-block;
+  padding: 0.15rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.pill.due-soon { background: #fef3c7; color: #92400e; }
+.pill.overdue { background: #fee2e2; color: #b91c1c; }
+.pill.ok { background: #ecfdf5; color: #047857; }
+.pill.missing { background: #fee2e2; color: #b91c1c; }
+
+.queue-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.65rem 0;
+  border-bottom: 1px solid #f1f5f9;
+  font-size: 0.85rem;
+}
+
+.queue-item:last-child { border-bottom: none; }
+
+.queue-item .name { font-weight: 600; color: #0f172a; }
+.queue-item .meta { color: #64748b; font-size: 0.78rem; margin-top: 0.1rem; }
 `;
 
 const RENEWAL_BOARD_INDEX_HTML = `<!doctype html>
@@ -1408,6 +1718,7 @@ const RENEWAL_BOARD_INDEX_HTML = `<!doctype html>
       <h1>Renewal Board</h1>
       <p>Reads this workspace's own "insurance-policies" Base via the Busabase REST API — not seeded, not synthetic.</p>
     </header>
+    <div id="stats" class="stats"></div>
     <div id="board"></div>
     <script src="client.js"></script>
   </body>
@@ -1436,11 +1747,46 @@ function daysUntil(dateString) {
 }
 
 function showEmpty(message) {
+  document.getElementById("stats")?.remove();
   board.innerHTML = "";
   const div = document.createElement("div");
   div.id = "empty";
   div.textContent = message;
   board.replaceWith(div);
+}
+
+function renderStats(records) {
+  const statsEl = document.getElementById("stats");
+  if (!statsEl) return;
+
+  const totalPremium = records.reduce((sum, r) => sum + (Number(r.headCommit?.payload?.premium) || 0), 0);
+  const totalCommission = records.reduce(
+    (sum, r) => sum + (Number(r.headCommit?.payload?.commission_amount) || 0),
+    0,
+  );
+  const activeCount = records.filter((r) => r.headCommit?.payload?.status === "active").length;
+  const dueSoonCount = records.filter((r) => {
+    const remaining = daysUntil(r.headCommit?.payload?.renewal_date);
+    return remaining !== null && remaining >= 0 && remaining <= 90;
+  }).length;
+
+  const tiles = [
+    ["Premium in force", money(totalPremium)],
+    ["Commission earned", money(totalCommission)],
+    ["Active policies", String(activeCount)],
+    ["Renewals due ≤ 90d", String(dueSoonCount)],
+  ];
+
+  statsEl.innerHTML = tiles
+    .map(
+      ([label, value]) =>
+        '<div class="stat"><div class="label">' +
+        label +
+        '</div><div class="value">' +
+        value +
+        "</div></div>",
+    )
+    .join("");
 }
 
 async function loadPolicies() {
@@ -1458,6 +1804,8 @@ async function loadPolicies() {
   const recordsRes = await fetch("/api/v1/records?baseId=" + policies.id + "&limit=100");
   if (!recordsRes.ok) throw new Error("GET /api/v1/records → " + recordsRes.status);
   const { records } = await recordsRes.json();
+
+  renderStats(records);
 
   for (const status of STATUSES) {
     const items = records.filter((r) => r.headCommit?.payload?.status === status.id);
@@ -1489,6 +1837,457 @@ async function loadPolicies() {
 }
 
 loadPolicies().catch((err) => showEmpty("Couldn't load policies: " + err.message));
+`;
+
+// ── Agent Desk AirApp — the advisor's own view: who ranks where, and what's due today ──
+
+const AGENT_DESK_INDEX_HTML = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agent Desk</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header>
+      <span class="badge">AirApp · Live workspace data</span>
+      <h1>Agent Desk</h1>
+      <p>Every advisor's book, ranked, plus what's due across the Clients and Renewal Tasks Bases — read live, not seeded.</p>
+    </header>
+    <div class="kicker">Book leaderboard</div>
+    <div class="panel"><table class="data-table" id="leaderboard"></table></div>
+    <div class="kicker">Today's queue — follow-ups &amp; renewal tasks, soonest first</div>
+    <div class="panel" id="queue"></div>
+  </body>
+  <script src="client.js"></script>
+</html>
+`;
+
+const AGENT_DESK_CLIENT_JS = `function money(n) {
+  return typeof n === "number" ? "$" + n.toLocaleString("en-US") : "—";
+}
+
+function daysUntil(dateString) {
+  if (!dateString) return null;
+  const target = new Date(dateString);
+  if (Number.isNaN(target.getTime())) return null;
+  return Math.round((target.getTime() - Date.now()) / 86400000);
+}
+
+function pillFor(remaining) {
+  if (remaining === null) return { cls: "ok", label: "no date" };
+  if (remaining < 0) return { cls: "overdue", label: Math.abs(remaining) + "d overdue" };
+  if (remaining <= 14) return { cls: "due-soon", label: remaining + "d left" };
+  return { cls: "ok", label: remaining + "d left" };
+}
+
+function showEmpty(message) {
+  document.querySelector(".kicker")?.remove();
+  document.querySelectorAll(".panel").forEach((el) => el.remove());
+  const div = document.createElement("div");
+  div.id = "empty";
+  div.textContent = message;
+  document.body.appendChild(div);
+}
+
+async function fetchBaseRecords(bases, slug) {
+  const base = bases.find((b) => b.slug === slug);
+  if (!base) return null;
+  const res = await fetch("/api/v1/records?baseId=" + base.id + "&limit=100");
+  if (!res.ok) throw new Error("GET /api/v1/records (" + slug + ") → " + res.status);
+  const { records } = await res.json();
+  return records;
+}
+
+async function load() {
+  const basesRes = await fetch("/api/v1/bases");
+  if (!basesRes.ok) throw new Error("GET /api/v1/bases → " + basesRes.status);
+  const bases = await basesRes.json();
+
+  const [clients, policies, renewals] = await Promise.all([
+    fetchBaseRecords(bases, "insurance-clients"),
+    fetchBaseRecords(bases, "insurance-policies"),
+    fetchBaseRecords(bases, "insurance-renewals"),
+  ]);
+  if (!clients || !policies || !renewals) {
+    showEmpty(
+      'This workspace is missing one of "insurance-clients", "insurance-policies" or "insurance-renewals". This demo reads real Bases live — seed the standard demo dataset (Insurance Agency folder) to see it populated.',
+    );
+    return;
+  }
+
+  const clientById = {};
+  for (const c of clients) clientById[c.id] = c.headCommit?.payload ?? {};
+
+  const byAdvisor = {};
+  for (const p of policies) {
+    const f = p.headCommit?.payload ?? {};
+    const clientId = Array.isArray(f.client) ? f.client[0] : null;
+    const advisor = (clientId && clientById[clientId]?.advisor) || "(unassigned)";
+    const row = byAdvisor[advisor] || { advisor, policyCount: 0, premium: 0, commission: 0 };
+    row.policyCount += 1;
+    row.premium += Number(f.premium) || 0;
+    row.commission += Number(f.commission_amount) || 0;
+    byAdvisor[advisor] = row;
+  }
+  const leaderboard = Object.values(byAdvisor).sort((a, b) => b.premium - a.premium);
+
+  const table = document.getElementById("leaderboard");
+  table.innerHTML =
+    "<thead><tr><th>Advisor</th><th>Policies</th><th>Premium in force</th><th>Commission earned</th></tr></thead><tbody></tbody>";
+  const tbody = table.querySelector("tbody");
+  leaderboard.forEach((row, i) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      "<td><span class=\\"rank\\">" +
+      (i + 1) +
+      "</span>" +
+      row.advisor +
+      "</td><td>" +
+      row.policyCount +
+      "</td><td>" +
+      money(row.premium) +
+      "</td><td>" +
+      money(row.commission) +
+      "</td>";
+    tbody.appendChild(tr);
+  });
+
+  const queueItems = [];
+  for (const c of clients) {
+    const f = c.headCommit?.payload ?? {};
+    if (!f.next_follow_up) continue;
+    queueItems.push({
+      type: "Follow-up",
+      date: f.next_follow_up,
+      name: f.client_name || "(unnamed client)",
+      meta: (f.advisor || "(unassigned)") + " · " + (f.stage || ""),
+    });
+  }
+  for (const r of renewals) {
+    const f = r.headCommit?.payload ?? {};
+    if (f.status === "done") continue;
+    if (!f.due_date) continue;
+    queueItems.push({
+      type: "Renewal",
+      date: f.due_date,
+      name: f.task || "(untitled task)",
+      meta: (f.owner || "(unassigned)") + " · " + (f.status || ""),
+    });
+  }
+  queueItems.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+  const queueEl = document.getElementById("queue");
+  if (queueItems.length === 0) {
+    queueEl.textContent = "Nothing due — the queue is clear.";
+  } else {
+    queueEl.innerHTML = "";
+    for (const item of queueItems.slice(0, 10)) {
+      const remaining = daysUntil(item.date);
+      const pill = pillFor(remaining);
+      const row = document.createElement("div");
+      row.className = "queue-item";
+      row.innerHTML =
+        '<div><div class="name">[' +
+        item.type +
+        "] " +
+        item.name +
+        '</div><div class="meta">' +
+        item.meta +
+        '</div></div><span class="pill ' +
+        pill.cls +
+        '">' +
+        pill.label +
+        "</span>";
+      queueEl.appendChild(row);
+    }
+  }
+}
+
+load().catch((err) => showEmpty("Couldn't load the agent desk: " + err.message));
+`;
+
+// ── Agency Scoreboard AirApp — the owner's view: the whole book, at a glance ──
+
+const AGENCY_SCOREBOARD_INDEX_HTML = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agency Scoreboard</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header>
+      <span class="badge">AirApp · Live workspace data</span>
+      <h1>Agency Scoreboard</h1>
+      <p>The whole book in one screen — premium, commission, and where it's concentrated. Reads the Clients and Policies Bases live.</p>
+    </header>
+    <div id="stats" class="stats"></div>
+    <div class="kicker">Premium by product line</div>
+    <div class="panel" id="by-line"></div>
+    <div class="kicker">Premium by carrier</div>
+    <div class="panel" id="by-carrier"></div>
+  </body>
+  <script src="client.js"></script>
+</html>
+`;
+
+const AGENCY_SCOREBOARD_CLIENT_JS = `function money(n) {
+  return typeof n === "number" ? "$" + n.toLocaleString("en-US") : "—";
+}
+
+function showEmpty(message) {
+  document.getElementById("stats")?.remove();
+  document.querySelectorAll(".kicker, .panel").forEach((el) => el.remove());
+  const div = document.createElement("div");
+  div.id = "empty";
+  div.textContent = message;
+  document.body.appendChild(div);
+}
+
+function renderBars(containerId, rows, total) {
+  const el = document.getElementById(containerId);
+  el.innerHTML = "";
+  const max = rows.reduce((m, r) => Math.max(m, r.value), 0) || 1;
+  for (const row of rows) {
+    const pct = Math.round((row.value / max) * 100);
+    const div = document.createElement("div");
+    div.className = "bar-row";
+    div.innerHTML =
+      '<div class="bar-label">' +
+      row.label +
+      '</div><div class="bar-track"><div class="bar-fill" style="width:' +
+      pct +
+      '%"></div></div><div class="bar-value">' +
+      money(row.value) +
+      "</div>";
+    el.appendChild(div);
+  }
+  if (rows.length === 0) {
+    el.textContent = "No data yet.";
+  }
+}
+
+async function fetchBaseRecords(bases, slug) {
+  const base = bases.find((b) => b.slug === slug);
+  if (!base) return null;
+  const res = await fetch("/api/v1/records?baseId=" + base.id + "&limit=100");
+  if (!res.ok) throw new Error("GET /api/v1/records (" + slug + ") → " + res.status);
+  const { records } = await res.json();
+  return records;
+}
+
+async function load() {
+  const basesRes = await fetch("/api/v1/bases");
+  if (!basesRes.ok) throw new Error("GET /api/v1/bases → " + basesRes.status);
+  const bases = await basesRes.json();
+
+  const [clients, policies] = await Promise.all([
+    fetchBaseRecords(bases, "insurance-clients"),
+    fetchBaseRecords(bases, "insurance-policies"),
+  ]);
+  if (!clients || !policies) {
+    showEmpty(
+      'This workspace is missing "insurance-clients" or "insurance-policies". This demo reads real Bases live — seed the standard demo dataset (Insurance Agency folder) to see it populated.',
+    );
+    return;
+  }
+
+  let totalPremium = 0;
+  let totalCommission = 0;
+  const byLine = {};
+  const byCarrier = {};
+  for (const p of policies) {
+    const f = p.headCommit?.payload ?? {};
+    const premium = Number(f.premium) || 0;
+    totalPremium += premium;
+    totalCommission += Number(f.commission_amount) || 0;
+    const line = f.product_line || "other";
+    byLine[line] = (byLine[line] || 0) + premium;
+    const carrier = f.insurer || "(unnamed carrier)";
+    byCarrier[carrier] = (byCarrier[carrier] || 0) + premium;
+  }
+
+  const insuredCount = clients.filter((c) => c.headCommit?.payload?.stage === "insured").length;
+  const pipeline = clients
+    .filter((c) => c.headCommit?.payload?.stage !== "insured" && c.headCommit?.payload?.stage !== "lost")
+    .reduce((sum, c) => sum + (Number(c.headCommit?.payload?.annual_budget) || 0), 0);
+
+  const statsEl = document.getElementById("stats");
+  const tiles = [
+    ["Premium in force", money(totalPremium)],
+    ["Commission earned", money(totalCommission)],
+    ["Insured clients", String(insuredCount)],
+    ["Active policies", String(policies.length)],
+    ["Open pipeline", money(pipeline)],
+  ];
+  statsEl.innerHTML = tiles
+    .map(
+      ([label, value]) =>
+        '<div class="stat"><div class="label">' + label + '</div><div class="value">' + value + "</div></div>",
+    )
+    .join("");
+
+  renderBars(
+    "by-line",
+    Object.entries(byLine)
+      .map(([label, value]) => ({ label, value }))
+      .sort((a, b) => b.value - a.value),
+  );
+  renderBars(
+    "by-carrier",
+    Object.entries(byCarrier)
+      .map(([label, value]) => ({ label, value }))
+      .sort((a, b) => b.value - a.value),
+  );
+}
+
+load().catch((err) => showEmpty("Couldn't load the scoreboard: " + err.message));
+`;
+
+// ── Issuance Desk AirApp — back office: what's still in flight, and what's missing ──
+
+const ISSUANCE_DESK_INDEX_HTML = `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Issuance Desk</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header>
+      <span class="badge">AirApp · Live workspace data</span>
+      <h1>Issuance Desk</h1>
+      <p>Where every policy sits between a quote and an in-force contract, and which files are still missing. Reads the Policies Base live.</p>
+    </header>
+    <div class="kicker">By stage</div>
+    <div class="panel" id="funnel"></div>
+    <div class="kicker">Needs attention — quoting or underwriting</div>
+    <div class="panel"><table class="data-table" id="queue-table"></table></div>
+  </body>
+  <script src="client.js"></script>
+</html>
+`;
+
+const ISSUANCE_DESK_CLIENT_JS = `const STAGE_ORDER = [
+  { id: "quoting", label: "Quoting" },
+  { id: "underwriting", label: "Underwriting" },
+  { id: "active", label: "Active" },
+  { id: "renewed", label: "Renewed" },
+  { id: "lapsed", label: "Lapsed" },
+];
+
+function money(n) {
+  return typeof n === "number" ? "$" + n.toLocaleString("en-US") : "—";
+}
+
+function daysUntil(dateString) {
+  if (!dateString) return null;
+  const target = new Date(dateString);
+  if (Number.isNaN(target.getTime())) return null;
+  return Math.round((target.getTime() - Date.now()) / 86400000);
+}
+
+function showEmpty(message) {
+  document.querySelectorAll(".kicker, .panel").forEach((el) => el.remove());
+  const div = document.createElement("div");
+  div.id = "empty";
+  div.textContent = message;
+  document.body.appendChild(div);
+}
+
+async function load() {
+  const basesRes = await fetch("/api/v1/bases");
+  if (!basesRes.ok) throw new Error("GET /api/v1/bases → " + basesRes.status);
+  const bases = await basesRes.json();
+  const policiesBase = bases.find((b) => b.slug === "insurance-policies");
+  const clientsBase = bases.find((b) => b.slug === "insurance-clients");
+  if (!policiesBase || !clientsBase) {
+    showEmpty(
+      'This workspace is missing "insurance-policies" or "insurance-clients". This demo reads a real Base live — seed the standard demo dataset (Insurance Agency folder) to see it populated.',
+    );
+    return;
+  }
+
+  const [policiesRes, clientsRes] = await Promise.all([
+    fetch("/api/v1/records?baseId=" + policiesBase.id + "&limit=100"),
+    fetch("/api/v1/records?baseId=" + clientsBase.id + "&limit=100"),
+  ]);
+  if (!policiesRes.ok) throw new Error("GET /api/v1/records → " + policiesRes.status);
+  if (!clientsRes.ok) throw new Error("GET /api/v1/records → " + clientsRes.status);
+  const { records: policies } = await policiesRes.json();
+  const { records: clients } = await clientsRes.json();
+  const clientNameById = {};
+  for (const c of clients) clientNameById[c.id] = c.headCommit?.payload?.client_name || "(unnamed client)";
+
+  const funnelEl = document.getElementById("funnel");
+  funnelEl.innerHTML = "";
+  const max = policies.length || 1;
+  for (const stage of STAGE_ORDER) {
+    const items = policies.filter((p) => p.headCommit?.payload?.status === stage.id);
+    const premium = items.reduce((sum, p) => sum + (Number(p.headCommit?.payload?.premium) || 0), 0);
+    const pct = Math.round((items.length / max) * 100);
+    const div = document.createElement("div");
+    div.className = "bar-row";
+    div.innerHTML =
+      '<div class="bar-label">' +
+      stage.label +
+      '</div><div class="bar-track"><div class="bar-fill" style="width:' +
+      pct +
+      '%"></div></div><div class="bar-value">' +
+      items.length +
+      " · " +
+      money(premium) +
+      "</div>";
+    funnelEl.appendChild(div);
+  }
+
+  const inFlight = policies
+    .filter((p) => ["quoting", "underwriting"].includes(p.headCommit?.payload?.status))
+    .sort(
+      (a, b) =>
+        new Date(a.headCommit?.payload?.effective_date || 0).getTime() -
+        new Date(b.headCommit?.payload?.effective_date || 0).getTime(),
+    );
+
+  const table = document.getElementById("queue-table");
+  table.innerHTML =
+    "<thead><tr><th>Policy</th><th>Client</th><th>Product</th><th>Premium</th><th>Status</th><th>Policy file</th></tr></thead><tbody></tbody>";
+  const tbody = table.querySelector("tbody");
+  if (inFlight.length === 0) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = '<td colspan="6">Nothing in flight — every policy is issued or renewed.</td>';
+    tbody.appendChild(tr);
+  }
+  for (const p of inFlight) {
+    const f = p.headCommit?.payload ?? {};
+    const clientId = Array.isArray(f.client) ? f.client[0] : null;
+    const hasFile = Array.isArray(f.policy_file) && f.policy_file.length > 0;
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      "<td>" +
+      (f.policy_number || "—") +
+      "</td><td>" +
+      (clientNameById[clientId] || "—") +
+      "</td><td>" +
+      (f.product || "—") +
+      "</td><td>" +
+      money(f.premium) +
+      '</td><td><span class="pill due-soon">' +
+      (STAGE_ORDER.find((s) => s.id === f.status)?.label || f.status || "—") +
+      "</span></td><td>" +
+      (hasFile
+        ? '<span class="pill ok">on file</span>'
+        : '<span class="pill missing">missing</span>') +
+      "</td>";
+    tbody.appendChild(tr);
+  }
+}
+
+load().catch((err) => showEmpty("Couldn't load the issuance desk: " + err.message));
 `;
 
 const INSURANCE_FILE_TREE_NODES: SeedFileTreeDef[] = [
@@ -1590,6 +2389,54 @@ const INSURANCE_FILE_TREE_NODES: SeedFileTreeDef[] = [
       { path: "client.js", content: RENEWAL_BOARD_CLIENT_JS },
     ],
   },
+  {
+    nodeType: "airapp",
+    nodeId: INSURANCE_AGENT_DESK_NODE_ID,
+    slug: "insurance-agent-desk",
+    name: "Agent Desk",
+    description:
+      "The advisor's own view: a book leaderboard across every advisor, plus today's follow-up and renewal queue. Reads the Clients and Renewal Tasks Bases live.",
+    position: 7,
+    files: [
+      { path: "package.json", content: RENEWAL_BOARD_PACKAGE_JSON },
+      { path: "server.js", content: RENEWAL_BOARD_SERVER_JS },
+      { path: "index.html", content: AGENT_DESK_INDEX_HTML },
+      { path: "style.css", content: RENEWAL_BOARD_STYLE_CSS },
+      { path: "client.js", content: AGENT_DESK_CLIENT_JS },
+    ],
+  },
+  {
+    nodeType: "airapp",
+    nodeId: INSURANCE_AGENCY_SCOREBOARD_NODE_ID,
+    slug: "insurance-agency-scoreboard",
+    name: "Agency Scoreboard",
+    description:
+      "The owner's view: total premium in force, commission earned, and where the book is concentrated by product line and carrier. Reads the Clients and Policies Bases live.",
+    position: 8,
+    files: [
+      { path: "package.json", content: RENEWAL_BOARD_PACKAGE_JSON },
+      { path: "server.js", content: RENEWAL_BOARD_SERVER_JS },
+      { path: "index.html", content: AGENCY_SCOREBOARD_INDEX_HTML },
+      { path: "style.css", content: RENEWAL_BOARD_STYLE_CSS },
+      { path: "client.js", content: AGENCY_SCOREBOARD_CLIENT_JS },
+    ],
+  },
+  {
+    nodeType: "airapp",
+    nodeId: INSURANCE_ISSUANCE_DESK_NODE_ID,
+    slug: "insurance-issuance-desk",
+    name: "Issuance Desk",
+    description:
+      "The back office's view: every policy still between a quote and an in-force contract, sorted by effective date, with a missing-policy-file flag. Reads the Policies Base live.",
+    position: 9,
+    files: [
+      { path: "package.json", content: RENEWAL_BOARD_PACKAGE_JSON },
+      { path: "server.js", content: RENEWAL_BOARD_SERVER_JS },
+      { path: "index.html", content: ISSUANCE_DESK_INDEX_HTML },
+      { path: "style.css", content: RENEWAL_BOARD_STYLE_CSS },
+      { path: "client.js", content: ISSUANCE_DESK_CLIENT_JS },
+    ],
+  },
 ];
 
 // ── Whiteboard / Workflow / HTML (metadata-backed rich nodes) ────────────────
@@ -1671,8 +2518,9 @@ export const whiteboardCard = (
 ];
 
 const BOOK_OF_BUSINESS_CARDS: Array<[string, number, number, string, string, number]> = [
-  ["households", 80, 130, "Households\n5 clients · 6 policies", "#dcfce7", 301],
-  ["renewals", 400, 130, "Next 90 days\nFleet · Senior health", "#fef3c7", 302],
+  ["households", 80, 130, "Households\n7 clients · 8 policies", "#dcfce7", 301],
+  ["book-value", 400, 130, "Book value\n$295.7K premium · $21.0K commission", "#e0e7ff", 305],
+  ["renewals", 720, 130, "Next 90 days\nFleet · Senior health · Group benefits", "#fef3c7", 302],
   ["gaps", 80, 330, "Open gaps\nIncome protection · Group health", "#dbeafe", 303],
   ["referrals", 400, 330, "Referral sources\nExisting clients · Community", "#fce7f3", 304],
 ];

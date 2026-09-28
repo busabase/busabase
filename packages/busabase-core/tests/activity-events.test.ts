@@ -1,7 +1,7 @@
 import type { ActivityItemVO, RecordVO } from "busabase-contract/types";
 import { describe, expect, it } from "vitest";
 import { buildActivityEventFromItem } from "../src/domains/dashboard/helpers/activity-events";
-import { coreMessagesByLocale } from "../src/i18n";
+import { coreMessagesByLocale } from "../src/i18n/catalog";
 
 /**
  * `buildActivityEventFromItem` renders one server-paginated activity descriptor

@@ -105,9 +105,19 @@ const getParentPath = (path: string) => {
 
 export const normalizeFolderPath = (path: string) => path.replace(/^\/+|\/+$/g, "");
 
+/**
+ * The folder an item is LISTED IN — for a file its directory, for a folder its
+ * parent.
+ *
+ * A folder used to answer with its own path. The list shows items whose folder
+ * equals the one being viewed, so a folder only appeared while you were
+ * already inside it — i.e. never. Every file below a folder (a Skill's
+ * `scripts/`, a Drive's subdirectories, an AirApp's `src/`) was unreachable on
+ * the phone, while the header still counted the folder.
+ */
 export const getFolderForFile = (file: FileTreeListItem) => {
   if (file.type === "folder") {
-    return normalizeFolderPath(file.path);
+    return getParentFolder(file.path);
   }
   return getParentPath(file.path) === "Root" ? "" : normalizeFolderPath(getParentPath(file.path));
 };

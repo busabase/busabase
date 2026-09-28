@@ -27,10 +27,17 @@ import { createDefaultFieldOptions } from "../helpers/field";
 import { fieldTypeOptions } from "../helpers/field-type-options";
 import { formatFullTime } from "../helpers/format";
 import { mergeSearchIntoHref } from "../helpers/link-search";
+import {
+  buildSelectChoices,
+  type ChoiceDraft,
+  diffSelectChoices,
+  type SelectChoice,
+} from "../helpers/select-choices";
 import type {
   CreateBaseFieldPayload,
   RecordSubmitOptions,
   RecordsPagination,
+  UpdateBaseFieldPatch,
   ViewFormPayload,
   ViewSubmitOptions,
 } from "../helpers/view-types";
@@ -48,8 +55,14 @@ import { NodePinButton, nodeSidePanelTabId } from "./node-pin-button";
 import { NodeSettingsDialog } from "./node-settings-dialog";
 import { EmptyState, PropertyRow, SidebarPanel } from "./primitives";
 import { RecordTitleBadge } from "./record-title-badge";
+import { SelectChoicesEditor } from "./select-choices-editor";
 import { NodeDetailSkeleton } from "./skeletons";
 import { SplitSubmitButton } from "./split-submit-button";
+
+const isChoiceField = (field: BaseFieldVO) =>
+  field.type === "select" || field.type === "multiselect";
+
+const fieldChoices = (field: BaseFieldVO): SelectChoice[] => field.options.choices ?? [];
 
 export function BaseDetailView({
   activeView,
@@ -288,7 +301,7 @@ export function BaseSetupView({
   onDeleteField,
   onRestoreField,
   onSetPrimaryField,
-  onUpdateFieldName,
+  onUpdateField,
 }: {
   base: BaseVO | null;
   bases: BaseVO[];
@@ -298,7 +311,7 @@ export function BaseSetupView({
   orpc: BusabaseQueryUtils;
   /**
    * Change a field's TYPE. Its own callback, never folded into
-   * `onUpdateFieldName`: the update endpoint rejects `type` outright, so a
+   * `onUpdateField`: the update endpoint rejects `type` outright, so a
    * bundled rename+retype would silently drop the retype and report success.
    */
   onConvertFieldType?: (
@@ -325,10 +338,11 @@ export function BaseSetupView({
     fieldId: string,
     options?: { mergeImmediately?: boolean },
   ) => Promise<void>;
-  onUpdateFieldName?: (
+  /** Rename a field and, for select / multiselect, edit its choices — one change request. */
+  onUpdateField?: (
     base: BaseVO,
     fieldId: string,
-    name: iString,
+    patch: UpdateBaseFieldPatch,
     options?: { mergeImmediately?: boolean },
   ) => Promise<void>;
 }) {
@@ -356,6 +370,8 @@ export function BaseSetupView({
   const [lookupRollup, setLookupRollup] = useState<LookupRollup>("values");
   const [isRequired, setIsRequired] = useState(false);
   const [isMultiple, setIsMultiple] = useState(true);
+  // Choices typed into the add-field dialog for a select / multiselect field.
+  const [choiceDrafts, setChoiceDrafts] = useState<ChoiceDraft[]>([]);
   // ── lookup field cascade (relation hop → target field → rollup) ────────────
   // Only relation fields with a resolved target Base can be hopped through.
   const lookupRelationFields = (base?.fields ?? []).filter(
@@ -390,6 +406,8 @@ export function BaseSetupView({
   const [restoringFieldId, setRestoringFieldId] = useState<string | null>(null);
   const [editingFieldId, setEditingFieldId] = useState<string | null>(null);
   const [editingFieldName, setEditingFieldName] = useState<iString>("");
+  // The edit dialog's working copy of a select field's choices.
+  const [editingChoiceDrafts, setEditingChoiceDrafts] = useState<ChoiceDraft[]>([]);
   const [isFieldRenameSaving, setIsFieldRenameSaving] = useState(false);
   const [fieldRenameError, setFieldRenameError] = useState<string | null>(null);
   const [recordTitleFieldId, setRecordTitleFieldId] = useState<string | null>(null);
@@ -470,6 +488,11 @@ export function BaseSetupView({
     );
   }
 
+  const choiceErrorMessage = (result: { error: "blank" | "duplicate"; name?: string }) =>
+    result.error === "blank"
+      ? messages.base.choiceNameRequired
+      : fmt(messages.base.choiceNameDuplicate, { name: result.name ?? "" });
+
   const resetAddFieldForm = () => {
     setFieldName("");
     setFieldSlug("");
@@ -483,6 +506,7 @@ export function BaseSetupView({
     setLookupRollup("values");
     setIsRequired(false);
     setIsMultiple(true);
+    setChoiceDrafts([]);
     setFormError(null);
     setFormErrorDetail(null);
   };
@@ -508,6 +532,12 @@ export function BaseSetupView({
       setFormError(messages.base.lookupConfigRequired);
       return;
     }
+    const isSelectType = fieldType === "select" || fieldType === "multiselect";
+    const builtChoices = isSelectType ? buildSelectChoices(choiceDrafts) : null;
+    if (builtChoices && !builtChoices.ok) {
+      setFormError(choiceErrorMessage(builtChoices));
+      return;
+    }
 
     setIsSaving(true);
     setFormError(null);
@@ -530,7 +560,9 @@ export function BaseSetupView({
                   }
                 : fieldType === "number" && numberFormat === "currency"
                   ? { number: { format: "currency", currency: currencyCode.trim() || "USD" } }
-                  : createDefaultFieldOptions(fieldType, targetBaseId, isMultiple),
+                  : builtChoices?.ok
+                    ? { choices: builtChoices.choices }
+                    : createDefaultFieldOptions(fieldType, targetBaseId, isMultiple),
           required: isRequired,
           slug,
           type: fieldType,
@@ -557,6 +589,7 @@ export function BaseSetupView({
   const resetFieldRenameForm = () => {
     setEditingFieldId(null);
     setEditingFieldName("");
+    setEditingChoiceDrafts([]);
     setEditingFieldType(null);
     setSelectChoiceMode("null_on_missing");
     setFieldRenameError(null);
@@ -603,25 +636,74 @@ export function BaseSetupView({
     }
   };
 
-  const submitFieldRename = async (fieldId: string, options?: { mergeImmediately?: boolean }) => {
-    if (!base || !onUpdateFieldName) return;
+  const submitFieldEdit = async (fieldId: string, options?: { mergeImmediately?: boolean }) => {
+    if (!base || !onUpdateField) return;
+    const field = base.fields.find((item) => item.id === fieldId);
     const name = iStringTrim(editingFieldName);
     if (iStringIsEmpty(name)) {
       setFieldRenameError(messages.base.fieldNameRequired);
       return;
     }
+    const patch: UpdateBaseFieldPatch = { name };
+    const previousChoices = field ? fieldChoices(field) : [];
+    if (field && isChoiceField(field)) {
+      const built = buildSelectChoices(
+        editingChoiceDrafts,
+        new Set(previousChoices.map((choice) => choice.id)),
+      );
+      if (!built.ok) {
+        setFieldRenameError(choiceErrorMessage(built));
+        return;
+      }
+      // Only send choices when they actually changed, so a plain rename stays
+      // a plain rename (and never trips the in-use guard on the server).
+      if (diffSelectChoices(previousChoices, built.choices).changed) {
+        patch.choices = built.choices;
+      }
+    }
     setIsFieldRenameSaving(true);
     setFieldRenameError(null);
     try {
-      await onUpdateFieldName(base, fieldId, name, options);
+      await onUpdateField(base, fieldId, patch, options);
       resetFieldRenameForm();
     } catch (error) {
       setFieldRenameError(
-        presentCoreError(messages, locale, error, messages.base.failedRenameField),
+        choicesInUseMessage(error, previousChoices) ??
+          presentCoreError(
+            messages,
+            locale,
+            error,
+            patch.choices ? messages.base.failedUpdateField : messages.base.failedRenameField,
+          ),
       );
     } finally {
       setIsFieldRenameSaving(false);
     }
+  };
+
+  /**
+   * The server refuses to drop a choice that active records still use, and says
+   * which ones in `error.data`. Turn that into a sentence naming the choices
+   * (the raw message only has ids and the field slug).
+   */
+  const choicesInUseMessage = (error: unknown, previousChoices: SelectChoice[]) => {
+    const data =
+      error && typeof error === "object" && "data" in error
+        ? (error as { data?: { removedChoiceIds?: unknown; affectedRecordIds?: unknown } }).data
+        : undefined;
+    if (!Array.isArray(data?.removedChoiceIds) || !Array.isArray(data?.affectedRecordIds)) {
+      return null;
+    }
+    const removedIds = new Set(data.removedChoiceIds as string[]);
+    const names = previousChoices
+      .filter((choice) => removedIds.has(choice.id))
+      .map((choice) => `“${choice.name}”`);
+    const count = data.affectedRecordIds.length;
+    return fmt(messages.base.choicesStillInUse, {
+      names: names.length > 0 ? names.join(", ") : [...removedIds].join(", "),
+      count,
+      plural: count === 1 ? "" : "s",
+    });
   };
 
   const handleRestoreField = async (fieldId: string) => {
@@ -651,6 +733,30 @@ export function BaseSetupView({
   };
 
   const editingField = base.fields.find((field) => field.id === editingFieldId) ?? null;
+  // A type conversion takes over the dialog; choices are edited only while the
+  // field keeps its select / multiselect type.
+  const isEditingChoices = Boolean(
+    editingField && isChoiceField(editingField) && !conversionTargetType,
+  );
+  const editingPreviousChoices = editingField ? fieldChoices(editingField) : [];
+  const editingDraftIds = new Set(editingChoiceDrafts.map((draft) => draft.id));
+  const editingRemovedChoiceNames = isEditingChoices
+    ? editingPreviousChoices
+        .filter((choice) => !editingDraftIds.has(choice.id))
+        .map((choice) => choice.name)
+    : [];
+  const editingBuiltChoices = isEditingChoices
+    ? buildSelectChoices(
+        editingChoiceDrafts,
+        new Set(editingPreviousChoices.map((choice) => choice.id)),
+      )
+    : null;
+  // A draft that can't be built yet (blank / duplicate) still counts as an edit:
+  // the button should read "save", and pressing it explains what is wrong.
+  const editingChoicesChanged = editingBuiltChoices
+    ? !editingBuiltChoices.ok ||
+      diffSelectChoices(editingPreviousChoices, editingBuiltChoices.choices).changed
+    : false;
   const primaryField = getPrimaryField(base);
   const recordTitleField = base.fields.find((field) => field.id === recordTitleFieldId) ?? null;
 
@@ -754,7 +860,7 @@ export function BaseSetupView({
                           {field.position}
                         </div>
                       </div>
-                      {onUpdateFieldName ? (
+                      {onUpdateField ? (
                         <button
                           aria-label={fmt(messages.base.renameFieldAria, {
                             name: resolveIString(field.name),
@@ -763,6 +869,9 @@ export function BaseSetupView({
                           onClick={() => {
                             setEditingFieldId(field.id);
                             setEditingFieldName(field.name);
+                            setEditingChoiceDrafts(
+                              fieldChoices(field).map((choice) => ({ ...choice })),
+                            );
                             setFieldRenameError(null);
                           }}
                           title={messages.base.renameField}
@@ -927,6 +1036,14 @@ export function BaseSetupView({
                       targetType={conversionTargetType}
                     />
                   ) : null}
+                  {isEditingChoices ? (
+                    <SelectChoicesEditor
+                      disabled={isFieldRenameSaving}
+                      drafts={editingChoiceDrafts}
+                      onChange={setEditingChoiceDrafts}
+                      removedNames={editingRemovedChoiceNames}
+                    />
+                  ) : null}
                   {fieldRenameError ? (
                     <div className="mt-3 text-rejected-strong text-sm">{fieldRenameError}</div>
                   ) : null}
@@ -972,19 +1089,25 @@ export function BaseSetupView({
                     ) : (
                       <SplitSubmitButton
                         changeRequestAction={{
-                          label: messages.base.requestRename,
+                          label: editingChoicesChanged
+                            ? messages.base.requestFieldUpdate
+                            : messages.base.requestRename,
                           loadingLabel: messages.common.submitting,
-                          onSubmit: () => editingField && submitFieldRename(editingField.id),
+                          onSubmit: () => editingField && submitFieldEdit(editingField.id),
                           isLoading: isFieldRenameSaving,
                         }}
                         disabled={isFieldRenameSaving || !editingField}
                         hint={messages.common.requestReviewHint}
                         immediateAction={{
-                          label: messages.base.renameNow,
-                          loadingLabel: messages.base.renaming,
+                          label: editingChoicesChanged
+                            ? messages.base.updateFieldNow
+                            : messages.base.renameNow,
+                          loadingLabel: editingChoicesChanged
+                            ? messages.base.updatingField
+                            : messages.base.renaming,
                           onSubmit: () =>
                             editingField &&
-                            submitFieldRename(editingField.id, { mergeImmediately: true }),
+                            submitFieldEdit(editingField.id, { mergeImmediately: true }),
                           isLoading: isFieldRenameSaving,
                         }}
                       />
@@ -1310,6 +1433,13 @@ export function BaseSetupView({
                       </label>
                     ) : null}
                   </div>
+                  {fieldType === "select" || fieldType === "multiselect" ? (
+                    <SelectChoicesEditor
+                      disabled={isSaving}
+                      drafts={choiceDrafts}
+                      onChange={setChoiceDrafts}
+                    />
+                  ) : null}
                   <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-border/50 border-t pt-4">
                     <div className="flex flex-wrap gap-4 text-sm">
                       <label className="inline-flex items-center gap-2 text-muted-foreground">

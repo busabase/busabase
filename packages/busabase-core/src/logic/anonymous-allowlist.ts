@@ -108,6 +108,11 @@ const ANONYMOUS_READ_ALLOWLIST: ReadonlySet<string> = new Set([
  */
 const EMBED_READ_ALLOWLIST: ReadonlySet<string> = new Set([
   "nodes.get",
+  // The dashboard's route guard asks this before rendering a node URL — a
+  // record preview lives at `/base/:base/:record`, so without it the embed
+  // showed "Node unavailable". It resolves through the same node ACL `nodes.get`
+  // does.
+  "nodes.resolveRouteState",
   "nodes.list",
   "bases.get",
   "bases.listViews",

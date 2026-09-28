@@ -5,7 +5,8 @@ import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-quer
 import type { NodeDetailVO } from "busabase-contract/contract/node-detail-schemas";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CoreI18nProvider, coreMessagesByLocale } from "../../../i18n";
+import { CoreI18nProvider } from "../../../i18n";
+import { coreMessagesByLocale } from "../../../i18n/catalog";
 import { isPinnableNode } from "../../dashboard/components/side-panel-sources";
 import { TopbarNodeActionsSlot, TopbarNodeInfoButton } from "../../dashboard/components/topbar";
 import { DashboardVisitorProvider } from "../../dashboard/visitor-context";

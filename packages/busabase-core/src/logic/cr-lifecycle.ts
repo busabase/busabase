@@ -94,7 +94,6 @@ import "../domains/airapp/handlers";
 import "../domains/drive/handlers";
 import "../domains/file-node/handlers";
 import "../domains/folder/handlers";
-import "../domains/skill/handlers";
 import { resolveLookupValues } from "../domains/base/logic/lookup-values";
 import {
   LIST_OMITTED_FIELD_VALUE,
@@ -103,6 +102,7 @@ import {
 import { mergeDocUpdate } from "../domains/doc/handlers";
 import { mergeFileTreeFile, mergeFileTreeMetadata } from "../domains/filetree/handlers";
 import { mergeRichNodeDocumentUpdate } from "../domains/rich-node/handlers";
+import { mergeSkillFile } from "../domains/skill/handlers";
 import { isSearchableNodeType, reindexNodeContent } from "./node-content";
 
 /**
@@ -131,6 +131,7 @@ const refreshNodeContentSearch = async (
   });
 };
 
+import { applyPlaybookAttributionVisibility } from "../domains/playbooks/logic/playbook-attribution";
 import { dispatchWebhookEvent, hasWebhookRuleFor } from "../domains/webhook/logic/dispatch";
 import { insertAuditEvent } from "./audit";
 import {
@@ -197,43 +198,69 @@ const changeRequestNotFound = (changeRequestId: string) =>
 const operationNotFound = (operationId: string) =>
   new ORPCError("NOT_FOUND", { message: `Operation not found: ${operationId}` });
 
-/** The record an already-approved operation targets is gone by merge time (e.g.
- *  purged after the CR was created but before it was reviewed) — a legitimate
- *  race reachable through normal usage, not an internal invariant violation. */
-const targetRecordNotFound = (recordId: string) =>
-  new ORPCError("NOT_FOUND", { message: `Target record not found: ${recordId}` });
-
-/** Same race as {@link targetRecordNotFound}, for a view target. */
+/** Same reachable race as the record case above, for a view target. */
 const targetViewNotFound = (viewId: string) =>
   new ORPCError("NOT_FOUND", { message: `Target view not found: ${viewId}` });
 
 /** The node an already-approved node-CR operation targets is gone by merge time
  *  (purged after the CR was created but before merge) — same reachable-race
- *  reasoning as {@link targetRecordNotFound}. */
+ *  reasoning as the stale-target record case above. */
 const mergeTargetNodeNotFound = (nodeId: string) =>
   new ORPCError("NOT_FOUND", { message: `Node not found: ${nodeId}` });
 
 const changeRequestConflict = (message: string, data?: Record<string, unknown>) =>
   new ORPCError("CONFLICT", { message, ...(data ? { data } : {}) });
 
-// Marks an ORPCError as a genuine *record content* merge conflict — i.e. the
-// target record's fields diverged from what this ChangeRequest's operation was
-// based on, and the 3-way merge could not reconcile them automatically. This is
-// the ONLY kind of CONFLICT error that should cause mergeChangeRequest() to
-// persist status="conflict" + a mergeSummary.conflict diff onto the CR (see the
-// try/catch around _mergeChangeRequest below), because it's the only case with
-// an actual escape hatch (reviseOperation / close). Every other CONFLICT thrown
-// inside _mergeChangeRequest is a plain precondition guard (not approved yet,
-// already merged, base archived, record already archived, …) and must NOT
-// mutate the CR — guard clauses are read-only checks, not side effects.
+// Which CONFLICTs move the CR to status="conflict" (+ a mergeSummary.conflict
+// the review page renders), and which just throw.
+//
+// The dividing line is NOT "precondition guard vs content conflict" — it is
+// **does the reviewer have somewhere to go**. A CR left at "approved · ready to
+// merge" after a failure is a dead end: the Merge button stays live and the
+// only thing it can do is fail the same way again. So anything a reviewer can
+// act on belongs in `conflict`, where the review page names the cause and
+// offers the exits.
+//
+// Two kinds qualify, both tagged below:
+//
+//  - RECORD FIELD CONFLICT — the target's fields diverged from what the
+//    operation was based on and the 3-way merge could not reconcile them.
+//    Exit: reviseOperation (re-baselines) or close.
+//  - STALE TARGET — the row this operation pinned was archived or deleted by
+//    someone else while the CR sat in review. A legitimate race, not an
+//    invariant violation. Exit today is close-and-resubmit; `reviseOperation`
+//    cannot help because it revises an operation's FIELDS and there is no way
+//    to drop an operation from a batch. Naming the row is what makes even that
+//    exit actionable — before this, the banner said only "Cannot update an
+//    archived record" and the reviewer could not tell which of N rows it meant.
+//
+// Everything else stays a plain throw: not approved yet, already merged, base
+// archived. Those are states of the CR itself, and re-marking the CR would say
+// nothing the reviewer can do anything about.
 const isRecordMergeFieldConflict = Symbol("isRecordMergeFieldConflict");
-type MergeConflictTag = Record<typeof isRecordMergeFieldConflict, true | undefined>;
+const isStaleTargetConflict = Symbol("isStaleTargetConflict");
+type MergeConflictTag = Record<
+  typeof isRecordMergeFieldConflict | typeof isStaleTargetConflict,
+  true | undefined
+>;
 const recordMergeFieldConflict = (
   message: string,
   data: { recordId: string; conflicts: string[] },
 ) => {
   const error = new ORPCError("CONFLICT", { message, data });
   (error as unknown as MergeConflictTag)[isRecordMergeFieldConflict] = true;
+  return error;
+};
+
+/** Reason codes carried in `mergeSummary.conflict.reason` for a stale target. */
+export type StaleTargetReason = "record_archived" | "record_deleted";
+
+const staleTargetConflict = (
+  message: string,
+  data: { recordId: string; reason: StaleTargetReason },
+) => {
+  const error = new ORPCError("CONFLICT", { message, data });
+  (error as unknown as MergeConflictTag)[isStaleTargetConflict] = true;
   return error;
 };
 
@@ -1135,7 +1162,7 @@ export const hydrateChangeRequests = async (
     ...reviewRows.map((review) => review.reviewerId),
   ]);
 
-  return changeRequests.map((changeRequest) => {
+  const vos = changeRequests.map((changeRequest): ChangeRequestVO => {
     const publicSource = toPublicSourceMetadata(changeRequest.sourceMeta);
     const operations: OperationVO[] = (hydratedOperationsByCr.get(changeRequest.id) ?? []).map(
       (item) => {
@@ -1191,6 +1218,8 @@ export const hydrateChangeRequests = async (
       }) as ReviewVO[],
     };
   });
+  // One batched visibility check for every playbook on the page (spec §11b H1).
+  return applyPlaybookAttributionVisibility(vos);
 };
 
 // `mergeSummary` is a stored JSON blob (populated once at merge time), not
@@ -1591,7 +1620,7 @@ type InboxCandidateRow = {
   submittedBy: string;
 };
 
-const CHANGE_REQUEST_ACL_BATCH_SIZE = 5_000;
+export const CHANGE_REQUEST_ACL_BATCH_SIZE = 5_000;
 
 const matchesInboxFilter = (
   row: InboxCandidateRow,
@@ -1970,7 +1999,10 @@ export const reviseOperation = async (
     payload: parsed.fields,
     operation: operation.operation,
     message: parsed.message,
-    author: parsed.author,
+    // The commit's author is stamped from the host-authenticated actor, exactly
+    // like the change request's `submittedBy` — a caller-supplied string is only
+    // the open-source single-user default (see `resolveActorId`).
+    author: resolveActorId(parsed.author),
     createdAt: timestamp,
   });
 
@@ -3135,6 +3167,42 @@ export const mergeChangeRequest = async (changeRequestId: string) => {
     } else if (
       err instanceof ORPCError &&
       err.code === "CONFLICT" &&
+      (err as unknown as MergeConflictTag)[isStaleTargetConflict]
+    ) {
+      // The row this operation pinned was archived or deleted while the CR sat
+      // in review. Record WHICH row and why, so the review page can name it —
+      // in a bulk CR the reviewer is otherwise looking at N rows and a message
+      // that identifies none of them.
+      try {
+        const db = await getDb();
+        const timestamp = now();
+        const data = (err.data ?? {}) as { recordId?: string; reason?: string };
+        await db
+          .update(busabaseChangeRequests)
+          .set({
+            status: "conflict",
+            mergeSummary: {
+              conflict: {
+                reason: data.reason ?? "record_archived",
+                recordId: data.recordId ?? null,
+                fields: [],
+                detectedAt: timestamp.toISOString(),
+              },
+            },
+            updatedAt: timestamp,
+          })
+          .where(
+            and(
+              eq(busabaseChangeRequests.id, changeRequestId),
+              eq(busabaseChangeRequests.spaceId, getContextSpaceId()),
+            ),
+          );
+      } catch {
+        // Best-effort, same as the branches around it — re-throw the original.
+      }
+    } else if (
+      err instanceof ORPCError &&
+      err.code === "CONFLICT" &&
       (err as unknown as MergeConflictTag)[isRecordMergeFieldConflict]
     ) {
       // Mark the CR as conflicted so callers can inspect it, and persist the
@@ -3290,7 +3358,14 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
         } else if (item.operation === "node_restore") {
           await mergeNodeRestore(ctx, item, node);
         } else if (/^[a-z0-9-]+_file_(create|update|delete)$/.test(item.operation)) {
-          await mergeFileTreeFile(ctx, item, node, headCommit);
+          // Skills take the same file write plus one follow-up: a merged
+          // SKILL.md re-syncs the node's description/name from its frontmatter,
+          // which is what playbook discovery ranks on.
+          if (node.type === "skill") {
+            await mergeSkillFile(ctx, item, node, headCommit);
+          } else {
+            await mergeFileTreeFile(ctx, item, node, headCommit);
+          }
         } else if (/^[a-z0-9-]+_metadata_update$/.test(item.operation)) {
           await mergeFileTreeMetadata(ctx, item, node, headCommit);
         } else if (/^[a-z0-9-]+_document_update$/.test(item.operation)) {
@@ -3458,7 +3533,10 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
 
     const targetRecord = targetRecordsById.get(item.targetRecordId);
     if (!targetRecord) {
-      throw targetRecordNotFound(item.targetRecordId);
+      throw staleTargetConflict(`Target record not found: ${item.targetRecordId}`, {
+        recordId: item.targetRecordId,
+        reason: "record_deleted",
+      });
     }
 
     // Guard record ops against the target's lifecycle state (mirrors the
@@ -3472,9 +3550,12 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
         });
       }
     } else if (targetRecord.status !== "active") {
-      throw new ORPCError("CONFLICT", {
-        message: `Cannot ${item.operation === "record_delete" ? "delete" : "update"} an archived record`,
-      });
+      // Tagged, so the CR lands in `conflict` naming THIS row rather than
+      // sitting at "ready to merge" with a button that can only fail again.
+      throw staleTargetConflict(
+        `Cannot ${item.operation === "record_delete" ? "delete" : "update"} an archived record`,
+        { recordId: targetRecord.id, reason: "record_archived" },
+      );
     }
 
     if (

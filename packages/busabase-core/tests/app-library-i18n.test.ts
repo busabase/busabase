@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { type CoreLocale, coreMessagesByLocale } from "../src/i18n";
+import type { CoreLocale } from "../src/i18n";
+import { coreMessagesByLocale } from "../src/i18n/catalog";
 
 const EXPECTED_COPY: Record<
   CoreLocale,

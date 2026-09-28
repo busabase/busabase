@@ -39,6 +39,7 @@ import {
   CircleStop,
   Clock3,
   GitBranch,
+  Info,
   Plus,
   Trash2,
   UserCheck,
@@ -495,9 +496,13 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
     <RichNodeShell
       actions={
         <>
+          {/* Icon-only, like the rest of this cluster. A visible label used to
+              sit inside this fixed-size square and spill over the save status
+              and the delete button; giving it real width instead squeezes the
+              breadcrumb out whenever the side panel is open. */}
           <Button
             aria-label={messages.richNodes.addStep}
-            className="size-7 gap-1.5 sm:size-8"
+            className="size-7 sm:size-8"
             onClick={addNode}
             size="icon"
             title={messages.richNodes.addStep}
@@ -505,7 +510,6 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
             variant="outline"
           >
             <Plus className="size-3.5" />
-            <span className="max-sm:hidden">{messages.richNodes.addStep}</span>
           </Button>
           <Button
             aria-label={messages.richNodes.deleteSelection}
@@ -536,31 +540,46 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
             : "grid h-full min-h-0 grid-cols-[minmax(0,1fr)_17rem] max-md:grid-cols-1 max-md:grid-rows-[minmax(18rem,1fr)_auto]"
         }
       >
-        <WorkflowCanvas
-          edges={edges}
-          nodes={nodes}
-          onConnect={(connection) => {
-            setEdges((current) =>
-              addEdge({ ...connection, type: "smoothstep", data: { outcome: "default" } }, current),
-            );
-            markDirty();
-          }}
-          onEdgeClick={(_, selected) => {
-            setSelectedEdgeId(selected.id);
-            setSelectedId(null);
-          }}
-          onEdgesChange={onEdgesChange}
-          onNodeClick={(_, selected) => {
-            setSelectedId(selected.id);
-            setSelectedEdgeId(null);
-          }}
-          onNodesChange={onNodesChange}
-          onPaneClick={() => {
-            setSelectedId(null);
-            setSelectedEdgeId(null);
-          }}
-          readOnly={isAnonymous}
-        />
+        <div className="flex min-h-0 flex-col">
+          <p
+            className="flex shrink-0 items-center gap-1.5 border-border/60 border-b bg-muted/30 px-3 py-1.5 text-muted-foreground text-xs"
+            data-workflow-not-executed-note=""
+            role="note"
+          >
+            <Info aria-hidden="true" className="size-3.5 shrink-0" />
+            <span>{messages.richNodes.notExecutedNote}</span>
+          </p>
+          <div className="min-h-0 flex-1">
+            <WorkflowCanvas
+              edges={edges}
+              nodes={nodes}
+              onConnect={(connection) => {
+                setEdges((current) =>
+                  addEdge(
+                    { ...connection, type: "smoothstep", data: { outcome: "default" } },
+                    current,
+                  ),
+                );
+                markDirty();
+              }}
+              onEdgeClick={(_, selected) => {
+                setSelectedEdgeId(selected.id);
+                setSelectedId(null);
+              }}
+              onEdgesChange={onEdgesChange}
+              onNodeClick={(_, selected) => {
+                setSelectedId(selected.id);
+                setSelectedEdgeId(null);
+              }}
+              onNodesChange={onNodesChange}
+              onPaneClick={() => {
+                setSelectedId(null);
+                setSelectedEdgeId(null);
+              }}
+              readOnly={isAnonymous}
+            />
+          </div>
+        </div>
         <aside
           data-workflow-configuration=""
           className={
@@ -838,6 +857,7 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
             <label className="grid gap-1.5 text-muted-foreground text-xs">
               {messages.richNodes.executionMode}
               <select
+                aria-describedby="rich-workflow-execution-mode-hint"
                 className="h-9 border border-input bg-card px-3 text-foreground text-sm"
                 onChange={(event) =>
                   updateWorkflowSettings({
@@ -849,6 +869,12 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
                 <option value="manual">{messages.richNodes.manual}</option>
                 <option value="event">{messages.richNodes.event}</option>
               </select>
+              <span
+                className="text-[11px] leading-snug text-muted-foreground/80"
+                id="rich-workflow-execution-mode-hint"
+              >
+                {messages.richNodes.executionModeHint}
+              </span>
             </label>
             <label className="grid gap-1.5 text-muted-foreground text-xs">
               {messages.richNodes.errorPolicy}

@@ -25,6 +25,7 @@ import { fileTreeRouter } from "./domains/filetree/router";
 import { formRouter } from "./domains/form/router";
 import { guidesRouter } from "./domains/guides/router";
 import { installRouter } from "./domains/install/router";
+import { getPlaybook, listPlaybooks, searchPlaybooks } from "./domains/playbooks/logic/playbooks";
 import { updateNodeContent } from "./domains/rich-node/handlers";
 import { templatesRouter } from "./domains/templates/router";
 import { vaultRouter } from "./domains/vault/router";
@@ -152,6 +153,13 @@ const busabaseRouterImpl = busabase.router({
     report: busabase.searchMetrics.report.handler(({ input }) => recordSearchInteraction(input)),
   },
   grep: busabase.grep.handler(async ({ input }) => grepUnified(input)),
+  playbooks: {
+    search: busabase.playbooks.search.handler(async ({ input }) => searchPlaybooks(input)),
+    get: busabase.playbooks.get.handler(async ({ input }) => getPlaybook(input)),
+    list: busabase.playbooks.list.handler(async ({ input }) =>
+      listPlaybooks(input, { withUsage: true }),
+    ),
+  },
   embedLinks: embedLinksRouter,
   nodes: {
     list: busabase.nodes.list.handler(async ({ input }) => {

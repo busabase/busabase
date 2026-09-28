@@ -10,7 +10,7 @@ import {
 } from "lucide-react-native";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { NativeRow, NativeSection } from "~/components/native-screen";
-import { nodeIconForType } from "~/domains/workspace/components/node-icons";
+import { NodeAvatar } from "~/domains/workspace/components/NodeAvatar";
 import type { KnownNode } from "~/domains/workspace/utils/known-node-cache";
 import { mobile, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
@@ -86,13 +86,12 @@ export function SearchResultsList({
       ) : null}
       {tab === "recent"
         ? recentResults.map((node, index) => {
-            const Icon = nodeIconForType(node.type);
             return (
               <NativeRow
                 key={node.id}
                 title={node.name}
                 meta={node.slug}
-                leading={<Icon size={18} color={tokens.mutedForeground} />}
+                leading={<NodeAvatar node={node} size={18} color={tokens.mutedForeground} />}
                 onPress={() => onOpenKnownNode(node)}
                 last={index === recentResults.length - 1}
               />

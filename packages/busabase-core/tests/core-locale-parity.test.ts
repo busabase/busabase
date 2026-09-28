@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { coreMessagesByLocale, coreMessagesEn } from "../src/i18n";
+import { coreMessagesEn } from "../src/i18n";
+import { coreMessagesByLocale } from "../src/i18n/catalog";
 
 type Tree = { [key: string]: Tree | string | readonly (Tree | string)[] };
 

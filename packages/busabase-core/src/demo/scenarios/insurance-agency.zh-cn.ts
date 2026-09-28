@@ -27,11 +27,17 @@ import {
   DEMO_INSURANCE_POLICIES_BASE_NODE_ID,
   DEMO_INSURANCE_RENEWALS_BASE_ID,
   DEMO_INSURANCE_RENEWALS_BASE_NODE_ID,
+  INSURANCE_AGENCY_SCOREBOARD_NODE_ID,
+  INSURANCE_AGENT_DESK_NODE_ID,
   INSURANCE_AIRAPP_NODE_ID,
   INSURANCE_CLIENT_BUSINESS_OWNER_COMMIT_ID,
   INSURANCE_CLIENT_BUSINESS_OWNER_ID,
+  INSURANCE_CLIENT_CORPORATE_GROUP_COMMIT_ID,
+  INSURANCE_CLIENT_CORPORATE_GROUP_ID,
   INSURANCE_CLIENT_EXPAT_COMMIT_ID,
   INSURANCE_CLIENT_EXPAT_ID,
+  INSURANCE_CLIENT_FAMILY_OFFICE_COMMIT_ID,
+  INSURANCE_CLIENT_FAMILY_OFFICE_ID,
   INSURANCE_CLIENT_FLEET_MANAGER_COMMIT_ID,
   INSURANCE_CLIENT_FLEET_MANAGER_ID,
   INSURANCE_CLIENT_NEW_PARENTS_COMMIT_ID,
@@ -45,12 +51,17 @@ import {
   INSURANCE_FORM_NODE_ID,
   INSURANCE_HTML_NODE_ID,
   INSURANCE_INTAKE_CR_ID,
+  INSURANCE_ISSUANCE_DESK_NODE_ID,
   INSURANCE_PLAYBOOK_CR_ID,
   INSURANCE_PLAYBOOK_DOC_NODE_ID,
   INSURANCE_POLICY_CRITICAL_ILLNESS_COMMIT_ID,
   INSURANCE_POLICY_CRITICAL_ILLNESS_ID,
+  INSURANCE_POLICY_ESTATE_UL_COMMIT_ID,
+  INSURANCE_POLICY_ESTATE_UL_ID,
   INSURANCE_POLICY_FLEET_AUTO_COMMIT_ID,
   INSURANCE_POLICY_FLEET_AUTO_ID,
+  INSURANCE_POLICY_GROUP_TERM_COMMIT_ID,
+  INSURANCE_POLICY_GROUP_TERM_ID,
   INSURANCE_POLICY_KEYMAN_COMMIT_ID,
   INSURANCE_POLICY_KEYMAN_ID,
   INSURANCE_POLICY_SENIOR_HEALTH_COMMIT_ID,
@@ -60,8 +71,12 @@ import {
   INSURANCE_POLICY_TRAVEL_COMMIT_ID,
   INSURANCE_POLICY_TRAVEL_ID,
   INSURANCE_PRODUCT_MATRIX_DOC_NODE_ID,
+  INSURANCE_RENEWAL_ESTATE_COMMIT_ID,
+  INSURANCE_RENEWAL_ESTATE_ID,
   INSURANCE_RENEWAL_FLEET_COMMIT_ID,
   INSURANCE_RENEWAL_FLEET_ID,
+  INSURANCE_RENEWAL_GROUP_COMMIT_ID,
+  INSURANCE_RENEWAL_GROUP_ID,
   INSURANCE_RENEWAL_KEYMAN_COMMIT_ID,
   INSURANCE_RENEWAL_KEYMAN_ID,
   INSURANCE_RENEWAL_SENIOR_HEALTH_COMMIT_ID,
@@ -657,6 +672,56 @@ const INSURANCE_RECORDS: SeedRecordDef[] = [
     minutesAgo: 190,
     useCases: ["insurance"],
   },
+  {
+    id: INSURANCE_CLIENT_FAMILY_OFFICE_ID,
+    baseId: DEMO_INSURANCE_CLIENTS_BASE_ID,
+    commitId: INSURANCE_CLIENT_FAMILY_OFFICE_COMMIT_ID,
+    fields: {
+      advisor: "chen.jia@busabase.local",
+      ai_summary:
+        "家族办公室通过一份大额增额终身寿险覆盖传承税负——已与外部律师协同，不是单纯的保单销售。",
+      annual_budget: 1050000,
+      client_name: "陆振邦（振邦家族办公室）",
+      email: "zhenbang.lu@family-office.example.com",
+      next_follow_up: "2026-09-19",
+      notes:
+        "多代家族办公室在一次流动性事件前重新搭建财富传承结构。这份增额终身寿险用于覆盖传承税负，避免被迫出售主营企业股权。目前正与外部律师团队协调保险金信托结构。",
+      phone: "138-0021-0199",
+      policies: [INSURANCE_POLICY_ESTATE_UL_ID],
+      protection_focus: ["life", "property", "retirement"],
+      source: "referral",
+      stage: "insured",
+    },
+    message: "录入配置传承保障的家族办公室客户",
+    author: "seed-insurance",
+    minutesAgo: 188,
+    useCases: ["insurance"],
+  },
+  {
+    id: INSURANCE_CLIENT_CORPORATE_GROUP_ID,
+    baseId: DEMO_INSURANCE_CLIENTS_BASE_ID,
+    commitId: INSURANCE_CLIENT_CORPORATE_GROUP_COMMIT_ID,
+    fields: {
+      advisor: "marco.silva@busabase.local",
+      ai_summary:
+        "快速扩张的团体账户——续保时点正好撞上招聘高峰，意外险保额也得跟着员工人数一起调整。",
+      annual_budget: 1470000,
+      client_name: "览智机器人（人力资源部）",
+      email: "benefits@lanzhi-robotics.example.com",
+      next_follow_up: "2026-09-20",
+      notes:
+        "C 轮机器人公司，秋季扩招后员工数到了 128 人。团体定期寿险加意外险每年 10 月续保；人力资源部希望这次续保时一并报一份健康管理附加方案。",
+      phone: "021-6600-0173",
+      policies: [INSURANCE_POLICY_GROUP_TERM_ID],
+      protection_focus: ["life", "health"],
+      source: "referral",
+      stage: "insured",
+    },
+    message: "录入企业团体福利账户",
+    author: "seed-insurance",
+    minutesAgo: 187,
+    useCases: ["insurance"],
+  },
 
   {
     id: INSURANCE_POLICY_TERM_LIFE_ID,
@@ -783,6 +848,54 @@ const INSURANCE_RECORDS: SeedRecordDef[] = [
     minutesAgo: 180,
     useCases: ["insurance"],
   },
+  {
+    id: INSURANCE_POLICY_ESTATE_UL_ID,
+    baseId: DEMO_INSURANCE_POLICIES_BASE_ID,
+    commitId: INSURANCE_POLICY_ESTATE_UL_COMMIT_ID,
+    fields: withComputedCommission({
+      client: [INSURANCE_CLIENT_FAMILY_OFFICE_ID],
+      commission_rate: 6,
+      effective_date: "2026-03-01",
+      insurer: "隆信人寿",
+      notes:
+        "指数型增额终身寿险，用于覆盖传承税负。年度复核时间对齐家族办公室自己的审计周期，不是普通续保对话。",
+      policy_number: "POL-UL-2026-0301",
+      premium: 620000,
+      product: "传承保障增额终身寿险",
+      product_line: "life",
+      renewal_date: "2027-03-01",
+      status: "active",
+      sum_insured: 70000000,
+    }),
+    message: "录入传承保障增额终身寿险",
+    author: "seed-insurance",
+    minutesAgo: 179,
+    useCases: ["insurance"],
+  },
+  {
+    id: INSURANCE_POLICY_GROUP_TERM_ID,
+    baseId: DEMO_INSURANCE_POLICIES_BASE_ID,
+    commitId: INSURANCE_POLICY_GROUP_TERM_COMMIT_ID,
+    fields: withComputedCommission({
+      client: [INSURANCE_CLIENT_CORPORATE_GROUP_ID],
+      commission_rate: 5,
+      effective_date: "2025-10-01",
+      insurer: "环宇团体保险",
+      notes:
+        "保额按员工工资倍数换算，员工数一变总保额就跟着大幅波动。10 月续保报价前必须先核对花名册。",
+      policy_number: "POL-GRP-2025-1001",
+      premium: 1036000,
+      product: "团体定期寿险 + 意外险（128 人）",
+      product_line: "life",
+      renewal_date: "2026-10-01",
+      status: "active",
+      sum_insured: 450000000,
+    }),
+    message: "录入企业团体定期寿险与意外险保单",
+    author: "seed-insurance",
+    minutesAgo: 178,
+    useCases: ["insurance"],
+  },
 
   {
     id: INSURANCE_RENEWAL_FLEET_ID,
@@ -854,6 +967,42 @@ const INSURANCE_RECORDS: SeedRecordDef[] = [
     message: "录入已延期的关键人保额复核",
     author: "seed-insurance",
     minutesAgo: 90,
+    useCases: ["insurance"],
+  },
+  {
+    id: INSURANCE_RENEWAL_ESTATE_ID,
+    baseId: DEMO_INSURANCE_RENEWALS_BASE_ID,
+    commitId: INSURANCE_RENEWAL_ESTATE_COMMIT_ID,
+    fields: {
+      channel: "in-person",
+      due_date: "2026-11-15",
+      outcome: "",
+      owner: "chen.jia@busabase.local",
+      policy: [INSURANCE_POLICY_ESTATE_UL_ID],
+      status: "todo",
+      task: "配合家族办公室的外部律师团队做保单年度复核",
+    },
+    message: "录入待处理的传承保单复核",
+    author: "seed-insurance",
+    minutesAgo: 88,
+    useCases: ["insurance"],
+  },
+  {
+    id: INSURANCE_RENEWAL_GROUP_ID,
+    baseId: DEMO_INSURANCE_RENEWALS_BASE_ID,
+    commitId: INSURANCE_RENEWAL_GROUP_COMMIT_ID,
+    fields: {
+      channel: "email",
+      due_date: "2026-09-30",
+      outcome: "花名册模板已发给对方人力资源部，等更新后的员工清单回来才能报意外险保额。",
+      owner: "marco.silva@busabase.local",
+      policy: [INSURANCE_POLICY_GROUP_TERM_ID],
+      status: "in-progress",
+      task: "10 月续保前核对览智机器人的花名册",
+    },
+    message: "录入进行中的团体保单花名册核对",
+    author: "seed-insurance",
+    minutesAgo: 86,
     useCases: ["insurance"],
   },
 ];
@@ -1114,6 +1263,16 @@ const INSURANCE_DOCS: SeedDocDef[] = [
 
 - **北辰财险** —— 年度多次往返，含冬季运动附加险，单次行程上限 90 天。
 
+## 传承与财富
+
+- **隆信人寿** —— 这里唯一能不做联合承保、独立核保八位数保额的公司，专门服务家族办公室。
+  出单慢（20 个工作日以上），但核保部门愿意直接对接外部律师团队做保险金信托结构。
+
+## 团体福利
+
+- **环宇团体保险** —— 25 人到几百人规模的团体定期寿险与意外险首选。续保定价完全按花名册走，
+  花名册没更新是团体报价出错最常见的原因。
+
 这份文档靠变更请求保持更新——过期的对照表，最后就是把客户报到错的承保公司那里。
 `,
   },
@@ -1212,6 +1371,7 @@ const RENEWAL_BOARD_INDEX_HTML = `<!doctype html>
       <h1>续保看板</h1>
       <p>通过 Busabase REST API 读取本工作区自己的「insurance-policies」数据表——不是预置数据，也不是假数据。</p>
     </header>
+    <div id="stats" class="stats"></div>
     <div id="board"></div>
     <script src="client.js"></script>
   </body>
@@ -1240,11 +1400,46 @@ function daysUntil(dateString) {
 }
 
 function showEmpty(message) {
+  document.getElementById("stats")?.remove();
   board.innerHTML = "";
   const div = document.createElement("div");
   div.id = "empty";
   div.textContent = message;
   board.replaceWith(div);
+}
+
+function renderStats(records) {
+  const statsEl = document.getElementById("stats");
+  if (!statsEl) return;
+
+  const totalPremium = records.reduce((sum, r) => sum + (Number(r.headCommit?.payload?.premium) || 0), 0);
+  const totalCommission = records.reduce(
+    (sum, r) => sum + (Number(r.headCommit?.payload?.commission_amount) || 0),
+    0,
+  );
+  const activeCount = records.filter((r) => r.headCommit?.payload?.status === "active").length;
+  const dueSoonCount = records.filter((r) => {
+    const remaining = daysUntil(r.headCommit?.payload?.renewal_date);
+    return remaining !== null && remaining >= 0 && remaining <= 90;
+  }).length;
+
+  const tiles = [
+    ["在保保费", money(totalPremium)],
+    ["已赚佣金", money(totalCommission)],
+    ["有效保单数", String(activeCount)],
+    ["90 天内待续保", String(dueSoonCount)],
+  ];
+
+  statsEl.innerHTML = tiles
+    .map(
+      ([label, value]) =>
+        '<div class="stat"><div class="label">' +
+        label +
+        '</div><div class="value">' +
+        value +
+        "</div></div>",
+    )
+    .join("");
 }
 
 async function loadPolicies() {
@@ -1262,6 +1457,8 @@ async function loadPolicies() {
   const recordsRes = await fetch("/api/v1/records?baseId=" + policies.id + "&limit=100");
   if (!recordsRes.ok) throw new Error("GET /api/v1/records → " + recordsRes.status);
   const { records } = await recordsRes.json();
+
+  renderStats(records);
 
   for (const status of STATUSES) {
     const items = records.filter((r) => r.headCommit?.payload?.status === status.id);
@@ -1293,6 +1490,449 @@ async function loadPolicies() {
 }
 
 loadPolicies().catch((err) => showEmpty("读取保单失败：" + err.message));
+`;
+
+// ── 代理人工作台 AirApp —— 顾问自己的视角：谁排第几、今天要处理什么 ─────────────
+
+const AGENT_DESK_INDEX_HTML = `<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>代理人工作台</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header>
+      <span class="badge">AirApp · 实时工作区数据</span>
+      <h1>代理人工作台</h1>
+      <p>所有顾问的业绩排行，加上「客户档案」和「续保跟进」两个数据表里今天要处理的事——实时读取，不是预置数据。</p>
+    </header>
+    <div class="kicker">业绩排行</div>
+    <div class="panel"><table class="data-table" id="leaderboard"></table></div>
+    <div class="kicker">今日待办 —— 按最近日期排序的跟进与续保任务</div>
+    <div class="panel" id="queue"></div>
+  </body>
+  <script src="client.js"></script>
+</html>
+`;
+
+const AGENT_DESK_CLIENT_JS = `function money(n) {
+  return typeof n === "number" ? "¥" + n.toLocaleString("zh-CN") : "—";
+}
+
+function daysUntil(dateString) {
+  if (!dateString) return null;
+  const target = new Date(dateString);
+  if (Number.isNaN(target.getTime())) return null;
+  return Math.round((target.getTime() - Date.now()) / 86400000);
+}
+
+function pillFor(remaining) {
+  if (remaining === null) return { cls: "ok", label: "无日期" };
+  if (remaining < 0) return { cls: "overdue", label: "逾期 " + Math.abs(remaining) + " 天" };
+  if (remaining <= 14) return { cls: "due-soon", label: "剩 " + remaining + " 天" };
+  return { cls: "ok", label: "剩 " + remaining + " 天" };
+}
+
+function showEmpty(message) {
+  document.querySelector(".kicker")?.remove();
+  document.querySelectorAll(".panel").forEach((el) => el.remove());
+  const div = document.createElement("div");
+  div.id = "empty";
+  div.textContent = message;
+  document.body.appendChild(div);
+}
+
+async function fetchBaseRecords(bases, slug) {
+  const base = bases.find((b) => b.slug === slug);
+  if (!base) return null;
+  const res = await fetch("/api/v1/records?baseId=" + base.id + "&limit=100");
+  if (!res.ok) throw new Error("GET /api/v1/records (" + slug + ") → " + res.status);
+  const { records } = await res.json();
+  return records;
+}
+
+async function load() {
+  const basesRes = await fetch("/api/v1/bases");
+  if (!basesRes.ok) throw new Error("GET /api/v1/bases → " + basesRes.status);
+  const bases = await basesRes.json();
+
+  const [clients, policies, renewals] = await Promise.all([
+    fetchBaseRecords(bases, "insurance-clients"),
+    fetchBaseRecords(bases, "insurance-policies"),
+    fetchBaseRecords(bases, "insurance-renewals"),
+  ]);
+  if (!clients || !policies || !renewals) {
+    showEmpty(
+      '本工作区缺少「insurance-clients」「insurance-policies」或「insurance-renewals」数据表之一。这个示例读的是真实数据表——先播种标准演示数据（保险展业目录）再看。',
+    );
+    return;
+  }
+
+  const clientById = {};
+  for (const c of clients) clientById[c.id] = c.headCommit?.payload ?? {};
+
+  const byAdvisor = {};
+  for (const p of policies) {
+    const f = p.headCommit?.payload ?? {};
+    const clientId = Array.isArray(f.client) ? f.client[0] : null;
+    const advisor = (clientId && clientById[clientId]?.advisor) || "（未分配）";
+    const row = byAdvisor[advisor] || { advisor, policyCount: 0, premium: 0, commission: 0 };
+    row.policyCount += 1;
+    row.premium += Number(f.premium) || 0;
+    row.commission += Number(f.commission_amount) || 0;
+    byAdvisor[advisor] = row;
+  }
+  const leaderboard = Object.values(byAdvisor).sort((a, b) => b.premium - a.premium);
+
+  const table = document.getElementById("leaderboard");
+  table.innerHTML =
+    "<thead><tr><th>顾问</th><th>保单数</th><th>在保保费</th><th>已赚佣金</th></tr></thead><tbody></tbody>";
+  const tbody = table.querySelector("tbody");
+  leaderboard.forEach((row, i) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      "<td><span class=\\"rank\\">" +
+      (i + 1) +
+      "</span>" +
+      row.advisor +
+      "</td><td>" +
+      row.policyCount +
+      "</td><td>" +
+      money(row.premium) +
+      "</td><td>" +
+      money(row.commission) +
+      "</td>";
+    tbody.appendChild(tr);
+  });
+
+  const queueItems = [];
+  for (const c of clients) {
+    const f = c.headCommit?.payload ?? {};
+    if (!f.next_follow_up) continue;
+    queueItems.push({
+      type: "跟进",
+      date: f.next_follow_up,
+      name: f.client_name || "（未命名客户）",
+      meta: (f.advisor || "（未分配）") + " · " + (f.stage || ""),
+    });
+  }
+  for (const r of renewals) {
+    const f = r.headCommit?.payload ?? {};
+    if (f.status === "done") continue;
+    if (!f.due_date) continue;
+    queueItems.push({
+      type: "续保",
+      date: f.due_date,
+      name: f.task || "（未命名任务）",
+      meta: (f.owner || "（未分配）") + " · " + (f.status || ""),
+    });
+  }
+  queueItems.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+  const queueEl = document.getElementById("queue");
+  if (queueItems.length === 0) {
+    queueEl.textContent = "没有待办——队列已经清空。";
+  } else {
+    queueEl.innerHTML = "";
+    for (const item of queueItems.slice(0, 10)) {
+      const remaining = daysUntil(item.date);
+      const pill = pillFor(remaining);
+      const row = document.createElement("div");
+      row.className = "queue-item";
+      row.innerHTML =
+        '<div><div class="name">【' +
+        item.type +
+        "】" +
+        item.name +
+        '</div><div class="meta">' +
+        item.meta +
+        '</div></div><span class="pill ' +
+        pill.cls +
+        '">' +
+        pill.label +
+        "</span>";
+      queueEl.appendChild(row);
+    }
+  }
+}
+
+load().catch((err) => showEmpty("读取代理人工作台失败：" + err.message));
+`;
+
+// ── 机构经营看板 AirApp —— 老板视角：整本账一屏看完 ────────────────────────────
+
+const AGENCY_SCOREBOARD_INDEX_HTML = `<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>机构经营看板</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header>
+      <span class="badge">AirApp · 实时工作区数据</span>
+      <h1>机构经营看板</h1>
+      <p>整本账一屏看完——保费、佣金，以及集中在哪些险种和承保公司。实时读取「客户档案」和「保单台账」。</p>
+    </header>
+    <div id="stats" class="stats"></div>
+    <div class="kicker">按险种拆分保费</div>
+    <div class="panel" id="by-line"></div>
+    <div class="kicker">按承保公司拆分保费</div>
+    <div class="panel" id="by-carrier"></div>
+  </body>
+  <script src="client.js"></script>
+</html>
+`;
+
+const AGENCY_SCOREBOARD_CLIENT_JS = `function money(n) {
+  return typeof n === "number" ? "¥" + n.toLocaleString("zh-CN") : "—";
+}
+
+function showEmpty(message) {
+  document.getElementById("stats")?.remove();
+  document.querySelectorAll(".kicker, .panel").forEach((el) => el.remove());
+  const div = document.createElement("div");
+  div.id = "empty";
+  div.textContent = message;
+  document.body.appendChild(div);
+}
+
+function renderBars(containerId, rows) {
+  const el = document.getElementById(containerId);
+  el.innerHTML = "";
+  const max = rows.reduce((m, r) => Math.max(m, r.value), 0) || 1;
+  for (const row of rows) {
+    const pct = Math.round((row.value / max) * 100);
+    const div = document.createElement("div");
+    div.className = "bar-row";
+    div.innerHTML =
+      '<div class="bar-label">' +
+      row.label +
+      '</div><div class="bar-track"><div class="bar-fill" style="width:' +
+      pct +
+      '%"></div></div><div class="bar-value">' +
+      money(row.value) +
+      "</div>";
+    el.appendChild(div);
+  }
+  if (rows.length === 0) {
+    el.textContent = "暂无数据。";
+  }
+}
+
+async function fetchBaseRecords(bases, slug) {
+  const base = bases.find((b) => b.slug === slug);
+  if (!base) return null;
+  const res = await fetch("/api/v1/records?baseId=" + base.id + "&limit=100");
+  if (!res.ok) throw new Error("GET /api/v1/records (" + slug + ") → " + res.status);
+  const { records } = await res.json();
+  return records;
+}
+
+async function load() {
+  const basesRes = await fetch("/api/v1/bases");
+  if (!basesRes.ok) throw new Error("GET /api/v1/bases → " + basesRes.status);
+  const bases = await basesRes.json();
+
+  const [clients, policies] = await Promise.all([
+    fetchBaseRecords(bases, "insurance-clients"),
+    fetchBaseRecords(bases, "insurance-policies"),
+  ]);
+  if (!clients || !policies) {
+    showEmpty(
+      '本工作区缺少「insurance-clients」或「insurance-policies」数据表。这个示例读的是真实数据表——先播种标准演示数据（保险展业目录）再看。',
+    );
+    return;
+  }
+
+  let totalPremium = 0;
+  let totalCommission = 0;
+  const byLine = {};
+  const byCarrier = {};
+  for (const p of policies) {
+    const f = p.headCommit?.payload ?? {};
+    const premium = Number(f.premium) || 0;
+    totalPremium += premium;
+    totalCommission += Number(f.commission_amount) || 0;
+    const line = f.product_line || "其他";
+    byLine[line] = (byLine[line] || 0) + premium;
+    const carrier = f.insurer || "（未命名承保公司）";
+    byCarrier[carrier] = (byCarrier[carrier] || 0) + premium;
+  }
+
+  const insuredCount = clients.filter((c) => c.headCommit?.payload?.stage === "insured").length;
+  const pipeline = clients
+    .filter((c) => c.headCommit?.payload?.stage !== "insured" && c.headCommit?.payload?.stage !== "lost")
+    .reduce((sum, c) => sum + (Number(c.headCommit?.payload?.annual_budget) || 0), 0);
+
+  const statsEl = document.getElementById("stats");
+  const tiles = [
+    ["在保保费", money(totalPremium)],
+    ["已赚佣金", money(totalCommission)],
+    ["已承保客户", String(insuredCount)],
+    ["有效保单数", String(policies.length)],
+    ["待开拓管道", money(pipeline)],
+  ];
+  statsEl.innerHTML = tiles
+    .map(
+      ([label, value]) =>
+        '<div class="stat"><div class="label">' + label + '</div><div class="value">' + value + "</div></div>",
+    )
+    .join("");
+
+  const LINE_LABELS = { life: "寿险", health: "健康险", auto: "车险", property: "财产险", travel: "旅行险" };
+  renderBars(
+    "by-line",
+    Object.entries(byLine)
+      .map(([key, value]) => ({ label: LINE_LABELS[key] || key, value }))
+      .sort((a, b) => b.value - a.value),
+  );
+  renderBars(
+    "by-carrier",
+    Object.entries(byCarrier)
+      .map(([label, value]) => ({ label, value }))
+      .sort((a, b) => b.value - a.value),
+  );
+}
+
+load().catch((err) => showEmpty("读取经营看板失败：" + err.message));
+`;
+
+// ── 核保出单台 AirApp —— 后勤视角：还有哪些在流转、缺了什么文件 ────────────────
+
+const ISSUANCE_DESK_INDEX_HTML = `<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>核保出单台</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header>
+      <span class="badge">AirApp · 实时工作区数据</span>
+      <h1>核保出单台</h1>
+      <p>每张保单在报价到生效之间卡在哪一步，以及哪些还缺文件。实时读取「保单台账」。</p>
+    </header>
+    <div class="kicker">按阶段</div>
+    <div class="panel" id="funnel"></div>
+    <div class="kicker">待处理 —— 报价中或核保中</div>
+    <div class="panel"><table class="data-table" id="queue-table"></table></div>
+  </body>
+  <script src="client.js"></script>
+</html>
+`;
+
+const ISSUANCE_DESK_CLIENT_JS = `const STAGE_ORDER = [
+  { id: "quoting", label: "报价中" },
+  { id: "underwriting", label: "核保中" },
+  { id: "active", label: "有效" },
+  { id: "renewed", label: "已续保" },
+  { id: "lapsed", label: "已失效" },
+];
+
+function money(n) {
+  return typeof n === "number" ? "¥" + n.toLocaleString("zh-CN") : "—";
+}
+
+function showEmpty(message) {
+  document.querySelectorAll(".kicker, .panel").forEach((el) => el.remove());
+  const div = document.createElement("div");
+  div.id = "empty";
+  div.textContent = message;
+  document.body.appendChild(div);
+}
+
+async function load() {
+  const basesRes = await fetch("/api/v1/bases");
+  if (!basesRes.ok) throw new Error("GET /api/v1/bases → " + basesRes.status);
+  const bases = await basesRes.json();
+  const policiesBase = bases.find((b) => b.slug === "insurance-policies");
+  const clientsBase = bases.find((b) => b.slug === "insurance-clients");
+  if (!policiesBase || !clientsBase) {
+    showEmpty(
+      '本工作区缺少「insurance-policies」或「insurance-clients」数据表。这个示例读的是真实数据表——先播种标准演示数据（保险展业目录）再看。',
+    );
+    return;
+  }
+
+  const [policiesRes, clientsRes] = await Promise.all([
+    fetch("/api/v1/records?baseId=" + policiesBase.id + "&limit=100"),
+    fetch("/api/v1/records?baseId=" + clientsBase.id + "&limit=100"),
+  ]);
+  if (!policiesRes.ok) throw new Error("GET /api/v1/records → " + policiesRes.status);
+  if (!clientsRes.ok) throw new Error("GET /api/v1/records → " + clientsRes.status);
+  const { records: policies } = await policiesRes.json();
+  const { records: clients } = await clientsRes.json();
+  const clientNameById = {};
+  for (const c of clients) clientNameById[c.id] = c.headCommit?.payload?.client_name || "（未命名客户）";
+
+  const funnelEl = document.getElementById("funnel");
+  funnelEl.innerHTML = "";
+  const max = policies.length || 1;
+  for (const stage of STAGE_ORDER) {
+    const items = policies.filter((p) => p.headCommit?.payload?.status === stage.id);
+    const premium = items.reduce((sum, p) => sum + (Number(p.headCommit?.payload?.premium) || 0), 0);
+    const pct = Math.round((items.length / max) * 100);
+    const div = document.createElement("div");
+    div.className = "bar-row";
+    div.innerHTML =
+      '<div class="bar-label">' +
+      stage.label +
+      '</div><div class="bar-track"><div class="bar-fill" style="width:' +
+      pct +
+      '%"></div></div><div class="bar-value">' +
+      items.length +
+      " · " +
+      money(premium) +
+      "</div>";
+    funnelEl.appendChild(div);
+  }
+
+  const inFlight = policies
+    .filter((p) => ["quoting", "underwriting"].includes(p.headCommit?.payload?.status))
+    .sort(
+      (a, b) =>
+        new Date(a.headCommit?.payload?.effective_date || 0).getTime() -
+        new Date(b.headCommit?.payload?.effective_date || 0).getTime(),
+    );
+
+  const table = document.getElementById("queue-table");
+  table.innerHTML =
+    "<thead><tr><th>保单号</th><th>客户</th><th>产品</th><th>保费</th><th>状态</th><th>保单文件</th></tr></thead><tbody></tbody>";
+  const tbody = table.querySelector("tbody");
+  if (inFlight.length === 0) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = '<td colspan="6">没有在流转的保单——都已出单或续保。</td>';
+    tbody.appendChild(tr);
+  }
+  for (const p of inFlight) {
+    const f = p.headCommit?.payload ?? {};
+    const clientId = Array.isArray(f.client) ? f.client[0] : null;
+    const hasFile = Array.isArray(f.policy_file) && f.policy_file.length > 0;
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      "<td>" +
+      (f.policy_number || "—") +
+      "</td><td>" +
+      (clientNameById[clientId] || "—") +
+      "</td><td>" +
+      (f.product || "—") +
+      "</td><td>" +
+      money(f.premium) +
+      '</td><td><span class="pill due-soon">' +
+      (STAGE_ORDER.find((s) => s.id === f.status)?.label || f.status || "—") +
+      "</span></td><td>" +
+      (hasFile ? '<span class="pill ok">已归档</span>' : '<span class="pill missing">缺失</span>') +
+      "</td>";
+    tbody.appendChild(tr);
+  }
+}
+
+load().catch((err) => showEmpty("读取核保出单台失败：" + err.message));
 `;
 
 const INSURANCE_FILE_TREE_NODES: SeedFileTreeDef[] = [
@@ -1393,13 +2033,62 @@ const INSURANCE_FILE_TREE_NODES: SeedFileTreeDef[] = [
       { path: "client.js", content: RENEWAL_BOARD_CLIENT_JS },
     ],
   },
+  {
+    nodeType: "airapp",
+    nodeId: INSURANCE_AGENT_DESK_NODE_ID,
+    slug: "insurance-agent-desk",
+    name: "代理人工作台",
+    description:
+      "顾问自己的视角：全体顾问的业绩排行，加上今天要跟进和续保的队列。实时读取「客户档案」和「续保跟进」。",
+    position: 7,
+    files: [
+      { path: "package.json", content: RENEWAL_BOARD_PACKAGE_JSON },
+      { path: "server.js", content: RENEWAL_BOARD_SERVER_JS },
+      { path: "index.html", content: AGENT_DESK_INDEX_HTML },
+      { path: "style.css", content: RENEWAL_BOARD_STYLE_CSS },
+      { path: "client.js", content: AGENT_DESK_CLIENT_JS },
+    ],
+  },
+  {
+    nodeType: "airapp",
+    nodeId: INSURANCE_AGENCY_SCOREBOARD_NODE_ID,
+    slug: "insurance-agency-scoreboard",
+    name: "机构经营看板",
+    description:
+      "老板视角：在保保费、已赚佣金，以及账面集中在哪些险种和承保公司。实时读取「客户档案」和「保单台账」。",
+    position: 8,
+    files: [
+      { path: "package.json", content: RENEWAL_BOARD_PACKAGE_JSON },
+      { path: "server.js", content: RENEWAL_BOARD_SERVER_JS },
+      { path: "index.html", content: AGENCY_SCOREBOARD_INDEX_HTML },
+      { path: "style.css", content: RENEWAL_BOARD_STYLE_CSS },
+      { path: "client.js", content: AGENCY_SCOREBOARD_CLIENT_JS },
+    ],
+  },
+  {
+    nodeType: "airapp",
+    nodeId: INSURANCE_ISSUANCE_DESK_NODE_ID,
+    slug: "insurance-issuance-desk",
+    name: "核保出单台",
+    description:
+      "后勤视角：每张保单还卡在报价到生效之间的哪一步，按生效日排序，并标出缺失保单文件的。实时读取「保单台账」。",
+    position: 9,
+    files: [
+      { path: "package.json", content: RENEWAL_BOARD_PACKAGE_JSON },
+      { path: "server.js", content: RENEWAL_BOARD_SERVER_JS },
+      { path: "index.html", content: ISSUANCE_DESK_INDEX_HTML },
+      { path: "style.css", content: RENEWAL_BOARD_STYLE_CSS },
+      { path: "client.js", content: ISSUANCE_DESK_CLIENT_JS },
+    ],
+  },
 ];
 
 // ── 白板 / 流程 / HTML ───────────────────────────────────────────────────────
 
 const BOOK_OF_BUSINESS_CARDS: Array<[string, number, number, string, string, number]> = [
-  ["households", 80, 130, "客户\n5 位客户 · 6 张保单", "#dcfce7", 301],
-  ["renewals", 400, 130, "未来 90 天\n车队 · 中老年医疗", "#fef3c7", 302],
+  ["households", 80, 130, "客户\n7 位客户 · 8 张保单", "#dcfce7", 301],
+  ["book-value", 400, 130, "在保保费\n¥205.4万保费 · ¥14.6万佣金", "#e0e7ff", 305],
+  ["renewals", 720, 130, "未来 90 天\n车队 · 中老年医疗 · 团体福利", "#fef3c7", 302],
   ["gaps", 80, 330, "待补缺口\n收入损失 · 团体医疗", "#dbeafe", 303],
   ["referrals", 400, 330, "转介来源\n老客户 · 社群活动", "#fce7f3", 304],
 ];

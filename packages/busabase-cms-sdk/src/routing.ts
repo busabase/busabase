@@ -212,3 +212,23 @@ export const filterCmsPostsByTaxonomy = <
     (post) => post.locale === taxonomy.locale && post[relationKey].includes(taxonomy.id),
   );
 };
+
+/**
+ * The locales a Category/Tag archive (`/<locale>/blog/tag/<slug>`) really exists in, for its
+ * hreflang set (`generatePageMetadata({ availableLocales })`).
+ *
+ * A taxonomy record is per locale and the archive route only resolves when a record with that
+ * `slug` exists in the requested locale, so the translations of one archive are exactly the
+ * records sharing its slug. Advertising every supported locale instead points hreflang at 404s
+ * — see `buildCmsAlternateLanguages`. `taxonomy.locale` is always kept.
+ */
+export const getCmsTaxonomyLocales = (
+  taxonomies: readonly { slug: string; locale: string }[],
+  taxonomy: { slug: string; locale: string },
+  supportedLocales: readonly string[],
+): string[] =>
+  supportedLocales.filter(
+    (locale) =>
+      locale === taxonomy.locale ||
+      taxonomies.some((item) => item.slug === taxonomy.slug && item.locale === locale),
+  );

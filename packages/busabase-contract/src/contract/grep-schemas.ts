@@ -20,6 +20,7 @@ import {
   GREP_DEFAULT_MAX_MATCHES,
   GREP_HARD_MAX_MATCHES,
   GREP_MAX_CONTEXT_LINES,
+  GrepMatchOwnerVOSchema,
 } from "../domains/assets/types";
 
 /**
@@ -35,8 +36,12 @@ import {
  * had been implemented, not the category, and kept the other three silently
  * unsearchable. Narrow with `scope.nodes.types` to get the old doc-only
  * behaviour back explicitly.
+ *
+ * `"prompts"` scans the custom agent prompts stored on nodes (label and body,
+ * every locale). It is exhaustive pattern matching; ranked discovery of a
+ * prompt for a job is `playbooks.search`'s job.
  */
-export const GrepSourceSchema = z.enum(["files", "nodes", "records"]);
+export const GrepSourceSchema = z.enum(["files", "nodes", "records", "prompts"]);
 export type GrepSource = z.infer<typeof GrepSourceSchema>;
 
 /** Files scope — identical shape to the internal files scanner's `GrepScopeSchema`. */
@@ -82,10 +87,15 @@ export const UnifiedGrepInputSchema = z.object({
   pattern: z.string().min(1),
   /** JS RegExp flags, e.g. `"i"` for case-insensitive. */
   flags: z.string().optional().default(""),
-  /** Which sources to scan. Omitted = all three (`files`, `nodes`, `records`). */
+  /** Which sources to scan. Omitted = all four (`files`, `nodes`, `records`, `prompts`). */
   sources: z.array(GrepSourceSchema).optional(),
   scope: UnifiedGrepScopeSchema.optional(),
-  /** Shared across every scanned source — files run to completion first, then nodes, then whatever remains goes to records. */
+  /**
+   * Shared across every scanned source. Each requested source is guaranteed a
+   * floor of `floor(maxMatches / sources)` (at least 1); budget a source does
+   * not use rolls forward to the next one (files → nodes → records → prompts).
+   * One wall-clock deadline covers the whole call.
+   */
   maxMatches: z.coerce
     .number()
     .int()
@@ -123,6 +133,8 @@ export const UnifiedGrepFileMatchVOSchema = z.object({
   fileName: z.string(),
   /** Drive/Skill mounted path, or "" when the asset isn't path-mounted (e.g. a File node). */
   drivePath: z.string(),
+  /** The node this file belongs to (e.g. which skill a `SKILL.md` hit is in). Absent for unmounted uploads and from older servers. */
+  owner: GrepMatchOwnerVOSchema.optional(),
   ...grepHitFields,
 });
 export type UnifiedGrepFileMatchVO = z.infer<typeof UnifiedGrepFileMatchVOSchema>;
@@ -153,10 +165,34 @@ export const UnifiedGrepRecordMatchVOSchema = z.object({
 });
 export type UnifiedGrepRecordMatchVO = z.infer<typeof UnifiedGrepRecordMatchVOSchema>;
 
+export const UnifiedGrepPromptMatchVOSchema = z.object({
+  source: z.literal("prompts"),
+  /** The node the custom prompt is stored on. */
+  nodeId: z.string(),
+  nodeName: z.string(),
+  nodeType: z.string(),
+  /** The node's slug, for its dashboard route (`/{nodeType}/{nodeSlug}`). */
+  nodeSlug: z.string(),
+  /** The prompt's key — pass it to `playbooks.get` to open the rendered prompt. */
+  key: z.string(),
+  /**
+   * The prompt's label in the matched locale (falling back like every localized
+   * label) — what a person recognises, where `key` is an identifier. Optional
+   * for responses from servers older than this field.
+   */
+  label: z.string().optional(),
+  /** Which localized value matched, e.g. `"zh-CN"`; `"default"` when the value is a plain string. */
+  locale: z.string(),
+  field: z.enum(["label", "body"]),
+  ...grepHitFields,
+});
+export type UnifiedGrepPromptMatchVO = z.infer<typeof UnifiedGrepPromptMatchVOSchema>;
+
 export const UnifiedGrepMatchVOSchema = z.discriminatedUnion("source", [
   UnifiedGrepFileMatchVOSchema,
   UnifiedGrepNodeMatchVOSchema,
   UnifiedGrepRecordMatchVOSchema,
+  UnifiedGrepPromptMatchVOSchema,
 ]);
 export type UnifiedGrepMatchVO = z.infer<typeof UnifiedGrepMatchVOSchema>;
 
@@ -191,15 +227,27 @@ export const UnifiedGrepRecordsCoverageSchema = z.object({
 });
 export type UnifiedGrepRecordsCoverage = z.infer<typeof UnifiedGrepRecordsCoverageSchema>;
 
+/** Custom-prompt coverage — counted per NODE that stores custom prompts, same simple shape as nodes'. */
+export const UnifiedGrepPromptsCoverageSchema = z.object({
+  scanned: z.number().int().nonnegative(),
+  /** Node ids whose stored prompt list failed validation, so it was NOT searched. */
+  errored: z.array(z.string()),
+  /** Count of in-scope prompt-bearing nodes never reached because the deadline/budget ran out first. */
+  notReached: z.number().int().nonnegative(),
+});
+export type UnifiedGrepPromptsCoverage = z.infer<typeof UnifiedGrepPromptsCoverageSchema>;
+
 export const UnifiedGrepCoverageSchema = z.object({
   files: UnifiedGrepFilesCoverageSchema,
   nodes: UnifiedGrepNodesCoverageSchema,
   records: UnifiedGrepRecordsCoverageSchema,
+  /** Always present from this server; optional so a client can read an older server's response. */
+  prompts: UnifiedGrepPromptsCoverageSchema.optional(),
 });
 export type UnifiedGrepCoverage = z.infer<typeof UnifiedGrepCoverageSchema>;
 
 export const UnifiedGrepResultVOSchema = z.object({
-  /** Deterministic order: every `files` match, then every `nodes` match, then every `records` match. */
+  /** Deterministic order: every `files` match, then `nodes`, then `records`, then `prompts`. */
   matches: z.array(UnifiedGrepMatchVOSchema),
   coverage: UnifiedGrepCoverageSchema,
   /** True when any source truncated, or any source has `notReached > 0`. */

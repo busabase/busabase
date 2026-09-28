@@ -4,6 +4,7 @@ import { formatMemberChipLabel } from "busabase-core/dashboard/format";
 import { ExternalLink, FileText } from "lucide-react-native";
 import { useState } from "react";
 import { Image, Linking, Pressable, StyleSheet, Text, View } from "react-native";
+import { CollapsedMarkdown } from "~/components/MarkdownView";
 import {
   NativeActionBar,
   NativeBottomSheet,
@@ -179,9 +180,20 @@ export function FieldValue({
     return valueText;
   }
 
+  // A markdown field on the record screen reads as formatted text, as on web —
+  // not as its `**` and `#` symbols.
+  const body =
+    field?.type === "markdown" ? (
+      <CollapsedMarkdown collapsed={!expanded} maxHeight={COLLAPSED_LINES * 22}>
+        {text}
+      </CollapsedMarkdown>
+    ) : (
+      valueText
+    );
+
   return (
     <View style={styles.longText}>
-      {valueText}
+      {body}
       <Text
         accessibilityRole="button"
         onPress={() => setExpanded((current) => !current)}

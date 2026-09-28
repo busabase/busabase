@@ -68,7 +68,9 @@ const handleEmbedRequest = async (
         embedCapabilityCookieName(publicId),
         encodeEmbedCapability(publicId, bootstrap.secret),
         {
-          expires: metadata.expiresAt,
+          // An expired link still gets its cookie, for this visit only, so
+          // the page after the redirect can say "expired".
+          expires: metadata.expired ? undefined : metadata.expiresAt,
           httpOnly: true,
           path: `/embed/${publicId}`,
           sameSite: "lax",

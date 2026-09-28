@@ -28,6 +28,7 @@ import { useHrefWithCurrentSearch } from "../helpers/link-search";
 import { resolveSubmissionIdentity } from "../helpers/source-attribution";
 import type { BusabaseListGroup } from "../helpers/view-types";
 import { ActivityRow } from "./activity";
+import { PlaybookChip } from "./playbook-chip";
 import { EmptyState } from "./primitives";
 import { type RecordPageSize, RecordsPaginationBar } from "./records-pagination-bar";
 import { InboxListSkeleton } from "./skeletons";
@@ -608,6 +609,13 @@ function ReviewChangeRequestRow({ changeRequest }: { changeRequest: ChangeReques
             owner={submissionIdentity.ownerLabel}
             showChannel={false}
           />
+          {changeRequest.sourceAttribution?.playbook ? (
+            <>
+              <span>·</span>
+              {/* The whole row is a link — a nested <a> is invalid, so plain text here. */}
+              <PlaybookChip linked={false} playbook={changeRequest.sourceAttribution.playbook} />
+            </>
+          ) : null}
         </div>
       </div>
       <div className="flex min-w-0 items-center justify-between gap-3 text-muted-foreground text-xs md:justify-end">

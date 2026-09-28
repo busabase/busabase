@@ -22,4 +22,6 @@ export const BUSABASE_API_ALLOW_HEADERS = [
   "x-busabase-space",
   "x-busabase-channel",
   "x-busabase-client",
+  // The playbook an agent is following — recorded on the change request (spec §11b H1).
+  "x-busabase-playbook",
 ].join(", ");

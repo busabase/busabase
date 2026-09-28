@@ -4,6 +4,7 @@ import {
   buildCmsTaxonomyArchivePath,
   createCmsPathHelpers,
   filterCmsPostsByTaxonomy,
+  getCmsTaxonomyLocales,
   isCmsBlogPostPath,
   isCmsContentForLocale,
   normalizeCmsPath,
@@ -83,6 +84,21 @@ describe("CMS canonical routing", () => {
     expect(filterCmsPostsByTaxonomy(posts, "tags", { id: "tag-1", locale: "zh-CN" })).toEqual([
       posts[1],
     ]);
+  });
+
+  it("lists only the locales that have a taxonomy record with the same slug", () => {
+    const tags = [
+      { slug: "ai", locale: "en" },
+      { slug: "ai", locale: "ja" },
+      { slug: "agents", locale: "zh-CN" },
+      { slug: "ai", locale: "fr" },
+    ];
+
+    expect(getCmsTaxonomyLocales(tags, tags[1], options.supportedLocales)).toEqual(["en", "ja"]);
+    // A slug present in one locale only is its own sole alternate — no x-default partner.
+    expect(getCmsTaxonomyLocales(tags, tags[2], options.supportedLocales)).toEqual(["zh-CN"]);
+    // The rendered record's own locale survives an empty (failed) list read.
+    expect(getCmsTaxonomyLocales([], tags[0], options.supportedLocales)).toEqual(["en"]);
   });
 
   it("binds a CmsCanonicalPathOptions once into ready-to-call helpers", () => {

@@ -5,13 +5,11 @@ import {
   loadAirAppEmbedRuntime,
 } from "busabase-core/domains/embed-links/detail-page";
 import { cookies, headers } from "next/headers";
+import { notFound } from "next/navigation";
+import { EmbedStatus } from "~/domains/busabase-dashboard/components/embed-status";
 import { getBusabaseAppLL, getBusabaseLocaleFromAcceptLanguage } from "~/lib/i18n";
 
 export const dynamic = "force-dynamic";
-
-const Unavailable = ({ label }: { label: string }) => (
-  <main className="grid min-h-dvh place-items-center bg-background text-foreground">{label}</main>
-);
 
 export default async function AirAppEmbedPage({
   params,
@@ -35,7 +33,8 @@ export default async function AirAppEmbedPage({
     view: query.view,
     cookieValue: cookieStore.get(embedCapabilityCookieName(publicId))?.value,
   });
-  if (!loaded) return <Unavailable label={LL.embedRuntime.unavailable()} />;
+  if (!loaded) notFound();
+  if ("expired" in loaded) return <EmbedStatus label={LL.embedRuntime.expired()} />;
 
   return (
     <AirAppEmbedRuntime
@@ -45,6 +44,7 @@ export default async function AirAppEmbedPage({
       labels={{
         loading: LL.embedRuntime.loading(),
         unavailable: LL.embedRuntime.unavailable(),
+        expired: LL.embedRuntime.expired(),
       }}
       nodeId={loaded.runtime.nodeId}
       title={loaded.runtime.nodeName}

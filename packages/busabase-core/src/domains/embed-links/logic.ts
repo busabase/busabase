@@ -504,11 +504,14 @@ interface ResolvedEmbedLinkRecord {
   framePolicy: EmbedFramePolicyVO;
 }
 
-const resolveEmbedLinkRecord = async (
+/**
+ * The row behind a capability whose secret checks out, whatever its lifetime
+ * says. Callers decide what an expired or revoked row means to them.
+ */
+const readEmbedLinkRecord = async (
   id: string,
   secret: string,
-  at = new Date(),
-): Promise<ResolvedEmbedLinkRecord | null> => {
+): Promise<(ResolvedEmbedLinkRecord & { revokedAt: Date | null }) | null> => {
   if (!EMBED_PUBLIC_ID_PATTERN.test(id) || !EMBED_SECRET_PATTERN.test(secret)) return null;
   const db = await getDb();
   const [row] = await db
@@ -528,9 +531,7 @@ const resolveEmbedLinkRecord = async (
     .from(busabaseEmbedLinks)
     .where(eq(busabaseEmbedLinks.id, id))
     .limit(1);
-  if (!row || !isEmbedLinkActive(row, at) || !verifyEmbedSecret(secret, row.secretHash)) {
-    return null;
-  }
+  if (!row || !verifyEmbedSecret(secret, row.secretHash)) return null;
   const type = EmbedTargetTypeSchema.safeParse(row.type);
   const framePolicy = EmbedFramePolicyVOSchema.safeParse({
     mode: row.frameMode,
@@ -539,6 +540,66 @@ const resolveEmbedLinkRecord = async (
   return type.success && framePolicy.success
     ? { ...row, type: type.data, framePolicy: framePolicy.data }
     : null;
+};
+
+const resolveEmbedLinkRecord = async (
+  id: string,
+  secret: string,
+  at = new Date(),
+): Promise<ResolvedEmbedLinkRecord | null> => {
+  const row = await readEmbedLinkRecord(id, secret);
+  return row && isEmbedLinkActive(row, at) ? row : null;
+};
+
+/**
+ * A link that ran out its time, as opposed to one that never worked or was
+ * taken back. Expiry is the one failure a visitor is told about by name —
+ * "ask for a new link" is something they can act on. Only the holder of the
+ * real secret learns it; an unknown id, a wrong secret or a revoked link stay
+ * the same anonymous "unavailable".
+ */
+const isExpiredEmbedLinkRecord = (
+  row: { expiresAt: Date; revokedAt: Date | null },
+  at: Date,
+): boolean => row.revokedAt === null && row.expiresAt.getTime() <= at.getTime();
+
+export const resolveExpiredEmbedLink = async (
+  id: string,
+  secret: string,
+  at = new Date(),
+): Promise<{ type: EmbedTargetType; framePolicy: EmbedFramePolicyVO } | null> => {
+  const row = await readEmbedLinkRecord(id, secret);
+  return row && isExpiredEmbedLinkRecord(row, at)
+    ? { type: row.type, framePolicy: row.framePolicy }
+    : null;
+};
+
+/**
+ * `resolveExpiredEmbedLink` for the AirApp page: only a link whose target is
+ * still an AirApp node counts, so a doc link opened at `/airapp` stays
+ * "unavailable" before and after it expires.
+ */
+export const resolveExpiredAirAppEmbedLink = async (
+  id: string,
+  secret: string,
+  at = new Date(),
+): Promise<{ framePolicy: EmbedFramePolicyVO } | null> => {
+  const row = await readEmbedLinkRecord(id, secret);
+  if (!row || row.type !== "node" || !isExpiredEmbedLinkRecord(row, at)) return null;
+  const db = await getDb();
+  const [node] = await db
+    .select({ type: busabaseNodes.type })
+    .from(busabaseNodes)
+    .where(
+      and(
+        eq(busabaseNodes.id, row.typeId),
+        eq(busabaseNodes.spaceId, row.spaceId),
+        isNull(busabaseNodes.archivedAt),
+        isNull(busabaseNodes.deletedAt),
+      ),
+    )
+    .limit(1);
+  return node?.type === "airapp" ? { framePolicy: row.framePolicy } : null;
 };
 
 export type ResolvedEmbedLink = ResolvedPolymorphicEmbedVO;
@@ -744,15 +805,26 @@ export const resolveAirAppEmbedRuntime = async (
 export interface EmbedCapabilityMetadata {
   expiresAt: Date;
   framePolicy: EmbedFramePolicyVO;
+  /**
+   * The link's time ran out. It still gets its framing policy and cookie so
+   * the page it lands on — inside the embedding site's iframe, too — can say
+   * "expired" instead of being blocked or showing a bare "unavailable".
+   */
+  expired: boolean;
 }
 
+/** Metadata for a live or expired link; null for anything unknown or revoked. */
 export const resolveEmbedCapabilityMetadata = async (
   id: string,
   secret: string,
   at = new Date(),
 ): Promise<EmbedCapabilityMetadata | null> => {
-  const row = await resolveEmbedLinkRecord(id, secret, at);
-  return row ? { expiresAt: row.expiresAt, framePolicy: row.framePolicy } : null;
+  const row = await readEmbedLinkRecord(id, secret);
+  if (!row) return null;
+  const expired = isExpiredEmbedLinkRecord(row, at);
+  return isEmbedLinkActive(row, at) || expired
+    ? { expiresAt: row.expiresAt, framePolicy: row.framePolicy, expired }
+    : null;
 };
 
 export const resolveEmbedFramePolicy = async (

@@ -96,18 +96,38 @@ async function waitUntil<T, U extends T>(
   read: () => Promise<T>,
   predicate: (value: T) => value is U,
 ): Promise<U> {
-  for (let attempt = 0; attempt < 2_000; attempt++) {
+  for (let attempt = 0; attempt < 100; attempt++) {
     const value = await read();
     if (predicate(value)) return value;
-    await vi.advanceTimersByTimeAsync(20);
+    await vi.advanceTimersByTimeAsync(1);
   }
   throw new Error("Condition never became true.");
+}
+
+async function createHungSession(): Promise<AgentSessionVO> {
+  const [clientSide, agentSide] = linkedStreams();
+  mocks.createWebSocketStream.mockReturnValue(clientSide);
+  serveHungAgent(agentSide);
+
+  return createAgentSession({ slug: "test-agent", spaceId: LOCAL_SPACE_ID });
+}
+
+async function storedSession(sessionId: string): Promise<AgentSessionVO | undefined> {
+  return (await listAgentSessions()).find((session) => session.id === sessionId);
+}
+
+async function waitForFailedSession(sessionId: string): Promise<AgentSessionVO> {
+  return waitUntil(
+    () => storedSession(sessionId),
+    (found): found is AgentSessionVO => found !== undefined && found.status === "failed",
+  );
 }
 
 describe("agent session manager — handshake timeout (PUL-257)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
+    vi.stubEnv("BUSABASE_AGENT_HANDSHAKE_TIMEOUT_MS", "");
     mocks.storedSessions.length = 0;
     mocks.storedScopes.clear();
     mocks.loadSessionEvents.mockResolvedValue([]);
@@ -138,30 +158,34 @@ describe("agent session manager — handshake timeout (PUL-257)", () => {
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     vi.useRealTimers();
   });
 
-  it("fails a session whose agent never answers the ACP handshake, instead of hanging forever", async () => {
-    const [clientSide, agentSide] = linkedStreams();
-    mocks.createWebSocketStream.mockReturnValue(clientSide);
-    serveHungAgent(agentSide);
-
-    const session = await createAgentSession({ slug: "test-agent", spaceId: LOCAL_SPACE_ID });
+  it("keeps a silent ACP handshake connecting through 119s and fails it after the 120s default", async () => {
+    const session = await createHungSession();
     expect(session.status).toBe("connecting");
 
-    // Nothing changes on its own before the deadline — this is the
-    // regression this test guards against: without a handshake timeout, the
-    // session would still be "connecting" no matter how long we wait.
-    await vi.advanceTimersByTimeAsync(29_000);
-    expect((await listAgentSessions()).find((s) => s.id === session.id)?.status).toBe("connecting");
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect((await storedSession(session.id))?.status).toBe("connecting");
 
-    // Crossing the deadline is what turns the hang into a visible, actionable
-    // failure — the same shape a rejected `initialize` call would produce.
-    const failed = await waitUntil(
-      async () => (await listAgentSessions()).find((s) => s.id === session.id),
-      (found): found is NonNullable<typeof found> =>
-        found !== undefined && found.status === "failed",
-    );
+    await vi.advanceTimersByTimeAsync(89_000);
+    expect((await storedSession(session.id))?.status).toBe("connecting");
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    const failed = await waitForFailedSession(session.id);
     expect(failed.error).toMatch(/did not respond to the ACP handshake/i);
+  });
+
+  it("uses BUSABASE_AGENT_HANDSHAKE_TIMEOUT_MS when it is configured", async () => {
+    vi.stubEnv("BUSABASE_AGENT_HANDSHAKE_TIMEOUT_MS", "2500");
+    const session = await createHungSession();
+
+    await vi.advanceTimersByTimeAsync(2_499);
+    expect((await storedSession(session.id))?.status).toBe("connecting");
+
+    await vi.advanceTimersByTimeAsync(1);
+    const failed = await waitForFailedSession(session.id);
+    expect(failed.error).toMatch(/within 2\.5s/i);
   });
 });

@@ -157,7 +157,8 @@ export interface AirAppBridgeRuntimeProps {
    */
   runtimeKind: AirAppHostedRuntime;
   files: Record<string, string>;
-  labels: { loading: string; unavailable: string };
+  /** `expired` replaces `unavailable` once `expiresAt` has passed; omitted = no distinction. */
+  labels: { loading: string; unavailable: string; expired?: string };
   /** ISO timestamp after which the runtime hard-stops. Omitted = no expiry. */
   expiresAt?: string;
   title: string;
@@ -180,8 +181,11 @@ export function AirAppBridgeRuntime({
 }: AirAppBridgeRuntimeProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const runnerRef = useRef<NodepodRunner | null>(null);
+  // Set when this component stops the runner itself (expiry / revocation), so
+  // the dev server's resulting non-zero exit is not reported as a crash.
+  const stoppedRef = useRef(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [state, setState] = useState<"loading" | "ready" | "unavailable">("loading");
+  const [state, setState] = useState<"loading" | "ready" | "unavailable" | "expired">("loading");
   // Header objects are built inline by callers, so a fresh identity every render
   // would restart the relay effects on each one.
   const headerKey = JSON.stringify(bridgeHeaders);
@@ -206,7 +210,7 @@ export function AirAppBridgeRuntime({
     // visible state. Living here rather than in the embed wrapper is the point
     // of sharing this runtime — both surfaces are equally blind without it.
     runner.onExit((code) => {
-      if (!active || code === 0) return;
+      if (!active || code === 0 || stoppedRef.current) return;
       setPreviewUrl(null);
       setState("unavailable");
     });
@@ -311,14 +315,26 @@ export function AirAppBridgeRuntime({
   }, [headers]);
 
   useEffect(() => {
-    const markUnavailable = () => {
+    const stop = (next: "unavailable" | "expired") => {
+      stoppedRef.current = true;
       runnerRef.current?.dispose();
       runnerRef.current = null;
       setPreviewUrl(null);
-      setState("unavailable");
+      // A link revoked before it ran out stays "unavailable" — it did not expire.
+      setState((current) => (current === "unavailable" ? current : next));
     };
+    // The heartbeat can notice first, so a failure past the deadline is expiry too.
+    const markUnavailable = () =>
+      stop(
+        expiresAt !== undefined && new Date(expiresAt).getTime() <= Date.now()
+          ? "expired"
+          : "unavailable",
+      );
     const expiryTimer = expiresAt
-      ? window.setTimeout(markUnavailable, Math.max(0, new Date(expiresAt).getTime() - Date.now()))
+      ? window.setTimeout(
+          () => stop("expired"),
+          Math.max(0, new Date(expiresAt).getTime() - Date.now()),
+        )
       : null;
     // The heartbeat is what makes revocation take effect on an ALREADY-OPEN
     // tab: `_status` runs the same credential resolution as a data call, so a
@@ -342,7 +358,7 @@ export function AirAppBridgeRuntime({
     };
   }, [expiresAt, headers]);
 
-  if (state === "unavailable") {
+  if (state === "unavailable" || state === "expired") {
     return (
       <div
         className={
@@ -351,7 +367,7 @@ export function AirAppBridgeRuntime({
             : "grid h-full place-items-center bg-background text-foreground"
         }
       >
-        {labels.unavailable}
+        {state === "expired" ? (labels.expired ?? labels.unavailable) : labels.unavailable}
       </div>
     );
   }

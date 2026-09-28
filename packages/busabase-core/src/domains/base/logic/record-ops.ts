@@ -517,7 +517,7 @@ const createChangeRequestInternal = async (
     payload: parsed.fields,
     operation: "record_create",
     message: parsed.message,
-    author: "producer",
+    author: resolveActorId("producer"),
     createdAt: timestamp,
   });
 
@@ -732,7 +732,7 @@ export const createBulkChangeRequest = async (
       payload: fields,
       operation: "record_create",
       message: parsed.message,
-      author: "producer",
+      author: resolveActorId("producer"),
       createdAt: timestamp,
     });
     await db.insert(busabaseOperations).values({
@@ -1114,7 +1114,7 @@ export const createDeleteChangeRequest = async (
     payload: headCommit.payload,
     operation: "record_delete",
     message: parsed.message,
-    author: "producer",
+    author: resolveActorId("producer"),
     createdAt: timestamp,
   });
 
@@ -1273,7 +1273,7 @@ export const createUpdateChangeRequest = async (
     payload: parsed.fields,
     operation: "record_update",
     message: parsed.message,
-    author: parsed.author,
+    author: submittedBy,
     createdAt: timestamp,
   });
 
@@ -1407,7 +1407,7 @@ export const createRestoreChangeRequest = async (
     payload: headCommit.payload,
     operation: "record_restore",
     message: message ?? "Restore record",
-    author: "producer",
+    author: resolveActorId("producer"),
     createdAt: timestamp,
   });
 
@@ -1513,7 +1513,7 @@ export const createArchiveBaseChangeRequest = async (
     payload: fields,
     operation: "base_archive",
     message: message ?? "Archive base",
-    author: submittedBy,
+    author: resolveActorId(submittedBy),
     createdAt: timestamp,
   });
 
@@ -1637,7 +1637,7 @@ export const createRestoreBaseChangeRequest = async (
     payload: fields,
     operation: "base_restore",
     message: message ?? "Restore base",
-    author: submittedBy,
+    author: resolveActorId(submittedBy),
     createdAt: timestamp,
   });
 

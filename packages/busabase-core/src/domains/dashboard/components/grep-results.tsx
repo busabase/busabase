@@ -4,7 +4,7 @@ import type {
   UnifiedGrepCoverage,
   UnifiedGrepMatchVO,
 } from "busabase-contract/contract/grep-schemas";
-import { FileText, Rows3, Table2 } from "lucide-react";
+import { FileText, MessageSquareText, Rows3, Table2 } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import type { ReactNode } from "react";
 import { fmt, useCoreI18n } from "../../../i18n";
@@ -24,6 +24,7 @@ const sourceIcon: Record<UnifiedGrepMatchVO["source"], ReactNode> = {
   files: <FileText className="size-3.5" />,
   nodes: <Rows3 className="size-3.5" />,
   records: <Table2 className="size-3.5" />,
+  prompts: <MessageSquareText className="size-3.5" />,
 };
 
 /** Where a hit lives, as a line a person can read. */
@@ -33,9 +34,15 @@ const hitLocation = (match: UnifiedGrepMatchVO): string => {
     // `busabase_asset_usages.path`), so joining it to `fileName` renders
     // `exports/december.csv/december.csv`. It is empty for an asset that is not
     // path-mounted — a File node — which is the only case that needs the name.
-    return match.drivePath || match.fileName;
+    const file = match.drivePath || match.fileName;
+    // Two skills both hold a `SKILL.md`: the owning node (and its folders) is
+    // what tells the hits apart. Absent on servers older than owner attribution.
+    return match.owner ? [...match.owner.path, match.owner.nodeName, file].join(" / ") : file;
   }
   if (match.source === "nodes") return match.name;
+  // A custom agent prompt: the node it is stored on, then the prompt's label
+  // (its key on a server too old to send one).
+  if (match.source === "prompts") return `${match.nodeName} · ${match.label ?? match.key}`;
   return `${match.baseSlug} · ${match.fieldSlug}`;
 };
 
@@ -46,7 +53,9 @@ const hitHref = (match: UnifiedGrepMatchVO, currentSearch: string): string => {
       ? `/assets/${match.assetId}`
       : match.source === "nodes"
         ? `/${match.type}/${match.slug}`
-        : `/base/${match.baseSlug}/${match.recordId}`;
+        : match.source === "prompts"
+          ? `/${match.nodeType}/${match.nodeSlug}`
+          : `/base/${match.baseSlug}/${match.recordId}`;
   return mergeSearchIntoHref(path, currentSearch);
 };
 
@@ -57,7 +66,9 @@ const hitKey = (match: UnifiedGrepMatchVO): string => {
       ? match.assetId
       : match.source === "nodes"
         ? match.nodeId
-        : `${match.recordId}:${match.fieldSlug}`;
+        : match.source === "prompts"
+          ? `${match.nodeId}:${match.key}:${match.field}:${match.locale}`
+          : `${match.recordId}:${match.fieldSlug}`;
   return `${match.source}:${owner}:${match.line}:${match.column}`;
 };
 
@@ -145,11 +156,20 @@ export function GrepCoverageNote({
   const messages = useCoreI18n();
   const t = messages.searchPage;
 
-  const scanned = coverage.files.scanned + coverage.nodes.scanned + coverage.records.scanned;
+  // `prompts` is absent from servers older than the prompts source.
+  const prompts = coverage.prompts ?? { scanned: 0, errored: [], notReached: 0 };
+  const scanned =
+    coverage.files.scanned + coverage.nodes.scanned + coverage.records.scanned + prompts.scanned;
   const notReached =
-    coverage.files.notReached + coverage.nodes.notReached + coverage.records.notReached;
+    coverage.files.notReached +
+    coverage.nodes.notReached +
+    coverage.records.notReached +
+    prompts.notReached;
   const errored =
-    coverage.files.errored.length + coverage.nodes.errored.length + coverage.records.errored.length;
+    coverage.files.errored.length +
+    coverage.nodes.errored.length +
+    coverage.records.errored.length +
+    prompts.errored.length;
   const unread =
     coverage.files.missing.length + coverage.files.stale.length + coverage.files.unsearchable;
 

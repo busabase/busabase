@@ -1,5 +1,10 @@
 import { NODE_TYPES, type NodeType } from "busabase-contract/domains";
-import type { NodeSearchResultVO, NodeVO } from "busabase-contract/types";
+import {
+  type NodeIcon,
+  NodeIconSchema,
+  type NodeSearchResultVO,
+  type NodeVO,
+} from "busabase-contract/types";
 
 export interface KnownNode {
   id: string;
@@ -8,6 +13,13 @@ export interface KnownNode {
   slug: string;
   path: string;
   lastVisitedAt?: string;
+  /**
+   * The node's own emoji or image. Without it the Recent lists on Home and in
+   * Search could only ever show the type icon: this cache was the one place a
+   * custom icon was dropped on its way from the server to the screen.
+   * `undefined` = the source did not say; `null` = the node has none.
+   */
+  icon?: NodeIcon | null;
 }
 
 export interface AsyncKeyValueStorage {
@@ -41,7 +53,10 @@ const isKnownNode = (value: unknown): value is KnownNode => {
     typeof node.name === "string" &&
     typeof node.slug === "string" &&
     typeof node.path === "string" &&
-    (node.lastVisitedAt === undefined || typeof node.lastVisitedAt === "string")
+    (node.lastVisitedAt === undefined || typeof node.lastVisitedAt === "string") &&
+    // Persisted by an older build (no icon) or by this one; anything else is
+    // stale junk and the entry is dropped rather than rendered.
+    (node.icon === undefined || node.icon === null || NodeIconSchema.safeParse(node.icon).success)
   );
 };
 
@@ -84,6 +99,7 @@ export const nodeToKnownNode = (node: NodeVO): KnownNode => ({
   name: node.name,
   slug: node.slug,
   path: nodeRoutePath(node.type, node.slug),
+  icon: node.icon ?? null,
 });
 
 export const nodeSearchResultToKnownNode = (node: NodeSearchResultVO): KnownNode => ({
@@ -92,6 +108,9 @@ export const nodeSearchResultToKnownNode = (node: NodeSearchResultVO): KnownNode
   name: node.name,
   slug: node.slug,
   path: node.path,
+  // Optional in the contract: a server predating the field sends nothing,
+  // which must not read as "this node has no icon".
+  ...(node.icon !== undefined ? { icon: node.icon } : {}),
 });
 
 export const flattenNodesForCache = (nodes: NodeVO[]): KnownNode[] =>
@@ -150,6 +169,9 @@ export const createKnownNodeCache = (
       for (const incoming of nodes) {
         const existing = cache.get(incoming.id);
         const lastVisitedAt = incoming.lastVisitedAt ?? existing?.lastVisitedAt;
+        // A source that does not know the icon keeps what we had; an explicit
+        // null (the icon was cleared) replaces it.
+        const icon = incoming.icon !== undefined ? incoming.icon : existing?.icon;
         cache.delete(incoming.id);
         cache.set(incoming.id, {
           id: incoming.id,
@@ -158,6 +180,7 @@ export const createKnownNodeCache = (
           slug: incoming.slug,
           path: incoming.path,
           ...(lastVisitedAt ? { lastVisitedAt } : {}),
+          ...(icon !== undefined ? { icon } : {}),
         });
       }
       evictIfNeeded(cache);

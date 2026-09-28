@@ -30,6 +30,13 @@ async function seedClaudeSettings(dir: string): Promise<void> {
 }
 
 /**
+ * Each ACP agent loads project instructions from its own file name: Claude Code reads
+ * `CLAUDE.md`, Codex reads `AGENTS.md`, Gemini CLI reads `GEMINI.md`. The same guide goes into
+ * all three so a non-Claude agent is not the one left without the "find the playbook first" rule.
+ */
+export const AGENT_WORKSPACE_GUIDE_FILES = ["CLAUDE.md", "AGENTS.md", "GEMINI.md"] as const;
+
+/**
  * Local subprocess agents require a real, stable absolute `cwd`: their ACP
  * adapters stat it, load project instructions from it, and key resumable state
  * by it. Busabase therefore owns one scratch directory per space.
@@ -51,6 +58,7 @@ export async function prepareAgentWorkspace(
   const dir = join(homeDir, ".busabase", "agent-workspaces", normalizedSpaceId);
   await mkdir(dir, { recursive: true });
   await seedClaudeSettings(dir);
-  await writeFile(join(dir, "CLAUDE.md"), buildAgentWorkspaceGuide(normalizedSpaceId));
+  const guide = buildAgentWorkspaceGuide(normalizedSpaceId);
+  await Promise.all(AGENT_WORKSPACE_GUIDE_FILES.map((file) => writeFile(join(dir, file), guide)));
   return dir;
 }

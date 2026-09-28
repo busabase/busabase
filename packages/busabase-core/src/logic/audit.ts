@@ -22,6 +22,7 @@ import {
   busabaseOperations,
   busabaseRecords,
 } from "../db/schema";
+import { applyPlaybookAttributionVisibility } from "../domains/playbooks/logic/playbook-attribution";
 import {
   dispatchAgentMentions,
   insertCommentMentions,
@@ -127,6 +128,17 @@ const withAuditSourceMeta = (metadata: Record<string, unknown>) => {
 
 // ── Logic ─────────────────────────────────────────────────────────────────────
 
+/**
+ * Write one audit event through `db` and return the stored row.
+ *
+ * `db` may be a transaction (e.g. `deleteAssetRow` during a file-tree merge),
+ * so this must touch nothing but `db`. In particular it does NOT resolve the
+ * actor's user ref: `resolveUserRefs` calls the host's `resolveUsers`, which
+ * queries through the host's own global handle — on PGlite (one connection)
+ * that waits on the open transaction while the transaction waits on it, and
+ * the merge hangs. Callers that need the VO resolve it after (see
+ * `createAuditEvent`).
+ */
 export const insertAuditEvent = async (
   db: Awaited<ReturnType<typeof getDb>>,
   input: z.input<typeof auditEventInputSchema>,
@@ -147,7 +159,6 @@ export const insertAuditEvent = async (
       createdAt: now(),
     })
     .returning();
-  const eventVO = toAuditEventVO(event, await resolveUserRefs([event.actorId]));
 
   if (event.changeRequestId && isLiveChangeRequestAuditAction(event.action)) {
     const { publishBusabaseLiveEvent } = await import("./live-events");
@@ -164,7 +175,7 @@ export const insertAuditEvent = async (
     });
   }
 
-  return eventVO;
+  return event;
 };
 
 /** Caller-supplied comment subjectId doesn't resolve within the current space —
@@ -356,7 +367,8 @@ export const createAuditEvent = async (input: z.infer<typeof auditEventInputSche
   await ensureReady();
   const db = await getDb();
   await assertAuditSubjectPermission(input, "write");
-  return insertAuditEvent(db, input);
+  const event = await insertAuditEvent(db, input);
+  return toAuditEventVO(event, await resolveUserRefs([event.actorId]));
 };
 
 const listVisibleChangeRequestIds = async (
@@ -420,7 +432,7 @@ export const listAuditEvents = async (input?: z.input<typeof listInputSchema>) =
   }
   events.splice(parsed.limit);
   const users = await resolveUserRefs(events.map((event) => event.actorId));
-  return events.map((event) => toAuditEventVO(event, users));
+  return applyPlaybookAttributionVisibility(events.map((event) => toAuditEventVO(event, users)));
 };
 
 export const listComments = async (input: z.infer<typeof commentSubjectInputSchema>) => {

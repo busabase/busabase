@@ -36,4 +36,5 @@ export type {
   StorageConfig,
   StorageObjectMetadata,
   StorageProvider,
+  UploadPresignOptions,
 } from "./types";

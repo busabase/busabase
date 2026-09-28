@@ -63,4 +63,51 @@ describe("public source attribution", () => {
       metadata: { verdict: "approved" },
     });
   });
+  describe("playbook", () => {
+    const playbook = {
+      kind: "prompt",
+      nodeId: "nod_visits",
+      key: "log-visit",
+      nodeType: "base",
+      nodeSlug: "visits",
+      label: "Log a customer visit",
+    };
+
+    it("surfaces a stored playbook next to the existing attribution", () => {
+      expect(
+        toPublicSourceMetadata({
+          subject: "record",
+          provenance: { ...rawSourceMeta.provenance, playbook },
+        }),
+      ).toEqual({
+        sourceAttribution: {
+          displayName: "Codex",
+          ownerName: "Leon",
+          channel: "mcp",
+          playbook: { ...playbook, accessible: true },
+        },
+        sourceMeta: { subject: "record" },
+      });
+    });
+
+    it("does not invent an API channel for a playbook-only provenance (open-source host)", () => {
+      expect(toPublicSourceMetadata({ provenance: { playbook } }).sourceAttribution).toEqual({
+        displayName: null,
+        ownerName: null,
+        channel: null,
+        playbook: { ...playbook, accessible: true },
+      });
+    });
+
+    it("ignores a malformed stored playbook and keeps the old shape", () => {
+      const result = toPublicSourceMetadata({
+        provenance: { ...rawSourceMeta.provenance, playbook: { kind: "recipe", nodeId: "x" } },
+      });
+      expect(result.sourceAttribution).toEqual({
+        displayName: "Codex",
+        ownerName: "Leon",
+        channel: "mcp",
+      });
+    });
+  });
 });

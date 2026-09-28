@@ -4,7 +4,8 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { NodeDetailVO } from "busabase-contract/contract/node-detail-schemas";
 import { afterEach, describe, expect, it } from "vitest";
-import { CoreI18nProvider, coreMessagesByLocale, fmt } from "../../../i18n";
+import { CoreI18nProvider, fmt } from "../../../i18n";
+import { coreMessagesByLocale } from "../../../i18n/catalog";
 import { isPinnableNode } from "../../dashboard/components/side-panel-sources";
 import { TopbarNodeActionsSlot } from "../../dashboard/components/topbar";
 import { DashboardVisitorProvider } from "../../dashboard/visitor-context";

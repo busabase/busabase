@@ -5,7 +5,8 @@ import type { InstallEventVO, InstallPlanVO } from "busabase-contract/domains/in
 import * as React from "react";
 import { act } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CoreI18nProvider, coreMessagesByLocale } from "../../../i18n";
+import { CoreI18nProvider } from "../../../i18n";
+import { coreMessagesByLocale } from "../../../i18n/catalog";
 import { InstallFromGithubModal } from "./install-from-github-modal";
 
 Object.assign(globalThis, { React });

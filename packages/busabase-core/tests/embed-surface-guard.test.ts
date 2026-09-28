@@ -58,6 +58,12 @@ describe("embed visitor procedure surface", () => {
       const detail = await client.nodes.get({ nodeId: doc.node.id });
       expect(detail).toMatchObject({ node: { id: doc.node.id } });
 
+      // The dashboard's route guard runs before it renders any node URL (a
+      // record preview is one); denying it made the embed read "Node unavailable".
+      await expect(client.nodes.resolveRouteState({ nodeId: doc.node.id })).resolves.toMatchObject({
+        status: "active",
+      });
+
       // The bearer capability authorizes one exact target, never neighboring
       // private content in the same workspace.
       await expect(client.nodes.get({ nodeId: sibling.node.id })).rejects.toMatchObject({

@@ -5,7 +5,9 @@ import {
   Github,
   Images,
   Inbox,
+  LayoutGrid,
   Network,
+  Shapes,
   Table2,
 } from "lucide-react-native";
 import type { CoreMessages } from "~/i18n/messages";
@@ -65,6 +67,13 @@ export const DRAWER_DESTINATIONS = [
   { key: "records", href: "/drawer/records", icon: FileText, activePaths: ["/records"] },
   { key: "bases", href: "/drawer/bases", icon: Table2, activePaths: ["/base"] },
   { key: "graph", href: "/drawer/graph", icon: Network },
+  // Web reaches these two contextually (Home's "recent apps" link, the New-item
+  // modal's template tab) rather than through this persistent menu — mobile has
+  // neither of those, so this "Go to" list is the entry point instead. Same
+  // destination, same icons (`LayoutGrid` / `Shapes`) as core's
+  // `dashboard-shell.tsx`.
+  { key: "apps", href: "/drawer/apps", icon: LayoutGrid, activePaths: ["/airapp"] },
+  { key: "templates", href: "/drawer/templates", icon: Shapes, activePaths: ["/templates"] },
 ] as const satisfies ReadonlyArray<DrawerEntry>;
 
 export const isPathActive = (pathname: string, basePath: string) =>

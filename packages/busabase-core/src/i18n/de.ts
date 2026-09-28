@@ -151,6 +151,9 @@ export const dashboardDe: CoreI18nMessages = {
     targetFolderHint: "Leer lassen, um Dateien im Drive-Stammverzeichnis hinzuzufügen.",
     removeSelectedFile: "{name} aus diesem Upload entfernen",
     fileAlreadyExists: "Unter „{path}“ existiert bereits eine Datei.",
+    replaceExistingFiles: "Dateien mit gleichem Namen ersetzen",
+    replaceExistingFilesHint:
+      "Dateien unter demselben Pfad werden überschrieben. Die vorherige Version wird nicht aufbewahrt – laden Sie sie zuerst herunter, falls Sie sie noch brauchen.",
     duplicateUploadNames: "Zwei ausgewählte Dateien würden denselben Drive-Pfad verwenden.",
     invalidFilePath: "Geben Sie einen gültigen relativen Drive-Ordnerpfad ein.",
     invalidFolderName: "Geben Sie einen Ordnernamen ohne Schrägstriche ein.",
@@ -870,6 +873,63 @@ export const dashboardDe: CoreI18nMessages = {
     agentPickerEmpty: "Noch keine Agents verbunden.",
     agentPickerConnect: "Agent verbinden",
   },
+  // The space-level Playbooks page (`/playbooks`, agent-playbook-discovery.md §11b H2).
+  playbooksPage: {
+    title: "Playbooks",
+    description:
+      "Skills und eigene Prompts in diesem Space. Agents schauen bei jeder Anweisung zuerst hier nach.",
+    tryTitle: "Ausprobieren",
+    tryLabel: "Was würdest du einem Agent sagen?",
+    tryPlaceholder: "z. B. heutigen Kundenbesuch erfassen",
+    trySubmit: "Suchen",
+    tryNote:
+      "Das ist eine wörtliche Vorschau – ein Agent schickt zusätzlich eigene Umformulierungen (und Englisch) mit und findet daher unter Umständen mehr.",
+    tryLoading: "Suche läuft …",
+    tryFailed: "Die Suche ist fehlgeschlagen.",
+    tryResultCount: "{shown} von {total} passenden Playbooks",
+    tryNoMatchesTitle: "Kein Playbook passt zu diesem Satz",
+    tryNoMatchesBody:
+      "Agents vergleichen Wörter, nicht Bedeutungen. Formuliere das Label so, wie Leute tatsächlich fragen – „Kundenbesuch erfassen“ statt „CRM-Eingabe v2“ – und nimm die Wörter in jeder Sprache auf, die dein Team verwendet.",
+    matchedOn: "Treffer in",
+    matchName: "Name",
+    matchSlug: "Slug",
+    matchDescription: "Beschreibung",
+    matchLabel: "Label",
+    matchBody: "Text",
+    catalogTitle: "Alle Playbooks",
+    catalogCount: "{count} Playbooks",
+    filterAll: "Alle",
+    filterSkills: "Skills",
+    filterPrompts: "Prompts",
+    kindSkill: "Skill",
+    kindPrompt: "Prompt",
+    rootGroup: "Workspace",
+    onNode: "auf {node}",
+    intentReadOnly: "Nur lesen",
+    intentChange: "Ändert Daten",
+    openPrompts: "Prompts öffnen",
+    truncated: "Die ersten {shown} von {total} werden angezeigt.",
+    loadFailedTitle: "Playbooks konnten nicht geladen werden",
+    loadFailedBody: "Prüfe deine Verbindung und versuche es erneut.",
+    retry: "Erneut versuchen",
+    emptyTitle: "Noch keine Playbooks",
+    emptyBody:
+      "Ein Playbook ist eine gespeicherte Arbeitsweise. Agents schlagen es nach, bevor sie improvisieren – so wird die Arbeit so erledigt, wie du es eingerichtet hast.",
+    emptyHowSkill: "Füge einen Skill-Knoten hinzu und schreibe die Schritte in seine SKILL.md.",
+    emptyHowPrompt:
+      "Oder öffne an einem beliebigen Knoten die Schaltfläche „Agent-Prompts“ und füge einen eigenen Prompt hinzu.",
+    emptyHelp:
+      "Wie du sie formulierst, damit Agents sie finden, steht im Hilfeartikel „Agent Playbooks“.",
+    emptyFilteredTitle: "Davon gibt es noch nichts",
+    noDescription: "Keine Beschreibung",
+    usageUsed: "{count}× in 30 Tagen verwendet",
+    usageLast: "zuletzt {when}",
+    usageUnused: "Seit 30 Tagen nicht verwendet",
+    usageUnusedHint:
+      "Seit 30 Tagen hat keine Änderungsanfrage dieses Playbook festgehalten. Nutzungen ohne Schreibvorgang zählen nicht; sollten Agenten es nutzen, prüfe die Formulierung unter „Ausprobieren“.",
+    usageHint:
+      "Änderungsanfragen, die dieses Playbook festgehalten haben, in jedem Status (auch abgelehnte). Gezählt werden nur die, die du sehen kannst. Ein Agent, der es befolgt, ohne etwas zu schreiben, wird nicht gezählt.",
+  },
   nav: {
     home: "Startseite",
     inbox: "Posteingang",
@@ -883,6 +943,7 @@ export const dashboardDe: CoreI18nMessages = {
     graph: "Graph-Ansicht",
     workspace: "Arbeitsbereich",
     shared: "Öffentliche Freigaben",
+    playbooks: "Playbooks",
     base: "Base",
     blogPosts: "Blogbeiträge",
     review: "Review",
@@ -940,6 +1001,7 @@ export const dashboardDe: CoreI18nMessages = {
     sourceFiles: "Dateien",
     sourceNodes: "Dokumentinhalt",
     sourceNames: "Bases",
+    sourcePrompts: "Agent-Prompts",
     sortLabel: "Sortieren",
     sortRelevance: "Relevanteste",
     sortUpdatedDesc: "Zuletzt aktualisiert",
@@ -1006,6 +1068,7 @@ export const dashboardDe: CoreI18nMessages = {
     editRecord: "Datensatz bearbeiten",
     record: "Datensatz",
     shared: "Öffentliche Freigaben",
+    playbooks: "Playbooks",
   },
   home: {
     title: "Startseite",
@@ -1120,6 +1183,9 @@ export const dashboardDe: CoreI18nMessages = {
     channelWebhook: "Webhook",
     channelAutomation: "Automatisierung",
     channelImport: "Import",
+    viaPlaybookNamed: "über Playbook „{label}“",
+    viaPlaybookHidden: "über ein Playbook",
+    playbookChipTitle: "Das Playbook, dem der Agent bei dieser Änderung gefolgt ist",
   },
   actor: {
     localAdmin: "Lokaler Admin",
@@ -1586,6 +1652,24 @@ export const dashboardDe: CoreI18nMessages = {
     relationTargetRequired: "Relationsfelder benötigen eine Ziel-Base.",
     failedAddField: "Feld konnte nicht hinzugefügt werden",
     failedRenameField: "Feld konnte nicht umbenannt werden",
+    choices: "Optionen",
+    addChoice: "Option hinzufügen",
+    choiceNamePlaceholder: "Name der Option",
+    moveChoiceUp: "Option „{name}“ nach oben verschieben",
+    moveChoiceDown: "Option „{name}“ nach unten verschieben",
+    removeChoice: "Option „{name}“ entfernen",
+    choicesEmptyHint:
+      "Noch keine Optionen. Füge welche hinzu, dann stehen sie beim Bearbeiten eines Datensatzes zur Auswahl.",
+    choiceNameRequired: "Der Name einer Option darf nicht leer sein.",
+    choiceNameDuplicate: "Die Option „{name}“ ist doppelt vorhanden.",
+    choicesRemovedHint:
+      "Wird entfernt: {names}. Verwendet noch ein Datensatz diese Optionen, wird das Speichern abgelehnt – stelle diese Datensätze zuerst auf eine andere Option um.",
+    choicesStillInUse:
+      "{names} kann nicht entfernt werden: {count} Datensatz/Datensätze verwenden die Option noch. Stelle sie auf eine andere Option um und speichere dann erneut.",
+    requestFieldUpdate: "Änderung anfragen",
+    updateFieldNow: "Jetzt speichern",
+    updatingField: "Wird gespeichert…",
+    failedUpdateField: "Feld konnte nicht gespeichert werden",
     recordsMissingValue: "Datensätze ohne Wert ({count}):",
     recordsReferencingRemovedChoices: "Datensätze, die entfernte Optionen referenzieren ({count}):",
     andMore: "…und {count} weitere",
@@ -1697,6 +1781,15 @@ export const dashboardDe: CoreI18nMessages = {
     conflictingFields: "Konfligierende Felder:",
     conflictResolveHint:
       "Öffnen Sie die vorgeschlagene Änderung unten erneut und überarbeiten Sie sie, um sie gegen die neuesten Werte zu mergen, oder schließen Sie den Change Request, um ihn zu verwerfen.",
+    statusConflict: "Konflikt · Mergen nicht möglich",
+    staleTargetArchivedTitle:
+      "Mergen nicht möglich — eine Zeile in diesem Change Request wurde archiviert",
+    staleTargetDeletedTitle:
+      "Mergen nicht möglich — eine Zeile in diesem Change Request wurde gelöscht",
+    staleTargetRow: "Die Zeile:",
+    staleTargetUnknownRow: "Eine Zeile, die es in dieser Base nicht mehr gibt.",
+    staleTargetHint:
+      "Jemand hat sie archiviert oder gelöscht, während dies auf die Prüfung wartete. Deshalb wird der gesamte Stapel abgelehnt und nichts wurde übernommen. Schließen Sie diesen Change Request und reichen Sie ihn ohne diese Zeile erneut ein.",
     conflictComposerHint:
       "Dieser Change Request steht im Konflikt mit dem neuesten Datensatz. Überarbeiten Sie die vorgeschlagene Änderung, um sie gegen die aktuellen Werte zu mergen, oder schließen Sie ihn, um ihn zu verwerfen.",
     changesRequestedHint:
@@ -1914,6 +2007,9 @@ export const dashboardDe: CoreI18nMessages = {
     updateRecordMessage: "{record} aktualisieren",
     addFieldMessage: "Feld {field} hinzufügen",
     renameFieldMessage: "Feld {field} umbenennen",
+    updateFieldMessage: "Feld {field} aktualisieren",
+    fieldUpdated: "Feld aktualisiert",
+    fieldUpdateRequestSubmitted: "Änderungsanfrage für das Feld gesendet",
     fieldRenamed: "Feld umbenannt",
     renameRequestSubmitted: "Umbenennungsanfrage gesendet",
     autoApproved: "Beim Erstellen und Mergen automatisch genehmigt",
@@ -2252,6 +2348,10 @@ export const dashboardDe: CoreI18nMessages = {
     edgeOutcome: "Verzweigungsergebnis",
     workflowSettings: "Ausführungseinstellungen",
     executionMode: "Ausführungsmodus",
+    notExecutedNote:
+      "Workflows werden derzeit nur gespeichert und geprüft – sie werden noch nicht ausgeführt.",
+    executionModeHint:
+      "Legt nur fest, wie der Workflow später starten soll – ausgeführt wird noch nichts.",
     manual: "Manuell",
     event: "Ereignis",
     errorPolicy: "Bei Fehler",

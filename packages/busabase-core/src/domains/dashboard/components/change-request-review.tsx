@@ -40,6 +40,7 @@ import { UserRefButton } from "./identity";
 import { memberUserMap, useSpaceMemberRoster } from "./member-field";
 import { OperationFieldChanges } from "./operation-diff";
 import { isChangeRequestRevisable, OperationReviseForm } from "./operation-revise";
+import { PlaybookChip } from "./playbook-chip";
 import {
   BackLink,
   BusabaseSidePanel,
@@ -63,18 +64,32 @@ export function ReviewConflictPanel({ message }: { message: string }) {
   );
 }
 
-/** Conflict detail persisted to `mergeSummary.conflict` when a merge hits a 3-way conflict. */
+/** Conflict detail persisted to `mergeSummary.conflict` when a merge is refused. */
 export interface ChangeRequestConflict {
   recordId: string | null;
   fields: string[];
   detectedAt?: string;
+  /**
+   * Why the merge was refused. Absent for the original 3-way field conflict
+   * (which predates this field, so old rows have no reason and must keep
+   * rendering as a field conflict). `record_archived` / `record_deleted` mean
+   * the row an operation pinned went away while the CR waited.
+   */
+  reason?: string;
 }
 
 export const getChangeRequestConflict = (
   changeRequest: ChangeRequestVO,
 ): ChangeRequestConflict | null => {
   const summary = changeRequest.mergeSummary as
-    | { conflict?: { recordId?: string | null; fields?: unknown; detectedAt?: string } }
+    | {
+        conflict?: {
+          recordId?: string | null;
+          fields?: unknown;
+          detectedAt?: string;
+          reason?: string;
+        };
+      }
     | undefined;
   const conflict = summary?.conflict;
   if (!conflict) {
@@ -83,13 +98,29 @@ export const getChangeRequestConflict = (
   const fields = Array.isArray(conflict.fields)
     ? conflict.fields.filter((field): field is string => typeof field === "string")
     : [];
-  return { recordId: conflict.recordId ?? null, fields, detectedAt: conflict.detectedAt };
+  return {
+    recordId: conflict.recordId ?? null,
+    fields,
+    detectedAt: conflict.detectedAt,
+    reason: typeof conflict.reason === "string" ? conflict.reason : undefined,
+  };
 };
 
+/** The stale-target reasons, which get their own banner and their own exit. */
+const STALE_TARGET_REASONS = new Set(["record_archived", "record_deleted"]);
+
 /**
- * Conflict diff banner shown on a `conflict` CR. Names the colliding fields
- * (from `mergeSummary.conflict`) and points to the two exits: revise the
- * operation to re-baseline + resolve, or close to abandon.
+ * Conflict banner shown on a `conflict` CR. Two shapes, because the two kinds
+ * of refusal have different exits:
+ *
+ *  - FIELD CONFLICT — names the colliding fields, and points at revise (which
+ *    re-baselines the operation) or close.
+ *  - STALE TARGET — names the ROW that was archived or deleted underneath the
+ *    change request. Revise is deliberately NOT offered here: it revises an
+ *    operation's fields, and there is no way to drop an operation from a batch,
+ *    so the honest exit is close-and-resubmit. Naming the row is the whole
+ *    point — in a bulk change request the old message ("Cannot update an
+ *    archived record") identified none of the N rows on screen.
  */
 export function ConflictDiffPanel({ changeRequest }: { changeRequest: ChangeRequestVO }) {
   const messages = useCoreI18n();
@@ -97,6 +128,37 @@ export function ConflictDiffPanel({ changeRequest }: { changeRequest: ChangeRequ
   if (changeRequest.status !== "conflict") {
     return null;
   }
+
+  if (conflict?.reason && STALE_TARGET_REASONS.has(conflict.reason)) {
+    // Resolve the row through the SAME helper the operation list above uses, so
+    // the banner and the list call the row by the same name.
+    const operation = changeRequest.operations.find(
+      (candidate) => candidate.targetRecordId === conflict.recordId,
+    );
+    const rowLabel = operation
+      ? getOperationTitle(operation, changeRequest.base, messages)
+      : messages.review.staleTargetUnknownRow;
+    return (
+      <section className="mt-5 max-w-4xl rounded-lg border border-rejected/35 bg-rejected/17 px-4 py-3 text-rejected-strong dark:text-rejected-soft">
+        <div className="flex items-center gap-2 font-semibold text-sm">
+          <X size={15} />
+          {conflict.reason === "record_deleted"
+            ? messages.review.staleTargetDeletedTitle
+            : messages.review.staleTargetArchivedTitle}
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs">
+          <span className="text-rejected-strong/80 dark:text-rejected-soft/80">
+            {messages.review.staleTargetRow}
+          </span>
+          <span className="rounded-md border border-rejected/35 bg-rejected/17 px-2 py-0.5 font-medium">
+            {rowLabel}
+          </span>
+        </div>
+        <p className="mt-2 text-xs leading-5">{messages.review.staleTargetHint}</p>
+      </section>
+    );
+  }
+
   return (
     <section className="mt-5 max-w-4xl rounded-lg border border-rejected/35 bg-rejected/17 px-4 py-3 text-rejected-strong dark:text-rejected-soft">
       <div className="flex items-center gap-2 font-semibold text-sm">
@@ -716,13 +778,18 @@ export function FinishReviewComposer({
     );
   }
 
-  // Conflict: no approve/merge path until revised. Offer the abandon (close) exit
-  // here; resolving is done by revising the proposed change (the operation editor).
+  // Conflict: no approve/merge path. For a FIELD conflict, resolving means
+  // revising the proposed change (the operation editor), so the hint says so.
+  // For a STALE TARGET it does not: revise re-authors an operation's fields and
+  // cannot drop one from a batch, so telling the reviewer to revise would send
+  // them somewhere that can't help. Close-and-resubmit is the honest exit.
   if (changeRequest.status === "conflict") {
+    const conflict = getChangeRequestConflict(changeRequest);
+    const isStaleTarget = Boolean(conflict?.reason && STALE_TARGET_REASONS.has(conflict.reason));
     return (
       <div className="flex flex-col gap-2">
         <div className="rounded-md border border-rejected/35 bg-rejected/17 px-3 py-2 text-rejected-strong text-xs leading-5 dark:text-rejected-soft">
-          {messages.review.conflictComposerHint}
+          {isStaleTarget ? messages.review.staleTargetHint : messages.review.conflictComposerHint}
         </div>
         <button
           className="flex w-full items-center justify-center gap-2 rounded-lg border border-border px-3 py-2.5 font-semibold text-sm transition-colors hover:bg-muted disabled:opacity-60"
@@ -978,6 +1045,12 @@ export function ChangeRequestReviewLayout({
                 )
               }
             />
+            {changeRequest.sourceAttribution?.playbook ? (
+              <>
+                <span>·</span>
+                <PlaybookChip playbook={changeRequest.sourceAttribution.playbook} />
+              </>
+            ) : null}
             {submissionIdentity.identityUnavailable ? (
               <>
                 <span>·</span>

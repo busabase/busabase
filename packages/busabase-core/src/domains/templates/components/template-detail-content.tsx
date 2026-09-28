@@ -1,9 +1,8 @@
 import type { TemplateCardVO } from "busabase-contract/domains/templates/types";
 import { Badge } from "kui/badge";
 import { ExternalLink, MessageSquare, PackageOpen } from "lucide-react";
-import type { LocaleType } from "openlib/i18n/i-string";
+import { iStringParse, type LocaleType } from "openlib/i18n/i-string";
 import type { ReactNode } from "react";
-import { templateTextForLocale } from "../utils/template-locale";
 import { TemplateScreenshotShowcase } from "./template-screenshot-showcase";
 import { TemplateVideoPreview } from "./template-video-preview";
 
@@ -87,7 +86,7 @@ export function TemplateDetailContent({
 }: TemplateDetailContentProps) {
   const { stats } = template;
   const title = template.displayName
-    ? templateTextForLocale(template.displayName, descriptionLocale)
+    ? iStringParse(template.displayName, descriptionLocale)
     : template.name;
   const contents = [
     [labels.bases, stats.bases],
@@ -116,7 +115,7 @@ export function TemplateDetailContent({
             ) : null}
           </div>
           <p className="text-sm leading-6 text-muted-foreground">
-            {templateTextForLocale(template.description, descriptionLocale)}
+            {iStringParse(template.description, descriptionLocale)}
           </p>
           {template.tags.length > 0 ? (
             <ul className="flex flex-wrap gap-1.5" aria-label={labels.tags}>

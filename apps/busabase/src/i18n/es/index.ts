@@ -8,6 +8,7 @@ const es = {
   embedRuntime: {
     loading: "Cargando la app…",
     unavailable: "Contenido no disponible",
+    expired: "Enlace caducado",
   },
   seo: {
     title: "Busabase",

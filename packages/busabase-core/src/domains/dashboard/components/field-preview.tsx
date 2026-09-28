@@ -29,6 +29,7 @@ import {
   stripHtmlTags,
 } from "../helpers/html";
 import { mergeSearchIntoHref } from "../helpers/link-search";
+import { markdownPreviewSource } from "../helpers/markdown-preview";
 import type { FieldChip } from "../helpers/view-types";
 import { DialogContent } from "./localized-dialog-content";
 import { MemberChips } from "./member-field";
@@ -225,7 +226,7 @@ export function MarkdownFieldPreview({
       className={className}
       preview={
         <div className="min-w-0 break-words text-sm leading-7 [word-break:break-word] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
-          <Streamdown components={mdComponents}>{value}</Streamdown>
+          <Streamdown components={mdComponents}>{markdownPreviewSource(value)}</Streamdown>
         </div>
       }
       source={value}

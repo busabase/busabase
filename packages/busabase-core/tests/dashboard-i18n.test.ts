@@ -5,7 +5,8 @@ import {
   createAgentSkillPrompt,
   createSetupSkillUrl,
 } from "../src/domains/dashboard/components/agent-skill-button";
-import { coreMessagesByLocale, coreMessagesEn, fmt } from "../src/i18n";
+import { coreMessagesEn, fmt } from "../src/i18n";
+import { coreMessagesByLocale } from "../src/i18n/catalog";
 
 describe("shared dashboard translations", () => {
   it("keeps interpolation parameters aligned across every locale", () => {

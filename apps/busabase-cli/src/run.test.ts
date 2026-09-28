@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { EXIT_CODES } from "./errors";
-import { HELP, HELP_ALL, runCli } from "./run";
+import { buildProgram, HELP, HELP_ALL, runCli } from "./run";
 
 const originalFetch = global.fetch;
 
@@ -332,6 +332,109 @@ describe("busabase-cli commands", () => {
         body: { operation: "update", fields: { title: "Updated" } },
       }),
     ]);
+  });
+
+  describe("--playbook attribution", () => {
+    const originalPlaybookEnv = process.env.BUSABASE_PLAYBOOK;
+    afterEach(() => {
+      if (originalPlaybookEnv === undefined) delete process.env.BUSABASE_PLAYBOOK;
+      else process.env.BUSABASE_PLAYBOOK = originalPlaybookEnv;
+    });
+
+    const captureHeaders = () => {
+      const seen: Array<{ method: string; playbook: string | null }> = [];
+      global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = input instanceof Request ? input : new Request(input, init);
+        seen.push({
+          method: request.method,
+          playbook: request.headers.get("x-busabase-playbook"),
+        });
+        return jsonResponse({ id: "crq_9", status: "in_review" });
+      }) as typeof fetch;
+      vi.spyOn(console, "log").mockImplementation(() => undefined);
+      return seen;
+    };
+
+    const writeArgs = [
+      "--base-url",
+      "http://localhost:15419",
+      "--output",
+      "json",
+      "records",
+      "update-change-request",
+      "--record-id",
+      "rec_1",
+      "--fields-json",
+      '{"title":"Updated"}',
+    ];
+
+    it("puts the playbook header on a write request", async () => {
+      delete process.env.BUSABASE_PLAYBOOK;
+      const seen = captureHeaders();
+      const exitCode = await runCli([...writeArgs, "--playbook", "prompt:nod_123:log-visit"]);
+      expect(exitCode).toBe(0);
+      expect(seen).toEqual([{ method: "POST", playbook: "prompt:nod_123:log-visit" }]);
+    });
+
+    it("sends no playbook header without the flag or env", async () => {
+      delete process.env.BUSABASE_PLAYBOOK;
+      const seen = captureHeaders();
+      expect(await runCli(writeArgs)).toBe(0);
+      expect(seen).toEqual([{ method: "POST", playbook: null }]);
+    });
+
+    it("falls back to BUSABASE_PLAYBOOK, and the flag wins over it", async () => {
+      process.env.BUSABASE_PLAYBOOK = "skill:nod_env";
+      const seen = captureHeaders();
+      expect(await runCli(writeArgs)).toBe(0);
+      expect(await runCli([...writeArgs, "--playbook", "skill:nod_flag"])).toBe(0);
+      expect(seen.map((s) => s.playbook)).toEqual(["skill:nod_env", "skill:nod_flag"]);
+    });
+
+    it("sends the header on raw requests (`api` passthrough) too", async () => {
+      delete process.env.BUSABASE_PLAYBOOK;
+      const seen = captureHeaders();
+      const exitCode = await runCli([
+        "--base-url",
+        "http://localhost:15419",
+        "--playbook",
+        "skill:nod_raw",
+        "api",
+        "--method",
+        "post",
+        "--path",
+        "/records/rec_1/change-requests",
+        "--body-json",
+        '{"operation":"update","fields":{"title":"x"}}',
+      ]);
+      expect(exitCode).toBe(0);
+      expect(seen).toEqual([{ method: "POST", playbook: "skill:nod_raw" }]);
+    });
+
+    it("rejects a malformed --playbook as a usage error before any request", async () => {
+      delete process.env.BUSABASE_PLAYBOOK;
+      global.fetch = vi.fn() as typeof fetch;
+      const stderr: string[] = [];
+      vi.spyOn(process.stderr, "write").mockImplementation((chunk: unknown) => {
+        stderr.push(String(chunk));
+        return true;
+      });
+      // A prompt needs its key; a skill must not have one.
+      for (const bad of ["prompt:nod_1", "skill:nod_1:key", "recipe:nod_1"]) {
+        expect(await runCli([...writeArgs, "--playbook", bad])).toBe(EXIT_CODES.USAGE);
+      }
+      expect(global.fetch).not.toHaveBeenCalled();
+      expect(stderr.join("")).toContain("prompt:<nodeId>:<key>");
+    });
+
+    it("rejects a malformed BUSABASE_PLAYBOOK as a usage error before any request", async () => {
+      process.env.BUSABASE_PLAYBOOK = "prompt:nod_1";
+      global.fetch = vi.fn() as typeof fetch;
+      const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      expect(await runCli(writeArgs)).toBe(EXIT_CODES.USAGE);
+      expect(global.fetch).not.toHaveBeenCalled();
+      expect(error.mock.calls.join("\n")).toContain('Invalid BUSABASE_PLAYBOOK "prompt:nod_1"');
+    });
   });
 
   it("routes generated Asset metadata updates through the public Assets API", async () => {
@@ -2021,6 +2124,63 @@ describe("busabase-cli commands", () => {
       ]);
     });
 
+    it("routes `grep --sources prompts` and rejects a source the server does not have before fetching", async () => {
+      const calls: Array<{ body: unknown; url: string }> = [];
+      global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = input instanceof Request ? input : new Request(input, init);
+        calls.push({ body: request.body ? await requestBody(request) : null, url: request.url });
+        return jsonResponse({
+          matches: [],
+          coverage: {
+            files: {
+              scanned: 0,
+              missing: [],
+              stale: [],
+              unsearchable: 0,
+              errored: [],
+              notReached: 0,
+            },
+            nodes: { scanned: 0, errored: [], notReached: 0 },
+            records: { scanned: 0, errored: [], notReached: 0 },
+            prompts: { scanned: 2, errored: [], notReached: 0 },
+          },
+          truncated: false,
+        });
+      }) as typeof fetch;
+
+      const ok = await runCli([
+        "--base-url",
+        "http://localhost:15419",
+        "--output",
+        "json",
+        "grep",
+        "--pattern",
+        "visit",
+        "--sources",
+        "prompts",
+      ]);
+      expect(ok).toBe(0);
+      expect(calls).toEqual([
+        {
+          url: "http://localhost:15419/api/v1/grep",
+          body: { pattern: "visit", sources: ["prompts"] },
+        },
+      ]);
+
+      vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+      const bad = await runCli([
+        "--base-url",
+        "http://localhost:15419",
+        "grep",
+        "--pattern",
+        "visit",
+        "--sources",
+        "docs",
+      ]);
+      expect(bad).toBe(EXIT_CODES.USAGE);
+      expect(calls).toHaveLength(1);
+    });
+
     it("routes the top-level `grep` command's records scope (--base-ids/--base-slugs) and 'records' source", async () => {
       const calls: Array<{ body: unknown; method: string; url: string }> = [];
       global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -2540,5 +2700,273 @@ describe("busabase-cli commands", () => {
         await rm(dir, { force: true, recursive: true });
       }
     });
+  });
+});
+
+// ── playbooks search / get (agent-playbook-discovery.md §6.6, CLI C1/C2) ──────
+describe("playbooks", () => {
+  afterEach(() => {
+    global.fetch = originalFetch;
+    vi.restoreAllMocks();
+  });
+
+  const captureStdout = () => {
+    const out: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+      out.push(args.map(String).join(" "));
+    });
+    return () => out.join("\n");
+  };
+
+  it("C1: sends every --query and the ranking flags to POST /playbooks/search and prints the result", async () => {
+    const calls: Array<{ body: unknown; method: string; url: string }> = [];
+    const serverResult = {
+      items: [
+        {
+          kind: "prompt",
+          nodeId: "nod_visits",
+          nodeType: "base",
+          nodeName: "Visits",
+          nodeSlug: "visits",
+          path: ["Sales"],
+          key: "log-visit",
+          label: "Log a customer visit",
+          intent: "change",
+          matchedOn: ["label"],
+          score: 6,
+          updatedAt: "2026-09-25T00:00:00.000Z",
+        },
+      ],
+      total: 1,
+      truncated: false,
+      coverage: { skillsScanned: 2, promptNodesScanned: 1 },
+    };
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      calls.push({
+        body: request.body ? await requestBody(request) : null,
+        method: request.method,
+        url: request.url,
+      });
+      return jsonResponse(serverResult);
+    }) as typeof fetch;
+    const stdout = captureStdout();
+
+    const exitCode = await runCli([
+      "--base-url",
+      "http://localhost:15419",
+      "--output",
+      "json",
+      "playbooks",
+      "search",
+      "--query",
+      "记录客户拜访",
+      "--query",
+      "log customer visit",
+      "--kinds",
+      "prompt",
+      "skill",
+      "--near-node-id",
+      "nod_pipeline",
+      "--limit",
+      "5",
+      "--locale",
+      "zh-CN",
+    ]);
+
+    expect(exitCode).toBe(0);
+    expect(calls).toEqual([
+      {
+        method: "POST",
+        url: "http://localhost:15419/api/v1/playbooks/search",
+        body: {
+          queries: ["记录客户拜访", "log customer visit"],
+          kinds: ["prompt", "skill"],
+          nearNodeId: "nod_pipeline",
+          limit: 5,
+          locale: "zh-CN",
+        },
+      },
+    ]);
+    expect(JSON.parse(stdout())).toEqual(serverResult);
+  });
+
+  it("C2: against a server without the route (404) it falls back to skills-only and says prompts were not searched", async () => {
+    const calls: string[] = [];
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const url = new URL(request.url);
+      calls.push(`${request.method} ${url.pathname}${url.search}`);
+      if (url.pathname === "/api/v1/playbooks/search") {
+        return new Response("Not Found", { status: 404 });
+      }
+      return jsonResponse([
+        {
+          id: "nod_weekly",
+          parentId: "nod_sales",
+          type: "skill",
+          slug: "weekly-report",
+          name: "Weekly Report",
+          description: "Compile the weekly sales report",
+          metadata: {},
+          settings: {},
+          explicitVisibility: null,
+          icon: null,
+          position: 0,
+          createdAt: "2026-09-01T00:00:00.000Z",
+          updatedAt: "2026-09-02T00:00:00.000Z",
+          baseId: null,
+          children: [],
+        },
+        {
+          id: "nod_triage",
+          parentId: null,
+          type: "skill",
+          slug: "triage",
+          name: "Ticket Triage",
+          description: "Sort tickets by severity",
+          metadata: {},
+          settings: {},
+          explicitVisibility: null,
+          icon: null,
+          position: 1,
+          createdAt: "2026-09-01T00:00:00.000Z",
+          updatedAt: "2026-09-02T00:00:00.000Z",
+          baseId: null,
+          children: [],
+        },
+      ]);
+    }) as typeof fetch;
+    const stdout = captureStdout();
+    const stderr = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const exitCode = await runCli([
+      "--base-url",
+      "http://localhost:15419",
+      "--output",
+      "json",
+      "playbooks",
+      "search",
+      "--query",
+      "weekly report",
+      "--query",
+      "周报",
+    ]);
+
+    expect(exitCode).toBe(0);
+    expect(calls).toEqual([
+      "POST /api/v1/playbooks/search",
+      // The oRPC OpenAPI link's bracket encoding of `types: ["skill"]`.
+      "GET /api/v1/nodes?types%5B0%5D=skill",
+    ]);
+    const result = JSON.parse(stdout()) as {
+      items: Array<{ kind: string; nodeId: string; matchedOn: string[] }>;
+      total: number;
+      coverage: { prompts?: string; skillsScanned: number; promptNodesScanned: number };
+    };
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({ kind: "skill", nodeId: "nod_weekly" });
+    expect(result.items[0]?.matchedOn).toEqual(["name"]);
+    expect(result.coverage).toEqual({
+      skillsScanned: 2,
+      promptNodesScanned: 0,
+      prompts: "unsupported by this server",
+    });
+    // Loud, never silent: the degradation is on stderr too.
+    expect(stderr.mock.calls.flat().join("\n")).toContain("custom node prompts were NOT searched");
+  });
+
+  it("does not fall back on a non-404 failure", async () => {
+    const calls: string[] = [];
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      calls.push(new URL(request.url).pathname);
+      return new Response(JSON.stringify({ code: "FORBIDDEN", message: "nope" }), {
+        headers: { "content-type": "application/json" },
+        status: 403,
+      });
+    }) as typeof fetch;
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const exitCode = await runCli([
+      "--base-url",
+      "http://localhost:15419",
+      "playbooks",
+      "search",
+      "--query",
+      "anything",
+    ]);
+
+    expect(exitCode).toBe(EXIT_CODES.FORBIDDEN);
+    expect(calls).toEqual(["/api/v1/playbooks/search"]);
+  });
+
+  it("routes playbooks get to GET /playbooks/{kind}/{nodeId} with the key as a query param", async () => {
+    const calls: string[] = [];
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const url = new URL(request.url);
+      calls.push(`${request.method} ${url.pathname}?${url.searchParams.toString()}`);
+      return jsonResponse({
+        kind: "prompt",
+        nodeId: "nod_visits",
+        nodeType: "base",
+        nodeName: "Visits",
+        nodeSlug: "visits",
+        path: [],
+        key: "log-visit",
+        content: "Target: …",
+      });
+    }) as typeof fetch;
+    captureStdout();
+
+    const exitCode = await runCli([
+      "--base-url",
+      "http://localhost:15419",
+      "playbooks",
+      "get",
+      "--kind",
+      "prompt",
+      "--node-id",
+      "nod_visits",
+      "--key",
+      "log-visit",
+    ]);
+
+    expect(exitCode).toBe(0);
+    expect(calls).toEqual(["GET /api/v1/playbooks/prompt/nod_visits?key=log-visit"]);
+  });
+
+  it("refuses playbooks get --kind prompt without --key before any request", async () => {
+    global.fetch = vi.fn() as typeof fetch;
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const exitCode = await runCli([
+      "--base-url",
+      "http://localhost:15419",
+      "playbooks",
+      "get",
+      "--kind",
+      "prompt",
+      "--node-id",
+      "nod_visits",
+    ]);
+
+    expect(exitCode).toBe(EXIT_CODES.VALIDATION);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it("documents search --sources nodes and that custom prompts are appended, not replacing", () => {
+    expect(HELP_ALL).toContain("playbooks search");
+    expect(HELP_ALL).toContain("playbooks get");
+    const program = buildProgram();
+    const search = program.commands.find((cmd) => cmd.name() === "search");
+    const sources = search?.options.find((option) => option.long === "--sources");
+    expect(sources?.description).toContain('"nodes"');
+    const setPrompts = program.commands
+      .find((cmd) => cmd.name() === "nodes")
+      ?.commands.find((cmd) => cmd.name() === "set-agent-prompts");
+    expect(setPrompts?.description()).toContain("ADDED after the node type's built-in");
+    expect(setPrompts?.description()).not.toContain("instead of");
   });
 });

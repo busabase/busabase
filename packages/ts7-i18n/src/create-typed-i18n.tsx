@@ -1,7 +1,10 @@
 "use client";
 
-import type { ReactNode } from "react";
-import { createI18nReactBindings, type I18nContextValue } from "./react";
+import {
+  createI18nReactBindings,
+  type I18nReactBindings,
+  type I18nReactBindingsOptions,
+} from "./react";
 import { createTranslationRegistry, type TranslationRegistry } from "./registry";
 import type { Translatable } from "./typed-translations";
 
@@ -9,12 +12,8 @@ export type { I18nContextValue } from "./react";
 export type { TranslationRegistry } from "./registry";
 
 export interface TypedI18n<Locale extends string, T extends object>
-  extends TranslationRegistry<Locale, T> {
-  /** Wraps `children` with the resolved `LL` accessor for `locale`. Throws if `locale` has not been `loadLocale`d yet. */
-  Provider: (props: { locale: Locale; children: ReactNode }) => ReactNode;
-  /** Reads `{ locale, LL }` from the nearest `Provider`. Throws if called outside one. */
-  useI18nContext: () => I18nContextValue<Locale, T>;
-}
+  extends TranslationRegistry<Locale, T>,
+    I18nReactBindings<Locale, T> {}
 
 /**
  * All-in-one convenience factory: registry + React bindings in a single call.
@@ -27,8 +26,8 @@ export interface TypedI18n<Locale extends string, T extends object>
  */
 export function createTypedI18n<Locale extends string, T extends object>(
   initialTranslations: Partial<Record<Locale, Translatable<T>>> = {},
+  options: I18nReactBindingsOptions<Locale, T> = {},
 ): TypedI18n<Locale, T> {
   const registry = createTranslationRegistry<Locale, T>(initialTranslations);
-  const { Provider, useI18nContext } = createI18nReactBindings<Locale, T>(registry);
-  return { ...registry, Provider, useI18nContext };
+  return { ...registry, ...createI18nReactBindings<Locale, T>(registry, options) };
 }
