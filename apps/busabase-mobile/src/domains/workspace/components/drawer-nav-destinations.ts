@@ -1,6 +1,7 @@
 import {
   Activity,
   Archive,
+  Bot,
   FileText,
   Github,
   Images,
@@ -74,6 +75,10 @@ export const DRAWER_DESTINATIONS = [
   // `dashboard-shell.tsx`.
   { key: "apps", href: "/drawer/apps", icon: LayoutGrid, activePaths: ["/airapp"] },
   { key: "templates", href: "/drawer/templates", icon: Shapes, activePaths: ["/templates"] },
+  // Same icon as core's `dashboard-shell.tsx` ("Bot"). Web reaches its /agents
+  // panel from a persistent sidebar item this app doesn't have room for, so
+  // this "Go to" list is the entry point here too — same reasoning as apps/templates above.
+  { key: "agents", href: "/drawer/agents", icon: Bot, activePaths: ["/agents"] },
 ] as const satisfies ReadonlyArray<DrawerEntry>;
 
 export const isPathActive = (pathname: string, basePath: string) =>

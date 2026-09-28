@@ -40,6 +40,7 @@ export const en = {
     // word because both surfaces name the identical destination.
     apps: "App Launcher",
     templates: "Templates",
+    agents: "Agents",
     newBase: "New Base",
     create: "Create",
     // Space Selector sheet: the destination group above the workspace list.
@@ -410,6 +411,62 @@ export const en = {
     readSource: "Read the source",
     tags: "Tags",
     playVideo: "Play the demo",
+  },
+  // Word for word with core's `agents` block where the wording is shared —
+  // see the long note on `install` above. Mobile's own scope is narrower: it
+  // only ever shows `remote-websocket` connections (see `AgentTransportSchema`
+  // in the contract — a phone cannot spawn a local ACP subprocess), and it
+  // does not offer a "connect a new agent" flow (that goes through an OAuth
+  // popup + `window.postMessage`, which has no mobile equivalent yet) — so
+  // every string about local agents, the catalog, or connecting is left out.
+  agents: {
+    title: "Agents",
+    newSession: "New session",
+    noSessionsTitle: "No sessions yet",
+    noSessionsBody: "Start a new session with {name} to begin.",
+    loadSessionsFailedTitle: "Couldn't load agent sessions",
+    loadConnectionsFailedTitle: "Couldn't load connected agents",
+    mineEmptyTitle: "No agents connected yet",
+    mineEmptyBody:
+      "Connect an agent on the web or desktop app first — this screen only opens conversations with agents you've already connected.",
+    sessionCount: "{count} {unit}",
+    sessionOne: "session",
+    sessionMany: "sessions",
+    notStarted: "not started",
+    sessionItemLabel: "{time}, {status}",
+    composerDefaultPlaceholder: "Message {name}…",
+    composerWaitingPlaceholder: "Respond to the request above to continue…",
+    submitPrompt: "Send message",
+    stopPrompt: "Stop response",
+    conversationConnectedTitle: "Connected.",
+    conversationConnectedBody: "Send a message to start.",
+    permissionAnswered: "Answered:",
+    thinking: "Thinking…",
+    briefReasoning: "Thought briefly",
+    reasoningDuration: "Thought for {count}s",
+    toolsExplored: "Explored {count} file{plural}",
+    toolsSearched: "Ran {count} search{plural}",
+    toolsEdited: "Edited {count} file{plural}",
+    toolsRan: "Ran {count} command{plural}",
+    toolsUsed: "Used {count} tool{plural}",
+    toolStatusPending: "Pending",
+    toolStatusRunning: "Running",
+    toolStatusCompleted: "Completed",
+    toolStatusError: "Error",
+    statusConnecting: "connecting…",
+    statusIdle: "idle",
+    statusBusy: "replying…",
+    statusWaitingPermission: "waiting for your decision",
+    statusEnded: "ended",
+    statusFailed: "failed",
+    sessionActions: "Session actions",
+    endSession: "End session",
+    endSessionTitle: "End this session?",
+    endSessionBody:
+      "Stop {name} and free the process it holds. The conversation stays here — start a new session with it any time.",
+    endSessionBusyBody:
+      "{name} is replying — ending interrupts that reply. The conversation stays here — start a new session with it any time.",
+    endSessionFailed: "Couldn't end this session.",
   },
   settings: {
     title: "Settings",
