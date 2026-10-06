@@ -49,6 +49,10 @@
       "types": "./realtime/index.ts",
       "default": "./realtime/index.ts"
     },
+    "./seo": {
+      "types": "./seo/index.ts",
+      "default": "./seo/index.ts"
+    },
     "./cache": {
       "types": "./cache/index.ts",
       "default": "./cache/index.ts"

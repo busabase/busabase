@@ -95,6 +95,18 @@ describe("ACP slash commands", () => {
     expect(screen.queryByRole("listbox", { name: "Available commands" })).not.toBeInTheDocument();
   });
 
+  it("inserts a clicked command without sending it", async () => {
+    const onSend = vi.fn();
+    render(<AcpComposer availableCommands={commands} disabled={false} onSend={onSend} />);
+    const box = screen.getByRole("textbox");
+    await userEvent.type(box, "/co");
+    await userEvent.click(screen.getByRole("option", { name: /\/compact/i }));
+    expect(box).toHaveValue("/compact");
+    expect(box).toHaveFocus();
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.queryByRole("listbox", { name: "Available commands" })).not.toBeInTheDocument();
+  });
+
   it("navigates commands with arrows and dismisses the palette with Escape", async () => {
     render(<AcpComposer availableCommands={commands} disabled={false} onSend={vi.fn()} />);
     const box = screen.getByRole("textbox");
@@ -206,6 +218,94 @@ describe("ACP slash commands", () => {
     expect(event.defaultPrevented).toBe(true);
     expect(box).toHaveValue("/");
     expect(onSend).not.toHaveBeenCalled();
+  });
+});
+
+// A long description, an unbroken token, or an embedded newline previously
+// wrapped onto a second line and grew the row. `truncate` clips the
+// description span to one visual line without touching the full text kept in
+// the DOM, filtering, or selection.
+describe("command palette description truncation", () => {
+  const longDescription =
+    "This command runs a very long diagnostic sweep across the entire workspace configuration and reports every finding it discovers along the way";
+
+  it("aligns the popup with the full-width conversation input region", async () => {
+    render(
+      <AcpComposer
+        availableCommands={[{ name: "diagnose", description: longDescription }]}
+        disabled={false}
+        onSend={vi.fn()}
+      />,
+    );
+    await userEvent.type(screen.getByRole("textbox"), "/di");
+    const listbox = screen.getByRole("listbox", { name: "Available commands" });
+    expect(listbox).toHaveClass("left-0", "w-full");
+    expect(listbox).not.toHaveAttribute("style");
+    expect(listbox.parentElement).toHaveClass("relative", "w-full");
+  });
+
+  it("puts truncate and min-w-0 on the description span, not the option button", async () => {
+    render(
+      <AcpComposer
+        availableCommands={[{ name: "diagnose", description: longDescription }]}
+        disabled={false}
+        onSend={vi.fn()}
+      />,
+    );
+    await userEvent.type(screen.getByRole("textbox"), "/di");
+    const option = screen.getByRole("option", { name: /\/diagnose/ });
+    expect(option.className).not.toContain("truncate");
+    // biome-ignore lint/style/noNonNullAssertion: the description span is always the option's second child
+    const descriptionSpan = option.lastElementChild!;
+    expect(descriptionSpan).toHaveClass("min-w-0", "truncate");
+  });
+
+  it("keeps the full description and hint as raw DOM text, including an embedded newline", async () => {
+    const withNewline = "Line one\nLine two of the description";
+    render(
+      <AcpComposer
+        availableCommands={[
+          { name: "wrap", description: withNewline, input: { hint: "extra context" } },
+        ]}
+        disabled={false}
+        onSend={vi.fn()}
+      />,
+    );
+    await userEvent.type(screen.getByRole("textbox"), "/wr");
+    const option = screen.getByRole("option", { name: /\/wrap/ });
+    // biome-ignore lint/style/noNonNullAssertion: the description span is always the option's second child
+    const descriptionSpan = option.lastElementChild!;
+    // textContent, not a whitespace-normalizing matcher like toHaveTextContent —
+    // truncation is CSS-only, so the raw newline must still be in the DOM.
+    expect(descriptionSpan.textContent).toBe(`${withNewline} - extra context`);
+  });
+
+  it("still matches and selects a command by a unique substring near the end of a long description, without sending", async () => {
+    const onSend = vi.fn();
+    render(
+      <AcpComposer
+        availableCommands={[
+          { name: "diagnose", description: longDescription },
+          { name: "compact", description: "Compact the conversation" },
+        ]}
+        disabled={false}
+        onSend={onSend}
+      />,
+    );
+    const box = screen.getByRole("textbox");
+    // Unique substring from near the end of the long description — proves
+    // filtering still runs against the full, untruncated string. The command
+    // query is a trailing no-whitespace token (see getCommandQuery), so this
+    // is one unbroken word, not a multi-word phrase.
+    await userEvent.type(box, "/discovers");
+    const option = screen.getByRole("option", { name: /\/diagnose/ });
+    expect(option).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /\/compact/ })).not.toBeInTheDocument();
+
+    await userEvent.click(option);
+    expect(box).toHaveValue("/diagnose");
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.queryByRole("listbox", { name: "Available commands" })).not.toBeInTheDocument();
   });
 });
 
