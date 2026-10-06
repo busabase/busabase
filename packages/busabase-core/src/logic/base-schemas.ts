@@ -72,6 +72,13 @@ const fieldOptionsSchema = z
         language: z.string().optional(),
       })
       .optional(),
+    // Must mirror the contract's fieldOptionsSchema — see base-schemas.ts there.
+    date: z
+      .object({
+        includeTime: z.boolean().optional(),
+        timezone: z.string().optional(),
+      })
+      .optional(),
     embed: z
       .object({
         aspectRatio: z.enum(["16:9", "4:3", "1:1"]).optional(),
@@ -221,29 +228,33 @@ const viewSortSchema = z.object({
 // validated and passed them through.
 const viewTypeSchema = z.enum(["table", "gallery", "kanban", "calendar", "gantt"]);
 
-export const viewConfigSchema = z
-  .object({
-    filters: z.array(viewFilterSchema).optional().default([]),
-    sorts: z.array(viewSortSchema).optional().default([]),
-    visibleFieldSlugs: z.array(z.string()).nullable().optional(),
-    fieldWidths: z
-      .record(
-        z.string().min(1),
-        z.number().int().min(VIEW_FIELD_MIN_WIDTH).max(VIEW_FIELD_MAX_WIDTH),
-      )
-      .optional(),
-    coverFieldSlug: z.string().nullable().optional(),
-    coverFit: z.enum(["cover", "fit"]).optional(),
-    cardSize: z.enum(["small", "medium", "large"]).optional(),
-    showFieldLabels: z.boolean().optional(),
-    stackByFieldSlug: z.string().nullable().optional(),
-    dateFieldSlug: z.string().nullable().optional(),
-    startFieldSlug: z.string().nullable().optional(),
-    endFieldSlug: z.string().nullable().optional(),
-    ganttScale: z.enum(["week", "month"]).optional(),
-  })
+const viewConfigObjectSchema = z.object({
+  filters: z.array(viewFilterSchema).optional().default([]),
+  sorts: z.array(viewSortSchema).optional().default([]),
+  visibleFieldSlugs: z.array(z.string()).nullable().optional(),
+  fieldWidths: z
+    .record(z.string().min(1), z.number().int().min(VIEW_FIELD_MIN_WIDTH).max(VIEW_FIELD_MAX_WIDTH))
+    .optional(),
+  coverFieldSlug: z.string().nullable().optional(),
+  coverFit: z.enum(["cover", "fit"]).optional(),
+  cardSize: z.enum(["small", "medium", "large"]).optional(),
+  showFieldLabels: z.boolean().optional(),
+  stackByFieldSlug: z.string().nullable().optional(),
+  dateFieldSlug: z.string().nullable().optional(),
+  startFieldSlug: z.string().nullable().optional(),
+  endFieldSlug: z.string().nullable().optional(),
+  ganttScale: z.enum(["week", "month"]).optional(),
+});
+
+export const viewConfigSchema = viewConfigObjectSchema
   .optional()
   .default({ filters: [], sorts: [] });
+
+// Mirror the contract patch: .partial() alone would still apply nested defaults.
+const viewConfigPatchSchema = viewConfigObjectSchema.omit({ filters: true, sorts: true }).extend({
+  filters: z.array(viewFilterSchema).optional(),
+  sorts: z.array(viewSortSchema).optional(),
+});
 
 // All four must mirror busabase-contract's view input schemas (same drift risk
 // noted on createBaseInputSchema's `autoMerge` below) — without `autoMerge`
@@ -265,7 +276,7 @@ export const createViewInputSchema = z.object({
 });
 
 export const updateViewInputSchema = z.object({
-  config: viewConfigSchema.optional(),
+  config: viewConfigPatchSchema.optional(),
   description: z.string().optional(),
   message: z.string().optional().default("Update view"),
   name: z.string().min(1).optional(),

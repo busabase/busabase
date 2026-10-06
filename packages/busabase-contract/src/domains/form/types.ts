@@ -33,6 +33,13 @@ export const FormBoundFieldSchema = z.object({
       }),
     )
     .default([]),
+  /** A `date` field's time settings (see the Base field `options.date`). */
+  date: z
+    .object({
+      includeTime: z.boolean().optional(),
+      timezone: z.string().optional(),
+    })
+    .optional(),
 });
 export type FormBoundFieldVO = z.infer<typeof FormBoundFieldSchema>;
 

@@ -38,13 +38,22 @@ export type FileTreeMutationMode = SubmitActionKind;
 
 export function FileTreeUploadControl({
   availableFolders,
+  defaultAction = "immediate",
   defaultFolder,
   existingPaths,
+  labels,
   onSubmit,
 }: {
   availableFolders: string[];
+  defaultAction?: FileTreeMutationMode;
   defaultFolder: string;
   existingPaths: Set<string>;
+  labels?: {
+    root: string;
+    duplicateUploadNames: string;
+    invalidFilePath: string;
+    invalidUploadFileName: string;
+  };
   /** `replacePaths` lists the selected paths that overwrite existing files. */
   onSubmit: (
     files: File[],
@@ -55,6 +64,7 @@ export function FileTreeUploadControl({
 }) {
   const messages = useCoreI18n();
   const locale = useCoreLocale();
+  const rootLabel = labels?.root ?? messages.nodeDetail.driveRoot;
   const inputRef = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
@@ -98,13 +108,13 @@ export function FileTreeUploadControl({
       : folderConflict
         ? messages.nodeDetail.folderAlreadyExists.replace("{path}", newFolderPath)
         : duplicatePath
-          ? messages.nodeDetail.duplicateUploadNames
+          ? (labels?.duplicateUploadNames ?? messages.nodeDetail.duplicateUploadNames)
           : newFolderError
             ? messages.nodeDetail.invalidFolderName
             : invalidFolderPath
-              ? messages.nodeDetail.invalidFilePath
+              ? (labels?.invalidFilePath ?? messages.nodeDetail.invalidFilePath)
               : invalidUploadFileName
-                ? messages.nodeDetail.invalidUploadFileName
+                ? (labels?.invalidUploadFileName ?? messages.nodeDetail.invalidUploadFileName)
                 : null);
 
   const reset = () => {
@@ -216,7 +226,7 @@ export function FileTreeUploadControl({
                   type="button"
                 >
                   <FolderTree aria-hidden className="size-4 shrink-0 text-muted-foreground" />
-                  <span className="min-w-0 flex-1 truncate">{messages.nodeDetail.driveRoot}</span>
+                  <span className="min-w-0 flex-1 truncate">{rootLabel}</span>
                   {selectedFolder === "" ? (
                     <Check aria-hidden className="size-3.5 shrink-0" />
                   ) : null}
@@ -255,7 +265,7 @@ export function FileTreeUploadControl({
                   size="sm"
                   title={messages.nodeDetail.newFolderIn.replace(
                     "{folder}",
-                    selectedFolder || messages.nodeDetail.driveRoot,
+                    selectedFolder || rootLabel,
                   )}
                   type="button"
                   variant="ghost"
@@ -264,9 +274,7 @@ export function FileTreeUploadControl({
                   <span className="truncate">
                     {messages.nodeDetail.newFolderIn.replace(
                       "{folder}",
-                      selectedFolder
-                        ? fileTreeFileName(selectedFolder)
-                        : messages.nodeDetail.driveRoot,
+                      selectedFolder ? fileTreeFileName(selectedFolder) : rootLabel,
                     )}
                   </span>
                 </Button>
@@ -295,7 +303,7 @@ export function FileTreeUploadControl({
                     </div>
                     <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1 text-xs">
                       <FolderTree aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
-                      <span>{messages.nodeDetail.driveRoot}</span>
+                      <span>{rootLabel}</span>
                       {selectedFolderBreadcrumbs.map(({ path, segment }) => (
                         <span className="inline-flex min-w-0 items-center gap-1" key={path}>
                           <ChevronRight
@@ -323,7 +331,7 @@ export function FileTreeUploadControl({
                   <p className="text-muted-foreground text-xs" id="file-tree-new-folder-help">
                     {messages.nodeDetail.newFolderInside.replace(
                       "{folder}",
-                      selectedFolder || messages.nodeDetail.driveRoot,
+                      selectedFolder || rootLabel,
                     )}
                   </p>
                 </div>
@@ -424,6 +432,7 @@ export function FileTreeUploadControl({
               disabled={
                 files.length === 0 || invalidPath || Boolean(blockingConflictPath) || duplicatePath
               }
+              defaultAction={defaultAction}
               dropdownPosition="above"
               hint={messages.common.mergeImmediatelyHint}
               immediateAction={{

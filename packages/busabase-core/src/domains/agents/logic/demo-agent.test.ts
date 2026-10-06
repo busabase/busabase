@@ -76,6 +76,26 @@ describe("sessions", () => {
   it("still refuses a slug the demo has no fake for", () => {
     expect(() => createDemoAgentSession("claude-acp")).toThrow(/cannot be launched/i);
   });
+
+  it("advertises a status command and handles it through the normal prompt path", async () => {
+    const session = createDemoAgentSession(DEMO_AGENT_SLUG);
+    promptDemoAgentSession(session.id, "/status");
+
+    const events = await collect(session.id, (seen) =>
+      textOf(seen, "agent_message_chunk").includes("ready for prompts"),
+    );
+    const commandUpdate = updates(events).find(
+      (update) => update.sessionUpdate === "available_commands_update",
+    );
+
+    expect(commandUpdate?.availableCommands).toEqual([
+      { name: "status", description: "Display the current demo session status." },
+    ]);
+    expect(textOf(events, "agent_message_chunk")).toContain(
+      "Demo session connected and ready for prompts.",
+    );
+    expect(listDemoAgentSessions()[0]?.status).toBe("idle");
+  });
 });
 
 describe("the scripted turn", () => {

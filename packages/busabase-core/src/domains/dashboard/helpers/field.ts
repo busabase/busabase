@@ -3,6 +3,11 @@ import type { AttachmentRef } from "open-domains/attachments/types";
 import { iStringParse } from "openlib/i18n/i-string";
 import type { CoreI18nMessages } from "../../../i18n";
 import { getMemberIds } from "../../base/field-types";
+import {
+  type DateFieldOptions,
+  describeDateFieldValue,
+  getDateFieldOptions,
+} from "../../base/utils/date-value";
 import { resolveEmbedPreview } from "../../base/utils/embed";
 import {
   EMPTY_WHITEBOARD_FIELD_VALUE,
@@ -106,9 +111,10 @@ export const getFieldPreviewText = (
   field: BaseFieldVO | undefined,
   value: unknown,
   messages?: CoreI18nMessages,
+  locale?: Intl.LocalesArgument,
 ) => {
   if (!field) {
-    return fieldPreviewText(value, undefined, messages);
+    return fieldPreviewText(value, undefined, messages, locale);
   }
   if (field.type === "select") {
     return getChoiceLabel(field, value);
@@ -144,10 +150,20 @@ export const getFieldPreviewText = (
       resolveEmbedPreview(value, field)?.label ?? fieldPreviewText(value, field.type, messages)
     );
   }
-  return fieldPreviewText(value, field.type, messages);
+  return fieldPreviewText(value, field.type, messages, locale, getDateFieldOptions(field.options));
 };
 
-export const fieldPreviewText = (value: unknown, type?: FieldType, messages?: CoreI18nMessages) => {
+/**
+ * `locale` is the app UI locale (`useCoreLocale()`); callers without one fall
+ * back to the runtime default. `dateOptions` is the field's `options.date`.
+ */
+export const fieldPreviewText = (
+  value: unknown,
+  type?: FieldType,
+  messages?: CoreI18nMessages,
+  locale?: Intl.LocalesArgument,
+  dateOptions?: DateFieldOptions,
+) => {
   if (type === "checkbox") {
     return value === true || value === "true"
       ? (messages?.common.yes ?? "Yes")
@@ -166,9 +182,9 @@ export const fieldPreviewText = (value: unknown, type?: FieldType, messages?: Co
     const text = fieldValueToString(value);
     return text ? `#${text}` : text;
   }
+  // A calendar day is never shifted into the reader's zone — see date-value.ts.
   if (type === "date" && typeof value === "string") {
-    const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString();
+    return describeDateFieldValue(value, { locale, options: dateOptions })?.text ?? value;
   }
   if (type === "multiselect" && Array.isArray(value)) {
     return value.join(", ");

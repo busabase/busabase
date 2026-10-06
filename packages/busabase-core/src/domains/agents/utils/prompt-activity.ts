@@ -8,7 +8,7 @@ export const getPromptActivityState = (status: AgentSessionVO["status"], sending
 /**
  * Whether the composer should refuse input right now.
  *
- * PUL-214: `ended`/`failed` used to disable the composer outright. But
+ * `ended`/`failed` used to disable the composer outright. But
  * ending is a transport-lifecycle fact, not a turn-busy one — the composer's
  * job is to hold input while a turn is in flight or blocked on the user, not
  * to pre-judge whether sending will succeed. The only states that should

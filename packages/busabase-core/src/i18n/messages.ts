@@ -337,11 +337,19 @@ export const coreMessagesEn = {
     /** Tooltip on the sidebar marker shown on every node with a live public link. */
     sharedMarker: "Shared publicly",
     restrictedMarker: "Restricted access",
+    /** Quieter sidebar marker: public only because an ancestor is shared. */
+    sharedViaAncestorMarker: "Public via a shared parent folder",
     dialogTitle: "Share",
     shareLinkTab: "Share link",
     embedTab: "Embed",
     restricted: "Restricted",
     anyoneWithLink: "Anyone with the link",
+    // Shown instead of the switch when this node has no share of its own but a
+    // parent folder's share already makes it public.
+    inheritedTitle: 'Anyone with the link — via "{name}"',
+    inheritedHint:
+      '"{name}" is shared publicly, so everything inside it is too. To stop sharing, turn it off there.',
+    openAncestor: 'Go to "{name}"',
     shareToWeb: "Share to web",
     shareToWebHint: "Anyone with the link can open this node",
     capabilityLabel: "What visitors can do",
@@ -400,6 +408,17 @@ export const coreMessagesEn = {
    * translatable apart — `share.title` ("Share", a verb) and `nav.shared`
    * ("Public shares", a place) are already different words in every locale.
    */
+  // Node `[...]` menu: the actor's notification subscription to the node.
+  nodeSubscription: {
+    subscribe: "Subscribe",
+    unsubscribe: "Unsubscribe",
+    subscribed: "Subscribed",
+    subscribedVia: "Subscribed via {name}",
+    notSubscribed: "Not subscribed",
+    subscribedToast: "Subscribed — you'll be notified about changes to {name}.",
+    unsubscribedToast: "Unsubscribed — you won't be notified about {name}.",
+    updateFailed: "Couldn't update your subscription.",
+  },
   sharedAccess: {
     title: "Public shares",
     description:
@@ -552,6 +571,12 @@ export const coreMessagesEn = {
     libraryRetry: "Retry",
     tabPreview: "App",
     tabFiles: "Files",
+    filesRoot: "App files",
+    duplicateUploadNames: "Two selected files would use the same app path.",
+    invalidFilePath: "Enter a valid relative app folder path.",
+    invalidUploadFileName: "Some selected files have names this app cannot store. Remove them.",
+    filesUploadHint:
+      "Uploads sent for review do not change the app. After a change is merged, restart a running app to load the updated files.",
     tabLogs: "Logs",
     runPanelTitle: "Run",
     run: "Run",
@@ -1712,6 +1737,14 @@ export const coreMessagesEn = {
     format: "Format",
     plainNumber: "Plain number",
     currency: "Currency",
+    includeTime: "Include time",
+    timeZone: "Time zone",
+    timeZoneViewerLocal: "Each viewer's local time",
+    timeZoneHint: "Time zone: {zone}",
+    pickDate: "Pick a date",
+    timeOfDay: "Time",
+    dateEnteredAs: "Entered as {value}",
+    dateYourLocalTime: "Your local time: {value}",
     multiple: "Multiple",
     addFieldRequest: "Add Field Request",
     addFieldNow: "Add Field Now",
@@ -2183,6 +2216,7 @@ export const coreMessagesEn = {
       "confirm that this environment is connected to Busabase and points to the correct target space{targetSpace}. If the Busabase connection is not configured or points to another space, read and follow this setup guide first:\n\n{setupUrl}",
     builtInScenarios: "Built-in scenarios",
     customScenarios: "Custom scenarios",
+    builtInPrompts: "Built-in prompts",
     newCustomPrompt: "New prompt",
     addPrompt: "Add prompt",
     noCustomScenariosHint: "Add a prompt for a workflow that is unique to this node.",

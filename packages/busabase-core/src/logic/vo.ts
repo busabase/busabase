@@ -225,6 +225,10 @@ export const toViewVO = (view: ViewPO, users?: UserRefMap): ViewVO => ({
 // row, so only a caller that batched that lookup passes it; `undefined` here
 // means "not resolved" and is left OFF the VO entirely rather than emitted as
 // a false that a client would read as "definitely not shared".
+//
+// `sharedViaAncestor` rides on the same resolution: it is only meaningful next
+// to `shared` (the materialized `effectivePublicScope` alone cannot tell an own
+// share from an inherited one), so it is emitted exactly when `shared` is.
 export const toNodeVO = (
   node: NodeListPO,
   baseId: string | null,
@@ -248,7 +252,9 @@ export const toNodeVO = (
   baseId,
   children,
   hasChildren,
-  ...(shared === undefined ? {} : { shared }),
+  ...(shared === undefined
+    ? {}
+    : { shared, sharedViaAncestor: !shared && node.effectivePublicScope != null }),
 });
 
 /**

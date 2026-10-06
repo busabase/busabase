@@ -4,7 +4,7 @@ import type { BaseFieldVO, BaseVO, RecordVO, ViewVO } from "busabase-contract/ty
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { useState } from "react";
 import { useSearch } from "wouter";
-import { useCoreI18n, useIString } from "../../../i18n";
+import { useCoreI18n, useCoreLocale, useIString } from "../../../i18n";
 import { getMemberIds, isPeopleFieldType } from "../../base/field-types";
 import { getPrimaryField } from "../../base/utils/primary-field";
 import { getRecordTitle } from "../helpers/change-request";
@@ -60,6 +60,7 @@ function KanbanCard({
   onDragStart: () => void;
 }) {
   const messages = useCoreI18n();
+  const locale = useCoreLocale();
   const resolveIString = useIString();
   const currentSearch = useSearch();
   const title = getRecordTitle(record, messages);
@@ -96,7 +97,7 @@ function KanbanCard({
             </div>
           );
         }
-        const preview = getFieldPreviewText(field, rawValue, messages);
+        const preview = getFieldPreviewText(field, rawValue, messages, locale);
         if (!preview || preview === "-") {
           return null;
         }

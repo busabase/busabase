@@ -1,5 +1,6 @@
 import type { FormBoundFieldVO, FormFieldBindingVO } from "busabase-contract/types";
 import { type FieldInputKind, fieldInputKind } from "../../base/field-types";
+import { DateFieldInput } from "../../dashboard/components/date-field";
 
 interface GeneratedFormFieldProps {
   binding: FormFieldBindingVO;
@@ -88,6 +89,16 @@ export function GeneratedFormField({
           </option>
         ))}
       </select>
+    ) : controlKind === "date" ? (
+      <DateFieldInput
+        ariaLabel={label}
+        className={`${controlClassName} h-9`}
+        dataAttributes={{ "data-input-name": binding.inputName }}
+        id={inputId}
+        onChange={onChange}
+        options={field?.date}
+        value={value}
+      />
     ) : (
       <input
         {...sharedProps}
@@ -102,7 +113,6 @@ export function GeneratedFormField({
         }
         type={
           controlKind === "number" ||
-          controlKind === "date" ||
           controlKind === "url" ||
           controlKind === "email" ||
           controlKind === "tel"

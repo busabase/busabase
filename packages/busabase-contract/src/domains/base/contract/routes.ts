@@ -281,9 +281,23 @@ export const recordContract = {
       path: "/records/{recordId}/change-requests",
       tags: ["Records", "Change Requests"],
       summary: "List record change request history",
-      successDescription: "Change requests and operations connected to the canonical record.",
+      successDescription:
+        "Change requests connected to the canonical record, newest first. Omit limit for the full legacy history. With limit, returns recent summaries with up to five record-scoped operations per change request, capped field payloads, and no embedded reviews. Get the change request for its complete diff and reviews.",
     })
-    .input(z.object({ recordId: z.string() }))
+    .input(
+      z.object({
+        recordId: z.string(),
+        limit: z.coerce
+          .number()
+          .int()
+          .min(1)
+          .max(100)
+          .optional()
+          .describe(
+            "Recent change request summaries to return. Omit to retain the full legacy history.",
+          ),
+      }),
+    )
     .output(z.array(changeRequestSchema)),
   listLinks: oc
     .route({

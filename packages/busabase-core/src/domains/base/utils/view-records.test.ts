@@ -137,4 +137,80 @@ describe("applyViewConfigToRecords", () => {
       }),
     ).toHaveLength(1);
   });
+
+  describe("date fields", () => {
+    const dateBase = (options: BaseVO["fields"][number]["options"]): BaseVO => ({
+      ...base,
+      fields: [
+        ...base.fields,
+        {
+          id: "due",
+          baseId: base.id,
+          slug: "due",
+          name: "Due",
+          type: "date",
+          required: false,
+          position: 2,
+          options,
+        },
+      ],
+    });
+    const withDue = (id: string, due: unknown, fieldBase: BaseVO) => {
+      const item = record(id, id);
+      return {
+        ...item,
+        base: fieldBase,
+        headCommit: { ...item.headCommit, payload: { ...item.headCommit.payload, due } },
+      } as RecordVO;
+    };
+
+    it("sorts chronologically, not by localized text, across day and legacy forms", () => {
+      const dayBase = dateBase({});
+      // As M/D/YYYY text, "10/2/2026" sorts before "9/30/2026".
+      const records = [
+        withDue("oct", "2026-10-02", dayBase),
+        withDue("sep", "2026-09-30T00:00:00.000Z", dayBase),
+        withDue("jan", "2027-01-05", dayBase),
+      ];
+      expect(
+        applyViewConfigToRecords(records, {
+          filters: [],
+          sorts: [{ fieldSlug: "due", direction: "asc" }],
+        }).map((item) => item.id),
+      ).toEqual(["sep", "oct", "jan"]);
+    });
+
+    it("equals a picked day matches the same day in any stored form", () => {
+      const dayBase = dateBase({});
+      const records = [
+        withDue("plain", "2026-10-02", dayBase),
+        withDue("legacy", "2026-10-02T00:00:00.000Z", dayBase),
+        withDue("other", "2026-10-03", dayBase),
+      ];
+      expect(
+        applyViewConfigToRecords(records, {
+          filters: [{ fieldSlug: "due", operator: "equals", value: "2026-10-02" }],
+          sorts: [],
+        })
+          .map((item) => item.id)
+          .sort(),
+      ).toEqual(["legacy", "plain"]);
+    });
+
+    it("equals a picked day matches a time-of-day value on that day in the field's zone", () => {
+      const timeBase = dateBase({ date: { includeTime: true, timezone: "Asia/Shanghai" } });
+      const records = [
+        // 01:00 in Shanghai on Oct 2 is still Oct 1 in UTC — the field's zone decides.
+        withDue("early", "2026-10-02T01:00:00+08:00", timeBase),
+        withDue("evening", "2026-10-02T18:00:00+08:00", timeBase),
+        withDue("next", "2026-10-03T09:00:00+08:00", timeBase),
+      ];
+      expect(
+        applyViewConfigToRecords(records, {
+          filters: [{ fieldSlug: "due", operator: "equals", value: "2026-10-02" }],
+          sorts: [{ fieldSlug: "due", direction: "desc" }],
+        }).map((item) => item.id),
+      ).toEqual(["evening", "early"]);
+    });
+  });
 });

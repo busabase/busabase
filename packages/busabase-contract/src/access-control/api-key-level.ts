@@ -286,10 +286,16 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   "nodes.share.list": workspace("manage"),
 
   "nodes.listFavorites": node("read"),
+  // Both halves are `read`, including `set`: subscribing or muting changes only
+  // the caller's OWN notification preference for a node they can already see —
+  // it writes nothing anyone else reads. A viewer must be able to follow a node.
+  "nodes.subscription.get": node("read"),
+  "nodes.subscription.set": node("read"),
   "auditEvents.list": node("read"),
   "activity.listPaged": node("read"),
   "activity.listForNode": node("read"),
   "activity.listForRecord": node("read"),
+  "activity.listForRecordPaged": node("read"),
   "comments.list": node("read"),
   // Both are scoped to the caller's own mentions by the handler, never to a
   // supplied user id, so they expose nothing a `read` key could not already
@@ -403,6 +409,9 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   "changeRequests.inboxSnapshot": node("read"),
   "changeRequests.counts": node("read"),
   "changeRequests.get": node("read"),
+  // CR-only capability: the handler checks active Space, full CR visibility and status.
+  // Generic embedLinks.create remains workspace manage (including Node links).
+  "changeRequests.createPreviewLink": node("changeRequest"),
 
   "records.list": node("read"),
   "records.listPage": node("read"),

@@ -27,6 +27,23 @@ describe("embed frame policy input", () => {
     });
   });
 
+  it("accepts only a CR id for the narrow preview route", () => {
+    const procedure = busabaseContractRoutes.changeRequests.createPreviewLink["~orpc"];
+    expect(procedure.route).toMatchObject({
+      method: "POST",
+      path: "/change-requests/{changeRequestId}/preview-link",
+    });
+    const input = procedure.inputSchema;
+    expect(input?.safeParse({ changeRequestId: "crq_1" }).success).toBe(true);
+    for (const extra of [
+      { type: "node", typeId: "nod_1" },
+      { expiresInMinutes: 1440 },
+      { framePolicy: { mode: "anywhere", allowedOrigins: [] } },
+    ]) {
+      expect(input?.safeParse({ changeRequestId: "crq_1", ...extra }).success).toBe(false);
+    }
+  });
+
   it("defaults the audit page to active links and keeps its limit bounded", () => {
     expect(ListEmbedLinksPagedInputSchema.parse({})).toEqual({ status: "active", limit: 50 });
     expect(ListEmbedLinksPagedInputSchema.parse({ status: "all", limit: "100" })).toEqual({

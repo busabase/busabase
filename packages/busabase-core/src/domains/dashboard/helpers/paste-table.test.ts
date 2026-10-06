@@ -42,11 +42,10 @@ describe("parsePastedTable", () => {
       "due_date",
       "score",
     ]);
-    // The shared converter normalizes a date cell to a full ISO instant, which is
-    // exactly what the grid stores — so an imported cell reads back identically.
-    expect(parsed?.rows).toEqual([
-      { title: "Hello", due_date: "2026-01-02T00:00:00.000Z", score: 7 },
-    ]);
+    // The shared converter keeps a day a day — `YYYY-MM-DD`, exactly what the
+    // date picker stores — so an imported cell reads back identically and is
+    // never shifted into the reader's time zone.
+    expect(parsed?.rows).toEqual([{ title: "Hello", due_date: "2026-01-02", score: 7 }]);
   });
 
   it("refuses columns the server would refuse, rather than importing them wrong", () => {

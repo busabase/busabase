@@ -28,6 +28,7 @@ import {
   listActivityResponseSchema,
   listNodeActivityInputSchema,
   listRecordActivityInputSchema,
+  listRecordActivityPagedInputSchema,
 } from "./activity-schemas";
 import {
   CreatedEmbedLinkVOSchema,
@@ -53,6 +54,11 @@ import {
   NodeIconUploadUrlVOSchema,
 } from "./node-icon-upload-schemas";
 import { NodeRouteStateVOSchema } from "./node-route-state-schemas";
+import {
+  GetNodeSubscriptionInputSchema,
+  NodeSubscriptionVOSchema,
+  SetNodeSubscriptionInputSchema,
+} from "./node-subscription-schemas";
 import {
   PlaybookGetInputSchema,
   PlaybookGetVOSchema,
@@ -471,6 +477,18 @@ export const busabaseContractRoutes = {
           "The acting user's favorited nodes, newest-favorited first, filtered through the same archived/deleted/visibility rules as the main tree — a favorited node that's later archived, purged, or (cloud) hidden from this actor silently drops out rather than erroring.",
       })
       .output(z.array(nodeSchema)),
+    /**
+     * The acting user's notification subscription to one node — the node
+     * `[...]` menu's Subscribe / Unsubscribe item. RPC-only by design (no
+     * `.route(...)`): the actor comes from context, so on an agent's API key it
+     * would resolve to the key's OWNER, and an agent toggling its owner's
+     * notifications is exactly the silent-drop this feature exists to prevent.
+     * Not in `/api/v1`, not in any MCP tool catalog.
+     */
+    subscription: {
+      get: oc.input(GetNodeSubscriptionInputSchema).output(NodeSubscriptionVOSchema),
+      set: oc.input(SetNodeSubscriptionInputSchema).output(NodeSubscriptionVOSchema),
+    },
     // Registered LAST among the `/nodes/...` GETs on purpose. `GET /nodes/search`
     // and `GET /nodes/favorites` are literal paths that now share a prefix with
     // this template. The oRPC OpenAPI matcher is a rou3 radix trie, which
@@ -653,6 +671,17 @@ export const busabaseContractRoutes = {
       .output(auditEventSchema),
   },
   activity: {
+    listForRecordPaged: oc
+      .route({
+        method: "GET",
+        path: "/activity/record/paged",
+        tags: ["Activity"],
+        summary: "List a record's activity with keyset pagination",
+        successDescription:
+          "Record-scoped operations and audit events, newest first, with an opaque nextCursor (null at the end). Embedded change requests include this page's operations with capped field payloads and no reviews. Embedded records are summaries with capped field payloads and Base identity, without Base fields, people cells, or lookups. Get the change request for the complete diff and reviews; get the record for all field values.",
+      })
+      .input(listRecordActivityPagedInputSchema)
+      .output(listActivityResponseSchema),
     listPaged: oc
       .route({
         method: "GET",
@@ -791,6 +820,15 @@ export const busabaseContractRoutes = {
   templates: templatesContract,
   guides: guidesContract,
   changeRequests: {
+    createPreviewLink: oc
+      .route({
+        method: "POST",
+        path: "/change-requests/{changeRequestId}/preview-link",
+        tags: ["Change Requests"],
+        summary: "Create a short-lived preview link for a visible Change Request",
+      })
+      .input(z.object({ changeRequestId: z.string().min(1) }).strict())
+      .output(CreatedEmbedLinkVOSchema),
     // Always keyset-paginated — the unpaginated twin returned a bare array that
     // silently truncated at `limit` with no way to ask for the next page.
     list: oc

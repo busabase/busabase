@@ -487,6 +487,46 @@ export const busabaseFavorites = pgTable(
   ],
 );
 
+/**
+ * Per-actor node subscriptions — who hears about a node's Change Requests and
+ * direct changes (see `logic/node-subscriptions.ts` and the Busabase Cloud
+ * app's notification delivery policy spec).
+ *
+ * Same `(nodeId, actorId)` composite-unique shape as `busabaseFavorites`.
+ * A row on a folder covers its descendants: subscribers are resolved at send
+ * time by walking the CURRENT ancestor chain, and the nearest row wins — so a
+ * muted row on a child silences an inherited folder subscription for that
+ * child only. The expanded result is never stored, which is what makes a node
+ * move change its audience automatically.
+ *
+ * - `source`: `auto` (created by creating/submitting/commenting/voting) or
+ *   `manual` (the node menu's Subscribe, or an Unsubscribe that had to create
+ *   the row to hold its mute).
+ * - `mutedAt`: the persistent opt-out. Auto triggers never clear it; only a
+ *   manual Subscribe does.
+ * - `lastInteractedAt`: bumped by every auto trigger; orders recipients when
+ *   an event has more eligible people than the immediate-delivery cap.
+ */
+export const busabaseNodeSubscriptions = pgTable(
+  "busabase_node_subscriptions",
+  {
+    id: text("id").primaryKey(),
+    spaceId: spaceIdColumn(),
+    nodeId: text("node_id")
+      .notNull()
+      .references(() => busabaseNodes.id, { onDelete: "cascade" }),
+    actorId: text("actor_id").notNull(),
+    source: text("source").$type<"auto" | "manual">().notNull(),
+    mutedAt: timestamp("muted_at", { mode: "date" }),
+    lastInteractedAt: timestamp("last_interacted_at", { mode: "date" }).defaultNow().notNull(),
+    createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
+  },
+  (base) => [
+    uniqueIndex("busabase_node_subscriptions_node_actor_uniq").on(base.nodeId, base.actorId),
+    index("busabase_node_subscriptions_actor_idx").on(base.actorId),
+  ],
+);
+
 export const busabaseCommits = pgTable(
   "busabase_commits",
   {

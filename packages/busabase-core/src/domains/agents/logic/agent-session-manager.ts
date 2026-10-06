@@ -165,7 +165,7 @@ interface LiveSession {
 }
 
 /**
- * Update the live model selector AND queue its durable mirror (PUL-246) from
+ * Update the live model selector AND queue its durable mirror from
  * one call site, so every place `session.modelOption` changes — initial
  * discovery, an agent-pushed `config_option_update`, a
  * `session/set_config_option` response — preserves protocol order even when
@@ -645,9 +645,13 @@ async function openAgentSession({
           await syncModelOption(session, findModelOption(ctx.params.update.configOptions));
         }
         // session/load replays the remote transcript. Busabase already has the
-        // outer transcript in its own event table, so emitting that replay
-        // again would duplicate every historical message with new seq values.
-        if (replayingHistory) return;
+        // outer transcript in its own event table, so emitting message/tool
+        // replay again would duplicate history with new seq values. Command
+        // metadata is different: it is a current full-list replacement and is
+        // needed to restore the composer's slash-command state on reconnect.
+        if (replayingHistory && ctx.params.update.sessionUpdate !== "available_commands_update") {
+          return;
+        }
         emit(session, { kind: "acpUpdate", acpUpdate: ctx.params.update });
       });
 
@@ -717,7 +721,7 @@ async function openAgentSession({
         // agents genuinely differ. Sending an HTTP MCP server to an agent that
         // only speaks stdio-MCP is not harmlessly ignored — it is a malformed
         // session for that agent — so an agent that does not advertise `http`
-        // simply gets no server (PUL-214: this used to also emit a visible
+        // simply gets no server (this used to also emit a visible
         // "no access to this workspace's data" note, but it fired on every
         // session/new regardless of whether the turn ever needed workspace
         // data, which made it noise more often than signal).
@@ -1206,7 +1210,7 @@ function requireLocalSession(sessionId: string): LiveSession {
  * `local-subprocess` sessions are pinned to one child process on one worker
  * — no other worker can ever hold a socket for them — so there is no
  * cross-worker race to fence and this stays a plain in-memory status check.
- * `remote-websocket` sessions can be reattached from any worker (PUL-223), so
+ * `remote-websocket` sessions can be reattached from any worker, so
  * they go through the DB-backed fencing lease: `acquireSessionLease` is one
  * atomic claim of both the lease and the busy status, keyed on an owner UUID
  * this call mints fresh each attempt.
@@ -1454,7 +1458,7 @@ export async function listAgentSessionsPaged(
  * Allocate the next seq, persist it fenced to the turn's current lease, and
  * only publish to the buffer/listeners if that persist succeeds.
  *
- * This is the persist-before-publish half of the ordering PUL-223's review
+ * This is the persist-before-publish half of the ordering the cross-worker reattach review
  * required: without it, a synthetic `user_message` event (or any other event
  * written this way) could be visible to a live subscriber, or already sent to
  * the agent, before it was durably recorded — so a persistence failure would

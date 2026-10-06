@@ -248,6 +248,24 @@ export const createDemoAgentSession = (slug: string): AgentSessionVO => {
           : "This is the demo agent: its replies are a fixed script. No model runs, and nothing in the workspace changes.",
     },
   });
+  // Exercise the same dynamic command path as a real ACP agent. This remains
+  // visibly a scripted demo; it exists so the real Operate composer can be
+  // browser-tested without requiring credentials or a model call.
+  emit(session, {
+    kind: "acpUpdate",
+    acpUpdate: {
+      sessionUpdate: "available_commands_update",
+      availableCommands: [
+        {
+          name: "status",
+          description:
+            locale === "zh-CN"
+              ? "显示当前演示会话状态。"
+              : "Display the current demo session status.",
+        },
+      ],
+    },
+  });
   return toVO(session);
 };
 
@@ -345,6 +363,23 @@ export const promptDemoAgentSession = (sessionId: string, text: string): void =>
   // the client's `translate()` adapter unpacks it, so a late subscriber sees
   // the whole turn rather than a reply to nothing.
   emit(session, { kind: "acpUpdate", acpUpdate: { sessionUpdate: "user_message", text } });
+  if (text.trim().toLowerCase() === "/status") {
+    emit(session, {
+      kind: "acpUpdate",
+      acpUpdate: {
+        sessionUpdate: "agent_message_chunk",
+        content: {
+          type: "text",
+          text:
+            session.locale === "zh-CN"
+              ? "演示会话已连接，可以接收提示词。"
+              : "Demo session connected and ready for prompts.",
+        },
+      },
+    });
+    setStatus(session, "idle");
+    return;
+  }
   void runScript(session).catch(() => {
     setStatus(session, "idle");
   });

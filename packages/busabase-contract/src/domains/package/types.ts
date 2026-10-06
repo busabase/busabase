@@ -273,8 +273,8 @@ export type PackageDocFrontmatter = z.infer<typeof PackageDocFrontmatterSchema>;
  * has no slug alias for them. Install MUST strip both before the options reach the
  * server and patch in the resolved ids afterwards.
  *
- * Everything else (`choices` incl. its ids, `multiple`, `number`, `code`, `embed`,
- * `attachment`) is carried verbatim — field options are stored verbatim server-side,
+ * Everything else (`choices` incl. its ids, `multiple`, `number`, `code`, `date`,
+ * `embed`, `attachment`) is carried verbatim — field options are stored verbatim server-side,
  * so choice ids survive and record values referencing them need no remap.
  */
 export const PackageFieldOptionsSchema = z
@@ -307,6 +307,12 @@ export const PackageFieldOptionsSchema = z
     code: z
       .object({
         language: z.string().optional(),
+      })
+      .optional(),
+    date: z
+      .object({
+        includeTime: z.boolean().optional(),
+        timezone: z.string().optional(),
       })
       .optional(),
     embed: z

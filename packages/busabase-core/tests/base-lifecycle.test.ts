@@ -342,6 +342,72 @@ describe("Base-domain DB lifecycle — oRPC", () => {
       expect(view?.config.fieldWidths).toEqual({ status: 168, title: 312 });
     });
 
+    it("preserves omitted view config while applying a partial update and allows explicit clearing", async () => {
+      const createCr = await proposeView({
+        operation: "create",
+        baseId: blogBaseId,
+        slug: "lc-partial-config",
+        name: "Partial config",
+        config: {
+          filters: [{ fieldSlug: "status", operator: "equals", value: "published" }],
+          sorts: [{ fieldSlug: "title", direction: "desc" }],
+          visibleFieldSlugs: ["status", "title"],
+          fieldWidths: { title: 312 },
+          coverFieldSlug: "cover",
+        },
+      });
+      await approveAndMerge(createCr.id);
+      const viewId = (await client.bases.listViews({ baseId: blogBaseId })).find(
+        (item) => item.slug === "lc-partial-config",
+      )?.id;
+      expect(viewId).toBeDefined();
+
+      const updateCr = await proposeView({
+        operation: "update",
+        viewId: viewId ?? "",
+        config: { visibleFieldSlugs: ["title", "status"] },
+      });
+      await approveAndMerge(updateCr.id);
+      let view = (await client.bases.listViews({ baseId: blogBaseId })).find(
+        (item) => item.id === viewId,
+      );
+      expect(view?.config.visibleFieldSlugs).toEqual(["title", "status"]);
+      expect(view?.config.filters).toMatchObject([
+        { fieldSlug: "status", operator: "equals", value: "published" },
+      ]);
+      expect(view?.config.sorts).toMatchObject([{ fieldSlug: "title", direction: "desc" }]);
+      expect(view?.config.fieldWidths).toEqual({ title: 312 });
+      expect(view?.config.coverFieldSlug).toBe("cover");
+
+      const clearCr = await proposeView({
+        operation: "update",
+        viewId: viewId ?? "",
+        config: { sorts: [] },
+      });
+      await approveAndMerge(clearCr.id);
+      view = (await client.bases.listViews({ baseId: blogBaseId })).find(
+        (item) => item.id === viewId,
+      );
+      expect(view?.config.sorts).toEqual([]);
+      expect(view?.config.filters).toHaveLength(1);
+      expect(view?.config.visibleFieldSlugs).toEqual(["title", "status"]);
+      expect(view?.config.fieldWidths).toEqual({ title: 312 });
+
+      const resetCr = await proposeView({
+        operation: "update",
+        viewId: viewId ?? "",
+        config: { fieldWidths: {}, coverFieldSlug: null },
+      });
+      await approveAndMerge(resetCr.id);
+      view = (await client.bases.listViews({ baseId: blogBaseId })).find(
+        (item) => item.id === viewId,
+      );
+      expect(view?.config.fieldWidths).toBeUndefined();
+      expect(view?.config.coverFieldSlug).toBeNull();
+      expect(view?.config.filters).toHaveLength(1);
+      expect(view?.config.sorts).toEqual([]);
+    });
+
     it("round-trips kanban and calendar view config through merge", async () => {
       const kanbanCr = await proposeView({
         operation: "create",

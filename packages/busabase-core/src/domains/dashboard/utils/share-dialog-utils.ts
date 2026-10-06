@@ -43,3 +43,21 @@ export const partitionEmbedLinks = (links: EmbedLinkVO[]) => ({
   active: links.filter((link) => link.active && !link.revokedAt),
   history: links.filter((link) => !link.active || Boolean(link.revokedAt)),
 });
+
+/**
+ * The ancestor whose share actually makes a node public: the NEAREST one carrying
+ * a live share of its own — the same "nearer wins" rule the server materializes in
+ * `recomputeEffectivePublicScope`. `ancestorIds` is root-first, as `nodes.ancestors`
+ * returns it; `sharedNodes` is `nodes.share.list`.
+ */
+export const nearestSharedAncestor = <T extends { nodeId: string }>(
+  ancestorIds: readonly string[],
+  sharedNodes: readonly T[],
+): T | null => {
+  const sharedById = new Map(sharedNodes.map((row) => [row.nodeId, row]));
+  for (let index = ancestorIds.length - 1; index >= 0; index -= 1) {
+    const hit = sharedById.get(ancestorIds[index] ?? "");
+    if (hit) return hit;
+  }
+  return null;
+};

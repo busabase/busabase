@@ -9,8 +9,9 @@ import { CoreI18nProvider } from "../../../i18n";
 import type { DocOutlineItem } from "../../doc/components";
 import { useTopbarNodeActionsStore } from "../store/topbar-node-actions-store";
 
+const navigate = vi.fn();
 vi.mock("wouter", () => ({
-  useLocation: () => ["/doc/handbook", vi.fn()],
+  useLocation: () => ["/doc/handbook", navigate],
   useSearch: () => "",
 }));
 vi.mock("../../doc/components", async (importOriginal) => {
@@ -20,10 +21,12 @@ vi.mock("../../doc/components", async (importOriginal) => {
     DocEditor: ({
       content,
       editable,
+      onChange,
       onOutlineChange,
     }: {
       content: string;
       editable: boolean;
+      onChange?: (next: string) => void;
       onOutlineChange?: (items: DocOutlineItem[]) => void;
     }) => {
       useEffect(() => {
@@ -41,7 +44,7 @@ vi.mock("../../doc/components", async (importOriginal) => {
       return (
         <textarea
           aria-label="Document body"
-          onChange={() => undefined}
+          onChange={(event) => onChange?.(event.target.value)}
           readOnly={!editable}
           value={content}
         />
@@ -89,16 +92,23 @@ const doc = {
   },
 } as const;
 
-const orpc = {
-  nodes: {
-    get: {
-      queryOptions: () => ({ queryKey: ["nodes", "get", doc.node.id], queryFn: async () => doc }),
+const updateContentMutation = vi.fn();
+
+function makeOrpc() {
+  return {
+    nodes: {
+      get: {
+        queryOptions: () => ({
+          queryKey: ["nodes", "get", doc.node.id],
+          queryFn: async () => doc,
+        }),
+      },
+      updateContent: {
+        mutationOptions: () => ({ mutationFn: updateContentMutation }),
+      },
     },
-    updateContent: {
-      mutationOptions: () => ({ mutationFn: vi.fn() }),
-    },
-  },
-} as unknown as BusabaseQueryUtils;
+  } as unknown as BusabaseQueryUtils;
+}
 
 function renderDoc() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -109,16 +119,25 @@ function renderDoc() {
           <TopbarNodeActionsSlot />
         </div>
         <main data-testid="doc-body">
-          <DocDetailView orpc={orpc} slug="handbook" />
+          <DocDetailView orpc={makeOrpc()} slug="handbook" />
         </main>
       </QueryClientProvider>
     </CoreI18nProvider>,
   );
 }
 
+async function enterEditModeAndChangeBody(topbar: HTMLElement, body: HTMLElement) {
+  fireEvent.click(await within(topbar).findByRole("button", { name: "Edit" }));
+  const textarea = await within(body).findByRole("textbox", { name: "Document body" });
+  fireEvent.change(textarea, { target: { value: "# Handbook\n\nEdited body" } });
+  return textarea;
+}
+
 afterEach(() => {
   cleanup();
   useTopbarNodeActionsStore.getState().setActions(null);
+  updateContentMutation.mockReset();
+  navigate.mockReset();
 });
 
 describe("DocDetailView editing actions", () => {
@@ -153,12 +172,66 @@ describe("DocDetailView editing actions", () => {
     expect(surface?.className).toContain("max-w-5xl");
     expect(surface?.className).toContain("border-x");
     expect(surface?.className).toContain("bg-card");
+    // Narrow containers only reserve the block-handle gutter for mouse users who are editing.
+    expect(surface?.className).not.toContain("pointer-fine:pl-24");
     expect(await within(body).findByRole("navigation", { name: "On this page" })).toBeTruthy();
 
     fireEvent.click(within(screen.getByTestId("topbar")).getByRole("button", { name: "Edit" }));
 
     await waitFor(() => {
       expect(within(body).queryByRole("navigation", { name: "On this page" })).toBeNull();
+    });
+    expect(body.querySelector("[data-doc-reading-surface]")?.className).toContain(
+      "pointer-fine:pl-24",
+    );
+  });
+
+  it("saves an edited draft as a change request with autoMerge:false and navigates to the inbox", async () => {
+    updateContentMutation.mockResolvedValue({ id: "cr_pending", status: "in_review" });
+    renderDoc();
+    const topbar = screen.getByTestId("topbar");
+    const body = screen.getByTestId("doc-body");
+    await enterEditModeAndChangeBody(topbar, body);
+
+    fireEvent.pointerDown(within(topbar).getByRole("button", { name: "More submit options" }), {
+      button: 0,
+    });
+    await waitFor(() => expect(screen.getByRole("menu")).toBeTruthy());
+    fireEvent.click(screen.getByRole("menuitem", { name: "Save as Change Request" }));
+
+    await waitFor(() => expect(updateContentMutation).toHaveBeenCalledTimes(1));
+    expect(updateContentMutation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        nodeId: doc.node.id,
+        content: { kind: "doc", body: "# Handbook\n\nEdited body" },
+        autoMerge: false,
+      }),
+      expect.anything(),
+    );
+    await waitFor(() => expect(navigate).toHaveBeenCalledWith("/inbox/cr_pending"));
+  });
+
+  it("saves an edited draft immediately with autoMerge:true", async () => {
+    updateContentMutation.mockResolvedValue({ id: "cr_merged", status: "merged" });
+    renderDoc();
+    const topbar = screen.getByTestId("topbar");
+    const body = screen.getByTestId("doc-body");
+    await enterEditModeAndChangeBody(topbar, body);
+
+    fireEvent.click(within(topbar).getByRole("button", { name: "Save Now" }));
+
+    await waitFor(() => expect(updateContentMutation).toHaveBeenCalledTimes(1));
+    expect(updateContentMutation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        nodeId: doc.node.id,
+        content: { kind: "doc", body: "# Handbook\n\nEdited body" },
+        autoMerge: true,
+      }),
+      expect.anything(),
+    );
+    expect(navigate).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(within(topbar).queryByRole("button", { name: "Save Now" })).toBeNull();
     });
   });
 });

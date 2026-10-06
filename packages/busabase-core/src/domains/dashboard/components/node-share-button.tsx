@@ -13,17 +13,21 @@ import { Label } from "kui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "kui/select";
 import { Switch } from "kui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "kui/tabs";
-import { Check, Copy, ExternalLink, Globe2, Lock, X } from "lucide-react";
+import { Check, Copy, ExternalLink, FolderOpen, Globe2, Lock, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-import { useCoreI18n } from "../../../i18n";
+import { useLocation } from "wouter";
+import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
+import { formatDayKey, localDateToCalendarDay } from "../../base/utils/date-value";
 import {
   expiryIsoForPreset,
+  nearestSharedAncestor,
   publicPreviewUrl,
   type ShareExpiryPreset,
   toDatetimeLocalValue,
 } from "../utils/share-dialog-utils";
 import { useIsAnonymousVisitor } from "../visitor-context";
+import { DayTimePicker } from "./day-time-picker";
 import {
   EmbedLinkSection,
   EmbedLinkStillLiveNotice,
@@ -103,6 +107,36 @@ export function NodeShareDialog({
   const share = shareQuery.data ?? null;
   const isPublic = share?.scope === "public";
 
+  // A node with no share of its own can still be public: a shared ancestor's
+  // link reaches everything under it (`recomputeEffectivePublicScope`). Showing
+  // "Restricted" there is the misleading answer this dialog used to give, so
+  // resolve the ancestor that actually gates it — the NEAREST ancestor carrying
+  // its own live share, which is exactly the "nearer wins" rule the server
+  // materializes. Built from two existing reads rather than a new endpoint:
+  // `share.get` is public API and documents `null` for "never shared", and
+  // `share.list` is already manage-gated like this dialog.
+  const inheritedLookupEnabled = canShareToWeb && open && shareQuery.isSuccess && !isPublic;
+  const ancestorsQuery = useQuery({
+    ...orpc.nodes.ancestors.queryOptions({ input: { nodeId } }),
+    enabled: inheritedLookupEnabled,
+  });
+  const sharedListQuery = useQuery({
+    ...orpc.nodes.share.list.queryOptions({ input: {} }),
+    enabled: inheritedLookupEnabled,
+  });
+  const inheritedFrom = useMemo(() => {
+    if (isPublic) return null;
+    const ancestorIds = ancestorsQuery.data?.ancestorIds;
+    const sharedNodes = sharedListQuery.data;
+    if (!ancestorIds || !sharedNodes) return null;
+    return nearestSharedAncestor(ancestorIds, sharedNodes);
+  }, [isPublic, ancestorsQuery.data, sharedListQuery.data]);
+  const inheritedLookupPending =
+    inheritedLookupEnabled && (ancestorsQuery.isPending || sharedListQuery.isPending);
+  const inheritedLookupError =
+    inheritedLookupEnabled && (ancestorsQuery.isError || sharedListQuery.isError);
+  const [, setLocation] = useLocation();
+
   // Feeds the "turning the switch off does not revoke these" notice below. Same
   // query key as the embed section's own list, so React Query serves both from
   // a single request.
@@ -143,12 +177,18 @@ export function NodeShareDialog({
 
   // Local drafts for the optional fields — a new password is only sent when the
   // user typed one (empty box = leave the stored password untouched); expiry is
-  // a datetime-local string converted to ISO on submit.
+  // a local `YYYY-MM-DDTHH:mm` string (from DayTimePicker) converted to ISO on submit.
   const [passwordDraft, setPasswordDraft] = useState("");
   const [copied, setCopied] = useState(false);
   const [activeTab, setActiveTab] = useState<"share" | "embed">(canShareToWeb ? "share" : "embed");
   const [expiryPreset, setExpiryPreset] = useState<ShareExpiryPreset>("never");
   const [customExpiry, setCustomExpiry] = useState("");
+  const locale = useCoreLocale();
+  const customExpiryText = customExpiry
+    ? new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(
+        new Date(customExpiry),
+      )
+    : null;
   const [hasUncopiedEmbedSecret, setHasUncopiedEmbedSecret] = useState(false);
   const submittedExpiryRef = useRef<string | null | undefined>(undefined);
 
@@ -196,6 +236,8 @@ export function NodeShareDialog({
       }),
       queryClient.invalidateQueries({ queryKey: orpc.nodes.list.key() }),
       queryClient.invalidateQueries({ queryKey: orpc.nodes.listFavorites.key() }),
+      // Descendants' dialogs read their inherited state off this list.
+      queryClient.invalidateQueries({ queryKey: orpc.nodes.share.list.key() }),
     ]);
   };
 
@@ -319,7 +361,7 @@ export function NodeShareDialog({
           {canShareToWeb && (
             <TabsContent className="mt-4 space-y-5" value="share">
               {/* Share-to-web toggle */}
-              {shareQuery.isPending ? (
+              {shareQuery.isPending || inheritedLookupPending ? (
                 <div
                   aria-live="polite"
                   className="py-8 text-center text-muted-foreground text-sm"
@@ -327,12 +369,18 @@ export function NodeShareDialog({
                 >
                   {t.loading}
                 </div>
-              ) : shareQuery.isError ? (
+              ) : shareQuery.isError || inheritedLookupError ? (
                 <div className="rounded-md border border-destructive/30 p-3 text-sm">
                   <p className="font-medium">{t.loadFailed}</p>
                   <Button
                     className="mt-2"
-                    onClick={() => shareQuery.refetch()}
+                    onClick={() => {
+                      void shareQuery.refetch();
+                      if (inheritedLookupEnabled) {
+                        void ancestorsQuery.refetch();
+                        void sharedListQuery.refetch();
+                      }
+                    }}
                     size="sm"
                     type="button"
                     variant="outline"
@@ -340,6 +388,66 @@ export function NodeShareDialog({
                     {t.retry}
                   </Button>
                 </div>
+              ) : inheritedFrom ? (
+                <>
+                  {/* Public through an ancestor. No switch: this node has no
+                      grant of its own to turn off, and turning one ON here
+                      would leave a second share behind that keeps this node
+                      public after the folder is closed. The honest controls
+                      are "copy the link that already works" and "go to the
+                      share that governs it". */}
+                  <div
+                    className="flex items-start gap-3 rounded-md border border-border/60 p-3"
+                    data-testid="node-share-inherited"
+                  >
+                    <div className="mt-0.5 rounded-md bg-muted p-2">
+                      <Globe2 aria-hidden="true" className="size-4" />
+                    </div>
+                    <div className="flex min-w-0 flex-col gap-1">
+                      <span className="font-medium text-sm">
+                        {fmt(t.inheritedTitle, { name: inheritedFrom.name })}
+                      </span>
+                      <span className="text-muted-foreground text-xs">
+                        {fmt(t.inheritedHint, { name: inheritedFrom.name })}
+                      </span>
+                      <Button
+                        className="mt-1 self-start"
+                        data-testid="node-share-open-ancestor"
+                        onClick={() => {
+                          handleOpenChange(false);
+                          setLocation(`/${inheritedFrom.type}/${inheritedFrom.slug}`);
+                        }}
+                        size="sm"
+                        type="button"
+                        variant="outline"
+                      >
+                        <FolderOpen aria-hidden="true" className="size-3.5" />
+                        {fmt(t.openAncestor, { name: inheritedFrom.name })}
+                      </Button>
+                    </div>
+                  </div>
+                  {publicUrl && (
+                    <div className="space-y-2">
+                      <Label className="font-medium text-sm">{t.linkLabel}</Label>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          className="h-9 flex-1"
+                          data-testid="node-share-public-url"
+                          readOnly
+                          value={publicUrl}
+                        />
+                        <Button
+                          data-testid="node-share-copy-link"
+                          onClick={handleCopy}
+                          type="button"
+                        >
+                          {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
+                          {t.copyLink}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </>
               ) : (
                 <>
                   <div className="flex items-center justify-between gap-4 rounded-md border border-border/60 p-3">
@@ -539,14 +647,18 @@ export function NodeShareDialog({
                         </Select>
                         {expiryPreset === "custom" && (
                           <div className="flex items-center gap-2">
-                            <Input
+                            <DayTimePicker
+                              ariaLabel={t.expiryCustom}
                               className="h-8 flex-1"
-                              data-testid="node-share-custom-expiry"
+                              dataAttributes={{ "data-testid": "node-share-custom-expiry" }}
+                              day={customExpiry.slice(0, 10)}
                               disabled={busy}
-                              min={toDatetimeLocalValue(new Date().toISOString())}
-                              onChange={(event) => setCustomExpiry(event.target.value)}
-                              type="datetime-local"
-                              value={customExpiry}
+                              id="node-share-custom-expiry"
+                              includeTime
+                              minDay={formatDayKey(localDateToCalendarDay(new Date()))}
+                              onPick={(day, time) => setCustomExpiry(`${day}T${time}`)}
+                              text={customExpiryText}
+                              time={customExpiry.slice(11, 16)}
                             />
                             <Button
                               disabled={busy || !customExpiry}

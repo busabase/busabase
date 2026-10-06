@@ -54,6 +54,8 @@ export interface ViewSubmitOptions {
 export interface UpdateBaseFieldPatch {
   name?: iString;
   choices?: Array<{ color?: string; id: string; name: string }>;
+  /** A date field's time settings; merged into the field's existing options. */
+  date?: { includeTime?: boolean; timezone?: string };
 }
 
 export interface CreateBaseFieldPayload {
@@ -72,6 +74,10 @@ export interface CreateBaseFieldPayload {
     }>;
     code?: {
       language?: string;
+    };
+    date?: {
+      includeTime?: boolean;
+      timezone?: string;
     };
     lookup?: {
       relationFieldSlug: string;

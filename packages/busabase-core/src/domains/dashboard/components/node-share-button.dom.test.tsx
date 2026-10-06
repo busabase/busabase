@@ -137,3 +137,50 @@ describe("NodeShareDialog: share-to-web availability follows the registry", () =
     }
   });
 });
+
+describe("NodeShareDialog: a node made public by a shared ancestor", () => {
+  const sharedRow = (nodeId: string, name: string) => ({
+    nodeId,
+    name,
+    slug: `${nodeId}-slug`,
+    type: "folder",
+    icon: null,
+    capability: "read",
+    hasPassword: false,
+    expiresAt: null,
+    createdAt: "2026-09-30T00:00:00.000Z",
+  });
+
+  afterEach(() => {
+    delete FIXTURES["nodes.ancestors"];
+    delete FIXTURES["nodes.share.list"];
+  });
+
+  it("says it is public via the NEAREST shared ancestor instead of 'Restricted'", async () => {
+    // Root-first: the grandparent and the parent are both shared; the parent
+    // is nearer, so it is the share that actually gates this node.
+    FIXTURES["nodes.ancestors"] = { ancestorIds: ["nod_root", "nod_grand", "nod_parent"] };
+    FIXTURES["nodes.share.list"] = [
+      sharedRow("nod_grand", "Grand Folder"),
+      sharedRow("nod_parent", "Parent Folder"),
+    ];
+    renderDialog("doc");
+
+    await waitFor(() => expect(screen.getByTestId("node-share-inherited")).toBeTruthy());
+    expect(screen.getByTestId("node-share-inherited").textContent).toContain("Parent Folder");
+    expect(screen.getByTestId("node-share-inherited").textContent).not.toContain("Grand Folder");
+    // No own-share switch to flip, but the link that already works is offered.
+    expect(shareToWebSwitch()).toBeNull();
+    expect(screen.getByTestId("node-share-public-url")).toBeTruthy();
+    expect(screen.getByTestId("node-share-open-ancestor").textContent).toContain("Parent Folder");
+  });
+
+  it("keeps the ordinary switch when no ancestor is shared", async () => {
+    FIXTURES["nodes.ancestors"] = { ancestorIds: ["nod_root", "nod_parent"] };
+    FIXTURES["nodes.share.list"] = [sharedRow("nod_elsewhere", "Unrelated Folder")];
+    renderDialog("doc");
+
+    await waitFor(() => expect(shareToWebSwitch()).not.toBeNull());
+    expect(screen.queryByTestId("node-share-inherited")).toBeNull();
+  });
+});

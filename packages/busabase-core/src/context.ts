@@ -148,6 +148,70 @@ export interface FilePreviewRuntimeConfig {
   configurationError?: string;
 }
 
+/**
+ * One notification-worthy thing that just happened in a space, as handed to a
+ * host's `onNotificationEvent`. Carries ids only — the host resolves who should
+ * hear about it (node subscribers, Change Request participants, the submitter)
+ * through busabase-core's `logic/node-subscriptions.ts` resolvers, so recipient
+ * policy lives in one place and this payload stays cheap to build on every
+ * write.
+ *
+ * `actorId` is always the resolved actor who caused the event (never notified
+ * about their own action). `nodeId` is the node the event belongs to for
+ * subscription purposes; for a pending node_create it is the PARENT the node
+ * would be created under (the node does not exist yet).
+ */
+export type BusabaseNotificationEvent =
+  | {
+      kind: "change_request.pending_review";
+      spaceId: string;
+      changeRequestId: string;
+      nodeId: string | null;
+      baseId: string | null;
+      actorId: string;
+    }
+  | {
+      kind: "change_request.commented";
+      spaceId: string;
+      changeRequestId: string;
+      commentId: string;
+      actorId: string;
+    }
+  | {
+      kind: "change_request.reviewed";
+      spaceId: string;
+      changeRequestId: string;
+      verdict: "approved" | "rejected";
+      actorId: string;
+    }
+  | {
+      kind: "change_request.revised";
+      spaceId: string;
+      changeRequestId: string;
+      actorId: string;
+    }
+  | {
+      kind: "change_request.resolved";
+      spaceId: string;
+      changeRequestId: string;
+      status: "merged" | "rejected";
+      submittedBy: string;
+      /**
+       * False for a merge that never waited on a human — a write-access edit,
+       * `autoMerge`, a structural auto-merge, or a direct write recorded as a
+       * merged CR. Those are announced as `node.changed` instead.
+       */
+      wasHumanReviewed: boolean;
+      actorId: string;
+    }
+  | {
+      kind: "node.changed";
+      spaceId: string;
+      nodeId: string;
+      changeRequestId: string | null;
+      actorId: string;
+    };
+
 export interface BusabaseContext {
   db?: BusabaseDatabase;
   actorId?: string;
@@ -223,19 +287,16 @@ export interface BusabaseContext {
   /** Which language the demo dataset is served in; only set when `isDemo`. */
   demoLocale?: DemoLocale;
   /**
-   * Host hook: invoked (best-effort, errors swallowed by the caller) whenever a
-   * change request freshly enters human review, so a multi-tenant host
-   * (Busabase Cloud) can persist an inbox notification for whoever should
-   * review it. The open-source host leaves this undefined — its reviewers get
-   * the ephemeral desktop Notification via the live SSE event instead (see
-   * `publishChangeRequestPendingReview` in `logic/live-events.ts`).
+   * Host hook: invoked (best-effort, AFTER the write committed, errors
+   * swallowed by the caller) for every notification-worthy event — see
+   * `BusabaseNotificationEvent`. Busabase Cloud registers it to resolve node
+   * subscribers / Change Request participants and persist (capped, coalesced)
+   * inbox notifications with email. The open-source host leaves it undefined —
+   * its reviewers get the ephemeral desktop Notification via the live SSE
+   * event instead (see `publishChangeRequestPendingReview` in
+   * `logic/live-events.ts`).
    */
-  onChangeRequestPendingReview?: (args: {
-    spaceId: string;
-    baseId: string | null;
-    changeRequestId: string;
-    submittedBy: string;
-  }) => void | Promise<void>;
+  onNotificationEvent?: (event: BusabaseNotificationEvent) => void | Promise<void>;
   /** Host-owned, best-effort performance sink. Values contain no tenant ids or payload data. */
   onPerformanceMetric?: (metric: BusabasePerformanceMetric) => void | Promise<void>;
   /**
@@ -779,9 +840,9 @@ export function getContextDemoLocale(): DemoLocale {
   return storage.getStore()?.demoLocale ?? "en";
 }
 
-/** The host's registered "CR entered review" notification hook, if any (cloud-only). */
-export function getContextChangeRequestPendingReviewHook() {
-  return storage.getStore()?.onChangeRequestPendingReview;
+/** The host's registered notification-event hook, if any (cloud-only). */
+export function getContextNotificationEventHook() {
+  return storage.getStore()?.onNotificationEvent;
 }
 
 /** Emit a host-owned performance metric without allowing observability failure to break a read. */

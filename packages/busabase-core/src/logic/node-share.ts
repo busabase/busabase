@@ -112,7 +112,19 @@ export async function listOwnLiveShareNodeIds(): Promise<Set<string>> {
   // Expiry is enforced HERE rather than in SQL, through the same `isShareLive`
   // predicate every other read uses — an expired share must not show a marker
   // saying the node is published when the link no longer opens.
-  return new Set(rows.filter(isShareLive).map((row) => row.nodeId));
+  const live = rows.filter(isShareLive);
+  // The inherited marker (`NodeVO.sharedViaAncestor`) reads the materialized
+  // `effective_public_scope`, which only closes when something sweeps the
+  // elapsed share. Anonymous requests sweep; a member's sidebar never did, so
+  // a folder whose link expired lost its own globe while every child kept the
+  // inherited one. Sweep here too — only when there is something to sweep, so
+  // an ordinary sidebar load stays read-only. (The node rows of THIS load were
+  // read concurrently and may still carry the old scope; the next load is
+  // clean.)
+  if (live.length < rows.length) {
+    await expireElapsedNodeShares();
+  }
+  return new Set(live.map((row) => row.nodeId));
 }
 
 /**
@@ -238,8 +250,13 @@ export async function listOwnLiveShares(): Promise<OwnLiveShareSummary[]> {
  * simply overrides a farther one, and a revoked/expired share contributes
  * nothing (so revoking a folder closes its subtree unless a child re-opens it).
  */
-export async function recomputeEffectivePublicScope(rootNodeId: string): Promise<void> {
-  const db = await getDb();
+export async function recomputeEffectivePublicScope(
+  rootNodeId: string,
+  // Pass the merge transaction when called from inside one (a node move) —
+  // re-acquiring `getDb()` there would deadlock the single pglite connection.
+  database?: Awaited<ReturnType<typeof getDb>>,
+): Promise<void> {
+  const db = database ?? (await getDb());
   const spaceId = getContextSpaceId();
 
   const nodes = await db

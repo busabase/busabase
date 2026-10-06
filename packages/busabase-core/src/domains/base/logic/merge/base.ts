@@ -17,6 +17,7 @@ import type { MergeCtx } from "../../../../logic/cr-lifecycle";
 import { id } from "../../../../logic/kernel";
 import { type MaterializeArgs, registerMaterializer } from "../../../../logic/materialize";
 import { registerNodeRuntime } from "../../../../logic/node-runtime";
+import { assertValidDateFieldOptionsOrThrow } from "../date-options";
 import { assertRelationOnlyOptionsOrThrow, resolveRelationFieldOptions } from "../relation-options";
 
 export const materializeBaseNode = async (
@@ -71,6 +72,7 @@ export const materializeBaseNode = async (
         // A node-CR base-create commit stores field options verbatim, so this is the
         // only place the `bases.create --fields-json` path validates them.
         assertRelationOnlyOptionsOrThrow(type, field.slug, field.options);
+        assertValidDateFieldOptionsOrThrow(type, field.slug, field.options);
         return {
           id: id("bsf"),
           spaceId: getContextSpaceId(),

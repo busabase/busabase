@@ -277,6 +277,19 @@ export const busabaseDemoRouter = os.router({
     // Demo mode has no persisted state to favorite against — an empty list is
     // truthful (matches `listArchived`'s demo handler above), not an error.
     listFavorites: os.nodes.listFavorites.handler(() => []),
+    // Demo mode persists nothing, so nobody is subscribed to anything: `none`
+    // is the truthful state, and subscribing is unsupported like favoriting.
+    subscription: {
+      get: os.nodes.subscription.get.handler(({ input }) => ({
+        nodeId: input.nodeId,
+        state: "none" as const,
+        source: null,
+        via: null,
+      })),
+      set: os.nodes.subscription.set.handler(() => {
+        throw demoUnsupported("Node subscriptions");
+      }),
+    },
     principals: {
       // The demo dataset has no grants — an empty list is truthful, and it
       // lets the Permissions dialog render read-only in demo mode.
@@ -323,6 +336,30 @@ export const busabaseDemoRouter = os.router({
     create: os.auditEvents.create.handler(({ input }) => demoCreateAuditEvent(input)),
   },
   activity: {
+    listForRecordPaged: os.activity.listForRecordPaged.handler(async ({ input }) => {
+      const [changeRequests, records, auditEvents] = await Promise.all([
+        demoListChangeRequests(),
+        demoListRecords(),
+        demoListAuditEvents(),
+      ]);
+      const all = buildActivityItemsFromVOs(changeRequests, records, auditEvents).filter((item) => {
+        if (item.kind === "audit") return item.auditEvent.recordId === input.recordId;
+        if (item.kind !== "operation") return false;
+        const operation = item.changeRequest.operations.find((op) => op.id === item.operationId);
+        return (
+          operation?.targetRecordId === input.recordId ||
+          operation?.sourceRecordId === input.recordId ||
+          operation?.mergedRecordId === input.recordId
+        );
+      });
+      const offset = getDemoActivityOffset(input.cursor);
+      const items = all.slice(offset, offset + input.limit);
+      const nextOffset = offset + items.length;
+      return {
+        items,
+        nextCursor: nextOffset < all.length ? `${DEMO_ACTIVITY_CURSOR_PREFIX}${nextOffset}` : null,
+      };
+    }),
     listPaged: os.activity.listPaged.handler(async ({ input }) => {
       const [changeRequests, records, auditEvents] = await Promise.all([
         demoListChangeRequests(),
@@ -831,6 +868,9 @@ export const busabaseDemoRouter = os.router({
   // demo should be reading the same rules it will be held to on a real space.
   guides: guidesRouter,
   changeRequests: {
+    createPreviewLink: os.changeRequests.createPreviewLink.handler(() => {
+      throw demoUnsupported("Create Change Request preview link");
+    }),
     list: os.changeRequests.list.handler(async ({ input }) => {
       const all = await demoListChangeRequests();
       const status = input?.status ?? [];
@@ -1194,7 +1234,7 @@ export const busabaseDemoRouter = os.router({
       }
     }),
     listChangeRequests: os.records.listChangeRequests.handler(({ input }) =>
-      demoListRecordChangeRequests(input.recordId),
+      demoListRecordChangeRequests(input.recordId).slice(0, input.limit),
     ),
     listLinks: os.records.listLinks.handler(() => []),
   },

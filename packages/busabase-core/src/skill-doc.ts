@@ -1112,8 +1112,8 @@ literally to the user. The user's final line must be:
     : ""
 }
 
-Normal agent work remains review-first. Only the versioned system-onboarding initializer may use
-\`autoMerge\` for starter structure and sample records.`;
+Later writes omit \`autoMerge\`: merged where the user can write, reviewed elsewhere. Only
+the onboarding initializer passes \`autoMerge: true\`, for starter data.`;
 
   return `---
 name: busabase

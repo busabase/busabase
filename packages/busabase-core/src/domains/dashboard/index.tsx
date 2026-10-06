@@ -1771,9 +1771,16 @@ function BusabaseDashboardContent({
       // A choices edit rides in the same update as a rename, so both land (or
       // wait for review) together. `options` replaces the stored object, so
       // keep whatever else a select field carries alongside `choices`.
+      // A date field's time settings ride along the same way.
       const nextOptions =
-        patch.choices !== undefined ? { ...field?.options, choices: patch.choices } : undefined;
-      const renameOnly = patch.choices === undefined;
+        patch.choices !== undefined || patch.date !== undefined
+          ? {
+              ...field?.options,
+              ...(patch.choices !== undefined ? { choices: patch.choices } : {}),
+              ...(patch.date !== undefined ? { date: patch.date } : {}),
+            }
+          : undefined;
+      const renameOnly = patch.choices === undefined && patch.date === undefined;
       const displayName = iStringParse(patch.name ?? field?.name ?? fieldId);
       // `autoMerge` was not being sent at all, so the endpoint's permission-aware
       // default applied to BOTH modes: a write-capable user pressing "submit for

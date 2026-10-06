@@ -4,8 +4,14 @@ import {
   type ApiKeyPermissionLevel,
   hasApiKeyLevel,
 } from "busabase-contract/access-control/api-key-level";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "kui/dropdown-menu";
 import { ChevronDown } from "lucide-react";
-import { createContext, type ReactNode, useContext, useEffect, useRef, useState } from "react";
+import { createContext, type ReactNode, useContext } from "react";
 import { useCoreI18n } from "../../../i18n";
 
 export type SubmitActionKind = "immediate" | "changeRequest";
@@ -90,19 +96,6 @@ export function SplitSubmitButton({
   const messages = useCoreI18n();
   const inheritedPermissionLevel = useContext(SubmitPermissionContext);
   const permissionLevel = permissionLevelOverride ?? inheritedPermissionLevel;
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const handler = (event: MouseEvent) => {
-      if (ref.current && !ref.current.contains(event.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [open]);
 
   const orderedKinds = resolveSubmitActionOrder(permissionLevel, defaultAction);
   const actions: Record<SubmitActionKind, SubmitActionConfig> = {
@@ -133,7 +126,7 @@ export function SplitSubmitButton({
   }
 
   return (
-    <div ref={ref} className="relative flex items-stretch">
+    <div className="relative flex items-stretch">
       <button
         className="rounded-l-md bg-foreground px-3 py-1.5 font-medium text-background text-xs transition-colors hover:bg-foreground/85 disabled:cursor-not-allowed disabled:opacity-60"
         disabled={isDisabled}
@@ -145,42 +138,34 @@ export function SplitSubmitButton({
 
       <span className="w-px shrink-0 bg-background/20" />
 
-      <button
-        aria-expanded={open}
-        aria-label={messages.common.moreSubmitOptions}
-        className="rounded-r-md bg-foreground px-2 py-1.5 text-background transition-colors hover:bg-foreground/85 disabled:cursor-not-allowed disabled:opacity-60"
-        disabled={isDisabled}
-        onClick={() => setOpen((value) => !value)}
-        type="button"
-      >
-        <ChevronDown className="h-3.5 w-3.5" />
-      </button>
-
-      {open ? (
-        <div
-          className={`absolute right-0 z-40 min-w-max rounded-md border border-border/70 bg-popover py-1 shadow-lg ${
-            dropdownPosition === "below" ? "top-full mt-1.5" : "bottom-full mb-1.5"
-          }`}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            aria-label={messages.common.moreSubmitOptions}
+            className="rounded-r-md bg-foreground px-2 py-1.5 text-background transition-colors hover:bg-foreground/85 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={isDisabled}
+            type="button"
+          >
+            <ChevronDown className="h-3.5 w-3.5" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align="end"
+          className="min-w-max"
+          side={dropdownPosition === "below" ? "bottom" : "top"}
         >
           {hint ? (
             <p className="border-border/50 border-b px-3 py-2 text-muted-foreground text-[11px] leading-relaxed">
               {hint}
             </p>
           ) : null}
-          <button
-            className="w-full px-3 py-2 text-left text-foreground text-xs transition-colors hover:bg-accent"
-            onClick={() => {
-              setOpen(false);
-              secondary.onSubmit();
-            }}
-            type="button"
-          >
+          <DropdownMenuItem className="justify-start text-xs" onSelect={() => secondary.onSubmit()}>
             {secondary.isLoading
               ? (secondary.loadingLabel ?? messages.common.working)
               : secondary.label}
-          </button>
-        </div>
-      ) : null}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 }

@@ -46,11 +46,19 @@
 // behind an unlabelled "•••" hid the product. It is in exactly one place per
 // toolbar; do not re-add a duplicate item to this menu.
 //
+// Subscribe / Unsubscribe sits right after Activity: both are about following
+// what happens to this node. Its label carries the CURRENT state ("Subscribed",
+// "Subscribed via <folder>", "Not subscribed") so the person knows whether
+// clicking it changes something here or only for this one child — unsubscribing
+// a node inside a subscribed folder mutes just that node. The state is fetched
+// only while the menu is open, so a detail page pays nothing until it's used.
+//
 // Favorites isn't included here — that action depends on the sidebar's own
 // `nodes.listFavorites` cache + toggle context, which isn't naturally
 // available to a lone detail page, and Favorites was never part of the
 // original ask for this button.
 
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { hasApiKeyLevel } from "busabase-contract/access-control/api-key-level";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import { publicAccessOf } from "busabase-contract/domains";
@@ -62,10 +70,21 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "kui/dropdown-menu";
-import { Globe, History, MoreHorizontal, Pencil, Settings, Shield, Trash2 } from "lucide-react";
+import {
+  Bell,
+  BellOff,
+  Globe,
+  History,
+  MoreHorizontal,
+  Pencil,
+  Settings,
+  Shield,
+  Trash2,
+} from "lucide-react";
 import { useContext, useState } from "react";
+import { toast } from "sonner";
 import { useLocation } from "wouter";
-import { useCoreI18n } from "../../../i18n";
+import { fmt, useCoreI18n } from "../../../i18n";
 import { useIsAnonymousVisitor } from "../visitor-context";
 import { useCanManageEmbedLinks } from "./embed-link-section";
 import { NodeDeleteDialog } from "./file-tree-browser";
@@ -124,6 +143,17 @@ export function NodeActionsMenu({
   } | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const queryClient = useQueryClient();
+  const subscriptionQueryOptions = orpc.nodes.subscription.get.queryOptions({
+    input: { nodeId },
+  });
+  const subscriptionQuery = useQuery({
+    ...subscriptionQueryOptions,
+    enabled: menuOpen,
+    retry: false,
+  });
+  const setSubscription = useMutation(orpc.nodes.subscription.set.mutationOptions());
   // Permissions is a cloud-only surface — see `node-settings-permissions-slot.tsx`.
   // Absent from the menu entirely (not disabled) when no host injected a panel.
   const hasPermissionsPanel = useContext(NodeSettingsPermissionsSlotContext) !== null;
@@ -169,9 +199,36 @@ export function NodeActionsMenu({
   // off the same slug-or-id every other detail route uses.
   const activityHref = `/${nodeType}/${nodeSlug ?? nodeId}/activity`;
 
+  const subscription = subscriptionQuery.data;
+  const isSubscribed = subscription?.state === "subscribed" || subscription?.state === "inherited";
+  const subscriptionStateLabel = !subscription
+    ? messages.common.loading
+    : subscription.state === "subscribed"
+      ? messages.nodeSubscription.subscribed
+      : subscription.state === "inherited" && subscription.via
+        ? fmt(messages.nodeSubscription.subscribedVia, { name: subscription.via.name })
+        : messages.nodeSubscription.notSubscribed;
+  const toggleSubscription = async () => {
+    const subscribed = !isSubscribed;
+    try {
+      const next = await setSubscription.mutateAsync({ nodeId, subscribed });
+      queryClient.setQueryData(subscriptionQueryOptions.queryKey, next);
+      toast.success(
+        fmt(
+          subscribed
+            ? messages.nodeSubscription.subscribedToast
+            : messages.nodeSubscription.unsubscribedToast,
+          { name: nodeName },
+        ),
+      );
+    } catch {
+      toast.error(messages.nodeSubscription.updateFailed);
+    }
+  };
+
   return (
     <>
-      <DropdownMenu>
+      <DropdownMenu onOpenChange={setMenuOpen}>
         <DropdownMenuTrigger asChild>
           <Button
             aria-label={messages.common.moreActions}
@@ -206,6 +263,26 @@ export function NodeActionsMenu({
           <DropdownMenuItem onSelect={() => setLocation(activityHref)}>
             <History className="mr-2 size-3.5" />
             {messages.nodeDetail.activity}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={!subscription || setSubscription.isPending}
+            onSelect={() => void toggleSubscription()}
+          >
+            {isSubscribed ? (
+              <BellOff className="mr-2 size-3.5" />
+            ) : (
+              <Bell className="mr-2 size-3.5" />
+            )}
+            <span className="flex min-w-0 flex-col">
+              <span>
+                {isSubscribed
+                  ? messages.nodeSubscription.unsubscribe
+                  : messages.nodeSubscription.subscribe}
+              </span>
+              <span className="max-w-56 truncate text-muted-foreground text-xs">
+                {subscriptionStateLabel}
+              </span>
+            </span>
           </DropdownMenuItem>
           {canShare && (
             <DropdownMenuItem onSelect={() => setShareOpen(true)}>

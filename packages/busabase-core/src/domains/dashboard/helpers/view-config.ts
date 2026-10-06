@@ -234,14 +234,13 @@ export const resetViewFieldWidth = (config: ViewConfigVO, fieldSlug: string): Vi
   }
   const fieldWidths = { ...config.fieldWidths };
   delete fieldWidths[fieldSlug];
-  return {
-    ...config,
-    fieldWidths: Object.keys(fieldWidths).length > 0 ? fieldWidths : undefined,
-  };
+  return { ...config, fieldWidths };
 };
 
+// Clear with `{}`, never `undefined`: view updates are patches, and an undefined key
+// is dropped from the request, so the stored widths would survive the reset.
 export const resetAllViewFieldWidths = (config: ViewConfigVO): ViewConfigVO =>
-  config.fieldWidths === undefined ? config : { ...config, fieldWidths: undefined };
+  config.fieldWidths === undefined ? config : { ...config, fieldWidths: {} };
 
 export const moveViewField = (
   config: ViewConfigVO,
