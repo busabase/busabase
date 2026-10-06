@@ -1,7 +1,7 @@
 {
   "name": "@busabase/desktop",
   "private": true,
-  "version": "0.90.2",
+  "version": "0.90.3",
   "type": "module",
   "scripts": {
     "dev": "next dev --port 3064",
@@ -10,7 +10,8 @@
     "preview": "npx serve out",
     "typecheck": "next typegen && tsc --noEmit",
     "tauri": "tauri",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:electron": "node --test electron/test/*.test.*"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.0",

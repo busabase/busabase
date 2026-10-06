@@ -3,7 +3,7 @@
     "name": "Busabase",
     "slug": "busabase-mobile",
     "scheme": "busabase",
-    "version": "0.90.2",
+    "version": "0.90.3",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -25,7 +25,8 @@
           "buda.im",
           "pub-5d59c786708441b3a80620d87e7dee2b.r2.dev",
           "moonrouter.dev",
-          "space.bilibili.com"
+          "space.bilibili.com",
+          "help.vika.cn"
         ],
         "NSAppTransportSecurity": {
           "NSAllowsLocalNetworking": true
