@@ -1,6 +1,6 @@
 import { expect, json, test, unique } from "./_fixtures";
 
-const prompt = "PUL-213 first prompt";
+const prompt = "first prompt";
 const fixtureControlUrl = `http://127.0.0.1:${process.env.PLAYWRIGHT_ACP_FIXTURE_PORT ?? "15430"}`;
 
 const controlPrompt = async (
@@ -133,7 +133,7 @@ test("selects an ACP model before the first prompt and renders the completed rep
   await capture(page, testInfo, "03-first-prompt-reply-complete");
 });
 
-test("shows how to restore an archived Buda Agent (PUL-273)", async ({ page }, testInfo) => {
+test("shows how to restore an archived Buda Agent", async ({ page }, testInfo) => {
   await connectBudaAgent(page);
   await page.evaluate(() => window.localStorage.setItem("busabaseLocale", "zh-CN"));
   await page.reload();
@@ -164,12 +164,10 @@ test("shows how to restore an archived Buda Agent (PUL-273)", async ({ page }, t
   await expect(alert).toBeVisible();
   await expect(alert).toHaveAttribute("role", "alert");
   await expect(page.getByText("无法继续此会话。", { exact: true })).toHaveCount(0);
-  await capture(page, testInfo, "pul-273-archived-agent-recovery-guidance");
+  await capture(page, testInfo, "archived-agent-recovery-guidance");
 });
 
-test("stops a streaming turn and keeps the follow-up separate (PUL-244, PUL-272)", async ({
-  page,
-}, testInfo) => {
+test("stops a streaming turn and keeps the follow-up separate", async ({ page }, testInfo) => {
   await connectBudaAgent(page);
 
   const composer = page.getByPlaceholder("Message Buda AI Agent…");
@@ -177,7 +175,7 @@ test("stops a streaming turn and keeps the follow-up separate (PUL-244, PUL-272)
   const submit = composerForm.locator('button[type="submit"]');
   const activity = page.getByTestId("agent-activity-indicator");
 
-  const stopPrompt = "PUL-244 stop this turn";
+  const stopPrompt = "stop this turn";
   await controlPrompt("prepare", stopPrompt, "thought");
   await composer.fill(stopPrompt);
   await submit.click();
@@ -221,7 +219,7 @@ test("stops a streaming turn and keeps the follow-up separate (PUL-244, PUL-272)
   ).toHaveCount(0);
 
   // The session must still accept a follow-up prompt after the stop.
-  const followUp = "PUL-244 follow-up after stop";
+  const followUp = "follow-up after stop";
   await composer.fill(followUp);
   await submit.click();
   await expect(page.locator(".is-user").getByText(followUp, { exact: true })).toBeVisible();
@@ -241,7 +239,7 @@ test("stops a streaming turn and keeps the follow-up separate (PUL-244, PUL-272)
   await capture(page, testInfo, "17-stop-turn-follow-up-stays-separate");
 });
 
-test("node side-panel chat keeps a post-cancel follow-up separate (PUL-272)", async ({
+test("node side-panel chat keeps a post-cancel follow-up separate", async ({
   page,
   request,
 }, testInfo) => {
@@ -249,7 +247,7 @@ test("node side-panel chat keeps a post-cancel follow-up separate (PUL-272)", as
   await connectBudaAgent(page);
   const sessionsBeforeSplitAction = await fixtureSessionCount();
 
-  const name = unique("PUL-226 agent chat node");
+  const name = unique("agent chat node");
   const slug = name
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
@@ -280,7 +278,7 @@ test("node side-panel chat keeps a post-cancel follow-up separate (PUL-272)", as
   ).toBeVisible();
   await expect.poll(fixtureSessionCount).toBe(sessionsBeforeSplitAction);
 
-  const firstTurn = "PUL-250 stop this side-panel turn";
+  const firstTurn = "stop this side-panel turn";
   await controlPrompt("prepare", firstTurn, "thought");
   await composer.fill(firstTurn);
   const composerForm = composer.locator("xpath=ancestor::form");
@@ -303,7 +301,7 @@ test("node side-panel chat keeps a post-cancel follow-up separate (PUL-272)", as
   expect(staleRelease.status).toBe(425);
   await capture(page, testInfo, "11-node-side-panel-turn-stopped");
 
-  const secondTurn = "PUL-250 follow up in the same side-panel session";
+  const secondTurn = "follow up in the same side-panel session";
   await controlPrompt("prepare", secondTurn, "tool");
   await composer.fill(secondTurn);
   await composerForm.locator('button[type="submit"]').click();
@@ -336,7 +334,7 @@ test("node side-panel chat keeps a post-cancel follow-up separate (PUL-272)", as
   await expect(composer).toBeEnabled();
   await capture(page, testInfo, "12-node-side-panel-follow-up-complete");
 
-  // PUL-262: the tool call row stays collapsed by default, but its rawInput/
+  // The tool call row stays collapsed by default, but its rawInput/
   // rawOutput must be discoverable — click the header and check the result.
   const toolCall = detail.getByTestId("acp-tool-call").filter({
     hasText: `Inspect context for: ${secondTurn}`,
@@ -395,7 +393,7 @@ test("keeps active work scoped while switching sessions and can reply after retu
   await expect(rows.first()).toBeVisible();
   const initialCount = await rows.count();
 
-  const researchPrompt = "PUL-256 investigate the interrupted session before proposing a fix";
+  const researchPrompt = "investigate the interrupted session before proposing a fix";
   await controlPrompt("prepare", researchPrompt, "thought");
   await composer.fill(researchPrompt);
   await submit.click();
@@ -444,7 +442,7 @@ test("keeps active work scoped while switching sessions and can reply after retu
   await expect(activity).toBeHidden();
   await expect(composer).toBeEnabled();
 
-  const followUp = "PUL-256 reply after returning to the first session";
+  const followUp = "reply after returning to the first session";
   await composer.fill(followUp);
   await submit.click();
   await expect(page.locator(".is-user").getByText(followUp, { exact: true })).toBeVisible();

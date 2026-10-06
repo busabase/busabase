@@ -104,7 +104,15 @@ test("creates a Field Type Lab record filling every editable input kind", async 
   await page.getByLabel("Markdown").fill("# heading\n\nbody");
   // number / date
   await page.getByLabel("Number", { exact: true }).fill("42");
-  await page.getByLabel("Date", { exact: true }).fill("2026-06-24");
+  // The date field is a day picker, not a text input; a date-only pick closes it.
+  const dateTrigger = page.getByLabel("Date", { exact: true });
+  await dateTrigger.click();
+  const datePicker = page.locator("[data-radix-popper-content-wrapper]");
+  await datePicker.getByRole("combobox", { name: "Choose the Year" }).selectOption("2026");
+  await datePicker.getByRole("combobox", { name: "Choose the Month" }).selectOption("5");
+  await datePicker.locator('[data-day="2026-06-24"] button').click();
+  await expect(datePicker).toHaveCount(0);
+  await expect(dateTrigger).toHaveAttribute("data-value", "2026-06-24");
   // checkbox (the lab has exactly one)
   await page.locator("#record-field-bsf_lab_checkbox").check();
   // single select — choose by its visible option label
@@ -114,9 +122,11 @@ test("creates a Field Type Lab record filling every editable input kind", async 
   await page.getByLabel("Email", { exact: true }).fill("qa@example.com");
   await page.getByLabel("Phone", { exact: true }).fill("+1 555-123-4567");
 
-  // "Submit Now" lives behind the split-button dropdown (direct merge, no review).
-  await page.getByRole("button", { name: "More submit options" }).click();
-  await page.getByRole("button", { name: "Submit Now" }).click();
+  // "Submit Now" is the primary immediate-merge action, always visible — no
+  // need to open the dropdown (its "More submit options" trigger also makes
+  // Radix treat the dropdown as modal while open, which blocks clicks on
+  // anything outside it, including this button).
+  await page.getByRole("button", { name: "Submit Now", exact: true }).click();
 
   // Lands on the canonical record view; the primary (first) field is the title.
   await expect(page).toHaveURL(/\/dashboard\/local\/base\/field-type-lab\/[\w-]+$/);
@@ -124,6 +134,9 @@ test("creates a Field Type Lab record filling every editable input kind", async 
   // A couple of the entered values are rendered on the record detail.
   await expect(page.getByText("qa@example.com")).toBeVisible();
   await expect(page.getByText("In review").first()).toBeVisible();
+  // The picked day reads as that same day, in the app's date format, whatever
+  // the browser's time zone.
+  await expect(page.getByText("Wed, Jun 24, 2026").first()).toBeVisible();
 });
 
 test("blocks creation when the required Text field is empty", async ({ page }) => {
@@ -132,9 +145,10 @@ test("blocks creation when the required Text field is empty", async ({ page }) =
 
   // Leave the required "Text" field empty; fill an optional one so the form is not blank.
   await page.getByLabel("Number", { exact: true }).fill("7");
-  // "Submit Request" lives behind the split-button dropdown (Submit Now is primary).
+  // "Submit Request" (the review-first path) lives behind the split-button
+  // dropdown as a menuitem — "Submit Now" is the primary immediate action.
   await page.getByRole("button", { name: "More submit options" }).click();
-  await page.getByRole("button", { name: "Submit Request" }).click();
+  await page.getByRole("menuitem", { name: "Submit Request" }).click();
 
   // Server-side validation surfaces in the error banner; we stay on the form.
   await expect(page.getByText("Check the following fields: Text.", { exact: true })).toBeVisible();
@@ -148,9 +162,10 @@ test("submitting for review routes the new record to the inbox", async ({ page }
   await page.locator("#record-field-bsf_lab_text").fill("Review-first lab row");
 
   // "Submit Request" queues a change request for review rather than merging; it
-  // lives behind the split-button dropdown (Submit Now is the primary action).
+  // lives behind the split-button dropdown as a menuitem (Submit Now is the
+  // primary action).
   await page.getByRole("button", { name: "More submit options" }).click();
-  await page.getByRole("button", { name: "Submit Request" }).click();
+  await page.getByRole("menuitem", { name: "Submit Request" }).click();
 
   await expect(page).toHaveURL(/\/dashboard\/local\/inbox\/[\w-]+$/);
   await expect(page.getByText("Review-first lab row").first()).toBeVisible();

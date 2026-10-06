@@ -128,7 +128,7 @@ const sendReply = (promptText: string, prepared: PreparedPrompt) => {
             sessionUpdate: "tool_call_update",
             toolCallId: prepared.toolCallId,
             status: "completed",
-            // PUL-262 follow-up: false is a valid ACP raw result, not an
+            // `false` is a valid ACP raw result, not an
             // absent result. The browser test must prove it stays visible.
             rawOutput: false,
           },
@@ -248,7 +248,7 @@ webSocketServer.on("connection", (socket) => {
         // `id` and expects no reply. What it obligates the agent to do is
         // resolve the *original* `session/prompt` request with
         // `stopReason: "cancelled"` rather than leaving it hanging, which is
-        // exactly the behavior PUL-244 depends on: busabase's client must not
+        // exactly the behavior stop-and-follow-up depends on: busabase's client must not
         // treat the turn as over until that original request settles.
         const cancelledSessionId = asRecord(request.params).sessionId;
         for (const [promptText, prepared] of preparedPrompts.entries()) {

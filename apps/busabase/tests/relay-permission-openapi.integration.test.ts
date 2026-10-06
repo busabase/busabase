@@ -42,6 +42,67 @@ describe("relay permission ceiling over the real OSS OpenAPI boundary", () => {
     return response.json();
   };
 
+  it("lets a read ceiling page record history while still refusing record edits", async () => {
+    const writeHeaders = {
+      "content-type": "application/json",
+      "x-busabase-relay-permission-level": "manage",
+    };
+    const baseResponse = await route.POST(
+      new Request("http://localhost/api/v1/bases", {
+        method: "POST",
+        headers: writeHeaders,
+        body: JSON.stringify({
+          slug: "relay-record-history",
+          name: "Relay record history",
+          fields: [{ slug: "title", name: "Title", type: "text", required: true }],
+          autoMerge: true,
+        }),
+      }),
+    );
+    expect(baseResponse.status).toBe(200);
+    const base = await baseResponse.json();
+    const created = await route.POST(
+      new Request(`http://localhost/api/v1/bases/${base.id}/change-requests`, {
+        method: "POST",
+        headers: writeHeaders,
+        body: JSON.stringify({ fields: { title: "Read-only history record" }, autoMerge: true }),
+      }),
+    );
+    expect(created.status).toBe(200);
+    const record = await created.json();
+    const readHeaders = { "x-busabase-relay-permission-level": "read" };
+    const history = await route.GET(
+      new Request(`http://localhost/api/v1/activity/record/paged?recordId=${record.id}&limit=1`, {
+        headers: readHeaders,
+      }),
+    );
+    expect(history.status).toBe(200);
+    const page = await history.json();
+    expect(page.items).toHaveLength(1);
+    expect(page.items[0].kind).toBe("operation");
+    expect(page.items[0].changeRequest.operations[0].mergedRecordId).toBe(record.id);
+
+    const edit = await route.POST(
+      new Request(`http://localhost/api/v1/records/${record.id}/change-requests`, {
+        method: "POST",
+        headers: { ...readHeaders, "content-type": "application/json" },
+        body: JSON.stringify({
+          operation: "update",
+          fields: { title: "Forbidden edit" },
+          autoMerge: true,
+        }),
+      }),
+    );
+    expect(edit.status).toBe(403);
+    const unchanged = await route.GET(
+      new Request(`http://localhost/api/v1/records/get?recordId=${record.id}`, {
+        headers: readHeaders,
+      }),
+    );
+    expect(unchanged.status).toBe(200);
+    expect((await unchanged.json()).headCommit.payload.title).toBe("Read-only history record");
+  });
+
   it("downgrades autoMerge for a changeRequest key while manage may materialize", async () => {
     const pending = await createFolder("changeRequest", "relay-pending-folder");
     expect(pending.status).toBe("in_review");

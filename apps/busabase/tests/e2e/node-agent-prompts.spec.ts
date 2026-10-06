@@ -124,18 +124,18 @@ test("record detail exposes the Agent dropdown without losing the prompts handof
       data: {
         autoMerge: true,
         fields: [{ name: "Company", required: true, slug: "company", type: "text" }],
-        name: `PUL-240 Companies ${suffix}`,
-        slug: `pul-240-companies-${suffix}`,
+        name: `Companies ${suffix}`,
+        slug: `companies-${suffix}`,
       },
     }),
   );
-  const company = `Acme PUL-240 ${suffix}`;
+  const company = `Acme ${suffix}`;
   const record = await json<RecordVO>(
     await request.post(`/api/v1/bases/${base.id}/change-requests`, {
       data: {
         autoMerge: true,
         fields: { company },
-        message: "Create the PUL-240 record-detail fixture",
+        message: "Create the record-detail fixture",
         submittedBy: "playwright",
       },
     }),
@@ -271,6 +271,11 @@ test("custom prompts reach the dialog without riding along on the node listing",
   await page.screenshot({ path: "test-results/agent-prompts-toolbar-delete.png", fullPage: true });
   await page.getByRole("button", { name: "Cancel", exact: true }).click();
 
+  // With custom scenarios on the node, the built-ins start folded below them.
+  const builtInsToggle = dialog.getByTestId("agent-prompts-built-ins-toggle");
+  await expect(builtInsToggle).toHaveAttribute("aria-expanded", "false");
+  await builtInsToggle.click();
+  await expect(builtInsToggle).toHaveAttribute("aria-expanded", "true");
   await dialog
     .getByRole("button", { name: "Answer my question from this doc", exact: true })
     .click();
@@ -292,7 +297,7 @@ test("custom prompts reach the dialog without riding along on the node listing",
   await expect(secondPrompt).toBeFocused();
   await expect(secondPrompt).toHaveAttribute("aria-current", "true");
   await page.screenshot({
-    path: "test-results/pul-231-agent-prompts-arrow-down.png",
+    path: "test-results/agent-prompts-arrow-down.png",
     fullPage: true,
   });
   await page.keyboard.press("ArrowUp");
@@ -300,13 +305,13 @@ test("custom prompts reach the dialog without riding along on the node listing",
   await expect(firstPrompt).toHaveAttribute("aria-current", "true");
 });
 
-// PUL-230: the real toolbar entry must remain usable with a long prompt,
+// The real toolbar entry must remain usable with a long prompt,
 // including copying and narrow or short viewports.
 test("roomy prompt dialog keeps Ask Agent and Copy inside the detail footer", async ({
   page,
   request,
 }, testInfo) => {
-  const name = unique("PUL-230 prompt workflow");
+  const name = unique("prompt workflow");
   const slug = slugify(name);
   const created = await json<{ node: { id: string } }>(
     await request.post("/api/v1/docs", {

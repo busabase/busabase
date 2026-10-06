@@ -2,8 +2,8 @@ import { expect, test } from "./_fixtures";
 
 const RENDER_TIMEOUT = 45_000;
 
-// Pin the locale so the `date` field renders as a deterministic M/D/YYYY string
-// (toLocaleDateString) we can parse out of each row.
+// Pin the locale so the `date` field renders as a deterministic "Fri, Oct 2, 2026"
+// string (the app's English date format) we can parse out of each row.
 test.use({ locale: "en-US" });
 
 /**
@@ -25,17 +25,18 @@ test("a server-sorted view renders records in publish_date-descending order", as
 
   // Each cell exposes its CLEAN value in a `title` attribute (row textContent
   // glues adjacent columns together, so we read per-cell titles instead). The
-  // publish_date cell's title is exactly an M/D/YYYY date; priority/text titles
+  // publish_date cell's title is exactly a "Wkd, Mon D, YYYY" date; priority/text titles
   // aren't. Rows with no publish_date sort LAST (nulls last) and are skipped.
+  // The date title reads "Fri, Oct 2, 2026"; drop the weekday before parsing.
   const dates: number[] = [];
   for (let i = 0; i < count; i++) {
     const titles = await rows
       .nth(i)
       .locator("[title]")
       .evaluateAll((els) => els.map((el) => el.getAttribute("title") ?? ""));
-    const dateTitle = titles.find((t) => /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(t));
+    const dateTitle = titles.find((t) => /^[A-Z][a-z]{2}, [A-Z][a-z]{2} \d{1,2}, \d{4}$/.test(t));
     if (!dateTitle) continue;
-    const time = new Date(dateTitle).getTime();
+    const time = new Date(dateTitle.replace(/^[A-Z][a-z]{2}, /, "")).getTime();
     if (!Number.isNaN(time)) dates.push(time);
   }
   expect(dates.length).toBeGreaterThan(3);
