@@ -1,7 +1,7 @@
 {
   "name": "busabase-core",
   "description": "Shared Busabase open-core protocol, local store, API helpers, and dashboard components.",
-  "version": "0.90.2",
+  "version": "0.95.0",
   "private": true,
   "type": "module",
   "exports": {
@@ -32,6 +32,14 @@
     "./logic/node-acl": {
       "types": "./src/logic/node-acl.ts",
       "default": "./src/logic/node-acl.ts"
+    },
+    "./logic/node-subscriptions": {
+      "types": "./src/logic/node-subscriptions.ts",
+      "default": "./src/logic/node-subscriptions.ts"
+    },
+    "./logic/notification-recipients": {
+      "types": "./src/logic/notification-recipients.ts",
+      "default": "./src/logic/notification-recipients.ts"
     },
     "./logic/comment-mentions": {
       "types": "./src/logic/comment-mentions.ts",
@@ -293,6 +301,10 @@
       "types": "./src/domains/dashboard/helpers/format.ts",
       "default": "./src/domains/dashboard/helpers/format.ts"
     },
+    "./base/date-value": {
+      "types": "./src/domains/base/utils/date-value.ts",
+      "default": "./src/domains/base/utils/date-value.ts"
+    },
     "./base/field-types": {
       "types": "./src/domains/base/field-types.ts",
       "default": "./src/domains/base/field-types.ts"
@@ -308,6 +320,14 @@
     "./dashboard/node-agent-prompts": {
       "types": "./src/domains/dashboard/helpers/node-agent-prompts.ts",
       "default": "./src/domains/dashboard/helpers/node-agent-prompts.ts"
+    },
+    "./dashboard/share-dialog-utils": {
+      "types": "./src/domains/dashboard/utils/share-dialog-utils.ts",
+      "default": "./src/domains/dashboard/utils/share-dialog-utils.ts"
+    },
+    "./dashboard/prompt-sections": {
+      "types": "./src/domains/dashboard/helpers/prompt-sections.ts",
+      "default": "./src/domains/dashboard/helpers/prompt-sections.ts"
     },
     "./dashboard/node-detail": {
       "types": "./src/domains/dashboard/helpers/node-detail.ts",
@@ -417,6 +437,10 @@
       "types": "./src/domains/base/utils/view-records.ts",
       "default": "./src/domains/base/utils/view-records.ts"
     },
+    "./domains/base/utils/view-field-resolution": {
+      "types": "./src/domains/base/utils/view-field-resolution.ts",
+      "default": "./src/domains/base/utils/view-field-resolution.ts"
+    },
     "./domains/doc/utils/video-url": {
       "types": "./src/domains/doc/utils/video-url.ts",
       "default": "./src/domains/doc/utils/video-url.ts"
@@ -484,6 +508,7 @@
     "postgres": "^3.4.6",
     "quickjs-emscripten": "^0.32.0",
     "react": "^19.2.7",
+    "react-day-picker": "^10.0.1",
     "react-easy-crop": "^5.5.6",
     "sandock": "^2.2.7",
     "server-only": "^0.0.1",
