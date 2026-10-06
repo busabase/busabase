@@ -98,13 +98,22 @@ export const cms = createCachedBusabaseCms({}, { revalidate: 300 });
 ```tsx
 import { SafeMarkdown, getSafeMarkdownToc, sanitizeLandingPageHtml } from "busabase-cms-sdk/fumadocs";
 
-const toc = await getSafeMarkdownToc(post.body);
-const body = await SafeMarkdown({ children: post.body });
+const toc = await getSafeMarkdownToc(post.body, { demoteH1: true });
+const body = await SafeMarkdown({ children: post.body, demoteH1: true });
 const safeHtml = sanitizeLandingPageHtml(page.body);
 ```
 
 Stored content is always treated as untrusted. `SafeMarkdown` does not execute MDX or pass raw HTML,
 and Page HTML must be sanitized before rendering.
+
+Rendered heading ids carry rehype-sanitize's `user-content-` prefix (DOM-clobbering protection).
+`getSafeMarkdownToc` returns URLs for those real ids, and in-body links such as `[see](#setup)` and
+GFM footnotes are rewritten to reach them, so the TOC, body links and footnotes all land.
+
+When your template already renders the post title as the page `<h1>`, pass `demoteH1` to both:
+a body `# Heading` renders as `<h2>` (same text and id) and its TOC entry reports depth 2. For local
+MDX bodies, `withDemotedH1(defaultMdxComponents)` does the same (it reuses your `h2` component), and
+`demoteTocH1(page.data.toc)` matches the TOC.
 
 ## Next.js integration layer
 
@@ -144,6 +153,15 @@ and the four `BUSABASE_CMS_{POSTS,PAGES,CATEGORIES,TAGS}_BASE_SLUG` per-deploy o
 body sanitizer stays in `busabase-cms-sdk/fumadocs` (`getSanitizedCmsPageBody`) so that consumers of
 `busabase-cms-sdk/integration` do not pull remark/rehype/sanitize-html into their bundle.
 
+### Site index entries (`/llms.txt` and friends)
+
+`cms.listCmsIndexEntriesOrFallback()` returns one locale's published, canonical Posts and Pages as
+plain `{ canonicalPath, segments, title, description, publishedAt, updatedAt }` entries — records
+whose `canonical-url` names another page, or whose path and `locale` field disagree, are left
+out. It reads through the `*OrFallback` reads, so an unconfigured or unreachable CMS yields empty
+lists. Rendering is left to the app. An app with its own client can apply the same rules to
+records it already holds with `selectCmsIndexEntries(records, { parsePath })`.
+
 ### Page `<head>` metadata: one call per route
 
 hreflang must list only the locales a piece of content **really** exists in — advertising
@@ -180,6 +198,25 @@ export async function generateMetadata({ params }) {
   The injected helper is typed `(options: CmsContentPageMetadataOptions) => …`, where
   `availableLocales` is always present, so it can be a helper that *requires* the locale set.
 - Tag/Category archives: `getCmsTaxonomyLocales(allTaxonomies, taxonomy, supportedLocales)`.
+
+### Structured data (JSON-LD): one call per route
+
+Pages and Posts each get their JSON-LD nodes from one call, ready to stringify into
+`<script type="application/ld+json">` tags:
+
+- Pages: `createCmsPageHelpers({ jsonLdSite, ... }).buildCmsPageJsonLd(page, lang)` →
+  `WebPage` + `BreadcrumbList` (+ `FAQPage` when the body really contains one).
+- Posts: `createCmsPostResolver({ jsonLdSite, homeLabel, blogLabel, ... }).resolvePostJsonLd(lang, slugPath, { localeFallback })`
+  → `BlogPosting` + a Home → Blog → Post `BreadcrumbList`. Same resolution and request cache as
+  `resolvePostMetadataInput`, so pass it the same `localeFallback`. On a locale fallback the
+  nodes describe the English original: `url` / `mainEntityOfPage` are its canonical URL and
+  `inLanguage` is the body's language. Returns `[]` without a `jsonLdSite` or a post.
+- `buildCmsPostJsonLd(site, input)` (root export) — the same nodes from values you resolved
+  yourself. Optional fields with no real value (cover, dates, author, description) are omitted,
+  never emitted empty; dates that do not parse are dropped.
+
+`jsonLdSite.organizationId` should be the `@id` of the Organization node the app already renders
+site-wide, so `publisher` references it; without one the publisher is inlined from `siteName`.
 
 The sitemap-side builders (`buildCmsAlternateLanguages`, `buildCmsAlternates`) must produce the
 same hreflang map as the app's `<head>` helper — if you keep both, test them against each other
