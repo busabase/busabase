@@ -1,4 +1,6 @@
 import type { FormBoundFieldVO, FormFieldBindingVO } from "busabase-contract/types";
+import { type DateFieldOptions, getDateFieldOptions } from "busabase-core/base/date-value";
+import { fromDateFieldInputText } from "~/domains/base/utils/date-input";
 
 export type FormControlKind =
   | "text"
@@ -26,6 +28,14 @@ export function getFormControlKind(field?: FormBoundFieldVO): FormControlKind {
   if (field.type === "phone") return "tel";
   if (field.type === "url" || field.type === "embed") return "url";
   return "text";
+}
+
+/**
+ * A bound date field's `options.date`. Read defensively: older servers send
+ * bound fields without `options`, which reads as a plain day field.
+ */
+export function getFormDateOptions(field?: FormBoundFieldVO): DateFieldOptions {
+  return getDateFieldOptions((field as { options?: unknown } | undefined)?.options);
 }
 
 export function formStringValue(value: unknown): string {
@@ -58,7 +68,12 @@ export function buildFormSubmissionValues(
   return Object.fromEntries(
     bindings.map((binding) => {
       const value = values[binding.inputName];
-      if (getFormControlKind(fieldsBySlug.get(binding.fieldSlug)) === "number") {
+      const field = fieldsBySlug.get(binding.fieldSlug);
+      const kind = getFormControlKind(field);
+      if (kind === "date" && typeof value === "string") {
+        return [binding.inputName, fromDateFieldInputText(value, getFormDateOptions(field))];
+      }
+      if (kind === "number") {
         const numberValue =
           typeof value === "string" && value.trim() !== "" ? Number(value) : value;
         return [

@@ -83,7 +83,11 @@ function OperationDetailContent() {
       if (!buda || !changeRequest || !operation) throw new Error("Not ready");
       return buda.client.operations.revise({
         operationId: operation.id,
-        fields: normalizeFormValues(changeRequest.base?.fields ?? [], values),
+        fields: normalizeFormValues(
+          changeRequest.base?.fields ?? [],
+          values,
+          operation.headCommit.payload,
+        ),
         message: "Revise operation",
         author: SUBMITTED_BY,
       });

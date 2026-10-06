@@ -15,6 +15,8 @@ import { mobile, radius } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 import { type BaseDisplayMode, useBaseDetailController } from "../hooks/use-base-detail-controller";
 import { BaseActionsSheet } from "./BaseActionsSheet";
+import { BaseCalendarView } from "./BaseCalendarView";
+import { BaseGalleryView } from "./BaseGalleryView";
 import { BaseRecordList } from "./BaseRecordList";
 import { BaseRecordTable } from "./BaseRecordTable";
 import { BaseViewSelector } from "./BaseViewSelector";
@@ -30,6 +32,7 @@ function BaseDetailContent() {
   const router = useRouter();
   const tokens = useTokens();
   const controller = useBaseDetailController(slug);
+  const viewType = controller.activeView?.type ?? "table";
 
   const openRecord = (id: string) => router.push({ pathname: "/records/[id]", params: { id } });
   const openNewRecord = () => {
@@ -95,14 +98,34 @@ function BaseDetailContent() {
               controller.setViewPickerOpen(false);
             }}
           />
-          <NativeSegmentedControl<BaseDisplayMode>
-            value={controller.displayMode}
-            options={DISPLAY_OPTIONS}
-            onChange={controller.setDisplayMode}
-          />
+          {/* Gallery/Calendar views are typed on the saved View itself (like web's
+              renderer switch in `base-table.tsx`) — the List/Table toggle only
+              applies when the View doesn't already dictate a renderer. */}
+          {viewType !== "gallery" && viewType !== "calendar" ? (
+            <NativeSegmentedControl<BaseDisplayMode>
+              value={controller.displayMode}
+              options={DISPLAY_OPTIONS}
+              onChange={controller.setDisplayMode}
+            />
+          ) : null}
 
-          {controller.records.length === 0 ? (
+          {viewType === "calendar" ? (
+            <BaseCalendarView
+              base={controller.base}
+              activeView={controller.activeView}
+              fields={controller.previewFields}
+              onOpenRecord={openRecord}
+            />
+          ) : controller.records.length === 0 ? (
             <NativeEmptyState title="No records" />
+          ) : viewType === "gallery" ? (
+            <BaseGalleryView
+              base={controller.base}
+              activeView={controller.activeView}
+              fields={controller.previewFields}
+              records={controller.records}
+              onOpenRecord={openRecord}
+            />
           ) : controller.displayMode === "list" ? (
             <BaseRecordList
               records={controller.records}
@@ -117,7 +140,9 @@ function BaseDetailContent() {
             />
           )}
 
-          {controller.recordsQuery.hasNextPage ? (
+          {/* Calendar drains its own month-scoped query independently —
+              `recordsQuery`'s pagination is unrelated to what it's showing. */}
+          {viewType !== "calendar" && controller.recordsQuery.hasNextPage ? (
             <NativeActionBar>
               <Button
                 label="Load more records"

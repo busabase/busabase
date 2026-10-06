@@ -1,9 +1,30 @@
-import { Check, ChevronDown } from "lucide-react-native";
+import type { ViewType } from "busabase-contract/types";
+import {
+  CalendarDays,
+  ChartGantt,
+  Check,
+  ChevronDown,
+  FolderKanban,
+  Images,
+  Table2,
+} from "lucide-react-native";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { NativeBottomSheet } from "~/components/native-screen";
 import { mobile, radius, spacing, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 import type { BaseDetailController } from "../hooks/use-base-detail-controller";
+
+/** Only Gallery/Calendar actually change the renderer on mobile today (see
+ * `BaseDetailScreen`) — Kanban/Gantt still fall back to List/Table, but get
+ * their own icon here too so a saved Kanban/Gantt view isn't shown as if it
+ * were a plain table. */
+const VIEW_TYPE_ICON: Record<ViewType, typeof Table2> = {
+  table: Table2,
+  gallery: Images,
+  kanban: FolderKanban,
+  calendar: CalendarDays,
+  gantt: ChartGantt,
+};
 
 interface Props {
   open: boolean;
@@ -64,36 +85,40 @@ export function BaseViewSelector({
           nestedScrollEnabled
           style={[styles.viewOptions, { borderColor: tokens.border }]}
         >
-          {[{ id: null as string | null, name: "All" }, ...views].map((view, index, options) => {
-            const selected = view.id === selectedId;
-            return (
-              <Pressable
-                key={view.id ?? "all"}
-                accessibilityRole="radio"
-                accessibilityState={{ selected }}
-                style={({ pressed }) => [
-                  styles.viewOption,
-                  index < options.length - 1
-                    ? { borderBottomWidth: StyleSheet.hairlineWidth }
-                    : null,
-                  {
-                    backgroundColor: selected ? tokens.primaryMuted : tokens.surface,
-                    borderColor: tokens.border,
-                    opacity: pressed ? 0.72 : 1,
-                  },
-                ]}
-                onPress={() => onSelect(view.id)}
-              >
-                <Text
-                  numberOfLines={1}
-                  style={[typography.body, styles.viewOptionLabel, { color: tokens.foreground }]}
+          {[{ id: null as string | null, name: "All", type: null }, ...views].map(
+            (view, index, options) => {
+              const selected = view.id === selectedId;
+              const Icon = view.type ? VIEW_TYPE_ICON[view.type] : null;
+              return (
+                <Pressable
+                  key={view.id ?? "all"}
+                  accessibilityRole="radio"
+                  accessibilityState={{ selected }}
+                  style={({ pressed }) => [
+                    styles.viewOption,
+                    index < options.length - 1
+                      ? { borderBottomWidth: StyleSheet.hairlineWidth }
+                      : null,
+                    {
+                      backgroundColor: selected ? tokens.primaryMuted : tokens.surface,
+                      borderColor: tokens.border,
+                      opacity: pressed ? 0.72 : 1,
+                    },
+                  ]}
+                  onPress={() => onSelect(view.id)}
                 >
-                  {view.name}
-                </Text>
-                {selected ? <Check size={17} color={tokens.foreground} /> : null}
-              </Pressable>
-            );
-          })}
+                  {Icon ? <Icon size={16} color={tokens.mutedForeground} /> : null}
+                  <Text
+                    numberOfLines={1}
+                    style={[typography.body, styles.viewOptionLabel, { color: tokens.foreground }]}
+                  >
+                    {view.name}
+                  </Text>
+                  {selected ? <Check size={17} color={tokens.foreground} /> : null}
+                </Pressable>
+              );
+            },
+          )}
         </ScrollView>
       </NativeBottomSheet>
     </>

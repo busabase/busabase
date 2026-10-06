@@ -168,6 +168,9 @@ export const zhCN: CoreMessages = {
   },
   share: {
     title: "分享",
+    sharedMarker: "已公开分享",
+    restrictedMarker: "受限访问",
+    sharedViaAncestorMarker: "随上级文件夹公开",
     shareToWeb: "分享到网页",
     shareToWebHint: "任何拿到链接的人都可以打开此节点",
     capabilityLabel: "访客可以做什么",
@@ -192,6 +195,10 @@ export const zhCN: CoreMessages = {
     copyUnavailable: "此处无法复制，请直接选中上方的链接。",
     linkUnavailable: "生成公开链接需要工作区 ID，请重新连接后再试。",
     enabled: "已启用公开链接",
+    inheritedTitle: "任何获得链接的人 — 随「{name}」公开",
+    inheritedHint:
+      "「{name}」已公开分享，里面的内容也都对外可见。要停止公开，请到该文件夹关闭分享。",
+    openAncestor: "前往「{name}」",
     disabled: "已关闭公开链接",
     updated: "分享设置已更新",
     failed: "操作出错",
@@ -209,8 +216,8 @@ export const zhCN: CoreMessages = {
     intro:
       "复制一条提示词给你的 Agent —— 里面已经带上这个节点的定位信息，Agent 不用猜要在哪里干活。",
     scenariosTab: "场景",
-    capabilitiesTab: "能力",
-    scenariosEmpty: "这类节点还没有精选场景，可以看「能力」标签页。",
+    customScenarios: "自定义场景",
+    builtInPrompts: "内置提示词",
     copy: "复制提示词",
     copied: "已复制",
     copyUnavailable: "此处无法复制，请直接选中上方的提示词文本。",
@@ -466,5 +473,11 @@ export const zhCN: CoreMessages = {
     removeSavedServer: "从已保存的服务器中移除",
     disconnectTitle: "要断开此设备吗？",
     disconnect: "断开连接",
+  },
+  dateField: {
+    timeZoneHint: "时区：{zone}",
+    enteredAs: "录入时为 {value}",
+    yourLocalTime: "你的本地时间：{value}",
+    dayShiftHint: "与录入时相差 {shift} 天",
   },
 };

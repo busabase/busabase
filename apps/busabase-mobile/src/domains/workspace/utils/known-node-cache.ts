@@ -93,7 +93,14 @@ export const createKnownNodeCacheScope = (
 
 export const nodeRoutePath = (type: NodeType, slug: string) => `/${type}/${slug}`;
 
-export const nodeToKnownNode = (node: NodeVO): KnownNode => ({
+/**
+ * What opening a node actually needs — its route (type + slug) and what the
+ * known-node cache records (id, name, icon). A full `NodeVO` satisfies it, and
+ * so does a lighter row like `nodes.share.list`'s, without inventing the rest.
+ */
+export type OpenableNode = Pick<NodeVO, "id" | "type" | "name" | "slug" | "icon">;
+
+export const nodeToKnownNode = (node: OpenableNode): KnownNode => ({
   id: node.id,
   type: node.type,
   name: node.name,

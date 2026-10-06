@@ -23,7 +23,11 @@ import { useTokens } from "~/theme/use-tokens";
 import { useContextualNavDestination } from "../hooks/use-contextual-nav-destination";
 import { useExpandedNodeIds } from "../hooks/use-expanded-node-ids";
 import { useKnownNodeCache } from "../hooks/use-known-node-cache";
-import { flattenNodesForCache, nodeToKnownNode } from "../utils/known-node-cache";
+import {
+  flattenNodesForCache,
+  nodeToKnownNode,
+  type OpenableNode,
+} from "../utils/known-node-cache";
 import { getMobileNodeDestination } from "../utils/node-navigation";
 import { getAppNavigationLayout } from "../utils/responsive-layout";
 import { ancestorIdsOfActiveNode, expandNodes } from "../utils/tree-expansion";
@@ -170,7 +174,7 @@ export function DrawerScaffold({
   };
 
   const navigateNode = useCallback(
-    (node: NodeVO) => {
+    (node: OpenableNode) => {
       const destination = getMobileNodeDestination(node);
       if (destination.status === "unsupported") return;
       setActionsTarget(null);

@@ -25,6 +25,7 @@ const requiredNavigationHosts = [
   "pub-5d59c786708441b3a80620d87e7dee2b.r2.dev",
   "moonrouter.dev",
   "space.bilibili.com",
+  "help.vika.cn",
 ] as const;
 
 describe("iOS App-Bound Domains", () => {

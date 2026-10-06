@@ -17,6 +17,7 @@ import { ScrollView, StyleSheet, View } from "react-native";
 import { NativeBottomSheet, NativeRow } from "~/components/native-screen";
 import { useI18n } from "~/i18n";
 import { useTokens } from "~/theme/use-tokens";
+import type { OpenableNode } from "../utils/known-node-cache";
 import { NodeAgentPromptsSheet } from "./NodeAgentPromptsSheet";
 import { NodeDeleteSheet } from "./NodeDeleteSheet";
 import { NodeMoveSheet } from "./NodeMoveSheet";
@@ -43,7 +44,7 @@ interface NodeActionsSheetProps {
    */
   spaceVisibilityMode?: "open" | "restricted" | null;
   onClose: () => void;
-  onOpenNode: (node: NodeVO) => void;
+  onOpenNode: (node: OpenableNode) => void;
   onToggleFavorite: (node: NodeVO) => void;
   /**
    * Create a new node INSIDE this one — the touch equivalent of the "+" web
@@ -271,6 +272,7 @@ export function NodeActionsSheet({
           visible={mode === "share"}
           node={node}
           spaceId={spaceId}
+          onOpenNode={onOpenNode}
           onClose={onClose}
           onBack={() => setMode("menu")}
         />
