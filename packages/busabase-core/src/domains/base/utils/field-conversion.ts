@@ -2,6 +2,7 @@
 // No DB, no React, no server-only imports — safe to use on both client and server.
 import type { FieldType } from "busabase-contract/types";
 import { isSystemFieldType } from "../field-types";
+import { normalizeDateFieldText } from "./date-value";
 import { EMPTY_WHITEBOARD_FIELD_VALUE } from "./whiteboard-value";
 
 export interface FieldConversionOptions {
@@ -83,7 +84,8 @@ export function toText(
       return value ? "true" : "false";
 
     case "date":
-      // Accept ISO strings or Date objects
+      // Accept ISO strings or Date objects. A stored day ("2026-10-02") or
+      // instant is already the portable text form — pass it through as-is.
       if (typeof value === "string") return value;
       if (value instanceof Date) return value.toISOString();
       return String(value);
@@ -176,11 +178,11 @@ export function fromText(
       return false;
     }
 
-    case "date": {
-      if (!text) return null;
-      const d = new Date(text);
-      return Number.isNaN(d.getTime()) ? null : d.toISOString();
-    }
+    case "date":
+      // A day ("2026-10-02", "10/2/2026") stays a day — `YYYY-MM-DD` from the
+      // digits typed, not re-read in whatever zone this runs in; text with a
+      // clock time becomes an ISO instant. See utils/date-value.ts.
+      return text ? normalizeDateFieldText(text) : null;
 
     case "select": {
       if (!options?.choices) return null;

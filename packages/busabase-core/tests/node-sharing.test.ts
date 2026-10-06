@@ -5,6 +5,7 @@ import { createRouterClient } from "@orpc/server";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runWithAnonymousContext, runWithBusabaseContext } from "../src/context";
 import { DEMO_BASES, DEMO_FOLDERS } from "../src/demo/dataset";
+import { createDoc } from "../src/domains/doc/handlers";
 import { getEffectiveNodeLevel, getPublicScopeOf } from "../src/logic/node-acl";
 import {
   disableNodeShare,
@@ -83,6 +84,19 @@ describe("public node sharing", () => {
     walk2((await client.nodes.list({})) as unknown[]);
     childNodeId = flat2.find((n) => n.slug === "share-child")?.id ?? "";
   }, 120_000);
+
+  const findNodeIdBySlug = async (slug: string): Promise<string | undefined> => {
+    const flat: Array<{ id: string; slug: string }> = [];
+    const walk = (list: unknown[]) => {
+      for (const raw of list) {
+        const n = raw as { id: string; slug: string; children?: unknown[] };
+        flat.push(n);
+        if (n.children?.length) walk(n.children);
+      }
+    };
+    walk((await client.nodes.list({})) as unknown[]);
+    return flat.find((n) => n.slug === slug)?.id;
+  };
 
   afterAll(async () => {
     process.chdir(originalCwd);
@@ -218,6 +232,145 @@ describe("public node sharing", () => {
       expect(await validatePublicShareUnlockProofs([oldProof])).toEqual([]);
       expect(await unlockPublicShare(folderNodeId, "old-password", "folder")).toBeNull();
       expect(await unlockPublicShare(folderNodeId, "new-password", "folder")).not.toBeNull();
+    });
+  });
+
+  it("publishes a node created inside an already-shared folder", async () => {
+    await runWithBusabaseContext({}, async () => {
+      await setNodeShare(folderNodeId, { scope: "public", capability: "read", password: null });
+    });
+    // Both create doors: the Doc fast path and the generic change-request merge.
+    const doc = await runWithBusabaseContext({}, () =>
+      createDoc({
+        slug: "share-late-doc",
+        name: "Late Doc",
+        body: "",
+        parentNodeId: folderNodeId,
+      }),
+    );
+    if (!doc.materialized) throw new Error("expected the doc to materialize immediately");
+    await client.nodes.createChangeRequest({
+      autoMerge: true,
+      operations: [
+        {
+          kind: "create",
+          nodeType: "folder",
+          slug: "share-late-folder",
+          name: "Late Folder",
+          parentNodeId: folderNodeId,
+        },
+      ],
+    });
+    const lateFolderId = (await findNodeIdBySlug("share-late-folder")) ?? "";
+
+    await runWithAnonymousContext({}, async () => {
+      expect(await getEffectiveNodeLevel(doc.node.id)).toBe("read");
+      expect(await getEffectiveNodeLevel(lateFolderId)).toBe("read");
+    });
+  });
+
+  it("publishes a node moved into a shared folder and closes it when moved out", async () => {
+    await runWithBusabaseContext({}, async () => {
+      await setNodeShare(folderNodeId, { scope: "public", capability: "read", password: null });
+    });
+    await client.nodes.createChangeRequest({
+      autoMerge: true,
+      operations: [{ kind: "create", nodeType: "folder", slug: "share-mover", name: "Mover" }],
+    });
+    const moverId = (await findNodeIdBySlug("share-mover")) ?? "";
+    await runWithAnonymousContext({}, async () => {
+      expect(await getEffectiveNodeLevel(moverId)).toBeNull();
+    });
+
+    await client.nodes.move({ nodeId: moverId, parentNodeId: folderNodeId });
+    await runWithAnonymousContext({}, async () => {
+      expect(await getEffectiveNodeLevel(moverId)).toBe("read");
+    });
+
+    const rootId = (await client.nodes.list({}))[0]?.id;
+    await client.nodes.move({ nodeId: moverId, parentNodeId: rootId });
+    await runWithAnonymousContext({}, async () => {
+      expect(await getEffectiveNodeLevel(moverId)).toBeNull();
+    });
+  });
+
+  it("marks inherited exposure on the tree separately from the folder's own share", async () => {
+    await runWithBusabaseContext({}, async () => {
+      await setNodeShare(folderNodeId, { scope: "public", capability: "read", password: null });
+    });
+    const flat: Array<{ id: string; shared?: boolean; sharedViaAncestor?: boolean }> = [];
+    const walk = (list: unknown[]) => {
+      for (const raw of list) {
+        const n = raw as {
+          id: string;
+          shared?: boolean;
+          sharedViaAncestor?: boolean;
+          children?: unknown[];
+        };
+        flat.push(n);
+        if (n.children?.length) walk(n.children);
+      }
+    };
+    walk((await client.nodes.list({})) as unknown[]);
+    const folder = flat.find((n) => n.id === folderNodeId);
+    const child = flat.find((n) => n.id === childNodeId);
+    expect(folder).toMatchObject({ shared: true, sharedViaAncestor: false });
+    expect(child).toMatchObject({ shared: false, sharedViaAncestor: true });
+
+    await runWithBusabaseContext({}, () => disableNodeShare(folderNodeId));
+    const after: typeof flat = [];
+    const walkAfter = (list: unknown[]) => {
+      for (const raw of list) {
+        const n = raw as (typeof flat)[number] & { children?: unknown[] };
+        after.push(n);
+        if (n.children?.length) walkAfter(n.children);
+      }
+    };
+    walkAfter((await client.nodes.list({})) as unknown[]);
+    expect(after.find((n) => n.id === childNodeId)).toMatchObject({
+      shared: false,
+      sharedViaAncestor: false,
+    });
+  });
+
+  it("drops the inherited marker once the ancestor's share expires, without an anonymous visit", async () => {
+    // Nothing anonymous touches the space in between: the member's own tree
+    // read is what has to notice the elapsed share and close the subtree.
+    await runWithBusabaseContext({}, async () => {
+      await setNodeShare(folderNodeId, {
+        scope: "public",
+        capability: "read",
+        password: null,
+        expiresAt: new Date(Date.now() + 1_500),
+      });
+    });
+    const markersOf = async () => {
+      const flat: Array<{ id: string; shared?: boolean; sharedViaAncestor?: boolean }> = [];
+      const walk = (list: unknown[]) => {
+        for (const raw of list) {
+          const n = raw as (typeof flat)[number] & { children?: unknown[] };
+          flat.push(n);
+          if (n.children?.length) walk(n.children);
+        }
+      };
+      walk((await client.nodes.list({})) as unknown[]);
+      return {
+        folder: flat.find((n) => n.id === folderNodeId),
+        child: flat.find((n) => n.id === childNodeId),
+      };
+    };
+    expect((await markersOf()).child).toMatchObject({ sharedViaAncestor: true });
+
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+    // The first read after the deadline performs the sweep (its own node rows
+    // were read concurrently and may still be stale); from then on it is closed.
+    await markersOf();
+    const after = await markersOf();
+    expect(after.folder).toMatchObject({ shared: false, sharedViaAncestor: false });
+    expect(after.child).toMatchObject({ shared: false, sharedViaAncestor: false });
+    // …and the sweep closed the materialized scope itself, not just the marker.
+    await runWithAnonymousContext({}, async () => {
+      expect(await getEffectiveNodeLevel(childNodeId)).toBeNull();
     });
   });
 

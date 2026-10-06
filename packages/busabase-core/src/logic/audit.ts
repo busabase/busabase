@@ -37,6 +37,7 @@ import {
 } from "./comment-mentions";
 import { CURRENT_USER_ID, id, listInputSchema, now } from "./kernel";
 import { assertNodePermission, assertWorkspacePermission } from "./node-acl";
+import { announceCommentCreated } from "./node-subscriptions";
 import { toAuditEventVO, toCommentVO } from "./vo";
 
 // ── Schemas ───────────────────────────────────────────────────────────────────
@@ -570,6 +571,17 @@ export const createComment = async (input: z.input<typeof createCommentInputSche
       agentSlugs,
     });
   }
+
+  // Subscribes the author to the commented node and, for a comment on a Change
+  // Request, notifies its participants. After the comment is committed;
+  // best-effort, never fails the comment.
+  await announceCommentCreated({
+    commentId: comment.id,
+    authorId,
+    changeRequestId: subjectLinks.changeRequestId,
+    recordId: subjectLinks.recordId,
+    commitId: subjectLinks.commitId,
+  });
 
   const users = await resolveUserRefs([authorId, ...mentionMemberIds(dispatchedRows)]);
   return toCommentVO(comment, users, toCommentMentionVOs(dispatchedRows, users));

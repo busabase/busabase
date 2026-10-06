@@ -223,10 +223,22 @@ describe("fieldPreviewText", () => {
     expect(fieldPreviewText(null, "auto_number")).toBe("");
   });
 
-  it("date → localized date, invalid dates passthrough", () => {
-    const rendered = fieldPreviewText("2026-01-15T00:00:00.000Z", "date");
-    expect(rendered).toBe(new Date("2026-01-15T00:00:00.000Z").toLocaleDateString());
+  it("date → the calendar day in the UI locale, never shifted by zone; invalid passthrough", () => {
+    // Legacy UTC-midnight and plain-day values name the SAME day for every reader.
+    for (const value of ["2026-01-15", "2026-01-15T00:00:00.000Z"]) {
+      expect(fieldPreviewText(value, "date", undefined, "en")).toBe("Thu, Jan 15, 2026");
+      expect(fieldPreviewText(value, "date", undefined, "zh-CN")).toBe("2026年1月15日周四");
+    }
     expect(fieldPreviewText("not-a-date", "date")).toBe("not-a-date");
+  });
+
+  it("date → a time-of-day field shows the time in its pinned zone", () => {
+    expect(
+      fieldPreviewText("2026-10-02T18:00:00+08:00", "date", undefined, "en", {
+        includeTime: true,
+        timezone: "Asia/Shanghai",
+      }),
+    ).toBe("Fri, Oct 2, 2026, 6:00 PM GMT+8");
   });
 
   it("multiselect array → comma joined", () => {

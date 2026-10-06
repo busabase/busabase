@@ -1,3 +1,4 @@
+import { foldAvailableCommands, reduceAcpEvents } from "@acp-ui/core/reduce";
 import type { Stream } from "@agentclientprotocol/sdk";
 import * as acp from "@agentclientprotocol/sdk";
 import type { AgentSessionEventVO, AgentSessionVO } from "busabase-contract/domains/agents/types";
@@ -8,6 +9,7 @@ import {
   LOCAL_SPACE_ID,
   runWithBusabaseContext,
 } from "../../../context";
+import { translateAgentSessionEvent } from "../hooks/use-agent-session";
 import type { AgentSessionRuntimeRecord } from "./agent-session-store";
 
 /**
@@ -267,6 +269,7 @@ function serveFakeAgent(
   options?: {
     initializeGate?: Promise<void>;
     loadError?: Error;
+    loadAvailableCommands?: acp.AvailableCommand[];
     loadReplayText?: string;
     loadSessionSupported?: boolean;
     promptChunkText?: string;
@@ -312,6 +315,15 @@ function serveFakeAgent(
       .onRequest(acp.methods.agent.session.load, async (ctx) => {
         loadedSessionIds.push(ctx.params.sessionId);
         if (options?.loadError) throw options.loadError;
+        if (options?.loadAvailableCommands) {
+          await ctx.client.notify(acp.methods.client.session.update, {
+            sessionId: ctx.params.sessionId,
+            update: {
+              sessionUpdate: "available_commands_update",
+              availableCommands: options.loadAvailableCommands,
+            },
+          });
+        }
         if (options?.loadReplayText) {
           await ctx.client.notify(acp.methods.client.session.update, {
             sessionId: ctx.params.sessionId,
@@ -1746,6 +1758,50 @@ describe("remote session worker handoff", () => {
 
     await closeAgentSession(record.session.id);
     expect(mocks.endRemoteSession).toHaveBeenCalledWith(record.session.id);
+  });
+
+  it("retains current commands from session/load without duplicating replayed transcript", async () => {
+    const record = runtimeRecord();
+    mocks.loadSessionRuntime.mockResolvedValue(record);
+    const [clientSide, agentSide] = linkedStreams();
+    mocks.createWebSocketStream.mockReturnValue(clientSide);
+    serveFakeAgent(agentSide, [MODEL_CONFIG], {
+      loadAvailableCommands: [
+        {
+          name: "skill:research-codebase",
+          description: "Research before changing code",
+          input: { hint: "instructions" },
+        },
+      ],
+      loadReplayText: "already persisted remote history",
+    });
+
+    await promptAgentSession(record.session.id, "continue after reconnect");
+
+    const persisted = mocks.persistSessionEvents.mock.calls.flatMap(
+      ([events]) => events as AgentSessionEventVO[],
+    );
+    const commandEvent = persisted.find(
+      (event) =>
+        (event.acpUpdate as { sessionUpdate?: string } | undefined)?.sessionUpdate ===
+        "available_commands_update",
+    );
+    expect(commandEvent).toBeDefined();
+    expect(JSON.stringify(persisted)).not.toContain("already persisted remote history");
+
+    const uiEvents = persisted.flatMap((event) => translateAgentSessionEvent(event));
+    expect(foldAvailableCommands(uiEvents)).toEqual([
+      {
+        name: "skill:research-codebase",
+        description: "Research before changing code",
+        input: { hint: "instructions" },
+      },
+    ]);
+    expect(JSON.stringify(reduceAcpEvents([], uiEvents))).not.toContain(
+      "already persisted remote history",
+    );
+
+    await closeAgentSession(record.session.id);
   });
 
   it(

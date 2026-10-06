@@ -19,6 +19,7 @@ import { fmt, useCoreI18n, useCoreLocale, useIString } from "../../../i18n";
 import { localizeCoreErrorMessage, presentCoreError } from "../../../i18n/localize-error";
 import { isSystemFieldType } from "../../base/field-types";
 import { isRollupCompatible, LOOKUP_ROLLUPS } from "../../base/lookup/rollup";
+import { type DateFieldOptions, getDateFieldOptions } from "../../base/utils/date-value";
 import { isUnconvertibleFieldType } from "../../base/utils/field-conversion";
 import { getPrimaryField } from "../../base/utils/primary-field";
 import { FormsForBasePanel } from "../../form/components/forms-for-base-panel";
@@ -46,6 +47,7 @@ import { useRegisterTopbarNodeInfo } from "../hooks/use-register-topbar-node-inf
 import { registerSidePanelTab, type SidePanelTabProps } from "../side-panel-registry";
 import { useIsAnonymousVisitor } from "../visitor-context";
 import { applyViewConfigToRecords, BusaBaseTable } from "./base-table";
+import { DateFieldOptionsEditor } from "./date-field";
 import { type ConversionPreview, FieldConversionPreview } from "./field-conversion-preview";
 import { IStringNameInput } from "./i-string-input";
 import { DialogContent } from "./localized-dialog-content";
@@ -63,6 +65,10 @@ const isChoiceField = (field: BaseFieldVO) =>
   field.type === "select" || field.type === "multiselect";
 
 const fieldChoices = (field: BaseFieldVO): SelectChoice[] => field.options.choices ?? [];
+
+const sameDateOptions = (left: DateFieldOptions, right: DateFieldOptions) =>
+  Boolean(left.includeTime) === Boolean(right.includeTime) &&
+  (left.timezone ?? "") === (right.timezone ?? "");
 
 export function BaseDetailView({
   activeView,
@@ -363,6 +369,7 @@ export function BaseSetupView({
   const [codeLanguage, setCodeLanguage] = useState("text");
   const [numberFormat, setNumberFormat] = useState<"plain" | "currency">("plain");
   const [currencyCode, setCurrencyCode] = useState("USD");
+  const [dateOptions, setDateOptions] = useState<DateFieldOptions>({});
   // `lookup` config: which relation field to hop through, which field on the
   // related Base to pull over, and how to roll the pulled values up.
   const [lookupRelationSlug, setLookupRelationSlug] = useState("");
@@ -408,6 +415,8 @@ export function BaseSetupView({
   const [editingFieldName, setEditingFieldName] = useState<iString>("");
   // The edit dialog's working copy of a select field's choices.
   const [editingChoiceDrafts, setEditingChoiceDrafts] = useState<ChoiceDraft[]>([]);
+  // The edit dialog's working copy of a date field's time settings.
+  const [editingDateOptions, setEditingDateOptions] = useState<DateFieldOptions>({});
   const [isFieldRenameSaving, setIsFieldRenameSaving] = useState(false);
   const [fieldRenameError, setFieldRenameError] = useState<string | null>(null);
   const [recordTitleFieldId, setRecordTitleFieldId] = useState<string | null>(null);
@@ -501,6 +510,7 @@ export function BaseSetupView({
     setCodeLanguage("text");
     setNumberFormat("plain");
     setCurrencyCode("USD");
+    setDateOptions({});
     setLookupRelationSlug("");
     setLookupTargetSlug("");
     setLookupRollup("values");
@@ -560,9 +570,11 @@ export function BaseSetupView({
                   }
                 : fieldType === "number" && numberFormat === "currency"
                   ? { number: { format: "currency", currency: currencyCode.trim() || "USD" } }
-                  : builtChoices?.ok
-                    ? { choices: builtChoices.choices }
-                    : createDefaultFieldOptions(fieldType, targetBaseId, isMultiple),
+                  : fieldType === "date" && dateOptions.includeTime
+                    ? { date: dateOptions }
+                    : builtChoices?.ok
+                      ? { choices: builtChoices.choices }
+                      : createDefaultFieldOptions(fieldType, targetBaseId, isMultiple),
           required: isRequired,
           slug,
           type: fieldType,
@@ -590,6 +602,7 @@ export function BaseSetupView({
     setEditingFieldId(null);
     setEditingFieldName("");
     setEditingChoiceDrafts([]);
+    setEditingDateOptions({});
     setEditingFieldType(null);
     setSelectChoiceMode("null_on_missing");
     setFieldRenameError(null);
@@ -661,6 +674,13 @@ export function BaseSetupView({
         patch.choices = built.choices;
       }
     }
+    // Same for a date field's time settings: only send them when they changed.
+    if (
+      field?.type === "date" &&
+      !sameDateOptions(getDateFieldOptions(field.options), editingDateOptions)
+    ) {
+      patch.date = editingDateOptions;
+    }
     setIsFieldRenameSaving(true);
     setFieldRenameError(null);
     try {
@@ -673,7 +693,9 @@ export function BaseSetupView({
             messages,
             locale,
             error,
-            patch.choices ? messages.base.failedUpdateField : messages.base.failedRenameField,
+            patch.choices || patch.date
+              ? messages.base.failedUpdateField
+              : messages.base.failedRenameField,
           ),
       );
     } finally {
@@ -757,6 +779,13 @@ export function BaseSetupView({
     ? !editingBuiltChoices.ok ||
       diffSelectChoices(editingPreviousChoices, editingBuiltChoices.choices).changed
     : false;
+  // Time settings are edited only while the field stays a `date` field.
+  const isEditingDateOptions = Boolean(editingField?.type === "date" && !conversionTargetType);
+  const editingDateOptionsChanged =
+    isEditingDateOptions && editingField
+      ? !sameDateOptions(getDateFieldOptions(editingField.options), editingDateOptions)
+      : false;
+  const editingOptionsChanged = editingChoicesChanged || editingDateOptionsChanged;
   const primaryField = getPrimaryField(base);
   const recordTitleField = base.fields.find((field) => field.id === recordTitleFieldId) ?? null;
 
@@ -872,6 +901,7 @@ export function BaseSetupView({
                             setEditingChoiceDrafts(
                               fieldChoices(field).map((choice) => ({ ...choice })),
                             );
+                            setEditingDateOptions(getDateFieldOptions(field.options));
                             setFieldRenameError(null);
                           }}
                           title={messages.base.renameField}
@@ -1044,6 +1074,15 @@ export function BaseSetupView({
                       removedNames={editingRemovedChoiceNames}
                     />
                   ) : null}
+                  {isEditingDateOptions ? (
+                    <div className="mt-4">
+                      <DateFieldOptionsEditor
+                        disabled={isFieldRenameSaving}
+                        onChange={setEditingDateOptions}
+                        value={editingDateOptions}
+                      />
+                    </div>
+                  ) : null}
                   {fieldRenameError ? (
                     <div className="mt-3 text-rejected-strong text-sm">{fieldRenameError}</div>
                   ) : null}
@@ -1089,7 +1128,7 @@ export function BaseSetupView({
                     ) : (
                       <SplitSubmitButton
                         changeRequestAction={{
-                          label: editingChoicesChanged
+                          label: editingOptionsChanged
                             ? messages.base.requestFieldUpdate
                             : messages.base.requestRename,
                           loadingLabel: messages.common.submitting,
@@ -1099,10 +1138,10 @@ export function BaseSetupView({
                         disabled={isFieldRenameSaving || !editingField}
                         hint={messages.common.requestReviewHint}
                         immediateAction={{
-                          label: editingChoicesChanged
+                          label: editingOptionsChanged
                             ? messages.base.updateFieldNow
                             : messages.base.renameNow,
-                          loadingLabel: editingChoicesChanged
+                          loadingLabel: editingOptionsChanged
                             ? messages.base.updatingField
                             : messages.base.renaming,
                           onSubmit: () =>
@@ -1439,6 +1478,15 @@ export function BaseSetupView({
                       drafts={choiceDrafts}
                       onChange={setChoiceDrafts}
                     />
+                  ) : null}
+                  {fieldType === "date" ? (
+                    <div className="mt-4">
+                      <DateFieldOptionsEditor
+                        disabled={isSaving}
+                        onChange={setDateOptions}
+                        value={dateOptions}
+                      />
+                    </div>
                   ) : null}
                   <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-border/50 border-t pt-4">
                     <div className="flex flex-wrap gap-4 text-sm">

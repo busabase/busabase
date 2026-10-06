@@ -9,8 +9,9 @@ import type {
 import { ImageOff, Paperclip, RotateCcw } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { useSearch } from "wouter";
-import { useCoreI18n, useIString } from "../../../i18n";
+import { useCoreI18n, useCoreLocale, useIString } from "../../../i18n";
 import { getPrimaryField } from "../../base/utils/primary-field";
+import { resolveCoverField } from "../../base/utils/view-field-resolution";
 import { getRecordTitle } from "../helpers/change-request";
 import { getAttachmentRefs, getFieldPreviewText, getSafeAttachmentUrl } from "../helpers/field";
 import { mergeSearchIntoHref } from "../helpers/link-search";
@@ -22,28 +23,6 @@ const CARD_MIN_WIDTH: Record<GalleryCardSize, string> = {
   small: "150px",
   medium: "220px",
   large: "300px",
-};
-
-/**
- * Resolve which attachment field supplies the cover image. Honors the view's
- * explicit `coverFieldSlug`; otherwise falls back to the first attachment field
- * on the base (the sensible default every gallery tool uses so a fresh gallery
- * shows images without any configuration).
- */
-export const resolveCoverField = (
-  base: BaseVO | null,
-  fields: BaseFieldVO[],
-  coverFieldSlug: string | null | undefined,
-): BaseFieldVO | null => {
-  const attachmentFields = (base?.fields ?? fields).filter((f) => f.type === "attachment");
-  if (coverFieldSlug === null) {
-    // Explicitly "no cover".
-    return null;
-  }
-  if (coverFieldSlug) {
-    return attachmentFields.find((f) => f.slug === coverFieldSlug) ?? null;
-  }
-  return attachmentFields[0] ?? null;
 };
 
 const firstImageUrl = (record: RecordVO, coverField: BaseFieldVO | null): string | null => {
@@ -82,6 +61,7 @@ function GalleryCard({
   onRestore?: () => void;
 }) {
   const messages = useCoreI18n();
+  const locale = useCoreLocale();
   const resolveIString = useIString();
   const currentSearch = useSearch();
   const title = getRecordTitle(record, messages);
@@ -139,6 +119,7 @@ function GalleryCard({
             field,
             record.headCommit.payload[field.slug],
             messages,
+            locale,
           );
           if (!preview || preview === "-") {
             return null;

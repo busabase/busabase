@@ -19,6 +19,7 @@ import {
 import { baseRouter, recordRouter, viewRouter } from "./domains/base/router";
 import { docRouter } from "./domains/doc/router";
 import { dumpRouter } from "./domains/dump/router";
+import { createChangeRequestPreviewLink } from "./domains/embed-links/logic";
 import { embedLinksRouter } from "./domains/embed-links/router";
 import { fileRouter } from "./domains/file-node/router";
 import { fileTreeRouter } from "./domains/filetree/router";
@@ -30,7 +31,7 @@ import { updateNodeContent } from "./domains/rich-node/handlers";
 import { templatesRouter } from "./domains/templates/router";
 import { vaultRouter } from "./domains/vault/router";
 import { webhookRouter } from "./domains/webhook/router";
-import { listActivityPaged } from "./logic/activity";
+import { listActivityPaged, listRecordActivityPaged } from "./logic/activity";
 import {
   anonymousAccessKindFor,
   denyPublicProcedure,
@@ -57,6 +58,7 @@ import {
   type OwnLiveShareSummary,
   setNodeShare,
 } from "./logic/node-share";
+import { getNodeSubscription, setNodeSubscription } from "./logic/node-subscriptions";
 import { recordSearchInteraction } from "./logic/search-metrics";
 import {
   closeChangeRequest,
@@ -222,6 +224,14 @@ const busabaseRouterImpl = busabase.router({
     listFavorites: busabase.nodes.listFavorites.handler(async () =>
       listFavoriteNodes(resolveActorId("local-user")),
     ),
+    subscription: {
+      get: busabase.nodes.subscription.get.handler(async ({ input }) =>
+        getNodeSubscription(input.nodeId, resolveActorId("local-user")),
+      ),
+      set: busabase.nodes.subscription.set.handler(async ({ input }) =>
+        setNodeSubscription(input, resolveActorId("local-user")),
+      ),
+    },
     principals: {
       list: busabase.nodes.principals.list.handler(async ({ input }) => {
         const rows = await listNodePrincipals(input.nodeId, resolveActorId("local-user"));
@@ -301,6 +311,9 @@ const busabaseRouterImpl = busabase.router({
     create: busabase.auditEvents.create.handler(async ({ input }) => createAuditEvent(input)),
   },
   activity: {
+    listForRecordPaged: busabase.activity.listForRecordPaged.handler(async ({ input }) =>
+      listRecordActivityPaged(input),
+    ),
     listPaged: busabase.activity.listPaged.handler(async ({ input }) => listActivityPaged(input)),
     listForNode: busabase.activity.listForNode.handler(async ({ input }) =>
       listNodeActivity(input.nodeId, { limit: input.limit }),
@@ -342,6 +355,9 @@ const busabaseRouterImpl = busabase.router({
   install: installRouter,
   templates: templatesRouter,
   changeRequests: {
+    createPreviewLink: busabase.changeRequests.createPreviewLink.handler(async ({ input }) =>
+      createChangeRequestPreviewLink(input.changeRequestId),
+    ),
     list: busabase.changeRequests.list.handler(async ({ input }) => listChangeRequestsPaged(input)),
     listPage: busabase.changeRequests.listPage.handler(async ({ input }) =>
       listChangeRequestsPage(input),

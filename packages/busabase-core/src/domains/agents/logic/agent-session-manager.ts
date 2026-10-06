@@ -645,9 +645,13 @@ async function openAgentSession({
           await syncModelOption(session, findModelOption(ctx.params.update.configOptions));
         }
         // session/load replays the remote transcript. Busabase already has the
-        // outer transcript in its own event table, so emitting that replay
-        // again would duplicate every historical message with new seq values.
-        if (replayingHistory) return;
+        // outer transcript in its own event table, so emitting message/tool
+        // replay again would duplicate history with new seq values. Command
+        // metadata is different: it is a current full-list replacement and is
+        // needed to restore the composer's slash-command state on reconnect.
+        if (replayingHistory && ctx.params.update.sessionUpdate !== "available_commands_update") {
+          return;
+        }
         emit(session, { kind: "acpUpdate", acpUpdate: ctx.params.update });
       });
 

@@ -95,6 +95,20 @@ export const fieldOptionsSchema = z
         language: z.string().optional(),
       })
       .optional(),
+    // `date` columns: whether a time of day is recorded, and in which IANA zone
+    // every reader sees it (absent = each reader's own local time). Without
+    // `includeTime` a value is a calendar day and is never shifted by zone.
+    date: z
+      .object({
+        includeTime: z.boolean().optional(),
+        timezone: z
+          .string()
+          .optional()
+          .describe(
+            'IANA time zone, e.g. "Asia/Shanghai". Omit to show each reader their own local time.',
+          ),
+      })
+      .optional(),
     embed: z
       .object({
         aspectRatio: z.enum(["16:9", "4:3", "1:1"]).optional(),

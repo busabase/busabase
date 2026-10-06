@@ -50,7 +50,7 @@ interface EnqueueFileUploadInput {
   mode: FileUploadTaskMode;
   nodeId: string;
   nodeName: string;
-  nodeType: "drive" | "skill";
+  nodeType: "airapp" | "drive" | "skill";
   /**
    * Paths whose existing file should be overwritten, mapped to the content
    * hash the user saw (or null when unknown). Paths absent here are created.
@@ -285,9 +285,8 @@ export function FileUploadTaskProvider({
         if (merged) {
           invalidations.push(
             queryClient.invalidateQueries({
-              queryKey: orpc.nodes.get.queryOptions({
-                input: { nodeId: runtime.input.nodeId, type: runtime.input.nodeType },
-              }).queryKey,
+              // Detail views may have queried by slug rather than node ID.
+              queryKey: orpc.nodes.get.key(),
             }),
           );
         }

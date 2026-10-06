@@ -87,8 +87,8 @@ const finalizeViewChangeRequest = async (args: {
     return { ...changeRequest, materialized: false as const };
   }
 
-  await reviewChangeRequest(args.changeRequestId, { verdict: "approved" });
-  const merged = await mergeChangeRequest(args.changeRequestId);
+  await reviewChangeRequest(args.changeRequestId, { verdict: "approved" }, { automatic: true });
+  const merged = await mergeChangeRequest(args.changeRequestId, { automatic: true });
   if (!merged.view) {
     throw new Error(`Auto-merge did not produce a view (${args.label})`);
   }
@@ -224,7 +224,7 @@ export const createUpdateViewChangeRequest = async (
   const commitId = id("cmt");
   const timestamp = now();
   const fields = {
-    config: parsed.config ?? normalizeViewConfig(view.config),
+    config: { ...normalizeViewConfig(view.config), ...parsed.config },
     description: parsed.description ?? view.description,
     name: parsed.name ?? view.name,
     type: parsed.type ?? view.type,

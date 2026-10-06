@@ -100,3 +100,22 @@ export const listRecordActivityInputSchema = z.object({
 });
 
 export type ActivityItemVO = z.infer<typeof activityItemSchema>;
+
+export const listRecordActivityPagedInputSchema = z.object({
+  recordId: z.string().min(1).describe("Activity is scoped to this record's own history."),
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(100)
+    .optional()
+    .default(50)
+    .describe("Items per page. Defaults to 50 and is capped at 100."),
+  cursor: z
+    .string()
+    .optional()
+    .describe(
+      "Opaque page cursor: pass back the `nextCursor` from the previous response. " +
+        "Do not construct or parse it.",
+    ),
+});

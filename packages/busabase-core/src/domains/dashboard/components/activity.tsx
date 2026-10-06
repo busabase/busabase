@@ -1,10 +1,11 @@
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import {
   CheckCircle2,
   ChevronRight,
   Eye,
   GitCommitHorizontal,
+  Loader2,
   type LucideIcon,
   MessageSquareText,
   PencilLine,
@@ -12,6 +13,7 @@ import {
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { useMemo } from "react";
 import { useCoreI18n, useCoreLocale } from "../../../i18n";
+import { presentCoreError } from "../../../i18n/localize-error";
 import {
   type ActivityEvent,
   type ActivityEventTone,
@@ -236,7 +238,7 @@ export function NodeActivityView({
 
 /**
  * Record-scoped mirror of `NodeActivityPanel` — backed by
- * `activity.listForRecord` instead of `activity.listForNode`. Same reuse of
+ * `activity.listForRecordPaged` instead of `activity.listForNode`. Same reuse of
  * `ActivityRow`/`buildActivityEventFromItem`, just a different query.
  */
 export function RecordActivityPanel({
@@ -247,12 +249,17 @@ export function RecordActivityPanel({
   orpc: BusabaseQueryUtils;
 }) {
   const messages = useCoreI18n();
-  const activityQuery = useQuery(
-    orpc.activity.listForRecord.queryOptions({ input: { recordId, limit: 50 } }),
-  );
+  const locale = useCoreLocale();
+  const activityQuery = useInfiniteQuery({
+    ...orpc.activity.listForRecordPaged.infiniteOptions({
+      input: (pageParam: string | undefined) => ({ recordId, limit: 50, cursor: pageParam }),
+      initialPageParam: undefined as string | undefined,
+      getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    }),
+  });
   const activityEvents = useMemo(
     () =>
-      (activityQuery.data ?? [])
+      (activityQuery.data?.pages.flatMap((page) => page.items) ?? [])
         .map((item) => buildActivityEventFromItem(item, messages))
         .filter((event): event is ActivityEvent => event !== null),
     [activityQuery.data, messages],
@@ -262,7 +269,7 @@ export function RecordActivityPanel({
     return <InboxListSkeleton />;
   }
 
-  if (activityEvents.length === 0) {
+  if (activityEvents.length === 0 && !activityQuery.error) {
     return (
       <p className="px-2 py-3 text-muted-foreground text-sm">
         {messages.nodeDetail.activityEmptyBody}
@@ -271,10 +278,44 @@ export function RecordActivityPanel({
   }
 
   return (
-    <div className="rounded-lg border border-border/60 px-1 py-1">
+    <div>
       {activityEvents.map((event) => (
         <ActivityRow event={event} key={event.id} />
       ))}
+      {activityQuery.error ? (
+        <div role="alert" className="px-2 py-3 text-rejected-strong text-sm">
+          {presentCoreError(
+            messages,
+            locale,
+            activityQuery.error,
+            messages.recordView.failedLoadHistory,
+          )}
+          <button
+            className="ml-2 text-foreground underline"
+            type="button"
+            onClick={() =>
+              activityQuery.isFetchNextPageError
+                ? void activityQuery.fetchNextPage()
+                : void activityQuery.refetch()
+            }
+          >
+            {messages.inbox.retry}
+          </button>
+        </div>
+      ) : null}
+      {activityQuery.hasNextPage && !activityQuery.isFetchNextPageError ? (
+        <button
+          className="mx-auto mt-3 flex items-center gap-2 rounded-md border border-border px-3 py-2 text-sm hover:bg-accent disabled:opacity-60"
+          disabled={activityQuery.isFetchingNextPage}
+          onClick={() => void activityQuery.fetchNextPage()}
+          type="button"
+        >
+          {activityQuery.isFetchingNextPage ? (
+            <Loader2 aria-hidden className="animate-spin" size={14} />
+          ) : null}
+          {messages.search.loadMore}
+        </button>
+      ) : null}
     </div>
   );
 }

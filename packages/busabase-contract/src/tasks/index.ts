@@ -228,4 +228,12 @@ export const AGENT_EXCLUDED_MCP_TOOLS: readonly string[] = [
   // `/api/v1` with the owner's key, where the person chose to point it.
   "comments_list_mentions",
   "comments_mark_mentions_read",
+  // The node `[...]` menu's Subscribe / Unsubscribe. Same reasoning as the two
+  // mention entries above: scoped to the caller from context, so on an agent's
+  // key it reads and rewrites the OWNER's notification preference. Both are
+  // already RPC-only (no `.route()`), which keeps them out of every catalog on
+  // its own; listing them here means adding a route later still cannot publish
+  // them to agents by accident.
+  "nodes_subscription_get",
+  "nodes_subscription_set",
 ];

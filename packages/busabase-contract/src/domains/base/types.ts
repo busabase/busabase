@@ -40,6 +40,11 @@ export interface BaseFieldVO {
     code?: {
       language?: string;
     };
+    // Must mirror the contract's fieldOptionsSchema — see base-schemas.ts there.
+    date?: {
+      includeTime?: boolean;
+      timezone?: string;
+    };
     embed?: {
       aspectRatio?: "16:9" | "4:3" | "1:1";
       height?: number;

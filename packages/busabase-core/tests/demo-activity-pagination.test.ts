@@ -43,4 +43,28 @@ describe("activity.listPaged (demo mode)", () => {
     expect(smallKeys).toEqual(largePages.map(keyOf));
     expect(new Set(smallKeys).size).toBe(smallKeys.length);
   });
+
+  it("pages a record's activity and bounds its review preview in demo mode", async () => {
+    const records = await client.records.list({ limit: 100 });
+    const record = records.records[0];
+    expect(record).toBeDefined();
+    const all = await client.activity.listForRecord({ recordId: record.id, limit: 100 });
+    const collected: typeof all = [];
+    let cursor: string | undefined;
+    for (let guard = 0; guard < 100; guard++) {
+      const page = await client.activity.listForRecordPaged({
+        recordId: record.id,
+        cursor,
+        limit: 1,
+      });
+      expect(page.items.length).toBeLessThanOrEqual(1);
+      collected.push(...page.items);
+      if (!page.nextCursor) break;
+      cursor = page.nextCursor;
+    }
+    expect(collected.map(keyOf)).toEqual(all.map(keyOf));
+    const history = await client.records.listChangeRequests({ recordId: record.id });
+    const preview = await client.records.listChangeRequests({ recordId: record.id, limit: 1 });
+    expect(preview.map((cr) => cr.id)).toEqual(history.slice(0, 1).map((cr) => cr.id));
+  });
 });

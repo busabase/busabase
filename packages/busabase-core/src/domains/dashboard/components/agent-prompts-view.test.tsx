@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { coreMessagesEn } from "../../../i18n/messages";
 import { buildNodeAgentPrompts, type NodePrompt } from "../helpers/node-agent-prompts";
-import { agentPromptsUpdateValue } from "../hooks/use-node-agent-prompts";
 import {
   buildPromptSections,
+  resolveActivePrompt,
+  splitBuiltInSections,
+} from "../helpers/prompt-sections";
+import { agentPromptsUpdateValue } from "../hooks/use-node-agent-prompts";
+import {
   createCustomPromptKey,
   removeCustomPrompt,
-  resolveActivePrompt,
   selectionAfterCustomPromptDelete,
   updateLocalizedPromptValue,
   upsertCustomPrompt,
@@ -181,5 +184,35 @@ describe("Agent prompt sidebar sections", () => {
     expect(selectionAfterCustomPromptDelete([first, second], "second")).toBeNull();
     expect(agentPromptsUpdateValue([])).toBeNull();
     expect(agentPromptsUpdateValue([first])).toEqual([first]);
+  });
+});
+
+describe("splitBuiltInSections", () => {
+  const labels = {
+    builtIn: "Built-in scenarios",
+    custom: "Custom scenarios",
+    includeEmptyCustom: true,
+  };
+  const builtIn = prompt("skill-use", "scenario", "Content");
+  const capability = prompt("record_create", "capability", "Records");
+  const custom = prompt("custom:mine", "scenario", "Content", "custom-scenario");
+
+  it("folds built-ins only when at least one custom prompt exists", () => {
+    const empty = splitBuiltInSections(buildPromptSections([builtIn], [capability], labels));
+    expect(empty.collapsible).toBe(false);
+    expect(empty.custom.map((section) => section.items.length)).toEqual([0]);
+
+    const withCustom = splitBuiltInSections(
+      buildPromptSections([custom, builtIn], [capability], labels),
+    );
+    expect(withCustom.collapsible).toBe(true);
+    expect(withCustom.builtIn.map((section) => section.name)).toEqual([
+      "Built-in scenarios",
+      "Records",
+    ]);
+  });
+
+  it("has nothing to fold when a node offers only custom prompts", () => {
+    expect(splitBuiltInSections(buildPromptSections([custom], [], labels)).collapsible).toBe(false);
   });
 });

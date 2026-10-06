@@ -2,6 +2,7 @@ import type { EmbedLinkVO } from "busabase-contract/contract/embed-link-schemas"
 import { describe, expect, it } from "vitest";
 import {
   expiryIsoForPreset,
+  nearestSharedAncestor,
   partitionEmbedLinks,
   publicPreviewUrl,
   toDatetimeLocalValue,
@@ -50,5 +51,20 @@ describe("share dialog utilities", () => {
     expect(publicPreviewUrl("https://busabase.com/dashboard/org/base/blog?source=share")).toBe(
       "https://busabase.com/dashboard/org/base/blog?source=share&share-preview=1",
     );
+  });
+});
+
+describe("nearestSharedAncestor", () => {
+  const row = (nodeId: string) => ({ nodeId, name: nodeId });
+
+  it("picks the nearest shared ancestor when several are shared", () => {
+    // root-first: root > projects > q3
+    const hit = nearestSharedAncestor(["root", "projects", "q3"], [row("root"), row("projects")]);
+    expect(hit?.nodeId).toBe("projects");
+  });
+
+  it("returns null when no ancestor carries its own share", () => {
+    expect(nearestSharedAncestor(["root", "projects"], [row("elsewhere")])).toBeNull();
+    expect(nearestSharedAncestor([], [row("root")])).toBeNull();
   });
 });

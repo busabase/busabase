@@ -182,10 +182,40 @@ const toEmbedLinkVO = (row: {
 });
 
 export const createEmbedLink = async (input: CreateEmbedLinkDTO): Promise<CreatedEmbedLinkVO> => {
-  const db = await getDb();
   const target = await resolveEmbedTargetMetadata(input.type, input.typeId);
   if (!target) throw new ORPCError("NOT_FOUND", { message: "Embed target not found" });
+  return mintEmbedLink(input, { targetName: target.targetName, nodeType: target.nodeType });
+};
 
+/** A single, short-lived preview for a visible, reviewable CR in the active Space. */
+export const createChangeRequestPreviewLink = async (
+  changeRequestId: string,
+): Promise<CreatedEmbedLinkVO> => {
+  const changeRequest = await getChangeRequest(changeRequestId);
+  if (
+    !changeRequest ||
+    !["in_review", "changes_requested", "approved", "conflict"].includes(changeRequest.status)
+  ) {
+    throw new ORPCError("NOT_FOUND", { message: "Change request preview not available" });
+  }
+  // Never accept type, expiry or frame policy from the caller. Visibility is checked
+  // by getChangeRequest against the active Space and every affected node.
+  return mintEmbedLink(
+    {
+      type: "change-request",
+      typeId: changeRequestId,
+      expiresInMinutes: 5,
+      framePolicy: { mode: "anywhere", allowedOrigins: [] },
+    },
+    { targetName: changeRequest.id, nodeType: null },
+  );
+};
+
+const mintEmbedLink = async (
+  input: CreateEmbedLinkDTO,
+  target: Pick<EmbedTargetMetadata, "targetName" | "nodeType">,
+): Promise<CreatedEmbedLinkVO> => {
+  const db = await getDb();
   const nodeType = target.nodeType ? EmbedNodeTypeSchema.safeParse(target.nodeType) : null;
   if (nodeType && !nodeType.success) {
     throw new ORPCError("BAD_REQUEST", { message: "Unsupported node type" });

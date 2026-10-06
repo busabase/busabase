@@ -3,6 +3,13 @@ import { SPALink as Link } from "openlib/ui/dashboard";
 import { useEffect, useState } from "react";
 import { useSearch } from "wouter";
 import { useCoreI18n, useCoreLocale } from "../../../i18n";
+import {
+  calendarDayToLocalDate,
+  fromDateTimeInputValue,
+  getDateFieldCalendarDay,
+  getDateFieldOptions,
+  toDateTimeInputValue,
+} from "../../base/utils/date-value";
 import { getRecordTitle } from "../helpers/change-request";
 import { mergeSearchIntoHref } from "../helpers/link-search";
 
@@ -32,8 +39,14 @@ export const resolveGanttFields = (
   return { start, end };
 };
 
-// Local-midnight Date from a YYYY-MM-DD or ISO value, or null.
-const parseDay = (value: unknown): Date | null => {
+// Local-midnight Date for the day a value sits on, or null. A `date` field's
+// calendar day is never shifted by the reader's zone (see date-value.ts);
+// `created_time` / `updated_time` are instants read in local time.
+const parseDay = (field: BaseFieldVO, value: unknown): Date | null => {
+  if (field.type === "date") {
+    const day = getDateFieldCalendarDay(value, getDateFieldOptions(field.options));
+    return day ? calendarDayToLocalDate(day) : null;
+  }
   if (typeof value !== "string" || value.length === 0) {
     return null;
   }
@@ -48,6 +61,21 @@ const toYMD = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const addDays = (d: Date, n: number) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
 const daysBetween = (a: Date, b: Date) => Math.round((b.getTime() - a.getTime()) / DAY_MS);
+
+/**
+ * The value to store after a bar is dragged onto `day`. A day field stores
+ * `YYYY-MM-DD`; a time-of-day field keeps its time of day (read in the field's
+ * zone, else the reader's) and moves to the new day in that same zone.
+ */
+const draggedDayValue = (field: BaseFieldVO, previous: unknown, day: Date): string => {
+  const options = getDateFieldOptions(field.options);
+  if (field.type !== "date" || !options.includeTime) {
+    return toYMD(day);
+  }
+  const zone = options.timezone || undefined;
+  const time = toDateTimeInputValue(previous, zone).slice(11) || "00:00";
+  return fromDateTimeInputValue(`${toYMD(day)}T${time}`, zone) ?? toYMD(day);
+};
 
 type DragMode = "move" | "resize-start" | "resize-end";
 type DragState = { recordId: string; mode: DragMode; originX: number; deltaDays: number };
@@ -112,8 +140,8 @@ export function BusaBaseGantt({
 
   const rows: Row[] = [];
   for (const record of records) {
-    const start = parseDay(record.headCommit.payload[startField.slug]);
-    const end = parseDay(record.headCommit.payload[endField.slug]);
+    const start = parseDay(startField, record.headCommit.payload[startField.slug]);
+    const end = parseDay(endField, record.headCommit.payload[endField.slug]);
     if (start && end && end.getTime() >= start.getTime()) {
       rows.push({ record, start, end });
     }
@@ -173,10 +201,18 @@ export function BusaBaseGantt({
     const { start, end } = previewDates(row);
     const patch: Record<string, unknown> = {};
     if (start.getTime() !== row.start.getTime()) {
-      patch[startField.slug] = toYMD(start);
+      patch[startField.slug] = draggedDayValue(
+        startField,
+        row.record.headCommit.payload[startField.slug],
+        start,
+      );
     }
     if (end.getTime() !== row.end.getTime()) {
-      patch[endField.slug] = toYMD(end);
+      patch[endField.slug] = draggedDayValue(
+        endField,
+        row.record.headCommit.payload[endField.slug],
+        end,
+      );
     }
     if (Object.keys(patch).length > 0) {
       void onPatchRecord(row.record, { ...row.record.headCommit.payload, ...patch });

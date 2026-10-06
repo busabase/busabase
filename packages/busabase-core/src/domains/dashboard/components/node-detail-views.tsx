@@ -1858,7 +1858,9 @@ export function DocDetailView({
     }
   }
 
-  // Save as Change Request: propose only, then open it for review.
+  // Save as Change Request: propose only, then open it for review. Explicit
+  // `autoMerge: false` — the endpoint's permission-aware default otherwise
+  // auto-merges for a write-capable actor, silently skipping review.
   async function saveAsChangeRequest() {
     if (!doc) return;
     setBusy("changeRequest");
@@ -1867,6 +1869,7 @@ export function DocDetailView({
       const changeRequest = await createCr.mutateAsync({
         nodeId: doc.node.id,
         content: { kind: "doc", body: draft },
+        autoMerge: false,
       });
       setLocation(`/inbox/${changeRequest.id}`);
     } catch (caught) {
@@ -1892,9 +1895,14 @@ export function DocDetailView({
       ) : null}
       {/* Keep the reading column capped at 1024px. Left padding is wider than the
        * right because Milkdown's block handle renders to the left of the hovered
-       * block and would otherwise be clipped by this scroll container. */}
+       * block and would otherwise be clipped by this scroll container. Narrow
+       * containers drop that gutter (it cost a phone a quarter of its width)
+       * unless a mouse user is editing, the only case the handle can appear. */}
       <div
-        className="mx-auto flex h-full min-h-0 w-full min-w-0 max-w-5xl flex-col overflow-auto border-border border-x bg-card py-10 pr-6 pl-24"
+        className={cn(
+          "mx-auto flex h-full min-h-0 w-full min-w-0 max-w-5xl flex-col overflow-auto border-border border-x bg-card px-4 py-6 @xl:py-10 @xl:pr-6 @xl:pl-24",
+          isEditing && "pointer-fine:pl-24",
+        )}
         data-dashboard-scroll="doc-detail"
         data-doc-reading-surface
         ref={docScrollRef}

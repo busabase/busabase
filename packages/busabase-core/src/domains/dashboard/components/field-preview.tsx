@@ -6,8 +6,9 @@ import { SPALink as Link } from "openlib/ui/dashboard";
 import { type ComponentProps, type ReactNode, useState } from "react";
 import { Streamdown, type Components as StreamdownComponents } from "streamdown";
 import { useSearch } from "wouter";
-import { fmt, useCoreI18n, useIString } from "../../../i18n";
+import { fmt, useCoreI18n, useCoreLocale, useIString } from "../../../i18n";
 import { fieldDisplayKind, fieldLinkPrefix } from "../../base/field-types";
+import { getDateFieldOptions, parseDateFieldValue } from "../../base/utils/date-value";
 import { embedAspectRatio, embedHeight, resolveEmbedPreview } from "../../base/utils/embed";
 import { parseWhiteboardFieldValue } from "../../base/utils/whiteboard-value";
 import { getRecordTitle } from "../helpers/change-request";
@@ -31,6 +32,7 @@ import {
 import { mergeSearchIntoHref } from "../helpers/link-search";
 import { markdownPreviewSource } from "../helpers/markdown-preview";
 import type { FieldChip } from "../helpers/view-types";
+import { DateFieldValue } from "./date-field";
 import { DialogContent } from "./localized-dialog-content";
 import { MemberChips } from "./member-field";
 import { CheckboxBadge } from "./primitives";
@@ -410,10 +412,19 @@ export function FieldValuePreview({
   value: unknown;
 }) {
   const messages = useCoreI18n();
+  const locale = useCoreLocale();
   const resolveIString = useIString();
   const currentSearch = useSearch();
   const fieldName = field ? resolveIString(field.name) : undefined;
   const kind = field ? fieldDisplayKind(field.type) : "plain";
+
+  if (field?.type === "date" && parseDateFieldValue(value)) {
+    return (
+      <div className={`min-w-0 leading-6 ${className}`}>
+        <DateFieldValue options={getDateFieldOptions(field.options)} value={value} />
+      </div>
+    );
+  }
 
   if (kind === "checkbox") {
     return <CheckboxBadge checked={value === true || value === "true"} />;
@@ -569,7 +580,7 @@ export function FieldValuePreview({
     );
   }
 
-  const text = getFieldPreviewText(field, value, messages);
+  const text = getFieldPreviewText(field, value, messages, locale);
   if (!text) {
     return <span className="text-muted-foreground">-</span>;
   }

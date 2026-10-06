@@ -841,19 +841,47 @@ export async function initializeNodeAcl(
   }
 
   let parentEffective: NodeVisibility | null = null;
+  let parentPublic: { scope: "read" | "submit" | null; requiresPassword: boolean } = {
+    scope: null,
+    requiresPassword: false,
+  };
   if (parentId) {
     const [parent] = await db
-      .select({ effectiveVisibility: busabaseNodes.effectiveVisibility })
+      .select({
+        effectiveVisibility: busabaseNodes.effectiveVisibility,
+        effectivePublicScope: busabaseNodes.effectivePublicScope,
+        effectivePublicRequiresPassword: busabaseNodes.effectivePublicRequiresPassword,
+      })
       .from(busabaseNodes)
       .where(eq(busabaseNodes.id, parentId))
       .limit(1);
     parentEffective = parent?.effectiveVisibility ?? null;
+    parentPublic = {
+      scope: parent?.effectivePublicScope ?? null,
+      requiresPassword: parent?.effectivePublicRequiresPassword ?? false,
+    };
   }
   const effective = strictest(parentEffective, explicitVisibilityOf({ explicitVisibility }));
   if (effective !== null) {
     await db
       .update(busabaseNodes)
       .set({ effectiveVisibility: effective })
+      .where(eq(busabaseNodes.id, nodeId));
+  }
+
+  // Inherit the parent's public-link state. `effective_public_scope` is only
+  // ever written by `recomputeEffectivePublicScope` when a SHARE changes, so a
+  // node born under an already-shared folder used to stay private until the
+  // folder's share was toggled off and on again. A fresh node has no share row
+  // of its own, so the nearest live share is exactly whatever gates its
+  // parent — the parent's materialized pair is the whole answer.
+  if (parentPublic.scope !== null) {
+    await db
+      .update(busabaseNodes)
+      .set({
+        effectivePublicScope: parentPublic.scope,
+        effectivePublicRequiresPassword: parentPublic.requiresPassword,
+      })
       .where(eq(busabaseNodes.id, nodeId));
   }
 

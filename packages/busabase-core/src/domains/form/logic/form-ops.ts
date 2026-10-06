@@ -32,6 +32,7 @@ import {
 import { registerNodeRuntime } from "../../../logic/node-runtime";
 import { ensureReady } from "../../../logic/seed";
 import { createFormSubmissionChangeRequest } from "../../base/logic/record-ops";
+import { getDateFieldOptions } from "../../base/utils/date-value";
 import type { FormPO } from "../schema";
 
 const formNotFound = (nodeId: string) =>
@@ -226,6 +227,11 @@ export const getFormByNodeId = async (nodeIdOrSlug: string): Promise<FormVO | nu
                 id: choice.id,
                 name: choice.name,
               })),
+              // A date field's time settings, so the Form offers a date-time
+              // picker in the right zone (a plain date picker otherwise).
+              ...(field.type === "date" && getDateFieldOptions(field.options).includeTime
+                ? { date: getDateFieldOptions(field.options) }
+                : {}),
             },
           ]
         : [];
