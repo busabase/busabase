@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'"
+    />
+    <title>Busabase Desktop</title>
+    <style>
+      /* Tokens mirror src/app/styles.css so the boot screen matches the Tauri shell. */
+      :root {
+        --background: 45 26% 97%;
+        --foreground: 198 16% 14%;
+        --card: 0 0% 100%;
+        --muted-foreground: 178 5% 42%;
+        --primary: 160 57% 30%;
+        --primary-foreground: 0 0% 100%;
+        --destructive: 2 56% 49%;
+        --border: 90 12% 84%;
+        --radius: 8px;
+      }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+      }
+      body {
+        display: grid;
+        place-items: center;
+        background: hsl(var(--background));
+        color: hsl(var(--foreground));
+        font-family: ui-sans-serif, system-ui, "Noto Sans CJK SC", "Source Han Sans SC", sans-serif;
+      }
+      main {
+        display: grid;
+        gap: 14px;
+        justify-items: center;
+        width: min(440px, calc(100vw - 40px));
+        padding: 28px;
+        border: 1px solid hsl(var(--border));
+        border-radius: var(--radius);
+        background: hsl(var(--card));
+        text-align: center;
+      }
+      h1 {
+        margin: 0;
+        font-size: 20px;
+      }
+      p {
+        margin: 0;
+        max-height: 40vh;
+        overflow: auto;
+        color: hsl(var(--muted-foreground));
+        font-size: 14px;
+        line-height: 1.5;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .spinner {
+        width: 28px;
+        height: 28px;
+        border: 3px solid hsl(var(--border));
+        border-top-color: hsl(var(--primary));
+        border-radius: 50%;
+        animation: spin 0.9s linear infinite;
+      }
+      .error-mark {
+        color: hsl(var(--destructive));
+        font-size: 28px;
+        line-height: 1;
+      }
+      button {
+        padding: 8px 16px;
+        border: 0;
+        border-radius: var(--radius);
+        background: hsl(var(--primary));
+        color: hsl(var(--primary-foreground));
+        font: inherit;
+        cursor: pointer;
+      }
+      button:focus-visible {
+        outline: 2px solid hsl(var(--primary));
+        outline-offset: 2px;
+      }
+      [hidden] {
+        display: none !important;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .spinner {
+          animation: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main aria-live="polite">
+      <div class="spinner" id="spinner" aria-hidden="true"></div>
+      <div class="error-mark" id="error-mark" aria-hidden="true" hidden>!</div>
+      <h1 id="title">Starting Busabase</h1>
+      <p id="message">Starting local Busabase...</p>
+      <button type="button" id="retry" hidden>Retry</button>
+    </main>
+    <script>
+      const params = new URLSearchParams(window.location.search);
+      const failed = params.get("state") === "failed";
+      if (failed) {
+        document.getElementById("spinner").hidden = true;
+        document.getElementById("error-mark").hidden = false;
+        document.getElementById("title").textContent = "Busabase is not ready";
+        document.getElementById("message").textContent =
+          params.get("message") || "The local Busabase server could not start.";
+        const retry = document.getElementById("retry");
+        retry.hidden = false;
+        retry.addEventListener("click", () => {
+          retry.disabled = true;
+          window.busabaseBoot?.retry();
+        });
+        retry.focus();
+      }
+    </script>
+  </body>
+</html>

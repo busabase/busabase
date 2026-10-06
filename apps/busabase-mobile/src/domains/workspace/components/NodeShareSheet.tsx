@@ -1,7 +1,8 @@
 import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { NodeVO } from "busabase-contract/types";
-import { Check, Copy } from "lucide-react-native";
-import { useState } from "react";
+import { nearestSharedAncestor } from "busabase-core/dashboard/share-dialog-utils";
+import { Check, Copy, FolderOpen, Globe } from "lucide-react-native";
+import { useMemo, useState } from "react";
 import { ScrollView, StyleSheet, Switch, Text, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import {
@@ -18,6 +19,7 @@ import { fmt, useI18n } from "~/i18n";
 import { copyToClipboard } from "~/lib/clipboard";
 import { radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
+import type { OpenableNode } from "../utils/known-node-cache";
 
 type ShareCapability = "read" | "submit";
 type ExpiryPreset = "never" | "day" | "week" | "month";
@@ -37,6 +39,12 @@ interface NodeShareSheetProps {
    * so without it there is a share setting but no link to hand out.
    */
   spaceId?: string | null;
+  /**
+   * The drawer's own node navigation: closes this sheet AND the drawer it was
+   * opened from, records the visit, then routes — so "Go to" lands on the
+   * folder instead of under a still-open drawer.
+   */
+  onOpenNode: (node: OpenableNode) => void;
   onClose: () => void;
   onBack: () => void;
 }
@@ -57,7 +65,14 @@ interface NodeShareSheetProps {
  *    that helper). The link is rendered as selectable text either way, and the
  *    button only claims "Copied" when the write actually succeeded.
  */
-export function NodeShareSheet({ visible, node, spaceId, onClose, onBack }: NodeShareSheetProps) {
+export function NodeShareSheet({
+  visible,
+  node,
+  spaceId,
+  onOpenNode,
+  onClose,
+  onBack,
+}: NodeShareSheetProps) {
   const tokens = useTokens();
   const { t, locale } = useI18n();
   const buda = useBusabaseOrpc();
@@ -75,15 +90,45 @@ export function NodeShareSheet({ visible, node, spaceId, onClose, onBack }: Node
   const share = shareQuery.data ?? null;
   const isPublic = share?.scope === "public";
 
+  // A node with no share of its own can still be public: a shared ancestor's
+  // link reaches everything under it. Same two reads web's dialog uses (no new
+  // endpoint): this node's ancestors, and every node carrying its own live share.
+  const inheritedLookupEnabled = visible && !!buda && shareQuery.isSuccess && !isPublic;
+  const ancestorsQuery = useQuery({
+    ...(buda
+      ? buda.orpc.nodes.ancestors.queryOptions({ input: { nodeId: node.id } })
+      : { queryKey: ["no-connection", "node-ancestors", node.id], queryFn: skipToken }),
+    enabled: inheritedLookupEnabled,
+  });
+  const sharedListQuery = useQuery({
+    ...(buda
+      ? buda.orpc.nodes.share.list.queryOptions({ input: {} })
+      : { queryKey: ["no-connection", "node-share-list"], queryFn: skipToken }),
+    enabled: inheritedLookupEnabled,
+  });
+  const inheritedFrom = useMemo(() => {
+    if (isPublic) return null;
+    const ancestorIds = ancestorsQuery.data?.ancestorIds;
+    const sharedNodes = sharedListQuery.data;
+    if (!ancestorIds || !sharedNodes) return null;
+    return nearestSharedAncestor(ancestorIds, sharedNodes);
+  }, [isPublic, ancestorsQuery.data, sharedListQuery.data]);
+  const inheritedLookupPending =
+    inheritedLookupEnabled && (ancestorsQuery.isPending || sharedListQuery.isPending);
+
   const publicUrl =
     buda?.serverUrl && spaceId
       ? `${buda.serverUrl.replace(/\/+$/, "")}/dashboard/${spaceId}/${node.type}/${node.slug}`
       : null;
 
   const invalidate = () =>
-    queryClient.invalidateQueries({
-      queryKey: buda?.orpc.nodes.share.get.key({ input: { nodeId: node.id } }),
-    });
+    Promise.all([
+      queryClient.invalidateQueries({
+        queryKey: buda?.orpc.nodes.share.get.key({ input: { nodeId: node.id } }),
+      }),
+      // Descendants' sheets read their inherited state off this list.
+      queryClient.invalidateQueries({ queryKey: buda?.orpc.nodes.share.list.key() }),
+    ]);
 
   // One mutation for every write: `nodes.share.set` is the single endpoint web
   // drives the toggle, capability, password and expiry through, and each call
@@ -134,7 +179,66 @@ export function NodeShareSheet({ visible, node, spaceId, onClose, onBack }: Node
     onBack();
   };
 
-  const error = setShare.error?.message ?? shareQuery.error?.message ?? null;
+  const error =
+    setShare.error?.message ??
+    shareQuery.error?.message ??
+    (inheritedLookupEnabled
+      ? (ancestorsQuery.error?.message ?? sharedListQuery.error?.message)
+      : undefined) ??
+    null;
+
+  const openAncestor = () => {
+    if (!inheritedFrom) return;
+    onOpenNode({
+      id: inheritedFrom.nodeId,
+      type: inheritedFrom.type,
+      name: inheritedFrom.name,
+      slug: inheritedFrom.slug,
+      icon: inheritedFrom.icon,
+    });
+  };
+
+  const linkBlock = (
+    <View style={styles.block}>
+      <Text style={[typography.small, { color: tokens.mutedForeground }]}>{t.share.linkLabel}</Text>
+      {publicUrl ? (
+        <>
+          <Text
+            selectable
+            style={[
+              typography.small,
+              styles.link,
+              { backgroundColor: tokens.muted, color: tokens.foreground },
+            ]}
+          >
+            {publicUrl}
+          </Text>
+          <Button
+            label={copied ? t.share.linkCopied : t.share.copyLink}
+            variant="secondary"
+            leadingIcon={
+              copied ? (
+                <Check size={16} color={tokens.foreground} />
+              ) : (
+                <Copy size={16} color={tokens.foreground} />
+              )
+            }
+            fullWidth
+            onPress={() => void copyLink()}
+          />
+          {copyFailed ? (
+            <Text style={[typography.small, { color: tokens.destructive }]}>
+              {t.share.copyUnavailable}
+            </Text>
+          ) : null}
+        </>
+      ) : (
+        <Text style={[typography.small, { color: tokens.mutedForeground }]}>
+          {t.share.linkUnavailable}
+        </Text>
+      )}
+    </View>
+  );
 
   return (
     <NativeBottomSheet
@@ -156,154 +260,150 @@ export function NodeShareSheet({ visible, node, spaceId, onClose, onBack }: Node
       }
     >
       <ScrollView style={styles.body} keyboardShouldPersistTaps="handled">
-        <View style={styles.toggleRow}>
-          <View style={styles.toggleText}>
-            <Text style={[typography.bodyEm, { color: tokens.foreground }]}>
-              {t.share.shareToWeb}
-            </Text>
-            <Text style={[typography.small, { color: tokens.mutedForeground }]}>
-              {isPublic ? t.share.enabled : t.share.shareToWebHint}
-            </Text>
+        {inheritedLookupPending ? (
+          <Text style={[typography.small, styles.pending, { color: tokens.mutedForeground }]}>
+            {t.common.loading}
+          </Text>
+        ) : inheritedFrom ? (
+          // Public through an ancestor. No switch: this node has no grant of its
+          // own to turn off, and turning one ON here would leave a second share
+          // behind that keeps it public after the folder is closed — same call
+          // web's dialog makes.
+          <View style={styles.inherited}>
+            <View style={[styles.inheritedCard, { borderColor: tokens.border }]}>
+              <View style={[styles.inheritedIcon, { backgroundColor: tokens.muted }]}>
+                <Globe size={16} color={tokens.foreground} />
+              </View>
+              <View style={styles.toggleText}>
+                <Text style={[typography.bodyEm, { color: tokens.foreground }]}>
+                  {fmt(t.share.inheritedTitle, { name: inheritedFrom.name })}
+                </Text>
+                <Text style={[typography.small, { color: tokens.mutedForeground }]}>
+                  {fmt(t.share.inheritedHint, { name: inheritedFrom.name })}
+                </Text>
+              </View>
+            </View>
+            <Button
+              label={fmt(t.share.openAncestor, { name: inheritedFrom.name })}
+              variant="secondary"
+              leadingIcon={<FolderOpen size={16} color={tokens.foreground} />}
+              fullWidth
+              onPress={openAncestor}
+            />
+            {linkBlock}
           </View>
-          <Switch
-            accessibilityLabel={t.share.shareToWeb}
-            value={isPublic}
-            disabled={busy || shareQuery.isLoading}
-            trackColor={{ false: tokens.muted, true: tokens.primary }}
-            thumbColor={tokens.surface}
-            onValueChange={(next) => setShare.mutate({ scope: next ? "public" : "none" })}
-          />
-        </View>
-
-        {isPublic ? (
-          <View style={[styles.details, { borderColor: tokens.border }]}>
-            <View style={styles.block}>
-              <Text style={[typography.small, { color: tokens.mutedForeground }]}>
-                {t.share.capabilityLabel}
-              </Text>
-              <NativeSegmentedControl<ShareCapability>
-                value={share?.capability ?? "read"}
-                options={[
-                  { value: "read", label: t.share.capabilityRead },
-                  { value: "submit", label: t.share.capabilitySubmit },
-                ]}
-                onChange={(capability) => setShare.mutate({ scope: "public", capability })}
+        ) : (
+          <>
+            <View style={styles.toggleRow}>
+              <View style={styles.toggleText}>
+                <Text style={[typography.bodyEm, { color: tokens.foreground }]}>
+                  {t.share.shareToWeb}
+                </Text>
+                <Text style={[typography.small, { color: tokens.mutedForeground }]}>
+                  {isPublic ? t.share.enabled : t.share.shareToWebHint}
+                </Text>
+              </View>
+              <Switch
+                accessibilityLabel={t.share.shareToWeb}
+                value={isPublic}
+                disabled={busy || shareQuery.isLoading}
+                trackColor={{ false: tokens.muted, true: tokens.primary }}
+                thumbColor={tokens.surface}
+                onValueChange={(next) => setShare.mutate({ scope: next ? "public" : "none" })}
               />
             </View>
 
-            <View style={styles.block}>
-              <TextInput
-                label={t.share.passwordLabel}
-                placeholder={t.share.passwordPlaceholder}
-                secureTextEntry
-                value={passwordDraft}
-                onChangeText={setPasswordDraft}
-              />
-              <Text style={[typography.small, { color: tokens.mutedForeground }]}>
-                {share?.hasPassword ? t.share.passwordSet : t.share.passwordHint}
-              </Text>
-              <Button
-                label={t.share.passwordSave}
-                variant="secondary"
-                disabled={busy || passwordDraft.trim().length === 0}
-                fullWidth
-                onPress={() => setShare.mutate({ scope: "public", password: passwordDraft })}
-              />
-              {share?.hasPassword ? (
-                <Button
-                  label={t.share.passwordClear}
-                  variant="ghost"
-                  disabled={busy}
-                  fullWidth
-                  onPress={() => setShare.mutate({ scope: "public", password: null })}
-                />
-              ) : null}
-            </View>
+            {isPublic ? (
+              <View style={[styles.details, { borderColor: tokens.border }]}>
+                <View style={styles.block}>
+                  <Text style={[typography.small, { color: tokens.mutedForeground }]}>
+                    {t.share.capabilityLabel}
+                  </Text>
+                  <NativeSegmentedControl<ShareCapability>
+                    value={share?.capability ?? "read"}
+                    options={[
+                      { value: "read", label: t.share.capabilityRead },
+                      { value: "submit", label: t.share.capabilitySubmit },
+                    ]}
+                    onChange={(capability) => setShare.mutate({ scope: "public", capability })}
+                  />
+                </View>
 
-            <View style={styles.block}>
-              <Text style={[typography.small, { color: tokens.mutedForeground }]}>
-                {t.share.expiryLabel}
-              </Text>
-              {/* Actions, not a selection: a stored expiry is an exact instant,
+                <View style={styles.block}>
+                  <TextInput
+                    label={t.share.passwordLabel}
+                    placeholder={t.share.passwordPlaceholder}
+                    secureTextEntry
+                    value={passwordDraft}
+                    onChangeText={setPasswordDraft}
+                  />
+                  <Text style={[typography.small, { color: tokens.mutedForeground }]}>
+                    {share?.hasPassword ? t.share.passwordSet : t.share.passwordHint}
+                  </Text>
+                  <Button
+                    label={t.share.passwordSave}
+                    variant="secondary"
+                    disabled={busy || passwordDraft.trim().length === 0}
+                    fullWidth
+                    onPress={() => setShare.mutate({ scope: "public", password: passwordDraft })}
+                  />
+                  {share?.hasPassword ? (
+                    <Button
+                      label={t.share.passwordClear}
+                      variant="ghost"
+                      disabled={busy}
+                      fullWidth
+                      onPress={() => setShare.mutate({ scope: "public", password: null })}
+                    />
+                  ) : null}
+                </View>
+
+                <View style={styles.block}>
+                  <Text style={[typography.small, { color: tokens.mutedForeground }]}>
+                    {t.share.expiryLabel}
+                  </Text>
+                  {/* Actions, not a selection: a stored expiry is an exact instant,
                   never one of three presets, so rendering these as a segmented
                   control would have to lie about which one is "current". The
                   server's real value is spelled out underneath instead. */}
-              <NativeActionRow>
-                {(["day", "week", "month"] as const).map((preset) => (
-                  <NativeActionItem key={preset}>
+                  <NativeActionRow>
+                    {(["day", "week", "month"] as const).map((preset) => (
+                      <NativeActionItem key={preset}>
+                        <Button
+                          label={
+                            preset === "day"
+                              ? t.share.expiryDay
+                              : preset === "week"
+                                ? t.share.expiryWeek
+                                : t.share.expiryMonth
+                          }
+                          variant="secondary"
+                          disabled={busy}
+                          fullWidth
+                          onPress={() => applyExpiry(preset)}
+                        />
+                      </NativeActionItem>
+                    ))}
+                  </NativeActionRow>
+                  <Text style={[typography.small, { color: tokens.mutedForeground }]}>
+                    {expiryText}
+                  </Text>
+                  {share?.expiresAt ? (
                     <Button
-                      label={
-                        preset === "day"
-                          ? t.share.expiryDay
-                          : preset === "week"
-                            ? t.share.expiryWeek
-                            : t.share.expiryMonth
-                      }
-                      variant="secondary"
+                      label={t.share.expiryNever}
+                      variant="ghost"
                       disabled={busy}
                       fullWidth
-                      onPress={() => applyExpiry(preset)}
+                      onPress={() => applyExpiry("never")}
                     />
-                  </NativeActionItem>
-                ))}
-              </NativeActionRow>
-              <Text style={[typography.small, { color: tokens.mutedForeground }]}>
-                {expiryText}
-              </Text>
-              {share?.expiresAt ? (
-                <Button
-                  label={t.share.expiryNever}
-                  variant="ghost"
-                  disabled={busy}
-                  fullWidth
-                  onPress={() => applyExpiry("never")}
-                />
-              ) : null}
-            </View>
-
-            <View style={styles.block}>
-              <Text style={[typography.small, { color: tokens.mutedForeground }]}>
-                {t.share.linkLabel}
-              </Text>
-              {publicUrl ? (
-                <>
-                  <Text
-                    selectable
-                    style={[
-                      typography.small,
-                      styles.link,
-                      { backgroundColor: tokens.muted, color: tokens.foreground },
-                    ]}
-                  >
-                    {publicUrl}
-                  </Text>
-                  <Button
-                    label={copied ? t.share.linkCopied : t.share.copyLink}
-                    variant="secondary"
-                    leadingIcon={
-                      copied ? (
-                        <Check size={16} color={tokens.foreground} />
-                      ) : (
-                        <Copy size={16} color={tokens.foreground} />
-                      )
-                    }
-                    fullWidth
-                    onPress={() => void copyLink()}
-                  />
-                  {copyFailed ? (
-                    <Text style={[typography.small, { color: tokens.destructive }]}>
-                      {t.share.copyUnavailable}
-                    </Text>
                   ) : null}
-                </>
-              ) : (
-                <Text style={[typography.small, { color: tokens.mutedForeground }]}>
-                  {t.share.linkUnavailable}
-                </Text>
-              )}
-            </View>
-          </View>
-        ) : null}
+                </View>
+
+                {linkBlock}
+              </View>
+            ) : null}
+          </>
+        )}
       </ScrollView>
     </NativeBottomSheet>
   );
@@ -322,4 +422,15 @@ const styles = StyleSheet.create({
   details: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 14, gap: 18 },
   block: { gap: 8 },
   link: { borderRadius: radius.md, paddingHorizontal: 12, paddingVertical: 10 },
+  pending: { paddingVertical: 24, textAlign: "center" },
+  inherited: { paddingTop: 12, gap: 14 },
+  inheritedCard: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: radius.md,
+    padding: 12,
+  },
+  inheritedIcon: { borderRadius: radius.md, padding: 8 },
 });

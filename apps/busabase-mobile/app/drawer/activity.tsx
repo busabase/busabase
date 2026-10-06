@@ -1,42 +1,21 @@
-import { useRouter } from "expo-router";
-import {
-  CircleDot,
-  FileText,
-  GitCommitHorizontal,
-  GitPullRequest,
-  ListChecks,
-  ShieldCheck,
-} from "lucide-react-native";
 import { useMemo } from "react";
 import {
   NativeActionBar,
   NativeEmptyState,
   NativeErrorState,
   NativeLoadingState,
-  NativeRow,
   NativeSection,
 } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
+import { ActivityEventRow } from "~/domains/review/components/ActivityEventRow";
 import { useInfiniteActivityFeed } from "~/domains/review/hooks/use-activity-feed";
-import type { ActivityEvent, ActivityTone } from "~/domains/review/types/activity-events";
+import type { ActivityEvent } from "~/domains/review/types/activity-events";
 import { ConnectionGuard } from "~/domains/workspace/components/ConnectionGuard";
 import { DrawerScaffold } from "~/domains/workspace/components/DrawerScaffold";
-import { formatListDateTime } from "~/lib/format";
-import { useTokens } from "~/theme/use-tokens";
 
 const ACTIVITY_PAGE_SIZE = 25;
 
-const toneIcons: Record<ActivityTone, typeof GitPullRequest> = {
-  audit: ShieldCheck,
-  change_request: GitPullRequest,
-  operation: ListChecks,
-  commit: GitCommitHorizontal,
-  record: FileText,
-};
-
 function ActivityContent() {
-  const router = useRouter();
-  const tokens = useTokens();
   const query = useInfiniteActivityFeed(ACTIVITY_PAGE_SIZE);
 
   const { today, earlier } = useMemo(() => {
@@ -49,32 +28,9 @@ function ActivityContent() {
     };
   }, [query.data]);
 
-  const openEvent = (event: ActivityEvent) => {
-    if (event.target.kind === "change-request") {
-      router.push({ pathname: "/change-requests/[id]", params: { id: event.target.id } });
-    } else if (event.target.kind === "operation") {
-      router.push({
-        pathname: "/change-requests/[id]/operations/[operationId]",
-        params: { id: event.target.changeRequestId, operationId: event.target.operationId },
-      });
-    } else if (event.target.kind === "record") {
-      router.push({ pathname: "/records/[id]", params: { id: event.target.id } });
-    }
-  };
-
-  const renderRow = (event: ActivityEvent, index: number, total: number) => {
-    const Icon = toneIcons[event.tone] ?? CircleDot;
-    return (
-      <NativeRow
-        key={event.id}
-        title={event.title}
-        subtitle={formatListDateTime(event.timestamp)}
-        leading={<Icon size={18} color={tokens.mutedForeground} />}
-        onPress={event.target.kind === "none" ? undefined : () => openEvent(event)}
-        last={index === total - 1}
-      />
-    );
-  };
+  const renderRow = (event: ActivityEvent, index: number, total: number) => (
+    <ActivityEventRow key={event.id} event={event} last={index === total - 1} />
+  );
 
   return (
     <DrawerScaffold

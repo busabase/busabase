@@ -1,11 +1,12 @@
 import { hasCapability } from "busabase-contract/domains";
 import type { NodeVO } from "busabase-contract/types";
-import { ChevronDown, ChevronRight, MoreHorizontal } from "lucide-react-native";
+import { ChevronDown, ChevronRight, Globe, Lock, MoreHorizontal } from "lucide-react-native";
 import { Pressable, Text, View } from "react-native";
 import { fmt, useI18n } from "~/i18n";
 import { mobile, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 import { isMobileNodePathActive } from "../utils/node-navigation";
+import { resolveNodeShareMarker } from "../utils/node-share-marker";
 import type { DrawerDestination } from "./drawer-nav-destinations";
 import { drawerScaffoldStyles as styles } from "./drawer-scaffold-styles";
 import { NodeAvatar } from "./NodeAvatar";
@@ -85,6 +86,7 @@ export function NodeNavItem({
   const { t } = useI18n();
   const meta = nodeNavMeta(node);
   const active = isNodeActive(node, pathname);
+  const shareMarker = resolveNodeShareMarker(node);
 
   if (hasCapability(node.type, "hidden")) return null;
 
@@ -165,6 +167,19 @@ export function NodeNavItem({
             </Text>
           </View>
         )}
+        {shareMarker ? (
+          <View accessibilityLabel={t.share[shareMarker.labelKey]} style={styles.nodeShareMarker}>
+            {shareMarker.icon === "globe" ? (
+              <Globe
+                size={14}
+                color={tokens.mutedForeground}
+                opacity={shareMarker.tone === "muted" ? 0.55 : 1}
+              />
+            ) : (
+              <Lock size={14} color={tokens.mutedForeground} />
+            )}
+          </View>
+        ) : null}
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={`${t.nodeActions.more} — ${node.name}`}

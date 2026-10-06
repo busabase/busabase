@@ -143,3 +143,82 @@ describe("getPreview skips people-typed cells", () => {
     expect(getPreview({ owner: ["local-producer", "local-viewer"] })).toContain("local-producer");
   });
 });
+
+/**
+ * A `date` field is a TextInput on mobile. Day values must open and save as the
+ * day they name wherever the phone is (run under TZ=America/Los_Angeles and
+ * TZ=Asia/Shanghai); date-time values are typed as wall-clock time in the
+ * field's zone and saved with that zone's offset.
+ */
+const dateField = (date?: { includeTime?: boolean; timezone?: string }): BaseFieldVO =>
+  ({
+    ...field("date"),
+    slug: "due",
+    options: date ? ({ date } as BaseFieldVO["options"]) : {},
+  }) satisfies BaseFieldVO;
+
+describe("date fields in the mobile record form", () => {
+  it("opens a day value as the day it names, in every time zone", () => {
+    expect(initialFieldValue(dateField(), "2026-10-02")).toBe("2026-10-02");
+    expect(initialFieldValue(dateField(), "2026-10-02T00:00:00.000Z")).toBe("2026-10-02");
+  });
+
+  it("saves typed day text as YYYY-MM-DD", () => {
+    expect(normalizeFormValues([dateField()], { due: "2026-10-02" })).toEqual({
+      due: "2026-10-02",
+    });
+    expect(normalizeFormValues([dateField()], { due: " 2026-10-02 " })).toEqual({
+      due: "2026-10-02",
+    });
+  });
+
+  it("keeps an empty date as the form's empty value", () => {
+    expect(initialFieldValue(dateField(), undefined)).toBe("");
+    expect(normalizeFormValues([dateField()], { due: "" })).toEqual({ due: "" });
+  });
+
+  it("passes unreadable text through so the server's validator reports it", () => {
+    expect(normalizeFormValues([dateField()], { due: "next friday" })).toEqual({
+      due: "next friday",
+    });
+    expect(initialFieldValue(dateField(), "not a date")).toBe("not a date");
+  });
+
+  it("opens a date-time value as wall-clock time in the field's zone", () => {
+    const shanghai = dateField({ includeTime: true, timezone: "Asia/Shanghai" });
+    expect(initialFieldValue(shanghai, "2026-10-02T10:00:00Z")).toBe("2026-10-02 18:00");
+  });
+
+  it("saves typed date-time text with the field zone's offset", () => {
+    const shanghai = dateField({ includeTime: true, timezone: "Asia/Shanghai" });
+    expect(normalizeFormValues([shanghai], { due: "2026-10-02 18:00" })).toEqual({
+      due: "2026-10-02T18:00:00+08:00",
+    });
+  });
+
+  it("round-trips a date-time value without drifting", () => {
+    const shanghai = dateField({ includeTime: true, timezone: "Asia/Shanghai" });
+    const stored = "2026-10-02T18:00:00+08:00";
+    const text = initialFieldValue(shanghai, stored);
+    expect(normalizeFormValues([shanghai], { due: text })).toEqual({ due: stored });
+  });
+
+  it("sends an untouched date-time back exactly as stored, not re-stamped", () => {
+    // No pinned zone: the device reads it in its own zone, whatever that is.
+    const local = dateField({ includeTime: true });
+    const stored = "2026-10-02T18:00:00+08:00";
+    const text = initialFieldValue(local, stored);
+    expect(normalizeFormValues([local], { due: text }, { due: stored })).toEqual({ due: stored });
+  });
+
+  it("an edited date-time is saved in the new wall-clock time", () => {
+    const shanghai = dateField({ includeTime: true, timezone: "Asia/Shanghai" });
+    expect(
+      normalizeFormValues(
+        [shanghai],
+        { due: "2026-10-02 19:30" },
+        { due: "2026-10-02T18:00:00+08:00" },
+      ),
+    ).toEqual({ due: "2026-10-02T19:30:00+08:00" });
+  });
+});

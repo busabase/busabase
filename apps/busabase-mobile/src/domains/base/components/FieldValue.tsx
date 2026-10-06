@@ -1,4 +1,5 @@
 import type { AssetAttachmentRef, BaseFieldVO, UserRefVO } from "busabase-contract/types";
+import { describeDateFieldValue, getDateFieldOptions } from "busabase-core/base/date-value";
 import { getMemberIds, isPeopleFieldType } from "busabase-core/base/field-types";
 import { formatMemberChipLabel } from "busabase-core/dashboard/format";
 import { ExternalLink, FileText } from "lucide-react-native";
@@ -14,6 +15,7 @@ import {
 import { Button } from "~/components/ui/Button";
 import { useConnection } from "~/connection/connection-store";
 import { stringifyFieldValue } from "~/domains/review/utils/busabase-display";
+import { fmt, useI18n } from "~/i18n";
 import {
   getAttachmentKindLabel,
   getAttachmentRefs,
@@ -119,6 +121,11 @@ export function FieldValue({
     );
   }
 
+  // Unparseable date text falls through to the raw string below rather than vanishing.
+  if (field?.type === "date" && describeDateFieldValue(value)) {
+    return <DateValue field={field} value={value} highlight={highlight} compact={!interactive} />;
+  }
+
   const chips = getChipLabels(field, value);
   if (chips.length > 0) {
     return (
@@ -201,6 +208,70 @@ export function FieldValue({
       >
         {expanded ? "Show less" : "Show more"}
       </Text>
+    </View>
+  );
+}
+
+/**
+ * A `date` field value, read the same by every teammate: a day value is that
+ * day everywhere; a date-time value is shown in the field's pinned zone (else
+ * the device's), with a "+1"/"-1" when that lands on a different day than the
+ * writer typed, and the writer's / reader's own wall time underneath.
+ */
+function DateValue({
+  field,
+  value,
+  highlight,
+  compact,
+}: {
+  field: BaseFieldVO;
+  value: unknown;
+  highlight?: boolean;
+  /** Dense cells (table, gallery): one line; the extra context moves to the a11y hint. */
+  compact?: boolean;
+}) {
+  const tokens = useTokens();
+  const { t, locale } = useI18n();
+  const display = describeDateFieldValue(value, {
+    locale,
+    options: getDateFieldOptions(field.options),
+  });
+  if (!display) {
+    return null;
+  }
+  const shift = display.dayShift > 0 ? `+${display.dayShift}` : String(display.dayShift);
+  const secondary = [
+    display.enteredAs ? fmt(t.dateField.enteredAs, { value: display.enteredAs }) : null,
+    display.readerLocal ? fmt(t.dateField.yourLocalTime, { value: display.readerLocal }) : null,
+  ].filter((line): line is string => line !== null);
+
+  return (
+    <View style={styles.dateValue}>
+      <Text
+        numberOfLines={compact ? 1 : undefined}
+        accessibilityHint={secondary.length > 0 ? secondary.join(". ") : undefined}
+        style={[
+          typography.body,
+          highlight
+            ? [styles.highlight, { backgroundColor: tokens.primaryMuted, color: tokens.foreground }]
+            : { color: tokens.foreground },
+        ]}
+      >
+        {display.text}
+        {display.dayShift !== 0 ? (
+          <Text
+            accessibilityLabel={fmt(t.dateField.dayShiftHint, { shift })}
+            style={[typography.small, { color: tokens.mutedForeground }]}
+          >
+            {` ${shift}`}
+          </Text>
+        ) : null}
+      </Text>
+      {(compact ? [] : secondary).map((line) => (
+        <Text key={line} style={[typography.small, { color: tokens.mutedForeground }]}>
+          {line}
+        </Text>
+      ))}
     </View>
   );
 }
@@ -419,4 +490,5 @@ const styles = StyleSheet.create({
   expandText: { alignSelf: "flex-start", paddingVertical: 2 },
   highlight: { borderRadius: radius.sm, paddingHorizontal: 4 },
   longText: { gap: 6 },
+  dateValue: { gap: 2 },
 });
