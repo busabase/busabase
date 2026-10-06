@@ -28,7 +28,7 @@ describe("compact by default", () => {
   });
 });
 
-describe("expanding a completed call reveals its result (PUL-262)", () => {
+describe("expanding a completed call reveals its result", () => {
   it("shows Parameters and Result after clicking the header", async () => {
     render(
       <AcpToolCallView

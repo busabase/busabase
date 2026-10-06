@@ -288,10 +288,10 @@ describe("tool calls", () => {
     expect(blocks).toHaveLength(2);
   });
 
-  // PUL-262: buda emits `rawInput` on `tool_call` and `rawOutput` on the
+  // Buda emits `rawInput` on `tool_call` and `rawOutput` on the
   // `tool_call_update` that follows. Both are patch fields the reducer used
   // to drop entirely — this pins that they now survive onto the block.
-  describe("raw input/output (PUL-262)", () => {
+  describe("raw input/output", () => {
     it("captures rawInput from the initial tool_call", () => {
       const blocks = fold([toolCall("t1", { rawInput: { path: "README.md" } })]);
       expect((blocks[0] as { rawInput: unknown }).rawInput).toEqual({ path: "README.md" });

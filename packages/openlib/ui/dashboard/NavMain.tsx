@@ -708,7 +708,12 @@ function NavMainComponent({
     if (!StatusIcon || !item.statusIconTitle) return null;
     return (
       <span
-        className="pointer-events-none absolute right-2 top-1/2 flex -translate-y-1/2 items-center text-sidebar-foreground/50 transition-opacity group-focus-within/nav-row:opacity-0 group-hover/nav-row:opacity-0 group-data-[collapsible=icon]:hidden"
+        className={`pointer-events-none absolute right-2 top-1/2 flex -translate-y-1/2 items-center transition-opacity group-focus-within/nav-row:opacity-0 group-hover/nav-row:opacity-0 group-data-[collapsible=icon]:hidden ${
+          item.statusIconTone === "muted"
+            ? "text-sidebar-foreground/30"
+            : "text-sidebar-foreground/50"
+        }`}
+        data-status-tone={item.statusIconTone ?? "default"}
         title={item.statusIconTitle}
       >
         <StatusIcon aria-hidden="true" className="size-3.5 shrink-0" />

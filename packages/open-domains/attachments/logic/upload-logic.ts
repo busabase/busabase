@@ -55,21 +55,46 @@ export interface RequestUploadUrlResult {
 }
 
 /**
- * Content-addressed storage key: identical bytes → identical key → ONE physical
- * object, globally (even across spaces/tenants). Combined with scoped dedup this
- * gives store-once without a cross-tenant existence oracle: same-scope re-uploads
- * skip the upload entirely; cross-scope uploads re-PUT the SAME key (idempotent
- * overwrite, no extra storage, nothing leaked). Falls back to a per-owner random
- * key when no hash is supplied (legacy clients) — fully backward compatible.
+ * Accepted shape of a client-supplied fingerprint: optional `sha256:` + 64 hex.
+ * Anything else is rejected outright — the hash lands in a storage key.
  */
-function contentAddressedKey(contentHash: string, fileName: string): string {
+const CONTENT_HASH_RE = /^(?:sha256:)?[0-9a-f]{64}$/;
+
+/**
+ * The per-owner key segment. Owner ids are opaque strings (nanoids, `local`,
+ * but also synthetic owners such as `local-node-icon:<nodeId>`), so anything
+ * outside a filesystem-safe alphabet is replaced — the local adapter maps keys
+ * to paths, and `:` is not a legal path character on Windows.
+ */
+function ownerSegment(userId: string): string {
+  return userId.replace(/[^A-Za-z0-9_-]/g, "_");
+}
+
+/**
+ * Content-addressed storage key, namespaced UNDER THE OWNER. The hash is
+ * computed by the client and the bytes go straight to the bucket, so the
+ * server never verifies it: a key shared across owners would let anyone who
+ * knows a file's hash (it is in the file's URL) get a presigned PUT for it and
+ * overwrite another user's object. Owner-scoping keeps store-once per owner —
+ * and scoped dedup (below) still reuses one row's object for the whole space —
+ * while no caller is ever handed a key that belongs to someone else.
+ */
+function contentAddressedKey(contentHash: string, fileName: string, userId: string): string {
   const ext = extractFileExtension(fileName);
   const hashHex = contentHash.replace(/^sha256:/, "");
   // Git/OCI-style: algorithm segment + 2-char fan-out (filesystem-friendly for the
   // local adapter; harmless on S3/R2). Keep the extension so direct-serve + the dev
   // proxy infer the right Content-Type (mime is also in the registry row).
   const shard = hashHex.slice(0, 2);
-  return `${ATTACHMENT_KEY_PREFIX}/blobs/sha256/${shard}/${hashHex}${ext ? `.${ext}` : ""}`;
+  return `${ATTACHMENT_KEY_PREFIX}/${ownerSegment(userId)}/blobs/sha256/${shard}/${hashHex}${ext ? `.${ext}` : ""}`;
+}
+
+function assertValidContentHash(contentHash: string | undefined): void {
+  if (contentHash !== undefined && !CONTENT_HASH_RE.test(contentHash)) {
+    throw new ORPCError("BAD_REQUEST", {
+      message: "contentHash must be a hex SHA-256 digest (optionally prefixed with sha256:).",
+    });
+  }
 }
 
 /**
@@ -82,6 +107,17 @@ function contentAddressedKey(contentHash: string, fileName: string): string {
 function isAttachmentStorageKey(storageKey: string): boolean {
   if (!storageKey.startsWith(`${ATTACHMENT_KEY_PREFIX}/`)) return false;
   return !storageKey.split("/").includes("..");
+}
+
+/**
+ * Is this a key `requestUploadUrl` would have minted for this owner? Confirming
+ * anything else would register another user's object as the caller's own.
+ */
+function isOwnAttachmentKey(storageKey: string, userId: string): boolean {
+  return (
+    isAttachmentStorageKey(storageKey) &&
+    storageKey.startsWith(`${ATTACHMENT_KEY_PREFIX}/${ownerSegment(userId)}/`)
+  );
 }
 
 /**
@@ -139,6 +175,8 @@ export async function requestUploadUrl(
     });
   }
 
+  assertValidContentHash(input.contentHash);
+
   // Dedup short-circuit: identical bytes already stored → reuse, skip upload.
   if (input.contentHash && db && attachmentsTable) {
     const existing = await findByContentHash(
@@ -160,13 +198,13 @@ export async function requestUploadUrl(
     }
   }
 
-  // Content-addressed key when we have a hash (store-once across tenants);
+  // Content-addressed key when we have a hash (store-once per owner);
   // otherwise the legacy per-owner random key (backward compatible).
   const ext = extractFileExtension(input.fileName);
   const context = input.context || "general";
   const storageKey = input.contentHash
-    ? contentAddressedKey(input.contentHash, input.fileName)
-    : `${ATTACHMENT_KEY_PREFIX}/${userId}/${context}/${generateNanoID()}${ext ? `.${ext}` : ""}`;
+    ? contentAddressedKey(input.contentHash, input.fileName, userId)
+    : `${ATTACHMENT_KEY_PREFIX}/${ownerSegment(userId)}/${context}/${generateNanoID()}${ext ? `.${ext}` : ""}`;
 
   // The storage adapter returns the right target: an s3/r2/minio presign for a
   // direct browser→bucket PUT, or the local dev relay URL carrying ?key=. Either
@@ -223,6 +261,14 @@ export async function confirmUpload(
       message: `storageKey must be an attachment upload under ${ATTACHMENT_KEY_PREFIX}/ (from createUploadUrl).`,
     });
   }
+  // Ownership guard: only a key minted for THIS caller may be finalized —
+  // otherwise anyone could claim another user's stored object as their own.
+  if (!isOwnAttachmentKey(input.storageKey, userId)) {
+    throw new ORPCError("BAD_REQUEST", {
+      message: "storageKey must be an attachment key issued to you by createUploadUrl.",
+    });
+  }
+  assertValidContentHash(input.contentHash);
 
   // Safety-net dedup: if the same content was registered concurrently (or the
   // host didn't wire request-time dedup), reuse the existing row instead of
@@ -273,9 +319,9 @@ export async function confirmUpload(
 }
 
 /**
- * Refcount-safe delete. Content-addressed keys are SHARED by many registry rows
- * (across spaces/tenants), so the physical object must only be removed once the
- * LAST row referencing that storageKey is gone. Always delete attachments via
+ * Refcount-safe delete. A content-addressed key can be SHARED by many registry
+ * rows (scoped dedup, and keys minted before keys were owner-scoped), so the
+ * physical object must only be removed once the LAST row referencing that storageKey is gone. Always delete attachments via
  * this helper — NEVER call `storage.deleteObject` on an attachment key directly,
  * or you may delete bytes another tenant still references.
  */
