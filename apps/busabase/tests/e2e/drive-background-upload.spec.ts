@@ -176,7 +176,10 @@ test("Drive review upload stays in place and creates one multi-file Change Reque
   ]);
   const dialog = page.getByRole("dialog");
   await dialog.getByRole("button", { name: "More submit options" }).click();
-  await dialog.getByRole("button", { name: "Request upload" }).click();
+  // The dropdown's menu content is a Radix portal rendered as a sibling of the
+  // dialog in `document.body`, not nested inside it — so the menuitem has to be
+  // found from `page`, not from `dialog`.
+  await page.getByRole("menuitem", { name: "Request upload" }).click();
 
   await expect(dialog).toHaveCount(0);
   // Assert the upload task panel's own row, not the page. Backgrounded uploads
