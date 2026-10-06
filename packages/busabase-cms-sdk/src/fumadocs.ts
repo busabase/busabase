@@ -2,31 +2,111 @@ import { createMarkdownRenderer, type MarkdownProps } from "fumadocs-core/conten
 import { getTableOfContents } from "fumadocs-core/content/toc";
 import { remarkHeading } from "fumadocs-core/mdx-plugins/remark-heading";
 import type { TOCItemType } from "fumadocs-core/toc";
-import type { ReactNode } from "react";
+import type { Element, Root } from "hast";
+import { type ComponentProps, createElement, type ElementType, type ReactNode } from "react";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 import sanitizeHtml from "sanitize-html";
 import type { PageVO } from "./types";
 
+/** rehype-sanitize's default `clobberPrefix`: every rendered `id` carries it. */
+const SAFE_ID_PREFIX = "user-content-";
+
+/**
+ * rehype-sanitize prefixes every `id` to block DOM clobbering, but leaves in-page `#fragment`
+ * links untouched — and GFM footnote ids arrive already prefixed, so they get it twice. Collapse
+ * the doubled prefix, then point each in-page link at the id that was actually rendered.
+ */
+const rehypeSafeAnchors = () => (tree: Root) => {
+  const ids = new Set<string>();
+  const links: Element[] = [];
+  const walk = (node: Root | Element) => {
+    for (const child of node.children) {
+      if (child.type !== "element") continue;
+      const { id, href } = child.properties;
+      if (typeof id === "string") {
+        const single = id.replace(`${SAFE_ID_PREFIX}${SAFE_ID_PREFIX}`, SAFE_ID_PREFIX);
+        child.properties.id = single;
+        ids.add(single);
+      }
+      if (child.tagName === "a" && typeof href === "string" && href.startsWith("#")) {
+        links.push(child);
+      }
+      walk(child);
+    }
+  };
+  walk(tree);
+  for (const link of links) {
+    const href = link.properties.href as string;
+    let fragment = href.slice(1);
+    try {
+      fragment = decodeURIComponent(fragment);
+    } catch {
+      // Keep a malformed escape as written; it simply won't match a heading.
+    }
+    if (!ids.has(fragment) && ids.has(`${SAFE_ID_PREFIX}${fragment}`)) {
+      link.properties.href = `#${SAFE_ID_PREFIX}${fragment}`;
+    }
+  }
+};
+
 const safeMarkdownRenderer = createMarkdownRenderer({
   remarkPlugins: [remarkGfm, remarkHeading],
-  rehypePlugins: [rehypeSanitize],
+  rehypePlugins: [rehypeSanitize, rehypeSafeAnchors],
 });
+
+type MarkdownComponents = NonNullable<MarkdownProps["components"]>;
+
+/**
+ * Components that render a body `# Heading` as `<h2>`, for pages whose template already owns
+ * the page's only `<h1>` (e.g. a Blog post title). Text, id and anchors are unchanged; a caller's
+ * own `h2` component is reused. Also usable for local MDX bodies.
+ */
+export const withDemotedH1 = <T extends Record<string, unknown>>(components?: T) => {
+  const H2 = (components?.h2 ?? "h2") as ElementType;
+  return {
+    ...components,
+    h1: (props: ComponentProps<"h1">) => createElement(H2, props),
+  };
+};
+
+/** Shift `depth: 1` TOC entries to 2 to match a body rendered with `withDemotedH1`. */
+export const demoteTocH1 = (toc: TOCItemType[]): TOCItemType[] =>
+  toc.map((item) => (item.depth === 1 ? { ...item, depth: 2 } : item));
 
 export interface SafeMarkdownProps {
   children: string;
-  components?: MarkdownProps["components"];
+  components?: MarkdownComponents;
+  /** Render body H1 as H2 because the surrounding template owns the page H1. */
+  demoteH1?: boolean;
 }
 
 /** Render stored Markdown without MDX execution or raw HTML passthrough. */
 export const SafeMarkdown = async ({
   children,
   components,
+  demoteH1 = false,
 }: SafeMarkdownProps): Promise<ReactNode> =>
-  safeMarkdownRenderer.MarkdownServer({ children, components });
+  safeMarkdownRenderer.MarkdownServer({
+    children,
+    components: demoteH1 ? (withDemotedH1(components) as MarkdownComponents) : components,
+  });
 
-export const getSafeMarkdownToc = async (markdown: string): Promise<TOCItemType[]> =>
-  getTableOfContents(markdown, [remarkGfm]);
+export interface SafeMarkdownTocOptions {
+  /** Match `SafeMarkdown`'s `demoteH1`: report body H1 entries at depth 2. */
+  demoteH1?: boolean;
+}
+
+/** TOC for `SafeMarkdown`; each `url` targets the id `SafeMarkdown` actually renders. */
+export const getSafeMarkdownToc = async (
+  markdown: string,
+  { demoteH1 = false }: SafeMarkdownTocOptions = {},
+): Promise<TOCItemType[]> => {
+  const toc = (await getTableOfContents(markdown, [remarkGfm])).map((item) =>
+    item.url.startsWith("#") ? { ...item, url: `#${SAFE_ID_PREFIX}${item.url.slice(1)}` } : item,
+  );
+  return demoteH1 ? demoteTocH1(toc) : toc;
+};
 
 const safeCssValue = /^(?!.*(?:url|expression|@import|javascript))[-a-zA-Z0-9#(),.%\s/]+$/i;
 const safeLength =

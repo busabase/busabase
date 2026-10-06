@@ -1,5 +1,6 @@
 import "server-only";
 
+import { type CmsIndexEntries, selectCmsIndexEntries } from "../content-index";
 import type { CmsCanonicalPath } from "../routing";
 import { type CmsPathHelpers, type CmsTaxonomyKind, createCmsPathHelpers } from "../routing";
 import { createCmsClientProvider } from "./client";
@@ -37,14 +38,19 @@ export {
 } from "./pages";
 export {
   type BlogCardContent,
+  type CmsPostJsonLdLabel,
   type CmsPostReads,
   type CmsPostResolver,
   type CmsPostResolverDependencies,
   type CmsPostResolverIntegration,
   type CmsPostResolverOptions,
+  cmsPostToBlogCard,
   createCmsPostReads,
   createCmsPostResolver,
+  type LocalBlogCardPage,
+  type LocalPostJsonLdFields,
   type LocalPostSourceLike,
+  localPageToBlogCard,
   mergeBlogCardsByPath,
   type ResolvedCmsPostPage,
   type ResolvePostMetadataInputOptions,
@@ -68,6 +74,13 @@ export interface CmsIntegration extends CmsPostReads, CmsPageReads, CmsTaxonomyR
   isBusabaseCmsEnabled: () => boolean;
   /** Re-reads the environment on every call — never memoized, unlike the client itself. */
   getCmsConfig: () => ResolvedCmsConfig | null;
+
+  /**
+   * One locale's published, canonical Posts and Pages as plain index entries — the facts
+   * behind a site index such as `/llms.txt` (see `selectCmsIndexEntries`). Built on the
+   * `*OrFallback` reads, so an unconfigured or unreachable CMS yields empty lists, never a throw.
+   */
+  listCmsIndexEntriesOrFallback: (options?: { locale?: string }) => Promise<CmsIndexEntries>;
 }
 
 export const createCmsIntegration = (config: CmsIntegrationConfig): CmsIntegration => {
@@ -78,6 +91,8 @@ export const createCmsIntegration = (config: CmsIntegrationConfig): CmsIntegrati
   });
 
   const provider = createCmsClientProvider(config);
+  const postReads = createCmsPostReads(provider, config.appLabel);
+  const pageReads = createCmsPageReads(provider, config.appLabel);
 
   return {
     cmsPathHelpers,
@@ -87,8 +102,20 @@ export const createCmsIntegration = (config: CmsIntegrationConfig): CmsIntegrati
     buildCmsTaxonomyArchivePath: cmsPathHelpers.buildTaxonomyArchivePath,
     isBusabaseCmsEnabled: provider.isBusabaseCmsEnabled,
     getCmsConfig: provider.getCmsConfig,
-    ...createCmsPostReads(provider, config.appLabel),
-    ...createCmsPageReads(provider, config.appLabel),
+    ...postReads,
+    ...pageReads,
     ...createCmsTaxonomyReads(provider, config.appLabel),
+    listCmsIndexEntriesOrFallback: async ({ locale = config.defaultLocale } = {}) => {
+      // Page summaries, not full Pages: an index needs no bodies.
+      const [posts, pages] = await Promise.all([
+        postReads.listBusabaseBlogPostsOrFallback(),
+        pageReads.listBusabaseLandingPageSummariesOrFallback(),
+      ]);
+      const options = { parsePath: cmsPathHelpers.parsePath, locale };
+      return {
+        posts: selectCmsIndexEntries(posts, options),
+        pages: selectCmsIndexEntries(pages, options),
+      };
+    },
   };
 };

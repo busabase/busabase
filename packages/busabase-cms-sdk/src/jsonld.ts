@@ -46,8 +46,19 @@ export interface CmsWebPageJsonLdInput {
   image?: string | null;
 }
 
-export interface CmsArticleJsonLdInput extends CmsWebPageJsonLdInput {
-  datePublished?: string | null;
+export interface CmsArticleJsonLdInput extends Omit<CmsWebPageJsonLdInput, "dateModified"> {
+  /**
+   * schema.org type. Defaults to `Article`; Blog Posts use `BlogPosting` (a subtype of
+   * `Article`, so everything that reads Article still reads it).
+   */
+  type?: "Article" | "BlogPosting";
+  /**
+   * ISO 8601 string, or a `Date` (fumadocs parses an unquoted YAML `date:` into one). A value
+   * that does not parse as a date is dropped rather than emitted.
+   */
+  datePublished?: string | Date | null;
+  /** Same rules as `datePublished`. Falls back to `datePublished` when absent. */
+  dateModified?: string | Date | null;
   author?: string | null;
 }
 
@@ -95,21 +106,52 @@ export const buildCmsWebPageJsonLd = (site: CmsJsonLdSite, input: CmsWebPageJson
     publisher: publisherOf(site),
   });
 
-/** `Article` node — for content that genuinely is editorial, i.e. Blog Posts. */
-export const buildCmsArticleJsonLd = (site: CmsJsonLdSite, input: CmsArticleJsonLdInput) =>
-  compact({
+/** A complete ISO 8601 date or date-time — the shapes schema.org accepts verbatim. */
+const ISO_8601 = /^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})?)?$/;
+
+/**
+ * An ISO 8601 date for structured data, or `undefined`.
+ *
+ * An ISO string is passed through untouched — re-serializing `2026-09-01` through `Date`
+ * would turn a calendar date into a UTC instant the author never wrote. A `Date` (fumadocs'
+ * YAML dates) is serialized; any other string is parsed, and dropped when it is not a date,
+ * because `"datePublished": "last Tuesday"` is invalid schema that nobody would notice.
+ */
+const toIsoDate = (value: string | Date | null | undefined): string | undefined => {
+  if (value === null || value === undefined) return undefined;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? undefined : value.toISOString();
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) return undefined;
+  return ISO_8601.test(trimmed) ? trimmed : parsed.toISOString();
+};
+
+/** A non-empty string, else `undefined` — an empty `description` is noise, not data. */
+const text = (value: string | null | undefined): string | undefined =>
+  value?.trim() ? value : undefined;
+
+/**
+ * `Article` node — for content that genuinely is editorial, i.e. Blog Posts. Pass
+ * `type: "BlogPosting"` for a post (what `buildCmsPostJsonLd` does).
+ */
+export const buildCmsArticleJsonLd = (site: CmsJsonLdSite, input: CmsArticleJsonLdInput) => {
+  const datePublished = toIsoDate(input.datePublished);
+  return compact({
     "@context": "https://schema.org",
-    "@type": "Article",
+    "@type": input.type ?? "Article",
     headline: input.title,
-    description: input.description ?? undefined,
+    description: text(input.description),
     inLanguage: input.lang,
-    datePublished: input.datePublished ?? undefined,
-    dateModified: input.dateModified ?? input.datePublished ?? undefined,
-    image: input.image ? [absolute(site.baseUrl, input.image)] : undefined,
-    author: input.author ? { "@type": "Person", name: input.author } : undefined,
+    datePublished,
+    dateModified: toIsoDate(input.dateModified) ?? datePublished,
+    image: text(input.image) ? [absolute(site.baseUrl, input.image as string)] : undefined,
+    author: text(input.author) ? { "@type": "Person", name: input.author } : undefined,
     publisher: publisherOf(site),
     mainEntityOfPage: { "@type": "WebPage", "@id": input.url },
+    url: input.url,
   });
+};
 
 /**
  * `BreadcrumbList` node. Returns `undefined` for a trail too short to be a trail —
@@ -222,6 +264,27 @@ export const buildCmsPageJsonLd = (
     buildCmsWebPageJsonLd(site, input),
     input.breadcrumbs ? buildCmsBreadcrumbJsonLd(input.breadcrumbs) : undefined,
     input.bodyHtml ? buildCmsFaqJsonLd(extractCmsFaqEntries(input.bodyHtml)) : undefined,
+  ];
+
+  return nodes.filter((node): node is Record<string, unknown> => node !== undefined);
+};
+
+/**
+ * Everything a Blog Post route needs, in one call: a `BlogPosting` and the breadcrumb trail
+ * (typically Home → Blog → Post). The Post counterpart of `buildCmsPageJsonLd`.
+ *
+ * Use it directly when an app resolves the post itself; apps on `createCmsPostResolver` get
+ * the same nodes, with the canonical URL and content locale already worked out, from
+ * `resolvePostJsonLd`.
+ */
+export const buildCmsPostJsonLd = (
+  site: CmsJsonLdSite,
+  input: Omit<CmsArticleJsonLdInput, "type"> & { breadcrumbs?: readonly CmsBreadcrumbItem[] },
+): Array<Record<string, unknown>> => {
+  const { breadcrumbs, ...article } = input;
+  const nodes: Array<Record<string, unknown> | undefined> = [
+    buildCmsArticleJsonLd(site, { ...article, type: "BlogPosting" }),
+    breadcrumbs ? buildCmsBreadcrumbJsonLd(breadcrumbs) : undefined,
   ];
 
   return nodes.filter((node): node is Record<string, unknown> => node !== undefined);

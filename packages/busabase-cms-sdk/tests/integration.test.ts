@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildCmsCacheKeyPrefix,
+  cmsPostToBlogCard,
   createCmsIntegration,
+  localPageToBlogCard,
   mergeBlogCardsByPath,
   readCmsEnvConfig,
   resolveCmsCacheTags,
@@ -187,5 +189,62 @@ describe("mergeBlogCardsByPath", () => {
       ["/blog/newer", "Local only"],
       ["/blog/hello", "CMS"],
     ]);
+  });
+
+  it("prefers sources in argument order across three sources and dedupes normalized paths", () => {
+    const posts = mergeBlogCardsByPath(
+      [{ url: "/blog/shared/", title: "CMS", date: "2026-07-21" }],
+      [
+        { url: "/blog/shared", title: "Local duplicate" },
+        { url: "/zh-CN/blog/local", title: "Local" },
+      ],
+      [
+        { url: "/blog/shared", title: "WordPress duplicate" },
+        { url: "/blog/wordpress", title: "WordPress" },
+      ],
+    );
+
+    expect(posts.map((post) => [post.url, post.title])).toEqual([
+      ["/blog/shared", "CMS"],
+      ["/zh-CN/blog/local", "Local"],
+      ["/blog/wordpress", "WordPress"],
+    ]);
+  });
+
+  it("drops invalid paths instead of allowing them to shadow valid content", () => {
+    expect(mergeBlogCardsByPath([{ url: "not-a-path", title: "Invalid" }])).toEqual([]);
+  });
+});
+
+describe("Blog card mappers", () => {
+  it("reads a CMS Post and a local page into the same card shape", () => {
+    expect(
+      cmsPostToBlogCard({
+        path: "/blog/a",
+        title: "A",
+        description: null,
+        publishedAt: null,
+        updatedAt: "2026-09-01T00:00:00.000Z",
+        author: "Ann",
+        coverImage: { url: "https://cdn.test/a.png" },
+      } as unknown as Parameters<typeof cmsPostToBlogCard>[0]),
+    ).toEqual({
+      url: "/blog/a",
+      title: "A",
+      description: undefined,
+      date: "2026-09-01T00:00:00.000Z",
+      author: "Ann",
+      image: "https://cdn.test/a.png",
+    });
+    expect(
+      localPageToBlogCard({ url: "/blog/b", data: { title: "B", date: "2026-08-01" } }),
+    ).toEqual({
+      url: "/blog/b",
+      title: "B",
+      description: undefined,
+      date: "2026-08-01",
+      author: undefined,
+      image: undefined,
+    });
   });
 });
