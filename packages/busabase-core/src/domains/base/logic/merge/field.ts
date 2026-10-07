@@ -441,7 +441,10 @@ export const mergeBaseConvertField = async (
         }
       }
       if (row.recordId) convertedByRecord.set(row.recordId, converted);
-      const norm = normalizeFieldValue(converted);
+      // Pass the TARGET type: `normalizeFieldValue` only projects `valueDate` (and
+      // the json-like columns) when it knows the type, so without it a column
+      // converted to `date` could never be range-filtered or sorted by date.
+      const norm = normalizeFieldValue(converted, fieldData.newType);
       await db
         .update(busabaseFieldValues)
         .set({

@@ -94,6 +94,12 @@ export interface NavItem {
   /** Tooltip/accessible label for `statusIcon`. Required for it to render. */
   statusIconTitle?: string;
   /**
+   * `muted` draws `statusIcon` a step fainter — for a state the row inherits
+   * rather than carries itself (e.g. public only because a parent folder is
+   * shared), so it reads as secondary next to the rows that own the state.
+   */
+  statusIconTone?: "default" | "muted";
+  /**
    * Optional space name for recent task items
    */
   spaceName?: string;

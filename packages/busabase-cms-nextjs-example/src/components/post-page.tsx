@@ -77,7 +77,7 @@ interface PostPageProps {
 
 export async function PostPage({ post }: PostPageProps) {
   const [toc, taxonomies] = await Promise.all([
-    getSafeMarkdownToc(post.body),
+    getSafeMarkdownToc(post.body, { demoteH1: true }),
     getLinkedTaxonomies(post),
   ]);
   const attachments = post.attachments.flatMap((attachment) => {
@@ -142,7 +142,7 @@ export async function PostPage({ post }: PostPageProps) {
           />
         ) : null}
         <div className="prose">
-          <SafeMarkdown>{post.body}</SafeMarkdown>
+          <SafeMarkdown demoteH1>{post.body}</SafeMarkdown>
         </div>
         {attachments.length > 0 ? (
           <section className="attachments" aria-labelledby="attachments-heading">

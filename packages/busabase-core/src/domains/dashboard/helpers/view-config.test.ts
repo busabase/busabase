@@ -101,7 +101,7 @@ describe("view config quick updates", () => {
     expect(clearAllViewSorts(config)).toMatchObject({ filters: config.filters, sorts: [] });
     expect(resetAllViewFieldWidths({ ...config, fieldWidths: { title: 220 } })).toMatchObject({
       cardSize: "large",
-      fieldWidths: undefined,
+      fieldWidths: {},
     });
     expect(clearAllViewFilters({ ...config, filters: [] })).toEqual({ ...config, filters: [] });
     expect(clearViewFilterAt(config, 1).filters).toEqual([config.filters[0], config.filters[2]]);
@@ -214,7 +214,7 @@ describe("view config quick updates", () => {
     expect(resetViewFieldWidth(withWidths, "title").fieldWidths).toEqual({ owner: 180 });
     expect(
       resetViewFieldWidth({ ...config, fieldWidths: { title: 248 } }, "title").fieldWidths,
-    ).toBe(undefined);
+    ).toEqual({});
     expect(resetViewFieldWidth(config, "title")).toBe(config);
   });
 

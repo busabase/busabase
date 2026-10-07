@@ -40,7 +40,7 @@ export const busabaseAgentSessions = pgTable(
     lastActivityAt: timestamp("last_activity_at", { mode: "date" }).defaultNow().notNull(),
     endedAt: timestamp("ended_at", { mode: "date" }),
     /**
-     * Cross-worker turn ownership (PUL-223 follow-up). `leaseOwnerId` is null
+     * Cross-worker turn ownership. `leaseOwnerId` is null
      * and `leaseExpiresAt` is null when no worker holds an active turn; both
      * are set atomically with `status: "busy"` by `acquireSessionLease`.
      *
@@ -56,9 +56,9 @@ export const busabaseAgentSessions = pgTable(
     leaseFencingToken: bigint("lease_fencing_token", { mode: "number" }).notNull().default(0),
     leaseExpiresAt: timestamp("lease_expires_at", { mode: "date" }),
     /**
-     * Durable mirror of `LiveSession.modelOption` (PUL-246), for
+     * Durable mirror of `LiveSession.modelOption`, for
      * `remote-websocket` sessions only. `remote-websocket` agents outlive the
-     * request and can be reattached from ANY worker (PUL-223), so the model
+     * request and can be reattached from ANY worker, so the model
      * selector must not live only in one worker's in-memory map — a list
      * request served by a non-owning worker would otherwise see the same
      * durable row with no selector at all. Untyped `jsonb` at rest: this

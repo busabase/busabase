@@ -16,7 +16,7 @@ test("real ACP: node action opens chat and completes two turns", async ({
   await expect(agentCard).toContainText("Remote");
   await agentCard.getByRole("button", { name: "Connect", exact: true }).click();
   await expect(page.getByPlaceholder("Message Buda AI Agent…")).toBeVisible();
-  const slug = `pul-226-live-${Date.now()}`;
+  const slug = `agent-chat-live-${Date.now()}`;
   const response = await request.post("/api/v1/docs", {
     data: {
       autoMerge: true,

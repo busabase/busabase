@@ -115,8 +115,16 @@ export const createViewInputSchema = z.object({
   autoMerge: autoMergeSchema,
 });
 
+// Zod's .partial() retains nested defaults, which would turn omitted keys into clears.
+const viewConfigPatchSchema = viewConfigSchema.omit({ filters: true, sorts: true }).extend({
+  filters: z.array(viewFilterSchema).optional(),
+  sorts: z.array(viewSortSchema).optional(),
+});
+
 export const updateViewInputSchema = z.object({
-  config: viewConfigSchema.optional(),
+  config: viewConfigPatchSchema
+    .optional()
+    .describe("Only supplied config keys change; empty arrays and null clear supported settings."),
   description: z.string().optional(),
   message: z.string().optional().default("Update view"),
   name: z.string().min(1).optional(),

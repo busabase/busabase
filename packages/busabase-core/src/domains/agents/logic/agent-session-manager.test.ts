@@ -1,3 +1,4 @@
+import { foldAvailableCommands, reduceAcpEvents } from "@acp-ui/core/reduce";
 import type { Stream } from "@agentclientprotocol/sdk";
 import * as acp from "@agentclientprotocol/sdk";
 import type { AgentSessionEventVO, AgentSessionVO } from "busabase-contract/domains/agents/types";
@@ -8,6 +9,7 @@ import {
   LOCAL_SPACE_ID,
   runWithBusabaseContext,
 } from "../../../context";
+import { translateAgentSessionEvent } from "../hooks/use-agent-session";
 import type { AgentSessionRuntimeRecord } from "./agent-session-store";
 
 /**
@@ -37,7 +39,7 @@ const mocks = vi.hoisted(() => ({
   releaseSessionLease: vi.fn(),
   renewSessionLease: vi.fn(),
   sessionLeaseTtlSeconds: 45,
-  // Backing store for `loadSessions()` — kept alongside the PUL-223 harness
+  // Backing store for `loadSessions()` — kept alongside the cross-worker reattach harness
   // above because "database-authoritative session identity" pushes rows
   // directly and asserts `listAgentSessions()` surfaces them, independent of
   // the reattachment-focused `loadSessionRuntime` mock.
@@ -267,6 +269,7 @@ function serveFakeAgent(
   options?: {
     initializeGate?: Promise<void>;
     loadError?: Error;
+    loadAvailableCommands?: acp.AvailableCommand[];
     loadReplayText?: string;
     loadSessionSupported?: boolean;
     promptChunkText?: string;
@@ -312,6 +315,15 @@ function serveFakeAgent(
       .onRequest(acp.methods.agent.session.load, async (ctx) => {
         loadedSessionIds.push(ctx.params.sessionId);
         if (options?.loadError) throw options.loadError;
+        if (options?.loadAvailableCommands) {
+          await ctx.client.notify(acp.methods.client.session.update, {
+            sessionId: ctx.params.sessionId,
+            update: {
+              sessionUpdate: "available_commands_update",
+              availableCommands: options.loadAvailableCommands,
+            },
+          });
+        }
         if (options?.loadReplayText) {
           await ctx.client.notify(acp.methods.client.session.update, {
             sessionId: ctx.params.sessionId,
@@ -554,7 +566,7 @@ describe("agent session manager — model config option", () => {
     await closeAgentSessions([session.id]);
   });
 
-  it("does not emit a note when the agent lacks HTTP MCP support (PUL-214)", async () => {
+  it("does not emit a note when the agent lacks HTTP MCP support", async () => {
     // `serveFakeAgent`'s `initialize` responds with `agentCapabilities: {}` —
     // no `mcpCapabilities.http` — so this exercises the exact branch that
     // used to synthesize the "does not support HTTP MCP servers" note.
@@ -746,10 +758,10 @@ describe("agent session manager — model config option", () => {
   });
 
   /**
-   * PUL-246 regression: before the durable mirror, `listAgentSessions` and
+   * Regression: before the durable mirror, `listAgentSessions` and
    * `listAgentSessionsPaged` could only recover `modelOption` from THIS
    * process's in-memory `sessions()` map. A `remote-websocket` session can be
-   * reattached from any worker (PUL-223), so a list request served by a
+   * reattached from any worker, so a list request served by a
    * worker that never held the live socket — simulated here by deleting the
    * entry from `__busabaseAgentSessions`, the same technique the
    * live-session-ownership tests below use — saw the same durable row with
@@ -757,7 +769,7 @@ describe("agent session manager — model config option", () => {
    * That is exactly the "intermittent" symptom: whichever worker happens to
    * answer the request decides whether the picker renders.
    */
-  it("surfaces the durable model option to a worker with no live copy of the session (PUL-246)", async () => {
+  it("surfaces the durable model option to a worker with no live copy of the session", async () => {
     serveFakeAgent(agentSide, [MODEL_CONFIG]);
     const session = await createAgentSession({ slug: "test-agent", spaceId: LOCAL_SPACE_ID });
     await waitUntilSettled(session.id);
@@ -793,7 +805,7 @@ describe("agent session manager — model config option", () => {
     mocks.storedScopes.clear();
   });
 
-  it("keeps the durable model option authoritative over a stale live socket (PUL-246)", async () => {
+  it("keeps the durable model option authoritative over a stale live socket", async () => {
     const agent = serveFakeAgent(agentSide, [MODEL_CONFIG]);
     const session = await createAgentSession({ slug: "test-agent", spaceId: LOCAL_SPACE_ID });
     await waitUntilSettled(session.id);
@@ -1469,7 +1481,7 @@ describe("promptAgentSession", () => {
   });
 });
 
-describe("cancelAgentSession (PUL-244)", () => {
+describe("cancelAgentSession", () => {
   let agentSide: Stream;
 
   beforeEach(() => {
@@ -1553,7 +1565,7 @@ describe("cancelAgentSession (PUL-244)", () => {
     await closeAgentSessions([session.id]);
   });
 
-  it("cancels a prompt waiting for ACP readiness and keeps the session usable (PUL-250)", async () => {
+  it("cancels a prompt waiting for ACP readiness and keeps the session usable", async () => {
     let releaseInitialize = () => {};
     const initializeGate = new Promise<void>((resolve) => {
       releaseInitialize = resolve;
@@ -1707,12 +1719,12 @@ describe("remote session worker handoff", () => {
       loadReplayText: "already persisted remote history",
     });
 
-    await promptAgentSession(record.session.id, "PUL-223 first prompt");
+    await promptAgentSession(record.session.id, "first prompt");
 
     expect(agent.newSessionCallCount()).toBe(0);
     expect(agent.loadedSessionIds()).toEqual([record.acpSessionId]);
     expect(agent.promptSessionIds()).toEqual([record.acpSessionId]);
-    expect(agent.promptTexts()).toEqual(["PUL-223 first prompt"]);
+    expect(agent.promptTexts()).toEqual(["first prompt"]);
     expect(mocks.persistSessionModelOption).toHaveBeenCalledWith(
       record.session.id,
       expect.objectContaining({ currentValue: "auto" }),
@@ -1728,13 +1740,12 @@ describe("remote session worker handoff", () => {
         sessionId: record.session.id,
         acpUpdate: expect.objectContaining({
           sessionUpdate: "user_message",
-          text: "PUL-223 first prompt",
+          text: "first prompt",
         }),
       }),
     );
     const userEvent = persisted.find(
-      (event) =>
-        (event.acpUpdate as { text?: unknown } | undefined)?.text === "PUL-223 first prompt",
+      (event) => (event.acpUpdate as { text?: unknown } | undefined)?.text === "first prompt",
     );
     expect(userEvent?.seq).toBeGreaterThan(record.lastEventSeq);
     expect(JSON.stringify(persisted)).not.toContain("already persisted remote history");
@@ -1748,9 +1759,53 @@ describe("remote session worker handoff", () => {
     expect(mocks.endRemoteSession).toHaveBeenCalledWith(record.session.id);
   });
 
+  it("retains current commands from session/load without duplicating replayed transcript", async () => {
+    const record = runtimeRecord();
+    mocks.loadSessionRuntime.mockResolvedValue(record);
+    const [clientSide, agentSide] = linkedStreams();
+    mocks.createWebSocketStream.mockReturnValue(clientSide);
+    serveFakeAgent(agentSide, [MODEL_CONFIG], {
+      loadAvailableCommands: [
+        {
+          name: "skill:research-codebase",
+          description: "Research before changing code",
+          input: { hint: "instructions" },
+        },
+      ],
+      loadReplayText: "already persisted remote history",
+    });
+
+    await promptAgentSession(record.session.id, "continue after reconnect");
+
+    const persisted = mocks.persistSessionEvents.mock.calls.flatMap(
+      ([events]) => events as AgentSessionEventVO[],
+    );
+    const commandEvent = persisted.find(
+      (event) =>
+        (event.acpUpdate as { sessionUpdate?: string } | undefined)?.sessionUpdate ===
+        "available_commands_update",
+    );
+    expect(commandEvent).toBeDefined();
+    expect(JSON.stringify(persisted)).not.toContain("already persisted remote history");
+
+    const uiEvents = persisted.flatMap((event) => translateAgentSessionEvent(event));
+    expect(foldAvailableCommands(uiEvents)).toEqual([
+      {
+        name: "skill:research-codebase",
+        description: "Research before changing code",
+        input: { hint: "instructions" },
+      },
+    ]);
+    expect(JSON.stringify(reduceAcpEvents([], uiEvents))).not.toContain(
+      "already persisted remote history",
+    );
+
+    await closeAgentSession(record.session.id);
+  });
+
   it(
     "reaches session/cancel for a remote-websocket session with no live copy on this " +
-      "worker, without claiming the operation lease (PUL-256)",
+      "worker, without claiming the operation lease",
     async () => {
       // A record marked "busy" simulates the ordinary shape of an in-flight
       // turn that another worker's process is actually awaiting — this

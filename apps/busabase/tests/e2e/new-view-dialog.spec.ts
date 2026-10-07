@@ -36,10 +36,17 @@ test("new view opens in a modal without navigating away from the base", async ({
     ...reorderedSlugs.slice(2),
   ]);
 
-  // "Add View Request" (review-first) lives behind the split-button dropdown —
-  // "Add View Now" is the primary immediate action by default.
+  // "Add View Request" (review-first) lives behind the split-button dropdown as
+  // a menuitem — "Add View Now" is the primary immediate action by default. The
+  // dropdown content is a Radix portal rendered as a sibling of the dialog in
+  // `document.body`, not nested inside it, so it has to be found from `page`.
   await dialog.getByRole("button", { name: "More submit options" }).click();
-  await expect(dialog.getByRole("button", { name: "Add View Request" })).toBeVisible();
+  const addViewRequestItem = page.getByRole("menuitem", { name: "Add View Request" });
+  await expect(addViewRequestItem).toBeVisible();
+  // Escape closes the topmost open layer first — the dropdown, not the dialog
+  // underneath it — so it takes two presses to get back to a closed dialog.
+  await page.keyboard.press("Escape");
+  await expect(addViewRequestItem).toBeHidden();
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
 });

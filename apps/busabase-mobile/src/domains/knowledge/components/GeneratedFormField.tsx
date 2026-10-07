@@ -1,11 +1,14 @@
 import type { FormBoundFieldVO, FormFieldBindingVO } from "busabase-contract/types";
+import { formatTimeZoneLabel } from "busabase-core/base/date-value";
 import { iStringParse } from "openlib/i18n/i-string";
 import { StyleSheet, Switch, Text, View } from "react-native";
 import { NativeChoicePicker } from "~/components/native-screen";
 import { TextInput } from "~/components/ui/TextInput";
+import { dateFieldPlaceholder } from "~/domains/base/utils/date-input";
+import { fmt, useI18n } from "~/i18n";
 import { spacing, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
-import { formStringValue, getFormControlKind } from "../utils/form-fields";
+import { formStringValue, getFormControlKind, getFormDateOptions } from "../utils/form-fields";
 
 interface GeneratedFormFieldProps {
   binding: FormFieldBindingVO;
@@ -23,7 +26,9 @@ export function GeneratedFormField({
   onChange,
 }: GeneratedFormFieldProps) {
   const tokens = useTokens();
+  const { t, locale } = useI18n();
   const kind = getFormControlKind(field);
+  const dateOptions = kind === "date" ? getFormDateOptions(field) : null;
   const label = binding.label ?? (field ? iStringParse(field.name) : binding.fieldSlug);
   const selected = Array.isArray(value)
     ? value.filter((item): item is string => typeof item === "string")
@@ -101,10 +106,17 @@ export function GeneratedFormField({
           }
           textAlignVertical={kind === "textarea" ? "top" : "center"}
           style={kind === "textarea" ? styles.multiline : undefined}
-          placeholder={kind === "date" ? "YYYY-MM-DD" : undefined}
+          placeholder={dateOptions ? dateFieldPlaceholder(dateOptions) : undefined}
           onChangeText={onChange}
         />
       )}
+      {dateOptions?.includeTime ? (
+        <Text style={[typography.small, { color: tokens.mutedForeground }]}>
+          {fmt(t.dateField.timeZoneHint, {
+            zone: formatTimeZoneLabel(dateOptions.timezone, locale),
+          })}
+        </Text>
+      ) : null}
       {binding.help ? (
         <Text style={[typography.small, { color: tokens.mutedForeground }]}>{binding.help}</Text>
       ) : null}

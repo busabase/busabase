@@ -145,6 +145,19 @@ describe("resolveRequiredLevel", () => {
     expect(resolveRequiredLevel(["workbench", "install", "planFromGithub"], "POST")).toBe("read");
   });
 
+  it("permits only the narrow CR preview at changeRequest while generic Node embeds stay manage", () => {
+    const preview = resolveRequiredLevel(
+      ["workbench", "changeRequests", "createPreviewLink"],
+      "POST",
+    );
+    const genericEmbed = resolveRequiredLevel(["workbench", "embedLinks", "create"], "POST");
+    expect(preview).toBe("changeRequest");
+    expect(genericEmbed).toBe("manage");
+    expect(hasApiKeyLevel("changeRequest", preview)).toBe(true);
+    expect(hasApiKeyLevel("changeRequest", genericEmbed)).toBe(false);
+    expect(hasApiKeyLevel("manage", genericEmbed)).toBe(true);
+  });
+
   it("an unclassified new mutation path defaults to manage (fail-closed)", () => {
     expect(resolveRequiredLevel(["workbench", "someFutureDomain", "doSomething"], "POST")).toBe(
       "manage",
@@ -174,6 +187,13 @@ describe("resolveRequiredLevel", () => {
 });
 
 describe("procedure permission policy", () => {
+  it("keeps paged record history available to node-scoped read keys", () => {
+    const path = ["workbench", "activity", "listForRecordPaged"];
+    expect(resolveProcedurePermissionPolicy(path)).toEqual({ level: "read", scope: "node" });
+    expect(resolveRequiredLevel(path, "GET")).toBe("read");
+    expect(hasApiKeyLevel("read", resolveRequiredLevel(path, "GET"))).toBe(true);
+  });
+
   it("is exhaustive for every current Busabase contract procedure", () => {
     const paths: string[] = [];
     const visit = (value: unknown, parent: string[] = []) => {

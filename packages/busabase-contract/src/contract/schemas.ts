@@ -87,13 +87,25 @@ export interface NodeOutput {
    * Deliberately NOT the inherited answer: a node under a shared folder IS
    * publicly reachable (that is `effective_public_scope`, which is what the
    * ACL gates read), but it is not itself a thing anybody chose to publish,
-   * and marking a whole subtree would drown the one row that matters. Read
-   * "who made this public" off the nearest ancestor with `shared: true`.
+   * and there is no grant on it to revoke. That answer is `sharedViaAncestor`
+   * below. Read "who made this public" off the nearest ancestor with
+   * `shared: true`.
    *
    * Optional/omitted means the read path didn't resolve share state at all
    * (e.g. a node detail fetch), NOT that the node is unshared.
    */
   shared?: boolean;
+  /**
+   * Anonymous visitors can open this node, but only because an ANCESTOR is
+   * publicly shared — the node has no live share of its own (so it is never
+   * `true` together with `shared`). The sidebar draws a quieter marker from
+   * it: without one, a Doc added to a published folder looks private while
+   * the whole internet can read it.
+   *
+   * Same omission rule as `shared`: present only where share state was
+   * resolved.
+   */
+  sharedViaAncestor?: boolean;
 }
 
 const nodeSchema: z.ZodType<NodeOutput> = z.lazy(() =>
@@ -115,6 +127,7 @@ const nodeSchema: z.ZodType<NodeOutput> = z.lazy(() =>
     children: z.array(nodeSchema),
     hasChildren: z.boolean().optional(),
     shared: z.boolean().optional(),
+    sharedViaAncestor: z.boolean().optional(),
   }),
 );
 

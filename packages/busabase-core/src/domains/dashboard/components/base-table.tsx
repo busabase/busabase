@@ -66,6 +66,7 @@ import {
   fieldLabel,
   fieldLinkPrefix,
 } from "../../base/field-types";
+import { getDateFieldOptions, parseDateFieldValue } from "../../base/utils/date-value";
 import { resolveEmbedPreview } from "../../base/utils/embed";
 import { getPrimaryField } from "../../base/utils/primary-field";
 import { parseWhiteboardFieldValue } from "../../base/utils/whiteboard-value";
@@ -101,6 +102,7 @@ import { BusaBaseGallery } from "./base-gallery";
 import { BusaBaseGantt } from "./base-gantt";
 import { BusaBaseKanban } from "./base-kanban";
 import { BulkEditRecordsDialog } from "./bulk-edit-records-dialog";
+import { DateFieldValue } from "./date-field";
 import { FieldBadge, WhiteboardThumbnail } from "./field-preview";
 import { ImportRecordsDialog } from "./import-records-dialog";
 import { DialogContent } from "./localized-dialog-content";
@@ -142,6 +144,11 @@ const getRecordTableColumnWidth = (field: BaseFieldVO, index: number) => {
   }
   if (["body", "content", "description"].includes(field.slug)) {
     return "minmax(280px,420px)";
+  }
+  // "Fri, Oct 2, 2026, 11:00 AM GMT+1" plus a "-1" badge: the zone is the point
+  // of a time-of-day value, so it must not be the part that gets truncated.
+  if (field.type === "date" && getDateFieldOptions(field.options).includeTime) {
+    return "minmax(270px,320px)";
   }
   return fieldColumnWidth(field.type);
 };
@@ -2231,6 +2238,7 @@ function RecordTableCellContent({
   records,
 }: RecordTableCellProps) {
   const messages = useCoreI18n();
+  const locale = useCoreLocale();
   const currentSearch = useSearch();
   const rawValue = record.headCommit.payload[field.slug];
   const chips = getFieldChipEntries(field, rawValue);
@@ -2498,7 +2506,20 @@ function RecordTableCellContent({
     );
   }
 
-  const value = getFieldPreviewText(field, rawValue, messages);
+  if (field.type === "date" && parseDateFieldValue(rawValue)) {
+    return (
+      <Link
+        className={`flex min-w-0 items-center gap-2 py-1 underline-offset-2 hover:underline ${
+          index === 0 ? "font-medium text-foreground" : "text-muted-foreground"
+        }`}
+        href={currentRecordHref}
+      >
+        <DateFieldValue options={getDateFieldOptions(field.options)} value={rawValue} />
+      </Link>
+    );
+  }
+
+  const value = getFieldPreviewText(field, rawValue, messages, locale);
 
   return (
     <Link

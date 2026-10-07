@@ -1,6 +1,7 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { hasApiKeyLevel } from "busabase-contract/access-control/api-key-level";
 import { CodeBlock } from "kui/ai-elements/code-block";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "kui/tabs";
 import { Files, MonitorPlay, Terminal } from "lucide-react";
@@ -15,6 +16,8 @@ import {
   guessFileTreeLanguage,
   renderFileTree,
 } from "../../dashboard/components/file-tree-browser";
+import { FileTreeUploadControl } from "../../dashboard/components/file-tree-file-actions";
+import { useFileUploadTasks } from "../../dashboard/components/file-upload-tasks";
 import { NodeActionsMenu } from "../../dashboard/components/node-actions-menu";
 import { NodeAgentPromptsButton } from "../../dashboard/components/node-agent-prompts-button";
 import {
@@ -23,11 +26,14 @@ import {
 } from "../../dashboard/components/preview-fullscreen";
 import { EmptyState } from "../../dashboard/components/primitives";
 import { FileContentSkeleton, NodeDetailSkeleton } from "../../dashboard/components/skeletons";
+import { useWorkspacePermissionLevel } from "../../dashboard/components/split-submit-button";
+import { fileTreeParentPath } from "../../dashboard/helpers/file-tree-files";
 import { asNodeDetail } from "../../dashboard/helpers/node-detail";
 import { useRegisterTopbarNodeActions } from "../../dashboard/hooks/use-register-topbar-node-actions";
 import { useRegisterTopbarNodeInfo } from "../../dashboard/hooks/use-register-topbar-node-info";
 import { useReportLoadedNode } from "../../dashboard/hooks/use-report-loaded-node";
 import type { NodeDetailProps } from "../../dashboard/node-detail-registry";
+import { useIsAnonymousVisitor } from "../../dashboard/visitor-context";
 import { disposeDeletedAirAppSession } from "../store/airapp-session-cleanup";
 import { useAirAppKeepAliveActive, useAirAppKeepAliveScope } from "./AirAppKeepAliveHost";
 import {
@@ -50,8 +56,7 @@ const TAB_CONTENT_CLASS =
  * preview — gets maximum vertical space. "App" (default) is the live run
  * preview iframe, since the primary thing a user wants when opening an AirApp
  * is to see it working; the Run button lives in the toolbar. "Files" is the
- * read-only file-tree browser (V1's edit surface for an airapp is the agent's
- * normal ChangeRequest flow). "Logs" is the streaming install/start console.
+ * file-tree browser with reviewable uploads. "Logs" is the streaming install/start console.
  * All three tabs stay mounted (forceMount + CSS hide) so switching away from
  * "App" never tears down the running dev server. HEAD-only: previewing a
  * pending (unmerged) ChangeRequest's file snapshot is out of scope for V1
@@ -60,6 +65,11 @@ const TAB_CONTENT_CLASS =
 export function AirAppDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) {
   const messages = useCoreI18n();
   const locale = useCoreLocale();
+  const queryClient = useQueryClient();
+  const uploadTasks = useFileUploadTasks();
+  const isAnonymous = useIsAnonymousVisitor();
+  const permissionLevel = useWorkspacePermissionLevel();
+  const canUploadFiles = !isAnonymous && hasApiKeyLevel(permissionLevel, "changeRequest");
   const keepAliveScopeKey = useAirAppKeepAliveScope();
   const isKeepAliveActive = useAirAppKeepAliveActive();
   const [openPath, setOpenPath] = useState<string | null>(null);
@@ -93,6 +103,36 @@ export function AirAppDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) 
     () => new Set((airapp?.files ?? []).map((file) => file.path)),
     [airapp?.files],
   );
+
+  const uploadFiles = async (
+    files: File[],
+    folder: string,
+    mode: "changeRequest" | "immediate",
+    replacePaths: string[],
+  ) => {
+    if (!airapp || !canUploadFiles) return;
+    const existingFiles = await Promise.all(
+      replacePaths.map((filePath) =>
+        queryClient.fetchQuery(
+          orpc.fileTrees.readFile.queryOptions({
+            input: { nodeId: airapp.node.id, filePath, type: "airapp" },
+          }),
+        ),
+      ),
+    );
+    const replace = new Map(
+      replacePaths.map((path, index) => [path, existingFiles[index]?.contentHash || null] as const),
+    );
+    uploadTasks.enqueue({
+      files,
+      folder,
+      mode,
+      nodeId: airapp.node.id,
+      nodeName: airapp.node.name,
+      nodeType: "airapp",
+      ...(replace.size > 0 ? { replace } : {}),
+    });
+  };
 
   useEffect(() => {
     if (!airapp || openPath) {
@@ -229,10 +269,32 @@ export function AirAppDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) 
                   <div className="font-medium text-muted-foreground text-xs uppercase">
                     {messages.nodeDetail.files}
                   </div>
-                  <div className="rounded-md border border-border/70 bg-card px-1.5 py-0.5 font-mono text-muted-foreground text-[11px]">
-                    {fileCount}
+                  <div className="flex items-center gap-1">
+                    {canUploadFiles ? (
+                      <FileTreeUploadControl
+                        availableFolders={collectFolderPaths(tree)}
+                        defaultAction="changeRequest"
+                        defaultFolder={openPath ? fileTreeParentPath(openPath) : ""}
+                        existingPaths={filePaths}
+                        labels={{
+                          root: messages.airapp.filesRoot,
+                          duplicateUploadNames: messages.airapp.duplicateUploadNames,
+                          invalidFilePath: messages.airapp.invalidFilePath,
+                          invalidUploadFileName: messages.airapp.invalidUploadFileName,
+                        }}
+                        onSubmit={uploadFiles}
+                      />
+                    ) : null}
+                    <div className="rounded-md border border-border/70 bg-card px-1.5 py-0.5 font-mono text-muted-foreground text-[11px]">
+                      {fileCount}
+                    </div>
                   </div>
                 </div>
+                {canUploadFiles ? (
+                  <p className="border-border/50 border-b px-4 py-2 text-muted-foreground text-xs">
+                    {messages.airapp.filesUploadHint}
+                  </p>
+                ) : null}
                 <div className="min-h-0 flex-1 overflow-auto p-2">
                   {airapp.files.length === 0 ? (
                     <div className="px-2 py-3 text-muted-foreground text-sm">

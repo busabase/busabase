@@ -191,7 +191,7 @@ export const recordRouter = {
     }
   }),
   listChangeRequests: os.records.listChangeRequests.handler(async ({ input }) =>
-    listRecordChangeRequests(input.recordId),
+    listRecordChangeRequests(input.recordId, { limit: input.limit }),
   ),
   listLinks: os.records.listLinks.handler(async ({ input }) => listRecordLinks(input.recordId)),
 };

@@ -138,7 +138,7 @@ describe("NodeAgentPromptsButton", () => {
   });
 
   it("still shows the dropdown for a scoped caller's orpc={null} when a DashboardOrpcProvider wraps it", async () => {
-    // Regression for PUL-240: `RecordTopbarActions` on /base/companies/<record>
+    // Regression: `RecordTopbarActions` on /base/companies/<record>
     // passes `orpc={null}` to skip its own custom-prompts fetch (see that
     // component's doc), but the record page mounts inside the same
     // `DashboardOrpcProvider` as the folder/pipeline page. The split button's

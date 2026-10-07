@@ -4,6 +4,7 @@ import {
   type activityItemSchema,
   listActivityPagedInputSchema,
   type listActivityResponseSchema,
+  listRecordActivityPagedInputSchema,
 } from "busabase-contract/contract/activity-schemas";
 import type { AuditEventVO, ChangeRequestVO, RecordVO } from "busabase-contract/types";
 import { and, type Column, desc, eq, inArray, lt, lte, or, type SQL } from "drizzle-orm";
@@ -108,8 +109,10 @@ const keysetFor = (
 
 export const listActivityPaged = async (
   input?: z.input<typeof listActivityPagedInputSchema>,
+  recordId?: string,
 ): Promise<z.input<typeof listActivityResponseSchema>> => {
   await ensureReady();
+  if (recordId) await assertAuditSubjectPermission({ recordId }, "read");
   const db = await getDb();
   const parsed = listActivityPagedInputSchema.parse(input);
   const limit = parsed.limit;
@@ -119,22 +122,24 @@ export const listActivityPaged = async (
 
   const fetchWindow = async (cursor: typeof initialCursor) => {
     const [crRows, opRows, recordRows, auditRows] = await Promise.all([
-      db
-        .select({ ts: busabaseChangeRequests.updatedAt, id: busabaseChangeRequests.id })
-        .from(busabaseChangeRequests)
-        .where(
-          and(
-            eq(busabaseChangeRequests.spaceId, spaceId),
-            keysetFor(
-              "change_request",
-              busabaseChangeRequests.updatedAt,
-              busabaseChangeRequests.id,
-              cursor,
-            ),
-          ),
-        )
-        .orderBy(desc(busabaseChangeRequests.updatedAt), desc(busabaseChangeRequests.id))
-        .limit(batchSize),
+      recordId
+        ? Promise.resolve([])
+        : db
+            .select({ ts: busabaseChangeRequests.updatedAt, id: busabaseChangeRequests.id })
+            .from(busabaseChangeRequests)
+            .where(
+              and(
+                eq(busabaseChangeRequests.spaceId, spaceId),
+                keysetFor(
+                  "change_request",
+                  busabaseChangeRequests.updatedAt,
+                  busabaseChangeRequests.id,
+                  cursor,
+                ),
+              ),
+            )
+            .orderBy(desc(busabaseChangeRequests.updatedAt), desc(busabaseChangeRequests.id))
+            .limit(batchSize),
       db
         .select({
           ts: busabaseOperations.updatedAt,
@@ -145,25 +150,34 @@ export const listActivityPaged = async (
         .where(
           and(
             eq(busabaseOperations.spaceId, spaceId),
+            recordId
+              ? or(
+                  eq(busabaseOperations.targetRecordId, recordId),
+                  eq(busabaseOperations.sourceRecordId, recordId),
+                  eq(busabaseOperations.mergedRecordId, recordId),
+                )
+              : undefined,
             keysetFor("operation", busabaseOperations.updatedAt, busabaseOperations.id, cursor),
           ),
         )
         .orderBy(desc(busabaseOperations.updatedAt), desc(busabaseOperations.id))
         .limit(batchSize),
-      db
-        .select({ ts: busabaseRecords.updatedAt, id: busabaseRecords.id })
-        .from(busabaseRecords)
-        .where(
-          and(
-            eq(busabaseRecords.spaceId, spaceId),
-            // Match the feed's record source (records.list is active-only), so
-            // archived records don't flood the activity feed with new events.
-            eq(busabaseRecords.status, "active"),
-            keysetFor("record", busabaseRecords.updatedAt, busabaseRecords.id, cursor),
-          ),
-        )
-        .orderBy(desc(busabaseRecords.updatedAt), desc(busabaseRecords.id))
-        .limit(batchSize),
+      recordId
+        ? Promise.resolve([])
+        : db
+            .select({ ts: busabaseRecords.updatedAt, id: busabaseRecords.id })
+            .from(busabaseRecords)
+            .where(
+              and(
+                eq(busabaseRecords.spaceId, spaceId),
+                // Match the feed's record source (records.list is active-only), so
+                // archived records don't flood the activity feed with new events.
+                eq(busabaseRecords.status, "active"),
+                keysetFor("record", busabaseRecords.updatedAt, busabaseRecords.id, cursor),
+              ),
+            )
+            .orderBy(desc(busabaseRecords.updatedAt), desc(busabaseRecords.id))
+            .limit(batchSize),
       db
         .select({
           ts: busabaseAuditEvents.createdAt,
@@ -178,6 +192,7 @@ export const listActivityPaged = async (
         .where(
           and(
             eq(busabaseAuditEvents.spaceId, spaceId),
+            recordId ? eq(busabaseAuditEvents.recordId, recordId) : undefined,
             keysetFor("audit", busabaseAuditEvents.createdAt, busabaseAuditEvents.id, cursor),
           ),
         )
@@ -380,9 +395,17 @@ export const listActivityPaged = async (
     await import("./cr-lifecycle");
   const [crVOs, recordVOs] = await Promise.all([
     hydrateChangeRequests(crPOs, {
-      maxOperationsPerChangeRequest: LIST_MAX_OPERATIONS_PER_CHANGE_REQUEST,
+      ...(recordId
+        ? {
+            maxOperationsPerChangeRequest: limit,
+            includeReviews: false,
+            operationIds: page
+              .filter((event) => event.kind === "operation")
+              .map((event) => event.id),
+          }
+        : { maxOperationsPerChangeRequest: LIST_MAX_OPERATIONS_PER_CHANGE_REQUEST }),
     }),
-    hydrateRecords(recordPOs),
+    hydrateRecords(recordPOs, recordId ? { summary: true } : undefined),
   ]);
   const crById = new Map(crVOs.map((cr) => [cr.id, cr]));
   const operationIdsByCrId = new Map(
@@ -426,6 +449,13 @@ export const listActivityPaged = async (
   }
 
   return { items, nextCursor };
+};
+
+export const listRecordActivityPaged = async (
+  input: z.input<typeof listRecordActivityPagedInputSchema>,
+): Promise<z.input<typeof listActivityResponseSchema>> => {
+  const { recordId, ...page } = listRecordActivityPagedInputSchema.parse(input);
+  return listActivityPaged(page, recordId);
 };
 
 /**

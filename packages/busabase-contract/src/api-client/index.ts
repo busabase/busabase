@@ -158,7 +158,10 @@ export interface BusabaseDashboardApiClient {
   getChangeRequest: (changeRequestId: string) => Promise<ChangeRequestVO>;
   listRecords: (options?: BusabaseListOptions) => Promise<RecordVO[]>;
   getRecord: (recordId: string) => Promise<RecordVO>;
-  listRecordChangeRequests: (recordId: string) => Promise<ChangeRequestVO[]>;
+  listRecordChangeRequests: (
+    recordId: string,
+    options?: { limit?: number },
+  ) => Promise<ChangeRequestVO[]>;
   searchRecords: (filter: BusabaseRecordFieldTextFilter) => Promise<RecordVO[]>;
   /**
    * One numbered page of a Base, optionally narrowed by exact filters. Unlike
@@ -712,7 +715,8 @@ export const createBusabaseRestApiClient = (
     getChangeRequest: (changeRequestId) => client.changeRequests.get({ changeRequestId }),
     listRecords: async (options) => (await client.records.list(options ?? {})).records,
     getRecord: (recordId) => client.records.get({ recordId }),
-    listRecordChangeRequests: (recordId) => client.records.listChangeRequests({ recordId }),
+    listRecordChangeRequests: (recordId, options) =>
+      client.records.listChangeRequests({ recordId, ...options }),
     searchRecords: (filter) => client.records.search(filter),
     groupRecords: (params) => client.records.groupBy(params),
     listRecordsPage: (params) => client.records.listPage(params),

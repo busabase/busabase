@@ -78,6 +78,9 @@ const renderView = ({
     </CoreI18nProvider>,
   );
 
+const expandBuiltIns = () =>
+  fireEvent.click(screen.getByRole("button", { name: /^Built-in prompts · \d+$/ }));
+
 const openPromptActions = (name = "More actions") => {
   fireEvent.pointerDown(screen.getByRole("button", { name }), {
     button: 0,
@@ -128,6 +131,7 @@ describe("AgentPromptsView management", () => {
 
   it("updates the detail title when another scenario is selected", () => {
     renderView();
+    expandBuiltIns();
 
     fireEvent.click(screen.getByRole("button", { name: "Use this skill" }));
 
@@ -167,6 +171,7 @@ describe("AgentPromptsView management", () => {
     ).toBeTruthy();
 
     fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    expandBuiltIns();
     fireEvent.click(screen.getByRole("button", { name: "Use this skill" }));
     openPromptActions();
     expect(screen.getByRole("menuitem", { name: "Copy prompt" })).toBeTruthy();
@@ -308,10 +313,65 @@ describe("AgentPromptsView management", () => {
   it("keeps the compact list and previews the prioritized custom scenario", () => {
     renderView();
 
-    expect(screen.getByRole("button", { name: "Use this skill" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Review a draft" })).toBeTruthy();
     expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe(
       "Review the selected skill.",
     );
+  });
+
+  it("folds every built-in into one collapsed group once the node has custom prompts", () => {
+    renderView();
+
+    const toggle = screen.getByRole("button", { name: "Built-in prompts · 2" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByRole("button", { name: "Use this skill" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Create skill file" })).toBeNull();
+
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByRole("button", { name: "Use this skill" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Create skill file" })).toBeTruthy();
+    expect(screen.getByText("Built-in scenarios")).toBeTruthy();
+  });
+
+  it("does not fold anything while the node has no custom prompts", () => {
+    renderView({ management: makeManagement({ customPrompts: [] }), prompts: [builtIn] });
+
+    expect(screen.queryByRole("button", { name: /^Built-in prompts/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "Use this skill" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Create skill file" })).toBeTruthy();
+    expect(screen.getByTestId("agent-prompts-active-title").textContent).toBe("Use this skill");
+  });
+
+  it("remembers the expanded state across mounts", async () => {
+    renderView();
+    expandBuiltIns();
+    cleanup();
+
+    renderView();
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Built-in prompts · 2" }).getAttribute("aria-expanded"),
+      ).toBe("true"),
+    );
+    expect(screen.getByRole("button", { name: "Use this skill" })).toBeTruthy();
+  });
+
+  it("moves the selection back to a custom prompt when collapsing over a selected built-in", () => {
+    renderView();
+    expandBuiltIns();
+    fireEvent.click(screen.getByRole("button", { name: "Use this skill" }));
+    expect(screen.getByTestId("agent-prompts-active-title").textContent).toBe("Use this skill");
+
+    expandBuiltIns();
+    expect(screen.queryByRole("button", { name: "Use this skill" })).toBeNull();
+    expect(screen.getByTestId("agent-prompts-active-title").textContent).toBe("Review a draft");
+  });
+
+  it("skips folded built-ins in arrow-key navigation", () => {
+    renderView();
+    const only = screen.getByRole("button", { name: "Review a draft" });
+    fireEvent.keyDown(only, { key: "ArrowDown" });
+    expect(screen.getByTestId("agent-prompts-active-title").textContent).toBe("Review a draft");
   });
 });

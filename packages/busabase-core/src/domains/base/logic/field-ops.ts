@@ -42,6 +42,7 @@ import { isRollupCompatible, rollupPreservesTargetUnit } from "../lookup/rollup"
 import { busabaseFieldValues } from "../schema";
 import { convertFieldValue, isUnconvertibleFieldType } from "../utils/field-conversion";
 import { isPrimaryField, PRIMARY_FIELD_DELETE_MESSAGE } from "../utils/primary-field";
+import { assertValidDateFieldOptionsOrThrow } from "./date-options";
 import { baseNotFound } from "./errors";
 import { getBase } from "./queries";
 import {
@@ -188,6 +189,7 @@ export const createBaseField = async (baseId: string, input: z.infer<typeof fiel
   await assertNodePermission(base.nodeId, "write");
   const parsed = fieldSchema.parse(input);
   assertRelationOnlyOptionsOrThrow(parsed.type, parsed.slug, parsed.options);
+  assertValidDateFieldOptionsOrThrow(parsed.type, parsed.slug, parsed.options);
   const relationResolved = await resolveRelationFieldOptions(db, parsed.options);
   if (parsed.type === "relation" && !relationResolved.targetBaseId) {
     throw relationRequiresTargetBase();
@@ -263,6 +265,7 @@ export const createFieldChangeRequest = async (
 
   const parsed = createFieldChangeRequestInputSchema.parse(input);
   assertRelationOnlyOptionsOrThrow(parsed.type, parsed.slug, parsed.options);
+  assertValidDateFieldOptionsOrThrow(parsed.type, parsed.slug, parsed.options);
   const relationResolved = await resolveRelationFieldOptions(db, parsed.options);
   if (parsed.type === "relation" && !relationResolved.targetBaseId) {
     throw relationRequiresTargetBase();
@@ -508,6 +511,7 @@ export const createUpdateFieldChangeRequest = async (
   const timestamp = now();
   if (patch.options !== undefined) {
     assertRelationOnlyOptionsOrThrow(field.type, field.slug, patch.options);
+    assertValidDateFieldOptionsOrThrow(field.type, field.slug, patch.options);
     // Turning a multi-value id column into a single-value one does not rewrite
     // the rows that already hold several, so the truncation lands silently on
     // whoever next saves each record. Count them here and refuse instead.

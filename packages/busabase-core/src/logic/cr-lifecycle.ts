@@ -155,17 +155,26 @@ import {
   shouldAutoMerge,
 } from "./node-acl";
 import { assertContainerParent } from "./node-parent";
+import { recomputeEffectivePublicScope } from "./node-share";
 import {
   assertNodeSlugAvailable,
   isNodeSlugConflictError,
   isNodeSlugUniqueViolation,
   nodeSlugConflict,
 } from "./node-slug";
+import {
+  announceChangeRequestMerged,
+  announceChangeRequestPendingReview,
+  announceChangeRequestRejected,
+  announceChangeRequestReviewed,
+  announceChangeRequestRevised,
+} from "./node-subscriptions";
 import { loadNodesByIds } from "./nodes";
 import { ensureReady, loadBasesByIds } from "./seed";
 import { toPublicSourceMetadata } from "./source-attribution";
 import {
   normalizeViewConfig,
+  toBaseVO,
   toCommentVO,
   toCommitVO,
   toIso,
@@ -684,6 +693,9 @@ const mergeNodeMove = async (
   // runs inside the merge transaction so it stays atomic with the move).
   if (parentNode.id !== node.parentId) {
     await recomputeSpaceNodeAcl(ctx.db, getContextSpaceId());
+    // Same for public links: moving into a shared folder publishes the
+    // subtree, moving out of one closes it (unless it carries its own share).
+    await recomputeEffectivePublicScope(node.id, ctx.db);
   }
 };
 
@@ -979,7 +991,12 @@ const listCommitPayloadExpression = () =>
 
 export const hydrateChangeRequests = async (
   changeRequests: ChangeRequestPO[],
-  options?: { maxOperationsPerChangeRequest?: number },
+  options?: {
+    maxOperationsPerChangeRequest?: number;
+    operationIds?: string[];
+    operationRecordId?: string;
+    includeReviews?: boolean;
+  },
 ): Promise<ChangeRequestVO[]> => {
   if (changeRequests.length === 0) {
     return [];
@@ -1008,6 +1025,17 @@ export const hydrateChangeRequests = async (
   // diffs for every proposed record. Callers that need every operation (the
   // single-CR detail view, `/agent/tasks`) omit `maxOperationsPerChangeRequest`.
   const maxOps = options?.maxOperationsPerChangeRequest;
+  const operationScope = and(
+    inArray(busabaseOperations.changeRequestId, changeRequestIds),
+    options?.operationIds ? inArray(busabaseOperations.id, options.operationIds) : undefined,
+    options?.operationRecordId
+      ? or(
+          eq(busabaseOperations.targetRecordId, options.operationRecordId),
+          eq(busabaseOperations.sourceRecordId, options.operationRecordId),
+          eq(busabaseOperations.mergedRecordId, options.operationRecordId),
+        )
+      : undefined,
+  );
 
   // The cap is applied in SQL, not after the fact. Reading every operation and
   // then slicing meant a 50-row page containing a few bulk imports pulled tens
@@ -1027,7 +1055,7 @@ export const hydrateChangeRequests = async (
                 ),
             })
             .from(busabaseOperations)
-            .where(inArray(busabaseOperations.changeRequestId, changeRequestIds)),
+            .where(operationScope),
         );
 
   const hydratedItemRows: OperationPO[] = rankedOperations
@@ -1044,7 +1072,7 @@ export const hydrateChangeRequests = async (
     : await db
         .select()
         .from(busabaseOperations)
-        .where(inArray(busabaseOperations.changeRequestId, changeRequestIds))
+        .where(operationScope)
         .orderBy(asc(busabaseOperations.position), asc(busabaseOperations.createdAt));
 
   const hydratedOperationsByCr = new Map<string, OperationPO[]>();
@@ -1060,7 +1088,7 @@ export const hydrateChangeRequests = async (
   // True per-CR totals. When nothing was capped the rows we already have ARE the
   // total, so this costs no extra query on the detail path.
   const operationCountByCr = new Map<string, number>();
-  if (maxOps === undefined) {
+  if (maxOps === undefined && !options?.operationIds && !options?.operationRecordId) {
     for (const [crId, ops] of hydratedOperationsByCr) operationCountByCr.set(crId, ops.length);
   } else {
     const countRows = await db
@@ -1141,11 +1169,14 @@ export const hydrateChangeRequests = async (
   };
 
   // Every review across all CRs in one query; grouped per CR (createdAt desc).
-  const reviewRows = await db
-    .select()
-    .from(busabaseReviews)
-    .where(inArray(busabaseReviews.changeRequestId, changeRequestIds))
-    .orderBy(desc(busabaseReviews.createdAt));
+  const reviewRows =
+    options?.includeReviews === false
+      ? []
+      : await db
+          .select()
+          .from(busabaseReviews)
+          .where(inArray(busabaseReviews.changeRequestId, changeRequestIds))
+          .orderBy(desc(busabaseReviews.createdAt));
   const reviewsByCr = new Map<string, ReviewPO[]>();
   for (const review of reviewRows) {
     const list = reviewsByCr.get(review.changeRequestId);
@@ -1249,20 +1280,33 @@ export const hydrateChangeRequest = async (
 
 /**
  * Batch-hydrate records: bases + head commits + users resolved once for the
- * whole set instead of per-record. Output is identical to `hydrateRecord` per
- * row — a pure N+1 fix.
+ * whole set instead of per-record. Default output matches `hydrateRecord` per
+ * row; activity summaries omit cell expansion and cap stored field payloads.
  */
-export const hydrateRecords = async (records: RecordPO[]): Promise<RecordVO[]> => {
+export const hydrateRecords = async (
+  records: RecordPO[],
+  options?: { summary?: boolean },
+): Promise<RecordVO[]> => {
   if (records.length === 0) {
     return [];
   }
   const db = await getDb();
-  const baseMap = await loadBasesByIds([...new Set(records.map((record) => record.baseId))]);
+  const baseIds = [...new Set(records.map((record) => record.baseId))];
+  // Activity audit rows need a record's route and identity, without expanding its cells.
+  const baseMap = options?.summary
+    ? new Map(
+        (await db.select().from(busabaseBases).where(inArray(busabaseBases.id, baseIds))).map(
+          (base) => [base.id, toBaseVO({ ...base, description: "" }, [])],
+        ),
+      )
+    : await loadBasesByIds(baseIds);
   const headCommitIds = [...new Set(records.map((record) => record.headCommitId))];
-  const commitRows = await db
-    .select()
-    .from(busabaseCommits)
-    .where(inArray(busabaseCommits.id, headCommitIds));
+  const commitRows = options?.summary
+    ? await db
+        .select({ ...getTableColumns(busabaseCommits), payload: listCommitPayloadExpression() })
+        .from(busabaseCommits)
+        .where(inArray(busabaseCommits.id, headCommitIds))
+    : await db.select().from(busabaseCommits).where(inArray(busabaseCommits.id, headCommitIds));
   const commitsById = new Map(commitRows.map((commit) => [commit.id, commit]));
   // Ids named by people-typed CELLS (`member`, `created_by`, `updated_by`),
   // computed once per record so the resolve below stays a single batched call
@@ -1282,7 +1326,9 @@ export const hydrateRecords = async (records: RecordPO[]): Promise<RecordVO[]> =
   // `lookup` fields are the one computed type NOT baked into the commit — they
   // derive from other records, so they're resolved here, on read. No-ops (and
   // issues no queries) unless a base in this set actually has a lookup field.
-  const lookupValues = await resolveLookupValues(db, records, baseMap);
+  const lookupValues = options?.summary
+    ? new Map<string, Record<string, unknown>>()
+    : await resolveLookupValues(db, records, baseMap);
 
   return records.map((record) => {
     const base = baseMap.get(record.baseId);
@@ -1884,7 +1930,7 @@ const loadMergedChangeRequest = async (changeRequestId: string) => {
   return changeRequest ? hydrateChangeRequest(changeRequest) : null;
 };
 
-export const listRecordChangeRequests = async (recordId: string) => {
+export const listRecordChangeRequests = async (recordId: string, options?: { limit?: number }) => {
   await ensureReady();
   const db = await getDb();
   const spaceId = getContextSpaceId();
@@ -1896,10 +1942,16 @@ export const listRecordChangeRequests = async (recordId: string) => {
     .limit(1);
   if (!recordScope) return [];
   await assertNodePermission(recordScope.nodeId, "read");
-  const operationRows = await db
+  const limit =
+    options?.limit === undefined
+      ? undefined
+      : z.number().int().min(1).max(100).parse(options.limit);
+  const latestOperationAt = sql<Date>`max(${busabaseOperations.updatedAt})`;
+  // Limit unique change requests in SQL; one bulk CR can have many matching operations.
+  const operationQuery = db
     .select({
       changeRequestId: busabaseOperations.changeRequestId,
-      updatedAt: busabaseOperations.updatedAt,
+      updatedAt: latestOperationAt,
     })
     .from(busabaseOperations)
     .where(
@@ -1912,7 +1964,9 @@ export const listRecordChangeRequests = async (recordId: string) => {
         ),
       ),
     )
-    .orderBy(desc(busabaseOperations.updatedAt));
+    .groupBy(busabaseOperations.changeRequestId)
+    .orderBy(desc(latestOperationAt), desc(busabaseOperations.changeRequestId));
+  const operationRows = await (limit === undefined ? operationQuery : operationQuery.limit(limit));
   const changeRequestIds = [
     ...new Set(operationRows.map((operation) => operation.changeRequestId)),
   ];
@@ -1937,6 +1991,13 @@ export const listRecordChangeRequests = async (recordId: string) => {
     changeRequestIds
       .map((crId) => changeRequestsById.get(crId))
       .filter((changeRequest): changeRequest is ChangeRequestPO => Boolean(changeRequest)),
+    limit === undefined
+      ? undefined
+      : {
+          maxOperationsPerChangeRequest: LIST_MAX_OPERATIONS_PER_CHANGE_REQUEST,
+          operationRecordId: recordId,
+          includeReviews: false,
+        },
   );
 };
 
@@ -2061,6 +2122,11 @@ export const reviseOperation = async (
     operationId: operation.id,
     commitId,
     metadata: { operation: operation.operation, revision: true },
+  });
+
+  await announceChangeRequestRevised({
+    changeRequestId: operation.changeRequestId,
+    actorId: resolveActorId(parsed.author),
   });
 
   const updatedChangeRequest = await getChangeRequest(operation.changeRequestId);
@@ -2425,6 +2491,13 @@ const assertCanApproveChangeRequest = async (changeRequestId: string): Promise<v
 export const reviewChangeRequest = async (
   changeRequestId: string,
   input: z.infer<typeof reviewInputSchema>,
+  /**
+   * `automatic`: the permission-aware self-approval a direct write performs
+   * right before merging its own Change Request (record/view/content
+   * auto-merge). It is bookkeeping, not a vote — so it neither subscribes the
+   * "reviewer" nor tells participants someone reviewed.
+   */
+  options: { automatic?: boolean } = {},
 ) => {
   await assertCanApproveChangeRequest(changeRequestId);
   await ensureReady();
@@ -2516,6 +2589,13 @@ export const reviewChangeRequest = async (
   });
   if (parsed.verdict !== "approved") {
     notifyAgentOfChangeRequest(changeRequest.id, "changes_requested");
+  }
+  if (!options.automatic) {
+    await announceChangeRequestReviewed({
+      changeRequestId: changeRequest.id,
+      reviewerId: resolveActorId(CURRENT_USER_ID),
+      verdict: parsed.verdict,
+    });
   }
 
   const updated = await getChangeRequest(changeRequest.id);
@@ -2627,7 +2707,7 @@ export const autoApproveAndMerge = async (
     metadata: { verdict: "approved", auto: true },
   });
 
-  return mergeChangeRequest(changeRequest.id);
+  return mergeChangeRequest(changeRequest.id, { automatic: true });
 };
 
 /**
@@ -2674,8 +2754,8 @@ export const finalizeChangeRequest = async (args: {
 
   if (autoMerge) {
     if (args.kind === "content") {
-      await reviewChangeRequest(args.changeRequestId, { verdict: "approved" });
-      const merged = await mergeChangeRequest(args.changeRequestId);
+      await reviewChangeRequest(args.changeRequestId, { verdict: "approved" }, { automatic: true });
+      const merged = await mergeChangeRequest(args.changeRequestId, { automatic: true });
       return merged.changeRequest;
     }
     const merged = await autoApproveAndMerge(args.changeRequestId);
@@ -2830,6 +2910,19 @@ export const recordMergedOperation = async (args: {
     recordIds: metadataStringArray(mergeSummary.recordIds),
     viewIds: metadataStringArray(mergeSummary.viewIds),
     operationCount: 1,
+  });
+  // A direct write is a merged change nobody reviewed: subscribes the writer
+  // (this is how a direct create subscribes its creator) and tells the node's
+  // subscribers, coalesced on the host side.
+  await announceChangeRequestMerged({
+    changeRequestId,
+    submittedBy: args.submittedBy,
+    mergedNodeIds: [
+      ...(nodeId ? [nodeId] : []),
+      ...metadataStringArray(mergeSummary.mergedNodeIds),
+    ],
+    automatic: true,
+    actorId: args.submittedBy,
   });
   return changeRequestId;
 };
@@ -2986,6 +3079,10 @@ export const recordPendingNodeCreate = async (args: {
     changeRequestId,
     metadata: { operation: "node_create", nodeType: args.nodeType },
   });
+  // Notification only (subscribers of the parent folder hear about a proposed
+  // child). Deliberately not `publishChangeRequestPendingReview`: this path has
+  // never broadcast the live SSE event, and changing that is out of scope here.
+  await announceChangeRequestPendingReview({ changeRequestId, baseId: null, submittedBy });
 
   const changeRequest = await getChangeRequest(changeRequestId);
   if (!changeRequest) {
@@ -3026,6 +3123,11 @@ export const closeChangeRequest = async (changeRequestId: string, reason?: strin
     baseId: changeRequest.baseId,
     changeRequestId: changeRequest.id,
     metadata: { verdict: "closed" },
+  });
+  await announceChangeRequestRejected({
+    changeRequestId: changeRequest.id,
+    submittedBy: changeRequest.submittedBy,
+    actorId: resolveActorId(CURRENT_USER_ID),
   });
 
   const updated = await getChangeRequest(changeRequest.id);
@@ -3131,10 +3233,19 @@ export const listAgentTasks = async () => {
 
 // ── Merge engine ──────────────────────────────────────────────────────────────
 
-export const mergeChangeRequest = async (changeRequestId: string) => {
+export const mergeChangeRequest = async (
+  changeRequestId: string,
+  /**
+   * `automatic`: this merge is the tail of a direct write that never waited on a
+   * human (structural auto-merge, permission-aware `autoMerge`). Decides whether
+   * the merge is announced to the node's subscribers as a direct change, or to
+   * the Change Request's participants as a reviewed outcome.
+   */
+  options: { automatic?: boolean } = {},
+) => {
   await assertCanApproveChangeRequest(changeRequestId);
   try {
-    return await _mergeChangeRequest(changeRequestId);
+    return await _mergeChangeRequest(changeRequestId, options);
   } catch (err) {
     if (isNodeSlugConflictError(err)) {
       try {
@@ -3245,7 +3356,10 @@ export const mergeChangeRequest = async (changeRequestId: string) => {
   }
 };
 
-const _mergeChangeRequest = async (changeRequestId: string) => {
+const _mergeChangeRequest = async (
+  changeRequestId: string,
+  options: { automatic?: boolean } = {},
+) => {
   await ensureReady();
   const db = await getDb();
   const [changeRequest] = await db
@@ -3424,6 +3538,13 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
       recordIds: [],
       viewIds: [],
       operationCount: operationKinds.length,
+    });
+    await announceChangeRequestMerged({
+      changeRequestId: changeRequest.id,
+      submittedBy: changeRequest.submittedBy,
+      mergedNodeIds: [...new Set(mergedNodeIds)],
+      automatic: options.automatic === true,
+      actorId: resolveActorId(CURRENT_USER_ID),
     });
     const updated = await loadMergedChangeRequest(changeRequest.id);
     if (!updated) {
@@ -3770,6 +3891,13 @@ const _mergeChangeRequest = async (changeRequestId: string) => {
     recordIds: [...new Set(mergedRecordIds)],
     viewIds: [...new Set(mergedViewIds)],
     operationCount: operationKinds.length,
+  });
+  await announceChangeRequestMerged({
+    changeRequestId: changeRequest.id,
+    submittedBy: changeRequest.submittedBy,
+    mergedNodeIds: [],
+    automatic: options.automatic === true,
+    actorId: resolveActorId(CURRENT_USER_ID),
   });
 
   // Fire `record.created` webhook rules for genuinely new records (not every

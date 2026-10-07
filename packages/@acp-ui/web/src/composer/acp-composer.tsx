@@ -342,6 +342,24 @@ export function AcpComposer({
     onDraftApplied?.(draft.id);
   }, [draft, onDraftApplied]);
 
+  useEffect(() => {
+    const inputGroup = textareaRef.current?.closest<HTMLElement>("[data-slot=input-group]");
+    if (!inputGroup) return;
+    // KUI intentionally clips its generic input group, but this composer owns
+    // a popup that opens outside those bounds. KUI exposes no class slot for
+    // the group, so opt this instance out without changing the shared library.
+    const previousOverflow = inputGroup.style.getPropertyValue("overflow");
+    const previousPriority = inputGroup.style.getPropertyPriority("overflow");
+    inputGroup.style.setProperty("overflow", "visible", "important");
+    return () => {
+      if (previousOverflow) {
+        inputGroup.style.setProperty("overflow", previousOverflow, previousPriority);
+      } else {
+        inputGroup.style.removeProperty("overflow");
+      }
+    };
+  }, []);
+
   const handleSubmit = (message: PromptInputMessage, event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const text = message.text.trim();
@@ -401,7 +419,11 @@ export function AcpComposer({
 
   return (
     <PromptInput
-      className={className}
+      // The palette opens upward over the transcript. Raise the whole composer
+      // into that stacking order; a z-index on the child alone cannot escape a
+      // sibling transcript's stacking context and leaves visible options
+      // unclickable in the real Operate panel.
+      className={["relative z-20", className].filter(Boolean).join(" ")}
       maxFileSize={maxFileSize}
       maxFiles={maxFiles}
       // Without this the hidden `<input type="file">` has no `multiple`
@@ -438,7 +460,7 @@ export function AcpComposer({
           {showCommandPalette ? (
             <div
               aria-label="Available commands"
-              className="absolute bottom-full left-3 z-10 mb-2 max-h-56 w-[min(28rem,calc(100%-1.5rem))] overflow-y-auto rounded-md border bg-popover p-1 shadow-md"
+              className="absolute bottom-full left-0 z-10 mb-2 max-h-56 w-full overflow-y-auto rounded-md border bg-popover p-1 shadow-md"
               id={commandListId}
               role="listbox"
             >
@@ -459,7 +481,7 @@ export function AcpComposer({
                   type="button"
                 >
                   <span className="shrink-0 font-medium">/{command.name}</span>
-                  <span className="min-w-0 text-muted-foreground">
+                  <span className="min-w-0 truncate text-muted-foreground">
                     {command.description}
                     {command.input?.hint ? ` - ${command.input.hint}` : ""}
                   </span>

@@ -142,7 +142,9 @@ test("staged view controls recover a hidden conditioned field with one update CR
     "Discard staged changes",
   );
 
-  await panel.getByRole("button", { name: "More submit options" }).click();
+  // "Update View Now" is the primary immediate action, always visible — no
+  // need to open the dropdown first (Radix's dropdown is modal while open and
+  // blocks clicks on anything outside it, including this button).
   await panel.getByRole("button", { name: "Update View Now" }).click();
 
   await expect(page.locator(`[data-field-slug="${hiddenField.slug}"]`)).toBeVisible();
@@ -280,7 +282,7 @@ test("edit view reuses the shared fields editor and preserves unrelated config",
     }
   });
 
-  await dialog.getByRole("button", { name: "More submit options" }).click();
+  // "Update View Now" is the primary immediate action, always visible.
   await dialog.getByRole("button", { name: "Update View Now" }).click();
 
   await expect(dialog).toBeHidden();

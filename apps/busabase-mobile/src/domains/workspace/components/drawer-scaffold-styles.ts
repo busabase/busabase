@@ -93,6 +93,12 @@ export const drawerScaffoldStyles = StyleSheet.create({
     justifyContent: "center",
     flexShrink: 0,
   },
+  nodeShareMarker: {
+    width: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
   nodeActionsButton: {
     width: 28,
     alignItems: "center",

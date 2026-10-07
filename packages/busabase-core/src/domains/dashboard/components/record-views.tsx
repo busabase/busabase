@@ -40,6 +40,7 @@ import {
   isPeopleFieldType,
   isSystemFieldType,
 } from "../../base/field-types";
+import { getDateFieldOptions } from "../../base/utils/date-value";
 import { getPrimaryField } from "../../base/utils/primary-field";
 import { parseWhiteboardFieldValue } from "../../base/utils/whiteboard-value";
 import {
@@ -71,6 +72,7 @@ import type { RecordSubmitOptions } from "../helpers/view-types";
 import { registerSidePanelTab, type SidePanelTabProps } from "../side-panel-registry";
 import { useIsAnonymousVisitor } from "../visitor-context";
 import { renderMentionedText } from "./comments";
+import { DateFieldInput } from "./date-field";
 import {
   FieldBadgeList,
   FieldValuePreview,
@@ -298,8 +300,8 @@ export function RecordDetailView({
   // its own and exposes data/error/loading directly.
   const historyQuery = useQuery({
     enabled: Boolean(record) && !isAnon,
-    queryFn: () => client.listRecordChangeRequests(record?.id ?? ""),
-    queryKey: ["busabase", "record-change-requests", record?.id],
+    queryFn: () => client.listRecordChangeRequests(record?.id ?? "", { limit: 5 }),
+    queryKey: ["busabase", "record-change-requests", record?.id, { limit: 5 }],
   });
   const historyChangeRequests = historyQuery.data ?? [];
   const historyError = historyQuery.error
@@ -335,7 +337,9 @@ export function RecordDetailView({
               <button
                 className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-medium text-foreground text-sm transition-colors hover:bg-accent"
                 onClick={(event) => {
-                  setLocation(`/base/${baseSlug}/${record.id}/activity`);
+                  setLocation(
+                    mergeSearchIntoHref(`/base/${baseSlug}/${record.id}/activity`, currentSearch),
+                  );
                   event.currentTarget.closest("details")?.removeAttribute("open");
                 }}
                 type="button"
@@ -467,7 +471,10 @@ export function RecordDetailView({
               action={
                 <Link
                   className="inline-flex items-center gap-0.5 rounded-md px-1.5 py-1 text-muted-foreground text-xs transition-colors hover:bg-muted/60 hover:text-foreground"
-                  href={mergeSearchIntoHref("/activity", currentSearch)}
+                  href={mergeSearchIntoHref(
+                    `/base/${baseSlug}/${record.id}/activity`,
+                    currentSearch,
+                  )}
                 >
                   {messages.recordView.seeAll}
                   <ChevronRight aria-hidden="true" size={13} />
@@ -485,9 +492,16 @@ export function RecordDetailView({
               quiet
               title={messages.recordView.reviewHistory}
               action={
-                <span className="rounded-md bg-muted/55 px-2 py-0.5 text-muted-foreground text-xs">
-                  {isHistoryLoading ? "…" : historyChangeRequests.length}
-                </span>
+                <Link
+                  className="inline-flex items-center gap-1 text-muted-foreground text-xs hover:text-foreground"
+                  href={mergeSearchIntoHref(
+                    `/base/${baseSlug}/${record.id}/activity`,
+                    currentSearch,
+                  )}
+                >
+                  {messages.recordView.seeAll}
+                  <ChevronRight aria-hidden size={12} />
+                </Link>
               }
             >
               {historyError ? (
@@ -1043,6 +1057,15 @@ export function RecordFieldInput({
         <WhiteboardFieldEditor
           editorInstanceKey={editorInstanceKey}
           onChange={onChange}
+          value={value}
+        />
+      ) : kind === "date" ? (
+        <DateFieldInput
+          ariaLabel={fieldName}
+          className="h-9 w-full rounded-md border border-border/70 bg-card px-2.5 py-1.5 text-sm outline-none transition-colors focus:border-primary"
+          id={inputId}
+          onChange={onChange}
+          options={getDateFieldOptions(field.options)}
           value={value}
         />
       ) : (

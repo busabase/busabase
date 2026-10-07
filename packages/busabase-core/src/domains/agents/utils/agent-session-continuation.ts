@@ -10,7 +10,7 @@ import { isReusableSession } from "./node-agent-sessions";
  * click, and not a message that silently vanishes.
  *
  * `AgentDetailView` used to let the composer accept input on any status
- * (PUL-214) but still called `chat.sendPrompt`, which targets whichever
+ * but still called `chat.sendPrompt`, which targets whichever
  * session `useAgentSession` was started with. Once that session is `ended`/
  * `failed`, `promptAgentSession` throws server-side — and because
  * `serverEchoesPrompt` is `true`, the client never appended its own echo, so

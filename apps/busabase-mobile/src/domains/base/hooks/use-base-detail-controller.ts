@@ -96,6 +96,7 @@ export function useBaseDetailController(slug: string) {
 
   return {
     actionsOpen,
+    activeView,
     base,
     basesQuery,
     displayMode,

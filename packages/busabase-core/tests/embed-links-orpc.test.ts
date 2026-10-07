@@ -2,7 +2,7 @@ import { OpenAPIHandler } from "@orpc/openapi/fetch";
 import { createRouterClient } from "@orpc/server";
 import { describe, expect, it } from "vitest";
 import { createBusabaseClient } from "../../../apps/busabase-sdk/src/client";
-import { runWithLocalContext } from "../src/context";
+import { LOCAL_SPACE_ID, runWithBusabaseContext, runWithLocalContext } from "../src/context";
 import {
   EMBED_PUBLIC_ID_PATTERN,
   EMBED_SECRET_PATTERN,
@@ -63,6 +63,96 @@ describe("embed links — Desktop oRPC integration", () => {
     await expect(client.embedLinks.revoke({ id: created.id })).resolves.toEqual({ revoked: true });
     await expect(resolveEmbedLink(created.id, secret)).resolves.toBeNull();
     expect((await client.embedLinks.list({ typeId: doc.node.id }))[0]?.active).toBe(false);
+  });
+
+  it("lets changeRequest credentials preview only visible pending CRs, never generic Node embeds", async () => {
+    await seedScenario("cr-preview-narrow-permission");
+    const client = createRouterClient(busabaseRouter);
+    const pending = await client.nodes.createChangeRequest({
+      autoMerge: false,
+      operations: [
+        {
+          kind: "create",
+          parentNodeId: ROOT_NODE_ID,
+          nodeType: "doc",
+          slug: "narrow-preview",
+          name: "Narrow Preview",
+        },
+      ],
+    });
+    const asScoped = <T>(fn: () => Promise<T>) =>
+      runWithBusabaseContext(
+        {
+          spaceId: LOCAL_SPACE_ID,
+          actorId: "local-editor",
+          isSpaceManager: false,
+          permissionLevel: "changeRequest",
+          permissionLevelIsCeiling: true,
+        },
+        fn,
+      );
+    const created = await asScoped(() =>
+      client.changeRequests.createPreviewLink({ changeRequestId: pending.id }),
+    );
+    expect(created).toMatchObject({
+      type: "change-request",
+      typeId: pending.id,
+      framePolicy: { mode: "anywhere", allowedOrigins: [] },
+    });
+    expect(new Date(created.expiresAt).getTime() - new Date(created.createdAt).getTime()).toBe(
+      5 * 60_000,
+    );
+    const secret = new URL(created.url).searchParams.get("token") ?? "";
+    await expect(resolveEmbedLink(created.id, secret)).resolves.toMatchObject({
+      type: "change-request",
+      changeRequest: { id: pending.id },
+    });
+    await expect(
+      asScoped(() => client.embedLinks.create({ type: "node", typeId: ROOT_NODE_ID })),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(
+      asScoped(() => client.changeRequests.createPreviewLink({ changeRequestId: ROOT_NODE_ID })),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(
+      runWithBusabaseContext(
+        {
+          spaceId: "another-space",
+          actorId: "local-editor",
+          permissionLevel: "changeRequest",
+          permissionLevelIsCeiling: true,
+        },
+        () => client.changeRequests.createPreviewLink({ changeRequestId: pending.id }),
+      ),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    const privateDoc = await client.docs.create({
+      autoMerge: true,
+      slug: "private-preview-target",
+      name: "Private Preview Target",
+      body: "# Private",
+    });
+    if (!("node" in privateDoc)) throw new Error("expected a materialized private Doc");
+    const privatePending = await client.nodes.updateContent({
+      nodeId: privateDoc.node.id,
+      content: { kind: "doc", body: "# Pending private edit" },
+      autoMerge: false,
+    });
+    await client.nodes.updateVisibility({ nodeId: privateDoc.node.id, visibility: "private" });
+    await expect(
+      runWithBusabaseContext(
+        {
+          spaceId: LOCAL_SPACE_ID,
+          actorId: "different-reader",
+          isSpaceManager: false,
+          permissionLevel: "changeRequest",
+          permissionLevelIsCeiling: true,
+        },
+        () => client.changeRequests.createPreviewLink({ changeRequestId: privatePending.id }),
+      ),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await client.changeRequests.close({ changeRequestId: pending.id });
+    await expect(
+      asScoped(() => client.changeRequests.createPreviewLink({ changeRequestId: pending.id })),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
   });
 
   it("keeps demo mode non-persistent", async () => {

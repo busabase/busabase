@@ -129,8 +129,9 @@ describe("Assets + attachment dedup — oRPC integration", () => {
         sizeBytes: 1234,
         contentHash: HASH_A,
       });
-      // Git/OCI-style content-addressed key: algorithm segment + 2-char fan-out.
-      expect(req1.storageKey).toMatch(/^attachments\/blobs\/sha256\/aa\//);
+      // Git/OCI-style content-addressed key (algorithm segment + 2-char fan-out),
+      // namespaced under its owner so nobody else can be handed the same key.
+      expect(req1.storageKey).toMatch(/^attachments\/local\/blobs\/sha256\/aa\//);
       expect(req1.storageKey).toMatch(/\.png$/);
       expect(req1.duplicate).toBe(false);
 
@@ -176,7 +177,7 @@ describe("Assets + attachment dedup — oRPC integration", () => {
       // A second confirm with a different storageKey but the same hash still
       // resolves to the first row (no duplicate registry entry).
       const c2 = await client.assets.confirm({
-        storageKey: "attachments/elsewhere/x.png",
+        storageKey: "attachments/local/elsewhere/x.png",
         fileName: "b.png",
         mimeType: "image/png",
         sizeBytes: 10,

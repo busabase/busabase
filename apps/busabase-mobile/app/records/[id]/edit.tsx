@@ -60,7 +60,7 @@ function EditRecordContent() {
       return buda.client.records.changeRequest({
         operation: "update",
         recordId: record.id,
-        fields: normalizeFormValues(record.base.fields, values),
+        fields: normalizeFormValues(record.base.fields, values, record.headCommit.payload),
         message: `Update ${getRecordTitle(record)}`,
         author: SUBMITTED_BY,
       });

@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getContextActorId, getContextSpaceId, LOCAL_SPACE_ID } from "../../../context";
 
 /**
- * PUL-257: an agent that accepts the ACP connection but never answers
+ * An agent that accepts the ACP connection but never answers
  * `initialize`/`session/new` used to leave `session.ready` pending forever —
  * neither the success path nor `connectPromise`'s `.catch` ever fires, so
  * the session stayed `connecting` with no error, and the busabase UI showed
@@ -123,7 +123,7 @@ async function waitForFailedSession(sessionId: string): Promise<AgentSessionVO> 
   );
 }
 
-describe("agent session manager — handshake timeout (PUL-257)", () => {
+describe("agent session manager — handshake timeout", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();

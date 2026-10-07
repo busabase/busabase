@@ -37,7 +37,7 @@ export interface FileUploadTask {
   id: string;
   nodeId: string;
   nodeName: string;
-  nodeType: "drive" | "skill";
+  nodeType: "airapp" | "drive" | "skill";
   folder: string;
   mode: FileUploadTaskMode;
   status: FileUploadTaskStatus;

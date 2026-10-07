@@ -190,6 +190,11 @@ export interface NodeVO {
    * NOT that the node is unshared.
    */
   shared?: boolean;
+  /**
+   * Publicly reachable only through an ancestor's share — see the matching
+   * field on the contract's `NodeOutput` (contract/schemas.ts).
+   */
+  sharedViaAncestor?: boolean;
 }
 
 // Keep the plain open-domains `AttachmentRef` available for lower-level file

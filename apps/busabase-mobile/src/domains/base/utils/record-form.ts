@@ -1,6 +1,8 @@
 import type { AssetAttachmentRef, BaseFieldVO, FieldType } from "busabase-contract/types";
+import { getDateFieldOptions } from "busabase-core/base/date-value";
 import { stringifyFieldValue } from "~/domains/review/utils/busabase-display";
 import { getAttachmentRefs } from "~/lib/attachment";
+import { fromDateFieldInputText, toDateFieldInputText } from "./date-input";
 
 /** Field types the mobile form renders an editable control for. */
 const EDITABLE_TYPES: ReadonlySet<FieldType> = new Set<FieldType>([
@@ -70,6 +72,11 @@ export function initialFieldValue(field: BaseFieldVO, value?: unknown): RecordFo
   if (field.type === "attachment") {
     return getAttachmentRefs(value);
   }
+  // A day value opens as the day it names ("2026-10-02"), never shifted into the
+  // device's zone; a date-time value opens as wall-clock time in the field's zone.
+  if (field.type === "date") {
+    return toDateFieldInputText(value, getDateFieldOptions(field.options));
+  }
   return stringifyFieldValue(value);
 }
 
@@ -84,10 +91,16 @@ export function buildInitialFormValues(
   );
 }
 
-/** Convert form state into the field payload the change request API expects. */
+/**
+ * Convert form state into the field payload the change request API expects.
+ * Pass the record's stored `source` when editing: a date the user did not touch
+ * is sent back exactly as stored, instead of being re-stamped with this
+ * device's UTC offset (which would show up as a change in the review diff).
+ */
 export function normalizeFormValues(
   fields: BaseFieldVO[],
   values: Record<string, RecordFormValue>,
+  source?: Record<string, unknown>,
 ): Record<string, unknown> {
   return Object.fromEntries(
     fields.filter(isEditableField).map((field) => {
@@ -115,6 +128,15 @@ export function normalizeFormValues(
       }
       if (field.type === "attachment") {
         return [field.slug, Array.isArray(value) ? value : []];
+      }
+      if (field.type === "date") {
+        const options = getDateFieldOptions(field.options);
+        const text = typeof value === "string" ? value : "";
+        const stored = source?.[field.slug];
+        if (source && stored != null && text === toDateFieldInputText(stored, options)) {
+          return [field.slug, stored];
+        }
+        return [field.slug, fromDateFieldInputText(text, options)];
       }
       return [field.slug, typeof value === "string" ? value : ""];
     }),

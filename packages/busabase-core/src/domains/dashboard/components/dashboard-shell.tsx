@@ -855,6 +855,7 @@ function DashboardShellInner({
         shareLabel: messages.share.title,
         sharedMarkerLabel: messages.share.sharedMarker,
         restrictedMarkerLabel: messages.share.restrictedMarker,
+        sharedViaAncestorMarkerLabel: messages.share.sharedViaAncestorMarker,
         deleteLabel: messages.nodeDetail.delete,
       },
       loadingNodeIds,
@@ -947,6 +948,7 @@ function DashboardShellInner({
       messages.share.title,
       messages.share.sharedMarker,
       messages.share.restrictedMarker,
+      messages.share.sharedViaAncestorMarker,
       messages.nodeDetail.delete,
       loadingNodeIds,
       orpc,
@@ -1495,6 +1497,8 @@ interface NavItemLabels {
   sharedMarkerLabel: string;
   /** Tooltip on the always-visible "this node's access is restricted" marker. */
   restrictedMarkerLabel: string;
+  /** Tooltip on the fainter marker for a node public only via a shared ancestor. */
+  sharedViaAncestorMarkerLabel: string;
   deleteLabel: string;
 }
 
@@ -1743,11 +1747,23 @@ function buildNavItem(node: NodeVO, ctx: NavItemContext): NavItem[] {
   // live public link is the genuinely alarming combination (you believe it is
   // locked, anonymous visitors can read it), and the marker that must survive
   // is the one announcing the exposure, not the one announcing the intent.
+  //
+  // Between the two sits the INHERITED exposure (`NodeVO.sharedViaAncestor`):
+  // the same globe, one step fainter. Without it a Doc added to a published
+  // folder looked private while anyone with the link could read it; drawing it
+  // at full strength would instead make every child look like its own grant.
+  // It outranks the lock for the same reason the own-share globe does.
   const sharedMarker = node.shared
     ? { statusIcon: Globe, statusIconTitle: labels.sharedMarkerLabel }
-    : node.explicitVisibility === "private"
-      ? { statusIcon: Lock, statusIconTitle: labels.restrictedMarkerLabel }
-      : {};
+    : node.sharedViaAncestor
+      ? {
+          statusIcon: Globe,
+          statusIconTitle: labels.sharedViaAncestorMarkerLabel,
+          statusIconTone: "muted" as const,
+        }
+      : node.explicitVisibility === "private"
+        ? { statusIcon: Lock, statusIconTitle: labels.restrictedMarkerLabel }
+        : {};
   if (hasCapability(node.type, "container")) {
     const url = nodeHref(node) ?? "";
     return [

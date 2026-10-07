@@ -91,7 +91,7 @@ test("collapsing still works from an empty panel", async ({ page }) => {
 });
 
 /**
- * PUL-232: the Agents launcher card used to navigate the main canvas away to
+ * The Agents launcher card used to navigate the main canvas away to
  * `/agents`, leaving the panel itself empty. It now stays put and drills into
  * a connected-agent picker in place — these pin that contract down from the
  * user's side: the card announces the extra step, picking it keeps you in

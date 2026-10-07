@@ -29,7 +29,10 @@ import {
 } from "../../../logic/cr-lifecycle";
 import { projectCommitFields } from "../../../logic/field-values";
 import { CURRENT_USER_ID, id, now, rootNodeIdForSpace } from "../../../logic/kernel";
-import { publishChangeRequestPendingReview } from "../../../logic/live-events";
+import {
+  broadcastChangeRequestPendingReview,
+  publishChangeRequestPendingReview,
+} from "../../../logic/live-events";
 import {
   assertBaseChangeRequestPermission,
   hasNodePermission,
@@ -38,6 +41,7 @@ import {
 } from "../../../logic/node-acl";
 import { assertContainerParent } from "../../../logic/node-parent";
 import { isNodeSlugUniqueViolation, nodeSlugConflict } from "../../../logic/node-slug";
+import { announceChangeRequestPendingReview } from "../../../logic/node-subscriptions";
 import { ensureReady } from "../../../logic/seed";
 import {
   createBaseInputSchema,
@@ -51,6 +55,7 @@ import { toBaseVO } from "../../../logic/vo";
 import { assertValidFormulaField, validateRecordFields } from "../field-rules";
 import type { FieldDef } from "../field-types";
 import { FormulaError } from "../formula";
+import { assertValidDateFieldOptionsOrThrow } from "./date-options";
 import { baseNotFound } from "./errors";
 import { resolveLookupFieldOptions } from "./field-ops";
 import { getBase } from "./queries";
@@ -194,6 +199,7 @@ export const createBase = async (input: z.input<typeof createBaseInputSchema>) =
   // without a resolvable targetBaseId — so it is safe to load here.
   for (const field of parsed.fields) {
     assertRelationOnlyOptionsOrThrow(field.type, field.slug, field.options);
+    assertValidDateFieldOptionsOrThrow(field.type, field.slug, field.options);
   }
   const relationResolvedFields = await Promise.all(
     parsed.fields.map(async (field) => ({
@@ -569,7 +575,10 @@ const createChangeRequestInternal = async (
     // Best-effort — an audit-log write failure must never fail change-request
     // creation; the CR/operation/commit rows above are already durably committed.
   }
-  await publishChangeRequestPendingReview({
+  // Live event only, at its historical position; the notification waits for the
+  // auto-merge decision below so a change that merges immediately is announced
+  // as a direct change, never as "pending review".
+  await broadcastChangeRequestPendingReview({
     spaceId: getContextSpaceId(),
     baseId: base.id,
     changeRequestId,
@@ -598,8 +607,8 @@ const createChangeRequestInternal = async (
     await hasNodePermission(base.nodeId, "write", submittedBy),
   );
   if (autoMerge) {
-    await reviewChangeRequest(changeRequestId, { verdict: "approved" });
-    const merged = await mergeChangeRequest(changeRequestId);
+    await reviewChangeRequest(changeRequestId, { verdict: "approved" }, { automatic: true });
+    const merged = await mergeChangeRequest(changeRequestId, { automatic: true });
     if (!merged.record) {
       throw new Error("Auto-merge did not produce a record");
     }
@@ -609,6 +618,7 @@ const createChangeRequestInternal = async (
     // router's output parse drops it and the public shape is unchanged.
     return { ...merged.record, changeRequestId, materialized: true as const };
   }
+  await announceChangeRequestPendingReview({ changeRequestId, baseId: base.id, submittedBy });
   return { ...changeRequest, materialized: false as const };
 };
 
@@ -1191,8 +1201,8 @@ export const createDeleteChangeRequest = async (
     await hasNodePermission(base.nodeId, "write", resolveActorId(parsed.submittedBy)),
   );
   if (autoMerge) {
-    await reviewChangeRequest(changeRequestId, { verdict: "approved" });
-    const merged = await mergeChangeRequest(changeRequestId);
+    await reviewChangeRequest(changeRequestId, { verdict: "approved" }, { automatic: true });
+    const merged = await mergeChangeRequest(changeRequestId, { automatic: true });
     if (!merged.record) {
       throw new Error("Auto-merge did not produce an archived record");
     }
@@ -1330,7 +1340,8 @@ export const createUpdateChangeRequest = async (
     commitId,
     metadata: { operation: "record_update" },
   });
-  await publishChangeRequestPendingReview({
+  // Live event only, at its historical position (see the record-create path).
+  await broadcastChangeRequestPendingReview({
     spaceId: getContextSpaceId(),
     baseId: record.baseId,
     changeRequestId,
@@ -1346,13 +1357,18 @@ export const createUpdateChangeRequest = async (
     await hasNodePermission(base.nodeId, "write", submittedBy),
   );
   if (autoMerge) {
-    await reviewChangeRequest(changeRequestId, { verdict: "approved" });
-    const merged = await mergeChangeRequest(changeRequestId);
+    await reviewChangeRequest(changeRequestId, { verdict: "approved" }, { automatic: true });
+    const merged = await mergeChangeRequest(changeRequestId, { automatic: true });
     if (!merged.record) {
       throw new Error("Auto-merge did not produce an updated record");
     }
     return { ...merged.record, materialized: true as const };
   }
+  await announceChangeRequestPendingReview({
+    changeRequestId,
+    baseId: record.baseId,
+    submittedBy,
+  });
   return { ...changeRequest, materialized: false as const };
 };
 
@@ -1464,8 +1480,8 @@ export const createRestoreChangeRequest = async (
     await hasNodePermission(base.nodeId, "write", resolveActorId(submittedBy)),
   );
   if (shouldMerge) {
-    await reviewChangeRequest(changeRequestId, { verdict: "approved" });
-    const merged = await mergeChangeRequest(changeRequestId);
+    await reviewChangeRequest(changeRequestId, { verdict: "approved" }, { automatic: true });
+    const merged = await mergeChangeRequest(changeRequestId, { automatic: true });
     if (!merged.record) {
       throw new Error("Auto-merge did not produce a restored record");
     }

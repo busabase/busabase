@@ -172,6 +172,14 @@ const orpc = {
     updateContent: {
       mutationOptions: () => ({ mutationFn: async () => ({}) }),
     },
+    // The node actions menu prepares (but, closed, never fetches) the
+    // subscription query and mutation.
+    subscription: {
+      get: {
+        queryOptions: () => ({ queryKey: ["nodes", "subscription"], queryFn: async () => null }),
+      },
+      set: { mutationOptions: () => ({ mutationFn: async () => null }) },
+    },
   },
 } as unknown as BusabaseQueryUtils;
 

@@ -2,6 +2,7 @@ import "server-only";
 
 import { cache } from "react";
 import { readCmsOrFallback } from "../fallback";
+import { buildCmsPostJsonLd, type CmsBreadcrumbItem, type CmsJsonLdSite } from "../jsonld";
 import {
   buildCmsContentMetadataInput,
   type CmsContentMetadataInput,
@@ -58,6 +59,38 @@ export interface BlogCardContent {
   author?: string;
   image?: string;
 }
+
+/** A CMS Post as a Blog index card. */
+export const cmsPostToBlogCard = (post: PostVO): BlogCardContent => ({
+  url: post.path,
+  title: post.title,
+  description: post.description ?? undefined,
+  date: post.publishedAt ?? post.updatedAt,
+  author: post.author ?? undefined,
+  image: post.coverImage?.url ?? undefined,
+});
+
+/** The frontmatter a local (fumadocs) Blog page may carry, read as a Blog index card. */
+export interface LocalBlogCardPage {
+  url: string;
+  data: {
+    title: string;
+    description?: string;
+    date?: string | Date;
+    author?: string;
+    image?: string;
+  };
+}
+
+/** A local (fumadocs) Blog page as a Blog index card. */
+export const localPageToBlogCard = (page: LocalBlogCardPage): BlogCardContent => ({
+  url: page.url,
+  title: page.data.title,
+  description: page.data.description,
+  date: page.data.date,
+  author: page.data.author,
+  image: page.data.image,
+});
 
 /**
  * Merge Post card sources in priority order, using canonical paths as identity — the earliest
@@ -116,6 +149,19 @@ export interface CmsPostResolverIntegration {
   getBusabaseBlogPostByPathOrFallback: (path: string) => Promise<PostVO | null>;
 }
 
+/**
+ * What `resolvePostJsonLd` reads off a LOCAL (MDX) post beyond title/description/image. A
+ * fumadocs YAML `date:` arrives as a `Date`, hence the union.
+ */
+export interface LocalPostJsonLdFields extends LocalContentMetadataFields {
+  datePublished?: string | Date | null;
+  dateModified?: string | Date | null;
+  author?: string | null;
+}
+
+/** A breadcrumb label: a fixed string per locale, or an async lookup (e.g. loading a dictionary). */
+export type CmsPostJsonLdLabel = (locale: string) => string | Promise<string>;
+
 export interface CmsPostResolverOptions<TPage> {
   integration: CmsPostResolverIntegration;
   localSource: LocalPostSourceLike<TPage>;
@@ -137,6 +183,21 @@ export interface CmsPostResolverOptions<TPage> {
    * read from the fumadocs page shape (`page.data.title` / `.description` / `.image`).
    */
   getLocalPostMetadata?: (page: TPage) => LocalContentMetadataFields;
+  /**
+   * Site identity for structured data. Supply it and `resolvePostJsonLd` returns the post's
+   * `BlogPosting` + `BreadcrumbList`; omit it and that call returns `[]`, so an app that has not
+   * opted in emits nothing rather than half-formed schema. Same option as the Page helpers'.
+   */
+  jsonLdSite?: CmsJsonLdSite;
+  /** Breadcrumb root label, asked for in the CONTENT locale. Defaults to "Home". */
+  homeLabel?: CmsPostJsonLdLabel;
+  /** Breadcrumb label of the blog index, asked for in the CONTENT locale. Defaults to "Blog". */
+  blogLabel?: CmsPostJsonLdLabel;
+  /**
+   * Dates/author/image of a LOCAL post, for `resolvePostJsonLd`. Omitted, they are read from the
+   * fumadocs page shape (`page.data.date` / `.lastModified` / `.author`, plus the metadata fields).
+   */
+  getLocalPostJsonLdFields?: (page: TPage) => LocalPostJsonLdFields;
 }
 
 export interface ResolvePostMetadataInputOptions {
@@ -198,6 +259,28 @@ export interface CmsPostResolver<TPage> {
     dependencies: CmsPostResolverDependencies<TPage>,
     options?: ResolvePostMetadataInputOptions,
   ) => Promise<CmsContentMetadataInput | null>;
+  /**
+   * The JSON-LD nodes for a Post route, in ONE call — the Post counterpart of the Page helpers'
+   * `buildCmsPageJsonLd`: a `BlogPosting` plus a Home → Blog → Post `BreadcrumbList`, ready for
+   * `<CmsJsonLd nodes={...} />`. Same resolution (and request cache) as `resolvePostPage` /
+   * `resolvePostMetadataInput`, so the three always describe the same post.
+   *
+   * Every URL is the CANONICAL one: on a locale fallback (`/ja/blog/x` serving the English
+   * original) the post's `url`/`mainEntityOfPage` point at the English URL and `inLanguage` is
+   * the language of the body, never the requested locale — matching the canonical link the
+   * metadata emits. `[]` when there is no post or no `jsonLdSite` was configured.
+   */
+  resolvePostJsonLd: (
+    requestedLocale: string,
+    slugPath: string,
+    options?: ResolvePostMetadataInputOptions,
+  ) => Promise<Array<Record<string, unknown>>>;
+  resolvePostJsonLdWithDependencies: (
+    requestedLocale: string,
+    slugPath: string,
+    dependencies: CmsPostResolverDependencies<TPage>,
+    options?: ResolvePostMetadataInputOptions,
+  ) => Promise<Array<Record<string, unknown>>>;
 }
 
 /** fumadocs' page shape: `{ data: { title, description, image } }`. */
@@ -207,12 +290,29 @@ const readFumadocsPostMetadata = (page: unknown): LocalContentMetadataFields => 
   return { title: text(data.title), description: text(data.description), image: text(data.image) };
 };
 
+/** fumadocs' page shape, plus the frontmatter a post's structured data needs. */
+const readFumadocsPostJsonLdFields = (page: unknown): LocalPostJsonLdFields => {
+  const data = (page as { data?: Record<string, unknown> } | undefined)?.data ?? {};
+  const date = (value: unknown) =>
+    typeof value === "string" || value instanceof Date ? value : undefined;
+  return {
+    ...readFumadocsPostMetadata(page),
+    datePublished: date(data.date),
+    dateModified: date(data.lastModified),
+    author: typeof data.author === "string" ? data.author : undefined,
+  };
+};
+
 export const createCmsPostResolver = <TPage>({
   integration,
   localSource,
   supportedLocales = [],
   defaultLocale,
   getLocalPostMetadata = readFumadocsPostMetadata,
+  jsonLdSite,
+  homeLabel = () => "Home",
+  blogLabel = () => "Blog",
+  getLocalPostJsonLdFields = readFumadocsPostJsonLdFields,
 }: CmsPostResolverOptions<TPage>): CmsPostResolver<TPage> => {
   const { buildCmsPath, getBusabaseBlogPostByPathOrFallback, isCmsContentForLocale, parseCmsPath } =
     integration;
@@ -397,6 +497,85 @@ export const createCmsPostResolver = <TPage>({
     );
   };
 
+  // The locale-prefixed URL of a path in `locale` — the same rule the canonical link uses
+  // (default locale unprefixed). `null` when the app cannot form that path at all.
+  const absoluteUrlFor = (baseUrl: string, locale: string, path: string): string | null => {
+    const localized = buildCmsPath(locale, path.replace(/^\/+/, ""));
+    return localized ? `${baseUrl}${localized}` : null;
+  };
+
+  const toJsonLd = async (
+    resolved: ResolvedCmsPostPage<TPage>,
+  ): Promise<Array<Record<string, unknown>>> => {
+    if (!jsonLdSite) return [];
+    const { baseUrl } = jsonLdSite;
+    // The language of the BODY: on a fallback this is English even though the visitor asked
+    // for another locale, and the canonical URL is the English one.
+    const locale = resolved.contentLocale;
+    const url = absoluteUrlFor(baseUrl, locale, resolved.canonicalPath);
+    if (!url) return [];
+
+    const fields: LocalPostJsonLdFields =
+      resolved.source === "busabase"
+        ? {
+            title: resolved.content.title,
+            description: resolved.content.description ?? resolved.content.seoDescription,
+            image: resolved.content.coverImage?.url,
+            datePublished: resolved.content.publishedAt,
+            dateModified: resolved.content.updatedAt,
+            author: resolved.content.author,
+          }
+        : getLocalPostJsonLdFields(resolved.content);
+    const title = fields.title ?? "";
+
+    const [home, blog] = await Promise.all([homeLabel(locale), blogLabel(locale)]);
+    // A locale root is not a content path, so `buildCmsPath` cannot form it; its prefix is
+    // whatever the blog index URL carries in front of `/blog` ("" for the default locale).
+    const blogIndexUrl = absoluteUrlFor(baseUrl, locale, "/blog");
+    const homeUrl = blogIndexUrl ? blogIndexUrl.slice(0, -"/blog".length) || baseUrl : baseUrl;
+    const breadcrumbs: CmsBreadcrumbItem[] = [{ name: home, url: homeUrl }];
+    if (blogIndexUrl) breadcrumbs.push({ name: blog, url: blogIndexUrl });
+    breadcrumbs.push({ name: title, url });
+
+    return buildCmsPostJsonLd(jsonLdSite, {
+      url,
+      title,
+      description: fields.description,
+      lang: locale,
+      image: fields.image,
+      datePublished: fields.datePublished,
+      dateModified: fields.dateModified,
+      author: fields.author,
+      breadcrumbs,
+    });
+  };
+
+  const resolvePostJsonLdWithDependencies = async (
+    requestedLocale: string,
+    slugPath: string,
+    dependencies: CmsPostResolverDependencies<TPage>,
+    { localeFallback = true }: ResolvePostMetadataInputOptions = {},
+  ): Promise<Array<Record<string, unknown>>> => {
+    if (!jsonLdSite) return [];
+    const resolved = localeFallback
+      ? await resolvePostPageWithDependencies(requestedLocale, slugPath, dependencies)
+      : await resolveExactLocale(requestedLocale, slugPath, dependencies);
+    return resolved ? toJsonLd(resolved) : [];
+  };
+
+  const resolvePostJsonLd = async (
+    requestedLocale: string,
+    slugPath: string,
+    { localeFallback = true }: ResolvePostMetadataInputOptions = {},
+  ): Promise<Array<Record<string, unknown>>> => {
+    if (!jsonLdSite) return [];
+    // Reuse the request-cached resolve so the page body, metadata and JSON-LD share one read.
+    const resolved = localeFallback
+      ? await resolvePostPage(requestedLocale, slugPath)
+      : await resolveExactLocale(requestedLocale, slugPath, defaultDependencies);
+    return resolved ? toJsonLd(resolved) : [];
+  };
+
   return {
     resolvePostPage,
     resolvePostPageWithDependencies,
@@ -404,5 +583,7 @@ export const createCmsPostResolver = <TPage>({
     getAvailablePostLocalesWithDependencies,
     resolvePostMetadataInput,
     resolvePostMetadataInputWithDependencies,
+    resolvePostJsonLd,
+    resolvePostJsonLdWithDependencies,
   };
 };

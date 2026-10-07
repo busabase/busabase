@@ -6,33 +6,27 @@ import { SPALink as Link } from "openlib/ui/dashboard";
 import { useEffect, useState } from "react";
 import { useSearch } from "wouter";
 import { useCoreI18n, useCoreLocale } from "../../../i18n";
+import {
+  getCalendarDateRange,
+  getDateFieldDayKey,
+  getDateFieldOptions,
+} from "../../base/utils/date-value";
+import { resolveDateField } from "../../base/utils/view-field-resolution";
 import { getRecordTitle } from "../helpers/change-request";
 import { mergeSearchIntoHref } from "../helpers/link-search";
-
-/**
- * Resolve which date field positions records on the grid. Honors the view's
- * `dateFieldSlug`; otherwise falls back to the first date field on the base.
- */
-export const resolveDateField = (
-  base: BaseVO | null,
-  fields: BaseFieldVO[],
-  dateFieldSlug: string | null | undefined,
-): BaseFieldVO | null => {
-  const dateFields = (base?.fields ?? fields).filter(
-    (f) => f.type === "date" || f.type === "created_time" || f.type === "updated_time",
-  );
-  if (dateFieldSlug) {
-    return dateFields.find((f) => f.slug === dateFieldSlug) ?? null;
-  }
-  return dateFields[0] ?? null;
-};
 
 // Local YYYY-MM-DD key for a Date (avoids UTC off-by-one from toISOString).
 const dayKey = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
-// Parse a record's date value (ISO string or YYYY-MM-DD) into a day key, or null.
-const recordDayKey = (value: unknown): string | null => {
+// The day a record sits on. `created_time` / `updated_time` are always real
+// instants (one that happens to fall on UTC midnight is still an instant, not
+// a day), so they keep reading in local time; a `date` field goes through the
+// shared date-value rules.
+const recordDayKey = (field: BaseFieldVO, value: unknown): string | null => {
+  if (field.type === "date") {
+    return getDateFieldDayKey(value, getDateFieldOptions(field.options));
+  }
   if (typeof value !== "string" || value.length === 0) {
     return null;
   }
@@ -71,11 +65,12 @@ export function BusaBaseCalendar({
   const gridEnd = new Date(gridStart);
   gridEnd.setDate(gridStart.getDate() + 42);
 
-  // `Date#toISOString()` converts a LOCAL instant to its exact UTC equivalent —
-  // this is what lets the server compare real timestamps with zero ambiguity
-  // about the viewer's timezone, which it never has (see the `dateRange` doc on
-  // `listRecordsPageInputSchema`). The client resolves the grid boundaries;
-  // the server just compares.
+  // The client resolves the grid boundaries to exact UTC instants — this is
+  // what lets the server compare real timestamps with zero ambiguity about the
+  // viewer's timezone, which it never has (see the `dateRange` doc on
+  // `listRecordsPageInputSchema`, and `getCalendarDateRange` for day values).
+  // The server just compares.
+  const range = getCalendarDateRange(dateField?.type, gridStart, gridEnd);
   const rangeQuery = useInfiniteQuery({
     enabled: Boolean(baseId) && Boolean(dateField),
     getNextPageParam: (last: { page: number; totalPages: number }) =>
@@ -86,8 +81,8 @@ export function BusaBaseCalendar({
         baseId,
         dateRange: {
           fieldSlug: dateField?.slug ?? "",
-          gte: gridStart.toISOString(),
-          lt: gridEnd.toISOString(),
+          gte: range.gte,
+          lt: range.lt,
         },
         page: pageParam as number,
         pageSize: RANGE_PAGE_SIZE,
@@ -99,7 +94,8 @@ export function BusaBaseCalendar({
       baseId,
       activeView?.id ?? "",
       dateField?.slug ?? "",
-      gridStart.toISOString(),
+      range.gte,
+      range.lt,
     ],
   });
 
@@ -128,11 +124,12 @@ export function BusaBaseCalendar({
   const isLoadingMonth =
     rangeQuery.isPending || rangeQuery.hasNextPage || rangeQuery.isFetchingNextPage;
 
-  // Bucket records by day — unchanged from before; still local time, still
-  // over whatever the current data set is (now the month's slice, not the Base).
+  // Bucket records by day. A calendar day stays on its own day for every
+  // reader; a time-of-day value lands on the day it is in the field's zone, or
+  // in the reader's own (see date-value.ts).
   const recordsByDay = new Map<string, RecordVO[]>();
   for (const record of records) {
-    const key = recordDayKey(record.headCommit.payload[dateField.slug]);
+    const key = recordDayKey(dateField, record.headCommit.payload[dateField.slug]);
     if (!key) {
       continue;
     }
@@ -217,6 +214,7 @@ export function BusaBaseCalendar({
               className={`min-h-24 border-border/50 border-r border-b p-1.5 ${
                 inMonth ? "" : "bg-muted/10 text-muted-foreground/50"
               }`}
+              data-calendar-day={key}
               key={key}
             >
               <div

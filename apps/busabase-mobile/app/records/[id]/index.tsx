@@ -5,6 +5,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import {
   ArrowLeft,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
   GitPullRequest,
   MoreHorizontal,
@@ -36,6 +37,13 @@ import { formatDate, shortId } from "~/lib/format";
 import { mobile, radius } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 
+/**
+ * The record screen shows only the most recent change requests, as web does
+ * (#7749): a record's full history can run to thousands of entries, and the
+ * whole of it now lives on the record's Activity screen, a page at a time.
+ */
+const HISTORY_PREVIEW_LIMIT = 5;
+
 function RecordDetailContent() {
   const params = useLocalSearchParams<{ id?: string }>();
   const router = useRouter();
@@ -53,12 +61,20 @@ function RecordDetailContent() {
   );
   const historyQuery = useQuery(
     buda && recordId
-      ? buda.orpc.records.listChangeRequests.queryOptions({ input: { recordId } })
+      ? buda.orpc.records.listChangeRequests.queryOptions({
+          input: { recordId, limit: HISTORY_PREVIEW_LIMIT },
+        })
       : { queryKey: ["no-connection", "record-history", recordId], queryFn: skipToken },
   );
 
   const record = recordQuery.data ?? null;
-  const history = (historyQuery.data as ChangeRequestVO[] | undefined) ?? [];
+  // An older server ignores `limit` and returns the full history; stay bounded anyway.
+  const history = ((historyQuery.data as ChangeRequestVO[] | undefined) ?? []).slice(
+    0,
+    HISTORY_PREVIEW_LIMIT,
+  );
+  const openActivity = () =>
+    router.push({ pathname: "/records/[id]/activity", params: { id: recordId } });
 
   const deleteMutation = useMutation({
     mutationFn: async () => {
@@ -205,21 +221,19 @@ function RecordDetailContent() {
         ) : null}
       </NativeSection>
 
-      <NativeSection title="Review history" caption={`${history.length}`}>
+      <NativeSection title="Review history">
         {history.length === 0 ? (
           <NativeRow
             title="No change requests"
             leading={<GitPullRequest size={18} color={tokens.mutedForeground} />}
-            last
           />
         ) : (
-          history.map((changeRequest, index) => (
+          history.map((changeRequest) => (
             <NativeRow
               key={changeRequest.id}
               title={getChangeRequestTitle(changeRequest)}
               subtitle={`${changeRequest.submittedBy} · ${formatDate(changeRequest.updatedAt)}`}
               trailing={<StatusBadge status={changeRequest.status} />}
-              last={index === history.length - 1}
               onPress={() =>
                 router.push({
                   pathname: "/change-requests/[id]",
@@ -229,6 +243,12 @@ function RecordDetailContent() {
             />
           ))
         )}
+        <NativeRow
+          title="See all activity"
+          trailing={<ChevronRight size={18} color={tokens.mutedForeground} />}
+          last
+          onPress={openActivity}
+        />
       </NativeSection>
 
       <CommentsSection subjectType="record" subjectId={record.id} />

@@ -87,6 +87,146 @@ describe("busabase-cli commands", () => {
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
+  it("gets a Base by id or slug with one direct request", async () => {
+    const urls: string[] = [];
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      urls.push(request.url);
+      return jsonResponse({ id: "bse_1", slug: "campaigns" });
+    }) as typeof fetch;
+
+    expect(
+      await runCli(["--base-url", "http://localhost:15419", "bases", "get", "--base-id", "bse_1"]),
+    ).toBe(0);
+    expect(
+      await runCli(["--base-url", "http://localhost:15419", "bases", "get", "--slug", "campaigns"]),
+    ).toBe(0);
+    expect(urls).toEqual([
+      "http://localhost:15419/api/v1/bases/bse_1",
+      "http://localhost:15419/api/v1/bases/campaigns",
+    ]);
+  });
+
+  it("requires exactly one Base selector before sending a request", async () => {
+    global.fetch = vi.fn() as typeof fetch;
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    expect(await runCli(["--base-url", "http://localhost:15419", "bases", "get"])).toBe(
+      EXIT_CODES.VALIDATION,
+    );
+    expect(
+      await runCli([
+        "--base-url",
+        "http://localhost:15419",
+        "bases",
+        "get",
+        "--slug",
+        "campaigns",
+        "--base-id",
+        "bse_1",
+      ]),
+    ).toBe(EXIT_CODES.VALIDATION);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it("accepts both short and full API paths without doubling the prefix", async () => {
+    const urls: string[] = [];
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      urls.push(request.url);
+      return jsonResponse([]);
+    }) as typeof fetch;
+
+    for (const path of ["/bases", "/api/v1/bases"]) {
+      expect(
+        await runCli([
+          "--base-url",
+          "http://localhost:15419",
+          "api",
+          "--method",
+          "get",
+          "--path",
+          path,
+        ]),
+      ).toBe(0);
+    }
+    expect(urls).toEqual([
+      "http://localhost:15419/api/v1/bases",
+      "http://localhost:15419/api/v1/bases",
+    ]);
+  });
+
+  it("updates a node description through a permission-aware Change Request", async () => {
+    const calls: Array<{ body: unknown; url: string }> = [];
+    global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      calls.push({ body: await requestBody(request), url: request.url });
+      return jsonResponse({ id: "crq_1", status: "in_review" });
+    }) as typeof fetch;
+
+    expect(
+      await runCli([
+        "--base-url",
+        "http://localhost:15419",
+        "nodes",
+        "update-description",
+        "--node-id",
+        "nod_1",
+        "--description",
+        "Campaign resources",
+        "--message",
+        "Refresh folder summary",
+      ]),
+    ).toBe(0);
+    expect(calls).toEqual([
+      {
+        url: "http://localhost:15419/api/v1/nodes/change-requests",
+        body: {
+          operations: [{ kind: "rename", nodeId: "nod_1", description: "Campaign resources" }],
+          message: "Refresh folder summary",
+        },
+      },
+    ]);
+  });
+
+  it("shows a dry-run description update without making a request", async () => {
+    global.fetch = vi.fn() as typeof fetch;
+    const output: string[] = [];
+    vi.spyOn(console, "log").mockImplementation((value: unknown) => {
+      output.push(String(value));
+    });
+
+    expect(
+      await runCli([
+        "--base-url",
+        "http://localhost:15419",
+        "--output",
+        "json",
+        "nodes",
+        "update-description",
+        "--node-id",
+        "nod_1",
+        "--description",
+        "Campaign resources",
+        "--dry-run",
+      ]),
+    ).toBe(0);
+    expect(global.fetch).not.toHaveBeenCalled();
+    expect(output.join("\n")).toContain("http://localhost:15419/api/v1/nodes/change-requests");
+  });
+
+  it("documents the node description command", async () => {
+    const output: string[] = [];
+    vi.spyOn(process.stdout, "write").mockImplementation((chunk: unknown) => {
+      output.push(String(chunk));
+      return true;
+    });
+    expect(await runCli(["nodes", "update-description", "--help"])).toBe(0);
+    expect(output.join("")).toContain("--node-id <id>");
+    expect(output.join("")).toContain("--description <text>");
+    expect(output.join("")).toContain("--dry-run");
+    expect(output.join("")).toContain("it merges with write access");
+  });
+
   it("documents the default-space login policy for agents", async () => {
     const output: string[] = [];
     vi.spyOn(process.stdout, "write").mockImplementation((chunk: unknown) => {

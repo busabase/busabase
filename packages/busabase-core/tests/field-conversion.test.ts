@@ -189,6 +189,18 @@ describe("fromText", () => {
     expect(fromText(iso, "date")).toBe(iso);
   });
 
+  it("→ date: text naming only a day → YYYY-MM-DD, taken from the typed digits", () => {
+    expect(fromText("2026-10-02", "date")).toBe("2026-10-02");
+    expect(fromText("10/2/2026", "date")).toBe("2026-10-02");
+    expect(fromText("Oct 2, 2026", "date")).toBe("2026-10-02");
+    // The UTC-midnight form older import paths wrote is a day, too.
+    expect(fromText("2026-10-02T00:00:00.000Z", "date")).toBe("2026-10-02");
+  });
+
+  it("→ date: text with a clock time keeps its instant", () => {
+    expect(fromText("2026-10-02T18:00:00+08:00", "date")).toBe("2026-10-02T10:00:00.000Z");
+  });
+
   it("→ date: invalid string → null", () => {
     expect(fromText("garbage date", "date")).toBeNull();
     expect(fromText("not-a-date", "date")).toBeNull();

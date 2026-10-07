@@ -24,7 +24,7 @@ const expectNoHorizontalOverflow = async (page: import("@playwright/test").Page)
 };
 
 test.describe
-  .serial("PUL-233 Agent List and Add Agent", () => {
+  .serial("Agent List and Add Agent", () => {
     test("desktop: moves from the inventory through Add Agent and into Agent Detail", async ({
       page,
     }, testInfo) => {
@@ -93,7 +93,7 @@ test.describe
       expect(secondBounds?.y ?? 0).toBeGreaterThan(
         (firstBounds?.y ?? 0) + (firstBounds?.height ?? 0),
       );
-      // The server's real reason, not a translated stand-in (PUL-273).
+      // The server's real reason, not a translated stand-in.
       await expect(
         page.getByText("Connecting to agents is disabled in the demo.").first(),
       ).toBeVisible();

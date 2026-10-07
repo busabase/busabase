@@ -5,6 +5,7 @@ import type {
   ViewConfigVO,
   ViewFilterVO,
 } from "busabase-contract/types";
+import { getDateFieldOptions, getDateFieldSortKey } from "./date-value";
 import { resolveEmbedPreview } from "./embed";
 
 const fieldValueToString = (value: unknown): string => {
@@ -80,7 +81,11 @@ const formatOpaqueUserId = (actorId: unknown): string => {
   return KNOWN_ACTOR_LABELS[id] ?? prettifyHumanIdentifier(id) ?? `User ${id.slice(0, 10)}`;
 };
 
-const previewText = (value: unknown, type?: FieldType): string => {
+const previewText = (
+  value: unknown,
+  type?: FieldType,
+  dateOptions?: ReturnType<typeof getDateFieldOptions>,
+): string => {
   if (type === "checkbox") {
     return value === true || value === "true" ? "Yes" : "No";
   }
@@ -102,9 +107,12 @@ const previewText = (value: unknown, type?: FieldType): string => {
   if (type === "member") {
     return Array.isArray(value) ? value.filter(Boolean).join(", ") : fieldValueToString(value);
   }
+  // A date compares by a locale-free sortable key (`YYYY-MM-DD`, plus ` HH:mm`
+  // for a time-of-day field), NOT by display text: this runs on the server,
+  // whose locale and zone are nobody's, and "10/2/2026" sorts before
+  // "9/30/2026" as text. A calendar day is never shifted by zone.
   if (type === "date" && typeof value === "string") {
-    const date = new Date(value);
-    return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString();
+    return getDateFieldSortKey(value, dateOptions);
   }
   if (type === "multiselect" && Array.isArray(value)) {
     return value.join(", ");
@@ -120,9 +128,11 @@ const previewText = (value: unknown, type?: FieldType): string => {
 };
 
 /**
- * Text used by authoritative server-side view filters and sorts. It mirrors
+ * Text used by authoritative server-side view filters and sorts. It follows
  * the dashboard cell semantics for the field types whose display differs from
- * their stored value (notably select labels, multiselect and currency).
+ * their stored value (notably select labels, multiselect and currency) — except
+ * `date`, which compares by a locale-free chronological key rather than the
+ * localized text a cell shows (see `previewText`).
  */
 export const getViewFieldPreviewText = (field: BaseFieldVO | undefined, value: unknown): string => {
   if (!field) {
@@ -165,7 +175,7 @@ export const getViewFieldPreviewText = (field: BaseFieldVO | undefined, value: u
   if (field.type === "embed") {
     return resolveEmbedPreview(value, field)?.label ?? previewText(value, field.type);
   }
-  return previewText(value, field.type);
+  return previewText(value, field.type, getDateFieldOptions(field.options));
 };
 
 /**
@@ -237,7 +247,14 @@ const recordMatchesViewFilter = (
   const expected = getViewFieldPreviewText(field, filter.value).toLowerCase();
 
   if (filter.operator === "contains") return text.includes(expected);
-  if (filter.operator === "equals") return text === expected;
+  if (filter.operator === "equals") {
+    // A day ("2026-10-02") picked in the filter matches every record on that
+    // day, including a time-of-day value whose key is "2026-10-02 18:00".
+    if (field?.type === "date" && /^\d{4}-\d{2}-\d{2}$/.test(expected)) {
+      return text.slice(0, 10) === expected;
+    }
+    return text === expected;
+  }
   if (filter.operator === "not_empty") return text.length > 0 && text !== "-";
   if (filter.operator === "is_empty") return text.length === 0 || text === "-";
   if (filter.operator === "is_true") return value === true || value === "true";

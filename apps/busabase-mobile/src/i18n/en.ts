@@ -200,6 +200,11 @@ export const en = {
   // mobile sheet offers presets instead.
   share: {
     title: "Share",
+    // Always-visible tree-row markers, word-for-word with busabase-core's
+    // `share` keys.
+    sharedMarker: "Shared publicly",
+    restrictedMarker: "Restricted access",
+    sharedViaAncestorMarker: "Public via a shared parent folder",
     shareToWeb: "Share to web",
     shareToWebHint: "Anyone with the link can open this node",
     capabilityLabel: "What visitors can do",
@@ -224,6 +229,12 @@ export const en = {
     copyUnavailable: "Copying isn't available here — select the link above instead.",
     linkUnavailable: "The public link needs a workspace id — reconnect and try again.",
     enabled: "Public link enabled",
+    // Shown instead of the switch when a parent folder's share already makes this
+    // node public. Word-for-word with busabase-core's `share` keys.
+    inheritedTitle: 'Anyone with the link — via "{name}"',
+    inheritedHint:
+      '"{name}" is shared publicly, so everything inside it is too. To stop sharing, turn it off there.',
+    openAncestor: 'Go to "{name}"',
     disabled: "Public link disabled",
     updated: "Share settings updated",
     failed: "Something went wrong",
@@ -243,9 +254,10 @@ export const en = {
     title: "Agent prompts",
     intro:
       "Copy a prompt into your agent — it already points at this node, so the agent doesn't have to guess where to work.",
+    // Section names, word-for-word with busabase-core's `agentPrompts` keys.
     scenariosTab: "Scenarios",
-    capabilitiesTab: "Capabilities",
-    scenariosEmpty: "No curated scenarios for this node type yet — see the Capabilities tab.",
+    customScenarios: "Custom scenarios",
+    builtInPrompts: "Built-in prompts",
     copy: "Copy prompt",
     copied: "Copied",
     copyUnavailable: "Copying isn't available here — select the prompt text above instead.",
@@ -529,5 +541,12 @@ export const en = {
     removeSavedServer: "Remove from saved servers",
     disconnectTitle: "Disconnect this device?",
     disconnect: "Disconnect",
+  },
+  // How a `date` field value is shown and typed (see busabase-core/base/date-value).
+  dateField: {
+    timeZoneHint: "Time zone: {zone}",
+    enteredAs: "Entered as {value}",
+    yourLocalTime: "Your local time: {value}",
+    dayShiftHint: "{shift} day from when it was entered",
   },
 } as const;

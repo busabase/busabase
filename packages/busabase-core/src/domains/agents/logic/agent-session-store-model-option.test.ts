@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 /**
- * `toVO`'s model-option boundary (PUL-246) — the piece a mocked-store test
+ * `toVO`'s model-option boundary — the piece a mocked-store test
  * like `agent-session-manager.test.ts` cannot exercise, because that suite
  * replaces `./agent-session-store` wholesale and never runs the real `toVO`.
  * This file drives the real store against a fake drizzle query builder that
@@ -69,7 +69,7 @@ const VALID_MODEL_OPTION = {
   options: [{ value: "auto", name: "Auto" }],
 };
 
-describe("agent session store — durable model option (PUL-246)", () => {
+describe("agent session store — durable model option", () => {
   it("surfaces a well-formed stored model option for a live remote-websocket session", async () => {
     mocks.rows = [{ ...baseRow, modelOption: VALID_MODEL_OPTION }];
     const session = await loadScopedSession("ags-1");

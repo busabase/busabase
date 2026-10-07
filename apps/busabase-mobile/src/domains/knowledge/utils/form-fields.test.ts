@@ -59,3 +59,23 @@ describe("buildFormSubmissionValues", () => {
     );
   });
 });
+
+describe("date fields in a generated form", () => {
+  it("submits typed day text as the day it names", () => {
+    const fields = new Map([["due", field("date", "due")]]);
+    expect(buildFormSubmissionValues([binding("due")], fields, { due: " 2026-10-02 " })).toEqual({
+      due: "2026-10-02",
+    });
+  });
+
+  it("submits date-time text with the bound field zone's offset", () => {
+    const due = {
+      ...field("date", "due"),
+      options: { date: { includeTime: true, timezone: "Asia/Shanghai" } },
+    } as FormBoundFieldVO;
+    const fields = new Map([["due", due]]);
+    expect(
+      buildFormSubmissionValues([binding("due")], fields, { due: "2026-10-02 18:00" }),
+    ).toEqual({ due: "2026-10-02T18:00:00+08:00" });
+  });
+});

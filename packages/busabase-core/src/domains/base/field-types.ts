@@ -39,6 +39,11 @@ export interface FieldDef {
     code?: {
       language?: string;
     };
+    /** `date` columns — see `utils/date-value.ts`. */
+    date?: {
+      includeTime?: boolean;
+      timezone?: string;
+    };
     embed?: {
       aspectRatio?: "16:9" | "4:3" | "1:1";
       height?: number;
@@ -540,7 +545,9 @@ export const FIELD_TYPES: Record<FieldType, FieldTypeSpec> = {
     type: "date",
     label: "date",
     input: "date",
-    columnWidth: "minmax(116px,150px)",
+    // Wide enough for "Fri, Oct 2, 2026". A time-of-day field gets a wider
+    // column in the grid (see `getRecordTableColumnWidth`).
+    columnWidth: "minmax(140px,220px)",
     validate: (value, def) =>
       isValidDate(value) ? null : `${fieldDisplayName(def)} must be a valid date`,
   },

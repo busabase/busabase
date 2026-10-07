@@ -1,7 +1,7 @@
 import type { liveEventSchema } from "busabase-contract/contract/busabase";
 import { publishRealtimeMessage, subscribeRealtimeMessages } from "openlib/realtime";
 import type { z } from "zod";
-import { getContextChangeRequestPendingReviewHook } from "../context";
+import { announceChangeRequestPendingReview } from "./node-subscriptions";
 
 export type BusabaseLiveEvent = z.infer<typeof liveEventSchema>;
 
@@ -20,29 +20,13 @@ export interface ChangeRequestPendingReviewArgs {
 }
 
 /**
- * Fire whenever a change request freshly lands in `in_review` status — i.e. it
- * now needs a human reviewer and won't get one automatically. Called from every
- * `create*ChangeRequest` entry point that can produce an `in_review` row:
- * `record-ops.ts` (record create/update/delete/restore), `field-ops.ts` (base
- * field create/update/delete/convert/reorder/restore), `view-ops.ts` (view
- * create/update/delete/restore), `doc/handlers.ts` and `filetree/handlers.ts`
- * (doc/drive file edits), and `nodes.ts`'s `createNodeChangeRequest` when its
- * caller didn't pass `autoMerge` (the UI's default "New base/skill/folder" flow).
- * Skipped wherever a change auto-merges instead of entering review (e.g.
- * `autoMerge: true` callers, or code paths that call `recordMergedOperation`
- * directly) — those never sit in anyone's inbox, so there is nothing to notify.
- *
- * Two independent effects:
- *  - Always: broadcast an ephemeral `change_request.pending_review` live event
- *    over the space's SSE channel. Every connected dashboard tab decides for
- *    itself whether to pop a desktop Notification (open source's path — no
- *    persistence; see `use-live-sync.ts`).
- *  - Only if the host registered `onChangeRequestPendingReview` on its
- *    `BusabaseContext` (busabase-cloud does, to persist a real inbox
- *    notification row): also invoke it. Best-effort — a notification failure
- *    must never fail the change-request creation that triggered it.
+ * The live-SSE half of `publishChangeRequestPendingReview` on its own. Only for
+ * the two record paths (create/update) that historically broadcast BEFORE
+ * deciding whether to auto-merge: they keep that live-event timing unchanged,
+ * and announce the notification separately, only once the change request has
+ * really been left for review.
  */
-export const publishChangeRequestPendingReview = async (
+export const broadcastChangeRequestPendingReview = async (
   args: ChangeRequestPendingReviewArgs,
 ): Promise<void> => {
   try {
@@ -63,16 +47,37 @@ export const publishChangeRequestPendingReview = async (
     // errors in cloud mode; a throwing subscriber re-entering synchronously
     // in local mode).
   }
+};
 
-  const hook = getContextChangeRequestPendingReviewHook();
-  if (!hook) {
-    return;
-  }
-  try {
-    await hook(args);
-  } catch {
-    // Best-effort — notification delivery must never fail CR creation.
-  }
+/**
+ * Fire whenever a change request freshly lands in `in_review` status — i.e. it
+ * now needs a human reviewer and won't get one automatically. Called from every
+ * `create*ChangeRequest` entry point that can produce an `in_review` row:
+ * `record-ops.ts` (record create/update/delete/restore), `field-ops.ts` (base
+ * field create/update/delete/convert/reorder/restore), `view-ops.ts` (view
+ * create/update/delete/restore), `doc/handlers.ts` and `filetree/handlers.ts`
+ * (doc/drive file edits), and `nodes.ts`'s `createNodeChangeRequest` when its
+ * caller didn't pass `autoMerge` (the UI's default "New base/skill/folder" flow).
+ * Skipped wherever a change auto-merges instead of entering review (e.g.
+ * `autoMerge: true` callers, or code paths that call `recordMergedOperation`
+ * directly) — those never sit in anyone's inbox, so there is nothing to notify.
+ *
+ * Two independent effects:
+ *  - Always: broadcast an ephemeral `change_request.pending_review` live event
+ *    over the space's SSE channel. Every connected dashboard tab decides for
+ *    itself whether to pop a desktop Notification (open source's path — no
+ *    persistence; see `use-live-sync.ts`).
+ *  - `announceChangeRequestPendingReview`: auto-subscribe the submitter to the
+ *    Change Request's node, then hand a `change_request.pending_review`
+ *    notification event to the host's `onNotificationEvent` (busabase-cloud
+ *    notifies the node's subscribers). Best-effort — a notification failure
+ *    must never fail the change-request creation that triggered it.
+ */
+export const publishChangeRequestPendingReview = async (
+  args: ChangeRequestPendingReviewArgs,
+): Promise<void> => {
+  await broadcastChangeRequestPendingReview(args);
+  await announceChangeRequestPendingReview(args);
 };
 
 /**

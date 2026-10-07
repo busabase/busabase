@@ -52,6 +52,14 @@ const orpc = {
       queryOptions: () => ({ queryKey: ["nodes", "html-1"], queryFn: async () => detail }),
     },
     updateContent: { mutationOptions: () => ({ mutationFn: async () => detail }) },
+    // The node actions menu prepares (but, closed, never fetches) the
+    // subscription query and mutation.
+    subscription: {
+      get: {
+        queryOptions: () => ({ queryKey: ["nodes", "subscription"], queryFn: async () => null }),
+      },
+      set: { mutationOptions: () => ({ mutationFn: async () => null }) },
+    },
   },
 } as unknown as BusabaseQueryUtils;
 
@@ -108,6 +116,17 @@ describe("HtmlDetailView preview", () => {
           }),
         },
         updateContent: { mutationOptions: () => ({ mutationFn: async () => detail }) },
+        // The node actions menu prepares (but, closed, never fetches) the
+        // subscription query and mutation.
+        subscription: {
+          get: {
+            queryOptions: () => ({
+              queryKey: ["nodes", "subscription"],
+              queryFn: async () => null,
+            }),
+          },
+          set: { mutationOptions: () => ({ mutationFn: async () => null }) },
+        },
       },
     } as unknown as BusabaseQueryUtils;
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });

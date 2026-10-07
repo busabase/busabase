@@ -309,7 +309,7 @@ export async function persistSessionState(
 }
 
 /**
- * Durable mirror of `LiveSession.modelOption` (PUL-246) — the one write path
+ * Durable mirror of `LiveSession.modelOption` — the one write path
  * every discovery/update site funnels through, so the shape landing in
  * `jsonb` always matches what `parseStoredModelOption` will read back.
  *
@@ -425,8 +425,8 @@ export async function persistSessionEvents(
 }
 
 /**
- * Boundary validation for the durable mirror of `LiveSession.modelOption`
- * (PUL-246): a raw `jsonb` column is never trusted verbatim, so a value that
+ * Boundary validation for the durable mirror of `LiveSession.modelOption`:
+ * a raw `jsonb` column is never trusted verbatim, so a value that
  * fails the contract's own VO shape — an old shape, a partial write, a `{}`
  * left by some future migration — degrades to `null` instead of surfacing a
  * malformed picker or throwing during a list read.

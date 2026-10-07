@@ -101,7 +101,7 @@ describe("Busabase OpenAPI record get route", () => {
     expect(spec.paths?.["/api/v1/bases/{baseId}/restore/change-requests"]).toBeUndefined();
   });
 
-  it("keeps the compressed public API at 120 operations", async () => {
+  it("keeps the compressed public API at 124 operations", async () => {
     const spec = await getBusabaseOpenApiSpec();
     const operationCount = Object.values(spec.paths ?? {}).reduce(
       (count, pathItem) =>
@@ -198,6 +198,12 @@ describe("Busabase OpenAPI record get route", () => {
     // +2 -> 123: `POST /playbooks/search` + `GET /playbooks/{kind}/{nodeId}`
     // (agent-playbook-discovery.md) — node-scoped reads an agent calls first on
     // every instruction to find the skills/custom prompts the space defines.
-    expect(operationCount).toBe(123);
+    // Record activity pagination adds one endpoint while retaining the legacy array response.
+    expect(spec.paths?.["/api/v1/activity/record/paged"]?.get).toBeDefined();
+    // A reviewable ChangeRequest can now mint its own short-lived preview (+1 -> 125).
+    expect(
+      spec.paths?.["/api/v1/change-requests/{changeRequestId}/preview-link"]?.post,
+    ).toBeDefined();
+    expect(operationCount).toBe(125);
   });
 });

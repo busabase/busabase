@@ -137,7 +137,7 @@ test("dashboard routes render the review-first seeded experience", async ({ page
   await page.getByLabel("Slug", { exact: true }).fill("smoke-test-ai-market-note");
   await page.getByLabel("Locale", { exact: true }).selectOption("en");
   await page.getByRole("button", { name: "More submit options" }).click();
-  await page.getByRole("button", { name: "Submit Request" }).click();
+  await page.getByRole("menuitem", { name: "Submit Request" }).click();
   await expect(page).toHaveURL(/\/dashboard\/local\/inbox\/crq/);
   await expect(
     page.getByRole("heading", { name: "Smoke test AI market note" }).first(),

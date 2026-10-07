@@ -1,21 +1,23 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import type { NodeVO } from "busabase-contract/types";
-import { Check, Copy } from "lucide-react-native";
-import { useMemo, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import {
-  NativeActionBar,
-  NativeBottomSheet,
-  NativeSegmentedControl,
-} from "~/components/native-screen";
+  BUILT_IN_PROMPTS_EXPANDED_STORAGE_KEY,
+  buildPromptSections,
+  flattenPromptSections,
+  resolveActivePrompt,
+  splitBuiltInSections,
+} from "busabase-core/dashboard/prompt-sections";
+import { Check, ChevronDown, ChevronRight, Copy } from "lucide-react-native";
+import { useEffect, useMemo, useState } from "react";
+import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { NativeActionBar, NativeBottomSheet } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
 import { useI18n } from "~/i18n";
 import { copyToClipboard } from "~/lib/clipboard";
 import { radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 import { useNodeCustomPrompts } from "../hooks/use-node-custom-prompts";
-import { buildNodeAgentPrompts, type NodePrompt } from "../utils/node-agent-prompts";
-
-type Tab = "scenarios" | "capabilities";
+import { buildNodeAgentPrompts } from "../utils/node-agent-prompts";
 
 interface NodeAgentPromptsSheetProps {
   visible: boolean;
@@ -28,10 +30,12 @@ interface NodeAgentPromptsSheetProps {
 }
 
 /**
- * Mobile port of `node-agent-prompts-dialog.tsx`: the per-node copy-paste
- * cheatsheet, driven by the shared node-type registry. Same two tiers and same
- * selection semantics as web — selection is scoped to the visible tab, so the
- * preview always comes from the list you're looking at.
+ * Mobile port of `node-agent-prompts-dialog.tsx` / `AgentPromptsView`: the
+ * per-node copy-paste cheatsheet, driven by the shared node-type registry. Same
+ * sectioned list as web — custom scenarios, then built-in scenarios, then each
+ * capability group — built by the same `buildPromptSections`, and the same fold:
+ * once the node has custom prompts, every built-in section collapses into one
+ * "Built-in prompts · N" group (`splitBuiltInSections`), remembered across opens.
  *
  * Layout differs by necessity: web puts the list and the preview side by side in
  * a 3xl dialog. A phone has one column, so the list sits above the preview and
@@ -78,30 +82,90 @@ export function NodeAgentPromptsSheet({
     [node.type, node.name, node.id, spaceId, spaceName, locale, customPrompts],
   );
 
-  // Open on Scenarios when the type has any, else straight to Capabilities.
-  const [tab, setTab] = useState<Tab>(scenarios.length > 0 ? "scenarios" : "capabilities");
+  const sections = useMemo(
+    () =>
+      buildPromptSections(scenarios, capabilities, {
+        builtIn: t.agentPrompts.scenariosTab,
+        custom: t.agentPrompts.customScenarios,
+      }),
+    [scenarios, capabilities, t],
+  );
+  const {
+    custom: customSections,
+    builtIn: builtInSections,
+    collapsible,
+  } = splitBuiltInSections(sections);
+  const active = resolveActivePrompt(sections, selected);
 
-  const visiblePrompts = tab === "scenarios" ? scenarios : capabilities;
-  const active = visiblePrompts.find((prompt) => prompt.key === selected) ?? visiblePrompts[0];
+  // Same remembered preference web keeps in localStorage, under the same key.
+  const [builtInsExpanded, setBuiltInsExpanded] = useState(false);
+  useEffect(() => {
+    AsyncStorage.getItem(BUILT_IN_PROMPTS_EXPANDED_STORAGE_KEY)
+      .then((value) => setBuiltInsExpanded(value === "1"))
+      .catch(() => undefined);
+  }, []);
+  const builtInCount = flattenPromptSections(builtInSections).length;
+  const activeIsBuiltIn =
+    active !== undefined &&
+    builtInSections.some((section) => section.items.some((prompt) => prompt.key === active.key));
+  // A selected built-in is never hidden: the preview below must always have its
+  // row in the list.
+  const builtInsOpen = !collapsible || builtInsExpanded || activeIsBuiltIn;
 
-  // Capabilities bucket under group headings; scenarios are a flat list.
-  const groups = useMemo(() => {
-    if (tab === "scenarios") return [{ name: null as string | null, items: scenarios }];
-    const byName = new Map<string, NodePrompt[]>();
-    for (const prompt of capabilities) {
-      const bucket = byName.get(prompt.group);
-      if (bucket) bucket.push(prompt);
-      else byName.set(prompt.group, [prompt]);
+  const toggleBuiltIns = () => {
+    const next = !builtInsOpen;
+    setBuiltInsExpanded(next);
+    AsyncStorage.setItem(BUILT_IN_PROMPTS_EXPANDED_STORAGE_KEY, next ? "1" : "0").catch(
+      () => undefined,
+    );
+    // Collapsing over the selected built-in would orphan the preview; hand the
+    // selection back to the first custom prompt instead, as web does.
+    if (!next && activeIsBuiltIn) {
+      setSelected(flattenPromptSections(customSections)[0]?.key ?? null);
+      setCopied(false);
+      setCopyFailed(false);
     }
-    return [...byName.entries()].map(([name, items]) => ({ name, items }));
-  }, [tab, scenarios, capabilities]);
-
-  const switchTab = (next: Tab) => {
-    setTab(next);
-    setSelected(null); // fall back to the new tab's own first entry
-    setCopied(false);
-    setCopyFailed(false);
   };
+
+  const renderSection = (section: (typeof sections)[number]) => (
+    <View key={`${section.source}:${section.name}`}>
+      <Text style={[styles.groupHeading, typography.caption, { color: tokens.mutedForeground }]}>
+        {section.name}
+      </Text>
+      {section.items.map((prompt) => {
+        const isActive = active?.key === prompt.key;
+        return (
+          <Pressable
+            key={prompt.key}
+            accessibilityRole="button"
+            accessibilityState={{ selected: isActive }}
+            style={({ pressed }) => [
+              styles.promptRow,
+              {
+                backgroundColor: isActive ? tokens.primaryMuted : "transparent",
+                opacity: pressed ? 0.72 : 1,
+              },
+            ]}
+            onPress={() => {
+              setSelected(prompt.key);
+              setCopied(false);
+              setCopyFailed(false);
+            }}
+          >
+            <Text
+              numberOfLines={1}
+              style={[
+                isActive ? typography.bodyEm : typography.body,
+                { color: isActive ? tokens.foreground : tokens.mutedForeground },
+              ]}
+            >
+              {prompt.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
 
   const copy = async () => {
     if (!active) return;
@@ -155,80 +219,29 @@ export function NodeAgentPromptsSheet({
         {t.agentPrompts.intro}
       </Text>
 
-      <NativeSegmentedControl<Tab>
-        value={tab}
-        options={[
-          {
-            value: "scenarios",
-            label: t.agentPrompts.scenariosTab,
-            meta: scenarios.length > 0 ? scenarios.length : undefined,
-          },
-          {
-            value: "capabilities",
-            label: t.agentPrompts.capabilitiesTab,
-            meta: capabilities.length,
-          },
-        ]}
-        onChange={switchTab}
-      />
-
-      {tab === "scenarios" && scenarios.length === 0 ? (
-        <View style={[styles.empty, { backgroundColor: tokens.muted }]}>
-          <Text style={[typography.small, { color: tokens.mutedForeground }]}>
-            {t.agentPrompts.scenariosEmpty}
-          </Text>
-        </View>
-      ) : (
-        <ScrollView style={styles.list} keyboardShouldPersistTaps="handled">
-          {groups.map((group) => (
-            <View key={group.name ?? "_"}>
-              {group.name ? (
-                <Text
-                  style={[
-                    styles.groupHeading,
-                    typography.caption,
-                    { color: tokens.mutedForeground },
-                  ]}
-                >
-                  {group.name}
-                </Text>
-              ) : null}
-              {group.items.map((prompt) => {
-                const isActive = active?.key === prompt.key;
-                return (
-                  <Pressable
-                    key={prompt.key}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: isActive }}
-                    style={({ pressed }) => [
-                      styles.promptRow,
-                      {
-                        backgroundColor: isActive ? tokens.primaryMuted : "transparent",
-                        opacity: pressed ? 0.72 : 1,
-                      },
-                    ]}
-                    onPress={() => {
-                      setSelected(prompt.key);
-                      setCopied(false);
-                      setCopyFailed(false);
-                    }}
-                  >
-                    <Text
-                      numberOfLines={1}
-                      style={[
-                        isActive ? typography.bodyEm : typography.body,
-                        { color: isActive ? tokens.foreground : tokens.mutedForeground },
-                      ]}
-                    >
-                      {prompt.label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          ))}
-        </ScrollView>
-      )}
+      <ScrollView style={styles.list} keyboardShouldPersistTaps="handled">
+        {(collapsible ? customSections : sections).map(renderSection)}
+        {collapsible ? (
+          <>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ expanded: builtInsOpen }}
+              style={({ pressed }) => [styles.foldRow, { opacity: pressed ? 0.72 : 1 }]}
+              onPress={toggleBuiltIns}
+            >
+              {builtInsOpen ? (
+                <ChevronDown size={16} color={tokens.mutedForeground} />
+              ) : (
+                <ChevronRight size={16} color={tokens.mutedForeground} />
+              )}
+              <Text style={[typography.bodyEm, { color: tokens.mutedForeground }]}>
+                {t.agentPrompts.builtInPrompts} · {builtInCount}
+              </Text>
+            </Pressable>
+            {builtInsOpen ? builtInSections.map(renderSection) : null}
+          </>
+        ) : null}
+      </ScrollView>
 
       {active ? (
         <ScrollView
@@ -244,9 +257,16 @@ export function NodeAgentPromptsSheet({
 }
 
 const styles = StyleSheet.create({
-  empty: { borderRadius: radius.md, padding: 14 },
-  list: { maxHeight: 190 },
+  list: { maxHeight: 240 },
   groupHeading: { paddingHorizontal: 10, paddingTop: 10, paddingBottom: 4 },
+  foldRow: {
+    minHeight: 40,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    marginTop: 6,
+  },
   promptRow: {
     minHeight: 40,
     justifyContent: "center",

@@ -1,9 +1,12 @@
 import type { AssetAttachmentRef, BaseFieldVO } from "busabase-contract/types";
+import { formatTimeZoneLabel, getDateFieldOptions } from "busabase-core/base/date-value";
 import { iStringParse } from "openlib/i18n/i-string";
 import { StyleSheet, Switch, Text, View } from "react-native";
 import { TextInput } from "~/components/ui/TextInput";
+import { fmt, useI18n } from "~/i18n";
 import { typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
+import { dateFieldPlaceholder } from "../utils/date-input";
 import type { RecordFormValue } from "../utils/record-form";
 import { RecordAttachmentField } from "./RecordAttachmentField";
 import { RecordChoiceField } from "./RecordChoiceField";
@@ -21,6 +24,7 @@ const MULTILINE_TYPES = new Set(["longtext", "markdown", "html"]);
 
 export function RecordFieldRow({ field, value, onChange, last, layout }: RecordFieldRowProps) {
   const tokens = useTokens();
+  const { t, locale } = useI18n();
   const rowStyle = [
     styles.field,
     layout === "full" ? styles.fieldFull : null,
@@ -84,6 +88,32 @@ export function RecordFieldRow({ field, value, onChange, last, layout }: RecordF
     );
   }
 
+  if (field.type === "date") {
+    const options = getDateFieldOptions(field.options);
+    return (
+      <View style={rowStyle}>
+        {label}
+        <TextInput
+          accessibilityLabel={fieldLabel}
+          value={typeof value === "string" ? value : ""}
+          keyboardType="numbers-and-punctuation"
+          autoCapitalize="none"
+          autoCorrect={false}
+          placeholder={dateFieldPlaceholder(options)}
+          onChangeText={onChange}
+        />
+        {options.includeTime ? (
+          // The typed time is wall-clock time in this zone — say which one.
+          <Text style={[typography.small, { color: tokens.mutedForeground }]}>
+            {fmt(t.dateField.timeZoneHint, {
+              zone: formatTimeZoneLabel(options.timezone, locale),
+            })}
+          </Text>
+        ) : null}
+      </View>
+    );
+  }
+
   const multiline = MULTILINE_TYPES.has(field.type);
   const keyboardType =
     field.type === "number"
@@ -106,7 +136,6 @@ export function RecordFieldRow({ field, value, onChange, last, layout }: RecordF
         keyboardType={keyboardType}
         textAlignVertical={multiline ? "top" : "center"}
         style={multiline ? styles.multiline : undefined}
-        placeholder={field.type === "date" ? "YYYY-MM-DD" : undefined}
         onChangeText={onChange}
       />
     </View>

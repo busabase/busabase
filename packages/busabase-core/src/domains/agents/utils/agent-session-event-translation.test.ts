@@ -1,4 +1,4 @@
-import { reduceAcpEvents } from "@acp-ui/core/reduce";
+import { availableCommandsOf, reduceAcpEvents } from "@acp-ui/core/reduce";
 import type { AgentSessionEventVO } from "busabase-contract/domains/agents/types";
 import { describe, expect, it } from "vitest";
 import { translateAgentSessionEvent } from "../hooks/use-agent-session";
@@ -64,5 +64,37 @@ describe("translateAgentSessionEvent user messages", () => {
         },
       ],
     });
+  });
+});
+
+describe("translateAgentSessionEvent available commands", () => {
+  it("preserves each dynamic full-list replacement from the agent", () => {
+    const event = (seq: number, availableCommands: Array<Record<string, unknown>>) =>
+      ({
+        sessionId: "session-1",
+        seq,
+        kind: "acpUpdate",
+        acpUpdate: { sessionUpdate: "available_commands_update", availableCommands },
+        at: "2026-09-28T00:00:00.000Z",
+      }) satisfies AgentSessionEventVO;
+
+    const initial = translateAgentSessionEvent(
+      event(1, [
+        { name: "status", description: "Display session configuration and token usage." },
+        { name: "review", description: "Review changes.", input: { hint: "instructions" } },
+      ]),
+    );
+    const replacement = translateAgentSessionEvent(
+      event(2, [{ name: "status", description: "Display current status." }]),
+    );
+
+    expect(initial).toHaveLength(1);
+    expect(availableCommandsOf(initial[0])).toEqual([
+      { name: "status", description: "Display session configuration and token usage." },
+      { name: "review", description: "Review changes.", input: { hint: "instructions" } },
+    ]);
+    expect(availableCommandsOf(replacement[0])).toEqual([
+      { name: "status", description: "Display current status." },
+    ]);
   });
 });

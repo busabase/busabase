@@ -28,13 +28,14 @@ import { Label } from "kui/label";
 import { Textarea } from "kui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "kui/tooltip";
 import { cn } from "kui/utils";
-import { Check, Copy, MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
+import { Check, ChevronRight, Copy, MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
 import { type iString, iStringParse } from "openlib/i18n/i-string";
 import {
   type KeyboardEvent,
   type ReactNode,
   type RefObject,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -43,19 +44,21 @@ import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
 import { presentCoreError } from "../../../i18n/localize-error";
 import { useAgentIntegrationTarget } from "../agent-integration-context";
 import { renderPromptForDispatch } from "../helpers/agent-prompt-dispatch";
-import type { NodePrompt, NodePromptSource } from "../helpers/node-agent-prompts";
+import type { NodePrompt } from "../helpers/node-agent-prompts";
+import {
+  BUILT_IN_PROMPTS_EXPANDED_STORAGE_KEY,
+  buildPromptSections,
+  flattenPromptSections,
+  type PromptSection,
+  resolveActivePrompt,
+  splitBuiltInSections,
+} from "../helpers/prompt-sections";
 import type { AgentIntegrationTarget } from "./agent-install-panel";
 import { AgentPromptAskAction } from "./agent-prompt-ask-action";
 import { createSetupSkillUrl } from "./agent-skill-button";
 import { DialogContent } from "./localized-dialog-content";
 import { ConfirmActionDialog } from "./primitives";
 import { useWorkspacePermissionLevel } from "./split-submit-button";
-
-export interface PromptSection {
-  name: string;
-  source: NodePromptSource;
-  items: NodePrompt[];
-}
 
 export interface AgentPromptsManagement {
   customPrompts: CustomAgentPrompts;
@@ -64,54 +67,20 @@ export interface AgentPromptsManagement {
   save: (prompts: CustomAgentPrompts) => Promise<void>;
 }
 
-interface PromptSectionLabels {
-  builtIn: string;
-  custom: string;
-  includeEmptyCustom?: boolean;
-}
-
-/** Node custom scenarios first, then built-ins, then capability groups. */
-export const buildPromptSections = (
-  scenarios: NodePrompt[],
-  capabilities: NodePrompt[],
-  labels: PromptSectionLabels,
-): PromptSection[] => {
-  const builtIn = scenarios.filter((prompt) => prompt.source === "built-in-scenario");
-  const custom = scenarios.filter((prompt) => prompt.source === "custom-scenario");
-  const sections: PromptSection[] = [];
-  if (custom.length > 0 || labels.includeEmptyCustom) {
-    sections.push({ name: labels.custom, source: "custom-scenario", items: custom });
+const readBuiltInsExpanded = (): boolean => {
+  try {
+    return window.localStorage.getItem(BUILT_IN_PROMPTS_EXPANDED_STORAGE_KEY) === "1";
+  } catch {
+    return false;
   }
-  if (builtIn.length > 0) {
-    sections.push({ name: labels.builtIn, source: "built-in-scenario", items: builtIn });
-  }
-
-  const capabilitySections = new Map<string, NodePrompt[]>();
-  for (const prompt of capabilities) {
-    const bucket = capabilitySections.get(prompt.group);
-    if (bucket) bucket.push(prompt);
-    else capabilitySections.set(prompt.group, [prompt]);
-  }
-
-  return [
-    ...sections,
-    ...[...capabilitySections.entries()].map(([name, items]) => ({
-      name,
-      source: "capability" as const,
-      items,
-    })),
-  ];
 };
 
-export const flattenPromptSections = (sections: PromptSection[]): NodePrompt[] =>
-  sections.flatMap((section) => section.items);
-
-export const resolveActivePrompt = (
-  sections: PromptSection[],
-  selected: string | null,
-): NodePrompt | undefined => {
-  const prompts = flattenPromptSections(sections);
-  return prompts.find((prompt) => prompt.key === selected) ?? prompts[0];
+const writeBuiltInsExpanded = (expanded: boolean) => {
+  try {
+    window.localStorage.setItem(BUILT_IN_PROMPTS_EXPANDED_STORAGE_KEY, expanded ? "1" : "0");
+  } catch {
+    // Storage unavailable (private mode, quota) — the toggle still works for this session.
+  }
 };
 
 export const utf8ByteLength = (value: string): number => new TextEncoder().encode(value).length;
@@ -499,14 +468,46 @@ function PromptPanel({
   snippetRef: RefObject<HTMLTextAreaElement | null>;
 }) {
   const messages = useCoreI18n();
+  const builtInsId = useId();
+
+  const {
+    custom: customSections,
+    builtIn: builtInSections,
+    collapsible,
+  } = splitBuiltInSections(sections);
+  // Read after mount, not in the initializer: the server has no localStorage,
+  // and a first render that disagrees with SSR is a hydration mismatch.
+  const [builtInsExpanded, setBuiltInsExpanded] = useState(false);
+  useEffect(() => setBuiltInsExpanded(readBuiltInsExpanded()), []);
+  const builtInCount = flattenPromptSections(builtInSections).length;
+  const activeIsBuiltIn =
+    active !== undefined &&
+    builtInSections.some((section) => section.items.some((prompt) => prompt.key === active.key));
+  // A selected built-in is never hidden — the preview on the right must always
+  // have its row on the left.
+  const builtInsOpen = !collapsible || builtInsExpanded || activeIsBuiltIn;
+  const visibleSections = builtInsOpen ? sections : customSections;
+
+  const toggleBuiltIns = () => {
+    const next = !builtInsOpen;
+    setBuiltInsExpanded(next);
+    writeBuiltInsExpanded(next);
+    // Collapsing over the selected built-in would leave the preview orphaned;
+    // hand the selection back to the first custom prompt instead.
+    if (!next && activeIsBuiltIn) {
+      const firstCustom = flattenPromptSections(customSections)[0];
+      if (firstCustom) onSelect(firstCustom.key);
+    }
+  };
 
   // Flat, ordered list of prompt keys backing arrow-key navigation — the
   // sections above are a purely visual grouping, so a prompt's neighbor for
   // ArrowUp/ArrowDown purposes crosses section boundaries the same way Tab
-  // would if every button were reachable in document order.
+  // would if every button were reachable in document order. Folded built-ins
+  // are not reachable, so they drop out of the order too.
   const orderedKeys = useMemo(
-    () => flattenPromptSections(sections).map((prompt) => prompt.key),
-    [sections],
+    () => flattenPromptSections(visibleSections).map((prompt) => prompt.key),
+    [visibleSections],
   );
   const buttonRefs = useRef(new Map<string, HTMLButtonElement>());
   const activeCustom = active?.customKey
@@ -533,6 +534,70 @@ function PromptPanel({
     if (nextKey) focusPrompt(nextKey);
   };
 
+  const renderSection = (section: PromptSection) => {
+    const isCustom = section.source === "custom-scenario";
+    return (
+      <div key={`${section.source}:${section.name}`}>
+        <div className="flex min-h-8 items-center justify-between gap-2 px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground">
+          <span>{section.name}</span>
+          {isCustom && canManage && section.items.length > 0 ? (
+            <TooltipProvider delayDuration={250}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    aria-label={messages.agentPrompts.newCustomPrompt}
+                    className="relative grid size-7 shrink-0 place-items-center rounded text-foreground before:absolute before:-inset-2 before:content-[''] hover:bg-muted hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    onClick={onCreate}
+                    type="button"
+                  >
+                    <Plus aria-hidden className="size-3.5" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent side="top">{messages.agentPrompts.newCustomPrompt}</TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          ) : null}
+        </div>
+        {isCustom && canManage && section.items.length === 0 ? (
+          <div className="px-1 pb-1">
+            <button
+              className="flex min-h-9 w-full items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-border border-dashed px-3 py-2 text-center text-muted-foreground text-xs transition-colors hover:border-foreground/40 hover:bg-muted/40 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              onClick={onCreate}
+              type="button"
+            >
+              <Plus aria-hidden className="size-4 shrink-0" />
+              <span>{messages.agentPrompts.addPrompt}</span>
+            </button>
+          </div>
+        ) : null}
+        {section.items.map((prompt) => {
+          const isActive = active?.key === prompt.key;
+          return (
+            <div className="flex items-center" key={prompt.key}>
+              <button
+                aria-current={isActive ? "true" : undefined}
+                className={cn(
+                  "min-w-0 flex-1 truncate rounded px-2 py-1.5 text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                  isActive ? "bg-muted font-medium text-foreground" : "hover:bg-muted/60",
+                )}
+                onClick={() => onSelect(prompt.key)}
+                onKeyDown={(event) => handlePromptKeyDown(event, prompt.key)}
+                ref={(node) => {
+                  if (node) buttonRefs.current.set(prompt.key, node);
+                  else buttonRefs.current.delete(prompt.key);
+                }}
+                title={prompt.label}
+                type="button"
+              >
+                {prompt.label}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
   return (
     <div
       className={cn(
@@ -546,71 +611,37 @@ function PromptPanel({
           compact && "max-h-[20vh] sm:h-80 sm:max-h-none",
         )}
       >
-        {sections.map((section) => {
-          const isCustom = section.source === "custom-scenario";
-          return (
-            <div key={`${section.source}:${section.name}`}>
-              <div className="flex min-h-8 items-center justify-between gap-2 px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground">
-                <span>{section.name}</span>
-                {isCustom && canManage && section.items.length > 0 ? (
-                  <TooltipProvider delayDuration={250}>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button
-                          aria-label={messages.agentPrompts.newCustomPrompt}
-                          className="relative grid size-7 shrink-0 place-items-center rounded text-foreground before:absolute before:-inset-2 before:content-[''] hover:bg-muted hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                          onClick={onCreate}
-                          type="button"
-                        >
-                          <Plus aria-hidden className="size-3.5" />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="top">
-                        {messages.agentPrompts.newCustomPrompt}
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                ) : null}
+        {collapsible ? (
+          <>
+            {customSections.map(renderSection)}
+            <button
+              aria-controls={builtInsId}
+              aria-expanded={builtInsOpen}
+              className="mt-1 flex min-h-8 w-full items-center gap-1 rounded px-2 pt-2 pb-1 text-left text-xs font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              data-testid="agent-prompts-built-ins-toggle"
+              onClick={toggleBuiltIns}
+              type="button"
+            >
+              <ChevronRight
+                aria-hidden
+                className={cn(
+                  "size-3.5 shrink-0 transition-transform",
+                  builtInsOpen && "rotate-90",
+                )}
+              />
+              <span>
+                {messages.agentPrompts.builtInPrompts} · {builtInCount}
+              </span>
+            </button>
+            {builtInsOpen ? (
+              <div className="pl-2" id={builtInsId}>
+                {builtInSections.map(renderSection)}
               </div>
-              {isCustom && canManage && section.items.length === 0 ? (
-                <div className="px-1 pb-1">
-                  <button
-                    className="flex min-h-9 w-full items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-border border-dashed px-3 py-2 text-center text-muted-foreground text-xs transition-colors hover:border-foreground/40 hover:bg-muted/40 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    onClick={onCreate}
-                    type="button"
-                  >
-                    <Plus aria-hidden className="size-4 shrink-0" />
-                    <span>{messages.agentPrompts.addPrompt}</span>
-                  </button>
-                </div>
-              ) : null}
-              {section.items.map((prompt) => {
-                const isActive = active?.key === prompt.key;
-                return (
-                  <div className="flex items-center" key={prompt.key}>
-                    <button
-                      aria-current={isActive ? "true" : undefined}
-                      className={cn(
-                        "min-w-0 flex-1 truncate rounded px-2 py-1.5 text-left text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                        isActive ? "bg-muted font-medium text-foreground" : "hover:bg-muted/60",
-                      )}
-                      onClick={() => onSelect(prompt.key)}
-                      onKeyDown={(event) => handlePromptKeyDown(event, prompt.key)}
-                      ref={(node) => {
-                        if (node) buttonRefs.current.set(prompt.key, node);
-                        else buttonRefs.current.delete(prompt.key);
-                      }}
-                      title={prompt.label}
-                      type="button"
-                    >
-                      {prompt.label}
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          );
-        })}
+            ) : null}
+          </>
+        ) : (
+          sections.map(renderSection)
+        )}
       </div>
 
       <div

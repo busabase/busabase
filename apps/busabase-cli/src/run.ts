@@ -2129,6 +2129,33 @@ than as a 403 later. The choice is stored in the active profile and mirrored to
     .description("Workspace node tree")
     .action(runAction(state, (client) => client.nodes.list()));
 
+  addGlobalFlags(nodes.command("update-description"))
+    .description("Propose a node description update via a Change Request")
+    .requiredOption("--node-id <id>", "node id")
+    .requiredOption("--description <text>", "new description")
+    .option("--message <text>", "reviewer-facing Change Request message")
+    .option("--submitted-by <name>", "producer label")
+    .option("--dry-run", "print the request this would send and send nothing")
+    .addHelpText(
+      "after",
+      `\nExample:\n  busabase-cli nodes update-description --node-id nod_123 --description "Campaign resources"\n\nThis submits a Change Request: it merges with write access, otherwise it waits for review.`,
+    )
+    .action(
+      runAction(state, (client, opts) =>
+        client.nodes.createChangeRequest({
+          operations: [
+            {
+              kind: "rename",
+              nodeId: opts.nodeId as string,
+              description: opts.description as string,
+            },
+          ],
+          message: opts.message as string | undefined,
+          submittedBy: opts.submittedBy as string | undefined,
+        }),
+      ),
+    );
+
   addGlobalFlags(nodes.command("purge"))
     .description(
       "Permanently delete an ALREADY-archived node and its subtree (irreversible). Archive it first with `nodes archive` if it isn't archived yet.",
@@ -2252,14 +2279,17 @@ Examples:
       ),
     );
   addGlobalFlags(bases.command("get"))
-    .description("Get one Base by slug")
-    .requiredOption("--slug <slug>", "Base slug")
+    .description("Get one Base by id or slug")
+    .option("--slug <slug>", "Base slug")
+    .option("--base-id <id>", "Base id")
     .action(
-      runAction(state, async (client, opts) => {
-        const slug = opts.slug as string;
-        const found = (await client.bases.list({})).find((base) => base.slug === slug);
-        if (!found) throw new Error(`no Base with slug "${slug}"`);
-        return found;
+      runAction(state, (client, opts) => {
+        const slug = opts.slug as string | undefined;
+        const baseId = opts.baseId as string | undefined;
+        if (Boolean(slug) === Boolean(baseId)) {
+          throw new CliOutcomeError("VALIDATION", "Pass exactly one of --slug or --base-id.");
+        }
+        return client.bases.get({ baseId: (baseId ?? slug) as string });
       }),
     );
   addGlobalFlags(bases.command("create-field"))
@@ -3009,7 +3039,7 @@ To copy a still-live space's current content into another space, use
         .choices(["get", "post", "put", "delete"])
         .makeOptionMandatory(),
     )
-    .requiredOption("--path <p>", "path under /api/v1, e.g. /bases")
+    .requiredOption("--path <p>", "path under /api/v1 (e.g. /bases) or full /api/v1 path")
     .option("--query <k=v...>", "query-string param, repeatable")
     .option("--body-json <json>", "JSON request body")
     .option("--dry-run", "print the request this would send and send nothing")
@@ -3021,7 +3051,14 @@ To copy a still-live space's current content into another space, use
           query.set(key, rest.join("="));
         }
         const qs = query.toString();
-        const path = `/api/v1${opts.path as string}${qs ? `?${qs}` : ""}`;
+        const requestedPath = opts.path as string;
+        if (!requestedPath.startsWith("/")) {
+          throw new CliOutcomeError("VALIDATION", "--path must start with /.");
+        }
+        const apiPath = /^\/api\/v1(?:\/|$)/.test(requestedPath)
+          ? requestedPath
+          : `/api/v1${requestedPath}`;
+        const path = `${apiPath}${qs ? `?${qs}` : ""}`;
         const bodyJson = opts.bodyJson as string | undefined;
         return rawFetch(
           config,
