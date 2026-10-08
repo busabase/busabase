@@ -16,6 +16,10 @@ Give Claude Code, Codex, Cursor, OpenClaw, and your own agents one place for str
 <a href="./apps/busabase/docs/README_ko.md">한국어</a>
 </p>
 
+<p align="center">
+<a href="https://www.producthunt.com/products/busabase?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_campaign=badge-busabase" target="_blank" rel="noopener noreferrer"><img alt="Busabase - The General System of Record for AI Agents | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1189118&amp;theme=light&amp;t=1791453316155"></a>
+</p>
+
 <p>
 <a href="https://www.npmjs.com/package/busabase"><img src="https://img.shields.io/npm/v/busabase?logo=npm&label=busabase&color=3fb950" alt="npm busabase" /></a>
 <a href="https://www.npmjs.com/package/busabase-cli"><img src="https://img.shields.io/npm/v/busabase-cli?logo=npm&label=busabase-cli&color=3fb950" alt="npm busabase-cli" /></a>
