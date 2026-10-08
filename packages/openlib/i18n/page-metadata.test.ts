@@ -244,6 +244,54 @@ describe("images and optional fields", () => {
     expect(metadata.openGraph.images[0].url).toBe("https://cdn.example/cover.png");
   });
 
+  // The bug this guards: busabase-cms-sdk's metadata input carries `coverImageUrl`, routes
+  // spread it in, and the field was silently dropped — so every post with a CMS cover still
+  // shared the site-wide default image. Shaped exactly like that spread.
+  it("uses the post's cover on share cards when a CMS metadata input is spread in", () => {
+    const input = {
+      title: "Post",
+      description: "D",
+      path: "/blog/post",
+      lang: "en",
+      availableLocales: ["en", "ja"],
+      coverImageUrl: "https://s1.example/cover.png",
+    };
+    const metadata = generateContentPageMetadata({ ...input, type: "article" });
+
+    expect(metadata.openGraph.images).toEqual([
+      { url: "https://s1.example/cover.png", alt: "Post" },
+    ]);
+    expect(metadata.twitter.images).toEqual(["https://s1.example/cover.png"]);
+  });
+
+  it("lets an explicit imageUrl win over the cover", () => {
+    const metadata = generateContentPageMetadata({
+      title: "T",
+      description: "D",
+      path: "/x",
+      lang: "en",
+      availableLocales: ["en"],
+      coverImageUrl: "https://s1.example/cover.png",
+      imageUrl: "https://cdn.example/explicit.png",
+    });
+
+    expect(metadata.openGraph.images[0].url).toBe("https://cdn.example/explicit.png");
+  });
+
+  it("keeps the default image and its 1200x630 size when there is no cover", () => {
+    const metadata = generateContentPageMetadata({
+      title: "T",
+      description: "D",
+      path: "/x",
+      lang: "en",
+      availableLocales: ["en"],
+    });
+
+    expect(metadata.openGraph.images).toEqual([
+      { url: "https://example.com/opengraph-image", width: 1200, height: 630, alt: "T" },
+    ]);
+  });
+
   it("ignores imageText when the app configured no template for it", () => {
     const bare = createPageMetadataHelpers({
       baseUrl: "https://bare.example",
