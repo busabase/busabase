@@ -125,5 +125,9 @@ describe("record update permission-aware auto-merge", () => {
     expect(result.materialized).toBe(false);
     if (result.materialized) throw new Error("Expected a pending ChangeRequest");
     expect(result.status).toBe("in_review");
+    const unchanged = await client.records.get({ recordId: record.id });
+    expect(unchanged?.headCommit.payload.title).toBe("ChangeRequest fallback");
+    const pending = await client.changeRequests.get({ changeRequestId: result.id });
+    expect(pending?.status).toBe("in_review");
   });
 });

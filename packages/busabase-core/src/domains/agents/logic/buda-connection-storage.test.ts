@@ -175,7 +175,7 @@ describe("Buda connection storage", () => {
 
     await expect(disconnectBuda("buda:agent-1")).resolves.toBe(true);
     expect(fetch).toHaveBeenCalledWith(
-      new URL("https://dev.buda.im/api/oauth/revoke"),
+      new URL("https://buda.im/api/oauth/revoke"),
       expect.objectContaining({
         body: new URLSearchParams({
           token: "refresh-actor-1",
@@ -212,7 +212,7 @@ describe("Buda connection storage", () => {
     await expect(disconnectBuda("buda:agent-2")).resolves.toBe(true);
 
     expect(fetch).toHaveBeenCalledWith(
-      new URL("https://dev.buda.im/api/oauth/revoke"),
+      new URL("https://buda.im/api/oauth/revoke"),
       expect.objectContaining({
         method: "POST",
         body: new URLSearchParams({

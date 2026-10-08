@@ -1398,6 +1398,8 @@ export const dashboardJa: CoreI18nMessages = {
     dateField: "日付フィールド",
     dateFieldAuto: "自動（最初の日付フィールド）",
     calendarNoDate: "日付フィールドを追加すると、レコードをカレンダーに配置できます。",
+    calendarDragHandle: "{record}を別の日に移動",
+    calendarDragHint: "ドラッグして日付を変更",
     calendarToday: "今日",
     calendarPrevMonth: "前の月",
     calendarNextMonth: "次の月",

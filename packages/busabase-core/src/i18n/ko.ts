@@ -1388,6 +1388,8 @@ export const dashboardKo: CoreI18nMessages = {
     dateField: "날짜 필드",
     dateFieldAuto: "자동(첫 번째 날짜 필드)",
     calendarNoDate: "날짜 필드를 추가하면 레코드를 캘린더에 배치할 수 있습니다.",
+    calendarDragHandle: "{record}을(를) 다른 날짜로 이동",
+    calendarDragHint: "드래그하여 날짜 변경",
     calendarToday: "오늘",
     calendarPrevMonth: "이전 달",
     calendarNextMonth: "다음 달",

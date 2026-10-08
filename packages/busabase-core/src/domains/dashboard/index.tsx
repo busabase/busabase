@@ -1554,7 +1554,7 @@ function BusabaseDashboardContent({
   const submitPatchRecord = useCallback(
     async (record: RecordVO, patch: Record<string, unknown>) => {
       setError(null);
-      await client.createUpdateChangeRequest(record.id, {
+      const result = await client.createUpdateChangeRequest(record.id, {
         author: "local-editor",
         autoMerge: true,
         fields: patch,
@@ -1563,6 +1563,9 @@ function BusabaseDashboardContent({
         }),
       });
       await refresh();
+      return result.materialized
+        ? { materialized: true as const }
+        : { materialized: false as const, changeRequestId: result.id };
     },
     [client, messages, messages.createNode.updateRecordMessage, refresh],
   );

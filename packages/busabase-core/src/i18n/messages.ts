@@ -1520,6 +1520,8 @@ export const coreMessagesEn = {
     dateField: "Date field",
     dateFieldAuto: "Auto (first date field)",
     calendarNoDate: "Add a date field to place records on the calendar.",
+    calendarDragHandle: "Move {record} to another day",
+    calendarDragHint: "Drag to reschedule",
     calendarToday: "Today",
     calendarPrevMonth: "Previous month",
     calendarNextMonth: "Next month",

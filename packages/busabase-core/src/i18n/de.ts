@@ -1436,6 +1436,8 @@ export const dashboardDe: CoreI18nMessages = {
     dateField: "Datumsfeld",
     dateFieldAuto: "Automatisch (erstes Datumsfeld)",
     calendarNoDate: "Fügen Sie ein Datumsfeld hinzu, um Datensätze im Kalender zu platzieren.",
+    calendarDragHandle: "{record} auf einen anderen Tag verschieben",
+    calendarDragHint: "Ziehen, um das Datum zu ändern",
     calendarToday: "Heute",
     calendarPrevMonth: "Vorheriger Monat",
     calendarNextMonth: "Nächster Monat",

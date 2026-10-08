@@ -1358,6 +1358,8 @@ export const dashboardZhTW: CoreI18nMessages = {
     dateField: "日期欄位",
     dateFieldAuto: "自動（第一個日期欄位）",
     calendarNoDate: "新增一個日期欄位，才能把記錄排到日曆上。",
+    calendarDragHandle: "將{record}移到其他日期",
+    calendarDragHint: "拖曳調整日期",
     calendarToday: "今天",
     calendarPrevMonth: "上個月",
     calendarNextMonth: "下個月",

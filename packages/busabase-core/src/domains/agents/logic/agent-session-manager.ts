@@ -1,5 +1,5 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { Readable, Writable } from "node:stream";
 import { buildPromptContent } from "@acp-ui/core/prompt";
 import * as acp from "@agentclientprotocol/sdk";
@@ -71,6 +71,7 @@ import { resolveBusabaseMcpUrl } from "./agent-workspace-guide";
  */
 
 const MAX_BUFFERED_EVENTS = 500;
+const MAX_CACHED_MODEL_OPTIONS = 500;
 
 /**
  * Reduce the agent's advertised `configOptions` to the one this domain
@@ -102,8 +103,8 @@ function findModelOption(
 interface LiveSession {
   id: string;
   /** Immutable request ownership captured when the process/socket is launched. */
-  spaceId: string;
-  actorId: string | null;
+  readonly spaceId: string;
+  readonly actorId: string | null;
   slug: string;
   agentName: string;
   transport: ResolvedLaunch["transport"];
@@ -129,13 +130,12 @@ interface LiveSession {
   close: () => void;
   closed: boolean;
   /**
-   * `null` until the agent's `session/new` response (or a later
-   * `config_option_update`) advertises a `category: "model"` select.
-   * Live-only, like the rest of `LiveSession` — a session reloaded from
-   * history after a restart has no process left to send
-   * `session/set_config_option` to, so there is nothing to advertise.
+   * Confirmed ACP metadata, seeded during startup from this session's
+   * durable snapshot on resume or the same Buda connection's cached snapshot
+   * on creation. Readiness still gates configuration and prompt dispatch.
    */
   modelOption: AgentSessionModelOptionVO | null;
+  modelCacheKey?: string;
   /** Serializes model snapshots with remote lease acquisition and release. */
   modelOptionSync: Promise<void>;
   setConfigOption: (configId: string, value: string) => Promise<AgentSessionModelOptionVO | null>;
@@ -156,12 +156,178 @@ interface LiveSession {
   permissionCounter: number;
   /**
    * The fencing lease held for the turn currently in flight on
-   * `remote-websocket` sessions; `null` when idle or on `local-subprocess`
+   * `remote-websocket` sessions; retained through final persistence and
+   * cleared by the operation guard, or always null on `local-subprocess`
    * (which has no cross-worker race to fence — a single child process is
    * never contended). Read by `setStatus`/`flushPendingEvents` so the fence
    * does not need threading through every call site.
    */
   lease: AgentSessionLease | null;
+  /** Shared with retained ACP callbacks across independently loaded modules. */
+  operationGuard?: OperationLeaseGuard | null;
+}
+
+interface OperationLeaseGuard {
+  readonly lease: AgentSessionLease;
+  readonly scope: { readonly spaceId: string; readonly actorId: string | null };
+  assertOwned(): void;
+  ready(renewBeforeDispatch?: boolean): Promise<void>;
+  release(waitForWrites?: boolean): Promise<void>;
+}
+
+function requireOperationGuard(session: LiveSession): OperationLeaseGuard | undefined {
+  if (session.transport !== "remote-websocket") return undefined;
+  const guard = session.operationGuard;
+  if (
+    !guard ||
+    session.lease !== guard.lease ||
+    session.id !== guard.lease.sessionId ||
+    session.spaceId !== guard.scope.spaceId ||
+    session.actorId !== guard.scope.actorId
+  ) {
+    throw new Error("This worker lost the agent session lease.");
+  }
+  guard.assertOwned();
+  return guard;
+}
+
+async function verifyOperationDispatch(
+  session: LiveSession,
+  guard?: OperationLeaseGuard,
+): Promise<void> {
+  await guard?.ready(true);
+  if (requireOperationGuard(session) !== guard) {
+    throw new Error("This worker lost the agent session lease.");
+  }
+}
+
+/** One immutable authority owns renewal and cleanup for the entire operation. */
+class LeaseGuard implements OperationLeaseGuard {
+  readonly lease: AgentSessionLease;
+  readonly scope: { readonly spaceId: string; readonly actorId: string | null };
+  private session?: LiveSession;
+  private lost = false;
+  private stopped = false;
+  private releasing = false;
+  private renewing: Promise<void> | null = null;
+  private cleanup: Promise<void> | null = null;
+  private readonly timer: ReturnType<typeof setInterval>;
+
+  constructor(lease: AgentSessionLease, scope: { spaceId: string; actorId: string | null }) {
+    this.lease = Object.freeze({ ...lease });
+    this.scope = Object.freeze({ ...scope });
+    this.timer = setInterval(
+      () => this.renew(),
+      Math.max(100, (sessionLeaseTtlSeconds() * 1_000) / 3),
+    );
+    this.timer.unref?.();
+    this.renew();
+  }
+
+  private renew(): void {
+    if (this.stopped || this.releasing || this.lost || this.renewing) return;
+    this.renewing = renewSessionLease(
+      this.lease.sessionId,
+      this.lease.ownerId,
+      this.lease.fencingToken,
+      sessionLeaseTtlSeconds(),
+      this.scope,
+    )
+      .then(
+        (renewed) => {
+          if (!renewed && !this.stopped) this.markLost();
+        },
+        () => {
+          if (!this.stopped) this.markLost();
+        },
+      )
+      .finally(() => {
+        this.renewing = null;
+      });
+  }
+
+  private markLost(): void {
+    if (this.lost) return;
+    this.lost = true;
+    clearInterval(this.timer);
+    if (this.session?.lease === this.lease && this.session.operationGuard === this) {
+      this.session.status = "failed";
+      this.session.error = "This worker lost the agent session lease.";
+      startingPromptControllers.get(this.session)?.abort(new Error(this.session.error));
+      detachRemoteSession(this.session);
+    }
+  }
+
+  assertOwned(): void {
+    if (
+      this.lost ||
+      this.stopped ||
+      (this.session && (this.session.lease !== this.lease || this.session.operationGuard !== this))
+    ) {
+      throw new Error("This worker lost the agent session lease.");
+    }
+  }
+
+  attach(session: LiveSession): void {
+    this.assertOwned();
+    const active = session.operationGuard;
+    if (active && active !== this) {
+      throw new Error("This agent is still replying. Wait for the current turn to finish.");
+    }
+    if (
+      session.id !== this.lease.sessionId ||
+      session.spaceId !== this.scope.spaceId ||
+      session.actorId !== this.scope.actorId
+    ) {
+      throw new Error(`Unknown agent session: ${this.lease.sessionId}`);
+    }
+    this.session = session;
+    session.lease = this.lease;
+    session.operationGuard = this;
+  }
+
+  async ready(renewBeforeDispatch = false): Promise<void> {
+    this.assertOwned();
+    if (renewBeforeDispatch) this.renew();
+    await this.renewing;
+    this.assertOwned();
+  }
+
+  release(waitForWrites = true): Promise<void> {
+    if (this.cleanup) return this.cleanup;
+    const cleanup = async () => {
+      try {
+        await this.session?.flushPending;
+        this.releasing = true;
+        await this.renewing;
+        const released = await releaseSessionLease(
+          this.lease.sessionId,
+          this.lease.ownerId,
+          this.lease.fencingToken,
+          this.scope,
+        );
+        if (!released) {
+          this.markLost();
+          this.assertOwned();
+        }
+      } finally {
+        this.stopped = true;
+        clearInterval(this.timer);
+        if (this.session?.operationGuard === this) {
+          if (this.session.lease === this.lease) this.session.lease = null;
+          this.session.operationGuard = null;
+        }
+      }
+    };
+    if (waitForWrites && this.session) {
+      const release = this.session.modelOptionSync.then(cleanup);
+      this.session.modelOptionSync = release.catch(() => undefined);
+      this.cleanup = release;
+    } else {
+      this.cleanup = cleanup();
+    }
+    return this.cleanup;
+  }
 }
 
 /**
@@ -198,6 +364,7 @@ function syncModelOption(
     // and in-memory publication in the same queue entry prevents a lease
     // claim's durable refresh from clobbering a newer queued notification.
     session.modelOption = modelOption;
+    rememberModelOption(session, modelOption);
   });
   // Keep later updates retryable even when this caller observes a rejection.
   session.modelOptionSync = write.catch(() => undefined);
@@ -270,7 +437,22 @@ const waitForReadyOrCancellation = (
 type GlobalWithAgentSessions = typeof globalThis & {
   __busabaseAgentSessions?: Map<string, LiveSession>;
   __busabaseAgentSessionReattachments?: Map<string, Promise<LiveSession>>;
+  __busabaseAgentModelOptions?: Map<string, AgentSessionModelOptionVO | null>;
 };
+
+function modelOptions(): Map<string, AgentSessionModelOptionVO | null> {
+  const g = globalThis as GlobalWithAgentSessions;
+  if (!g.__busabaseAgentModelOptions) g.__busabaseAgentModelOptions = new Map();
+  return g.__busabaseAgentModelOptions;
+}
+
+function rememberModelOption(session: LiveSession, option: AgentSessionModelOptionVO | null) {
+  if (!session.modelCacheKey) return;
+  const cache = modelOptions();
+  cache.delete(session.modelCacheKey);
+  cache.set(session.modelCacheKey, option ? structuredClone(option) : null);
+  if (cache.size > MAX_CACHED_MODEL_OPTIONS) cache.delete(cache.keys().next().value as string);
+}
 
 function sessions(): Map<string, LiveSession> {
   const g = globalThis as GlobalWithAgentSessions;
@@ -389,14 +571,10 @@ async function setStatus(
     if (transitionLease && !persisted) {
       throw new Error("This worker lost the agent session lease.");
     }
-    if (transitionLease && status !== "busy" && session.lease === transitionLease) {
-      session.lease = null;
-    }
   };
   if (transitionLease && status !== "busy") {
-    // This state write clears the durable lease. Queue it behind every model
-    // snapshot received during the turn; later idle notifications queue after
-    // it and observe the cleared local lease.
+    // Keep state commits behind earlier model snapshots while the operation's
+    // guard retains the fence through final persistence and explicit release.
     const transition = session.modelOptionSync.then(persistTransition);
     session.modelOptionSync = transition.catch(() => undefined);
     await transition;
@@ -413,13 +591,17 @@ async function setStatus(
  * or duplicating the remainder of a partially streamed message.
  */
 async function flushPendingEvents(session: LiveSession): Promise<void> {
+  const fence = session.lease ?? undefined;
   const flush = session.flushPending.then(async () => {
     const pending = session.buffer.filter((event) => event.seq > session.persistedSeq);
     if (pending.length === 0) return;
     const nextPersistedSeq = pending[pending.length - 1]?.seq ?? session.persistedSeq;
     const durableEvents =
       session.transport === "remote-websocket" ? pending : collapseForPersistence(pending);
-    const persisted = await persistSessionEvents(durableEvents, session.lease ?? undefined);
+    const persisted = await persistSessionEvents(durableEvents, fence, {
+      spaceId: session.spaceId,
+      actorId: session.actorId,
+    });
     if (!persisted && session.transport === "remote-websocket") {
       throw new Error("Could not persist the remote agent transcript.");
     }
@@ -473,6 +655,7 @@ export interface CreateSessionArgs {
 interface OpenAgentSessionArgs extends CreateSessionArgs {
   resume?: AgentSessionRuntimeRecord;
   lease?: AgentSessionLease;
+  guard?: LeaseGuard;
 }
 
 async function openAgentSession({
@@ -480,9 +663,20 @@ async function openAgentSession({
   spaceId,
   resume,
   lease,
+  guard,
 }: OpenAgentSessionArgs): Promise<LiveSession> {
-  const actorId = getContextActorId() ?? null;
+  const actorId = guard ? guard.scope.actorId : (getContextActorId() ?? null);
   const launch = await resolveLaunch(slug);
+  guard?.assertOwned();
+  // Credentials are hashed, never retained in the cache. A token rotation
+  // deliberately misses rather than borrowing another connection's metadata.
+  const modelCacheKey =
+    launch.transport === "remote-websocket" &&
+    (launch.slug === "buda" || launch.slug.startsWith("buda:"))
+      ? createHash("sha256")
+          .update(JSON.stringify([spaceId, actorId, launch.slug, launch.url, launch.authHeader]))
+          .digest("hex")
+      : undefined;
   const id =
     resume?.session.id ??
     `ags_${Math.random().toString(36).slice(2, 12)}${Date.now().toString(36)}`;
@@ -518,7 +712,12 @@ async function openAgentSession({
     detach: () => {},
     close: () => {},
     closed: false,
-    modelOption: null,
+    modelOption: structuredClone(
+      resume
+        ? resume.session.modelOption
+        : (modelCacheKey && modelOptions().get(modelCacheKey)) || null,
+    ),
+    modelCacheKey,
     modelOptionSync: Promise.resolve(),
     setConfigOption: async () => null,
     seq: resume?.lastEventSeq ?? 0,
@@ -530,6 +729,7 @@ async function openAgentSession({
     permissionCounter: 0,
     lease: lease ?? null,
   };
+  guard?.attach(session);
   // Identity must be durable before a process or socket exists. Otherwise a
   // failed INSERT creates a live session that no disconnect/delete request in
   // any process can discover or tombstone. Skipped on resume: the row already
@@ -540,6 +740,7 @@ async function openAgentSession({
 
   session.ready = (async () => {
     const workspace = await prepareAgentWorkspace(launch.transport, spaceId);
+    guard?.assertOwned();
 
     let stream: acp.Stream;
     if (launch.transport === "local-subprocess") {
@@ -803,6 +1004,7 @@ async function openAgentSession({
           configOptions = created.configOptions;
         }
         clearHandshakeTimeout();
+        guard?.assertOwned();
         if (session.closed) return;
         logAcpConnection("info", `${sessionMethod}_succeeded`, {
           connectionId,
@@ -821,6 +1023,7 @@ async function openAgentSession({
           attachments?: PromptAttachmentInput[],
           cancellationSignal?: AbortSignal,
         ) => {
+          const promptGuard = requireOperationGuard(session);
           if (
             session.status === "waiting_permission" ||
             (session.status === "busy" && !session.promptStarting)
@@ -898,6 +1101,7 @@ async function openAgentSession({
                 acpUpdate: { sessionUpdate: "note", text: note },
               });
             }
+            await verifyOperationDispatch(session, promptGuard);
             await Promise.race([
               ctx.request(
                 acp.methods.agent.session.prompt,
@@ -972,6 +1176,8 @@ async function openAgentSession({
         };
 
         session.setConfigOption = async (configId: string, value: string) => {
+          const configGuard = requireOperationGuard(session);
+          await verifyOperationDispatch(session, configGuard);
           const response = await ctx.request(acp.methods.agent.session.setConfigOption, {
             sessionId: acpSessionId,
             configId,
@@ -995,10 +1201,16 @@ async function openAgentSession({
           // A same-worker first prompt may reserve the durable row while
           // session/new is still running. Publish only the inner id here so
           // readiness cannot overwrite that cross-worker busy reservation.
-          await persistSessionAcpIdentity(session.id, acpSessionId);
+          await persistSessionAcpIdentity(session.id, acpSessionId, {
+            spaceId: session.spaceId,
+            actorId: session.actorId,
+          });
         } else {
           if (launch.transport === "remote-websocket") {
-            await persistSessionAcpIdentity(session.id, acpSessionId);
+            await persistSessionAcpIdentity(session.id, acpSessionId, {
+              spaceId: session.spaceId,
+              actorId: session.actorId,
+            });
           }
           await setStatus(session, "idle");
         }
@@ -1125,6 +1337,7 @@ async function reattachRemoteSession(
   sessionId: string,
   claimedRecord?: AgentSessionRuntimeRecord,
   lease?: AgentSessionLease,
+  guard?: LeaseGuard,
 ): Promise<LiveSession> {
   const existing = sessions().get(sessionId);
   if (existing) {
@@ -1168,11 +1381,13 @@ async function reattachRemoteSession(
     try {
       session = await openAgentSession({
         slug: record.session.slug,
-        spaceId: getContextSpaceId(),
+        spaceId: guard?.scope.spaceId ?? getContextSpaceId(),
         resume: record,
         lease,
+        guard,
       });
       await session.ready;
+      guard?.assertOwned();
     } catch (error) {
       throw new Error(
         error instanceof Error ? error.message : "The remote agent session could not reconnect.",
@@ -1237,32 +1452,38 @@ function throwUnavailableSession(
 
 async function acquireOperationSession(
   sessionId: string,
-): Promise<{ session: LiveSession; leased: boolean }> {
+): Promise<{ session: LiveSession; guard?: LeaseGuard }> {
+  const scope = Object.freeze({
+    spaceId: getContextSpaceId(),
+    actorId: getContextActorId() ?? null,
+  });
   const candidate = sessions().get(sessionId);
   const existing =
     candidate && isLiveSessionVisibleToCurrentRequest(candidate) ? candidate : undefined;
   if (existing?.transport === "local-subprocess") {
-    return { session: existing, leased: false };
+    return { session: existing };
   }
 
   if (existing) {
     const ownerId = randomUUID();
     const claim = existing.modelOptionSync.then(async () => {
-      const lease = await acquireSessionLease(sessionId, ownerId);
+      const lease = await acquireSessionLease(sessionId, ownerId, sessionLeaseTtlSeconds(), scope);
       if (!lease) throwUnavailableSession(sessionId, await loadSessionRuntime(sessionId));
+      const guard = new LeaseGuard(lease, scope);
       try {
-        const claimed = await loadSessionRuntime(sessionId);
+        guard.attach(existing);
+        const claimed = await loadSessionRuntime(sessionId, scope);
+        await guard.ready();
         if (!claimed) throw new Error(`Unknown agent session: ${sessionId}`);
         // The queue drained every earlier local config update before the
         // claim, so this durable snapshot is now the cross-worker authority.
         existing.modelOption = claimed.session.modelOption;
         existing.seq = Math.max(existing.seq, claimed.lastEventSeq);
         existing.persistedSeq = Math.max(existing.persistedSeq, claimed.lastEventSeq);
-        existing.lease = lease;
         existing.status = "idle";
-        return { session: existing, leased: true };
+        return { session: existing, guard };
       } catch (error) {
-        await releaseSessionLease(sessionId, lease.ownerId, lease.fencingToken);
+        await releaseClaimedPromptPreservingFailure(guard, error, false);
         throw error;
       }
     });
@@ -1284,90 +1505,50 @@ async function acquireOperationSession(
   }
 
   const ownerId = randomUUID();
-  const lease = await acquireSessionLease(sessionId, ownerId);
+  const lease = await acquireSessionLease(sessionId, ownerId, sessionLeaseTtlSeconds(), scope);
   if (!lease) throwUnavailableSession(sessionId, await loadSessionRuntime(sessionId));
+  const guard = new LeaseGuard(lease, scope);
 
   try {
-    const claimed = await loadSessionRuntime(sessionId);
+    const claimed = await loadSessionRuntime(sessionId, scope);
+    await guard.ready();
     if (!claimed) throw new Error(`Unknown agent session: ${sessionId}`);
-    const session = await reattachRemoteSession(sessionId, claimed, lease);
+    const session = await reattachRemoteSession(sessionId, claimed, guard.lease, guard);
+    guard.attach(session);
     // This worker may have kept an older idle socket while another worker ran
     // the previous turn. The DB claim is the handoff point, so refresh the
     // sequence before this worker emits anything for the newly-owned turn.
     session.seq = Math.max(session.seq, claimed.lastEventSeq);
     session.persistedSeq = Math.max(session.persistedSeq, claimed.lastEventSeq);
-    session.lease = lease;
     // The durable row is busy because this lease now owns the operation. The
     // local ACP wrapper must begin from idle so `session.prompt` can perform
     // its normal idle -> busy transition under that same fence.
     session.status = "idle";
-    return { session, leased: true };
+    return { session, guard };
   } catch (error) {
-    await releaseSessionLease(sessionId, lease.ownerId, lease.fencingToken);
+    await releaseClaimedPromptPreservingFailure(guard, error, false);
     throw error;
   }
 }
 
 /** Release the turn slot claimed by `acquireOperationSession`, if any. */
-async function releaseClaimedPrompt(session: LiveSession): Promise<void> {
-  if (session.transport !== "remote-websocket" || !session.lease) return;
-  const lease = session.lease;
-  const release = session.modelOptionSync.then(async () => {
-    const released = await releaseSessionLease(session.id, lease.ownerId, lease.fencingToken);
-    if (!released) {
-      if (session.lease === lease) session.lease = null;
-      detachRemoteSession(session);
-      throw new Error("This worker lost the agent session lease.");
-    }
-    if (session.lease === lease) session.lease = null;
-  });
-  // A notification received after release was queued chains behind it and
-  // reads the now-cleared lease when its own queue entry executes.
-  session.modelOptionSync = release.catch(() => undefined);
-  await release;
-}
-
 async function releaseClaimedPromptPreservingFailure(
-  session: LiveSession,
+  guard: LeaseGuard,
   operationError?: unknown,
+  waitForWrites = true,
 ): Promise<void> {
   try {
-    await releaseClaimedPrompt(session);
+    await guard.release(waitForWrites);
   } catch (releaseError) {
     if (operationError === undefined) throw releaseError;
     console.warn("[agents:acp]", {
       event: "lease_release_failed_after_operation_failure",
-      sessionId: session.id,
+      sessionId: guard.lease.sessionId,
       operationMessage:
         operationError instanceof Error ? operationError.message : String(operationError),
       releaseMessage: releaseError instanceof Error ? releaseError.message : String(releaseError),
     });
   }
-}
-
-function startLeaseHeartbeat(session: LiveSession): () => void {
-  const lease = session.lease;
-  if (!lease) return () => {};
-  let renewing = false;
-  const timer = setInterval(
-    () => {
-      if (renewing || session.lease !== lease) return;
-      renewing = true;
-      void renewSessionLease(session.id, lease.ownerId, lease.fencingToken)
-        .then((renewed) => {
-          if (renewed || session.lease !== lease) return;
-          session.status = "failed";
-          session.error = "This worker lost the agent session lease.";
-          detachRemoteSession(session);
-        })
-        .finally(() => {
-          renewing = false;
-        });
-    },
-    Math.max(1_000, (sessionLeaseTtlSeconds() * 1_000) / 3),
-  );
-  timer.unref?.();
-  return () => clearInterval(timer);
 }
 
 function detachRemoteSession(session: LiveSession): void {
@@ -1476,7 +1657,10 @@ async function emitPersistedFirst(
   const seq = session.seq + 1;
   const at = nowIso();
   const full: AgentSessionEventVO = { sessionId: session.id, seq, at, ...event };
-  const persisted = await persistSessionEvents(collapseForPersistence([full]), fence);
+  const persisted = await persistSessionEvents(collapseForPersistence([full]), fence, {
+    spaceId: session.spaceId,
+    actorId: session.actorId,
+  });
   if (!persisted) return null;
   session.seq = seq;
   session.persistedSeq = seq;
@@ -1506,24 +1690,23 @@ export async function promptAgentSession(
   attachments?: PromptAttachmentInput[],
   options?: { onAccepted?: () => void },
 ): Promise<void> {
-  const { session: s, leased } = await acquireOperationSession(sessionId);
-  let stopHeartbeat = () => {};
+  const { session: s, guard } = await acquireOperationSession(sessionId);
   try {
     assertSessionCanAcceptPrompt(s, false);
     if (s.promptStarting || s.status === "busy" || s.status === "waiting_permission") {
       throw new Error("This agent is still replying. Wait for the current turn to finish.");
     }
   } catch (error) {
-    if (leased) await releaseClaimedPromptPreservingFailure(s, error);
+    if (guard) await releaseClaimedPromptPreservingFailure(guard, error);
     throw error;
   }
   s.promptStarting = true;
   const promptController = new AbortController();
   startingPromptControllers.set(s, promptController);
-  stopHeartbeat = startLeaseHeartbeat(s);
   let operationError: unknown;
 
   try {
+    guard?.assertOwned();
     // Persist the user's own message before waiting for initialize +
     // session/new, so it is authoritative and visible to current and late
     // clients even though agent startup may take seconds. `attachments`
@@ -1576,15 +1759,16 @@ export async function promptAgentSession(
       throw new Error(message);
     }
     assertSessionCanAcceptPrompt(s, true);
+    guard?.assertOwned();
     await s.prompt(text, attachments, promptController.signal);
+    guard?.assertOwned();
   } catch (error) {
     operationError = error;
     throw error;
   } finally {
     try {
-      if (leased) await releaseClaimedPromptPreservingFailure(s, operationError);
+      if (guard) await releaseClaimedPromptPreservingFailure(guard, operationError);
     } finally {
-      stopHeartbeat();
       if (startingPromptControllers.get(s) === promptController) {
         startingPromptControllers.delete(s);
       }
@@ -1752,11 +1936,11 @@ export async function setAgentSessionConfigOption(
   configId: string,
   value: string,
 ): Promise<AgentSessionVO> {
-  const { session: s, leased } = await acquireOperationSession(sessionId);
-  const stopHeartbeat = startLeaseHeartbeat(s);
+  const { session: s, guard } = await acquireOperationSession(sessionId);
   let operationError: unknown;
   try {
     await s.ready;
+    guard?.assertOwned();
     if (!s.modelOption || s.modelOption.id !== configId) {
       throw new Error("This session has no such config option to set.");
     }
@@ -1764,6 +1948,7 @@ export async function setAgentSessionConfigOption(
       throw new Error(`"${value}" is not one of the offered options.`);
     }
     await s.setConfigOption(configId, value);
+    guard?.assertOwned();
     return toVO(s);
   } catch (error) {
     operationError = error;
@@ -1774,11 +1959,7 @@ export async function setAgentSessionConfigOption(
     if (s.transport === "remote-websocket") detachRemoteSession(s);
     throw error;
   } finally {
-    try {
-      if (leased) await releaseClaimedPromptPreservingFailure(s, operationError);
-    } finally {
-      stopHeartbeat();
-    }
+    if (guard) await releaseClaimedPromptPreservingFailure(guard, operationError);
     if (s.status === "failed") detachRemoteSession(s);
   }
 }

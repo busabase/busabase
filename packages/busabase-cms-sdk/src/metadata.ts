@@ -42,10 +42,10 @@ export interface CmsContentMetadataInput {
    */
   availableLocales: string[];
   /**
-   * The CMS cover image (or the local post's `image`), when there is one. NOT one of the
-   * metadata helper's option names on purpose: a route opts in with
-   * `imageUrl: input.coverImageUrl`, so adopting this object never changes a route's
-   * `og:image` by itself.
+   * The CMS cover image (or the local post's `image`), when there is one. openlib's
+   * `generateContentPageMetadata` reads this same option name and uses it as the share
+   * image when the route passes no explicit `imageUrl`, so spreading this object is
+   * enough to put a post's cover on its share card.
    */
   coverImageUrl?: string;
 }

@@ -7,7 +7,7 @@ import { busabaseVaultItems } from "../../vault/schema/vault-items";
 
 const LEGACY_CONNECTION_KEY = "BUDA_ACP_CONNECTION";
 const CONNECTION_KEY_PREFIX = `${LEGACY_CONNECTION_KEY}:`;
-const DEFAULT_BUDA_ORIGIN = "https://dev.buda.im";
+const DEFAULT_BUDA_ORIGIN = "https://buda.im";
 const CLIENT_ID = "busabase-cloud";
 
 export function getBudaOAuthOrigin(): string {

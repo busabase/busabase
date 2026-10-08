@@ -96,7 +96,7 @@ export interface PageMetadata {
     locale?: string;
     alternateLocale?: string[];
     modifiedTime?: string;
-    images: Array<{ url: string; width: number; height: number; alt: string }>;
+    images: Array<{ url: string; width?: number; height?: number; alt: string }>;
   };
   twitter: {
     card: "summary_large_image";
@@ -339,6 +339,14 @@ export interface GenerateContentPageMetadataOptions
    * among them.
    */
   availableLocales: readonly string[];
+  /**
+   * The item's own cover image (a CMS `cover-image`, a local post's `image`). Used as
+   * the OG/Twitter image when no explicit `imageUrl` is passed, so a route that spreads
+   * busabase-cms-sdk's metadata input gets its post's cover on share cards without
+   * having to remember to wire it up — which is how every app except one shipped
+   * posts with covers that never reached a share card.
+   */
+  coverImageUrl?: string;
 }
 
 export interface PageMetadataHelpers extends PageAlternatesHelpers {
@@ -408,6 +416,7 @@ export function createPageMetadataHelpers<T extends string>(
     canonicalUrl,
     type = "website",
     imageUrl,
+    coverImageUrl,
     imageText,
     absoluteTitle = false,
     keywords,
@@ -421,8 +430,9 @@ export function createPageMetadataHelpers<T extends string>(
     const alternates: PageAlternates = consolidatedElsewhere
       ? { canonical: url, languages: {} }
       : { canonical: url, languages: computed.alternates.languages };
+    const ownImage = imageUrl ?? coverImageUrl;
     const image =
-      imageUrl ?? (imageText && buildImageTextUrl ? buildImageTextUrl(imageText) : defaultImageUrl);
+      ownImage ?? (imageText && buildImageTextUrl ? buildImageTextUrl(imageText) : defaultImageUrl);
     const alternateLocale = getOpenGraphAlternateLocales(contentLang, availableLocales);
 
     return {
@@ -441,7 +451,14 @@ export function createPageMetadataHelpers<T extends string>(
         locale: toOpenGraphLocale(contentLang, openGraphLocales),
         ...(alternateLocale.length ? { alternateLocale } : {}),
         ...(modifiedTime && type === "article" ? { modifiedTime } : {}),
-        images: [{ url: image, width: 1200, height: 630, alt: title }],
+        // 1200x630 is true only of the images generated here (the site default and
+        // `imageText` cards); an uploaded cover can be any size, and wrong declared
+        // dimensions make some scrapers crop or reject it — so omit them there.
+        images: [
+          ownImage
+            ? { url: image, alt: title }
+            : { url: image, width: 1200, height: 630, alt: title },
+        ],
       },
       twitter: {
         card: "summary_large_image",
