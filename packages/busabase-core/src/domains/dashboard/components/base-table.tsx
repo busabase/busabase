@@ -842,7 +842,10 @@ export function BusaBaseTable({
   /** Kanban drag-to-move: set one field on a record and auto-merge, no navigation. */
   onMoveRecord?: (record: RecordVO, fieldSlug: string, value: string | null) => Promise<void>;
   /** Gantt drag-to-reschedule: patch several fields at once and auto-merge, no navigation. */
-  onPatchRecord?: (record: RecordVO, patch: Record<string, unknown>) => Promise<void>;
+  onPatchRecord?: (
+    record: RecordVO,
+    patch: Record<string, unknown>,
+  ) => Promise<{ materialized: true } | { materialized: false; changeRequestId: string }>;
   onUpdateView: (
     view: ViewVO,
     payload: ViewFormPayload,
@@ -1346,7 +1349,13 @@ export function BusaBaseTable({
           onMoveRecord={onMoveRecord}
         />
       ) : activeView?.type === "calendar" ? (
-        <BusaBaseCalendar activeView={activeView} base={base} client={client} fields={fields} />
+        <BusaBaseCalendar
+          activeView={activeView}
+          base={base}
+          client={client}
+          fields={fields}
+          onPatchRecord={onPatchRecord}
+        />
       ) : activeView?.type === "gantt" ? (
         <BusaBaseGantt
           activeView={activeView}

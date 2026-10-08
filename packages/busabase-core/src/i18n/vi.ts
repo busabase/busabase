@@ -1405,6 +1405,8 @@ export const dashboardVi: CoreI18nMessages = {
     dateField: "Trường ngày",
     dateFieldAuto: "Tự động (trường ngày đầu tiên)",
     calendarNoDate: "Thêm một trường ngày để đặt các bản ghi lên lịch.",
+    calendarDragHandle: "Chuyển {record} sang ngày khác",
+    calendarDragHint: "Kéo để đổi ngày",
     calendarToday: "Hôm nay",
     calendarPrevMonth: "Tháng trước",
     calendarNextMonth: "Tháng sau",

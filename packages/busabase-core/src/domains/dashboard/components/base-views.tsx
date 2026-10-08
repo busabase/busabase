@@ -135,7 +135,10 @@ export function BaseDetailView({
   onRestoreView?: (view: ViewVO) => Promise<void>;
   onRestoreRecord?: (record: RecordVO) => Promise<void>;
   onMoveRecord?: (record: RecordVO, fieldSlug: string, value: string | null) => Promise<void>;
-  onPatchRecord?: (record: RecordVO, patch: Record<string, unknown>) => Promise<void>;
+  onPatchRecord?: (
+    record: RecordVO,
+    patch: Record<string, unknown>,
+  ) => Promise<{ materialized: true } | { materialized: false; changeRequestId: string }>;
   onUpdateView: (
     view: ViewVO,
     payload: ViewFormPayload,

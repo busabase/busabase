@@ -1432,6 +1432,8 @@ export const dashboardFr: CoreI18nMessages = {
     dateField: "Champ de date",
     dateFieldAuto: "Auto (premier champ de date)",
     calendarNoDate: "Ajoutez un champ de date pour placer les enregistrements dans le calendrier.",
+    calendarDragHandle: "Déplacer {record} à une autre date",
+    calendarDragHint: "Glisser pour changer la date",
     calendarToday: "Aujourd'hui",
     calendarPrevMonth: "Mois précédent",
     calendarNextMonth: "Mois suivant",

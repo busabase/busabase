@@ -37,8 +37,8 @@ function warn(what: string, error: unknown) {
 }
 
 export interface AgentSessionScope {
-  spaceId: string;
-  actorId: string | null;
+  readonly spaceId: string;
+  readonly actorId: string | null;
 }
 
 const currentScope = (): AgentSessionScope => ({
@@ -102,10 +102,10 @@ export async function persistSessionAcpIdentity(
  * previous owner stopped responding.
  */
 export interface AgentSessionLease {
-  sessionId: string;
-  ownerId: string;
-  fencingToken: number;
-  expiresAt: string;
+  readonly sessionId: string;
+  readonly ownerId: string;
+  readonly fencingToken: number;
+  readonly expiresAt: string;
 }
 
 export const DEFAULT_SESSION_LEASE_TTL_SECONDS = 45;
@@ -203,7 +203,7 @@ export async function releaseSessionLease(
   const released = await database
     .update(busabaseAgentSessions)
     .set({
-      status: "idle",
+      status: sql`case when ${busabaseAgentSessions.status} in ('busy', 'waiting_permission') then 'idle' else ${busabaseAgentSessions.status} end`,
       lastActivityAt: new Date(),
       leaseOwnerId: null,
       leaseExpiresAt: null,
@@ -212,7 +212,6 @@ export async function releaseSessionLease(
       and(
         eq(busabaseAgentSessions.id, sessionId),
         scopeCondition(scope),
-        eq(busabaseAgentSessions.status, "busy"),
         eq(busabaseAgentSessions.leaseOwnerId, ownerId),
         eq(busabaseAgentSessions.leaseFencingToken, fencingToken),
         gt(busabaseAgentSessions.leaseExpiresAt, sql`now()`),
@@ -287,7 +286,6 @@ export async function persistSessionState(
         lastActivityAt: new Date(session.lastActivityAt),
         ...(acpSessionId === undefined ? {} : { acpSessionId }),
         ...(ended ? { endedAt: new Date() } : {}),
-        ...(fence && session.status !== "busy" ? { leaseOwnerId: null, leaseExpiresAt: null } : {}),
       })
       .where(
         and(
@@ -373,6 +371,7 @@ export async function persistSessionModelOption(
 export async function persistSessionEvents(
   events: AgentSessionEventVO[],
   fence?: LeaseFence,
+  scope: AgentSessionScope = currentScope(),
 ): Promise<boolean> {
   if (events.length === 0) return true;
   const sessionId = events[0]?.sessionId;
@@ -406,7 +405,7 @@ export async function persistSessionEvents(
         .where(
           and(
             eq(busabaseAgentSessions.id, sessionId),
-            scopeCondition(currentScope()),
+            scopeCondition(scope),
             fenceCondition(fence),
           ),
         )

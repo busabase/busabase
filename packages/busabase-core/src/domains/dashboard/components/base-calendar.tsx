@@ -1,11 +1,26 @@
+import {
+  DndContext,
+  DragOverlay,
+  type KeyboardCoordinateGetter,
+  KeyboardSensor,
+  MouseSensor,
+  pointerWithin,
+  rectIntersection,
+  TouchSensor,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
 import type { BaseFieldVO, BaseVO, RecordVO, ViewVO } from "busabase-contract/types";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, GripVertical } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { useSearch } from "wouter";
-import { useCoreI18n, useCoreLocale } from "../../../i18n";
+import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
+import { presentCoreError } from "../../../i18n/localize-error";
 import {
   getCalendarDateRange,
   getDateFieldDayKey,
@@ -14,6 +29,7 @@ import {
 import { resolveDateField } from "../../base/utils/view-field-resolution";
 import { getRecordTitle } from "../helpers/change-request";
 import { mergeSearchIntoHref } from "../helpers/link-search";
+import { rescheduledCalendarValue } from "./calendar-reschedule";
 
 // Local YYYY-MM-DD key for a Date (avoids UTC off-by-one from toISOString).
 const dayKey = (d: Date) =>
@@ -37,16 +53,115 @@ const recordDayKey = (field: BaseFieldVO, value: unknown): string | null => {
 /** Records per request within the current month's slice (server max is 100). */
 const RANGE_PAGE_SIZE = 100;
 
+const calendarKeyboardCoordinates: KeyboardCoordinateGetter = (event, { context }) => {
+  const offset = {
+    ArrowLeft: -1,
+    ArrowRight: 1,
+    ArrowUp: -7,
+    ArrowDown: 7,
+  }[event.code];
+  if (!offset) return undefined;
+  event.preventDefault();
+  const currentDay = String(
+    context.over?.id ??
+      context.activeNode?.closest("[data-calendar-day]")?.getAttribute("data-calendar-day") ??
+      "",
+  );
+  const parts = currentDay.split("-").map(Number);
+  if (parts.length !== 3 || parts.some((part) => !Number.isInteger(part))) return undefined;
+  const [year, month, day] = parts as [number, number, number];
+  const targetDay = dayKey(new Date(year, month - 1, day + offset));
+  const target = context.droppableRects.get(targetDay);
+  const card = context.collisionRect;
+  if (!target || !card) return undefined;
+  return {
+    x: target.left + (target.width - card.width) / 2,
+    y: target.top + (target.height - card.height) / 2,
+  };
+};
+
+function CalendarDayCell({
+  canDrop,
+  children,
+  day,
+  inMonth,
+}: {
+  canDrop: boolean;
+  children: ReactNode;
+  day: string;
+  inMonth: boolean;
+}) {
+  const { isOver, setNodeRef } = useDroppable({ id: day, disabled: !canDrop });
+  return (
+    <div
+      className={`min-h-24 border-border/50 border-r border-b p-1.5 ${
+        inMonth ? "" : "bg-muted/10 text-muted-foreground/50"
+      } ${isOver ? "bg-primary/10 ring-1 ring-inset ring-primary" : ""}`}
+      data-calendar-day={day}
+      data-calendar-drop-target={isOver ? "true" : undefined}
+      ref={setNodeRef}
+    >
+      {children}
+    </div>
+  );
+}
+
+function CalendarCard({
+  canDrag,
+  href,
+  record,
+}: {
+  canDrag: boolean;
+  href: string;
+  record: RecordVO;
+}) {
+  const messages = useCoreI18n();
+  const title = getRecordTitle(record, messages);
+  const { attributes, isDragging, listeners, setActivatorNodeRef, setNodeRef } = useDraggable({
+    id: record.id,
+    disabled: !canDrag,
+  });
+  return (
+    <div
+      className={`flex min-w-0 items-center rounded bg-primary/10 px-0.5 text-foreground text-xs hover:bg-primary/20 ${isDragging ? "opacity-40" : ""}`}
+      data-calendar-record-id={record.id}
+      ref={setNodeRef}
+    >
+      {canDrag ? (
+        <button
+          {...attributes}
+          {...listeners}
+          aria-label={fmt(messages.base.calendarDragHandle, { record: title })}
+          className="inline-flex size-5 shrink-0 touch-none items-center justify-center rounded cursor-grab text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing"
+          ref={setActivatorNodeRef}
+          title={messages.base.calendarDragHint}
+          type="button"
+        >
+          <GripVertical aria-hidden="true" size={12} />
+        </button>
+      ) : null}
+      <Link className="min-w-0 flex-1 truncate px-1 py-0.5" href={href} title={title}>
+        {title}
+      </Link>
+    </div>
+  );
+}
+
 export function BusaBaseCalendar({
   activeView,
   base,
   client,
   fields,
+  onPatchRecord,
 }: {
   activeView: ViewVO | null;
   base: BaseVO | null;
   client: BusabaseDashboardApiClient;
   fields: BaseFieldVO[];
+  onPatchRecord?: (
+    record: RecordVO,
+    patch: Record<string, unknown>,
+  ) => Promise<{ materialized: true } | { materialized: false; changeRequestId: string }>;
 }) {
   const messages = useCoreI18n();
   const locale = useCoreLocale();
@@ -55,6 +170,15 @@ export function BusaBaseCalendar({
   const baseId = base?.id ?? "";
   const today = new Date();
   const [cursor, setCursor] = useState({ year: today.getFullYear(), month: today.getMonth() });
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [pendingRecordId, setPendingRecordId] = useState<string | null>(null);
+  const [dropError, setDropError] = useState<string | null>(null);
+  const [reviewRequestId, setReviewRequestId] = useState<string | null>(null);
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 220, tolerance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: calendarKeyboardCoordinates }),
+  );
 
   // Build a 6-week grid starting on the Sunday on/before the 1st of the month,
   // in LOCAL time — unchanged from before. `gridEnd` is the day AFTER the grid's
@@ -119,7 +243,32 @@ export function BusaBaseCalendar({
   }
 
   const records = (rangeQuery.data?.pages ?? []).flatMap((page) => page.records);
+  const canReschedule = dateField.type === "date" && Boolean(onPatchRecord);
+
+  const dropOnDay = async (recordId: string, targetDay: string) => {
+    const record = records.find((item) => item.id === recordId);
+    if (!record || !canReschedule || !onPatchRecord || pendingRecordId) return;
+    const previous = record.headCommit.payload[dateField.slug];
+    if (recordDayKey(dateField, previous) === targetDay) return;
+    const next = rescheduledCalendarValue(dateField, previous, targetDay);
+    if (!next) return;
+    setDropError(null);
+    setReviewRequestId(null);
+    setPendingRecordId(recordId);
+    try {
+      const result = await onPatchRecord(record, {
+        ...record.headCommit.payload,
+        [dateField.slug]: next,
+      });
+      if (!result.materialized) setReviewRequestId(result.changeRequestId);
+    } catch (error) {
+      setDropError(presentCoreError(messages, locale, error, messages.shell.operationFailed));
+    } finally {
+      setPendingRecordId(null);
+    }
+  };
   const baseSlug = base?.slug ?? records[0]?.base.slug ?? "";
+  const activeRecord = activeId ? records.find((record) => record.id === activeId) : null;
   // True until the month's slice has been fully drained — see the effect above.
   const isLoadingMonth =
     rangeQuery.isPending || rangeQuery.hasNextPage || rangeQuery.isFetchingNextPage;
@@ -194,59 +343,101 @@ export function BusaBaseCalendar({
         {isLoadingMonth ? (
           <span className="text-muted-foreground text-xs">{messages.common.loading}</span>
         ) : null}
+        {pendingRecordId ? (
+          <span aria-live="polite" className="text-muted-foreground text-xs">
+            {messages.common.working}
+          </span>
+        ) : null}
       </div>
-
-      <div className="grid grid-cols-7 border-border/50 border-t border-l">
-        {weekdays.map((label) => (
-          <div
-            className="border-border/50 border-r border-b bg-muted/20 px-2 py-1.5 text-muted-foreground text-xs"
-            key={label}
+      {dropError ? (
+        <div className="mb-3 text-destructive text-sm" role="alert">
+          {dropError}
+        </div>
+      ) : null}
+      {reviewRequestId ? (
+        <div aria-live="polite" className="mb-3 text-muted-foreground text-sm" role="status">
+          {messages.form.pendingReview}{" "}
+          <Link
+            className="text-primary underline-offset-2 hover:underline"
+            href={mergeSearchIntoHref(`/inbox/${reviewRequestId}`, currentSearch)}
           >
-            {label}
-          </div>
-        ))}
-        {days.map((day) => {
-          const key = dayKey(day);
-          const inMonth = day.getMonth() === cursor.month;
-          const dayRecords = recordsByDay.get(key) ?? [];
-          return (
+            {messages.inbox.title}
+          </Link>
+        </div>
+      ) : null}
+
+      <DndContext
+        collisionDetection={(args) => {
+          const hits = pointerWithin(args);
+          return hits.length ? hits : rectIntersection(args);
+        }}
+        onDragCancel={() => setActiveId(null)}
+        onDragEnd={({ active, over }) => {
+          setActiveId(null);
+          if (over) void dropOnDay(String(active.id), String(over.id));
+        }}
+        onDragStart={({ active }) => setActiveId(String(active.id))}
+        sensors={sensors}
+      >
+        <div
+          className="grid grid-cols-7 border-border/50 border-t border-l"
+          data-calendar-dragging={activeId ? "true" : undefined}
+        >
+          {weekdays.map((label) => (
             <div
-              className={`min-h-24 border-border/50 border-r border-b p-1.5 ${
-                inMonth ? "" : "bg-muted/10 text-muted-foreground/50"
-              }`}
-              data-calendar-day={key}
-              key={key}
+              className="border-border/50 border-r border-b bg-muted/20 px-2 py-1.5 text-muted-foreground text-xs"
+              key={label}
             >
-              <div
-                className={`mb-1 text-right text-xs ${
-                  key === todayKey
-                    ? "inline-flex h-5 w-5 items-center justify-center justify-self-end rounded-full bg-primary font-medium text-primary-foreground"
-                    : ""
-                }`}
-              >
-                {day.getDate()}
-              </div>
-              <div className="flex flex-col gap-1">
-                {dayRecords.slice(0, 4).map((record) => (
-                  <Link
-                    className="truncate rounded bg-primary/10 px-1.5 py-0.5 text-foreground text-xs hover:bg-primary/20"
-                    href={mergeSearchIntoHref(`/base/${baseSlug}/${record.id}`, currentSearch)}
-                    key={record.id}
-                    title={getRecordTitle(record, messages)}
-                  >
-                    {getRecordTitle(record, messages)}
-                  </Link>
-                ))}
-                {dayRecords.length > 4 ? (
-                  <span className="px-1 text-muted-foreground text-xs">
-                    +{dayRecords.length - 4}
-                  </span>
-                ) : null}
-              </div>
+              {label}
             </div>
-          );
-        })}
-      </div>
+          ))}
+          {days.map((day) => {
+            const key = dayKey(day);
+            const inMonth = day.getMonth() === cursor.month;
+            const dayRecords = recordsByDay.get(key) ?? [];
+            return (
+              <CalendarDayCell
+                canDrop={canReschedule && !pendingRecordId}
+                day={key}
+                inMonth={inMonth}
+                key={key}
+              >
+                <div
+                  className={`mb-1 text-right text-xs ${
+                    key === todayKey
+                      ? "inline-flex h-5 w-5 items-center justify-center justify-self-end rounded-full bg-primary font-medium text-primary-foreground"
+                      : ""
+                  }`}
+                >
+                  {day.getDate()}
+                </div>
+                <div className="flex flex-col gap-1">
+                  {dayRecords.slice(0, 4).map((record) => (
+                    <CalendarCard
+                      canDrag={canReschedule && !pendingRecordId}
+                      href={mergeSearchIntoHref(`/base/${baseSlug}/${record.id}`, currentSearch)}
+                      key={record.id}
+                      record={record}
+                    />
+                  ))}
+                  {dayRecords.length > 4 ? (
+                    <span className="px-1 text-muted-foreground text-xs">
+                      +{dayRecords.length - 4}
+                    </span>
+                  ) : null}
+                </div>
+              </CalendarDayCell>
+            );
+          })}
+        </div>
+        <DragOverlay>
+          {activeRecord ? (
+            <div className="rounded border border-primary bg-card px-2 py-1 text-foreground text-xs shadow-md">
+              {getRecordTitle(activeRecord, messages)}
+            </div>
+          ) : null}
+        </DragOverlay>
+      </DndContext>
     </div>
   );
 }

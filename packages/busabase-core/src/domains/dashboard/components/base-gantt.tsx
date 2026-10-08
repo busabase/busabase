@@ -94,7 +94,10 @@ export function BusaBaseGantt({
   fields: BaseFieldVO[];
   records: RecordVO[];
   /** Reschedule: patch start/end on a record and auto-merge, no navigation. */
-  onPatchRecord?: (record: RecordVO, patch: Record<string, unknown>) => Promise<void>;
+  onPatchRecord?: (
+    record: RecordVO,
+    patch: Record<string, unknown>,
+  ) => Promise<{ materialized: true } | { materialized: false; changeRequestId: string }>;
 }) {
   const messages = useCoreI18n();
   const locale = useCoreLocale();

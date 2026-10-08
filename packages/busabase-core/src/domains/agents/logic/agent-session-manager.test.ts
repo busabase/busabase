@@ -26,6 +26,7 @@ import type { AgentSessionRuntimeRecord } from "./agent-session-store";
  */
 
 const mocks = vi.hoisted(() => ({
+  resolveLaunch: vi.fn(),
   acquireSessionLease: vi.fn(),
   createWebSocketStream: vi.fn<() => Stream>(),
   endRemoteSession: vi.fn(),
@@ -84,12 +85,7 @@ vi.mock("./agent-workspace-guide", () => ({
   resolveBusabaseMcpUrl: () => "http://localhost/mcp",
 }));
 vi.mock("./agent-catalog", () => ({
-  resolveLaunch: async () => ({
-    slug: "test-agent",
-    name: "Test Agent",
-    transport: "remote-websocket",
-    url: "wss://agent.test/acp",
-  }),
+  resolveLaunch: mocks.resolveLaunch,
 }));
 vi.mock("@agentclientprotocol/sdk/experimental/ws-client", () => ({
   createWebSocketStream: mocks.createWebSocketStream,
@@ -132,6 +128,12 @@ const MODEL_CONFIG: acp.SessionConfigOption = {
 };
 
 const resetStoreMocks = () => {
+  mocks.resolveLaunch.mockImplementation(async () => ({
+    slug: "test-agent",
+    name: "Test Agent",
+    transport: "remote-websocket",
+    url: "wss://agent.test/acp",
+  }));
   mocks.sessionLeaseTtlSeconds = 45;
   const scopedSession = (sessionId: string) => {
     const scope = mocks.storedScopes.get(sessionId);
@@ -236,7 +238,9 @@ const resetStoreMocks = () => {
   });
   mocks.releaseSessionLease.mockImplementation(async (sessionId: string) => {
     const stored = scopedSession(sessionId);
-    if (stored) stored.status = "idle";
+    if (stored && (stored.status === "busy" || stored.status === "waiting_permission")) {
+      stored.status = "idle";
+    }
     return true;
   });
   mocks.renewSessionLease.mockResolvedValue(true);
@@ -265,9 +269,11 @@ const runtimeRecord = (
 /** Runs a scripted fake agent over one side of a linked stream pair. */
 function serveFakeAgent(
   stream: Stream,
-  initialConfigOptions: acp.SessionConfigOption[],
+  initialConfigOptions: acp.SessionConfigOption[] | null,
   options?: {
     initializeGate?: Promise<void>;
+    initializeError?: Error;
+    imageSupported?: boolean;
     loadError?: Error;
     loadAvailableCommands?: acp.AvailableCommand[];
     loadReplayText?: string;
@@ -292,6 +298,7 @@ function serveFakeAgent(
   let setConfigCalls = 0;
   const loadedSessionIds: string[] = [];
   const promptTexts: string[] = [];
+  const promptContents: acp.ContentBlock[][] = [];
   const promptSessionIds: string[] = [];
   const cancelledSessionIds: string[] = [];
   const cancelledRequestSessionIds: string[] = [];
@@ -303,9 +310,13 @@ function serveFakeAgent(
       .onRequest(acp.methods.agent.initialize, async () => {
         initializeCalls += 1;
         await options?.initializeGate;
+        if (options?.initializeError) throw options.initializeError;
         return {
           protocolVersion: acp.PROTOCOL_VERSION,
-          agentCapabilities: { loadSession: options?.loadSessionSupported !== false },
+          agentCapabilities: {
+            loadSession: options?.loadSessionSupported !== false,
+            promptCapabilities: { image: options?.imageSupported === true },
+          },
         };
       })
       .onRequest(acp.methods.agent.session.new, async () => {
@@ -336,6 +347,7 @@ function serveFakeAgent(
         return { configOptions };
       })
       .onRequest(acp.methods.agent.session.prompt, async (ctx) => {
+        promptContents.push(ctx.params.prompt);
         promptSessionIds.push(ctx.params.sessionId);
         const text = ctx.params.prompt.find((block) => block.type === "text");
         if (text?.type === "text") promptTexts.push(text.text);
@@ -386,11 +398,12 @@ function serveFakeAgent(
       })
       .onRequest(acp.methods.agent.session.setConfigOption, async (ctx) => {
         setConfigCalls += 1;
-        configOptions = configOptions.map((option) => {
-          if (option.id !== ctx.params.configId || option.type !== "select") return option;
-          if (!("value" in ctx.params) || typeof ctx.params.value !== "string") return option;
-          return { ...option, currentValue: ctx.params.value };
-        });
+        configOptions =
+          configOptions?.map((option) => {
+            if (option.id !== ctx.params.configId || option.type !== "select") return option;
+            if (!("value" in ctx.params) || typeof ctx.params.value !== "string") return option;
+            return { ...option, currentValue: ctx.params.value };
+          }) ?? [];
         return { configOptions };
       })
       .connectWith(stream, (ctx) => {
@@ -408,6 +421,7 @@ function serveFakeAgent(
     promptSessionIds: () => promptSessionIds,
     setConfigCallCount: () => setConfigCalls,
     promptTexts: () => promptTexts,
+    promptContents: () => promptContents,
     cancelledSessionIds: () => cancelledSessionIds,
     cancelledRequestSessionIds: () => cancelledRequestSessionIds,
     setConfigOptionsSilently: (nextConfigOptions: acp.SessionConfigOption[]) => {
@@ -445,6 +459,185 @@ async function waitUntil<T, U extends T>(
   }
   throw new Error("Condition never became true.");
 }
+
+describe("agent session manager — Buda confirmed model cache", () => {
+  const launch = {
+    slug: "buda:agent-1",
+    name: "Buda Agent",
+    transport: "remote-websocket",
+    url: "wss://buda.test/acp?agentId=agent-1",
+    authHeader: "Bearer account-1",
+  };
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    resetStoreMocks();
+    mocks.storedSessions.length = 0;
+    mocks.storedScopes.clear();
+    Object.assign(globalThis, {
+      __busabaseAgentSessions: new Map(),
+      __busabaseAgentModelOptions: new Map(),
+    });
+    mocks.resolveLaunch.mockResolvedValue(launch);
+  });
+
+  async function open(
+    config: acp.SessionConfigOption[] | null,
+    options?: Parameters<typeof serveFakeAgent>[2],
+    spaceId = LOCAL_SPACE_ID,
+  ) {
+    const [clientSide, agentSide] = linkedStreams();
+    mocks.createWebSocketStream.mockReturnValueOnce(clientSide);
+    const agent = serveFakeAgent(agentSide, config, options);
+    const session = await createAgentSession({ slug: launch.slug, spaceId });
+    return { session, agent };
+  }
+
+  it("exposes confirmed metadata while connecting and replaces it with fresh metadata or null", async () => {
+    const first = await open([MODEL_CONFIG]);
+    await waitUntilSettled(first.session.id);
+    await closeAgentSessions([first.session.id]);
+    for (const { config, cached, confirmed } of [
+      { config: [{ ...MODEL_CONFIG, currentValue: "fast" }], cached: "auto", confirmed: "fast" },
+      { config: null, cached: "fast", confirmed: null },
+      { config: [MODEL_CONFIG], cached: null, confirmed: "auto" },
+      { config: [], cached: "auto", confirmed: null },
+    ]) {
+      let release = () => {};
+      const initializeGate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const next = await open(config, { initializeGate });
+      expect(next.session.status).toBe("connecting");
+      expect(next.session.modelOption?.currentValue ?? null).toBe(cached);
+      release();
+      const settled = await waitUntilSettled(next.session.id);
+      expect(settled.modelOption?.currentValue ?? null).toBe(confirmed);
+      await closeAgentSessions([next.session.id]);
+    }
+    let release = () => {};
+    const initializeGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const afterRevocation = await open([], { initializeGate });
+    expect(afterRevocation.session.modelOption).toBeNull();
+    release();
+    await waitUntilSettled(afterRevocation.session.id);
+    await closeAgentSessions([afterRevocation.session.id]);
+    const failed = await open([MODEL_CONFIG], { initializeError: new Error("Handshake failed") });
+    expect((await waitUntilSettled(failed.session.id)).status).toBe("failed");
+    const afterFailure = await open([]);
+    expect(afterFailure.session.modelOption).toBeNull();
+    await waitUntilSettled(afterFailure.session.id);
+    await closeAgentSessions([afterFailure.session.id]);
+  });
+
+  it("resumes with its own persisted model choice instead of another session's cache", async () => {
+    const first = await open([MODEL_CONFIG]);
+    await waitUntilSettled(first.session.id);
+    await closeAgentSessions([first.session.id]);
+    const record = runtimeRecord({
+      slug: launch.slug,
+      modelOption: {
+        id: "model",
+        name: "Model",
+        currentValue: "fast",
+        options: [{ value: "fast", name: "Fast" }],
+      },
+    });
+    mocks.loadSessionRuntime.mockResolvedValue(record);
+    let release = () => {};
+    const initializeGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const [clientSide, agentSide] = linkedStreams();
+    mocks.createWebSocketStream.mockReturnValueOnce(clientSide);
+    const agent = serveFakeAgent(agentSide, [{ ...MODEL_CONFIG, currentValue: "fast" }], {
+      initializeGate,
+    });
+    const completion = promptAgentSession(record.session.id, "resume");
+    await vi.waitFor(() => expect(agent.initializeCallCount()).toBe(1));
+    const live = (
+      globalThis as typeof globalThis & { __busabaseAgentSessions?: Map<string, AgentSessionVO> }
+    ).__busabaseAgentSessions?.get(record.session.id);
+    expect(live?.modelOption?.currentValue).toBe("fast");
+    expect(agent.promptTexts()).toEqual([]);
+    release();
+    await completion;
+    await closeAgentSessions([record.session.id]);
+  });
+
+  it("does not publish unconfirmed metadata when its durable mirror fails", async () => {
+    const first = await open([MODEL_CONFIG]);
+    await waitUntilSettled(first.session.id);
+    await closeAgentSessions([first.session.id]);
+    mocks.persistSessionModelOption.mockResolvedValueOnce(false);
+    const failed = await open([{ ...MODEL_CONFIG, currentValue: "fast" }]);
+    expect((await waitUntilSettled(failed.session.id)).status).toBe("failed");
+    const next = await open([]);
+    expect(next.session.modelOption?.currentValue).toBe("auto");
+    await waitUntilSettled(next.session.id);
+    await closeAgentSessions([next.session.id]);
+  });
+
+  it.each(["agent", "space", "actor", "endpoint", "credential"])(
+    "does not borrow metadata across %s identity",
+    async (identity) => {
+      const first = await open([MODEL_CONFIG]);
+      await waitUntilSettled(first.session.id);
+      await closeAgentSessions([first.session.id]);
+      mocks.resolveLaunch.mockResolvedValue({
+        ...launch,
+        ...(identity === "agent" ? { slug: "buda:agent-2" } : {}),
+        ...(identity === "endpoint" ? { url: "wss://other.test/acp?agentId=agent-1" } : {}),
+        ...(identity === "credential" ? { authHeader: "Bearer account-2" } : {}),
+      });
+      const spaceId = identity === "space" ? "other-space" : LOCAL_SPACE_ID;
+      await runWithBusabaseContext(
+        { spaceId, actorId: identity === "actor" ? "other-actor" : undefined },
+        async () => {
+          let release = () => {};
+          const initializeGate = new Promise<void>((resolve) => {
+            release = resolve;
+          });
+          const next = await open([], { initializeGate }, spaceId);
+          expect(next.session.modelOption).toBeNull();
+          release();
+          await waitUntilSettled(next.session.id);
+          await closeAgentSessions([next.session.id]);
+        },
+      );
+    },
+  );
+
+  it.each([true, false])(
+    "queues text and image until readiness and uses current image capability (%s)",
+    async (imageSupported) => {
+      const first = await open([MODEL_CONFIG], { imageSupported: true });
+      await waitUntilSettled(first.session.id);
+      await closeAgentSessions([first.session.id]);
+      let release = () => {};
+      const initializeGate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const next = await open([MODEL_CONFIG], { initializeGate, imageSupported });
+      expect(next.session.modelOption?.currentValue).toBe("auto");
+      mocks.persistSessionEvents.mockClear();
+      const prompt = promptAgentSession(next.session.id, "queued text", [
+        { kind: "image", data: "aGVsbG8=", mimeType: "image/png" },
+      ]);
+      await vi.waitFor(() => expect(mocks.persistSessionEvents).toHaveBeenCalled());
+      expect(next.agent.promptContents()).toEqual([]);
+      release();
+      await prompt;
+      expect(next.agent.promptTexts()).toEqual(["queued text"]);
+      expect(next.agent.promptContents()[0]?.some((block) => block.type === "image")).toBe(
+        imageSupported,
+      );
+      await closeAgentSessions([next.session.id]);
+    },
+  );
+});
 
 describe("agent session manager — model config option", () => {
   let agentSide: Stream;
@@ -536,7 +729,7 @@ describe("agent session manager — model config option", () => {
     expect(agent.promptTexts()).toEqual(["prompt while model discovery finishes"]);
     expect(mocks.persistSessionModelOption).toHaveBeenCalledOnce();
     expect(mocks.acquireSessionLease).toHaveBeenCalledOnce();
-    expect(mocks.releaseSessionLease).not.toHaveBeenCalled();
+    expect(mocks.releaseSessionLease).toHaveBeenCalledOnce();
 
     await closeAgentSessions([session.id]);
   });
@@ -710,7 +903,7 @@ describe("agent session manager — model config option", () => {
     releaseModelWrite();
     await update;
     await prompt;
-    expect(mocks.releaseSessionLease).not.toHaveBeenCalled();
+    expect(mocks.releaseSessionLease).toHaveBeenCalledOnce();
     expect(mocks.storedSessions.find((candidate) => candidate.id === session.id)).toMatchObject({
       status: "idle",
       modelOption: { currentValue: "fast" },
@@ -1731,7 +1924,7 @@ describe("remote session worker handoff", () => {
       { spaceId: LOCAL_SPACE_ID, actorId: null },
       expect.objectContaining({ fencingToken: 1 }),
     );
-    expect(mocks.releaseSessionLease).not.toHaveBeenCalled();
+    expect(mocks.releaseSessionLease).toHaveBeenCalledOnce();
     const persisted = mocks.persistSessionEvents.mock.calls.flatMap(
       ([events]) => events as AgentSessionEventVO[],
     );
@@ -1860,6 +2053,10 @@ describe("remote session worker handoff", () => {
   it("shares one in-process reattachment across concurrent prompt requests", async () => {
     const record = runtimeRecord();
     mocks.loadSessionRuntime.mockResolvedValue(record);
+    const acquire = mocks.acquireSessionLease.getMockImplementation();
+    mocks.acquireSessionLease
+      .mockImplementationOnce(acquire as (...args: unknown[]) => unknown)
+      .mockResolvedValueOnce(null);
     const [clientSide, agentSide] = linkedStreams();
     mocks.createWebSocketStream.mockReturnValue(clientSide);
     const agent = serveFakeAgent(agentSide, []);
@@ -1917,6 +2114,7 @@ describe("remote session worker handoff", () => {
       record.session.id,
       expect.any(String),
       1,
+      { spaceId: LOCAL_SPACE_ID, actorId: null },
     );
     expect(agent.promptTexts()).toEqual([]);
   });
@@ -1937,6 +2135,7 @@ describe("remote session worker handoff", () => {
       record.session.id,
       expect.any(String),
       1,
+      { spaceId: LOCAL_SPACE_ID, actorId: null },
     );
     expect(agent.promptTexts()).toEqual([]);
   });
@@ -2094,7 +2293,7 @@ describe("remote session worker handoff", () => {
     const record = runtimeRecord({ id: "ags-lost-heartbeat" });
     mocks.loadSessionRuntime.mockResolvedValue(record);
     mocks.sessionLeaseTtlSeconds = 1;
-    mocks.renewSessionLease.mockResolvedValue(false);
+    mocks.renewSessionLease.mockResolvedValue(true);
     const [clientSide, agentSide] = linkedStreams();
     mocks.createWebSocketStream.mockReturnValue(clientSide);
     let finishPrompt: (() => void) | undefined;
@@ -2107,6 +2306,7 @@ describe("remote session worker handoff", () => {
       (error: unknown) => error,
     );
     await vi.waitFor(() => expect(agent.promptTexts()).toEqual(["hold the lease"]));
+    mocks.renewSessionLease.mockResolvedValue(false);
     await vi.waitFor(
       () => {
         expect(mocks.renewSessionLease).toHaveBeenCalled();
@@ -2123,6 +2323,309 @@ describe("remote session worker handoff", () => {
 
     finishPrompt?.();
     await prompt;
+  });
+
+  it("renews immediately and throughout initialize before sending a reattached prompt", async () => {
+    const record = runtimeRecord({ id: "ags-slow-startup" });
+    mocks.loadSessionRuntime.mockResolvedValue(record);
+    mocks.sessionLeaseTtlSeconds = 1;
+    let finishInitialize = () => {};
+    const initializeGate = new Promise<void>((resolve) => {
+      finishInitialize = resolve;
+    });
+    const [clientSide, agentSide] = linkedStreams();
+    mocks.createWebSocketStream.mockReturnValue(clientSide);
+    const agent = serveFakeAgent(agentSide, [], { initializeGate });
+    const completion = promptAgentSession(record.session.id, "after startup");
+    await vi.waitFor(() =>
+      expect(mocks.renewSessionLease.mock.calls.length).toBeGreaterThanOrEqual(2),
+    );
+    expect(agent.promptTexts()).toEqual([]);
+    expect(mocks.releaseSessionLease).not.toHaveBeenCalled();
+    expect(mocks.renewSessionLease).toHaveBeenCalledWith(
+      record.session.id,
+      mocks.acquireSessionLease.mock.calls[0]?.[1],
+      1,
+      1,
+      {
+        spaceId: LOCAL_SPACE_ID,
+        actorId: null,
+      },
+    );
+    finishInitialize();
+    await completion;
+    expect(agent.promptTexts()).toEqual(["after startup"]);
+    expect(mocks.releaseSessionLease).toHaveBeenCalledOnce();
+    await closeAgentSessions([record.session.id]);
+  });
+
+  it("never sends a prompt after losing the lease during initialize", async () => {
+    const record = runtimeRecord({ id: "ags-startup-loss" });
+    mocks.loadSessionRuntime.mockResolvedValue(record);
+    mocks.sessionLeaseTtlSeconds = 1;
+    mocks.renewSessionLease.mockResolvedValueOnce(true).mockResolvedValue(false);
+    let finishInitialize = () => {};
+    const initializeGate = new Promise<void>((resolve) => {
+      finishInitialize = resolve;
+    });
+    const [clientSide, agentSide] = linkedStreams();
+    mocks.createWebSocketStream.mockReturnValue(clientSide);
+    const agent = serveFakeAgent(agentSide, [], { initializeGate });
+    const completion = promptAgentSession(record.session.id, "must not send").catch(
+      (error: unknown) => error,
+    );
+    await vi.waitFor(() => expect(mocks.renewSessionLease).toHaveBeenCalledTimes(2));
+    finishInitialize();
+    expect(await completion).toBeInstanceOf(Error);
+    expect(agent.promptTexts()).toEqual([]);
+    expect(
+      (
+        globalThis as typeof globalThis & { __busabaseAgentSessions?: Map<string, unknown> }
+      ).__busabaseAgentSessions?.has(record.session.id),
+    ).toBe(false);
+    expect(mocks.releaseSessionLease).toHaveBeenCalledOnce();
+  });
+
+  it("does not restore a lease lost while the post-claim runtime read was pending", async () => {
+    const record = runtimeRecord({ id: "ags-delayed-claim-read" });
+    let finishRead = () => {};
+    const readGate = new Promise<void>((resolve) => {
+      finishRead = resolve;
+    });
+    mocks.loadSessionRuntime.mockResolvedValueOnce(record).mockImplementationOnce(async () => {
+      await readGate;
+      return record;
+    });
+    mocks.renewSessionLease.mockResolvedValue(false);
+    const completion = promptAgentSession(record.session.id, "must not reconnect").catch(
+      (error: unknown) => error,
+    );
+    await vi.waitFor(() => expect(mocks.renewSessionLease).toHaveBeenCalledOnce());
+    finishRead();
+    expect(await completion).toBeInstanceOf(Error);
+    expect(mocks.createWebSocketStream).not.toHaveBeenCalled();
+    expect(mocks.releaseSessionLease).toHaveBeenCalledOnce();
+  });
+
+  it("renews configuration startup and prevents dispatch after losing its lease", async () => {
+    const record = runtimeRecord({
+      id: "ags-config-startup-loss",
+      modelOption: {
+        id: "model",
+        name: "Model",
+        currentValue: "auto",
+        options: [{ value: "auto", name: "Auto" }],
+      },
+    });
+    mocks.loadSessionRuntime.mockResolvedValue(record);
+    mocks.sessionLeaseTtlSeconds = 1;
+    mocks.renewSessionLease.mockResolvedValueOnce(true).mockResolvedValue(false);
+    let finishInitialize = () => {};
+    const initializeGate = new Promise<void>((resolve) => {
+      finishInitialize = resolve;
+    });
+    const [clientSide, agentSide] = linkedStreams();
+    mocks.createWebSocketStream.mockReturnValue(clientSide);
+    const agent = serveFakeAgent(agentSide, [MODEL_CONFIG], { initializeGate });
+    const completion = setAgentSessionConfigOption(record.session.id, "model", "auto").catch(
+      (error: unknown) => error,
+    );
+    await vi.waitFor(() => expect(mocks.renewSessionLease).toHaveBeenCalledTimes(2));
+    finishInitialize();
+    expect(await completion).toBeInstanceOf(Error);
+    expect(agent.setConfigCallCount()).toBe(0);
+    expect(mocks.releaseSessionLease).toHaveBeenCalledOnce();
+  });
+
+  it("uses a fresh guard when a retained remote socket runs another operation", async () => {
+    const record = runtimeRecord({ id: "ags-reused-operation-guard" });
+    mocks.loadSessionRuntime.mockResolvedValue(record);
+    const [clientSide, agentSide] = linkedStreams();
+    mocks.createWebSocketStream.mockReturnValue(clientSide);
+    const agent = serveFakeAgent(agentSide, [MODEL_CONFIG]);
+    await promptAgentSession(record.session.id, "first guard");
+    await promptAgentSession(record.session.id, "second guard");
+    expect(agent.promptTexts()).toEqual(["first guard", "second guard"]);
+    expect(mocks.createWebSocketStream).toHaveBeenCalledOnce();
+    expect(mocks.releaseSessionLease).toHaveBeenCalledTimes(2);
+    expect(mocks.acquireSessionLease.mock.calls[0]?.[1]).not.toBe(
+      mocks.acquireSessionLease.mock.calls[1]?.[1],
+    );
+    await closeAgentSessions([record.session.id]);
+  });
+
+  it("shares the operation guard with ACP callbacks created by another module instance", async () => {
+    const record = runtimeRecord({
+      id: "ags-cross-module-guard",
+      modelOption: {
+        id: "model",
+        name: "Model",
+        currentValue: "auto",
+        options: [
+          { value: "auto", name: "Auto" },
+          { value: "fast", name: "Fast" },
+        ],
+      },
+    });
+    mocks.loadSessionRuntime.mockResolvedValue(record);
+    let token = 0;
+    mocks.acquireSessionLease.mockImplementation(async (sessionId: string, ownerId: string) => ({
+      sessionId,
+      ownerId,
+      fencingToken: ++token,
+      expiresAt: new Date(Date.now() + 45_000).toISOString(),
+    }));
+    const [clientSide, agentSide] = linkedStreams();
+    mocks.createWebSocketStream.mockReturnValue(clientSide);
+    const agent = serveFakeAgent(agentSide, [MODEL_CONFIG]);
+    await promptAgentSession(record.session.id, "module A");
+    vi.resetModules();
+    const managerB = await import("./agent-session-manager");
+    const renewalsBefore = mocks.renewSessionLease.mock.calls.length;
+    await managerB.promptAgentSession(record.session.id, "module B");
+    await managerB.setAgentSessionConfigOption(record.session.id, "model", "fast");
+    expect(agent.promptTexts()).toEqual(["module A", "module B"]);
+    expect(agent.setConfigCallCount()).toBe(1);
+    expect(mocks.createWebSocketStream).toHaveBeenCalledOnce();
+    expect(mocks.renewSessionLease.mock.calls.length - renewalsBefore).toBeGreaterThanOrEqual(4);
+    const ownerA = mocks.acquireSessionLease.mock.calls[0]?.[1];
+    const ownerB = mocks.acquireSessionLease.mock.calls[1]?.[1];
+    const configOwnerB = mocks.acquireSessionLease.mock.calls[2]?.[1];
+    expect(ownerB).not.toBe(ownerA);
+    expect(mocks.renewSessionLease.mock.calls.filter((call) => call[1] === ownerB)).toEqual([
+      [record.session.id, ownerB, 2, 45, { spaceId: LOCAL_SPACE_ID, actorId: null }],
+      [record.session.id, ownerB, 2, 45, { spaceId: LOCAL_SPACE_ID, actorId: null }],
+    ]);
+    expect(mocks.renewSessionLease.mock.calls.filter((call) => call[1] === configOwnerB)).toEqual([
+      [record.session.id, configOwnerB, 3, 45, { spaceId: LOCAL_SPACE_ID, actorId: null }],
+      [record.session.id, configOwnerB, 3, 45, { spaceId: LOCAL_SPACE_ID, actorId: null }],
+    ]);
+    expect(mocks.releaseSessionLease).toHaveBeenCalledTimes(3);
+    await managerB.closeAgentSessions([record.session.id]);
+  });
+
+  it.each(["prompt", "config"] as const)(
+    "rejects cross-module %s dispatch when the dispatch-time renewal detects takeover",
+    async (operation) => {
+      const record = runtimeRecord({
+        id: `ags-cross-module-${operation}-loss`,
+        modelOption: {
+          id: "model",
+          name: "Model",
+          currentValue: "auto",
+          options: [
+            { value: "auto", name: "Auto" },
+            { value: "fast", name: "Fast" },
+          ],
+        },
+      });
+      mocks.loadSessionRuntime.mockResolvedValue(record);
+      const [clientSide, agentSide] = linkedStreams();
+      mocks.createWebSocketStream.mockReturnValue(clientSide);
+      const agent = serveFakeAgent(agentSide, [MODEL_CONFIG]);
+      await promptAgentSession(record.session.id, "establish module A socket");
+      vi.resetModules();
+      const managerB = await import("./agent-session-manager");
+      mocks.renewSessionLease.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+      const completion =
+        operation === "prompt"
+          ? managerB.promptAgentSession(record.session.id, "must not dispatch")
+          : managerB.setAgentSessionConfigOption(record.session.id, "model", "fast");
+      await expect(completion).rejects.toThrow(/lost the agent session lease/i);
+      expect(agent.promptTexts()).toEqual(["establish module A socket"]);
+      expect(agent.setConfigCallCount()).toBe(0);
+      expect(mocks.releaseSessionLease).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it("fails closed when retained remote ACP callbacks have a lease but no guard", async () => {
+    const record = runtimeRecord({ id: "ags-missing-dispatch-guard" });
+    mocks.loadSessionRuntime.mockResolvedValue(record);
+    const [clientSide, agentSide] = linkedStreams();
+    mocks.createWebSocketStream.mockReturnValue(clientSide);
+    const agent = serveFakeAgent(agentSide, [MODEL_CONFIG]);
+    await promptAgentSession(record.session.id, "establish callback");
+    const live = (
+      globalThis as typeof globalThis & {
+        __busabaseAgentSessions?: Map<
+          string,
+          {
+            lease: unknown;
+            operationGuard?: unknown;
+            prompt: (text: string) => Promise<void>;
+            setConfigOption: (configId: string, value: string) => Promise<unknown>;
+          }
+        >;
+      }
+    ).__busabaseAgentSessions?.get(record.session.id);
+    if (!live) throw new Error("Expected retained remote session");
+    live.lease = {
+      sessionId: record.session.id,
+      ownerId: "missing-guard",
+      fencingToken: 10,
+      expiresAt: new Date().toISOString(),
+    };
+    live.operationGuard = null;
+    await expect(live.prompt("must not dispatch")).rejects.toThrow(/lost the agent session lease/i);
+    await expect(live.setConfigOption("model", "fast")).rejects.toThrow(
+      /lost the agent session lease/i,
+    );
+    expect(agent.promptTexts()).toEqual(["establish callback"]);
+    expect(agent.setConfigCallCount()).toBe(0);
+    live.lease = null;
+    await closeAgentSessions([record.session.id]);
+  });
+
+  it("does not remove a replacement guard when an older module's operation cleans up", async () => {
+    const record = runtimeRecord({ id: "ags-cross-module-replaced-guard" });
+    mocks.loadSessionRuntime.mockResolvedValue(record);
+    const [clientSide, agentSide] = linkedStreams();
+    mocks.createWebSocketStream.mockReturnValue(clientSide);
+    let finishPrompt = () => {};
+    const promptGate = new Promise<void>((resolve) => {
+      finishPrompt = resolve;
+    });
+    const agent = serveFakeAgent(agentSide, [MODEL_CONFIG], { promptGate });
+    const completion = promptAgentSession(record.session.id, "old operation").catch(
+      (error: unknown) => error,
+    );
+    await vi.waitFor(() => expect(agent.promptTexts()).toEqual(["old operation"]));
+    vi.resetModules();
+    await import("./agent-session-manager");
+    const live = (
+      globalThis as typeof globalThis & {
+        __busabaseAgentSessions?: Map<
+          string,
+          {
+            lease: unknown;
+            operationGuard?: unknown;
+          }
+        >;
+      }
+    ).__busabaseAgentSessions?.get(record.session.id);
+    if (!live) throw new Error("Expected active remote session");
+    const replacementLease = {
+      sessionId: record.session.id,
+      ownerId: "replacement-owner",
+      fencingToken: 10,
+      expiresAt: new Date().toISOString(),
+    };
+    const replacementGuard = {
+      lease: replacementLease,
+      scope: { spaceId: LOCAL_SPACE_ID, actorId: null },
+      assertOwned: () => {},
+      ready: async () => {},
+      release: async () => {},
+    };
+    live.lease = replacementLease;
+    live.operationGuard = replacementGuard;
+    finishPrompt();
+    expect(await completion).toBeInstanceOf(Error);
+    expect(live.operationGuard).toBe(replacementGuard);
+    expect(live.lease).toBe(replacementLease);
+    live.operationGuard = null;
+    live.lease = null;
+    await closeAgentSessions([record.session.id]);
   });
 
   it("does not reattach local, terminal, missing, or inner-id-less sessions", async () => {
