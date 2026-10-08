@@ -17,11 +17,19 @@ import { expect, json, test } from "./_fixtures";
 const suffix = `${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 const baseSlug = `delivery-schedule-${suffix}`;
 
-const openIn = async (browser: Browser, timezoneId: string, path: string) => {
+const openIn = async (
+  browser: Browser,
+  timezoneId: string,
+  path: string,
+  recordVideoDir?: string,
+  mobile = false,
+) => {
   const context = await browser.newContext({
     locale: "en-US",
     timezoneId,
-    viewport: { width: 1400, height: 820 },
+    viewport: mobile ? { width: 390, height: 844 } : { width: 1400, height: 820 },
+    ...(mobile ? { hasTouch: true, isMobile: true } : {}),
+    ...(recordVideoDir ? { recordVideo: { dir: recordVideoDir } } : {}),
   });
   const page = await context.newPage();
   await page.goto(path, { waitUntil: "commit" });
@@ -193,4 +201,247 @@ test("London reads the same deadlines in its own time, and is told when the day 
   await expect(launch).toContainText("Fri, Oct 2, 2026");
   await page.screenshot({ path: test.info().outputPath("05-london-grid.png") });
   await page.context().close();
+});
+
+test("dragging a calendar card saves its new day without changing other fields", async ({
+  browser,
+  request,
+}) => {
+  const readLaunch = async () => {
+    const { records } = await json<{
+      records: Array<{ baseId: string; headCommit: { payload: Record<string, unknown> } }>;
+    }>(await request.get(`/api/v1/records?baseSlug=${baseSlug}&pageSize=100`));
+    return records.find(
+      (record) =>
+        record.baseId === base.id && record.headCommit.payload.title === "Launch landing page",
+    )?.headCommit.payload;
+  };
+  const before = await readLaunch();
+  expect(before?.due).toBe("2026-10-02");
+  const page = await openIn(
+    browser,
+    "America/Los_Angeles",
+    `/dashboard/local/base/${baseSlug}`,
+    test.info().outputDir,
+  );
+  await page.getByRole("link", { name: "Due Calendar" }).click();
+  const heading = page.getByText("October 2026").first();
+  for (let step = 0; step < 24 && !(await heading.isVisible()); step += 1) {
+    const now = new Date();
+    await page
+      .getByRole("button", { name: now < new Date(2026, 9, 1) ? /next/i : /prev/i })
+      .first()
+      .click();
+  }
+  await expect(heading).toBeVisible();
+  const source = page.locator('[data-calendar-day="2026-10-02"]');
+  const target = page.locator('[data-calendar-day="2026-10-05"]');
+  await expect(source.getByRole("link", { name: "Launch landing page" })).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath("06-sf-calendar-before-drag.png") });
+  const handle = source.getByRole("button", { name: "Move Launch landing page to another day" });
+  const from = await handle.boundingBox();
+  const to = await target.boundingBox();
+  if (!from || !to) throw new Error("Calendar drag targets are not visible");
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 20 });
+  await expect(target).toHaveAttribute("data-calendar-drop-target", "true");
+  await page.mouse.up();
+  await expect(target.getByRole("link", { name: "Launch landing page" })).toBeVisible();
+  await expect(source).not.toContainText("Launch landing page");
+  await page.screenshot({ path: test.info().outputPath("06-sf-calendar-after-drag.png") });
+
+  const after = await readLaunch();
+  expect(after).toEqual({ ...before, due: "2026-10-05" });
+  await page.context().close();
+  await page.video()?.saveAs(test.info().outputPath("calendar-drag.webm"));
+});
+
+test("a touch user can long-press and reschedule without a tap moving the card", async ({
+  browser,
+  request,
+}) => {
+  const readShip = async () => {
+    const { records } = await json<{
+      records: Array<{ baseId: string; headCommit: { payload: Record<string, unknown> } }>;
+    }>(await request.get(`/api/v1/records?baseSlug=${baseSlug}&pageSize=100`));
+    return records.find(
+      (record) =>
+        record.baseId === base.id && record.headCommit.payload.title === "Ship mobile build",
+    )?.headCommit.payload;
+  };
+  const before = await readShip();
+  expect(before?.due).toBe("2026-10-01");
+  const page = await openIn(
+    browser,
+    "America/Los_Angeles",
+    `/dashboard/local/base/${baseSlug}`,
+    test.info().outputDir,
+    true,
+  );
+  await page.getByRole("link", { name: "Due Calendar" }).click();
+  const heading = page.getByText("October 2026").first();
+  for (let step = 0; step < 24 && !(await heading.isVisible()); step += 1) {
+    const now = new Date();
+    await page
+      .getByRole("button", { name: now < new Date(2026, 9, 1) ? /next/i : /prev/i })
+      .first()
+      .click();
+  }
+  await expect(heading).toBeVisible();
+  const source = page.locator('[data-calendar-day="2026-10-01"]');
+  const target = page.locator('[data-calendar-day="2026-10-03"]');
+  const handle = source.getByRole("button", { name: "Move Ship mobile build to another day" });
+  await expect(handle).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath("07-mobile-calendar-before-drag.png") });
+  await handle.tap();
+  expect(await readShip()).toEqual(before);
+
+  const from = await handle.boundingBox();
+  const to = await target.boundingBox();
+  if (!from || !to) throw new Error("Mobile calendar drag targets are not visible");
+  const start = { x: from.x + from.width / 2, y: from.y + from.height / 2 };
+  const end = { x: to.x + to.width / 2, y: to.y + to.height / 2 };
+  const session = await page.context().newCDPSession(page);
+  await session.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [start] });
+  await page.waitForTimeout(260);
+  for (let step = 1; step <= 12; step += 1) {
+    await session.send("Input.dispatchTouchEvent", {
+      type: "touchMove",
+      touchPoints: [
+        {
+          x: start.x + ((end.x - start.x) * step) / 12,
+          y: start.y + ((end.y - start.y) * step) / 12,
+        },
+      ],
+    });
+  }
+  await session.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await expect(target.getByRole("link", { name: "Ship mobile build" })).toBeVisible();
+  expect(await readShip()).toEqual({ ...before, due: "2026-10-03" });
+  await page.screenshot({ path: test.info().outputPath("08-mobile-calendar-after-drag.png") });
+  await page.context().close();
+  await page.video()?.saveAs(test.info().outputPath("calendar-touch-drag.webm"));
+});
+
+test("a keyboard user can move a calendar record to the next day", async ({ browser, request }) => {
+  await json(
+    await request.post(`/api/v1/bases/${base.id}/records/bulk-change-request`, {
+      data: {
+        autoMerge: true,
+        message: "Seed keyboard rescheduling",
+        records: [{ due: "2026-10-08", title: "Keyboard schedule" }],
+        submittedBy: "playwright",
+      },
+    }),
+  );
+  const page = await openIn(
+    browser,
+    "America/Los_Angeles",
+    `/dashboard/local/base/${baseSlug}`,
+    test.info().outputDir,
+  );
+  await page.getByRole("link", { name: "Due Calendar" }).click();
+  const heading = page.getByText("October 2026").first();
+  for (let step = 0; step < 24 && !(await heading.isVisible()); step += 1) {
+    const now = new Date();
+    await page
+      .getByRole("button", { name: now < new Date(2026, 9, 1) ? /next/i : /prev/i })
+      .first()
+      .click();
+  }
+  await expect(heading).toBeVisible();
+  const source = page.locator('[data-calendar-day="2026-10-08"]');
+  const target = page.locator('[data-calendar-day="2026-10-09"]');
+  await page.screenshot({ path: test.info().outputPath("11-keyboard-calendar-before-drag.png") });
+  await source.getByRole("button", { name: "Move Keyboard schedule to another day" }).focus();
+  await page.keyboard.press("Space");
+  await expect(page.locator('[data-calendar-dragging="true"]')).toBeVisible();
+  await page.keyboard.press("ArrowRight");
+  await expect(target).toHaveAttribute("data-calendar-drop-target", "true");
+  await page.keyboard.press("Space");
+  await expect(target.getByRole("link", { name: "Keyboard schedule" })).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath("12-keyboard-calendar-after-drag.png") });
+  await page.context().close();
+  await page.video()?.saveAs(test.info().outputPath("calendar-keyboard-drag.webm"));
+});
+
+test("a review-first date change stays on its old day and opens the pending request", async ({
+  browser,
+  request,
+}) => {
+  await json(
+    await request.post(`/api/v1/bases/${base.id}/records/bulk-change-request`, {
+      data: {
+        autoMerge: true,
+        message: "Seed review-first rescheduling",
+        records: [{ due: "2026-10-12", title: "Review schedule" }],
+        submittedBy: "playwright",
+      },
+    }),
+  );
+  const page = await openIn(
+    browser,
+    "America/Los_Angeles",
+    `/dashboard/local/base/${baseSlug}`,
+    test.info().outputDir,
+  );
+  let intercepted = false;
+  // The local OSS UI has no restricted login. Force review-first intent on this
+  // one real RPC write so the backend returns a genuine pending ChangeRequest.
+  await page.route("**/api/rpc/records/changeRequest**", async (route) => {
+    const body = route.request().postDataJSON() as { json?: Record<string, unknown> } & Record<
+      string,
+      unknown
+    >;
+    const input = body.json ?? body;
+    intercepted = true;
+    await route.continue({
+      postData: JSON.stringify(
+        body.json
+          ? { ...body, json: { ...input, autoMerge: false } }
+          : { ...body, autoMerge: false },
+      ),
+    });
+  });
+  await page.getByRole("link", { name: "Due Calendar" }).click();
+  const heading = page.getByText("October 2026").first();
+  for (let step = 0; step < 24 && !(await heading.isVisible()); step += 1) {
+    const now = new Date();
+    await page
+      .getByRole("button", { name: now < new Date(2026, 9, 1) ? /next/i : /prev/i })
+      .first()
+      .click();
+  }
+  await expect(heading).toBeVisible();
+  const source = page.locator('[data-calendar-day="2026-10-12"]');
+  const target = page.locator('[data-calendar-day="2026-10-13"]');
+  await expect(source.getByRole("link", { name: "Review schedule" })).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath("09-calendar-review-before-drag.png") });
+  const handle = source.getByRole("button", { name: "Move Review schedule to another day" });
+  const from = await handle.boundingBox();
+  const to = await target.boundingBox();
+  if (!from || !to) throw new Error("Review-first calendar drag targets are not visible");
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 20 });
+  await expect(target).toHaveAttribute("data-calendar-drop-target", "true");
+  await page.mouse.up();
+  const notice = page.getByRole("status").filter({ hasText: "sent for review" });
+  await expect(notice).toBeVisible();
+  expect(intercepted).toBe(true);
+  await expect(source.getByRole("link", { name: "Review schedule" })).toBeVisible();
+  await expect(target).not.toContainText("Review schedule");
+  const reviewLink = notice.getByRole("link", { name: "Reviews" });
+  const reviewId = (await reviewLink.getAttribute("href"))?.split("/").pop();
+  if (!reviewId) throw new Error("Review request link is missing its ID");
+  const detail = await json<{ status: string }>(
+    await request.get(`/api/v1/change-requests/${reviewId}`),
+  );
+  expect(detail.status).toBe("in_review");
+  await page.screenshot({ path: test.info().outputPath("10-calendar-review-pending.png") });
+  await reviewLink.click();
+  await expect(page).toHaveURL(new RegExp(`/inbox/${reviewId}$`));
+  await page.context().close();
+  await page.video()?.saveAs(test.info().outputPath("calendar-review-pending.webm"));
 });
