@@ -8,6 +8,7 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "kui/breadcrumb";
+import { useAddDemoParam } from "./demo-client";
 import type { BreadcrumbState } from "./hooks/useSPABreadcrumb";
 
 interface SPABreadcrumbProps {
@@ -24,6 +25,10 @@ interface SPABreadcrumbProps {
 /**
  * Shared SPA breadcrumb component
  * Reduces boilerplate in spa-client files
+ *
+ * The crumbs are plain anchors (full page loads), so they carry `?demo`
+ * explicitly — otherwise clicking "Dashboard" in demo mode lands an anonymous
+ * visitor on the sign-in page.
  */
 export function SPABreadcrumb({
   rootHref,
@@ -31,6 +36,7 @@ export function SPABreadcrumb({
   breadcrumb,
   showRoot = true,
 }: SPABreadcrumbProps) {
+  const addDemoParam = useAddDemoParam();
   const displayRootLabel = rootLabel || breadcrumb.parent || "Home";
 
   return (
@@ -39,14 +45,14 @@ export function SPABreadcrumb({
         {showRoot && (
           <>
             <BreadcrumbItem className="hidden md:block">
-              <BreadcrumbLink href={rootHref}>{displayRootLabel}</BreadcrumbLink>
+              <BreadcrumbLink href={addDemoParam(rootHref)}>{displayRootLabel}</BreadcrumbLink>
             </BreadcrumbItem>
             {/* Show parent if different from root */}
             {breadcrumb.parent && breadcrumb.parent !== displayRootLabel && (
               <>
                 <BreadcrumbSeparator className="hidden md:block" />
                 <BreadcrumbItem className="hidden md:block">
-                  <BreadcrumbLink href={rootHref}>{breadcrumb.parent}</BreadcrumbLink>
+                  <BreadcrumbLink href={addDemoParam(rootHref)}>{breadcrumb.parent}</BreadcrumbLink>
                 </BreadcrumbItem>
               </>
             )}
@@ -65,13 +71,16 @@ export function SPABreadcrumb({
  * Breadcrumb for admin/systemadmin pages with parent based on route
  */
 export function SystemAdminBreadcrumb({ breadcrumb }: { breadcrumb: BreadcrumbState }) {
+  const addDemoParam = useAddDemoParam();
   return (
     <Breadcrumb>
       <BreadcrumbList>
         {breadcrumb.parent && (
           <>
             <BreadcrumbItem className="hidden md:block">
-              <BreadcrumbLink href="/systemadmin">{breadcrumb.parent}</BreadcrumbLink>
+              <BreadcrumbLink href={addDemoParam("/systemadmin")}>
+                {breadcrumb.parent}
+              </BreadcrumbLink>
             </BreadcrumbItem>
             <BreadcrumbSeparator className="hidden md:block" />
           </>
@@ -79,7 +88,7 @@ export function SystemAdminBreadcrumb({ breadcrumb }: { breadcrumb: BreadcrumbSt
         {breadcrumb.intermediate && (
           <>
             <BreadcrumbItem className="hidden md:block">
-              <BreadcrumbLink href={breadcrumb.intermediate.href}>
+              <BreadcrumbLink href={addDemoParam(breadcrumb.intermediate.href)}>
                 {breadcrumb.intermediate.label}
               </BreadcrumbLink>
             </BreadcrumbItem>
