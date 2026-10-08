@@ -7,8 +7,10 @@
 
 <h1>Busabase</h1>
 
-<p><b>Database &amp; Workspace for AI Agents</b><br/>
-Give Claude Code, Codex, Cursor, OpenClaw, and your own agents one place for structured data, durable knowledge, reusable skills, runnable apps, and a reviewable history of every change.</p>
+<h3>The System of Record for AI Agents</h3>
+
+<p>Different agents. One shared base.<br/>
+The open-source database &amp; workspace where Claude Code, Codex, Cursor, and your own agents keep the records, docs, skills, and apps the next task builds on.</p>
 
 <p>
 <a href="./docs/README_zh-CN.md">中文</a> &nbsp;·&nbsp;
@@ -33,109 +35,78 @@ Give Claude Code, Codex, Cursor, OpenClaw, and your own agents one place for str
 
 <p>
 <a href="#quick-start"><b>Quick Start</b></a> &nbsp;·&nbsp;
-<a href="#one-workspace-many-building-blocks">Building Blocks</a> &nbsp;·&nbsp;
-<a href="#inside-the-workspace">Screenshots</a> &nbsp;·&nbsp;
+<a href="#features">Features</a> &nbsp;·&nbsp;
 <a href="#connect-your-agent">Connect an Agent</a> &nbsp;·&nbsp;
-<a href="#personal-desktop-and-cloud">Editions</a>
+<a href="#use-cases">Use Cases</a> &nbsp;·&nbsp;
+<a href="https://busabase.com/docs">Docs</a> &nbsp;·&nbsp;
+<a href="https://community.busabase.com/community">Community</a>
 </p>
 
 <br/>
 
-<a href="#inside-the-workspace"><img src="./public/assets/readme/busabase-hero.webp" alt="An AI agent working with data, knowledge, skills, and apps in Busabase" width="100%" /></a>
+<a href="#features"><img src="./public/assets/readme/busabase-hero.webp" alt="Claude Code writes this week's content posts into a shared Busabase board, which stays current for the next week's work" width="100%" /></a>
 
 </div>
 
+<br/>
+
 > Busabase is an open-source database and workspace for AI agents — agents and people share the same structured data, docs, skills, and apps, and writes that matter become reviewed, trusted records.
 
-AI agents can write code and generate output, but their useful work usually ends up scattered across chats, files, databases, and SaaS tools. On the next run, the agent has to rediscover the context. When it writes back, humans often cannot see what changed or why.
+Every agent session starts from zero. Your `CLAUDE.md` lives in one repo, the best output dies in a chat, and switching tools means explaining the project all over again.
 
-**Busabase gives agents an operational workspace, not another chat window.**
-
-- **Database for agents** — typed Bases, records, relations, views, forms, and assets.
-- **Knowledge base for agents** — Docs, Files, Drives, search, history, and provenance.
-- **Workspace for agents** — Skills, AirApps, Whiteboards, Workflows, Agents, and shared activity.
-- **Trust layer for agent work** — Change Requests, field-level diffs, comments, approvals, commits, and audit trails.
-
-Agents can read the same workspace you see, use its knowledge and skills, build apps on its data, and write improvements back into it. Every write travels as a Change Request, so it carries a message, a diff, an author, and a full history — and your workspace permissions decide whether it merges on the spot or waits in the Inbox for review.
-
-**Free and open source. Local-first. Agent-native. Every change accounted for.**
+Busabase keeps the agents stateless and the work durable: connect any agent, and it reads the same records, docs, skills, and apps your team and other agents already left behind — then writes its own work back, with a diff and a history.
 
 ## Quick Start
-
-### Run it now
 
 ```bash
 npx busabase server
 ```
 
-Open **http://localhost:15419/dashboard/local**. No external database, account, or setup is required. Busabase starts with an embedded PGlite database, local file storage, and demo workspace content.
+Open **http://localhost:15419/dashboard/local** — no database, account, or config. It starts with embedded PGlite, local file storage, and a demo workspace.
 
-```bash
-npm i -g busabase       # install once, then run: busabase server
-npx busabase-cli --help # API client for any Busabase server
+Then point your agent at it. Paste into Claude Code, Codex, Cursor, Gemini CLI, or any agent that can read a URL:
+
+```text
+Read and follow the Busabase Agent Skill — it is the single source of truth:
+http://localhost:15419/SETUP_SKILL.md
+
+Follow its onboarding to connect to this workspace. Don't choose a merge policy yourself unless I ask for one — submit the change and let Busabase apply my permissions to decide whether it merges now or waits for review. Reply to me in English.
 ```
 
-### Docker
+**Try this:** have one agent record a project's updates and conventions, then open a different agent and ask *"What changed on this project this week?"* It answers from the workspace, not from your clipboard.
+
+<details>
+<summary><b>Docker · Desktop · global install · from source</b></summary>
 
 ```bash
+# Docker (Docker Hub: busabase/busabase · GHCR: ghcr.io/busabase/busabase)
 docker run --rm -p 15419:15419 -v ~/.busabase/data:/data busabase/busabase
-```
 
-Images are published to Docker Hub (`busabase/busabase`) and GHCR (`ghcr.io/busabase/busabase`).
+# Global install
+npm i -g busabase       # then: busabase server
+npx busabase-cli --help # API client for any Busabase server
 
-### Desktop
-
-Download the native app for **macOS, Windows, or Linux** at **[busabase.com/download](https://busabase.com/download)**. Personal Desktop runs locally and works offline; your workspace data does not need to leave your machine.
-
-### From source
-
-```bash
+# From source
 pnpm install
 cp apps/busabase/.env.example apps/busabase/.env
 pnpm --filter busabase dev
 ```
 
-The local-start check reports missing dependencies or storage configuration before the dashboard opens. The default development setup stores PGlite data under `.data/busabase` and files under `.data/busabase-storage`.
+**Desktop** for macOS, Windows, and Linux: **[busabase.com/download](https://busabase.com/download)** — runs locally and works offline.
 
-### Where local data lives
+Local data lives in `~/.busabase/data/` (`pgdata/` for the embedded PGlite database, `storage/` for files). Set `BUSABASE_DATA_DIR`, `PG_DATABASE_URL`, or `STORAGE_URL` to use another location, external Postgres, or S3-compatible storage. Only one process can hold the same PGlite database at a time.
 
-The CLI server and Desktop share one default data root:
+</details>
 
-```text
-~/.busabase/data/
-├── pgdata/   # embedded PGlite database
-└── storage/  # files and attachments
-```
+## Features
 
-Set `BUSABASE_DATA_DIR`, `PG_DATABASE_URL`, or `STORAGE_URL` to use another location, external Postgres, or S3-compatible storage. Only one process can hold the same PGlite database at a time.
-
-## One Workspace, Many Building Blocks
-
-Busabase is not a database with a few AI buttons. Every building block is a first-class node in the same workspace, addressable by humans, agents, MCP, and OpenAPI.
-
-| Building block | What it gives an agent | What you get |
-| --- | --- | --- |
-| **Base** | Structured records, field schemas, relations, filters, and views | A real operational database instead of unstructured chat memory |
-| **Doc** | Durable Markdown knowledge and operating instructions | Editable, versioned knowledge with provenance |
-| **File & Drive** | Files, attachments, and project trees | One place for the artifacts behind agent work |
-| **Skill** | Reusable instructions, references, examples, and scripts | Capabilities that travel with the workspace context |
-| **AirApp** | Runnable apps backed by workspace data and APIs | Purpose-built interfaces without creating another silo |
-| **Whiteboard & Workflow** | Visual context and process definitions agents can read | Shared plans and processes agents can inspect and improve |
-| **Inbox & Activity** | Proposed changes and workspace events | Human control, recovery, and a complete audit trail |
-
-Current node types include Folder, Base, Doc, File, Drive, Skill, AirApp, Form, HTML, Whiteboard, and Workflow. See **[Node Types](./docs/node-types.md)** for the detailed model.
-
-### Start from a template
-
-A template installs a whole workspace app at once — its Bases, views, Docs, sample rows, AirApps, and the Skill manual that tells an agent how the app is meant to be used.
-
-```bash
-busabase-cli install https://github.com/busabase/templates/tree/main/templates/busa-crm
-```
-
-Browse the catalog at **[busabase.com/templates](https://busabase.com/templates)**, or install any Busabase package from a GitHub URL or a local directory. `--dry-run` prints the plan first, and `--require-review` leaves the package's records and docs as change requests instead of merging them.
-
-## Inside the Workspace
+- **One workspace for every kind of agent output** — Bases (typed records, relations, views, forms), Docs, Files, Drives, Skills, AirApps, Whiteboards, and Workflows as first-class nodes in one tree. [Node types →](./docs/node-types.md)
+- **Shared skills across agents** — keep `SKILL.md` playbooks and custom prompts in the workspace. **Playbooks** collects them into one catalog every connected agent can look up before it acts.
+- **Every write accounted for** — agent writes travel as Change Requests with a message, a field-level diff, an author, and history. Permissions decide whether a change merges on the spot or waits for review.
+- **Apps on live data** — ask an agent to turn a Base into a dashboard, CRM, or content desk. AirApps run inside Busabase on workspace data, with a `SKILL.md` the next agent can read.
+- **Bring any agent** — no built-in model, no lock-in. Agent Skill, MCP, OpenAPI, CLI, or an ACP chat session.
+- **Templates** — install a whole working setup (Bases, views, docs, sample data, apps, and its agent manual) in one command.
+- **Local-first and open source** — MIT, embedded database, works offline. The same engine powers [Busabase Cloud](https://busabase.com).
 
 <img src="./public/assets/readme/busabase-workspace-home.webp" alt="Busabase workspace home with review queue, recently visited knowledge, and agent activity" width="100%" />
 
@@ -145,14 +116,15 @@ Browse the catalog at **[busabase.com/templates](https://busabase.com/templates)
 | **Database** — typed, related, queryable records | **Knowledge base** — durable docs with version history |
 | ![Reusable agent Skill](./public/assets/readme/busabase-skill-detail.webp) | ![Workspace-native AirApps](./public/assets/readme/busabase-apps-gallery.webp) |
 | **Skills** — reusable instructions and supporting files | **Apps** — focused interfaces built on workspace data |
-| ![Product launch Whiteboard](./public/assets/readme/busabase-whiteboard.webp) | ![Lead intake Workflow](./public/assets/readme/busabase-workflow.webp) |
-| **Whiteboards** — visual context shared with agents | **Workflows** — processes kept beside their data and knowledge |
 | ![Agent-proposed field diff](./public/assets/readme/busabase-agent-output-preview.webp) | ![Record history and audit trail](./public/assets/readme/busabase-record-detail-audit.webp) |
-| **Review** — see exactly what an agent changed | **Provenance** — see the source, reviewer, commit, and history |
+| **Change Requests** — see exactly what an agent changed | **History** — source, reviewer, commit, and timeline |
+| ![Product launch Whiteboard](./public/assets/readme/busabase-whiteboard.webp) | ![Lead intake Workflow](./public/assets/readme/busabase-workflow.webp) |
+| **Whiteboards** — visual context shared with agents | **Workflows** — processes kept beside their data |
 
-### On mobile
+<details>
+<summary><b>On mobile</b></summary>
 
-Review agent Change Requests and open trusted records from the [Busabase mobile app](https://github.com/busabase/busabase/tree/main/apps/busabase-mobile).
+Review agent Change Requests and open records from the [Busabase mobile app](https://github.com/busabase/busabase/tree/main/apps/busabase-mobile).
 
 <p align="center">
   <img src="./public/assets/readme/mobile-inbox-framed.webp" alt="Mobile Inbox" width="30%" />
@@ -162,25 +134,11 @@ Review agent Change Requests and open trusted records from the [Busabase mobile 
   <img src="./public/assets/readme/mobile-record-framed.webp" alt="Mobile canonical record" width="30%" />
 </p>
 
-## Connect Your Agent
-
-Busabase has no built-in model. Connect the agent you already use: Claude Code, Codex, Cursor, Gemini CLI, OpenClaw, Hermes, Buda AI, n8n, or your own process.
-
-<details>
-<summary><b>Copy the local onboarding prompt</b></summary>
-
-```text
-Read and follow the Busabase Agent Skill — it is the single source of truth:
-http://localhost:15419/SETUP_SKILL.md
-
-Follow its onboarding to connect to this workspace. Don't choose a merge policy yourself unless I ask for one — submit the change and let Busabase apply my permissions to decide whether it merges now or waits for review. Reply to me in English.
-```
-
 </details>
 
-**[Claude Code guide](./docs/claude-code.md)** explains the local skill and Cloud plugin. **[DeepSeek Harness guide](./docs/deepseek-harness.md)** covers the `@busabase/dsh-plugin` local integration. **[Bring Your Own Agent](./docs/bring-your-agent.md)** covers the agent-neutral flow and permanent skill installation.
+## Connect Your Agent
 
-Agents can connect in four ways:
+Works with **Claude Code · Codex · Cursor · Gemini CLI · OpenCode · OpenClaw · Hermes · Buda AI · n8n** — or your own process.
 
 | Connection | Best for |
 | --- | --- |
@@ -189,89 +147,64 @@ Agents can connect in four ways:
 | **OpenAPI / CLI** | Apps, scripts, automations, and custom agents |
 | **Agents view (ACP)** | Conversational sessions with inline tool activity and permission requests |
 
-Open **Agent Skills** in the sidebar to get the current setup instructions, MCP endpoint, and OpenAPI specification for your running instance.
+Guides: [Claude Code](./docs/claude-code.md) · [DeepSeek Harness](./docs/deepseek-harness.md) · [Bring Your Own Agent](./docs/bring-your-agent.md). Open **Agent Skills** in the sidebar for the MCP endpoint and OpenAPI spec of your running instance (`/api/v1/doc`). Also on [Glama's MCP directory](https://glama.ai/mcp/connectors/com.busabase/busabase).
 
-Busabase's MCP server is also listed on [Glama's MCP connector directory](https://glama.ai/mcp/connectors/com.busabase/busabase), including its live connector score.
-
-## The Trust Loop
-
-Agents need write access to be useful. They also make mistakes. Busabase's answer is not to make every write wait for a human — it is to make every write **accountable**:
+<details>
+<summary><b>How writes work</b></summary>
 
 ```text
 Agent reads workspace context
         ↓
 Agent writes data, docs, skills, or app changes — always as a Change Request
         ↓
-The Change Request carries the diff, the message, the author, and the impact
-        ↓
 Your permissions decide: it merges on the spot, or it waits in the Inbox
         ↓
 Either way the change stays inspectable, attributable, and reversible
 ```
 
-Review is a capability, not a toll booth. A credential capped at `changeRequest` level can only ever propose; a single call can opt in with `autoMerge: false`; `busabase-cli install … --require-review` holds a package's content back for approval. Anything else that is allowed to write, writes — and still leaves a diff and a history behind.
+A credential capped at `changeRequest` level can only propose; a single call can opt in with `autoMerge: false`; `busabase-cli install … --require-review` holds a package's content back for approval. Anything else that is allowed to write, writes — and still leaves a diff and a history behind.
 
-This path applies across the workspace. A record update, Doc edit, Skill file, schema change, or AirApp package all carry the same message, diff, merge, and audit history.
+</details>
 
-## What Agents Can Build Here
+## Use Cases
 
-| Workspace | Agent operation | Trusted result |
+| Workspace | What agents do | What stays in Busabase |
 | --- | --- | --- |
-| **Team memory** | Collect notes, sources, decisions, and operating context | A durable knowledge base future agents can reuse |
-| **CRM & research** | Enrich companies, deduplicate records, monitor markets | Verified business intelligence instead of hidden hallucinations |
-| **Content system** | Draft posts, docs, pages, metadata, and assets | A headless CMS with an editorial approval trail |
-| **Product operations** | Maintain projects, tasks, vendors, policies, and configs | An auditable operational database |
-| **Dataset pipeline** | Label examples, attach evidence, score quality | Human-reviewed training and evaluation data |
-| **Internal tools** | Build AirApps and workflows over workspace data | Focused apps that inherit the same source of truth |
+| **Software delivery** | Turn feedback into tasks, write and test code, ship, start the next cycle | Feedback, tasks, specs, conventions, release notes |
+| **SEO & content** | Track search trends, plan, draft the next article in a shared CMS | Keyword research, briefs, drafts, published pages |
+| **CRM** | Research prospects, follow up, log every visit | Companies, contacts, visit notes, follow-ups |
+| **Team memory** | Capture decisions, sources, and operating context | A knowledge base the next agent starts from |
+| **Datasets** | Label examples, attach evidence, score quality | Reviewed training and evaluation data |
 
-See **[all use cases](./docs/use-cases.md)** for complete examples and demo datasets.
+Start from a template — the whole app, its data, and the manual that tells an agent how to use it:
 
-## A Different Category
-
-Busabase overlaps with databases and knowledge tools, but it is designed around a different primary operator: the agent.
-
-| Product category | Primary model | Missing when agents do the work |
-| --- | --- | --- |
-| Human databases (Airtable, Baserow, NocoDB) | People edit rows directly | Agent context, reusable skills/apps, and a native proposal boundary |
-| Human knowledge tools (Notion, Confluence, Obsidian) | People write and organize pages | Structured agent operations across data, files, tools, and review |
-| Databases (Postgres) | Applications read and write storage | A workspace UI, knowledge model, review loop, and provenance |
-| Agent runtimes and chat tools | Agents execute tasks and produce output | A durable system of record shared across agents and future sessions |
-| **Busabase** | Agents and humans build one workspace together | Database + knowledge + skills + apps — output that accumulates instead of evaporating |
-
-Change Requests are not the category; they are the mechanism that makes an agent workspace dependable.
-
-## Personal Desktop and Cloud
-
-Both editions use the same Busabase core and change model.
-
-| Personal Desktop / local | Busabase Cloud |
-| --- | --- |
-| Open source and free | Hosted, multi-user workspace |
-| Local PGlite and file storage | Managed Postgres and object storage |
-| No login required | Authentication, Spaces, roles, and permissions |
-| Works offline | Collaboration, hosted APIs, and governance |
-| Data stays on your machine | Access from web and mobile |
-
-**Cloud Connect** can link a local workspace to [Busabase Cloud](https://busabase.com) through an authenticated tunnel. The local machine keeps the data and can run local agents; Cloud and mobile become controlled windows onto that workspace.
-
-## API Surface
-
-Busabase exposes the workspace through **MCP**, **OpenAPI**, and `busabase-cli`. Agents can discover nodes, search content, read file trees, work with records, and create reviewable changes without scraping the UI.
-
-Typical resources include:
-
-- nodes, folders, and search
-- Bases, fields, views, records, and forms
-- Docs, files, assets, Drives, and Skills
-- AirApps, Whiteboards, Workflows, and HTML nodes
-- Change Requests, operations, reviews, comments, and commits
-- activity, audit events, webhooks, and agent tasks
-
-Open the machine-readable API documentation at:
-
-```text
-http://localhost:15419/api/v1/doc
+```bash
+busabase-cli install https://github.com/busabase/templates/tree/main/templates/busa-crm
 ```
+
+Browse [busabase.com/templates](https://busabase.com/templates) and [all use cases](./docs/use-cases.md).
+
+## How It Compares
+
+| | Designed for | Missing when agents do the work |
+| --- | --- | --- |
+| Airtable, Notion, Baserow, NocoDB | People editing directly | Agent-native access, shared skills and apps, a proposal boundary |
+| Postgres | Applications reading and writing storage | A workspace UI, knowledge model, review loop, and provenance |
+| Agent memory, vector DBs | One agent recalling context | Structured facts people can open, cite, and correct |
+| **Busabase** | **People and agents building one workspace** | — |
+
+Busabase runs on Postgres (or embedded PGlite) itself; it is the workspace on top, not a replacement for your app's database.
+
+## Editions
+
+| Open source / Personal Desktop | Busabase Cloud |
+| --- | --- |
+| MIT-licensed and free | Hosted, multi-user workspace |
+| Local PGlite and file storage | Managed Postgres and object storage |
+| No login, works offline | Spaces, roles, permissions, Team Insights |
+| Data stays on your machine | Web and mobile access |
+
+**Cloud Connect** links a local workspace to [Busabase Cloud](https://busabase.com) through an authenticated tunnel — your machine keeps the data and runs local agents. See [pricing](https://busabase.com/pricing).
 
 ## Architecture
 
@@ -279,13 +212,9 @@ http://localhost:15419/api/v1/doc
   <img src="./public/architecture-diagram.svg" alt="Busabase architecture diagram" width="100%">
 </div>
 
-`apps/busabase` is the local, single-workspace Next.js shell. The workspace engine lives in `packages/busabase-core`: nodes, records, file trees, rich node types, review primitives, search, agents, and API contracts. [Busabase Cloud](https://busabase.com) runs the same engine with multi-tenant identity, permissions, hosted storage, and collaboration.
+`apps/busabase` is the local, single-workspace Next.js shell. The workspace engine lives in `packages/busabase-core`: nodes, records, file trees, rich node types, review primitives, search, agents, and API contracts — exposed through MCP, OpenAPI, and `busabase-cli`. Cloud runs the same engine with multi-tenant identity, permissions, and hosted storage.
 
-The local edition is login-free by construction. It uses a fixed local actor and Space, embedded PGlite by default, and local storage. Cloud supplies real actor and Space context to the shared engine.
-
-## Security
-
-The open-source server is designed for a trusted local machine or private network. Do not expose write endpoints directly to the public internet without authentication and a properly configured reverse proxy. Use scoped credentials and Cloud Connect when remote access is required.
+**Security:** the open-source server is designed for a trusted local machine or private network. Do not expose write endpoints to the public internet without authentication and a reverse proxy; use scoped credentials and Cloud Connect for remote access.
 
 ## Contributing
 
@@ -296,20 +225,15 @@ pnpm --filter busabase typecheck
 pnpm --filter busabase lint:err
 ```
 
-Bug reports, feature ideas, docs, and pull requests are welcome in [Issues](https://github.com/busabase/busabase/issues) and [Discussions](https://github.com/busabase/busabase/discussions).
+Bug reports, ideas, docs, and pull requests are welcome in [Issues](https://github.com/busabase/busabase/issues) and [Discussions](https://github.com/busabase/busabase/discussions).
 
 ## Community
 
-- [Busabase website](https://busabase.com)
-- [Documentation](https://busabase.com/docs)
-- [Community Forum](https://busabase.com/community)
-- [GitHub Discussions](https://github.com/busabase/busabase/discussions)
+[Website](https://busabase.com) · [Docs](https://busabase.com/docs) · [Forum](https://community.busabase.com/community) · [YouTube](https://www.youtube.com/@BusabaseAI) · [X](https://x.com/Busabase4agent) · [LinkedIn](https://www.linkedin.com/company/busabase/)
 
-## Star History
+If Busabase is useful to you, a ⭐ helps other agent builders find it.
 
-<a href="https://star-history.com/#busabase/busabase&Date">
-  <img src="https://api.star-history.com/svg?repos=busabase/busabase&type=Date" alt="Busabase star history" width="600" />
-</a>
+<a href="https://github.com/busabase/busabase/graphs/contributors"><img src="https://contrib.rocks/image?repo=busabase/busabase" alt="Busabase contributors" /></a>
 
 ## License
 
