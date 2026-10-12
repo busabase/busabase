@@ -19,7 +19,7 @@ The open-source database &amp; workspace where Claude Code, Codex, Cursor, and y
 </p>
 
 <p align="center">
-<a href="https://www.producthunt.com/products/busabase?embed=true&amp;utm_source=badge-featured&amp;utm_medium=badge&amp;utm_campaign=badge-busabase" target="_blank" rel="noopener noreferrer"><img alt="Busabase - The General System of Record for AI Agents | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/featured.svg?post_id=1189118&amp;theme=light&amp;t=1791453316155"></a>
+<a href="https://www.producthunt.com/products/busabase?embed=true&amp;utm_source=badge-top-post-badge&amp;utm_medium=badge&amp;utm_campaign=badge-busabase" target="_blank" rel="noopener noreferrer"><img alt="Busabase - The general system of record for AI agents | Product Hunt" width="250" height="54" src="https://api.producthunt.com/widgets/embed-image/v1/top-post-badge.svg?post_id=1189118&amp;theme=light&amp;period=daily&amp;t=1791791087570"></a>
 </p>
 
 <p>
