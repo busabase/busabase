@@ -1324,6 +1324,9 @@ export const dashboardZhCN: CoreI18nMessages = {
     iconFileTooLarge: "图片大小需小于 2MB",
     iconUpdated: "图标已更新",
     iconUploadFailed: "图标上传失败",
+    defaultViewLabel: "默认视图",
+    defaultViewAllRecords: "所有记录",
+    defaultViewHint: "打开此数据表时显示的视图。指向其他视图的链接仍然有效。",
   },
   base: {
     searchRecordsToLink: "搜索要关联的记录",

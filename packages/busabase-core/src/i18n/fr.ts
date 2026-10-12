@@ -1399,6 +1399,10 @@ export const dashboardFr: CoreI18nMessages = {
     iconFileTooLarge: "L'image doit faire moins de 2 Mo",
     iconUpdated: "Icône mise à jour",
     iconUploadFailed: "Échec du téléversement de l'icône",
+    defaultViewLabel: "Vue par défaut",
+    defaultViewAllRecords: "Tous les enregistrements",
+    defaultViewHint:
+      "La vue sur laquelle cette Base s'ouvre. Les liens vers d'autres vues continuent de fonctionner.",
   },
   base: {
     searchRecordsToLink: "Rechercher des enregistrements à lier",

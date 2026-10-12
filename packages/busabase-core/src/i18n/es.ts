@@ -1385,6 +1385,10 @@ export const dashboardEs: CoreI18nMessages = {
     iconFileTooLarge: "La imagen debe pesar menos de 2 MB",
     iconUpdated: "Icono actualizado",
     iconUploadFailed: "No se pudo subir el icono",
+    defaultViewLabel: "Vista predeterminada",
+    defaultViewAllRecords: "Todos los registros",
+    defaultViewHint:
+      "La vista con la que se abre esta Base. Los enlaces a otras vistas siguen funcionando.",
   },
   base: {
     /** Placeholder for the relation field picker's server-backed search box. */

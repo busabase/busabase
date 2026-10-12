@@ -19,6 +19,7 @@ import type { NodeIcon } from "busabase-contract/types";
 import { Dialog, DialogDescription, DialogHeader, DialogTitle } from "kui/dialog";
 import { Input } from "kui/input";
 import { Label } from "kui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "kui/select";
 import type { LucideIcon } from "lucide-react";
 import { Info, Shield, SlidersHorizontal } from "lucide-react";
 import { useContext, useEffect, useRef, useState } from "react";
@@ -46,6 +47,9 @@ import { ShimmerSkeleton as Skeleton } from "./shimmer-skeleton";
 import { SplitSubmitButton } from "./split-submit-button";
 
 export type NodeSettingsTab = "general" | "info" | "permissions";
+
+/** The "All records" choice of the default-view select; Radix refuses an empty value. */
+const ALL_RECORDS = "__all_records__" as const;
 
 export interface NodeSettingsDialogProps {
   orpc: BusabaseQueryUtils;
@@ -217,6 +221,7 @@ function GeneralTabContent({
   // got different answers, and the choice did not travel with the node the way
   // every other node setting does.
   const savedEngine = detail?.node.settings?.airappEngine ?? null;
+  const savedDefaultViewSlug = detail?.node.settings?.defaultViewSlug ?? null;
 
   const [name, setName] = useState(nodeName);
   const [description, setDescription] = useState("");
@@ -226,10 +231,33 @@ function GeneralTabContent({
   /** What `airapp.json` asks for, so "follow the app" can name it. */
   const [appPreferred, setAppPreferred] = useState<AirAppRunnerKind | undefined>(undefined);
   const [appRequired, setAppRequired] = useState<AirAppRunnerKind | undefined>(undefined);
+  const [defaultView, setDefaultView] = useState<string>(ALL_RECORDS);
   const hydratedRef = useRef(false);
   const runnerKindDirtyRef = useRef(false);
+  const defaultViewDirtyRef = useRef(false);
 
   const updateSettings = useMutation(orpc.nodes.updateSettings.mutationOptions());
+
+  // The Base's views, for the default-view select. The dialog holds the Base's
+  // NODE id, and views are listed by Base id, so `bases.list` (a cache hit
+  // anywhere in the dashboard) bridges the two.
+  const basesQuery = useQuery({
+    ...orpc.bases.list.queryOptions({ input: {} }),
+    enabled: open && nodeType === "base",
+  });
+  const baseId = basesQuery.data?.find((base) => base.nodeId === nodeId)?.id ?? "";
+  const viewsQuery = useQuery({
+    ...orpc.bases.listViews.queryOptions({ input: { baseId } }),
+    enabled: open && nodeType === "base" && Boolean(baseId),
+  });
+  const baseViews = viewsQuery.data ?? [];
+
+  const saveDefaultView = async () => {
+    await updateSettings.mutateAsync({
+      nodeId,
+      settings: { defaultViewSlug: defaultView === ALL_RECORDS ? null : defaultView },
+    });
+  };
 
   /**
    * Persist the engine override onto the node.
@@ -253,6 +281,7 @@ function GeneralTabContent({
     }
     setName(nodeName);
     runnerKindDirtyRef.current = false;
+    defaultViewDirtyRef.current = false;
     setAppPreferred(undefined);
     setAppRequired(undefined);
   }, [open, nodeName]);
@@ -267,6 +296,11 @@ function GeneralTabContent({
         : FOLLOW_APP,
     );
   }, [availableAirAppEngines, open, savedEngine]);
+
+  useEffect(() => {
+    if (!open || defaultViewDirtyRef.current) return;
+    setDefaultView(savedDefaultViewSlug ?? ALL_RECORDS);
+  }, [open, savedDefaultViewSlug]);
 
   // Read what the app itself asks for, so "follow the app" names a concrete
   // engine. Without this the dialog could say "follow the app" while
@@ -350,6 +384,7 @@ function GeneralTabContent({
           },
         ],
       });
+      if (nodeType === "base" && defaultViewDirtyRef.current) await saveDefaultView();
       await invalidateNodes();
       if (nodeType === "airapp" && runnerKindDirtyRef.current) await saveEngine();
       // Report what happened, not what was asked for.
@@ -407,6 +442,37 @@ function GeneralTabContent({
           value={description}
         />
       </div>
+
+      {nodeType === "base" ? (
+        <div className="space-y-2">
+          <Label htmlFor="node-settings-default-view">{t.defaultViewLabel}</Label>
+          <Select
+            disabled={!detail}
+            onValueChange={(next) => {
+              defaultViewDirtyRef.current = true;
+              setDefaultView(next);
+            }}
+            value={defaultView}
+          >
+            <SelectTrigger className="w-full" id="node-settings-default-view">
+              <SelectValue>
+                {defaultView === ALL_RECORDS
+                  ? t.defaultViewAllRecords
+                  : (baseViews.find((view) => view.slug === defaultView)?.name ?? defaultView)}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_RECORDS}>{t.defaultViewAllRecords}</SelectItem>
+              {baseViews.map((view) => (
+                <SelectItem key={view.id} value={view.slug}>
+                  {view.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-muted-foreground text-xs">{t.defaultViewHint}</p>
+        </div>
+      ) : null}
 
       {nodeType === "airapp" ? (
         <AirAppEngineSetting

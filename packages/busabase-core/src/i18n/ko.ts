@@ -1355,6 +1355,9 @@ export const dashboardKo: CoreI18nMessages = {
     iconFileTooLarge: "이미지는 2MB 미만이어야 합니다",
     iconUpdated: "아이콘이 업데이트되었습니다",
     iconUploadFailed: "아이콘을 업로드하지 못했습니다",
+    defaultViewLabel: "기본 뷰",
+    defaultViewAllRecords: "모든 레코드",
+    defaultViewHint: "이 베이스를 열 때 표시되는 뷰입니다. 다른 뷰로의 링크는 계속 작동합니다.",
   },
   base: {
     searchRecordsToLink: "연결할 레코드 검색",

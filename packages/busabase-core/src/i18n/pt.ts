@@ -1382,6 +1382,10 @@ export const dashboardPt: CoreI18nMessages = {
     iconFileTooLarge: "A imagem deve ter menos de 2 MB",
     iconUpdated: "Ícone atualizado",
     iconUploadFailed: "Falha ao enviar o ícone",
+    defaultViewLabel: "Visualização padrão",
+    defaultViewAllRecords: "Todos os registros",
+    defaultViewHint:
+      "A visualização com que esta Base abre. Links para outras visualizações continuam funcionando.",
   },
   base: {
     searchRecordsToLink: "Pesquisar registros para vincular",

@@ -230,6 +230,15 @@ export const getBusabaseDashboardRoutes = (
       title: messages?.nodeDetail.activity ?? "Activity",
     },
     {
+      // The view switcher's all-records tab. Its own entry, ahead of the
+      // generic view route, so a Base that opens on a default view still has a
+      // route that means "the grid" and is never redirected.
+      path: "/base/:slug/all",
+      component: dashboard,
+      breadcrumb: messages?.routes.base ?? "Base",
+      title: messages?.routes.base ?? "Base",
+    },
+    {
       path: "/base/:slug/:viewId",
       component: dashboard,
       breadcrumb: messages?.routes.view ?? "View",
