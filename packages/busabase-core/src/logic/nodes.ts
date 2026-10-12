@@ -28,6 +28,7 @@ import {
   busabaseFavorites,
   busabaseNodes,
   busabaseOperations,
+  busabaseViews,
   nodeListColumns,
 } from "../db/schema";
 import { docBodyKey } from "../domains/doc/handlers";
@@ -1060,6 +1061,54 @@ export const updateNodeMetadata = async (
 };
 
 /**
+ * A `defaultViewSlug` is only meaningful on a Base, and only while it names one
+ * of that Base's active views. Checked at write time so an agent scaffolding a
+ * Base learns about a typo in the slug from the PATCH, not from a dashboard
+ * that silently keeps opening the all-records grid.
+ */
+const assertDefaultViewTarget = async (
+  db: Awaited<ReturnType<typeof getDb>>,
+  spaceId: string,
+  node: { id: string; type: string },
+  defaultViewSlug: string,
+) => {
+  if (node.type !== "base") {
+    throw new ORPCError("BAD_REQUEST", {
+      message: `defaultViewSlug only applies to a Base node (got ${node.type})`,
+    });
+  }
+  const [base] = await db
+    .select({ id: busabaseBases.id })
+    .from(busabaseBases)
+    .where(
+      and(
+        eq(busabaseBases.nodeId, node.id),
+        eq(busabaseBases.spaceId, spaceId),
+        isNull(busabaseBases.deletedAt),
+      ),
+    )
+    .limit(1);
+  const [view] = base
+    ? await db
+        .select({ id: busabaseViews.id })
+        .from(busabaseViews)
+        .where(
+          and(
+            eq(busabaseViews.baseId, base.id),
+            eq(busabaseViews.slug, defaultViewSlug),
+            eq(busabaseViews.status, "active"),
+          ),
+        )
+        .limit(1)
+    : [];
+  if (!view) {
+    throw new ORPCError("NOT_FOUND", {
+      message: `View not found on this Base: ${defaultViewSlug}`,
+    });
+  }
+};
+
+/**
  * Replace a node's system settings.
  *
  * Deliberately a REPLACE, not the top-level jsonb merge `updateNodeMetadata`
@@ -1103,6 +1152,10 @@ export const updateNodeSettings = async (
   }
 
   await assertNodePermission(node.id, "write", actorId);
+
+  if (parsed.settings.defaultViewSlug) {
+    await assertDefaultViewTarget(db, spaceId, node, parsed.settings.defaultViewSlug);
+  }
 
   // Drop nulls rather than storing them: absent and null mean the same thing,
   // and keeping only one of the two spellings on disk means readers never have

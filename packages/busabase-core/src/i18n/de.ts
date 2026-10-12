@@ -1402,6 +1402,10 @@ export const dashboardDe: CoreI18nMessages = {
     iconFileTooLarge: "Das Bild darf höchstens 2 MB groß sein",
     iconUpdated: "Symbol aktualisiert",
     iconUploadFailed: "Symbol konnte nicht hochgeladen werden",
+    defaultViewLabel: "Standardansicht",
+    defaultViewAllRecords: "Alle Datensätze",
+    defaultViewHint:
+      "Die Ansicht, mit der diese Base geöffnet wird. Links zu anderen Ansichten funktionieren weiterhin.",
   },
   base: {
     searchRecordsToLink: "Datensätze zum Verknüpfen suchen",

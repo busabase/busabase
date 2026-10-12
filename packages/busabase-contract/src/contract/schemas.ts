@@ -19,7 +19,10 @@ import { customAgentPromptsSchema } from "./node-agent-prompt-schemas";
 import { PlaybookAttributionVOSchema } from "./playbook-schemas";
 
 /** @see nodeSettingsSchema — declared here so `NodeOutput` can reference it. */
-export type NodeSettings = { airappEngine?: "browser" | "local" | "remote" | null };
+export type NodeSettings = {
+  airappEngine?: "browser" | "local" | "remote" | null;
+  defaultViewSlug?: string | null;
+};
 
 export interface NodeOutput {
   id: string;
@@ -334,6 +337,16 @@ export const nodeSettingsSchema = z.strictObject({
    * override and returns the node to following the app.
    */
   airappEngine: z.enum(["browser", "local", "remote"]).nullish(),
+  /**
+   * The saved view a Base opens on when its route names no view, by slug.
+   *
+   * A property of how the Base opens rather than of the view itself, which is
+   * why it lives here and not as a flag on the view row. Absent or `null`
+   * means the all-records grid. The dashboard only honours a slug that still
+   * names an active view of that Base, and merging a delete of that view
+   * clears the key.
+   */
+  defaultViewSlug: z.string().nullish(),
 });
 
 const updateNodeSettingsInputSchema = z.object({

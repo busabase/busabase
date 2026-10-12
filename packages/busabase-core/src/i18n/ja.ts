@@ -1365,6 +1365,10 @@ export const dashboardJa: CoreI18nMessages = {
     iconFileTooLarge: "画像は2MB未満にしてください",
     iconUpdated: "アイコンを更新しました",
     iconUploadFailed: "アイコンのアップロードに失敗しました",
+    defaultViewLabel: "デフォルトのビュー",
+    defaultViewAllRecords: "すべてのレコード",
+    defaultViewHint:
+      "このベースを開いたときに表示されるビューです。他のビューへのリンクはそのまま使えます。",
   },
   base: {
     searchRecordsToLink: "リンクするレコードを検索",

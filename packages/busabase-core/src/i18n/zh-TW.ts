@@ -1325,6 +1325,9 @@ export const dashboardZhTW: CoreI18nMessages = {
     iconFileTooLarge: "圖片大小需小於 2MB",
     iconUpdated: "圖示已更新",
     iconUploadFailed: "圖示上傳失敗",
+    defaultViewLabel: "預設檢視",
+    defaultViewAllRecords: "所有記錄",
+    defaultViewHint: "開啟此資料表時顯示的檢視。指向其他檢視的連結仍然有效。",
   },
   base: {
     searchRecordsToLink: "搜尋要關聯的記錄",

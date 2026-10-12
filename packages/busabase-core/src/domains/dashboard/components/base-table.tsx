@@ -71,6 +71,7 @@ import { resolveEmbedPreview } from "../../base/utils/embed";
 import { getPrimaryField } from "../../base/utils/primary-field";
 import { parseWhiteboardFieldValue } from "../../base/utils/whiteboard-value";
 import { getRecordTitle } from "../helpers/change-request";
+import { ALL_RECORDS_CHILD_ID } from "../helpers/default-view";
 import {
   getAttachmentRefs,
   getFieldChipEntries,
@@ -1068,7 +1069,10 @@ export function BusaBaseTable({
                     ? "border-transparent text-muted-foreground hover:bg-accent/60 hover:text-foreground"
                     : ACTIVE_VIEW_CONTROL_CLASS_NAME
                 }`}
-                href={mergeSearchIntoHref(`/base/${base.slug}`, currentSearch)}
+                href={mergeSearchIntoHref(
+                  `/base/${base.slug}/${ALL_RECORDS_CHILD_ID}`,
+                  currentSearch,
+                )}
               >
                 {messages.base.all}
               </Link>

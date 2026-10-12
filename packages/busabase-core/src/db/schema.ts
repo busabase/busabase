@@ -181,6 +181,12 @@ export const busabaseNodes = pgTable(
          * so the column stores the absence rather than defaulting it away.
          */
         airappEngine?: "browser" | "local" | "remote";
+        /**
+         * Slug of the saved view a Base opens on when its route names none.
+         * Absent means the all-records grid. Dropped again when a merged
+         * delete archives that view, so it never names a view that is gone.
+         */
+        defaultViewSlug?: string;
       }>()
       .notNull()
       .default({}),

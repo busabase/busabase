@@ -105,6 +105,7 @@ import { BusabaseTopbarBreadcrumb, TopbarNodeActionsSlot } from "./components/to
 import { getNodeDetailBreadcrumbItems } from "./helpers/breadcrumbs";
 import { shouldQueryGlobalChangeRequests } from "./helpers/change-request-data-source";
 import { createChangeRequestQueryKeys } from "./helpers/change-request-query-keys";
+import { ALL_RECORDS_CHILD_ID, resolveDefaultViewPath } from "./helpers/default-view";
 import { getRelationRecordIds } from "./helpers/field";
 import { getLocationPath, readInboxView } from "./helpers/inbox";
 import {
@@ -654,13 +655,41 @@ function BusabaseDashboardContent({
     () => views.filter((view) => view.baseId === activeBase?.id),
     [activeBase?.id, views],
   );
+  const isAllRecordsRoute = baseChildParams?.childId === ALL_RECORDS_CHILD_ID;
   const selectedBaseView = useMemo(() => {
     const childId = baseChildParams?.childId;
-    if (!childId || childId === "new" || childId === "design" || childId === "setup") {
+    if (
+      !childId ||
+      childId === "new" ||
+      childId === "design" ||
+      childId === "setup" ||
+      childId === ALL_RECORDS_CHILD_ID
+    ) {
       return null;
     }
     return baseViews.find((view) => view.slug === childId || view.id === childId) ?? null;
   }, [baseChildParams?.childId, baseViews]);
+  // The bare `/base/<slug>` route opens the Base's default view when its node
+  // names one. A redirect rather than a silent `selectedBaseView` fallback, so
+  // the URL stays canonical and the pagination scope below keys off the same
+  // `childId` it always has. `nodes.get` by slug is the key the Base settings
+  // dialog reads and invalidates, so a saved change lands here on the next open.
+  const isBareBaseRoute = Boolean(baseParams?.slug);
+  const baseNodeQuery = useQuery({
+    ...orpc.nodes.get.queryOptions({ input: { nodeId: activeBase?.slug ?? "", type: "base" } }),
+    enabled: Boolean(activeBase?.slug) && isBareBaseRoute,
+  });
+  const defaultViewPath =
+    isBareBaseRoute && activeBase
+      ? resolveDefaultViewPath({
+          baseSlug: activeBase.slug,
+          defaultViewSlug: baseNodeQuery.data?.node.settings?.defaultViewSlug,
+          views: baseViews,
+        })
+      : null;
+  useEffect(() => {
+    if (defaultViewPath) setLocation(defaultViewPath, { replace: true });
+  }, [defaultViewPath, setLocation]);
   const recordPaginationUrl = useMemo(() => readRecordPagination(search), [search]);
   // Kanban and Calendar are listed here not because they show a pagination
   // bar, but because neither needs the whole Base anymore: Kanban's columns
@@ -866,7 +895,11 @@ function BusabaseDashboardContent({
     usesPagePagination,
   ]);
   const isRecordRoute = Boolean(
-    isBaseChildRoute && !selectedBaseView && !isBaseSetupRoute && !isBaseActivityRoute,
+    isBaseChildRoute &&
+      !selectedBaseView &&
+      !isAllRecordsRoute &&
+      !isBaseSetupRoute &&
+      !isBaseActivityRoute,
   );
   const selectedRecordId =
     isEditRecordRoute && editRecordParams?.recordId
@@ -2353,6 +2386,7 @@ function BusabaseDashboardContent({
     const showBaseTabs =
       Boolean(activeBase) &&
       (Boolean(baseParams?.slug) ||
+        isAllRecordsRoute ||
         isBaseSetupRoute ||
         isBaseDesignRoute ||
         isLegacyBaseSetupRoute) &&
@@ -2371,6 +2405,7 @@ function BusabaseDashboardContent({
     activeBase,
     activeRecord,
     baseParams?.slug,
+    isAllRecordsRoute,
     isBaseDesignRoute,
     isBaseSetupRoute,
     isEditRecordRoute,

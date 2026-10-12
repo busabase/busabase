@@ -5,7 +5,13 @@ import type { ViewConfigVO } from "busabase-contract/types";
 import { and, eq, isNull } from "drizzle-orm";
 import { getContextSpaceId, resolveActorId } from "../../../../context";
 import type { CommitPO, OperationPO } from "../../../../db/schema";
-import { busabaseBaseFields, busabaseOperations, busabaseViews } from "../../../../db/schema";
+import {
+  busabaseBaseFields,
+  busabaseBases,
+  busabaseNodes,
+  busabaseOperations,
+  busabaseViews,
+} from "../../../../db/schema";
 import { parseCommitPayload } from "../../../../logic/commit-payload-schemas";
 import type { MergeCtx } from "../../../../logic/cr-lifecycle";
 import { CURRENT_USER_ID, id, requireBaseId } from "../../../../logic/kernel";
@@ -117,6 +123,29 @@ export const mergeViewUpdate = async (ctx: MergeCtx, item: OperationPO, headComm
   ctx.mergedViewIds.push(targetView.id);
 };
 
+/**
+ * A Base whose `settings.defaultViewSlug` names the view being archived would
+ * keep pointing at a view its switcher no longer lists, so the key goes with
+ * the view. Restoring the view later does not bring the setting back: by then
+ * the Base may have been opening on the grid for weeks, and that is the state
+ * people have got used to.
+ */
+const clearDefaultViewSetting = async (ctx: MergeCtx, baseId: string, viewSlug: string) => {
+  const { db, timestamp } = ctx;
+  const [row] = await db
+    .select({ nodeId: busabaseNodes.id, settings: busabaseNodes.settings })
+    .from(busabaseBases)
+    .innerJoin(busabaseNodes, eq(busabaseNodes.id, busabaseBases.nodeId))
+    .where(eq(busabaseBases.id, baseId))
+    .limit(1);
+  if (!row || row.settings.defaultViewSlug !== viewSlug) return;
+  const { defaultViewSlug: _dropped, ...settings } = row.settings;
+  await db
+    .update(busabaseNodes)
+    .set({ settings, updatedAt: timestamp })
+    .where(eq(busabaseNodes.id, row.nodeId));
+};
+
 export const mergeViewDelete = async (ctx: MergeCtx, item: OperationPO, _headCommit: CommitPO) => {
   const { db, timestamp } = ctx;
   const targetView = item.targetViewId ? ctx.targetViewsById.get(item.targetViewId) : undefined;
@@ -127,6 +156,7 @@ export const mergeViewDelete = async (ctx: MergeCtx, item: OperationPO, _headCom
     .update(busabaseViews)
     .set({ archivedAt: timestamp, status: "archived", updatedAt: timestamp })
     .where(eq(busabaseViews.id, targetView.id));
+  await clearDefaultViewSetting(ctx, targetView.baseId, targetView.slug);
   await db
     .update(busabaseOperations)
     .set({ status: "archived", mergedViewId: targetView.id, updatedAt: timestamp })

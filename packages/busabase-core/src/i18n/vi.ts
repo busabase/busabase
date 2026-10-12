@@ -1372,6 +1372,10 @@ export const dashboardVi: CoreI18nMessages = {
     iconFileTooLarge: "Ảnh phải nhỏ hơn 2MB",
     iconUpdated: "Đã cập nhật biểu tượng",
     iconUploadFailed: "Tải biểu tượng lên thất bại",
+    defaultViewLabel: "Chế độ xem mặc định",
+    defaultViewAllRecords: "Tất cả bản ghi",
+    defaultViewHint:
+      "Chế độ xem mở ra khi vào cơ sở dữ liệu này. Liên kết đến các chế độ xem khác vẫn hoạt động.",
   },
   base: {
     searchRecordsToLink: "Tìm bản ghi để liên kết",
