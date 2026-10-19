@@ -162,6 +162,24 @@ export interface LocalPostJsonLdFields extends LocalContentMetadataFields {
 /** A breadcrumb label: a fixed string per locale, or an async lookup (e.g. loading a dictionary). */
 export type CmsPostJsonLdLabel = (locale: string) => string | Promise<string>;
 
+/**
+ * Whether a local (fumadocs) page really exists in `locale`. A page served at an untranslated
+ * locale is the default-locale file (fumadocs' `fallbackLanguage`), so only a distinct `data`
+ * object is a real translation. Without `defaultLocale`, any page returned counts as its own.
+ */
+export const hasOwnLocalPage = <TPage>(
+  getPage: (locale: string, slugs: string[]) => TPage | undefined,
+  locale: string,
+  slugs: string[],
+  defaultLocale?: string,
+): boolean => {
+  const page = getPage(locale, slugs);
+  if (!page) return false;
+  if (!defaultLocale || locale === defaultLocale) return true;
+  const fallback = getPage(defaultLocale, slugs);
+  return (page as { data?: unknown }).data !== (fallback as { data?: unknown } | undefined)?.data;
+};
+
 export interface CmsPostResolverOptions<TPage> {
   integration: CmsPostResolverIntegration;
   localSource: LocalPostSourceLike<TPage>;
@@ -328,19 +346,11 @@ export const createCmsPostResolver = <TPage>({
     getLocalPost: (locale, slugs) => localSource.getPage(slugs, locale),
   };
 
-  // A page served at an untranslated locale is the default-locale file (fumadocs'
-  // `fallbackLanguage`), so only a distinct `data` object is a real translation.
   const hasOwnLocalPost = (
     locale: string,
     slugs: string[],
     dependencies: CmsPostResolverDependencies<TPage>,
-  ) => {
-    const page = dependencies.getLocalPost(locale, slugs);
-    if (!page) return false;
-    if (!defaultLocale || locale === defaultLocale) return true;
-    const fallback = dependencies.getLocalPost(defaultLocale, slugs);
-    return (page as { data?: unknown }).data !== (fallback as { data?: unknown } | undefined)?.data;
-  };
+  ) => hasOwnLocalPage(dependencies.getLocalPost, locale, slugs, defaultLocale);
 
   const resolveForLocale = async (
     locale: string,

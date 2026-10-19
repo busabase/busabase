@@ -32,8 +32,10 @@ export {
   type CmsPageIdentity,
   type CmsPageMetadataOptions,
   type CmsPageReads,
+  type CmsPageSeoFields,
   createCmsPageHelpers,
   createCmsPageReads,
+  defaultCmsPageSeoFields,
   type ResolvedCmsPage,
 } from "./pages";
 export {
@@ -47,6 +49,7 @@ export {
   cmsPostToBlogCard,
   createCmsPostReads,
   createCmsPostResolver,
+  hasOwnLocalPage,
   type LocalBlogCardPage,
   type LocalPostJsonLdFields,
   type LocalPostSourceLike,

@@ -3,6 +3,7 @@ import {
   buildCmsCacheKeyPrefix,
   cmsPostToBlogCard,
   createCmsIntegration,
+  hasOwnLocalPage,
   localPageToBlogCard,
   mergeBlogCardsByPath,
   readCmsEnvConfig,
@@ -246,5 +247,23 @@ describe("Blog card mappers", () => {
       author: undefined,
       image: undefined,
     });
+  });
+});
+
+describe("hasOwnLocalPage", () => {
+  const en = { data: { title: "EN" } };
+  const ja = { data: { title: "JA" } };
+  const pages: Record<string, typeof en | undefined> = { en, ja, "zh-CN": en };
+  const getPage = (locale: string) => pages[locale];
+
+  it("counts only a distinct data object as a real translation", () => {
+    expect(hasOwnLocalPage(getPage, "en", ["privacy"], "en")).toBe(true);
+    expect(hasOwnLocalPage(getPage, "ja", ["privacy"], "en")).toBe(true);
+    expect(hasOwnLocalPage(getPage, "zh-CN", ["privacy"], "en")).toBe(false);
+    expect(hasOwnLocalPage(getPage, "ko", ["privacy"], "en")).toBe(false);
+  });
+
+  it("counts any returned page without a default locale", () => {
+    expect(hasOwnLocalPage(getPage, "zh-CN", ["privacy"])).toBe(true);
   });
 });

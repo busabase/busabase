@@ -149,7 +149,11 @@ required — a partial configuration counts as "off"), plus the optional `BUSABA
 and the four `BUSABASE_CMS_{POSTS,PAGES,CATEGORIES,TAGS}_BASE_SLUG` per-deploy overrides.
 
 `createCmsPostResolver` adds the "CMS Post → bundled MDX → English fallback" cascade for
-`/blog/[...slug]` routes, and `createCmsPageHelpers` resolves a Page plus its metadata. The Page
+`/blog/[...slug]` routes, and `createCmsPageHelpers` resolves a Page plus its metadata. Two
+optional hooks cover app-specific Bases: `filterPage(page)` treats records another route owns as
+missing (Busabase Cloud drops `/blog/...` records from its Pages Base), and
+`resolveSeoFields(page)` picks the `<title>` / description fields (Buda prefers its own
+`meta-title` / `meta-description`; the default is `defaultCmsPageSeoFields`). The Page
 body sanitizer stays in `busabase-cms-sdk/fumadocs` (`getSanitizedCmsPageBody`) so that consumers of
 `busabase-cms-sdk/integration` do not pull remark/rehype/sanitize-html into their bundle.
 
