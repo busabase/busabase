@@ -40,9 +40,19 @@ export const baseContract = {
       tags: ["Bases"],
       summary: "List Bases",
       successDescription:
-        "Developer-facing Bases. `status=archived` returns the archived ones instead of the active ones.",
+        "Developer-facing Bases. `status=archived` returns the archived ones instead of the active ones. `fields=links` trims each Base to its relation and lookup fields.",
     })
-    .input(listByStatusInputSchema)
+    .input(
+      listByStatusInputSchema.extend({
+        fields: z
+          .enum(["all", "links"])
+          .optional()
+          .default("all")
+          .describe(
+            "`all` (default): every live field. `links`: only relation and lookup fields — enough to see how Bases connect (relation targets, lookups, inverse relations) across a large space, not to read or edit records. Fetch one Base with `bases.get` for its full schema.",
+          ),
+      }),
+    )
     .output(z.array(baseSchema)),
   get: oc
     .route({
@@ -166,7 +176,7 @@ export const baseContract = {
       tags: ["Bases", "Change Requests"],
       summary: "Create Base lifecycle change request",
       successDescription:
-        "Created change request that moves a Base between its lifecycle states. `operation` selects the direction: `archive` (soft-delete a live Base) or `restore` (bring an archived Base back).",
+        "Created change request that moves a Base between its lifecycle states. `operation` selects the direction: `archive` (soft-delete a live Base) or `restore` (bring an archived Base back). If another Base took the slug while this one was archived, the restore brings it back under the next free slug (`tasks-2`) and lists the change in `mergeSummary.slugChanges`.",
     })
     .input(baseLifecycleChangeRequestInputSchema)
     .output(changeRequestSchema),
@@ -195,7 +205,7 @@ export const recordContract = {
       tags: ["Records"],
       summary: "List a numbered record page",
       successDescription:
-        "A random-access page of active records. When viewId is supplied, the saved view is authoritatively filtered and sorted before total and page slicing are calculated. `dateRange` additionally scopes to a `[gte, lt)` UTC instant window on a date/created_time/updated_time field.",
+        "A random-access page of active records. When viewId is supplied, the saved view is authoritatively filtered and sorted before total and page slicing are calculated. An explicit `sort` (same shape as `records.list`'s) replaces the View's sort, so page N of a number- or date-sorted list is one request. `dateRange` additionally scopes to a `[gte, lt)` UTC instant window on a date/created_time/updated_time field.",
     })
     .input(listRecordsPageInputSchema)
     .output(listRecordsPageResponseSchema),

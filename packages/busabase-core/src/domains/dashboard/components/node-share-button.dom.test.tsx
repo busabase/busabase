@@ -19,11 +19,15 @@
  */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import { listNodeTypes, publicAccessOf } from "busabase-contract/domains";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { NodeShareDialog } from "./node-share-button";
+
+vi.mock("qrcode", () => ({
+  default: { toDataURL: vi.fn(async () => "data:image/png;base64,dGVzdA==") },
+}));
 
 class ResizeObserverStub {
   observe() {}
@@ -69,7 +73,7 @@ const fakeOrpc = (): BusabaseQueryUtils => {
   return node([]) as BusabaseQueryUtils;
 };
 
-const renderDialog = (nodeType: string) =>
+const renderDialog = (nodeType: string, nodeSlug = "thing") =>
   render(
     <QueryClientProvider
       client={new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })}
@@ -77,7 +81,7 @@ const renderDialog = (nodeType: string) =>
       <NodeShareDialog
         nodeId="nod_1"
         nodeName="Thing"
-        nodeSlug="thing"
+        nodeSlug={nodeSlug}
         nodeType={nodeType}
         onOpenChange={() => {}}
         open
@@ -182,5 +186,86 @@ describe("NodeShareDialog: a node made public by a shared ancestor", () => {
 
     await waitFor(() => expect(shareToWebSwitch()).not.toBeNull());
     expect(screen.queryByTestId("node-share-inherited")).toBeNull();
+  });
+});
+
+describe("NodeShareDialog: public QR link", () => {
+  afterEach(() => {
+    FIXTURES["nodes.share.get"] = {
+      scope: "none",
+      capability: "read",
+      hasPassword: false,
+      expiresAt: null,
+    };
+  });
+
+  it("shows a QR only for an active public link and encodes the displayed URL", async () => {
+    renderDialog("base");
+    await waitFor(() => expect(shareToWebSwitch()).not.toBeNull());
+    expect(screen.queryByRole("button", { name: "QR code" })).toBeNull();
+    cleanup();
+
+    FIXTURES["nodes.share.get"] = {
+      scope: "public",
+      capability: "read",
+      hasPassword: false,
+      expiresAt: null,
+    };
+    renderDialog("base");
+    const qrButton = await screen.findByRole("button", { name: "QR code" });
+    fireEvent.click(qrButton);
+    expect(await screen.findByAltText("QR code for this link")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Download PNG" })).toBeTruthy();
+    const { default: QRCode } = await import("qrcode");
+    expect(QRCode.toDataURL).toHaveBeenCalledWith(
+      (screen.getByTestId("node-share-public-url") as HTMLInputElement).value,
+      expect.objectContaining({ width: 512, margin: 4 }),
+    );
+  });
+
+  it.each(listNodeTypes().filter(({ type }) => publicAccessOf(type) !== "no"))(
+    "offers a QR for a public $type node",
+    async ({ type }) => {
+      FIXTURES["nodes.share.get"] = {
+        scope: "public",
+        capability: "read",
+        hasPassword: false,
+        expiresAt: null,
+      };
+      renderDialog(type);
+      expect(await screen.findByRole("button", { name: "QR code" })).toBeTruthy();
+    },
+  );
+
+  it("hides the QR for an expired public grant", async () => {
+    FIXTURES["nodes.share.get"] = {
+      scope: "public",
+      capability: "read",
+      hasPassword: false,
+      expiresAt: "2020-01-01T00:00:00.000Z",
+    };
+    renderDialog("base");
+    await waitFor(() => expect(shareToWebSwitch()?.getAttribute("data-state")).toBe("unchecked"));
+    expect(screen.queryByRole("button", { name: "QR code" })).toBeNull();
+  });
+
+  it("keeps a Base share URL stable when its slug changes", async () => {
+    FIXTURES["nodes.share.get"] = {
+      scope: "public",
+      capability: "read",
+      hasPassword: false,
+      expiresAt: null,
+    };
+    const first = renderDialog("base", "original-name");
+    const firstUrl = ((await screen.findByTestId("node-share-public-url")) as HTMLInputElement)
+      .value;
+    expect(firstUrl).toContain("/base/nod_1");
+    first.unmount();
+    cleanup();
+
+    renderDialog("base", "renamed-base");
+    const renamedUrl = ((await screen.findByTestId("node-share-public-url")) as HTMLInputElement)
+      .value;
+    expect(renamedUrl).toBe(firstUrl);
   });
 });

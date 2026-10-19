@@ -9,13 +9,8 @@
 import type { FieldType, LookupRollup } from "busabase-contract/types";
 import { type iString, iStringParse, type LocaleType } from "openlib/i18n/i-string";
 import { parseDocument } from "yaml";
-import {
-  evaluateFormula,
-  type FieldResolver,
-  FormulaError,
-  type FormulaValue,
-  serializeFormulaResult,
-} from "./formula";
+import { FormulaError, type FormulaValue } from "./formula";
+import { evaluateFormulaField } from "./formula/evaluation";
 import { validateEmbedUrl } from "./utils/embed";
 import { WhiteboardFieldValueSchema } from "./utils/whiteboard-value";
 
@@ -51,6 +46,9 @@ export interface FieldDef {
     };
     formula?: {
       expression: string;
+      format?: "auto" | "number" | "currency" | "percent" | "date";
+      precision?: number;
+      currency?: string;
     };
     lookup?: {
       relationFieldSlug: string;
@@ -405,56 +403,26 @@ const computeCreatedBy = (c: SystemComputeCtx) =>
 const computeAutoNumber = (c: SystemComputeCtx) =>
   c.mode === "create" ? c.nextAutoNumber(c.slug) : (c.existing[c.slug] ?? c.nextAutoNumber(c.slug));
 
-const coerceForFormula = (rawValue: unknown, type: FieldType): FormulaValue => {
-  if (rawValue === undefined || rawValue === null) return null;
-  if (type === "number") {
-    const n = typeof rawValue === "number" ? rawValue : Number(rawValue);
-    return Number.isFinite(n) ? n : null;
-  }
-  if (type === "checkbox") return Boolean(rawValue);
-  if (type === "date" || type === "created_time" || type === "updated_time") {
-    const date = new Date(rawValue as string | number);
-    return Number.isNaN(date.getTime()) ? null : date;
-  }
-  // `relation`/`multiselect` store an array of record ids / choice ids —
-  // pass through as-is so array functions (ARRAYJOIN etc.) can consume it.
-  // `attachment` stays null: its array holds ref OBJECTS, not scalars, and
-  // has no sensible formula-facing representation yet.
-  if (type === "relation" || type === "multiselect") {
-    return Array.isArray(rawValue) ? (rawValue as FormulaValue[]) : null;
-  }
-  if (
-    typeof rawValue === "string" ||
-    typeof rawValue === "number" ||
-    typeof rawValue === "boolean"
-  ) {
-    return rawValue;
-  }
-  return null;
-};
-
 const computeFormula = (c: SystemComputeCtx): FormulaValue => {
   const expression = c.def.options?.formula?.expression;
   if (!expression) return null;
-  const defsBySlug = new Map(c.defs.map((def) => [def.slug, def]));
-  const resolveField: FieldResolver = (slug) => {
-    const def = defsBySlug.get(slug);
-    return def ? coerceForFormula(c.values[slug], def.type) : null;
-  };
   try {
-    const result = evaluateFormula(expression, resolveField, {
+    return evaluateFormulaField({
+      expression,
+      slug: c.slug,
+      fields: c.defs,
+      values: c.values,
       recordId: c.recordId,
       createdAtIso: c.recordCreatedAtIso,
-      lastModifiedIso: c.timestampIso,
+      updatedAtIso: c.timestampIso,
     });
-    return serializeFormulaResult(result);
   } catch (error) {
     // A formula can transiently fail (e.g. a referenced field was deleted or
     // retyped after this formula was authored) — field-ops.ts validates the
     // expression at create/edit time, so a runtime failure here means stale
     // schema, not bad user input on THIS write. Fail soft (null) rather than
     // blocking every write to every OTHER field on the record.
-    if (error instanceof FormulaError) return null;
+    if (error instanceof FormulaError || error instanceof RangeError) return null;
     throw error;
   }
 };

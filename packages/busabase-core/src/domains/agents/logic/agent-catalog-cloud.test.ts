@@ -28,6 +28,17 @@ vi.mock("./buda-connection", () => ({
   getBudaConnection: mocks.getBudaConnection,
   listBudaConnections: mocks.listBudaConnections,
 }));
+vi.mock("./acprouter-origin-config", () => ({
+  resolveAcprouterEnrollmentOrigin: () => {
+    throw new Error("ACPROUTER_ENROLLMENT_ORIGIN must be set.");
+  },
+}));
+vi.mock("./router-connection", () => ({
+  listRouterConnections: vi.fn(async () => []),
+  resolveRouterConnectionLaunch: vi.fn(async () => {
+    throw new Error("not connected");
+  }),
+}));
 
 import { listCatalog, resolveLaunch } from "./agent-catalog";
 

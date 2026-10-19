@@ -4,16 +4,10 @@ import type { AcpAttachment, AcpBlock } from "@acp-ui/core/reduce";
 import { AcpComposer, type AcpComposerDraft } from "@acp-ui/web/composer";
 import { AcpSessionMeta } from "@acp-ui/web/session-meta";
 import { AcpConversation } from "@acp-ui/web/transcript";
-import {
-  type InfiniteData,
-  useInfiniteQuery,
-  useMutation,
-  useQuery,
-  useQueryClient,
-} from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { hasApiKeyLevel } from "busabase-contract/access-control/api-key-level";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
-import type { AgentSessionsPageVO, AgentSessionVO } from "busabase-contract/domains/agents/types";
+import type { AgentSessionVO } from "busabase-contract/domains/agents/types";
 import { Message, MessageContent } from "kui/ai-elements/message";
 import { Button } from "kui/button";
 import {
@@ -40,7 +34,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { type CoreI18nMessages, fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
 import { presentCoreError } from "../../../i18n/localize-error";
-import { resolveSpaceId } from "../../dashboard/components/node-agent-prompts-dialog";
+import { useAgentIntegrationTarget } from "../../dashboard/agent-integration-context";
 import { ConfirmActionDialog } from "../../dashboard/components/primitives";
 import {
   AGENT_CHAT_TAB_TYPE,
@@ -54,11 +48,22 @@ import type { LoadedNode } from "../../dashboard/node-detail-registry";
 import { registerSidePanelTab, type SidePanelTabProps } from "../../dashboard/side-panel-registry";
 import { useCurrentNodeStore } from "../../dashboard/store/current-node-store";
 import { useSidePanelStore } from "../../dashboard/store/side-panel-store";
-import { useAgentSession } from "../hooks/use-agent-session";
+import { useAgentModelScope } from "../agent-model-scope-context";
+import { type AgentSessionStatusUpdate, useAgentSession } from "../hooks/use-agent-session";
+import {
+  agentModelCatalogScope,
+  toAgentModelCatalogEntry,
+  toAgentModelCatalogTombstone,
+  useAgentModelListStore,
+} from "../store/agent-model-list-store";
 import { withNodeContext } from "../utils/agent-message-context";
 import { sendOrContinueAgentPrompt } from "../utils/agent-session-continuation";
 import { shouldRenderAgentMessage } from "../utils/agent-visible-message";
-import { getPromptActivityState, isComposerDisabled } from "../utils/prompt-activity";
+import {
+  getPromptActivityState,
+  isComposerDisabled,
+  isModelSelectorDisabled,
+} from "../utils/prompt-activity";
 import { AgentLoadingState, AgentQueryErrorState } from "./agent-query-state";
 import { ModelSelectorRow } from "./model-selector-row";
 import { TransportBadge } from "./transport-badge";
@@ -176,19 +181,24 @@ function AgentActivityIndicator({ label }: { label: string }) {
 const isSessionAlreadyGone = (error: unknown): boolean =>
   error instanceof Error && error.message.startsWith("Unknown agent session:");
 
-const updateSessionPages = (
-  previous: InfiniteData<AgentSessionsPageVO> | undefined,
-  update: (session: AgentSessionVO) => AgentSessionVO,
-) =>
-  previous
-    ? {
-        ...previous,
-        pages: previous.pages.map((page) => ({
-          ...page,
-          items: page.items.map(update),
-        })),
-      }
-    : previous;
+/**
+ * Overlay a locally-known session onto the server-derived list so it is
+ * visible the instant a mutation resolves, without writing into the query
+ * cache: `bridged` wins over any row the query already carries for the same
+ * id (a response can be stricter/fresher than a 4s-stale poll), and is
+ * prepended when the list doesn't have it yet. Retire the bridge once a
+ * query response actually contains it — see the `useEffect` below — so a
+ * later authoritative refetch is what ends up owning that row, never this
+ * overlay.
+ */
+const overlaySessionBridge = (
+  sessions: readonly AgentSessionVO[],
+  bridged: AgentSessionVO | null,
+): AgentSessionVO[] => {
+  if (!bridged) return [...sessions];
+  const withoutBridged = sessions.filter((session) => session.id !== bridged.id);
+  return [bridged, ...withoutBridged];
+};
 
 interface AgentDetailViewProps {
   orpc: BusabaseQueryUtils;
@@ -245,7 +255,12 @@ interface AgentDetailViewProps {
  * navigates into — connecting a *new* agent type happens on the Add page, not
  * here.
  */
-export function AgentDetailView({
+export function AgentDetailView(props: AgentDetailViewProps) {
+  const scope = useAgentModelScope();
+  return <AgentDetailViewContent key={JSON.stringify([scope, props.agentSlug])} {...props} />;
+}
+
+function AgentDetailViewContent({
   orpc,
   agentSlug,
   onBack,
@@ -260,6 +275,43 @@ export function AgentDetailView({
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(
     initialSessionId ?? null,
   );
+  /**
+   * The session a `create`/`setConfigOption` response just confirmed, kept
+   * here — not in the query cache — until a real query response contains it.
+   * `agentSessions` overlays this onto the server-derived list so the UI
+   * reflects a mutation's result immediately without a `setQueryData` write
+   * that an unrelated later refetch could then stomp on, or that could stomp
+   * on a fresher concurrent refetch itself.
+   */
+  const [sessionBridge, setSessionBridge] = useState<AgentSessionVO | null>(null);
+  const bridgeQueryTime = useRef(0);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  // Mirrors `sessionBridge` for callbacks that must read its latest value
+  // without taking it as a dependency — see `handleMetadataRefresh` below.
+  // Depending on `sessionBridge` directly would give that callback a new
+  // identity on every bridge update, and since it is passed into
+  // `useAgentSession` as `onMetadataRefresh`, that would recreate the
+  // `AcpSessionPort` and tear down/reopen the live subscription for no
+  // reason other than a bridge write.
+  const sessionBridgeRef = useRef(sessionBridge);
+  useEffect(() => {
+    sessionBridgeRef.current = sessionBridge;
+  }, [sessionBridge]);
+  /**
+   * The subscription's live status for the active session, applied on top of
+   * both the query-derived list and the session bridge above. Replaces the
+   * previous `setQueryData` patch from `use-agent-session.ts`: a status
+   * notification is a UI-only annotation now, not a cache write a refetch
+   * could race. Cleared whenever the active session changes, since a status
+   * notification is only ever about the session the subscription is open on.
+   */
+  const [statusOverlay, setStatusOverlay] = useState<AgentSessionStatusUpdate | null>(null);
 
   // Follow the caller's target when it changes. This is what makes a SECOND
   // Ask Agent — about a different node, in the already-open tab — switch the
@@ -307,17 +359,55 @@ export function AgentDetailView({
     [orpc, queryClient, sessionListOptions.queryKey],
   );
 
-  const agentSessions = useMemo(
-    () => [
-      ...new Map(
-        (sessions.data?.pages.flatMap((page) => page.items) ?? []).map((session) => [
-          session.id,
-          session,
-        ]),
-      ).values(),
-    ],
-    [sessions.data],
+  const applyStatusOverlay = useCallback(
+    (session: AgentSessionVO): AgentSessionVO =>
+      statusOverlay &&
+      statusOverlay.sessionId === session.id &&
+      // A poll that already landed a `lastActivityAt` at least as recent as
+      // the overlay is, by definition, at least as fresh — defer to it so a
+      // slow-to-retire overlay can never hold a session on a status the
+      // server has since moved past.
+      session.lastActivityAt <= statusOverlay.lastActivityAt
+        ? {
+            ...session,
+            status: statusOverlay.status,
+            lastActivityAt: statusOverlay.lastActivityAt,
+            ...(statusOverlay.error ? { error: statusOverlay.error } : {}),
+          }
+        : session,
+    [statusOverlay],
   );
+
+  const agentSessions = useMemo(
+    () =>
+      overlaySessionBridge(
+        [
+          ...new Map(
+            (sessions.data?.pages.flatMap((page) => page.items) ?? []).map((session) => [
+              session.id,
+              session,
+            ]),
+          ).values(),
+        ],
+        sessionBridge,
+      ).map(applyStatusOverlay),
+    [sessions.data, sessionBridge, applyStatusOverlay],
+  );
+
+  // Retire only after a query result newer than the mutation's snapshot.
+  // Session activity timestamps do not advance for every config change.
+  useEffect(() => {
+    if (!sessionBridge) return;
+    const pages = sessions.data?.pages.flatMap((page) => page.items) ?? [];
+    const caughtUp = pages.find((item) => item.id === sessionBridge.id);
+    if (
+      caughtUp &&
+      sessions.dataUpdatedAt > bridgeQueryTime.current &&
+      caughtUp.lastActivityAt >= sessionBridge.lastActivityAt
+    ) {
+      setSessionBridge(null);
+    }
+  }, [sessionBridge, sessions.data, sessions.dataUpdatedAt]);
 
   // Derived, not effect-driven: a manual selection wins only while it still
   // names one of *this* agent's sessions. Switching agentSlug (or the
@@ -332,9 +422,158 @@ export function AgentDetailView({
   }, [selectedSessionId, agentSessions]);
   const active = agentSessions.find((s) => s.id === activeSessionId) ?? null;
 
+  // SSR and the first client render both see an empty, stable snapshot
+  // (`skipHydration: true`); this is what reads the real one in afterward.
+  useEffect(() => {
+    if (!useAgentModelListStore.persist.hasHydrated()) {
+      void useAgentModelListStore.persist.rehydrate();
+    }
+  }, []);
+
+  const modelScope = useAgentModelScope();
+  const catalogScope = useMemo(
+    () =>
+      agentModelCatalogScope(
+        modelScope.host,
+        modelScope.workspaceKey,
+        modelScope.actorId,
+        agentSlug,
+      ),
+    [modelScope, agentSlug],
+  );
+  const setCatalog = useAgentModelListStore((state) => state.setCatalog);
+  const cachedCatalog = useAgentModelListStore((state) => state.getCatalog(catalogScope));
+  const lastStatusSeqRef = useRef<number>(-1);
+  // The highest metadata-refresh request generation issued so far. Each
+  // `onMetadataRefresh` signal starts a new generation; a fetch that resolves
+  // after a NEWER generation has already started must not write — the newer
+  // signal means something has already superseded whatever that fetch saw.
+  const metadataRequestGenerationRef = useRef(0);
+  // The scope a request generation was issued under. A workspace/account
+  // switch bumps `catalogScope` without necessarily bumping the generation
+  // counter on its own, so this is checked independently before any write.
+  const metadataRequestScopeRef = useRef(catalogScope);
+
+  // A workspace/account switch changes `catalogScope` while this view can
+  // stay mounted (the dashboard root re-renders the provider, not this
+  // component). Everything keyed on the OLD scope — the bridge, the status
+  // overlay, their fencing refs, and any metadata request already in
+  // flight — must drop immediately: carrying any of it across the switch
+  // could show one actor's in-flight session state, or write one actor's
+  // confirmed catalog, under another actor's scope.
+  useEffect(() => {
+    setSessionBridge(null);
+    setStatusOverlay(null);
+    lastStatusSeqRef.current = -1;
+    metadataRequestGenerationRef.current += 1;
+    metadataRequestScopeRef.current = catalogScope;
+  }, [catalogScope]);
+
+  /**
+   * Confirmed, live metadata only — never derived from whichever session the
+   * user happens to be viewing, and never from a `create` response.
+   *
+   * Triggered exclusively by `use-agent-session`'s `onMetadataRefresh`
+   * signal, which fires only on the subscription's own first-readiness and
+   * config-option-update events — never on the plain 4s poll. On that
+   * signal, this issues its OWN explicit RPC (not a derivation of the
+   * component's current `active`/render state) to fetch this agent's fresh
+   * session list, finds the row the signal was about, and — only if that
+   * session is still the newest LIVE session for this agent (by
+   * `lastActivityAt` among non-terminal rows, folding in the session bridge
+   * so a just-created session counts immediately) — writes its `modelOption`
+   * to the shared catalog, including an explicit `null` write when the fresh
+   * row confirms no model option (a revoked capability must clear a stale
+   * cached entry, not leave it standing).
+   *
+   * Request-generation fenced: a scope switch (handled above) or a NEWER
+   * metadata-refresh signal for the same scope bumps the generation before
+   * this resolves, and a stale generation's result is discarded rather than
+   * written — ordering follows signal arrival, not RPC completion order.
+   */
+  const handleMetadataRefresh = useCallback(
+    (signal: { sessionId: string; seq: number }) => {
+      const generation = ++metadataRequestGenerationRef.current;
+      const requestScope = catalogScope;
+      metadataRequestScopeRef.current = requestScope;
+      void orpc.agents.sessions.listPaged
+        // `listPaged` sorts by `lastActivityAt` descending (same as the
+        // unpaged `list`), so the newest-live session for this agent is
+        // always on page 1 regardless of how many older sessions exist below
+        // the cap — no need to page through everything. `limit` is capped at
+        // 50 server-side (`ListAgentSessionsPagedInputSchema`); passing more
+        // would fail input validation.
+        .call({ slug: agentSlug, limit: 50 })
+        .then((page) => {
+          if (
+            !mounted.current ||
+            metadataRequestGenerationRef.current !== generation ||
+            metadataRequestScopeRef.current !== requestScope
+          ) {
+            return;
+          }
+          const signaledSession = page.items.find((item) => item.id === signal.sessionId);
+          if (
+            !signaledSession ||
+            !["idle", "busy", "waiting_permission"].includes(signaledSession.status)
+          )
+            return;
+          // "Newest LIVE session for this agent" — not "the session the user
+          // happens to have open". A historical, already-ready session the
+          // user clicked into in the rail must never be mistaken for the
+          // agent's current handshake just because it also satisfies
+          // readiness; only the most-recently-active non-terminal session
+          // (folding in the bridge, so a session this view just created wins
+          // immediately even before the fresh query row's `lastActivityAt`
+          // catches up) is allowed to write the catalog.
+          const liveCandidates = [
+            ...page.items,
+            ...(sessionBridgeRef.current ? [sessionBridgeRef.current] : []),
+          ].filter((item) => item.status !== "ended" && item.status !== "failed");
+          const newestLive = liveCandidates.reduce<AgentSessionVO | null>(
+            (newest, item) =>
+              !newest || item.lastActivityAt > newest.lastActivityAt ? item : newest,
+            null,
+          );
+          if (!newestLive || newestLive.id !== signaledSession.id) return;
+          setSessionBridge(signaledSession);
+          setCatalog(
+            requestScope,
+            signaledSession.modelOption
+              ? toAgentModelCatalogEntry(
+                  signaledSession.modelOption,
+                  signaledSession.lastActivityAt,
+                )
+              : toAgentModelCatalogTombstone(signaledSession.lastActivityAt),
+          );
+        })
+        .catch(() => {
+          // Best-effort refresh: a failed fetch leaves the existing cached
+          // catalog (or lack thereof) exactly as it was. The next readiness
+          // or config-option signal gets another chance; there is nothing
+          // useful to surface to the user over a missed background refresh.
+        });
+    },
+    [agentSlug, catalogScope, orpc, setCatalog],
+  );
+
   const createSession = useMutation({
     ...orpc.agents.sessions.create.mutationOptions(),
     onSuccess: (session: AgentSessionVO) => {
+      if (!mounted.current) return;
+      // Bridge the response into the rendered list immediately — it already
+      // carries the (provisional) `modelOption` from PUL-307's connecting-state
+      // cache — rather than waiting on the invalidation below. `agentSessions`,
+      // and so `active`, is derived from this bridge plus the two queries, so
+      // without it a newly created session falls back to the previous
+      // `activeSessionId` (or null) until the refetch lands, and the composer
+      // footer shows the PREVIOUS session's model, or none, for that window.
+      // The persisted catalog itself is NOT written here — only
+      // `handleMetadataRefresh`'s own fresh RPC fetch, triggered by the
+      // subscription's first-readiness signal once ACP actually connects, is
+      // trusted to confirm it.
+      bridgeQueryTime.current = sessions.dataUpdatedAt;
+      setSessionBridge(session);
       setSelectedSessionId(session.id);
       void refreshSessionLists();
     },
@@ -346,20 +585,19 @@ export function AgentDetailView({
   const setConfigOption = useMutation({
     ...orpc.agents.sessions.setConfigOption.mutationOptions(),
     onSuccess: (session: AgentSessionVO) => {
-      // Replace, not merge: the response carries the agent's complete,
-      // possibly-changed config state (e.g. a reasoning-effort option tied to
-      // the new model), and the cache should reflect exactly that rather than
-      // a stale local guess.
-      queryClient.setQueryData<InfiniteData<AgentSessionsPageVO>>(
-        sessionListOptions.queryKey,
-        (previous) =>
-          updateSessionPages(previous, (item) => (item.id === session.id ? session : item)),
-      );
-      queryClient.setQueryData(
-        orpc.agents.sessions.list.queryKey(),
-        (previous: AgentSessionVO[] | undefined) =>
-          previous?.map((item) => (item.id === session.id ? session : item)),
-      );
+      if (!mounted.current) return;
+      // Bridge the response into the rendered list immediately for the same
+      // reason session creation does. The persisted catalog write still
+      // comes only from `handleMetadataRefresh`, driven by this mutation's
+      // own `config_option_update` event on the subscription — not from this
+      // response directly — so the same newest-live-session fence applies
+      // uniformly to every write path instead of this mutation getting a
+      // shortcut around it.
+      metadataRequestGenerationRef.current += 1;
+      bridgeQueryTime.current = sessions.dataUpdatedAt;
+      setSessionBridge(session);
+      handleMetadataRefresh({ sessionId: session.id, seq: 0 });
+      void refreshSessionLists();
     },
   });
 
@@ -383,7 +621,31 @@ export function AgentDetailView({
   // busabase's own.
   const messages = useCoreI18n();
   const locale = useCoreLocale();
-  const chat = useAgentSession(orpc, activeSessionId, sessionListOptions.queryKey);
+  const targetSpaceId = useAgentIntegrationTarget()?.targetSpaceId;
+  const handleStatusUpdate = useCallback((update: AgentSessionStatusUpdate) => {
+    // Reject a replayed-but-stale status: the subscription resumes from
+    // `afterSeq` on every reconnect, so a seq at or below the last one
+    // already applied is a redelivery, not new information, and applying it
+    // again could stomp a status a newer poll has since reported.
+    if (update.seq <= lastStatusSeqRef.current) return;
+    lastStatusSeqRef.current = update.seq;
+    setStatusOverlay(update);
+  }, []);
+  const chat = useAgentSession(
+    orpc,
+    activeSessionId,
+    sessionListOptions.queryKey,
+    handleStatusUpdate,
+    handleMetadataRefresh,
+  );
+  // A status notification only ever concerns the session the subscription is
+  // currently open on. Switching sessions must not let the previous one's
+  // last-known status linger and get applied to the newly active row.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only the trigger (activeSessionId changing) matters, not a value read in the body.
+  useEffect(() => {
+    setStatusOverlay(null);
+    lastStatusSeqRef.current = -1;
+  }, [activeSessionId]);
   const promptActivity = active
     ? getPromptActivityState(active.status, chat.sending || continuing)
     : { active: false, starting: false };
@@ -508,7 +770,7 @@ export function AgentDetailView({
       // you mean"), so it is kept here, at send time, rather than by pre-filling
       // the textbox — which would make the user delete the line to opt out and
       // leave them editing our words instead of writing their own.
-      const body = withNodeContext(text, activeContextNode, locale, resolveSpaceId());
+      const body = withNodeContext(text, activeContextNode, locale, targetSpaceId);
       const operationId = ++turnOperationCounter.current;
       let operationSessionId = active.id;
       const operationSessionIds = new Set([operationSessionId]);
@@ -608,6 +870,7 @@ export function AgentDetailView({
       messages,
       orpc,
       refreshSessionLists,
+      targetSpaceId,
     ],
   );
 
@@ -618,7 +881,36 @@ export function AgentDetailView({
     connections.data !== undefined &&
     !connections.data.some((connection) => connection.slug === agentSlug && connection.connected);
 
-  if (sessions.isPending) {
+  /**
+   * Shown while no confirmed `modelOption` exists yet (startup, or before any
+   * session for this agent has ever answered). Built from the id/name/options
+   * triple only — never a remembered `currentValue` — because the cache can
+   * only ever answer "what choices does this agent generally offer", not
+   * "what is THIS session's live selection". Remote startup choices are
+   * applied only after the server confirms readiness and validates them.
+   */
+  const cachedModelPreview = useMemo(
+    () =>
+      active?.modelOption || !cachedCatalog || cachedCatalog.configId === null
+        ? null
+        : {
+            id: cachedCatalog.configId,
+            name: cachedCatalog.name,
+            // Deliberately NOT `cachedCatalog.options[0]?.value`: the cache
+            // never recorded which option this session actually had selected
+            // (see `AgentModelCatalogEntry`'s doc comment), so inferring one
+            // from list order would show a choice nobody confirmed. An empty,
+            // unconfirmed placeholder is correct here — `ModelSelectorRow` is
+            // rendered `disabled` in this branch regardless (see `disabled`
+            // below), so there is no selected-looking affordance to mislead.
+            currentValue: "",
+            options: cachedCatalog.options,
+          },
+    [active?.modelOption, cachedCatalog],
+  );
+  const displayModelOption = active?.modelOption ?? cachedModelPreview;
+
+  if (sessions.isPending && !sessionBridge) {
     return <AgentLoadingState />;
   }
 
@@ -1012,10 +1304,17 @@ export function AgentDetailView({
                   ) : undefined
                 }
                 footerControls={
-                  active.modelOption ? (
+                  displayModelOption ? (
                     <ModelSelectorRow
-                      modelOption={active.modelOption}
-                      disabled={setConfigOption.isPending || active.status !== "idle"}
+                      modelOption={displayModelOption}
+                      disabled={
+                        !active ||
+                        isModelSelectorDisabled(
+                          active.status,
+                          active.transport,
+                          setConfigOption.isPending,
+                        )
+                      }
                       error={
                         setConfigOption.error
                           ? presentCoreError(
@@ -1029,7 +1328,7 @@ export function AgentDetailView({
                       onChange={(value) =>
                         setConfigOption.mutate({
                           sessionId: active.id,
-                          configId: active.modelOption?.id ?? "",
+                          configId: displayModelOption.id,
                           value,
                         })
                       }

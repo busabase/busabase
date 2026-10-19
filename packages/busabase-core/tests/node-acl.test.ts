@@ -261,6 +261,65 @@ describe("node ACL", () => {
     );
   });
 
+  it("creates Skills/AirApps/Drives visible to members unless asked to be private", async () => {
+    // These used to default to `private` on both create paths, so a node a
+    // member made in an open space came out visible only to its creator and
+    // the managers — unlike a Doc or Base created the same way.
+    await seedScenario("acl-filetree-default");
+    const raw: RawClient = createRouterClient(busabaseRouter);
+
+    const ids = await asManager("alice", async () => {
+      // API / CLI / MCP path.
+      const skill = await raw.fileTrees.create({
+        type: "skill",
+        slug: "team-skill",
+        name: "Team Skill",
+        autoMerge: true,
+      });
+      if (!skill.materialized) throw new Error("expected materialized skill");
+      // Dashboard "new" path: a node_create ChangeRequest merged through the
+      // type's materializer.
+      const cr = await raw.nodes.createChangeRequest({
+        message: "Create AirApp",
+        operations: [
+          { kind: "create", ref: "a", nodeType: "airapp", slug: "team-app", name: "Team App" },
+        ],
+        autoMerge: true,
+      });
+      const airappId = cr.mergeSummary?.mergedNodeIds?.[0] as string;
+      expect(airappId).toBeTruthy();
+      const hidden = await raw.fileTrees.create({
+        type: "drive",
+        slug: "hidden-drive",
+        name: "Hidden Drive",
+        visibility: "private",
+        autoMerge: true,
+      });
+      if (!hidden.materialized) throw new Error("expected materialized drive");
+      return { skillId: skill.node.id, airappId, hiddenId: hidden.node.id };
+    });
+
+    await asMember("bob", async () => {
+      const skill = await raw.nodes.get({ nodeId: ids.skillId, type: "skill" });
+      expect(skill.visibility).toBe("workspace");
+      const airapp = await raw.nodes.get({ nodeId: ids.airappId, type: "airapp" });
+      expect(airapp.visibility).toBe("workspace");
+      await expect(raw.nodes.get({ nodeId: ids.hiddenId, type: "drive" })).rejects.toMatchObject({
+        code: "NOT_FOUND",
+      });
+    });
+    // A restricted space still hides a node that declares nothing.
+    await asMember(
+      "bob",
+      async () => {
+        await expect(raw.nodes.get({ nodeId: ids.skillId, type: "skill" })).rejects.toMatchObject({
+          code: "NOT_FOUND",
+        });
+      },
+      { restricted: true },
+    );
+  });
+
   it("enforces the changeRequest level gate: read can view but not propose", async () => {
     await seedScenario("acl-cr-gate");
     const raw: RawClient = createRouterClient(busabaseRouter);

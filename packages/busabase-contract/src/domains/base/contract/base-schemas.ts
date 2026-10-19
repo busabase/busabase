@@ -62,8 +62,16 @@ export const lookupRollupSchema = z
   .enum(["values", "count", "sum", "average", "min", "max", "concatenate"])
   .default("values");
 
+/** Public, plain-text guidance. Examples are hints, never default record values. */
+export const fieldHelpSchema = z.object({
+  description: z.string().max(1000).optional(),
+  example: z.string().max(200).optional(),
+});
+export type FieldHelp = z.infer<typeof fieldHelpSchema>;
+
 export const fieldOptionsSchema = z
   .object({
+    help: fieldHelpSchema.optional(),
     ai: z
       .object({
         model: z.string().optional(),
@@ -124,6 +132,12 @@ export const fieldOptionsSchema = z
     formula: z
       .object({
         expression: z.string().min(1),
+        format: z.enum(["auto", "number", "currency", "percent", "date"]).optional(),
+        precision: z.number().int().min(0).max(10).optional(),
+        currency: z
+          .string()
+          .regex(/^[A-Z]{3}$/)
+          .optional(),
       })
       .optional(),
     inverseFieldId: z.string().optional(),
@@ -281,7 +295,11 @@ export const updateFieldChangeRequestInputSchema = z.object({
   patch: z.object({
     name: fieldNameSchema.optional(),
     required: z.boolean().optional(),
-    options: fieldOptionsSchema.optional(),
+    // The read/create options schema has a {} default. Unwrap it here: omission
+    // means no settings change, rather than replacing the settings with {}.
+    options: fieldOptionsSchema.removeDefault().optional(),
+    /** Applied against current options at merge time; null removes all guidance. */
+    help: fieldHelpSchema.nullable().optional(),
     /**
      * Not a patch key — rejected on purpose, and the only key here that is.
      *

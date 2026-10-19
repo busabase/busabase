@@ -1,13 +1,18 @@
+// @vitest-environment jsdom
+
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
+import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { RecordVO } from "busabase-contract/types";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { Router } from "wouter";
 import { CoreI18nProvider } from "../../../i18n";
+import { DashboardOrpcProvider } from "../orpc-context";
 import { DashboardVisitorProvider } from "../visitor-context";
-import { RecordDetailView } from "./record-views";
+import { RecordDetailView, RecordEditorView } from "./record-views";
 
 Object.assign(globalThis, { React });
 
@@ -82,6 +87,145 @@ const renderRecord = (visitorKind: "anonymous" | "member") =>
     </QueryClientProvider>,
   );
 
+afterEach(cleanup);
+
+describe("Record editor draft", () => {
+  function editor(
+    recordValue: RecordVO,
+    submit = vi.fn().mockResolvedValue(undefined),
+    onError = vi.fn(),
+  ) {
+    return (
+      <Router hook={useStaticLocation} searchHook={() => ""}>
+        <CoreI18nProvider locale="en">
+          <RecordEditorView
+            base={recordValue.base}
+            client={client}
+            mode="edit"
+            record={recordValue}
+            records={[recordValue]}
+            onSubmitError={onError}
+            onSubmitUpdate={submit}
+          />
+        </CoreI18nProvider>
+      </Router>
+    );
+  }
+  it("a background refresh does not erase a dirty draft, but another record resets it", () => {
+    const view = render(editor(record));
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Draft name" } });
+    view.rerender(
+      editor({ ...record, headCommit: { ...record.headCommit, payload: { name: "Server name" } } }),
+    );
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Draft name");
+    view.rerender(
+      editor({
+        ...record,
+        id: "rec_other",
+        headCommit: { ...record.headCommit, payload: { name: "Another record" } },
+      }),
+    );
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Another record");
+  });
+  it("failed saves preserve the draft and allow retry", async () => {
+    const submit = vi.fn().mockRejectedValueOnce(new Error("offline")).mockResolvedValue(undefined);
+    const onError = vi.fn();
+    render(editor(record, submit, onError));
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Keep me" } });
+    fireEvent.click(screen.getByRole("button", { name: "Update Now" }));
+    await waitFor(() => expect(onError).toHaveBeenCalledWith("offline"));
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Keep me");
+    fireEvent.click(screen.getByRole("button", { name: "Update Now" }));
+    await waitFor(() => expect(submit).toHaveBeenCalledTimes(2));
+    expect(submit.mock.calls[1]?.[1]).toEqual({ name: "Keep me" });
+  });
+  it("sends only edited fields so a refreshed untouched value cannot be overwritten", async () => {
+    const submit = vi.fn().mockResolvedValue(undefined);
+    const withScore = {
+      ...record,
+      base: {
+        ...record.base,
+        fields: [
+          ...record.base.fields,
+          {
+            id: "score",
+            slug: "score",
+            name: "Score",
+            type: "number",
+            required: false,
+            options: {},
+            position: 1,
+          },
+        ],
+      },
+      headCommit: { ...record.headCommit, payload: { name: "Original", score: 80 } },
+    } as RecordVO;
+    const view = render(editor(withScore, submit));
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Draft name" } });
+    view.rerender(
+      editor(
+        {
+          ...withScore,
+          headCommitId: "cmt_refreshed",
+          headCommit: { ...withScore.headCommit, payload: { name: "Original", score: 90 } },
+        },
+        submit,
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Update Now" }));
+    await waitFor(() => expect(submit).toHaveBeenCalledTimes(1));
+    expect(submit.mock.calls[0]?.[1]).toEqual({ name: "Draft name" });
+    expect(submit.mock.calls[0]?.[0].headCommitId).toBe("cmt_preview");
+  });
+  it("cancelling the discard prompt keeps the editor draft", () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    render(editor(record));
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Keep me" } });
+    fireEvent.click(screen.getByRole("link", { name: "Cancel" }));
+    expect(confirm).toHaveBeenCalledWith("Discard unsaved changes and leave this record?");
+    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Keep me");
+    confirm.mockRestore();
+  });
+});
+
+const renderRecordShare = (publicState: "private" | "public" | "inherited") => {
+  const baseNode = {
+    id: record.base.nodeId,
+    children: [],
+    shared: publicState === "public",
+    sharedViaAncestor: publicState === "inherited",
+  };
+  const orpc = {
+    nodes: {
+      list: {
+        queryOptions: () => ({ queryKey: ["nodes", "list"], queryFn: async () => [baseNode] }),
+      },
+    },
+  } as unknown as BusabaseQueryUtils;
+  render(
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
+      <DashboardOrpcProvider orpc={orpc}>
+        <Router hook={useStaticLocation} searchHook={() => ""}>
+          <CoreI18nProvider locale="en">
+            <DashboardVisitorProvider visitorKind="member">
+              <RecordDetailView
+                baseSlug="customers"
+                client={client}
+                onDeleteChangeRequest={async () => undefined}
+                record={record}
+                records={[record]}
+              />
+            </DashboardVisitorProvider>
+          </CoreI18nProvider>
+        </Router>
+      </DashboardOrpcProvider>
+    </QueryClientProvider>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Share" }));
+};
+
 describe("Record detail layout", () => {
   it("lets anonymous embed content fill the available width", () => {
     const markup = renderRecord("anonymous");
@@ -97,4 +241,21 @@ describe("Record detail layout", () => {
     expect(markup).toContain("max-w-[860px]");
     expect(markup).toContain("lg:grid-cols-[minmax(0,1fr)_auto]");
   });
+});
+
+describe("Record sharing", () => {
+  it("keeps the internal link copyable without offering a QR before public sharing is active", async () => {
+    renderRecordShare("private");
+    expect(await screen.findByRole("dialog")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Copy link" })).toBeTruthy();
+    await waitFor(() => expect(screen.queryByRole("button", { name: "QR code" })).toBeNull());
+  });
+
+  it.each(["public", "inherited"] as const)(
+    "offers the record QR when its Base is %s",
+    async (publicState) => {
+      renderRecordShare(publicState);
+      expect(await screen.findByRole("button", { name: "QR code" })).toBeTruthy();
+    },
+  );
 });

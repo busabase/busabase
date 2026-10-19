@@ -19,6 +19,7 @@ import {
   createMcpAgentGuides,
   createMcpEndpoint,
   defaultMcpModeFor,
+  getConnectAgentUrl,
   getDefaultCloudMcpBaseUrl,
   isSameMcpOrigin,
   isValidMcpBaseUrl,
@@ -209,7 +210,6 @@ export function AgentIntegrationContent({
     mcpMode === "cloud" && edition === "cloud" && isSameMcpOrigin(mcpBaseUrl, origin)
       ? targetSpaceId
       : undefined;
-  const mcpGuideUrl = getMcpGuideUrl(lang);
   const openApiJsonUrl = `${origin}/api/v1/openapi.json`;
   const openApiDocUrl = `${origin}/api/v1/doc`;
 
@@ -549,7 +549,7 @@ export function AgentIntegrationContent({
                   <a
                     aria-label={`${guide.name}: ${messages.integration.openFullGuide}`}
                     className="inline-flex w-fit items-center gap-1 text-xs text-primary hover:underline"
-                    href={`${mcpGuideUrl}#${guide.docAnchor}`}
+                    href={getConnectAgentUrl(guide.connectAgentSlug, lang)}
                     rel="noreferrer"
                     target="_blank"
                   >
@@ -691,15 +691,6 @@ export function BusabaseAgentSkillButton({
       />
     </>
   );
-}
-
-/** Locales with a published `/docs/mcp` guide; every other UI language links the English one. */
-const MCP_DOC_LOCALES: readonly string[] = ["zh-CN", "ja"];
-
-function getMcpGuideUrl(lang?: string): string {
-  return lang && MCP_DOC_LOCALES.includes(lang)
-    ? `https://busabase.com/${lang}/docs/mcp`
-    : "https://busabase.com/docs/mcp";
 }
 
 /**

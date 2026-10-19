@@ -1,47 +1,39 @@
 import { mergeSearchIntoHref } from "openlib/ui/dashboard";
 import { describe, expect, it } from "vitest";
-import { type InboxViewKey, readInboxView } from "./inbox";
+import {
+  type InboxViewKey,
+  inboxNeighborPage,
+  readInboxQueueContext,
+  readInboxView,
+  writeInboxQueueContext,
+} from "./inbox";
 
-// The tab bar's own href expression (BusabaseListToolbar in ../components/inbox.tsx).
-// Kept here as a literal so this test fails loudly if the tab bar ever goes back
-// to emitting a bare "/inbox" for the default tab.
-const tabHref = (tab: InboxViewKey) => `/inbox?view=${tab}`;
-
+const tabHref = (tab: InboxViewKey) => `/inbox?view=${tab}&inboxPage=1`;
 const TABS: InboxViewKey[] = ["review", "changes", "created", "approved", "merged", "rejected"];
 
 describe("readInboxView", () => {
-  it("defaults to review when view is absent", () => {
+  it("defaults to review for absent or unknown values", () => {
     expect(readInboxView("")).toBe("review");
-    expect(readInboxView("?foo=bar")).toBe("review");
-  });
-
-  it("defaults to review when view is unrecognized", () => {
     expect(readInboxView("?view=nonsense")).toBe("review");
   });
 
-  it("round-trips every tab key, including the explicit review", () => {
-    for (const tab of TABS) {
-      expect(readInboxView(`?view=${tab}`)).toBe(tab);
-    }
+  it("round-trips every tab key", () => {
+    for (const tab of TABS) expect(readInboxView(`?view=${tab}`)).toBe(tab);
   });
 
-  it("keeps plain /inbox bookmarks (no view param) on the review tab", () => {
+  it("keeps plain /inbox bookmarks on the review tab", () => {
     expect(readInboxView("?panel=open")).toBe("review");
   });
 });
 
 describe("inbox tab navigation through SPALink's query merge", () => {
-  // The regression this file exists for: SPALink merges the CURRENT query
-  // string into every href so unrelated params survive navigation. A tab whose
-  // href omits `view` therefore inherits the view it is trying to leave — the
-  // "For review" tab used to link to a bare "/inbox" and was consequently
-  // unclickable from any other tab (it navigated to the URL already displayed).
-  it("lands on the clicked tab no matter which tab is currently active", () => {
+  it("lands on the clicked tab and resets its page", () => {
     for (const from of TABS) {
-      const currentSearch = `?view=${from}`;
       for (const to of TABS) {
-        const resolved = mergeSearchIntoHref(tabHref(to), currentSearch);
-        expect(readInboxView(resolved.split("?")[1] ?? ""), `${from} -> ${to}`).toBe(to);
+        const resolved = mergeSearchIntoHref(tabHref(to), `?view=${from}&inboxPage=4`);
+        const search = resolved.split("?")[1] ?? "";
+        expect(readInboxView(search), `${from} -> ${to}`).toBe(to);
+        expect(new URLSearchParams(search).get("inboxPage")).toBe("1");
       }
     }
   });
@@ -52,10 +44,50 @@ describe("inbox tab navigation through SPALink's query merge", () => {
     expect(new URLSearchParams(resolved.split("?")[1]).get("demo")).toBe("1");
   });
 
-  it("a bare /inbox href cannot leave the active tab (why the fix was needed)", () => {
-    // Documents the broken behavior so the reason for the explicit `view=review`
-    // is not lost: this is what the old href produced.
+  it("documents why a bare /inbox href cannot leave the active tab", () => {
     const resolved = mergeSearchIntoHref("/inbox", "?view=changes");
     expect(readInboxView(resolved.split("?")[1] ?? "")).toBe("changes");
+  });
+});
+
+describe("inbox queue context", () => {
+  it("round-trips the selected tab and page without dropping unrelated search state", () => {
+    const search = writeInboxQueueContext("space=remote&lang=zh-CN", {
+      view: "review",
+      page: 3,
+      pageSize: 25,
+    });
+    expect(readInboxQueueContext(search)).toEqual({ view: "review", page: 3, pageSize: 25 });
+    expect(new URLSearchParams(search).get("space")).toBe("remote");
+    expect(new URLSearchParams(search).get("lang")).toBe("zh-CN");
+  });
+
+  it("does not treat a direct link or malformed paging data as a queue", () => {
+    expect(readInboxQueueContext("view=review")).toBeNull();
+    expect(readInboxQueueContext("view=review&inboxPage=0&inboxPageSize=50")).toBeNull();
+    expect(readInboxQueueContext("view=review&inboxPage=1&inboxPageSize=500")).toBeNull();
+    expect(readInboxQueueContext("view=unknown&inboxPage=1&inboxPageSize=50")).toBeNull();
+  });
+});
+
+describe("inbox queue neighbors", () => {
+  it("uses the displayed order within a page", () => {
+    expect(inboxNeighborPage(["new", "middle", "old"], "middle", "previous", 2, 4)).toEqual({
+      id: "new",
+      page: 2,
+    });
+    expect(inboxNeighborPage(["new", "middle", "old"], "middle", "next", 2, 4)).toEqual({
+      id: "old",
+      page: 2,
+    });
+  });
+
+  it("points to an adjacent page only at a page boundary", () => {
+    expect(inboxNeighborPage(["first", "last"], "last", "next", 2, 4)).toEqual({ page: 3 });
+    expect(inboxNeighborPage(["first", "last"], "first", "previous", 2, 4)).toEqual({
+      page: 1,
+    });
+    expect(inboxNeighborPage(["first", "last"], "last", "next", 4, 4)).toBeNull();
+    expect(inboxNeighborPage(["first", "last"], "missing", "next", 2, 4)).toBeNull();
   });
 });

@@ -81,7 +81,11 @@ export const TEXT_FUNCTIONS: Record<string, FormulaFn> = {
   REPT: (args) => {
     arity("REPT", args, 2);
     const count = Math.max(0, asNumber(args[1], "REPT"));
-    return asString(args[0]).repeat(count);
+    const text = asString(args[0]);
+    if (text.length * count > 1_000_000) {
+      throw new FormulaEvalError("REPT: result exceeds the 1000000-character calculation limit");
+    }
+    return text.repeat(count);
   },
   // Excel-style TRIM: leading/trailing whitespace removed AND internal runs
   // of whitespace collapsed to a single space (not just String.trim()).

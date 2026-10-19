@@ -1,13 +1,10 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
-import type {
-  ChangeRequestStatus,
-  ChangeRequestVO,
-  MentionInboxItemVO,
-} from "busabase-contract/types";
+import type { ChangeRequestVO, MentionInboxItemVO } from "busabase-contract/types";
 import { ChevronDown, Loader2 } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { useLocation, useSearch } from "wouter";
 import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
 import { presentCoreError } from "../../../i18n/localize-error";
 import { type ActivityEvent, buildActivityEventFromItem } from "../helpers/activity-events";
@@ -23,14 +20,24 @@ import {
   statusTone,
 } from "../helpers/change-request";
 import { formatListTime, formatUserRefLabel } from "../helpers/format";
-import { INBOX_VIEW_KEYS, type InboxViewKey, inboxTabLabel } from "../helpers/inbox";
+import {
+  getLocationPath,
+  INBOX_VIEW_KEYS,
+  type InboxPageSize,
+  type InboxQueueContext,
+  type InboxViewKey,
+  inboxTabFilter,
+  inboxTabLabel,
+  readInboxQueueContext,
+  writeInboxQueueContext,
+} from "../helpers/inbox";
 import { useHrefWithCurrentSearch } from "../helpers/link-search";
 import { resolveSubmissionIdentity } from "../helpers/source-attribution";
 import type { BusabaseListGroup } from "../helpers/view-types";
 import { ActivityRow } from "./activity";
 import { PlaybookChip } from "./playbook-chip";
 import { EmptyState } from "./primitives";
-import { type RecordPageSize, RecordsPaginationBar } from "./records-pagination-bar";
+import { RecordsPaginationBar } from "./records-pagination-bar";
 import { InboxListSkeleton } from "./skeletons";
 import { SourceAttributionInline } from "./source-attribution";
 
@@ -115,26 +122,6 @@ function BusabaseList({
 
 const INBOX_PAGE_SIZE = 50;
 
-// Server-side filter for each inbox tab. The paginated list + counts endpoints
-// resolve `mine` / `status` against the request context, so tab badges and rows
-// stay correct no matter how many change requests exist.
-const tabFilter = (tab: InboxViewKey): { status?: ChangeRequestStatus[]; mine?: boolean } => {
-  switch (tab) {
-    case "changes":
-      return { status: ["changes_requested"] };
-    case "created":
-      return { mine: true };
-    case "approved":
-      return { status: ["approved"] };
-    case "merged":
-      return { status: ["merged"] };
-    case "rejected":
-      return { status: ["rejected", "abandoned"] };
-    default:
-      return { status: ["in_review"] };
-  }
-};
-
 export function InboxView({
   activeView,
   emptyGuide,
@@ -176,36 +163,45 @@ function InboxList({
 }) {
   const messages = useCoreI18n();
   const queryClient = useQueryClient();
+  const [location, setLocation] = useLocation();
+  const search = useSearch();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
-  // Numbered paging, sharing the Base table's paginator. "Load more" was fine
-  // for a handful of pending items, but a reviewer working a tab that holds
-  // thousands (a merged/closed history) could only reach page 30 by clicking 29
-  // times, and had no idea how many pages there even were.
-  const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState<RecordPageSize>(INBOX_PAGE_SIZE);
-  // Switching tabs restarts at page 1 — page 7 of "for review" means nothing in
-  // "merged", and silently landing on it would look like data loss.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reset on tab change only
+  // Keep paging in the URL so a reviewer returns to the same position after
+  // opening a change request. Tab links explicitly reset inboxPage to 1.
+  const urlContext = readInboxQueueContext(search);
+  const page = urlContext?.view === activeView ? urlContext.page : 1;
+  const pageSize: InboxPageSize = urlContext?.pageSize ?? INBOX_PAGE_SIZE;
+  const setPagination = (nextPage: number, nextPageSize: InboxPageSize = pageSize) => {
+    const nextSearch = writeInboxQueueContext(search, {
+      view: activeView,
+      page: nextPage,
+      pageSize: nextPageSize,
+    });
+    setLocation(`${getLocationPath(location)}?${nextSearch}`, { replace: true });
+  };
+  // Selection is scoped to the visible tab.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: clear on tab change only
   useEffect(() => {
-    setPage(1);
     setSelectedIds(new Set());
   }, [activeView]);
 
   const snapshotQuery = useQuery(
     orpc.changeRequests.inboxSnapshot.queryOptions({
-      input: { ...tabFilter(activeView), page, pageSize },
+      input: { ...inboxTabFilter(activeView), page, pageSize },
     }),
   );
-  // Hosts use the standalone counts key for the global Inbox badge. Seeding it
-  // from the combined response lets that badge reuse this request while the
-  // Inbox route is active; Home and other routes still fetch counts directly.
+  // Seed both the public counts cache and the lightweight global review badge
+  // from the same snapshot while the Inbox route is active.
   useEffect(() => {
     if (snapshotQuery.data?.counts) {
       queryClient.setQueryData(
         orpc.changeRequests.counts.queryOptions({}).queryKey,
         snapshotQuery.data.counts,
       );
+      queryClient.setQueryData(orpc.changeRequests.reviewCount.queryOptions({}).queryKey, {
+        review: snapshotQuery.data.counts.review,
+      });
     }
   }, [orpc, queryClient, snapshotQuery.data?.counts]);
   // Mentions are comments, not change requests, so they cannot ride
@@ -275,10 +271,15 @@ function InboxList({
         changeRequest={changeRequest}
         key={changeRequest.id}
         onToggle={() => toggleSelected(changeRequest.id)}
+        queueContext={{ view: activeView, page, pageSize }}
         selected={selectedIds.has(changeRequest.id)}
       />
     ) : (
-      <ReviewChangeRequestRow changeRequest={changeRequest} key={changeRequest.id} />
+      <ReviewChangeRequestRow
+        changeRequest={changeRequest}
+        key={changeRequest.id}
+        queueContext={{ view: activeView, page, pageSize }}
+      />
     );
 
   const isOpenStatus = (status: ChangeRequestVO["status"]) =>
@@ -347,10 +348,9 @@ function InboxList({
         <RecordsPaginationBar
           isFetching={isMentions ? mentionsQuery.isFetching : snapshotQuery.isFetching}
           isLoading={isMentions ? mentionsQuery.isLoading : snapshotQuery.isLoading}
-          onPageChange={setPage}
+          onPageChange={(next) => setPagination(next)}
           onPageSizeChange={(next) => {
-            setPageSize(next);
-            setPage(1);
+            setPagination(1, next);
           }}
           onRetry={() => {
             void (isMentions ? mentionsQuery.refetch() : snapshotQuery.refetch());
@@ -423,10 +423,12 @@ function InboxList({
 function SelectableChangeRequestRow({
   changeRequest,
   onToggle,
+  queueContext,
   selected,
 }: {
   changeRequest: ChangeRequestVO;
   onToggle: () => void;
+  queueContext: InboxQueueContext;
   selected: boolean;
 }) {
   const messages = useCoreI18n();
@@ -440,7 +442,7 @@ function SelectableChangeRequestRow({
         type="checkbox"
       />
       <div className="min-w-0 flex-1">
-        <ReviewChangeRequestRow changeRequest={changeRequest} />
+        <ReviewChangeRequestRow changeRequest={changeRequest} queueContext={queueContext} />
       </div>
     </div>
   );
@@ -479,7 +481,7 @@ function BusabaseListToolbar({
             // `?view=changes` straight back in: clicking "For review" from any
             // other tab navigated to the URL it was already on and looked
             // completely dead. Only a literal `view=review` overrides it.
-            href={`/inbox?view=${tab}`}
+            href={`/inbox?view=${tab}&inboxPage=1`}
             key={tab}
           >
             <span>{inboxTabLabel(messages, tab)}</span>
@@ -551,7 +553,13 @@ function MentionRow({
   );
 }
 
-function ReviewChangeRequestRow({ changeRequest }: { changeRequest: ChangeRequestVO }) {
+function ReviewChangeRequestRow({
+  changeRequest,
+  queueContext,
+}: {
+  changeRequest: ChangeRequestVO;
+  queueContext: InboxQueueContext;
+}) {
   const messages = useCoreI18n();
   const locale = useCoreLocale();
   const updatedAt = formatListTime(changeRequest.updatedAt, locale);
@@ -564,11 +572,14 @@ function ReviewChangeRequestRow({ changeRequest }: { changeRequest: ChangeReques
     changeRequest.sourceAttribution,
     messages,
   );
-  const href = useHrefWithCurrentSearch(`/inbox/${changeRequest.id}`);
+  const href = useHrefWithCurrentSearch(
+    `/inbox/${changeRequest.id}?${writeInboxQueueContext("", queueContext)}&inboxItem=${encodeURIComponent(changeRequest.id)}`,
+  );
 
   return (
     <Link
       className="group relative grid min-h-14 items-center gap-2 py-2.5 pr-3 pl-5 transition-colors hover:bg-accent/25 md:grid-cols-[minmax(0,1fr)_220px]"
+      data-testid="inbox-change-request-row"
       href={href}
     >
       {/* 3px status rail on the left edge. In a queue this dense, scanning the

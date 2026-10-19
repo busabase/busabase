@@ -55,6 +55,9 @@ const generatedForm: FormVO = {
 const makeOrpc = (form: FormVO) =>
   ({
     forms: {
+      update: {
+        mutationOptions: () => ({ mutationFn: async () => form }),
+      },
       getByNode: {
         queryOptions: () => ({
           queryKey: ["forms", form.nodeId],

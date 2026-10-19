@@ -314,9 +314,7 @@ describe("AgentPromptsView management", () => {
     renderView();
 
     expect(screen.getByRole("button", { name: "Review a draft" })).toBeTruthy();
-    expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe(
-      "Review the selected skill.",
-    );
+    expect(screen.getByRole("textbox").textContent).toBe("Review the selected skill.");
   });
 
   it("folds every built-in into one collapsed group once the node has custom prompts", () => {

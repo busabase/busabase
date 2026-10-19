@@ -2,6 +2,7 @@ import "server-only";
 
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { ORPCError } from "@orpc/server";
+import { hasApiKeyLevel } from "busabase-contract/access-control/api-key-level";
 import type {
   CreatedEmbedLinkVO,
   CreateEmbedLinkDTO,
@@ -20,6 +21,7 @@ import {
 import type { FileTreeReadFileVO } from "busabase-contract/types";
 import { and, desc, eq, gt, isNotNull, isNull, lt, lte, or, type SQL } from "drizzle-orm";
 import {
+  type BusabaseEmbedRecordScope,
   getContextEmbedOrigin,
   getContextSourceProvenance,
   getContextSpaceId,
@@ -29,7 +31,8 @@ import {
 } from "../../context";
 import { getDb } from "../../db";
 import { busabaseBases, busabaseEmbedLinks, busabaseNodes } from "../../db/schema";
-import { getChangeRequest } from "../../logic/cr-lifecycle";
+import { assertChangeRequestPermission, getChangeRequest } from "../../logic/cr-lifecycle";
+import { rootNodeIdForSpace } from "../../logic/kernel";
 import { getEffectiveNodeLevel } from "../../logic/node-acl";
 import { getAirApp, readAirAppFile } from "../airapp/handlers";
 import { getBase, getRecord, listRecordsPaged } from "../base/handlers";
@@ -97,6 +100,7 @@ interface EmbedTargetMetadata {
 const resolveEmbedTargetMetadata = async (
   type: EmbedTargetType,
   typeId: string,
+  forCreate = false,
 ): Promise<EmbedTargetMetadata | null> => {
   const db = await getDb();
   const actorId = resolveActorId("local-admin");
@@ -115,9 +119,15 @@ const resolveEmbedTargetMetadata = async (
     scopeNodeId = record?.base.nodeId ?? null;
     targetName = record?.id ?? typeId;
   }
-  if (!scopeNodeId || (await getEffectiveNodeLevel(scopeNodeId, actorId, db)) !== "manage") {
-    return null;
-  }
+  if (!scopeNodeId) return null;
+  const level = await getEffectiveNodeLevel(scopeNodeId, actorId, db);
+  const requiredLevel =
+    forCreate && type === "change-request"
+      ? "changeRequest"
+      : forCreate && type === "record-detail"
+        ? "write"
+        : "manage";
+  if (!level || !hasApiKeyLevel(level, requiredLevel)) return null;
 
   const [node] = await db
     .select({ name: busabaseNodes.name, type: busabaseNodes.type })
@@ -151,7 +161,7 @@ function changeRequestEmbedScopeNodeId(
   const payload = operation.headCommit.payload as { parentNodeId?: unknown };
   return typeof payload.parentNodeId === "string" && payload.parentNodeId
     ? payload.parentNodeId
-    : null;
+    : rootNodeIdForSpace(getContextSpaceId());
 }
 
 const toEmbedLinkVO = (row: {
@@ -182,7 +192,14 @@ const toEmbedLinkVO = (row: {
 });
 
 export const createEmbedLink = async (input: CreateEmbedLinkDTO): Promise<CreatedEmbedLinkVO> => {
-  const target = await resolveEmbedTargetMetadata(input.type, input.typeId);
+  // A proposal preview may be shared by a changeRequest-scoped credential,
+  // but only when it can propose on EVERY node affected by the CR. The shared
+  // metadata resolver remains manage-only for audit/list/revoke. Record-detail
+  // creation requires write on its Base node; sharing a whole Node needs manage.
+  if (input.type === "change-request") {
+    await assertChangeRequestPermission(input.typeId, "changeRequest");
+  }
+  const target = await resolveEmbedTargetMetadata(input.type, input.typeId, true);
   if (!target) throw new ORPCError("NOT_FOUND", { message: "Embed target not found" });
   return mintEmbedLink(input, { targetName: target.targetName, nodeType: target.nodeType });
 };
@@ -639,6 +656,7 @@ export interface EmbedRequestContext {
   spaceId: string;
   restrictedVisibility: boolean;
   embedTargetNodeId?: string;
+  embedRecordScope?: BusabaseEmbedRecordScope;
 }
 
 /**
@@ -670,12 +688,26 @@ export const resolveEmbedRequestContext = async (
 ): Promise<EmbedRequestContext | null> => {
   const active = await resolveActiveEmbedLink(id, secret, at);
   if (!active) return null;
-  return {
+  const context: EmbedRequestContext = {
     actorId: active.row.createdBy,
     spaceId: active.row.spaceId,
     restrictedVisibility: active.actorState.restrictedVisibility,
     ...(active.row.type === "node" ? { embedTargetNodeId: active.row.typeId } : {}),
   };
+  if (active.row.type === "record-detail") {
+    const db = await getDb();
+    const record = await runWithEmbedContext({ ...context, db }, () =>
+      getRecord(active.row.typeId),
+    );
+    if (!record?.base.nodeId) return null;
+    context.embedRecordScope = {
+      recordId: record.id,
+      baseId: record.baseId,
+      baseNodeId: record.base.nodeId,
+      baseSlug: record.base.slug,
+    };
+  }
+  return context;
 };
 
 export const resolveEmbedLink = async (

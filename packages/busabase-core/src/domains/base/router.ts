@@ -46,7 +46,9 @@ const os = implement(busabaseContract);
 
 export const baseRouter = {
   list: os.bases.list.handler(async ({ input }) =>
-    input.status === "archived" ? listArchivedBases() : listBases(),
+    input.status === "archived"
+      ? listArchivedBases({ fields: input.fields })
+      : listBases({ fields: input.fields }),
   ),
   get: os.bases.get.handler(async ({ input }) => {
     const base = await getBase(input.baseId);

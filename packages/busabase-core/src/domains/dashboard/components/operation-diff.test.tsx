@@ -1,7 +1,7 @@
-import type { ChangeRequestVO } from "busabase-contract/types";
+import type { ChangeRequestVO, OperationVO } from "busabase-contract/types";
 import { describe, expect, it } from "vitest";
 import { coreMessagesEn } from "../../../i18n/messages";
-import { describeViewConfig } from "./operation-diff";
+import { describeViewConfig, getOperationFieldChanges } from "./operation-diff";
 
 const changeRequest = {
   base: {
@@ -32,4 +32,27 @@ describe("view configuration diff", () => {
     expect(rules.find((rule) => rule.kind === "order")?.label).toBe("Status → Title");
     expect(rules.find((rule) => rule.kind === "width")?.label).toBe("Title · 280px");
   });
+});
+
+it("hides formula merge guards on field proposals while retaining same-named record fields", () => {
+  const operation = {
+    operation: "base_add_field",
+    baseFields: null,
+    headCommit: {
+      payload: {
+        name: "Total",
+        formulaDependencies: { price: "fld_price" },
+        formulaBaseExpression: "{price}",
+      },
+    },
+  } as unknown as OperationVO;
+  expect(getOperationFieldChanges(changeRequest, operation).map((change) => change.slug)).toEqual([
+    "name",
+  ]);
+  operation.operation = "record_create";
+  expect(getOperationFieldChanges(changeRequest, operation).map((change) => change.slug)).toEqual([
+    "name",
+    "formulaDependencies",
+    "formulaBaseExpression",
+  ]);
 });

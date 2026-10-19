@@ -43,7 +43,11 @@ import {
 import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
 import { presentCoreError } from "../../../i18n/localize-error";
 import { useAgentIntegrationTarget } from "../agent-integration-context";
-import { renderPromptForDispatch } from "../helpers/agent-prompt-dispatch";
+import {
+  joinPromptSegments,
+  type PromptSegment,
+  renderPromptSegments,
+} from "../helpers/agent-prompt-dispatch";
 import type { NodePrompt } from "../helpers/node-agent-prompts";
 import {
   BUILT_IN_PROMPTS_EXPANDED_STORAGE_KEY,
@@ -66,6 +70,11 @@ export interface AgentPromptsManagement {
   saving: boolean;
   save: (prompts: CustomAgentPrompts) => Promise<void>;
 }
+
+/** Select exactly the preview's text — what a textarea's own select-all used to do. */
+const selectPreviewText = (node: HTMLElement) => {
+  window.getSelection()?.selectAllChildren(node);
+};
 
 const readBuiltInsExpanded = (): boolean => {
   try {
@@ -185,7 +194,10 @@ export function AgentPromptsView({
   const [deleteTarget, setDeleteTarget] = useState<CustomPromptDef | null>(null);
   const copyAttemptRef = useRef(0);
   const copyResetTimeoutRef = useRef<number | null>(null);
-  const snippetRef = useRef<HTMLTextAreaElement>(null);
+  const snippetRef = useRef<HTMLDivElement>(null);
+  // The live browser origin, read after mount — never a host's SSR placeholder.
+  const [origin, setOrigin] = useState<string>();
+  useEffect(() => setOrigin(window.location.origin), []);
 
   useEffect(
     () => () => {
@@ -220,29 +232,38 @@ export function AgentPromptsView({
   const targetSpaceId = edition === "cloud" ? agentIntegration?.targetSpaceId : undefined;
 
   /**
-   * The bytes that actually leave — body plus the connection check.
+   * The prompt as previewed — and, joined, the bytes that actually leave: body
+   * plus the connection check, so what the user reads is what the agent gets.
    *
-   * The origin is read at dispatch time rather than at render time, and there is
-   * no fallback to the host's `defaultOrigin`: that value is an SSR placeholder
-   * (see `AgentInstallPanel`, which rebuilds for the same reason), and a
-   * placeholder dev URL reaching a real agent is exactly the failure the
-   * rebuild exists to prevent.
+   * There is no fallback to the host's `defaultOrigin`: that value is an SSR
+   * placeholder (see `AgentInstallPanel`, which rebuilds for the same reason),
+   * and a placeholder dev URL reaching a real agent is exactly the failure the
+   * rebuild exists to prevent. Until the origin is known there is simply no
+   * connection segment.
    */
-  const dispatchText = (prompt: NodePrompt): string => {
-    const origin = typeof window === "undefined" ? undefined : window.location.origin;
-    return renderPromptForDispatch({
-      body: prompt.body,
-      connectionCheck: messages.agentPrompts.connectionCheck,
-      fmt,
-      leadIn: messages.agentPrompts.connectionCheckLeadIn,
-      // `editionConfirmed` is true because a dashboard node is as authoritative
-      // as an entry point gets: we know which edition the user is looking at,
-      // so the guide should not stop to ask them again.
-      setupUrl:
-        edition && origin ? createSetupSkillUrl(origin, edition, true, targetSpaceId) : undefined,
-      targetSpaceId,
-    });
-  };
+  const segments = useMemo(
+    () =>
+      active
+        ? renderPromptSegments({
+            body: active.body,
+            connectionCheck: messages.agentPrompts.connectionCheck,
+            footer: active.footer,
+            fmt,
+            leadIn: messages.agentPrompts.connectionCheckLeadIn,
+            // `editionConfirmed` is true because a dashboard node is as authoritative
+            // as an entry point gets: we know which edition the user is looking at,
+            // so the guide should not stop to ask them again.
+            setupUrl:
+              edition && origin
+                ? createSetupSkillUrl(origin, edition, true, targetSpaceId)
+                : undefined,
+            target: active.target,
+            targetSpaceId,
+          })
+        : [],
+    [active, edition, messages, origin, targetSpaceId],
+  );
+  const dispatchText = joinPromptSegments(segments);
 
   const copy = async () => {
     if (!active) return;
@@ -255,7 +276,7 @@ export function AgentPromptsView({
     setCopied(false);
     setCopyError(false);
     try {
-      await navigator.clipboard.writeText(dispatchText(active));
+      await navigator.clipboard.writeText(dispatchText);
       if (copyAttemptRef.current !== attempt) return;
       setCopied(true);
       copyResetTimeoutRef.current = window.setTimeout(() => {
@@ -266,7 +287,12 @@ export function AgentPromptsView({
       if (copyAttemptRef.current !== attempt) return;
       setCopied(false);
       setCopyError(true);
-      snippetRef.current?.focus();
+      // Hand the user a ready selection to copy by hand.
+      const snippet = snippetRef.current;
+      if (snippet) {
+        snippet.focus();
+        selectPreviewText(snippet);
+      }
     }
   };
 
@@ -374,7 +400,7 @@ export function AgentPromptsView({
             <AgentPromptAskAction
               onHandedOff={onHandedOff}
               orpc={askAgent.orpc}
-              promptText={active ? dispatchText(active) : undefined}
+              promptText={active ? dispatchText : undefined}
               sessionScopeId={askAgent.sessionScopeId}
             />
           ) : null
@@ -401,6 +427,7 @@ export function AgentPromptsView({
           setSelected(key);
         }}
         sections={sections}
+        segments={segments}
         snippetRef={snippetRef}
       />
 
@@ -448,6 +475,7 @@ function PromptPanel({
   onCreate,
   onEdit,
   onDelete,
+  segments,
   snippetRef,
 }: {
   sections: PromptSection[];
@@ -465,7 +493,9 @@ function PromptPanel({
   onCreate: () => void;
   onEdit: (prompt: CustomPromptDef) => void;
   onDelete: (prompt: CustomPromptDef) => void;
-  snippetRef: RefObject<HTMLTextAreaElement | null>;
+  /** The active prompt, split the way `renderPromptSegments` assembles it. */
+  segments: PromptSegment[];
+  snippetRef: RefObject<HTMLDivElement | null>;
 }) {
   const messages = useCoreI18n();
   const builtInsId = useId();
@@ -705,13 +735,43 @@ function PromptPanel({
             ) : null}
           </div>
         ) : null}
-        <textarea
+        {/* Everything that will be copied, weighted by what a person reads:
+            the task at full size, the target line, merge/reply footer and
+            connection check turned down around it. One <p> per segment so a
+            hand-made selection keeps the paragraph breaks. */}
+        <div
           aria-label={active?.label}
-          className="min-h-[18vh] w-full flex-1 resize-none border-0 bg-transparent p-3 font-mono text-xs leading-relaxed text-foreground outline-none sm:min-h-0"
-          readOnly
+          aria-multiline="true"
+          aria-readonly="true"
+          className="min-h-[18vh] w-full flex-1 space-y-3 overflow-y-auto p-3 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset sm:min-h-0"
+          data-testid="agent-prompts-preview"
           ref={snippetRef}
-          value={active?.body ?? ""}
-        />
+          // A div's Ctrl/Cmd+A selects the whole page; keep it inside the prompt.
+          onKeyDown={(event) => {
+            if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
+              event.preventDefault();
+              selectPreviewText(event.currentTarget);
+            }
+          }}
+          role="textbox"
+          tabIndex={0}
+        >
+          {segments.map((segment, index) => (
+            <p
+              className={cn(
+                "whitespace-pre-wrap break-words",
+                segment.kind === "task"
+                  ? "text-foreground text-sm leading-relaxed"
+                  : "text-muted-foreground text-xs leading-relaxed",
+                segment.kind === "connection" && "border-t border-dashed pt-3",
+              )}
+              data-segment={segment.kind}
+              key={`${segment.kind}-${index}`}
+            >
+              {segment.text}
+            </p>
+          ))}
+        </div>
         <div
           className="flex min-w-0 items-start justify-end gap-2 border-t bg-card/60 p-2"
           data-testid="agent-prompts-primary-action"

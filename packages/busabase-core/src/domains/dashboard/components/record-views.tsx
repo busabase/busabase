@@ -8,26 +8,32 @@ import type {
   BaseFieldVO,
   BaseVO,
   ChangeRequestVO,
+  NodeVO,
   RecordVO,
   UserRefVO,
 } from "busabase-contract/types";
-import { Dialog, DialogHeader, DialogTitle } from "kui/dialog";
+import { Button } from "kui/button";
+import { Dialog, DialogDescription, DialogHeader, DialogTitle } from "kui/dialog";
+import { Input } from "kui/input";
 import {
   Box,
   Check,
   ChevronRight,
+  Copy,
   Eye,
   GitMerge,
   History,
   Maximize2,
   MoreHorizontal,
   Paperclip,
+  Share2,
   Sparkles,
   Trash2,
   X,
 } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { useLocation, useSearch } from "wouter";
 import { fmt, useCoreI18n, useCoreLocale, useIString } from "../../../i18n";
 import { localizeCoreErrorMessage, presentCoreError } from "../../../i18n/localize-error";
@@ -41,7 +47,6 @@ import {
   isSystemFieldType,
 } from "../../base/field-types";
 import { getDateFieldOptions } from "../../base/utils/date-value";
-import { getPrimaryField } from "../../base/utils/primary-field";
 import { parseWhiteboardFieldValue } from "../../base/utils/whiteboard-value";
 import {
   getChangeRequestTitle,
@@ -69,10 +74,13 @@ import {
 } from "../helpers/format";
 import { mergeSearchIntoHref, useHrefWithCurrentSearch } from "../helpers/link-search";
 import type { RecordSubmitOptions } from "../helpers/view-types";
+import { useDashboardOrpc } from "../orpc-context";
 import { registerSidePanelTab, type SidePanelTabProps } from "../side-panel-registry";
+import { dashboardNodeShareUrl } from "../utils/share-url";
 import { useIsAnonymousVisitor } from "../visitor-context";
 import { renderMentionedText } from "./comments";
 import { DateFieldInput } from "./date-field";
+import { FieldHelp, hasFieldHelp } from "./field-help";
 import {
   FieldBadgeList,
   FieldValuePreview,
@@ -94,6 +102,8 @@ import {
   SidebarRow,
   StatusBadge,
 } from "./primitives";
+import { RelationFieldEditor } from "./relation-field";
+import { ShareLinkActions } from "./share-link-actions";
 import { ShimmerSkeleton as Skeleton } from "./shimmer-skeleton";
 import { WhiteboardContentSkeleton } from "./skeletons";
 import { SplitSubmitButton } from "./split-submit-button";
@@ -268,6 +278,15 @@ function RecordSidePanelPreview({ orpc, payload }: SidePanelTabProps) {
 }
 registerSidePanelTab("record-preview", RecordSidePanelPreview);
 
+function findNodeById(nodes: NodeVO[], nodeId: string): NodeVO | undefined {
+  for (const node of nodes) {
+    if (node.id === nodeId) return node;
+    const child = findNodeById(node.children, nodeId);
+    if (child) return child;
+  }
+  return undefined;
+}
+
 export function RecordDetailView({
   baseSlug,
   client,
@@ -288,12 +307,25 @@ export function RecordDetailView({
   const locale = useCoreLocale();
   const currentSearch = useSearch();
   const isAnon = useIsAnonymousVisitor();
+  const orpc = useDashboardOrpc();
   const [, setLocation] = useLocation();
   const [panelOpen, setPanelOpen] = useState(true);
+  const [shareOpen, setShareOpen] = useState(false);
+  const [shareCopied, setShareCopied] = useState(false);
   const [deleteAction, setDeleteAction] = useState<"change_request" | "merge" | null>(null);
   const [confirmDeleteAction, setConfirmDeleteAction] = useState<"change_request" | "merge" | null>(
     null,
   );
+  const nodesOptions = orpc?.nodes.list.queryOptions({});
+  const nodesQuery = useQuery<NodeVO[]>({
+    ...(nodesOptions ?? {
+      queryKey: ["record-share", "unavailable", record?.base.nodeId],
+      queryFn: async () => [],
+    }),
+    enabled: Boolean(orpc && shareOpen && record && !isAnon),
+  });
+  const baseNode = findNodeById(nodesQuery.data ?? [], record?.base.nodeId ?? "");
+  const hasPublicLink = Boolean(baseNode?.shared || baseNode?.sharedViaAncestor);
 
   // Record lineage (the change requests that produced this record), via React
   // Query instead of a useEffect + setState fetch — it caches and refetches on
@@ -322,6 +354,28 @@ export function RecordDetailView({
     );
   }
 
+  const recordUrl =
+    typeof window === "undefined"
+      ? null
+      : dashboardNodeShareUrl({
+          currentHref: window.location.href,
+          nodeType: "base",
+          nodeSlug: record.base.nodeId,
+          extraSegments: [record.id],
+        });
+
+  const copyRecordUrl = async () => {
+    if (!recordUrl) return;
+    try {
+      await navigator.clipboard.writeText(recordUrl);
+      setShareCopied(true);
+      toast.success(messages.share.linkCopied);
+    } catch {
+      setShareCopied(false);
+      toast.error(messages.share.failed);
+    }
+  };
+
   return (
     <div
       className="h-full min-h-0 w-full min-w-0 flex-1 overflow-auto overflow-x-hidden"
@@ -329,6 +383,10 @@ export function RecordDetailView({
     >
       {!isAnon ? (
         <div className="flex items-center justify-end gap-2 px-6 pt-4">
+          <Button onClick={() => setShareOpen(true)} size="sm" type="button" variant="outline">
+            <Share2 aria-hidden="true" className="size-4" />
+            {messages.share.title}
+          </Button>
           <details className="relative">
             <summary className="flex size-8 cursor-pointer list-none items-center justify-center rounded-md border border-border/70 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground [&::-webkit-details-marker]:hidden">
               <MoreHorizontal size={16} />
@@ -380,6 +438,44 @@ export function RecordDetailView({
           <RailToggleButton onToggle={() => setPanelOpen((current) => !current)} open={panelOpen} />
         </div>
       ) : null}
+      <Dialog onOpenChange={setShareOpen} open={shareOpen}>
+        <DialogContent className="max-w-md" data-testid="record-share-dialog">
+          <DialogHeader>
+            <DialogTitle>{messages.share.recordLinkTitle}</DialogTitle>
+            <DialogDescription>{getRecordTitle(record, messages)}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2 rounded-md border border-border/70 p-3 text-sm">
+              <p className="font-medium">{messages.share.recordPrivateTitle}</p>
+              <p className="text-muted-foreground">{messages.share.recordPrivateHint}</p>
+              <p className="text-muted-foreground">{messages.share.recordPublicHint}</p>
+            </div>
+            {recordUrl && (
+              <div className="space-y-3">
+                <div className="flex gap-2">
+                  <Input
+                    aria-label={messages.share.recordLinkTitle}
+                    className="min-w-0 flex-1"
+                    readOnly
+                    value={recordUrl}
+                  />
+                  <Button onClick={() => void copyRecordUrl()} type="button">
+                    {shareCopied ? (
+                      <Check aria-hidden="true" className="size-4" />
+                    ) : (
+                      <Copy aria-hidden="true" className="size-4" />
+                    )}
+                    {messages.share.copyLink}
+                  </Button>
+                </div>
+                {hasPublicLink && (
+                  <ShareLinkActions title={getRecordTitle(record, messages)} url={recordUrl} />
+                )}
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
       <section
         className={`grid w-full min-w-0 gap-6 px-6 pt-2 pb-4 ${
           isAnon ? "" : "lg:grid-cols-[minmax(0,1fr)_auto]"
@@ -616,9 +712,21 @@ export function RecordEditorView({
     ),
   );
   const [saveAction, setSaveAction] = useState<"change_request" | "merge" | null>(null);
+  const dirty = useRef(false);
+  // Preserve the draft's starting revision, even if live queries update the record.
+  const draftRecord = useRef(record);
+  const changedFields = useRef(new Set<string>());
   const editorBase = base ?? record?.base ?? null;
+  const editorIdentity = `${mode}:${editorBase?.id}:${record?.id ?? "new"}`;
+  const previousEditorIdentity = useRef(editorIdentity);
 
   useEffect(() => {
+    // Live refreshes must not silently discard a user's in-progress selection.
+    if (previousEditorIdentity.current === editorIdentity && dirty.current) return;
+    previousEditorIdentity.current = editorIdentity;
+    draftRecord.current = record;
+    dirty.current = false;
+    changedFields.current.clear();
     setFields(
       Object.fromEntries(
         (editorBase?.fields ?? []).map((field) => [
@@ -629,7 +737,47 @@ export function RecordEditorView({
         ]),
       ),
     );
-  }, [editorBase, mode, record]);
+  }, [editorBase, editorIdentity, mode, record]);
+
+  useEffect(() => {
+    const warn = (event: BeforeUnloadEvent) => {
+      if (!dirty.current) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    const confirmNavigation = (event: MouseEvent) => {
+      if (
+        !dirty.current ||
+        event.defaultPrevented ||
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey
+      )
+        return;
+      const anchor = event.target instanceof Element ? event.target.closest("a[href]") : null;
+      if (
+        !(anchor instanceof HTMLAnchorElement) ||
+        anchor.download ||
+        (anchor.target && anchor.target !== "_self")
+      )
+        return;
+      const destination = new URL(anchor.href, window.location.href);
+      if (destination.href === window.location.href || destination.protocol === "javascript:")
+        return;
+      if (!window.confirm(messages.recordView.discardUnsavedChanges)) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    };
+    window.addEventListener("beforeunload", warn);
+    document.addEventListener("click", confirmNavigation, true);
+    return () => {
+      window.removeEventListener("beforeunload", warn);
+      document.removeEventListener("click", confirmNavigation, true);
+    };
+  }, [messages.recordView.discardUnsavedChanges]);
 
   if (!editorBase) {
     return (
@@ -674,8 +822,13 @@ export function RecordEditorView({
       if (mode === "new") {
         await onSubmitCreate?.(editorBase, normalizedFields, { mergeImmediately });
       } else if (record) {
-        await onSubmitUpdate?.(record, normalizedFields, { mergeImmediately });
+        const patch = Object.fromEntries(
+          Object.entries(normalizedFields).filter(([slug]) => changedFields.current.has(slug)),
+        );
+        await onSubmitUpdate?.(draftRecord.current ?? record, patch, { mergeImmediately });
       }
+      dirty.current = false;
+      changedFields.current.clear();
     } catch (submitError) {
       onSubmitError(
         submitError instanceof Error
@@ -714,9 +867,11 @@ export function RecordEditorView({
                   field={field}
                   key={field.id}
                   memberUsers={record?.fieldUsers}
-                  onChange={(value) =>
-                    setFields((current) => ({ ...current, [field.slug]: value }))
-                  }
+                  onChange={(value) => {
+                    dirty.current = true;
+                    changedFields.current.add(field.slug);
+                    setFields((current) => ({ ...current, [field.slug]: value }));
+                  }}
                   onUploadAttachment={onUploadAttachment}
                   records={records}
                   value={fields[field.slug] ?? ""}
@@ -761,136 +916,6 @@ export function RecordEditorView({
   );
 }
 
-/**
- * Options for a relation field. The records already in memory are NOT enough:
- * a Base is paged, so the record a user wants to link may simply not be loaded.
- * Typing queries the server (`contains` on the target Base's primary field),
- * and the already-selected records are always merged in so the control can
- * still render its own value.
- */
-function RelationFieldEditor({
-  client,
-  field,
-  inputId,
-  fieldName,
-  loadedRecords,
-  onChange,
-  value,
-}: {
-  client: BusabaseDashboardApiClient;
-  field: BaseFieldVO;
-  inputId: string;
-  fieldName: string;
-  loadedRecords: RecordVO[];
-  onChange: (value: unknown) => void;
-  value: string[];
-}) {
-  const messages = useCoreI18n();
-  const [query, setQuery] = useState("");
-  const [debouncedQuery, setDebouncedQuery] = useState("");
-  const targetBaseId = field.options.targetBaseId;
-
-  useEffect(() => {
-    const timer = setTimeout(() => setDebouncedQuery(query.trim()), 250);
-    return () => clearTimeout(timer);
-  }, [query]);
-
-  // The target Base's primary field is what `getRecordTitle` renders, so it is
-  // also what the user is typing against. The Base list is small and cached;
-  // there is no single-Base read on this client.
-  const basesQuery = useQuery({
-    enabled: Boolean(targetBaseId),
-    queryFn: () => client.listBases(),
-    queryKey: ["busabase", "relation-bases"],
-    staleTime: 60_000,
-  });
-  const targetBase = basesQuery.data?.find((base) => base.id === targetBaseId);
-  const primarySlug = getPrimaryField(targetBase)?.slug;
-
-  const optionsQuery = useQuery({
-    enabled: Boolean(targetBaseId) && (!debouncedQuery || Boolean(primarySlug)),
-    queryFn: () =>
-      client.listRecordsPage({
-        baseId: targetBaseId as string,
-        pageSize: 50,
-        ...(debouncedQuery && primarySlug
-          ? {
-              filters: [
-                {
-                  fieldSlug: primarySlug,
-                  fieldType: "text" as const,
-                  operator: "contains" as const,
-                  value: debouncedQuery,
-                },
-              ],
-            }
-          : {}),
-      }),
-    queryKey: ["busabase", "relation-options", targetBaseId, primarySlug ?? "", debouncedQuery],
-  });
-
-  // Selected records must stay in the list even when they fall outside the
-  // current search, or the browser drops them from the control's value.
-  const selectedRecords = loadedRecords.filter((record) => value.includes(record.id));
-  const seen = new Set(selectedRecords.map((record) => record.id));
-  const options = [
-    ...selectedRecords,
-    ...(optionsQuery.data?.records ?? []).filter((record) => {
-      if (seen.has(record.id)) return false;
-      seen.add(record.id);
-      return true;
-    }),
-  ];
-  // A selected id whose record isn't loaded yet still needs an entry, otherwise
-  // selecting anything else would silently drop it.
-  const orphanIds = value.filter((id) => !seen.has(id));
-
-  return (
-    <div className="grid gap-1.5">
-      <input
-        aria-label={`${messages.base.searchRecordsToLink} — ${fieldName}`}
-        className="h-9 w-full rounded-md border border-border/70 bg-card px-2.5 py-1.5 text-sm outline-none transition-colors focus:border-primary"
-        onChange={(event) => setQuery(event.target.value)}
-        placeholder={messages.base.searchRecordsToLink}
-        type="search"
-        value={query}
-      />
-      <select
-        aria-label={fieldName}
-        className="min-h-9 w-full rounded-md border border-border/70 bg-card px-2.5 py-1.5 text-sm outline-none transition-colors focus:border-primary"
-        id={inputId}
-        multiple={field.options.multiple ?? true}
-        onChange={(event) => {
-          const selected = Array.from(event.currentTarget.selectedOptions).map(
-            (option) => option.value,
-          );
-          onChange(field.options.multiple === false ? (selected[0] ?? "") : selected);
-        }}
-        // React requires a scalar for a single-select and an array for a
-        // multi-select; passing an array to a single-select warns and leaves the
-        // control unbound, so a single-relation field showed no current value.
-        value={field.options.multiple === false ? (value[0] ?? "") : value}
-      >
-        {orphanIds.map((id) => (
-          <option key={id} value={id}>
-            {id}
-          </option>
-        ))}
-        {options.map((item) => (
-          <option key={item.id} value={item.id}>
-            {getRecordTitle(item, messages)}
-          </option>
-        ))}
-      </select>
-      {optionsQuery.isFetching ? (
-        <span className="text-muted-foreground text-[11px]">{messages.common.loading}</span>
-      ) : debouncedQuery && options.length === selectedRecords.length ? (
-        <span className="text-muted-foreground text-[11px]">{messages.search.noMatchesTitle}</span>
-      ) : null}
-    </div>
-  );
-}
-
 export function RecordFieldInput({
   client,
   editorInstanceKey,
@@ -925,6 +950,7 @@ export function RecordFieldInput({
   const resolveIString = useIString();
   const fieldName = resolveIString(field.name);
   const inputId = `record-field-${field.id}`;
+  const helpId = hasFieldHelp(field.options.help) ? `field-help-${field.id}` : undefined;
   const relationValue = Array.isArray(value)
     ? value.filter((item): item is string => typeof item === "string")
     : typeof value === "string" && value
@@ -941,7 +967,11 @@ export function RecordFieldInput({
       : [];
 
   return (
-    <div className="grid gap-3 border-border/40 border-b px-2 py-2.5 text-sm transition-colors hover:bg-muted/25 md:grid-cols-[180px_minmax(0,1fr)]">
+    <div
+      role="group"
+      aria-describedby={helpId}
+      className="grid gap-3 border-border/40 border-b px-2 py-2.5 text-sm transition-colors hover:bg-muted/25 md:grid-cols-[180px_minmax(0,1fr)]"
+    >
       <div className="min-w-0">
         <label className="block truncate font-medium" htmlFor={inputId}>
           {fieldName}
@@ -956,6 +986,7 @@ export function RecordFieldInput({
           )}
           <span>{messages.fieldTypes[field.type]}</span>
         </div>
+        <FieldHelp help={field.options.help} id={helpId} />
       </div>
       {kind === "computed" ? (
         <div
@@ -975,6 +1006,7 @@ export function RecordFieldInput({
         </div>
       ) : kind === "attachment" ? (
         <AttachmentFieldEditor
+          ariaDescribedBy={helpId}
           field={field}
           inputId={inputId}
           onChange={onChange}
@@ -983,6 +1015,7 @@ export function RecordFieldInput({
         />
       ) : kind === "relation" ? (
         <RelationFieldEditor
+          ariaDescribedBy={helpId}
           client={client}
           field={field}
           fieldName={fieldName}
@@ -993,6 +1026,7 @@ export function RecordFieldInput({
         />
       ) : kind === "member" ? (
         <MemberFieldEditor
+          ariaDescribedBy={helpId}
           client={client}
           field={field}
           fieldName={fieldName}
@@ -1003,6 +1037,7 @@ export function RecordFieldInput({
         />
       ) : kind === "select" ? (
         <select
+          aria-describedby={helpId}
           aria-label={fieldName}
           className="h-9 w-full rounded-md border border-border/70 bg-card px-2.5 py-1.5 text-sm outline-none transition-colors focus:border-primary"
           id={inputId}
@@ -1018,6 +1053,7 @@ export function RecordFieldInput({
         </select>
       ) : kind === "multiselect" ? (
         <select
+          aria-describedby={helpId}
           aria-label={fieldName}
           className="min-h-9 w-full rounded-md border border-border/70 bg-card px-2.5 py-1.5 text-sm outline-none transition-colors focus:border-primary"
           id={inputId}
@@ -1034,10 +1070,17 @@ export function RecordFieldInput({
           ))}
         </select>
       ) : kind === "tags" ? (
-        <TagFieldEditor inputId={inputId} label={fieldName} onChange={onChange} value={value} />
+        <TagFieldEditor
+          ariaDescribedBy={helpId}
+          inputId={inputId}
+          label={fieldName}
+          onChange={onChange}
+          value={value}
+        />
       ) : kind === "checkbox" ? (
         <label className="inline-flex h-9 items-center gap-2 text-muted-foreground text-sm">
           <input
+            aria-describedby={helpId}
             checked={value === true}
             id={inputId}
             onChange={(event) => onChange(event.target.checked)}
@@ -1047,6 +1090,7 @@ export function RecordFieldInput({
         </label>
       ) : kind === "textarea" ? (
         <RichTextareaFieldEditor
+          ariaDescribedBy={helpId}
           field={field}
           inputId={inputId}
           label={fieldName}
@@ -1061,6 +1105,7 @@ export function RecordFieldInput({
         />
       ) : kind === "date" ? (
         <DateFieldInput
+          ariaDescribedBy={helpId}
           ariaLabel={fieldName}
           className="h-9 w-full rounded-md border border-border/70 bg-card px-2.5 py-1.5 text-sm outline-none transition-colors focus:border-primary"
           id={inputId}
@@ -1072,6 +1117,7 @@ export function RecordFieldInput({
         // Plain inputs — the registry's input kind doubles as the HTML input type
         // (text / number / date / url / email / tel).
         <input
+          aria-describedby={helpId}
           aria-label={fieldName}
           className="h-9 w-full rounded-md border border-border/70 bg-card px-2.5 py-1.5 text-sm outline-none transition-colors focus:border-primary"
           id={inputId}
@@ -1085,12 +1131,14 @@ export function RecordFieldInput({
 }
 
 function RichTextareaFieldEditor({
+  ariaDescribedBy,
   field,
   inputId,
   label,
   onChange,
   value,
 }: {
+  ariaDescribedBy?: string;
   field: BaseFieldVO;
   inputId: string;
   label: string;
@@ -1106,6 +1154,7 @@ function RichTextareaFieldEditor({
 
   const textarea = (className = "min-h-28", withId = true) => (
     <textarea
+      aria-describedby={withId ? ariaDescribedBy : `${inputId}-fullscreen-help`}
       aria-label={label}
       className={`${className} w-full resize-y rounded-md border border-border/70 bg-card px-2.5 py-2 font-mono text-sm leading-6 outline-none transition-colors focus:border-primary`}
       id={withId ? inputId : undefined}
@@ -1172,6 +1221,7 @@ function RichTextareaFieldEditor({
             <DialogTitle className="text-sm font-medium">{label}</DialogTitle>
           </DialogHeader>
           <div className="min-h-0 flex-1 overflow-auto px-5 py-4">
+            <FieldHelp help={field.options.help} id={`${inputId}-fullscreen-help`} />
             {previewOpen && canPreview ? preview() : textarea("min-h-[58vh]", false)}
           </div>
         </DialogContent>
@@ -1366,11 +1416,13 @@ function WhiteboardFieldEditor({
 // Editable tag input (ai_tags): chips with remove buttons + a free-text entry.
 // Enter / comma commits a tag; Backspace/Delete on an empty field removes the last.
 function TagFieldEditor({
+  ariaDescribedBy,
   inputId,
   label,
   onChange,
   value,
 }: {
+  ariaDescribedBy?: string;
   inputId: string;
   label: string;
   onChange: (value: unknown) => void;
@@ -1421,6 +1473,7 @@ function TagFieldEditor({
       ))}
       <input
         aria-label={label}
+        aria-describedby={ariaDescribedBy}
         className="min-w-[6rem] flex-1 bg-transparent text-sm outline-none"
         id={inputId}
         onBlur={() => addTag(draft)}
@@ -1446,12 +1499,14 @@ function TagFieldEditor({
 }
 
 function AttachmentFieldEditor({
+  ariaDescribedBy,
   field,
   inputId,
   onChange,
   onUploadAttachment,
   value,
 }: {
+  ariaDescribedBy?: string;
   field: BaseFieldVO;
   inputId: string;
   onChange: (value: unknown) => void;
@@ -1500,6 +1555,7 @@ function AttachmentFieldEditor({
       </label>
       <input
         accept={accept}
+        aria-describedby={ariaDescribedBy}
         aria-label={fieldName}
         className="sr-only"
         disabled={isUploading || !onUploadAttachment}
@@ -1641,6 +1697,7 @@ function RecordFieldPanel({ record, records }: { record: RecordVO; records: Reco
                     }
                     field={field}
                     fieldUsers={record.fieldUsers}
+                    record={record}
                     records={records}
                     value={value}
                   />
@@ -1790,6 +1847,7 @@ function RecordPropertyItem({
           className="inline text-sm leading-5"
           field={field}
           fieldUsers={record.fieldUsers}
+          record={record}
           records={records}
           value={value}
         />

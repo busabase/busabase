@@ -17,7 +17,7 @@ import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
 import type { BaseFieldVO, BaseVO, RecordVO, ViewVO } from "busabase-contract/types";
 import { ChevronLeft, ChevronRight, GripVertical } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useSearch } from "wouter";
 import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
 import { presentCoreError } from "../../../i18n/localize-error";
@@ -121,16 +121,44 @@ function CalendarCard({
     id: record.id,
     disabled: !canDrag,
   });
+  const suppressDragClick = useRef(false);
+  useEffect(() => {
+    if (isDragging) suppressDragClick.current = true;
+  }, [isDragging]);
+  // Only mouse activation covers the card. Touch and keyboard stay on the handle.
+  const { onMouseDown, ...handleListeners } = listeners ?? {};
   return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: Mouse drag delegates to the accessible handle; the link and keyboard handle retain their semantics.
     <div
       className={`flex min-w-0 items-center rounded bg-primary/10 px-0.5 text-foreground text-xs hover:bg-primary/20 ${isDragging ? "opacity-40" : ""}`}
       data-calendar-record-id={record.id}
+      onMouseDown={
+        canDrag
+          ? (event) => {
+              suppressDragClick.current = false;
+              onMouseDown?.(event);
+            }
+          : undefined
+      }
+      onTouchStartCapture={() => {
+        if (!isDragging) suppressDragClick.current = false;
+      }}
+      onKeyDownCapture={() => {
+        if (!isDragging) suppressDragClick.current = false;
+      }}
+      onClickCapture={(event) => {
+        if (isDragging || suppressDragClick.current) {
+          event.preventDefault();
+          event.stopPropagation();
+          suppressDragClick.current = false;
+        }
+      }}
       ref={setNodeRef}
     >
       {canDrag ? (
         <button
           {...attributes}
-          {...listeners}
+          {...handleListeners}
           aria-label={fmt(messages.base.calendarDragHandle, { record: title })}
           className="inline-flex size-5 shrink-0 touch-none items-center justify-center rounded cursor-grab text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing"
           ref={setActivatorNodeRef}
@@ -140,7 +168,13 @@ function CalendarCard({
           <GripVertical aria-hidden="true" size={12} />
         </button>
       ) : null}
-      <Link className="min-w-0 flex-1 truncate px-1 py-0.5" href={href} title={title}>
+      <Link
+        className="min-w-0 flex-1 truncate px-1 py-0.5"
+        href={href}
+        title={title}
+        draggable={false}
+        onDragStart={(event) => event.preventDefault()}
+      >
         {title}
       </Link>
     </div>

@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { recordGetInputSchema } from "./record-schemas";
+import { listRecordsInputSchema, recordGetInputSchema } from "./record-schemas";
+
+describe("listRecordsInputSchema", () => {
+  it("keeps full records by default and accepts an explicit summary option", () => {
+    expect(listRecordsInputSchema.parse({ baseId: "bse_1" }).summary).toBeUndefined();
+    expect(listRecordsInputSchema.parse({ baseId: "bse_1", summary: true }).summary).toBe(true);
+    expect(listRecordsInputSchema.parse({ baseId: "bse_1", summary: false }).summary).toBe(false);
+    expect(listRecordsInputSchema.parse({ baseId: "bse_1", summary: "true" }).summary).toBe(true);
+    expect(listRecordsInputSchema.parse({ baseId: "bse_1", summary: "false" }).summary).toBe(false);
+  });
+});
 
 describe("recordGetInputSchema", () => {
   it("accepts either record id or exact field selector", () => {

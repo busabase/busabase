@@ -44,6 +44,7 @@ const normalizeTimeOfDay = (text: string): string | null => {
 };
 
 interface DayTimePickerProps {
+  ariaDescribedBy?: string;
   ariaLabel: string;
   className: string;
   dataAttributes?: Record<`data-${string}`, string>;
@@ -72,6 +73,7 @@ interface DayTimePickerProps {
  * behaves the same.
  */
 export function DayTimePicker({
+  ariaDescribedBy,
   ariaLabel,
   className,
   dataAttributes,
@@ -99,6 +101,7 @@ export function DayTimePicker({
         <button
           {...dataAttributes}
           aria-label={ariaLabel}
+          aria-describedby={ariaDescribedBy}
           className={`${className} flex items-center justify-between gap-2 text-left`}
           data-value={includeTime && day ? `${day}T${time}` : day}
           disabled={disabled}

@@ -7,6 +7,7 @@
 // dependency-first recompute ordering — see field-ops.ts (validation) and
 // domains/base/logic/merge/record.ts (compute ordering) for where it's used.
 import { collectFieldRefs } from "./ast";
+import { validateFormulaFunctions } from "./catalog";
 import { FormulaSelfRefError, FormulaUnknownFieldError } from "./errors";
 import type { FormulaValue } from "./functions";
 import { evaluateAst, type FieldResolver, type FormulaRecordContext } from "./interpreter";
@@ -65,7 +66,9 @@ export function validateFormulaExpression(
   ownSlug: string,
   siblingTypeBySlug: ReadonlyMap<string, string>,
 ): void {
-  const refs = collectFieldRefs(parseFormula(expression));
+  const ast = parseFormula(expression);
+  validateFormulaFunctions(ast);
+  const refs = collectFieldRefs(ast);
   for (const slug of refs) {
     if (slug === ownSlug) {
       throw new FormulaSelfRefError(slug);

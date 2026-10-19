@@ -3,7 +3,9 @@
  *
  * P0 #1 (completed): archiving a base now also archives its node, so BOTH the
  * base and node partial unique indexes release the slug. A brand-new base may
- * then take the slug; restoring the original is blocked if the slug was reused.
+ * then take the slug; restoring the original then moves it to the next free
+ * slug (`dup-2`) instead of failing — an archived base cannot be renamed, so a
+ * "rename it first" error left it stuck in the Trash.
  */
 import { createRouterClient } from "@orpc/server";
 import { and, eq } from "drizzle-orm";
@@ -94,11 +96,14 @@ describe("Boundary P6 — node lifecycle", () => {
       .where(and(eq(busabaseNodes.slug, "roundtrip")))
       .limit(1);
     expect(node?.archivedAt).toBeNull();
+    // The slug was free, so the history records no slug change.
+    const merged = await raw.changeRequests.get({ changeRequestId: restoreCr.id });
+    expect(merged?.mergeSummary).not.toHaveProperty("slugChanges");
   });
 
-  // ── restore-after-reuse collision is rejected ─────────────────────────────
-  it("Fix 4: restoring a base whose slug was reused is rejected with CONFLICT", async () => {
-    const { client } = await seedScenario("p6-restore-collision");
+  // ── restore-after-reuse takes the next free slug ──────────────────────────
+  it("Fix 4: restoring a base whose slug was reused moves it to the next free slug", async () => {
+    const { client, db } = await seedScenario("p6-restore-collision");
     const raw = createRouterClient(busabaseRouter);
 
     const first = await client.bases.create({ name: "Dup", slug: "dup" });
@@ -108,22 +113,85 @@ describe("Boundary P6 — node lifecycle", () => {
       mergeImmediately: true,
     });
     // A new active base grabs the freed slug.
-    await client.bases.create({ name: "Dup v2", slug: "dup" });
+    const second = await client.bases.create({ name: "Dup v2", slug: "dup" });
 
-    // Now restoring the original must fail (slug is taken).
     const restoreCr = await raw.bases.lifecycleChangeRequest({
       operation: "restore",
-      // review-first: this test asserts the guard that fires at MERGE time, so the
-      // proposal must stay pending instead of being merged inside this same call.
+      // review-first: the slug is resolved at MERGE time, so the proposal must
+      // stay pending instead of being merged inside this same call.
       autoMerge: false,
       baseId: first.id,
       submittedBy: "alice",
     });
     await raw.changeRequests.review({ changeRequestIds: [restoreCr.id], verdict: "approved" });
     const mergeResult = await raw.changeRequests.merge({ changeRequestIds: [restoreCr.id] });
-    expect(mergeResult.results[0]).toMatchObject({
-      ok: false,
-      error: expect.stringMatching(/slug .* is now used|Rename it first/i),
+    expect(mergeResult.results[0]).toMatchObject({ ok: true });
+
+    // Both bases are active; the one that held "dup" keeps it.
+    const active = await client.bases.list({});
+    expect(active.find((b) => b.id === second.id)?.slug).toBe("dup");
+    const restored = active.find((b) => b.id === first.id);
+    expect(restored).toMatchObject({ slug: "dup-2", name: "Dup" });
+
+    // The base row and its node move together, or the next rename/restore of
+    // either would hit the other table's unique index.
+    const [node] = await db
+      .select({ slug: busabaseNodes.slug, archivedAt: busabaseNodes.archivedAt })
+      .from(busabaseNodes)
+      .where(eq(busabaseNodes.id, restored?.nodeId ?? ""))
+      .limit(1);
+    expect(node).toEqual({ slug: "dup-2", archivedAt: null });
+
+    // The change request's history says where the base came back.
+    const merged = await raw.changeRequests.get({ changeRequestId: restoreCr.id });
+    expect(merged?.mergeSummary.slugChanges).toEqual([
+      { nodeId: restored?.nodeId, nodeType: "base", name: "Dup", fromSlug: "dup", toSlug: "dup-2" },
+    ]);
+  });
+
+  // The reported case: delete "base1", create "base1" again, delete that too,
+  // create a third — then restore both from the Trash with one click each.
+  it("Fix 5: two archived bases with the same slug both come back from the Trash", async () => {
+    const { client } = await seedScenario("p6-restore-twice");
+    const raw = createRouterClient(busabaseRouter);
+
+    const archiveBase = async (baseId: string) =>
+      client.bases.createArchiveChangeRequest({
+        baseId,
+        submittedBy: "alice",
+        mergeImmediately: true,
+      });
+    const oldest = await client.bases.create({ name: "base1", slug: "base1" });
+    await archiveBase(oldest.id);
+    const middle = await client.bases.create({ name: "base1", slug: "base1" });
+    await archiveBase(middle.id);
+    const current = await client.bases.create({ name: "base1", slug: "base1" });
+
+    // The Trash page's restore button: a direct write that merges on the spot.
+    const restoredTo = new Map<string, string | undefined>();
+    for (const base of [oldest, middle]) {
+      const cr = await raw.bases.lifecycleChangeRequest({
+        operation: "restore",
+        baseId: base.id,
+        submittedBy: "alice",
+      });
+      expect(cr.status).toBe("merged");
+      // An agent restoring over the API learns the new slug from the response.
+      restoredTo.set(
+        base.id,
+        (cr.mergeSummary.slugChanges as Array<{ toSlug: string }> | undefined)?.[0]?.toSlug,
+      );
+    }
+    expect(Object.fromEntries(restoredTo)).toEqual({
+      [oldest.id]: "base1-2",
+      [middle.id]: "base1-3",
     });
+
+    const active = await client.bases.list({});
+    const slugOf = (baseId: string) => active.find((b) => b.id === baseId)?.slug;
+    expect(slugOf(current.id)).toBe("base1");
+    expect(slugOf(oldest.id)).toBe("base1-2");
+    expect(slugOf(middle.id)).toBe("base1-3");
+    expect(await client.bases.list({ status: "archived" })).toEqual([]);
   });
 });

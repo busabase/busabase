@@ -10,7 +10,12 @@ import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import { confirmUpload, requestUploadUrl } from "open-domains/attachments/logic";
 import { storage } from "openlib/storage";
 import type { z } from "zod";
-import { getContextSpaceId, resolveActorId, withContextSourceMeta } from "../../context";
+import {
+  getContextRestrictedVisibility,
+  getContextSpaceId,
+  resolveActorId,
+  withContextSourceMeta,
+} from "../../context";
 import { getDb } from "../../db";
 import {
   attachments,
@@ -765,7 +770,16 @@ export const getFileTreeNode = async (
     // reading the bag here returned undefined and silently reported every node
     // as "private" — caught by the Skills round-trip test, which creates one
     // with `visibility: "workspace"` and reads it back.
-    visibility: node.explicitVisibility || "private",
+    //
+    // A node that declares nothing reports what it actually resolves to — the
+    // value inherited from its folders, else the space default — instead of
+    // "private". New nodes declare nothing by default, so reporting "private"
+    // here would tell every agent that reads it back that a member-visible
+    // node is hidden.
+    visibility:
+      node.explicitVisibility ||
+      node.effectiveVisibility ||
+      (getContextRestrictedVisibility() ? "private" : "workspace"),
     version: node.metadata.version || "0.1.0",
     files,
   };
@@ -1350,8 +1364,10 @@ export const makeMaterializer =
       name,
       description,
       // `entryFile` deliberately absent — see the note in `createFileTreeNode`.
+      // No `visibility` default: the Dashboard's "new" flow lands here, and a
+      // node that declares nothing follows the space default like every other
+      // node type. `initializeNodeAcl` still promotes a caller-supplied one.
       metadata: {
-        visibility: "private" as const,
         version,
         ...metadata,
       },

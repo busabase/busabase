@@ -119,6 +119,7 @@ export const demoGetForm = (nodeIdOrSlug: string): FormVO | null => {
               slug: field.slug,
               name: field.name,
               type: field.type,
+              ...(field.options.help ? { help: field.options.help } : {}),
               choices: (field.options.choices ?? []).map((choice) => ({
                 id: choice.id,
                 name: choice.name,

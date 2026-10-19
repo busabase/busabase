@@ -49,6 +49,7 @@ import { toast } from "sonner";
 import { useLocation, useSearch } from "wouter";
 import { CoreI18nProvider, fmt, useCoreI18n, useCoreLocale } from "../../i18n";
 import { presentCoreError } from "../../i18n/localize-error";
+import { AgentModelScopeProvider } from "../agents/agent-model-scope-context";
 import { AgentDetailView } from "../agents/components/agent-detail-view";
 import { AgentsAddView } from "../agents/components/agents-add-view";
 import { AgentsListView } from "../agents/components/agents-list-view";
@@ -71,6 +72,7 @@ import {
   getChangeRequestTitle,
   getOperationTitle,
   getRecordTitle,
+  getRestoreToastMessage,
 } from "./helpers/change-request";
 // Side-effect import: registers the skill/doc/folder node-detail renderers.
 import "./components/node-detail-views";
@@ -106,7 +108,16 @@ import { getNodeDetailBreadcrumbItems } from "./helpers/breadcrumbs";
 import { shouldQueryGlobalChangeRequests } from "./helpers/change-request-data-source";
 import { createChangeRequestQueryKeys } from "./helpers/change-request-query-keys";
 import { getRelationRecordIds } from "./helpers/field";
-import { getLocationPath, readInboxView } from "./helpers/inbox";
+import { homePendingListInput } from "./helpers/home";
+import {
+  getLocationPath,
+  type InboxQueueContext,
+  inboxNeighborPage,
+  inboxTabFilter,
+  readInboxQueueContext,
+  readInboxView,
+  writeInboxQueueContext,
+} from "./helpers/inbox";
 import {
   createKnownNodeCache,
   type KnownNode,
@@ -118,7 +129,7 @@ import {
   shouldMountResidentAirApp,
   shouldShowRouteGuardSkeleton,
 } from "./helpers/node-route-guard";
-import { shouldShowInitialLoadingState } from "./helpers/query-state";
+import { retryUnlessNotFound, shouldShowInitialLoadingState } from "./helpers/query-state";
 import { readRecordPagination, writeRecordPagination } from "./helpers/record-pagination-url";
 import { isConflictErrorMessage } from "./helpers/search";
 import type {
@@ -136,7 +147,14 @@ import { useBusabaseLiveSync } from "./hooks/use-live-sync";
 import { getNodeDetail, type LoadedNode } from "./node-detail-registry";
 import { DashboardOrpcProvider } from "./orpc-context";
 import { useCurrentNodeStore } from "./store/current-node-store";
+import { mergeFreshRecords } from "./utils/merge-records";
 import { type DashboardVisitorKind, DashboardVisitorProvider } from "./visitor-context";
+
+const EMPTY_BASES: BaseVO[] = [];
+
+/** A Base route names its Base by id, nodeId or slug — the same three `bases.get` accepts. */
+const findBaseByRef = (bases: readonly BaseVO[], ref: string): BaseVO | null =>
+  bases.find((base) => base.id === ref || base.nodeId === ref || base.slug === ref) ?? null;
 
 // Flattens the (already-fetched, for sidebar-tree rendering) node tree into
 // `KnownNode` cache entries — free, no new request: every `nodes.list`
@@ -182,7 +200,13 @@ function SidebarAwareSearchDialog({
 
 interface BusabaseDashboardProps {
   nodes: NodeVO[];
-  bases: BaseVO[];
+  /**
+   * Optional seed for the open Base, not a catalog: a seeded Base the route
+   * names (by id, nodeId or slug) is used as that Base's initial data, so an
+   * SSR host or a public share renders it without a round trip. The dashboard
+   * loads every other Base it needs itself.
+   */
+  bases?: BaseVO[];
   changeRequests: ChangeRequestVO[];
   records: RecordVO[];
   views?: ViewVO[];
@@ -265,7 +289,7 @@ interface BusabaseDashboardProps {
    * (see `logic/anonymous-allowlist.ts`); asking anyway just yielded a page of
    * 403s and, worse, an EMPTY base, because `activeBase` used to be looked up
    * inside the (refused) `bases.list` result. Anonymous hosts pass the shared
-   * base in via the `bases` prop instead, which seeds the same lookup.
+   * base in via the `bases` prop instead, and `activeBase` is read from it.
    *
    * Defaults to `"member"` so every existing consumer is untouched.
    */
@@ -331,7 +355,7 @@ function BusabaseDashboardContent({
   currentUserId = null,
   emptyGuide,
   onCreateNode,
-  bases: initialBases,
+  bases: initialBases = EMPTY_BASES,
   nodes: nodeTree,
   views: initialViews = [],
   embedded = false,
@@ -367,6 +391,37 @@ function BusabaseDashboardContent({
   const [location, rawSetLocation] = useLocation();
   const search = useSearch();
   const locationPath = getLocationPath(location);
+  const {
+    isArchivedRoute,
+    isGraphRoute,
+    isAssetDetailRoute,
+    isAgentDetailRoute,
+    agentDetailParams,
+    isTemplateDetailRoute,
+    templateDetailParams,
+    isOperationRoute,
+    operationParams,
+    isChangeRequestRoute,
+    isBaseDesignRoute,
+    isLegacyBaseSetupRoute,
+    isNewRecordRoute,
+    isEditRecordRoute,
+    editRecordParams,
+    isRecordActivityRoute,
+    recordActivityParams,
+    baseParams,
+    isBaseChildRoute,
+    baseChildParams,
+    isAirappRoute,
+    isBaseSetupRoute,
+    isBaseActivityRoute,
+    selectedBaseSlug,
+    selectedAirappSlug,
+    nodeDetailRoute,
+    nodeActivityRoute,
+    routeNodeRef,
+    selectedChangeRequestId,
+  } = useDashboardRoutes();
   const nodeCache = useMemo(
     () => createKnownNodeCache(knownNodeCacheScope(cacheSpaceKey, currentUserId)),
     [cacheSpaceKey, currentUserId],
@@ -394,8 +449,11 @@ function BusabaseDashboardContent({
     [cacheSpaceKey, nodeCache],
   );
   // Reads run through oRPC + React Query, seeded by the SSR props as initialData.
-  const changeRequestsList = orpc.changeRequests.list.queryOptions({ input: {} });
-  const basesList = orpc.bases.list.queryOptions({ input: {} });
+  // Home's "waiting for your review" preview, not the newest page of every
+  // change request (see `homePendingListInput`).
+  const changeRequestsList = orpc.changeRequests.list.queryOptions({
+    input: homePendingListInput(),
+  });
   const archivedBasesList = orpc.bases.list.queryOptions({ input: { status: "archived" } });
   const archivedNodesList = orpc.nodes.list.queryOptions({ input: { status: "archived" } });
   const auditEventsList = orpc.auditEvents.list.queryOptions({ input: {} });
@@ -411,12 +469,42 @@ function BusabaseDashboardContent({
     } & Awaited<ReturnType<typeof changeRequestsList.queryFn>>,
     enabled: !isAnon && shouldQueryGlobalChangeRequests(locationPath),
   });
-  // For an anonymous visitor `bases.list` is off; `activeBase` resolves from the
-  // seeded `initialBases` prop (the one shared base the public host fetched via
-  // the allowlisted `bases.get`) that this query keeps as its fallback data.
-  const basesQuery = useQuery({ ...basesList, initialData: initialBases, enabled: !isAnon });
-  const archivedBasesQuery = useQuery({ ...archivedBasesList, enabled: !isAnon });
-  const archivedNodesQuery = useQuery({ ...archivedNodesList, enabled: !isAnon });
+  // The open Base is ONE `bases.get` for the Base the route names. Every page
+  // used to load every Base in the space with all its fields instead (1.4MB and
+  // ~290ms for 880 Bases, `scripts/bench-sidebar.ts`), and with no Base in the
+  // route it fell back to the first one, so Home, Inbox and docs also fetched
+  // that Base's views and a page of its records for nothing.
+  const seededActiveBase = useMemo(
+    () => (selectedBaseSlug ? findBaseByRef(initialBases, selectedBaseSlug) : null),
+    [initialBases, selectedBaseSlug],
+  );
+  const activeBaseQuery = useQuery({
+    ...orpc.bases.get.queryOptions({ input: { baseId: selectedBaseSlug ?? "" } }),
+    initialData: seededActiveBase ?? undefined,
+    enabled: !isAnon && Boolean(selectedBaseSlug),
+    retry: retryUnlessNotFound,
+  });
+  // Other Bases, on the two routes that read them. The graph draws every field
+  // of every Base, so it takes the whole catalog. The design page only needs
+  // how Bases connect (relation targets and lookups, for its relation picker
+  // and its cross-Base dependency check), so it asks for `fields: "links"`:
+  // ~10x smaller in a large space. A lookup's target fields come from that one
+  // Base (`bases.get`, inside BaseSetupView).
+  const baseCatalogQuery = useQuery({
+    ...orpc.bases.list.queryOptions({ input: isGraphRoute ? {} : { fields: "links" } }),
+    enabled: !isAnon && (isGraphRoute || isBaseSetupRoute),
+  });
+  // The Trash page is their only reader, so they load there and nowhere else.
+  // Every other page used to download the whole Trash on first paint: ~225KB
+  // for 250 archived nodes and 88 archived Bases (`scripts/bench-sidebar.ts`).
+  const archivedBasesQuery = useQuery({
+    ...archivedBasesList,
+    enabled: !isAnon && isArchivedRoute,
+  });
+  const archivedNodesQuery = useQuery({
+    ...archivedNodesList,
+    enabled: !isAnon && isArchivedRoute,
+  });
   const auditEventsQuery = useQuery({
     ...auditEventsList,
     initialData: initialAuditEvents,
@@ -426,11 +514,20 @@ function BusabaseDashboardContent({
   const isChangeRequestsLoaded =
     changeRequestsQuery.isFetchedAfterMount || !changeRequestsQuery.isFetching;
   // Anonymous mode reads the seeded prop directly, NOT the disabled query's
-  // cache: `basesQuery` freezes `initialData` at first mount, but the public
-  // host resolves the shared base asynchronously (`bases.get`) and passes it in
-  // a render later — reading the prop lets that update flow through so
+  // cache: a query freezes `initialData` at first mount, but the public host
+  // resolves the shared base asynchronously (`bases.get`) and passes it in a
+  // render later — reading the prop lets that update flow through so
   // `activeBase` (and therefore the records query) actually populates.
-  const bases = isAnon ? (initialBases ?? []) : (basesQuery.data ?? []);
+  const activeBase = isAnon ? seededActiveBase : (activeBaseQuery.data ?? null);
+  const baseCatalog = useMemo(() => {
+    const catalog = isAnon ? initialBases : (baseCatalogQuery.data ?? EMPTY_BASES);
+    // The open Base is always present and always complete: the design page's
+    // dependency scan reads its formulas too, and a `links` catalog carries
+    // only its relation and lookup fields (or lacks it entirely, for an
+    // archived Base opened by id).
+    if (!activeBase) return catalog;
+    return [...catalog.filter((base) => base.id !== activeBase.id), activeBase];
+  }, [activeBase, baseCatalogQuery.data, initialBases, isAnon]);
   const archivedBases = archivedBasesQuery.data ?? [];
   const archivedNodes = archivedNodesQuery.data ?? [];
   const auditEvents = auditEventsQuery.data ?? [];
@@ -445,8 +542,12 @@ function BusabaseDashboardContent({
       ...createChangeRequestQueryKeys(orpc),
       records: orpc.records.list.key() as QueryKey,
       recordsPage: orpc.records.listPage.key() as QueryKey,
+      recordDetail: orpc.records.get.key() as QueryKey,
       recordsCount: orpc.records.count.key() as QueryKey,
       bases: orpc.bases.list.queryOptions({ input: {} }).queryKey as QueryKey,
+      // Partial key: one invalidation covers the open Base however the route
+      // named it (id, nodeId or slug).
+      baseDetail: orpc.bases.get.key() as QueryKey,
       // Partial key, so one invalidation covers every Base's deleted-field list.
       // It was missing entirely, which meant `refresh()` never touched it: a
       // restored field stayed in BOTH lists, and — now that a field can be
@@ -492,37 +593,22 @@ function BusabaseDashboardContent({
   const [uncontrolledSearchOpen, setUncontrolledSearchOpen] = useState(false);
   const isSearchOpen = searchOpen ?? uncontrolledSearchOpen;
 
-  const {
-    isArchivedRoute,
-    isGraphRoute,
-    isAssetDetailRoute,
-    isAgentDetailRoute,
-    agentDetailParams,
-    isTemplateDetailRoute,
-    templateDetailParams,
-    isOperationRoute,
-    operationParams,
-    isChangeRequestRoute,
-    isBaseDesignRoute,
-    isLegacyBaseSetupRoute,
-    isNewRecordRoute,
-    isEditRecordRoute,
-    editRecordParams,
-    isRecordActivityRoute,
-    recordActivityParams,
-    baseParams,
-    isBaseChildRoute,
-    baseChildParams,
-    isAirappRoute,
-    isBaseSetupRoute,
-    isBaseActivityRoute,
-    selectedBaseSlug,
-    selectedAirappSlug,
-    nodeDetailRoute,
-    nodeActivityRoute,
-    routeNodeRef,
-    selectedChangeRequestId,
-  } = useDashboardRoutes();
+  const inboxQueueContext =
+    selectedChangeRequestId &&
+    new URLSearchParams(search).get("inboxItem") === selectedChangeRequestId &&
+    (isChangeRequestRoute || isOperationRoute)
+      ? readInboxQueueContext(search)
+      : null;
+  const inboxQueueQuery = useQuery({
+    ...orpc.changeRequests.inboxSnapshot.queryOptions({
+      input: {
+        ...inboxTabFilter(inboxQueueContext?.view ?? "review"),
+        page: inboxQueueContext?.page ?? 1,
+        pageSize: inboxQueueContext?.pageSize ?? 50,
+      },
+    }),
+    enabled: Boolean(inboxQueueContext && (isChangeRequestRoute || isOperationRoute)),
+  });
   const nodeRouteStateQuery = useQuery({
     ...orpc.nodes.resolveRouteState.queryOptions({
       input: {
@@ -566,18 +652,6 @@ function BusabaseDashboardContent({
       ? loadedNode
       : null;
   }, [cacheSpaceKey, loadedDetailNode, nodeActivityRoute, nodeTree]);
-  const activeBase = useMemo(
-    () =>
-      selectedBaseSlug
-        ? (bases.find(
-            (base) =>
-              base.id === selectedBaseSlug ||
-              base.nodeId === selectedBaseSlug ||
-              base.slug === selectedBaseSlug,
-          ) ?? null)
-        : (bases[0] ?? null),
-    [selectedBaseSlug, bases],
-  );
   useBusabaseLiveSync({
     activeBaseId: activeBase?.id,
     listKeys,
@@ -894,19 +968,11 @@ function BusabaseDashboardContent({
     })),
   });
   const records = useMemo(() => {
-    const seen = new Set<string>();
-    const merged: RecordVO[] = [];
-    for (const record of [
+    return mergeFreshRecords([
       fallbackRecordQuery.data,
       ...relationRecordQueries.map((query) => query.data),
       ...baseRecords,
-    ]) {
-      if (record && !seen.has(record.id)) {
-        seen.add(record.id);
-        merged.push(record);
-      }
-    }
-    return merged;
+    ]);
   }, [baseRecords, fallbackRecordQuery.data, relationRecordQueries]);
   const activeRecord = useMemo(
     () => records.find((record) => record.id === selectedRecordId) ?? null,
@@ -1316,8 +1382,13 @@ function BusabaseDashboardContent({
       queryClient.invalidateQueries({ queryKey: listKeys.changeRequestDetail }),
       queryClient.invalidateQueries({ queryKey: listKeys.records }),
       queryClient.invalidateQueries({ queryKey: listKeys.recordsPage }),
+      queryClient.invalidateQueries({ queryKey: listKeys.recordDetail }),
+      queryClient.invalidateQueries({ queryKey: ["busabase", "relation-options"] }),
+      queryClient.invalidateQueries({ queryKey: ["busabase", "relation-selected"] }),
+      queryClient.invalidateQueries({ queryKey: ["busabase", "relation-bases"] }),
       queryClient.invalidateQueries({ queryKey: listKeys.recordsCount }),
       queryClient.invalidateQueries({ queryKey: listKeys.bases }),
+      queryClient.invalidateQueries({ queryKey: listKeys.baseDetail }),
       queryClient.invalidateQueries({ queryKey: listKeys.deletedFields }),
       queryClient.invalidateQueries({ queryKey: listKeys.nodes }),
       queryClient.invalidateQueries({ queryKey: listKeys.archivedNodes }),
@@ -1338,6 +1409,61 @@ function BusabaseDashboardContent({
       }),
     ]);
   }, [activeBase?.id, listKeys, orpc, queryClient]);
+
+  const fetchInboxQueuePage = useCallback(
+    (context: InboxQueueContext, page: number) =>
+      queryClient.fetchQuery(
+        orpc.changeRequests.inboxSnapshot.queryOptions({
+          input: { ...inboxTabFilter(context.view), page, pageSize: context.pageSize },
+        }),
+      ),
+    [orpc, queryClient],
+  );
+  const goToInboxQueue = useCallback(
+    (context: InboxQueueContext, id: string | null, page: number) => {
+      const path = id ? `/inbox/${id}` : "/inbox";
+      const params = new URLSearchParams(writeInboxQueueContext(search, { ...context, page }));
+      if (id) params.set("inboxItem", id);
+      rawSetLocation(addDemoParam(`${path}?${params.toString()}`));
+    },
+    [addDemoParam, rawSetLocation, search],
+  );
+  const navigateInboxQueue = useCallback(
+    async (direction: "previous" | "next") => {
+      if (!inboxQueueContext || !selectedChangeRequestId) return;
+      try {
+        const current = await fetchInboxQueuePage(inboxQueueContext, inboxQueueContext.page);
+        const neighbor = inboxNeighborPage(
+          current.changeRequests.map((item) => item.id),
+          selectedChangeRequestId,
+          direction,
+          current.page,
+          current.totalPages,
+        );
+        if (!neighbor) return;
+        if ("id" in neighbor) {
+          goToInboxQueue(inboxQueueContext, neighbor.id, neighbor.page);
+          return;
+        }
+        const adjacent = await fetchInboxQueuePage(inboxQueueContext, neighbor.page);
+        const item =
+          direction === "next" ? adjacent.changeRequests[0] : adjacent.changeRequests.at(-1);
+        if (item) goToInboxQueue(inboxQueueContext, item.id, adjacent.page);
+      } catch (navigationError) {
+        setError(
+          presentCoreError(messages, locale, navigationError, messages.inbox.loadFailedBody),
+        );
+      }
+    },
+    [
+      fetchInboxQueuePage,
+      goToInboxQueue,
+      inboxQueueContext,
+      locale,
+      messages,
+      selectedChangeRequestId,
+    ],
+  );
 
   const reviewMutation = useMutation({
     mutationFn: async (variables: {
@@ -1388,20 +1514,116 @@ function BusabaseDashboardContent({
     },
     onSettled: () => refresh(),
   });
+  const reviewInFlightRef = useRef(false);
+  const [preparingReviewAction, setPreparingReviewAction] = useState<ReviewAction | null>(null);
   const pendingReviewAction: ReviewAction | null = reviewMutation.isPending
     ? (reviewMutation.variables?.action ?? null)
-    : null;
+    : preparingReviewAction;
+
+  const reviewAndAdvance = useCallback(
+    async (action: "approve" | "reject", changeRequestId: string, reason?: string) => {
+      if (reviewInFlightRef.current) return;
+      reviewInFlightRef.current = true;
+      setPreparingReviewAction(action);
+      try {
+        const context =
+          inboxQueueContext?.view === "review" && selectedChangeRequestId === changeRequestId
+            ? inboxQueueContext
+            : null;
+        let position = -1;
+        let nextId: string | null = null;
+        let nextPage = context?.page ?? 1;
+        let hasNext = false;
+        if (context) {
+          try {
+            const before = await fetchInboxQueuePage(context, context.page);
+            position = before.changeRequests.findIndex((item) => item.id === changeRequestId);
+            hasNext =
+              position >= 0 && (before.page - 1) * context.pageSize + position + 1 < before.total;
+            if (hasNext) {
+              const neighbor = inboxNeighborPage(
+                before.changeRequests.map((item) => item.id),
+                changeRequestId,
+                "next",
+                before.page,
+                before.totalPages,
+              );
+              if (neighbor) {
+                nextPage = neighbor.page;
+                nextId =
+                  "id" in neighbor
+                    ? neighbor.id
+                    : ((await fetchInboxQueuePage(context, neighbor.page)).changeRequests[0]?.id ??
+                      null);
+              }
+            }
+          } catch {
+            // A queue read must never block the review itself.
+          }
+        }
+
+        try {
+          await reviewMutation.mutateAsync({ action, changeRequestId, reason });
+        } catch {
+          return;
+        }
+        if (!context || position < 0) return;
+        if (!hasNext) {
+          goToInboxQueue(context, null, context.page);
+          return;
+        }
+        try {
+          await queryClient.invalidateQueries({ queryKey: listKeys.inboxSnapshot });
+          const current = await fetchInboxQueuePage(context, context.page);
+          let target = current.changeRequests.find((item) => item.id === nextId);
+          let targetPage = current.page;
+          if (!target && nextId && nextPage !== current.page) {
+            const adjacent = await fetchInboxQueuePage(context, nextPage);
+            target = adjacent.changeRequests.find((item) => item.id === nextId);
+            targetPage = adjacent.page;
+          }
+          // Another reviewer may have resolved the original successor. Continue
+          // from the same slot in the freshly filtered queue instead.
+          if (!target) {
+            target = current.changeRequests[position];
+            targetPage = current.page;
+          }
+          if (target) {
+            goToInboxQueue(context, target.id, targetPage);
+          } else {
+            goToInboxQueue(context, null, current.page);
+          }
+        } catch {
+          goToInboxQueue(context, null, context.page);
+        }
+      } finally {
+        reviewInFlightRef.current = false;
+        setPreparingReviewAction(null);
+      }
+    },
+    [
+      fetchInboxQueuePage,
+      goToInboxQueue,
+      inboxQueueContext,
+      listKeys.inboxSnapshot,
+      queryClient,
+      reviewMutation,
+      selectedChangeRequestId,
+    ],
+  );
 
   const approveChangeRequest = useCallback(
-    (changeRequestId: string, reason?: string) =>
-      reviewMutation.mutate({ action: "approve", changeRequestId, reason }),
-    [reviewMutation],
+    (changeRequestId: string, reason?: string) => {
+      void reviewAndAdvance("approve", changeRequestId, reason);
+    },
+    [reviewAndAdvance],
   );
 
   const rejectChangeRequest = useCallback(
-    (changeRequestId: string, reason?: string) =>
-      reviewMutation.mutate({ action: "reject", changeRequestId, reason }),
-    [reviewMutation],
+    (changeRequestId: string, reason?: string) => {
+      void reviewAndAdvance("reject", changeRequestId, reason);
+    },
+    [reviewAndAdvance],
   );
 
   const mergeChangeRequest = useCallback(
@@ -1495,13 +1717,15 @@ function BusabaseDashboardContent({
       });
       if (result.materialized) {
         await refresh();
+        toast.success(messages.nodeSettings.saved);
         setLocation(`/base/${result.base.slug}/${result.id}`);
         return;
       }
+      toast.success(messages.nodeSettings.changeRequestSubmitted);
       setLocation(`/inbox/${result.id}`);
       await refresh();
     },
-    [client, messages.createNode.createRecordMessage, refresh, setLocation],
+    [client, messages, refresh, setLocation],
   );
 
   const submitUpdateRecord = useCallback(
@@ -1509,6 +1733,7 @@ function BusabaseDashboardContent({
       setError(null);
       const result = await client.createUpdateChangeRequest(record.id, {
         author: "local-editor",
+        baseCommitId: record.headCommitId,
         autoMerge: options?.mergeImmediately === true,
         fields,
         message: fmt(messages.createNode.updateRecordMessage, {
@@ -1517,9 +1742,11 @@ function BusabaseDashboardContent({
       });
       if (result.materialized) {
         await refresh();
+        toast.success(messages.nodeSettings.saved);
         setLocation(`/base/${result.base.slug}/${result.id}`);
         return;
       }
+      toast.success(messages.nodeSettings.changeRequestSubmitted);
       setLocation(`/inbox/${result.id}`);
       await refresh();
     },
@@ -1751,6 +1978,7 @@ function BusabaseDashboardContent({
       }
       const changeRequest = await client.createFieldChangeRequest(base.id, {
         ...payload,
+        ...(payload.type === "formula" ? { autoMerge: false } : {}),
         message: fmt(messages.createNode.addFieldMessage, {
           field: iStringParse(payload.name),
         }),
@@ -1771,19 +1999,28 @@ function BusabaseDashboardContent({
     ) => {
       setError(null);
       const field = base.fields.find((item) => item.id === fieldId);
+      // Guidance has its own patch so unrelated settings cannot restore an old
+      // help snapshot. The merge handler retains the current help metadata.
+      const fieldOptions = { ...field?.options };
+      delete fieldOptions.help;
       // A choices edit rides in the same update as a rename, so both land (or
       // wait for review) together. `options` replaces the stored object, so
       // keep whatever else a select field carries alongside `choices`.
       // A date field's time settings ride along the same way.
       const nextOptions =
-        patch.choices !== undefined || patch.date !== undefined
+        patch.choices !== undefined || patch.date !== undefined || patch.formula !== undefined
           ? {
-              ...field?.options,
+              ...fieldOptions,
               ...(patch.choices !== undefined ? { choices: patch.choices } : {}),
               ...(patch.date !== undefined ? { date: patch.date } : {}),
+              ...(patch.formula !== undefined ? { formula: patch.formula } : {}),
             }
           : undefined;
-      const renameOnly = patch.choices === undefined && patch.date === undefined;
+      const renameOnly =
+        patch.choices === undefined &&
+        patch.date === undefined &&
+        patch.formula === undefined &&
+        patch.help === undefined;
       const displayName = iStringParse(patch.name ?? field?.name ?? fieldId);
       // `autoMerge` was not being sent at all, so the endpoint's permission-aware
       // default applied to BOTH modes: a write-capable user pressing "submit for
@@ -1793,7 +2030,9 @@ function BusabaseDashboardContent({
         fieldId,
         patch: {
           ...(patch.name !== undefined ? { name: patch.name } : {}),
+          ...(patch.help !== undefined ? { help: patch.help } : {}),
           ...(nextOptions ? { options: nextOptions } : {}),
+          ...(patch.formula !== undefined ? { required: false } : {}),
         },
         message: fmt(
           renameOnly
@@ -1949,23 +2188,34 @@ function BusabaseDashboardContent({
       setError(null);
       // Restore has no "propose it" affordance anywhere in the UI — it is the undo
       // of an archive — so it asks for the merge directly, in one request.
-      await client.createRestoreBaseChangeRequest(base.id, {
+      const changeRequest = await client.createRestoreBaseChangeRequest(base.id, {
         submittedBy: "local-editor",
         message: fmt(messages.base.restoreBaseMessage, { base: base.name }),
         autoMerge: true,
       });
       await queryClient.invalidateQueries({ queryKey: listKeys.bases });
+      await queryClient.invalidateQueries({ queryKey: listKeys.baseDetail });
       await queryClient.invalidateQueries({
         queryKey: orpc.bases.list.queryOptions({ input: { status: "archived" } }).queryKey,
       });
-      toast.success(messages.base.baseRestored);
-      setLocation(`/base/${base.slug}`);
+      // The sidebar tree is `nodes.list`, not `bases.list` — without this the
+      // restored Base only showed up in the sidebar after a page reload.
+      await queryClient.invalidateQueries({ queryKey: listKeys.nodes });
+      toast.success(
+        getRestoreToastMessage(changeRequest, messages.base, messages.base.baseRestored),
+      );
+      // Re-read the slug: if another base took it while this one was in the
+      // Trash, the restore moved this one to `slug-2`, and the old slug would
+      // open the other base.
+      const restored = await client.getBase(base.id);
+      setLocation(`/base/${restored.slug}`);
     },
     [
       client,
+      listKeys.baseDetail,
       listKeys.bases,
-      messages.base.baseRestored,
-      messages.base.restoreBaseMessage,
+      listKeys.nodes,
+      messages.base,
       orpc,
       queryClient,
       setLocation,
@@ -1975,7 +2225,7 @@ function BusabaseDashboardContent({
   const submitRestoreNode = useCallback(
     async (node: RestorableNode) => {
       setError(null);
-      await client.createNodeChangeRequest({
+      const changeRequest = await client.createNodeChangeRequest({
         submittedBy: "local-editor",
         message: fmt(messages.base.restoreNodeMessage, {
           name: node.name,
@@ -1994,15 +2244,22 @@ function BusabaseDashboardContent({
       await queryClient.invalidateQueries({ queryKey: listKeys.nodeDetail });
       if (node.type === "base") {
         await queryClient.invalidateQueries({ queryKey: listKeys.bases });
+        await queryClient.invalidateQueries({ queryKey: listKeys.baseDetail });
         await queryClient.invalidateQueries({ queryKey: listKeys.archivedBases });
       }
-      toast.success(fmt(messages.base.nodeRestored, { type: node.type }));
+      toast.success(
+        getRestoreToastMessage(
+          changeRequest,
+          messages.base,
+          fmt(messages.base.nodeRestored, { type: node.type }),
+        ),
+      );
     },
     [
       client,
-      messages.base.nodeRestored,
-      messages.base.restoreNodeMessage,
+      messages.base,
       listKeys.archivedBases,
+      listKeys.baseDetail,
       listKeys.bases,
       listKeys.nodeDetail,
       listKeys.nodeRouteState,
@@ -2095,13 +2352,15 @@ function BusabaseDashboardContent({
       });
       await refresh();
       if (changeRequest.materialized) {
-        const viewBase = bases.find((item) => item.id === view.baseId);
-        setLocation(`/base/${viewBase?.slug ?? activeBase?.slug ?? "blog"}/${changeRequest.slug}`);
+        // Views are edited from their own Base's page, so this is the open
+        // Base; a Base route also accepts the id if it ever is not.
+        const viewBaseRef = activeBase?.id === view.baseId ? activeBase.slug : view.baseId;
+        setLocation(`/base/${viewBaseRef}/${changeRequest.slug}`);
         return;
       }
       setLocation(`/inbox/${changeRequest.id}`);
     },
-    [activeBase?.slug, bases, client, messages.base.updateViewMessage, refresh, setLocation],
+    [activeBase, client, messages.base.updateViewMessage, refresh, setLocation],
   );
 
   const submitDeleteView = useCallback(
@@ -2382,6 +2641,24 @@ function BusabaseDashboardContent({
     selectedRecordId,
   ]);
 
+  const queuePosition =
+    inboxQueueQuery.data?.changeRequests.findIndex((item) => item.id === selectedChangeRequestId) ??
+    -1;
+  const queueNavigation = inboxQueueContext
+    ? {
+        onBack: () => goToInboxQueue(inboxQueueContext, null, inboxQueueContext.page),
+        canPrevious:
+          queuePosition >= 0 && (queuePosition > 0 || (inboxQueueQuery.data?.page ?? 1) > 1),
+        canNext:
+          queuePosition >= 0 &&
+          (queuePosition < (inboxQueueQuery.data?.changeRequests.length ?? 0) - 1 ||
+            (inboxQueueQuery.data?.page ?? 1) < (inboxQueueQuery.data?.totalPages ?? 0)),
+        isLoading: inboxQueueQuery.isFetching || pendingReviewAction !== null,
+        onPrevious: () => void navigateInboxQueue("previous"),
+        onNext: () => void navigateInboxQueue("next"),
+      }
+    : undefined;
+
   const activeView = useMemo(() => {
     // Home is the landing page; Inbox keeps its own route but is no longer what
     // an unqualified visit resolves to.
@@ -2437,6 +2714,7 @@ function BusabaseDashboardContent({
           onMerge={mergeChangeRequest}
           onReject={rejectChangeRequest}
           onRevised={refresh}
+          queueNavigation={queueNavigation}
           readOnly={readOnlyChangeRequestPreview}
         />
       );
@@ -2567,7 +2845,7 @@ function BusabaseDashboardContent({
 
     if (
       locationPath.startsWith("/base/") &&
-      shouldShowInitialLoadingState(activeBase, basesQuery.isFetching)
+      shouldShowInitialLoadingState(activeBase, activeBaseQuery.isFetching)
     ) {
       return <BaseTableSkeleton />;
     }
@@ -2589,14 +2867,24 @@ function BusabaseDashboardContent({
     }
 
     if (isGraphRoute) {
-      return <BaseGraphView bases={bases} nodes={nodeTree} />;
+      if (!isAnon && baseCatalogQuery.isPending) {
+        return <NodeDetailSkeleton variant="folder" />;
+      }
+      return <BaseGraphView bases={baseCatalog} nodes={nodeTree} />;
     }
 
     if (isBaseSetupRoute) {
+      // Wait for the catalog rather than render without it: the delete-field
+      // warning reads cross-Base dependencies from it and would silently list
+      // none.
+      if (!isAnon && baseCatalogQuery.isPending) {
+        return <BaseTableSkeleton />;
+      }
       return (
         <BaseSetupView
+          draftScope={`${cacheSpaceKey}:${currentUserId ?? "anonymous"}`}
           base={activeBase}
-          bases={bases}
+          bases={baseCatalog}
           deletedFields={deletedFields}
           orpc={orpc}
           onConvertFieldType={submitConvertFieldType}
@@ -2763,8 +3051,10 @@ function BusabaseDashboardContent({
     auditEvents,
     archivedBasesQuery.isPending,
     archivedNodesQuery.isPending,
-    bases,
-    basesQuery.isFetching,
+    activeBaseQuery.isFetching,
+    baseCatalog,
+    baseCatalogQuery.isPending,
+    isAnon,
     client,
     emptyGuide,
     onCreateNode,
@@ -2792,6 +3082,7 @@ function BusabaseDashboardContent({
     runBatchReview,
     locationPath,
     inboxView,
+    queueNavigation,
     mergeChangeRequest,
     records,
     readOnlyChangeRequestPreview,
@@ -2845,6 +3136,7 @@ function BusabaseDashboardContent({
     openSearch,
     cacheSpaceKey,
     apiClient,
+    currentUserId,
     agentIntegration,
     queryClient,
     isTemplateDetailRoute,
@@ -2968,7 +3260,13 @@ function BusabaseDashboardContent({
             dialog hangs off node toolbars nine components down, and it needs to
             know which edition/space to point an agent at. */}
         <AgentIntegrationProvider agentIntegration={agentIntegration}>
-          {content}
+          {/* Scopes the agent model-list cache to this host+workspace+actor,
+              reaching both the full-page AgentDetailView below and the
+              side-panel's AgentChatSidePanelTab, which otherwise has no route
+              to this information through the generic SidePanelTabProps. */}
+          <AgentModelScopeProvider workspaceKey={cacheSpaceKey} actorId={currentUserId}>
+            {content}
+          </AgentModelScopeProvider>
         </AgentIntegrationProvider>
       </FileUploadTaskProvider>
     </DashboardOrpcProvider>

@@ -1,6 +1,7 @@
 import type { FieldType, LookupRollup, ViewConfigVO, ViewType } from "busabase-contract/types";
 import type { iString } from "openlib/i18n/i-string";
 import type { ReactNode } from "react";
+import type { FormulaFieldOptions } from "./formula-field";
 
 export interface BusabaseBreadcrumbItem {
   href?: string;
@@ -52,15 +53,18 @@ export interface ViewSubmitOptions {
  * choice ids are the stored cell values, so a renamed choice keeps its id.
  */
 export interface UpdateBaseFieldPatch {
+  help?: { description?: string; example?: string } | null;
   name?: iString;
   choices?: Array<{ color?: string; id: string; name: string }>;
   /** A date field's time settings; merged into the field's existing options. */
   date?: { includeTime?: boolean; timezone?: string };
+  formula?: FormulaFieldOptions;
 }
 
 export interface CreateBaseFieldPayload {
   name: iString;
   options?: {
+    help?: { description?: string; example?: string };
     ai?: {
       model?: string;
       prompt?: string;
@@ -79,6 +83,7 @@ export interface CreateBaseFieldPayload {
       includeTime?: boolean;
       timezone?: string;
     };
+    formula?: FormulaFieldOptions;
     lookup?: {
       relationFieldSlug: string;
       targetFieldSlug: string;

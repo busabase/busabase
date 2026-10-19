@@ -14,9 +14,11 @@ import { type BusabaseContract, busabaseContract } from "../contract/busabase";
 import type { NodeContentInput } from "../contract/node-content-schemas";
 import type { NodeDetailVO } from "../contract/node-detail-schemas";
 import type { AgentCatalogEntryVO } from "../domains/agents/types";
+import type { FieldHelp } from "../domains/base/contract/base-schemas";
 import type {
   groupRecordsInputSchema,
   groupRecordsResponseSchema,
+  listRecordsSortSchema,
 } from "../domains/base/contract/record-schemas";
 import type {
   InstallEventVO,
@@ -199,10 +201,17 @@ export interface BusabaseDashboardApiClient {
      * its own slice instead of the whole Base.
      */
     dateRange?: { fieldSlug: string; gte: string; lt: string };
+    /**
+     * Same one-field sort as `records.list` (number/date fields only); it
+     * replaces the View's sort when `viewId` is also given.
+     */
+    sort?: z.input<typeof listRecordsSortSchema>;
     page?: number;
     pageSize?: number;
   }) => Promise<{ records: RecordVO[]; total: number; totalPages: number; page: number }>;
   listBases: () => Promise<BaseVO[]>;
+  /** One Base with its fields, by id, nodeId or slug. */
+  getBase: (baseId: string) => Promise<BaseVO>;
   createBase: (payload: {
     parentNodeId?: string;
     slug: string;
@@ -291,6 +300,7 @@ export interface BusabaseDashboardApiClient {
     payload: {
       name: iString;
       options?: {
+        help?: FieldHelp;
         ai?: {
           model?: string;
           prompt?: string;
@@ -319,6 +329,7 @@ export interface BusabaseDashboardApiClient {
       type?: BaseVO["fields"][number]["type"];
       required?: boolean;
       options?: {
+        help?: FieldHelp;
         ai?: {
           model?: string;
           prompt?: string;
@@ -342,7 +353,9 @@ export interface BusabaseDashboardApiClient {
       patch: {
         name?: iString;
         required?: boolean;
+        help?: FieldHelp | null;
         options?: {
+          help?: FieldHelp;
           ai?: {
             model?: string;
             prompt?: string;
@@ -466,6 +479,7 @@ export interface BusabaseDashboardApiClient {
       message?: string;
       author?: string;
       autoMerge?: boolean;
+      baseCommitId?: string;
     },
   ) => Promise<RecordUpdateChangeRequestResult>;
   /**
@@ -721,6 +735,7 @@ export const createBusabaseRestApiClient = (
     groupRecords: (params) => client.records.groupBy(params),
     listRecordsPage: (params) => client.records.listPage(params),
     listBases: () => client.bases.list({}),
+    getBase: (baseId) => client.bases.get({ baseId }),
     createBase: (payload) => client.bases.create(payload),
     createNodeChangeRequest: (payload) => client.nodes.createChangeRequest(payload),
     listViews: (baseId) => client.bases.listViews({ baseId, status: "active" }),

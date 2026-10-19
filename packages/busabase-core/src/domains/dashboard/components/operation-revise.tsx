@@ -5,7 +5,11 @@ import { Loader2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { type CoreI18nMessages, useCoreI18n, useCoreLocale } from "../../../i18n";
 import { presentCoreError } from "../../../i18n/localize-error";
-import { getOperationFieldLabel, isLongTextValue } from "./operation-diff";
+import {
+  getOperationFieldLabel,
+  isInternalFormulaMetadata,
+  isLongTextValue,
+} from "./operation-diff";
 
 /**
  * Statuses whose operations `operations.revise` will accept. Mirrors the guard in
@@ -241,14 +245,16 @@ export function OperationReviseForm({
 
       {entries.length > 0 ? (
         <div className="mt-3 divide-y divide-border/50">
-          {entries.map((entry) => (
-            <PayloadFieldEditor
-              entry={entry}
-              error={errors[entry.slug]}
-              key={entry.slug}
-              onChange={(raw) => updateEntry(entry.slug, raw)}
-            />
-          ))}
+          {entries
+            .filter((entry) => !isInternalFormulaMetadata(operation, entry.slug))
+            .map((entry) => (
+              <PayloadFieldEditor
+                entry={entry}
+                error={errors[entry.slug]}
+                key={entry.slug}
+                onChange={(raw) => updateEntry(entry.slug, raw)}
+              />
+            ))}
         </div>
       ) : (
         <div className="mt-3 rounded-md bg-muted/25 px-3 py-3 text-muted-foreground text-sm">

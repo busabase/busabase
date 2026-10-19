@@ -55,11 +55,27 @@ function mergeLazyChildren(tree: NodeVO[], childrenByParentId: Map<string, NodeV
  * folder's children are cached until something ELSE invalidates the
  * `nodes.list` family (a move/create/delete), not merely on re-collapse.
  */
+/**
+ * Only what the merge reads, per expanded folder. `useQueries` hands back a
+ * new results array on every render; passing it through `combine` (a stable,
+ * module-level function) is what lets TanStack Query structurally share the
+ * output, so it keeps its identity until a folder's data or fetching state
+ * actually changes. Without that, `nodes` below was a new tree on every
+ * render, and a consumer that writes the tree somewhere observable from an
+ * effect (mobile's known-node cache) re-rendered itself into a loop.
+ */
+const pickLazyResults = (results: Array<{ data?: unknown; isFetching: boolean }>) =>
+  results.map((result) => ({
+    data: result.data as NodeVO[] | undefined,
+    isFetching: result.isFetching,
+  }));
+
 export function useLazyNodeChildren({
   orpc,
   baseNodes,
 }: {
-  orpc: Pick<BusabaseQueryUtils, "nodes">;
+  /** Null while a host has no connection yet (mobile): nothing is fetched. */
+  orpc: Pick<BusabaseQueryUtils, "nodes"> | null;
   baseNodes: NodeVO[];
 }) {
   const [expandedIds, setExpandedIds] = useState<ReadonlySet<string>>(() => new Set());
@@ -71,12 +87,15 @@ export function useLazyNodeChildren({
   const expandedIdList = useMemo(() => Array.from(expandedIds), [expandedIds]);
 
   const results = useQueries({
-    queries: expandedIdList.map((parentId) => ({
-      ...orpc.nodes.list.queryOptions({
-        input: { parentId, depth: LAZY_CHILDREN_DEPTH },
-      }),
-      staleTime: Number.POSITIVE_INFINITY,
-    })),
+    queries: orpc
+      ? expandedIdList.map((parentId) => ({
+          ...orpc.nodes.list.queryOptions({
+            input: { parentId, depth: LAZY_CHILDREN_DEPTH },
+          }),
+          staleTime: Number.POSITIVE_INFINITY,
+        }))
+      : [],
+    combine: pickLazyResults,
   });
 
   const { childrenByParentId, loadingNodeIds } = useMemo(() => {
@@ -85,7 +104,7 @@ export function useLazyNodeChildren({
     expandedIdList.forEach((parentId, index) => {
       const result = results[index];
       if (result?.data) {
-        children.set(parentId, result.data as NodeVO[]);
+        children.set(parentId, result.data);
       } else if (result?.isFetching) {
         loading.add(parentId);
       }

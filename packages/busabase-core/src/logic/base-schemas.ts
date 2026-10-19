@@ -1,5 +1,6 @@
 import { CREATABLE_NODE_TYPES } from "busabase-contract/domains";
 import {
+  fieldHelpSchema,
   fieldNameSchema,
   lookupRollupSchema,
 } from "busabase-contract/domains/base/contract/base-schemas";
@@ -40,6 +41,7 @@ const fieldTypeSchema = z.enum([
 
 const fieldOptionsSchema = z
   .object({
+    help: fieldHelpSchema.optional(),
     ai: z
       .object({
         model: z.string().optional(),
@@ -90,6 +92,12 @@ const fieldOptionsSchema = z
     formula: z
       .object({
         expression: z.string().min(1),
+        format: z.enum(["auto", "number", "currency", "percent", "date"]).optional(),
+        precision: z.number().int().min(0).max(10).optional(),
+        currency: z
+          .string()
+          .regex(/^[A-Z]{3}$/)
+          .optional(),
       })
       .optional(),
     inverseFieldId: z.string().optional(),

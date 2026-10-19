@@ -119,6 +119,40 @@ async function* subscribeDemoLiveEvents(signal?: AbortSignal) {
 
 const shouldEmitDemoLiveEvent = () => false;
 const DEMO_ACTIVITY_CURSOR_PREFIX = "demo-activity:";
+
+/**
+ * Demo twin of `records.listPage`'s SQL sort: number/date fields only (the
+ * caller's `fieldType` decides, as in real mode), empty values last, ties by
+ * record id ascending. Any other field type leaves the order untouched.
+ */
+const demoSortRecordsForPage = <
+  T extends { id: string; headCommit: { payload: Record<string, unknown> } },
+>(
+  records: T[],
+  sort?: { fieldSlug: string; fieldType?: string; direction: "asc" | "desc" },
+): T[] => {
+  if (!sort) return records;
+  const isNumber = sort.fieldType === "number" || sort.fieldType === "auto_number";
+  const isDate = sort.fieldType === "date";
+  if (!isNumber && !isDate) return records;
+  const keyOf = (record: T): number | null => {
+    const raw = record.headCommit.payload[sort.fieldSlug];
+    if (raw === null || raw === undefined || raw === "") return null;
+    const key = isNumber ? Number(raw) : new Date(String(raw)).getTime();
+    return Number.isFinite(key) ? key : null;
+  };
+  return [...records].sort((left, right) => {
+    const a = keyOf(left);
+    const b = keyOf(right);
+    if (a !== b) {
+      if (a === null) return 1;
+      if (b === null) return -1;
+      return sort.direction === "asc" ? a - b : b - a;
+    }
+    return left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
+  });
+};
+
 const DEMO_RECORD_CURSOR_PREFIX = "demo-record:";
 
 const demoChangeRequestAffectsNode = (
@@ -498,12 +532,27 @@ export const busabaseDemoRouter = os.router({
     }),
   },
   bases: {
-    list: os.bases.list.handler(({ input }) =>
-      input.status === "archived" ? [] : demoListBases(),
-    ),
+    list: os.bases.list.handler(({ input }) => {
+      if (input.status === "archived") return [];
+      const bases = demoListBases();
+      // Same projection as the real `listBases({ fields: "links" })`.
+      return input.fields === "links"
+        ? bases.map((base) => ({
+            ...base,
+            fields: base.fields.filter(
+              (field) => field.type === "relation" || field.type === "lookup",
+            ),
+          }))
+        : bases;
+    }),
     get: os.bases.get.handler(({ input }) => {
+      // Same id / nodeId / slug addressing as the real `getBase`: the dashboard
+      // asks for the open Base by whatever its route carries.
       const base = demoListBases().find(
-        (candidate) => candidate.id === input.baseId || candidate.slug === input.baseId,
+        (candidate) =>
+          candidate.id === input.baseId ||
+          candidate.nodeId === input.baseId ||
+          candidate.slug === input.baseId,
       );
       if (!base) {
         throw new ORPCError("NOT_FOUND", { message: `Base not found: ${input.baseId}` });
@@ -677,6 +726,21 @@ export const busabaseDemoRouter = os.router({
     }),
   },
   agents: {
+    routerEnrollment: {
+      grants: os.agents.routerEnrollment.grants.handler(() => []),
+      mint: os.agents.routerEnrollment.mint.handler(() => {
+        throw demoUnsupported("Router pairing");
+      }),
+      status: os.agents.routerEnrollment.status.handler(() => {
+        throw demoUnsupported("Router pairing");
+      }),
+      complete: os.agents.routerEnrollment.complete.handler(() => {
+        throw demoUnsupported("Router pairing");
+      }),
+      cancel: os.agents.routerEnrollment.cancel.handler(() => {
+        throw demoUnsupported("Router pairing");
+      }),
+    },
     // Demo mode cannot spawn a process or hold a socket, so every REAL agent is
     // still explicitly unavailable — the demo keeps telling the truth about
     // what a local install adds. What it no longer does is refuse everything:
@@ -948,6 +1012,9 @@ export const busabaseDemoRouter = os.router({
         pageSize,
       };
     }),
+    reviewCount: os.changeRequests.reviewCount.handler(async () => ({
+      review: (await demoListChangeRequests()).filter((row) => row.status === "in_review").length,
+    })),
     counts: os.changeRequests.counts.handler(async () => {
       const all = await demoListChangeRequests();
       const countBy = (predicate: (changeRequest: (typeof all)[number]) => boolean) =>
@@ -1051,14 +1118,18 @@ export const busabaseDemoRouter = os.router({
       }
       // The View's filters AND any ad-hoc ones, exactly as the real handler
       // merges them — a demo board column must page the same way a real one does.
-      const ordered = applyViewConfigToRecords(
-        scoped,
-        input.filters?.length || view
-          ? {
-              filters: [...(view?.config.filters ?? []), ...(input.filters ?? [])],
-              sorts: view?.config.sorts ?? [],
-            }
-          : undefined,
+      // An explicit `sort` replaces the View's sort, as it does there too.
+      const ordered = demoSortRecordsForPage(
+        applyViewConfigToRecords(
+          scoped,
+          input.filters?.length || view
+            ? {
+                filters: [...(view?.config.filters ?? []), ...(input.filters ?? [])],
+                sorts: input.sort ? [] : (view?.config.sorts ?? []),
+              }
+            : undefined,
+        ),
+        input.sort,
       );
       const total = ordered.length;
       const totalPages = Math.ceil(total / input.pageSize);

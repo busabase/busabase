@@ -15,6 +15,13 @@ import {
   ListAgentSessionsPagedInputSchema,
   PromptAgentSessionInputSchema,
   RespondToAgentPermissionInputSchema,
+  RouterEnrollmentCompleteInputSchema,
+  RouterEnrollmentConnectionVOSchema,
+  RouterEnrollmentInputSchema,
+  RouterEnrollmentMintInputSchema,
+  RouterEnrollmentMintVOSchema,
+  RouterEnrollmentStatusVOSchema,
+  RouterGrantVOSchema,
   SetAgentSessionConfigOptionInputSchema,
 } from "./types";
 
@@ -27,6 +34,15 @@ import {
  * matching how `live.subscribe` is declared.
  */
 export const agentsContract = {
+  routerEnrollment: {
+    grants: oc.output(RouterGrantVOSchema.array()),
+    mint: oc.input(RouterEnrollmentMintInputSchema).output(RouterEnrollmentMintVOSchema),
+    status: oc.input(RouterEnrollmentInputSchema).output(RouterEnrollmentStatusVOSchema),
+    complete: oc
+      .input(RouterEnrollmentCompleteInputSchema)
+      .output(RouterEnrollmentConnectionVOSchema),
+    cancel: oc.input(RouterEnrollmentInputSchema).output(z.object({ ok: z.boolean() })),
+  },
   /** Connectable backends. Availability is resolved per request, not cached in the client. */
   catalog: oc.output(AgentCatalogEntryVOSchema.array()),
 

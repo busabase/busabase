@@ -102,6 +102,20 @@ describe("the other dashboard facades forward it too", () => {
     ).toMatchObject({ operation: "reorder", autoMerge: false });
   });
 
+  it("forwards guidance updates and explicit clearing without an options snapshot", async () => {
+    for (const help of [{ description: "Actual acceptance date", example: "2026-10-14" }, null]) {
+      const body = await capture((client) =>
+        client.createUpdateFieldChangeRequest("bas_1", {
+          fieldId: "fld_1",
+          patch: { help },
+          autoMerge: false,
+        }),
+      );
+      expect(body).toMatchObject({ operation: "update", patch: { help }, autoMerge: false });
+      expect(body.patch).not.toHaveProperty("options");
+    }
+  });
+
   it("view create and update send the intent instead of a pinned false", async () => {
     expect(
       await capture((c) =>

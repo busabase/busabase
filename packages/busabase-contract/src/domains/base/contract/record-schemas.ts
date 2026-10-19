@@ -146,6 +146,15 @@ export const listRecordsInputSchema = z
       .optional()
       .default("active")
       .describe("`active` is the live table; `archived` is the Base's trash."),
+    summary: z
+      .union([z.boolean(), z.literal("true"), z.literal("false")])
+      .transform((value) => value === true || value === "true")
+      .optional()
+      .describe(
+        "Return compact list previews: field values larger than 4 KB are replaced with omission markers, " +
+          "and Base field definitions and computed lookup values are omitted. Omit for full records; " +
+          "use records.get to read the complete content of a selected row.",
+      ),
     filters: z
       .array(listRecordsFilterSchema)
       .optional()
@@ -246,6 +255,24 @@ export const listRecordsPageInputSchema = z.object({
         "a half-open range of absolute UTC instants, not a `filters` condition. Resolve the " +
         "bounds yourself: a day or a month only means something in a timezone, and the server " +
         "does not know the viewer's.",
+    ),
+  /**
+   * The same one-field sort `records.list` takes, with the same semantics —
+   * so an app can jump straight to page N of "newest follow-up first" without
+   * creating a View in the user's Base or walking a cursor through every page.
+   *
+   * It REPLACES the View's saved sort when both are given (the View's filters
+   * still apply). Ties on the value are broken by record id, so consecutive
+   * pages never overlap or skip a record.
+   */
+  sort: listRecordsSortSchema
+    .optional()
+    .describe(
+      "Sort by one field. Only number and date fields sort authoritatively (their typed value " +
+        "column matches a client's own ordering); any other field type is returned in the " +
+        "default order and left for the caller to sort. " +
+        "Replaces the saved View's sort when `viewId` is also given (the View's filters still " +
+        "apply). Empty values sort last; ties are broken by record id, so pages never overlap.",
     ),
   page: z.coerce.number().int().min(1).optional().default(1).describe("1-indexed, not 0-indexed."),
   pageSize: z.coerce

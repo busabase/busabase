@@ -8,7 +8,7 @@ import { Skeleton } from "kui/skeleton";
 import { Switch } from "kui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "kui/tabs";
 import { Eye, KeyRound, Loader2, Plus, Save, Trash2, Variable } from "lucide-react";
-import type { ReactNode } from "react";
+import { type ReactNode, useEffect, useRef } from "react";
 
 const VAULT_ROW_SKELETON_IDS = ["vault-row-skel-1", "vault-row-skel-2", "vault-row-skel-3"];
 
@@ -160,6 +160,18 @@ export function VaultSettingsPanel({
   message,
 }: VaultSettingsPanelProps) {
   const isBoxed = variant === "boxed";
+  const previousRowIdsRef = useRef<string[]>([]);
+
+  // Focus the name of a row the user just added, whichever Add button the host
+  // renders. Adding keeps every existing row and appends one; loading, clearing
+  // and removing the last row all swap ids instead, so they never steal focus.
+  useEffect(() => {
+    const previousIds = previousRowIdsRef.current;
+    previousRowIdsRef.current = rows.map((row) => row.id);
+    if (previousIds.length === 0 || rows.length !== previousIds.length + 1) return;
+    if (!previousIds.every((id, index) => rows[index]?.id === id)) return;
+    document.getElementById(`vault-key-${rows[rows.length - 1].id}`)?.focus();
+  }, [rows]);
 
   const inputClassName = isBoxed
     ? "font-mono text-sm"

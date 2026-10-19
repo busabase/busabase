@@ -425,3 +425,35 @@ describe("Failed dry run", () => {
     expect(markup).toContain("Showing 10 of 200.");
   });
 });
+
+describe("Restore that moved an item to a new slug", () => {
+  const restored = {
+    ...changeRequest,
+    status: "merged",
+    mergeSummary: {
+      slugChanges: [
+        {
+          nodeId: "nod_old",
+          nodeType: "base",
+          name: "base1",
+          fromSlug: "base1",
+          toSlug: "base1-2",
+        },
+      ],
+    },
+  } as ChangeRequestVO;
+
+  it("says on the change request where the item came back", () => {
+    const html = renderReview(false, "member", { changeRequest: restored });
+    expect(html).toContain("Restored under a new slug");
+    expect(html).toContain("base1-2");
+    expect(html).toContain("now open the other item");
+  });
+
+  it("stays silent when no slug moved", () => {
+    const html = renderReview(false, "member", {
+      changeRequest: { ...restored, mergeSummary: {} } as ChangeRequestVO,
+    });
+    expect(html).not.toContain("Restored under a new slug");
+  });
+});

@@ -7,6 +7,12 @@ describe("AirApp embed data policy", () => {
     ["nodes.get"],
     ["bases.list"],
     ["records.list"],
+    // The aggregate / paged siblings an embedded dashboard renders from. Each
+    // filters through the same Base node-ACL clause as `records.list`.
+    ["records.listPage"],
+    ["records.count"],
+    ["records.groupBy"],
+    ["records.search"],
     ["nodes.readLines"],
     ["fileTrees.readFile"],
     ["assets.download"],
@@ -40,6 +46,13 @@ describe("AirApp embed data policy", () => {
     ["playbooks.get", "GET"],
     ["playbooks.list", undefined],
     ["live.subscribe", undefined],
+    // Space-scoped reads with no node ACL behind them: a GET at `read` level is
+    // not enough, they must stay off the explicit list.
+    ["changeRequests.list", "GET"],
+    ["comments.list", "GET"],
+    ["auditEvents.list", "GET"],
+    ["dump.exportTables", "GET"],
+    ["vault.get", "GET"],
   ])("denies non-data or mutating procedure %s", (path, method) => {
     expect(isAirAppEmbedReadableProcedure(path.split("."), method)).toBe(false);
   });

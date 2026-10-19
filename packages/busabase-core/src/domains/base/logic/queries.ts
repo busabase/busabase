@@ -33,7 +33,7 @@ import {
 import type { z } from "zod";
 import { getContextSpaceId, resolveUserRefs } from "../../../context";
 import { getDb } from "../../../db";
-import type { RecordPO } from "../../../db/schema";
+import type { BaseFieldPO, RecordPO } from "../../../db/schema";
 import {
   busabaseBaseFields,
   busabaseBases,
@@ -63,13 +63,60 @@ import {
   applyViewConfigToEvaluableRecords,
   applyViewConfigToRecords,
   DATE_RANGE_FIELD_TYPES,
+  filterEvaluableRecordsByViewFilters,
+  filterRecordsByViewFilters,
   GROUPABLE_FIELD_TYPES,
   groupKeyForValue,
 } from "../utils/view-records";
 
 export { listInputSchema, recordFieldFilterInputSchema, recordFieldGetInputSchema };
 
-export const listBases = async () => {
+/**
+ * Live fields of exactly these Bases, grouped by `baseId`. One query scoped to
+ * the ids, then one pass to group them.
+ *
+ * Both Base listings used to read every field in the space (archived Bases'
+ * included) and re-scan that whole array once per Base, so the cost grew with
+ * bases × fields. `bases.list` runs on every dashboard page, and in a space
+ * with 880 Bases of 10 fields it took ~470ms (`scripts/bench-sidebar.ts`).
+ */
+/**
+ * `bases.list({ fields })`: `all` is every live field; `links` keeps only the
+ * fields that connect Bases (relation targets, lookups, inverse relations). A
+ * screen that only needs to know how Bases connect, like the Base design page
+ * checking what else depends on a field, otherwise downloads every field of
+ * every Base in the space.
+ */
+type BaseListFields = "all" | "links";
+const LINK_FIELD_TYPES: BaseFieldPO["type"][] = ["relation", "lookup"];
+
+const listFieldRowsByBaseId = async (
+  db: Awaited<ReturnType<typeof getDb>>,
+  baseIds: string[],
+  fields: BaseListFields = "all",
+): Promise<Map<string, BaseFieldPO[]>> => {
+  const fieldsByBaseId = new Map<string, BaseFieldPO[]>();
+  if (baseIds.length === 0) return fieldsByBaseId;
+  const fieldRows = await db
+    .select()
+    .from(busabaseBaseFields)
+    .where(
+      and(
+        inArray(busabaseBaseFields.baseId, baseIds),
+        isNull(busabaseBaseFields.deletedAt),
+        fields === "links" ? inArray(busabaseBaseFields.type, LINK_FIELD_TYPES) : undefined,
+      ),
+    )
+    .orderBy(asc(busabaseBaseFields.position));
+  for (const field of fieldRows) {
+    const fields = fieldsByBaseId.get(field.baseId);
+    if (fields) fields.push(field);
+    else fieldsByBaseId.set(field.baseId, [field]);
+  }
+  return fieldsByBaseId;
+};
+
+export const listBases = async ({ fields = "all" }: { fields?: BaseListFields } = {}) => {
   await ensureReady();
   const db = await getDb();
   const spaceId = getContextSpaceId();
@@ -84,61 +131,70 @@ export const listBases = async () => {
       ),
     )
     .orderBy(asc(busabaseBases.createdAt));
-  const fieldRows = await db
-    .select()
-    .from(busabaseBaseFields)
-    .where(and(eq(busabaseBaseFields.spaceId, spaceId), isNull(busabaseBaseFields.deletedAt)))
-    .orderBy(asc(busabaseBaseFields.position));
-  return baseRows.map(({ base }) =>
-    toBaseVO(
-      base,
-      fieldRows.filter((field) => field.baseId === base.id),
-    ),
+  const fieldsByBaseId = await listFieldRowsByBaseId(
+    db,
+    baseRows.map(({ base }) => base.id),
+    fields,
   );
+  return baseRows.map(({ base }) => toBaseVO(base, fieldsByBaseId.get(base.id) ?? []));
 };
 
 export const getBase = async (baseId: string) => {
   await ensureReady();
   const db = await getDb();
   const spaceId = getContextSpaceId();
-  // Slug resolution prefers the ACTIVE base: after slug reuse an archived base
-  // and a new active base can share a slug, and navigating to /base/<slug>
-  // must land on the live one. (The id fallback below stays unfiltered on
-  // archivedAt so an archived-but-not-purged base is still reachable by id for
-  // the restore / notice flows. Both the Base id and its owning Node id are
-  // accepted so `/base/:ref` follows the same ID-or-slug rule as other node
-  // routes. A permanently deleted Base is excluded:
+  // An active exact id wins over an active slug, so a record QR cannot be
+  // redirected by a later slug collision. An active slug wins over an archived
+  // id, preserving the live Base when its slug is reused. Archived ids remain
+  // reachable for restore / notice flows. Permanently deleted Bases are excluded:
   // once purged there is no restore flow left, so it must resolve to "not
   // found" like everything else that's been purged.)
   // Node ACL: a base whose node the actor can't see resolves to null here —
   // indistinguishable from a base that doesn't exist.
   const visible = buildNodeVisibilityExists(db, busabaseBases.nodeId);
-  const [bySlug] = await db
+  const [byId] = await db
     .select({ base: busabaseBases })
     .from(busabaseBases)
     .where(
       and(
-        eq(busabaseBases.slug, baseId),
+        or(eq(busabaseBases.id, baseId), eq(busabaseBases.nodeId, baseId)),
         eq(busabaseBases.spaceId, spaceId),
+        isNull(busabaseBases.deletedAt),
         isNull(busabaseBases.archivedAt),
         visible,
       ),
     )
     .limit(1);
-  const [row] = bySlug
-    ? [bySlug]
+  const [bySlug] = byId
+    ? []
     : await db
         .select({ base: busabaseBases })
         .from(busabaseBases)
         .where(
           and(
-            or(eq(busabaseBases.id, baseId), eq(busabaseBases.nodeId, baseId)),
+            eq(busabaseBases.slug, baseId),
             eq(busabaseBases.spaceId, spaceId),
-            isNull(busabaseBases.deletedAt),
+            isNull(busabaseBases.archivedAt),
             visible,
           ),
         )
         .limit(1);
+  const [archivedById] =
+    byId || bySlug
+      ? []
+      : await db
+          .select({ base: busabaseBases })
+          .from(busabaseBases)
+          .where(
+            and(
+              or(eq(busabaseBases.id, baseId), eq(busabaseBases.nodeId, baseId)),
+              eq(busabaseBases.spaceId, spaceId),
+              isNull(busabaseBases.deletedAt),
+              visible,
+            ),
+          )
+          .limit(1);
+  const row = byId ?? bySlug ?? archivedById;
   if (!row) {
     return null;
   }
@@ -154,6 +210,8 @@ export const listViews = async (baseId?: string) => {
   await ensureReady();
   const db = await getDb();
   const resolvedBase = baseId ? await getBase(baseId) : null;
+  // An unresolved target must not turn a scoped request into a workspace listing.
+  if (baseId !== undefined && !resolvedBase) return [];
   const viewRows = resolvedBase
     ? await db
         .select()
@@ -670,7 +728,12 @@ export const listRecordsPaged = async (input?: z.input<typeof listRecordsInputSc
     const pageRows = hasMore ? rows.slice(0, parsed.limit) : rows;
     const last = pageRows[pageRows.length - 1];
     const nextCursor = hasMore && last ? encodeSortCursor(last.sortValue, last.record.id) : null;
-    const records = await hydrateRecords(pageRows.map((row) => row.record));
+    const records = await hydrateRecords(
+      pageRows.map((row) => row.record),
+      {
+        summary: parsed.summary,
+      },
+    );
     return { records, nextCursor };
   }
 
@@ -700,8 +763,51 @@ export const listRecordsPaged = async (input?: z.input<typeof listRecordsInputSc
   const last = pageRows[pageRows.length - 1];
   const nextCursor = hasMore && last ? encodeRecordCursor(last.createdAt, last.id) : null;
 
-  const records = await hydrateRecords(pageRows);
+  const records = await hydrateRecords(pageRows, { summary: parsed.summary });
   return { records, nextCursor };
+};
+
+/**
+ * `records.listPage`'s explicit `sort`, as SQL ORDER BY terms — or null when
+ * there is nothing to push down.
+ *
+ * Same semantics as `records.list`'s sort (`sortColumnFor` decides, from the
+ * caller's `fieldType`, exactly as it does there): number/date fields order by
+ * their typed value column with NULLS LAST; any other type is not sorted here.
+ * The tiebreaker is `id ASC` in both directions, like `records.list`, which is
+ * what makes OFFSET paging deterministic: ties on the value would otherwise
+ * come back in whatever order the engine likes, and page N+1 could repeat a
+ * record from page N while another one is never shown.
+ *
+ * The value is read with a scalar subquery + LIMIT 1 rather than `records.list`'s
+ * LEFT JOIN. `busabase_field_values` has no `(record_id, field_slug)` unique
+ * index, so a stray duplicate projection row would make a JOIN emit a record
+ * twice — tolerable for a keyset cursor, but here it would desynchronise the
+ * page slices from the SQL COUNT `total` that is computed separately.
+ */
+const buildPageSortOrder = (
+  db: Awaited<ReturnType<typeof getDb>>,
+  sort: z.infer<typeof listRecordsPageInputSchema>["sort"],
+): SQL[] | null => {
+  if (!sort) return null;
+  const sortInfo = sortColumnFor(sort.fieldType);
+  if (!sortInfo) return null;
+  const sortKey = db
+    .select({ value: sortInfo.col })
+    .from(busabaseFieldValues)
+    .where(
+      and(
+        eq(busabaseFieldValues.recordId, busabaseRecords.id),
+        eq(busabaseFieldValues.fieldSlug, sort.fieldSlug),
+        isNull(busabaseFieldValues.deletedAt),
+      ),
+    )
+    .orderBy(desc(busabaseFieldValues.createdAt), desc(busabaseFieldValues.id))
+    .limit(1);
+  return [
+    sort.direction === "asc" ? sql`(${sortKey}) asc nulls last` : sql`(${sortKey}) desc nulls last`,
+    asc(busabaseRecords.id),
+  ];
 };
 
 /**
@@ -710,6 +816,11 @@ export const listRecordsPaged = async (input?: z.input<typeof listRecordsInputSc
  * set is hydrated first, then filtered/sorted, and only then sliced. This keeps
  * totals and every page correct for complex fields that cannot be expressed by
  * the field-value SQL projection yet.
+ *
+ * An explicit `sort` REPLACES the View's saved sort (its filters still apply):
+ * the caller asked for an order, so the View only decides which records are
+ * in. A number/date `sort` is ordered in SQL (see `buildPageSortOrder`); any
+ * other field type, as on `records.list`, leaves the default order.
  */
 export const listRecordsPage = async (input: z.input<typeof listRecordsPageInputSchema>) => {
   await ensureReady();
@@ -791,9 +902,16 @@ export const listRecordsPage = async (input: z.input<typeof listRecordsPageInput
     parsed.filters?.length || viewConfig
       ? {
           filters: [...(viewConfig?.filters ?? []), ...(parsed.filters ?? [])],
-          sorts: viewConfig?.sorts ?? [],
+          // An explicit `sort` replaces the View's — see the doc above.
+          sorts: parsed.sort ? [] : (viewConfig?.sorts ?? []),
         }
       : undefined;
+  const sqlSortOrder = buildPageSortOrder(db, parsed.sort);
+  // Without an explicit sort this is exactly the order every path used before.
+  const candidateOrder = sqlSortOrder ?? [
+    desc(busabaseRecords.createdAt),
+    desc(busabaseRecords.id),
+  ];
   const needsExactViewEvaluation = Boolean(
     effectiveViewConfig &&
       (effectiveViewConfig.filters.length > 0 || effectiveViewConfig.sorts.length > 0),
@@ -824,7 +942,7 @@ export const listRecordsPage = async (input: z.input<typeof listRecordsPageInput
       .select()
       .from(busabaseRecords)
       .where(and(...recordFilters))
-      .orderBy(desc(busabaseRecords.createdAt), desc(busabaseRecords.id))
+      .orderBy(...candidateOrder)
       .limit(parsed.pageSize)
       .offset(offset);
     return {
@@ -869,16 +987,21 @@ export const listRecordsPage = async (input: z.input<typeof listRecordsPageInput
       .from(busabaseRecords)
       .innerJoin(busabaseCommits, eq(busabaseCommits.id, busabaseRecords.headCommitId))
       .where(and(...recordFilters))
-      .orderBy(desc(busabaseRecords.createdAt), desc(busabaseRecords.id));
-    const ordered = applyViewConfigToEvaluableRecords(
-      candidateRows.map((row) => ({
-        id: row.id,
-        updatedAt: row.updatedAt.toISOString(),
-        fields: (row.fields ?? {}) as Record<string, unknown>,
-      })),
-      base.fields,
-      effectiveViewConfig,
-    );
+      .orderBy(...candidateOrder);
+    const evaluable = candidateRows.map((row) => ({
+      id: row.id,
+      updatedAt: row.updatedAt.toISOString(),
+      fields: (row.fields ?? {}) as Record<string, unknown>,
+    }));
+    // With a SQL sort the rows already arrive in their final order, so only
+    // filter: the view comparator would re-sort them by its own fallback.
+    const ordered = sqlSortOrder
+      ? filterEvaluableRecordsByViewFilters(
+          evaluable,
+          base.fields,
+          effectiveViewConfig?.filters ?? [],
+        )
+      : applyViewConfigToEvaluableRecords(evaluable, base.fields, effectiveViewConfig);
     const total = ordered.length;
     const totalPages = Math.ceil(total / parsed.pageSize);
     const page = totalPages === 0 ? 1 : Math.min(parsed.page, totalPages);
@@ -908,9 +1031,11 @@ export const listRecordsPage = async (input: z.input<typeof listRecordsPageInput
     .select()
     .from(busabaseRecords)
     .where(and(...recordFilters))
-    .orderBy(desc(busabaseRecords.createdAt), desc(busabaseRecords.id));
+    .orderBy(...candidateOrder);
   const candidates = await hydrateRecords(candidateRows);
-  const ordered = applyViewConfigToRecords(candidates, effectiveViewConfig);
+  const ordered = sqlSortOrder
+    ? filterRecordsByViewFilters(candidates, effectiveViewConfig?.filters ?? [])
+    : applyViewConfigToRecords(candidates, effectiveViewConfig);
   const total = ordered.length;
   const totalPages = Math.ceil(total / parsed.pageSize);
   const page = totalPages === 0 ? 1 : Math.min(parsed.page, totalPages);
@@ -1867,7 +1992,7 @@ export const getRecordByField = async (input: z.input<typeof recordFieldGetInput
   return getRecord(projectionRow.recordId);
 };
 
-export const listArchivedBases = async () => {
+export const listArchivedBases = async ({ fields = "all" }: { fields?: BaseListFields } = {}) => {
   await ensureReady();
   const db = await getDb();
   const spaceId = getContextSpaceId();
@@ -1885,17 +2010,12 @@ export const listArchivedBases = async () => {
       ),
     )
     .orderBy(asc(busabaseBases.createdAt));
-  const fieldRows = await db
-    .select()
-    .from(busabaseBaseFields)
-    .where(and(eq(busabaseBaseFields.spaceId, spaceId), isNull(busabaseBaseFields.deletedAt)))
-    .orderBy(asc(busabaseBaseFields.position));
-  return baseRows.map(({ base }) =>
-    toBaseVO(
-      base,
-      fieldRows.filter((field) => field.baseId === base.id),
-    ),
+  const fieldsByBaseId = await listFieldRowsByBaseId(
+    db,
+    baseRows.map(({ base }) => base.id),
+    fields,
   );
+  return baseRows.map(({ base }) => toBaseVO(base, fieldsByBaseId.get(base.id) ?? []));
 };
 
 /**
@@ -1996,6 +2116,6 @@ export const listArchivedRecordsPaged = async (input?: z.input<typeof listRecord
   const pageRows = hasMore ? rows.slice(0, parsed.limit) : rows;
   const last = pageRows[pageRows.length - 1];
   const nextCursor = hasMore && last ? encodeRecordCursor(last.createdAt, last.id) : null;
-  const records = await hydrateRecords(pageRows);
+  const records = await hydrateRecords(pageRows, { summary: parsed.summary });
   return { records, nextCursor };
 };

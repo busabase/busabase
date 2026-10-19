@@ -532,6 +532,76 @@ describe("agent session manager — Buda confirmed model cache", () => {
     await closeAgentSessions([afterFailure.session.id]);
   });
 
+  it("applies a cached selection made while still connecting once the handshake confirms it", async () => {
+    const warm = await open([MODEL_CONFIG]);
+    await waitUntilSettled(warm.session.id);
+    await closeAgentSessions([warm.session.id]);
+
+    let release = () => {};
+    const initializeGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const next = await open([MODEL_CONFIG], { initializeGate });
+    // Cache-seeded while the handshake is still outstanding — this is the
+    // "cached list for selection" state the connecting-remote picker relies on.
+    expect(next.session.status).toBe("connecting");
+    expect(next.session.modelOption?.currentValue).toBe("auto");
+
+    // The picker is enabled from the moment this cached value is visible
+    // (see `isModelSelectorDisabled`), but every selection is a fresh RPC
+    // validated against whatever `s.ready` ultimately confirms — so a pick
+    // "made while connecting" still only resolves once the handshake has.
+    release();
+    await waitUntilSettled(next.session.id);
+    const updated = await setAgentSessionConfigOption(next.session.id, "model", "fast");
+    expect(updated.modelOption?.currentValue).toBe("fast");
+    expect(updated.status).toBe("idle");
+
+    await closeAgentSessions([next.session.id]);
+  });
+
+  it("rejects a cached choice removed by the new handshake", async () => {
+    const warm = await open([MODEL_CONFIG]);
+    await waitUntilSettled(warm.session.id);
+    await closeAgentSessions([warm.session.id]);
+    let release = () => {};
+    const initializeGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const next = await open([{ ...MODEL_CONFIG, options: [{ value: "auto", name: "Auto" }] }], {
+      initializeGate,
+    });
+    const configured = setAgentSessionConfigOption(next.session.id, "model", "fast");
+    const rejected = expect(configured).rejects.toThrow("not one of the offered options");
+    release();
+    await rejected;
+    await closeAgentSessions([next.session.id]);
+  });
+
+  it("rejects a connecting selection instead of succeeding when the handshake fails", async () => {
+    const warm = await open([MODEL_CONFIG]);
+    await waitUntilSettled(warm.session.id);
+    await closeAgentSessions([warm.session.id]);
+
+    let release = () => {};
+    const initializeGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const next = await open([MODEL_CONFIG], {
+      initializeGate,
+      initializeError: new Error("Handshake failed"),
+    });
+    expect(next.session.status).toBe("connecting");
+    expect(next.session.modelOption?.currentValue).toBe("auto");
+
+    const configured = setAgentSessionConfigOption(next.session.id, "model", "fast");
+    const rejected = expect(configured).rejects.toThrow("Handshake failed");
+    release();
+    // Readiness resolves even on failure; the queued selection must reject.
+    await rejected;
+    expect((await waitUntilSettled(next.session.id)).status).toBe("failed");
+  });
+
   it("resumes with its own persisted model choice instead of another session's cache", async () => {
     const first = await open([MODEL_CONFIG]);
     await waitUntilSettled(first.session.id);

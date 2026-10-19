@@ -3,6 +3,7 @@
  * and return a typed client + raw db handle for assertions.
  *
  * Each scenario gets its own `pglite://` data directory so tests don't share state.
+ * Formula acceptance may opt into a caller-migrated, isolated local PostgreSQL DB.
  */
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
@@ -264,7 +265,10 @@ function buildClient(raw: RawClient) {
 
 export type BuiltClient = ReturnType<typeof buildClient>;
 
-export async function seedScenario(_scenario: string): Promise<{
+export async function seedScenario(
+  _scenario: string,
+  postgresUrl?: string,
+): Promise<{
   client: BuiltClient;
   db: Awaited<ReturnType<typeof getDb>>;
   spaceId: string;
@@ -275,8 +279,21 @@ export async function seedScenario(_scenario: string): Promise<{
   const originalPgUrl = process.env.PG_DATABASE_URL;
   const originalStorageUrl = process.env.STORAGE_URL;
 
+  // PostgreSQL verification is opt-in and must target a dedicated local fixture,
+  // never the application's configured/shared database. The caller migrates it.
+  if (postgresUrl) {
+    const target = new URL(postgresUrl);
+    if (
+      !["postgres:", "postgresql:"].includes(target.protocol) ||
+      !["127.0.0.1", "localhost"].includes(target.hostname) ||
+      !target.pathname.startsWith("/formula_acceptance")
+    ) {
+      throw new Error("PostgreSQL tests require an isolated local formula_acceptance database");
+    }
+  }
+
   process.chdir(MIGRATIONS_CWD);
-  process.env.PG_DATABASE_URL = `pglite://${dataDir}`;
+  process.env.PG_DATABASE_URL = postgresUrl ?? `pglite://${dataDir}`;
   process.env.STORAGE_URL = `local:${storageDir}?base_url=/api/test/storage`;
 
   // Reset the DB singleton and ensureReady state so each scenario gets a fresh isolated DB.
@@ -290,10 +307,15 @@ export async function seedScenario(_scenario: string): Promise<{
   };
   const g = globalThis as GlobalWithBusabaseState;
   if (g.__busabaseCoreDbState) {
-    // Close the pglite client if possible.
+    // Close either supported database client before replacing the singleton.
     const prevClient = g.__busabaseCoreDbState.client;
     if (prevClient && typeof (prevClient as { close?: () => Promise<void> }).close === "function") {
       await (prevClient as { close: () => Promise<void> }).close();
+    } else if (
+      prevClient &&
+      typeof (prevClient as { end?: () => Promise<void> }).end === "function"
+    ) {
+      await (prevClient as { end: () => Promise<void> }).end();
     }
     g.__busabaseCoreDbState = { db: null, client: null, initPromise: null };
   }
@@ -307,7 +329,7 @@ export async function seedScenario(_scenario: string): Promise<{
   const spaceId = LOCAL_SPACE_ID;
 
   afterAll(async () => {
-    // Close the pglite client and reset global singletons.
+    // Close the database client and reset global singletons.
     const g2 = globalThis as GlobalWithBusabaseState;
     if (g2.__busabaseCoreDbState) {
       const prevClient = g2.__busabaseCoreDbState.client;
@@ -316,14 +338,21 @@ export async function seedScenario(_scenario: string): Promise<{
         typeof (prevClient as { close?: () => Promise<void> }).close === "function"
       ) {
         await (prevClient as { close: () => Promise<void> }).close();
+      } else if (
+        prevClient &&
+        typeof (prevClient as { end?: () => Promise<void> }).end === "function"
+      ) {
+        await (prevClient as { end: () => Promise<void> }).end();
       }
       g2.__busabaseCoreDbState = { db: null, client: null, initPromise: null };
     }
     if (g2.__busabaseReadyBySpace) {
       g2.__busabaseReadyBySpace = new Map();
     }
-    process.env.PG_DATABASE_URL = originalPgUrl;
-    process.env.STORAGE_URL = originalStorageUrl;
+    if (originalPgUrl === undefined) delete process.env.PG_DATABASE_URL;
+    else process.env.PG_DATABASE_URL = originalPgUrl;
+    if (originalStorageUrl === undefined) delete process.env.STORAGE_URL;
+    else process.env.STORAGE_URL = originalStorageUrl;
     if (originalCwd) {
       process.chdir(originalCwd);
     }

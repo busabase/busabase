@@ -2,6 +2,7 @@
 import type { AttachmentRef } from "open-domains/attachments/types";
 import type { iString } from "openlib/i18n/i-string";
 import type { CommitVO, FieldType, LookupRollup, UserRefVO } from "../../types";
+import type { FieldHelp } from "./contract/base-schemas";
 
 export interface AssetAttachmentRef extends AttachmentRef {
   attachmentId: string;
@@ -21,6 +22,7 @@ export interface BaseFieldVO {
   required: boolean;
   position: number;
   options: {
+    help?: FieldHelp;
     ai?: {
       model?: string;
       prompt?: string;
@@ -53,6 +55,9 @@ export interface BaseFieldVO {
     // Must mirror the contract's fieldOptionsSchema — see base-schemas.ts there.
     formula?: {
       expression: string;
+      format?: "auto" | "number" | "currency" | "percent" | "date";
+      precision?: number;
+      currency?: string;
     };
     inverseFieldId?: string;
     // Must mirror the contract's fieldOptionsSchema — see base-schemas.ts there.

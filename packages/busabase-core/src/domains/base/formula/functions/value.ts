@@ -7,13 +7,13 @@ import { FormulaEvalError } from "../errors";
 export type FormulaValue = number | string | boolean | Date | FormulaValue[] | null;
 
 export const asNumber = (value: FormulaValue, fnName: string): number => {
-  if (value instanceof Date) return value.getTime();
   if (Array.isArray(value)) {
     throw new FormulaEvalError(`${fnName}: expected a number, got an array`);
   }
-  const n = typeof value === "number" ? value : Number(value);
-  if (Number.isNaN(n)) {
-    throw new FormulaEvalError(`${fnName}: expected a number, got ${JSON.stringify(value)}`);
+  const n =
+    value instanceof Date ? value.getTime() : typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n)) {
+    throw new FormulaEvalError(`${fnName}: expected a finite number, got ${String(value)}`);
   }
   return n;
 };
@@ -26,10 +26,8 @@ export const asString = (value: FormulaValue): string => {
 };
 
 export const asDate = (value: FormulaValue, fnName: string): Date => {
-  if (value instanceof Date) return value;
-  if (typeof value === "number") return new Date(value);
-  if (typeof value === "string") {
-    const parsed = new Date(value);
+  if (value instanceof Date || typeof value === "number" || typeof value === "string") {
+    const parsed = value instanceof Date ? value : new Date(value);
     if (!Number.isNaN(parsed.getTime())) return parsed;
   }
   throw new FormulaEvalError(`${fnName}: expected a date, got ${JSON.stringify(value)}`);

@@ -237,7 +237,11 @@ export function SearchDialog({
 
   useEffect(() => {
     if (open && !wasOpenRef.current) {
-      openerRef.current = document.activeElement as HTMLElement | null;
+      const active = document.activeElement as HTMLElement | null;
+      // Opened from a menu item: the item is gone once the menu closes, so
+      // return focus to the menu's trigger instead.
+      const menuTriggerId = active?.closest('[role="menu"]')?.getAttribute("aria-labelledby");
+      openerRef.current = (menuTriggerId ? document.getElementById(menuTriggerId) : null) ?? active;
       wasOpenRef.current = true;
       return;
     }

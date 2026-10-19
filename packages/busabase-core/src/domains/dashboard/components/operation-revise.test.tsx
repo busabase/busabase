@@ -137,6 +137,18 @@ describe("buildPayloadDraft", () => {
     expect(errors).toEqual({});
     expect(fields).toEqual(payload);
   });
+
+  it("retains hidden formula guards when revising a field proposal", () => {
+    const payload = {
+      name: "Total",
+      formulaDependencies: { price: "fld_price" },
+      formulaBaseExpression: "{price}",
+    };
+    const operation = { ...makeOperation(payload), operation: "base_update_field" as const };
+    const entries = buildPayloadDraft(makeChangeRequest("in_review"), operation, coreMessagesEn);
+    entries.find((entry) => entry.slug === "name")!.raw = "Updated total";
+    expect(resolvePayloadDraft(entries).fields).toEqual({ ...payload, name: "Updated total" });
+  });
 });
 
 describe("resolvePayloadDraft", () => {

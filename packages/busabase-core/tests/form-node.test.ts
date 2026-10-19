@@ -285,6 +285,15 @@ describe("Form-as-Node — submission + access gates", () => {
     expect(publicFormNodeId).not.toBe("");
     const target = await client.bases.get({ baseId: blogBaseId });
     if (!target) throw new Error("expected target Base");
+    const titleField = target.fields.find((field) => field.slug === "title");
+    if (!titleField) throw new Error("expected title field");
+    await client.bases.fieldChangeRequest({
+      operation: "update",
+      baseId: blogBaseId,
+      fieldId: titleField.id,
+      autoMerge: true,
+      patch: { help: { description: "Public submission title", example: "A new article" } },
+    });
 
     await client.nodes.share.set({
       nodeId: publicFormNodeId,
@@ -299,7 +308,14 @@ describe("Form-as-Node — submission + access gates", () => {
       const publicForm = await client.forms.getByNode({ nodeId: publicFormNodeId });
       expect(publicForm).toMatchObject({ nodeId: publicFormNodeId });
       expect(publicForm?.boundFields).toEqual([
-        expect.objectContaining({ slug: "title", type: "text" }),
+        expect.objectContaining({
+          slug: "title",
+          type: "text",
+          help: {
+            description: "Public submission title",
+            example: "A new article",
+          },
+        }),
         expect.objectContaining({ slug: "body", type: "markdown" }),
       ]);
       await expect(

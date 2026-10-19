@@ -1,7 +1,8 @@
 // ISERROR / IS_ERROR are NOT here — they need their argument's evaluation to
 // be caught (not pre-evaluated), so they're special-cased directly in
-// ../interpreter.ts's "call" branch, bypassing this registry. Every other
-// logical function below receives already-evaluated args like normal.
+// ../interpreter.ts's "call" branch, bypassing this registry. IF also uses
+// lazy branches there; the implementation below documents the value choice.
+// Other logical functions receive already-evaluated args like normal.
 import { FormulaEvalError } from "../errors";
 import { arity, type FormulaFn, isTruthy } from "./value";
 

@@ -48,6 +48,7 @@ import { formatDetailTime } from "../helpers/format";
 import { partitionEmbedLinks } from "../utils/share-dialog-utils";
 import { useIsAnonymousVisitor } from "../visitor-context";
 import { ConfirmActionDialog } from "./primitives";
+import { ShareLinkActions } from "./share-link-actions";
 import { useWorkspacePermissionLevel } from "./split-submit-button";
 
 /** What an embed link would point at. `nodeType` is only read for `"node"`. */
@@ -356,6 +357,11 @@ export function EmbedLinkSection({
     if (!revokeTarget) return;
     try {
       await revokeLink.mutateAsync({ id: revokeTarget.id });
+      if (created?.id === revokeTarget.id) {
+        setCreated(null);
+        setCopiedCreatedValue(null);
+        onUncopiedSecretChange?.(false);
+      }
       setRevokeTarget(null);
       await invalidate();
       toast.success(t.revoked);
@@ -496,6 +502,7 @@ export function EmbedLinkSection({
             testId="embed-link-created-url"
             value={created.url}
           />
+          <ShareLinkActions title={created.targetName} url={created.url} />
           <CopyableValue
             copyLabel={t.copyIframe}
             label={t.iframeLabel}

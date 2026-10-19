@@ -48,8 +48,18 @@ const renderInstall = (
     </CoreI18nProvider>,
   );
 
+// Radix FocusScope dispatches its unmount focus event on a setTimeout(0). Let it
+// fire while jsdom is still alive, or it lands after teardown as an unhandled
+// "parameter 1 is not of type 'Event'" error that fails the whole run.
+const unmountAndFlushTimers = async () => {
+  cleanup();
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+};
+
 describe("InstallFromGithubModal diagnostic detail", () => {
-  afterEach(cleanup);
+  afterEach(unmountAndFlushTimers);
 
   it.each(["zh-CN", "ja"] as const)(
     "shows the server's actionable preview refusal in the %s interface",
@@ -101,4 +111,62 @@ describe("InstallFromGithubModal diagnostic detail", () => {
       }
     },
   );
+});
+
+describe("InstallFromGithubModal review choice", () => {
+  afterEach(unmountAndFlushTimers);
+
+  const messages = coreMessagesByLocale["zh-CN"].install;
+  const emptyStream = async (_input: unknown): Promise<AsyncIterable<InstallEventVO>> =>
+    (async function* () {})();
+
+  it("leaves autoMerge to the server by default, so a manager's install goes live", async () => {
+    const installFromGithubStream = vi.fn(emptyStream);
+    renderInstall("zh-CN", {
+      planInstallFromGithub: vi.fn().mockResolvedValue(plan),
+      installFromGithubStream,
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: messages.install }));
+
+    await vi.waitFor(() => expect(installFromGithubStream).toHaveBeenCalledTimes(1));
+    // The stub stream ends without a result; wait for the dialog to settle on that.
+    expect(await screen.findByText(messages.installFailed)).toBeTruthy();
+    expect(installFromGithubStream.mock.calls[0]?.[0]).not.toHaveProperty("autoMerge");
+  });
+
+  it("sends autoMerge: false only when the user opts into review", async () => {
+    const installFromGithubStream = vi.fn(emptyStream);
+    renderInstall("zh-CN", {
+      planInstallFromGithub: vi.fn().mockResolvedValue(plan),
+      installFromGithubStream,
+    });
+
+    fireEvent.click(
+      await screen.findByRole("checkbox", { name: new RegExp(messages.requireReview) }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: messages.install }));
+
+    await vi.waitFor(() => expect(installFromGithubStream).toHaveBeenCalledTimes(1));
+    // The stub stream ends without a result; wait for the dialog to settle on that.
+    expect(await screen.findByText(messages.installFailed)).toBeTruthy();
+    expect(installFromGithubStream.mock.calls[0]?.[0]).toMatchObject({ autoMerge: false });
+  });
+
+  it("does not offer review for a package whose links need live records, and still installs it", async () => {
+    const installFromGithubStream = vi.fn(emptyStream);
+    renderInstall("zh-CN", {
+      planInstallFromGithub: vi.fn().mockResolvedValue({ ...plan, requiresAutoMerge: true }),
+      installFromGithubStream,
+    });
+
+    expect(await screen.findByText(messages.autoMergeRequiredTitle)).toBeTruthy();
+    expect(screen.queryByText(messages.requireReview)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: messages.install }));
+
+    await vi.waitFor(() => expect(installFromGithubStream).toHaveBeenCalledTimes(1));
+    // The stub stream ends without a result; wait for the dialog to settle on that.
+    expect(await screen.findByText(messages.installFailed)).toBeTruthy();
+    expect(installFromGithubStream.mock.calls[0]?.[0]).not.toHaveProperty("autoMerge");
+  });
 });

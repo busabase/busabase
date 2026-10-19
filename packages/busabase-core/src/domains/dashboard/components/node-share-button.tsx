@@ -4,7 +4,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { hasApiKeyLevel } from "busabase-contract/access-control/api-key-level";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import { publicAccessOf } from "busabase-contract/domains";
-import { nodeWebUrl } from "busabase-contract/node-web-url";
 import { Badge } from "kui/badge";
 import { Button } from "kui/button";
 import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "kui/dialog";
@@ -26,6 +25,7 @@ import {
   type ShareExpiryPreset,
   toDatetimeLocalValue,
 } from "../utils/share-dialog-utils";
+import { dashboardNodeShareUrl } from "../utils/share-url";
 import { useIsAnonymousVisitor } from "../visitor-context";
 import { DayTimePicker } from "./day-time-picker";
 import {
@@ -35,23 +35,10 @@ import {
   useCanManageEmbedLinks,
 } from "./embed-link-section";
 import { DialogContent } from "./localized-dialog-content";
+import { ShareLinkActions } from "./share-link-actions";
 import { useWorkspacePermissionLevel } from "./split-submit-button";
 
 type NodeShareCapability = "read" | "submit";
-
-/**
- * The space id for the canonical public URL. When the caller can't hand it in
- * (the base-detail header doesn't carry it), fall back to reading it from the
- * current `/dashboard/<spaceId>/…` pathname — every dashboard route is mounted
- * under that prefix, so the id is always the first path segment after
- * `/dashboard`.
- */
-const resolveSpaceId = (spaceId?: string): string | null => {
-  if (spaceId) return spaceId;
-  if (typeof window === "undefined") return null;
-  const match = window.location.pathname.match(/\/dashboard\/([^/]+)/);
-  return match?.[1] ?? null;
-};
 
 export function NodeShareDialog({
   orpc,
@@ -105,7 +92,8 @@ export function NodeShareDialog({
     enabled: canShareToWeb,
   });
   const share = shareQuery.data ?? null;
-  const isPublic = share?.scope === "public";
+  const shareExpired = Boolean(share?.expiresAt && Date.parse(share.expiresAt) <= Date.now());
+  const isPublic = share?.scope === "public" && !shareExpired;
 
   // A node with no share of its own can still be public: a shared ancestor's
   // link reaches everything under it (`recomputeEffectivePublicScope`). Showing
@@ -209,18 +197,13 @@ export function NodeShareDialog({
 
   const publicUrl = useMemo(() => {
     if (typeof window === "undefined") return null;
-    const resolvedSpaceId = resolveSpaceId(spaceId);
-    if (!resolvedSpaceId) return null;
-    // Shared with the SDK/CLI/server via busabase-contract — this used to be an
-    // inline template literal here, which is why no headless caller could ever
-    // produce the same link. See node-web-url.ts.
-    return nodeWebUrl({
-      webOrigin: window.location.origin,
-      spaceId: resolvedSpaceId,
+    return dashboardNodeShareUrl({
+      currentHref: window.location.href,
+      spaceId,
       nodeType,
-      nodeSlug,
+      nodeSlug: nodeType === "base" ? nodeId : nodeSlug,
     });
-  }, [spaceId, nodeType, nodeSlug]);
+  }, [spaceId, nodeId, nodeType, nodeSlug]);
 
   // Both the share row itself AND the node listings: `NodeVO.shared` is what
   // draws the sidebar's "shared publicly" marker, so publishing/revoking here
@@ -243,7 +226,11 @@ export function NodeShareDialog({
 
   const handleToggle = async (next: boolean) => {
     try {
-      await setShare.mutateAsync({ nodeId, scope: next ? "public" : "none" });
+      await setShare.mutateAsync({
+        nodeId,
+        scope: next ? "public" : "none",
+        ...(next && shareExpired ? { expiresAt: null } : {}),
+      });
       await invalidate();
       toast.success(next ? t.enabled : t.disabled);
     } catch (err) {
@@ -445,6 +432,7 @@ export function NodeShareDialog({
                           {t.copyLink}
                         </Button>
                       </div>
+                      <ShareLinkActions title={nodeName} url={publicUrl} />
                     </div>
                   )}
                 </>
@@ -509,6 +497,7 @@ export function NodeShareDialog({
                           {t.copyLink}
                         </Button>
                       </div>
+                      <ShareLinkActions title={nodeName} url={publicUrl} />
                       <Button
                         className="px-0"
                         data-testid="node-share-preview"

@@ -6,17 +6,20 @@
 // record. Values in locales outside the dashboard set are preserved untouched.
 import { Languages } from "lucide-react";
 import type { iString, iStringRecord } from "openlib/i18n/i-string";
-import { useState } from "react";
+import { type RefObject, useState } from "react";
 import { type CoreLocale, coreLocaleOptions, useCoreI18n, useCoreLocale } from "../../../i18n";
 
 const textInputClassName =
   "mt-1 h-8 w-full rounded-md border border-border/70 bg-card px-2.5 text-sm outline-none transition-colors focus:border-primary";
 
 export function IStringNameInput({
+  inputRef,
   label,
   onChange,
   value,
 }: {
+  /** The field a dialog should focus: the plain input, or the active locale's when expanded. */
+  inputRef?: RefObject<HTMLInputElement | null>;
   label?: string;
   onChange: (value: iString) => void;
   value: iString;
@@ -80,6 +83,7 @@ export function IStringNameInput({
               <input
                 className={textInputClassName}
                 onChange={(event) => setLocaleValue(option.code, event.target.value)}
+                ref={option.code === locale ? inputRef : undefined}
                 value={
                   typeof value === "string"
                     ? option.code === locale
@@ -93,6 +97,7 @@ export function IStringNameInput({
         </div>
       ) : (
         <input
+          aria-label={label ?? messages.common.name}
           className={textInputClassName}
           onChange={(event) => {
             if (typeof value === "string") {
@@ -101,6 +106,7 @@ export function IStringNameInput({
               setLocaleValue(locale, event.target.value);
             }
           }}
+          ref={inputRef}
           value={
             typeof value === "string"
               ? value

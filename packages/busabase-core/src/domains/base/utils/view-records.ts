@@ -8,8 +8,18 @@ import type {
 import { getDateFieldOptions, getDateFieldSortKey } from "./date-value";
 import { resolveEmbedPreview } from "./embed";
 
+// An empty list renders as "" — never as the literal text "[]". A relation or
+// attachment value is an array whose non-empty form is JSON-stringified below,
+// so without this a cleared relation (`[]`) read as the two-character string
+// "[]": `is_empty` missed it, `not_empty` counted it, and `equals "[]"` matched
+// it as if it were a value. The SQL projection already agrees (`normalizeFieldValue`
+// stores an array's `valueText` as `value.join(", ")`, i.e. "" for `[]`), as does
+// the required-field gate (`isEmptyFieldValue` in field-types.ts).
 const fieldValueToString = (value: unknown): string => {
   if (value === null || value === undefined) {
+    return "";
+  }
+  if (Array.isArray(value) && value.length === 0) {
     return "";
   }
   return typeof value === "string" ? value : JSON.stringify(value, null, 2);
@@ -286,6 +296,35 @@ const compareRecordsByViewSort = (
   return updatedAtResult !== 0 ? updatedAtResult : right.id.localeCompare(left.id);
 };
 
+/**
+ * The FILTER half of the saved-view semantics alone, keeping the input order.
+ *
+ * `records.listPage` needs this when the caller passes an explicit `sort`: the
+ * order then comes from SQL (the same typed-column ordering `records.list`
+ * uses), and running the view comparator afterwards would throw it away — it
+ * always sorts, falling back to `updatedAt desc`. Same matcher as the full
+ * apply below, so a filter means the same thing on both paths.
+ */
+export const filterEvaluableRecordsByViewFilters = <T extends ViewEvaluableRecord>(
+  records: T[],
+  baseFields: ReadonlyArray<BaseFieldVO>,
+  filters: ReadonlyArray<ViewFilterVO>,
+): T[] =>
+  records.filter((record) =>
+    filters.every((filter) => recordMatchesViewFilter(record, baseFields, filter)),
+  );
+
+/** `filterEvaluableRecordsByViewFilters` over hydrated VOs (lookup values already merged in). */
+export const filterRecordsByViewFilters = (
+  records: RecordVO[],
+  filters: ReadonlyArray<ViewFilterVO>,
+): RecordVO[] =>
+  records.filter((record) =>
+    filters.every((filter) =>
+      recordMatchesViewFilter(toViewEvaluableRecord(record), record.base.fields, filter),
+    ),
+  );
+
 /** Apply the complete saved-view semantics before any page is selected. */
 export const applyViewConfigToRecords = (
   records: RecordVO[],
@@ -294,11 +333,7 @@ export const applyViewConfigToRecords = (
   if (!config) {
     return records;
   }
-  const filtered = records.filter((record) =>
-    config.filters.every((filter) =>
-      recordMatchesViewFilter(toViewEvaluableRecord(record), record.base.fields, filter),
-    ),
-  );
+  const filtered = filterRecordsByViewFilters(records, config.filters);
   return [...filtered].sort((left, right) =>
     compareRecordsByViewSort(
       toViewEvaluableRecord(left),
@@ -323,9 +358,7 @@ export const applyViewConfigToEvaluableRecords = <T extends ViewEvaluableRecord>
   if (!config) {
     return records;
   }
-  const filtered = records.filter((record) =>
-    config.filters.every((filter) => recordMatchesViewFilter(record, baseFields, filter)),
-  );
+  const filtered = filterEvaluableRecordsByViewFilters(records, baseFields, config.filters);
   return [...filtered].sort((left, right) =>
     compareRecordsByViewSort(left, right, baseFields, config),
   );

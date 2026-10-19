@@ -7,7 +7,7 @@ import {
 } from "busabase-contract/access-control/api-key-level";
 import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
-import { type CreatableNodeType, listNodeTypes } from "busabase-contract/domains";
+import { type CreatableNodeType, listNodeTypes, type NodeType } from "busabase-contract/domains";
 import { Button } from "kui/button";
 import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "kui/dialog";
 import { Input } from "kui/input";
@@ -24,13 +24,14 @@ import {
   toFormBindings,
 } from "../../form/components/form-base-binding-picker";
 import { TemplateGrid } from "../../templates/components/template-grid";
+import { useAgentIntegrationTarget } from "../agent-integration-context";
+import { nodeRoutePath } from "../helpers/known-node-cache";
 import { buildCreateNodePrompts } from "../helpers/node-agent-prompts";
 import { nodeIconForId } from "../helpers/node-icons";
 import { useAttachmentUpload } from "../hooks/use-attachment-upload";
 import type { AgentIntegrationTarget } from "./agent-install-panel";
 import { AgentPromptsView } from "./agent-prompts-view";
 import { DialogContent } from "./localized-dialog-content";
-import { resolveSpaceId } from "./node-agent-prompts-dialog";
 import { SplitSubmitButton } from "./split-submit-button";
 
 // The creatable types, composed from the registry — adding a creatable node type
@@ -135,8 +136,16 @@ interface CreateNodeModalProps {
   open: boolean;
   apiClient: BusabaseDashboardApiClient;
   onOpenChange: (open: boolean) => void;
-  /** `mode` is "change-request" when submitted normally, "merged" after approve+merge. */
-  onCreated: (changeRequestId: string, mode: "change-request" | "merged") => void;
+  /**
+   * `mode` is "change-request" when submitted normally, "merged" after approve+merge.
+   * `nodePath` is the new node's dashboard route (relative to the router base),
+   * set only when merged — the node does not exist until then.
+   */
+  onCreated: (
+    changeRequestId: string,
+    mode: "change-request" | "merged",
+    nodePath?: string,
+  ) => void;
   /** When opened from a folder's "+", the new node is created inside it. */
   parent?: { id: string; name: string } | null;
   /** Host-resolved workspace permission for this dashboard-sibling modal. */
@@ -173,6 +182,8 @@ export function CreateNodeModal({
 }: CreateNodeModalProps) {
   const messages = useCoreI18n();
   const locale = useCoreLocale();
+  const integrationFromContext = useAgentIntegrationTarget();
+  const resolvedSpaceId = spaceId ?? (agentIntegration ?? integrationFromContext)?.targetSpaceId;
   const [, setLocation] = useLocation();
   const [selectedType, setSelectedType] = useState(CREATABLE_TYPES[0]?.type ?? "base");
   const [name, setName] = useState("");
@@ -224,12 +235,12 @@ export function CreateNodeModal({
         {
           parentNodeId: parent?.id,
           parentName: parent?.name,
-          spaceId: resolveSpaceId(spaceId),
+          spaceId: resolvedSpaceId,
           spaceName,
         },
         locale,
       ),
-    [parent?.id, parent?.name, spaceId, spaceName, locale],
+    [parent?.id, parent?.name, resolvedSpaceId, spaceName, locale],
   );
   /**
    * Browsing and installing stay where they already work: the Template Center
@@ -246,7 +257,7 @@ export function CreateNodeModal({
   // One conversation per place-to-create, per agent (see `AskAgentAction`).
   // Creating three things in the same folder continues one thread; at the root
   // the space stands in, so a root-level session is still stable across clicks.
-  const askAgentScopeId = parent?.id ?? resolveSpaceId(spaceId) ?? "root";
+  const askAgentScopeId = parent?.id ?? resolvedSpaceId ?? "root";
 
   const reset = () => {
     setName("");
@@ -393,9 +404,12 @@ export function CreateNodeModal({
         }),
         operations: buildOperations(trimmedName, finalSlug, metadata),
       });
+      // Read before `reset()` clears the selected type. The server rejects a
+      // taken slug instead of renaming it, so the slug sent is the node's slug.
+      const nodePath = nodeRoutePath(selectedType as NodeType, finalSlug);
       reset();
       onOpenChange(false);
-      onCreated(changeRequest.id, "merged");
+      onCreated(changeRequest.id, "merged", nodePath);
     } catch (caught) {
       setError(presentCoreError(messages, locale, caught, messages.createNode.couldNotCreate));
     } finally {

@@ -9,6 +9,20 @@ const resolve =
   };
 
 describe("formula logical functions", () => {
+  it("IF evaluates only the selected branch so data guards suppress unused errors", () => {
+    expect(
+      evaluateFormula("IF({divisor} == 0, BLANK(), 10 / {divisor})", resolve({ divisor: 0 })),
+    ).toBeNull();
+    expect(
+      evaluateFormula("IF({divisor} == 0, BLANK(), 10 / {divisor})", resolve({ divisor: 2 })),
+    ).toBe(5);
+    expect(evaluateFormula('IF(TRUE(), 1, ERROR("unused"))', resolve())).toBe(1);
+    expect(evaluateFormula('IF(FALSE(), ERROR("unused"))', resolve())).toBeNull();
+    expect(() => evaluateFormula('IF(TRUE(), ERROR("selected"), 1)', resolve())).toThrow(
+      "selected",
+    );
+  });
+
   it("SWITCH matches a case and falls back to the trailing default", () => {
     expect(evaluateFormula('SWITCH("b", "a", 1, "b", 2, "c", 3)', resolve())).toBe(2);
     expect(evaluateFormula('SWITCH("z", "a", 1, "b", 2, "default")', resolve())).toBe("default");

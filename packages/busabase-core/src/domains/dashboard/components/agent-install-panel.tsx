@@ -6,18 +6,18 @@ import { Button } from "kui/button";
 import { Check, Copy, TriangleAlert } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { fmt, useCoreI18n } from "../../../i18n";
-import { buildAgentInstallPrompt, skillNameForSource } from "../helpers/agent-install-prompt";
+import {
+  buildAgentInstallPrompt,
+  isTemplateInstallSource,
+  skillNameForSource,
+} from "../helpers/agent-install-prompt";
 import type { McpGuideEdition } from "./agent-mcp-guides";
 import { createSetupSkillUrl } from "./agent-skill-button";
 
 /**
- * "Agent install" — the tab that installs nothing here.
- *
- * The other tab creates the app's resources in this space and leaves the user's
- * own agent none the wiser. This one is the mirror image: it hands the agent the
- * package's manual (`SKILL.md`, via `npx skills add`) and touches no data. Which
- * one a user wants depends on where they work, so the dialog asks instead of
- * guessing — and says plainly, on both tabs, what the other one does NOT do.
+ * "Agent install" — a copyable prompt for the package's supported installer.
+ * Templates install space resources through busabase-cli and their local skill
+ * through the skills CLI; standalone skills need only the latter.
  *
  * Skill-less packages are the honest edge (spec §4.7): `skills add` would have
  * nothing to install, so rather than print a command that appears to work, the
@@ -61,6 +61,7 @@ export function AgentInstallPanel({
   // A package with no skill node carries no manual — `counts.skills` is the
   // plan's own answer, so this stays true for packages the catalog never saw.
   const hasSkill = plan.counts.skills > 0;
+  const isTemplate = isTemplateInstallSource(plan.source);
   const appName = skillNameForSource(plan.source) ?? plan.package.name;
   const edition = agentIntegration?.edition ?? "desktop";
   // A stray targetSpaceId from a host must never leak into Desktop guidance.
@@ -71,7 +72,9 @@ export function AgentInstallPanel({
       packageName: plan.package.name,
       setupUrl: createSetupSkillUrl(promptOrigin, edition, true, targetSpaceId),
       targetSpaceId,
-      template: messages.install.agentPromptBody,
+      template: isTemplate
+        ? messages.install.agentTemplatePromptBody
+        : messages.install.agentPromptBody,
       // Shared verbatim with the node Agent-prompts dialog, so the "am I even
       // connected?" instruction is one string rather than two that drift.
       connectionCheck: messages.agentPrompts.connectionCheck,
@@ -122,7 +125,9 @@ export function AgentInstallPanel({
   return (
     <div className="flex flex-col gap-3">
       <p className="text-muted-foreground text-sm">
-        {fmt(messages.install.agentIntro, { name: appName })}
+        {fmt(isTemplate ? messages.install.agentTemplateIntro : messages.install.agentIntro, {
+          name: appName,
+        })}
       </p>
 
       <div className="flex flex-col gap-2">

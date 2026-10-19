@@ -100,7 +100,11 @@ export const createFileTreeInputSchema = z.object({
     .regex(/^[a-z0-9-]+$/),
   name: z.string().min(1),
   description: z.string().optional().default(""),
-  visibility: z.enum(["private", "workspace", "public"]).optional().default("private"),
+  // No default: an omitted visibility declares nothing, so the node follows the
+  // space's default and its parent folder exactly like a Doc or Base does. A
+  // "private" default here silently hid every new Skill/AirApp/Drive from the
+  // rest of the space, because the node ACL enforces this value.
+  visibility: z.enum(["private", "workspace", "public"]).optional(),
   version: z.string().optional().default("0.1.0"),
   /**
    * Extra node metadata, stored alongside the server-owned keys.

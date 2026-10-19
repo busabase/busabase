@@ -17,6 +17,13 @@ import {
   startAgentSessionPrompt,
   subscribeAgentSession,
 } from "./logic/agent-session-manager";
+import {
+  cancelRouterEnrollment,
+  listRouterGrants,
+  mintRouterEnrollment,
+  pollRouterEnrollmentStatus,
+  registerRouterConnection,
+} from "./logic/router-enrollment";
 
 const os = implement(busabaseContract);
 
@@ -69,6 +76,21 @@ const requireAgentWorkspaceAccess = baseOs.middleware(({ next }) => {
 });
 
 const agentsRouterImpl = {
+  routerEnrollment: {
+    grants: os.agents.routerEnrollment.grants.handler(() => listRouterGrants()),
+    mint: os.agents.routerEnrollment.mint.handler(({ input }) =>
+      mintRouterEnrollment(input.grantId, input.agentSlug),
+    ),
+    status: os.agents.routerEnrollment.status.handler(({ input }) =>
+      pollRouterEnrollmentStatus(input.grantId, input.enrollmentId),
+    ),
+    complete: os.agents.routerEnrollment.complete.handler(({ input }) =>
+      registerRouterConnection(input.grantId, input.enrollmentId, input.agentSlug),
+    ),
+    cancel: os.agents.routerEnrollment.cancel.handler(({ input }) =>
+      cancelRouterEnrollment(input.grantId, input.enrollmentId),
+    ),
+  },
   catalog: os.agents.catalog.handler(() => listCatalog()),
 
   connections: {

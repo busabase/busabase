@@ -7,6 +7,7 @@ import { localBudaConfig } from "./agent-catalog";
 import { listAgentSessions } from "./agent-session-manager";
 import { normalizeLegacyBudaSessions } from "./agent-session-store";
 import { listBudaConnections } from "./buda-connection";
+import { listRouterConnections } from "./router-connection";
 
 /** Display name for an env-configured Buda agent until a real session or vault row names it. */
 const ENV_BUDA_AGENT_NAME = "Buda AI Agent";
@@ -56,6 +57,20 @@ export async function listAgentConnections(
     connected: true,
     ownedByCurrentUser: connection.ownedByCurrentUser,
   }));
+  if (getContextActorId() !== undefined) {
+    for (const connection of await listRouterConnections()) {
+      connections.push({
+        slug: connection.slug,
+        agentName: connection.agentSlug,
+        transport: "remote-websocket",
+        sessionCount: sessions.filter((session) => session.slug === connection.slug).length,
+        latest: sessions.find((session) => session.slug === connection.slug) ?? null,
+        connected: connection.connectionState === "ready",
+        connectionState: connection.connectionState,
+        ownedByCurrentUser: true,
+      });
+    }
+  }
 
   // Same presence check as agent-catalog.ts's `resolveLaunch`/`listCatalog`:
   // both BUDA_API_KEY and BUDA_AGENT_ID must be set, a lone one is treated as

@@ -1,6 +1,49 @@
 import type { CoreI18nMessages } from "./messages";
 
 export const dashboardJa: CoreI18nMessages = {
+  fieldHelp: {
+    inherit: "フィールドの説明を使用",
+    override: "このフォームの説明を設定",
+    save: "説明を保存",
+    saveFailed: "説明を保存できませんでした。変更は保持されています。",
+    description: "入力の説明",
+    example: "入力例",
+    preview: "プレビュー",
+    more: "もっと見る",
+    less: "折りたたむ",
+    view: "{name}の入力説明を見る",
+    publicHint: "説明は共有フォームにも表示されます。機密情報を含めないでください。",
+  },
+  formula: {
+    expression: "数式",
+    computed: "自動計算 · 読み取り専用",
+    invalid: "無効な数式",
+    valid: "有効な数式",
+    catalog: "フィールドまたは関数を挿入",
+    suggestions: "候補",
+    functions: "関数",
+    search: "フィールドまたは関数を検索",
+    preview: "サンプルプレビュー",
+    previewUnavailable: "サンプルを読み込めませんでした。",
+    retry: "再試行",
+    sampleRecord: "サンプルレコード",
+    recordLabel: "レコード {index}",
+    temporaryValues: "一時サンプル値",
+    sampleValue: "サンプル値",
+    result: "結果",
+    computationError: "計算エラー",
+    unavailable: "プレビュー不可",
+    empty: "空",
+    resultFormat: "結果の形式",
+    auto: "自動",
+    percent: "パーセント",
+    precision: "小数点以下の桁数",
+    currencyCode: "通貨コード",
+    dependencies: "依存する数式：{fields}",
+    discardChanges: "未保存の数式の変更を破棄しますか？",
+    confirmDependencies: "次の数式も再計算されます：{fields}。続行しますか？",
+    restored: "未保存の数式の下書きを復元しました。",
+  },
   common: {
     add: "追加",
     archived: "アーカイブ済み",
@@ -117,6 +160,10 @@ export const dashboardJa: CoreI18nMessages = {
     filePreviewUnavailable: "プレビューを利用できません",
     filePreviewRetry: "再試行",
     filePreviewUseBuiltin: "内蔵プレビューを使用",
+    parsedText: "解析テキスト",
+    parsedTextMissing: "このファイルの解析テキストはまだありません。",
+    parsedTextNone: "このファイルには読み取り可能なテキストがないとマークされています。",
+    parsedTextEmpty: "解析テキストは空です。",
     filePreviewReasons: {
       not_configured: "このワークスペースには PreviewFile が設定されていません。",
       invalid_configuration: "PreviewFile の設定が無効です。",
@@ -359,6 +406,17 @@ export const dashboardJa: CoreI18nMessages = {
     linkLabel: "公開リンク",
     copyLink: "リンクをコピー",
     linkCopied: "リンクをコピーしました",
+    qrCode: "QR コード",
+    qrAlt: "このリンクの QR コード",
+    downloadQr: "PNG をダウンロード",
+    qrFailed: "QR コードを生成できませんでした",
+    shareViaDevice: "共有",
+    recordLinkTitle: "レコードのリンクを共有",
+    recordPrivateTitle: "レコードへのアクセス",
+    recordPrivateHint:
+      "非公開レコードを開くには、ログインとこの Base へのアクセス権が必要です。QR コードは権限を変更しません。",
+    recordPublicHint:
+      "ログインなしで開くには Base 全体を公開する必要があります。このレコードだけでなく、Base と表示可能なレコードが公開されます。",
     previewAsVisitor: "訪問者としてプレビュー",
     settingsTitle: "リンク設定",
     settingsHint: "訪問者ができることと、リンクが無効になる時刻を設定します。",
@@ -739,7 +797,7 @@ export const dashboardJa: CoreI18nMessages = {
   templates: {
     title: "テンプレート",
     overview:
-      "テーブル、画面、そしてエージェントがデータを扱う前に読むマニュアルを備えたアプリです。インストールするとテーブルが作成され、アプリはレビュー用に提案されます。",
+      "テーブル、画面、そしてエージェントがデータを扱う前に読むマニュアルを備えたアプリです。インストールするとテーブル、サンプルデータ、アプリがすぐに使えます。先に内容をレビューすることもできます。",
     search: "テンプレートを検索…",
     refresh: "テンプレートを更新",
     browseOnly:
@@ -762,7 +820,7 @@ export const dashboardJa: CoreI18nMessages = {
       "テンプレートには作者のマニュアルも含まれ、Base と一緒にインストールされます。エージェントがスキーマを推測する必要はありません。",
     contentsTitle: "インストールで作成されるもの",
     contentsDescription:
-      "Base、フィールド、サンプル行はすぐに作成されます。アプリのコードとエージェントのマニュアルは、まずレビュー用の変更リクエストとして提案されます。",
+      "このスペースを編集できる場合、Base、フィールド、サンプル行、アプリ、エージェントのマニュアルはすぐに作成されます。インストール時に「先にレビューに回す」をオンにすると、アプリのコードとマニュアルは変更リクエストとして届きます。",
     bases: "Base",
     apps: "アプリ",
     documents: "ドキュメント",
@@ -1078,6 +1136,8 @@ export const dashboardJa: CoreI18nMessages = {
   inbox: {
     title: "レビュー",
     forReview: "レビュー待ち",
+    previousRequest: "前の変更リクエスト",
+    nextRequest: "次の変更リクエスト",
     mentions: "メンション",
     mentionsEmpty: "まだ誰からもメンションされていません。",
     mentionsEmptyBody: "コメントで @ メンションされると、ここに表示されます。",
@@ -1368,6 +1428,10 @@ export const dashboardJa: CoreI18nMessages = {
   },
   base: {
     searchRecordsToLink: "リンクするレコードを検索",
+    addRelation: "リンクを追加",
+    removeRelation: "{name} へのリンクを解除",
+    relationUnavailable: "利用できないレコード",
+    relationLoadFailed: "リンク候補を読み込めませんでした。",
     searchMembers: "メンバーを検索",
     noMembersAvailable: "選択できるメンバーがいません",
     unassignedMember: "未割り当て",
@@ -1424,8 +1488,8 @@ export const dashboardJa: CoreI18nMessages = {
     paginationPage: "{page} ページへ",
     paginationCurrentPage: "{page} ページ、現在のページ",
     paginationRetry: "再試行",
-    hideArchived: "アーカイブを非表示",
-    archivedCount: "{count} 件のアーカイブ",
+    hideArchivedRecords: "アーカイブ済みレコードを非表示",
+    showArchivedRecords: "アーカイブ済みレコードを表示（{count}）",
     createDeleteRequestTitle: "削除リクエストを作成しますか？",
     createDeleteRequestLabel: "削除リクエストを作成",
     deleteViewRequestBody:
@@ -1604,6 +1668,10 @@ export const dashboardJa: CoreI18nMessages = {
     baseRestored: "ベースを復元しました",
     restoreNodeMessage: "{type}「{name}」を復元",
     nodeRestored: "{type}を復元しました",
+    restoredWithNewSlug:
+      "「{name}」を復元しました。元の slug「{from}」は使用中のため、「{to}」に変更しました。",
+    restoredWithNewSlugs:
+      "復元しました。{count} 件は slug が使用中だったため、新しい slug に変更しました。詳細は変更リクエストをご覧ください。",
     nodeDeletedPermanently: "{type}を完全に削除しました",
     restoreFieldMessage: "削除済みフィールドを復元",
     fieldRestored: "フィールドを復元しました",
@@ -1719,6 +1787,21 @@ export const dashboardJa: CoreI18nMessages = {
     deleteFieldCounting: "対象レコードを集計中…",
     deleteFieldCountUnavailable: "対象レコードを集計できませんでした。",
     deleteFieldImpact: "{count} 件のレコードにこの列の値があります。",
+    deleteFieldDependencies: "このフィールドの参照先",
+    deleteFieldDependenciesLoading: "保存済みビューを確認しています…",
+    deleteFieldDependenciesUnavailable:
+      "ビューを確認できませんでした。削除前に再試行してください。",
+    deleteFieldDependenciesNone: "確認済みの項目に参照は見つかりませんでした。",
+    deleteFieldDependenciesScope:
+      "表示可能な Base と保存済みビューを確認します。非表示の Base、フォーム、Workflow 設定、AirApp のソースコードは確認しません。",
+    deleteFieldDependencyKinds: {
+      viewFilter: "ビューフィルター",
+      viewSort: "ビューの並び替え",
+      viewDisplay: "ビューレイアウト",
+      formula: "数式フィールド",
+      lookup: "ルックアップフィールド",
+      relation: "リンクフィールド",
+    },
     deleteFieldReversible: "列と値は保持され、「削除済みフィールド」から復元できます。",
     deleteFieldHint: "リクエストは受信トレイで確認、今すぐは即時削除します。",
     requestDeleteField: "削除をリクエスト",
@@ -1758,6 +1841,9 @@ export const dashboardJa: CoreI18nMessages = {
     changesRequestedAwaiting: "修正依頼済み · 修正待ち",
     mergedIntoBase: "ベースにマージ済み",
     statusClosed: "クローズ済み",
+    restoredSlugChangesTitle: "新しい slug で復元しました",
+    restoredSlugChangesHint:
+      "ゴミ箱にある間に、元の slug が別の項目に使われました。そのため、空いている次の slug で復元しています。古い slug を使ったリンク、ブックマーク、エージェントへの指示は、今は別の項目を開きます。",
     mergeNeedsReview: "マージにはレビューが必要です",
     mergeNeedsReviewBody:
       "{message} 変更リクエストはここで安全に保持されています。修正を依頼するか、レビュー後に閉じてください。",
@@ -1915,6 +2001,7 @@ export const dashboardJa: CoreI18nMessages = {
     updateRequest: "更新リクエスト",
     submitNow: "今すぐ送信",
     updateNow: "今すぐ更新",
+    discardUnsavedChanges: "未保存の変更を破棄して、このレコードを離れますか？",
     saving: "保存中...",
     checked: "チェック済み",
     addTag: "タグを追加…",
@@ -2083,7 +2170,7 @@ export const dashboardJa: CoreI18nMessages = {
     noAgents: "まだエージェントが接続されていません。",
     connectionCheckLeadIn: "作業を始める前に、",
     connectionCheck:
-      "この環境が Busabase に接続済みで、正しい対象スペース{targetSpace}に接続されていることを確認してください。Busabase の接続が未設定、または別のスペースを参照している場合は、先に次の接続ガイドを読んで従ってください：\n\n{setupUrl}",
+      "この環境から busabase スキル、Busabase MCP、または busabase-cli で Busabase にアクセスでき、正しい対象スペース{targetSpace}に接続されていることを確認し、作業はそれらのツールで行ってください。ブラウザで Busabase の画面を開いて操作しないでください。どれも未設定、または別のスペースを参照している場合は、先に次の接続ガイドをプレーンテキストとして取得し（例：curl）、その手順に従ってください：\n\n{setupUrl}",
     builtInScenarios: "組み込みシナリオ",
     customScenarios: "カスタムシナリオ",
     builtInPrompts: "組み込みプロンプト",
@@ -2375,9 +2462,9 @@ export const dashboardJa: CoreI18nMessages = {
     targetFolder: "インストール先フォルダ",
     targetFolderHint:
       "パッケージ用に新しいフォルダが作成されます。既定はパッケージ自身の名前です。",
-    autoMerge: "レビューせずにそのままインストールする",
-    autoMergeBody:
-      "既定では、パッケージの内容はまず変更リクエストとして届き、あなたが読むまで反映されません。これを省くのは作者を信頼するということです。パッケージにはスキルや AirApp、つまりこのスペースのエージェントが実行するコードを含められます。",
+    requireReview: "先にレビューに回す",
+    requireReviewBody:
+      "既定ではオフです。あなたはこのスペースに書き込めるので、パッケージのレコード、ドキュメント、スキル、AirApp はインストール直後に反映されます。オンにすると、それらは変更リクエストとして届き、一つずつ読んでからマージできます。作者をよく知らないパッケージでは有効にする価値があります。スキルや AirApp はこのスペースのエージェントが実行するコードだからです。",
     autoMergeRequiredTitle: "このパッケージはレビューなしでしかインストールできません",
     autoMergeRequiredBody:
       "レコード同士がリンクしており、リンクは既に存在するレコードしか指せません。レビュー待ちのままだとリンクはすべて空になるため、レコードを即座に作成する必要があります。インストール前に GitHub で中身を確認してください。作者のスキルと AirApp がこのスペースで動きます。",
@@ -2399,6 +2486,10 @@ export const dashboardJa: CoreI18nMessages = {
     chooseHow: "導入方法は 2 つあります。作業環境に合う方を選んでください。",
     tabAgent: "エージェントに導入",
     tabUi: "UI に導入",
+    agentTemplateIntro:
+      "Agent に「{name}」テンプレートをこの Busabase スペースへインストールしてもらいます。",
+    agentTemplatePromptBody:
+      "Busabase テンプレート「{name}」を接続済みのスペースにインストールし、この Agent 用のスキルもローカルにインストールしてください。\n\nインストール前に、{connectionCheck}\n\n接続の準備ができたら、両方のコマンドを順番に実行してください：\n\n{command}\n\n最初のコマンドはフォルダー、テーブル、アプリなどのリソースをスペースにインストールします。次のコマンドはスキルと付属ファイルをこの Agent のローカルスキルディレクトリにインストールします。両方とも同じソースと ref を使用します。インストールしたローカルの SKILL.md を読み、そのディレクトリを基準に相対パスを解決してください。初期設定の前に、スペースの既存リソースとレビュー待ちの変更リクエストを確認し、既存リソースを再利用してください。初期化や保留中のリクエストの提出を繰り返さないでください。ローカルスキルのパス、各インストールの結果、スペースのリソースの状態、レビュー待ちの変更リクエストを報告してください。失敗した場合は失敗した手順と成功した部分を示し、全体の完了を報告しないでください。",
     agentIntro:
       "すでに使っているエージェント（Claude Code、Codex、Cursor）に「{name}」のマニュアルを渡します。このアプリの使い方を覚えますが、このスペースには何も作成・変更されません。",
     agentPromptLabel: "これをエージェントに貼り付けてください",

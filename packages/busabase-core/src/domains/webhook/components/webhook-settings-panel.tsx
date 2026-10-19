@@ -587,6 +587,7 @@ export function WebhookSettingsPanel({
       <div className="space-y-1.5">
         <Label htmlFor="webhook-name">{labels.nameLabel()}</Label>
         <Input
+          autoFocus
           id="webhook-name"
           placeholder={labels.namePlaceholder()}
           value={form.name}

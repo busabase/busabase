@@ -1,26 +1,26 @@
 /**
  * The last thing that happens to a prompt before it leaves Busabase.
  *
- * A node prompt has three parts the user can read in the preview — the target
- * line, the body, the merge/reply footer — and a FOURTH that only exists on the
- * way out: a paragraph telling the agent to check it is actually connected to
- * this space, with a link to the credential-free setup guide.
+ * A node prompt has four parts: the target line, the task, the merge/reply
+ * footer, and — only when the host knows which Busabase this is — a paragraph
+ * telling the agent to reach this space through the busabase skill, MCP or CLI,
+ * with a link to the credential-free setup guide.
  *
- * Why it is not in the preview: the target line is the one part people copy on
- * its own ("just tell my agent which node"), so it has to stay visible and
- * selectable — and the connection check is machine-facing boilerplate that is
- * identical on every one of the ~10 prompts in the list. Showing it would push
- * the part a human actually reads off the top of the box, to say something no
- * human needs to read.
+ * All four are in the preview. The connection check used to be appended only on
+ * the way out, which meant the text people saw was not the text their agent got,
+ * and a hand-selected copy silently lost it. Instead the preview now renders the
+ * same segments this module returns and turns the framing down (target, footer,
+ * connection check) so the task still reads first.
  *
- * Why it is needed at all: Busabase's agents (Claude Code, Codex CLI, the Buda
- * AI Agent) are external ACP agents running on the user's own machine. Unlike
- * the MCP surface, nothing guarantees they have the busabase skill installed or
- * pointed at this space, so a prompt that just says "edit nodeId nod_x" can land
- * on an agent with no way to reach it.
+ * Why the check is needed at all: Busabase's agents (Claude Code, Codex CLI, the
+ * Buda AI Agent) are external ACP agents running on the user's own machine.
+ * Unlike the MCP surface, nothing guarantees they have the busabase skill
+ * installed or pointed at this space, so a prompt that just says "edit nodeId
+ * nod_x" can land on an agent with no way to reach it — and one that then opens
+ * Busabase in a browser instead.
  *
- * Both exits render through here — the Copy button and Ask Agent — precisely so
- * there is no second copy of this assembly to drift out of sync.
+ * Every exit renders through here — the preview, the Copy button and Ask Agent —
+ * precisely so there is no second copy of this assembly to drift out of sync.
  *
  * Pure: takes a resolved setup URL and the localized strings, returns text. No
  * react, no `window`, no transport, so the exact bytes an agent receives can be
@@ -61,8 +61,12 @@ export const renderAgentConnectionCheck = ({
   });
 
 export interface AgentPromptDispatchOptions {
-  /** The prompt exactly as the preview shows it. */
+  /** The prompt body — `NodePrompt.body`. */
   body: string;
+  /** `NodePrompt.target`: split off the top when the body opens with it. */
+  target?: string;
+  /** `NodePrompt.footer`: split off the end when the body closes on it. */
+  footer?: string;
   /**
    * Credential-free onboarding guide for this host and target space, or
    * `undefined` when the host could not resolve one — no edition, or no browser
@@ -77,25 +81,71 @@ export interface AgentPromptDispatchOptions {
   fmt: (template: string, values: Record<string, string>) => string;
 }
 
+/** Framing the preview turns down (`target`, `footer`, `connection`) vs. the `task` it leads with. */
+export type PromptSegmentKind = "target" | "task" | "footer" | "connection";
+
+export interface PromptSegment {
+  kind: PromptSegmentKind;
+  text: string;
+}
+
+const PARAGRAPH_BREAK = "\n\n";
+
+export const joinPromptSegments = (segments: PromptSegment[]): string =>
+  segments.map((segment) => segment.text).join(PARAGRAPH_BREAK);
+
 /**
- * The exact text that goes to the clipboard, or to an agent over Ask Agent.
+ * Split a body back into target / task / footer using the exact strings it was
+ * assembled from. A custom prompt may put `{target}` anywhere; when the body does
+ * not open with it (or close on the footer) that part simply stays in the task.
+ * Anything that would not join back to the identical body is left whole.
+ */
+const splitBody = (body: string, target?: string, footer?: string): PromptSegment[] => {
+  let task = body;
+  const head: PromptSegment[] = [];
+  const tail: PromptSegment[] = [];
+  if (target && task.startsWith(`${target}${PARAGRAPH_BREAK}`)) {
+    head.push({ kind: "target", text: target });
+    task = task.slice(target.length + PARAGRAPH_BREAK.length);
+  }
+  if (footer && task === footer) {
+    tail.push({ kind: "footer", text: footer });
+    task = "";
+  } else if (footer && task.endsWith(`${PARAGRAPH_BREAK}${footer}`)) {
+    tail.push({ kind: "footer", text: footer });
+    task = task.slice(0, -(PARAGRAPH_BREAK.length + footer.length));
+  }
+  const segments = [...head, ...(task ? [{ kind: "task" as const, text: task }] : []), ...tail];
+  return joinPromptSegments(segments) === body ? segments : [{ kind: "task", text: body }];
+};
+
+/**
+ * The prompt as the preview shows it — and, joined, exactly what goes to the
+ * clipboard or to an agent over Ask Agent.
  *
- * With no setup URL this returns the body untouched, on purpose. The tempting
+ * With no setup URL there is no connection segment, on purpose. The tempting
  * alternative — fall back to a default origin — is actively harmful here: a
  * guide pointing at `localhost:15419` handed to a Cloud user's agent sends it
  * to a machine that is not theirs, which is worse than saying nothing and
  * letting the agent use whatever connection it already has. Silence is the
  * safe degradation; a wrong URL is not.
  */
-export const renderPromptForDispatch = ({
+export const renderPromptSegments = ({
   body,
+  target,
+  footer,
   setupUrl,
   targetSpaceId,
   leadIn,
   connectionCheck,
   fmt,
-}: AgentPromptDispatchOptions): string => {
-  if (!setupUrl) return body;
+}: AgentPromptDispatchOptions): PromptSegment[] => {
+  const segments = splitBody(body, target, footer);
+  if (!setupUrl) return segments;
   const paragraph = renderAgentConnectionCheck({ connectionCheck, fmt, setupUrl, targetSpaceId });
-  return `${body}\n\n${leadIn}${paragraph}`;
+  return [...segments, { kind: "connection", text: `${leadIn}${paragraph}` }];
 };
+
+/** The exact text that goes to the clipboard, or to an agent over Ask Agent. */
+export const renderPromptForDispatch = (options: AgentPromptDispatchOptions): string =>
+  joinPromptSegments(renderPromptSegments(options));

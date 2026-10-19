@@ -1930,17 +1930,47 @@ export async function cancelAgentSession(sessionId: string): Promise<void> {
  * from `modelOption`, but the RPC is the trust boundary, not the UI, so a
  * request naming a stale id or a value the agent never listed is rejected
  * here rather than forwarded.
+ *
+ * `s.ready` resolves even when startup failed (its `.catch` branch sets
+ * `status`/`error` and still calls `releaseReady`, so `reattachRemoteSession`
+ * can report a clean message instead of an unhandled rejection) — so a
+ * failed/ended/closed status or a still-missing `acpSessionId` is checked
+ * explicitly here. Without this, a cached `modelOption` from before the
+ * failed handshake would pass the checks below and reach the startup
+ * placeholder `setConfigOption` (`async () => null`), which never talks to
+ * the agent and would make a failed connection look like a successful
+ * config change.
  */
 export async function setAgentSessionConfigOption(
   sessionId: string,
   configId: string,
   value: string,
 ): Promise<AgentSessionVO> {
+  // Startup owns the connecting -> idle transition. Claiming a lease before
+  // it finishes would change the durable status to busy and invalidate that
+  // transition's fence. Wait without claiming, then validate and acquire.
+  const starting = sessions().get(sessionId);
+  if (
+    starting &&
+    isLiveSessionVisibleToCurrentRequest(starting) &&
+    starting.transport === "remote-websocket" &&
+    starting.status === "connecting"
+  ) {
+    await starting.ready;
+    assertSessionCanAcceptPrompt(starting, false);
+    if (starting.closed || !starting.acpSessionId) {
+      throw new Error("This agent session is not connected.");
+    }
+  }
   const { session: s, guard } = await acquireOperationSession(sessionId);
   let operationError: unknown;
   try {
     await s.ready;
     guard?.assertOwned();
+    assertSessionCanAcceptPrompt(s, false);
+    if (s.closed || !s.acpSessionId) {
+      throw new Error("This agent session is not connected.");
+    }
     if (!s.modelOption || s.modelOption.id !== configId) {
       throw new Error("This session has no such config option to set.");
     }

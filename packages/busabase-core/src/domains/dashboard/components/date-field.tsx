@@ -77,6 +77,7 @@ export function DateFieldValue({
  * UTC offset, and says which zone the typed time is in.
  */
 export function DateFieldInput({
+  ariaDescribedBy,
   ariaLabel,
   className,
   dataAttributes,
@@ -85,6 +86,7 @@ export function DateFieldInput({
   options,
   value,
 }: {
+  ariaDescribedBy?: string;
   ariaLabel: string;
   className: string;
   dataAttributes?: Record<`data-${string}`, string>;
@@ -107,6 +109,7 @@ export function DateFieldInput({
 
   const picker = (
     <DayTimePicker
+      ariaDescribedBy={ariaDescribedBy}
       ariaLabel={ariaLabel}
       className={className}
       dataAttributes={dataAttributes}
