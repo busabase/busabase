@@ -1,6 +1,8 @@
 import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { hasCapability } from "busabase-contract/domains";
 import type { NodeVO } from "busabase-contract/types";
+import { NODE_TREE_PREFETCH_DEPTH } from "busabase-core/dashboard/node-tree-depth";
+import { useLazyNodeChildren } from "busabase-core/dashboard/use-lazy-node-children";
 import { usePathname, useRouter } from "expo-router";
 import { Menu } from "lucide-react-native";
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
@@ -28,9 +30,9 @@ import {
   nodeToKnownNode,
   type OpenableNode,
 } from "../utils/known-node-cache";
-import { getMobileNodeDestination } from "../utils/node-navigation";
+import { getMobileNodeDestination, parseMobileNodeRoute } from "../utils/node-navigation";
 import { getAppNavigationLayout } from "../utils/responsive-layout";
-import { ancestorIdsOfActiveNode, expandNodes } from "../utils/tree-expansion";
+import { ancestorIdsOfActiveNode, expandNodes, unloadedExpandedIds } from "../utils/tree-expansion";
 import { CreateNodeModal } from "./CreateNodeModal";
 import { DrawerNavigationPanel } from "./DrawerNavigationPanel";
 import { isNodeActive, nodeNavMeta } from "./DrawerNavigationRows";
@@ -50,6 +52,8 @@ interface DrawerScaffoldProps {
   contentContainerStyle?: StyleProp<ViewStyle>;
   contentWidth?: "full" | "readable";
 }
+
+const EMPTY_NODES: NodeVO[] = [];
 
 interface ActionsTarget {
   node: NodeVO;
@@ -101,12 +105,52 @@ export function DrawerScaffold({
   const expandedIds = useExpandedNodeIds();
   const contextualDestination = useContextualNavDestination(pathname);
 
+  // Root + two levels, like the web sidebar; a deeper folder loads when it is
+  // opened. This used to be the whole tree (1.3MB for 3,400 nodes) every time
+  // the drawer opened. A server that predates `depth` ignores it and returns
+  // the whole tree, which the code below handles the same way.
   const nodesQuery = useQuery({
     ...(buda
-      ? buda.orpc.nodes.list.queryOptions({ input: {} })
+      ? buda.orpc.nodes.list.queryOptions({
+          input: { parentId: null, depth: NODE_TREE_PREFETCH_DEPTH },
+        })
       : { queryKey: ["no-connection", "nodes"], queryFn: skipToken }),
     enabled: sidebarVisible && !!buda,
   });
+  const {
+    nodes: loadedTree,
+    loadingNodeIds,
+    onExpandNode,
+  } = useLazyNodeChildren({
+    orpc: buda?.orpc ?? null,
+    baseNodes: nodesQuery.data ?? EMPTY_NODES,
+  });
+  // Expansion outlives this scaffold (it remounts on every route); loaded
+  // children do not. Fetch every expanded folder the tree is missing, which is
+  // also how a reveal below opens a path level by level. Cached reads return at
+  // once.
+  useEffect(() => {
+    for (const nodeId of unloadedExpandedIds(loadedTree, expandedIds)) onExpandNode(nodeId);
+  }, [loadedTree, expandedIds, onExpandNode]);
+
+  // The folders above the open node, from the server: a deep node is not in
+  // the loaded tree, so the local reveal below cannot find it. A server without
+  // `nodes.ancestors` (before 2026-08-28) fails this quietly and keeps the
+  // local reveal.
+  const activeRoute = useMemo(() => parseMobileNodeRoute(pathname), [pathname]);
+  const ancestorsQuery = useQuery({
+    ...(buda && activeRoute
+      ? buda.orpc.nodes.ancestors.queryOptions({
+          input: { nodeId: activeRoute.ref, type: activeRoute.type },
+        })
+      : { queryKey: ["no-connection", "node-ancestors", pathname], queryFn: skipToken }),
+    enabled: sidebarVisible && !!buda && !!activeRoute,
+    staleTime: Number.POSITIVE_INFINITY,
+    retry: false,
+  });
+  useEffect(() => {
+    if (ancestorsQuery.data) expandNodes(ancestorsQuery.data.ancestorIds);
+  }, [ancestorsQuery.data]);
 
   // Counted by the server, not by whatever fit in a page. This used to fetch
   // with an empty input — the default `limit: 50` — and count the rows that came
@@ -149,16 +193,16 @@ export function DrawerScaffold({
   });
 
   useEffect(() => {
-    if (!nodeCache || !nodesQuery.data) return;
-    void nodeCache.merge(flattenNodesForCache(nodesQuery.data));
-  }, [nodeCache, nodesQuery.data]);
+    if (!nodeCache || loadedTree.length === 0) return;
+    void nodeCache.merge(flattenNodesForCache(loadedTree));
+  }, [nodeCache, loadedTree]);
 
   const treeNodes = useMemo(() => {
-    const roots = nodesQuery.data ?? [];
+    const roots = loadedTree;
     return roots.length === 1 && hasCapability(roots[0].type, "container") && !roots[0].baseId
       ? roots[0].children
       : roots;
-  }, [nodesQuery.data]);
+  }, [loadedTree]);
 
   useEffect(() => {
     expandNodes(ancestorIdsOfActiveNode(treeNodes, (node) => isNodeActive(node, pathname)));
@@ -198,7 +242,7 @@ export function DrawerScaffold({
   const nodeActionsSheet = actionsTarget ? (
     <NodeActionsSheet
       node={actionsTarget.node}
-      nodes={nodesQuery.data ?? []}
+      nodes={loadedTree}
       canOpen={nodeNavMeta(actionsTarget.node).tappable}
       isFavorite={favoriteNodeIds.has(actionsTarget.node.id)}
       spaceId={spaceId}
@@ -229,6 +273,7 @@ export function DrawerScaffold({
       nodesLoading={nodesQuery.isLoading}
       nodesError={!!nodesQuery.error}
       expandedIds={expandedIds}
+      loadingNodeIds={loadingNodeIds}
       onDismiss={() => setOpen(false)}
       onRequestInstall={() => setInstallOpen(true)}
       onNavigate={navigate}

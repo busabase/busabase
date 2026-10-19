@@ -1,5 +1,9 @@
 import type { BusabaseORPCClient } from "busabase-contract/api-client/react-query";
-import type { ChangeRequestCountsVO, ChangeRequestVO } from "busabase-contract/types";
+import type {
+  ChangeRequestCountsVO,
+  ChangeRequestStatus,
+  ChangeRequestVO,
+} from "busabase-contract/types";
 import { selectPendingChangeRequests } from "busabase-core/dashboard/home";
 import { isMissingRouteError } from "~/api/mobile-api-compat";
 
@@ -15,7 +19,10 @@ export const PENDING_PREVIEW_LIMIT = 20;
 /** The two calls this needs, narrowed off the real client (see the assert below). */
 export interface PendingCountClient {
   counts: (input: Record<string, never>) => Promise<ChangeRequestCountsVO>;
-  list: (input: { limit: number }) => Promise<{ changeRequests: ChangeRequestVO[] }>;
+  list: (input: {
+    limit: number;
+    status?: ChangeRequestStatus[];
+  }) => Promise<{ changeRequests: ChangeRequestVO[] }>;
 }
 
 /**
@@ -84,7 +91,11 @@ export const fetchPendingCountOrNull = async (
 export const fetchPendingSnapshot = async (
   client: PendingCountClient,
 ): Promise<PendingSnapshot> => {
-  const page = await client.list({ limit: PENDING_PREVIEW_LIMIT });
+  // Asked for by status, not filtered from the newest page: a request still in
+  // review is otherwise missing from the cards once 20 newer ones have merged,
+  // leaving a count with nothing under it. A server too old to filter by status
+  // ignores it, and the local filter below still applies.
+  const page = await client.list({ status: ["in_review"], limit: PENDING_PREVIEW_LIMIT });
   const preview = selectPendingChangeRequests(page.changeRequests);
   const serverCount = await fetchPendingCountOrNull(client);
 

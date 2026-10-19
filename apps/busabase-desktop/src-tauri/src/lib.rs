@@ -2,6 +2,7 @@ mod codex_runtime;
 mod desktop_menu;
 mod platform;
 mod sidecar;
+mod sidecar_probe;
 mod updater;
 
 use tauri::{AppHandle, Manager};
@@ -48,6 +49,10 @@ pub fn run() {
             #[cfg(any(target_os = "linux", target_os = "windows"))]
             if let Err(error) = app.deep_link().register_all() {
                 eprintln!("[busabase-desktop] Could not register busabase:// scheme: {error}");
+                #[cfg(target_os = "linux")]
+                eprintln!(
+                    "[busabase-desktop] Linux protocol registration requires xdg-mime (xdg-utils) and update-desktop-database (desktop-file-utils) on PATH. Install these system packages if missing, then restart Busabase Desktop. Local use remains available without protocol registration."
+                );
             }
 
             let handle = app.handle().clone();

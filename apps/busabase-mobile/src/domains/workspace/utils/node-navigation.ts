@@ -50,3 +50,19 @@ export const isMobileNodePathActive = (node: NavigableNode, pathname: string): b
       : destination.pathname.replace("[nodeId]", destination.params.nodeId ?? "");
   return pathname === path || pathname.startsWith(`${path}/`);
 };
+
+/**
+ * The node a detail route shows, read back from its pathname: `/base/<slug>`
+ * or `/<type>/<nodeId>`. Null on every other screen. Feeds `nodes.ancestors`,
+ * which takes either an id or a slug, so the drawer can open the folders above
+ * a node it has not loaded yet.
+ */
+export const parseMobileNodeRoute = (pathname: string): { type: NodeType; ref: string } | null => {
+  const [, first, second] = pathname.split("/");
+  if (!first || !second) return null;
+  if (first === "base") return { type: "base", ref: decodeURIComponent(second) };
+  const type = (Object.keys(NODE_DETAIL_PATHS) as NodeType[]).find(
+    (candidate) => NODE_DETAIL_PATHS[candidate] === `/${first}/[nodeId]`,
+  );
+  return type ? { type, ref: decodeURIComponent(second) } : null;
+};

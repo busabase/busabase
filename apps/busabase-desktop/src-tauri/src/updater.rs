@@ -37,6 +37,32 @@ pub(crate) fn should_update_busabase_desktop(current: Version, release: RemoteRe
 mod updater_tests {
     use super::should_update_version;
     use semver::Version;
+    use tauri_plugin_updater::RemoteRelease;
+
+    #[test]
+    fn unsigned_uos_metadata_does_not_break_signed_platform_updates() {
+        let mut manifest = serde_json::json!({
+            "version": "0.95.1",
+            "platforms": {
+                "linux-x86_64": {
+                    "url": "https://s1.busabase.com/desktop.AppImage",
+                    "signature": "signed-bundle"
+                },
+                "linux-x86_64-uos": {
+                    "url": "https://s1.busabase.com/desktop.deb",
+                    "signature": null
+                }
+            }
+        });
+        assert!(serde_json::from_value::<RemoteRelease>(manifest.clone()).is_err());
+        manifest["platforms"]["linux-x86_64-uos"]["signature"] = serde_json::json!("");
+        let release = serde_json::from_value::<RemoteRelease>(manifest).unwrap();
+        assert_eq!(release.signature("linux-x86_64").unwrap(), "signed-bundle");
+        assert_eq!(
+            release.download_url("linux-x86_64").unwrap().path(),
+            "/desktop.AppImage"
+        );
+    }
 
     fn version(value: &str) -> Version {
         Version::parse(value).expect("test version must be valid semver")

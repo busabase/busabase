@@ -1,8 +1,7 @@
 /** @type {(phase: string) => import("next").NextConfig} */
 const nextConfig = (phase) => ({
-  output: "export",
-  // The window is a thin launcher that boots the sidecar then navigates to the
-  // live Busabase web app (the sidecar serves the full UI), so the desktop bundle
+  ...(phase === "phase-development-server" ? {} : { output: "export" }),
+  // The window boots and embeds the live sidecar UI, so the desktop bundle
   // only needs kui for its boot screen.
   transpilePackages: ["kui"],
   images: {

@@ -1,7 +1,7 @@
 import { hasCapability } from "busabase-contract/domains";
 import type { NodeVO } from "busabase-contract/types";
 import { ChevronDown, ChevronRight, Globe, Lock, MoreHorizontal } from "lucide-react-native";
-import { Pressable, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, Text, View } from "react-native";
 import { fmt, useI18n } from "~/i18n";
 import { mobile, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
@@ -66,6 +66,10 @@ interface NodeNavItemProps {
   pathname: string;
   depth: number;
   expandedIds: ReadonlySet<string>;
+  /** Folders whose children are still being fetched. */
+  loadingNodeIds?: ReadonlySet<string>;
+  /** Handed the active row's View, so the drawer can keep it on screen. */
+  onActiveRowRef?: (row: View | null) => void;
   collapsible?: boolean;
   onPress: (node: NodeVO) => void;
   onToggleExpanded: (nodeId: string) => void;
@@ -77,6 +81,8 @@ export function NodeNavItem({
   pathname,
   depth,
   expandedIds,
+  loadingNodeIds,
+  onActiveRowRef,
   collapsible = true,
   onPress,
   onToggleExpanded,
@@ -97,6 +103,8 @@ export function NodeNavItem({
   return (
     <>
       <View
+        ref={active ? onActiveRowRef : undefined}
+        collapsable={false}
         style={[
           styles.navItem,
           styles.baseItem,
@@ -190,6 +198,18 @@ export function NodeNavItem({
           <MoreHorizontal size={18} color={tokens.mutedForeground} />
         </Pressable>
       </View>
+      {expanded && node.children.length === 0 && loadingNodeIds?.has(node.id) ? (
+        <View
+          accessibilityLabel={t.common.loading}
+          style={[styles.navItem, styles.baseItem, { paddingLeft: 8 + (depth + 1) * 12 }]}
+        >
+          <View style={styles.nodeChevron} />
+          <ActivityIndicator size="small" color={tokens.mutedForeground} />
+          <Text style={[typography.body, styles.baseText, { color: tokens.mutedForeground }]}>
+            {t.common.loading}
+          </Text>
+        </View>
+      ) : null}
       {expanded
         ? node.children.map((child) => (
             <NodeNavItem
@@ -198,6 +218,8 @@ export function NodeNavItem({
               pathname={pathname}
               depth={depth + 1}
               expandedIds={expandedIds}
+              loadingNodeIds={loadingNodeIds}
+              onActiveRowRef={onActiveRowRef}
               onPress={onPress}
               onToggleExpanded={onToggleExpanded}
               onOpenActions={onOpenActions}

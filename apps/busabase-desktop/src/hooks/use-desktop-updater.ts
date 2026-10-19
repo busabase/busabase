@@ -71,7 +71,7 @@ export function useDesktopUpdater(canUseTauriCommands: boolean) {
         });
         setStatus("available");
       } catch (error) {
-        console.error("[busabase-desktop] Update check failed", error);
+        console.warn("[busabase-desktop] Update check failed", error);
         updateFoundRef.current = false;
         setUpdate(null);
         setStatus(isManual ? "error" : "idle");

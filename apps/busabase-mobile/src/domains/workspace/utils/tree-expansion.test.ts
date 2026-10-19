@@ -7,6 +7,7 @@ import {
   getExpandedNodeIds,
   resetNodeExpansion,
   toggleNodeExpanded,
+  unloadedExpandedIds,
 } from "./tree-expansion";
 
 const node = (
@@ -85,5 +86,42 @@ describe("expansion store", () => {
     // identity is what stops useSyncExternalStore from re-rendering forever.
     expandNodes(["root", "a"]);
     expect(getExpandedNodeIds()).toBe(before);
+  });
+});
+
+describe("unloadedExpandedIds", () => {
+  // A depth-bounded tree: `lazy` sits at the boundary, so it reports
+  // hasChildren without carrying them.
+  const boundary = (id: string, parentId: string): NodeVO => ({
+    ...node(id, "folder", [], parentId),
+    hasChildren: true,
+  });
+  const bounded = [
+    node("root", "folder", [
+      node(
+        "loaded",
+        "folder",
+        [boundary("lazy", "loaded"), node("leaf", "doc", [], "loaded")],
+        "root",
+      ),
+      boundary("closed", "root"),
+    ]),
+  ];
+
+  it("names the expanded folders whose children have not been loaded", () => {
+    expect(unloadedExpandedIds(bounded, new Set(["root", "loaded", "lazy"]))).toEqual(["lazy"]);
+  });
+
+  it("leaves collapsed boundary folders alone", () => {
+    expect(unloadedExpandedIds(bounded, new Set(["root", "loaded"]))).toEqual([]);
+  });
+
+  it("ignores expanded folders that are loaded, and ones that are simply empty", () => {
+    const empty = node("empty", "folder", [], "root");
+    expect(unloadedExpandedIds([...bounded, empty], new Set(["loaded", "empty"]))).toEqual([]);
+  });
+
+  it("finds them at any depth, so a revealed path loads level by level", () => {
+    expect(unloadedExpandedIds(bounded, new Set(["lazy", "closed"]))).toEqual(["lazy", "closed"]);
   });
 });

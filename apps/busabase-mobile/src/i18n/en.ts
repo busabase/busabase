@@ -354,9 +354,9 @@ export const en = {
     targetFolder: "Install into folder",
     targetFolderHint:
       "A new folder is created for the package. Defaults to the package's own name.",
-    autoMerge: "Install immediately, without review",
-    autoMergeBody:
-      "By default the package's content arrives as change requests you read before anything goes live. Skipping that means trusting the author: a package can carry skills and AirApps, and that is code this space's agents will run.",
+    requireReview: "Send the content for review first",
+    requireReviewBody:
+      "Off by default: you can write to this space, so the package's records, docs, skills and AirApps go live as soon as it installs. Turn this on to receive them as change requests and read each one before merging — worth it for a package whose author you don't know, since its skills and AirApps are code this space's agents will run.",
     autoMergeRequiredTitle: "This package can only be installed without review",
     autoMergeRequiredBody:
       "Its records link to each other, and a link can only point at a record that already exists. Held for review, every link would arrive empty — so the records have to be created immediately. Read the package on GitHub first: installing it runs the author's skills and AirApps in this space.",
@@ -391,7 +391,7 @@ export const en = {
   templates: {
     title: "Templates",
     overview:
-      "Complete apps — tables, an interface, and the manual an agent reads before it touches your data. Installing one fills in its tables, and proposes the app itself for your review.",
+      "Complete apps — tables, an interface, and the manual an agent reads before it touches your data. Installing one sets up its tables, sample rows and app, ready to use; you can choose to review the content first.",
     search: "Search templates…",
     refresh: "Refresh templates",
     searchEmpty: "Nothing matches \u201c{search}\u201d.",
@@ -410,7 +410,7 @@ export const en = {
       "The agent can answer these because the template installs its author's manual alongside its Bases. It does not have to guess your schema.",
     contentsTitle: "What installing this creates",
     contentsDescription:
-      "Bases, fields, and sample rows are created straight away. App code and the agent manual are proposed as change requests for you to review first.",
+      'Bases, fields, sample rows, the app and the agent manual are created straight away when you can edit this space. Tick "Send the content for review first" while installing to receive the app code and manual as change requests instead.',
     bases: "Bases",
     apps: "Apps",
     documents: "Documents",

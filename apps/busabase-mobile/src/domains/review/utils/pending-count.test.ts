@@ -65,6 +65,16 @@ describe("fetchPendingCountOrNull", () => {
 });
 
 describe("fetchPendingSnapshot", () => {
+  it("asks the server for in-review requests, not the newest page of every status", async () => {
+    // Filtering the newest page locally left a count with no cards under it
+    // once 20 newer requests had merged on top of one still in review.
+    const client = stub();
+
+    await fetchPendingSnapshot(client);
+
+    expect(client.list).toHaveBeenCalledWith({ status: ["in_review"], limit: 20 });
+  });
+
   it("counts the whole space, not the rows it fetched", async () => {
     // The bug this pins: Home fetched `limit: 100` and the sidebar fetched the
     // default 50, then each counted what came back — so the badge reported the

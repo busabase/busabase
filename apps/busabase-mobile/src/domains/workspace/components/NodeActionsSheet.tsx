@@ -17,6 +17,7 @@ import { ScrollView, StyleSheet, View } from "react-native";
 import { NativeBottomSheet, NativeRow } from "~/components/native-screen";
 import { useI18n } from "~/i18n";
 import { useTokens } from "~/theme/use-tokens";
+import { useFullNodeTree } from "../hooks/use-full-node-tree";
 import type { OpenableNode } from "../utils/known-node-cache";
 import { NodeAgentPromptsSheet } from "./NodeAgentPromptsSheet";
 import { NodeDeleteSheet } from "./NodeDeleteSheet";
@@ -27,7 +28,10 @@ import { NodeShareSheet } from "./NodeShareSheet";
 
 interface NodeActionsSheetProps {
   node: NodeVO;
-  /** The RAW `nodes.list` tree, for the move picker and inherited privacy. */
+  /**
+   * The drawer's RAW `nodes.list` tree (root + what has been loaded). Move and
+   * Permissions read the whole tree on their own while open.
+   */
   nodes: NodeVO[];
   /** Whether this node type has a mobile detail screen to open. */
   canOpen: boolean;
@@ -106,6 +110,7 @@ export function NodeActionsSheet({
   const tokens = useTokens();
   const { t } = useI18n();
   const [mode, setMode] = useState<Mode>("menu");
+  const treeForSheets = useFullNodeTree(mode === "move" || mode === "permissions", nodes);
 
   const typeLabel = getNodeType(node.type)?.label ?? node.type;
   const canRename = node.type !== "base";
@@ -247,14 +252,14 @@ export function NodeActionsSheet({
       <NodeMoveSheet
         visible={mode === "move"}
         node={node}
-        nodes={nodes}
+        nodes={treeForSheets}
         onClose={onClose}
         onBack={() => setMode("menu")}
       />
       <NodePermissionsSheet
         visible={mode === "permissions"}
         node={node}
-        nodes={nodes}
+        nodes={treeForSheets}
         spaceVisibilityMode={spaceVisibilityMode}
         onClose={onClose}
         onBack={() => setMode("menu")}
