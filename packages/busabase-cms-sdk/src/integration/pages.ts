@@ -138,6 +138,31 @@ export interface ResolvedCmsPage<TPage extends CmsPageIdentity = PageVO> {
   isLocaleFallback: boolean;
 }
 
+/**
+ * The `<head>` text a Page contributes, after the app decided which of its fields win.
+ * `absoluteTitle` is true only when `title` is a complete editor-authored title rather than a
+ * bare Page title the app's `title.template` should still decorate.
+ */
+export interface CmsPageSeoFields {
+  title: string;
+  description: string;
+  absoluteTitle: boolean;
+}
+
+/** The SDK's own precedence: `seo-title` over `title`, `seo-description` over nothing. */
+export const defaultCmsPageSeoFields = (page: CmsPageIdentity): CmsPageSeoFields => {
+  const { title, seoTitle, seoDescription } = page as Partial<
+    Pick<PageVO, "title" | "seoTitle" | "seoDescription">
+  >;
+  return {
+    title: seoTitle ?? title ?? "",
+    description: seoDescription ?? "",
+    // Only when the editor actually authored an SEO title. A page falling back to its
+    // plain `title` IS a fragment, and should still get the app's template.
+    absoluteTitle: Boolean(seoTitle),
+  };
+};
+
 /** The slice of a `CmsIntegration` the Page helpers depend on. */
 export interface CmsPageHelpersIntegration<TPage extends CmsPageIdentity = PageVO> {
   buildCmsPath: (locale: string, path: string | readonly string[]) => string | null;
@@ -167,6 +192,20 @@ export interface CmsPageHelpersOptions<TMetadata, TPage extends CmsPageIdentity 
   jsonLdSite?: CmsJsonLdSite;
   /** Localized label for the breadcrumb root. Defaults to "Home". */
   homeLabel?: (locale: string) => string;
+  /**
+   * Narrows which records in the Pages Base count as a Page for these helpers. A record it
+   * rejects is treated exactly like a missing one — by every lookup, the locale fallback,
+   * hreflang probing and the breadcrumb trail. Use it when the Pages Base also holds records
+   * another route owns (Busabase Cloud keeps `/blog/...` paths there). Defaults to accepting
+   * every record.
+   */
+  filterPage?: (page: TPage) => boolean;
+  /**
+   * Which of the Page's fields become its `<title>` / description. Defaults to
+   * `defaultCmsPageSeoFields`; override it when the app's Page schema carries its own
+   * overrides (Buda's `meta-title` / `meta-description`).
+   */
+  resolveSeoFields?: (page: TPage) => CmsPageSeoFields;
 }
 
 export interface CmsPageHelpers<TMetadata, TPage extends CmsPageIdentity = PageVO> {
@@ -245,7 +284,7 @@ export interface CmsPageHelpers<TMetadata, TPage extends CmsPageIdentity = PageV
    * async `generateMetadata`, so this costs them nothing but an `await`.
    */
   generateCmsPageMetadata: (
-    page: PageVO,
+    page: TPage,
     lang: string,
   ) => Promise<TMetadata | Record<string, never>>;
 }
@@ -255,6 +294,8 @@ export const createCmsPageHelpers = <TMetadata, TPage extends CmsPageIdentity = 
   generatePageMetadata,
   jsonLdSite,
   homeLabel = () => "Home",
+  filterPage = () => true,
+  resolveSeoFields = defaultCmsPageSeoFields,
 }: CmsPageHelpersOptions<TMetadata, TPage>): CmsPageHelpers<TMetadata, TPage> => {
   const {
     buildCmsPath,
@@ -273,7 +314,7 @@ export const createCmsPageHelpers = <TMetadata, TPage extends CmsPageIdentity = 
     if (!canonicalPath) return null;
 
     const page = await getBusabaseLandingPageByPathOrFallback(canonicalPath);
-    return page && isCmsContentForLocale(page, locale) ? page : null;
+    return page && filterPage(page) && isCmsContentForLocale(page, locale) ? page : null;
   };
 
   const readForLocale = async (
@@ -287,7 +328,10 @@ export const createCmsPageHelpers = <TMetadata, TPage extends CmsPageIdentity = 
     const read = await readBusabaseLandingPageByPath(canonicalPath);
     if (read.status !== "ok") return read;
     const page = read.data;
-    return { status: "ok", data: page && isCmsContentForLocale(page, locale) ? page : null };
+    return {
+      status: "ok",
+      data: page && filterPage(page) && isCmsContentForLocale(page, locale) ? page : null,
+    };
   };
 
   const resolved = (page: TPage, requestedLocale: string, contentLocale: string) => ({
@@ -372,7 +416,7 @@ export const createCmsPageHelpers = <TMetadata, TPage extends CmsPageIdentity = 
   };
 
   const generateCmsPageMetadata = async (
-    page: PageVO,
+    page: TPage,
     lang: string,
   ): Promise<TMetadata | Record<string, never>> => {
     const parsed = parseCmsPath(page.path);
@@ -384,10 +428,11 @@ export const createCmsPageHelpers = <TMetadata, TPage extends CmsPageIdentity = 
     // rather than at the untranslated request URL.
     const contentLocale = isCmsContentForLocale(page, lang) ? lang : parsed.locale;
     const availableLocales = await resolveAvailableLocales(parsed.pathWithoutLocale, contentLocale);
+    const { title, description, absoluteTitle } = resolveSeoFields(page);
 
     return generatePageMetadata({
-      title: page.seoTitle ?? page.title,
-      description: page.seoDescription ?? "",
+      title,
+      description,
       path: parsed.pathWithoutLocale,
       lang,
       canonicalLang: contentLocale,
@@ -395,11 +440,9 @@ export const createCmsPageHelpers = <TMetadata, TPage extends CmsPageIdentity = 
       availableLocales,
       // An editor-set canonical wins over the computed one; it also suppresses hreflang,
       // because we cannot know the alternates of a URL we did not compute.
-      canonicalUrl: page.canonicalUrl ?? undefined,
-      imageText: page.seoTitle ?? page.title,
-      // Only when the editor actually authored an SEO title. A page falling back to its
-      // plain `title` IS a fragment, and should still get the app's template.
-      absoluteTitle: Boolean(page.seoTitle),
+      canonicalUrl: (page as { canonicalUrl?: string | null }).canonicalUrl ?? undefined,
+      imageText: title,
+      absoluteTitle,
       type: "website",
     });
   };

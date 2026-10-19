@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { CmsRead } from "../src/fallback";
-import { createCmsPageHelpers } from "../src/integration";
+import {
+  type CmsPageSeoFields,
+  createCmsPageHelpers,
+  defaultCmsPageSeoFields,
+} from "../src/integration";
 import { createCmsPathHelpers } from "../src/routing";
 import type { PageVO } from "../src/types";
 
@@ -24,7 +28,16 @@ const page = (path: string, locale: string): PageVO =>
  * Builds helpers over a fixed set of Pages. `unavailable` makes every read report the CMS as
  * unreachable, which the status-aware reads must never confuse with "no such page".
  */
-const helpersFor = (pages: PageVO[], { unavailable = false } = {}) => {
+interface HelpersForOptions {
+  unavailable?: boolean;
+  filterPage?: (page: PageVO) => boolean;
+  resolveSeoFields?: (page: PageVO) => CmsPageSeoFields;
+}
+
+const helpersFor = (
+  pages: PageVO[],
+  { unavailable = false, filterPage, resolveSeoFields }: HelpersForOptions = {},
+) => {
   const byPath = new Map(pages.map((p) => [p.path, p]));
   const reads: string[] = [];
 
@@ -46,6 +59,8 @@ const helpersFor = (pages: PageVO[], { unavailable = false } = {}) => {
       },
     },
     generatePageMetadata: (options) => options,
+    filterPage,
+    resolveSeoFields,
   });
 
   return { helpers, reads };
@@ -363,5 +378,155 @@ describe("createCmsPageHelpers — getCmsPageForLocale is strict", () => {
     expect(ja?.path).toBe("/ja/gpt-6-astra");
     const en = await helpers.getCmsPageForLocale("en", ["gpt-6-astra"]);
     expect(en?.path).toBe("/gpt-6-astra");
+  });
+});
+
+describe("createCmsPageHelpers — filterPage", () => {
+  // Busabase Cloud's Pages Base also holds `/blog/...` records, which its Blog route owns.
+  const isNotBlog = (candidate: PageVO) => !candidate.path.split("/").includes("blog");
+  const WITH_BLOG_RECORDS = [
+    page("/gpt-6-astra", "en"),
+    page("/blog", "en"),
+    page("/blog/launch", "en"),
+    page("/ja/blog/launch", "ja"),
+  ];
+
+  it("accepts every record when no filter is configured", async () => {
+    const { helpers } = helpersFor(WITH_BLOG_RECORDS);
+
+    await expect(helpers.getCmsPageForRequest("en", ["blog", "launch"])).resolves.toMatchObject({
+      path: "/blog/launch",
+    });
+  });
+
+  it("treats a rejected record as missing on every lookup", async () => {
+    const { helpers } = helpersFor(WITH_BLOG_RECORDS, { filterPage: isNotBlog });
+
+    await expect(helpers.getCmsPageForRequest("en", ["blog", "launch"])).resolves.toBeNull();
+    await expect(helpers.getCmsPageForLocale("ja", ["blog", "launch"])).resolves.toBeNull();
+    await expect(helpers.readCmsPageForRequest("en", ["blog", "launch"])).resolves.toEqual({
+      status: "ok",
+      data: null,
+    });
+    // A rejected record is not a translation either, so it never becomes an English fallback.
+    await expect(helpers.readResolvedCmsPageForRequest("pt", ["blog", "launch"])).resolves.toEqual({
+      status: "ok",
+      data: null,
+    });
+    await expect(helpers.getAvailableCmsPageLocales("/blog/launch")).resolves.toEqual([]);
+  });
+
+  it("still resolves the records it accepts", async () => {
+    const { helpers } = helpersFor(WITH_BLOG_RECORDS, { filterPage: isNotBlog });
+
+    await expect(helpers.getCmsPageForRequest("pt", ["gpt-6-astra"])).resolves.toMatchObject({
+      path: "/gpt-6-astra",
+    });
+  });
+
+  it("keeps an unreachable CMS distinct from a filtered-out record", async () => {
+    const { helpers } = helpersFor(WITH_BLOG_RECORDS, {
+      filterPage: isNotBlog,
+      unavailable: true,
+    });
+
+    await expect(helpers.readCmsPageForRequest("en", ["blog", "launch"])).resolves.toEqual({
+      status: "unavailable",
+    });
+  });
+
+  it("leaves a filtered-out ancestor out of the breadcrumb trail", async () => {
+    const pages = [page("/blog", "en"), page("/blog/guide", "en")];
+    const site = { baseUrl: "https://example.com", siteName: "Example" };
+    const build = (filterPage?: (candidate: PageVO) => boolean) =>
+      createCmsPageHelpers({
+        integration: {
+          buildCmsPath: paths.buildPath,
+          parseCmsPath: paths.parsePath,
+          isCmsContentForLocale: paths.isForLocale,
+          cmsPathHelpers: paths,
+          getBusabaseLandingPageByPathOrFallback: async (path: string) =>
+            pages.find((candidate) => candidate.path === path) ?? null,
+          readBusabaseLandingPageByPath: async (path: string) => ({
+            status: "ok" as const,
+            data: pages.find((candidate) => candidate.path === path) ?? null,
+          }),
+        },
+        generatePageMetadata: (options) => options,
+        jsonLdSite: site,
+        filterPage,
+      });
+    const crumbsOf = async (filterPage?: (candidate: PageVO) => boolean) => {
+      const nodes = await build(filterPage).buildCmsPageJsonLd(page("/blog/guide", "en"), "en");
+      const list = nodes.find((node) => node["@type"] === "BreadcrumbList") as {
+        itemListElement: Array<{ name: string }>;
+      };
+      return list.itemListElement.map((item) => item.name);
+    };
+
+    await expect(crumbsOf()).resolves.toEqual(["Home", "SEO en", "SEO en"]);
+    await expect(crumbsOf((candidate) => candidate.path !== "/blog")).resolves.toEqual([
+      "Home",
+      "SEO en",
+    ]);
+  });
+});
+
+describe("createCmsPageHelpers — resolveSeoFields", () => {
+  it("defaults to seo-title over title, and marks only an authored seo-title absolute", async () => {
+    expect(defaultCmsPageSeoFields(page("/gpt-6-astra", "en"))).toEqual({
+      title: "SEO en",
+      description: "Desc en",
+      absoluteTitle: true,
+    });
+
+    const untitled = {
+      ...page("/gpt-6-astra", "en"),
+      seoTitle: null,
+      seoDescription: null,
+    } as PageVO;
+    expect(defaultCmsPageSeoFields(untitled)).toEqual({
+      title: "Title en",
+      description: "",
+      absoluteTitle: false,
+    });
+
+    const { helpers } = helpersFor([untitled]);
+    await expect(helpers.generateCmsPageMetadata(untitled, "en")).resolves.toMatchObject({
+      title: "Title en",
+      description: "",
+      imageText: "Title en",
+      absoluteTitle: false,
+    });
+  });
+
+  it("lets an app map its own override fields into the <head>", async () => {
+    // Buda's Pages carry meta-title / meta-description overrides on top of the SDK's fields.
+    type MetaPage = PageVO & { metaTitle: string | null; metaDescription: string | null };
+    const withMeta = {
+      ...page("/gpt-6-astra", "en"),
+      metaTitle: "Meta en",
+      metaDescription: "Meta desc en",
+    } as MetaPage;
+    const { helpers } = helpersFor([withMeta], {
+      resolveSeoFields: (candidate) => {
+        const { metaTitle, metaDescription } = candidate as MetaPage;
+        const authored = metaTitle ?? candidate.seoTitle;
+        return {
+          title: authored ?? candidate.title,
+          description: metaDescription ?? candidate.seoDescription ?? "",
+          absoluteTitle: Boolean(authored),
+        };
+      },
+    });
+
+    await expect(helpers.generateCmsPageMetadata(withMeta, "en")).resolves.toMatchObject({
+      title: "Meta en",
+      description: "Meta desc en",
+      imageText: "Meta en",
+      absoluteTitle: true,
+      path: "/gpt-6-astra",
+      availableLocales: ["en"],
+    });
   });
 });
