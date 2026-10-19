@@ -67,12 +67,14 @@ test("staged view controls recover a hidden conditioned field with one update CR
     if (browserRequest.method() !== "POST") {
       return;
     }
-    const url = browserRequest.url();
-    if (url.includes("/api/rpc/views/changeRequest")) {
+    // Match the procedure exactly: a prefix match also counts the inbox badge's
+    // `changeRequests/reviewCount` refetch as a review.
+    const procedure = new URL(browserRequest.url()).pathname.replace(/\/__batch__$/, "");
+    if (procedure === "/api/rpc/views/changeRequest") {
       workflowRequests.update += 1;
-    } else if (url.includes("/api/rpc/changeRequests/review")) {
+    } else if (procedure === "/api/rpc/changeRequests/review") {
       workflowRequests.review += 1;
-    } else if (url.includes("/api/rpc/changeRequests/merge")) {
+    } else if (procedure === "/api/rpc/changeRequests/merge") {
       workflowRequests.merge += 1;
     }
   });
@@ -272,12 +274,14 @@ test("edit view reuses the shared fields editor and preserves unrelated config",
     if (browserRequest.method() !== "POST") {
       return;
     }
-    const url = browserRequest.url();
-    if (url.includes("/api/rpc/views/changeRequest")) {
+    // Match the procedure exactly: a prefix match also counts the inbox badge's
+    // `changeRequests/reviewCount` refetch as a review.
+    const procedure = new URL(browserRequest.url()).pathname.replace(/\/__batch__$/, "");
+    if (procedure === "/api/rpc/views/changeRequest") {
       workflowRequests.update += 1;
-    } else if (url.includes("/api/rpc/changeRequests/review")) {
+    } else if (procedure === "/api/rpc/changeRequests/review") {
       workflowRequests.review += 1;
-    } else if (url.includes("/api/rpc/changeRequests/merge")) {
+    } else if (procedure === "/api/rpc/changeRequests/merge") {
       workflowRequests.merge += 1;
     }
   });

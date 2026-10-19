@@ -1,0 +1,1 @@
+ALTER TABLE "busabase_router_connections" ADD COLUMN "pending_revoked_at" timestamp;

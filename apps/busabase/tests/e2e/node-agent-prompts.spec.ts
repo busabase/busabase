@@ -331,7 +331,7 @@ test("roomy prompt dialog keeps Ask Agent and Copy inside the detail footer", as
   await page.getByTestId("node-agent-prompts-button").click();
   const dialog = page.getByRole("dialog");
   await dialog.getByRole("button", { name: "Long review", exact: true }).click();
-  const preview = dialog.locator("textarea[readonly]");
+  const preview = dialog.getByTestId("agent-prompts-preview");
   const copy = dialog.getByRole("button", { name: "Copy", exact: true });
   const askAgent = dialog.getByRole("button", { name: "Ask Agent", exact: true });
   await expect(dialog.getByText(/^Copying or sending also appends/)).toHaveCount(0);

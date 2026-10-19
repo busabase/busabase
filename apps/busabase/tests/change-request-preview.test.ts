@@ -70,6 +70,11 @@ describe("Change Request preview SPA location", () => {
 
     expect(dashboardClientSource).toContain("lockInitialPath={readOnlyChangeRequestPreview}");
     expect(spaWrapperSource).toContain("memoryLocation({");
-    expect(spaWrapperSource).toContain("hook={lockInitialPath ? lockedLocation.hook : undefined}");
+    expect(spaWrapperSource).toContain(
+      "hook={lockInitialPath ? lockedLocation.hook : useNextSafeBrowserLocation}",
+    );
+    expect(spaWrapperSource).toContain(
+      "searchHook={lockInitialPath ? lockedLocation.searchHook : useNextSafeSearch}",
+    );
   });
 });

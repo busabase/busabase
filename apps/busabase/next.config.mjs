@@ -120,6 +120,8 @@ export const changeRequestPreviewHeaders = [
 
 /** @type {import('next').NextConfig} */
 const config = {
+  // Keep desktop development from sharing locks/build state with OSS dev.
+  distDir: process.env.BUSABASE_DESKTOP_DEV_SIDECAR === "1" ? ".next-desktop" : ".next",
   reactStrictMode: true,
   reactCompiler: true,
   experimental: {
