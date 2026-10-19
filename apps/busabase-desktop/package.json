@@ -1,7 +1,7 @@
 {
   "name": "@busabase/desktop",
   "private": true,
-  "version": "0.95.1",
+  "version": "0.96.0",
   "type": "module",
   "scripts": {
     "dev": "next dev --port 3064",
@@ -9,8 +9,13 @@
     "prepare:tauri": "node scripts/prepare-tauri-build.mjs",
     "preview": "npx serve out",
     "typecheck": "next typegen && tsc --noEmit",
-    "tauri": "tauri",
+    "tauri": "node scripts/tauri.mjs",
+    "tauri:dev:software": "node scripts/tauri-dev-software.mjs",
     "test": "vitest run",
+    "test:styles": "node --test tests/css-pipeline.test.mjs",
+    "test:linux-launcher": "node --test tests/linux-launcher.test.mjs",
+    "test:startup": "node --test tests/startup.browser.test.mjs",
+    "test:updater": "node --test tests/updater.browser.test.mjs",
     "test:electron": "node --test electron/test/*.test.*"
   },
   "dependencies": {
@@ -28,10 +33,14 @@
     "wouter": "^3.9.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.56.1",
     "@tauri-apps/cli": "^2.11.0",
+    "@tailwindcss/postcss": "^4.3.3",
     "@types/node": "^26.3.0",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2",
     "vitest": "^4.1.11"
   },

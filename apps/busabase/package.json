@@ -18,7 +18,7 @@
     "pglite",
     "cli"
   ],
-  "version": "0.95.1",
+  "version": "0.96.0",
   "private": false,
   "license": "MIT",
   "homepage": "https://github.com/busabase/busabase/tree/main/apps/busabase",
@@ -120,6 +120,7 @@
     "react-dom": "^19.2.7",
     "relaylib": "workspace:*",
     "server-only": "^0.0.1",
+    "sonner": "^2.0.7",
     "tailwindcss": "^4.3.3",
     "tsdown": "^0.22.14",
     "typescript": "^7.0.2",
