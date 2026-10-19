@@ -5,16 +5,43 @@ import type { AcpUiEvent } from "@acp-ui/core/reduce";
 import type { AcpSessionPort } from "@acp-ui/core/session";
 import { useAcpSession } from "@acp-ui/core/session";
 import { consumeEventIterator } from "@orpc/client";
-import { type InfiniteData, type QueryKey, useQueryClient } from "@tanstack/react-query";
+import { type QueryKey, useQueryClient } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type {
   AgentSessionEventVO,
-  AgentSessionsPageVO,
   AgentSessionVO,
   PromptAttachmentInput,
 } from "busabase-contract/domains/agents/types";
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import { shouldRenderAgentMessage } from "../utils/agent-visible-message";
+
+/**
+ * One session's live status, reported out-of-band from the query cache. The
+ * subscription learns a status change seconds before the next 4s session-list
+ * poll would, and used to patch that fact straight into the query cache via
+ * `setQueryData` so the UI reflected it immediately. That meant two sources —
+ * this subscription and the ordinary poll/refetch — could both "win" a cache
+ * write for the same row, and a stale replayed status could stomp a newer
+ * polled one. Reporting it to the caller instead (who overlays it onto the
+ * query-derived list, the same way the create/config-option session bridge
+ * does) keeps the query cache server-owned: this is a transient, UI-only
+ * annotation, not a write a refetch has to race.
+ */
+export interface AgentSessionStatusUpdate {
+  sessionId: string;
+  status: AgentSessionVO["status"];
+  lastActivityAt: string;
+  error?: string;
+  /**
+   * The event's own `seq`, monotonic per session. The subscription can
+   * replay from `afterSeq` on reconnect, so without this the consumer has no
+   * way to tell a just-replayed, now-stale status from a genuinely new one —
+   * it would overwrite whatever a newer poll already reported. Compare with
+   * `>=` against the last applied value for this session; never `>` only,
+   * since a reconnect can legitimately redeliver the same seq.
+   */
+  seq: number;
+}
 
 /**
  * Translate one persisted busabase event into zero or more shared-model
@@ -135,8 +162,20 @@ export function useAgentSession(
   orpc: BusabaseQueryUtils,
   sessionId: string | null,
   pagedSessionQueryKey?: QueryKey,
+  onStatusUpdate?: (update: AgentSessionStatusUpdate) => void,
+  // Fired on exactly the two signals that can change a session's confirmed
+  // model metadata server-side — first readiness after connect, and a
+  // config-option change — never on the plain 4s poll tick. Carries the
+  // event's own `seq` so the caller can fence a request it issues in
+  // response against a newer signal arriving before that request resolves.
+  // Deliberately does not fetch anything itself: fetching is the caller's
+  // job (see `agent-detail-view.tsx`), because only the caller knows which
+  // scope/catalog that fetch's result is allowed to be written into.
+  onMetadataRefresh?: (signal: { sessionId: string; seq: number }) => void,
 ) {
   const queryClient = useQueryClient();
+  const callbacks = useRef({ onStatusUpdate, onMetadataRefresh });
+  callbacks.current = { onStatusUpdate, onMetadataRefresh };
   const port = useMemo<AcpSessionPort>(
     () => ({
       start: async () => sessionId ?? "",
@@ -146,6 +185,16 @@ export function useAgentSession(
         let unsubscribe: (() => void) | undefined;
         let retryTimer: ReturnType<typeof setTimeout> | undefined;
         let lastSeq = -1;
+        let readinessRefreshed = false;
+
+        const refreshSessions = () => {
+          void queryClient.invalidateQueries({
+            queryKey: orpc.agents.sessions.list.queryKey(),
+          });
+          if (pagedSessionQueryKey) {
+            void queryClient.invalidateQueries({ queryKey: pagedSessionQueryKey });
+          }
+        };
 
         const connect = () => {
           if (cancelled) return;
@@ -153,50 +202,36 @@ export function useAgentSession(
             orpc.agents.sessions.subscribe.call({ sessionId: id, afterSeq: lastSeq }, { signal }),
             {
               onEvent: (event: AgentSessionEventVO) => {
-                if (cancelled) return;
+                if (cancelled || event.seq <= lastSeq) return;
                 lastSeq = Math.max(lastSeq, event.seq);
                 if (event.kind === "status" && event.status) {
-                  const applyStatus = (session: AgentSessionVO) =>
-                    session.id === id
-                      ? {
-                          ...session,
-                          status: event.status as AgentSessionVO["status"],
-                          lastActivityAt: event.at,
-                          ...(event.status === "failed" && event.message
-                            ? { error: event.message }
-                            : {}),
-                        }
-                      : session;
-                  queryClient.setQueryData(
-                    orpc.agents.sessions.list.queryKey(),
-                    (previous: AgentSessionVO[] | undefined) => previous?.map(applyStatus),
-                  );
-                  if (pagedSessionQueryKey)
-                    queryClient.setQueryData<InfiniteData<AgentSessionsPageVO>>(
-                      pagedSessionQueryKey,
-                      (previous) =>
-                        previous
-                          ? {
-                              ...previous,
-                              pages: previous.pages.map((page) => ({
-                                ...page,
-                                items: page.items.map(applyStatus),
-                              })),
-                            }
-                          : previous,
-                    );
+                  callbacks.current.onStatusUpdate?.({
+                    sessionId: id,
+                    status: event.status as AgentSessionVO["status"],
+                    lastActivityAt: event.at,
+                    seq: event.seq,
+                    ...(event.status === "failed" && event.message ? { error: event.message } : {}),
+                  });
+                  // Replay may start ready, or startup may go straight into a prompt.
+                  // Keep this guard across reconnects, but not across subscriptions.
+                  if (
+                    !readinessRefreshed &&
+                    (event.status === "idle" ||
+                      event.status === "busy" ||
+                      event.status === "waiting_permission")
+                  ) {
+                    readinessRefreshed = true;
+                    refreshSessions();
+                    callbacks.current.onMetadataRefresh?.({ sessionId: id, seq: event.seq });
+                  }
                 }
                 const update = event.acpUpdate as { sessionUpdate?: unknown } | undefined;
                 if (
                   event.kind === "acpUpdate" &&
                   update?.sessionUpdate === "config_option_update"
                 ) {
-                  void queryClient.invalidateQueries({
-                    queryKey: orpc.agents.sessions.list.queryKey(),
-                  });
-                  if (pagedSessionQueryKey) {
-                    void queryClient.invalidateQueries({ queryKey: pagedSessionQueryKey });
-                  }
+                  refreshSessions();
+                  callbacks.current.onMetadataRefresh?.({ sessionId: id, seq: event.seq });
                 }
                 for (const translated of translateAgentSessionEvent(event)) onEvent(translated);
               },

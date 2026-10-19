@@ -59,6 +59,16 @@ export function evaluateAst(
         evaluateAst(node.right, resolveField, recordContext),
       );
     case "call": {
+      // IF must not evaluate the unused branch: it is how authors guard
+      // missing values and errors such as division by zero.
+      if (node.name === "IF") {
+        if (node.args.length < 2 || node.args.length > 3) {
+          throw new FormulaEvalError(`IF: expected 2-3 argument(s), got ${node.args.length}`);
+        }
+        const condition = evaluateAst(node.args[0], resolveField, recordContext);
+        const branch = isTruthy(condition) ? node.args[1] : node.args[2];
+        return branch ? evaluateAst(branch, resolveField, recordContext) : null;
+      }
       // ISERROR/IS_ERROR need their argument's EVALUATION caught, not its
       // (already-thrown) result — bypasses FORMULA_FUNCTIONS' eager
       // arg-array convention entirely.

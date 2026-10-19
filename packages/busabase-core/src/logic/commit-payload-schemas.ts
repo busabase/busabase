@@ -41,7 +41,10 @@
  * and cross-checked against the READ sites (what the merge handlers assert).
  * Where the two disagreed, the write side won — see the per-kind notes.
  */
-import { fieldTypeSchema } from "busabase-contract/domains/base/contract/base-schemas";
+import {
+  fieldHelpSchema,
+  fieldTypeSchema,
+} from "busabase-contract/domains/base/contract/base-schemas";
 import { NodeIconSchema } from "busabase-contract/types";
 import { iStringSchema } from "openlib/i18n/i-string";
 import { z } from "zod";
@@ -286,7 +289,11 @@ export const COMMIT_PAYLOAD_SCHEMAS = {
   // `mergeBaseDeleteField` requires fieldId.
   base_delete_field: z.looseObject({ ...fieldDefinition, fieldId: z.string() }),
   // `mergeBaseUpdateField` requires fieldId.
-  base_update_field: z.looseObject({ ...fieldDefinition, fieldId: z.string() }),
+  base_update_field: z.looseObject({
+    ...fieldDefinition,
+    fieldId: z.string(),
+    help: fieldHelpSchema.nullable().optional(),
+  }),
   // `mergeBaseConvertField` requires fieldId + fromType + newType.
   base_convert_field: z.looseObject({
     fieldId: z.string(),

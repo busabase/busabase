@@ -143,5 +143,27 @@ class Parser {
 }
 
 export function parseFormula(expression: string): AstNode {
-  return new Parser(tokenize(expression)).parse();
+  if (expression.length > 10_000) {
+    throw new FormulaSyntaxError(
+      "Formula expression exceeds the 10000-character calculation limit",
+    );
+  }
+  const tokens = tokenize(expression);
+  if (tokens.length > 2_048) {
+    throw new FormulaSyntaxError("Formula expression exceeds the 2048-token calculation limit");
+  }
+  let depth = 0;
+  let unaryRun = 0;
+  for (const token of tokens) {
+    if (token.type === "lparen") depth++;
+    if (token.type === "rparen") depth--;
+    unaryRun =
+      token.type === "op" && (token.value === "-" || token.value === "!") ? unaryRun + 1 : 0;
+    if (depth > 64 || unaryRun > 64) {
+      throw new FormulaSyntaxError(
+        "Formula expression exceeds the 64-level nesting calculation limit",
+      );
+    }
+  }
+  return new Parser(tokens).parse();
 }

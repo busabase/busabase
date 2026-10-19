@@ -389,6 +389,11 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   "agents.connections.list": workspace("manage"),
   "agents.disconnect": workspace("manage"),
   "agents.deleteHistory": workspace("manage"),
+  "agents.routerEnrollment.grants": workspace("manage"),
+  "agents.routerEnrollment.mint": workspace("manage"),
+  "agents.routerEnrollment.status": workspace("manage"),
+  "agents.routerEnrollment.complete": workspace("manage"),
+  "agents.routerEnrollment.cancel": workspace("manage"),
   "agents.sessions.list": workspace("manage"),
   "agents.sessions.listPaged": workspace("manage"),
   "agents.sessions.create": workspace("manage"),
@@ -408,6 +413,7 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   // beyond those two node-scoped reads, so it keeps the same permission floor.
   "changeRequests.inboxSnapshot": node("read"),
   "changeRequests.counts": node("read"),
+  "changeRequests.reviewCount": node("read"),
   "changeRequests.get": node("read"),
   // CR-only capability: the handler checks active Space, full CR visibility and status.
   // Generic embedLinks.create remains workspace manage (including Node links).
@@ -463,6 +469,33 @@ export function resolveProcedurePermissionPolicy(
 ): ProcedurePermissionPolicy {
   const key = normalizePath(path).join(".");
   return PROCEDURE_PERMISSION_POLICY[key] ?? workspace("manage");
+}
+
+/**
+ * Input-aware creation permissions: a `changeRequest` key may share a proposal
+ * preview, and a `write` key may share one record's read-only detail. Node
+ * embeds and link administration (`list`/`listPaged`/`revoke`) retain `manage`.
+ *
+ * This is intentionally its own function rather than a change to
+ * `PROCEDURE_PERMISSION_POLICY`: that table is level-only (keyed on path, not
+ * on the request body) and its exhaustiveness test enumerates the contract by
+ * path alone, so it has no way to express "this level, but only for one input
+ * shape" without breaking that guarantee for every other procedure. Callers
+ * that don't have a parsed input yet (route matching before the body is read,
+ * e.g. `tunnel-forward.ts`) can still call `resolveProcedurePermissionPolicy`
+ * and get the safe `manage` baseline.
+ *
+ * This does NOT perform the target-specific check (whether the caller
+ * holds `changeRequest`+ on every node affected by a proposal, or `write`+ on
+ * the Base node owning a record). Core's create path checks those targets;
+ * the shared metadata resolver retains manage-only checks for list/revoke.
+ */
+export function resolveEmbedLinksCreatePermissionPolicy(
+  input: { type?: unknown } | null | undefined,
+): ProcedurePermissionPolicy {
+  if (input?.type === "change-request") return workspace("changeRequest");
+  if (input?.type === "record-detail") return node("write");
+  return workspace("manage");
 }
 
 /**

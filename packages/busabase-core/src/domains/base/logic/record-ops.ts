@@ -204,6 +204,7 @@ export const createBase = async (input: z.input<typeof createBaseInputSchema>) =
   const relationResolvedFields = await Promise.all(
     parsed.fields.map(async (field) => ({
       ...field,
+      required: field.type === "formula" ? false : field.required,
       options: await resolveRelationFieldOptions(db, field.options),
     })),
   );

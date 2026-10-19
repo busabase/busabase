@@ -18,7 +18,6 @@ import {
   SidebarMenuItem,
 } from "kui/sidebar";
 import { Skeleton } from "kui/skeleton";
-import { Toaster } from "kui/sonner";
 import {
   Activity,
   Archive,
@@ -483,8 +482,8 @@ function DashboardShellInner({
   // dialogs (`NodeRenameDialog`/`NodePermissionsDialog`) with their own
   // target state each — now they're tabs of the same dialog, so one target
   // (carrying which tab to land on, and whether to focus the name field)
-  // replaces all three. Neither Settings nor Rename is ever set for a Base
-  // node — `buildNavItem` omits both actions for those.
+  // replaces all three. Base nodes omit Settings, but offer Rename here as
+  // well as the existing entry point in their Design tab.
   const [location] = useLocation();
   // Read back from the provider our own wrapper mounts below, so there is
   // exactly one resolved level in play for this subtree — the sidebar rows and
@@ -1291,8 +1290,9 @@ function DashboardShellInner({
   // harmless since a descendant `<BusabaseDashboard>` overrides it anyway.
   return (
     <CoreI18nProvider locale={locale}>
+      {/* No Toaster here: each host mounts one (OSS `providers.tsx`, Cloud's root
+          shell) on the same `sonner` copy core's `toast()` resolves to. */}
       <div data-busabase-dashboard-layout className="h-full min-h-0">
-        <Toaster position="top-right" />
         <DashboardLayout
           {...chrome}
           className="h-full min-h-0"
@@ -1638,8 +1638,8 @@ function buildNavItem(node: NodeVO, ctx: NavItemContext): NavItem[] {
     : null;
   // The "•••" Settings action — opens `NodeSettingsDialog` on its General
   // tab (icon / name / description), with Info and Permissions one click away
-  // in the same dialog. Same Base exception as Rename below: a Base reaches
-  // this dialog from its Design tab's "Base Info" → Edit button instead.
+  // in the same dialog. Base Settings remain accessible from the Design
+  // tab's "Base Info" → Edit button instead of a separate sidebar entry.
   const settingsAction: NavItemAction | null =
     onOpenSettings && node.type !== "base"
       ? {
@@ -1650,17 +1650,14 @@ function buildNavItem(node: NodeVO, ctx: NavItemContext): NavItem[] {
       : null;
   // The "•••" Rename action — same shared mechanism as Permissions/Favorite,
   // and the same dialog as Settings above, only with the name field focused.
-  // Base nodes keep their own independent rename path (Design Tab), so the
-  // host never wires `onOpenRename` for them (see `submitRenameBase`); guard
-  // here too so a future host mistake can't double up on the "base" type.
-  const renameAction: NavItemAction | null =
-    onOpenRename && node.type !== "base"
-      ? {
-          title: labels.renameLabel,
-          icon: Pencil,
-          onSelect: () => onOpenRename(node),
-        }
-      : null;
+  // Available for Base nodes too, alongside their Design tab entry point.
+  const renameAction: NavItemAction | null = onOpenRename
+    ? {
+        title: labels.renameLabel,
+        icon: Pencil,
+        onSelect: () => onOpenRename(node),
+      }
+    : null;
   // The "•••" Favorites toggle — same shared mechanism, one click, same menu
   // as Open/Permissions.
   // Label reflects the node's CURRENT membership in `favoriteNodeIds`, so a
@@ -1677,7 +1674,7 @@ function buildNavItem(node: NodeVO, ctx: NavItemContext): NavItem[] {
       }
     : null;
   // The "•••" "Move to…" action — opens `NodeMoveDialog` for this node.
-  // Offered on every node type (unlike Rename's Base exception), since
+  // Offered on every node type, since
   // `nodes.move` is a generic node-reparenting endpoint. Only present when
   // the host wired `onMoveNode` (no dialog without a mutation to call).
   const moveAction: NavItemAction | null = onOpenMove

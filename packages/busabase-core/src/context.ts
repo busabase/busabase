@@ -8,6 +8,9 @@ import type { ApiKeyPermissionLevel } from "busabase-contract/access-control/api
 import type { BusabaseSourceChannel, UserRefVO } from "busabase-contract/types";
 import type { PgDatabase } from "drizzle-orm/pg-core";
 import { type DemoUseCase, normalizeDemoUseCase } from "./demo/use-case";
+import type { BusabaseEmbedRecordScope } from "./domains/embed-links/utils/record-scope";
+
+export type { BusabaseEmbedRecordScope } from "./domains/embed-links/utils/record-scope";
 
 /**
  * Request-scoped Busabase execution context.
@@ -271,6 +274,8 @@ export interface BusabaseContext {
   embedOrigin?: string;
   /** Exact node one Embed Link authorizes; never a workspace-wide grant. */
   embedTargetNodeId?: string;
+  /** Restricts a record-detail capability's RPC calls to its exact target. */
+  embedRecordScope?: BusabaseEmbedRecordScope;
   /**
    * Display name injected by the single-user open-source host. Cloud must not
    * set this; it resolves registered users through `resolveUsers`.
@@ -820,6 +825,10 @@ export function getContextEmbedOrigin(): string | undefined {
 /** Exact node authorized by the current Embed Link, if this is an embed request. */
 export function getContextEmbedTargetNodeId(): string | undefined {
   return storage.getStore()?.embedTargetNodeId;
+}
+
+export function getContextEmbedRecordScope(): BusabaseEmbedRecordScope | undefined {
+  return storage.getStore()?.embedRecordScope;
 }
 
 /** True when the current request is served by the stateless demo router. */

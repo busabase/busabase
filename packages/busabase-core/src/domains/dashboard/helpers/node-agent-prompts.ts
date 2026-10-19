@@ -100,6 +100,13 @@ export interface NodePrompt {
   group: string;
   /** The final, fully-interpolated text the user copies. */
   body: string;
+  /**
+   * The target line `body` was built around, and the merge/reply footer it ends
+   * on — the framing the preview turns down so the task in between reads first.
+   * Optional: a prompt built without them previews its whole body at full weight.
+   */
+  target?: string;
+  footer?: string;
 }
 
 // ── Shared framing ────────────────────────────────────────────────────────────
@@ -1890,6 +1897,8 @@ const buildCuratedPrompt = (
     label: prompt.label[locale],
     group,
     body: `${prompt.body[locale](target)}\n\n${footer}`,
+    target,
+    footer,
   };
 };
 
@@ -2004,13 +2013,16 @@ export function buildNodeAgentPrompts(
         definition?.operations.find((operation) => operation.kind === kind)?.label ??
         kind;
       const group = groupOf(kind);
+      const footer = `${MERGE_POLICY[locale]} ${reply}`;
       return {
         key: kind,
         tier: "capability",
         source: "capability",
         label: opLabel,
         group: groupLabels[group],
-        body: `${CAPABILITY_TEMPLATE[locale](target, opLabel)}\n\n${MERGE_POLICY[locale]} ${reply}`,
+        body: `${CAPABILITY_TEMPLATE[locale](target, opLabel)}\n\n${footer}`,
+        target,
+        footer,
       };
     }),
   ];
@@ -2409,15 +2421,16 @@ export function buildCreateNodePrompts(
     .filter((definition) => definition.capabilities.creatable && !definition.capabilities.hidden)
     .map((definition): NodePrompt => {
       const typeLabel = definition.label;
+      const footer = `${MERGE_POLICY[locale]} ${REPLY_LANGUAGE[locale]}`;
       return {
         key: `create-${definition.type}`,
         tier: "capability",
         source: "capability",
         label: CREATE_ITEM_LABEL[locale](typeLabel),
         group: CREATE_GROUP_LABEL[locale],
-        body: `${CREATE_CAPABILITY_TEMPLATE[locale](target, typeLabel, definition.type)}\n\n${
-          MERGE_POLICY[locale]
-        } ${REPLY_LANGUAGE[locale]}`,
+        body: `${CREATE_CAPABILITY_TEMPLATE[locale](target, typeLabel, definition.type)}\n\n${footer}`,
+        target,
+        footer,
       };
     });
 

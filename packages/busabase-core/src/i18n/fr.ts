@@ -1,6 +1,50 @@
 import type { CoreI18nMessages } from "./messages";
 
 export const dashboardFr: CoreI18nMessages = {
+  fieldHelp: {
+    inherit: "Utiliser les instructions du champ",
+    override: "Personnaliser pour ce formulaire",
+    save: "Enregistrer les instructions",
+    saveFailed: "Impossible d’enregistrer les instructions. Vos modifications sont conservées.",
+    description: "Instructions de saisie",
+    example: "Exemple",
+    preview: "Aperçu",
+    more: "Afficher plus",
+    less: "Afficher moins",
+    view: "Voir les instructions pour {name}",
+    publicHint:
+      "Les instructions apparaissent aussi dans les formulaires partagés. N’incluez pas d’informations sensibles.",
+  },
+  formula: {
+    expression: "Formule",
+    computed: "Calculé · lecture seule",
+    invalid: "Formule invalide",
+    valid: "Formule valide",
+    catalog: "Insérer un champ ou une fonction",
+    suggestions: "Suggestions",
+    functions: "Fonctions",
+    search: "Rechercher des champs ou fonctions",
+    preview: "Aperçu d'exemple",
+    previewUnavailable: "Impossible de charger les exemples.",
+    retry: "Réessayer",
+    sampleRecord: "Enregistrement d'exemple",
+    recordLabel: "Enregistrement {index}",
+    temporaryValues: "Valeurs d'exemple temporaires",
+    sampleValue: "Valeur d'exemple",
+    result: "Résultat",
+    computationError: "Erreur de calcul",
+    unavailable: "Indisponible",
+    empty: "Vide",
+    resultFormat: "Format du résultat",
+    auto: "Automatique",
+    percent: "Pourcentage",
+    precision: "Décimales",
+    currencyCode: "Code de devise",
+    dependencies: "Formules dépendantes : {fields}",
+    discardChanges: "Abandonner les modifications non enregistrées ?",
+    confirmDependencies: "Ces formules seront aussi recalculées : {fields}. Continuer ?",
+    restored: "Brouillon de formule non enregistré restauré.",
+  },
   common: {
     add: "Ajouter",
     archived: "archivé",
@@ -119,6 +163,10 @@ export const dashboardFr: CoreI18nMessages = {
     filePreviewUnavailable: "L'aperçu est indisponible",
     filePreviewRetry: "Réessayer",
     filePreviewUseBuiltin: "Utiliser l'aperçu intégré",
+    parsedText: "Texte extrait",
+    parsedTextMissing: "Aucun texte extrait n'a encore été fourni pour ce fichier.",
+    parsedTextNone: "Ce fichier est marqué comme ne contenant aucun texte lisible.",
+    parsedTextEmpty: "Le texte extrait est vide.",
     filePreviewReasons: {
       not_configured: "PreviewFile n'a pas été configuré pour cet espace de travail.",
       invalid_configuration: "La configuration de PreviewFile est invalide.",
@@ -363,6 +411,17 @@ export const dashboardFr: CoreI18nMessages = {
     linkLabel: "Lien public",
     copyLink: "Copier le lien",
     linkCopied: "Lien copié",
+    qrCode: "Code QR",
+    qrAlt: "Code QR de ce lien",
+    downloadQr: "Télécharger le PNG",
+    qrFailed: "Impossible de créer le code QR",
+    shareViaDevice: "Partager",
+    recordLinkTitle: "Partager le lien de la fiche",
+    recordPrivateTitle: "Accès à la fiche",
+    recordPrivateHint:
+      "Pour ouvrir une fiche privée, il faut se connecter et avoir accès à cette Base. Le code QR ne change pas les droits.",
+    recordPublicHint:
+      "Pour ouvrir sans connexion, il faut rendre toute la Base publique. Cela expose la Base et ses fiches visibles, pas seulement celle-ci.",
     previewAsVisitor: "Prévisualiser en tant que visiteur",
     settingsTitle: "Paramètres du lien",
     settingsHint:
@@ -757,7 +816,7 @@ export const dashboardFr: CoreI18nMessages = {
   templates: {
     title: "Modèles",
     overview:
-      "Des applications complètes : des tableaux, une interface et le manuel qu'un agent lit avant de toucher à vos données. L'installation d'un modèle remplit ses tableaux et propose l'application elle-même à votre révision.",
+      "Des applications complètes : des tableaux, une interface et le manuel qu'un agent lit avant de toucher à vos données. L'installation d'un modèle met en place ses tableaux, ses données d'exemple et l'application, prêts à l'emploi ; vous pouvez aussi choisir de relire le contenu d'abord.",
     search: "Rechercher des modèles…",
     refresh: "Actualiser les modèles",
     browseOnly:
@@ -780,7 +839,7 @@ export const dashboardFr: CoreI18nMessages = {
       "L'agent peut y répondre car le modèle installe le manuel de son auteur à côté de ses Bases. Il n'a pas à deviner votre schéma.",
     contentsTitle: "Ce que crée l'installation",
     contentsDescription:
-      "Les Bases, les champs et les lignes d'exemple sont créés immédiatement. Le code de l'application et le manuel de l'agent sont proposés sous forme de demandes de modification que vous examinez d'abord.",
+      "Si vous pouvez modifier cet espace, les Bases, les champs, les lignes d'exemple, l'application et le manuel de l'agent sont créés immédiatement. Cochez « Soumettre d'abord le contenu à une revue » lors de l'installation pour recevoir le code de l'application et le manuel sous forme de demandes de modification.",
     bases: "Bases",
     apps: "Applications",
     documents: "Documents",
@@ -1104,6 +1163,8 @@ export const dashboardFr: CoreI18nMessages = {
   inbox: {
     title: "Révisions",
     forReview: "À réviser",
+    previousRequest: "Demande précédente",
+    nextRequest: "Demande suivante",
     mentions: "Mentions",
     mentionsEmpty: "Personne ne vous a encore mentionné.",
     mentionsEmptyBody: "Lorsqu'un collègue vous @-mentionne dans un commentaire, il apparaît ici.",
@@ -1402,6 +1463,10 @@ export const dashboardFr: CoreI18nMessages = {
   },
   base: {
     searchRecordsToLink: "Rechercher des enregistrements à lier",
+    addRelation: "Ajouter un lien",
+    removeRelation: "Retirer le lien vers {name}",
+    relationUnavailable: "Enregistrement indisponible",
+    relationLoadFailed: "Impossible de charger les enregistrements.",
     searchMembers: "Rechercher des membres",
     noMembersAvailable: "Aucun membre à choisir",
     unassignedMember: "Non attribué",
@@ -1458,8 +1523,8 @@ export const dashboardFr: CoreI18nMessages = {
     paginationPage: "Aller à la page {page}",
     paginationCurrentPage: "Page {page}, page actuelle",
     paginationRetry: "Réessayer",
-    hideArchived: "Masquer les archivés",
-    archivedCount: "{count} archivé(s)",
+    hideArchivedRecords: "Masquer les enregistrements archivés",
+    showArchivedRecords: "Afficher les enregistrements archivés ({count})",
     createDeleteRequestTitle: "Créer une demande de suppression ?",
     createDeleteRequestLabel: "Créer une demande de suppression",
     deleteViewRequestBody:
@@ -1639,6 +1704,10 @@ export const dashboardFr: CoreI18nMessages = {
     baseRestored: "Base restaurée",
     restoreNodeMessage: "Restaurer {type} {name}",
     nodeRestored: "{type} restauré",
+    restoredWithNewSlug:
+      "{name} restauré. Son slug « {from} » était déjà pris, il devient « {to} ».",
+    restoredWithNewSlugs:
+      "Restauré. {count} éléments avaient un slug déjà pris et ont reçu un nouveau slug. La demande de modification les liste.",
     nodeDeletedPermanently: "{type} supprimé définitivement",
     restoreFieldMessage: "Restaurer le champ supprimé",
     fieldRestored: "Champ restauré",
@@ -1758,6 +1827,21 @@ export const dashboardFr: CoreI18nMessages = {
     deleteFieldCounting: "Comptage des enregistrements concernés…",
     deleteFieldCountUnavailable: "Impossible de compter les enregistrements concernés.",
     deleteFieldImpact: "Cette colonne contient une valeur dans {count} enregistrement{plural}.",
+    deleteFieldDependencies: "Utilisations de ce champ",
+    deleteFieldDependenciesLoading: "Vérification des vues enregistrées…",
+    deleteFieldDependenciesUnavailable:
+      "Impossible de vérifier les vues. Réessayez avant de supprimer.",
+    deleteFieldDependenciesNone: "Aucune référence trouvée dans les éléments vérifiés.",
+    deleteFieldDependenciesScope:
+      "Vérifie les Bases visibles et les vues enregistrées. Les Bases masquées, les formulaires, les configurations Workflow et le code source AirApp ne sont pas vérifiés.",
+    deleteFieldDependencyKinds: {
+      viewFilter: "filtre de vue",
+      viewSort: "tri de vue",
+      viewDisplay: "présentation de vue",
+      formula: "champ formule",
+      lookup: "champ de recherche",
+      relation: "champ lié",
+    },
     deleteFieldReversible:
       "La colonne et ses valeurs sont conservées et peuvent être restaurées depuis les champs supprimés.",
     deleteFieldHint:
@@ -1800,6 +1884,9 @@ export const dashboardFr: CoreI18nMessages = {
     changesRequestedAwaiting: "Modifications demandées · en attente de révision",
     mergedIntoBase: "Fusionné dans la Base",
     statusClosed: "Fermé",
+    restoredSlugChangesTitle: "Restauré avec un nouveau slug",
+    restoredSlugChangesHint:
+      "Un autre élément a pris le slug d'origine pendant que celui-ci était dans la Corbeille ; il a donc été restauré avec le slug libre suivant. Les liens, favoris et instructions d'agent qui utilisent encore l'ancien slug ouvrent désormais l'autre élément.",
     mergeNeedsReview: "La fusion nécessite une relecture",
     mergeNeedsReviewBody:
       "{message} La demande de modification reste intacte ici ; demandez une révision ou fermez-la après relecture.",
@@ -1971,6 +2058,8 @@ export const dashboardFr: CoreI18nMessages = {
     updateRequest: "Mettre à jour la demande",
     submitNow: "Soumettre maintenant",
     updateNow: "Mettre à jour maintenant",
+    discardUnsavedChanges:
+      "Abandonner les modifications non enregistrées et quitter cet enregistrement ?",
     saving: "Enregistrement...",
     checked: "Coché",
     addTag: "Ajouter une étiquette…",
@@ -2143,7 +2232,7 @@ export const dashboardFr: CoreI18nMessages = {
     noAgents: "Aucun agent n'est encore connecté.",
     connectionCheckLeadIn: "Avant de commencer, ",
     connectionCheck:
-      "vérifiez que cet environnement est connecté à Busabase et pointe vers le bon espace cible{targetSpace}. Si la connexion à Busabase n'est pas configurée ou pointe vers un autre espace, lisez et suivez d'abord ce guide de configuration :\n\n{setupUrl}",
+      "vérifiez que cet environnement peut accéder à Busabase via la skill busabase, le MCP Busabase ou busabase-cli, en pointant vers le bon espace cible{targetSpace}, et faites le travail avec ces outils, pas en ouvrant Busabase dans un navigateur. Si aucun n'est configuré ou si la connexion pointe vers un autre espace, récupérez d'abord ce guide de configuration en texte brut (par exemple avec curl) et suivez-le :\n\n{setupUrl}",
     builtInScenarios: "Scénarios intégrés",
     customScenarios: "Scénarios personnalisés",
     builtInPrompts: "Prompts intégrés",
@@ -2441,9 +2530,9 @@ export const dashboardFr: CoreI18nMessages = {
     targetFolder: "Installer dans le dossier",
     targetFolderHint:
       "Un nouveau dossier est créé pour le package. Par défaut, il porte le nom du package.",
-    autoMerge: "Installer immédiatement, sans revue",
-    autoMergeBody:
-      "Par défaut, le contenu du package arrive sous forme de demandes de modification que vous relisez avant toute mise en ligne. Y renoncer, c'est faire confiance à l'auteur : un package peut contenir des compétences et des AirApps, c'est-à-dire du code que les agents de cet espace exécuteront.",
+    requireReview: "Soumettre d'abord le contenu à une revue",
+    requireReviewBody:
+      "Désactivé par défaut : vous pouvez écrire dans cet espace, donc les enregistrements, documents, compétences et AirApps du package sont en ligne dès l'installation. Activez cette option pour les recevoir sous forme de demandes de modification et les relire une à une avant de fusionner — utile pour un package dont vous ne connaissez pas l'auteur, car ses compétences et AirApps sont du code que les agents de cet espace exécuteront.",
     autoMergeRequiredTitle: "Ce package ne peut être installé que sans revue",
     autoMergeRequiredBody:
       "Ses enregistrements sont liés entre eux, et un lien ne peut pointer que vers un enregistrement déjà existant. En attente de revue, chaque lien arriverait vide : les enregistrements doivent donc être créés immédiatement. Lisez d'abord le package sur GitHub : l'installer exécute les compétences et les AirApps de l'auteur dans cet espace.",
@@ -2466,6 +2555,10 @@ export const dashboardFr: CoreI18nMessages = {
       "Deux façons d'installer ceci. Choisissez celle qui correspond à votre façon de travailler.",
     tabAgent: "Installation par agent",
     tabUi: "Installation via l'interface",
+    agentTemplateIntro:
+      "Demandez à votre agent d’installer le modèle « {name} » dans cet espace Busabase.",
+    agentTemplatePromptBody:
+      "Installez le modèle Busabase « {name} » dans mon espace connecté et sa skill localement pour cet Agent.\n\nAvant l’installation, {connectionCheck}\n\nUne fois la connexion prête, exécutez les deux commandes dans l’ordre :\n\n{command}\n\nLa première installe les dossiers, tables, application et autres ressources dans l’espace. La seconde installe la skill et ses fichiers associés dans le répertoire local des skills de cet Agent. Les deux utilisent la même source et la même ref. Lisez le SKILL.md installé localement et résolvez les chemins relatifs depuis son répertoire. Avant de suivre les instructions de configuration, vérifiez les ressources installées et les demandes de modification en attente ; réutilisez les ressources existantes sans répéter l’initialisation ni soumettre à nouveau les demandes en attente. Indiquez le chemin local de la skill, le résultat de chaque installation, l’état des ressources et les demandes en attente de validation. Si une commande échoue, indiquez l’étape en échec et ce qui a réussi ; ne déclarez pas l’installation entière terminée.",
     agentIntro:
       "Remettez le manuel de « {name} » à un agent que vous utilisez déjà — Claude Code, Codex, Cursor. Il apprend comment fonctionne cette application ; rien n'est créé ni modifié dans cet espace.",
     agentPromptLabel: "Collez ceci à votre agent",

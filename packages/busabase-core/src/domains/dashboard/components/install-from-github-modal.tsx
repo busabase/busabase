@@ -183,7 +183,13 @@ export function InstallFromGithubModal({
   const [planning, setPlanning] = useState(false);
   const [intoFolder, setIntoFolder] = useState(initialIntoFolder ?? "");
   const [rename, setRename] = useState(false);
-  const [autoMerge, setAutoMerge] = useState(false);
+  /**
+   * Opt-in, not opt-out. Left alone, `autoMerge` is omitted and the server
+   * decides by permission like every other write — and only a space manager can
+   * install, so in practice the content goes live. Sending an explicit `false`
+   * by default is what used to drop every UI install into Change Requests.
+   */
+  const [requireReview, setRequireReview] = useState(false);
   const [installing, setInstalling] = useState(false);
   /**
    * The latest line the server reported for the install in flight.
@@ -225,7 +231,7 @@ export function InstallFromGithubModal({
     setPlanning(false);
     setIntoFolder(initialIntoFolder ?? "");
     setRename(false);
-    setAutoMerge(false);
+    setRequireReview(false);
     setInstalling(false);
     setInstallProgress(null);
     setResult(null);
@@ -323,7 +329,7 @@ export function InstallFromGithubModal({
         repoUrl: repoUrl.trim(),
         ...(trimmedFolder ? { intoFolder: trimmedFolder } : {}),
         rename,
-        autoMerge,
+        ...(requireReview ? { autoMerge: false } : {}),
       });
       let installed: InstallResultVO | null = null;
       for await (const event of events) {
@@ -380,9 +386,8 @@ export function InstallFromGithubModal({
   // Derived from the plan's structured signals rather than its `applicable`
   // flag: `applicable` reflects the autoMerge the plan was FETCHED with, but the
   // checkbox below can change after that without a re-plan. Recomputing locally
-  // keeps the button in sync with the box on the same tick — and a package that
-  // requires auto-merge is a prompt here, not a dead end.
-  const autoMergeUnmet = Boolean(plan?.requiresAutoMerge) && !autoMerge;
+  // keeps the button in sync with the box on the same tick.
+  const autoMergeUnmet = Boolean(plan?.requiresAutoMerge) && requireReview;
   const canInstall =
     plan !== null &&
     !planning &&
@@ -639,33 +644,38 @@ export function InstallFromGithubModal({
                         </label>
                       ) : null}
 
+                      {/* A package whose records link to each other cannot be held for
+                          review (a link needs a record that already exists), so the
+                          option is replaced by the reason it is not offered. */}
                       {plan.requiresAutoMerge ? (
-                        <Alert variant="destructive">
+                        <Alert>
                           <TriangleAlert className="size-4" />
                           <AlertTitle>{messages.install.autoMergeRequiredTitle}</AlertTitle>
                           <AlertDescription>
                             {messages.install.autoMergeRequiredBody}
                           </AlertDescription>
                         </Alert>
-                      ) : null}
-
-                      <label
-                        className="flex items-start gap-2 rounded-md border border-border p-3 text-sm"
-                        htmlFor="install-auto-merge"
-                      >
-                        <Checkbox
-                          checked={autoMerge}
-                          disabled={installing}
-                          id="install-auto-merge"
-                          onCheckedChange={(checked) => setAutoMerge(checked === true)}
-                        />
-                        <span className="flex flex-col gap-0.5">
-                          <span className="text-foreground">{messages.install.autoMerge}</span>
-                          <span className="text-muted-foreground text-xs">
-                            {messages.install.autoMergeBody}
+                      ) : (
+                        <label
+                          className="flex items-start gap-2 rounded-md border border-border p-3 text-sm"
+                          htmlFor="install-require-review"
+                        >
+                          <Checkbox
+                            checked={requireReview}
+                            disabled={installing}
+                            id="install-require-review"
+                            onCheckedChange={(checked) => setRequireReview(checked === true)}
+                          />
+                          <span className="flex flex-col gap-0.5">
+                            <span className="text-foreground">
+                              {messages.install.requireReview}
+                            </span>
+                            <span className="text-muted-foreground text-xs">
+                              {messages.install.requireReviewBody}
+                            </span>
                           </span>
-                        </span>
-                      </label>
+                        </label>
+                      )}
                     </TabsContent>
                   </Tabs>
                 </>

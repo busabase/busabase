@@ -122,6 +122,7 @@ export function MemberChips({
  * it.
  */
 export function MemberFieldEditor({
+  ariaDescribedBy,
   client,
   field,
   fieldName,
@@ -130,6 +131,7 @@ export function MemberFieldEditor({
   users,
   value,
 }: {
+  ariaDescribedBy?: string;
   client: Pick<BusabaseDashboardApiClient, "listSpaceMembers">;
   field: BaseFieldVO;
   fieldName: string;
@@ -185,6 +187,7 @@ export function MemberFieldEditor({
       />
       <select
         aria-label={fieldName}
+        aria-describedby={ariaDescribedBy}
         className="min-h-9 w-full rounded-md border border-border/70 bg-card px-2.5 py-1.5 text-sm outline-none transition-colors focus:border-primary"
         data-member-field-editor={field.slug}
         id={inputId}

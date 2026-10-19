@@ -12,7 +12,7 @@ import {
 } from "busabase-contract/domains/base/contract/base-schemas";
 import type { FieldType, LookupRollup } from "busabase-contract/types";
 import { and, asc, eq, gt, isNotNull, isNull, or, sql } from "drizzle-orm";
-import { type iString, iStringFromText, iStringToText } from "openlib/i18n/i-string";
+import { iStringFromText, iStringToText } from "openlib/i18n/i-string";
 import type { z } from "zod";
 import { getContextSpaceId, resolveActorId, withContextSourceMeta } from "../../../context";
 import { getDb } from "../../../db";
@@ -44,6 +44,7 @@ import { convertFieldValue, isUnconvertibleFieldType } from "../utils/field-conv
 import { isPrimaryField, PRIMARY_FIELD_DELETE_MESSAGE } from "../utils/primary-field";
 import { assertValidDateFieldOptionsOrThrow } from "./date-options";
 import { baseNotFound } from "./errors";
+import { formulaDependencySnapshot } from "./formula-recalculation";
 import { getBase } from "./queries";
 import {
   assertNoMultiValueTruncationOrThrow,
@@ -188,6 +189,19 @@ export const createBaseField = async (baseId: string, input: z.infer<typeof fiel
   }
   await assertNodePermission(base.nodeId, "write");
   const parsed = fieldSchema.parse(input);
+  // Formula creation must use the transactional schema + historical-value merge,
+  // including on this convenience endpoint which historically inserted directly.
+  if (parsed.type === "formula") {
+    await createFieldChangeRequest(base.id, {
+      ...parsed,
+      required: false,
+      autoMerge: true,
+      submittedBy: CURRENT_USER_ID,
+    });
+    const updated = await getBase(base.id);
+    if (!updated) throw new Error("Failed to create formula field");
+    return updated;
+  }
   assertRelationOnlyOptionsOrThrow(parsed.type, parsed.slug, parsed.options);
   assertValidDateFieldOptionsOrThrow(parsed.type, parsed.slug, parsed.options);
   const relationResolved = await resolveRelationFieldOptions(db, parsed.options);
@@ -300,8 +314,9 @@ export const createFieldChangeRequest = async (
     name: parsed.name,
     slug: parsed.slug,
     type: parsed.type,
-    required: parsed.required,
+    required: parsed.type === "formula" ? false : parsed.required,
     options,
+    formulaDependencies: formulaDependencySnapshot(parsed.type, options, base.fields),
   };
 
   await insertCommit(db, {
@@ -485,7 +500,7 @@ export const createDeleteFieldChangeRequest = async (
 export const createUpdateFieldChangeRequest = async (
   baseId: string,
   fieldId: string,
-  patch: { name?: iString; required?: boolean; options?: Record<string, unknown> },
+  patch: z.infer<typeof updateFieldChangeRequestInputSchema>["patch"],
   submittedBy = "local-editor",
   message?: string,
   autoMerge?: boolean,
@@ -546,10 +561,19 @@ export const createUpdateFieldChangeRequest = async (
   const fields = {
     fieldId: field.id,
     slug: field.slug,
-    name: patch.name ?? iStringFromText(field.name),
+    name: patch.name,
     type: field.type,
-    required: patch.required ?? field.required,
-    options,
+    required: patch.required,
+    options: patch.options === undefined ? undefined : options,
+    help: patch.help,
+    formulaDependencies:
+      patch.options === undefined
+        ? undefined
+        : formulaDependencySnapshot(field.type, options, base.fields),
+    formulaBaseExpression:
+      field.type === "formula" && patch.options !== undefined
+        ? field.options.formula?.expression
+        : undefined,
   };
 
   await insertCommit(db, {

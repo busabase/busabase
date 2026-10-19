@@ -14,6 +14,12 @@ const mocks = vi.hoisted(() => ({
   normalizeLegacyBudaSessions: vi.fn(),
   envConfig: {} as { token?: string; agentId?: string },
   actorId: undefined as string | undefined,
+  routerConnections: [] as Array<{
+    slug: string;
+    agentSlug: string;
+    grantId: string;
+    connectionState: "ready" | "activating" | "disconnecting";
+  }>,
 }));
 
 vi.mock("../../../context", () => ({
@@ -31,6 +37,9 @@ vi.mock("./buda-connection", () => ({
 }));
 vi.mock("./agent-session-manager", () => ({
   listAgentSessions: async () => mocks.sessions,
+}));
+vi.mock("./router-connection", () => ({
+  listRouterConnections: async () => mocks.routerConnections,
 }));
 vi.mock("./agent-session-store", () => ({
   normalizeLegacyBudaSessions: mocks.normalizeLegacyBudaSessions,
@@ -60,6 +69,33 @@ describe("listAgentConnections", () => {
     mocks.normalizeLegacyBudaSessions.mockResolvedValue(0);
     mocks.envConfig = {};
     mocks.actorId = undefined;
+    mocks.routerConnections.length = 0;
+  });
+
+  it("surfaces ready devices and incomplete disconnects without advertising the latter as connected", async () => {
+    mocks.actorId = "cloud-actor";
+    mocks.routerConnections.push(
+      {
+        slug: "acprouter:ready",
+        agentSlug: "claude-acp",
+        grantId: "grant",
+        connectionState: "ready",
+      },
+      {
+        slug: "acprouter:pending",
+        agentSlug: "codex-acp",
+        grantId: "grant",
+        connectionState: "disconnecting",
+      },
+    );
+    const connections = await listAgentConnections();
+    expect(connections.find((row) => row.slug === "acprouter:ready")).toMatchObject({
+      connected: true,
+    });
+    expect(connections.find((row) => row.slug === "acprouter:pending")).toMatchObject({
+      connected: false,
+      connectionState: "disconnecting",
+    });
   });
 
   it("maps saved Buda connection rows to agent connections", async () => {

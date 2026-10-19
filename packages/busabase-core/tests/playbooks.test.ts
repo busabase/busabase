@@ -642,12 +642,16 @@ describe("playbooks.list (dashboard Playbooks page)", () => {
     expect(payrollPrompt?.bodyPreview?.endsWith("…")).toBe(true);
     expect(payrollPrompt?.intent).toBe("change");
 
-    // ACL: a member sees only what they can read. New skills start private to
-    // their creator; Weekly Report is opened to the workspace, the other two
-    // skills and the private Payroll base stay hidden — neither shown nor counted.
-    await asManager(() =>
-      raw.nodes.updateVisibility({ nodeId: idOf(ids, "weekly-report"), visibility: "workspace" }),
-    );
+    // ACL: a member sees only what they can read. Weekly Report keeps the
+    // space default; the other two skills are made private and, with the
+    // private Payroll base, stay hidden — neither shown nor counted.
+    await asManager(async () => {
+      await raw.nodes.updateVisibility({ nodeId: idOf(ids, "ops-digest"), visibility: "private" });
+      await raw.nodes.updateVisibility({
+        nodeId: idOf(ids, "zeta-root-skill"),
+        visibility: "private",
+      });
+    });
     const member = await asMember("bob", () => raw.playbooks.list({}));
     expect(summary(member.items)).toEqual([
       ["Sales", "skill", "Weekly Report"],

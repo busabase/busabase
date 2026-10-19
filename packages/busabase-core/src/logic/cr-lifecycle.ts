@@ -11,10 +11,12 @@ import type {
   CommentVO,
   OperationVO,
   RecordVO,
+  RestoredSlugChangeVO,
   ReviewVO,
   ViewVO,
 } from "busabase-contract/types";
 import {
+  type AnyColumn,
   and,
   asc,
   desc,
@@ -94,6 +96,7 @@ import "../domains/airapp/handlers";
 import "../domains/drive/handlers";
 import "../domains/file-node/handlers";
 import "../domains/folder/handlers";
+import { rebaselineFormulaOperation } from "../domains/base/logic/formula-recalculation";
 import { resolveLookupValues } from "../domains/base/logic/lookup-values";
 import {
   LIST_OMITTED_FIELD_VALUE,
@@ -103,6 +106,7 @@ import { mergeDocUpdate } from "../domains/doc/handlers";
 import { mergeFileTreeFile, mergeFileTreeMetadata } from "../domains/filetree/handlers";
 import { mergeRichNodeDocumentUpdate } from "../domains/rich-node/handlers";
 import { mergeSkillFile } from "../domains/skill/handlers";
+import { type FormulaStaleConflictTag, isFormulaStaleConflict } from "./formula-merge-conflict";
 import { isSearchableNodeType, reindexNodeContent } from "./node-content";
 
 /**
@@ -135,6 +139,13 @@ import { applyPlaybookAttributionVisibility } from "../domains/playbooks/logic/p
 import { dispatchWebhookEvent, hasWebhookRuleFor } from "../domains/webhook/logic/dispatch";
 import { insertAuditEvent } from "./audit";
 import {
+  type ChangeRequestScope,
+  changeRequestScopeCacheKey,
+  getCachedChangeRequestScope,
+  type ScopeCacheCandidate,
+  setCachedChangeRequestScope,
+} from "./change-request-scope-cache";
+import {
   loadCommentMentions,
   mentionMemberIds,
   toCommentMentionVOs,
@@ -158,6 +169,7 @@ import { assertContainerParent } from "./node-parent";
 import { recomputeEffectivePublicScope } from "./node-share";
 import {
   assertNodeSlugAvailable,
+  findAvailableNodeSlug,
   isNodeSlugConflictError,
   isNodeSlugUniqueViolation,
   nodeSlugConflict,
@@ -230,11 +242,13 @@ const changeRequestConflict = (message: string, data?: Record<string, unknown>) 
 // act on belongs in `conflict`, where the review page names the cause and
 // offers the exits.
 //
-// Two kinds qualify, both tagged below:
+// Three kinds qualify, all explicitly tagged:
 //
 //  - RECORD FIELD CONFLICT — the target's fields diverged from what the
 //    operation was based on and the 3-way merge could not reconcile them.
 //    Exit: reviseOperation (re-baselines) or close.
+//  - STALE FORMULA — the expression or a pinned dependency changed in review.
+//    Exit: reviseOperation (refreshes expression/dependency baselines) or close.
 //  - STALE TARGET — the row this operation pinned was archived or deleted by
 //    someone else while the CR sat in review. A legitimate race, not an
 //    invariant violation. Exit today is close-and-resubmit; `reviseOperation`
@@ -305,6 +319,11 @@ export interface MergeCtx {
   // change a field and write records in one unit, and those records have to see
   // the new schema.
   fieldDefsByBaseId: Map<string, BaseFieldPO[]>;
+  // Restores that had to move a node to a new slug because its old one was
+  // taken while it sat in the Trash. Written to `mergeSummary.slugChanges` so
+  // the change request's history, the API response, and the restore toast all
+  // say where the item came back.
+  slugChanges: RestoredSlugChangeVO[];
 }
 
 /**
@@ -855,21 +874,51 @@ const mergeNodeRestore = async (ctx: MergeCtx, _item: OperationPO, node: NodePO)
   // being un-deleted, instead of resurrecting the others too.
   const batchIds = await collectArchivedSubtreeIds(db, node.id, node.archivedAt);
   const restoringNodes = await db
-    .select({ id: busabaseNodes.id, type: busabaseNodes.type, slug: busabaseNodes.slug })
+    .select({
+      id: busabaseNodes.id,
+      type: busabaseNodes.type,
+      slug: busabaseNodes.slug,
+      name: busabaseNodes.name,
+    })
     .from(busabaseNodes)
     .where(inArray(busabaseNodes.id, batchIds));
-  const restoringIdentities = new Set<string>();
+  // A slug taken while this item sat in the Trash moves the restored node to the
+  // next free one (see findAvailableNodeSlug). Every slug in the batch counts as
+  // taken for the others, so a renamed node cannot land on a sibling that is
+  // coming back in the same restore.
+  const batchSlugsByType = new Map<string, Set<string>>();
   for (const restoringNode of restoringNodes) {
-    const identity = `${restoringNode.type}\u0000${restoringNode.slug}`;
-    if (restoringIdentities.has(identity)) {
-      throw nodeSlugConflict(restoringNode.type, restoringNode.slug);
-    }
-    restoringIdentities.add(identity);
-    await assertNodeSlugAvailable(db, {
+    const slugs = batchSlugsByType.get(restoringNode.type) ?? new Set<string>();
+    slugs.add(restoringNode.slug);
+    batchSlugsByType.set(restoringNode.type, slugs);
+  }
+  for (const restoringNode of restoringNodes) {
+    const batchSlugs = batchSlugsByType.get(restoringNode.type) ?? new Set<string>();
+    batchSlugs.delete(restoringNode.slug);
+    const slug = await findAvailableNodeSlug(
+      db,
+      { nodeType: restoringNode.type, slug: restoringNode.slug, excludeNodeId: restoringNode.id },
+      batchSlugs,
+    );
+    batchSlugs.add(slug);
+    if (slug === restoringNode.slug) continue;
+    ctx.slugChanges.push({
+      nodeId: restoringNode.id,
       nodeType: restoringNode.type,
-      slug: restoringNode.slug,
-      excludeNodeId: restoringNode.id,
+      name: restoringNode.name,
+      fromSlug: restoringNode.slug,
+      toSlug: slug,
     });
+    await db
+      .update(busabaseNodes)
+      .set({ slug, updatedAt: timestamp })
+      .where(eq(busabaseNodes.id, restoringNode.id));
+    if (restoringNode.type === "base") {
+      await db
+        .update(busabaseBases)
+        .set({ slug })
+        .where(eq(busabaseBases.nodeId, restoringNode.id));
+    }
   }
   try {
     await db
@@ -1383,18 +1432,29 @@ const loadVisibleChangeRequestWindow = async (
   const db = await getDb();
   const batchSize = Math.max(requiredCount, 20);
   const visible: ChangeRequestPO[] = [];
-  let offset = 0;
+  // Keyset, not OFFSET: each window continues strictly after the last row seen,
+  // so walking deep into a space never re-scans the rows already rejected.
+  let after: { createdAt: Date; id: string } | null = null;
   for (;;) {
-    const candidates = await db
+    const keyset: SQL | undefined = after
+      ? or(
+          lt(busabaseChangeRequests.createdAt, after.createdAt),
+          and(
+            eq(busabaseChangeRequests.createdAt, after.createdAt),
+            lt(busabaseChangeRequests.id, after.id),
+          ),
+        )
+      : undefined;
+    const candidates: ChangeRequestPO[] = await db
       .select()
       .from(busabaseChangeRequests)
-      .where(and(...filters))
+      .where(and(...filters, keyset))
       .orderBy(desc(busabaseChangeRequests.createdAt), desc(busabaseChangeRequests.id))
-      .limit(batchSize)
-      .offset(offset);
+      .limit(batchSize);
     visible.push(...(await filterVisibleChangeRequestRows(candidates)));
-    if (visible.length >= requiredCount || candidates.length < batchSize) break;
-    offset += candidates.length;
+    const last: ChangeRequestPO | undefined = candidates[candidates.length - 1];
+    if (visible.length >= requiredCount || candidates.length < batchSize || !last) break;
+    after = { createdAt: last.createdAt, id: last.id };
   }
   return visible.slice(0, requiredCount);
 };
@@ -1555,22 +1615,18 @@ export const listChangeRequestsPaged = async (
  */
 const listVisibleChangeRequestIds = async (filters: SQL[]): Promise<{ id: string }[]> => {
   const db = await getDb();
-  const visible: { id: string }[] = [];
-  const batchSize = 200;
-  let offset = 0;
-  for (;;) {
-    const rows = await db
-      .select({ id: busabaseChangeRequests.id })
-      .from(busabaseChangeRequests)
-      .where(and(...filters))
-      .orderBy(desc(busabaseChangeRequests.createdAt), desc(busabaseChangeRequests.id))
-      .limit(batchSize)
-      .offset(offset);
-    visible.push(...(await filterVisibleChangeRequestRows(rows)));
-    if (rows.length < batchSize) break;
-    offset += rows.length;
-  }
-  return visible;
+  // One ordered read instead of a 200-row OFFSET walk (O(n²) on a big space);
+  // `filterVisibleChangeRequestRows` bounds its own ACL queries.
+  const rows = await db
+    .select({
+      id: busabaseChangeRequests.id,
+      status: busabaseChangeRequests.status,
+      updatedAt: busabaseChangeRequests.updatedAt,
+    })
+    .from(busabaseChangeRequests)
+    .where(and(...filters))
+    .orderBy(desc(busabaseChangeRequests.createdAt), desc(busabaseChangeRequests.id));
+  return (await filterVisibleChangeRequestRows(rows)).map((row) => ({ id: row.id }));
 };
 
 /**
@@ -1664,6 +1720,15 @@ type InboxCandidateRow = {
   id: string;
   status: ChangeRequestPO["status"];
   submittedBy: string;
+  /** Lets settled terminal rows reuse a cached node scope. */
+  updatedAt: Date;
+};
+
+const inboxCandidateSelection = {
+  id: busabaseChangeRequests.id,
+  status: busabaseChangeRequests.status,
+  submittedBy: busabaseChangeRequests.submittedBy,
+  updatedAt: busabaseChangeRequests.updatedAt,
 };
 
 export const CHANGE_REQUEST_ACL_BATCH_SIZE = 5_000;
@@ -1730,26 +1795,16 @@ export const getInboxSnapshot = async (input?: z.input<typeof inboxSnapshotInput
       mineRow?.count ?? 0,
     );
   } else {
-    const allRows: InboxCandidateRow[] = [];
-    const batchSize = 200;
-    let offset = 0;
-    for (;;) {
-      const rows = await db
-        .select({
-          id: busabaseChangeRequests.id,
-          status: busabaseChangeRequests.status,
-          submittedBy: busabaseChangeRequests.submittedBy,
-        })
-        .from(busabaseChangeRequests)
-        .where(eq(busabaseChangeRequests.spaceId, spaceId))
-        .orderBy(desc(busabaseChangeRequests.createdAt), desc(busabaseChangeRequests.id))
-        .limit(batchSize)
-        .offset(offset);
-      candidateRows += rows.length;
-      allRows.push(...(await filterVisibleChangeRequestRows(rows)));
-      if (rows.length < batchSize) break;
-      offset += rows.length;
-    }
+    // One ordered read of the light candidate shape (no OFFSET walk — that
+    // re-scanned every earlier row per 200-row page, O(n²) on a big space).
+    // `filterVisibleChangeRequestRows` bounds its own ACL queries.
+    const rows = await db
+      .select(inboxCandidateSelection)
+      .from(busabaseChangeRequests)
+      .where(eq(busabaseChangeRequests.spaceId, spaceId))
+      .orderBy(desc(busabaseChangeRequests.createdAt), desc(busabaseChangeRequests.id));
+    candidateRows = rows.length;
+    const allRows = await filterVisibleChangeRequestRows(rows);
     visibleRows = allRows.length;
     counts = countInboxCandidateRows(allRows);
     matchingIds = allRows.filter((row) => matchesInboxFilter(row, parsed)).map((row) => row.id);
@@ -1814,6 +1869,32 @@ export const getInboxSnapshot = async (input?: z.input<typeof inboxSnapshotInput
   return result;
 };
 
+/** Count only pending reviews for the global badge, preserving fresh node ACL checks. */
+export const countReviewChangeRequests = async () => {
+  await ensureReady();
+  const db = await getDb();
+  const filters = and(
+    eq(busabaseChangeRequests.spaceId, getContextSpaceId()),
+    eq(busabaseChangeRequests.status, "in_review"),
+  );
+
+  if (getContextIsSpaceManager()) {
+    const [row] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(busabaseChangeRequests)
+      .where(filters);
+    return { review: row?.count ?? 0 };
+  }
+
+  // Pending rows never reuse terminal-scope caches. Only their IDs are needed
+  // to resolve scopes and evaluate the caller's current visibility.
+  const rows = await db
+    .select({ id: busabaseChangeRequests.id })
+    .from(busabaseChangeRequests)
+    .where(filters);
+  return { review: (await filterVisibleChangeRequestRows(rows)).length };
+};
+
 /**
  * Whole-space inbox tab counts. One grouped query by status plus a scoped count
  * for the "created" tab — so the badges are correct regardless of how many
@@ -1862,21 +1943,10 @@ export const countChangeRequests = async () => {
   // ordering is irrelevant to a tally. Bound each ACL query so unusually large
   // spaces do not create an unbounded IN list or Operations result set.
   const rows = await db
-    .select({
-      id: busabaseChangeRequests.id,
-      status: busabaseChangeRequests.status,
-      submittedBy: busabaseChangeRequests.submittedBy,
-    })
+    .select(inboxCandidateSelection)
     .from(busabaseChangeRequests)
     .where(eq(busabaseChangeRequests.spaceId, spaceId));
-  const visibleRows: InboxCandidateRow[] = [];
-  for (let offset = 0; offset < rows.length; offset += CHANGE_REQUEST_ACL_BATCH_SIZE) {
-    visibleRows.push(
-      ...(await filterVisibleChangeRequestRows(
-        rows.slice(offset, offset + CHANGE_REQUEST_ACL_BATCH_SIZE),
-      )),
-    );
-  }
+  const visibleRows = await filterVisibleChangeRequestRows(rows);
 
   return countInboxCandidateRows(visibleRows);
 };
@@ -2050,6 +2120,7 @@ export const reviseOperation = async (
 
   const commitId = id("cmt");
   const timestamp = now();
+  const revisedFields = await rebaselineFormulaOperation(db, operation, parsed.fields);
   await insertCommit(db, {
     id: commitId,
     baseId: operation.baseId,
@@ -2057,7 +2128,7 @@ export const reviseOperation = async (
     nodeId: operation.nodeId,
     operationId: operation.id,
     parentCommitId: operation.headCommitId,
-    payload: parsed.fields,
+    payload: revisedFields,
     operation: operation.operation,
     message: parsed.message,
     // The commit's author is stamped from the host-authenticated actor, exactly
@@ -2111,7 +2182,7 @@ export const reviseOperation = async (
       commitId,
       changeRequestId: operation.changeRequestId,
       operationId: operation.id,
-      fields: parsed.fields,
+      fields: revisedFields,
     });
   }
   await insertAuditEvent(db, {
@@ -2256,67 +2327,103 @@ interface ChangeRequestScopeHint {
   ref: string | null;
 }
 
-// Constrained to `{ id }` rather than the full ChangeRequestPO on purpose: the
-// body only ever reads `row.id`, and callers that are merely tallying should be
-// free to select three columns instead of paying for whole rows.
-export const filterVisibleChangeRequestRows = async <T extends { id: string }>(
-  rows: T[],
-): Promise<T[]> => {
-  if (rows.length === 0 || getContextIsSpaceManager()) return rows;
-  const db = await getDb();
-  const changeRequestIds = rows.map((row) => row.id);
-  const directNodeId = sql<string | null>`coalesce(
-    ${busabaseOperations.nodeId},
-    ${busabaseBases.nodeId}
-  )`;
-  // Keep these as two narrow queries. On PostgreSQL, DISTINCT direct scopes plus
-  // a separately filtered unresolved scan is substantially cheaper than a
-  // per-change-request array/json aggregate, while still collapsing a bulk
-  // proposal's repeated Base target before anything reaches Node.
-  const directScopeRows = await db
+/**
+ * Bind a text[] as ONE parameter (`= any($1::text[])`) instead of an
+ * `in ($1, …, $5000)` list: thousands of bind parameters cost parse/plan time on
+ * every call and give the planner a different statement shape per batch size.
+ */
+const anyText = (column: AnyColumn, values: readonly string[]): SQL =>
+  sql`${column} = any(${sql.param([...values])}::text[])`;
+
+/**
+ * Resolve the actor-independent node scope of each change request, straight
+ * from the database (no cache).
+ *
+ *  1. ONE narrow scan of `busabase_operations`: DISTINCT
+ *     `(changeRequestId, nodeId, baseId)`. A 1,000-row bulk proposal against one
+ *     Base collapses to one row, and three narrow columns keep PostgreSQL on an
+ *     in-memory HashAggregate. No join to `busabase_bases`: the old join turned
+ *     `coalesce(...) is [not] null` into a post-join filter, so the same rows
+ *     had to be scanned twice (once per query) with nothing indexable.
+ *  2. Unresolved operations (neither node nor Base — normally a pending
+ *     node_create) are only fetched for the change requests step 1 flagged,
+ *     through the existing `(change_request_id, position)` index — a handful of
+ *     CRs instead of re-scanning every operation of the batch.
+ *  3. Base → node is resolved once on the distinct Base ids.
+ */
+const loadChangeRequestScopes = async (
+  db: Awaited<ReturnType<typeof getDb>>,
+  changeRequestIds: readonly string[],
+): Promise<Map<string, ChangeRequestScope>> => {
+  const spaceId = getContextSpaceId();
+  const operationRows = await db
     .selectDistinct({
       changeRequestId: busabaseOperations.changeRequestId,
-      nodeId: directNodeId.as("node_id"),
+      nodeId: busabaseOperations.nodeId,
+      baseId: busabaseOperations.baseId,
     })
     .from(busabaseOperations)
-    .leftJoin(
-      busabaseBases,
-      and(
-        eq(busabaseBases.id, busabaseOperations.baseId),
-        eq(busabaseBases.spaceId, getContextSpaceId()),
-      ),
-    )
     .where(
       and(
-        eq(busabaseOperations.spaceId, getContextSpaceId()),
-        inArray(busabaseOperations.changeRequestId, changeRequestIds),
-        sql`${directNodeId} is not null`,
+        eq(busabaseOperations.spaceId, spaceId),
+        anyText(busabaseOperations.changeRequestId, changeRequestIds),
       ),
     );
-  const unresolvedOperations = await db
-    .select({
-      changeRequestId: busabaseOperations.changeRequestId,
-      baseId: busabaseOperations.baseId,
-      headCommitId: busabaseOperations.headCommitId,
-      operation: busabaseOperations.operation,
-      position: busabaseOperations.position,
-    })
-    .from(busabaseOperations)
-    .leftJoin(
-      busabaseBases,
-      and(
-        eq(busabaseBases.id, busabaseOperations.baseId),
-        eq(busabaseBases.spaceId, getContextSpaceId()),
-      ),
-    )
-    .where(
-      and(
-        eq(busabaseOperations.spaceId, getContextSpaceId()),
-        inArray(busabaseOperations.changeRequestId, changeRequestIds),
-        sql`${directNodeId} is null`,
-      ),
-    )
-    .orderBy(asc(busabaseOperations.changeRequestId), asc(busabaseOperations.position));
+
+  const baseIds = new Set<string>();
+  const unresolvedChangeRequestIds = new Set<string>();
+  for (const row of operationRows) {
+    if (row.nodeId) continue;
+    if (row.baseId) baseIds.add(row.baseId);
+    else unresolvedChangeRequestIds.add(row.changeRequestId);
+  }
+
+  const unresolvedOperations: {
+    changeRequestId: string;
+    headCommitId: string;
+    operation: OperationPO["operation"];
+  }[] = [];
+  const unresolvedIdList = [...unresolvedChangeRequestIds];
+  for (
+    let offset = 0;
+    offset < unresolvedIdList.length;
+    offset += CHANGE_REQUEST_SCOPE_HINT_BATCH_SIZE
+  ) {
+    const batch = unresolvedIdList.slice(offset, offset + CHANGE_REQUEST_SCOPE_HINT_BATCH_SIZE);
+    unresolvedOperations.push(
+      ...(await db
+        .select({
+          changeRequestId: busabaseOperations.changeRequestId,
+          headCommitId: busabaseOperations.headCommitId,
+          operation: busabaseOperations.operation,
+        })
+        .from(busabaseOperations)
+        .where(
+          and(
+            eq(busabaseOperations.spaceId, spaceId),
+            anyText(busabaseOperations.changeRequestId, batch),
+            isNull(busabaseOperations.nodeId),
+            isNull(busabaseOperations.baseId),
+          ),
+        )
+        // Declared temp refs must be seen in operation order.
+        .orderBy(asc(busabaseOperations.changeRequestId), asc(busabaseOperations.position))),
+    );
+  }
+
+  // Space-scoped on purpose: a Base from another tenant must never lend its
+  // node as scope — such an operation leaves the change request unresolved.
+  const baseNodeIds = new Map<string, string>();
+  const baseIdList = [...baseIds];
+  for (let offset = 0; offset < baseIdList.length; offset += CHANGE_REQUEST_SCOPE_HINT_BATCH_SIZE) {
+    const batch = baseIdList.slice(offset, offset + CHANGE_REQUEST_SCOPE_HINT_BATCH_SIZE);
+    const baseRows = await db
+      .select({ id: busabaseBases.id, nodeId: busabaseBases.nodeId })
+      .from(busabaseBases)
+      .where(and(eq(busabaseBases.spaceId, spaceId), anyText(busabaseBases.id, batch)));
+    for (const row of baseRows) baseNodeIds.set(row.id, row.nodeId);
+  }
+
   // Only unresolved operations (normally pending node creates) need scope
   // hints from the head commit. Base-backed bulk payloads remain untouched.
   const scopeCommitIds = [
@@ -2349,59 +2456,125 @@ export const filterVisibleChangeRequestRows = async <T extends { id: string }>(
             end`,
         })
         .from(busabaseCommits)
-        .where(
-          and(
-            eq(busabaseCommits.spaceId, getContextSpaceId()),
-            inArray(busabaseCommits.id, commitIds),
-          ),
-        )),
+        .where(and(eq(busabaseCommits.spaceId, spaceId), anyText(busabaseCommits.id, commitIds)))),
     );
   }
   const scopeHintsByCommitId = new Map(scopeHintRows.map((row) => [row.id, row]));
-  const scopes = new Map<string, Set<string>>();
+
+  const nodeIdsByChangeRequest = new Map<string, Set<string>>();
   const unresolved = new Set<string>();
-  for (const row of directScopeRows) {
-    const scope = scopes.get(row.changeRequestId) ?? new Set<string>();
-    if (row.nodeId) scope.add(row.nodeId);
-    scopes.set(row.changeRequestId, scope);
+  const scopeOf = (changeRequestId: string) => {
+    const scope = nodeIdsByChangeRequest.get(changeRequestId) ?? new Set<string>();
+    nodeIdsByChangeRequest.set(changeRequestId, scope);
+    return scope;
+  };
+  for (const row of operationRows) {
+    if (row.nodeId) {
+      scopeOf(row.changeRequestId).add(row.nodeId);
+    } else if (row.baseId) {
+      const baseNodeId = baseNodeIds.get(row.baseId);
+      if (baseNodeId) scopeOf(row.changeRequestId).add(baseNodeId);
+      else {
+        scopeOf(row.changeRequestId);
+        unresolved.add(row.changeRequestId);
+      }
+    }
   }
   const refsByChangeRequest = new Map<string, Set<string>>();
   for (const operation of unresolvedOperations) {
-    const scope = scopes.get(operation.changeRequestId) ?? new Set<string>();
+    const scope = scopeOf(operation.changeRequestId);
     const refs = refsByChangeRequest.get(operation.changeRequestId) ?? new Set<string>();
     const scopeHints = scopeHintsByCommitId.get(operation.headCommitId);
     if (scopeHints?.parentNodeId) scope.add(scopeHints.parentNodeId);
     else if (scopeHints?.parentNodeRef && refs.has(scopeHints.parentNodeRef)) {
       // The earlier declaration's existing parent already anchors this new subtree.
-    } else if (
-      operation.operation === "node_create" &&
-      !operation.baseId &&
-      !scopeHints?.parentNodeRef
-    ) {
-      scope.add(rootNodeIdForSpace(getContextSpaceId()));
+    } else if (operation.operation === "node_create" && !scopeHints?.parentNodeRef) {
+      scope.add(rootNodeIdForSpace(spaceId));
     } else unresolved.add(operation.changeRequestId);
     if (scopeHints?.ref) refs.add(scopeHints.ref);
-    scopes.set(operation.changeRequestId, scope);
     refsByChangeRequest.set(operation.changeRequestId, refs);
   }
-  const allNodeIds = [...new Set([...scopes.values()].flatMap((scope) => [...scope]))];
-  const visibleNodeIds =
-    allNodeIds.length > 0
-      ? new Set(
-          (
-            await db
-              .select({ id: busabaseNodes.id })
-              .from(busabaseNodes)
-              .where(
-                and(
-                  eq(busabaseNodes.spaceId, getContextSpaceId()),
-                  inArray(busabaseNodes.id, allNodeIds),
-                  buildNodeVisibilityCondition(db),
-                ),
-              )
-          ).map((node) => node.id),
-        )
-      : new Set<string>();
+
+  const scopes = new Map<string, ChangeRequestScope>();
+  for (const changeRequestId of changeRequestIds) {
+    const nodeIds = nodeIdsByChangeRequest.get(changeRequestId);
+    scopes.set(changeRequestId, {
+      nodeIds: nodeIds ? [...nodeIds] : [],
+      // No operations at all, or nothing provable, means no scope to show.
+      unresolved: unresolved.has(changeRequestId) || !nodeIds || nodeIds.size === 0,
+    });
+  }
+  return scopes;
+};
+
+const scopeCacheCandidateOf = (row: { id: string }): ScopeCacheCandidate => {
+  const { status, updatedAt } = row as { status?: unknown; updatedAt?: unknown };
+  return {
+    id: row.id,
+    status: typeof status === "string" ? status : undefined,
+    updatedAt: updatedAt instanceof Date ? updatedAt : undefined,
+  };
+};
+
+// Constrained to `{ id }` rather than the full ChangeRequestPO on purpose: the
+// body only ever reads `row.id`, and callers that are merely tallying should be
+// free to select three columns instead of paying for whole rows. Rows that also
+// carry `status` + `updatedAt` let settled, terminal change requests reuse a
+// cached node scope (see change-request-scope-cache.ts) instead of re-reading
+// their operations; node VISIBILITY is still evaluated fresh on every call.
+export const filterVisibleChangeRequestRows = async <T extends { id: string }>(
+  rows: T[],
+): Promise<T[]> => {
+  if (rows.length === 0 || getContextIsSpaceManager()) return rows;
+  const db = await getDb();
+  const spaceId = getContextSpaceId();
+  const nowMs = Date.now();
+
+  const scopes = new Map<string, ChangeRequestScope>();
+  const cacheKeys = new Map<string, string>();
+  const missingIds: string[] = [];
+  for (const row of rows) {
+    if (scopes.has(row.id) || cacheKeys.has(row.id)) continue;
+    const key = changeRequestScopeCacheKey(spaceId, scopeCacheCandidateOf(row), nowMs);
+    const cached = key ? getCachedChangeRequestScope(key) : undefined;
+    if (cached) {
+      scopes.set(row.id, cached);
+      continue;
+    }
+    if (key) cacheKeys.set(row.id, key);
+    missingIds.push(row.id);
+  }
+  const uniqueMissingIds = [...new Set(missingIds)];
+  for (let offset = 0; offset < uniqueMissingIds.length; offset += CHANGE_REQUEST_ACL_BATCH_SIZE) {
+    const loaded = await loadChangeRequestScopes(
+      db,
+      uniqueMissingIds.slice(offset, offset + CHANGE_REQUEST_ACL_BATCH_SIZE),
+    );
+    for (const [changeRequestId, scope] of loaded) {
+      scopes.set(changeRequestId, scope);
+      const key = cacheKeys.get(changeRequestId);
+      if (key) setCachedChangeRequestScope(key, scope);
+    }
+  }
+
+  const allNodeIds = [
+    ...new Set([...scopes.values()].flatMap((scope) => (scope.unresolved ? [] : scope.nodeIds))),
+  ];
+  const visibleNodeIds = new Set<string>();
+  for (let offset = 0; offset < allNodeIds.length; offset += CHANGE_REQUEST_ACL_BATCH_SIZE) {
+    const batch = allNodeIds.slice(offset, offset + CHANGE_REQUEST_ACL_BATCH_SIZE);
+    const nodeRows = await db
+      .select({ id: busabaseNodes.id })
+      .from(busabaseNodes)
+      .where(
+        and(
+          eq(busabaseNodes.spaceId, spaceId),
+          anyText(busabaseNodes.id, batch),
+          buildNodeVisibilityCondition(db),
+        ),
+      );
+    for (const node of nodeRows) visibleNodeIds.add(node.id);
+  }
   // The workspace root is always visible to a member, but only
   // `getEffectiveNodeLevel` carries that special case — the SQL visibility
   // condition above filters the root out in Restricted mode (its
@@ -2413,15 +2586,15 @@ export const filterVisibleChangeRequestRows = async <T extends { id: string }>(
   // has to agree with the gate. Anonymous visitors keep their share-only
   // view — the root special case has never applied to them.
   if (!isAnonymousVisitor()) {
-    visibleNodeIds.add(rootNodeIdForSpace(getContextSpaceId()));
+    visibleNodeIds.add(rootNodeIdForSpace(spaceId));
   }
   return rows.filter((row) => {
     const scope = scopes.get(row.id);
     return (
-      !unresolved.has(row.id) &&
       scope !== undefined &&
-      scope.size > 0 &&
-      [...scope].every((nodeId) => visibleNodeIds.has(nodeId))
+      !scope.unresolved &&
+      scope.nodeIds.length > 0 &&
+      scope.nodeIds.every((nodeId) => visibleNodeIds.has(nodeId))
     );
   });
 };
@@ -3278,6 +3451,38 @@ export const mergeChangeRequest = async (
     } else if (
       err instanceof ORPCError &&
       err.code === "CONFLICT" &&
+      (err as unknown as FormulaStaleConflictTag)[isFormulaStaleConflict]
+    ) {
+      try {
+        const db = await getDb();
+        const timestamp = now();
+        const data = (err.data ?? {}) as Record<string, unknown>;
+        await db
+          .update(busabaseChangeRequests)
+          .set({
+            status: "conflict",
+            mergeSummary: {
+              conflict: {
+                ...data,
+                fieldId: data.fieldId ?? null,
+                fields: typeof data.fieldSlug === "string" ? [data.fieldSlug] : [],
+                detectedAt: timestamp.toISOString(),
+              },
+            },
+            updatedAt: timestamp,
+          })
+          .where(
+            and(
+              eq(busabaseChangeRequests.id, changeRequestId),
+              eq(busabaseChangeRequests.spaceId, getContextSpaceId()),
+            ),
+          );
+      } catch {
+        // Preserve the original conflict if the best-effort status update fails.
+      }
+    } else if (
+      err instanceof ORPCError &&
+      err.code === "CONFLICT" &&
       (err as unknown as MergeConflictTag)[isStaleTargetConflict]
     ) {
       // The row this operation pinned was archived or deleted while the CR sat
@@ -3418,6 +3623,7 @@ const _mergeChangeRequest = async (
     // singleton mid-transaction deadlocks the single pglite connection. (Storage
     // file writes are not transactional but are idempotently re-synced on retry.)
     const mergedNodeIds: string[] = [];
+    const slugChanges: RestoredSlugChangeVO[] = [];
     await db.transaction(async (tx) => {
       await claimChangeRequestForMerge(
         tx as unknown as MergeCtx["db"],
@@ -3438,6 +3644,7 @@ const _mergeChangeRequest = async (
         nodeRefs: new Map(),
         resolvedRecordFields: new Map(),
         fieldDefsByBaseId: new Map(),
+        slugChanges: [],
       };
       for (const item of operationKinds) {
         const headCommit = headCommitsById.get(item.headCommitId);
@@ -3514,11 +3721,13 @@ const _mergeChangeRequest = async (
           mergeSummary: {
             mergedNodeIds: [...new Set(ctx.mergedNodeIds)],
             operationCount: operationKinds.length,
+            ...(ctx.slugChanges.length > 0 ? { slugChanges: ctx.slugChanges } : {}),
           },
           updatedAt: timestamp,
         })
         .where(eq(busabaseChangeRequests.id, changeRequest.id));
       mergedNodeIds.push(...ctx.mergedNodeIds);
+      slugChanges.push(...ctx.slugChanges);
     });
 
     await insertAuditEvent(db, {
@@ -3526,7 +3735,10 @@ const _mergeChangeRequest = async (
       actorId: CURRENT_USER_ID,
       baseId: null,
       changeRequestId: changeRequest.id,
-      metadata: { mergedNodeIds: [...new Set(mergedNodeIds)] },
+      metadata: {
+        mergedNodeIds: [...new Set(mergedNodeIds)],
+        ...(slugChanges.length > 0 ? { slugChanges } : {}),
+      },
     });
     await publishBusabaseLiveEvent({
       kind: "change_request.merged",
@@ -3722,6 +3934,7 @@ const _mergeChangeRequest = async (
   // through `tx`; re-acquiring getDb() mid-transaction would deadlock pglite's
   // single connection (projectCommitFields / asset-usage helpers take the tx).
   const mergedRecordIds: string[] = [];
+  const slugChanges: RestoredSlugChangeVO[] = [];
   const mergedViewIds: string[] = [];
   // Record ids attributable specifically to a record_create/record_variant
   // operation in THIS loop — as opposed to record_update/record_delete/
@@ -3736,6 +3949,43 @@ const _mergeChangeRequest = async (
   await db.transaction(async (tx) => {
     await claimChangeRequestForMerge(tx as unknown as MergeCtx["db"], changeRequest.id, timestamp);
 
+    // Formula backfills and source-record writes must serialize on the same Base,
+    // otherwise a concurrent write can compute from the schema being replaced.
+    // Stable ordering also prevents deadlocks for multi-Base requests.
+    const affectedBaseIds = [
+      ...new Set(operationKinds.flatMap((item) => (item.baseId ? [item.baseId] : []))),
+    ].sort();
+    if (affectedBaseIds.length > 0) {
+      await tx
+        .select({ id: busabaseBases.id })
+        .from(busabaseBases)
+        .where(inArray(busabaseBases.id, affectedBaseIds))
+        .orderBy(asc(busabaseBases.id))
+        .for("update");
+    }
+    if (targetRecordIds.length > 0) {
+      const latest = await tx
+        .select()
+        .from(busabaseRecords)
+        .where(inArray(busabaseRecords.id, targetRecordIds));
+      const latestById = new Map(latest.map((record) => [record.id, record]));
+      for (const recordId of targetRecordIds) {
+        const before = targetRecordsById.get(recordId);
+        const current = latestById.get(recordId);
+        if (
+          !before ||
+          !current ||
+          before.headCommitId !== current.headCommitId ||
+          before.status !== current.status
+        ) {
+          throw new ORPCError("CONFLICT", {
+            message:
+              "Record changed while this request was merging. Retry the merge against the latest data.",
+          });
+        }
+      }
+    }
+
     const ctx: MergeCtx = {
       db: tx as unknown as MergeCtx["db"],
       timestamp,
@@ -3749,6 +3999,7 @@ const _mergeChangeRequest = async (
       nodeRefs: new Map(),
       resolvedRecordFields,
       fieldDefsByBaseId: new Map(),
+      slugChanges: [],
     };
     for (const item of operationKinds) {
       const headCommit = headCommitsById.get(item.headCommitId);
@@ -3845,12 +4096,14 @@ const _mergeChangeRequest = async (
           operationCount: operationKinds.length,
           recordIds: ctx.mergedRecordIds,
           viewIds: ctx.mergedViewIds,
+          ...(ctx.slugChanges.length > 0 ? { slugChanges: ctx.slugChanges } : {}),
         },
         updatedAt: timestamp,
       })
       .where(eq(busabaseChangeRequests.id, changeRequest.id));
     mergedRecordIds.push(...ctx.mergedRecordIds);
     mergedViewIds.push(...ctx.mergedViewIds);
+    slugChanges.push(...ctx.slugChanges);
   });
 
   // An import changes the shape of these tables enough that the planner's old
@@ -3879,6 +4132,7 @@ const _mergeChangeRequest = async (
       operationCount: operationKinds.length,
       recordIds: mergedRecordIds,
       viewIds: mergedViewIds,
+      ...(slugChanges.length > 0 ? { slugChanges } : {}),
     },
   });
   await publishBusabaseLiveEvent({

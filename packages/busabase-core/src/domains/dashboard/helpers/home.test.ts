@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isHomeDigestEmpty } from "./home";
+import { HOME_PENDING_PREVIEW_COUNT, homePendingListInput, isHomeDigestEmpty } from "./home";
 
 const EMPTY_DIGEST = {
   activityCount: 0,
@@ -21,5 +21,21 @@ describe("home digest empty state", () => {
 
   it("keeps the digest when any source has content", () => {
     expect(isHomeDigestEmpty({ ...EMPTY_DIGEST, pendingCount: 1 })).toBe(false);
+  });
+});
+
+describe("homePendingListInput", () => {
+  it("asks only for in-review change requests, and only as many as the preview shows", () => {
+    // Anything wider and Home is back to downloading every merged request to
+    // filter it locally; anything narrower than the preview leaves cards empty.
+    expect(homePendingListInput()).toEqual({
+      status: ["in_review"],
+      limit: HOME_PENDING_PREVIEW_COUNT,
+    });
+  });
+
+  it("hands each caller its own object, so no query key shares a mutable array", () => {
+    expect(homePendingListInput()).not.toBe(homePendingListInput());
+    expect(homePendingListInput().status).not.toBe(homePendingListInput().status);
   });
 });

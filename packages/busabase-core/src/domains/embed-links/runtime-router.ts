@@ -19,6 +19,13 @@ const READABLE_PROCEDURES = new Set([
   "bases.get",
   "bases.listViews",
   "records.list",
+  // The numbered-page and per-group-count siblings of `records.list` /
+  // `records.count`: same `node("read")` level, same `buildBaseVisibilityExists`
+  // row filter, and the Base itself resolves through the node-ACL'd `getBase`.
+  // Missing here, an embedded AirApp's paged tables and board/summary tiles
+  // failed while the plain listing worked.
+  "records.listPage",
+  "records.groupBy",
   "records.count",
   "records.get",
   "records.search",

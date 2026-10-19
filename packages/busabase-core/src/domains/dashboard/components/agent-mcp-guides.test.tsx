@@ -64,7 +64,16 @@ describe("agent-specific MCP guides", () => {
     });
 
     expect(guides.map((guide) => guide.id)).toEqual(MCP_AGENT_IDS);
-    expect(guides.map((guide) => guide.docAnchor)).toEqual(MCP_AGENT_IDS);
+    expect(guides.map((guide) => guide.connectAgentSlug)).toEqual([
+      "codex",
+      "claude-code",
+      "cursor",
+      "gemini-cli",
+      "openclaw",
+      "hermes-agent",
+      "workbuddy",
+      "buda-agent",
+    ]);
     expect(guides.map((guide) => guide.name)).toEqual([
       "Codex",
       "Claude Code",

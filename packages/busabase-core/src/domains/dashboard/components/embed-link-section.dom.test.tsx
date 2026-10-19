@@ -11,6 +11,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { CoreI18nProvider } from "../../../i18n";
 import { EmbedLinkSection } from "./embed-link-section";
 
+vi.mock("qrcode", () => ({
+  default: { toDataURL: vi.fn(async () => "data:image/png;base64,dGVzdA==") },
+}));
+
 const activeLink: EmbedLinkVO = {
   id: "emb_active",
   type: "node",
@@ -93,6 +97,7 @@ describe("EmbedLinkSection", () => {
 
   it("protects a newly created one-time link until either value is copied", async () => {
     const onUncopiedSecretChange = renderSection();
+    expect(screen.queryByRole("button", { name: "QR code" })).toBeNull();
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
       value: { writeText: vi.fn(async () => undefined) },
@@ -104,6 +109,10 @@ describe("EmbedLinkSection", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create embed link" }));
 
     const created = await screen.findByTestId("embed-link-created");
+    fireEvent.click(within(created).getByRole("button", { name: "QR code" }));
+    expect(await within(created).findByAltText("QR code for this link")).toBeTruthy();
+    const { default: QRCode } = await import("qrcode");
+    expect(QRCode.toDataURL).toHaveBeenCalledWith(createdLink.url, expect.any(Object));
     expect(onUncopiedSecretChange).toHaveBeenCalledWith(true);
     fireEvent.click(within(created).getByRole("button", { name: "Copy link" }));
     await waitFor(() => expect(onUncopiedSecretChange).toHaveBeenLastCalledWith(false));

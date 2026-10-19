@@ -6,12 +6,14 @@ import {
   normalizeLegacyBudaSessions,
 } from "./agent-session-store";
 import { disconnectBuda, getOwnedBudaConnectionIdentity } from "./buda-connection";
+import { beginRouterConnectionDisconnect, disconnectRouterConnection } from "./router-connection";
 
 const isBudaConnection = (slug: string) => slug === "buda" || slug.startsWith("buda:");
 
 export async function disconnectAgentConnection(
   slug: string,
 ): Promise<{ ok: true; endedSessionCount: number }> {
+  if (slug.startsWith("acprouter:")) await beginRouterConnectionDisconnect(slug);
   const identity = isBudaConnection(slug) ? await getOwnedBudaConnectionIdentity(slug) : null;
   if (identity?.legacy) await normalizeLegacyBudaSessions(identity.canonicalSlug);
   const sessionSlug = identity?.canonicalSlug ?? slug;
@@ -26,7 +28,10 @@ export async function disconnectAgentConnection(
     if (!disconnected) throw new Error("Agent connection not found.");
   }
 
-  if (!isBudaConnection(slug) && connectedSessions.length === 0) {
+  const routerDisconnected = slug.startsWith("acprouter:")
+    ? await disconnectRouterConnection(slug)
+    : false;
+  if (!routerDisconnected && !isBudaConnection(slug) && connectedSessions.length === 0) {
     throw new Error("Agent connection not found.");
   }
 

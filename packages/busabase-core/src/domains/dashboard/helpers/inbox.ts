@@ -1,3 +1,4 @@
+import type { ChangeRequestStatus } from "busabase-contract/types";
 import type { CoreI18nMessages } from "../../../i18n";
 
 export type InboxViewKey =
@@ -20,6 +21,25 @@ export const inboxTabLabel = (messages: CoreI18nMessages, key: InboxViewKey): st
     review: messages.inbox.forReview,
   };
   return labels[key];
+};
+
+export const inboxTabFilter = (
+  tab: InboxViewKey,
+): { status?: ChangeRequestStatus[]; mine?: boolean } => {
+  switch (tab) {
+    case "changes":
+      return { status: ["changes_requested"] };
+    case "created":
+      return { mine: true };
+    case "approved":
+      return { status: ["approved"] };
+    case "merged":
+      return { status: ["merged"] };
+    case "rejected":
+      return { status: ["rejected", "abandoned"] };
+    default:
+      return { status: ["in_review"] };
+  }
 };
 
 export const getLocationPath = (location: string) => location.split("?")[0] || "/";
@@ -57,4 +77,53 @@ const isInboxViewKey = (value: string | null): value is InboxViewKey =>
 export const readInboxView = (search: string): InboxViewKey => {
   const view = new URLSearchParams(search).get("view");
   return isInboxViewKey(view) ? view : "review";
+};
+
+export const INBOX_PAGE_SIZES = [25, 50, 100] as const;
+export type InboxPageSize = (typeof INBOX_PAGE_SIZES)[number];
+export interface InboxQueueContext {
+  view: InboxViewKey;
+  page: number;
+  pageSize: InboxPageSize;
+}
+
+export const readInboxQueueContext = (search: string): InboxQueueContext | null => {
+  const params = new URLSearchParams(search);
+  const page = Number(params.get("inboxPage"));
+  const pageSize = Number(params.get("inboxPageSize"));
+  const view = params.get("view");
+  if (
+    !isInboxViewKey(view) ||
+    !Number.isSafeInteger(page) ||
+    page < 1 ||
+    !INBOX_PAGE_SIZES.includes(pageSize as InboxPageSize)
+  ) {
+    return null;
+  }
+  return { view, page, pageSize: pageSize as InboxPageSize };
+};
+
+export const writeInboxQueueContext = (search: string, context: InboxQueueContext): string => {
+  const params = new URLSearchParams(search);
+  params.set("view", context.view);
+  params.set("inboxPage", String(context.page));
+  params.set("inboxPageSize", String(context.pageSize));
+  params.delete("inboxItem");
+  return params.toString();
+};
+
+export const inboxNeighborPage = (
+  ids: readonly string[],
+  currentId: string,
+  direction: "previous" | "next",
+  page: number,
+  totalPages: number,
+): { id: string; page: number } | { page: number } | null => {
+  const index = ids.indexOf(currentId);
+  if (index < 0) return null;
+  const neighbor = ids[index + (direction === "next" ? 1 : -1)];
+  if (neighbor) return { id: neighbor, page };
+  const adjacentPage = page + (direction === "next" ? 1 : -1);
+  if (adjacentPage < 1 || adjacentPage > totalPages) return null;
+  return { page: adjacentPage };
 };

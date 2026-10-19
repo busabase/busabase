@@ -246,6 +246,8 @@ export const busabaseContractRoutes = {
         path: "/embed-links",
         tags: ["Embed Links"],
         summary: "Create a polymorphic read-only embed link",
+        description:
+          "Record detail requires write on the owning Base node; change requests require changeRequest on every affected node; whole-node links require manage. Listing and revoking links require manage.",
         successDescription: "The capability URL is returned once; only its secret hash is stored.",
       })
       .errors(embedLinkErrors)
@@ -860,6 +862,8 @@ export const busabaseContractRoutes = {
     // remain the stable public API; this transport optimization stays RPC-only.
     // No `affectsNodeId` here on purpose — see `inboxSnapshotInputSchema`.
     inboxSnapshot: oc.input(inboxSnapshotInputSchema).output(inboxSnapshotResponseSchema),
+    // Global badges need only pending reviews, without reading settled history.
+    reviewCount: oc.output(z.object({ review: z.number().int().min(0) })),
     counts: oc
       .route({
         method: "GET",

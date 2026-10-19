@@ -1,7 +1,15 @@
-import { enhanceRouter, implement, ORPCError, os } from "@orpc/server";
+import {
+  type Context,
+  type EnhancedRouter,
+  enhanceRouter,
+  implement,
+  ORPCError,
+  os,
+} from "@orpc/server";
 import { busabaseContract } from "busabase-contract/contract/busabase";
 import type { SharedNodeVO } from "busabase-contract/contract/schemas";
 import {
+  getContextEmbedRecordScope,
   getContextSpaceId,
   isEmbedVisitor,
   isPublicVisitor,
@@ -21,6 +29,7 @@ import { docRouter } from "./domains/doc/router";
 import { dumpRouter } from "./domains/dump/router";
 import { createChangeRequestPreviewLink } from "./domains/embed-links/logic";
 import { embedLinksRouter } from "./domains/embed-links/router";
+import { isRecordEmbedProcedureAllowed } from "./domains/embed-links/utils/record-scope";
 import { fileRouter } from "./domains/file-node/router";
 import { fileTreeRouter } from "./domains/filetree/router";
 import { formRouter } from "./domains/form/router";
@@ -63,6 +72,7 @@ import { recordSearchInteraction } from "./logic/search-metrics";
 import {
   closeChangeRequest,
   countChangeRequests,
+  countReviewChangeRequests,
   createAuditEvent,
   createComment,
   createNodeChangeRequest,
@@ -365,6 +375,9 @@ const busabaseRouterImpl = busabase.router({
     inboxSnapshot: busabase.changeRequests.inboxSnapshot.handler(async ({ input }) =>
       getInboxSnapshot(input),
     ),
+    reviewCount: busabase.changeRequests.reviewCount.handler(async () =>
+      countReviewChangeRequests(),
+    ),
     counts: busabase.changeRequests.counts.handler(async () => countChangeRequests()),
     get: busabase.changeRequests.get.handler(async ({ input }) => {
       const changeRequest = await getChangeRequest(input.changeRequestId);
@@ -429,7 +442,11 @@ const publicSurfaceGuard = os.middleware(async ({ next, path }, input) => {
   // one. Same default-deny shape, same reason — most of this router is
   // space-scoped with no node ACL behind it.
   if (isEmbedVisitor()) {
-    if (!isEmbedProcedureAllowed(path)) {
+    const recordScope = getContextEmbedRecordScope();
+    if (
+      !isEmbedProcedureAllowed(path) ||
+      (recordScope && !isRecordEmbedProcedureAllowed(path, input, recordScope))
+    ) {
       denyPublicProcedure(path);
     }
     return next();
@@ -467,7 +484,14 @@ const publicSurfaceGuard = os.middleware(async ({ next, path }, input) => {
  * Exported already-guarded on purpose: there is no unguarded variant a host
  * could mount by mistake.
  */
-export const busabaseRouter = enhanceRouter(busabaseRouterImpl, {
+// Keep declaration emit anchored to the implementation instead of serializing
+// every procedure's expanded schema again after applying the public guard.
+export const busabaseRouter: EnhancedRouter<
+  typeof busabaseRouterImpl,
+  Context,
+  Context,
+  Record<never, never>
+> = enhanceRouter(busabaseRouterImpl, {
   errorMap: {},
   middlewares: [publicSurfaceGuard],
   dedupeLeadingMiddlewares: false,

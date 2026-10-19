@@ -17,14 +17,16 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    setupFiles: ["./tests/setup-core-i18n.ts"],
+    setupFiles: ["./tests/setup-core-i18n.ts", "./tests/setup-dom-teardown.ts"],
     // An allowlist, so a co-located test under a directory not named here is silently never
     // run — it looks green because it never executed. Add the directory when you add the test.
     include: [
       "tests/**/*.test.ts",
       "src/domains/agents/components/**/*.test.tsx",
+      "src/domains/agents/hooks/**/*.test.tsx",
       "src/domains/agents/logic/**/*.test.ts",
       "src/domains/agents/utils/**/*.test.ts",
+      "src/domains/agents/store/**/*.test.ts",
       "src/domains/airapp/logic/**/*.test.ts",
       "src/domains/airapp/components/**/*.test.tsx",
       "src/domains/airapp/store/**/*.test.ts",
@@ -32,6 +34,7 @@ export default defineConfig({
       "src/domains/assets/utils/**/*.test.ts",
       "src/domains/base/utils/**/*.test.ts",
       "src/domains/dashboard/helpers/**/*.test.ts",
+      "src/domains/dashboard/hooks/**/*.test.tsx",
       "src/domains/dashboard/*.test.tsx",
       "src/domains/dashboard/utils/**/*.test.ts",
       "src/domains/dashboard/components/**/*.test.tsx",
@@ -44,6 +47,7 @@ export default defineConfig({
       "src/domains/rich-node/components/**/*.test.tsx",
       "src/domains/templates/components/**/*.test.tsx",
       "src/domains/templates/logic/**/*.test.ts",
+      "src/domains/vault/components/**/*.test.tsx",
       "src/demo/**/*.test.ts",
       "src/logic/**/*.test.ts",
     ],

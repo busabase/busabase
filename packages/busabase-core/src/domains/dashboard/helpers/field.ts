@@ -3,6 +3,7 @@ import type { AttachmentRef } from "open-domains/attachments/types";
 import { iStringParse } from "openlib/i18n/i-string";
 import type { CoreI18nMessages } from "../../../i18n";
 import { getMemberIds } from "../../base/field-types";
+import { formatFormulaValue } from "../../base/formula/field-preview";
 import {
   type DateFieldOptions,
   describeDateFieldValue,
@@ -124,6 +125,13 @@ export const getFieldPreviewText = (
   }
   if (field.type === "number" && field.options.number?.format === "currency") {
     return formatNumberField(value, field.options.number);
+  }
+  if (field.type === "formula") {
+    return formatFormulaValue(
+      value,
+      field.options.formula,
+      typeof locale === "string" ? locale : undefined,
+    );
   }
   // A lookup inherits the target field's number formatting when the rollup keeps
   // its unit (see resolveLookupFieldOptions) — so a `sum` over a currency column

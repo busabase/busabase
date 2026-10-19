@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { LOCAL_SPACE_ID, runWithBusabaseContext } from "../src/context";
 import { getDb } from "../src/db";
@@ -11,7 +11,7 @@ import {
   CommitPayloadError,
   parseCommitPayload,
 } from "../src/logic/commit-payload-schemas";
-import { insertCommit } from "../src/logic/commits";
+import { insertCommit, insertCommits } from "../src/logic/commits";
 
 /**
  * `busabase_commits.payload` is a discriminated union stored as untyped jsonb,
@@ -61,6 +61,37 @@ describe("commit payload validation (real PGlite)", () => {
   });
 
   // ── WRITE PATH ─────────────────────────────────────────────────────────────
+
+  it("validates every commit before writing a batch, even when a later payload is invalid", async () => {
+    const db = await getDb();
+    const valid = {
+      id: "cmt_batch_valid_before_invalid",
+      operation: "record_update" as const,
+      payload: { price: 12, extra: { kept: true } },
+      author: "alice",
+      message: "valid batch member",
+    };
+    const invalid = {
+      ...valid,
+      id: "cmt_batch_invalid",
+      operation: "doc_update" as const,
+      payload: { body: 42 },
+    };
+    await expect(insertCommits(db, [valid, invalid])).rejects.toBeInstanceOf(CommitPayloadError);
+    expect(
+      await db
+        .select()
+        .from(busabaseCommits)
+        .where(inArray(busabaseCommits.id, [valid.id, invalid.id])),
+    ).toHaveLength(0);
+    await insertCommits(db, [valid, { ...valid, id: "cmt_batch_retry_second" }]);
+    const rows = await db
+      .select()
+      .from(busabaseCommits)
+      .where(inArray(busabaseCommits.id, [valid.id, "cmt_batch_retry_second"]));
+    expect(rows).toHaveLength(2);
+    for (const row of rows) expect(row.payload).toEqual(valid.payload);
+  });
 
   it("insertCommit REJECTS a malformed payload and writes nothing", async () => {
     await asManager(async () => {

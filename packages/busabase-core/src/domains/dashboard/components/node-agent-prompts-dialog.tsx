@@ -26,7 +26,6 @@
 
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import { Dialog, DialogDescription, DialogHeader, DialogTitle } from "kui/dialog";
-import { useEffect, useState } from "react";
 import { useCoreI18n } from "../../../i18n";
 import type { NodePromptScope } from "../helpers/node-agent-prompts";
 import { useNodeAgentPrompts } from "../hooks/use-node-agent-prompts";
@@ -34,21 +33,6 @@ import { useDashboardOrpc } from "../orpc-context";
 import type { AgentIntegrationTarget } from "./agent-install-panel";
 import { AgentPromptsView } from "./agent-prompts-view";
 import { DialogContent } from "./localized-dialog-content";
-
-/**
- * The space id used to tell the agent which space to target. Falls back to the
- * `/dashboard/<spaceId>/…` pathname when the caller can't hand one in — every
- * dashboard route is mounted under it. Same approach as `node-share-button`.
- *
- * Exported because the New-item modal's create-prompts tab needs the identical
- * fallback: it also names a space in its target line, and also has callers that
- * do not thread a space id down.
- */
-export const resolveSpaceId = (spaceId?: string): string | undefined => {
-  if (spaceId) return spaceId;
-  if (typeof window === "undefined") return undefined;
-  return window.location.pathname.split("/").filter(Boolean)[1];
-};
 
 /** What the dialog header names: the node, or the column/record/cell inside it. */
 const scopeSubject = (nodeName: string, scope?: NodePromptScope): string => {
@@ -69,7 +53,7 @@ export function NodeAgentPromptsDialog({
   spaceId,
   spaceName,
   scope,
-  agentIntegration,
+  agentIntegration: explicitAgentIntegration,
   orpc: orpcProp,
 }: {
   open: boolean;
@@ -116,13 +100,6 @@ export function NodeAgentPromptsDialog({
   // only avoids showing an action that would be refused. Copy stays available
   // to everyone: pasting a prompt into your own terminal needs no permission
   // from Busabase.
-  const [resolvedSpaceId, setResolvedSpaceId] = useState<string | undefined>(spaceId);
-
-  // Pathname is only readable after mount; keep SSR output stable.
-  useEffect(() => {
-    setResolvedSpaceId(resolveSpaceId(spaceId));
-  }, [spaceId]);
-
   // Closed dialogs cost nothing. Custom prompts extend the whole-node scenario
   // tier only, so scope is the authority for whether this read may run; the
   // resolved client can still power Ask Agent in a scoped dialog.
@@ -141,7 +118,9 @@ export function NodeAgentPromptsDialog({
     nodeType,
     orpc,
     scope,
-    spaceId: resolvedSpaceId,
+    // Sidebar dialogs are outside the integration provider; toolbars use the
+    // hook's canonical target from context when no explicit target is passed.
+    spaceId: spaceId ?? explicitAgentIntegration?.targetSpaceId,
     spaceName,
   });
   return (
@@ -164,7 +143,7 @@ export function NodeAgentPromptsDialog({
             expanded panel the remaining height and lets each pane own overflow. */}
         <div className="min-h-0 overflow-y-auto sm:overflow-hidden">
           <AgentPromptsView
-            agentIntegration={agentIntegration}
+            agentIntegration={explicitAgentIntegration}
             askAgent={orpc ? { orpc, sessionScopeId: nodeId } : null}
             capabilities={capabilities}
             loading={promptsLoading}

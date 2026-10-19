@@ -7,10 +7,9 @@ import type { AgentIntegrationTarget } from "./agent-install-panel";
 import { AgentPromptsView } from "./agent-prompts-view";
 
 /**
- * The connection check is deliberately NOT in the preview, which means the
- * preview cannot prove it exists — only the clipboard can. So these need a real
- * DOM and a real click on Copy; `renderToStaticMarkup` would happily pass while
- * the appended paragraph was missing entirely.
+ * The preview shows everything that will be copied, connection check included,
+ * so these need a real DOM and a real click on Copy: the clipboard is the only
+ * thing that can prove the preview and the copied text are the same.
  */
 const prompt: NodePrompt = {
   key: "folder-summarize",
@@ -20,6 +19,21 @@ const prompt: NodePrompt = {
   label: "Summarize this folder",
   body: 'Target: the Busabase Folder "Coder" (nodeId: nod_coder).\n\nReply to me in English.',
 };
+
+const framedPrompt: NodePrompt = {
+  ...prompt,
+  key: "folder-review",
+  label: "Review this folder",
+  body: 'Target: the Busabase Folder "Coder" (nodeId: nod_coder).\n\nReview every draft in it.\n\nReply to me in English.',
+  target: 'Target: the Busabase Folder "Coder" (nodeId: nod_coder).',
+  footer: "Reply to me in English.",
+};
+
+const previewSegments = () =>
+  [...screen.getByTestId("agent-prompts-preview").querySelectorAll("p")].map((node) => ({
+    kind: node.dataset.segment,
+    text: node.textContent,
+  }));
 
 const secondPrompt: NodePrompt = {
   ...prompt,
@@ -284,9 +298,11 @@ describe("AgentPromptsView copy", () => {
     fireEvent.click(screen.getByRole("button", { name: "Copy" }));
     await screen.findByText(/select the prompt preview and copy it manually/);
 
-    const snippet = screen.getByRole("textbox", { name: prompt.label }) as HTMLTextAreaElement;
-    expect(snippet.readOnly).toBe(true);
+    const snippet = screen.getByRole("textbox", { name: prompt.label });
+    expect(snippet.getAttribute("aria-readonly")).toBe("true");
     expect(document.activeElement).toBe(snippet);
+    // The whole preview is already selected, ready to copy by hand.
+    expect(window.getSelection()?.toString()).toContain("nod_coder");
   });
 
   it("clears stale success and failure feedback when a new prompt is selected", async () => {
@@ -299,9 +315,9 @@ describe("AgentPromptsView copy", () => {
 
     expect(screen.queryByRole("button", { name: "Copied" })).toBeNull();
     expect(screen.queryByText(/select the prompt preview and copy it manually/)).toBeNull();
-    expect(
-      (screen.getByRole("textbox", { name: secondPrompt.label }) as HTMLTextAreaElement).value,
-    ).toBe(secondPrompt.body);
+    expect(screen.getByRole("textbox", { name: secondPrompt.label }).textContent).toBe(
+      secondPrompt.body,
+    );
   });
 
   it("removes stale success when a later clipboard write rejects", async () => {
@@ -379,10 +395,12 @@ describe("AgentPromptsView copy", () => {
 
     const text = await copy();
 
-    // The preview's own text still leads, unchanged — the target line stays the
-    // first thing a human can select off the top of a copied prompt.
+    // The target line stays the first thing a human can select off the top.
     expect(text.startsWith(prompt.body)).toBe(true);
-    expect(text).toContain("Before you begin, confirm that this environment is connected");
+    expect(text).toContain(
+      "Before you begin, make sure this environment can reach Busabase through the busabase skill",
+    );
+    expect(text).toContain("not by opening Busabase in a browser");
     // Rebuilt from the live browser origin, never a host's SSR placeholder.
     expect(text).toContain(
       `${window.location.origin}/SETUP_SKILL.md?edition=cloud&editionConfirmed=1&space=spc_acme`,
@@ -406,6 +424,44 @@ describe("AgentPromptsView copy", () => {
     renderView(undefined);
 
     expect(await copy()).toBe(prompt.body);
+  });
+
+  it("previews exactly what is copied, with the task set apart from its framing", async () => {
+    renderView({ edition: "cloud", targetSpaceId: "spc_acme" }, [framedPrompt]);
+
+    const segments = previewSegments();
+    expect(segments.map((segment) => segment.kind)).toEqual([
+      "target",
+      "task",
+      "footer",
+      "connection",
+    ]);
+    expect(segments[1]?.text).toBe("Review every draft in it.");
+
+    const text = await copy();
+    expect(text).toBe(segments.map((segment) => segment.text).join("\n\n"));
+  });
+
+  it("keeps Ctrl/Cmd+A inside the preview instead of selecting the whole page", () => {
+    renderView({ edition: "cloud", targetSpaceId: "spc_acme" }, [framedPrompt]);
+    const preview = screen.getByTestId("agent-prompts-preview");
+
+    for (const modifier of [{ ctrlKey: true }, { metaKey: true }]) {
+      window.getSelection()?.removeAllRanges();
+      const event = new KeyboardEvent("keydown", {
+        key: "a",
+        bubbles: true,
+        cancelable: true,
+        ...modifier,
+      });
+      preview.dispatchEvent(event);
+
+      expect(event.defaultPrevented).toBe(true);
+      const range = window.getSelection()?.getRangeAt(0);
+      expect(range && preview.contains(range.commonAncestorContainer)).toBe(true);
+      expect(window.getSelection()?.toString()).toContain("Review every draft in it.");
+      expect(window.getSelection()?.toString()).not.toContain("Built-in");
+    }
   });
 
   it("does not show connection-check metadata in the compact prompt surface", () => {

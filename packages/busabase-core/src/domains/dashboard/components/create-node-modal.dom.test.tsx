@@ -5,6 +5,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CoreI18nProvider } from "../../../i18n";
+import { AgentIntegrationProvider } from "../agent-integration-context";
 
 const setLocation = vi.fn();
 
@@ -15,6 +16,35 @@ const { CreateNodeModal } = await import("./create-node-modal");
 afterEach(() => {
   cleanup();
   setLocation.mockClear();
+  window.history.replaceState({}, "", "/");
+});
+
+describe("CreateNodeModal stable workspace identity", () => {
+  it("targets the canonical workspace from context on a customized address", () => {
+    window.history.replaceState({}, "", "/dashboard/my-custom-slug/home");
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <CoreI18nProvider locale="en">
+        <QueryClientProvider client={client}>
+          <AgentIntegrationProvider
+            agentIntegration={{ edition: "cloud", targetSpaceId: "org_stable_workspace" }}
+          >
+            <CreateNodeModal
+              apiClient={{} as unknown as BusabaseDashboardApiClient}
+              onCreated={() => {}}
+              onOpenChange={() => {}}
+              open
+              orpc={null}
+            />
+          </AgentIntegrationProvider>
+        </QueryClientProvider>
+      </CoreI18nProvider>,
+    );
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Let an Agent create it" }));
+    const prompt = screen.getByRole("tabpanel").textContent ?? "";
+    expect(prompt).toContain("spaceId: org_stable_workspace");
+    expect(prompt).not.toContain("spaceId: my-custom-slug");
+  });
 });
 
 /**

@@ -19,6 +19,7 @@ import { CURRENT_USER_ID, id, requireBaseId } from "../../../../logic/kernel";
 import { removeRecordAssetUsages, syncRecordAssetUsages } from "../../../assets/handlers";
 import { computeSystemFieldValues, validateRecordFields } from "../../field-rules";
 import { isSystemFieldType } from "../../field-types";
+import { recalculateFormulaRecords } from "../formula-recalculation";
 
 /**
  * Re-validate the final merged fields against the base's CURRENT schema. A CR can
@@ -326,6 +327,9 @@ export const mergeRecordRestore = async (
     .update(busabaseRecords)
     .set({ status: "active", archivedAt: null, updatedAt: timestamp })
     .where(eq(busabaseRecords.id, targetRecord.id));
+  // Archived records are excluded from schema backfills. Refresh their derived
+  // fields only when they re-enter the active dataset, using the latest schema.
+  await recalculateFormulaRecords(ctx, targetRecord.baseId, null, item.id, [targetRecord.id]);
   // Un-delete ONLY the inbound links that were soft-deleted by this record's
   // archive — matched by the archive timestamp (mergeRecordDelete stamps both the
   // record's archivedAt and the links' deletedAt with the same merge timestamp).

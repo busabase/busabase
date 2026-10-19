@@ -131,7 +131,8 @@ describe("Agent Skills API — oRPC integration", () => {
     });
 
     expect(created.node.type).toBe("skill");
-    expect(created.visibility).toBe("private");
+    // Declares nothing, so it reports the open space default.
+    expect(created.visibility).toBe("workspace");
     expect(created.version).toBe("0.1.0");
     const paths = created.files.map((file) => file.path);
     expect(paths).toEqual(expect.arrayContaining(["SKILL.md", "skill.json", "references/tone.md"]));

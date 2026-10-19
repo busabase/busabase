@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
   normalizeLegacyBudaSessions: vi.fn(),
   disconnectBuda: vi.fn(),
   getOwnedBudaConnectionIdentity: vi.fn(),
+  disconnectRouterConnection: vi.fn(),
+  beginRouterConnectionDisconnect: vi.fn(),
 }));
 
 vi.mock("./agent-session-manager", () => ({
@@ -27,6 +29,10 @@ vi.mock("./agent-session-store", () => ({
 vi.mock("./buda-connection", () => ({
   disconnectBuda: mocks.disconnectBuda,
   getOwnedBudaConnectionIdentity: mocks.getOwnedBudaConnectionIdentity,
+}));
+vi.mock("./router-connection", () => ({
+  disconnectRouterConnection: mocks.disconnectRouterConnection,
+  beginRouterConnectionDisconnect: mocks.beginRouterConnectionDisconnect,
 }));
 
 import { deleteAgentHistory, disconnectAgentConnection } from "./agent-connection";
@@ -44,10 +50,23 @@ describe("disconnectAgentConnection", () => {
     );
     mocks.listLiveAgentSessionIds.mockReturnValue([]);
     mocks.disconnectBuda.mockResolvedValue(true);
+    mocks.disconnectRouterConnection.mockResolvedValue(true);
     mocks.getOwnedBudaConnectionIdentity.mockResolvedValue({
       canonicalSlug: "buda:agent-1",
       legacy: false,
     });
+  });
+
+  it("revokes a stored Router device even if no session was ever started", async () => {
+    expect(await disconnectAgentConnection("acprouter:device-1")).toEqual({
+      ok: true,
+      endedSessionCount: 0,
+    });
+    expect(mocks.disconnectRouterConnection).toHaveBeenCalledWith("acprouter:device-1");
+    expect(mocks.beginRouterConnectionDisconnect.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.closeAgentSessions.mock.invocationCallOrder[0],
+    );
+    expect(mocks.disconnectBuda).not.toHaveBeenCalled();
   });
 
   it("tombstones active sessions, revokes Buda, and retains scoped history", async () => {

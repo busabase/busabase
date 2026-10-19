@@ -10,6 +10,9 @@ import { FormulaEvalError } from "../errors";
 import { arity, asDate, asNumber, asString, type FormulaFn } from "./value";
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
+// These functions walk days individually. Bound work in both the browser
+// preview and server computation so an accidental huge range cannot hang either.
+const MAX_WORKDAY_STEPS = 100_000;
 const DATE_UNIT_MS: Record<string, number> = {
   seconds: 1000,
   minutes: 60 * 1000,
@@ -175,6 +178,9 @@ export const DATE_TIME_FUNCTIONS: Record<string, FormulaFn> = {
     let remaining = asNumber(args[1], "WORKDAY");
     const step = remaining >= 0 ? 1 : -1;
     remaining = Math.abs(remaining);
+    if (remaining > (MAX_WORKDAY_STEPS * 5) / 7) {
+      throw new FormulaEvalError("WORKDAY: date range exceeds the 100000-day calculation limit");
+    }
     while (remaining > 0) {
       date = new Date(date.getTime() + step * MS_PER_DAY);
       if (!isWeekend(date)) remaining--;
@@ -186,6 +192,11 @@ export const DATE_TIME_FUNCTIONS: Record<string, FormulaFn> = {
     arity("WORKDAY_DIFF", args, 2);
     const start = asDate(args[0], "WORKDAY_DIFF");
     const end = asDate(args[1], "WORKDAY_DIFF");
+    if (Math.abs(end.getTime() - start.getTime()) / MS_PER_DAY > MAX_WORKDAY_STEPS) {
+      throw new FormulaEvalError(
+        "WORKDAY_DIFF: date range exceeds the 100000-day calculation limit",
+      );
+    }
     const step = end.getTime() >= start.getTime() ? 1 : -1;
     let count = 0;
     let cursor = new Date(start.getTime() + step * MS_PER_DAY);

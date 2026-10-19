@@ -1,6 +1,7 @@
 import type { FormBoundFieldVO, FormFieldBindingVO } from "busabase-contract/types";
 import { type FieldInputKind, fieldInputKind } from "../../base/field-types";
 import { DateFieldInput } from "../../dashboard/components/date-field";
+import { FieldHelp, hasFieldHelp } from "../../dashboard/components/field-help";
 
 interface GeneratedFormFieldProps {
   binding: FormFieldBindingVO;
@@ -28,7 +29,13 @@ export function GeneratedFormField({
 }: GeneratedFormFieldProps) {
   const controlKind = generatedFormControlKind(field);
   const inputId = `form-field-${binding.inputName}`;
+  const help = {
+    description: binding.help ?? field?.help?.description,
+    example: field?.help?.example,
+  };
+  const helpId = hasFieldHelp(help) ? `${inputId}-help` : undefined;
   const sharedProps = {
+    "aria-describedby": helpId,
     "data-input-name": binding.inputName,
     id: inputId,
   };
@@ -91,6 +98,7 @@ export function GeneratedFormField({
       </select>
     ) : controlKind === "date" ? (
       <DateFieldInput
+        ariaDescribedBy={helpId}
         ariaLabel={label}
         className={`${controlClassName} h-9`}
         dataAttributes={{ "data-input-name": binding.inputName }}
@@ -129,6 +137,7 @@ export function GeneratedFormField({
         {label}
         {binding.required ? <span className="ml-0.5 text-rejected-strong">*</span> : null}
       </label>
+      <FieldHelp help={help} id={helpId} />
       {control}
     </div>
   );

@@ -373,7 +373,8 @@ export const nodeCreateTask: TaskDefinition<NodeCreateInput> = {
       appliesWhen: { param: "type", values: ["skill", "drive", "airapp"] },
       kind: "enum",
       choices: ["private", "workspace", "public"],
-      description: "Skill/Drive/AirApp only. Defaults to private.",
+      description:
+        "Skill/Drive/AirApp only. Omit to follow the space default and parent folder, like any other node.",
     },
     {
       name: "version",

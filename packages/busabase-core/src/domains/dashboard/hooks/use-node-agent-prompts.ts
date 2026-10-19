@@ -16,6 +16,7 @@ import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-quer
 import type { CustomAgentPrompts } from "busabase-contract/contract/node-agent-prompt-schemas";
 import { useCallback, useMemo } from "react";
 import { useCoreI18n, useCoreLocale } from "../../../i18n";
+import { useAgentIntegrationTarget } from "../agent-integration-context";
 import {
   buildNodeAgentPrompts,
   type NodePrompt,
@@ -70,6 +71,10 @@ export const useNodeAgentPrompts = ({
   const messages = useCoreI18n();
   const locale = useCoreLocale();
   const queryClient = useQueryClient();
+  // URLs carry a mutable slug, or no workspace token on subdomains. The host
+  // connection target carries the stable API space id instead.
+  const agentIntegration = useAgentIntegrationTarget();
+  const resolvedSpaceId = spaceId ?? agentIntegration?.targetSpaceId;
 
   const promptsOptions = orpc?.nodes.getAgentPrompts.queryOptions({ input: { nodeId } });
   const promptsQuery = useQuery({
@@ -102,12 +107,12 @@ export const useNodeAgentPrompts = ({
       nodeType,
       nodeName,
       nodeId,
-      spaceId,
+      spaceId: resolvedSpaceId,
       spaceName,
       scope,
       customPrompts: promptsQuery.data?.agentPrompts ?? undefined,
     }),
-    [nodeType, nodeName, nodeId, spaceId, spaceName, scope, promptsQuery.data],
+    [nodeType, nodeName, nodeId, resolvedSpaceId, spaceName, scope, promptsQuery.data],
   );
 
   const { scenarios, capabilities } = useMemo(

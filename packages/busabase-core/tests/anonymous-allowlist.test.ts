@@ -10,6 +10,7 @@ import {
   anonymousAllowlistSnapshot,
   isAnonymousProcedureAllowed,
   isAnonymousReadableNodeType,
+  isEmbedProcedureAllowed,
 } from "../src/logic/anonymous-allowlist";
 import { setNodeShare } from "../src/logic/node-share";
 import { seedScenario } from "../src/logic/seed";
@@ -156,6 +157,69 @@ describe("anonymous allowlist (unit)", () => {
     // Denials must survive the prefix too.
     expect(anonymousAccessKindFor(["core", "vault", "get"])).toBeNull();
     expect(anonymousAccessKindFor(["core", "dump", "exportTables"])).toBeNull();
+  });
+});
+
+describe("embed allowlist (unit)", () => {
+  it("allows exactly the embed read surface", () => {
+    expect(anonymousAllowlistSnapshot().embed).toEqual([
+      "bases.get",
+      "bases.listViews",
+      "changeRequests.get",
+      "fileTrees.get",
+      "fileTrees.preparePreview",
+      "fileTrees.previewConfig",
+      "fileTrees.readFile",
+      "nodes.get",
+      "nodes.list",
+      "nodes.resolveRouteState",
+      // Node-ACL'd aggregates an embedded AirApp dashboard renders from.
+      "records.count",
+      "records.get",
+      "records.groupBy",
+      "records.list",
+      "records.listPage",
+      "records.search",
+    ]);
+  });
+
+  it.each([["records.count"], ["records.groupBy"], ["records.search"], ["records.listPage"]])(
+    "lets an embed reach the node-ACL'd read %s, under the cloud mount too",
+    (key) => {
+      expect(isEmbedProcedureAllowed(key.split("."))).toBe(true);
+      expect(isEmbedProcedureAllowed(["core", ...key.split(".")])).toBe(true);
+    },
+  );
+
+  it("still refuses the space-scoped surface to an embed", () => {
+    for (const key of [
+      "changeRequests.list",
+      "comments.list",
+      "comments.create",
+      "auditEvents.list",
+      "activity.listPaged",
+      "dump.exportTables",
+      "vault.get",
+      "webhooks.list",
+      "assets.list",
+      "agent.listTasks",
+      "search",
+      "grep",
+      "records.changeRequest",
+      "records.listChangeRequests",
+    ]) {
+      expect(isEmbedProcedureAllowed(key.split(".")), `${key} must stay denied for embeds`).toBe(
+        false,
+      );
+    }
+  });
+
+  it("does not widen the guest (public share) surface", () => {
+    // The guest list is a separate decision; adding the aggregates to the embed
+    // list must not have leaked them onto public shares.
+    for (const key of ["records.count", "records.groupBy", "records.search"]) {
+      expect(isAnonymousProcedureAllowed(key.split(".")), key).toBe(false);
+    }
   });
 });
 

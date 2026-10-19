@@ -8,6 +8,7 @@ import {
   PROCEDURE_PERMISSION_POLICY,
   parseBusabaseRelayPermissionLevel,
   permissionLevelForSpaceRole,
+  resolveEmbedLinksCreatePermissionPolicy,
   resolveProcedurePermissionPolicy,
   resolveRequiredLevel,
 } from "./api-key-level";
@@ -187,6 +188,27 @@ describe("resolveRequiredLevel", () => {
 });
 
 describe("procedure permission policy", () => {
+  it.each(
+    ["grants", "mint", "status", "complete", "cancel"].flatMap((procedure) => [
+      `agents.routerEnrollment.${procedure}`,
+      `workbench.agents.routerEnrollment.${procedure}`,
+    ]),
+  )("requires workspace manage for %s", (path) => {
+    const segments = path.split(".");
+    const policy = resolveProcedurePermissionPolicy(segments);
+    const barePath = path.replace(/^workbench\./, "");
+    expect(PROCEDURE_PERMISSION_POLICY[barePath]).toEqual({
+      level: "manage",
+      scope: "workspace",
+    });
+    expect(policy).toEqual({ level: "manage", scope: "workspace" });
+    expect(resolveRequiredLevel(segments, undefined)).toBe("manage");
+    for (const level of ["read", "changeRequest", "write"] as const) {
+      expect(hasApiKeyLevel(level, policy.level)).toBe(false);
+    }
+    expect(hasApiKeyLevel("manage", policy.level)).toBe(true);
+  });
+
   it("keeps paged record history available to node-scoped read keys", () => {
     const path = ["workbench", "activity", "listForRecordPaged"];
     expect(resolveProcedurePermissionPolicy(path)).toEqual({ level: "read", scope: "node" });
@@ -246,19 +268,80 @@ describe("procedure permission policy", () => {
     expect(resolveRequiredLevel(["workbench", "nodes", "resolveRouteState"], "GET")).toBe("read");
   });
 
-  it("classifies the RPC-only Inbox snapshot like its list and count reads", () => {
-    expect(resolveProcedurePermissionPolicy(["changeRequests", "inboxSnapshot"])).toEqual({
-      level: "read",
-      scope: "node",
-    });
-    expect(resolveRequiredLevel(["workbench", "changeRequests", "inboxSnapshot"], undefined)).toBe(
-      "read",
-    );
-  });
+  it.each(["inboxSnapshot", "reviewCount"])(
+    "classifies RPC-only %s as a node read",
+    (procedure) => {
+      expect(resolveProcedurePermissionPolicy(["changeRequests", procedure])).toEqual({
+        level: "read",
+        scope: "node",
+      });
+      expect(resolveRequiredLevel(["workbench", "changeRequests", procedure], undefined)).toBe(
+        "read",
+      );
+    },
+  );
 
   it("rejects nodeScope on creation while preserving legacy read parsing", () => {
     const legacy = { level: "read" as const, nodeScope: ["nod_private"] };
     expect(apiKeyPermissionsSchema.safeParse(legacy).success).toBe(true);
     expect(createApiKeyPermissionsSchema.safeParse(legacy).success).toBe(false);
+  });
+});
+
+describe("resolveEmbedLinksCreatePermissionPolicy", () => {
+  it("narrows to changeRequest ONLY for a change-request-type embed", () => {
+    expect(resolveEmbedLinksCreatePermissionPolicy({ type: "change-request" })).toEqual({
+      level: "changeRequest",
+      scope: "workspace",
+    });
+  });
+
+  it("keeps the manage baseline for whole-node links", () => {
+    expect(resolveEmbedLinksCreatePermissionPolicy({ type: "node" })).toEqual({
+      level: "manage",
+      scope: "workspace",
+    });
+  });
+
+  it("requires node-scoped write for record detail", () => {
+    const policy = resolveEmbedLinksCreatePermissionPolicy({ type: "record-detail" });
+    expect(policy).toEqual({ level: "write", scope: "node" });
+    expect(hasApiKeyLevel("manage", policy.level)).toBe(true);
+    expect(hasApiKeyLevel("write", policy.level)).toBe(true);
+    expect(hasApiKeyLevel("changeRequest", policy.level)).toBe(false);
+    expect(hasApiKeyLevel("read", policy.level)).toBe(false);
+  });
+
+  it("fails closed to manage for a missing, malformed, or unparsed body", () => {
+    expect(resolveEmbedLinksCreatePermissionPolicy(null).level).toBe("manage");
+    expect(resolveEmbedLinksCreatePermissionPolicy(undefined).level).toBe("manage");
+    expect(resolveEmbedLinksCreatePermissionPolicy({}).level).toBe("manage");
+    expect(resolveEmbedLinksCreatePermissionPolicy({ type: "not-a-real-type" }).level).toBe(
+      "manage",
+    );
+  });
+
+  it("never relaxes list/listPaged/revoke — only embedLinks.create has an input-aware policy", () => {
+    // These stay on the static, input-independent table regardless of what a
+    // caller might pass — there is no input-aware resolver for them at all,
+    // which is itself the guarantee: a changeRequest key can never reach them.
+    expect(resolveProcedurePermissionPolicy(["embedLinks", "list"])).toEqual({
+      level: "manage",
+      scope: "workspace",
+    });
+    expect(resolveProcedurePermissionPolicy(["embedLinks", "listPaged"])).toEqual({
+      level: "manage",
+      scope: "workspace",
+    });
+    expect(resolveProcedurePermissionPolicy(["embedLinks", "revoke"])).toEqual({
+      level: "manage",
+      scope: "workspace",
+    });
+  });
+
+  it("still requires the changeRequest tier, not read or below", () => {
+    const policy = resolveEmbedLinksCreatePermissionPolicy({ type: "change-request" });
+    expect(hasApiKeyLevel("changeRequest", policy.level)).toBe(true);
+    expect(hasApiKeyLevel("read", policy.level)).toBe(false);
   });
 });

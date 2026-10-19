@@ -1,7 +1,7 @@
 /**
  * The single write path into `busabase_commits`.
  *
- * Every commit insert in the codebase goes through `insertCommit`, which parses
+ * Every commit insert in the codebase goes through `insertCommit(s)`, which parses
  * the payload against the schema for its `operation` before touching the db.
  * That makes "a malformed payload cannot enter the ledger" a structural
  * property of the system rather than something each of the ~27 call sites has
@@ -41,6 +41,18 @@ export interface InsertCommitValues extends Omit<CommitInsert, "operation" | "pa
  * validation can never quietly reshape an append-only ledger entry.
  */
 export const insertCommit = async (db: CommitWriter, values: InsertCommitValues) => {
-  const payload = assertCommitPayload(values.operation, values.payload);
-  await db.insert(busabaseCommits).values({ ...values, payload });
+  await insertCommits(db, [values]);
+};
+
+/** Validate the entire bounded batch before issuing its single INSERT. */
+export const insertCommits = async (
+  db: CommitWriter,
+  values: ReadonlyArray<InsertCommitValues>,
+) => {
+  if (values.length === 0) return;
+  const validated = values.map((value) => ({
+    ...value,
+    payload: assertCommitPayload(value.operation, value.payload),
+  }));
+  await db.insert(busabaseCommits).values(validated);
 };

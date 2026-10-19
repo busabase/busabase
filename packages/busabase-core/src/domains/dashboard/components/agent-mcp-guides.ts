@@ -22,9 +22,9 @@ export type McpAgentKind = "shell" | "web-chat";
  * Deliberately absent: 豆包 and 元宝's own chat apps accept no third-party tools at all,
  * so their ecosystems appear here as 扣子空间 and 腾讯元器 instead.
  *
- * The quick-setup panel below mirrors the checked commands in `/docs/mcp`. Keep command
- * changes synchronized with that document so the dialog remains the concise path and the
- * guide remains the complete recovery/reference path.
+ * The quick-setup panel below is the concise path; the complete per-agent reference is
+ * busabase.com/connect-agents/<slug>, written from each vendor's own docs and stored in the
+ * Agents Directory Base. When a vendor changes its MCP command, update both.
  */
 export const AGENT_BRAND_LINKS: { name: string; url: string; kind: McpAgentKind }[] = [
   { name: "Claude Code", url: "https://claude.com/claude-code", kind: "shell" },
@@ -57,10 +57,32 @@ export const MCP_AGENT_IDS = [
 
 export type McpAgentId = (typeof MCP_AGENT_IDS)[number];
 
+/**
+ * Per-agent setup lives on busabase.com/connect-agents/<slug>, kept current from each vendor's own
+ * docs. The slugs match the guide ids except Hermes, whose directory row is `hermes-agent`.
+ */
+const CONNECT_AGENT_SLUGS: Record<McpAgentId, string> = {
+  codex: "codex",
+  "claude-code": "claude-code",
+  cursor: "cursor",
+  "gemini-cli": "gemini-cli",
+  openclaw: "openclaw",
+  hermes: "hermes-agent",
+  workbuddy: "workbuddy",
+  "buda-agent": "buda-agent",
+};
+
+/** busabase.com routes every core locale; English is served without a prefix. */
+export const getConnectAgentUrl = (slug: string, lang?: string): string =>
+  lang && lang !== "en"
+    ? `https://busabase.com/${lang}/connect-agents/${slug}`
+    : `https://busabase.com/connect-agents/${slug}`;
+
 export interface McpAgentGuide {
   id: McpAgentId;
   name: string;
-  docAnchor: string;
+  /** Slug of this agent's maintained setup page, `busabase.com/connect-agents/<slug>`. */
+  connectAgentSlug: string;
   format: "bash" | "json" | "yaml" | "text";
   setup: string;
   connection: string;
@@ -668,7 +690,7 @@ export function createMcpAgentGuides({
     return {
       id,
       name: AGENT_NAMES[id],
-      docAnchor: id,
+      connectAgentSlug: CONNECT_AGENT_SLUGS[id],
       format,
       setup,
       connection: connectionCopy[id],

@@ -3,14 +3,9 @@
  *
  * A template carries two things that travel separately: the *resources* (Folder,
  * Bases, AirApp) and the *manual* (`SKILL.md`) that tells an agent how to drive
- * them. "UI install" puts the resources in this space and leaves an external
- * agent none the wiser; this is the other direction — it hands the manual to an
- * agent and touches nothing in the space.
- *
- * Deliberately install-only: the prompt tells the agent to add the skill and
- * then STOP. An agent that helpfully provisions a Folder on the way would make
- * the two tabs do the same thing by different routes, and the user picked a tab
- * precisely to say which one they wanted.
+ * them. Template packages use Busabase's CLI for resources in the connected
+ * space and the skills CLI for the local manual. Standalone skills need only
+ * the skills CLI.
  *
  * Pure: takes a resolved source + the localized strings, returns text. No react,
  * no db, no transport — so the command it prints can be asserted in a unit test
@@ -28,9 +23,7 @@ export interface AgentInstallSource {
 }
 
 /**
- * The skill's own name in the `skills` CLI sense — the LAST path segment of the
- * package's subdirectory (`skills/kelly-email` → `kelly-email`), which is the
- * directory `npx skills add --skill` matches on.
+ * The package selector is the LAST path segment of its subdirectory.
  *
  * A package installed from a repository root has no subdirectory and therefore
  * no name to select: the repository IS the skill.
@@ -40,15 +33,30 @@ export const skillNameForSource = (source: AgentInstallSource): string | null =>
   return segments.length > 0 ? (segments.at(-1) as string) : null;
 };
 
-/**
- * `npx skills add <owner>/<repo> [--skill <name>]`.
- *
- * The ref is NOT passed as a flag. `skills add` takes a repository, and inventing
- * a `--ref` it may not have would produce a command that fails in the user's
- * terminal — worse than a command that installs the default branch, which is
- * what the catalog is built from anyway. Callers surface the ref as prose.
- */
+export const isTemplateInstallSource = (source: AgentInstallSource): boolean =>
+  (source.subdir ?? "").split("/").filter(Boolean).join("/").startsWith("templates/");
+
+/** Templates install both space resources and the local agent skill. */
 export const buildAgentInstallCommand = (source: AgentInstallSource): string => {
+  if (isTemplateInstallSource(source)) {
+    const ref = source.ref || "main";
+    const encodedRef = encodeURIComponent(ref);
+    const repo = `${source.owner}/${source.repo}`;
+    const repoUrl = `https://github.com/${repo}/tree/${encodedRef}`;
+    const subdir = (source.subdir ?? "")
+      .split("/")
+      .filter(Boolean)
+      .map(encodeURIComponent)
+      .join("/");
+    // skills decodes fragment refs, but treats encoded tree refs as literal branch names.
+    const localSkillSource =
+      encodedRef === ref ? `${repoUrl}/${subdir}` : `${repo}/${subdir}#${encodedRef}`;
+    return [
+      `npx busabase-cli install ${repoUrl} --skill ${skillNameForSource(source)}`,
+      `npx skills add ${localSkillSource}`,
+    ].join("\n");
+  }
+
   const skill = skillNameForSource(source);
   const repo = `${source.owner}/${source.repo}`;
   return skill ? `npx skills add ${repo} --skill ${skill}` : `npx skills add ${repo}`;

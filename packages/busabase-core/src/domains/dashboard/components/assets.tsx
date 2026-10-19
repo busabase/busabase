@@ -20,7 +20,7 @@ import {
   Trash2,
   Upload,
 } from "lucide-react";
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
 import { presentCoreError } from "../../../i18n/localize-error";
@@ -634,6 +634,7 @@ export function AssetSearchableTextPanel({
   const messages = useCoreI18n();
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<AssetTextWriteMode>("paste");
+  const pasteTextareaRef = useRef<HTMLTextAreaElement>(null);
   const [text, setText] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [pendingStorageKey, setPendingStorageKey] = useState<string | null>(null);
@@ -811,7 +812,15 @@ export function AssetSearchableTextPanel({
               if (!nextOpen) resetWriteState();
             }}
           >
-            <DialogContent className="sm:max-w-xl">
+            <DialogContent
+              className="sm:max-w-xl"
+              // Radix would focus the Paste tab; on the Paste tab the textarea is the point.
+              onOpenAutoFocus={(event) => {
+                if (!pasteTextareaRef.current) return;
+                event.preventDefault();
+                pasteTextareaRef.current.focus();
+              }}
+            >
               <DialogHeader>
                 <DialogTitle>{actionLabel}</DialogTitle>
                 <DialogDescription>{messages.assets.textWriteDescription}</DialogDescription>
@@ -849,6 +858,7 @@ export function AssetSearchableTextPanel({
                     id="asset-searchable-text"
                     onChange={(event) => setText(event.target.value)}
                     placeholder={messages.assets.textPastePlaceholder}
+                    ref={pasteTextareaRef}
                     value={text}
                   />
                   <div

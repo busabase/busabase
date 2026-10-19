@@ -205,6 +205,11 @@ export function HomeView({
     [nodeCacheSnapshot.visited],
   );
 
+  // The whole-space total: the preview list is only the first few, so it can
+  // never be the number.
+  const countsQuery = useQuery(orpc.changeRequests.reviewCount.queryOptions({}));
+  const pendingCount = countsQuery.data?.review ?? pendingChangeRequests.length;
+
   const activityQuery = useQuery(
     orpc.activity.listPaged.queryOptions({ input: { limit: HOME_ACTIVITY_PREVIEW_COUNT } }),
   );
@@ -242,7 +247,7 @@ export function HomeView({
                 // whatever `view` the user last left behind, so "View all"
                 // under a "Waiting for your review" list could land on Merged.
                 action={<HomeSectionLink href="/inbox?view=review" label={home.pendingViewAll} />}
-                count={fmt(home.pendingCount, { count: pendingChangeRequests.length })}
+                count={fmt(home.pendingCount, { count: pendingCount })}
                 name="pending"
                 title={home.pendingTitle}
               >

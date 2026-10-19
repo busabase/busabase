@@ -41,7 +41,7 @@ const defaultLabels: TemplateDetailLabels = {
     "The agent can answer these because the template installs its author's manual alongside its Bases. It does not have to guess your schema.",
   contentsTitle: "What installing this creates",
   contentsDescription:
-    "Bases, fields, and sample rows are created straight away. App code and the agent manual are proposed as change requests for you to review first.",
+    'Bases, fields, sample rows, the app and the agent manual go live as soon as you install, since installing needs an owner or admin of the workspace. Tick "Send the content for review first" in the install dialog to receive the app code and manual as change requests instead.',
   bases: "Bases",
   apps: "Apps",
   documents: "Documents",

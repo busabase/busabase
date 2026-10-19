@@ -273,7 +273,7 @@ export function FileUploadTaskProvider({
         const invalidations = [
           queryClient.invalidateQueries({ queryKey: orpc.assets.list.key() }),
           queryClient.invalidateQueries({ queryKey: orpc.changeRequests.list.key() }),
-          queryClient.invalidateQueries({ queryKey: orpc.changeRequests.counts.key() }),
+          queryClient.invalidateQueries({ queryKey: orpc.changeRequests.reviewCount.key() }),
         ];
         if (merged && runtime.batch.files.some((item) => item.replace)) {
           // A replace keeps the path but swaps the bytes, so an open preview

@@ -42,6 +42,38 @@ const plan: InstallPlanVO = {
 };
 
 describe("AgentInstallPanel", () => {
+  it("shows the template resource install command and matching instructions", () => {
+    const markup = renderToStaticMarkup(
+      <CoreI18nProvider locale="en">
+        <AgentInstallPanel
+          plan={{
+            ...plan,
+            package: { ...plan.package, name: "Busa Drama" },
+            source: {
+              owner: "busabase",
+              repo: "templates",
+              subdir: "templates/busa-drama",
+            },
+          }}
+        />
+      </CoreI18nProvider>,
+    );
+
+    expect(markup).toContain(
+      "npx busabase-cli install https://github.com/busabase/templates/tree/main --skill busa-drama",
+    );
+    expect(markup).toContain(
+      "npx skills add https://github.com/busabase/templates/tree/main/templates/busa-drama",
+    );
+    expect(markup).toContain("installs the template&#x27;s folders, tables, app");
+    expect(markup).toContain("Read the installed local SKILL.md");
+    expect(markup).toContain("do not repeat initialization or resubmit pending requests");
+    expect(markup).toContain("local skill path");
+    expect(markup).toContain("change requests waiting for review");
+    expect(markup).not.toContain("do not create, change or delete anything");
+    expect(markup).not.toContain("nothing in this space is created or changed");
+  });
+
   it("keeps connection guidance inside the single copyable prompt", () => {
     const markup = renderToStaticMarkup(
       <CoreI18nProvider locale="en">

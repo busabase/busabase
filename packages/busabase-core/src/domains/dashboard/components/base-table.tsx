@@ -103,7 +103,9 @@ import { BusaBaseGantt } from "./base-gantt";
 import { BusaBaseKanban } from "./base-kanban";
 import { BulkEditRecordsDialog } from "./bulk-edit-records-dialog";
 import { DateFieldValue } from "./date-field";
+import { FieldHelpPopover } from "./field-help";
 import { FieldBadge, WhiteboardThumbnail } from "./field-preview";
+import { FormulaValue } from "./formula-value";
 import { ImportRecordsDialog } from "./import-records-dialog";
 import { DialogContent } from "./localized-dialog-content";
 import { MemberChips } from "./member-field";
@@ -398,6 +400,7 @@ function FieldColumnHeader({
         />
       )}
       <span className="truncate">{name}</span>
+      <FieldHelpPopover help={field.options.help} name={name} fieldId={field.id} />
       <span className="relative ml-auto size-7 shrink-0">
         <Popover onOpenChange={setOpen} open={open}>
           <PopoverTrigger asChild>
@@ -1120,20 +1123,9 @@ export function BusaBaseTable({
                 plural: displayCount === 1 ? "" : "s",
               });
             })()}
-            {archivedRecords.length > 0 ? (
-              <button
-                className="ml-2 underline-offset-2 hover:underline"
-                onClick={() => setShowArchivedRecords((v) => !v)}
-                type="button"
-              >
-                {showArchivedRecords
-                  ? messages.base.hideArchived
-                  : fmt(messages.base.archivedCount, { count: archivedRecords.length })}
-              </button>
-            ) : null}
           </span>
           <div className="flex shrink-0 items-center gap-2">
-            {!isAnon && (activeView || archivedViews.length > 0) ? (
+            {!isAnon && (activeView || archivedViews.length > 0 || archivedRecords.length > 0) ? (
               <details className="relative">
                 <summary
                   aria-label={messages.base.viewActions}
@@ -1143,7 +1135,7 @@ export function BusaBaseTable({
                 >
                   <MoreHorizontal size={15} />
                 </summary>
-                <div className="absolute right-0 z-50 mt-1 w-48 rounded-md border border-border/70 bg-card p-1 shadow-md">
+                <div className="absolute right-0 z-50 mt-1 w-max min-w-48 max-w-72 rounded-md border border-border/70 bg-card p-1 shadow-md">
                   {activeView ? (
                     <>
                       <button
@@ -1188,6 +1180,28 @@ export function BusaBaseTable({
                         count: archivedViews.length,
                         plural: archivedViews.length === 1 ? "" : "s",
                       })}
+                    </button>
+                  ) : null}
+                  {archivedRecords.length > 0 ? (
+                    <button
+                      className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-medium text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground ${
+                        activeView && archivedViews.length === 0
+                          ? "mt-1 border-border/60 border-t pt-2"
+                          : ""
+                      }`}
+                      data-testid="archived-records-menu-item"
+                      onClick={(event) => {
+                        setShowArchivedRecords((v) => !v);
+                        event.currentTarget.closest("details")?.removeAttribute("open");
+                      }}
+                      type="button"
+                    >
+                      {showArchivedRecords ? <EyeOff size={13} /> : <Archive size={13} />}
+                      {showArchivedRecords
+                        ? messages.base.hideArchivedRecords
+                        : fmt(messages.base.showArchivedRecords, {
+                            count: archivedRecords.length,
+                          })}
                     </button>
                   ) : null}
                 </div>
@@ -1775,6 +1789,7 @@ interface ViewChangeRequestFormProps {
 }
 
 function ViewChangeRequestDialog(props: ViewChangeRequestFormProps) {
+  const nameInputRef = useRef<HTMLInputElement>(null);
   return (
     <Dialog
       open
@@ -1787,9 +1802,15 @@ function ViewChangeRequestDialog(props: ViewChangeRequestFormProps) {
       <DialogContent
         aria-describedby={undefined}
         className="max-h-[85vh] w-[calc(100%-2rem)] overflow-y-auto p-0 sm:max-w-4xl"
+        // Radix would focus the close button rendered before the name field.
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          nameInputRef.current?.focus();
+          if (props.mode === "edit") nameInputRef.current?.select();
+        }}
         showCloseButton={false}
       >
-        <ViewChangeRequestForm {...props} />
+        <ViewChangeRequestForm {...props} nameInputRef={nameInputRef} />
       </DialogContent>
     </Dialog>
   );
@@ -1798,12 +1819,13 @@ function ViewChangeRequestDialog(props: ViewChangeRequestFormProps) {
 function ViewChangeRequestForm({
   base,
   mode,
+  nameInputRef,
   onCancel,
   onCreateView,
   onSubmitted,
   onUpdateView,
   view,
-}: ViewChangeRequestFormProps) {
+}: ViewChangeRequestFormProps & { nameInputRef: RefObject<HTMLInputElement | null> }) {
   const messages = useCoreI18n();
   const locale = useCoreLocale();
   const resolveIString = useIString();
@@ -1952,6 +1974,7 @@ function ViewChangeRequestForm({
                 setSlug(toSlug(event.target.value));
               }
             }}
+            ref={nameInputRef}
             value={name}
           />
         </label>
@@ -2252,6 +2275,14 @@ function RecordTableCellContent({
   const rawValue = record.headCommit.payload[field.slug];
   const chips = getFieldChipEntries(field, rawValue);
   const kind = fieldDisplayKind(field.type);
+
+  if (field.type === "formula") {
+    return (
+      <Link className="block min-w-0 truncate py-1" href={currentRecordHref}>
+        <FormulaValue field={field} value={rawValue} record={record} />
+      </Link>
+    );
+  }
 
   if (kind === "checkbox") {
     const checked = rawValue === true || rawValue === "true";

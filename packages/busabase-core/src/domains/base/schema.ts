@@ -104,6 +104,7 @@ export const busabaseBaseFields = pgTable(
     position: integer("position").notNull().default(0),
     options: jsonb("options")
       .$type<{
+        help?: { description?: string; example?: string };
         targetBaseId?: string;
         multiple?: boolean;
         inverseFieldId?: string;
@@ -121,6 +122,9 @@ export const busabaseBaseFields = pgTable(
         };
         formula?: {
           expression: string;
+          format?: "auto" | "number" | "currency" | "percent" | "date";
+          precision?: number;
+          currency?: string;
         };
         lookup?: {
           relationFieldSlug: string;

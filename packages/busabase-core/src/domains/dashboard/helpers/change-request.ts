@@ -6,6 +6,7 @@ import type {
   OperationKind,
   OperationVO,
   RecordVO,
+  RestoredSlugChangeVO,
 } from "busabase-contract/types";
 import { iStringParse, iStringSchema } from "openlib/i18n/i-string";
 import { fmt } from "../../../i18n/fmt";
@@ -347,6 +348,47 @@ const DEFAULT_COMMIT_MESSAGES = new Set([
 export const getOperationMessage = (operation: OperationVO | null | undefined) => {
   const message = operation?.headCommit.message.trim() ?? "";
   return message && !DEFAULT_COMMIT_MESSAGES.has(message) ? message : "";
+};
+
+/**
+ * The items a restore brought back under a new slug, because another item took
+ * the old one while they sat in the Trash. Empty for every other change request,
+ * including ones merged before the merge engine recorded this.
+ */
+export const getRestoredSlugChanges = (
+  changeRequest: Pick<ChangeRequestVO, "mergeSummary">,
+): RestoredSlugChangeVO[] => {
+  const entries = (changeRequest.mergeSummary as { slugChanges?: unknown } | undefined)
+    ?.slugChanges;
+  if (!Array.isArray(entries)) return [];
+  return entries.filter(
+    (entry): entry is RestoredSlugChangeVO =>
+      typeof entry === "object" &&
+      entry !== null &&
+      ["nodeId", "nodeType", "name", "fromSlug", "toSlug"].every(
+        (key) => typeof (entry as Record<string, unknown>)[key] === "string",
+      ),
+  );
+};
+
+/**
+ * The toast after a restore. When items had to move to a free slug it names the
+ * new slug, because the old one now opens whatever took it.
+ */
+export const getRestoreToastMessage = (
+  changeRequest: Pick<ChangeRequestVO, "mergeSummary">,
+  copy: Pick<CoreI18nMessages["base"], "restoredWithNewSlug" | "restoredWithNewSlugs">,
+  fallback: string,
+): string => {
+  const changes = getRestoredSlugChanges(changeRequest);
+  const [only] = changes;
+  if (changes.length === 1 && only) {
+    return fmt(copy.restoredWithNewSlug, { name: only.name, from: only.fromSlug, to: only.toSlug });
+  }
+  if (changes.length > 1) {
+    return fmt(copy.restoredWithNewSlugs, { count: changes.length });
+  }
+  return fallback;
 };
 
 export const getChangeRequestMessage = (changeRequest: ChangeRequestVO) =>

@@ -7,7 +7,17 @@ import type {
   OperationVO,
   ReviewVO,
 } from "busabase-contract/types";
-import { Check, ChevronRight, GitMerge, Loader2, PencilLine, Sparkles, X } from "lucide-react";
+import {
+  ArrowLeft,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  GitMerge,
+  Loader2,
+  PencilLine,
+  Sparkles,
+  X,
+} from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
@@ -27,6 +37,7 @@ import {
   getOperationTargetHref,
   getOperationTargetLabel,
   getOperationTitle,
+  getRestoredSlugChanges,
   operationMeta,
   statusTone,
 } from "../helpers/change-request";
@@ -181,6 +192,43 @@ export function ConflictDiffPanel({ changeRequest }: { changeRequest: ChangeRequ
         </div>
       ) : null}
       <p className="mt-2 text-xs leading-5">{messages.review.conflictResolveHint}</p>
+    </section>
+  );
+}
+
+/**
+ * Shown on a merged restore whose items came back under a new slug. Without it
+ * the history only says "restored", and nothing tells the reader that the old
+ * slug — in a link, a bookmark, an agent's prompt — now opens a different item.
+ */
+export function RestoredSlugChangesPanel({ changeRequest }: { changeRequest: ChangeRequestVO }) {
+  const messages = useCoreI18n();
+  const changes = getRestoredSlugChanges(changeRequest);
+  if (changes.length === 0) {
+    return null;
+  }
+  return (
+    <section className="mt-5 max-w-4xl rounded-lg border border-border bg-muted/40 px-4 py-3 text-sm">
+      <div className="font-semibold">{messages.review.restoredSlugChangesTitle}</div>
+      <ul className="mt-2 space-y-1.5 text-xs">
+        {changes.map((change) => (
+          <li className="flex flex-wrap items-center gap-1.5" key={change.nodeId}>
+            <span className="font-medium">{change.name}</span>
+            <code className="rounded-md border border-border bg-card px-1.5 py-0.5 font-mono">
+              {change.fromSlug}
+            </code>
+            <span aria-hidden="true" className="text-muted-foreground">
+              →
+            </span>
+            <code className="rounded-md border border-border bg-card px-1.5 py-0.5 font-mono">
+              {change.toSlug}
+            </code>
+          </li>
+        ))}
+      </ul>
+      <p className="mt-2 text-muted-foreground text-xs leading-5">
+        {messages.review.restoredSlugChangesHint}
+      </p>
     </section>
   );
 }
@@ -722,6 +770,15 @@ export function ChangeRequestDiscussion({
 
 export type ReviewAction = "approve" | "reject" | "merge" | "close";
 
+interface InboxQueueNavigation {
+  onBack: () => void;
+  canPrevious: boolean;
+  canNext: boolean;
+  isLoading: boolean;
+  onPrevious: () => void;
+  onNext: () => void;
+}
+
 export function FinishReviewComposer({
   changeRequest,
   pendingAction,
@@ -909,6 +966,7 @@ export function ChangeRequestDetailPage({
   onMerge,
   onReject,
   onRevised,
+  queueNavigation,
   readOnly = false,
 }: {
   auditEvents: AuditEventVO[];
@@ -921,9 +979,37 @@ export function ChangeRequestDetailPage({
   onMerge: (changeRequestId: string) => void;
   onReject: (changeRequestId: string, reason?: string) => void;
   onRevised?: () => void | Promise<void>;
+  queueNavigation?: InboxQueueNavigation;
   readOnly?: boolean;
 }) {
   const messages = useCoreI18n();
+  useEffect(() => {
+    if (!queueNavigation) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || event.isComposing) {
+        return;
+      }
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest('input, textarea, select, button, [contenteditable="true"], [role="dialog"]')
+      ) {
+        return;
+      }
+      if (document.querySelector('[role="dialog"], dialog[open]') || queueNavigation.isLoading) {
+        return;
+      }
+      if (event.key.toLowerCase() === "j" && queueNavigation.canNext) {
+        event.preventDefault();
+        queueNavigation.onNext();
+      } else if (event.key.toLowerCase() === "k" && queueNavigation.canPrevious) {
+        event.preventDefault();
+        queueNavigation.onPrevious();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [queueNavigation]);
 
   if (!changeRequest) {
     return (
@@ -950,6 +1036,7 @@ export function ChangeRequestDetailPage({
           onMerge={onMerge}
           onReject={onReject}
           onRevised={onRevised}
+          queueNavigation={queueNavigation}
           readOnly={readOnly}
         />
       </section>
@@ -968,6 +1055,7 @@ export function ChangeRequestReviewLayout({
   onMerge,
   onReject,
   onRevised,
+  queueNavigation,
   readOnly = false,
 }: {
   auditEvents: AuditEventVO[];
@@ -980,6 +1068,7 @@ export function ChangeRequestReviewLayout({
   onMerge: (changeRequestId: string) => void;
   onReject: (changeRequestId: string, reason?: string) => void;
   onRevised?: () => void | Promise<void>;
+  queueNavigation?: InboxQueueNavigation;
   readOnly?: boolean;
 }) {
   const messages = useCoreI18n();
@@ -1019,8 +1108,48 @@ export function ChangeRequestReviewLayout({
       className="mx-auto max-w-6xl px-6 py-5"
       data-change-request-read-only={readOnly ? "true" : undefined}
     >
-      <div className="mb-2 flex items-center justify-end">
-        <RailToggleButton onToggle={() => setPanelOpen((current) => !current)} open={panelOpen} />
+      <div className="mb-2 flex items-center justify-between gap-3">
+        {queueNavigation ? (
+          <button
+            className="inline-flex items-center gap-1.5 text-muted-foreground text-xs transition-colors hover:text-foreground"
+            onClick={queueNavigation.onBack}
+            type="button"
+          >
+            <ArrowLeft size={14} />
+            {messages.nav.inbox}
+          </button>
+        ) : (
+          <span />
+        )}
+        <div className="flex items-center gap-1">
+          {queueNavigation ? (
+            <>
+              <button
+                aria-keyshortcuts="K"
+                aria-label={messages.inbox.previousRequest}
+                className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40"
+                disabled={!queueNavigation.canPrevious || queueNavigation.isLoading}
+                onClick={queueNavigation.onPrevious}
+                title={`${messages.inbox.previousRequest} (K)`}
+                type="button"
+              >
+                <ChevronLeft size={17} />
+              </button>
+              <button
+                aria-keyshortcuts="J"
+                aria-label={messages.inbox.nextRequest}
+                className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40"
+                disabled={!queueNavigation.canNext || queueNavigation.isLoading}
+                onClick={queueNavigation.onNext}
+                title={`${messages.inbox.nextRequest} (J)`}
+                type="button"
+              >
+                <ChevronRight size={17} />
+              </button>
+            </>
+          ) : null}
+          <RailToggleButton onToggle={() => setPanelOpen((current) => !current)} open={panelOpen} />
+        </div>
       </div>
       <div className="grid gap-7 lg:grid-cols-[minmax(0,1fr)_auto]">
         <main className="min-w-0">
@@ -1098,6 +1227,7 @@ export function ChangeRequestReviewLayout({
           </div>
 
           <ConflictDiffPanel changeRequest={changeRequest} />
+          <RestoredSlugChangesPanel changeRequest={changeRequest} />
 
           <section className="mt-6 max-w-4xl">
             <div className="font-semibold text-base">{messages.review.whatWillChange}</div>

@@ -9,6 +9,46 @@
  */
 import { z } from "zod";
 
+export const RouterOauthStartVOSchema = z.object({ redirectUrl: z.string() });
+export const RouterOauthCallbackVOSchema = z.object({
+  grantId: z.string(),
+  acprouterSpaceName: z.string(),
+});
+export const RouterGrantVOSchema = z.object({ grantId: z.string(), spaceName: z.string() });
+export const RouterEnrollmentInputSchema = z.object({
+  grantId: z.string().min(1),
+  enrollmentId: z.string().min(1),
+});
+export const RouterEnrollmentMintInputSchema = z.object({
+  grantId: z.string().min(1),
+  agentSlug: z.enum(["claude-acp", "codex-acp"]),
+});
+export const RouterEnrollmentMintVOSchema = z.object({
+  enrollmentId: z.string(),
+  command: z.string(),
+  expiresAt: z.string(),
+});
+export const RouterEnrollmentStatusVOSchema = z.object({
+  state: z.enum(["not_redeemed", "redeemed_offline", "online", "failed"]),
+  machineId: z.string().optional(),
+});
+export const RouterEnrollmentCompleteInputSchema = RouterEnrollmentInputSchema.extend({
+  agentSlug: z.enum(["claude-acp", "codex-acp"]),
+});
+export const RouterEnrollmentConnectionVOSchema = z.object({
+  connectionSlug: z.string(),
+  agentSlug: z.string(),
+});
+export type RouterOauthStartVO = z.infer<typeof RouterOauthStartVOSchema>;
+export type RouterOauthCallbackVO = z.infer<typeof RouterOauthCallbackVOSchema>;
+export type RouterGrantVO = z.infer<typeof RouterGrantVOSchema>;
+export type RouterEnrollmentInput = z.infer<typeof RouterEnrollmentInputSchema>;
+export type RouterEnrollmentMintInput = z.infer<typeof RouterEnrollmentMintInputSchema>;
+export type RouterEnrollmentMintVO = z.infer<typeof RouterEnrollmentMintVOSchema>;
+export type RouterEnrollmentStatusVO = z.infer<typeof RouterEnrollmentStatusVOSchema>;
+export type RouterEnrollmentCompleteInput = z.infer<typeof RouterEnrollmentCompleteInputSchema>;
+export type RouterEnrollmentConnectionVO = z.infer<typeof RouterEnrollmentConnectionVOSchema>;
+
 /**
  * How a backend is reached. This is the axis that decides everything else:
  * `local-subprocess` runs on whichever machine serves the request (the user's
@@ -141,6 +181,7 @@ export const AgentConnectionVOSchema = z.object({
   latest: AgentSessionVOSchema.nullable(),
   /** Whether Busabase can start another conversation with this agent right now. */
   connected: z.boolean(),
+  connectionState: z.enum(["ready", "activating", "disconnecting"]).optional(),
   /** Controls owner-only actions such as deleting the saved OAuth grant. */
   ownedByCurrentUser: z.boolean(),
 });

@@ -12,6 +12,10 @@ import {
   busabaseCommits,
   busabaseOperations,
 } from "../src/db/schema";
+import {
+  CHANGE_REQUEST_SCOPE_SETTLE_MS,
+  clearChangeRequestScopeCache,
+} from "../src/logic/change-request-scope-cache";
 import { filterVisibleChangeRequestRows } from "../src/logic/cr-lifecycle";
 import { busabaseRouter } from "../src/router";
 
@@ -35,6 +39,7 @@ const EXTRA_PENDING = 80;
 const HIGH_FANOUT_OPERATIONS = 1_000;
 const ACL_BATCH_BOUNDARY_TOTAL = 5_001;
 const FIXTURE_INSERT_BATCH_SIZE = 1_000;
+const OPERATION_SCOPE_SELECTION = "baseId,changeRequestId,nodeId";
 
 describe("inbox counts", () => {
   let dataDir = "";
@@ -244,19 +249,17 @@ describe("inbox counts", () => {
           .sort()
           .join(","),
       );
-      expect(selectionKeys.filter((keys) => keys === "id,status,submittedBy")).toHaveLength(1);
       expect(
-        selectionKeys.filter(
-          (keys) => keys === "baseId,changeRequestId,headCommitId,operation,position",
-        ),
+        selectionKeys.filter((keys) => keys === "id,status,submittedBy,updatedAt"),
       ).toHaveLength(1);
       const distinctSelectionKeys = selectDistinctSpy.mock.calls.map(([selection]) =>
         Object.keys(selection ?? {})
           .sort()
           .join(","),
       );
+      // ONE operations scan per ACL batch (it used to be two identical scans).
       expect(
-        distinctSelectionKeys.filter((keys) => keys === "changeRequestId,nodeId"),
+        distinctSelectionKeys.filter((keys) => keys === OPERATION_SCOPE_SELECTION),
       ).toHaveLength(1);
       expect(
         selectionKeys.filter(
@@ -291,18 +294,15 @@ describe("inbox counts", () => {
           .join(","),
       );
       expect(
-        selectionKeys.filter(
-          (keys) => keys === "baseId,changeRequestId,headCommitId,operation,position",
-        ),
-      ).toHaveLength(1);
-      expect(
         selectDistinctSpy.mock.calls.filter(
           ([selection]) =>
             Object.keys(selection ?? {})
               .sort()
-              .join(",") === "changeRequestId,nodeId",
+              .join(",") === OPERATION_SCOPE_SELECTION,
         ),
       ).toHaveLength(1);
+      // Base → node is resolved once per distinct Base, not joined per operation.
+      expect(selectionKeys.filter((keys) => keys === "id,nodeId")).toHaveLength(1);
       const directScopes = await db
         .selectDistinct({
           changeRequestId: busabaseOperations.changeRequestId,
@@ -527,6 +527,122 @@ describe("inbox counts", () => {
     }
   });
 
+  it("caches settled terminal scopes but re-checks node visibility on every call", async () => {
+    const db = await getDb();
+    const cachedBase = await client.bases.create({
+      slug: "inbox-scope-cache",
+      name: "Inbox Scope Cache",
+      autoMerge: true,
+    });
+    const settledAt = new Date(Date.now() - CHANGE_REQUEST_SCOPE_SETTLE_MS - 60_000);
+    const fixtures = [
+      { suffix: "merged", status: "merged" as const, updatedAt: settledAt },
+      { suffix: "open", status: "in_review" as const, updatedAt: settledAt },
+      { suffix: "fresh", status: "merged" as const, updatedAt: new Date() },
+    ].map((row) => ({
+      ...row,
+      changeRequestId: `cr-inbox-scope-cache-${row.suffix}`,
+      commitId: `cmt-inbox-scope-cache-${row.suffix}`,
+      operationId: `op-inbox-scope-cache-${row.suffix}`,
+    }));
+    await db.insert(busabaseChangeRequests).values(
+      fixtures.map((row) => ({
+        id: row.changeRequestId,
+        spaceId: LOCAL_SPACE_ID,
+        baseId: cachedBase.id,
+        status: row.status,
+        submittedBy: OTHER,
+        createdAt: settledAt,
+        updatedAt: row.updatedAt,
+      })),
+    );
+    await db.insert(busabaseCommits).values(
+      fixtures.map((row) => ({
+        id: row.commitId,
+        spaceId: LOCAL_SPACE_ID,
+        baseId: cachedBase.id,
+        operationId: row.operationId,
+        payload: {},
+        operation: "record_create" as const,
+        author: OTHER,
+      })),
+    );
+    await db.insert(busabaseOperations).values(
+      fixtures.map((row) => ({
+        id: row.operationId,
+        spaceId: LOCAL_SPACE_ID,
+        changeRequestId: row.changeRequestId,
+        baseId: cachedBase.id,
+        operation: "record_create" as const,
+        headCommitId: row.commitId,
+        position: 0,
+      })),
+    );
+    const [mergedFixture, openFixture] = fixtures;
+    if (!mergedFixture || !openFixture) throw new Error("missing scope-cache fixtures");
+    const candidates = fixtures.map((row) => ({
+      id: row.changeRequestId,
+      status: row.status,
+      updatedAt: row.updatedAt,
+    }));
+    const mergedCandidate = {
+      id: mergedFixture.changeRequestId,
+      status: mergedFixture.status,
+      updatedAt: mergedFixture.updatedAt,
+    };
+    const member = <T>(fn: () => Promise<T>) =>
+      runWithBusabaseContext(
+        {
+          spaceId: LOCAL_SPACE_ID,
+          actorId: MINE,
+          isSpaceManager: false,
+          permissionLevel: "manage",
+        },
+        fn,
+      );
+    const scannedIds = (calls: unknown[][]) =>
+      calls.filter(
+        ([selection]) =>
+          Object.keys(selection ?? {})
+            .sort()
+            .join(",") === OPERATION_SCOPE_SELECTION,
+      ).length;
+
+    clearChangeRequestScopeCache();
+    const selectDistinctSpy = vi.spyOn(db, "selectDistinct");
+    try {
+      const first = await member(() => filterVisibleChangeRequestRows(candidates));
+      expect(first.map((row) => row.id)).toEqual(fixtures.map((row) => row.changeRequestId));
+      expect(scannedIds(selectDistinctSpy.mock.calls)).toBe(1);
+
+      // Second call: only the non-cacheable rows (open + fresh) hit operations.
+      selectDistinctSpy.mockClear();
+      const second = await member(() => filterVisibleChangeRequestRows([mergedCandidate]));
+      expect(second.map((row) => row.id)).toEqual([mergedFixture.changeRequestId]);
+      expect(scannedIds(selectDistinctSpy.mock.calls)).toBe(0);
+
+      // Visibility is NOT cached: hiding the node hides the cached CR at once.
+      await client.nodes.updateVisibility({ nodeId: cachedBase.nodeId, visibility: "private" });
+      const hidden = await member(() => filterVisibleChangeRequestRows([mergedCandidate]));
+      expect(hidden).toEqual([]);
+      expect(scannedIds(selectDistinctSpy.mock.calls)).toBe(0);
+      await client.nodes.updateVisibility({ nodeId: cachedBase.nodeId, visibility: null });
+
+      // Non-terminal and freshly-written rows are always re-read.
+      selectDistinctSpy.mockClear();
+      await member(() => filterVisibleChangeRequestRows(candidates.slice(1)));
+      expect(scannedIds(selectDistinctSpy.mock.calls)).toBe(1);
+    } finally {
+      selectDistinctSpy.mockRestore();
+      clearChangeRequestScopeCache();
+    }
+    // Leave the tab counts used by the other tests untouched.
+    await db
+      .update(busabaseChangeRequests)
+      .set({ status: "abandoned" })
+      .where(eq(busabaseChangeRequests.id, openFixture.changeRequestId));
+  });
+
   it("caps each operation scope query at 5,000 change requests", async () => {
     const db = await getDb();
     const existingRows = await db
@@ -555,19 +671,16 @@ describe("inbox counts", () => {
           .sort()
           .join(","),
       );
-      expect(selectionKeys.filter((keys) => keys === "id,status,submittedBy")).toHaveLength(1);
       expect(
-        selectionKeys.filter(
-          (keys) => keys === "baseId,changeRequestId,headCommitId,operation,position",
-        ),
-      ).toHaveLength(2);
+        selectionKeys.filter((keys) => keys === "id,status,submittedBy,updatedAt"),
+      ).toHaveLength(1);
       const distinctSelectionKeys = selectDistinctSpy.mock.calls.map(([selection]) =>
         Object.keys(selection ?? {})
           .sort()
           .join(","),
       );
       expect(
-        distinctSelectionKeys.filter((keys) => keys === "changeRequestId,nodeId"),
+        distinctSelectionKeys.filter((keys) => keys === OPERATION_SCOPE_SELECTION),
       ).toHaveLength(2);
       expect(counts.review).toBe(11 + EXTRA_PENDING + overflowRows);
     } finally {

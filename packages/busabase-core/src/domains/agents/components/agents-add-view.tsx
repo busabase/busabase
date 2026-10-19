@@ -24,6 +24,7 @@ import {
   requestDesktopAgent,
 } from "../utils/desktop-codex";
 import { AgentLoadingState, AgentQueryErrorState } from "./agent-query-state";
+import { RouterEnrollmentDialog } from "./router-enrollment-dialog";
 import { TransportBadge } from "./transport-badge";
 
 interface AgentsAddViewProps {
@@ -352,6 +353,13 @@ export function AgentsAddView({ orpc, onBack, onConnected, spaceId }: AgentsAddV
                         <p className="text-muted-foreground text-xs">
                           {messages.agents.integrationComingSoon}
                         </p>
+                      ) : entry.slug === "acprouter" && entry.connectionRequired ? (
+                        <RouterEnrollmentDialog
+                          key={spaceId}
+                          orpc={orpc}
+                          spaceId={spaceId}
+                          onConnected={onConnected}
+                        />
                       ) : entry.slug === "buda" && entry.connectionRequired ? (
                         <Button className="min-h-11 sm:min-h-9" onClick={openBudaConnect} size="sm">
                           {messages.agents.connectBuda}

@@ -260,6 +260,155 @@ describe("Field management — delete / update / convert", () => {
   // ── updateField ─────────────────────────────────────────────────────────────
 
   describe("updateField", () => {
+    it("merges guidance against live settings, preserves it on options edits and conversion, and clears it", async () => {
+      const initialHelp = { description: "Use the actual delivery status", example: "Done" };
+      const base = await client.bases.create({
+        autoMerge: true,
+        slug: "field-help-test",
+        name: "Field Help Test",
+        fields: [
+          { slug: "title", name: "Title", type: "text" },
+          {
+            slug: "status",
+            name: "Status",
+            type: "select",
+            options: {
+              choices: [{ id: "draft", name: "Draft" }],
+              help: initialHelp,
+            },
+          },
+        ],
+      });
+      const fieldId = requireFound(base.fields[1], "Field help test field not found").id;
+      const readField = async () => {
+        const current = await client.bases.get({ baseId: base.id });
+        if (!current) throw new Error("Field help test Base not found");
+        return requireFound(
+          current.fields.find((field) => field.id === fieldId),
+          "Field help test field not found",
+        );
+      };
+      expect((await readField()).options.help).toEqual(initialHelp);
+      const helpRequest = await client.bases.fieldChangeRequest({
+        autoMerge: false,
+        operation: "update",
+        baseId: base.id,
+        fieldId,
+        patch: { help: { description: "Actual completion only", example: "Completed" } },
+      });
+      // Guidance awaiting approval is not yet visible to colleagues.
+      expect((await readField()).options.help).toEqual(initialHelp);
+      const optionsRequest = await client.bases.fieldChangeRequest({
+        autoMerge: false,
+        operation: "update",
+        baseId: base.id,
+        fieldId,
+        patch: {
+          name: "Actual Status",
+          required: true,
+          options: { choices: [{ id: "done", name: "Done" }] },
+        },
+      });
+      await approveAndMerge(optionsRequest.id);
+      await approveAndMerge(helpRequest.id);
+      expect(await readField()).toMatchObject({ name: "Actual Status", required: true });
+      expect((await readField()).options).toMatchObject({
+        choices: [{ id: "done", name: "Done" }],
+        help: { description: "Actual completion only", example: "Completed" },
+      });
+      // A type-specific replacement retains the most recently merged help.
+      const laterOptions = await client.bases.fieldChangeRequest({
+        autoMerge: false,
+        operation: "update",
+        baseId: base.id,
+        fieldId,
+        patch: { options: { choices: [{ id: "archived", name: "Archived" }] } },
+      });
+      await approveAndMerge(laterOptions.id);
+      expect((await readField()).options.help?.description).toBe("Actual completion only");
+      const convert = await client.bases.fieldChangeRequest({
+        operation: "convert",
+        baseId: base.id,
+        fieldId,
+        newType: "text",
+      });
+      await approveAndMerge(convert.id);
+      expect((await readField()).options).toEqual({
+        help: { description: "Actual completion only", example: "Completed" },
+      });
+      const clear = await client.bases.fieldChangeRequest({
+        autoMerge: false,
+        operation: "update",
+        baseId: base.id,
+        fieldId,
+        patch: { help: null },
+      });
+      await approveAndMerge(clear.id);
+      expect((await readField()).options).toEqual({});
+    });
+
+    it("rejects guidance over the description and example limits", async () => {
+      const fieldId = await getFieldId(testBaseId, "notes");
+      for (const help of [{ description: "x".repeat(1001) }, { example: "x".repeat(201) }]) {
+        await expect(
+          client.bases.fieldChangeRequest({
+            operation: "update",
+            baseId: testBaseId,
+            fieldId,
+            patch: { help },
+          }),
+        ).rejects.toBeDefined();
+      }
+    });
+
+    it("does not restore the previous type or date settings when queued guidance merges", async () => {
+      const base = await client.bases.create({
+        autoMerge: true,
+        slug: "queued-field-help-test",
+        name: "Queued Field Help",
+        fields: [
+          { slug: "title", name: "Title", type: "text" },
+          { slug: "delivery", name: "Delivery", type: "text" },
+        ],
+      });
+      const fieldId = requireFound(base.fields[1], "Expected delivery field").id;
+      const guidance = await client.bases.fieldChangeRequest({
+        autoMerge: false,
+        operation: "update",
+        baseId: base.id,
+        fieldId,
+        patch: { help: { description: "Actual acceptance time", example: "2026-10-14 09:00" } },
+      });
+      const conversion = await client.bases.fieldChangeRequest({
+        operation: "convert",
+        baseId: base.id,
+        fieldId,
+        newType: "date",
+      });
+      await approveAndMerge(conversion.id);
+      const dateSettings = await client.bases.fieldChangeRequest({
+        autoMerge: false,
+        operation: "update",
+        baseId: base.id,
+        fieldId,
+        patch: {
+          name: "Actual delivery",
+          options: { date: { includeTime: true, timezone: "Asia/Shanghai" } },
+        },
+      });
+      await approveAndMerge(dateSettings.id);
+      await approveAndMerge(guidance.id);
+      const current = await client.bases.get({ baseId: base.id });
+      expect(current?.fields.find((field) => field.id === fieldId)).toMatchObject({
+        name: "Actual delivery",
+        type: "date",
+        options: {
+          date: { includeTime: true, timezone: "Asia/Shanghai" },
+          help: { description: "Actual acceptance time" },
+        },
+      });
+    });
+
     it("renames a field (name only, slug stays the same)", async () => {
       const notesId = await getFieldId(testBaseId, "notes");
       const cr = await client.bases.fieldChangeRequest({

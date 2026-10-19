@@ -3,7 +3,8 @@
 // RECORD_ID / CREATED_TIME / LAST_MODIFIED_TIME and ISERROR / IS_ERROR are
 // NOT here — they're special-cased directly in ../interpreter.ts because
 // they need something other than a plain evaluated-args array (record
-// bookkeeping, and lazy/caught evaluation, respectively).
+// bookkeeping, and lazy/caught evaluation, respectively). IF is retained in
+// this registry for discoverability; the interpreter handles its lazy branches.
 import { ARRAY_FUNCTIONS } from "./array";
 import { DATE_TIME_FUNCTIONS } from "./date-time";
 import { LOGICAL_FUNCTIONS } from "./logical";

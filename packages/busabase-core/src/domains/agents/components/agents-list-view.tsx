@@ -30,6 +30,9 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
 import { presentCoreError } from "../../../i18n/localize-error";
+import { routerEnrollmentText } from "../../../i18n/router-enrollment-copy";
+import { useAgentModelScope } from "../agent-model-scope-context";
+import { agentModelCatalogScope, useAgentModelListStore } from "../store/agent-model-list-store";
 import { AgentLoadingState, AgentQueryErrorState } from "./agent-query-state";
 import { TransportBadge } from "./transport-badge";
 
@@ -114,21 +117,39 @@ function AgentActionConfirmDialog({
  * on the Add page (`AgentsAddView`); conversations are grouped by stable agent
  * slug so "3 conversations with Claude Code" reads as one card, not three.
  */
-export function AgentsListView({ orpc, onSelectAgent, onAddAgent }: AgentsListViewProps) {
+export function AgentsListView(props: AgentsListViewProps) {
+  const scope = useAgentModelScope();
+  return <AgentsListViewContent key={JSON.stringify(scope)} {...props} />;
+}
+
+function AgentsListViewContent({ orpc, onSelectAgent, onAddAgent }: AgentsListViewProps) {
   const messages = useCoreI18n();
   const locale = useCoreLocale();
   const queryClient = useQueryClient();
   const [scope, setScope] = useState<AgentConnectionScope>("mine");
   const [disconnecting, setDisconnecting] = useState<AgentConnectionVO | null>(null);
   const [deletingHistory, setDeletingHistory] = useState<AgentConnectionVO | null>(null);
+  const isDisconnectingRouter = disconnecting?.slug.startsWith("acprouter:") ?? false;
   const connections = useQuery({
     ...orpc.agents.connections.list.queryOptions({ input: { scope } }),
     refetchInterval: 4000,
   });
 
+  const modelScope = useAgentModelScope();
   const disconnect = useMutation({
     ...orpc.agents.disconnect.mutationOptions(),
-    onSuccess: async () => {
+    onSuccess: async (_result, input) => {
+      useAgentModelListStore
+        .getState()
+        .setCatalog(
+          agentModelCatalogScope(
+            modelScope.host,
+            modelScope.workspaceKey,
+            modelScope.actorId,
+            input.slug,
+          ),
+          { configId: null, updatedAt: new Date().toISOString() },
+        );
       await Promise.all([
         queryClient.invalidateQueries({
           queryKey: orpc.agents.connections.list.queryKey({ input: { scope: "mine" } }),
@@ -143,6 +164,12 @@ export function AgentsListView({ orpc, onSelectAgent, onAddAgent }: AgentsListVi
       setDisconnecting(null);
     },
     onError: (error) => {
+      void queryClient.invalidateQueries({
+        queryKey: orpc.agents.connections.list.queryKey({ input: { scope: "mine" } }),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: orpc.agents.connections.list.queryKey({ input: { scope: "space" } }),
+      });
       toast.error(
         presentCoreError(messages, locale, error, messages.agents.connectionDeleteFailed),
       );
@@ -268,13 +295,18 @@ export function AgentsListView({ orpc, onSelectAgent, onAddAgent }: AgentsListVi
                         ·
                       </span>
                       <span className="font-medium text-foreground/80">
-                        {group.latest
-                          ? statusLabel(group.latest.status, messages)
-                          : messages.agents.notStarted}
+                        {group.connectionState === "disconnecting"
+                          ? routerEnrollmentText(locale, "Disconnecting — retry disconnect")
+                          : group.connectionState === "activating"
+                            ? routerEnrollmentText(locale, "Pairing activation incomplete")
+                            : group.latest
+                              ? statusLabel(group.latest.status, messages)
+                              : messages.agents.notStarted}
                       </span>
                     </p>
                   </button>
-                  {(group.ownedByCurrentUser && group.connected) || group.sessionCount > 0 ? (
+                  {(group.ownedByCurrentUser && (group.connected || group.connectionState)) ||
+                  group.sessionCount > 0 ? (
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <Button
@@ -288,7 +320,7 @@ export function AgentsListView({ orpc, onSelectAgent, onAddAgent }: AgentsListVi
                         </Button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end">
-                        {group.connected && group.ownedByCurrentUser ? (
+                        {(group.connected || group.connectionState) && group.ownedByCurrentUser ? (
                           <DropdownMenuItem onSelect={() => setDisconnecting(group)}>
                             <Unplug className="mr-2 size-4" />
                             {messages.agents.disconnectAgent}
@@ -315,14 +347,19 @@ export function AgentsListView({ orpc, onSelectAgent, onAddAgent }: AgentsListVi
       <AgentActionConfirmDialog
         body={
           disconnecting
-            ? fmt(messages.agents.deleteConnectionBody, {
-                name: disconnecting.agentName,
-                count: disconnecting.sessionCount,
-                unit:
-                  disconnecting.sessionCount === 1
-                    ? messages.agents.sessionOne
-                    : messages.agents.sessionMany,
-              })
+            ? isDisconnectingRouter
+              ? routerEnrollmentText(
+                  locale,
+                  "End this device’s active sessions and remove its connection. Conversation history is kept, and other devices stay connected.",
+                )
+              : fmt(messages.agents.deleteConnectionBody, {
+                  name: disconnecting.agentName,
+                  count: disconnecting.sessionCount,
+                  unit:
+                    disconnecting.sessionCount === 1
+                      ? messages.agents.sessionOne
+                      : messages.agents.sessionMany,
+                })
             : ""
         }
         cancelLabel={messages.common.cancel}
@@ -334,7 +371,11 @@ export function AgentsListView({ orpc, onSelectAgent, onAddAgent }: AgentsListVi
         open={disconnecting !== null}
         pending={disconnect.isPending}
         pendingLabel={messages.common.working}
-        title={messages.agents.deleteConnectionTitle}
+        title={
+          isDisconnectingRouter
+            ? routerEnrollmentText(locale, "Disconnect this device?")
+            : messages.agents.deleteConnectionTitle
+        }
       />
       <AgentActionConfirmDialog
         body={

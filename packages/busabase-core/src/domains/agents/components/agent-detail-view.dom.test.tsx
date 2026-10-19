@@ -9,8 +9,10 @@ import type { AgentSessionVO } from "busabase-contract/domains/agents/types";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CoreI18nProvider } from "../../../i18n";
+import { AgentIntegrationProvider } from "../../dashboard/agent-integration-context";
 import { SubmitPermissionProvider } from "../../dashboard/components/split-submit-button";
 import type { LoadedNode } from "../../dashboard/node-detail-registry";
+import { agentModelCatalogScope, useAgentModelListStore } from "../store/agent-model-list-store";
 
 /**
  * "End this agent conversation" — the one affordance that releases a spawned
@@ -56,6 +58,7 @@ vi.mock("../hooks/use-agent-session", () => ({
 vi.mock("@acp-ui/web/composer", () => ({
   AcpComposer: ({
     disabled,
+    footerControls,
     headerControls,
     labels,
     onSend,
@@ -63,6 +66,7 @@ vi.mock("@acp-ui/web/composer", () => ({
     sending,
   }: {
     disabled?: boolean;
+    footerControls?: ReactNode;
     headerControls?: ReactNode;
     labels?: { stopPrompt?: string };
     onSend: (text: string) => void;
@@ -81,6 +85,7 @@ vi.mock("@acp-ui/web/composer", () => ({
         >
           {canStop ? "Stop" : "Send test prompt"}
         </button>
+        <div data-testid="composer-footer">{footerControls}</div>
       </div>
     );
   },
@@ -89,6 +94,29 @@ vi.mock("@acp-ui/web/composer", () => ({
 vi.mock("@acp-ui/web/transcript", () => ({
   AcpConversation: ({ activity }: { activity?: ReactNode }) => (
     <div data-testid="conversation">{activity}</div>
+  ),
+}));
+
+/**
+ * `ModelSelectorRow` renders kui's Radix `Select` under the hood, which has
+ * its own dedicated test file (`model-selector-row.dom.test.tsx`). Mocked
+ * here down to the facts these tests care about — which `modelOption` the
+ * view handed it, and whether it was told to disable the picker — so a
+ * regression in *which session's model* reaches the footer slot, or in
+ * *when the picker is allowed to be touched*, cannot hide behind an
+ * unrelated Radix rendering failure.
+ */
+vi.mock("./model-selector-row", () => ({
+  ModelSelectorRow: ({
+    modelOption,
+    disabled,
+  }: {
+    modelOption: { name: string };
+    disabled?: boolean;
+  }) => (
+    <span data-testid="model-selector-row" data-disabled={disabled ? "true" : "false"}>
+      {modelOption.name}
+    </span>
   ),
 }));
 
@@ -150,6 +178,7 @@ function renderView(options: {
   compactSessionNavigation?: boolean;
   contextNode?: LoadedNode | null;
   locale?: string;
+  targetSpaceId?: string;
 }) {
   const close = options.close ?? vi.fn(async () => ({ ok: true }));
   const sessions = options.sessions;
@@ -171,15 +200,19 @@ function renderView(options: {
   const view = () => (
     <QueryClientProvider client={client}>
       <CoreI18nProvider locale={options.locale}>
-        {wrap(
-          <AgentDetailView
-            agentSlug="test-agent"
-            compactSessionNavigation={options.compactSessionNavigation}
-            contextNode={options.contextNode}
-            onBack={() => {}}
-            orpc={stubOrpc(getItems, close, create, prompt, options.listPage)}
-          />,
-        )}
+        <AgentIntegrationProvider
+          agentIntegration={{ edition: "cloud", targetSpaceId: options.targetSpaceId }}
+        >
+          {wrap(
+            <AgentDetailView
+              agentSlug="test-agent"
+              compactSessionNavigation={options.compactSessionNavigation}
+              contextNode={options.contextNode}
+              onBack={() => {}}
+              orpc={stubOrpc(getItems, close, create, prompt, options.listPage)}
+            />,
+          )}
+        </AgentIntegrationProvider>
       </CoreI18nProvider>
     </QueryClientProvider>
   );
@@ -583,6 +616,167 @@ describe("AgentDetailView — end session", () => {
     });
   });
 
+  it("shows the new session's model immediately, before the session list refetch resolves", async () => {
+    const previousModel = {
+      id: "model",
+      name: "GPT-5",
+      currentValue: "gpt-5",
+      options: [{ value: "gpt-5", name: "GPT-5" }],
+    };
+    const newModel = {
+      id: "model",
+      name: "Claude Opus",
+      currentValue: "opus",
+      options: [{ value: "opus", name: "Claude Opus" }],
+    };
+    const previous = { ...SESSION, modelOption: previousModel };
+    const created = { ...SESSION, id: "sess-2", modelOption: newModel };
+    let releaseSessionList: (() => void) | undefined;
+    const sessionListGate = new Promise<void>((resolve) => {
+      releaseSessionList = resolve;
+    });
+    const create = vi.fn(async () => created);
+    let calls = 0;
+    renderView({
+      sessions: [previous],
+      create,
+      listPage: async () => {
+        calls += 1;
+        // Only the refetch `onSuccess` triggers (the second call) is gated —
+        // the initial mount load must resolve immediately, or nothing in
+        // this view would ever render.
+        if (calls > 1) await sessionListGate;
+        return { items: calls > 1 ? [created, previous] : [previous], nextCursor: null };
+      },
+    });
+
+    expect((await screen.findByTestId("model-selector-row")).textContent).toContain("GPT-5");
+
+    fireEvent.click(await screen.findByRole("button", { name: "New session" }));
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+
+    // The list refetch triggered by `onSuccess` has not resolved yet — proof
+    // that the new session's model came from the mutation response, not from
+    // the invalidated query landing.
+    expect(screen.getByTestId("model-selector-row").textContent).toContain("Claude Opus");
+
+    releaseSessionList?.();
+    await waitFor(() => expect(screen.getByTestId("model-selector-row")).toBeTruthy());
+    expect(screen.getByTestId("model-selector-row").textContent).toContain("Claude Opus");
+  });
+
+  it("shows only the created session's model when the previous session has no model", async () => {
+    const otherAgentModel = {
+      id: "model",
+      name: "Claude Opus",
+      currentValue: "opus",
+      options: [{ value: "opus", name: "Claude Opus" }],
+    };
+    const created = { ...SESSION, id: "sess-2", modelOption: otherAgentModel };
+    const create = vi.fn(async () => created);
+    let items = [{ ...SESSION, modelOption: null } as AgentSessionVO];
+    create.mockImplementation(async () => {
+      items = [created, ...items];
+      return created;
+    });
+    renderView({ sessions: () => items, create });
+
+    expect(screen.queryByTestId("model-selector-row")).toBeNull();
+
+    fireEvent.click(await screen.findByRole("button", { name: "New session" }));
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+
+    expect((await screen.findByTestId("model-selector-row")).textContent).toContain("Claude Opus");
+  });
+
+  it("eventually matches the authoritative list response once it resolves", async () => {
+    const createdOptimistic = {
+      id: "model",
+      name: "Claude Opus",
+      currentValue: "opus",
+      options: [{ value: "opus", name: "Claude Opus" }],
+    };
+    // The server's own refetch can disagree with the create response (e.g. a
+    // concurrent model-option change raced the creation) — the refetch must
+    // win, not be shadowed by the optimistic seed.
+    const createdAuthoritative = {
+      ...createdOptimistic,
+      currentValue: "sonnet",
+      name: "Claude Sonnet",
+    };
+    const created = { ...SESSION, id: "sess-2", modelOption: createdOptimistic };
+    const create = vi.fn(async () => created);
+    let releaseSessionList: (() => void) | undefined;
+    const sessionListGate = new Promise<void>((resolve) => {
+      releaseSessionList = resolve;
+    });
+    let calls = 0;
+    renderView({
+      sessions: [SESSION],
+      create,
+      listPage: async () => {
+        calls += 1;
+        if (calls > 1) await sessionListGate;
+        return calls > 1
+          ? {
+              items: [{ ...created, modelOption: createdAuthoritative }, SESSION],
+              nextCursor: null,
+            }
+          : { items: [SESSION], nextCursor: null };
+      },
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "New session" }));
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId("model-selector-row").textContent).toContain("Claude Opus");
+
+    releaseSessionList?.();
+    await waitFor(() =>
+      expect(screen.getByTestId("model-selector-row").textContent).toContain("Claude Sonnet"),
+    );
+  });
+
+  it("restores the old session's own model after creating and selecting a new session", async () => {
+    const oldModel = {
+      id: "model",
+      name: "GPT-5",
+      currentValue: "gpt-5",
+      options: [{ value: "gpt-5", name: "GPT-5" }],
+    };
+    const old = { ...SESSION, id: "sess-old", modelOption: oldModel };
+    const newModel = {
+      id: "model",
+      name: "Claude Opus",
+      currentValue: "opus",
+      options: [{ value: "opus", name: "Claude Opus" }],
+    };
+    const created = { ...SESSION, id: "sess-2", modelOption: newModel };
+    const create = vi.fn(async () => created);
+    let items = [old];
+    create.mockImplementation(async () => {
+      items = [created, old];
+      return created;
+    });
+    renderView({ sessions: () => items, create });
+
+    const rows = await screen.findAllByTestId("agent-session-item");
+    fireEvent.click(rows[0] as HTMLElement);
+    expect((await screen.findByTestId("model-selector-row")).textContent).toContain("GPT-5");
+
+    fireEvent.click(await screen.findByRole("button", { name: "New session" }));
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("model-selector-row").textContent).toContain("Claude Opus"),
+    );
+    const oldRow = screen.getAllByTestId("agent-session-item")[1];
+    expect(oldRow).toBeTruthy();
+    fireEvent.click(oldRow as HTMLElement);
+    await waitFor(() =>
+      expect(screen.getByTestId("model-selector-row").textContent).toContain("GPT-5"),
+    );
+  });
+
   it("reads a session that was already gone as an outcome, not a failure", async () => {
     const close = vi.fn(async () => {
       throw new Error("Unknown agent session: sess-1");
@@ -648,6 +842,21 @@ describe("AgentDetailView — node context chip", () => {
 
   const node: LoadedNode = { id: "nod_visits", type: "base", name: "Visits", slug: "visits" };
 
+  it("dispatches node context with the stable workspace ID on a customized address", async () => {
+    window.history.replaceState({}, "", "/dashboard/custom-workspace-slug/base/visits");
+    try {
+      const { prompt } = renderView({ contextNode: node, targetSpaceId: "org_stable_workspace" });
+      fireEvent.click(await screen.findByRole("button", { name: "Send test prompt" }));
+      await waitFor(() => expect(prompt).toHaveBeenCalled());
+      const text = prompt.mock.calls[0]?.[0].text;
+      expect(text).toContain("spaceId: org_stable_workspace");
+      expect(text).toContain("nodeId: nod_visits");
+      expect(text).not.toContain("spaceId: custom-workspace-slug");
+    } finally {
+      window.history.replaceState({}, "", "/");
+    }
+  });
+
   it("lands the chip inside the composer's header slot, not as a sibling before it", async () => {
     renderView({ contextNode: node });
 
@@ -679,5 +888,108 @@ describe("AgentDetailView — node context chip", () => {
     expect(
       (screen.getByRole("button", { name: "Send test prompt" }) as HTMLButtonElement).disabled,
     ).toBe(false);
+  });
+});
+
+describe("AgentDetailView — model selector availability", () => {
+  afterEach(cleanup);
+
+  const MODEL = {
+    id: "model",
+    name: "GPT-5",
+    currentValue: "gpt-5",
+    options: [{ value: "gpt-5", name: "GPT-5" }],
+  };
+
+  it("enables the selector while idle", async () => {
+    renderView({ sessions: [{ ...SESSION, status: "idle", modelOption: MODEL }] });
+
+    expect((await screen.findByTestId("model-selector-row")).dataset.disabled).toBe("false");
+  });
+
+  it("enables the selector while connecting over remote-websocket, for the cached list", async () => {
+    renderView({
+      sessions: [
+        { ...SESSION, status: "connecting", transport: "remote-websocket", modelOption: MODEL },
+      ],
+    });
+
+    expect((await screen.findByTestId("model-selector-row")).dataset.disabled).toBe("false");
+  });
+
+  it("keeps the selector disabled while connecting over local-subprocess", async () => {
+    renderView({
+      sessions: [
+        { ...SESSION, status: "connecting", transport: "local-subprocess", modelOption: MODEL },
+      ],
+    });
+
+    expect((await screen.findByTestId("model-selector-row")).dataset.disabled).toBe("true");
+  });
+
+  it("keeps the selector disabled once a turn is busy or the agent is gone", async () => {
+    for (const status of ["busy", "waiting_permission", "failed", "ended"] as const) {
+      renderView({
+        sessions: [
+          { ...SESSION, status, transport: "remote-websocket", modelOption: MODEL, id: status },
+        ],
+      });
+
+      expect((await screen.findByTestId("model-selector-row")).dataset.disabled).toBe("true");
+      cleanup();
+    }
+  });
+});
+
+describe("AgentDetailView — storage-first catalog", () => {
+  afterEach(() => {
+    cleanup();
+    useAgentModelListStore.setState({ catalogs: {} });
+  });
+
+  it("offers persisted choices while remote startup has no model metadata, without inventing a selected model", async () => {
+    useAgentModelListStore
+      .getState()
+      .setCatalog(agentModelCatalogScope("local", "local", "anonymous", "test-agent"), {
+        configId: "model",
+        name: "Model",
+        options: [{ value: "cached", name: "Cached model" }],
+        updatedAt: SESSION.lastActivityAt,
+      });
+    renderView({
+      sessions: [
+        { ...SESSION, status: "connecting", transport: "remote-websocket", modelOption: null },
+      ],
+    });
+    const selector = await screen.findByTestId("model-selector-row");
+    expect(selector.dataset.disabled).toBe("false");
+    expect(selector.textContent).not.toContain("Cached model");
+  });
+
+  it("does not rewrite the latest catalog when opening an older ready session", async () => {
+    const scope = agentModelCatalogScope("local", "local", "anonymous", "test-agent");
+    const catalog = {
+      configId: "model",
+      name: "Latest",
+      options: [],
+      updatedAt: SESSION.lastActivityAt,
+    };
+    useAgentModelListStore.getState().setCatalog(scope, catalog);
+    renderView({
+      sessions: [
+        {
+          ...SESSION,
+          status: "idle",
+          modelOption: {
+            id: "model",
+            name: "Historical",
+            currentValue: "old",
+            options: [{ value: "old", name: "Old" }],
+          },
+        },
+      ],
+    });
+    await screen.findByTestId("model-selector-row");
+    expect(useAgentModelListStore.getState().getCatalog(scope)).toEqual(catalog);
   });
 });

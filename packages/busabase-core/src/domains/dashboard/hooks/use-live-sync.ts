@@ -4,7 +4,7 @@ import { consumeEventIterator } from "@orpc/client";
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { liveEventSchema } from "busabase-contract/contract/busabase";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import type { z } from "zod";
 import {
   createLiveInvalidationBatcher,
@@ -42,6 +42,9 @@ interface UseBusabaseLiveSyncOptions {
     archivedNodes: QueryKey;
     auditEvents: QueryKey;
     bases: QueryKey;
+    // Partial key matching every `bases.get` — the open Base is its own query,
+    // so it is invalidated everywhere `bases` is.
+    baseDetail: QueryKey;
     changeRequests: QueryKey;
     changeRequestsPaged: QueryKey;
     inboxSnapshot: QueryKey;
@@ -142,6 +145,7 @@ export function useBusabaseLiveSync({
       listKeys.archivedNodes,
       listKeys.auditEvents,
       listKeys.bases,
+      listKeys.baseDetail,
       listKeys.changeRequests,
       listKeys.changeRequestsPaged,
       listKeys.inboxSnapshot,
@@ -155,6 +159,11 @@ export function useBusabaseLiveSync({
       listKeys,
     ],
   );
+
+  // Read through a ref, not an effect dependency: as a dependency, opening a
+  // different Base tore the event stream down and reconnected it.
+  const activeBaseIdRef = useRef(activeBaseId);
+  activeBaseIdRef.current = activeBaseId;
 
   useEffect(() => {
     if (!enabled) {
@@ -231,6 +240,9 @@ export function useBusabaseLiveSync({
           continue;
         }
         void queryClient.invalidateQueries({ queryKey: keyForTarget(target) });
+        if (target === "bases") {
+          void queryClient.invalidateQueries({ queryKey: stableListKeys.baseDetail });
+        }
       }
       for (const baseId of batch.baseIds) invalidateBaseScope(baseId);
     };
@@ -250,6 +262,7 @@ export function useBusabaseLiveSync({
       void queryClient.invalidateQueries({ queryKey: stableListKeys.nodeRouteState });
       void queryClient.invalidateQueries({ queryKey: stableListKeys.archivedNodes });
       void queryClient.invalidateQueries({ queryKey: stableListKeys.bases });
+      void queryClient.invalidateQueries({ queryKey: stableListKeys.baseDetail });
       void queryClient.invalidateQueries({ queryKey: stableListKeys.archivedBases });
       void queryClient.invalidateQueries({ queryKey: stableListKeys.records });
       void queryClient.invalidateQueries({ queryKey: stableListKeys.recordsPage });
@@ -259,8 +272,8 @@ export function useBusabaseLiveSync({
       inboxSnapshotInvalidator.request();
       void queryClient.invalidateQueries({ queryKey: stableListKeys.changeRequestCounts });
       void queryClient.invalidateQueries({ queryKey: stableListKeys.auditEvents });
-      if (activeBaseId) {
-        invalidateBaseScope(activeBaseId);
+      if (activeBaseIdRef.current) {
+        invalidateBaseScope(activeBaseIdRef.current);
       }
     };
 
@@ -354,7 +367,6 @@ export function useBusabaseLiveSync({
     };
   }, [
     enabled,
-    activeBaseId,
     orpc,
     queryClient,
     stableListKeys,

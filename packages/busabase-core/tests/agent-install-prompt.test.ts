@@ -22,6 +22,42 @@ describe("agent install prompt", () => {
     ref: "main",
     subdir: "skills/kelly-email",
   };
+  const templateSource = {
+    owner: "busabase",
+    repo: "templates",
+    ref: "main",
+    subdir: "templates/busa-email",
+  };
+
+  it("installs template resources and the local skill from the same main ref", () => {
+    expect(buildAgentInstallCommand(templateSource)).toBe(
+      "npx busabase-cli install https://github.com/busabase/templates/tree/main --skill busa-email\nnpx skills add https://github.com/busabase/templates/tree/main/templates/busa-email",
+    );
+    expect(buildAgentInstallCommand({ ...templateSource, ref: undefined })).toBe(
+      "npx busabase-cli install https://github.com/busabase/templates/tree/main --skill busa-email\nnpx skills add https://github.com/busabase/templates/tree/main/templates/busa-email",
+    );
+    expect(buildAgentInstallCommand({ ...templateSource, subdir: "/templates/busa-email/" })).toBe(
+      "npx busabase-cli install https://github.com/busabase/templates/tree/main --skill busa-email\nnpx skills add https://github.com/busabase/templates/tree/main/templates/busa-email",
+    );
+  });
+
+  it("preserves non-default template versions with the CLI's GitHub tree URL", () => {
+    expect(buildAgentInstallCommand({ ...templateSource, ref: "v1.2.3" })).toBe(
+      "npx busabase-cli install https://github.com/busabase/templates/tree/v1.2.3 --skill busa-email\nnpx skills add https://github.com/busabase/templates/tree/v1.2.3/templates/busa-email",
+    );
+  });
+
+  it("uses a decoded fragment ref for skills when the branch contains a slash", () => {
+    expect(
+      buildAgentInstallCommand({
+        ...templateSource,
+        ref: "chore/declare-template-video",
+        subdir: "templates/busa-drama",
+      }),
+    ).toBe(
+      "npx busabase-cli install https://github.com/busabase/templates/tree/chore%2Fdeclare-template-video --skill busa-drama\nnpx skills add busabase/templates/templates/busa-drama#chore%2Fdeclare-template-video",
+    );
+  });
 
   it("selects the skill by its directory name inside a skills repository", () => {
     expect(skillNameForSource(catalogSource)).toBe("kelly-email");
@@ -122,6 +158,41 @@ describe("agent install prompt", () => {
       expect(prompt).toContain("space_localized");
       expect(prompt).not.toMatch(/\{[a-zA-Z]+\}/);
       expect(prompt).not.toMatch(/api[_ -]?key|access[_ -]?token|secret/i);
+
+      const templatePrompt = buildAgentInstallPrompt({
+        source: templateSource,
+        packageName: "Busa Email",
+        setupUrl,
+        targetSpaceId: "space_localized",
+        template: messages.install.agentTemplatePromptBody,
+        connectionCheck: messages.agentPrompts.connectionCheck,
+        fmt,
+      });
+      expect(templatePrompt).toContain(buildAgentInstallCommand(templateSource));
+      expect(templatePrompt).toContain(setupUrl);
+      expect(templatePrompt).toContain("space_localized");
+      expect(templatePrompt).toContain("SKILL.md");
+      expect(templatePrompt).not.toMatch(/\{[a-zA-Z]+\}/);
+      expect(templatePrompt).not.toMatch(/do not create, change or delete anything/i);
     }
+  });
+
+  it("asks the agent to read its local skill, reuse resources and distinguish partial failure", () => {
+    const prompt = buildAgentInstallPrompt({
+      source: templateSource,
+      packageName: "Busa Email",
+      setupUrl: createSetupSkillUrl("http://localhost:15419", "desktop", true),
+      template: coreMessagesEn.install.agentTemplatePromptBody,
+      connectionCheck: coreMessagesEn.agentPrompts.connectionCheck,
+      fmt,
+    });
+
+    expect(prompt).toContain("Read the installed local SKILL.md");
+    expect(prompt).toContain("resolving file paths relative to its directory");
+    expect(prompt).toContain("do not repeat initialization or resubmit pending requests");
+    expect(prompt).toContain("Report the local skill path, each installation's result");
+    expect(prompt).toContain(
+      "If either command fails, report which step failed and what succeeded",
+    );
   });
 });

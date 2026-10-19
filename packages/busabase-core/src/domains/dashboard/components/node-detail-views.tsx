@@ -75,9 +75,11 @@ import { useReportLoadedNode } from "../hooks/use-report-loaded-node";
 import type { LoadedNode } from "../node-detail-registry";
 import { type NodeDetailProps, registerNodeDetail } from "../node-detail-registry";
 import { registerSidePanelTab, type SidePanelTabProps } from "../side-panel-registry";
+import { useSidePanelStore } from "../store/side-panel-store";
 import { useIsAnonymousVisitor } from "../visitor-context";
 import { AgentPromptsView } from "./agent-prompts-view";
 import { AssetMediaPreview } from "./assets";
+import { DriveParsedTextPanel, type DriveParsedTextPayload } from "./drive-parsed-text-panel";
 import { MarkdownFieldPreview } from "./field-preview";
 import { FilePreviewSurface, isFileFullscreenMime } from "./file-preview-surface";
 import {
@@ -100,7 +102,6 @@ import {
 import { useFileUploadTasks } from "./file-upload-tasks";
 import { NodeActionsMenu } from "./node-actions-menu";
 import { NodeAgentPromptsButton } from "./node-agent-prompts-button";
-import { resolveSpaceId } from "./node-agent-prompts-dialog";
 import { NodePinButton, nodeSidePanelTabId } from "./node-pin-button";
 import { NodeShareDialog } from "./node-share-button";
 import { PreviewFullscreenButton, usePreviewFullscreen } from "./preview-fullscreen";
@@ -171,6 +172,7 @@ export function FileTreeDetailView({
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState("");
+  const fileEditorRef = useRef<HTMLTextAreaElement>(null);
   const [busy, setBusy] = useState<null | "save" | "changeRequest">(null);
   const [fileActionError, setFileActionError] = useState<string | null>(null);
   const [renameTarget, setRenameTarget] = useState<FileTreeFileVO | null>(null);
@@ -382,6 +384,22 @@ export function FileTreeDetailView({
     () => new Map((fileTree?.files ?? []).map((file) => [file.path, file])),
     [fileTree?.files],
   );
+  const parsedTextTabId = fileTree ? `drive-parsed-text-${fileTree.node.id}` : null;
+  const parsedTextOpen = useSidePanelStore(
+    (state) => state.isOpen && state.activeTabId === parsedTextTabId,
+  );
+
+  useEffect(() => {
+    if (nodeType !== "drive" || hideActions || !parsedTextTabId || !fileTree) return;
+    const panel = useSidePanelStore.getState();
+    if (!panel.tabs.some((tab) => tab.id === parsedTextTabId)) return;
+    const file = openPath ? filesByPath.get(openPath) : null;
+    if (!file) {
+      if (openPath || fileTree.files.length === 0) panel.closeTab(parsedTextTabId);
+      return;
+    }
+    panel.updateTabPayload(parsedTextTabId, { assetId: file.assetId, filePath: openPath });
+  }, [fileTree, filesByPath, hideActions, nodeType, openPath, parsedTextTabId]);
   const selectedFilePaths = useMemo(
     () => resolveFileTreeSelectedPaths(selectedKeys, fileTree?.files ?? []),
     [fileTree?.files, selectedKeys],
@@ -760,6 +778,14 @@ export function FileTreeDetailView({
     setIsEditing(true);
   };
 
+  // Clicking Edit should let the user type straight away — caret at the top,
+  // not at the end of a long file.
+  useEffect(() => {
+    if (!isEditing) return;
+    fileEditorRef.current?.setSelectionRange(0, 0);
+    fileEditorRef.current?.focus();
+  }, [isEditing]);
+
   const cancelEditingFile = () => {
     setIsEditing(false);
     setDraft("");
@@ -889,7 +915,10 @@ export function FileTreeDetailView({
         </TabsContent>
       ) : null}
 
-      <FileTreeBrowserPane hasTabs={agentPromptsTab !== undefined}>
+      <FileTreeBrowserPane
+        compactTree={nodeType === "drive" && parsedTextOpen}
+        hasTabs={agentPromptsTab !== undefined}
+      >
         <aside className="min-h-[220px] border-border/60 border-b bg-muted/20 lg:min-h-0 lg:border-r lg:border-b-0">
           <div className="flex h-full min-h-0 flex-col">
             <div className="flex min-h-11 items-center justify-between gap-3 border-border/50 border-b px-4">
@@ -1045,6 +1074,32 @@ export function FileTreeDetailView({
             </div>
             {openPath && fileQuery.data && !fileQuery.isError ? (
               <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+                {nodeType === "drive" && !hideActions && fileQuery.data.assetId ? (
+                  <Button
+                    className="h-8 gap-1.5 px-2 text-muted-foreground"
+                    onClick={() => {
+                      if (!parsedTextTabId || !openPath) return;
+                      const panel = useSidePanelStore.getState();
+                      panel.updateTabPayload(parsedTextTabId, {
+                        assetId: fileQuery.data.assetId,
+                        filePath: openPath,
+                      });
+                      panel.openTab({
+                        id: parsedTextTabId,
+                        type: "drive-parsed-text",
+                        title: messages.nodeDetail.parsedText,
+                        payload: { assetId: fileQuery.data.assetId, filePath: openPath },
+                      });
+                      panel.setLayout("split");
+                    }}
+                    size="sm"
+                    type="button"
+                    variant="ghost"
+                  >
+                    <FileText aria-hidden className="size-3.5" />
+                    {messages.nodeDetail.parsedText}
+                  </Button>
+                ) : null}
                 {fileQuery.data.assetId ? (
                   <Button
                     asChild
@@ -1160,6 +1215,7 @@ export function FileTreeDetailView({
                 aria-label={openPath}
                 className="min-h-[calc(100vh-15rem)] w-full resize-none border-0 bg-background p-4 font-mono text-sm leading-6 outline-none placeholder:text-muted-foreground"
                 onChange={(event) => setDraft(event.target.value)}
+                ref={fileEditorRef}
                 spellCheck={false}
                 value={draft}
               />
@@ -1360,8 +1416,19 @@ const FileTreeTabsFrame = ({ children }: { children: ReactNode }) => (
  * the expanded folders, and a tab switch must not silently discard someone's
  * half-written edit.
  */
-const FileTreeBrowserPane = ({ hasTabs, children }: { hasTabs: boolean; children: ReactNode }) => {
-  const className = "mt-0 grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[300px_minmax(0,1fr)]";
+const FileTreeBrowserPane = ({
+  hasTabs,
+  compactTree,
+  children,
+}: {
+  hasTabs: boolean;
+  compactTree: boolean;
+  children: ReactNode;
+}) => {
+  const className = cn(
+    "mt-0 grid min-h-0 flex-1 grid-cols-1",
+    compactTree ? "lg:grid-cols-[180px_minmax(0,1fr)]" : "lg:grid-cols-[300px_minmax(0,1fr)]",
+  );
   if (!hasTabs) return <div className={className}>{children}</div>;
   return (
     <TabsContent className={`${className} data-[state=inactive]:hidden`} forceMount value="files">
@@ -1447,7 +1514,6 @@ function SkillAgentPromptsTab({ node, orpc }: { node: LoadedNode; orpc: Busabase
     nodeName: node.name,
     nodeType: "skill",
     orpc,
-    spaceId: resolveSpaceId(),
   });
 
   return (
@@ -1507,6 +1573,12 @@ function DriveSidePanelPreview({ orpc, payload }: SidePanelTabProps) {
   return <DriveDetailView hideActions orpc={orpc} slug={nodeId} />;
 }
 registerSidePanelTab("drive-preview", DriveSidePanelPreview);
+
+function DriveParsedTextSidePanel({ orpc, payload }: SidePanelTabProps) {
+  const { assetId, filePath } = payload as DriveParsedTextPayload;
+  return <DriveParsedTextPanel assetId={assetId} filePath={filePath} key={assetId} orpc={orpc} />;
+}
+registerSidePanelTab("drive-parsed-text", DriveParsedTextSidePanel);
 
 export function FileNodeDetailView({
   orpc,

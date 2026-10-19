@@ -7,6 +7,50 @@
 // and so busabase-core's own runtime accessor (`fmt`) can interpolate them.
 
 export const coreMessagesEn = {
+  fieldHelp: {
+    inherit: "Use field instructions",
+    override: "Customize for this form",
+    save: "Save instructions",
+    saveFailed: "Could not save instructions. Your changes are retained.",
+    description: "Filling instructions",
+    example: "Example",
+    preview: "Preview",
+    more: "Show more",
+    less: "Show less",
+    view: "View instructions for {name}",
+    publicHint:
+      "Instructions are also visible on shared forms. Do not include sensitive information.",
+  },
+  formula: {
+    expression: "Formula",
+    computed: "Computed · read-only",
+    invalid: "Invalid formula",
+    valid: "Valid formula",
+    catalog: "Insert field or function",
+    suggestions: "Suggestions",
+    functions: "Functions",
+    search: "Search fields or functions",
+    preview: "Sample preview",
+    previewUnavailable: "Samples could not be loaded.",
+    retry: "Retry",
+    sampleRecord: "Sample record",
+    recordLabel: "Record {index}",
+    temporaryValues: "Temporary sample values",
+    sampleValue: "Sample value",
+    result: "Result",
+    computationError: "Calculation error",
+    unavailable: "Unavailable",
+    empty: "Empty",
+    resultFormat: "Result format",
+    auto: "Automatic",
+    percent: "Percent",
+    precision: "Decimal places",
+    currencyCode: "Currency code",
+    dependencies: "Dependent formulas: {fields}",
+    discardChanges: "Discard unsaved formula changes?",
+    confirmDependencies: "Updating this formula will also recalculate: {fields}. Continue?",
+    restored: "Unsaved formula draft restored.",
+  },
   common: {
     add: "Add",
     archived: "archived",
@@ -129,6 +173,10 @@ export const coreMessagesEn = {
     filePreviewUnavailable: "Preview is unavailable",
     filePreviewRetry: "Retry",
     filePreviewUseBuiltin: "Use built-in preview",
+    parsedText: "Parsed text",
+    parsedTextMissing: "No parsed text has been supplied for this file yet.",
+    parsedTextNone: "This file was marked as having no readable text.",
+    parsedTextEmpty: "The parsed text is empty.",
     filePreviewReasons: {
       not_configured: "PreviewFile has not been configured for this workspace.",
       invalid_configuration: "The PreviewFile configuration is invalid.",
@@ -384,6 +432,17 @@ export const coreMessagesEn = {
     linkLabel: "Public link",
     copyLink: "Copy link",
     linkCopied: "Link copied",
+    qrCode: "QR code",
+    qrAlt: "QR code for this link",
+    downloadQr: "Download PNG",
+    qrFailed: "Could not generate QR code",
+    shareViaDevice: "Share",
+    recordLinkTitle: "Share record link",
+    recordPrivateTitle: "Access to this record",
+    recordPrivateHint:
+      "People need to sign in and have access to this Base to open a private record link. A QR code does not change permissions.",
+    recordPublicHint:
+      "To open without signing in, the Base must be shared publicly. That exposes the Base and its visible records, not only this record.",
     previewAsVisitor: "Preview as visitor",
     settingsTitle: "Link settings",
     settingsHint: "Control what visitors can do and when this link stops working.",
@@ -794,7 +853,7 @@ export const coreMessagesEn = {
   templates: {
     title: "Templates",
     overview:
-      "Complete apps — tables, an interface, and the manual an agent reads before it touches your data. Installing one fills in its tables, and proposes the app itself for your review.",
+      "Complete apps — tables, an interface, and the manual an agent reads before it touches your data. Installing one sets up its tables, sample rows and app, ready to use; you can choose to review the content first.",
     search: "Search templates…",
     refresh: "Refresh templates",
     browseOnly:
@@ -817,7 +876,7 @@ export const coreMessagesEn = {
       "The agent can answer these because the template installs its author's manual alongside its Bases. It does not have to guess your schema.",
     contentsTitle: "What installing this creates",
     contentsDescription:
-      "Bases, fields, and sample rows are created straight away. App code and the agent manual are proposed as change requests for you to review first.",
+      'Bases, fields, sample rows, the app and the agent manual are created straight away when you can edit this space. Tick "Send the content for review first" while installing to receive the app code and manual as change requests instead.',
     bases: "Bases",
     apps: "Apps",
     documents: "Documents",
@@ -1161,6 +1220,8 @@ export const coreMessagesEn = {
   inbox: {
     title: "Reviews",
     forReview: "For review",
+    previousRequest: "Previous change request",
+    nextRequest: "Next change request",
     mentions: "Mentions",
     mentionsEmpty: "No one has mentioned you yet.",
     mentionsEmptyBody: "When a teammate @-mentions you in a comment, it lands here.",
@@ -1490,6 +1551,10 @@ export const coreMessagesEn = {
   base: {
     /** Placeholder for the relation field picker's server-backed search box. */
     searchRecordsToLink: "Search records to link",
+    addRelation: "Add link",
+    removeRelation: "Remove link to {name}",
+    relationUnavailable: "Unavailable record",
+    relationLoadFailed: "Could not load linked records.",
     searchMembers: "Search members",
     noMembersAvailable: "No members to choose from",
     unassignedMember: "Unassigned",
@@ -1546,8 +1611,8 @@ export const coreMessagesEn = {
     paginationPage: "Go to page {page}",
     paginationCurrentPage: "Page {page}, current page",
     paginationRetry: "Retry",
-    hideArchived: "Hide archived",
-    archivedCount: "{count} archived",
+    hideArchivedRecords: "Hide archived records",
+    showArchivedRecords: "Show archived records ({count})",
     createDeleteRequestTitle: "Create delete request?",
     createDeleteRequestLabel: "Create delete request",
     deleteViewRequestBody:
@@ -1725,6 +1790,9 @@ export const coreMessagesEn = {
     baseRestored: "Base restored",
     restoreNodeMessage: "Restore {type} {name}",
     nodeRestored: "{type} restored",
+    restoredWithNewSlug: '{name} restored. Its slug "{from}" was taken, so it is now "{to}".',
+    restoredWithNewSlugs:
+      "Restored. {count} items had their slug taken and came back under new ones. The change request lists them.",
     nodeDeletedPermanently: "{type} permanently deleted",
     restoreFieldMessage: "Restore deleted field",
     fieldRestored: "Field restored",
@@ -1839,6 +1907,20 @@ export const coreMessagesEn = {
     deleteFieldCounting: "Counting affected records…",
     deleteFieldCountUnavailable: "Couldn't count the affected records.",
     deleteFieldImpact: "This column has a value in {count} record{plural}.",
+    deleteFieldDependencies: "Places using this field",
+    deleteFieldDependenciesLoading: "Checking saved views…",
+    deleteFieldDependenciesUnavailable: "Couldn't check saved views. Try again before deleting.",
+    deleteFieldDependenciesNone: "No references found in the checked items.",
+    deleteFieldDependenciesScope:
+      "Checks saved views and fields in Bases you can see. Hidden Bases, Forms, Workflow configurations, and AirApp source code are not checked.",
+    deleteFieldDependencyKinds: {
+      viewFilter: "view filter",
+      viewSort: "view sort",
+      viewDisplay: "view layout",
+      formula: "formula field",
+      lookup: "lookup field",
+      relation: "linked field",
+    },
     deleteFieldReversible:
       "The column and its values are kept and can be brought back from Deleted Fields.",
     deleteFieldHint: "Request goes to your inbox for review. Now deletes immediately.",
@@ -1879,6 +1961,9 @@ export const coreMessagesEn = {
     changesRequestedAwaiting: "Changes requested · awaiting revision",
     mergedIntoBase: "Merged into Base",
     statusClosed: "Closed",
+    restoredSlugChangesTitle: "Restored under a new slug",
+    restoredSlugChangesHint:
+      "Another item took the original slug while this one was in the Trash, so it came back under the next free one. Links, bookmarks and agent instructions that still use the old slug now open the other item.",
     mergeNeedsReview: "Merge needs review",
     mergeNeedsReviewBody:
       "{message} The change request is still safe here; request a revision or close it after review.",
@@ -2040,6 +2125,7 @@ export const coreMessagesEn = {
     updateRequest: "Update Request",
     submitNow: "Submit Now",
     updateNow: "Update Now",
+    discardUnsavedChanges: "Discard unsaved changes and leave this record?",
     saving: "Saving...",
     checked: "Checked",
     addTag: "Add tag…",
@@ -2215,7 +2301,7 @@ export const coreMessagesEn = {
     noAgents: "No agent is connected yet.",
     connectionCheckLeadIn: "Before you begin, ",
     connectionCheck:
-      "confirm that this environment is connected to Busabase and points to the correct target space{targetSpace}. If the Busabase connection is not configured or points to another space, read and follow this setup guide first:\n\n{setupUrl}",
+      "make sure this environment can reach Busabase through the busabase skill, the Busabase MCP or busabase-cli, pointed at the correct target space{targetSpace}, and do the work through them — not by opening Busabase in a browser. If none of them is set up, or the connection points to another space, first fetch this setup guide as plain text (for example with curl) and follow it:\n\n{setupUrl}",
     builtInScenarios: "Built-in scenarios",
     customScenarios: "Custom scenarios",
     builtInPrompts: "Built-in prompts",
@@ -2507,9 +2593,9 @@ export const coreMessagesEn = {
     targetFolder: "Install into folder",
     targetFolderHint:
       "A new folder is created for the package. Defaults to the package's own name.",
-    autoMerge: "Install immediately, without review",
-    autoMergeBody:
-      "By default the package's content arrives as change requests you read before anything goes live. Skipping that means trusting the author: a package can carry skills and AirApps, and that is code this space's agents will run.",
+    requireReview: "Send the content for review first",
+    requireReviewBody:
+      "Off by default: you can write to this space, so the package's records, docs, skills and AirApps go live as soon as it installs. Turn this on to receive them as change requests and read each one before merging — worth it for a package whose author you don't know, since its skills and AirApps are code this space's agents will run.",
     autoMergeRequiredTitle: "This package can only be installed without review",
     autoMergeRequiredBody:
       "Its records link to each other, and a link can only point at a record that already exists. Held for review, every link would arrive empty — so the records have to be created immediately. Read the package on GitHub first: installing it runs the author's skills and AirApps in this space.",
@@ -2534,6 +2620,9 @@ export const coreMessagesEn = {
     chooseHow: "Two ways to install this. Pick the one that matches where you work.",
     tabAgent: "Agent install",
     tabUi: "UI install",
+    agentTemplateIntro: "Ask your agent to install “{name}” into this Busabase space.",
+    agentTemplatePromptBody:
+      "Install the Busabase template \"{name}\" into my connected space and install its skill locally for this agent.\n\nBefore installing, {connectionCheck}\n\nOnce the connection is ready, run both commands in order:\n\n{command}\n\nThe first command installs the template's folders, tables, app and other packaged resources in the space. The second installs the template skill and its supporting files in this agent's local skills directory. Both use the same source and ref. Read the installed local SKILL.md, resolving file paths relative to its directory. Inspect the installed space resources and any pending change requests before following setup instructions; reuse existing resources and do not repeat initialization or resubmit pending requests. Report the local skill path, each installation's result, the space resources and any change requests waiting for review. If either command fails, report which step failed and what succeeded; do not claim the entire installation is complete.",
     agentIntro:
       "Hand the manual for “{name}” to an agent you already use — Claude Code, Codex, Cursor. It learns how this app works; nothing in this space is created or changed.",
     agentPromptLabel: "Paste this to your agent",

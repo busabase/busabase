@@ -99,3 +99,56 @@ describe("view filter preview-text parity for choice fields", () => {
     expect(filterBy([TAGS], "tags", "equals", "opt_gone")).toEqual([]);
   });
 });
+
+describe("empty list values are empty to is_empty / not_empty", () => {
+  const LEAD = field("lead", "relation");
+  const FILES = field("files", "attachment");
+  const NOTES = field("notes", "json");
+  const at = "2026-01-01T00:00:00.000Z";
+  const listRows = [
+    { id: "unset", updatedAt: at, fields: {} },
+    { id: "null", updatedAt: at, fields: { lead: null, files: null, notes: null } },
+    { id: "empty", updatedAt: at, fields: { lead: [], files: [], notes: [] } },
+    {
+      id: "filled",
+      updatedAt: at,
+      fields: { lead: ["rec_1"], files: [{ assetId: "ast_1", name: "a.pdf" }], notes: [1] },
+    },
+  ];
+  const ids = (
+    fields: BaseFieldVO[],
+    fieldSlug: string,
+    operator: ViewConfigVO["filters"][number]["operator"],
+    value?: unknown,
+  ): string[] =>
+    applyViewConfigToEvaluableRecords(listRows, fields, {
+      filters: [{ fieldSlug, operator, value }],
+      sorts: [],
+    })
+      .map((row) => row.id)
+      .sort();
+
+  it('renders [] as empty text, never the literal "[]"', () => {
+    expect(getViewFieldPreviewText(LEAD, [])).toBe("");
+    expect(getViewFieldPreviewText(FILES, [])).toBe("");
+    expect(getViewFieldPreviewText(TAGS, [])).toBe("");
+  });
+
+  for (const [slug, def] of [
+    ["lead", LEAD],
+    ["files", FILES],
+    ["notes", NOTES],
+  ] as const) {
+    it(`${def.type}: is_empty matches unset/null/[]; not_empty is the exact complement`, () => {
+      const empty = ids([def], slug, "is_empty");
+      const present = ids([def], slug, "not_empty");
+      expect(empty).toEqual(["empty", "null", "unset"]);
+      expect(present).toEqual(["filled"]);
+      expect([...empty, ...present].sort()).toEqual(listRows.map((row) => row.id).sort());
+    });
+  }
+
+  it('equals "[]" does not match an empty relation as a value', () => {
+    expect(ids([LEAD], "lead", "equals", "[]")).toEqual([]);
+  });
+});

@@ -15,6 +15,7 @@ import { iStringSchema } from "openlib/i18n/i-string";
 import { z } from "zod";
 import { customAgentPromptsSchema } from "../../contract/node-agent-prompt-schemas";
 import {
+  fieldHelpSchema,
   fieldNameSchema,
   fieldTypeSchema,
   lookupRollupSchema,
@@ -279,6 +280,7 @@ export type PackageDocFrontmatter = z.infer<typeof PackageDocFrontmatterSchema>;
  */
 export const PackageFieldOptionsSchema = z
   .object({
+    help: fieldHelpSchema.optional(),
     ai: z
       .object({
         model: z.string().optional(),

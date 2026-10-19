@@ -119,6 +119,17 @@ const EMBED_READ_ALLOWLIST: ReadonlySet<string> = new Set([
   "records.list",
   "records.listPage",
   "records.get",
+  // The aggregate and lookup reads an embedded AirApp dashboard renders its
+  // summary tiles, board column headers and keyed lookups from. Without them
+  // a shared dashboard showed 0 / failed to load while `records.list` worked.
+  // None of them is space-scoped: each filters rows through the same
+  // `buildBaseVisibilityExists` node-ACL clause `records.list` uses, and every
+  // path that resolves a Base by id (`viewId`, `filters`, `valueFilters`,
+  // `groupBy` always) goes through `getBase`, which is node-ACL'd too — so a
+  // Base the link creator cannot read counts 0 / 404s, never leaks.
+  "records.count",
+  "records.groupBy",
+  "records.search",
   "changeRequests.get",
   "fileTrees.get",
   "fileTrees.readFile",

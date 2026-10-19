@@ -120,6 +120,52 @@ describe("Base-domain DB lifecycle — oRPC", () => {
       expect(byNodeId.id).toBe(created.id);
     });
 
+    it("resolves exact Base and Node ids before a colliding slug", async () => {
+      const original = await client.bases.create({
+        slug: "lc-id-priority",
+        name: "Original",
+        fields: [{ slug: "title", name: "Title", type: "text" }],
+        autoMerge: true,
+      });
+      if ("status" in original) throw new Error("Expected materialized BaseVO");
+      const collision = await client.bases.create({
+        slug: original.id,
+        name: "Collision",
+        fields: [{ slug: "title", name: "Title", type: "text" }],
+        autoMerge: true,
+      });
+      if ("status" in collision) throw new Error("Expected materialized BaseVO");
+
+      expect((await client.bases.get({ baseId: original.id })).id).toBe(original.id);
+      expect((await client.bases.get({ baseId: original.nodeId })).id).toBe(original.id);
+      expect((await client.bases.get({ baseId: collision.id })).id).toBe(collision.id);
+    });
+
+    it("keeps an active slug ahead of an archived Base id", async () => {
+      const archived = await client.bases.create({
+        slug: "lc-archive-id-priority",
+        name: "Archived",
+        fields: [{ slug: "title", name: "Title", type: "text" }],
+        autoMerge: true,
+      });
+      if ("status" in archived) throw new Error("Expected materialized BaseVO");
+      const archiveRequest = await client.bases.lifecycleChangeRequest({
+        operation: "archive",
+        baseId: archived.id,
+        submittedBy: "agent",
+      });
+      await approveAndMerge(archiveRequest.id);
+      const active = await client.bases.create({
+        slug: archived.id,
+        name: "Active",
+        fields: [{ slug: "title", name: "Title", type: "text" }],
+        autoMerge: true,
+      });
+      if ("status" in active) throw new Error("Expected materialized BaseVO");
+
+      expect((await client.bases.get({ baseId: archived.id })).id).toBe(active.id);
+    });
+
     it("is idempotent on a duplicate slug + matching name (returns the existing Base)", async () => {
       const first = await client.bases.create({
         slug: "lc-dup",

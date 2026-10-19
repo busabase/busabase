@@ -1,4 +1,4 @@
-import type { ChangeRequestVO } from "busabase-contract/types";
+import type { ChangeRequestStatus, ChangeRequestVO } from "busabase-contract/types";
 
 /**
  * Platform-neutral rules behind the Home landing digest, shared by the web
@@ -33,6 +33,22 @@ export const selectPendingChangeRequests = (
   changeRequests: readonly ChangeRequestVO[],
 ): ChangeRequestVO[] =>
   changeRequests.filter((changeRequest) => changeRequest.status === "in_review");
+
+/**
+ * The `changeRequests.list` input behind Home's "waiting for your review"
+ * preview: only `in_review`, only as many rows as the preview shows. The total
+ * comes from `changeRequests.reviewCount` (`review`), never from this page.
+ *
+ * Shared so every Home asks the same question, including a server render that
+ * seeds it. Home used to ask for the newest 50 change requests of any status,
+ * with every operation, and filter them locally. That downloaded 455KB of
+ * merged requests to show "nothing waiting" in a busy space, and it missed a
+ * request still in review once 50 newer ones had landed.
+ */
+export const homePendingListInput = (): { status: ChangeRequestStatus[]; limit: number } => ({
+  status: ["in_review"],
+  limit: HOME_PENDING_PREVIEW_COUNT,
+});
 
 /**
  * Whether Home has nothing at all to show and should hand over to the

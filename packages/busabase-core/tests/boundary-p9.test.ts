@@ -4,7 +4,8 @@
  * Non-base node deletion used to hard-delete (cascade). It now soft-archives so
  * the deletion is recoverable: archived nodes leave their listings + the tree,
  * surface in nodes.list({ status: "archived" }), and node_restore brings them back. Folders
- * archive/restore their whole subtree as one batch; reused slugs block restore.
+ * archive/restore their whole subtree as one batch; a slug reused while the node
+ * sat in the Trash moves the restored node to the next free slug.
  */
 import { createRouterClient } from "@orpc/server";
 import { describe, expect, it } from "vitest";
@@ -25,7 +26,8 @@ async function deleteNode(raw: RawClient, nodeId: string) {
 
 async function restoreNode(raw: RawClient, nodeId: string) {
   const cr = await raw.nodes.createChangeRequest({ operations: [{ kind: "restore", nodeId }] });
-  return approveMerge(raw, cr.id);
+  await approveMerge(raw, cr.id);
+  return raw.changeRequests.get({ changeRequestId: cr.id });
 }
 
 const flatten = (nodes: Array<{ slug: string; children: unknown[] }>): string[] =>
@@ -88,7 +90,7 @@ describe("Boundary P9 — node soft-delete + restore", () => {
     );
   });
 
-  it("Fix 3: an archived node's slug is reusable; restoring it then conflicts", async () => {
+  it("Fix 3: an archived node's slug is reusable; restoring it takes the next free slug", async () => {
     await seedScenario("p9-slug-reuse");
     const raw: RawClient = createRouterClient(busabaseRouter);
 
@@ -101,10 +103,66 @@ describe("Boundary P9 — node soft-delete + restore", () => {
     if ("status" in second) throw new Error("Expected materialized DocVO");
     expect(second.node.id).not.toBe(first.node.id);
 
-    // Restoring the original now collides with the active sibling → CONFLICT.
-    await expect(restoreNode(raw, first.node.id)).rejects.toThrow(
-      /slug .* (?:is now used|is already used)|Rename it/i,
-    );
+    // Restoring the original comes back as "spec-2"; the new doc keeps "spec".
+    const merged = await restoreNode(raw, first.node.id);
+    expect(merged?.mergeSummary.slugChanges).toEqual([
+      { nodeId: first.node.id, nodeType: "doc", name: "Spec", fromSlug: "spec", toSlug: "spec-2" },
+    ]);
+    const docs = await raw.nodes.list({ types: ["doc"] });
+    expect(docs.find((d) => d.id === second.node.id)?.slug).toBe("spec");
+    expect(docs.find((d) => d.id === first.node.id)).toMatchObject({
+      slug: "spec-2",
+      name: "Spec",
+    });
+  });
+
+  it("Fix 4: a folder restore never renames a node onto a sibling coming back with it", async () => {
+    await seedScenario("p9-slug-reuse-batch");
+    const raw: RawClient = createRouterClient(busabaseRouter);
+
+    // Folder "lab" holds bases "rep" and "rep-2".
+    const folderCr = await raw.nodes.createChangeRequest({
+      operations: [{ kind: "create", nodeType: "folder", slug: "lab", name: "Lab" }],
+    });
+    await approveMerge(raw, folderCr.id);
+    const folder = flattenFind(await raw.nodes.list(), "lab");
+    const baseCr = await raw.nodes.createChangeRequest({
+      operations: ["rep", "rep-2"].map((slug) => ({
+        kind: "create" as const,
+        nodeType: "base" as const,
+        parentNodeId: folder?.id,
+        slug,
+        name: slug,
+      })),
+    });
+    await approveMerge(raw, baseCr.id);
+    const inFolder = await raw.bases.list({});
+    const repId = inFolder.find((b) => b.slug === "rep")?.id;
+    const rep2Id = inFolder.find((b) => b.slug === "rep-2")?.id;
+
+    await deleteNode(raw, folder?.id as string);
+    // Meanwhile a new "rep" is created at the root.
+    const newRep = await raw.bases.create({ name: "rep", slug: "rep" });
+
+    // "rep-2" is free among ACTIVE bases but is coming back in this same restore,
+    // so the old "rep" has to skip it.
+    const merged = await restoreNode(raw, folder?.id as string);
+    // Only the node that actually moved is reported.
+    expect(merged?.mergeSummary.slugChanges).toEqual([
+      {
+        nodeId: expect.any(String),
+        nodeType: "base",
+        name: "rep",
+        fromSlug: "rep",
+        toSlug: "rep-3",
+      },
+    ]);
+    const active = await raw.bases.list({});
+    const slugOf = (baseId: string | undefined) => active.find((b) => b.id === baseId)?.slug;
+    expect(slugOf(newRep.id)).toBe("rep");
+    expect(slugOf(rep2Id)).toBe("rep-2");
+    expect(slugOf(repId)).toBe("rep-3");
+    expect(flatten(await raw.nodes.list())).toEqual(expect.arrayContaining(["lab", "rep-3"]));
   });
 });
 

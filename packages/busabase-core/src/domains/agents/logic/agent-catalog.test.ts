@@ -29,14 +29,33 @@ const mocks = vi.hoisted(() => ({
       ],
     ]).get(slug),
   ),
+  acprouterOrigin: null as string | null,
+  actorId: undefined as string | undefined,
+  listRouterConnections: vi.fn(
+    async () => [] as { slug: string; agentSlug: string; grantId: string }[],
+  ),
+  resolveRouterConnectionLaunch: vi.fn(async (slug: string) => ({
+    url: `wss://acprouter.example/acp/${slug}`,
+    authHeader: "Bearer router-secret",
+  })),
 }));
 
 vi.mock("node:child_process", () => ({ spawnSync: mocks.spawnSync }));
-vi.mock("../../../context", () => ({ getContextActorId: () => undefined }));
+vi.mock("../../../context", () => ({ getContextActorId: () => mocks.actorId }));
 vi.mock("./buda-connection", () => ({
   getBudaAcpUrl: (agentId: string) => `wss://buda.example/api/acp?agentId=${agentId}`,
   getBudaConnection: mocks.getBudaConnection,
   listBudaConnections: mocks.listBudaConnections,
+}));
+vi.mock("./acprouter-origin-config", () => ({
+  resolveAcprouterEnrollmentOrigin: () => {
+    if (!mocks.acprouterOrigin) throw new Error("ACPROUTER_ENROLLMENT_ORIGIN must be set.");
+    return mocks.acprouterOrigin;
+  },
+}));
+vi.mock("./router-connection", () => ({
+  listRouterConnections: mocks.listRouterConnections,
+  resolveRouterConnectionLaunch: mocks.resolveRouterConnectionLaunch,
 }));
 
 import { listCatalog, resolveLaunch } from "./agent-catalog";
@@ -51,6 +70,9 @@ describe("agent catalog availability", () => {
     vi.clearAllMocks();
     vi.unstubAllEnvs();
     mocks.spawnSync.mockReturnValue({ status: 0 });
+    mocks.acprouterOrigin = null;
+    mocks.actorId = undefined;
+    mocks.listRouterConnections.mockResolvedValue([]);
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => new Response(JSON.stringify({ agents: [] }), { status: 200 })),
@@ -243,6 +265,48 @@ describe("agent catalog availability", () => {
       transport: "remote-websocket",
       url: "wss://buda.example/api/acp?agentId=agent-2",
       authHeader: "Bearer access-agent-2",
+    });
+  });
+
+  describe("ACPRouter catalog entry", () => {
+    beforeEach(() => {
+      mocks.actorId = "cloud-actor";
+    });
+    it("reports unavailable with a configuration-specific reason on an unconfigured deployment", async () => {
+      mocks.acprouterOrigin = null;
+      const catalog = await listCatalog();
+      expect(catalog.find((entry) => entry.slug === "acprouter")).toMatchObject({
+        available: false,
+        unavailableReason: expect.stringContaining("not configured"),
+        connectedAgents: [],
+      });
+    });
+
+    it("surfaces two enrolled machines under one grant as two distinct connections", async () => {
+      mocks.acprouterOrigin = "https://acprouter.example";
+      mocks.listRouterConnections.mockResolvedValue([
+        { slug: "acprouter:conn-1", agentSlug: "agent-one", grantId: "rgr_1" },
+        { slug: "acprouter:conn-2", agentSlug: "agent-two", grantId: "rgr_1" },
+      ]);
+
+      const catalog = await listCatalog();
+      const entry = catalog.find((e) => e.slug === "acprouter");
+      expect(entry).toMatchObject({ available: true, unavailableReason: null });
+      expect(entry?.connectedAgents).toEqual([
+        { slug: "acprouter:conn-1", name: "agent-one" },
+        { slug: "acprouter:conn-2", name: "agent-two" },
+      ]);
+    });
+
+    it("resolves launch for a stable ACPRouter connection slug", async () => {
+      mocks.acprouterOrigin = "https://acprouter.example";
+      await expect(resolveLaunch("acprouter:conn-1")).resolves.toEqual({
+        slug: "acprouter:conn-1",
+        name: "ACPRouter Agent",
+        transport: "remote-websocket",
+        url: "wss://acprouter.example/acp/acprouter:conn-1",
+        authHeader: "Bearer router-secret",
+      });
     });
   });
 });

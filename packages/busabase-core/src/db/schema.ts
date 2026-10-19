@@ -883,6 +883,12 @@ export * from "open-domains/attachments/schema";
 // remote ones index state the agent itself still holds.
 export * from "../domains/agents/schema/agent-session-events";
 export * from "../domains/agents/schema/agent-sessions";
+export * from "../domains/agents/schema/router-enrollments";
+export * from "../domains/agents/schema/router-grants";
+// Connect-via-ACPRouter enrollment flow: pending OAuth state, authorized
+// grants, and the pending-enrollment/connection pair (one grant can enroll
+// multiple machines, so these are not singleton tables).
+export * from "../domains/agents/schema/router-oauth-states";
 // Assets domain: Drive Grep Retrieval text slot (0..1 row per Asset).
 export * from "../domains/assets/schema/asset-texts";
 // Assets domain: the deduped Asset library + its where-used reverse index.

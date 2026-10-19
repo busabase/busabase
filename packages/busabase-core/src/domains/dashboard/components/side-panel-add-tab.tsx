@@ -13,7 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "kui/dropdown-menu";
 import { Bot, Clock, Pin, Plus, Search } from "lucide-react";
-import { useSyncExternalStore } from "react";
+import { useRef, useSyncExternalStore } from "react";
 import { useCoreI18n } from "../../../i18n";
 import type { KnownNodeCache } from "../helpers/known-node-cache";
 import { NodeAvatar } from "../helpers/node-icons";
@@ -54,6 +54,8 @@ export function SidePanelAddTab({
   onNavigate,
 }: SidePanelAddTabProps) {
   const messages = useCoreI18n();
+  /** Set while "Search" is closing the menu, so the menu doesn't take focus back from the search input. */
+  const openingSearchRef = useRef(false);
 
   const snapshot = useSyncExternalStore(
     nodeCache.subscribe,
@@ -85,7 +87,15 @@ export function SidePanelAddTab({
           <Plus className="size-4" />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-56">
+      <DropdownMenuContent
+        align="end"
+        className="w-56"
+        onCloseAutoFocus={(event) => {
+          if (!openingSearchRef.current) return;
+          openingSearchRef.current = false;
+          event.preventDefault();
+        }}
+      >
         <DropdownMenuItem
           disabled={!canPinCurrent}
           onSelect={() => {
@@ -100,7 +110,12 @@ export function SidePanelAddTab({
           </span>
         </DropdownMenuItem>
 
-        <DropdownMenuItem onSelect={onOpenSearch}>
+        <DropdownMenuItem
+          onSelect={() => {
+            openingSearchRef.current = true;
+            onOpenSearch();
+          }}
+        >
           <Search className="size-4" />
           <span className="flex-1">{messages.sidePanel.search}</span>
         </DropdownMenuItem>

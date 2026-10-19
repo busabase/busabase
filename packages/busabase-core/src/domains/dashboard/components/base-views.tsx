@@ -13,7 +13,7 @@ import { Dialog, DialogDescription, DialogHeader, DialogTitle } from "kui/dialog
 import { Pencil, Plus, RotateCcw, Star, Trash2 } from "lucide-react";
 import { type iString, iStringIsEmpty, iStringParse, iStringTrim } from "openlib/i18n/i-string";
 import { SPALink as Link } from "openlib/ui/dashboard";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearch } from "wouter";
 import { fmt, useCoreI18n, useCoreLocale, useIString } from "../../../i18n";
 import { localizeCoreErrorMessage, presentCoreError } from "../../../i18n/localize-error";
@@ -25,9 +25,18 @@ import { getPrimaryField } from "../../base/utils/primary-field";
 import { FormsForBasePanel } from "../../form/components/forms-for-base-panel";
 import { isDerivedFieldSlug } from "../helpers/change-request";
 import { createDefaultFieldOptions } from "../helpers/field";
+import { getFieldDependencies } from "../helpers/field-dependencies";
 import { fieldTypeOptions } from "../helpers/field-type-options";
 import { formatFullTime } from "../helpers/format";
+import {
+  type FormulaFieldOptions,
+  formulaDependentFields,
+  formulaFieldDraftKey,
+  readFormulaFieldDraft,
+  writeFormulaFieldDraft,
+} from "../helpers/formula-field";
 import { mergeSearchIntoHref } from "../helpers/link-search";
+import { retryUnlessNotFound } from "../helpers/query-state";
 import {
   buildSelectChoices,
   type ChoiceDraft,
@@ -49,6 +58,8 @@ import { useIsAnonymousVisitor } from "../visitor-context";
 import { applyViewConfigToRecords, BusaBaseTable } from "./base-table";
 import { DateFieldOptionsEditor } from "./date-field";
 import { type ConversionPreview, FieldConversionPreview } from "./field-conversion-preview";
+import { FieldHelpSettings, type FieldHelpValue, hasFieldHelp } from "./field-help";
+import { FormulaFieldEditor } from "./formula-field-editor";
 import { IStringNameInput } from "./i-string-input";
 import { DialogContent } from "./localized-dialog-content";
 import { NodeActionsMenu } from "./node-actions-menu";
@@ -303,6 +314,7 @@ function FieldTypeConversionPanel({
 export function BaseSetupView({
   base,
   bases,
+  draftScope = "local",
   deletedFields = [],
   orpc,
   onConvertFieldType,
@@ -313,7 +325,13 @@ export function BaseSetupView({
   onUpdateField,
 }: {
   base: BaseVO | null;
+  /**
+   * Every Base, for the relation picker and the cross-Base dependency check.
+   * Other Bases may carry only their relation and lookup fields
+   * (`bases.list({ fields: "links" })`); `base` itself is always complete.
+   */
   bases: BaseVO[];
+  draftScope?: string;
   deletedFields?: BaseFieldVO[];
   /** Wired through to the header's "•••" menu (NodeActionsMenu) AND the
    *  read-only "Base Info" card's "Edit" button (opens `NodeSettingsDialog`). */
@@ -358,6 +376,7 @@ export function BaseSetupView({
   const messages = useCoreI18n();
   const locale = useCoreLocale();
   const resolveIString = useIString();
+  const currentSearch = useSearch();
   // Base Info is now read-only here — editing (name/description/icon) opens
   // the unified `NodeSettingsDialog` General tab, same as every other node
   // type. Base used to keep its own inline rename form + `submitRenameBase`
@@ -366,6 +385,7 @@ export function BaseSetupView({
   // every node type.
   const [isBaseSettingsOpen, setIsBaseSettingsOpen] = useState(false);
   const [fieldName, setFieldName] = useState<iString>("");
+  const [fieldHelp, setFieldHelp] = useState<FieldHelpValue>({});
   const [fieldSlug, setFieldSlug] = useState("");
   const [fieldType, setFieldType] = useState<FieldType>("text");
   const [targetBaseId, setTargetBaseId] = useState("");
@@ -373,6 +393,8 @@ export function BaseSetupView({
   const [numberFormat, setNumberFormat] = useState<"plain" | "currency">("plain");
   const [currencyCode, setCurrencyCode] = useState("USD");
   const [dateOptions, setDateOptions] = useState<DateFieldOptions>({});
+  const [formulaOptions, setFormulaOptions] = useState<FormulaFieldOptions>({ expression: "" });
+  const [isFormulaValid, setIsFormulaValid] = useState(false);
   // `lookup` config: which relation field to hop through, which field on the
   // related Base to pull over, and how to roll the pulled values up.
   const [lookupRelationSlug, setLookupRelationSlug] = useState("");
@@ -387,11 +409,15 @@ export function BaseSetupView({
   const lookupRelationFields = (base?.fields ?? []).filter(
     (field) => field.type === "relation" && Boolean(field.options.targetBaseId),
   );
-  const lookupTargetBase = bases.find(
-    (item) =>
-      item.id ===
-      lookupRelationFields.find((field) => field.slug === lookupRelationSlug)?.options.targetBaseId,
-  );
+  // Its full schema, from `bases.get`: the page's catalog of other Bases only
+  // carries their relation and lookup fields.
+  const lookupTargetBaseId = lookupRelationFields.find((field) => field.slug === lookupRelationSlug)
+    ?.options.targetBaseId;
+  const lookupTargetBaseQuery = useQuery({
+    ...orpc.bases.get.queryOptions({ input: { baseId: lookupTargetBaseId ?? "" } }),
+    enabled: Boolean(lookupTargetBaseId),
+  });
+  const lookupTargetBase = lookupTargetBaseId ? lookupTargetBaseQuery.data : undefined;
   // Chained lookups are rejected server-side (see field-ops.ts's
   // assertValidLookupField) — don't offer them here either.
   const lookupTargetFields = (lookupTargetBase?.fields ?? []).filter(
@@ -407,6 +433,7 @@ export function BaseSetupView({
     : LOOKUP_ROLLUPS;
   const [isSaving, setIsSaving] = useState(false);
   const [isAddFieldOpen, setIsAddFieldOpen] = useState(false);
+  const addFieldNameInputRef = useRef<HTMLInputElement>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [formErrorDetail, setFormErrorDetail] = useState<{
     recordIds?: string[];
@@ -416,10 +443,18 @@ export function BaseSetupView({
   const [restoringFieldId, setRestoringFieldId] = useState<string | null>(null);
   const [editingFieldId, setEditingFieldId] = useState<string | null>(null);
   const [editingFieldName, setEditingFieldName] = useState<iString>("");
+  const editingFieldNameInputRef = useRef<HTMLInputElement>(null);
+  const [editingFieldHelp, setEditingFieldHelp] = useState<FieldHelpValue>({});
   // The edit dialog's working copy of a select field's choices.
   const [editingChoiceDrafts, setEditingChoiceDrafts] = useState<ChoiceDraft[]>([]);
   // The edit dialog's working copy of a date field's time settings.
   const [editingDateOptions, setEditingDateOptions] = useState<DateFieldOptions>({});
+  const [editingFormulaOptions, setEditingFormulaOptions] = useState<FormulaFieldOptions>({
+    expression: "",
+  });
+  const [isEditingFormulaValid, setIsEditingFormulaValid] = useState(false);
+  const [draftRestored, setDraftRestored] = useState(false);
+  const [loadedDraftKey, setLoadedDraftKey] = useState<string | null>(null);
   const [isFieldRenameSaving, setIsFieldRenameSaving] = useState(false);
   const [fieldRenameError, setFieldRenameError] = useState<string | null>(null);
   const [recordTitleFieldId, setRecordTitleFieldId] = useState<string | null>(null);
@@ -437,6 +472,77 @@ export function BaseSetupView({
   const [fieldDeleteError, setFieldDeleteError] = useState<string | null>(null);
 
   const editingFieldForQuery = base?.fields.find((field) => field.id === editingFieldId) ?? null;
+  const draftKey = base ? formulaFieldDraftKey(draftScope, base.id) : null;
+  useEffect(() => {
+    if (!draftKey || !base || loadedDraftKey === draftKey) return;
+    setIsAddFieldOpen(false);
+    setEditingFieldId(null);
+    setFieldName("");
+    setFieldSlug("");
+    setFieldType("text");
+    setFormulaOptions({ expression: "" });
+    setDraftRestored(false);
+    const draft = readFormulaFieldDraft(draftKey);
+    if (draft?.operation === "add") {
+      setFieldName(draft.name);
+      setFieldSlug(draft.slug);
+      setFieldType("formula");
+      setFormulaOptions(draft.formula);
+      setIsAddFieldOpen(true);
+      setDraftRestored(true);
+    } else if (draft?.operation === "edit") {
+      const field = base.fields.find(
+        (item) => item.id === draft.fieldId && item.type === "formula",
+      );
+      if (field && field.options.formula?.expression === draft.originalExpression) {
+        setEditingFieldId(field.id);
+        setEditingFieldName(draft.name);
+        setEditingFieldHelp(field.options.help ?? {});
+        setEditingFormulaOptions(draft.formula);
+        setDraftRestored(true);
+      } else writeFormulaFieldDraft(draftKey, null);
+    }
+    setLoadedDraftKey(draftKey);
+  }, [draftKey, base, loadedDraftKey]);
+  useEffect(() => {
+    if (!draftKey || loadedDraftKey !== draftKey) return;
+    if (isAddFieldOpen && fieldType === "formula") {
+      writeFormulaFieldDraft(draftKey, {
+        operation: "add",
+        name: fieldName,
+        slug: fieldSlug,
+        formula: formulaOptions,
+      });
+    } else if (editingFieldForQuery?.type === "formula") {
+      writeFormulaFieldDraft(draftKey, {
+        operation: "edit",
+        fieldId: editingFieldForQuery.id,
+        originalExpression: editingFieldForQuery.options.formula?.expression,
+        name: editingFieldName,
+        slug: editingFieldForQuery.slug,
+        formula: editingFormulaOptions,
+      });
+    }
+  }, [
+    draftKey,
+    loadedDraftKey,
+    isAddFieldOpen,
+    fieldType,
+    fieldName,
+    fieldSlug,
+    formulaOptions,
+    editingFieldForQuery,
+    editingFieldName,
+    editingFormulaOptions,
+  ]);
+  const formulaSamplesQuery = useQuery({
+    ...orpc.records.list.queryOptions({ input: { baseId: base?.id ?? "", limit: 5 } }),
+    enabled: Boolean(
+      base?.id &&
+        ((isAddFieldOpen && fieldType === "formula") || editingFieldForQuery?.type === "formula"),
+    ),
+    retry: false,
+  });
   const conversionTargetType =
     editingFieldType && editingFieldType !== editingFieldForQuery?.type ? editingFieldType : null;
   /**
@@ -486,6 +592,14 @@ export function BaseSetupView({
     enabled: Boolean(base?.id && pendingDeleteField),
     retry: false,
   });
+  const deleteViewsQuery = useQuery({
+    ...orpc.bases.listViews.queryOptions({ input: { baseId: base?.id ?? "" } }),
+    enabled: Boolean(base?.id && pendingDeleteField),
+    retry: false,
+  });
+  const fieldDependencies = pendingDeleteField
+    ? getFieldDependencies(pendingDeleteField, bases, deleteViewsQuery.data ?? [])
+    : [];
 
   if (!base) {
     return (
@@ -507,6 +621,7 @@ export function BaseSetupView({
 
   const resetAddFieldForm = () => {
     setFieldName("");
+    setFieldHelp({});
     setFieldSlug("");
     setFieldType("text");
     setTargetBaseId("");
@@ -514,6 +629,9 @@ export function BaseSetupView({
     setNumberFormat("plain");
     setCurrencyCode("USD");
     setDateOptions({});
+    setFormulaOptions({ expression: "" });
+    setIsFormulaValid(false);
+    setDraftRestored(false);
     setLookupRelationSlug("");
     setLookupTargetSlug("");
     setLookupRollup("values");
@@ -526,6 +644,13 @@ export function BaseSetupView({
 
   const closeAddFieldDialog = () => {
     if (isSaving) return;
+    if (
+      fieldType === "formula" &&
+      (formulaOptions.expression || fieldName || fieldSlug) &&
+      !window.confirm(messages.formula.discardChanges)
+    )
+      return;
+    if (draftKey && fieldType === "formula") writeFormulaFieldDraft(draftKey, null);
     setIsAddFieldOpen(false);
     resetAddFieldForm();
   };
@@ -545,6 +670,7 @@ export function BaseSetupView({
       setFormError(messages.base.lookupConfigRequired);
       return;
     }
+    if (fieldType === "formula" && !isFormulaValid) return;
     const isSelectType = fieldType === "select" || fieldType === "multiselect";
     const builtChoices = isSelectType ? buildSelectChoices(choiceDrafts) : null;
     if (builtChoices && !builtChoices.ok) {
@@ -560,30 +686,35 @@ export function BaseSetupView({
         base,
         {
           name,
-          options:
-            fieldType === "code"
-              ? { code: { language: codeLanguage || "text" } }
-              : fieldType === "lookup"
-                ? {
-                    lookup: {
-                      relationFieldSlug: lookupRelationSlug,
-                      targetFieldSlug: lookupTargetSlug,
-                      rollup: lookupRollup,
-                    },
-                  }
-                : fieldType === "number" && numberFormat === "currency"
-                  ? { number: { format: "currency", currency: currencyCode.trim() || "USD" } }
-                  : fieldType === "date" && dateOptions.includeTime
-                    ? { date: dateOptions }
-                    : builtChoices?.ok
-                      ? { choices: builtChoices.choices }
-                      : createDefaultFieldOptions(fieldType, targetBaseId, isMultiple),
-          required: isRequired,
+          options: {
+            ...(hasFieldHelp(fieldHelp) ? { help: fieldHelp } : {}),
+            ...(fieldType === "formula"
+              ? { formula: formulaOptions }
+              : fieldType === "code"
+                ? { code: { language: codeLanguage || "text" } }
+                : fieldType === "lookup"
+                  ? {
+                      lookup: {
+                        relationFieldSlug: lookupRelationSlug,
+                        targetFieldSlug: lookupTargetSlug,
+                        rollup: lookupRollup,
+                      },
+                    }
+                  : fieldType === "number" && numberFormat === "currency"
+                    ? { number: { format: "currency", currency: currencyCode.trim() || "USD" } }
+                    : fieldType === "date" && dateOptions.includeTime
+                      ? { date: dateOptions }
+                      : builtChoices?.ok
+                        ? { choices: builtChoices.choices }
+                        : createDefaultFieldOptions(fieldType, targetBaseId, isMultiple)),
+          },
+          required: fieldType === "formula" ? false : isRequired,
           slug,
           type: fieldType,
         },
         options,
       );
+      if (draftKey) writeFormulaFieldDraft(draftKey, null);
       resetAddFieldForm();
       setIsAddFieldOpen(false);
     } catch (error) {
@@ -604,8 +735,12 @@ export function BaseSetupView({
   const resetFieldRenameForm = () => {
     setEditingFieldId(null);
     setEditingFieldName("");
+    setEditingFieldHelp({});
     setEditingChoiceDrafts([]);
     setEditingDateOptions({});
+    setEditingFormulaOptions({ expression: "" });
+    setIsEditingFormulaValid(false);
+    setDraftRestored(false);
     setEditingFieldType(null);
     setSelectChoiceMode("null_on_missing");
     setFieldRenameError(null);
@@ -613,6 +748,16 @@ export function BaseSetupView({
 
   const closeFieldRenameDialog = () => {
     if (isFieldRenameSaving || isFieldConvertSaving) return;
+    if (
+      editingFieldForQuery?.type === "formula" &&
+      (JSON.stringify(editingFormulaOptions) !==
+        JSON.stringify(editingFieldForQuery.options.formula) ||
+        JSON.stringify(editingFieldName) !== JSON.stringify(editingFieldForQuery.name)) &&
+      !window.confirm(messages.formula.discardChanges)
+    )
+      return;
+    if (draftKey && editingFieldForQuery?.type === "formula")
+      writeFormulaFieldDraft(draftKey, null);
     resetFieldRenameForm();
   };
 
@@ -660,7 +805,11 @@ export function BaseSetupView({
       setFieldRenameError(messages.base.fieldNameRequired);
       return;
     }
-    const patch: UpdateBaseFieldPatch = { name };
+    const patch: UpdateBaseFieldPatch = {};
+    if (JSON.stringify(name) !== JSON.stringify(field?.name)) patch.name = name;
+    if (JSON.stringify(field?.options.help ?? {}) !== JSON.stringify(editingFieldHelp)) {
+      patch.help = hasFieldHelp(editingFieldHelp) ? editingFieldHelp : null;
+    }
     const previousChoices = field ? fieldChoices(field) : [];
     if (field && isChoiceField(field)) {
       const built = buildSelectChoices(
@@ -684,10 +833,28 @@ export function BaseSetupView({
     ) {
       patch.date = editingDateOptions;
     }
+    if (field?.type === "formula") {
+      if (!isEditingFormulaValid) return;
+      if (JSON.stringify(field.options.formula) !== JSON.stringify(editingFormulaOptions)) {
+        patch.formula = editingFormulaOptions;
+        const impacted = formulaDependentFields(base.fields, field.slug);
+        if (
+          field.options.formula?.expression !== editingFormulaOptions.expression &&
+          impacted.length &&
+          !window.confirm(
+            fmt(messages.formula.confirmDependencies, {
+              fields: impacted.map((item) => resolveIString(item.name)).join(", "),
+            }),
+          )
+        )
+          return;
+      }
+    }
     setIsFieldRenameSaving(true);
     setFieldRenameError(null);
     try {
       await onUpdateField(base, fieldId, patch, options);
+      if (draftKey && field?.type === "formula") writeFormulaFieldDraft(draftKey, null);
       resetFieldRenameForm();
     } catch (error) {
       setFieldRenameError(
@@ -788,7 +955,15 @@ export function BaseSetupView({
     isEditingDateOptions && editingField
       ? !sameDateOptions(getDateFieldOptions(editingField.options), editingDateOptions)
       : false;
-  const editingOptionsChanged = editingChoicesChanged || editingDateOptionsChanged;
+  const isEditingFormula = editingField?.type === "formula" && !conversionTargetType;
+  const editingFormulaChanged =
+    isEditingFormula &&
+    JSON.stringify(editingField.options.formula) !== JSON.stringify(editingFormulaOptions);
+  const editingOptionsChanged =
+    editingChoicesChanged ||
+    editingDateOptionsChanged ||
+    editingFormulaChanged ||
+    JSON.stringify(editingField?.options.help ?? {}) !== JSON.stringify(editingFieldHelp);
   const primaryField = getPrimaryField(base);
   const recordTitleField = base.fields.find((field) => field.id === recordTitleFieldId) ?? null;
 
@@ -901,10 +1076,13 @@ export function BaseSetupView({
                           onClick={() => {
                             setEditingFieldId(field.id);
                             setEditingFieldName(field.name);
+                            setEditingFieldHelp(field.options.help ?? {});
                             setEditingChoiceDrafts(
                               fieldChoices(field).map((choice) => ({ ...choice })),
                             );
                             setEditingDateOptions(getDateFieldOptions(field.options));
+                            setEditingFormulaOptions(field.options.formula ?? { expression: "" });
+                            setIsEditingFormulaValid(false);
                             setFieldRenameError(null);
                           }}
                           title={messages.base.renameField}
@@ -1039,9 +1217,15 @@ export function BaseSetupView({
               open={Boolean(editingField)}
             >
               <DialogContent
-                className="max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-lg grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden p-0"
+                className={`max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] ${isEditingFormula ? "max-w-3xl" : "max-w-lg"} grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden p-0`}
                 onEscapeKeyDown={(event) => {
                   if (isFieldRenameSaving || isFieldConvertSaving) event.preventDefault();
+                }}
+                // Radix would focus the translations toggle rendered before the name field.
+                onOpenAutoFocus={(event) => {
+                  event.preventDefault();
+                  editingFieldNameInputRef.current?.focus();
+                  editingFieldNameInputRef.current?.select();
                 }}
                 onPointerDownOutside={(event) => {
                   if (isFieldRenameSaving || isFieldConvertSaving) event.preventDefault();
@@ -1058,7 +1242,43 @@ export function BaseSetupView({
                   </DialogDescription>
                 </DialogHeader>
                 <div className="min-h-0 overflow-y-auto px-5 py-4">
-                  <IStringNameInput onChange={setEditingFieldName} value={editingFieldName} />
+                  <IStringNameInput
+                    inputRef={editingFieldNameInputRef}
+                    onChange={setEditingFieldName}
+                    value={editingFieldName}
+                  />
+                  {!conversionTargetType ? (
+                    <div className="mt-4">
+                      <FieldHelpSettings
+                        disabled={isFieldRenameSaving}
+                        help={editingFieldHelp}
+                        onChange={setEditingFieldHelp}
+                      />
+                    </div>
+                  ) : null}
+                  {isEditingFormula && editingField ? (
+                    <>
+                      {draftRestored ? (
+                        <p className="mt-2 text-muted-foreground text-xs" role="status">
+                          {messages.formula.restored}
+                        </p>
+                      ) : null}
+                      <FormulaFieldEditor
+                        fields={base.fields}
+                        slug={editingField.slug}
+                        value={editingFormulaOptions}
+                        onChange={setEditingFormulaOptions}
+                        onValidityChange={setIsEditingFormulaValid}
+                        records={formulaSamplesQuery.data?.records ?? []}
+                        isLoading={formulaSamplesQuery.isFetching}
+                        loadError={
+                          formulaSamplesQuery.error ? messages.formula.previewUnavailable : null
+                        }
+                        onRetry={() => void formulaSamplesQuery.refetch()}
+                        disabled={isFieldRenameSaving}
+                      />
+                    </>
+                  ) : null}
                   {onConvertFieldType && editingField ? (
                     <FieldTypeConversionPanel
                       choiceMode={selectChoiceMode}
@@ -1138,7 +1358,11 @@ export function BaseSetupView({
                           onSubmit: () => editingField && submitFieldEdit(editingField.id),
                           isLoading: isFieldRenameSaving,
                         }}
-                        disabled={isFieldRenameSaving || !editingField}
+                        disabled={
+                          isFieldRenameSaving ||
+                          !editingField ||
+                          (isEditingFormula && !isEditingFormulaValid)
+                        }
                         hint={messages.common.requestReviewHint}
                         immediateAction={{
                           label: editingOptionsChanged
@@ -1201,6 +1425,50 @@ export function BaseSetupView({
                   <p className="mt-2 text-muted-foreground text-xs">
                     {messages.base.deleteFieldReversible}
                   </p>
+                  <div className="mt-4 border-border/60 border-t pt-3">
+                    <p className="font-medium text-sm">{messages.base.deleteFieldDependencies}</p>
+                    {deleteViewsQuery.isPending ? (
+                      <p className="mt-2 text-muted-foreground text-xs">
+                        {messages.base.deleteFieldDependenciesLoading}
+                      </p>
+                    ) : deleteViewsQuery.error ? (
+                      <p className="mt-2 text-rejected-strong text-xs">
+                        {messages.base.deleteFieldDependenciesUnavailable}
+                      </p>
+                    ) : fieldDependencies.length ? (
+                      <ul className="mt-2 max-h-48 space-y-1 overflow-y-auto text-sm">
+                        {fieldDependencies.map((dependency, index) => (
+                          <li
+                            key={`${dependency.kind}-${dependency.base.id}-${dependency.view?.id ?? index}`}
+                          >
+                            <Link
+                              className="text-primary underline underline-offset-2"
+                              href={mergeSearchIntoHref(
+                                dependency.view
+                                  ? `/base/${dependency.base.slug}/${dependency.view.slug}`
+                                  : `/base/${dependency.base.slug}/design`,
+                                currentSearch,
+                              )}
+                            >
+                              {dependency.view
+                                ? resolveIString(dependency.name)
+                                : `${dependency.base.name} / ${resolveIString(dependency.name)}`}
+                            </Link>
+                            <span className="text-muted-foreground">
+                              {` · ${messages.base.deleteFieldDependencyKinds[dependency.kind]}`}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="mt-2 text-muted-foreground text-xs">
+                        {messages.base.deleteFieldDependenciesNone}
+                      </p>
+                    )}
+                    <p className="mt-2 text-muted-foreground text-xs">
+                      {messages.base.deleteFieldDependenciesScope}
+                    </p>
+                  </div>
                   {fieldDeleteError ? (
                     <div className="mt-3 text-rejected-strong text-sm">{fieldDeleteError}</div>
                   ) : null}
@@ -1222,7 +1490,12 @@ export function BaseSetupView({
                         isLoading: isFieldDeleteSaving,
                       }}
                       defaultAction="changeRequest"
-                      disabled={isFieldDeleteSaving || !pendingDeleteField}
+                      disabled={
+                        isFieldDeleteSaving ||
+                        !pendingDeleteField ||
+                        deleteViewsQuery.isPending ||
+                        Boolean(deleteViewsQuery.error)
+                      }
                       hint={messages.base.deleteFieldHint}
                       immediateAction={{
                         label: messages.base.deleteFieldNow,
@@ -1245,9 +1518,14 @@ export function BaseSetupView({
               open={isAddFieldOpen}
             >
               <DialogContent
-                className="max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-2xl grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden p-0"
+                className={`max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] ${fieldType === "formula" ? "max-w-3xl" : "max-w-2xl"} grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden p-0`}
                 onEscapeKeyDown={(event) => {
                   if (isSaving) event.preventDefault();
+                }}
+                // Radix would focus the translations toggle rendered before the name field.
+                onOpenAutoFocus={(event) => {
+                  event.preventDefault();
+                  addFieldNameInputRef.current?.focus();
                 }}
                 onPointerDownOutside={(event) => {
                   if (isSaving) event.preventDefault();
@@ -1263,6 +1541,7 @@ export function BaseSetupView({
                 <div className="min-h-0 overflow-y-auto px-5 py-4">
                   <div className="grid gap-3 sm:grid-cols-2">
                     <IStringNameInput
+                      inputRef={addFieldNameInputRef}
                       onChange={(next) => {
                         setFieldName(next);
                         if (!fieldSlug) {
@@ -1475,6 +1754,13 @@ export function BaseSetupView({
                       </label>
                     ) : null}
                   </div>
+                  <div className="mt-4">
+                    <FieldHelpSettings
+                      disabled={isSaving}
+                      help={fieldHelp}
+                      onChange={setFieldHelp}
+                    />
+                  </div>
                   {fieldType === "select" || fieldType === "multiselect" ? (
                     <SelectChoicesEditor
                       disabled={isSaving}
@@ -1491,16 +1777,41 @@ export function BaseSetupView({
                       />
                     </div>
                   ) : null}
+                  {fieldType === "formula" ? (
+                    <>
+                      {draftRestored ? (
+                        <p className="mt-2 text-muted-foreground text-xs" role="status">
+                          {messages.formula.restored}
+                        </p>
+                      ) : null}
+                      <FormulaFieldEditor
+                        fields={base.fields}
+                        slug={fieldSlug}
+                        value={formulaOptions}
+                        onChange={setFormulaOptions}
+                        onValidityChange={setIsFormulaValid}
+                        records={formulaSamplesQuery.data?.records ?? []}
+                        isLoading={formulaSamplesQuery.isFetching}
+                        loadError={
+                          formulaSamplesQuery.error ? messages.formula.previewUnavailable : null
+                        }
+                        onRetry={() => void formulaSamplesQuery.refetch()}
+                        disabled={isSaving}
+                      />
+                    </>
+                  ) : null}
                   <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-border/50 border-t pt-4">
                     <div className="flex flex-wrap gap-4 text-sm">
-                      <label className="inline-flex items-center gap-2 text-muted-foreground">
-                        <input
-                          checked={isRequired}
-                          onChange={(event) => setIsRequired(event.target.checked)}
-                          type="checkbox"
-                        />
-                        {messages.base.required}
-                      </label>
+                      {fieldType !== "formula" ? (
+                        <label className="inline-flex items-center gap-2 text-muted-foreground">
+                          <input
+                            checked={isRequired}
+                            onChange={(event) => setIsRequired(event.target.checked)}
+                            type="checkbox"
+                          />
+                          {messages.base.required}
+                        </label>
+                      ) : null}
                       {fieldType === "relation" ? (
                         <label className="inline-flex items-center gap-2 text-muted-foreground">
                           <input
@@ -1528,7 +1839,7 @@ export function BaseSetupView({
                           onSubmit: () => submit(),
                           isLoading: isSaving,
                         }}
-                        disabled={isSaving}
+                        disabled={isSaving || (fieldType === "formula" && !isFormulaValid)}
                         hint={messages.common.requestReviewHint}
                         immediateAction={{
                           label: messages.base.addFieldNow,
@@ -1747,11 +2058,15 @@ function BaseSidePanelPreview({ orpc, payload }: SidePanelTabProps) {
   const messages = useCoreI18n();
   const currentSearch = useSearch();
   const { nodeId } = payload as { nodeId: string };
-  const basesQuery = useQuery(orpc.bases.list.queryOptions({ input: {} }));
-  const base = basesQuery.data?.find((candidate) => candidate.nodeId === nodeId) ?? null;
+  // Just this Base (`bases.get` takes its nodeId), not every Base in the space.
+  const baseQuery = useQuery({
+    ...orpc.bases.get.queryOptions({ input: { baseId: nodeId } }),
+    retry: retryUnlessNotFound,
+  });
+  const base = baseQuery.data ?? null;
 
   if (!base) {
-    return basesQuery.isLoading ? (
+    return baseQuery.isLoading ? (
       <NodeDetailSkeleton variant="doc" />
     ) : (
       <EmptyState

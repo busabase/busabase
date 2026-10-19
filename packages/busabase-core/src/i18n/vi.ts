@@ -1,6 +1,50 @@
 import type { CoreI18nMessages } from "./messages";
 
 export const dashboardVi: CoreI18nMessages = {
+  fieldHelp: {
+    inherit: "Dùng hướng dẫn của trường",
+    override: "Tùy chỉnh cho biểu mẫu này",
+    save: "Lưu hướng dẫn",
+    saveFailed: "Không thể lưu hướng dẫn. Thay đổi của bạn được giữ lại.",
+    description: "Hướng dẫn điền",
+    example: "Ví dụ",
+    preview: "Xem trước",
+    more: "Xem thêm",
+    less: "Thu gọn",
+    view: "Xem hướng dẫn cho {name}",
+    publicHint:
+      "Hướng dẫn cũng hiển thị trên biểu mẫu được chia sẻ. Không nhập thông tin nhạy cảm.",
+  },
+  formula: {
+    expression: "Công thức",
+    computed: "Tự động tính · chỉ đọc",
+    invalid: "Công thức không hợp lệ",
+    valid: "Công thức hợp lệ",
+    catalog: "Chèn trường hoặc hàm",
+    suggestions: "Gợi ý",
+    functions: "Hàm",
+    search: "Tìm trường hoặc hàm",
+    preview: "Xem trước mẫu",
+    previewUnavailable: "Không thể tải bản ghi mẫu.",
+    retry: "Thử lại",
+    sampleRecord: "Bản ghi mẫu",
+    recordLabel: "Bản ghi {index}",
+    temporaryValues: "Giá trị mẫu tạm thời",
+    sampleValue: "Giá trị mẫu",
+    result: "Kết quả",
+    computationError: "Lỗi tính toán",
+    unavailable: "Không khả dụng",
+    empty: "Trống",
+    resultFormat: "Định dạng kết quả",
+    auto: "Tự động",
+    percent: "Phần trăm",
+    precision: "Số chữ số thập phân",
+    currencyCode: "Mã tiền tệ",
+    dependencies: "Công thức phụ thuộc: {fields}",
+    discardChanges: "Bỏ các thay đổi công thức chưa lưu?",
+    confirmDependencies: "Các công thức này cũng sẽ được tính lại: {fields}. Tiếp tục?",
+    restored: "Đã khôi phục bản nháp công thức chưa lưu.",
+  },
   common: {
     add: "Thêm",
     archived: "đã lưu trữ",
@@ -118,6 +162,10 @@ export const dashboardVi: CoreI18nMessages = {
     filePreviewUnavailable: "Không thể xem trước",
     filePreviewRetry: "Thử lại",
     filePreviewUseBuiltin: "Dùng bản xem trước tích hợp",
+    parsedText: "Văn bản đã phân tích",
+    parsedTextMissing: "Chưa có văn bản đã phân tích cho tệp này.",
+    parsedTextNone: "Tệp này được đánh dấu là không có văn bản có thể đọc.",
+    parsedTextEmpty: "Văn bản đã phân tích đang trống.",
     filePreviewReasons: {
       not_configured: "PreviewFile chưa được cấu hình cho không gian làm việc này.",
       invalid_configuration: "Cấu hình PreviewFile không hợp lệ.",
@@ -356,6 +404,17 @@ export const dashboardVi: CoreI18nMessages = {
     linkLabel: "Liên kết công khai",
     copyLink: "Sao chép liên kết",
     linkCopied: "Đã sao chép liên kết",
+    qrCode: "Mã QR",
+    qrAlt: "Mã QR của liên kết này",
+    downloadQr: "Tải PNG",
+    qrFailed: "Không thể tạo mã QR",
+    shareViaDevice: "Chia sẻ",
+    recordLinkTitle: "Chia sẻ liên kết bản ghi",
+    recordPrivateTitle: "Quyền truy cập bản ghi",
+    recordPrivateHint:
+      "Cần đăng nhập và có quyền truy cập Base này để mở bản ghi riêng tư. Mã QR không thay đổi quyền.",
+    recordPublicHint:
+      "Muốn mở mà không đăng nhập, cần chia sẻ công khai toàn bộ Base. Điều này công khai Base và các bản ghi hiển thị, không chỉ bản ghi này.",
     previewAsVisitor: "Xem trước với vai trò người truy cập",
     settingsTitle: "Cài đặt liên kết",
     settingsHint:
@@ -740,7 +799,7 @@ export const dashboardVi: CoreI18nMessages = {
   templates: {
     title: "Mẫu",
     overview:
-      "Các ứng dụng hoàn chỉnh — gồm bảng dữ liệu, giao diện và cuốn hướng dẫn mà tác nhân AI đọc trước khi động vào dữ liệu của bạn. Cài đặt một mẫu sẽ điền sẵn các bảng của nó, và đề xuất chính ứng dụng để bạn xem xét.",
+      "Các ứng dụng hoàn chỉnh — gồm bảng dữ liệu, giao diện và cuốn hướng dẫn mà tác nhân AI đọc trước khi động vào dữ liệu của bạn. Cài đặt một mẫu sẽ thiết lập sẵn bảng, dữ liệu mẫu và ứng dụng để dùng ngay; bạn cũng có thể chọn xét duyệt nội dung trước.",
     search: "Tìm mẫu…",
     refresh: "Làm mới mẫu",
     browseOnly:
@@ -763,7 +822,7 @@ export const dashboardVi: CoreI18nMessages = {
       "Tác nhân AI trả lời được những câu này vì mẫu cài kèm cuốn hướng dẫn của tác giả cùng các cơ sở dữ liệu. Nó không phải đoán lược đồ của bạn.",
     contentsTitle: "Cài đặt mẫu này sẽ tạo ra gì",
     contentsDescription:
-      "Cơ sở dữ liệu, trường và bản ghi mẫu được tạo ngay. Mã ứng dụng và hướng dẫn cho tác nhân AI được đề xuất dưới dạng yêu cầu thay đổi để bạn xem xét trước.",
+      'Nếu bạn có quyền chỉnh sửa không gian này, cơ sở dữ liệu, trường, bản ghi mẫu, ứng dụng và hướng dẫn cho tác nhân AI được tạo ngay. Chọn "Gửi nội dung đi xét duyệt trước" khi cài đặt để nhận mã ứng dụng và hướng dẫn dưới dạng yêu cầu thay đổi.',
     bases: "Cơ sở dữ liệu",
     apps: "Ứng dụng",
     documents: "Tài liệu",
@@ -1082,6 +1141,8 @@ export const dashboardVi: CoreI18nMessages = {
   inbox: {
     title: "Đánh giá",
     forReview: "Cần xét duyệt",
+    previousRequest: "Yêu cầu thay đổi trước",
+    nextRequest: "Yêu cầu thay đổi tiếp theo",
     mentions: "Lượt nhắc",
     mentionsEmpty: "Chưa có ai nhắc đến bạn.",
     mentionsEmptyBody: "Khi đồng đội @-nhắc đến bạn trong một bình luận, nó sẽ hiện ở đây.",
@@ -1375,6 +1436,10 @@ export const dashboardVi: CoreI18nMessages = {
   },
   base: {
     searchRecordsToLink: "Tìm bản ghi để liên kết",
+    addRelation: "Thêm liên kết",
+    removeRelation: "Xóa liên kết đến {name}",
+    relationUnavailable: "Bản ghi không khả dụng",
+    relationLoadFailed: "Không thể tải bản ghi liên kết.",
     searchMembers: "Tìm thành viên",
     noMembersAvailable: "Không có thành viên nào để chọn",
     unassignedMember: "Chưa phân công",
@@ -1431,8 +1496,8 @@ export const dashboardVi: CoreI18nMessages = {
     paginationPage: "Đến trang {page}",
     paginationCurrentPage: "Trang {page}, trang hiện tại",
     paginationRetry: "Thử lại",
-    hideArchived: "Ẩn mục đã lưu trữ",
-    archivedCount: "{count} đã lưu trữ",
+    hideArchivedRecords: "Ẩn bản ghi đã lưu trữ",
+    showArchivedRecords: "Hiện bản ghi đã lưu trữ ({count})",
     createDeleteRequestTitle: "Tạo yêu cầu xóa?",
     createDeleteRequestLabel: "Tạo yêu cầu xóa",
     deleteViewRequestBody:
@@ -1609,6 +1674,9 @@ export const dashboardVi: CoreI18nMessages = {
     baseRestored: "Đã khôi phục cơ sở dữ liệu",
     restoreNodeMessage: "Khôi phục {type} {name}",
     nodeRestored: "Đã khôi phục {type}",
+    restoredWithNewSlug: "Đã khôi phục {name}. Slug “{from}” đã bị dùng nên giờ là “{to}”.",
+    restoredWithNewSlugs:
+      "Đã khôi phục. {count} mục có slug đã bị dùng và được đổi sang slug mới. Xem danh sách trong yêu cầu thay đổi.",
     nodeDeletedPermanently: "Đã xóa vĩnh viễn {type}",
     restoreFieldMessage: "Khôi phục trường đã xóa",
     fieldRestored: "Đã khôi phục trường",
@@ -1724,6 +1792,20 @@ export const dashboardVi: CoreI18nMessages = {
     deleteFieldCounting: "Đang đếm các bản ghi bị ảnh hưởng…",
     deleteFieldCountUnavailable: "Không thể đếm các bản ghi bị ảnh hưởng.",
     deleteFieldImpact: "Cột này có giá trị trong {count} bản ghi{plural}.",
+    deleteFieldDependencies: "Nơi sử dụng trường này",
+    deleteFieldDependenciesLoading: "Đang kiểm tra các chế độ xem đã lưu…",
+    deleteFieldDependenciesUnavailable: "Không thể kiểm tra chế độ xem. Hãy thử lại trước khi xóa.",
+    deleteFieldDependenciesNone: "Không tìm thấy tham chiếu trong các mục đã kiểm tra.",
+    deleteFieldDependenciesScope:
+      "Kiểm tra Base có thể xem và các chế độ xem đã lưu. Không kiểm tra Base ẩn, biểu mẫu, cấu hình Workflow hoặc mã nguồn AirApp.",
+    deleteFieldDependencyKinds: {
+      viewFilter: "bộ lọc",
+      viewSort: "sắp xếp",
+      viewDisplay: "bố cục",
+      formula: "trường công thức",
+      lookup: "trường tra cứu",
+      relation: "trường liên kết",
+    },
     deleteFieldReversible:
       "Cột và các giá trị của nó được giữ lại và có thể khôi phục từ Trường đã xóa.",
     deleteFieldHint:
@@ -1765,6 +1847,9 @@ export const dashboardVi: CoreI18nMessages = {
     changesRequestedAwaiting: "Đã yêu cầu chỉnh sửa · đang chờ bản sửa",
     mergedIntoBase: "Đã hợp nhất vào cơ sở dữ liệu",
     statusClosed: "Đã đóng",
+    restoredSlugChangesTitle: "Đã khôi phục với slug mới",
+    restoredSlugChangesHint:
+      "Trong lúc mục này nằm trong Thùng rác, một mục khác đã dùng slug gốc, nên nó được khôi phục với slug trống tiếp theo. Liên kết, dấu trang và chỉ dẫn cho tác nhân AI còn dùng slug cũ giờ sẽ mở mục kia.",
     mergeNeedsReview: "Cần xem xét việc hợp nhất",
     mergeNeedsReviewBody:
       "{message} Yêu cầu thay đổi vẫn an toàn ở đây; hãy yêu cầu chỉnh sửa hoặc đóng nó sau khi xem xét.",
@@ -1925,6 +2010,7 @@ export const dashboardVi: CoreI18nMessages = {
     updateRequest: "Cập nhật yêu cầu",
     submitNow: "Gửi ngay",
     updateNow: "Cập nhật ngay",
+    discardUnsavedChanges: "Bỏ thay đổi chưa lưu và rời khỏi bản ghi này?",
     saving: "Đang lưu...",
     checked: "Đã chọn",
     addTag: "Thêm thẻ…",
@@ -2092,7 +2178,7 @@ export const dashboardVi: CoreI18nMessages = {
     noAgents: "Chưa có tác nhân AI nào được kết nối.",
     connectionCheckLeadIn: "Trước khi bắt đầu, ",
     connectionCheck:
-      "hãy xác nhận rằng môi trường này đã kết nối với Busabase và trỏ đến đúng không gian đích{targetSpace}. Nếu kết nối Busabase chưa được cấu hình hoặc trỏ đến không gian khác, hãy đọc và làm theo hướng dẫn thiết lập này trước:\n\n{setupUrl}",
+      "hãy xác nhận rằng môi trường này truy cập được Busabase qua skill busabase, Busabase MCP hoặc busabase-cli và trỏ đến đúng không gian đích{targetSpace}, rồi làm việc qua các công cụ đó, không mở Busabase trong trình duyệt. Nếu chưa có công cụ nào được cấu hình hoặc kết nối trỏ đến không gian khác, trước tiên hãy tải hướng dẫn thiết lập này dưới dạng văn bản thuần (ví dụ bằng curl) và làm theo:\n\n{setupUrl}",
     builtInScenarios: "Kịch bản có sẵn",
     customScenarios: "Kịch bản tùy chỉnh",
     builtInPrompts: "Prompt có sẵn",
@@ -2386,9 +2472,9 @@ export const dashboardVi: CoreI18nMessages = {
     warningsTitle: "Cần lưu ý",
     targetFolder: "Cài đặt vào thư mục",
     targetFolderHint: "Một thư mục mới được tạo cho gói. Mặc định là tên của chính gói.",
-    autoMerge: "Cài đặt ngay, không cần xét duyệt",
-    autoMergeBody:
-      "Theo mặc định, nội dung của gói đến dưới dạng các yêu cầu thay đổi để bạn đọc trước khi có gì được áp dụng. Bỏ qua bước đó nghĩa là tin tưởng tác giả: một gói có thể chứa kỹ năng và AirApp, và đó là mã mà các tác nhân AI của không gian này sẽ chạy.",
+    requireReview: "Gửi nội dung đi xét duyệt trước",
+    requireReviewBody:
+      "Mặc định tắt: bạn có quyền ghi trong không gian này, nên bản ghi, tài liệu, kỹ năng và AirApp của gói được áp dụng ngay khi cài đặt. Bật tùy chọn này để nhận chúng dưới dạng yêu cầu thay đổi và đọc từng cái trước khi hợp nhất — nên bật với gói của tác giả bạn chưa biết, vì kỹ năng và AirApp là mã mà các tác nhân AI của không gian này sẽ chạy.",
     autoMergeRequiredTitle: "Gói này chỉ có thể được cài đặt mà không cần xét duyệt",
     autoMergeRequiredBody:
       "Các bản ghi của nó liên kết với nhau, và một liên kết chỉ có thể trỏ đến bản ghi đã tồn tại. Nếu giữ lại để xét duyệt, mọi liên kết sẽ đến rỗng — nên các bản ghi phải được tạo ngay lập tức. Hãy đọc gói trên GitHub trước: cài đặt nó sẽ chạy các kỹ năng và AirApp của tác giả trong không gian này.",
@@ -2410,6 +2496,9 @@ export const dashboardVi: CoreI18nMessages = {
     chooseHow: "Có hai cách cài đặt. Hãy chọn cách phù hợp với nơi bạn làm việc.",
     tabAgent: "Cài đặt qua tác nhân AI",
     tabUi: "Cài đặt qua giao diện",
+    agentTemplateIntro: "Yêu cầu Agent cài mẫu “{name}” vào không gian Busabase này.",
+    agentTemplatePromptBody:
+      "Cài mẫu Busabase “{name}” vào không gian đã kết nối của tôi và cài skill cục bộ cho Agent này.\n\nTrước khi cài đặt, {connectionCheck}\n\nKhi kết nối đã sẵn sàng, chạy lần lượt cả hai lệnh:\n\n{command}\n\nLệnh đầu cài thư mục, bảng, ứng dụng và các tài nguyên đóng gói khác vào không gian. Lệnh thứ hai cài skill và các tệp hỗ trợ vào thư mục skill cục bộ của Agent này. Cả hai dùng cùng nguồn và ref. Đọc SKILL.md đã cài cục bộ và giải quyết đường dẫn tương đối từ thư mục chứa nó. Trước khi làm theo hướng dẫn khởi tạo, kiểm tra tài nguyên đã cài và yêu cầu thay đổi đang chờ xét duyệt; tái sử dụng tài nguyên hiện có, không khởi tạo lại hoặc gửi lại yêu cầu đang chờ. Báo cáo đường dẫn skill cục bộ, kết quả từng bước cài đặt, trạng thái tài nguyên và yêu cầu thay đổi đang chờ xét duyệt. Nếu lệnh nào thất bại, nêu bước thất bại và phần đã thành công; không báo cáo toàn bộ quá trình đã hoàn tất.",
     agentIntro:
       "Trao hướng dẫn của “{name}” cho một tác nhân AI bạn đang dùng — Claude Code, Codex, Cursor. Nó sẽ biết ứng dụng này hoạt động ra sao; không có gì trong không gian này được tạo hoặc thay đổi.",
     agentPromptLabel: "Dán nội dung này cho tác nhân AI của bạn",

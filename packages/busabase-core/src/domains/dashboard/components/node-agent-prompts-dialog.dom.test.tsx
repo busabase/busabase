@@ -5,11 +5,90 @@ import { cleanup, render, screen } from "@testing-library/react";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CoreI18nProvider } from "../../../i18n";
+import { AgentIntegrationProvider } from "../agent-integration-context";
 import type { NodePromptScope } from "../helpers/node-agent-prompts";
 import { DashboardOrpcProvider } from "../orpc-context";
 import { NodeAgentPromptsDialog } from "./node-agent-prompts-dialog";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  window.history.replaceState({}, "", "/");
+});
+
+describe("NodeAgentPromptsDialog stable workspace identity", () => {
+  const canonicalId = "org_stable_workspace";
+  const types = ["airapp", "base", "folder", "doc", "filetree", "skill", "form"];
+
+  it.each(types)("uses the host space id for %s prompts after an address rename", (nodeType) => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = (targetSpaceId: string, spaceId?: string) => (
+      <CoreI18nProvider locale="zh-CN">
+        <QueryClientProvider client={client}>
+          <AgentIntegrationProvider agentIntegration={{ edition: "cloud", targetSpaceId }}>
+            <NodeAgentPromptsDialog
+              nodeId="nod_ops"
+              nodeName="Ops Overview"
+              nodeType={nodeType}
+              onOpenChange={() => {}}
+              open
+              orpc={null}
+              spaceId={spaceId}
+            />
+          </AgentIntegrationProvider>
+        </QueryClientProvider>
+      </CoreI18nProvider>
+    );
+    window.history.replaceState({}, "", "/dashboard/old-custom-slug/airapp/ops");
+    const { rerender } = render(view(canonicalId));
+    const prompt = () => screen.getByRole("dialog").textContent ?? "";
+    expect(prompt()).toContain(`spaceId: ${canonicalId}`);
+    expect(prompt()).not.toContain("spaceId: old-custom-slug");
+
+    // Renaming changes the URL, never the database identity.
+    window.history.replaceState({}, "", "/dashboard/new-custom-slug/airapp/ops");
+    rerender(view(canonicalId));
+    expect(prompt()).toContain(`spaceId: ${canonicalId}`);
+    expect(prompt()).not.toContain("spaceId: new-custom-slug");
+
+    // Subdomain workbenches have no workspace token in the pathname at all.
+    window.history.replaceState({}, "", "/dashboard/airapp/ops");
+    rerender(view(canonicalId));
+    expect(prompt()).toContain(`spaceId: ${canonicalId}`);
+    expect(prompt()).not.toContain("spaceId: airapp");
+
+    // Switching spaces while the dialog is mounted must replace the target.
+    rerender(view("org_second_workspace"));
+    expect(prompt()).toContain("spaceId: org_second_workspace");
+    expect(prompt()).not.toContain(`spaceId: ${canonicalId}`);
+
+    rerender(view(canonicalId, "org_explicit_workspace"));
+    expect(prompt()).toContain("spaceId: org_explicit_workspace");
+  });
+
+  it("uses the explicit shell target without a provider and omits unknown local targets", () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = (targetSpaceId?: string) => (
+      <CoreI18nProvider locale="en">
+        <QueryClientProvider client={client}>
+          <NodeAgentPromptsDialog
+            agentIntegration={targetSpaceId ? { edition: "cloud", targetSpaceId } : undefined}
+            nodeId="nod_ops"
+            nodeName="Ops Overview"
+            nodeType="airapp"
+            onOpenChange={() => {}}
+            open
+            orpc={null}
+          />
+        </QueryClientProvider>
+      </CoreI18nProvider>
+    );
+    window.history.replaceState({}, "", "/dashboard/renamed-slug/airapp/ops");
+    const { rerender } = render(view(canonicalId));
+    expect(screen.getByRole("dialog").textContent).toContain(`spaceId: ${canonicalId}`);
+    rerender(view());
+    expect(screen.getByRole("dialog").textContent).not.toContain("spaceId:");
+  });
+});
 
 /**
  * `orpc={null}` keeps these pure layout checks: no fetch, no Ask Agent action,

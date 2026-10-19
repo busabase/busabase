@@ -1,10 +1,10 @@
 import "server-only";
 
 import { ORPCError } from "@orpc/server";
-import { and, eq, isNull, ne } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { iStringToText } from "openlib/i18n/i-string";
 import { getContextSpaceId } from "../../../../context";
-import type { CommitPO, OperationPO } from "../../../../db/schema";
+import type { BaseFieldPO, CommitPO, OperationPO } from "../../../../db/schema";
 import {
   busabaseBaseFields,
   busabaseBases,
@@ -17,7 +17,9 @@ import type { MergeCtx } from "../../../../logic/cr-lifecycle";
 import { id } from "../../../../logic/kernel";
 import { type MaterializeArgs, registerMaterializer } from "../../../../logic/materialize";
 import { registerNodeRuntime } from "../../../../logic/node-runtime";
+import { findAvailableNodeSlug } from "../../../../logic/node-slug";
 import { assertValidDateFieldOptionsOrThrow } from "../date-options";
+import { assertFormulaMergeValid } from "../formula-recalculation";
 import { assertRelationOnlyOptionsOrThrow, resolveRelationFieldOptions } from "../relation-options";
 
 export const materializeBaseNode = async (
@@ -57,6 +59,12 @@ export const materializeBaseNode = async (
     fields.fields && fields.fields.length > 0
       ? fields.fields
       : [{ slug: "title", name: "Title", type: "text" as const, required: true, options: {} }];
+  const formulaDefs = baseFields.map((field) => ({
+    slug: field.slug,
+    type: field.type ?? "text",
+    options: (field.options ?? {}) as BaseFieldPO["options"],
+  }));
+  for (const def of formulaDefs) assertFormulaMergeValid(def, formulaDefs);
   await db.insert(busabaseBaseFields).values(
     await Promise.all(
       (
@@ -80,7 +88,7 @@ export const materializeBaseNode = async (
           slug: field.slug,
           name: iStringToText(field.name),
           type,
-          required: field.required ?? false,
+          required: type === "formula" ? false : (field.required ?? false),
           position: index,
           // Resolve targetBaseSlug → id on the SAME merge transaction (ctx.db), which
           // is where the node path's relation slug is resolved.
@@ -144,7 +152,7 @@ export const mergeBaseRestore = async (ctx: MergeCtx, item: OperationPO, _headCo
   const [target] = await db
     .select({
       slug: busabaseBases.slug,
-      spaceId: busabaseBases.spaceId,
+      name: busabaseBases.name,
       nodeId: busabaseBases.nodeId,
       archivedAt: busabaseBases.archivedAt,
       deletedAt: busabaseBases.deletedAt,
@@ -165,30 +173,30 @@ export const mergeBaseRestore = async (ctx: MergeCtx, item: OperationPO, _headCo
       message: "Cannot restore: this base was permanently deleted.",
     });
   }
-  // Restore-after-reuse: if a new active base grabbed this slug while it was
-  // archived, restoring would collide on the (now partial) unique index. Fail
-  // with a clear message instead of a raw constraint violation.
-  const [slugTaken] = await db
-    .select({ id: busabaseBases.id })
-    .from(busabaseBases)
-    .where(
-      and(
-        eq(busabaseBases.spaceId, target.spaceId),
-        eq(busabaseBases.slug, target.slug),
-        isNull(busabaseBases.archivedAt),
-        ne(busabaseBases.id, baseId),
-      ),
-    )
-    .limit(1);
-  if (slugTaken) {
-    throw new ORPCError("CONFLICT", {
-      message: `Cannot restore: the slug "${target.slug}" is now used by another base. Rename it first.`,
+  // Restore-after-reuse: a new base may have taken this slug while it was
+  // archived. The restored base moves to the next free slug (see
+  // findAvailableNodeSlug); the base that holds the slug keeps it.
+  const slug = await findAvailableNodeSlug(db, {
+    nodeType: "base",
+    slug: target.slug,
+    excludeNodeId: target.nodeId,
+  });
+  if (slug !== target.slug) {
+    ctx.slugChanges.push({
+      nodeId: target.nodeId,
+      nodeType: "base",
+      name: target.name,
+      fromSlug: target.slug,
+      toSlug: slug,
     });
   }
-  await db.update(busabaseBases).set({ archivedAt: null }).where(eq(busabaseBases.id, baseId));
+  await db
+    .update(busabaseBases)
+    .set({ slug, archivedAt: null })
+    .where(eq(busabaseBases.id, baseId));
   await db
     .update(busabaseNodes)
-    .set({ archivedAt: null, updatedAt: timestamp })
+    .set({ slug, archivedAt: null, updatedAt: timestamp })
     .where(eq(busabaseNodes.id, target.nodeId));
   // Un-archive only the records/views that were archived BY this base archive
   // (same archivedAt timestamp) — records/views deleted individually beforehand

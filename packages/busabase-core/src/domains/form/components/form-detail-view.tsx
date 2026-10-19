@@ -21,6 +21,7 @@ import { NodeDetailSkeleton } from "../../dashboard/components/skeletons";
 import { useWorkspacePermissionLevel } from "../../dashboard/components/split-submit-button";
 import { useIsAnonymousVisitor } from "../../dashboard/visitor-context";
 import { isFormNotConfiguredError } from "../utils/not-configured-error";
+import { FormHelpSettings } from "./form-help-settings";
 import { FormSandboxFrame } from "./form-sandbox-frame";
 import { FormSetupDialog } from "./form-setup-dialog";
 import { GeneratedFormField } from "./generated-form-field";
@@ -198,7 +199,7 @@ export function FormDetailView({
   const isNotConfigured = isFormNotConfiguredError(formQuery.error);
   const submit = useMutation(orpc.forms.submit.mutationOptions());
   const [values, setValues] = useState<Record<string, unknown>>({});
-  const [tab, setTab] = useState<"form" | "code">("form");
+  const [tab, setTab] = useState<"form" | "code" | "help">("form");
   const [isSetUpOpen, setIsSetUpOpen] = useState(false);
 
   useEffect(() => {
@@ -288,7 +289,7 @@ export function FormDetailView({
     <div className="flex h-full min-h-0 w-full flex-col bg-background">
       <Tabs
         className="flex min-h-0 flex-1 flex-col"
-        onValueChange={(value) => setTab(value as "form" | "code")}
+        onValueChange={(value) => setTab(value as "form" | "code" | "help")}
         value={fullscreenState.fullscreen ? "form" : tab}
       >
         {/* Identity moved to the topbar; what is left here is the local view
@@ -304,6 +305,11 @@ export function FormDetailView({
               <Code2 className="size-3.5" />
               {messages.form.tabCode}
             </TabsTrigger>
+            {canSetUp ? (
+              <TabsTrigger className={PREVIEW_DETAIL_TAB_TRIGGER_CLASS} value="help">
+                {messages.fieldHelp.description}
+              </TabsTrigger>
+            ) : null}
           </TabsList>
           <span className="inline-flex shrink-0 items-center gap-1 rounded-md bg-muted/60 px-2 py-0.5 text-muted-foreground text-xs">
             {form.share.isPublic ? <Globe size={11} /> : <Lock size={11} />}
@@ -348,6 +354,20 @@ export function FormDetailView({
             </div>
           </div>
         </TabsContent>
+        {canSetUp ? (
+          <TabsContent
+            forceMount
+            className="m-0 min-h-0 flex-1 overflow-auto p-4 md:p-6 data-[state=inactive]:hidden"
+            value="help"
+          >
+            <FormHelpSettings
+              key={form.id}
+              form={form}
+              orpc={orpc}
+              onSaved={() => formQuery.refetch({ throwOnError: true })}
+            />
+          </TabsContent>
+        ) : null}
       </Tabs>
     </div>
   );

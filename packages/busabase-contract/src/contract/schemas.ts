@@ -650,7 +650,11 @@ const changeRequestSchema = z.object({
   sourceAttribution: sourceAttributionSchema.nullable().optional(),
   sourceMeta: z.record(z.string(), z.unknown()),
   reviewPolicySnapshot: z.record(z.string(), z.unknown()),
-  mergeSummary: z.record(z.string(), z.unknown()),
+  mergeSummary: z
+    .record(z.string(), z.unknown())
+    .describe(
+      "Filled in when the change request merges. `slugChanges` (present only when non-empty) lists items a restore brought back under a new slug because another item took the old one while they were in the Trash: `{ nodeId, nodeType, name, fromSlug, toSlug }`. Read the new slug from here instead of assuming the old one.",
+    ),
   rejectedReason: z.string().nullable(),
   reviewedAt: z.string().nullable(),
   mergedAt: z.string().nullable(),

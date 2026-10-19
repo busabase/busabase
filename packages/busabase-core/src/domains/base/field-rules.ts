@@ -10,13 +10,7 @@ import {
   isEmptyFieldValue,
   isSystemFieldType,
 } from "./field-types";
-import {
-  detectFieldCycle,
-  FormulaCycleError,
-  FormulaError,
-  topologicalFieldOrder,
-  validateFormulaExpression,
-} from "./formula";
+import { topologicalFieldOrder } from "./formula";
 
 export type { FieldDef } from "./field-types";
 
@@ -33,32 +27,7 @@ export type { FieldDef } from "./field-types";
  * their own error type — e.g. field-ops.ts wraps them as ORPCError
  * BAD_REQUEST).
  */
-export const assertValidFormulaField = (
-  type: FieldType,
-  slug: string,
-  options: { formula?: { expression?: string } } | null | undefined,
-  siblingFields: ReadonlyArray<{
-    slug: string;
-    type: FieldType;
-    options?: { formula?: { expression?: string } } | null;
-  }>,
-): void => {
-  if (type !== "formula") return;
-  const expression = options?.formula?.expression;
-  if (!expression) {
-    throw new FormulaError(`Formula field requires options.formula.expression: ${slug}`);
-  }
-  const siblingTypeBySlug = new Map(siblingFields.map((field) => [field.slug, field.type]));
-  validateFormulaExpression(expression, slug, siblingTypeBySlug);
-  const graphFields = [
-    ...siblingFields.filter((field) => field.slug !== slug),
-    { slug, type, options: { formula: { expression } } },
-  ];
-  const cycle = detectFieldCycle(graphFields);
-  if (cycle) {
-    throw new FormulaCycleError(cycle);
-  }
-};
+export { assertValidFormulaField } from "./formula/validation";
 
 export interface FieldValidationError {
   slug: string;

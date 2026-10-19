@@ -33,6 +33,7 @@ import { mergeSearchIntoHref } from "../helpers/link-search";
 import { markdownPreviewSource } from "../helpers/markdown-preview";
 import type { FieldChip } from "../helpers/view-types";
 import { DateFieldValue } from "./date-field";
+import { FormulaValue } from "./formula-value";
 import { DialogContent } from "./localized-dialog-content";
 import { MemberChips } from "./member-field";
 import { CheckboxBadge } from "./primitives";
@@ -398,6 +399,7 @@ export function FieldValuePreview({
   field,
   fieldUsers,
   records = [],
+  record,
   value,
 }: {
   className?: string;
@@ -409,6 +411,7 @@ export function FieldValuePreview({
    */
   fieldUsers?: Record<string, UserRefVO>;
   records?: RecordVO[];
+  record?: RecordVO;
   value: unknown;
 }) {
   const messages = useCoreI18n();
@@ -417,6 +420,9 @@ export function FieldValuePreview({
   const currentSearch = useSearch();
   const fieldName = field ? resolveIString(field.name) : undefined;
   const kind = field ? fieldDisplayKind(field.type) : "plain";
+
+  if (field?.type === "formula")
+    return <FormulaValue field={field} value={value} record={record} />;
 
   if (field?.type === "date" && parseDateFieldValue(value)) {
     return (

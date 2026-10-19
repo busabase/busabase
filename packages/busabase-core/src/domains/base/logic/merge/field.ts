@@ -7,19 +7,27 @@ import type { BaseFieldPO, CommitPO, OperationPO } from "../../../../db/schema";
 import { busabaseBaseFields, busabaseBases, busabaseOperations } from "../../../../db/schema";
 import { parseCommitPayload } from "../../../../logic/commit-payload-schemas";
 import type { MergeCtx } from "../../../../logic/cr-lifecycle";
+import { formulaStaleConflict } from "../../../../logic/formula-merge-conflict";
 import { id, requireBaseId } from "../../../../logic/kernel";
+import { mergeFieldHelpOptions } from "../../utils/field-help-options";
 import { PRIMARY_FIELD_DELETE_MESSAGE } from "../../utils/primary-field";
+import { assertFormulaMergeValid, recalculateFormulaRecords } from "../formula-recalculation";
 import { getPrimaryFieldIdFromDb } from "../queries";
 
 export const mergeBaseAddField = async (ctx: MergeCtx, item: OperationPO, headCommit: CommitPO) => {
   const { db, timestamp } = ctx;
   const baseId = requireBaseId(item.baseId, item.operation);
   const fieldData = parseCommitPayload("base_add_field", headCommit.payload);
-  const fieldCount = await db
+  const fields = await db
     .select()
     .from(busabaseBaseFields)
-    .where(and(eq(busabaseBaseFields.baseId, baseId), isNull(busabaseBaseFields.deletedAt)))
-    .then((rows) => rows.length);
+    .where(and(eq(busabaseBaseFields.baseId, baseId), isNull(busabaseBaseFields.deletedAt)));
+  const type = fieldData.type ?? "text";
+  assertFormulaMergeValid(
+    { slug: fieldData.slug, type, options: (fieldData.options ?? {}) as BaseFieldPO["options"] },
+    fields,
+    fieldData.formulaDependencies,
+  );
   // Resolve spaceId: query the base row (most reliable across local + cloud).
   const [baseRow] = await db
     .select({ spaceId: busabaseBases.spaceId })
@@ -33,11 +41,14 @@ export const mergeBaseAddField = async (ctx: MergeCtx, item: OperationPO, headCo
     spaceId,
     slug: fieldData.slug,
     name: iStringToText(fieldData.name),
-    type: fieldData.type ?? "text",
-    required: fieldData.required ?? false,
-    position: fieldCount,
+    type,
+    required: type === "formula" ? false : (fieldData.required ?? false),
+    position: fields.length,
     options: (fieldData.options ?? {}) as BaseFieldPO["options"],
   });
+  if (type === "formula") {
+    await recalculateFormulaRecords(ctx, baseId, fieldData.slug, item.id);
+  }
   await db
     .update(busabaseOperations)
     .set({ status: "merged", updatedAt: timestamp })
@@ -57,6 +68,12 @@ export const mergeBaseDeleteField = async (
     const { ORPCError } = await import("@orpc/server");
     throw new ORPCError("BAD_REQUEST", { message: PRIMARY_FIELD_DELETE_MESSAGE });
   }
+  const [deleting] = await db
+    .select({ slug: busabaseBaseFields.slug })
+    .from(busabaseBaseFields)
+    .where(
+      and(eq(busabaseBaseFields.id, fieldData.fieldId), eq(busabaseBaseFields.baseId, baseId)),
+    );
   await db
     .update(busabaseBaseFields)
     .set({ deletedAt: timestamp })
@@ -111,6 +128,9 @@ export const mergeBaseDeleteField = async (
     }
   }
 
+  if (deleting) {
+    await recalculateFormulaRecords(ctx, baseId, deleting.slug, item.id);
+  }
   await db
     .update(busabaseOperations)
     .set({ status: "merged", updatedAt: timestamp })
@@ -124,11 +144,43 @@ export const mergeBaseUpdateField = async (
 ) => {
   const { db, timestamp } = ctx;
   const fieldData = parseCommitPayload("base_update_field", headCommit.payload);
+  const baseId = requireBaseId(item.baseId, item.operation);
+  const fields = await db
+    .select()
+    .from(busabaseBaseFields)
+    .where(and(eq(busabaseBaseFields.baseId, baseId), isNull(busabaseBaseFields.deletedAt)));
+  const currentField = fields.find((field) => field.id === fieldData.fieldId);
+  if (!currentField) {
+    const { ORPCError } = await import("@orpc/server");
+    throw new ORPCError("NOT_FOUND", { message: `Field not found: ${fieldData.fieldId}` });
+  }
+  // Help is common metadata, independent of type-specific settings. Resolve it
+  // against the live row so queued help changes never restore stale options.
+  const nextOptions = mergeFieldHelpOptions(
+    currentField.options,
+    fieldData.options as BaseFieldPO["options"] | undefined,
+    fieldData.help,
+  );
+  if (
+    currentField.type === "formula" &&
+    typeof fieldData.formulaBaseExpression === "string" &&
+    fieldData.formulaBaseExpression !== currentField.options.formula?.expression
+  ) {
+    throw formulaStaleConflict(
+      "Formula changed since this request was created. Revise the request before merging, or close it and submit a new request.",
+      { reason: "formula_changed", fieldId: currentField.id, fieldSlug: currentField.slug },
+    );
+  }
+  assertFormulaMergeValid(
+    { ...currentField, options: nextOptions },
+    fields,
+    fieldData.formulaDependencies,
+  );
 
   // When a field is being promoted to required, every active record must already
   // carry a non-empty value — otherwise the new constraint would be retroactively
   // violated. Block the merge and surface the offending record ids.
-  if (fieldData.required === true) {
+  if (fieldData.required === true && currentField.type !== "formula") {
     const { ORPCError } = await import("@orpc/server");
     const [currentField] = await db
       .select()
@@ -275,13 +327,21 @@ export const mergeBaseUpdateField = async (
   const updateSet: Record<string, unknown> = {};
   if (fieldData.name !== undefined) updateSet.name = iStringToText(fieldData.name);
   if (fieldData.required !== undefined) updateSet.required = fieldData.required;
-  if (fieldData.options !== undefined) updateSet.options = fieldData.options;
+  if (currentField.type === "formula") updateSet.required = false;
+  if (fieldData.options !== undefined || fieldData.help !== undefined)
+    updateSet.options = nextOptions;
 
   if (Object.keys(updateSet).length > 0) {
     await db
       .update(busabaseBaseFields)
       .set(updateSet as Partial<BaseFieldPO>)
       .where(eq(busabaseBaseFields.id, fieldData.fieldId));
+  }
+  if (
+    currentField.type === "formula" &&
+    currentField.options.formula?.expression !== nextOptions.formula?.expression
+  ) {
+    await recalculateFormulaRecords(ctx, baseId, currentField.slug, item.id);
   }
   await db
     .update(busabaseOperations)
@@ -306,7 +366,11 @@ export const mergeBaseConvertField = async (
   // Resolve the field's slug — the authoritative record data is keyed by slug in
   // each record's head-commit `fields` JSON, and we rewrite that below.
   const [fieldRow] = await db
-    .select({ slug: busabaseBaseFields.slug, baseId: busabaseBaseFields.baseId })
+    .select({
+      slug: busabaseBaseFields.slug,
+      baseId: busabaseBaseFields.baseId,
+      options: busabaseBaseFields.options,
+    })
     .from(busabaseBaseFields)
     .where(eq(busabaseBaseFields.id, fieldData.fieldId))
     .limit(1);
@@ -379,6 +443,7 @@ export const mergeBaseConvertField = async (
     fieldData.newType === "select" || fieldData.newType === "multiselect"
       ? { choices: newChoices }
       : {};
+  if (fieldRow?.options.help) newOptions.help = fieldRow.options.help;
   await db
     .update(busabaseBaseFields)
     .set({ type: fieldData.newType, options: newOptions })
@@ -462,6 +527,10 @@ export const mergeBaseConvertField = async (
     const last = chunk[chunk.length - 1];
     if (!last || chunk.length < CONVERT_SCAN_CHUNK) break;
     convertCursor = last.id;
+  }
+
+  if (fieldRow && fieldSlug) {
+    await recalculateFormulaRecords(ctx, fieldRow.baseId, fieldSlug, item.id);
   }
 
   await db
@@ -555,6 +624,9 @@ export const mergeBaseRestoreField = async (
     .update(busabaseFieldValues)
     .set({ deletedAt: null })
     .where(eq(busabaseFieldValues.fieldId, fieldData.fieldId));
+  if (restoring) {
+    await recalculateFormulaRecords(ctx, restoring.baseId, restoring.slug, item.id);
+  }
   await db
     .update(busabaseOperations)
     .set({ status: "merged", updatedAt: timestamp })

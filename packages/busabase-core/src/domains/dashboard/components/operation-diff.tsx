@@ -54,6 +54,11 @@ export interface OperationFieldChange {
 
 export const isViewOperation = (operation: OperationVO) => operation.operation.startsWith("view_");
 
+/** Merge guards belong to the commit, not to the author's editable field settings. */
+export const isInternalFormulaMetadata = (operation: OperationVO, slug: string) =>
+  (operation.operation === "base_add_field" || operation.operation === "base_update_field") &&
+  (slug === "formulaDependencies" || slug === "formulaBaseExpression");
+
 export const getOperationFieldLabel = (
   changeRequest: ChangeRequestVO,
   operation: OperationVO,
@@ -75,7 +80,7 @@ export const getOperationFieldChanges = (
 ): OperationFieldChange[] => {
   const before = operation.baseFields;
   return Object.entries(operation.headCommit.payload)
-    .filter(([, value]) => value !== undefined)
+    .filter(([slug, value]) => value !== undefined && !isInternalFormulaMetadata(operation, slug))
     .map(([slug, afterValue]): OperationFieldChange => {
       const hasBefore = before != null && slug in before && before[slug] !== undefined;
       return {

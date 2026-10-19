@@ -65,6 +65,95 @@ describe("embed links — Desktop oRPC integration", () => {
     expect((await client.embedLinks.list({ typeId: doc.node.id }))[0]?.active).toBe(false);
   });
 
+  it("lets writers share one record while keeping node links and administration manage-only", async () => {
+    await seedScenario("embed-record-writer");
+    const client = createRouterClient(busabaseRouter);
+    const base = await client.bases.create({
+      autoMerge: true,
+      slug: "record-link-base",
+      name: "Record link Base",
+      fields: [{ slug: "title", name: "Title", type: "text" }],
+    });
+    if (!base.materialized) throw new Error("expected a materialized Base");
+    const record = await client.bases.createChangeRequest({
+      baseId: base.id,
+      fields: { title: "Writer delivery" },
+      autoMerge: true,
+    });
+    if (!record.materialized) throw new Error("expected a materialized record");
+    const asWriter = <T>(fn: () => Promise<T>) =>
+      runWithBusabaseContext(
+        {
+          spaceId: LOCAL_SPACE_ID,
+          actorId: "record-writer",
+          isSpaceManager: false,
+          permissionLevel: "write",
+          credentialPermissionCeiling: "write",
+        },
+        fn,
+      );
+    const link = await asWriter(() =>
+      client.embedLinks.create({ type: "record-detail", typeId: record.id }),
+    );
+    expect(new Date(link.expiresAt).getTime() - new Date(link.createdAt).getTime()).toBe(
+      15 * 60_000,
+    );
+    const secret = new URL(link.url).searchParams.get("token") ?? "";
+    await expect(resolveEmbedLink(link.id, secret)).resolves.toMatchObject({
+      type: "record-detail",
+      record: { id: record.id },
+    });
+    await expect(resolveEmbedLink(link.id, "x".repeat(43))).resolves.toBeNull();
+    await expect(resolveEmbedLink(link.id, secret, new Date(link.expiresAt))).resolves.toBeNull();
+    await expect(
+      asWriter(() => client.embedLinks.create({ type: "node", typeId: base.nodeId })),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(asWriter(() => client.embedLinks.list({}))).resolves.toEqual([]);
+    await expect(asWriter(() => client.embedLinks.listPaged({}))).resolves.toMatchObject({
+      items: [],
+    });
+    await expect(asWriter(() => client.embedLinks.revoke({ id: link.id }))).rejects.toMatchObject({
+      code: "NOT_FOUND",
+    });
+    for (const level of ["read", "changeRequest"] as const) {
+      await expect(
+        runWithBusabaseContext(
+          {
+            spaceId: LOCAL_SPACE_ID,
+            actorId: "record-reader",
+            isSpaceManager: false,
+            permissionLevel: level,
+            credentialPermissionCeiling: level,
+          },
+          () => client.embedLinks.create({ type: "record-detail", typeId: record.id }),
+        ),
+      ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    }
+    await expect(
+      runWithBusabaseContext(
+        { spaceId: "other-space", actorId: "record-writer", isSpaceManager: true },
+        () => client.embedLinks.create({ type: "record-detail", typeId: record.id }),
+      ),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await client.nodes.updateVisibility({ nodeId: base.nodeId, visibility: "private" });
+    await expect(
+      asWriter(() => client.embedLinks.create({ type: "record-detail", typeId: record.id })),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    // A visible record with an explicit read grant still cannot be shared.
+    await client.nodes.principals.add({
+      nodeId: base.nodeId,
+      principalType: "user",
+      principalId: "record-writer",
+      role: "read",
+    });
+    await expect(asWriter(() => client.records.get({ recordId: record.id }))).resolves.toBeTruthy();
+    await expect(
+      asWriter(() => client.embedLinks.create({ type: "record-detail", typeId: record.id })),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await client.embedLinks.revoke({ id: link.id });
+    await expect(resolveEmbedLink(link.id, secret)).resolves.toBeNull();
+  });
+
   it("lets changeRequest credentials preview only visible pending CRs, never generic Node embeds", async () => {
     await seedScenario("cr-preview-narrow-permission");
     const client = createRouterClient(busabaseRouter);

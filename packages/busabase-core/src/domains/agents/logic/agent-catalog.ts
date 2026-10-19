@@ -4,7 +4,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { delimiter, dirname, join } from "node:path";
 import type { AgentCatalogEntryVO, AgentTransport } from "busabase-contract/domains/agents/types";
 import { getContextActorId } from "../../../context";
+import { resolveAcprouterEnrollmentOrigin } from "./acprouter-origin-config";
 import { getBudaAcpUrl, getBudaConnection, listBudaConnections } from "./buda-connection";
+import { listRouterConnections, resolveRouterConnectionLaunch } from "./router-connection";
 
 /**
  * What Busabase is willing to launch, and how.
@@ -99,6 +101,13 @@ const CATALOG: CatalogSpec[] = [
     description: "A hosted Buda agent. Runs in Buda's cloud — nothing is installed locally.",
     transport: "remote-websocket",
   },
+  {
+    slug: "acprouter",
+    name: "ACPRouter Agent",
+    description:
+      "An agent bridged through your ACPRouter workspace. Runs wherever that agent is hosted.",
+    transport: "remote-websocket",
+  },
 ];
 
 export interface ResolvedLaunch {
@@ -117,7 +126,11 @@ export interface ResolvedLaunch {
 
 const findSpec = (slug: string): CatalogSpec | undefined =>
   CATALOG.find((entry) => entry.slug === slug) ??
-  (slug.startsWith("buda:") ? CATALOG.find((entry) => entry.slug === "buda") : undefined);
+  (slug.startsWith("buda:")
+    ? CATALOG.find((entry) => entry.slug === "buda")
+    : slug.startsWith("acprouter:")
+      ? CATALOG.find((entry) => entry.slug === "acprouter")
+      : undefined);
 
 /**
  * Local-subprocess spawning is only safe on the single-user OSS/desktop host,
@@ -376,6 +389,21 @@ export async function listCatalog(): Promise<AgentCatalogEntryVO[]> {
   const cloudHost = isCloudHost();
   const registryInfo = await fetchRegistryDisplayInfo();
   const budaConnections = await listBudaConnections("space");
+  const routerConnections = cloudHost
+    ? (await listRouterConnections()).filter(
+        (connection) =>
+          connection.connectionState !== "activating" &&
+          connection.connectionState !== "disconnecting",
+      )
+    : [];
+  const routerConfigured = (() => {
+    try {
+      resolveAcprouterEnrollmentOrigin();
+      return true;
+    } catch {
+      return false;
+    }
+  })();
 
   return CATALOG.map((spec) => {
     let available = false;
@@ -403,6 +431,14 @@ export async function listCatalog(): Promise<AgentCatalogEntryVO[]> {
       } else {
         unavailableReason = `\`${spec.probeBinary ?? "npx"}\` was not found on this machine. Install Node.js to use ${spec.name}.`;
       }
+    } else if (spec.slug === "acprouter") {
+      if (!routerConfigured) {
+        unavailableReason = "ACPRouter enrollment is not configured for this deployment.";
+      } else if (routerConnections.length > 0) {
+        available = true;
+      } else {
+        unavailableReason = "Connect via ACPRouter to enroll an agent.";
+      }
     } else {
       const localConfig = localBudaConfig();
       if (budaConnections.length > 0 || (!cloudHost && localConfig.token && localConfig.agentId)) {
@@ -415,9 +451,9 @@ export async function listCatalog(): Promise<AgentCatalogEntryVO[]> {
     }
 
     // Registry-sourced display info only, never the spawn command — see the
-    // doc comment on CATALOG above. `buda` is never in the official registry
-    // (spec: no URL-based distribution exists for it), so it always falls
-    // through to its own hardcoded description below.
+    // doc comment on CATALOG above. `buda`/`acprouter` are never in the
+    // official registry (spec: no URL-based distribution exists for either),
+    // so both always fall through to their own hardcoded description below.
     const synced = registryInfo.get(spec.slug);
 
     return {
@@ -429,15 +465,26 @@ export async function listCatalog(): Promise<AgentCatalogEntryVO[]> {
       available,
       comingSoon: spec.comingSoon ?? false,
       unavailableReason,
-      connectionRequired: spec.slug === "buda" && cloudHost,
-      connectedAgentName: spec.slug === "buda" ? (budaConnections[0]?.agentName ?? null) : null,
+      connectionRequired:
+        (spec.slug === "buda" || (spec.slug === "acprouter" && routerConfigured)) && cloudHost,
+      connectedAgentName:
+        spec.slug === "buda"
+          ? (budaConnections[0]?.agentName ?? null)
+          : spec.slug === "acprouter"
+            ? (routerConnections[0]?.agentSlug ?? null)
+            : null,
       connectedAgents:
         spec.slug === "buda"
           ? budaConnections.map((connection) => ({
               slug: connection.slug,
               name: connection.agentName,
             }))
-          : [],
+          : spec.slug === "acprouter"
+            ? routerConnections.map((connection) => ({
+                slug: connection.slug,
+                name: connection.agentSlug,
+              }))
+            : [],
     };
   });
 }
@@ -525,6 +572,11 @@ export async function resolveLaunch(slug: string): Promise<ResolvedLaunch> {
       // nobody attached to answer it.
       args: ["--yes", spec.npxPackage as string, ...(spec.args ?? [])],
     };
+  }
+
+  if (spec.slug === "acprouter") {
+    const launch = await resolveRouterConnectionLaunch(slug);
+    return { slug, name: spec.name, transport: spec.transport, ...launch };
   }
 
   const connection = await getBudaConnection(slug);

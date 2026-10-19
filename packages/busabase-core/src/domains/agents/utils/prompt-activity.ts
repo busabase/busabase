@@ -24,6 +24,33 @@ export const isComposerDisabled = (
 ): boolean => streaming || status === "waiting_permission" || configOptionPending;
 
 /**
+ * Whether the model picker should refuse a new selection right now.
+ *
+ * `idle` is always selectable. `connecting` is also allowed for
+ * `remote-websocket` sessions: the backend's `setAgentSessionConfigOption`
+ * awaits the same readiness this status reflects and re-validates the
+ * choice against whatever the agent actually confirmed before dispatching
+ * (see its guard in `agent-session-manager.ts`), so letting the user queue a
+ * pick while the handshake is still in flight does not bypass that check —
+ * it only lets a cached choice travel with the connection instead of making
+ * the user wait and re-open the picker. `local-subprocess` is excluded: it
+ * has no equivalent cross-worker lease to serialize a model change against a
+ * concurrent first prompt, so this would be a different, unreviewed safety
+ * question for that transport. `busy`/`waiting_permission`/`failed`/`ended`
+ * stay disabled, and a config-option mutation already in flight always
+ * disables the picker regardless of status.
+ */
+export const isModelSelectorDisabled = (
+  status: AgentSessionVO["status"],
+  transport: AgentSessionVO["transport"],
+  configOptionPending: boolean,
+): boolean => {
+  if (configOptionPending) return true;
+  if (status === "idle") return false;
+  return !(status === "connecting" && transport === "remote-websocket");
+};
+
+/**
  * The composer's placeholder for the current session state. `waiting_permission`
  * still points the user at the request above; every other state — including
  * `ended`/`failed`, which no longer disable the composer — falls through to

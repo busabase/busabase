@@ -79,9 +79,8 @@ const nodeVO = (
 });
 
 /**
- * The three endpoints the shell itself touches when a host wires `orpc` — none
- * of which this test has an opinion about. `orpc` still has to be present: the
- * Share action is wired only for a host that supplied a client.
+ * Stub persistence for the shell and its real settings dialog. `orpc` still
+ * has to be present: the Share/Rename actions require a host-supplied client.
  */
 const stubOrpc = () =>
   ({
@@ -99,6 +98,20 @@ const stubOrpc = () =>
         }),
       },
       toggleFavorite: { mutationOptions: () => ({ mutationFn: async () => ({ ok: true }) }) },
+      get: {
+        queryOptions: () => ({
+          queryKey: ["nodes", "get", "contacts"],
+          queryFn: async () => ({ node: BASE }),
+        }),
+      },
+      updateSettings: { mutationOptions: () => ({ mutationFn: async () => ({ ok: true }) }) },
+      createChangeRequest: {
+        mutationOptions: () => ({ mutationFn: async () => ({ status: "merged" }) }),
+      },
+      icon: {
+        createUploadUrl: { mutationOptions: () => ({ mutationFn: async () => ({}) }) },
+        confirm: { mutationOptions: () => ({ mutationFn: async () => ({}) }) },
+      },
     },
   }) as unknown as BusabaseQueryUtils;
 
@@ -109,6 +122,7 @@ const AIRAPP = nodeVO({
   type: "airapp",
 });
 const DOC = nodeVO({ id: "nd_doc", name: "Handbook", slug: "handbook", type: "doc" });
+const BASE = nodeVO({ id: "nd_base", name: "Contacts", slug: "contacts", type: "base" });
 
 function renderShell(
   submitPermissionLevel?: ApiKeyPermissionLevel,
@@ -129,7 +143,7 @@ function renderShell(
             user: { avatar: "", email: "tester@example.com", name: "Tester" },
           }}
           locale="en"
-          nodes={[AIRAPP, DOC]}
+          nodes={[AIRAPP, DOC, BASE]}
           onCreateClick={() => undefined}
           onSearchClick={() => undefined}
           orpc={stubOrpc()}
@@ -195,6 +209,24 @@ describe("BusabaseDashboardShell sidebar Share action", () => {
   it("defaults to manage for a host that states no level (open-source install)", async () => {
     renderShell();
     expect(await openRowMenu("Kelly CRM")).toContain("Share");
+  });
+});
+
+describe("BusabaseDashboardShell sidebar Base Rename action", () => {
+  it("offers Rename without Settings and opens the name field focused", async () => {
+    renderShell("manage");
+    const entries = await openRowMenu("Contacts");
+    expect(entries).toContain("Rename");
+    expect(entries).not.toContain("Settings");
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "Rename" }));
+
+    const dialog = await screen.findByRole("dialog");
+    const nameInput = within(dialog).getByRole("textbox", { name: "Name" }) as HTMLInputElement;
+    expect(nameInput.value).toBe("Contacts");
+    await waitFor(() => expect(document.activeElement).toBe(nameInput));
+    expect(nameInput.selectionStart).toBe(0);
+    expect(nameInput.selectionEnd).toBe("Contacts".length);
   });
 });
 

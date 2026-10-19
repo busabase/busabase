@@ -186,6 +186,7 @@ export const baseFieldChangeTask: TaskDefinition<BaseFieldChangeInput> = {
   examples: [
     "busabase-cli bases field-change-request --base-id bas_1 --operation add --slug status --name Status --field-type select",
     "busabase-cli bases field-change-request --base-id bas_1 --operation update --field-id fld_1 --patch-json '{\"required\":true}'",
+    'busabase-cli bases field-change-request --base-id bas_1 --operation update --field-id fld_1 --patch-json \'{"help":{"description":"Actual customer acceptance date","example":"2026-10-14"}}\'',
     "busabase-cli bases field-change-request --base-id bas_1 --operation reorder --field-ids fld_2 --field-ids fld_1",
   ],
   execute: async (client: BusabaseTaskClient, input: BaseFieldChangeInput) => {

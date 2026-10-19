@@ -1,6 +1,6 @@
 // Form-as-Node DTO/VO schemas. Pure zod leaf — no db, no server imports.
 import { z } from "zod";
-import { fieldNameSchema, fieldTypeSchema } from "../base/contract/base-schemas";
+import { fieldHelpSchema, fieldNameSchema, fieldTypeSchema } from "../base/contract/base-schemas";
 
 /**
  * One input-to-field mapping. `inputName` is the name the agent-authored page
@@ -25,6 +25,7 @@ export const FormBoundFieldSchema = z.object({
   slug: z.string(),
   name: fieldNameSchema,
   type: fieldTypeSchema,
+  help: fieldHelpSchema.optional(),
   choices: z
     .array(
       z.object({

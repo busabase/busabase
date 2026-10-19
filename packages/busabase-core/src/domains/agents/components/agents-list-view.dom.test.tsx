@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type {
   AgentConnectionScope,
@@ -47,6 +47,14 @@ const CODEX_CONNECTION: AgentConnectionVO = {
   slug: "codex-acp",
   agentName: "Codex CLI",
   latest: { ...SESSION, id: "sess-2", slug: "codex-acp", agentName: "Codex CLI" },
+};
+
+const ROUTER_CONNECTION: AgentConnectionVO = {
+  ...CONNECTION,
+  slug: "acprouter:device-1",
+  agentName: "Router laptop",
+  transport: "remote-websocket",
+  latest: { ...SESSION, slug: "acprouter:device-1", transport: "remote-websocket" },
 };
 
 type SlugMutation = (input: { slug: string }) => Promise<{ ok: true }>;
@@ -172,6 +180,63 @@ describe("AgentsListView", () => {
     expect((addAgent as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(addAgent);
     expect(onAddAgent).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    {
+      locale: "en" as const,
+      actions: "Actions for Router laptop",
+      disconnectLabel: "Disconnect",
+      title: "Disconnect this device?",
+      body: "End this device’s active sessions and remove its connection. Conversation history is kept, and other devices stay connected.",
+    },
+    {
+      locale: "zh-CN" as const,
+      actions: "Router laptop 的操作",
+      disconnectLabel: "断开连接",
+      title: "断开此设备？",
+      body: "结束此设备的活动会话并移除其连接。对话历史会保留，其他设备仍保持连接。",
+    },
+  ])(
+    "explains retained Router history in $locale and disconnects only the selected device",
+    async ({ locale, actions, disconnectLabel, title, body }) => {
+      const { disconnect, deleteHistory } = renderView({
+        locale,
+        listConnections: async () => [
+          ROUTER_CONNECTION,
+          { ...ROUTER_CONNECTION, slug: "acprouter:device-2", agentName: "Router desktop" },
+        ],
+      });
+
+      await openAgentActions(actions);
+      fireEvent.click(await screen.findByRole("menuitem", { name: disconnectLabel }));
+
+      const dialog = await screen.findByRole("alertdialog", { name: title });
+      expect(within(dialog).getByText(body)).toBeTruthy();
+      expect(disconnect).not.toHaveBeenCalled();
+      fireEvent.click(within(dialog).getByRole("button", { name: disconnectLabel }));
+
+      await waitFor(() => expect(disconnect).toHaveBeenCalledOnce());
+      expect(disconnect.mock.calls[0]?.[0]).toEqual({ slug: "acprouter:device-1" });
+      expect(deleteHistory).not.toHaveBeenCalled();
+      await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    },
+  );
+
+  it("retains the existing confirmation for a non-Router connection", async () => {
+    const { disconnect, deleteHistory } = renderView({});
+
+    await openAgentActions();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Disconnect" }));
+
+    const dialog = await screen.findByRole("alertdialog", { name: "Delete agent connection?" });
+    expect(dialog.textContent).toContain(
+      "Delete Claude Code and its 5 sessions? This removes the saved connection and conversation history. This cannot be undone.",
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Disconnect" }));
+
+    await waitFor(() => expect(disconnect.mock.calls[0]?.[0]).toEqual({ slug: "claude-acp" }));
+    expect(deleteHistory).not.toHaveBeenCalled();
   });
 
   it("uses a localized alert dialog and success feedback for history deletion", async () => {

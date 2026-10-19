@@ -1,6 +1,49 @@
 import type { CoreI18nMessages } from "./messages";
 
 export const dashboardKo: CoreI18nMessages = {
+  fieldHelp: {
+    inherit: "필드 안내 사용",
+    override: "이 양식의 안내 설정",
+    save: "안내 저장",
+    saveFailed: "안내를 저장하지 못했습니다. 변경 사항은 유지됩니다.",
+    description: "입력 안내",
+    example: "입력 예시",
+    preview: "미리보기",
+    more: "더 보기",
+    less: "접기",
+    view: "{name}의 입력 안내 보기",
+    publicHint: "안내는 공유 양식에도 표시됩니다. 민감한 정보를 포함하지 마세요.",
+  },
+  formula: {
+    expression: "수식",
+    computed: "자동 계산 · 읽기 전용",
+    invalid: "잘못된 수식",
+    valid: "유효한 수식",
+    catalog: "필드 또는 함수 삽입",
+    suggestions: "추천",
+    functions: "함수",
+    search: "필드 또는 함수 검색",
+    preview: "샘플 미리보기",
+    previewUnavailable: "샘플을 불러올 수 없습니다.",
+    retry: "다시 시도",
+    sampleRecord: "샘플 레코드",
+    recordLabel: "레코드 {index}",
+    temporaryValues: "임시 샘플 값",
+    sampleValue: "샘플 값",
+    result: "결과",
+    computationError: "계산 오류",
+    unavailable: "미리보기 불가",
+    empty: "빈 값",
+    resultFormat: "결과 형식",
+    auto: "자동",
+    percent: "백분율",
+    precision: "소수 자릿수",
+    currencyCode: "통화 코드",
+    dependencies: "종속 수식: {fields}",
+    discardChanges: "저장하지 않은 수식 변경 사항을 버릴까요?",
+    confirmDependencies: "다음 수식도 다시 계산됩니다: {fields}. 계속할까요?",
+    restored: "저장하지 않은 수식 초안을 복원했습니다.",
+  },
   common: {
     add: "추가",
     archived: "보관됨",
@@ -116,6 +159,10 @@ export const dashboardKo: CoreI18nMessages = {
     filePreviewUnavailable: "미리보기를 사용할 수 없습니다",
     filePreviewRetry: "다시 시도",
     filePreviewUseBuiltin: "기본 미리보기 사용",
+    parsedText: "분석된 텍스트",
+    parsedTextMissing: "이 파일의 분석된 텍스트가 아직 없습니다.",
+    parsedTextNone: "이 파일에는 읽을 수 있는 텍스트가 없는 것으로 표시되었습니다.",
+    parsedTextEmpty: "분석된 텍스트가 비어 있습니다.",
     filePreviewReasons: {
       not_configured: "이 워크스페이스에는 PreviewFile이 설정되어 있지 않습니다.",
       invalid_configuration: "PreviewFile 설정이 올바르지 않습니다.",
@@ -355,6 +402,17 @@ export const dashboardKo: CoreI18nMessages = {
     linkLabel: "공개 링크",
     copyLink: "링크 복사",
     linkCopied: "링크가 복사되었습니다",
+    qrCode: "QR 코드",
+    qrAlt: "이 링크의 QR 코드",
+    downloadQr: "PNG 다운로드",
+    qrFailed: "QR 코드를 만들 수 없습니다",
+    shareViaDevice: "공유",
+    recordLinkTitle: "레코드 링크 공유",
+    recordPrivateTitle: "레코드 접근 권한",
+    recordPrivateHint:
+      "비공개 레코드 링크를 열려면 로그인하고 이 Base에 대한 접근 권한이 있어야 합니다. QR 코드는 권한을 변경하지 않습니다.",
+    recordPublicHint:
+      "로그인 없이 열려면 Base 전체를 공개해야 합니다. 이 레코드만이 아니라 Base와 표시 가능한 레코드가 공개됩니다.",
     previewAsVisitor: "방문자로 미리보기",
     settingsTitle: "링크 설정",
     settingsHint: "방문자가 할 수 있는 작업과 링크가 만료되는 시점을 설정합니다.",
@@ -732,7 +790,7 @@ export const dashboardKo: CoreI18nMessages = {
   templates: {
     title: "템플릿",
     overview:
-      "테이블, 인터페이스, 그리고 에이전트가 데이터를 다루기 전에 읽는 매뉴얼까지 갖춘 완성형 앱입니다. 설치하면 테이블이 채워지고, 앱 자체는 리뷰를 위해 제안됩니다.",
+      "테이블, 인터페이스, 그리고 에이전트가 데이터를 다루기 전에 읽는 매뉴얼까지 갖춘 완성형 앱입니다. 설치하면 테이블, 샘플 데이터, 앱을 바로 사용할 수 있으며, 먼저 내용을 리뷰하도록 선택할 수도 있습니다.",
     search: "템플릿 검색…",
     refresh: "템플릿 새로고침",
     browseOnly:
@@ -755,7 +813,7 @@ export const dashboardKo: CoreI18nMessages = {
       "템플릿이 베이스와 함께 작성자의 매뉴얼을 설치하므로 에이전트가 이런 요청에 답할 수 있습니다. 스키마를 추측할 필요가 없습니다.",
     contentsTitle: "설치하면 생성되는 항목",
     contentsDescription:
-      "베이스, 필드, 샘플 행은 바로 생성됩니다. 앱 코드와 에이전트 매뉴얼은 먼저 리뷰할 수 있도록 변경 요청으로 제안됩니다.",
+      '이 스페이스를 편집할 수 있으면 베이스, 필드, 샘플 행, 앱, 에이전트 매뉴얼이 바로 생성됩니다. 설치할 때 "먼저 리뷰를 거친 뒤 반영"을 켜면 앱 코드와 매뉴얼이 변경 요청으로 전달됩니다.',
     bases: "베이스",
     apps: "앱",
     documents: "문서",
@@ -1069,6 +1127,8 @@ export const dashboardKo: CoreI18nMessages = {
   inbox: {
     title: "리뷰",
     forReview: "리뷰 대상",
+    previousRequest: "이전 변경 요청",
+    nextRequest: "다음 변경 요청",
     mentions: "멘션",
     mentionsEmpty: "아직 나를 멘션한 사람이 없습니다.",
     mentionsEmptyBody: "팀원이 댓글에서 @멘션하면 여기에 표시됩니다.",
@@ -1358,6 +1418,10 @@ export const dashboardKo: CoreI18nMessages = {
   },
   base: {
     searchRecordsToLink: "연결할 레코드 검색",
+    addRelation: "연결 추가",
+    removeRelation: "{name} 연결 제거",
+    relationUnavailable: "사용할 수 없는 레코드",
+    relationLoadFailed: "연결할 레코드를 불러올 수 없습니다.",
     searchMembers: "멤버 검색",
     noMembersAvailable: "선택할 수 있는 멤버가 없습니다",
     unassignedMember: "미지정",
@@ -1414,8 +1478,8 @@ export const dashboardKo: CoreI18nMessages = {
     paginationPage: "{page}페이지로 이동",
     paginationCurrentPage: "{page}페이지, 현재 페이지",
     paginationRetry: "다시 시도",
-    hideArchived: "보관됨 숨기기",
-    archivedCount: "보관됨 {count}개",
+    hideArchivedRecords: "보관된 레코드 숨기기",
+    showArchivedRecords: "보관된 레코드 표시 ({count}개)",
     createDeleteRequestTitle: "삭제 요청을 만드시겠습니까?",
     createDeleteRequestLabel: "삭제 요청 만들기",
     deleteViewRequestBody:
@@ -1591,6 +1655,10 @@ export const dashboardKo: CoreI18nMessages = {
     baseRestored: "베이스가 복원되었습니다",
     restoreNodeMessage: "{type} {name} 복원",
     nodeRestored: "{type}이(가) 복원되었습니다",
+    restoredWithNewSlug:
+      "'{name}'을(를) 복원했습니다. 기존 slug '{from}'이(가) 사용 중이어서 '{to}'(으)로 바꿨습니다.",
+    restoredWithNewSlugs:
+      "복원했습니다. {count}개 항목은 slug가 사용 중이어서 새 slug로 바꿨습니다. 자세한 내용은 변경 요청에서 확인하세요.",
     nodeDeletedPermanently: "{type}이(가) 영구적으로 삭제되었습니다",
     restoreFieldMessage: "삭제된 필드 복원",
     fieldRestored: "필드가 복원되었습니다",
@@ -1706,6 +1774,20 @@ export const dashboardKo: CoreI18nMessages = {
     deleteFieldCounting: "영향받는 레코드를 세는 중…",
     deleteFieldCountUnavailable: "영향받는 레코드를 세지 못했습니다.",
     deleteFieldImpact: "이 열에는 레코드 {count}개에 값이 있습니다.",
+    deleteFieldDependencies: "이 필드를 사용하는 위치",
+    deleteFieldDependenciesLoading: "저장된 뷰를 확인하는 중…",
+    deleteFieldDependenciesUnavailable: "뷰를 확인할 수 없습니다. 삭제하기 전에 다시 시도하세요.",
+    deleteFieldDependenciesNone: "확인한 항목에서 참조를 찾지 못했습니다.",
+    deleteFieldDependenciesScope:
+      "볼 수 있는 Base와 저장된 뷰를 확인합니다. 숨겨진 Base, 양식, Workflow 구성, AirApp 소스 코드는 확인하지 않습니다.",
+    deleteFieldDependencyKinds: {
+      viewFilter: "뷰 필터",
+      viewSort: "뷰 정렬",
+      viewDisplay: "뷰 레이아웃",
+      formula: "수식 필드",
+      lookup: "조회 필드",
+      relation: "연결 필드",
+    },
     deleteFieldReversible: "열과 값은 유지되며 삭제된 필드에서 다시 복원할 수 있습니다.",
     deleteFieldHint: "요청은 리뷰를 위해 받은함으로 전달됩니다. '지금'은 즉시 삭제합니다.",
     requestDeleteField: "삭제 요청",
@@ -1746,6 +1828,9 @@ export const dashboardKo: CoreI18nMessages = {
     changesRequestedAwaiting: "변경 요청됨 · 수정 대기 중",
     mergedIntoBase: "베이스에 병합됨",
     statusClosed: "닫힘",
+    restoredSlugChangesTitle: "새 slug로 복원됨",
+    restoredSlugChangesHint:
+      "휴지통에 있는 동안 다른 항목이 기존 slug를 가져갔기 때문에, 비어 있는 다음 slug로 복원했습니다. 기존 slug를 쓰는 링크, 북마크, 에이전트 지시는 이제 다른 항목을 엽니다.",
     mergeNeedsReview: "병합 전 리뷰가 필요합니다",
     mergeNeedsReviewBody:
       "{message} 변경 요청은 여기에 안전하게 남아 있습니다. 리뷰 후 수정을 요청하거나 닫으세요.",
@@ -1904,6 +1989,7 @@ export const dashboardKo: CoreI18nMessages = {
     updateRequest: "요청 수정",
     submitNow: "지금 제출",
     updateNow: "지금 수정",
+    discardUnsavedChanges: "저장하지 않은 변경 사항을 버리고 이 레코드를 나가시겠습니까?",
     saving: "저장하는 중...",
     checked: "선택됨",
     addTag: "태그 추가…",
@@ -2071,7 +2157,7 @@ export const dashboardKo: CoreI18nMessages = {
     noAgents: "아직 연결된 에이전트가 없습니다.",
     connectionCheckLeadIn: "시작하기 전에 ",
     connectionCheck:
-      "이 환경이 Busabase에 연결되어 있고 올바른 대상 스페이스{targetSpace}를 가리키는지 확인하세요. Busabase 연결이 설정되지 않았거나 다른 스페이스를 가리키고 있다면 먼저 아래 설정 가이드를 읽고 따르세요.\n\n{setupUrl}",
+      "이 환경에서 busabase 스킬, Busabase MCP 또는 busabase-cli로 Busabase에 접근할 수 있고 올바른 대상 스페이스{targetSpace}를 가리키는지 확인한 뒤, 작업은 이 도구들로 하세요. 브라우저에서 Busabase 페이지를 열어 작업하지 마세요. 아무것도 설정되지 않았거나 연결이 다른 스페이스를 가리키고 있다면, 먼저 아래 설정 가이드를 일반 텍스트로 가져와서(예: curl) 그대로 따르세요.\n\n{setupUrl}",
     builtInScenarios: "기본 시나리오",
     customScenarios: "사용자 지정 시나리오",
     builtInPrompts: "기본 프롬프트",
@@ -2360,9 +2446,9 @@ export const dashboardKo: CoreI18nMessages = {
     warningsTitle: "알아 두세요",
     targetFolder: "설치할 폴더",
     targetFolderHint: "패키지용 새 폴더가 생성됩니다. 기본값은 패키지 이름입니다.",
-    autoMerge: "리뷰 없이 즉시 설치",
-    autoMergeBody:
-      "기본적으로 패키지 콘텐츠는 변경 요청으로 전달되며, 내용을 확인한 후에 반영됩니다. 이 과정을 건너뛰면 작성자를 신뢰하는 것이 됩니다. 패키지에는 스킬과 AirApp이 포함될 수 있으며, 이는 이 스페이스의 에이전트가 실행할 코드입니다.",
+    requireReview: "먼저 리뷰를 거친 뒤 반영",
+    requireReviewBody:
+      "기본값은 꺼짐입니다. 이 스페이스에 쓰기 권한이 있으므로 패키지의 레코드, 문서, 스킬, AirApp은 설치 즉시 반영됩니다. 켜면 변경 요청으로 받아 하나씩 확인한 뒤 병합할 수 있습니다. 작성자를 잘 모르는 패키지라면 켜 둘 만합니다. 스킬과 AirApp은 이 스페이스의 에이전트가 실행할 코드이기 때문입니다.",
     autoMergeRequiredTitle: "이 패키지는 리뷰 없이만 설치할 수 있습니다",
     autoMergeRequiredBody:
       "패키지의 레코드끼리 서로 연결되어 있으며, 링크는 이미 존재하는 레코드만 가리킬 수 있습니다. 리뷰를 위해 보류하면 모든 링크가 비어 있게 되므로 레코드를 즉시 생성해야 합니다. 먼저 GitHub에서 패키지를 읽어 보세요. 설치하면 작성자의 스킬과 AirApp이 이 스페이스에서 실행됩니다.",
@@ -2384,6 +2470,9 @@ export const dashboardKo: CoreI18nMessages = {
     chooseHow: "설치 방법은 두 가지입니다. 작업하는 환경에 맞는 방법을 선택하세요.",
     tabAgent: "에이전트로 설치",
     tabUi: "UI로 설치",
+    agentTemplateIntro: "Agent에게 “{name}” 템플릿을 이 Busabase 공간에 설치하도록 요청하세요.",
+    agentTemplatePromptBody:
+      "Busabase 템플릿 “{name}”을 연결된 공간에 설치하고 현재 Agent를 위한 로컬 스킬도 설치하세요.\n\n설치 전에, {connectionCheck}\n\n연결이 준비되면 두 명령을 순서대로 실행하세요:\n\n{command}\n\n첫 번째 명령은 폴더, 테이블, 앱 및 기타 패키지 리소스를 공간에 설치합니다. 두 번째 명령은 스킬과 지원 파일을 현재 Agent의 로컬 스킬 디렉터리에 설치합니다. 두 명령은 동일한 소스와 ref를 사용합니다. 설치된 로컬 SKILL.md를 읽고 해당 디렉터리를 기준으로 상대 경로를 해석하세요. 초기화 지침을 따르기 전에 설치된 공간 리소스와 검토 대기 중인 변경 요청을 확인하고 기존 리소스를 재사용하세요. 초기화나 대기 중인 요청 제출을 반복하지 마세요. 로컬 스킬 경로, 각 설치 결과, 공간 리소스 상태 및 검토 대기 중인 변경 요청을 보고하세요. 명령이 실패하면 실패한 단계와 성공한 부분을 구분하고 전체 설치가 완료되었다고 보고하지 마세요.",
     agentIntro:
       "이미 사용 중인 에이전트(Claude Code, Codex, Cursor)에게 “{name}” 매뉴얼을 전달하세요. 에이전트가 이 앱의 작동 방식을 익히며, 이 스페이스에는 아무것도 생성되거나 변경되지 않습니다.",
     agentPromptLabel: "이 내용을 에이전트에게 붙여 넣으세요",

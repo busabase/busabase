@@ -287,6 +287,19 @@ export interface OperationVO {
   baseFields: Record<string, unknown> | null;
 }
 
+/**
+ * One entry of a merged change request's `mergeSummary.slugChanges`: a restore
+ * brought this item back under `toSlug` because another item took `fromSlug`
+ * while it sat in the Trash. The item that holds `fromSlug` keeps it.
+ */
+export interface RestoredSlugChangeVO {
+  nodeId: string;
+  nodeType: string;
+  name: string;
+  fromSlug: string;
+  toSlug: string;
+}
+
 export interface ChangeRequestVO {
   id: string;
   baseId: string | null;
