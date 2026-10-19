@@ -1,10 +1,12 @@
 use std::{
     fs::{self, OpenOptions},
-    io::{Read, Write},
-    net::{TcpStream, ToSocketAddrs},
+    net::TcpStream,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
-    sync::{Mutex, OnceLock},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Mutex, OnceLock,
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -21,9 +23,32 @@ const SIDECAR_LOG_SUMMARY_CHARS: usize = 2000;
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 static BUSABASE_SIDECAR_PROCESS: OnceLock<Mutex<Option<Child>>> = OnceLock::new();
+static BUSABASE_DASHBOARD_READY: AtomicBool = AtomicBool::new(false);
 
 fn sidecar_process() -> &'static Mutex<Option<Child>> {
     BUSABASE_SIDECAR_PROCESS.get_or_init(|| Mutex::new(None))
+}
+
+fn parse_sidecar_port(value: Option<&str>) -> Result<u16, String> {
+    match value {
+        None => Ok(BUSABASE_PORT),
+        Some(value) => value
+            .parse::<u16>()
+            .ok()
+            .filter(|port| *port > 0)
+            .ok_or_else(|| {
+                "BUSABASE_DESKTOP_SIDECAR_PORT must be an integer from 1 to 65535.".to_string()
+            }),
+    }
+}
+
+fn busabase_port() -> u16 {
+    parse_sidecar_port(
+        std::env::var("BUSABASE_DESKTOP_SIDECAR_PORT")
+            .ok()
+            .as_deref(),
+    )
+    .unwrap_or(BUSABASE_PORT)
 }
 
 #[derive(Serialize, Clone)]
@@ -47,6 +72,11 @@ pub(crate) fn busabase_sidecar_status(app: AppHandle) -> Result<BusabaseSidecarS
 
 #[tauri::command]
 pub(crate) fn start_busabase_sidecar(app: AppHandle) -> Result<BusabaseSidecarStatus, String> {
+    let port = parse_sidecar_port(
+        std::env::var("BUSABASE_DESKTOP_SIDECAR_PORT")
+            .ok()
+            .as_deref(),
+    )?;
     {
         let mut guard = sidecar_process()
             .lock()
@@ -56,15 +86,22 @@ pub(crate) fn start_busabase_sidecar(app: AppHandle) -> Result<BusabaseSidecarSt
         }
     }
 
+    BUSABASE_DASHBOARD_READY.store(false, Ordering::Release);
     if is_busabase_healthy() {
-        return build_status(&app, None);
+        let error = check_dashboard(SIDECAR_START_TIMEOUT)
+            .err()
+            .map(|error| format!(
+                "An existing Busabase server on port {port} failed: {error}. This desktop did not start that server, so no local sidecar log was captured. Close the other Busabase instance (including Windows apps when using WSL), or restart this desktop with BUSABASE_DESKTOP_SIDECAR_PORT set to an unused port."
+            ));
+        BUSABASE_DASHBOARD_READY.store(error.is_none(), Ordering::Release);
+        return build_status(&app, error);
     }
 
     if is_busabase_port_open() {
         return build_status(
             &app,
             Some(format!(
-                "Port {BUSABASE_PORT} is already in use, but it is not serving Busabase. Close the process using that port, then retry."
+                "Port {port} is already in use, but it is not serving Busabase. Close the process using that port, or set BUSABASE_DESKTOP_SIDECAR_PORT to an unused port, then retry."
             )),
         );
     }
@@ -110,6 +147,7 @@ pub(crate) fn stop_busabase_sidecar(app: AppHandle) -> Result<BusabaseSidecarSta
 }
 
 pub(crate) fn stop_busabase_sidecar_process() -> Result<(), String> {
+    BUSABASE_DASHBOARD_READY.store(false, Ordering::Release);
     let mut guard = sidecar_process()
         .lock()
         .map_err(|error| error.to_string())?;
@@ -135,7 +173,7 @@ fn status_with_health(
     error: Option<String>,
 ) -> BusabaseSidecarStatus {
     let data_dir = busabase_data_dir(app).unwrap_or_else(|_| PathBuf::from(""));
-    let healthy = is_busabase_healthy();
+    let healthy = BUSABASE_DASHBOARD_READY.load(Ordering::Acquire) && is_busabase_healthy();
     if let Some(mut status) = managed {
         status.healthy = healthy;
         status.running = status.running || healthy;
@@ -151,7 +189,7 @@ fn status_with_health(
     BusabaseSidecarStatus {
         running: healthy,
         healthy,
-        port: BUSABASE_PORT,
+        port: busabase_port(),
         pid: None,
         local_url: local_url(),
         api_url: api_url(),
@@ -177,7 +215,7 @@ fn running_child_status(
                 return Ok(Some(BusabaseSidecarStatus {
                     running: true,
                     healthy: false,
-                    port: BUSABASE_PORT,
+                    port: busabase_port(),
                     pid: Some(child.id()),
                     local_url: local_url(),
                     api_url: api_url(),
@@ -187,6 +225,7 @@ fn running_child_status(
                 }));
             }
             Some(_) => {
+                BUSABASE_DASHBOARD_READY.store(false, Ordering::Release);
                 *guard = None;
             }
         }
@@ -199,7 +238,7 @@ fn local_url() -> String {
     // The health probe below still uses 127.0.0.1 for a deterministic loopback
     // socket check, while the WebView loads localhost so the Busabase SPA can
     // hydrate and call /api/rpc during tauri dev.
-    format!("http://localhost:{BUSABASE_PORT}")
+    format!("http://localhost:{}", busabase_port())
 }
 
 fn api_url() -> String {
@@ -301,7 +340,7 @@ fn resolve_bundled_sidecar(app: &AppHandle) -> Option<BundledSidecarCommand> {
     }
 }
 
-/// Build the command that runs the Busabase sidecar on `BUSABASE_PORT`.
+/// Build the command that runs the Busabase sidecar on its configured port.
 ///
 /// Production: launches the bundled standalone `node server.js`. Dev fallback:
 /// `pnpm --filter busabase dev` from the workspace root. Both receive a local
@@ -365,7 +404,10 @@ fn build_sidecar_command(
             .arg("--filter")
             .arg("busabase")
             .arg("dev")
+            .arg("--port")
+            .arg(busabase_port().to_string())
             .current_dir(workspace_root);
+        command.env("BUSABASE_DESKTOP_DEV_SIDECAR", "1");
         command.env("APP_ENV", "DESKTOP");
         command.env(
             "BUSABASE_DESKTOP_CODEX_HOME",
@@ -389,7 +431,7 @@ fn build_sidecar_command(
     }
 
     command
-        .env("PORT", BUSABASE_PORT.to_string())
+        .env("PORT", busabase_port().to_string())
         .env("PG_DATABASE_URL", pg_url)
         .env("STORAGE_URL", storage_url)
         .stdin(Stdio::null())
@@ -419,6 +461,9 @@ fn wait_for_sidecar(data_dir: &Path, timeout: Duration) -> Result<(), String> {
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
         if is_busabase_healthy() {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            check_dashboard(remaining).map_err(|error| sidecar_start_error(&error, data_dir))?;
+            BUSABASE_DASHBOARD_READY.store(true, Ordering::Release);
             return Ok(());
         }
 
@@ -479,7 +524,16 @@ fn tail_chars(value: &str, limit: usize) -> String {
 
 #[cfg(test)]
 mod sidecar_tests {
-    use super::tail_chars;
+    use super::{parse_sidecar_port, tail_chars};
+
+    #[test]
+    fn validates_sidecar_port_overrides_without_changing_the_default() {
+        assert_eq!(parse_sidecar_port(None).unwrap(), 15419);
+        assert_eq!(parse_sidecar_port(Some("15420")).unwrap(), 15420);
+        for value in ["", "0", "65536", "-1", "abc", "15420/other"] {
+            assert!(parse_sidecar_port(Some(value)).is_err());
+        }
+    }
 
     #[test]
     fn keeps_the_end_of_sidecar_logs_on_character_boundaries() {
@@ -491,7 +545,7 @@ mod sidecar_tests {
 
 fn is_busabase_port_open() -> bool {
     TcpStream::connect_timeout(
-        &format!("127.0.0.1:{BUSABASE_PORT}")
+        &format!("127.0.0.1:{}", busabase_port())
             .parse()
             .expect("Busabase loopback address must be valid"),
         Duration::from_millis(300),
@@ -500,26 +554,13 @@ fn is_busabase_port_open() -> bool {
 }
 
 fn is_busabase_healthy() -> bool {
-    let address = format!("127.0.0.1:{BUSABASE_PORT}");
-    let Ok(mut addresses) = address.to_socket_addrs() else {
-        return false;
-    };
-    let Some(address) = addresses.next() else {
-        return false;
-    };
-    let Ok(mut stream) = TcpStream::connect_timeout(&address, Duration::from_millis(500)) else {
-        return false;
-    };
-    let _ = stream.set_read_timeout(Some(Duration::from_millis(800)));
-    let request = format!(
-        "GET /api/health HTTP/1.1\r\nHost: 127.0.0.1:{BUSABASE_PORT}\r\nConnection: close\r\n\r\n"
-    );
-    if stream.write_all(request.as_bytes()).is_err() {
-        return false;
-    }
-    let mut response = String::new();
-    if stream.read_to_string(&mut response).is_err() {
-        return false;
-    }
-    response.starts_with("HTTP/1.1 200") || response.starts_with("HTTP/1.0 200")
+    super::sidecar_probe::http_status(
+        ([127, 0, 0, 1], busabase_port()).into(),
+        "/api/health",
+        Duration::from_millis(800),
+    ) == Ok(200)
+}
+
+fn check_dashboard(timeout: Duration) -> Result<(), String> {
+    super::sidecar_probe::check_dashboard(([127, 0, 0, 1], busabase_port()).into(), timeout)
 }

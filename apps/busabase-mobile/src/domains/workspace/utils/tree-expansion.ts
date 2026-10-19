@@ -92,3 +92,26 @@ export const ancestorIdsOfActiveNode = (
   };
   return walk(nodes, []) ?? [];
 };
+
+/**
+ * Expanded folders whose children the drawer has not loaded: the tree comes in
+ * root + two levels, and a folder below that only says `hasChildren`. Expansion
+ * outlives the drawer (see above) but loaded children do not, so after a route
+ * change, or when a reveal opens folders, these are the ones to fetch again.
+ */
+export const unloadedExpandedIds = (
+  nodes: readonly NodeVO[],
+  expanded: ReadonlySet<string>,
+): string[] => {
+  const ids: string[] = [];
+  const walk = (list: readonly NodeVO[]) => {
+    for (const node of list) {
+      if (expanded.has(node.id) && node.hasChildren && node.children.length === 0) {
+        ids.push(node.id);
+      }
+      walk(node.children);
+    }
+  };
+  walk(nodes);
+  return ids;
+};

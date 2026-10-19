@@ -36,6 +36,8 @@ export function NativeSection({ title, caption, children, style }: NativeSection
 interface NativeRowProps {
   title: string;
   subtitle?: string;
+  /** Lines the subtitle may wrap to; 0 means no limit. Defaults to one line. */
+  subtitleLines?: number;
   meta?: string;
   leading?: ReactNode;
   trailing?: ReactNode;
@@ -49,6 +51,7 @@ interface NativeRowProps {
 export function NativeRow({
   title,
   subtitle,
+  subtitleLines = 1,
   meta,
   leading,
   trailing,
@@ -81,7 +84,10 @@ export function NativeRow({
           ) : null}
         </View>
         {subtitle ? (
-          <Text numberOfLines={1} style={[typography.small, { color: tokens.mutedForeground }]}>
+          <Text
+            numberOfLines={subtitleLines}
+            style={[typography.small, { color: tokens.mutedForeground }]}
+          >
             {subtitle}
           </Text>
         ) : null}

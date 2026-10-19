@@ -174,21 +174,23 @@ export function InstallPlanStep({ flow, urlLocked }: InstallPlanStepProps) {
           {plan.requiresAutoMerge ? (
             <InstallNotice
               body={t.install.autoMergeRequiredBody}
-              danger
               title={t.install.autoMergeRequiredTitle}
             />
-          ) : null}
-
-          <View style={[styles.toggle, { borderColor: tokens.border }]}>
-            <NativeRow
-              title={t.install.autoMerge}
-              subtitle={t.install.autoMergeBody}
-              disabled={flow.installing}
-              trailing={<InstallCheckMark checked={flow.autoMerge} />}
-              last
-              onPress={() => flow.setAutoMerge((current) => !current)}
-            />
-          </View>
+          ) : (
+            <View style={[styles.toggle, { borderColor: tokens.border }]}>
+              <NativeRow
+                title={t.install.requireReview}
+                subtitle={t.install.requireReviewBody}
+                // The reason to turn review on is the whole point of this row; one
+                // line cut it off before the part about unknown authors.
+                subtitleLines={0}
+                disabled={flow.installing}
+                trailing={<InstallCheckMark checked={flow.requireReview} />}
+                last
+                onPress={() => flow.setRequireReview((current) => !current)}
+              />
+            </View>
+          )}
         </>
       ) : null}
     </>

@@ -304,9 +304,9 @@ export const zhCN: CoreMessages = {
     warningsTitle: "需要留意",
     targetFolder: "安装到文件夹",
     targetFolderHint: "会为该软件包新建一个文件夹，默认用软件包自己的名字。",
-    autoMerge: "跳过评审，直接安装",
-    autoMergeBody:
-      "默认情况下，软件包的内容会先变成变更请求，等你读过之后才会生效。跳过这一步意味着你信任作者：软件包里可以带有 Skill 和 AirApp，那是本空间的 Agent 会真正执行的代码。",
+    requireReview: "先送审内容，再生效",
+    requireReviewBody:
+      "默认关闭：你对这个空间有写权限，软件包的记录、文档、Skill 和 AirApp 会在安装后立即生效。打开后，这些内容会先变成变更请求，你逐条读过再合并——作者不熟时值得打开，因为 Skill 和 AirApp 是本空间的 Agent 会真正执行的代码。",
     autoMergeRequiredTitle: "该软件包只能跳过评审安装",
     autoMergeRequiredBody:
       "它的记录之间互相关联，而关联只能指向已经存在的记录。如果先挂起评审，所有关联都会是空的——所以这些记录必须立即创建。安装前请先在 GitHub 上读一遍：装上之后，作者的 Skill 和 AirApp 就会在本空间里运行。",
@@ -333,7 +333,7 @@ export const zhCN: CoreMessages = {
   templates: {
     title: "模板",
     overview:
-      "完整的应用模板，包含表格、界面和 Agent 操作数据前要阅读的手册。安装后会填充表格，并提交应用供你审核。",
+      "完整的应用模板，包含表格、界面和 Agent 操作数据前要阅读的手册。安装后表格、示例数据和应用即可直接使用；也可以选择先审核内容再生效。",
     search: "搜索模板…",
     refresh: "刷新模板",
     searchEmpty: "没有与“{search}”匹配的模板。",
@@ -351,7 +351,7 @@ export const zhCN: CoreMessages = {
     promptsDescription: "模板会连同 Base 一起安装作者编写的手册，Agent 因此无需猜测数据结构。",
     contentsTitle: "安装后会创建的内容",
     contentsDescription:
-      "Base、字段和示例数据会立即创建。应用代码和 Agent 手册则会作为变更请求提交，供你先行审核。",
+      "你能编辑这个空间时，Base、字段、示例数据、应用和 Agent 手册都会立即创建。安装时勾选「先送审内容，再生效」，应用代码和手册就会改为变更请求，供你先审核。",
     bases: "Base",
     apps: "应用",
     documents: "文档",

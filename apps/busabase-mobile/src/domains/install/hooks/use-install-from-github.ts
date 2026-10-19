@@ -31,7 +31,12 @@ export function useInstallFromGithub() {
   const [plan, setPlan] = useState<InstallPlanVO | null>(null);
   const [intoFolder, setIntoFolder] = useState("");
   const [rename, setRename] = useState(false);
-  const [autoMerge, setAutoMerge] = useState(false);
+  /**
+   * Opt-in: left off, `autoMerge` is omitted and the server decides by
+   * permission — so a space manager's install goes live instead of landing in
+   * Change Requests they would only approve themselves.
+   */
+  const [requireReview, setRequireReview] = useState(false);
   const [result, setResult] = useState<InstallResultVO | null>(null);
   /** The install's latest server-side progress line; null when not installing. */
   const [installProgress, setInstallProgress] = useState<string | null>(null);
@@ -70,7 +75,7 @@ export function useInstallFromGithub() {
         repoUrl: repoUrl.trim(),
         ...(trimmedFolder ? { intoFolder: trimmedFolder } : {}),
         rename,
-        autoMerge,
+        ...(requireReview ? { autoMerge: false } : {}),
       };
 
       return runInstall(buda.client.install as unknown as InstallClient, input, {
@@ -95,7 +100,7 @@ export function useInstallFromGithub() {
     setPlan(null);
     setIntoFolder("");
     setRename(false);
-    setAutoMerge(false);
+    setRequireReview(false);
     setResult(null);
     setInstallProgress(null);
     resetErrors();
@@ -129,13 +134,12 @@ export function useInstallFromGithub() {
     !planning &&
     !installing &&
     unresolvedCollisions.length === 0 &&
-    !(plan.requiresAutoMerge && !autoMerge);
+    !(plan.requiresAutoMerge && requireReview);
   const error =
     errorMessage(installMutation.error, t.install.installFailed) ??
     errorMessage(planMutation.error, t.install.previewFailed);
 
   return {
-    autoMerge,
     canInstall,
     error,
     installing,
@@ -145,6 +149,7 @@ export function useInstallFromGithub() {
     planning,
     rename,
     repoUrl,
+    requireReview,
     result,
     unresolvedCollisions,
     install,
@@ -152,7 +157,7 @@ export function useInstallFromGithub() {
     previewTargetFolderIfChanged,
     reset,
     resetErrors,
-    setAutoMerge,
+    setRequireReview,
     setIntoFolder,
     setRepoUrl,
     toggleRename,

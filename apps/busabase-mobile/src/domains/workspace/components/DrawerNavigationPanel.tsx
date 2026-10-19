@@ -4,6 +4,7 @@ import { Platform, Pressable, ScrollView, Text, View } from "react-native";
 import type { CoreMessages } from "~/i18n/messages";
 import { mobile, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
+import { useRevealActiveRow } from "../hooks/use-reveal-active-row";
 import { toggleNodeExpanded } from "../utils/tree-expansion";
 import { DrawerNavRow, NodeNavItem } from "./DrawerNavigationRows";
 import {
@@ -39,6 +40,8 @@ interface DrawerNavigationPanelProps {
   nodesLoading: boolean;
   nodesError: boolean;
   expandedIds: ReadonlySet<string>;
+  /** Folders whose children are being fetched (see `useLazyNodeChildren`). */
+  loadingNodeIds: ReadonlySet<string>;
   onDismiss: () => void;
   /** Present the install sheet above the drawer, not inside it. */
   onRequestInstall: () => void;
@@ -61,6 +64,7 @@ export function DrawerNavigationPanel({
   nodesLoading,
   nodesError,
   expandedIds,
+  loadingNodeIds,
   onDismiss,
   onRequestInstall,
   onNavigate,
@@ -69,6 +73,7 @@ export function DrawerNavigationPanel({
   onCreateRoot,
 }: DrawerNavigationPanelProps) {
   const tokens = useTokens();
+  const reveal = useRevealActiveRow(pathname);
 
   return (
     <View
@@ -96,114 +101,133 @@ export function DrawerNavigationPanel({
       </View>
 
       <ScrollView
-        contentContainerStyle={styles.drawerBody}
+        ref={reveal.scrollRef}
         style={styles.drawerScroll}
         showsVerticalScrollIndicator={false}
+        scrollEventThrottle={16}
+        onScroll={reveal.onScroll}
+        onLayout={reveal.onViewportLayout}
       >
-        <View style={styles.navGroup}>
-          {pinnedItems.map((item) => (
-            <DrawerNavRow
-              key={item.href}
-              active={isDrawerItemActive(pathname, item)}
-              badge={item.key === "home" ? pendingCount : undefined}
-              icon={item.icon}
-              label={t.nav[item.key]}
-              onPress={() => onNavigate(item.href)}
-            />
-          ))}
-          {contextualDestination ? (
-            <DrawerNavRow
-              active={isDrawerItemActive(pathname, contextualDestination)}
-              badge={contextualDestination.key === "inbox" ? pendingCount : undefined}
-              icon={contextualDestination.icon}
-              label={t.nav[contextualDestination.key]}
-              onPress={() => onNavigate(contextualDestination.href)}
-            />
-          ) : null}
-        </View>
+        {/* The body's own View (not `contentContainerStyle`) so the active row
+            can be measured against it; `collapsable={false}` keeps Android
+            from flattening it away. */}
+        <View
+          ref={reveal.contentRef}
+          collapsable={false}
+          style={styles.drawerBody}
+          onLayout={reveal.onContentLayout}
+        >
+          <View style={styles.navGroup}>
+            {pinnedItems.map((item) => (
+              <DrawerNavRow
+                key={item.href}
+                active={isDrawerItemActive(pathname, item)}
+                badge={item.key === "home" ? pendingCount : undefined}
+                icon={item.icon}
+                label={t.nav[item.key]}
+                onPress={() => onNavigate(item.href)}
+              />
+            ))}
+            {contextualDestination ? (
+              <DrawerNavRow
+                active={isDrawerItemActive(pathname, contextualDestination)}
+                badge={contextualDestination.key === "inbox" ? pendingCount : undefined}
+                icon={contextualDestination.icon}
+                label={t.nav[contextualDestination.key]}
+                onPress={() => onNavigate(contextualDestination.href)}
+              />
+            ) : null}
+          </View>
 
-        {favoriteNodes.length > 0 ? (
+          {favoriteNodes.length > 0 ? (
+            <View style={styles.section}>
+              <View style={styles.sectionHeader}>
+                <Text
+                  style={[
+                    typography.caption,
+                    styles.sectionLabel,
+                    { color: tokens.mutedForeground },
+                  ]}
+                >
+                  {t.nav.favorites}
+                </Text>
+                <Text style={[typography.small, { color: tokens.mutedForeground }]}>
+                  {favoriteNodes.length}
+                </Text>
+              </View>
+              <View style={styles.navGroup}>
+                {favoriteNodes.map((node) => (
+                  <NodeNavItem
+                    key={`favorite-${node.id}`}
+                    node={{ ...node, children: [] }}
+                    pathname={pathname}
+                    depth={0}
+                    collapsible={false}
+                    expandedIds={expandedIds}
+                    onPress={onNavigateNode}
+                    onToggleExpanded={toggleNodeExpanded}
+                    onOpenActions={(target) => onOpenActions(target, false)}
+                  />
+                ))}
+              </View>
+            </View>
+          ) : null}
+
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
               <Text
                 style={[typography.caption, styles.sectionLabel, { color: tokens.mutedForeground }]}
               >
-                {t.nav.favorites}
+                {t.nav.workspace}
               </Text>
-              <Text style={[typography.small, { color: tokens.mutedForeground }]}>
-                {favoriteNodes.length}
-              </Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={t.nav.create}
+                hitSlop={mobile.hitSlop}
+                style={({ pressed }) => [
+                  styles.workspaceCreateButton,
+                  { opacity: pressed ? 0.6 : 1 },
+                ]}
+                onPress={onCreateRoot}
+              >
+                <Plus size={16} color={tokens.mutedForeground} />
+              </Pressable>
             </View>
             <View style={styles.navGroup}>
-              {favoriteNodes.map((node) => (
+              {nodesLoading ? (
+                <Text
+                  style={[typography.small, styles.sectionHint, { color: tokens.mutedForeground }]}
+                >
+                  {t.nav.workspaceLoading}
+                </Text>
+              ) : null}
+              {nodesError ? (
+                <Text style={[typography.small, styles.sectionHint, { color: tokens.destructive }]}>
+                  {t.nav.workspaceError}
+                </Text>
+              ) : null}
+              {!nodesLoading && !nodesError && treeNodes.length === 0 ? (
+                <Text
+                  style={[typography.small, styles.sectionHint, { color: tokens.mutedForeground }]}
+                >
+                  {t.nav.workspaceEmpty}
+                </Text>
+              ) : null}
+              {treeNodes.map((node) => (
                 <NodeNavItem
-                  key={`favorite-${node.id}`}
-                  node={{ ...node, children: [] }}
+                  key={node.id}
+                  node={node}
                   pathname={pathname}
                   depth={0}
-                  collapsible={false}
                   expandedIds={expandedIds}
+                  loadingNodeIds={loadingNodeIds}
+                  onActiveRowRef={reveal.setActiveRow}
                   onPress={onNavigateNode}
                   onToggleExpanded={toggleNodeExpanded}
-                  onOpenActions={(target) => onOpenActions(target, false)}
+                  onOpenActions={(target) => onOpenActions(target, true)}
                 />
               ))}
             </View>
-          </View>
-        ) : null}
-
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text
-              style={[typography.caption, styles.sectionLabel, { color: tokens.mutedForeground }]}
-            >
-              {t.nav.workspace}
-            </Text>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={t.nav.create}
-              hitSlop={mobile.hitSlop}
-              style={({ pressed }) => [
-                styles.workspaceCreateButton,
-                { opacity: pressed ? 0.6 : 1 },
-              ]}
-              onPress={onCreateRoot}
-            >
-              <Plus size={16} color={tokens.mutedForeground} />
-            </Pressable>
-          </View>
-          <View style={styles.navGroup}>
-            {nodesLoading ? (
-              <Text
-                style={[typography.small, styles.sectionHint, { color: tokens.mutedForeground }]}
-              >
-                {t.nav.workspaceLoading}
-              </Text>
-            ) : null}
-            {nodesError ? (
-              <Text style={[typography.small, styles.sectionHint, { color: tokens.destructive }]}>
-                {t.nav.workspaceError}
-              </Text>
-            ) : null}
-            {!nodesLoading && !nodesError && treeNodes.length === 0 ? (
-              <Text
-                style={[typography.small, styles.sectionHint, { color: tokens.mutedForeground }]}
-              >
-                {t.nav.workspaceEmpty}
-              </Text>
-            ) : null}
-            {treeNodes.map((node) => (
-              <NodeNavItem
-                key={node.id}
-                node={node}
-                pathname={pathname}
-                depth={0}
-                expandedIds={expandedIds}
-                onPress={onNavigateNode}
-                onToggleExpanded={toggleNodeExpanded}
-                onOpenActions={(target) => onOpenActions(target, true)}
-              />
-            ))}
           </View>
         </View>
       </ScrollView>

@@ -4,7 +4,7 @@ Busabase Desktop is the private local-first desktop shell for the open-source Bu
 
 The desktop app uses Tauri and manages the existing `apps/busabase` OSS server as a local sidecar. The default mode is private: Busabase binds to localhost and keeps data in the local desktop data directory.
 
-When the desktop window opens, it starts the sidecar automatically, then the desktop SPA loads data from the sidecar API at `http://127.0.0.1:15419/api/v1`. The sidecar also serves the OSS web UI for debugging or browser fallback, but the desktop app renders its own static SPA instead of embedding that webpage.
+When the desktop window opens, the Tauri shell starts the sidecar automatically and embeds its OSS dashboard. Startup checks both `/api/health` and the dashboard, following local redirects before declaring readiness. A dashboard startup failure stays on the error screen with a retry action instead of opening a broken workspace.
 
 ## Development
 
@@ -12,15 +12,52 @@ When the desktop window opens, it starts the sidecar automatically, then the des
 pnpm --filter @busabase/desktop tauri dev
 ```
 
-The Tauri shell runs on port `3064`. The managed Busabase sidecar runs on port `15419`.
+The Tauri shell runs on port `3064`. The managed Busabase sidecar runs on port `15419`, except that `pnpm tauri dev` in WSL defaults to `15420` to avoid reusing a Windows desktop server.
 
-The sidecar command sets `PORT=15419` and `PG_DATABASE_URL` to the desktop-owned PGlite directory
+The sidecar command sets `PORT` to the selected port and `PG_DATABASE_URL` to the desktop-owned PGlite directory
 before running `pnpm --filter busabase dev`.
 
 Environment overrides:
 
 - `BUSABASE_DESKTOP_WORKSPACE_ROOT` points the sidecar launcher at a specific workspace root.
 - `BUSABASE_DESKTOP_PNPM` overrides the `pnpm` executable used to launch the OSS sidecar.
+- `BUSABASE_DESKTOP_SIDECAR_PORT` overrides port `15419` (integer from 1 to 65535). Close other apps using the default port, or select an unused port when running Windows and WSL instances together. Each instance must use its own data directory if they are separate workspaces.
+- `BUSABASE_DATA_DIR` overrides the local data directory (default: `~/.busabase/data`). Startup failures include the location of `sidecar.log` and recent log output.
+- `BUSABASE_DESKTOP_RENDERER=hardware` opts out of automatic software rendering in WSL development. Other platforms and production/build commands keep their normal rendering environment.
+
+### Linux startup troubleshooting
+
+Registering `busabase://` requires `xdg-utils` and `desktop-file-utils`. If these tools are missing, the shell logs an actionable warning; local workspace startup can continue, but external deep links will not work. On Debian/Ubuntu, install them separately:
+
+```bash
+sudo apt-get install xdg-utils desktop-file-utils
+```
+
+If Mesa Zink/EGL initialization fails on the machine, try the opt-in software-rendering development launcher:
+
+```bash
+pnpm --filter @busabase/desktop tauri:dev:software
+```
+
+In WSL, the ordinary development command automatically selects software rendering and port `15420`; no environment prefix is required:
+
+```bash
+pnpm --filter @busabase/desktop tauri dev
+```
+
+The development sidecar uses `.next-desktop` so a separate OSS development server does not hold its build lock. An already-running external server is never stopped automatically; its failures are reported as external-server errors rather than pointing at a nonexistent managed log.
+
+Software mode sets `LIBGL_ALWAYS_SOFTWARE=true`, `GALLIUM_DRIVER=llvmpipe`, and `WEBKIT_DISABLE_COMPOSITING_MODE=1` for this launch only. It can reduce rendering performance. It does not fix an HTTP 500: inspect the reported sidecar log for that failure. Do not delete the local database to troubleshoot startup.
+
+Startup regression checks:
+
+```bash
+pnpm --filter @busabase/desktop test:styles
+pnpm --filter @busabase/desktop test:linux-launcher
+cargo test --manifest-path apps/busabase-desktop/src-tauri/Cargo.toml
+```
+
+`test:startup` additionally requires `DESKTOP_E2E_URL`, `DESKTOP_E2E_SIDECAR_URL`, and `DESKTOP_E2E_OUTPUT_DIR` pointing at isolated desktop/OSS development servers and an artifact directory. It exercises the browser shell's failure/retry flow with a simulated native bridge and loads the real OSS workspace; it does not replace native WebKit/GPU testing.
 
 ## Local ACP agents
 
@@ -110,8 +147,8 @@ boot/failure page are identical to the Tauri shell.
 ```txt
 Busabase Desktop
 -> Tauri shell
--> Next.js static SPA
--> apps/busabase OSS sidecar API
+-> Next.js static shell
+-> embedded apps/busabase OSS dashboard and API
 -> local PGlite data
 -> localhost API
 ```
