@@ -1,5 +1,6 @@
 export * from "./AcpSourceIcon";
 export * from "./account-switcher-context";
+export * from "./browser-location";
 export * from "./DashboardLayout";
 export * from "./demo";
 export * from "./demo-client";

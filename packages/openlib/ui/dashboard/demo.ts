@@ -123,3 +123,21 @@ export function resolveHideDemoChrome(): boolean {
     return false;
   }
 }
+
+/** Window event fired by `hideDemoChrome()` so mounted demo chrome hides at once. */
+export const HIDE_DEMO_CHROME_EVENT = "demo-chrome-hidden";
+
+/**
+ * Suppress demo-only chrome for the rest of this browser tab — same sticky
+ * state as `?hidden=1`. Backs the banner's near-invisible close button, used
+ * when recording or presenting a demo; the demo data itself stays active.
+ */
+export function hideDemoChrome(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(HIDE_CHROME_KEY, "1");
+  } catch {
+    // sessionStorage unavailable — still hide what is mounted right now
+  }
+  window.dispatchEvent(new Event(HIDE_DEMO_CHROME_EVENT));
+}

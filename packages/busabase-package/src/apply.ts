@@ -612,7 +612,7 @@ const applyAgentPrompts = async (
   if (!agentPrompts?.length) return;
   if (!nodeId) {
     state.warnings.push(
-      `"${node.slug}" installs as a change request, so its ${agentPrompts.length} agent prompt(s) were not applied. After merging it, run \`busabase-cli nodes set-agent-prompts\` for that node, or re-install with --auto-merge.`,
+      `"${node.slug}" installs as a change request, so its ${agentPrompts.length} agent prompt(s) were not applied. After merging it, run \`busabase-cli nodes set-agent-prompts\` for that node, or re-install without asking for review (drop --require-review, or leave "Send the content for review first" off).`,
     );
     return;
   }
@@ -948,9 +948,9 @@ const createFileTreeNode = async (
     files,
     // Inline, so it rides along the change request on the review-first path.
     // Stamping after the fact only works when the node was created outright —
-    // and review-first is the DEFAULT, so a post-hoc stamp meant the ordinary
-    // install produced a Skill and an AirApp that the app could never
-    // recognise as its own, and whose manual an agent could never find.
+    // on a review-first install a post-hoc stamp meant a Skill and an AirApp
+    // that the app could never recognise as its own, and whose manual an agent
+    // could never find.
     ...(app ? { metadata: resourceStamp(app, node.slug, extraMetadata) } : {}),
     // The package hands over a complete, self-contained node; "merge" would layer the
     // default scaffold underneath and leave stray unrelated files behind.
