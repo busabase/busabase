@@ -343,7 +343,7 @@ describe("--auto-merge requirement (§12)", () => {
       noTarget,
     );
     expect(plan.requiresAutoMerge).toBe(true);
-    expect(() => assertPlanIsApplicable(plan, false)).toThrow(/--auto-merge/);
+    expect(() => assertPlanIsApplicable(plan, false)).toThrow(/drop --require-review/);
     expect(() => assertPlanIsApplicable(plan, true)).not.toThrow();
   });
 

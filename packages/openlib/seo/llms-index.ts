@@ -82,6 +82,13 @@ const classifyPage = (segments: readonly string[]): PageGroup => {
   return "guides";
 };
 
+/**
+ * `_draft`-style posts: a leading underscore on the last path segment keeps a post out of the
+ * Blog index and the sitemap (buda's convention), so it stays out of the llms index too.
+ */
+const isDraftSlug = (segments: readonly string[]): boolean =>
+  Boolean(segments.at(-1)?.startsWith("_"));
+
 /** One line of prose: descriptions can carry newlines, which would break a list item. */
 const oneLine = (value: string | null | undefined): string | null => {
   const text = value?.replace(/\s+/g, " ").trim();
@@ -142,6 +149,7 @@ export const buildLlmsIndexSections = (
 ): LlmsIndexSection[] => {
   const blogPosts = toCandidates(posts, baseUrl)
     .filter(({ entry }) => entry.segments[0] === "blog" && entry.segments.length > 1)
+    .filter(({ entry }) => !isDraftSlug(entry.segments))
     .sort(byNewest)
     .slice(0, blogPostLimit);
 

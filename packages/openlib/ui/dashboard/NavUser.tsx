@@ -122,7 +122,7 @@ export function NavUser({
             // raising `maximumSessions` would grow it without bound. Radix
             // measures the space left to the viewport edge for us; cap to that
             // and scroll, so the menu fits any screen at any account count.
-            className="flex max-h-[var(--radix-dropdown-menu-content-available-height)] w-[--radix-dropdown-menu-trigger-width] min-w-56 flex-col overflow-y-auto rounded-lg"
+            className="flex max-h-[var(--radix-dropdown-menu-content-available-height)] w-(--radix-dropdown-menu-trigger-width) min-w-56 flex-col overflow-y-auto rounded-lg"
             side={isMobile ? "bottom" : "right"}
             align="end"
             sideOffset={4}

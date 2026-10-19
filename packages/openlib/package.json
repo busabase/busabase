@@ -53,6 +53,10 @@
       "types": "./seo/index.ts",
       "default": "./seo/index.ts"
     },
+    "./seo/llms-routes": {
+      "types": "./seo/llms-routes.ts",
+      "default": "./seo/llms-routes.ts"
+    },
     "./cache": {
       "types": "./cache/index.ts",
       "default": "./cache/index.ts"

@@ -144,6 +144,18 @@ describe("buildLlmsIndexSections", () => {
   });
 });
 
+describe("draft posts", () => {
+  it("leaves out posts whose slug starts with an underscore", () => {
+    const sections = buildLlmsIndexSections(
+      { posts: [post("_draft-note", "Draft", "2026-09-30"), post("live", "Live", "2026-09-01")] },
+      options,
+    );
+    expect(sections.flatMap((section) => section.links.map((link) => link.title))).toEqual([
+      "Live",
+    ]);
+  });
+});
+
 describe("renderLlmsIndexSections", () => {
   it("renders llms.txt list items, titles only under Optional", () => {
     const text = renderLlmsIndexSections([

@@ -650,7 +650,7 @@ export const findPlanBlockers = (plan: InstallPlan, autoMerge: boolean): string[
   }
   if (plan.requiresAutoMerge && !autoMerge) {
     blockers.push(
-      "This package's records carry relation values, and a relation stores the ids of the records it points at — which only exist once the records are merged. Installing review-first would leave every relation empty.\n\nRe-run with --auto-merge to install it (this trusts the package author: records are created immediately instead of landing as change requests you review first).",
+      'This package\'s records carry relation values, and a relation stores the ids of the records it points at — which only exist once the records are merged. Installing review-first would leave every relation empty.\n\nInstall it without asking for review: drop --require-review, or leave "Send the content for review first" off in the dashboard. Records are then created immediately. A credential that can only propose changes cannot install this package; use one with write access to the space.',
     );
   }
   const unsatisfiable = findUnsatisfiableRequiredFields(plan);

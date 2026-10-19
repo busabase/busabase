@@ -1,8 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useBrowserLocation } from "wouter/use-browser-location";
-import { addDemoParam, resolveDemoMode } from "./demo";
+import type { useBrowserLocation } from "wouter/use-browser-location";
+import { useNextSafeBrowserLocation } from "./browser-location";
+import {
+  addDemoParam,
+  HIDE_DEMO_CHROME_EVENT,
+  hideDemoChrome,
+  resolveDemoMode,
+  resolveHideDemoChrome,
+} from "./demo";
 
 /**
  * Whether the page is in demo mode. Resolved AFTER mount (starts `false`) to avoid
@@ -14,6 +21,22 @@ export function useDemoMode(): boolean {
     setIsDemo(resolveDemoMode().useCase !== null);
   }, []);
   return isDemo;
+}
+
+/**
+ * Whether demo-only chrome is suppressed (`?hidden=1` or the banner's close
+ * button), plus the action that suppresses it. Resolved after mount (starts
+ * `false`) like `useDemoMode`, and updates when any banner calls `hide`.
+ */
+export function useHideDemoChrome(): [hidden: boolean, hide: () => void] {
+  const [hidden, setHidden] = useState(false);
+  useEffect(() => {
+    setHidden(resolveHideDemoChrome());
+    const onHide = () => setHidden(true);
+    window.addEventListener(HIDE_DEMO_CHROME_EVENT, onHide);
+    return () => window.removeEventListener(HIDE_DEMO_CHROME_EVENT, onHide);
+  }, []);
+  return [hidden, hideDemoChrome];
 }
 
 /**
@@ -36,9 +59,12 @@ export function useAddDemoParam(): (url: string) => string {
  * around. Non-demo users are unaffected (`addDemoParam` is a no-op outside demo
  * mode), and the banner's "Exit demo mode" link is a plain `<a href>` (full
  * reload) that bypasses this hook.
+ *
+ * Built on `useNextSafeBrowserLocation` (see `./browser-location`); pair it with
+ * `searchHook={useNextSafeSearch}` on the same `<Router>`.
  */
 export const useDemoPreservingLocation: typeof useBrowserLocation = (options) => {
-  const [path, navigate] = useBrowserLocation(options);
+  const [path, navigate] = useNextSafeBrowserLocation(options);
   const demoNavigate = useCallback<typeof navigate>(
     (to, navOptions) =>
       navigate(
