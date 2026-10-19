@@ -1,5 +1,6 @@
 "use client";
 
+import { useNextSafeBrowserLocation, useNextSafeSearch } from "openlib/ui/dashboard";
 import { type ReactNode, useMemo } from "react";
 import { Router } from "wouter";
 import { memoryLocation } from "wouter/memory-location";
@@ -74,8 +75,8 @@ export function SPAWrapper({
         <div className="min-h-0 flex-1">
           <Router
             base={basePath}
-            hook={lockInitialPath ? lockedLocation.hook : undefined}
-            searchHook={lockInitialPath ? lockedLocation.searchHook : undefined}
+            hook={lockInitialPath ? lockedLocation.hook : useNextSafeBrowserLocation}
+            searchHook={lockInitialPath ? lockedLocation.searchHook : useNextSafeSearch}
             ssrPath={ssrPathWithSpace}
             ssrSearch={ssrSearch}
           >

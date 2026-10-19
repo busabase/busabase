@@ -13,17 +13,19 @@ import { getBusabaseDashboardRoutes as getDashboardRoutes } from "busabase-core/
 import { useNodeTree } from "busabase-core/dashboard/use-node-tree";
 import { CoreI18nProvider, useCoreMessages } from "busabase-core/i18n";
 import { Skeleton } from "kui/skeleton";
-import { useRouter, useSearchParams } from "next/navigation";
-import { detectBrowserLocale, type Locale } from "openlib/i18n";
+import { useSearchParams } from "next/navigation";
+import type { Locale } from "openlib/i18n";
 import { addDemoParam, resolveDemoMode } from "openlib/ui/dashboard";
 import { Suspense, startTransition, useCallback, useEffect, useMemo, useState } from "react";
 import { useLocation } from "wouter";
+import { navigate } from "wouter/use-browser-location";
 import { BusabaseDashboardShell } from "~/components/dashboard/busabase-dashboard-shell";
 import { DashboardNotFound } from "~/components/spa/not-found";
 
 import { SPAWrapper } from "~/components/spa/spa-wrapper";
 import { getSecondarySidebarNav } from "~/config/navigation-nested";
 import { normalizeBusabaseAppLocale } from "~/i18n/app-locale";
+import { detectBusabaseBrowserLocale } from "~/i18n/browser-locale";
 import { SUPPORTED_LOCALES } from "~/i18n/config";
 import { useBusabaseAppLL } from "~/i18n/use-app-ll";
 import { buildDashboardUrl, getDashboardBasePath } from "~/lib/dashboard-routes";
@@ -203,7 +205,6 @@ function DashboardClientContent({
   chromeless: chromelessOverride,
   readOnlyChangeRequestPreview = false,
 }: DashboardClientProps) {
-  const router = useRouter();
   const queryClient = useQueryClient();
   // `initialPath` is available during SSR, so a direct Inbox load never mounts
   // the redundant counts request. DashboardRouteObserver runs inside Wouter's
@@ -259,7 +260,8 @@ function DashboardClientContent({
         window.localStorage.setItem("busabaseLocale", normalizedStored);
       }
     }
-    const detected = normalizeBusabaseAppLocale(detectBrowserLocale(appLocaleCodes)) ?? "en";
+    const detected =
+      normalizeBusabaseAppLocale(detectBusabaseBrowserLocale(appLocaleCodes)) ?? "en";
     startTransition(() => setDetectedLocale(detected));
   }, [appLocaleCodes]);
   const demoMode = resolveDemoMode(searchParams);
@@ -285,24 +287,24 @@ function DashboardClientContent({
       queryClient,
       onMoveError: LL.shell.nodeMoveFailed(),
     });
-  const basesQuery = useQuery(orpc.bases.list.queryOptions({ input: {} }));
   // ChangeRequest rows are route-owned inside BusabaseDashboard: Home uses
   // the cursor list, Inbox uses listPage, and detail uses get. The shell needs
   // only the whole-space review count for its badge.
   const changeRequestCountsQuery = useQuery({
-    ...orpc.changeRequests.counts.queryOptions({}),
+    ...orpc.changeRequests.reviewCount.queryOptions({}),
     enabled: !isInboxRoute,
   });
   const auditEventsQuery = useQuery(orpc.auditEvents.list.queryOptions({ input: {} }));
-  const bases = basesQuery.data ?? [];
   const changeRequests = useMemo<never[]>(() => [], []);
   // The core dashboard loads records itself via records.list and ignores
   // this prop, so we don't fetch the whole records table just to hand it over.
   const records = useMemo<never[]>(() => [], []);
   const auditEvents = auditEventsQuery.data ?? [];
-  const loadError = nodesQuery.error ?? basesQuery.error ?? auditEventsQuery.error;
-  const isLoadingDashboardData =
-    nodesQuery.isPending || basesQuery.isPending || auditEventsQuery.isPending;
+  // No `bases.list` here: the dashboard loads the open Base itself and the
+  // catalog only on the pages that draw from it. Fetching it here held the
+  // whole first paint until every Base in the space had arrived.
+  const loadError = nodesQuery.error ?? auditEventsQuery.error;
+  const isLoadingDashboardData = nodesQuery.isPending || auditEventsQuery.isPending;
   const coreMessages = useCoreMessages(locale);
   // RPC errors can contain unlocalized server messages. Surface one useful,
   // translated recovery message and retain the underlying error in the query.
@@ -334,7 +336,6 @@ function DashboardClientContent({
         provideQueryClient={false}
         records={records}
         readOnlyChangeRequestPreview={readOnlyChangeRequestPreview}
-        bases={bases}
         onSearchOpenChange={setIsSearchOpen}
         searchOpen={isSearchOpen}
       />
@@ -344,7 +345,6 @@ function DashboardClientContent({
       auditEvents,
       changeRequests,
       records,
-      bases,
       nodes,
       isSearchOpen,
       locale,
@@ -465,17 +465,18 @@ function DashboardClientContent({
               setCreateParent(null);
             }
           }}
-          onCreated={(changeRequestId, mode) => {
-            queryClient.invalidateQueries({ queryKey: orpc.nodes.list.key() });
-            queryClient.invalidateQueries({ queryKey: orpc.bases.list.key() });
-            queryClient.invalidateQueries({ queryKey: orpc.changeRequests.list.key() });
-            queryClient.invalidateQueries({ queryKey: orpc.changeRequests.counts.key() });
-            router.refresh();
-            if (mode === "merged") {
-              router.push(addDemoParam(buildDashboardUrl("/")));
-            } else {
-              router.push(addDemoParam(buildDashboardUrl(`/inbox/${changeRequestId}`)));
-            }
+          // Stay in the SPA: refetch what the create changed, then route in place.
+          // `router.push`/`router.refresh()` to another slug remounts this whole
+          // page — a fresh QueryClient, the skeleton, every open panel gone.
+          onCreated={async (changeRequestId, mode, nodePath) => {
+            await queryClient.invalidateQueries();
+            navigate(
+              addDemoParam(
+                buildDashboardUrl(
+                  mode === "merged" ? (nodePath ?? "/") : `/inbox/${changeRequestId}`,
+                ),
+              ),
+            );
           }}
         />
         <InstallFromGithubModal
@@ -486,14 +487,13 @@ function DashboardClientContent({
           onCreateNode={openCreateNode}
           // Structure (the folder, its Bases, fields and views) is materialized
           // immediately, so the tree has changed even when every record is still
-          // pending review — reload rather than leave a stale sidebar.
+          // pending review — refetch rather than leave a stale sidebar. No reload:
+          // "create an item instead" closes this dialog and opens the create one,
+          // which a reload would throw away.
           onInstalled={() => {
-            router.refresh();
-            window.location.assign(addDemoParam(buildDashboardUrl("/")));
+            void queryClient.invalidateQueries();
           }}
-          onReviewChangeRequests={() => {
-            window.location.assign(addDemoParam(buildDashboardUrl("/inbox")));
-          }}
+          onReviewChangeRequests={() => navigate(addDemoParam(buildDashboardUrl("/inbox")))}
         />
       </CoreI18nProvider>
     </SPAWrapper>
