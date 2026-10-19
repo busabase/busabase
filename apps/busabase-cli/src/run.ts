@@ -2802,7 +2802,8 @@ manual lands as a Skill node, its nodes are stamped as belonging to that app, it
 Base slugs are prefixed with the target folder so two templates cannot collide on
 a name like "settings", and its sample rows are merged so the app is not empty
 when you open it (--no-sample-records opts out). Its AirApp code and its Skill
-still wait for your review.
+follow the same rule as other content: live if you can write, held for review
+with --require-review.
 
 If the URL is a repository that holds several packages rather than being one,
 install lists them and you pick with --skill <name>.
