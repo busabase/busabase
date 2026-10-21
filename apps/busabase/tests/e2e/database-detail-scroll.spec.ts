@@ -72,6 +72,10 @@ test("Table and Gallery can jump between numbered record pages", async ({ page, 
   const lastPageSize = firstPage.total - (firstPage.totalPages - 1) * firstPage.pageSize;
 
   await page.goto(`/dashboard/local/base/${baseSlug}`);
+  // The bare Base route opens its leftmost view — the default "Grid view".
+  await expect(page).toHaveURL(new RegExp(`/dashboard/local/base/${baseSlug}/grid-view$`), {
+    timeout: 45_000,
+  });
   const rows = page.locator("[data-record-id]");
   await expect(rows.first()).toBeVisible({ timeout: 45_000 });
   await expect(rows).toHaveCount(firstPage.pageSize);

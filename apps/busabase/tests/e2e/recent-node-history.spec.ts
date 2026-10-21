@@ -8,12 +8,21 @@ test("sidebar node visits appear in Search Recent in most-recent order", async (
 
   const pages = page.getByRole("link", { name: "Pages", exact: true });
   const posts = page.getByRole("link", { name: "Posts", exact: true });
+  const breadcrumb = page.getByRole("navigation", { name: "Breadcrumb" });
   await expect(pages).toBeVisible({ timeout: RENDER_TIMEOUT });
 
+  // A sidebar Base link opens that Base's leftmost saved view (keeping `?demo`).
+  // Recent records a Base once it has loaded, not when the URL changes: leaving
+  // before `bases.get` answers is not a visit. Until then the breadcrumb reads
+  // the generic "Base", so wait for it to name the Base before moving on. On a
+  // busy CI server the URL-only wait clicked Posts first and Pages never
+  // reached Recent.
   await pages.click();
-  await expect(page).toHaveURL(/\/dashboard\/local\/base\/pages\?demo=1$/);
+  await expect(page).toHaveURL(/\/dashboard\/local\/base\/pages\/[a-z0-9-]+\?demo=1$/);
+  await expect(breadcrumb.getByText("Pages", { exact: true })).toBeVisible();
   await posts.click();
-  await expect(page).toHaveURL(/\/dashboard\/local\/base\/blog\?demo=1$/);
+  await expect(page).toHaveURL(/\/dashboard\/local\/base\/blog\/all-records\?demo=1$/);
+  await expect(breadcrumb.getByText("Posts", { exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "Search", exact: true }).click();
   const dialog = page.getByRole("dialog");

@@ -57,9 +57,16 @@ test("mobile Inbox views stay in one bounded, horizontally scrollable row", asyn
 test("mobile Base separates record actions from horizontally scrollable views", async ({
   page,
 }) => {
-  await page.setViewportSize({ width: 390, height: 844 });
+  // 360px, not 390: the strip lost its pseudo "All" tab, and the demo blog's
+  // three saved views only just fit at 390 — this asserts the overflow scroller,
+  // so it needs a width where the tabs genuinely overflow.
+  await page.setViewportSize({ width: 360, height: 800 });
   await page.goto("/dashboard/local/base/blog?demo=1");
 
+  // The bare Base route opens its leftmost saved view and keeps `?demo`.
+  await expect(page).toHaveURL(/\/dashboard\/local\/base\/blog\/all-records\?demo=1$/, {
+    timeout: RENDER_TIMEOUT,
+  });
   await expect(page.getByRole("link", { exact: true, name: "Ready to publish" })).toBeVisible({
     timeout: RENDER_TIMEOUT,
   });

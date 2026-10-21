@@ -22,8 +22,14 @@ test("legacy dashboard paths redirect to the local-space canonical URL", async (
 test("canonical local-space dashboard path renders directly", async ({ page }) => {
   await page.goto("/dashboard/local/base/blog?demo=blog");
 
-  await expect(page).toHaveURL(/\/dashboard\/local\/base\/blog\?demo=blog$/);
+  // Renders in the local space directly; the bare Base route then opens the
+  // Base's leftmost saved view, keeping the query string.
+  await expect(page).toHaveURL(/\/dashboard\/local\/base\/blog\/all-records\?demo=blog$/);
   // `exact` matters: without it this also matches any seeded record link whose
-  // body happens to contain "posts", which trips strict mode.
-  await expect(page.getByRole("link", { exact: true, name: "Posts" })).toBeVisible();
+  // body happens to contain "posts", which trips strict mode. Scoped to the
+  // breadcrumb because on a view route the Base crumb is a link too, next to
+  // the sidebar row of the same name.
+  await expect(
+    page.getByLabel("Breadcrumb").getByRole("link", { exact: true, name: "Posts" }),
+  ).toBeVisible();
 });

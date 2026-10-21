@@ -33,7 +33,24 @@ test("field header actions require a saved view and support keyboard quick sorti
     throw new Error("Expected the field header actions saved view to be merged");
   }
 
-  await page.goto("/dashboard/local/base/blog");
+  // Every Base normally has at least one saved view and opens on it, so the
+  // only way to reach the plain, view-less grid is a Base created without its
+  // default view (`defaultView: false`). That fallback must stay read-only.
+  const viewlessSlug = `viewless-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+  await json<BaseVO>(
+    await request.post("/api/v1/bases", {
+      data: {
+        autoMerge: true,
+        defaultView: false,
+        fields: [{ name: "Title", required: true, slug: "title", type: "text" }],
+        name: "Viewless header actions",
+        slug: viewlessSlug,
+      },
+    }),
+  );
+  await page.goto(`/dashboard/local/base/${viewlessSlug}`);
+  await expect(page.getByTestId("view-control-toolbar-readonly")).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`/dashboard/local/base/${viewlessSlug}$`));
 
   const allViewAction = page.getByRole("button", { name: "Actions for Title" });
   await allViewAction.focus();
@@ -46,7 +63,7 @@ test("field header actions require a saved view and support keyboard quick sorti
   // same panel already shows once a view exists (asserted below).
   await expect(
     savedViewPrompt.locator("xpath=..").getByRole("link", { name: "Edit field" }),
-  ).toHaveAttribute("href", "/dashboard/local/base/blog/design");
+  ).toHaveAttribute("href", `/dashboard/local/base/${viewlessSlug}/design`);
   await page.keyboard.press("Escape");
 
   await page.goto(`/dashboard/local/base/blog/${merged.view.slug}`);

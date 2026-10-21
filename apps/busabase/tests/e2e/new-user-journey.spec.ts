@@ -51,8 +51,13 @@ test("a new user tours the approval-first knowledge base", async ({ page }) => {
 
   await test.step("browses the Posts base and its saved views", async () => {
     await page.goto("/dashboard/local/base/blog");
+    // A Base opens on its leftmost saved view — there is no unsaved "All" tab.
+    await expect(page).toHaveURL(/\/dashboard\/local\/base\/blog\/all-records$/);
     await expect(page.locator("[data-topbar-current-item]")).toHaveText("Posts");
-    await expect(page.getByRole("link", { exact: true, name: "All" })).toBeVisible();
+    await expect(
+      page.getByTestId("base-view-tabs").getByRole("link", { exact: true, name: "All records" }),
+    ).toHaveAttribute("aria-current", "page");
+    await expect(page.getByRole("link", { exact: true, name: "All" })).toHaveCount(0);
     await expect(page.getByRole("link", { exact: true, name: "Ready to publish" })).toBeVisible();
     await expect(page.getByRole("link", { exact: true, name: "Drafts" })).toBeVisible();
     // Approval-first: the base renders its records view (empty-state when nothing

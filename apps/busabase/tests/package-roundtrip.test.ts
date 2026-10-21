@@ -535,6 +535,10 @@ describe("busabase-cli export → install round trip (real demo seed, two databa
     expect(unexpected).toEqual([]);
   });
 
+  // A full second install of the whole demo seed. Every demo Base that ships no
+  // views of its own now carries a "Grid view", so the export holds ~20 more
+  // views and this install creates each through its own change request — past
+  // the 30s default on a busy runner.
   it("re-installing with --rename creates space-unique copies inside the second folder", async () => {
     // Every node type now owns its slug across the whole space. Installing the
     // same package under a different folder therefore still collides, and
@@ -591,7 +595,7 @@ describe("busabase-cli export → install round trip (real demo seed, two databa
     expect(findUnderFolder(after, "second-copy", "ai-research-editor", "skill")).toBeUndefined();
     // The whole point: a genuinely new node, not the first install's node reused.
     expect(secondCopySkill?.id).not.toBe(firstCopySkill?.id);
-  });
+  }, 90_000);
 
   it("re-materializes every base, with identical fields, views and record counts", () => {
     expect([...targetBases.keys()].sort()).toEqual([...sourceBases.keys()].sort());

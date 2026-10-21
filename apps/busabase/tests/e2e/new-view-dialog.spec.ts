@@ -3,6 +3,8 @@ import { dragSortableTo, expect, json, test } from "./_fixtures";
 
 test("new view opens in a modal without navigating away from the base", async ({ page }) => {
   await page.goto("/dashboard/local/base/blog?demo=blog");
+  // The bare Base route opens the leftmost saved view, keeping `?demo`.
+  await expect(page).toHaveURL(/\/dashboard\/local\/base\/blog\/all-records\?demo=blog$/);
 
   const newViewButton = page.getByRole("button", { name: "New view" });
   await expect(newViewButton).toBeVisible();
@@ -14,7 +16,7 @@ test("new view opens in a modal without navigating away from the base", async ({
   await expect(dialog).toContainText("Name");
   await expect(dialog.locator(":focus")).toBeVisible();
   await expect(dialog.getByRole("button", { name: "Add View Now" })).toBeVisible();
-  await expect(page).toHaveURL(/\/dashboard\/local\/base\/blog\?demo=blog$/);
+  await expect(page).toHaveURL(/\/dashboard\/local\/base\/blog\/all-records\?demo=blog$/);
 
   const fieldsEditor = dialog.getByTestId("new-view-shared-fields");
   const draggableRows = fieldsEditor.locator(
@@ -96,6 +98,7 @@ test("new Gallery view keeps its selected type and Auto cover after immediate cr
   );
 
   await page.goto(`/dashboard/local/base/${baseSlug}`);
+  await expect(page).toHaveURL(new RegExp(`/dashboard/local/base/${baseSlug}/grid-view$`));
   await page.getByRole("button", { name: "New view" }).click();
 
   const dialog = page.getByRole("dialog");

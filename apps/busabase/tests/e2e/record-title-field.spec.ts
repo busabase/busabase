@@ -36,6 +36,8 @@ test("Base Design changes the record title used by Gallery", async ({ page, requ
   if (!titleField || !summaryField) throw new Error("Expected title and summary fields");
 
   await page.goto(`/dashboard/local/base/${baseSlug}`);
+  // A new Base opens on its default "Grid view".
+  await expect(page).toHaveURL(new RegExp(`/dashboard/local/base/${baseSlug}/grid-view$`));
   await page.getByRole("button", { name: "New view" }).click();
   const tableViewDialog = page.getByRole("dialog");
   await tableViewDialog.getByLabel("Name").fill("Record title Table");

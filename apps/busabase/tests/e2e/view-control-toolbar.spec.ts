@@ -58,8 +58,11 @@ test("staged view controls recover a hidden conditioned field with one update CR
   }
 
   await page.goto("/dashboard/local/base/blog");
-  const readonlyToolbar = page.getByTestId("view-control-toolbar-readonly");
-  await expect(readonlyToolbar).toContainText("Open a saved view or create one");
+  // There is no unsaved "All" grid any more: the bare route opens the Base's
+  // leftmost saved view, whose toolbar is editable like any other view's.
+  await expect(page).toHaveURL(/\/dashboard\/local\/base\/blog\/all-records$/);
+  await expect(page.getByTestId("view-control-fields")).toBeVisible();
+  await expect(page.getByTestId("view-control-toolbar-readonly")).toHaveCount(0);
   await expect(page.getByTestId("base-new-view-button")).toBeVisible();
 
   const workflowRequests = { merge: 0, review: 0, update: 0 };

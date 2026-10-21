@@ -13,6 +13,8 @@ const TITLE = "E2E field coverage row";
 
 test("shows typed, accessible headers in the Field Type Lab grid", async ({ page }) => {
   await page.goto("/dashboard/local/base/field-type-lab");
+  // The Base opens on its leftmost saved view, the seeded "All field types".
+  await expect(page).toHaveURL(/\/dashboard\/local\/base\/field-type-lab\/all-field-types$/);
   await expect(page.locator("[data-topbar-current-item]")).toHaveText("Field Type Lab");
 
   const grid = page.getByTestId("base-records-grid");

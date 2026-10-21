@@ -51,6 +51,10 @@ test("an active base wins when an archived base has the same slug", async ({ pag
   );
 
   await page.goto(`/dashboard/local/base/${slug}`);
+  // A new Base comes with its "Grid view", and the bare route opens it.
+  await expect(page).toHaveURL(new RegExp(`/dashboard/local/base/${slug}/grid-view$`), {
+    timeout: RENDER_TIMEOUT,
+  });
 
   // The node's name lives in the topbar breadcrumb now, not in an in-page <h1>.
   await expect(page.locator("[data-topbar-current-item]")).toHaveText(activeName, {
