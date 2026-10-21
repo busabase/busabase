@@ -63,7 +63,8 @@
       "!**/i18n/i18n-util.async.ts",
       "!**/i18n/i18n-util.sync.ts",
       "!**/i18n/i18n-react.tsx",
-      "!**/i18n/formatters.ts"
+      "!**/i18n/formatters.ts",
+      "!packages/busabase-python-sdk/openapi.json"
     ]
   }
 }

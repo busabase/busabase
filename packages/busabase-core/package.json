@@ -1,7 +1,7 @@
 {
   "name": "busabase-core",
   "description": "Shared Busabase open-core protocol, local store, API helpers, and dashboard components.",
-  "version": "0.96.0",
+  "version": "0.97.0",
   "private": true,
   "type": "module",
   "exports": {
@@ -260,6 +260,10 @@
     "./dashboard/node-settings-permissions-slot": {
       "types": "./src/domains/dashboard/components/node-settings-permissions-slot.tsx",
       "default": "./src/domains/dashboard/components/node-settings-permissions-slot.tsx"
+    },
+    "./dashboard/file-viewer-slot": {
+      "types": "./src/domains/dashboard/components/file-viewer-slot.tsx",
+      "default": "./src/domains/dashboard/components/file-viewer-slot.tsx"
     },
     "./dashboard/empty-agent-guide": {
       "types": "./src/domains/dashboard/components/empty-agent-guide.tsx",
