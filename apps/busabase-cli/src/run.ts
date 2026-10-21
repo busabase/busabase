@@ -1817,10 +1817,11 @@ export function buildProgram(state: CliState = {}): Command {
 Answers "what do I send, and what comes back" without fetching anything. The
 contract is compiled into this CLI, so \`schema\` works offline and unauthenticated.
 
-Prefer it over \`busabase-cli openapi\`: that returns the WHOLE document — 936 KB
-across 103 endpoints as of 2026-09-04, with every type inlined per endpoint — so
-reading one endpoint's arguments out of it costs roughly 234k tokens. One
-endpoint through \`schema\` is a few KB.
+Prefer it over \`busabase-cli openapi\`: that returns the WHOLE document — about
+240 KB across 106 endpoints as of 2026-10-20, with shared types behind \`$ref\`s
+into \`components.schemas\` — so reading one endpoint's arguments out of it costs
+tens of thousands of tokens plus chasing references. One endpoint through
+\`schema\` is a few KB and self-contained.
 
   busabase-cli schema                                 # every endpoint: id, method, path
   busabase-cli schema ${sampleEndpointId()}                       # input + output schema
@@ -2211,8 +2212,8 @@ Each entry: { key: string (unique per node), intent?: "read-only" | "change",
 label: string | { <locale>: string }, body: string | { <locale>: string } }.
 Locale keys (when using the object form): en, zh-CN, zh-TW, ja, ko, de, fr, es,
 pt — anything else fails validation as "Invalid input" on that field.
-"body" may contain a literal "{target}" placeholder, substituted at render time
-with the same node/space description every built-in prompt uses. At most 50
+"body" is only the task: every prompt opens with the same node/space line the
+built-in prompts use, added for you, so do not write "{target}". At most 50
 entries per node, 80 characters per localized label, 8 KiB per localized body.
 
 The file is validated against this exact schema BEFORE any network request —
