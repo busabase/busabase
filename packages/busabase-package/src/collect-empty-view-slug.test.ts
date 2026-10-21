@@ -18,7 +18,9 @@ const manifest = (): PackageManifest => ({
   tags: [],
 });
 
-const stubClient = (views: Array<{ slug: string; name: string }>): PackageClient =>
+const stubClient = (
+  views: Array<{ slug: string; name: string; position?: number }>,
+): PackageClient =>
   ({
     bases: {
       get: async () => ({
@@ -33,6 +35,7 @@ const stubClient = (views: Array<{ slug: string; name: string }>): PackageClient
         views.map((v) => ({
           slug: v.slug,
           name: v.name,
+          ...(v.position !== undefined ? { position: v.position } : {}),
           description: "",
           config: { filters: [], sorts: [] },
         })),
@@ -95,5 +98,38 @@ describe("collectBase — a View with no slug (legacy data) must not break the w
     const views = base?.type === "base" ? base.base.views : undefined;
     expect(views).toHaveLength(1);
     expect(warnings.some((w) => w.includes("no slug"))).toBe(false);
+  });
+});
+
+describe("collectBase — view order", () => {
+  const exportedSlugs = async (
+    views: Array<{ slug: string; name: string; position?: number }>,
+  ): Promise<string[]> => {
+    const tree = await collectPackageTree(stubClient(views), baseRoot(), {
+      manifest: manifest(),
+      warn: () => {},
+      baseUrl: "http://localhost",
+    });
+    const base = tree.nodes.find((n) => n.type === "base");
+    return base?.type === "base" ? base.base.views.map((view) => view.slug) : [];
+  };
+
+  it("exports views in the Base's shared tab order, so install recreates it", async () => {
+    expect(
+      await exportedSlugs([
+        { slug: "grid-view", name: "Grid view", position: 1 },
+        { slug: "board", name: "Board", position: 0 },
+        { slug: "open", name: "Open", position: 2 },
+      ]),
+    ).toEqual(["board", "grid-view", "open"]);
+  });
+
+  it("keeps the server's order when it sends no positions (a server that predates them)", async () => {
+    expect(
+      await exportedSlugs([
+        { slug: "b", name: "B" },
+        { slug: "a", name: "A" },
+      ]),
+    ).toEqual(["b", "a"]);
   });
 });

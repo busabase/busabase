@@ -122,7 +122,12 @@ const createFakeServer = (): FakeServer => {
     views: {
       changeRequest: async (input: unknown) => {
         record(`views.changeRequest:${(input as { operation: string }).operation}`, input);
-        return { id: `crq_${++crSeq}` };
+        // Install asks for views outright (`autoMerge: true`) and refuses a
+        // pending one, so answer the way a server with write access does.
+        return {
+          id: `crq_${++crSeq}`,
+          materialized: (input as { autoMerge?: boolean }).autoMerge === true,
+        };
       },
     },
     docs: {
@@ -241,6 +246,43 @@ const planFor = (nodes: PackageTree["nodes"], assets?: PackageTree["assets"]) =>
     },
     { targetFolder: undefined, existingNodeSlugsByType: new Map() },
   );
+
+describe("the views a package ships", () => {
+  const withViews = (slug: string, viewSlugs: string[]): PackageBaseNode => {
+    const node = plainBase(slug);
+    node.base.views = viewSlugs.map((viewSlug) => ({
+      slug: viewSlug,
+      name: viewSlug,
+      description: "",
+      type: "table",
+      config: { filters: [], sorts: [] },
+    }));
+    return node;
+  };
+
+  it("creates the Base without its default Grid view, then the package's views in order", async () => {
+    const { calls, client } = createFakeServer();
+    const result = await applyInstall(client, planFor([withViews("deals", ["board", "won"])]), {
+      autoMerge: true,
+    });
+    expect(result.created.views).toBe(2);
+    const create = calls.find((call) => call.method === "bases.create");
+    expect(create?.input).toMatchObject({ slug: "deals", defaultView: false });
+    expect(
+      calls
+        .filter((call) => call.method === "views.changeRequest:create")
+        .map((call) => (call.input as { slug: string }).slug),
+    ).toEqual(["board", "won"]);
+  });
+
+  it("leaves the default Grid view to the server when the package ships no views", async () => {
+    const { calls, client } = createFakeServer();
+    await applyInstall(client, planFor([plainBase("notes")]), { autoMerge: true });
+    const create = calls.find((call) => call.method === "bases.create");
+    expect(create?.input).not.toHaveProperty("defaultView");
+    expect(calls.some((call) => call.method.startsWith("views."))).toBe(false);
+  });
+});
 
 describe("target folder", () => {
   it("reuses an existing workspace root instead of creating a second root folder", async () => {

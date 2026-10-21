@@ -38,7 +38,7 @@ lets a web, React Native or Taro binding share one interaction sequence.
 `src/__tests__/purity.test.ts` enforces all of it by scanning the source and `package.json`.
 
 The Buda-family surfaces are `UIMessage`-native and are served by
-[`@kaiui/core`](../../@kaiui/core) instead. The two stacks share `kui/ai-elements` as their
+`@kaiui/core` instead. The two stacks share `kui/ai-elements` as their
 component primitives and nothing else.
 
 ## Design notes worth knowing
