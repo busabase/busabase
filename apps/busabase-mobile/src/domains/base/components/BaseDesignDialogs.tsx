@@ -5,6 +5,7 @@ import { Button } from "~/components/ui/Button";
 import { TextInput } from "~/components/ui/TextInput";
 import { useTokens } from "~/theme/use-tokens";
 import type { BaseDesignController } from "../hooks/use-base-design-controller";
+import { LAST_VIEW_DELETE_MESSAGE } from "../utils/base-views";
 
 export function BaseDesignDialogs({ controller }: { controller: BaseDesignController }) {
   const tokens = useTokens();
@@ -56,7 +57,11 @@ export function BaseDesignDialogs({ controller }: { controller: BaseDesignContro
         title="View actions"
         description={
           controller.viewPendingDelete
-            ? `${controller.viewPendingDelete.name} · Create a change request before deleting.`
+            ? `${controller.viewPendingDelete.name} · ${
+                controller.canDeleteViews
+                  ? "Create a change request before deleting."
+                  : LAST_VIEW_DELETE_MESSAGE
+              }`
             : undefined
         }
         showCloseButton
@@ -73,7 +78,7 @@ export function BaseDesignDialogs({ controller }: { controller: BaseDesignContro
               label="Create delete change request"
               variant="destructive"
               loading={deleteMutation.isPending}
-              disabled={!controller.viewPendingDelete}
+              disabled={!controller.viewPendingDelete || !controller.canDeleteViews}
               fullWidth
               leadingIcon={<Trash2 size={18} color={tokens.destructiveForeground} />}
               onPress={() => {

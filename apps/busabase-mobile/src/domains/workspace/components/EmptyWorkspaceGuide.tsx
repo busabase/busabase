@@ -1,4 +1,4 @@
-import { Bot, Database, GitPullRequest, Plus, Sparkles } from "lucide-react-native";
+import { AppWindow, BookOpen, Database, Plus, Sparkles } from "lucide-react-native";
 import { StyleSheet, Text, View } from "react-native";
 import { Button } from "~/components/ui/Button";
 import { useI18n } from "~/i18n";
@@ -8,8 +8,10 @@ import { useTokens } from "~/theme/use-tokens";
 /**
  * Shown on Home when the workspace has nothing at all — no pending reviews, no
  * recently visited nodes, no activity. Mirrors the web dashboard's
- * `EmptyAgentGuide`: rather than three empty section shells, explain the
- * approval-first model and give one obvious next step.
+ * `EmptyAgentGuide`: rather than three empty section shells, explain what the
+ * workspace is for (agent work that stays and gets reused, every write on the
+ * record), name the four bases an agent fills it with, and give one obvious
+ * next step.
  *
  * Deliberate platform difference: web's primary action opens its Agent Skills
  * dialog. This app has no agent-integration surface at all, so there would be
@@ -21,10 +23,12 @@ export function EmptyWorkspaceGuide({ onCreate }: { onCreate: () => void }) {
   const tokens = useTokens();
   const { t } = useI18n();
 
+  // The four bases, same names and icons as web and the onboarding wizard.
   const points = [
-    { icon: Database, text: t.home.guideStructuredData },
-    { icon: GitPullRequest, text: t.home.guideChangeRequests },
-    { icon: Bot, text: t.home.guideAgentDatabase },
+    { icon: Database, name: t.home.guideBaseDataName, desc: t.home.guideBaseDataDesc },
+    { icon: BookOpen, name: t.home.guideBaseKnowledgeName, desc: t.home.guideBaseKnowledgeDesc },
+    { icon: AppWindow, name: t.home.guideBaseAppsName, desc: t.home.guideBaseAppsDesc },
+    { icon: Sparkles, name: t.home.guideBaseSkillsName, desc: t.home.guideBaseSkillsDesc },
   ];
 
   return (
@@ -45,10 +49,12 @@ export function EmptyWorkspaceGuide({ onCreate }: { onCreate: () => void }) {
         {points.map((point) => {
           const Icon = point.icon;
           return (
-            <View key={point.text} style={styles.point}>
+            <View key={point.name} style={styles.point}>
               <Icon size={16} color={tokens.mutedForeground} />
               <Text style={[typography.small, styles.pointText, { color: tokens.mutedForeground }]}>
-                {point.text}
+                <Text style={[styles.pointName, { color: tokens.foreground }]}>{point.name}</Text>
+                {" · "}
+                {point.desc}
               </Text>
             </View>
           );
@@ -88,5 +94,6 @@ const styles = StyleSheet.create({
   points: { gap: 8 },
   point: { flexDirection: "row", alignItems: "center", gap: 8 },
   pointText: { flex: 1, minWidth: 0 },
+  pointName: { fontWeight: "600" },
   hint: { textAlign: "center" },
 });

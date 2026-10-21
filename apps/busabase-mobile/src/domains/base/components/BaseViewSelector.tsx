@@ -33,7 +33,7 @@ interface Props {
   views: BaseDetailController["views"];
   onClose: () => void;
   onOpen: () => void;
-  onSelect: (viewId: string | null) => void;
+  onSelect: (viewId: string) => void;
 }
 
 export function BaseViewSelector({
@@ -85,40 +85,38 @@ export function BaseViewSelector({
           nestedScrollEnabled
           style={[styles.viewOptions, { borderColor: tokens.border }]}
         >
-          {[{ id: null as string | null, name: "All", type: null }, ...views].map(
-            (view, index, options) => {
-              const selected = view.id === selectedId;
-              const Icon = view.type ? VIEW_TYPE_ICON[view.type] : null;
-              return (
-                <Pressable
-                  key={view.id ?? "all"}
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected }}
-                  style={({ pressed }) => [
-                    styles.viewOption,
-                    index < options.length - 1
-                      ? { borderBottomWidth: StyleSheet.hairlineWidth }
-                      : null,
-                    {
-                      backgroundColor: selected ? tokens.primaryMuted : tokens.surface,
-                      borderColor: tokens.border,
-                      opacity: pressed ? 0.72 : 1,
-                    },
-                  ]}
-                  onPress={() => onSelect(view.id)}
+          {/* Only the Base's saved views, in their shared order — every Base
+              has at least one, so there is no unsaved "All" option. */}
+          {views.map((view, index) => {
+            const selected = view.id === selectedId;
+            const Icon = VIEW_TYPE_ICON[view.type] ?? Table2;
+            return (
+              <Pressable
+                key={view.id}
+                accessibilityRole="radio"
+                accessibilityState={{ selected }}
+                style={({ pressed }) => [
+                  styles.viewOption,
+                  index < views.length - 1 ? { borderBottomWidth: StyleSheet.hairlineWidth } : null,
+                  {
+                    backgroundColor: selected ? tokens.primaryMuted : tokens.surface,
+                    borderColor: tokens.border,
+                    opacity: pressed ? 0.72 : 1,
+                  },
+                ]}
+                onPress={() => onSelect(view.id)}
+              >
+                <Icon size={16} color={tokens.mutedForeground} />
+                <Text
+                  numberOfLines={1}
+                  style={[typography.body, styles.viewOptionLabel, { color: tokens.foreground }]}
                 >
-                  {Icon ? <Icon size={16} color={tokens.mutedForeground} /> : null}
-                  <Text
-                    numberOfLines={1}
-                    style={[typography.body, styles.viewOptionLabel, { color: tokens.foreground }]}
-                  >
-                    {view.name}
-                  </Text>
-                  {selected ? <Check size={17} color={tokens.foreground} /> : null}
-                </Pressable>
-              );
-            },
-          )}
+                  {view.name}
+                </Text>
+                {selected ? <Check size={17} color={tokens.foreground} /> : null}
+              </Pressable>
+            );
+          })}
         </ScrollView>
       </NativeBottomSheet>
     </>

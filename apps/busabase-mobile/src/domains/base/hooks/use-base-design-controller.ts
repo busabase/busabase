@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { SUBMITTED_BY } from "~/domains/review/utils/submitted-by";
 import { buildChoiceFieldOptions, isChoiceFieldType, toBaseDesignSlug } from "../utils/base-design";
+import { canDeleteView, orderViews } from "../utils/base-views";
 
 export function useBaseDesignController(slug: string) {
   const router = useRouter();
@@ -24,6 +25,11 @@ export function useBaseDesignController(slug: string) {
       ? buda.orpc.bases.listViews.queryOptions({ input: { baseId: base.id } })
       : { queryKey: ["no-connection", "views", slug], queryFn: skipToken },
   );
+  const views = useMemo(() => orderViews(viewsQuery.data ?? []), [viewsQuery.data]);
+  // A Base must keep at least one view: the server rejects deleting the last
+  // one, so the sheet disables the action up front and says why. A stale list
+  // can still let a delete through — its server error is shown inline.
+  const canDeleteViews = canDeleteView(views);
 
   const [fieldName, setFieldName] = useState("");
   const [fieldSlug, setFieldSlug] = useState("");
@@ -150,6 +156,7 @@ export function useBaseDesignController(slug: string) {
     addFieldMutation,
     base,
     basesQuery,
+    canDeleteViews,
     choices,
     choiceDraft,
     choicePendingRemove,
@@ -164,6 +171,7 @@ export function useBaseDesignController(slug: string) {
     viewName,
     viewPendingDelete,
     viewSheetOpen,
+    views,
     viewsQuery,
     addChoice,
     closeFieldSheet,
