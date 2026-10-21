@@ -35,7 +35,8 @@ describe("Boundary P15 — base archive hides records + views", () => {
       mergeImmediately: true,
     });
     expect((await raw.records.list({})).records.some((r) => r.id === record.id)).toBe(true);
-    expect((await raw.bases.listViews({ baseId: base.id })).length).toBe(1);
+    // The Base's default "Grid view" plus the one created above.
+    expect((await raw.bases.listViews({ baseId: base.id })).length).toBe(2);
     expect((await raw.search({ query: "sales" })).results.some((x) => x.kind === "base")).toBe(
       true,
     );
@@ -63,6 +64,9 @@ describe("Boundary P15 — base archive hides records + views", () => {
     await raw.changeRequests.merge({ changeRequestIds: [restoreCr.id] });
 
     expect((await raw.records.list({})).records.some((r) => r.id === record.id)).toBe(true);
-    expect((await raw.bases.listViews({ baseId: base.id })).length).toBe(1);
+    expect((await raw.bases.listViews({ baseId: base.id })).map((view) => view.name)).toEqual([
+      "Grid view",
+      "Grid",
+    ]);
   });
 });

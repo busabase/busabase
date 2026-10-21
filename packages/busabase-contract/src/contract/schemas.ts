@@ -234,7 +234,9 @@ const listNodesInputSchema = z
       .string()
       .nullable()
       .optional()
-      .describe("Node to start from. Omit or null to start from the space root."),
+      .describe(
+        "Folder to start from: a node id or a folder slug. Omit or null to start from the space root. An unknown ref is a 404 and a node that is not a folder is a 400 — never an empty list. With `types`, scopes the flat list to this folder's subtree.",
+      ),
     depth: z.coerce
       .number()
       .int()
@@ -242,7 +244,7 @@ const listNodesInputSchema = z
       .max(5)
       .optional()
       .describe(
-        "How many levels beneath the start point to eagerly include (default 2 once either field is set). Capped at 5.",
+        "How many levels beneath the start point to eagerly include (default 2 once either field is set). Capped at 5. With `types` and `parentId`, how many levels of the folder's subtree to search (default: all of it).",
       ),
     status: z
       .enum(["active", "archived"])
@@ -251,7 +253,7 @@ const listNodesInputSchema = z
       .describe(
         "`active` walks the live TREE. `archived` returns a FLAT list of soft-archived nodes " +
           "(the Trash view) with no parent/depth walk — so the response shape you can rely on " +
-          "differs between the two, not just the rows.",
+          "differs between the two, not just the rows. `parentId` with `archived` is a 400.",
       ),
     /**
      * Narrow to specific node types and return a FLAT list of lightweight node
@@ -281,7 +283,7 @@ const listNodesInputSchema = z
       .transform((value) => (Array.isArray(value) ? value : [value]))
       .optional()
       .describe(
-        "Return a flat list of lightweight summaries for these node types instead of the tree. Read one node's full detail with GET /nodes/{nodeId}.",
+        "Return a flat list of lightweight summaries for these node types instead of the tree — across the space, or within `parentId`'s subtree when given. Read one node's full detail with GET /nodes/{nodeId}.",
       ),
   })
   .optional();
@@ -668,6 +670,15 @@ const changeRequestSchema = z.object({
   reviews: z.array(reviewSchema),
 });
 
+/**
+ * The review-first half of every create/write endpoint that returns a
+ * `materialized` discriminator: the write was queued as a pending
+ * ChangeRequest instead of being merged in the same call. One shared instance
+ * (rather than an inline `.extend()` per route) so the published OpenAPI spec
+ * names it once — see `openapi-components.ts`.
+ */
+const pendingChangeRequestSchema = changeRequestSchema.extend({ materialized: z.literal(false) });
+
 // A unit of work for an external agent (poll via /agent/tasks). Self-describing:
 // the full change request (operations + diffs), why it is queued, the requested-
 // changes summary, and the agent-mentioning comments directing the revision.
@@ -986,7 +997,7 @@ const reviseOperationInputSchema = z.object({
   fields: z
     .record(z.string(), z.unknown())
     .describe(
-      "Updated field values keyed by field slug. If you set the base's PRIMARY field (its first field), keep it a short human-readable name — it is the record's display title everywhere.",
+      "Updated field values keyed by field slug. A field id or its exact display name (any language, unambiguous) is mapped to the slug; a write in which no key names a field of the Base is a 400 listing the valid slugs. If you set the base's PRIMARY field (its first field), keep it a short human-readable name — it is the record's display title everywhere.",
     ),
   message: z
     .string()
@@ -1424,6 +1435,7 @@ export {
   markMentionsReadOutputSchema,
   changeRequestStatusSchema,
   changeRequestSchema,
+  pendingChangeRequestSchema,
   changeRequestCountsSchema,
   inboxSnapshotResponseSchema,
   agentTaskSchema,

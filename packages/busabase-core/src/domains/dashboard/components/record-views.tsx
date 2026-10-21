@@ -1628,8 +1628,13 @@ export const normalizeEditorFieldValue = (field: BaseFieldVO, value: unknown): u
     return getAttachmentRefs(value);
   }
   if (field.type === "number") {
+    // An empty input clears the field; it is distinct from an explicit zero.
+    if (value == null || (typeof value === "string" && value.trim() === "")) return null;
+    // Keep invalid input intact so field validation can report it instead of
+    // silently clearing it or coercing booleans/arrays into a numeric value.
+    if (typeof value !== "string" && typeof value !== "number") return value;
     const numberValue = typeof value === "number" ? value : Number(value);
-    return Number.isFinite(numberValue) ? numberValue : null;
+    return Number.isFinite(numberValue) ? numberValue : value;
   }
   if (field.type === "checkbox") {
     return value === true || value === "true";

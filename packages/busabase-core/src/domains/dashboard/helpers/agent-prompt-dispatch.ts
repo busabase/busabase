@@ -96,9 +96,10 @@ export const joinPromptSegments = (segments: PromptSegment[]): string =>
 
 /**
  * Split a body back into target / task / footer using the exact strings it was
- * assembled from. A custom prompt may put `{target}` anywhere; when the body does
- * not open with it (or close on the footer) that part simply stays in the task.
- * Anything that would not join back to the identical body is left whole.
+ * assembled from. Every node prompt, built-in or custom, opens with its target
+ * line; a body that does not (or does not close on the footer) simply keeps that
+ * part in the task. Anything that would not join back to the identical body is
+ * left whole.
  */
 const splitBody = (body: string, target?: string, footer?: string): PromptSegment[] => {
   let task = body;

@@ -28,13 +28,18 @@ export const assertContainerParent = (
     throw new ORPCError("NOT_FOUND", { message: `Parent node not found: ${parentNodeId}` });
   }
   if (!hasCapability(parentNode.type, "container")) {
-    const childLabel = getNodeType(childNodeType)?.label ?? childNodeType;
-    const parentLabel = getNodeType(parentNode.type)?.label ?? parentNode.type;
-    throw new ORPCError("INVALID_PARENT_NODE_TYPE", {
-      status: 422,
-      message: `${childLabel} cannot be nested under a ${parentLabel}; choose a folder or root node.`,
-      data: { allowedParentTypes: ["folder"] },
-    });
+    throw invalidParentNodeType(childNodeType, parentNode.type);
   }
   return parentNode;
+};
+
+/** The 422 `assertContainerParent` throws for a parent that cannot hold children. */
+export const invalidParentNodeType = (childNodeType: string, parentNodeType: string) => {
+  const childLabel = getNodeType(childNodeType)?.label ?? childNodeType;
+  const parentLabel = getNodeType(parentNodeType)?.label ?? parentNodeType;
+  return new ORPCError("INVALID_PARENT_NODE_TYPE", {
+    status: 422,
+    message: `${childLabel} cannot be nested under a ${parentLabel}; choose a folder or root node.`,
+    data: { allowedParentTypes: ["folder"] },
+  });
 };

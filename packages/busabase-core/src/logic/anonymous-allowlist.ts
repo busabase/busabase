@@ -68,6 +68,8 @@ const ANONYMOUS_READ_ALLOWLIST: ReadonlySet<string> = new Set([
   // ACL; archived rows deliberately collapse to `unavailable`.
   "nodes.resolveRouteState",
   "bases.get",
+  // Both active and archived listings filter through buildNodeVisibilityExists.
+  "bases.list",
   // A base's views and rows are reachable only via a base the visitor could
   // already `bases.get`; the base-visibility EXISTS clause carries the same
   // anonymous branch.
@@ -75,6 +77,10 @@ const ANONYMOUS_READ_ALLOWLIST: ReadonlySet<string> = new Set([
   "records.list",
   "records.listPage",
   "records.get",
+  // Same live-public Base ACL as records.list, including unscoped queries.
+  "records.count",
+  "records.groupBy",
+  "records.search",
   // Public form rendering. The form logic still enforces the Form's own share
   // settings; this entry only makes the node-scoped procedure reachable.
   "forms.getByNode",
@@ -115,6 +121,7 @@ const EMBED_READ_ALLOWLIST: ReadonlySet<string> = new Set([
   "nodes.resolveRouteState",
   "nodes.list",
   "bases.get",
+  "bases.list",
   "bases.listViews",
   "records.list",
   "records.listPage",

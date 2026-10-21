@@ -1,4 +1,5 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { hasApiKeyLevel } from "busabase-contract/access-control/api-key-level";
 import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
 import type {
   BaseFieldVO,
@@ -53,6 +54,7 @@ import {
   type RefObject,
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useRef,
   useState,
@@ -90,6 +92,7 @@ import {
   resetViewFieldWidth,
   setViewFieldWidth,
 } from "../helpers/view-config";
+import { isOnlyRemainingView } from "../helpers/view-order";
 import type {
   RecordSubmitOptions,
   RecordsPagination,
@@ -101,6 +104,7 @@ import { BusaBaseCalendar } from "./base-calendar";
 import { BusaBaseGallery } from "./base-gallery";
 import { BusaBaseGantt } from "./base-gantt";
 import { BusaBaseKanban } from "./base-kanban";
+import { BaseViewTabs } from "./base-view-tabs";
 import { BulkEditRecordsDialog } from "./bulk-edit-records-dialog";
 import { DateFieldValue } from "./date-field";
 import { FieldHelpPopover } from "./field-help";
@@ -112,7 +116,7 @@ import { MemberChips } from "./member-field";
 import { NodeAgentPromptsDialog } from "./node-agent-prompts-dialog";
 import { ConfirmActionDialog } from "./primitives";
 import { RecordsPaginationBar } from "./records-pagination-bar";
-import { SplitSubmitButton } from "./split-submit-button";
+import { SplitSubmitButton, useWorkspacePermissionLevel } from "./split-submit-button";
 import {
   FIELD_TYPE_ICONS,
   ViewConfigEditorDialog,
@@ -120,25 +124,6 @@ import {
   ViewConfigToolbar,
   ViewFieldsEditor,
 } from "./view-config-editor";
-import { ACTIVE_VIEW_CONTROL_CLASS_NAME } from "./view-control-styles";
-
-// Per-view-type tab glyph (kept in one place so tabs and the type picker agree).
-function ViewTypeIcon({ type }: { type: ViewType }) {
-  const className = "shrink-0 opacity-70";
-  if (type === "gallery") {
-    return <LayoutGrid className={className} size={12} />;
-  }
-  if (type === "kanban") {
-    return <Columns3 className={className} size={12} />;
-  }
-  if (type === "calendar") {
-    return <CalendarDays className={className} size={12} />;
-  }
-  if (type === "gantt") {
-    return <GanttChart className={className} size={12} />;
-  }
-  return <Table2 className={className} size={12} />;
-}
 
 const getRecordTableColumnWidth = (field: BaseFieldVO, index: number) => {
   if (index === 0) {
@@ -792,6 +777,7 @@ export function BusaBaseTable({
   onRestoreRecord,
   onMoveRecord,
   onPatchRecord,
+  onReorderView,
   onUpdateView,
   records,
   relationRecords = records,
@@ -849,6 +835,8 @@ export function BusaBaseTable({
     record: RecordVO,
     patch: Record<string, unknown>,
   ) => Promise<{ materialized: true } | { materialized: false; changeRequestId: string }>;
+  /** Drag-to-reorder a view tab; `position` is its 0-based target index among the Base's views. */
+  onReorderView?: (view: ViewVO, position: number) => void;
   onUpdateView: (
     view: ViewVO,
     payload: ViewFormPayload,
@@ -888,6 +876,14 @@ export function BusaBaseTable({
   // A public read-only visitor gets no "New record" affordance — the create
   // route/mutation isn't on the anonymous allowlist, so it could only ever fail.
   const isAnon = useIsAnonymousVisitor();
+  // The view order is shared by everyone on the Base, so only someone who can
+  // write may drag the tabs (a proposer would only queue a review per drop).
+  const workspacePermissionLevel = useWorkspacePermissionLevel();
+  const canReorderViews =
+    !isAnon && Boolean(onReorderView) && hasApiKeyLevel(workspacePermissionLevel, "write");
+  // A Base must keep at least one view; the server refuses to delete the last.
+  const activeViewIsLastView = activeView ? isOnlyRemainingView(views, activeView) : false;
+  const lastViewDeleteHintId = useId();
   const allFields = base?.fields ?? records[0]?.base.fields ?? [];
   const primaryField = getPrimaryField({ fields: allFields });
   const fields = activeView
@@ -1064,39 +1060,15 @@ export function BusaBaseTable({
             ref={viewTabsRef}
           >
             {base ? (
-              <Link
-                aria-current={activeView ? undefined : "page"}
-                className={`inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2.5 font-medium text-xs transition-colors ${
-                  activeView
-                    ? "border-transparent text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-                    : ACTIVE_VIEW_CONTROL_CLASS_NAME
-                }`}
-                href={mergeSearchIntoHref(`/base/${base.slug}`, currentSearch)}
-              >
-                {messages.base.all}
-              </Link>
+              <BaseViewTabs
+                activeViewId={activeView?.id ?? null}
+                base={base}
+                canReorder={canReorderViews}
+                currentSearch={currentSearch}
+                onReorder={onReorderView}
+                views={views}
+              />
             ) : null}
-            {views.map((view) => {
-              const active = view.id === activeView?.id;
-              return (
-                <Link
-                  aria-current={active ? "page" : undefined}
-                  className={`inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2.5 font-medium text-xs transition-colors ${
-                    active
-                      ? ACTIVE_VIEW_CONTROL_CLASS_NAME
-                      : "border-transparent text-muted-foreground hover:bg-accent/60 hover:text-foreground"
-                  }`}
-                  href={mergeSearchIntoHref(
-                    `/base/${base?.slug ?? ""}/${view.slug}`,
-                    currentSearch,
-                  )}
-                  key={view.id}
-                >
-                  <ViewTypeIcon type={view.type} />
-                  {view.name}
-                </Link>
-              );
-            })}
           </nav>
           {base && !isAnon ? (
             <button
@@ -1150,17 +1122,30 @@ export function BusaBaseTable({
                         {messages.base.editView}
                       </button>
                       <button
-                        className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-medium text-rejected-strong text-xs transition-colors hover:bg-rejected/17 disabled:opacity-60"
-                        disabled={isDeletingView}
+                        aria-describedby={activeViewIsLastView ? lastViewDeleteHintId : undefined}
+                        className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-medium text-rejected-strong text-xs transition-colors hover:bg-rejected/17 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent"
+                        data-testid="delete-view-menu-item"
+                        disabled={isDeletingView || activeViewIsLastView}
                         onClick={(event) => {
                           setConfirmDeleteView(activeView);
                           event.currentTarget.closest("details")?.removeAttribute("open");
                         }}
+                        title={
+                          activeViewIsLastView ? messages.base.lastViewCannotBeDeleted : undefined
+                        }
                         type="button"
                       >
                         <Trash2 size={13} />
                         {isDeletingView ? messages.common.deleting : messages.base.deleteView}
                       </button>
+                      {activeViewIsLastView ? (
+                        <p
+                          className="max-w-64 px-2 pb-1 text-muted-foreground text-xs leading-snug"
+                          id={lastViewDeleteHintId}
+                        >
+                          {messages.base.lastViewCannotBeDeleted}
+                        </p>
+                      ) : null}
                     </>
                   ) : null}
                   {archivedViews.length > 0 ? (
@@ -1237,7 +1222,11 @@ export function BusaBaseTable({
           fields={allFields}
           onOpen={(section) => setViewEditorRequest({ section, source: "toolbar" })}
         />
-      ) : base ? (
+      ) : base && !activeView ? (
+        // Only the view-less fallback (a Base with no saved view at all). A
+        // read-only visitor looking at a saved view is not missing one, and a
+        // Base now opens on its leftmost view, so they would otherwise be told
+        // to "open a saved view" while already on one.
         <div
           className="mb-3 flex min-w-0 items-center gap-2 border-border/60 border-y py-2"
           data-testid="view-control-toolbar-readonly"

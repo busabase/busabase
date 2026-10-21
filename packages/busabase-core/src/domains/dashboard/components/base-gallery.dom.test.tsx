@@ -63,6 +63,7 @@ const view = {
     coverFit: "cover",
   },
   status: "active",
+  position: 0,
   createdBy: "usr_test",
   archivedAt: null,
   createdAt: "2026-09-15T00:00:00.000Z",

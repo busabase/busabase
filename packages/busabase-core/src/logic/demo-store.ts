@@ -60,6 +60,7 @@ import {
 import { DEMO_NODE_AGENT_PROMPTS, DEMO_PLAYBOOK_USAGE } from "../demo/playbooks";
 import { zhCnScenario } from "../demo/scenarios/zh-cn";
 import { getPrimaryField } from "../domains/base/utils/primary-field";
+import { sortViewsByOrder } from "../domains/base/utils/view-order";
 import { type DocLinesResult, sliceDocLinesRange, splitDocLines } from "../domains/doc/handlers";
 import { type PlaybookNodeRow, renderPromptPlaybook } from "../domains/playbooks/logic/playbooks";
 import { collectAncestorIds } from "./ancestor-chain";
@@ -296,7 +297,8 @@ export const demoGetBase = (baseId: string): BaseVO => {
 };
 
 export const demoListViews = (baseId?: string): ViewVO[] => {
-  const views = dataset().views;
+  // Same order as the real listViews: shared tab order, first = opening view.
+  const views = sortViewsByOrder(dataset().views);
   return baseId ? views.filter((view) => view.baseId === baseId) : views;
 };
 

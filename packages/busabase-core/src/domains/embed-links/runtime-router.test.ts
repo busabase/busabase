@@ -3,6 +3,7 @@ import { isAirAppEmbedReadableInput, isAirAppEmbedReadableProcedure } from "./ru
 
 describe("AirApp embed data policy", () => {
   it.each([
+    ["auth.verify"],
     ["nodes.list"],
     ["nodes.get"],
     ["bases.list"],

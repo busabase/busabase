@@ -145,6 +145,8 @@ const nodeCreatePayload = z.looseObject({
     )
     .optional(),
   mergeMode: z.enum(["merge", "replace"]).optional(),
+  // Base-only: `false` skips the default Grid view (bases.create's opt-out).
+  defaultView: z.boolean().optional(),
 });
 
 /**
@@ -193,6 +195,9 @@ const viewSnapshot = {
   description: z.string().nullable().optional(),
   name: z.string().optional(),
   type: z.string().optional(),
+  // view_update only: move to this 0-based index among the Base's active views.
+  // A pure reorder writes `{ position }` and nothing else.
+  position: z.number().int().min(0).optional(),
 };
 
 // ── The registry ─────────────────────────────────────────────────────────────

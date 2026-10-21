@@ -110,10 +110,10 @@ export const createAirAppEmbedBridgeHandler = ({
     request: Request,
     nodeId: string,
   ): Promise<(<T>(fn: () => Promise<T>) => Promise<T>) | null> => {
-    const encoded = decodeEmbedCapability(
-      request.headers.get(EMBED_RUNTIME_CAPABILITY_HEADER) ?? undefined,
-    );
-    if (encoded) {
+    const presentedCapability = request.headers.get(EMBED_RUNTIME_CAPABILITY_HEADER);
+    if (presentedCapability !== null) {
+      const encoded = decodeEmbedCapability(presentedCapability);
+      if (!encoded) return null;
       const capability = await withHostContext(() =>
         resolveAirAppEmbedCapability(encoded.id, encoded.secret, nodeId),
       );

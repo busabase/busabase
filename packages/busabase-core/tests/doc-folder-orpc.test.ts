@@ -60,7 +60,7 @@ describe("Doc & Folder domains — oRPC integration", () => {
     expect(docs.some((d) => d.slug === "runbook")).toBe(true);
   });
 
-  it("is idempotent on slug — a second create returns the existing doc", async () => {
+  it("is idempotent on slug for a true retry — same name and body return the existing doc", async () => {
     const first = await client.docs.create({
       autoMerge: true,
       slug: "policy",
@@ -70,12 +70,17 @@ describe("Doc & Folder domains — oRPC integration", () => {
     const again = await client.docs.create({
       autoMerge: true,
       slug: "policy",
-      name: "Policy (dupe)",
-      body: "v2\n",
+      name: "Policy",
+      body: "v1\n",
     });
     expect(again.node.id).toBe(first.node.id);
-    // Body is not overwritten by the idempotent re-create.
-    expect(again.body).toBe("v1\n");
+    // A DIFFERENT submission on the taken slug used to return the old doc as
+    // "created" and drop the new name/body; it is a conflict naming that doc.
+    await expect(
+      client.docs.create({ autoMerge: true, slug: "policy", name: "Policy (dupe)", body: "v2\n" }),
+    ).rejects.toMatchObject({ code: "CONFLICT", message: expect.stringContaining(first.node.id) });
+    const unchanged = await client.nodes.get({ nodeId: first.node.id, type: "doc" });
+    expect(unchanged.body).toBe("v1\n");
   });
 
   it("gets a doc by slug and rejects an unknown one", async () => {
@@ -368,11 +373,13 @@ describe("Doc & Folder domains — oRPC integration", () => {
       expect(read.totalLines).toBe(2); // two text elements, no JSON structure
     });
 
-    it("refuses a node type that stores no content", async () => {
+    it("refuses a node type that stores no content, saying what it is", async () => {
       const rootId = (await client.nodes.list({}))[0]?.id ?? "";
+      // A 400 that names the node's type, not "Node not found" for a node the
+      // caller can plainly see.
       await expect(
         client.nodes.readLines({ nodeId: rootId, startLine: 1, endLine: 5 }),
-      ).rejects.toMatchObject({ code: "NOT_FOUND" });
+      ).rejects.toMatchObject({ code: "BAD_REQUEST", message: expect.stringContaining("folder") });
     });
 
     it("rejects a non-existent nodeId with NOT_FOUND", async () => {

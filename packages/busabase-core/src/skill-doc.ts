@@ -213,6 +213,7 @@ Quick reference — every path is relative to the base URL above; worked example
 | Bulk create records CR | \`POST /api/v1/bases/:baseId/records/bulk-change-request\` | propose many records (≤1000) as ONE CR |
 | Bulk update records CR | \`POST /api/v1/bases/:baseId/records/bulk-update-change-request\` | partially update many existing records (≤1000) as ONE atomic CR |
 | Create node CR | \`POST /api/v1/nodes/change-requests\` | propose folder / Skill structure changes (supports in-CR \`ref\`/\`parentNodeRef\`) |
+| View CR | \`POST /api/v1/views/change-requests\` | create / update / delete / restore a Base view. Order is shared: \`update\` with \`position\` reorders, the leftmost view is what the Base opens on, and a Base's last view can't be deleted. A new Base starts with a "Grid view" unless created with \`"defaultView": false\` |
 | Read Skill files | \`GET /api/v1/file-trees/:nodeId/files/:filePath\` | read a Skill file (same route for Drives and AirApps) |
 | Create Skill file CR | \`POST /api/v1/file-trees/:nodeId/change-requests\` | propose a Skill file edit |
 | Request asset upload | \`POST /api/v1/assets/upload-urls\` | request an upload target for attachment-field files |
@@ -563,7 +564,9 @@ curl ${base}/api/v1/openapi.json
 \`\`\`
 
 It is large — **do not load the whole file into context.** Pull out only the path you need
-(e.g. \`curl ${base}/api/v1/openapi.json | jq '.paths["/api/v1/records"]'\`), or browse the
+(e.g. \`curl ${base}/api/v1/openapi.json | jq '.paths["/api/v1/records"]'\`); shared types such as
+\`ChangeRequest\`, \`Base\`, and \`Record\` are \`$ref\`s into \`.components.schemas\` (e.g.
+\`jq '.components.schemas.ChangeRequest'\`). Or browse the
 interactive docs at \`${base}/api/v1/doc\`. MCP-capable agents can skip docs entirely and
 connect to \`${base}/api/mcp\` (Streamable HTTP) — the most context-efficient path.
 
@@ -660,9 +663,9 @@ ${authLine}  -H 'content-type: application/json' \\
   --data '{
     "agentPrompts": [
       { "key": "log-visit", "label": "Log a customer visit",
-        "body": "{target}\\n\\nAdd a visit record with the date I give, the contact I name, and a one-line summary." },
+        "body": "Add a visit record with the date I give, the contact I name, and a one-line summary." },
       { "key": "quarter-recap", "intent": "read-only", "label": "What did we discuss this quarter",
-        "body": "{target}\\n\\nSummarize every visit to the account I name since the quarter started." }
+        "body": "Summarize every visit to the account I name since the quarter started." }
     ]
   }'
 \`\`\`
@@ -677,8 +680,8 @@ Four rules, each of which is a way this goes wrong:
    write nothing — the defaults already cover the generic work.
 3. **Only write them when you know the job.** You usually do — the user just told you why they
    wanted this node. A scratch table, a one-off Doc, a folder that only groups things: no prompts.
-4. **\`{target}\` expands to a full sentence** naming the node and space, so give it its own line.
-   Dropped mid-sentence it reads as a run-on with two full stops.
+4. **Write only the task.** Busabase opens every prompt with a line naming the node and space, so
+   do not write \`{target}\` — the target is no longer yours to place.
 
 Prompts are addressed by node id, so they are a second call after the node exists. When your
 create was proposed for review instead of merged, there is no node id yet — say so, and write

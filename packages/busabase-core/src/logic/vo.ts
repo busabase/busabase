@@ -206,6 +206,7 @@ export const toViewVO = (view: ViewPO, users?: UserRefMap): ViewVO => ({
   type: toViewType(view.type),
   config: normalizeViewConfig(view.config),
   status: view.status === "archived" ? "archived" : "active",
+  position: view.position,
   createdBy: view.createdBy,
   createdByUser: userRef(users, view.createdBy),
   archivedAt: toIso(view.archivedAt),

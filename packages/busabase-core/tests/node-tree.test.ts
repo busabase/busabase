@@ -104,13 +104,17 @@ describe("Node tree + Doc lifecycle — oRPC", () => {
         name: "Dup",
         body: "a",
       });
+      // A true retry returns the same doc; a different submission is a 409.
       const second = await client.docs.create({
         autoMerge: true,
         slug: "lc-doc-dup",
-        name: "Dup2",
-        body: "b",
+        name: "Dup",
+        body: "a",
       });
       expect(second.node.id).toBe(first.node.id);
+      await expect(
+        client.docs.create({ autoMerge: true, slug: "lc-doc-dup", name: "Dup2", body: "b" }),
+      ).rejects.toMatchObject({ code: "CONFLICT" });
     });
 
     it("rejects an unknown parent and a missing doc", async () => {

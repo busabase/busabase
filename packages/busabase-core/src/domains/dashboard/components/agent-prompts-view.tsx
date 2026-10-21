@@ -48,7 +48,7 @@ import {
   type PromptSegment,
   renderPromptSegments,
 } from "../helpers/agent-prompt-dispatch";
-import type { NodePrompt } from "../helpers/node-agent-prompts";
+import { type NodePrompt, stripTargetPlaceholderLines } from "../helpers/node-agent-prompts";
 import {
   BUILT_IN_PROMPTS_EXPANDED_STORAGE_KEY,
   buildPromptSections,
@@ -212,6 +212,9 @@ export function AgentPromptsView({
   const permissionLevel = useWorkspacePermissionLevel();
   const canAskAgent = hasApiKeyLevel(permissionLevel, "manage");
   const canManage = Boolean(management?.canSave && hasApiKeyLevel(permissionLevel, "write"));
+  // Every node-scope prompt carries the same target line; the editor shows it
+  // read-only above the draft, since authors no longer place it themselves.
+  const fixedTarget = scenarios.find((prompt) => prompt.target)?.target;
   const sections = useMemo(
     () =>
       buildPromptSections(scenarios, capabilities, {
@@ -297,7 +300,7 @@ export function AgentPromptsView({
   };
 
   const beginCreate = () => {
-    setEditor({ mode: "create", label: "", body: "{target}", intent: "change" });
+    setEditor({ mode: "create", label: "", body: "", intent: "change" });
     setSaveAttempted(false);
     setSaveError(null);
   };
@@ -307,7 +310,9 @@ export function AgentPromptsView({
       mode: "edit",
       original: prompt,
       label: iStringParse(prompt.label, locale),
-      body: iStringParse(prompt.body, locale),
+      // The target line is fixed now; a draft from before that still opens
+      // with the `{target}` placeholder line shows without it.
+      body: stripTargetPlaceholderLines(iStringParse(prompt.body, locale)),
       intent: prompt.intent ?? "change",
     });
     setSaveAttempted(false);
@@ -434,6 +439,7 @@ export function AgentPromptsView({
       <CustomPromptDialog
         editor={editor}
         error={saveError}
+        fixedTarget={fixedTarget}
         onChange={setEditor}
         onOpenChange={(open) => {
           if (!open && !management?.saving) setEditor(null);
@@ -798,6 +804,7 @@ function PromptPanel({
 
 function CustomPromptDialog({
   editor,
+  fixedTarget,
   onOpenChange,
   onChange,
   onSave,
@@ -807,6 +814,8 @@ function CustomPromptDialog({
   error,
 }: {
   editor: EditorState | null;
+  /** The node's target line, which every prompt opens with and authors cannot edit. */
+  fixedTarget?: string;
   onOpenChange: (open: boolean) => void;
   onChange: (editor: EditorState) => void;
   onSave: () => void;
@@ -872,6 +881,19 @@ function CustomPromptDialog({
 
           <div className="space-y-2">
             <Label htmlFor="agent-prompt-body">{messages.agentPrompts.promptTemplate}</Label>
+            {fixedTarget ? (
+              <div
+                className="rounded-md border border-dashed bg-muted/40 px-3 py-2 text-xs"
+                data-testid="agent-prompt-fixed-target"
+              >
+                <p className="font-medium text-muted-foreground">
+                  {messages.agentPrompts.fixedTargetLabel}
+                </p>
+                <p className="mt-1 whitespace-pre-wrap break-words font-mono text-foreground/80 leading-relaxed">
+                  {fixedTarget}
+                </p>
+              </div>
+            ) : null}
             <Textarea
               className="min-h-48 resize-y font-mono text-xs leading-relaxed"
               id="agent-prompt-body"

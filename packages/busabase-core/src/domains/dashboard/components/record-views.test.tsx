@@ -4,15 +4,16 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
-import type { RecordVO } from "busabase-contract/types";
+import type { BaseFieldVO, RecordVO } from "busabase-contract/types";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Router } from "wouter";
 import { CoreI18nProvider } from "../../../i18n";
+import { validateRecordFields } from "../../base/field-rules";
 import { DashboardOrpcProvider } from "../orpc-context";
 import { DashboardVisitorProvider } from "../visitor-context";
-import { RecordDetailView, RecordEditorView } from "./record-views";
+import { normalizeEditorFieldValue, RecordDetailView, RecordEditorView } from "./record-views";
 
 Object.assign(globalThis, { React });
 
@@ -89,6 +90,63 @@ const renderRecord = (visitorKind: "anonymous" | "member") =>
 
 afterEach(cleanup);
 
+const scoreField: BaseFieldVO = {
+  id: "score",
+  baseId: record.baseId,
+  slug: "score",
+  name: "Score",
+  type: "number",
+  required: false,
+  options: {},
+  position: 1,
+};
+
+const recordWithScore = (score: number | null, required = false): RecordVO => ({
+  ...record,
+  base: { ...record.base, fields: [...record.base.fields, { ...scoreField, required }] },
+  headCommit: { ...record.headCommit, payload: { name: "Acme", score } },
+});
+
+describe("Numeric editor values", () => {
+  it.each([null, undefined, "", "   ", "\t\n"])("normalizes blank %j to null", (value) => {
+    const normalized = normalizeEditorFieldValue(scoreField, value);
+    expect(normalized).toBeNull();
+    expect(validateRecordFields({ score: normalized }, [scoreField])).toEqual([]);
+    expect(
+      validateRecordFields({ score: normalized }, [{ ...scoreField, required: true }]),
+    ).toEqual([expect.objectContaining({ slug: "score", message: "Score is required" })]);
+  });
+
+  it.each([
+    [0, 0],
+    ["0", 0],
+    [" 0 ", 0],
+    [-3, -3],
+    ["-12.5", -12.5],
+    ["2.75", 2.75],
+    ["1e2", 100],
+  ])("normalizes valid %j to %j", (value, expected) => {
+    const normalized = normalizeEditorFieldValue(scoreField, value);
+    expect(normalized).toBe(expected);
+    expect(
+      validateRecordFields({ score: normalized }, [{ ...scoreField, required: true }]),
+    ).toEqual([]);
+  });
+
+  it.each(["invalid", "12px", "1e999", Number.NaN, Infinity, false, true, [1], {}])(
+    "preserves invalid %j so optional fields cannot silently clear it",
+    (value) => {
+      const normalized = normalizeEditorFieldValue(scoreField, value);
+      expect(normalized).toBe(value);
+      for (const required of [false, true]) {
+        expect(validateRecordFields({ score: normalized }, [{ ...scoreField, required }])).toEqual([
+          expect.objectContaining({ slug: "score", message: "Score must be a number" }),
+        ]);
+      }
+    },
+  );
+});
+
 describe("Record editor draft", () => {
   function editor(
     recordValue: RecordVO,
@@ -111,6 +169,30 @@ describe("Record editor draft", () => {
       </Router>
     );
   }
+  it.each([
+    ["", null],
+    ["0", 0],
+    ["-12.5", -12.5],
+  ])(
+    "saves edited numeric input %j as %j without resending untouched fields",
+    async (input, value) => {
+      const submit = vi.fn().mockResolvedValue(undefined);
+      render(editor(recordWithScore(80), submit));
+      fireEvent.change(screen.getByLabelText("Score"), { target: { value: input } });
+      fireEvent.click(screen.getByRole("button", { name: "Update Now" }));
+      await waitFor(() => expect(submit).toHaveBeenCalledTimes(1));
+      expect(submit.mock.calls[0]?.[1]).toEqual({ score: value });
+    },
+  );
+  it("does not turn a cleared required number into zero to bypass validation", async () => {
+    const submit = vi.fn().mockResolvedValue(undefined);
+    const onError = vi.fn();
+    render(editor(recordWithScore(80, true), submit, onError));
+    fireEvent.change(screen.getByLabelText("Score"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Update Now" }));
+    expect(onError).toHaveBeenLastCalledWith(expect.stringContaining("Score"));
+    expect(submit).not.toHaveBeenCalled();
+  });
   it("a background refresh does not erase a dirty draft, but another record resets it", () => {
     const view = render(editor(record));
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Draft name" } });

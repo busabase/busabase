@@ -101,6 +101,7 @@ export function BaseDetailView({
   onRestoreRecord,
   onMoveRecord,
   onPatchRecord,
+  onReorderView,
   onUpdateView,
   views,
 }: {
@@ -150,6 +151,8 @@ export function BaseDetailView({
     record: RecordVO,
     patch: Record<string, unknown>,
   ) => Promise<{ materialized: true } | { materialized: false; changeRequestId: string }>;
+  /** Drag-to-reorder a view tab; `position` is its 0-based target index among the Base's views. */
+  onReorderView?: (view: ViewVO, position: number) => void;
   onUpdateView: (
     view: ViewVO,
     payload: ViewFormPayload,
@@ -194,6 +197,7 @@ export function BaseDetailView({
             onRestoreRecord={onRestoreRecord}
             onMoveRecord={onMoveRecord}
             onPatchRecord={onPatchRecord}
+            onReorderView={onReorderView}
             onUpdateView={onUpdateView}
             records={filteredRecords}
             relationRecords={records}

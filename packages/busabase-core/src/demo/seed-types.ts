@@ -97,6 +97,11 @@ export interface SeedChangeRequestDef {
   operations: SeedOperationDef[];
 }
 
+/**
+ * A view a scenario ships for one of its Bases. A Base's views open in the
+ * order the scenario lists them (the first is the one the Base opens on); a
+ * Base with none gets the default Grid view instead.
+ */
 export interface SeedViewDef {
   id: string;
   baseId: string;
@@ -281,6 +286,12 @@ export interface SeedCommentDef {
 }
 
 export interface SeedScenario {
+  /**
+   * Name of the default view a Base gets when the scenario ships no views for
+   * it (defaults to "Grid view"). Lets a localized scenario name it in its own
+   * language — busabase-core has no server-side reader locale to go by.
+   */
+  defaultViewName?: string;
   folders?: SeedFolderDef[];
   bases?: SeedBaseDef[];
   records?: SeedRecordDef[];

@@ -217,7 +217,8 @@ export const listViews = async (baseId?: string) => {
         .select()
         .from(busabaseViews)
         .where(and(eq(busabaseViews.baseId, resolvedBase.id), eq(busabaseViews.status, "active")))
-        .orderBy(asc(busabaseViews.createdAt))
+        // Shared tab order; the first row is the view the Base opens on.
+        .orderBy(asc(busabaseViews.position), asc(busabaseViews.createdAt), asc(busabaseViews.id))
     : await db
         .select({ view: busabaseViews })
         .from(busabaseViews)
@@ -230,7 +231,9 @@ export const listViews = async (baseId?: string) => {
             buildNodeVisibilityExists(db, busabaseBases.nodeId),
           ),
         )
-        .orderBy(asc(busabaseViews.createdAt))
+        // Any one Base's views, filtered out of this list, come in its shared
+        // tab order.
+        .orderBy(asc(busabaseViews.position), asc(busabaseViews.createdAt), asc(busabaseViews.id))
         .then((rows) => rows.map((r) => r.view));
   const users = await resolveUserRefs(viewRows.map((view) => view.createdBy));
   return viewRows.map((view) => toViewVO(view, users));
@@ -630,6 +633,24 @@ const decodeSortCursor = (
 };
 
 /**
+ * A record listing's optional `baseId` → the Base it names, by id OR slug (the
+ * same resolution `bases.get` uses). Unknown or invisible is a 404.
+ *
+ * The listings used to compare `baseId` straight against `records.base_id`, so
+ * a slug — what every agent has in hand after `bases.list` — matched nothing
+ * and came back as an empty, successful page: "this Base has no records".
+ */
+const resolveListingBase = async (baseId: string) => {
+  const base = await getBase(baseId);
+  if (!base) {
+    throw new ORPCError("NOT_FOUND", {
+      message: `Base not found: ${baseId}. Pass a Base id or slug from GET /bases.`,
+    });
+  }
+  return base;
+};
+
+/**
  * Keyset-paginated record list. Default order is (createdAt DESC, id DESC). When
  * a number/date `sort` is given it pushes down: LEFT JOINs the field value and
  * orders by that typed column (NULLS LAST, id ASC tiebreak), so a sorted big base
@@ -647,8 +668,9 @@ export const listRecordsPaged = async (input?: z.input<typeof listRecordsInputSc
   if (recordsVisible) {
     filters.push(recordsVisible);
   }
-  if (parsed.baseId) {
-    filters.push(eq(busabaseRecords.baseId, parsed.baseId));
+  const base = parsed.baseId ? await resolveListingBase(parsed.baseId) : null;
+  if (base) {
+    filters.push(eq(busabaseRecords.baseId, base.id));
   }
   // Best-effort server-side view-filter push-down (superset; the client filter
   // stays authoritative). Non-pushable filters are skipped here. Applies to both
@@ -665,12 +687,12 @@ export const listRecordsPaged = async (input?: z.input<typeof listRecordsInputSc
   // every one of these either becomes SQL or raises — so whatever survives here
   // makes the returned row set authoritative for the conditions given.
   if (parsed.valueFilters?.length) {
-    if (!parsed.baseId) {
+    if (!base) {
       throw new ORPCError("BAD_REQUEST", {
         message: "valueFilters requires baseId — a field slug only resolves within one Base",
       });
     }
-    filters.push(...(await buildValueFilterPredicates(db, parsed.baseId, parsed.valueFilters)));
+    filters.push(...(await buildValueFilterPredicates(db, base.id, parsed.valueFilters)));
   }
 
   const sortInfo = parsed.sort ? sortColumnFor(parsed.sort.fieldType) : null;
@@ -1454,8 +1476,11 @@ export const countRecords = async (input?: z.input<typeof countRecordsInputSchem
   if (countVisible) {
     baseFilters.push(countVisible);
   }
-  if (parsed.baseId) {
-    baseFilters.push(eq(busabaseRecords.baseId, parsed.baseId));
+  // Resolved like the listings (id or slug; unknown → 404). A count against a
+  // slug used to be a plain 0 — the same silent "empty Base" answer.
+  const countBase = parsed.baseId ? await resolveListingBase(parsed.baseId) : null;
+  if (countBase) {
+    baseFilters.push(eq(busabaseRecords.baseId, countBase.id));
   }
   // Pushed into the BASE filters, not into the exact-path predicates, so every
   // route below inherits them — the fast SQL count, the proven-exact count, and
@@ -1463,14 +1488,9 @@ export const countRecords = async (input?: z.input<typeof countRecordsInputSchem
   // value filter left out here would be silently dropped on those paths.
   //
   // They are also exact by construction, so unlike an ad-hoc view `filters` set
-  // they never push a count off its single-`count(*)` fast path. Resolving them
-  // does resolve the Base, so a count carrying valueFilters against an unknown
-  // baseId now 404s where a bare one still returns 0 (the pre-existing
-  // contract for the unscoped case is untouched).
-  if (parsed.valueFilters?.length) {
-    baseFilters.push(
-      ...(await buildValueFilterPredicates(db, parsed.baseId as string, parsed.valueFilters)),
-    );
+  // they never push a count off its single-`count(*)` fast path.
+  if (parsed.valueFilters?.length && countBase) {
+    baseFilters.push(...(await buildValueFilterPredicates(db, countBase.id, parsed.valueFilters)));
   }
 
   const sqlCount = async (extra: SQL[] = []) => {
@@ -1482,8 +1502,6 @@ export const countRecords = async (input?: z.input<typeof countRecordsInputSchem
   };
 
   // Fast path: unchanged from before viewId/filters existed on this endpoint.
-  // An unscoped or bare-baseId count never resolves the Base, so an unknown
-  // baseId returns 0 rather than 404 — the pre-existing contract.
   if (!parsed.viewId && !parsed.filters?.length) {
     return sqlCount();
   }
@@ -1493,7 +1511,7 @@ export const countRecords = async (input?: z.input<typeof countRecordsInputSchem
   // resolvable from here on.
   const { base, allFilters, dependsOnLookup, exactPredicates } = await resolveAggregateFilterScope(
     db,
-    parsed.baseId as string,
+    countBase?.id ?? (parsed.baseId as string),
     parsed.viewId,
     parsed.filters,
   );
@@ -1929,7 +1947,17 @@ export const listRecordsByFieldText = async (
     filters.push(fieldTextVisible);
   }
   if (parsed.baseId) {
-    filters.push(eq(busabaseFieldValues.baseId, parsed.baseId));
+    const base = await resolveListingBase(parsed.baseId);
+    // Scoped to one Base, an unknown `fieldSlug` is a caller mistake, not "no
+    // matches" — name the fields it could have been.
+    if (!base.fields.some((field) => field.slug === parsed.fieldSlug)) {
+      throw new ORPCError("BAD_REQUEST", {
+        message: `Base ${base.slug} has no field "${parsed.fieldSlug}". Fields: ${base.fields
+          .map((field) => field.slug)
+          .join(", ")}.`,
+      });
+    }
+    filters.push(eq(busabaseFieldValues.baseId, base.id));
   }
 
   const projectionRows = await db
@@ -2066,7 +2094,7 @@ export const listArchivedViews = async (baseId: string) => {
     .select()
     .from(busabaseViews)
     .where(and(eq(busabaseViews.baseId, resolvedBase.id), eq(busabaseViews.status, "archived")))
-    .orderBy(asc(busabaseViews.createdAt));
+    .orderBy(asc(busabaseViews.position), asc(busabaseViews.createdAt), asc(busabaseViews.id));
   const users = await resolveUserRefs(viewRows.map((view) => view.createdBy));
   return viewRows.map((view) => toViewVO(view, users));
 };
@@ -2085,11 +2113,7 @@ export const listArchivedRecordsPaged = async (input?: z.input<typeof listRecord
     eq(busabaseRecords.status, "archived"),
   ];
   if (parsed.baseId) {
-    const resolvedBase = await getBase(parsed.baseId);
-    if (!resolvedBase) {
-      return { records: [], nextCursor: null };
-    }
-    filters.push(eq(busabaseRecords.baseId, resolvedBase.id));
+    filters.push(eq(busabaseRecords.baseId, (await resolveListingBase(parsed.baseId)).id));
   }
   const archivedVisible = buildBaseVisibilityExists(db, busabaseRecords.baseId);
   if (archivedVisible) {

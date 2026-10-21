@@ -30,18 +30,12 @@ export const API_KEY_LEVEL_ORDER: Record<ApiKeyPermissionLevel, number> = {
 };
 
 /**
- * What a NEW credential is pre-filled with, everywhere a human is asked to
- * issue one (the OAuth consent screen and the API-keys settings dialog).
+ * The OAuth consent screen pre-fills new credentials with this level.
+ * The API-keys settings dialog separately derives its default from space roles.
  *
- * Both surfaces used to default to `manage` + never-expires, which is the
- * widest grant the system can express and the exact opposite of the minimum-
- * privilege story the product tells everywhere else. A default is what most
- * keys end up carrying, because most people accept it — so the default has to
- * be the safe one and the wide grant has to be a deliberate act.
- *
- * `changeRequest` is the level an agent needs to be useful without being
- * dangerous: it can read, and it can propose changes that a human merges. It
- * cannot write directly, merge, delete, export, or change permissions.
+ * `write` lets integrations read and write data immediately. Users can still
+ * explicitly select another level, including `changeRequest` for reviewed edits.
+ * Administrative operations remain subject to the existing permission checks.
  *
  * This is ONLY the pre-fill for new keys. It is deliberately NOT a fallback
  * for reading existing keys: a stored `permissions` of `null` means "no
@@ -50,7 +44,7 @@ export const API_KEY_LEVEL_ORDER: Record<ApiKeyPermissionLevel, number> = {
  * the UI must keep showing `manage` for it. Narrowing that display would tell
  * the operator their key is weaker than it is.
  */
-export const DEFAULT_NEW_API_KEY_LEVEL: ApiKeyPermissionLevel = "changeRequest";
+export const DEFAULT_NEW_API_KEY_LEVEL: ApiKeyPermissionLevel = "write";
 
 /** 30 days, in seconds — matches the `days30` option both pickers already offer. */
 export const DEFAULT_NEW_API_KEY_EXPIRY_SECONDS = 30 * 24 * 60 * 60;

@@ -1,6 +1,10 @@
 import { type OpenAPI, OpenAPIGenerator } from "@orpc/openapi";
 import { ZodToJsonSchemaConverter } from "@orpc/zod/zod4";
 import { busabaseContract } from "busabase-contract/contract/busabase";
+import {
+  busabaseOpenApiCommonSchemas,
+  busabaseOpenApiErrorResponseBodySchema,
+} from "busabase-contract/contract/openapi-components";
 import { isRpcOnly } from "openlib/openapi";
 
 const openApiGenerator = new OpenAPIGenerator({
@@ -10,6 +14,12 @@ const openApiGenerator = new OpenAPIGenerator({
 export async function getBusabaseOpenApiSpec(): Promise<OpenAPI.Document> {
   const spec = await openApiGenerator.generate(busabaseContract, {
     exclude: (contract) => isRpcOnly(contract),
+    // Named, shared `components.schemas` (ChangeRequest, Base, Record, …) so a
+    // generated SDK gets one model per domain type instead of one per use site.
+    commonSchemas: busabaseOpenApiCommonSchemas,
+    // Document the `{ error, code, data }` envelope the server really sends
+    // (encodeBusabaseOpenApiError), not oRPC's default error shape.
+    customErrorResponseBodySchema: busabaseOpenApiErrorResponseBodySchema,
     info: {
       title: "Busabase API",
       version: process.env.VERSION || "0.0.0",
@@ -76,8 +86,8 @@ export async function getBusabaseOpenApiSpec(): Promise<OpenAPI.Document> {
     ],
   });
 
-  return {
-    ...spec,
-    openapi: "3.0.0",
-  };
+  // oRPC emits OpenAPI 3.1 (JSON Schema 2020-12: `type: "null"`, `const`,
+  // numeric `exclusiveMinimum`). This used to be relabelled "3.0.0", which made
+  // the document invalid as 3.0 and misled 3.0-mode SDK generators/validators.
+  return spec;
 }

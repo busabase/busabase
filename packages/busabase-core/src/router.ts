@@ -82,14 +82,12 @@ import {
   getNodeAgentPrompts,
   isDescendantOf,
   listAgentTasks,
-  listArchivedNodes,
   listAuditEvents,
   listChangeRequestsPage,
   listChangeRequestsPaged,
   listComments,
   listFavoriteNodes,
-  listNodeSummaries,
-  listNodes,
+  listNodesForInput,
   mergeChangeRequests,
   moveNode,
   purgeNode,
@@ -174,15 +172,8 @@ const busabaseRouterImpl = busabase.router({
   },
   embedLinks: embedLinksRouter,
   nodes: {
-    list: busabase.nodes.list.handler(async ({ input }) => {
-      // `types` opts into the flat summary projection that replaced the four
-      // narrow listings. Absent, every existing caller keeps exactly the tree /
-      // bounded-tree / archived behaviour it had before this parameter existed.
-      if (input?.types && input.types.length > 0) {
-        return listNodeSummaries(input.types, input.status ?? "active");
-      }
-      return input?.status === "archived" ? listArchivedNodes() : listNodes(input);
-    }),
+    // Tree / bounded tree / flat `types` summaries / Trash — picked in logic.
+    list: busabase.nodes.list.handler(async ({ input }) => listNodesForInput(input)),
     get: busabase.nodes.get.handler(async ({ input }) => getNodeDetail(input.nodeId, input.type)),
     searchByName: busabase.nodes.searchByName.handler(async ({ input }) =>
       searchNodesByName(input),

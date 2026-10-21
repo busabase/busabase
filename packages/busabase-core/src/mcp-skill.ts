@@ -316,7 +316,7 @@ ${PLAYBOOK_SECTION}
 | Propose a whole subtree in one review | \`nodes_create_change_request\` (ordered \`operations\`, see below) |
 | Archive a node (reversible) | \`node_archive\` — NOT \`nodes_purge\`, which is permanent and only accepts an already-archived node |
 | See what was archived (Trash) | \`list_archived\` (\`scope\`: nodes / bases / fields / views / records) |
-| Base views | \`view_change_request\` (\`action\`: create / update / delete / restore) |
+| Base views | \`view_change_request\` (\`action\`: create / update / delete / restore; \`position\` reorders — the leftmost view is what the Base opens on, and a Base's last view can't be deleted; a new Base starts with a Grid view, skip it with \`node_create\` \`skipDefaultView\` when you add your own) |
 | Who can reach a node | \`node_permission\` (grant a named user or space inside the workspace) |
 | Public share link | \`node_share\` — a BEARER capability; only enable when the user asks to publish that node |
 | Edit node content (Doc body, whiteboard, workflow, HTML) | \`nodes_update_content\` — one tool for all four; \`content.kind\` picks the shape |

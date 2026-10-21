@@ -1,6 +1,13 @@
+import type { OperationVO } from "busabase-contract/types";
 import { describe, expect, it } from "vitest";
 import { coreMessagesEn } from "../../../i18n/messages";
-import { getRestoredSlugChanges, getRestoreToastMessage } from "./change-request";
+import {
+  getOperationImpact,
+  getRestoredSlugChanges,
+  getRestoreToastMessage,
+  getViewMoveTargetPosition,
+} from "./change-request";
+import { shortIdentifier } from "./format";
 
 const change = (name: string, fromSlug: string, toSlug: string) => ({
   nodeId: `nod_${toSlug}`,
@@ -62,5 +69,59 @@ describe("getRestoreToastMessage", () => {
         "folder restored",
       ),
     ).toContain("2 items had their slug taken");
+  });
+});
+
+describe("view move impact", () => {
+  const viewUpdate = (
+    payload: Record<string, unknown>,
+    baseFields: Record<string, unknown> | null = {
+      name: "Board",
+      description: "",
+      config: { filters: [], sorts: [] },
+      position: 2,
+    },
+  ) =>
+    ({
+      operation: "view_update",
+      targetViewId: "viw_board_123456",
+      mergedViewId: null,
+      baseFields,
+      headCommit: { payload },
+    }) as unknown as OperationVO;
+
+  it("reads a position-only update as a move, counting tabs from 1", () => {
+    const operation = viewUpdate({ position: 0 });
+    expect(getViewMoveTargetPosition(operation)).toBe(0);
+    expect(getOperationImpact(operation, coreMessagesEn)).toBe(
+      `Moves view ${shortIdentifier("viw_board_123456")} to position 1`,
+    );
+  });
+
+  it("keeps calling an update that also edits the view an update", () => {
+    const renamed = viewUpdate({
+      name: "Kanban",
+      description: "",
+      config: { filters: [], sorts: [] },
+      position: 0,
+    });
+    expect(getViewMoveTargetPosition(renamed)).toBeNull();
+    expect(getOperationImpact(renamed, coreMessagesEn)).toBe(
+      `Updates view ${shortIdentifier("viw_board_123456")}`,
+    );
+    expect(getViewMoveTargetPosition(viewUpdate({ name: "Board" }))).toBeNull();
+  });
+
+  it("treats an unchanged snapshot carried along with the move as a move", () => {
+    expect(
+      getViewMoveTargetPosition(
+        viewUpdate({
+          name: "Board",
+          description: "",
+          config: { sorts: [], filters: [] },
+          position: 3,
+        }),
+      ),
+    ).toBe(3);
   });
 });

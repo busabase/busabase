@@ -2617,32 +2617,9 @@ export const DEMO_VIEWS: SeedViewDef[] = [
     config: {
       filters: [],
       sorts: [{ direction: "asc", fieldSlug: "auto_number" }],
-      visibleFieldSlugs: [
-        "text",
-        "code_json",
-        "code_yaml",
-        "code",
-        "attachment",
-        "relation",
-        "member",
-        "member_one",
-        "number",
-        "date",
-        "checkbox",
-        "select",
-        "multiselect",
-        "url",
-        "embed",
-        "email",
-        "phone",
-        "created_time",
-        "updated_time",
-        "created_by",
-        "updated_by",
-        "auto_number",
-        "ai_summary",
-        "ai_tags",
-      ],
+      // No visibleFieldSlugs: every field the Base has shows, in Base order — this
+      // view is what the Field Type Lab opens on, so a hand-kept list would silently
+      // drop each newly added field type (it had already missed markdown/html/…).
     },
     minutesAgo: 114,
     useCases: ["field-types"],
@@ -3278,6 +3255,22 @@ export const buildRecordSeedFields = (
     ? { ...record.fields, [record.createdTimeSlug]: createdAtIso }
     : record.fields;
 
+/**
+ * Each authored view's tab position within its Base: the order the scenario
+ * lists that Base's views in (0 = the view the Base opens on). Shared by the
+ * demo build and the real DB seed (`logic/seed.ts`) so the two never drift.
+ */
+export const seedViewPositionById = (views: readonly SeedViewDef[]): Map<string, number> => {
+  const nextPositionByBase = new Map<string, number>();
+  const positions = new Map<string, number>();
+  for (const view of views) {
+    const position = nextPositionByBase.get(view.baseId) ?? 0;
+    positions.set(view.id, position);
+    nextPositionByBase.set(view.baseId, position + 1);
+  }
+  return positions;
+};
+
 const toBaseFieldVO = (baseId: string, field: SeedFieldDef, position: number): BaseFieldVO => ({
   ...field,
   baseId,
@@ -3655,7 +3648,8 @@ export const buildDemoDataset = (
       headCommit: recordCommit(record),
     }));
 
-  const views: ViewVO[] = (scenario.views ?? [])
+  const viewPositions = seedViewPositionById(scenario.views ?? []);
+  const authoredViews: ViewVO[] = (scenario.views ?? [])
     .filter((view) => baseById.has(view.baseId) && includesUseCase(view.useCases, useCase))
     .map((view) => ({
       id: view.id,
@@ -3666,11 +3660,34 @@ export const buildDemoDataset = (
       type: view.type ?? "table",
       config: view.config,
       status: "active",
+      position: viewPositions.get(view.id) ?? 0,
       createdBy: DEMO_ACTOR_ID,
       archivedAt: null,
       createdAt: iso(anchor, view.minutesAgo),
       updatedAt: iso(anchor, view.minutesAgo),
     }));
+  // Same rule as the DB seed: a Base this dataset carries no views for opens on
+  // the default Grid view. Decided AFTER the use-case filter, so a Base whose
+  // authored views are all tagged for other use-cases is never served view-less.
+  const basesWithViews = new Set(authoredViews.map((view) => view.baseId));
+  const defaultViews: ViewVO[] = baseVOs
+    .filter((base) => !basesWithViews.has(base.id))
+    .map((base) => ({
+      id: `viw_grid_${base.id}`,
+      baseId: base.id,
+      slug: "grid-view",
+      name: scenario.defaultViewName ?? "Grid view",
+      description: "",
+      type: "table",
+      config: { filters: [], sorts: [] },
+      status: "active",
+      position: 0,
+      createdBy: DEMO_ACTOR_ID,
+      archivedAt: null,
+      createdAt: base.createdAt,
+      updatedAt: base.createdAt,
+    }));
+  const views = [...authoredViews, ...defaultViews];
 
   const baseChangeRequests: ChangeRequestVO[] = (scenario.changeRequests ?? [])
     .filter((cr) => baseById.has(cr.baseId) && includesUseCase(cr.useCases, useCase))

@@ -1334,6 +1334,7 @@ export const dashboardVi: CoreI18nMessages = {
     impactRecordVariant: "Biến thể {id}",
     impactViewCreate: "Thêm một chế độ xem mới",
     impactViewUpdate: "Cập nhật chế độ xem {id}",
+    impactViewMove: "Di chuyển chế độ xem {id} đến vị trí {position}",
     impactViewDelete: "Xóa chế độ xem {id}",
     impactFile: "{operation} {file}",
     impactNodeCreate: "Tạo {nodeType}",
@@ -1443,7 +1444,14 @@ export const dashboardVi: CoreI18nMessages = {
     searchMembers: "Tìm thành viên",
     noMembersAvailable: "Không có thành viên nào để chọn",
     unassignedMember: "Chưa phân công",
-    all: "Tất cả",
+    lastViewCannotBeDeleted:
+      "Mỗi cơ sở dữ liệu phải giữ ít nhất một chế độ xem. Hãy tạo một chế độ xem khác trước khi xóa chế độ xem này.",
+    viewTabDragInstructions:
+      "Để di chuyển một thẻ chế độ xem, nhấn phím cách. Dùng các phím mũi tên để đổi vị trí, nhấn phím cách hoặc Enter để thả, hoặc Esc để hủy. Chế độ xem ngoài cùng bên trái là chế độ xem được mở cùng cơ sở dữ liệu.",
+    viewTabDragOutside: "Chế độ xem đang ở ngoài các thẻ. Thả để hủy.",
+    reorderViewFailed: "Không thể di chuyển chế độ xem. Vui lòng thử lại.",
+    reorderViewProposed: "Thứ tự chế độ xem mới đã được gửi để duyệt.",
+    moveViewMessage: "Di chuyển chế độ xem {view} đến vị trí {position}",
     newView: "Chế độ xem mới",
     editView: "Chỉnh sửa chế độ xem",
     deleteView: "Xóa chế độ xem",
@@ -1931,6 +1939,7 @@ export const dashboardVi: CoreI18nMessages = {
   operationDiff: {
     name: "Tên",
     configuration: "Cấu hình",
+    position: "Vị trí",
     description: "Mô tả",
     sort: "sắp xếp",
     filter: "bộ lọc",
@@ -2088,11 +2097,15 @@ export const dashboardVi: CoreI18nMessages = {
   },
   emptyGuide: {
     title: "Nhờ tác nhân AI giúp lấp đầy không gian làm việc này",
-    body: "Busabase có thể dùng thủ công, nhưng được thiết kế để các tác nhân AI ghi dữ liệu vào — mỗi thay đổi của chúng đều kèm một thông điệp, một bản so sánh khác biệt và toàn bộ lịch sử để bạn xem xét hoặc hoàn tác.",
-    itemStructuredData: "Tạo dữ liệu có cấu trúc và thêm các ví dụ hữu ích",
-    itemChangeRequests:
-      "Ghi dữ liệu thông qua yêu cầu thay đổi, để mỗi thay đổi đều được giải thích và có thể hoàn tác",
-    itemAgentDatabase: "Thêm bản ghi, cập nhật trường và phát triển cơ sở dữ liệu cùng tác nhân AI",
+    body: "Busabase có thể dùng thủ công, nhưng được xây dựng cho tác nhân AI: những gì chúng tạo ra không bị rải rác trong lịch sử trò chuyện mà ở lại trong không gian làm việc này. Mọi lần ghi đều được lưu vết, và cả đội có thể tái sử dụng.",
+    baseDataName: "Cơ sở dữ liệu",
+    baseDataDesc: "Khách hàng, dự án và tồn kho trong các bảng có cột cố định",
+    baseKnowledgeName: "Cơ sở tri thức",
+    baseKnowledgeDesc: "Câu trả lời của đội, dễ tìm và có nguồn",
+    baseAppsName: "Cơ sở ứng dụng",
+    baseAppsDesc: "Công cụ nội bộ xây trên cùng dữ liệu",
+    baseSkillsName: "Cơ sở kỹ năng",
+    baseSkillsDesc: "Quy trình lưu một lần thành kỹ năng, tác nhân AI nào cũng chạy được",
     startFromTemplate: "Bắt đầu từ một mẫu",
     startFromTemplateHint:
       "Cài đặt một không gian làm việc hoạt động được trong khoảng một phút — gồm cơ sở dữ liệu, các dòng mẫu và hướng dẫn cho tác nhân AI đi kèm.",
@@ -2196,7 +2209,9 @@ export const dashboardVi: CoreI18nMessages = {
     readOnly: "Chỉ đọc",
     mayMakeChanges: "Có thể thay đổi",
     promptTemplate: "Mẫu lời nhắc",
-    targetHint: "Dùng {target} để tự động chèn nút này.",
+    fixedTargetLabel: "Luôn đứng đầu",
+    targetHint:
+      "Busabase tự thêm dòng này để tác nhân AI luôn biết cần làm việc trên nút nào. Bên dưới chỉ cần viết nhiệm vụ.",
     byteCount: "{count} / {limit} byte",
     addScenario: "Thêm kịch bản",
     saveChanges: "Lưu thay đổi",

@@ -2,14 +2,21 @@ import "server-only";
 
 import { ORPCError } from "@orpc/server";
 import type { ViewConfigVO } from "busabase-contract/types";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, count, eq, isNull, max, ne } from "drizzle-orm";
 import { getContextSpaceId, resolveActorId } from "../../../../context";
-import type { CommitPO, OperationPO } from "../../../../db/schema";
-import { busabaseBaseFields, busabaseOperations, busabaseViews } from "../../../../db/schema";
+import type { CommitPO, OperationPO, ViewPO } from "../../../../db/schema";
+import {
+  busabaseBaseFields,
+  busabaseBases,
+  busabaseOperations,
+  busabaseViews,
+} from "../../../../db/schema";
 import { parseCommitPayload } from "../../../../logic/commit-payload-schemas";
 import type { MergeCtx } from "../../../../logic/cr-lifecycle";
 import { CURRENT_USER_ID, id, requireBaseId } from "../../../../logic/kernel";
 import { normalizeViewConfig } from "../../../../logic/vo";
+import { compareViewOrder } from "../../utils/view-order";
+import { lastViewDeleteRejected } from "../errors";
 
 /**
  * Stamp the stable `fieldId` onto every filter/sort entry by resolving each
@@ -42,6 +49,57 @@ const stampFieldIds = async (
 const targetViewNotFound = (viewId: string | null) =>
   new ORPCError("NOT_FOUND", { message: `Target view not found: ${viewId}` });
 
+const countOtherActiveViews = async (ctx: MergeCtx, baseId: string, viewId: string) => {
+  const [row] = await ctx.db
+    .select({ total: count() })
+    .from(busabaseViews)
+    .where(
+      and(
+        eq(busabaseViews.baseId, baseId),
+        eq(busabaseViews.status, "active"),
+        ne(busabaseViews.id, viewId),
+      ),
+    );
+  return Number(row?.total ?? 0);
+};
+
+/**
+ * Move `view` to `requestedPosition` (0-based) among its Base's active views.
+ *
+ * Same approach as mergeNodeMove: renumber EVERY active sibling to 0..n-1 with
+ * the moved view spliced in at the clamped index. Writing the requested value
+ * onto the moved view alone would tie with whichever sibling already holds it,
+ * and the (position, createdAt) tie-break would then silently undo the move.
+ */
+const moveViewToPosition = async (ctx: MergeCtx, view: ViewPO, requestedPosition: number) => {
+  const siblings = await ctx.db
+    .select({
+      id: busabaseViews.id,
+      position: busabaseViews.position,
+      createdAt: busabaseViews.createdAt,
+    })
+    .from(busabaseViews)
+    .where(
+      and(
+        eq(busabaseViews.baseId, view.baseId),
+        eq(busabaseViews.status, "active"),
+        ne(busabaseViews.id, view.id),
+      ),
+    );
+  siblings.sort(compareViewOrder);
+  const insertIndex = Math.max(0, Math.min(requestedPosition, siblings.length));
+  const orderedIds = siblings.map((sibling) => sibling.id);
+  orderedIds.splice(insertIndex, 0, view.id);
+  await Promise.all(
+    orderedIds.map((viewId, position) =>
+      ctx.db
+        .update(busabaseViews)
+        .set({ position, ...(viewId === view.id ? { updatedAt: ctx.timestamp } : {}) })
+        .where(eq(busabaseViews.id, viewId)),
+    ),
+  );
+};
+
 export const mergeViewCreate = async (ctx: MergeCtx, item: OperationPO, headCommit: CommitPO) => {
   const { db, timestamp } = ctx;
   const baseId = requireBaseId(item.baseId, item.operation);
@@ -67,6 +125,11 @@ export const mergeViewCreate = async (ctx: MergeCtx, item: OperationPO, headComm
       message: `A view with slug "${viewFields.slug}" already exists in this Base ("${existingSibling.name}"). Choose a different slug.`,
     });
   }
+  // A new view joins the end of the Base's shared tab order.
+  const [{ maxPosition } = { maxPosition: null }] = await db
+    .select({ maxPosition: max(busabaseViews.position) })
+    .from(busabaseViews)
+    .where(and(eq(busabaseViews.baseId, baseId), eq(busabaseViews.status, "active")));
   await db.insert(busabaseViews).values({
     id: viewId,
     spaceId: getContextSpaceId(),
@@ -77,6 +140,7 @@ export const mergeViewCreate = async (ctx: MergeCtx, item: OperationPO, headComm
     type: viewFields.type ?? "table",
     config: await stampFieldIds(ctx, baseId, normalizeViewConfig(viewFields.config ?? {})),
     status: "active",
+    position: maxPosition === null ? 0 : maxPosition + 1,
     createdBy: resolveActorId(CURRENT_USER_ID),
     archivedAt: null,
     createdAt: timestamp,
@@ -96,20 +160,33 @@ export const mergeViewUpdate = async (ctx: MergeCtx, item: OperationPO, headComm
     throw targetViewNotFound(item.targetViewId);
   }
   const viewFields = parseCommitPayload("view_update", headCommit.payload);
-  await db
-    .update(busabaseViews)
-    .set({
-      config: await stampFieldIds(
-        ctx,
-        targetView.baseId,
-        normalizeViewConfig(viewFields.config ?? targetView.config),
-      ),
-      description: viewFields.description ?? targetView.description,
-      name: viewFields.name ?? targetView.name,
-      type: viewFields.type ?? targetView.type,
-      updatedAt: timestamp,
-    })
-    .where(eq(busabaseViews.id, targetView.id));
+  if (viewFields.position !== undefined) {
+    await moveViewToPosition(ctx, targetView, viewFields.position);
+  }
+  // A pure reorder (`{ position }` only — see createUpdateViewChangeRequest)
+  // leaves the view's content alone rather than rewriting it from the snapshot
+  // loaded before this transaction.
+  const touchesContent =
+    viewFields.config !== undefined ||
+    viewFields.description !== undefined ||
+    viewFields.name !== undefined ||
+    viewFields.type !== undefined;
+  if (touchesContent) {
+    await db
+      .update(busabaseViews)
+      .set({
+        config: await stampFieldIds(
+          ctx,
+          targetView.baseId,
+          normalizeViewConfig(viewFields.config ?? targetView.config),
+        ),
+        description: viewFields.description ?? targetView.description,
+        name: viewFields.name ?? targetView.name,
+        type: viewFields.type ?? targetView.type,
+        updatedAt: timestamp,
+      })
+      .where(eq(busabaseViews.id, targetView.id));
+  }
   await db
     .update(busabaseOperations)
     .set({ status: "merged", mergedViewId: targetView.id, updatedAt: timestamp })
@@ -122,6 +199,19 @@ export const mergeViewDelete = async (ctx: MergeCtx, item: OperationPO, _headCom
   const targetView = item.targetViewId ? ctx.targetViewsById.get(item.targetViewId) : undefined;
   if (!targetView) {
     throw targetViewNotFound(item.targetViewId);
+  }
+  // Re-checked HERE, inside the merge transaction, not just at proposal time:
+  // two delete CRs proposed against a two-view Base each pass the propose-time
+  // check, and merging both would leave the Base with no view at all. Locking
+  // the Base row serializes concurrent view deletes on it, so the count below
+  // sees whatever the other merge committed.
+  await db
+    .select({ id: busabaseBases.id })
+    .from(busabaseBases)
+    .where(eq(busabaseBases.id, targetView.baseId))
+    .for("update");
+  if ((await countOtherActiveViews(ctx, targetView.baseId, targetView.id)) === 0) {
+    throw lastViewDeleteRejected();
   }
   await db
     .update(busabaseViews)

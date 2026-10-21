@@ -1362,6 +1362,7 @@ export const dashboardDe: CoreI18nMessages = {
     impactRecordVariant: "Varianten von {id}",
     impactViewCreate: "Fügt eine neue Ansicht hinzu",
     impactViewUpdate: "Aktualisiert Ansicht {id}",
+    impactViewMove: "Verschiebt Ansicht {id} auf Position {position}",
     impactViewDelete: "Löscht Ansicht {id}",
     impactFile: "{operation} {file}",
     impactNodeCreate: "Erstellt {nodeType}",
@@ -1473,7 +1474,14 @@ export const dashboardDe: CoreI18nMessages = {
     searchMembers: "Mitglieder suchen",
     noMembersAvailable: "Keine Mitglieder zur Auswahl",
     unassignedMember: "Nicht zugewiesen",
-    all: "Alle",
+    lastViewCannotBeDeleted:
+      "Eine Base braucht mindestens eine Ansicht. Erstelle eine weitere Ansicht, bevor du diese löschst.",
+    viewTabDragInstructions:
+      "Drücke die Leertaste, um einen Ansichts-Tab aufzunehmen. Verschiebe ihn mit den Pfeiltasten. Drücke Leertaste oder Eingabe zum Ablegen oder Escape zum Abbrechen. Die Ansicht ganz links ist die, mit der die Base geöffnet wird.",
+    viewTabDragOutside: "Die Ansicht befindet sich außerhalb der Tabs. Loslassen bricht ab.",
+    reorderViewFailed: "Die Ansicht konnte nicht verschoben werden. Bitte versuche es erneut.",
+    reorderViewProposed: "Die neue Reihenfolge der Ansichten wurde zur Prüfung eingereicht.",
+    moveViewMessage: "Ansicht {view} auf Position {position} verschieben",
     newView: "Neue Ansicht",
     editView: "Ansicht bearbeiten",
     deleteView: "Ansicht löschen",
@@ -1976,6 +1984,7 @@ export const dashboardDe: CoreI18nMessages = {
   operationDiff: {
     name: "Name",
     configuration: "Konfiguration",
+    position: "Position",
     description: "Beschreibung",
     sort: "Sortierung",
     filter: "Filter",
@@ -2137,12 +2146,15 @@ export const dashboardDe: CoreI18nMessages = {
   },
   emptyGuide: {
     title: "Lassen Sie einen Agent helfen, diesen Arbeitsbereich zu füllen",
-    body: "Busabase lässt sich auch manuell nutzen, ist aber darauf ausgelegt, dass Agents hineinschreiben – jede ihrer Änderungen enthält eine Nachricht, einen Diff und einen vollständigen Verlauf, den Sie prüfen oder zurückrollen können.",
-    itemStructuredData: "Strukturierte Daten erstellen und nützliche Beispiele anlegen",
-    itemChangeRequests:
-      "Über Change Requests schreiben, sodass jede Änderung erklärt und umkehrbar ist",
-    itemAgentDatabase:
-      "Datensätze hinzufügen, Felder aktualisieren und eine Datenbank mit einem KI-Agent weiterentwickeln",
+    body: "Busabase lässt sich auch manuell nutzen, ist aber für Agents gebaut: Was sie erzeugen, verstreut sich nicht in Chatverläufen, sondern bleibt in diesem Arbeitsbereich. Jeder Schreibvorgang ist dokumentiert, und Ihr ganzes Team kann es wiederverwenden.",
+    baseDataName: "Datenbasis",
+    baseDataDesc: "Kunden, Projekte und Bestände in Tabellen mit festen Spalten",
+    baseKnowledgeName: "Wissensbasis",
+    baseKnowledgeDesc: "Die Antworten des Teams, auffindbar und mit Quelle",
+    baseAppsName: "App-Basis",
+    baseAppsDesc: "Interne Tools auf denselben Daten",
+    baseSkillsName: "Skill-Basis",
+    baseSkillsDesc: "Einmal als Skill gespeicherte Workflows, die jeder Agent ausführen kann",
     startFromTemplate: "Mit einer Vorlage starten",
     startFromTemplateHint:
       "Installieren Sie in etwa einer Minute einen funktionierenden Arbeitsbereich – Bases, Beispielzeilen und das dazugehörige Agent-Handbuch.",
@@ -2250,7 +2262,9 @@ export const dashboardDe: CoreI18nMessages = {
     readOnly: "Nur lesen",
     mayMakeChanges: "Darf Änderungen vornehmen",
     promptTemplate: "Prompt-Vorlage",
-    targetHint: "Verwenden Sie {target}, um diesen Knoten automatisch einzufügen.",
+    fixedTargetLabel: "Steht immer am Anfang",
+    targetHint:
+      "Busabase fügt diese Zeile automatisch ein, damit der KI-Agent immer weiß, an welchem Knoten er arbeiten soll. Schreiben Sie darunter nur die Aufgabe.",
     byteCount: "{count} / {limit} Byte",
     addScenario: "Szenario hinzufügen",
     saveChanges: "Änderungen speichern",

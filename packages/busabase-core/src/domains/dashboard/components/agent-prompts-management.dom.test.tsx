@@ -292,10 +292,51 @@ describe("AgentPromptsView management", () => {
     fireEvent.change(screen.getByLabelText("Scenario name"), {
       target: { value: "Unpublished idea" },
     });
+    fireEvent.change(screen.getByLabelText("Prompt template"), {
+      target: { value: "Sketch the idea." },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Add scenario" }));
 
     await waitFor(() => expect(screen.getByText("Server denied the update")).toBeTruthy());
     expect(screen.getByDisplayValue("Unpublished idea")).toBeTruthy();
+  });
+
+  it("starts a new prompt empty and shows the fixed target line above it", () => {
+    const target = 'Target: the Busabase Skill "Research" (nodeId: nod_skill).';
+    renderView({
+      prompts: [
+        { ...builtIn, target },
+        { ...custom, target },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "New prompt" }));
+
+    expect((screen.getByLabelText("Prompt template") as HTMLTextAreaElement).value).toBe("");
+    const fixed = screen.getByTestId("agent-prompt-fixed-target");
+    expect(fixed.textContent).toContain(target);
+    expect(fixed.textContent).toContain("Always sent first");
+  });
+
+  it("opens an older prompt without its {target} line, and saves it without it", async () => {
+    const save = vi.fn(async (_prompts: CustomAgentPrompts) => {});
+    renderView({
+      management: makeManagement({
+        customPrompts: [{ ...customDef, body: "{target}\n\nReview the latest draft." }],
+        save,
+      }),
+    });
+
+    openPromptActions();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit scenario" }));
+
+    expect((screen.getByLabelText("Prompt template") as HTMLTextAreaElement).value).toBe(
+      "Review the latest draft.",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() =>
+      expect(save).toHaveBeenCalledWith([{ ...customDef, body: "Review the latest draft." }]),
+    );
   });
 
   it("shows validation in the modal without submitting", () => {

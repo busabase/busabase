@@ -26,8 +26,10 @@ const mergeScenarios = (...scenarios: SeedScenario[]): SeedScenario => ({
   comments: scenarios.flatMap((s) => s.comments ?? []),
 });
 
-export const zhCnScenario: SeedScenario = withSeedNodeIcons(
-  mergeScenarios(
+export const zhCnScenario: SeedScenario = withSeedNodeIcons({
+  // Default view name for Bases this scenario ships no views for.
+  defaultViewName: "表格视图",
+  ...mergeScenarios(
     datasetZhCnScenario,
     financeInvoiceZhCnScenario,
     readmeScenariosZhCnScenario,
@@ -40,4 +42,4 @@ export const zhCnScenario: SeedScenario = withSeedNodeIcons(
     nestedFoldersZhCnScenario,
     insuranceAgencyZhCnScenario,
   ),
-);
+});

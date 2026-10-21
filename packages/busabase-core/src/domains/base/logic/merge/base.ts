@@ -19,6 +19,7 @@ import { type MaterializeArgs, registerMaterializer } from "../../../../logic/ma
 import { registerNodeRuntime } from "../../../../logic/node-runtime";
 import { findAvailableNodeSlug } from "../../../../logic/node-slug";
 import { assertValidDateFieldOptionsOrThrow } from "../date-options";
+import { insertDefaultGridView } from "../default-view";
 import { assertFormulaMergeValid } from "../formula-recalculation";
 import { assertRelationOnlyOptionsOrThrow, resolveRelationFieldOptions } from "../relation-options";
 
@@ -97,6 +98,16 @@ export const materializeBaseNode = async (
       }),
     ),
   );
+  // Same rule as createBase's direct path: the Base opens on a real saved view
+  // unless the creator opted out because it adds its own views right away.
+  if (fields.defaultView !== false) {
+    await insertDefaultGridView(db, {
+      spaceId: getContextSpaceId(),
+      baseId,
+      createdBy: ctx.actorId,
+      timestamp,
+    });
+  }
   return baseNodeId;
 };
 

@@ -1,8 +1,8 @@
 "use client";
 
-import { Bot, Database, GitPullRequest, Plus, Shapes, Sparkles } from "lucide-react";
+import { AppWindow, BookOpen, Database, Plus, Shapes, Sparkles } from "lucide-react";
 import { SPALink } from "openlib/ui/dashboard";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useCoreI18n } from "../../../i18n";
 import type { McpGuideEdition } from "./agent-mcp-guides";
 import { AgentIntegrationDialog } from "./agent-skill-button";
@@ -45,19 +45,16 @@ export function EmptyAgentGuide({
 }: EmptyAgentGuideProps = {}) {
   const messages = useCoreI18n();
   const [open, setOpen] = useState(false);
-  const guideItems = [
-    {
-      icon: Database,
-      text: messages.emptyGuide.itemStructuredData,
-    },
-    {
-      icon: GitPullRequest,
-      text: messages.emptyGuide.itemChangeRequests,
-    },
-    {
-      icon: Bot,
-      text: messages.emptyGuide.itemAgentDatabase,
-    },
+  // What an agent fills this workspace with: the four bases the homepage hero
+  // rotates through and the onboarding wizard's last step shows, with the same
+  // names and icons, so the product picks up where the site left off. Review is
+  // not the pitch here (see busabase-cloud content/spec/category-definition.md).
+  const { emptyGuide } = messages;
+  const bases = [
+    { icon: Database, name: emptyGuide.baseDataName, desc: emptyGuide.baseDataDesc },
+    { icon: BookOpen, name: emptyGuide.baseKnowledgeName, desc: emptyGuide.baseKnowledgeDesc },
+    { icon: AppWindow, name: emptyGuide.baseAppsName, desc: emptyGuide.baseAppsDesc },
+    { icon: Sparkles, name: emptyGuide.baseSkillsName, desc: emptyGuide.baseSkillsDesc },
   ];
 
   return (
@@ -74,19 +71,16 @@ export function EmptyAgentGuide({
             </p>
           </div>
         </div>
-        <div className="mt-3 grid gap-2">
-          {guideItems.map((item) => {
-            const Icon = item.icon;
-            return (
-              <div
-                className="flex items-center gap-2 text-muted-foreground text-sm"
-                key={item.text}
-              >
-                <Icon className="size-4 shrink-0" aria-hidden="true" />
-                <span>{item.text}</span>
-              </div>
-            );
-          })}
+        {/* Icon · base name · what it holds. Names line up in their own column so
+            the four bases read at a glance. */}
+        <div className="mt-3 grid grid-cols-[auto_auto_1fr] items-start gap-x-2 gap-y-2 text-sm">
+          {bases.map(({ icon: Icon, name, desc }) => (
+            <Fragment key={name}>
+              <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+              <span className="whitespace-nowrap font-medium text-foreground">{name}</span>
+              <span className="text-muted-foreground">{desc}</span>
+            </Fragment>
+          ))}
         </div>
         <div className="mt-4 flex flex-col gap-2">
           <div className="flex flex-wrap items-center gap-2">

@@ -19,6 +19,7 @@ export interface ViewChangeInput {
   type?: string;
   config?: unknown;
   patch?: unknown;
+  position?: number;
   message?: string;
   submittedBy?: string;
   autoMerge?: boolean;
@@ -48,7 +49,13 @@ export const viewChangeTask: TaskDefinition<ViewChangeInput> = {
     "(a Base plus the views that make it usable) let it merge so the workspace is not left half-built " +
     "behind a review queue, exactly as you would for `node_create` and `POST /bases`. " +
     "`create` needs the BASE id; update / delete / restore need the VIEW id — the endpoint split " +
-    "follows whichever id identifies the target, which this task handles for you.",
+    "follows whichever id identifies the target, which this task handles for you. " +
+    "View order is shared by everyone: a new view joins the end, `update` with `position` moves one " +
+    "(0 = leftmost), and the leftmost view is what the Base opens on. Every Base keeps at least one " +
+    "view, so deleting its last one is rejected — create the replacement first. A new Base already " +
+    'starts with a default "Grid view" (every record and field): when you are about to add your own ' +
+    "views, create the Base with `node_create` `skipDefaultView` (REST `defaultView: false`) so your " +
+    "first view is the one it opens on.",
   annotations: { readOnly: false, destructive: false },
   params: [
     {
@@ -94,6 +101,14 @@ export const viewChangeTask: TaskDefinition<ViewChangeInput> = {
       appliesWhen: { param: "action", values: ["update"] },
       description: "Changes to apply to the view (update only).",
     },
+    {
+      name: "position",
+      kind: "number",
+      min: 0,
+      appliesWhen: { param: "action", values: ["update"] },
+      description:
+        "Move the view to this 0-based index among the Base's views (update only); the others shift to make room. 0 makes it the view the Base opens on.",
+    },
     { name: "message", kind: "string", description: "Explanation for the reviewer." },
     { name: "submittedBy", kind: "string", description: "Producer label recorded on the change." },
     {
@@ -111,6 +126,7 @@ export const viewChangeTask: TaskDefinition<ViewChangeInput> = {
   examples: [
     'busabase-cli views change-request --action create --base-id bas_1 --name "Published" --type table',
     'busabase-cli views change-request --action create --base-id bas_1 --name "Published" --require-review',
+    "busabase-cli views change-request --action update --view-id viw_1 --position 0",
     "busabase-cli views change-request --action delete --view-id viw_1",
   ],
   execute: async (client: BusabaseTaskClient, input: ViewChangeInput) => {
@@ -144,11 +160,14 @@ export const viewChangeTask: TaskDefinition<ViewChangeInput> = {
     const target = { viewId: input.viewId, ...meta };
 
     if (input.action === "update") {
-      if (!input.patch) throw new Error('action "update" requires patch.');
+      if (!input.patch && input.position === undefined) {
+        throw new Error('action "update" requires patch or position.');
+      }
       return client.views.changeRequest({
         operation: "update",
         ...target,
-        ...(input.patch as Record<string, unknown>),
+        ...((input.patch ?? {}) as Record<string, unknown>),
+        ...(input.position !== undefined ? { position: input.position } : {}),
       } as ViewInput);
     }
     if (input.action === "delete") {

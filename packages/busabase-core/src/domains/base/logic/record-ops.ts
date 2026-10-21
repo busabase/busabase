@@ -1,7 +1,8 @@
 import "server-only";
 
 import { ORPCError } from "@orpc/server";
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import type { BaseVO } from "busabase-contract/types";
+import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { iStringToText } from "openlib/i18n/i-string";
 import type { z } from "zod";
 import { getContextSpaceId, resolveActorId, withContextSourceMeta } from "../../../context";
@@ -55,7 +56,9 @@ import { toBaseVO } from "../../../logic/vo";
 import { assertValidFormulaField, validateRecordFields } from "../field-rules";
 import type { FieldDef } from "../field-types";
 import { FormulaError } from "../formula";
+import { describeRecordFieldKeyProblem, resolveRecordFieldKeys } from "../utils/record-field-keys";
 import { assertValidDateFieldOptionsOrThrow } from "./date-options";
+import { insertDefaultGridView } from "./default-view";
 import { baseNotFound } from "./errors";
 import { resolveLookupFieldOptions } from "./field-ops";
 import { getBase } from "./queries";
@@ -87,6 +90,35 @@ const assertValidRecordFields = (
       data: { errors },
     });
   }
+};
+
+/**
+ * Record writes' `fields` keys → field slugs (see `utils/record-field-keys.ts`
+ * for the rules and why mixed unknown keys stay tolerated). One resolver per
+ * request: the deleted-field slugs are read once, and only when some key is
+ * not already a live slug — the common, all-slug write costs no query.
+ */
+const createRecordFieldKeyResolver = (base: BaseVO) => {
+  const liveSlugs = new Set(base.fields.map((field) => field.slug));
+  let deletedSlugs: Promise<Set<string>> | null = null;
+  const loadDeletedSlugs = async () => {
+    const db = await getDb();
+    const rows = await db
+      .select({ slug: busabaseBaseFields.slug })
+      .from(busabaseBaseFields)
+      .where(and(eq(busabaseBaseFields.baseId, base.id), isNotNull(busabaseBaseFields.deletedAt)));
+    return new Set(rows.map((row) => row.slug));
+  };
+  return async (fields: Record<string, unknown>, label?: string) => {
+    if (Object.keys(fields).every((key) => liveSlugs.has(key))) return fields;
+    deletedSlugs ??= loadDeletedSlugs();
+    const result = resolveRecordFieldKeys(fields, base.fields, await deletedSlugs);
+    if (result.ok) return result.fields;
+    throw new ORPCError("BAD_REQUEST", {
+      message: `${label ? `${label}: ` : ""}${describeRecordFieldKeyProblem(result.problem, base)}`,
+      data: { problem: result.problem, fieldSlugs: [...liveSlugs] },
+    });
+  };
 };
 
 /**
@@ -277,6 +309,8 @@ export const createBase = async (input: z.input<typeof createBaseInputSchema>) =
       description: parsed.description,
       parentNodeId: parentNode.id,
       fields: parsed.fields,
+      // Carried through review so materializeBaseNode honours the opt-out.
+      ...(parsed.defaultView === false ? { defaultView: false } : {}),
       message: `Create base ${parsed.name}`,
       submittedBy: resolveActorId(CURRENT_USER_ID),
     });
@@ -337,6 +371,16 @@ export const createBase = async (input: z.input<typeof createBaseInputSchema>) =
         options: field.options,
       })),
     );
+  }
+  // A Base always opens on a real saved view. Callers that add their own views
+  // right away (template/package install) opt out with `defaultView: false`.
+  if (parsed.defaultView !== false) {
+    await insertDefaultGridView(db, {
+      spaceId,
+      baseId,
+      createdBy: resolveActorId(CURRENT_USER_ID),
+      timestamp: createdAt,
+    });
   }
 
   const base = await getBase(baseId);
@@ -439,6 +483,11 @@ const createChangeRequestInternal = async (
   }
 
   const parsed = createChangeRequestInputSchema.parse(input);
+  // A Form's keys come from its own bindings, not from a caller's typing, and a
+  // public submitter cannot fix a stale binding — so only API writes resolve.
+  if (authorization.kind === "base") {
+    parsed.fields = await createRecordFieldKeyResolver(base)(parsed.fields);
+  }
   assertValidRecordFields(parsed.fields, base.fields);
   await assertRelationTargetsLive(parsed.fields, base.fields);
   const submittedBy = resolveActorId(parsed.submittedBy);
@@ -673,6 +722,10 @@ export const createBulkChangeRequest = async (
   const parsed = createBulkChangeRequestInputSchema.parse(input);
   // Validate the entire batch before writing anything, so one bad record fails fast
   // instead of leaving a partially-populated change request behind.
+  const resolveFieldKeys = createRecordFieldKeyResolver(base);
+  for (const [index, fields] of parsed.records.entries()) {
+    parsed.records[index] = await resolveFieldKeys(fields, `records[${index}]`);
+  }
   for (const fields of parsed.records) {
     assertValidRecordFields(fields, base.fields);
     await assertRelationTargetsLive(fields, base.fields);
@@ -816,6 +869,12 @@ export const createBulkUpdateChangeRequest = async (
   const parsed = createBulkUpdateChangeRequestInputSchema.parse(input);
   const submittedBy = resolveActorId(parsed.submittedBy);
   await assertBaseChangeRequestPermission(base.id, submittedBy);
+  // The caller's own keys only — never the merged object validated below, which
+  // carries whatever the stored payload already holds.
+  const resolveFieldKeys = createRecordFieldKeyResolver(base);
+  for (const [index, update] of parsed.updates.entries()) {
+    update.fields = await resolveFieldKeys(update.fields, `updates[${index}]`);
+  }
 
   if (parsed.idempotencyKey) {
     const existingId = await findChangeRequestByIdempotencyKey(
@@ -1251,6 +1310,9 @@ export const createUpdateChangeRequest = async (
     throw baseNotFound(record.baseId);
   }
   await assertBaseChangeRequestPermission(base.id, submittedBy);
+  // Resolved on the caller's delta only, before it is merged with the stored
+  // payload below (which may hold deleted fields' keys).
+  parsed.fields = await createRecordFieldKeyResolver(base)(parsed.fields);
   // `parsed.fields` is only the caller's partial delta — an omitted required
   // field means "leave it alone", not "this record has no value for it".
   // Validate against the MERGED view (current committed fields + delta) so the

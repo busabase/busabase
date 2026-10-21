@@ -1357,29 +1357,9 @@ export const datasetZhCnScenario: SeedScenario = {
       config: {
         filters: [],
         sorts: [{ direction: "asc", fieldSlug: "auto_number" }],
-        visibleFieldSlugs: [
-          "text",
-          "attachment",
-          "relation",
-          "member",
-          "member_one",
-          "number",
-          "date",
-          "checkbox",
-          "select",
-          "multiselect",
-          "url",
-          "embed",
-          "email",
-          "phone",
-          "created_time",
-          "updated_time",
-          "created_by",
-          "updated_by",
-          "auto_number",
-          "ai_summary",
-          "ai_tags",
-        ],
+        // No visibleFieldSlugs: every field the Base has shows, in Base order — this
+        // view is what the Field Type Lab opens on, so a hand-kept list would silently
+        // drop each newly added field type (it had already missed markdown/html/…).
       },
       minutesAgo: 114,
       useCases: ["field-types"],

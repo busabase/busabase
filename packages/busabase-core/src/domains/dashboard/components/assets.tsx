@@ -27,6 +27,7 @@ import { presentCoreError } from "../../../i18n/localize-error";
 import { INLINE_ASSET_TEXT_MAX_BYTES, isTxtFile, utf8ByteLength } from "../helpers/asset-text-grep";
 import { useIsAnonymousVisitor } from "../visitor-context";
 import { AssetMetadataEditorDialog } from "./asset-metadata-editor";
+import { type HostFileViewerFile, useHostFileViewer } from "./file-viewer-slot";
 import { DialogContent } from "./localized-dialog-content";
 import { ConfirmActionDialog, EmptyState } from "./primitives";
 import { useWorkspacePermissionLevel } from "./split-submit-button";
@@ -56,6 +57,12 @@ export function isPreviewableAssetMime(mimeType: string) {
   );
 }
 
+/** The host viewer that will render this asset, or `null` when the built-in
+ *  preview handles it (or nothing can). A host viewer wins whatever it claims. */
+export function useAssetHostViewer(file: HostFileViewerFile | null) {
+  return useHostFileViewer(file);
+}
+
 interface AssetMediaPreviewProps {
   mimeType: string;
   url: string;
@@ -63,10 +70,22 @@ interface AssetMediaPreviewProps {
   mediaClassName: string;
 }
 
-/** Renders the asset inline for mime kinds browsers support natively;
- *  everything else falls back to an "open file" link, same as before. */
+/** Hands the asset to a host-registered viewer (`FileViewerSlotProvider`) when
+ *  it claims it, else renders mime kinds browsers support natively; with
+ *  neither, it falls back to an "open file" link. */
 export function AssetMediaPreview({ mimeType, url, name, mediaClassName }: AssetMediaPreviewProps) {
   const messages = useCoreI18n();
+  const hostViewer = useAssetHostViewer({ mimeType, name, url });
+  if (hostViewer) {
+    return (
+      <div
+        className={cn("h-[70vh] w-full overflow-auto", mediaClassName)}
+        data-asset-preview="host"
+      >
+        {hostViewer.render({ mimeType, name, url })}
+      </div>
+    );
+  }
   if (mimeType.startsWith("image/")) {
     return <img alt={name} className={mediaClassName} src={url} />;
   }

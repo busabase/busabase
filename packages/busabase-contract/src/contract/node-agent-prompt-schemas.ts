@@ -61,15 +61,15 @@ const customPromptBodySchema = iStringSchema.refine(
 );
 
 /**
- * One custom scenario prompt. `body`'s `{target}` placeholder is substituted at
- * render time with the same target string `PromptDef.body(target)` receives
- * today (see `node-agent-prompts.ts`) — this schema does not interpolate it.
+ * One custom scenario prompt. `body` is only the task: every rendered prompt
+ * opens with the node's target line, the same one a built-in prompt opens with
+ * (see `node-agent-prompts.ts`), so authors never place it and this schema
+ * interpolates nothing.
  *
- * The placeholder is OPTIONAL and chooses placement only: a `body` that never
- * mentions `{target}` gets the target line prepended as its first paragraph, so
- * a custom prompt can never reach an agent without naming the node it acts on.
- * That is why the schema does not require it — forgetting it is not an error to
- * reject, it is a default to supply.
+ * `{target}` is a retired placeholder that is still accepted, because bodies
+ * saved before the target line became fixed contain it: a line that is only
+ * `{target}` is dropped (the target already opens the prompt), and one inside a
+ * sentence reads as the node's name. Rejecting it would break those prompts.
  */
 export const customPromptDefSchema = z.object({
   /** Stable id, unique within this node's custom list. */
@@ -81,7 +81,7 @@ export const customPromptDefSchema = z.object({
   intent: customPromptIntentSchema.optional(),
   /** Short title shown in the dialog's left list. */
   label: customPromptLabelSchema,
-  /** Template text; "{target}" is substituted with the rendered target line. */
+  /** The task. The node's target line is added ahead of it when the prompt renders. */
   body: customPromptBodySchema,
 });
 export type CustomPromptDef = z.infer<typeof customPromptDefSchema>;

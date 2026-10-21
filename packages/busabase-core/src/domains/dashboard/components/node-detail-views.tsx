@@ -77,11 +77,12 @@ import { type NodeDetailProps, registerNodeDetail } from "../node-detail-registr
 import { registerSidePanelTab, type SidePanelTabProps } from "../side-panel-registry";
 import { useSidePanelStore } from "../store/side-panel-store";
 import { useIsAnonymousVisitor } from "../visitor-context";
+import { useWorkbenchLinkClickHandler } from "../workbench-link-context";
 import { AgentPromptsView } from "./agent-prompts-view";
-import { AssetMediaPreview } from "./assets";
+import { AssetMediaPreview, useAssetHostViewer } from "./assets";
 import { DriveParsedTextPanel, type DriveParsedTextPayload } from "./drive-parsed-text-panel";
 import { MarkdownFieldPreview } from "./field-preview";
-import { FilePreviewSurface, isFileFullscreenMime } from "./file-preview-surface";
+import { FilePreviewSurface, useFileFullscreenAvailable } from "./file-preview-surface";
 import {
   buildFileTree,
   collectFolderPaths,
@@ -847,6 +848,21 @@ export function FileTreeDetailView({
     }
   };
 
+  const previewMimeType = fileQuery.data
+    ? inferFileTreeMimeType(openPath ?? "", fileQuery.data.mimeType)
+    : "application/octet-stream";
+  const previewHostViewer = useAssetHostViewer(
+    fileQuery.data?.assetUrl && openPath
+      ? {
+          mimeType: previewMimeType,
+          name: fileQuery.data.displayName ?? openPath,
+          url: fileQuery.data.assetUrl,
+        }
+      : null,
+  );
+  // Same full-height frame a PDF gets: host viewers scroll and paginate themselves.
+  const previewFillsFrame = previewMimeType === "application/pdf" || Boolean(previewHostViewer);
+
   if (!fileTree) {
     return fileTreeQuery.isLoading ? (
       <NodeDetailSkeleton variant={labels.skeletonVariant} />
@@ -862,9 +878,6 @@ export function FileTreeDetailView({
   const previewKind = fileQuery.data
     ? resolveFileTreePreviewKind(openPath ?? "", fileQuery.data.mimeType)
     : "code";
-  const previewMimeType = fileQuery.data
-    ? inferFileTreeMimeType(openPath ?? "", fileQuery.data.mimeType)
-    : "application/octet-stream";
   const resolvedRemotePreview =
     remotePreview?.path === openPath && remotePreview.status === "resolved"
       ? remotePreview.result
@@ -1271,12 +1284,14 @@ export function FileTreeDetailView({
                 </div>
               )
             ) : fileQuery.data && fileQuery.data.encoding !== "utf8" ? (
-              fileQuery.data.assetUrl && previewKind !== "code" ? (
-                <div className={previewMimeType === "application/pdf" ? "h-full min-h-0" : "p-5"}>
+              // Media kinds render built in; any other binary (EPUB, Office…) only
+              // when a host viewer claims it, else it stays "preview unavailable".
+              fileQuery.data.assetUrl && (previewKind !== "code" || previewHostViewer) ? (
+                <div className={previewFillsFrame ? "h-full min-h-0" : "p-5"}>
                   <div
                     className={cn(
                       "grid place-items-center overflow-hidden",
-                      previewMimeType === "application/pdf"
+                      previewFillsFrame
                         ? "h-full min-h-0"
                         : "max-h-[55vh] rounded-md border bg-muted",
                     )}
@@ -1284,7 +1299,7 @@ export function FileTreeDetailView({
                   >
                     <AssetMediaPreview
                       mediaClassName={
-                        previewMimeType === "application/pdf"
+                        previewFillsFrame
                           ? "h-full max-h-full w-full border-0"
                           : "max-h-[55vh] w-full object-contain"
                       }
@@ -1593,6 +1608,11 @@ export function FileNodeDetailView({
     enabled: Boolean(slug),
   });
   const detail = asNodeDetail(fileQuery.isError ? undefined : fileQuery.data, "file");
+  const fullscreenAvailable = useFileFullscreenAvailable(
+    detail
+      ? { mimeType: detail.asset.mimeType, name: detail.asset.name, url: detail.asset.url }
+      : null,
+  );
   useReportLoadedNode(detail?.node, onNodeLoaded);
   useRegisterTopbarNodeActions(
     detail ? (
@@ -1610,7 +1630,7 @@ export function FileNodeDetailView({
           title={detail.node.name}
         />
         <PreviewFullscreenButton
-          available={isFileFullscreenMime(detail.asset.mimeType)}
+          available={fullscreenAvailable}
           fullscreenState={fullscreenState}
           label={messages.airapp.enterFullscreen}
         />
@@ -1663,6 +1683,7 @@ export function FileNodeDetailView({
           fullscreenState={fullscreenState}
           mimeType={asset.mimeType}
           name={asset.name}
+          textSource={{ orpc, asset }}
           url={asset.url}
         />
       </div>
@@ -1699,6 +1720,7 @@ export function FileSidePanelPreview({ orpc, payload }: SidePanelTabProps) {
       mimeType={detail.asset.mimeType}
       name={detail.asset.name}
       showToolbar
+      textSource={{ orpc, asset: detail.asset }}
       url={detail.asset.url}
     />
   );
@@ -1726,6 +1748,9 @@ export function DocDetailView({
   const doc = asNodeDetail(docQuery.isError ? undefined : docQuery.data, "doc");
   useReportLoadedNode(doc?.node, onNodeLoaded);
   const [isEditing, setIsEditing] = useState(false);
+  // Reading mode only: while editing, a click on a link places the caret, and
+  // the browser never follows links inside contenteditable anyway.
+  const handleWorkbenchLinkClick = useWorkbenchLinkClickHandler();
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState<null | "save" | "changeRequest">(null);
   const [error, setError] = useState<string | null>(null);
@@ -1970,6 +1995,7 @@ export function DocDetailView({
        * block and would otherwise be clipped by this scroll container. Narrow
        * containers drop that gutter (it cost a phone a quarter of its width)
        * unless a mouse user is editing, the only case the handle can appear. */}
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: delegated clicks on the Doc's own links; Enter on a focused link dispatches the same click, so keyboard users get it too */}
       <div
         className={cn(
           "mx-auto flex h-full min-h-0 w-full min-w-0 max-w-5xl flex-col overflow-auto border-border border-x bg-card px-4 py-6 @xl:py-10 @xl:pr-6 @xl:pl-24",
@@ -1977,6 +2003,7 @@ export function DocDetailView({
         )}
         data-dashboard-scroll="doc-detail"
         data-doc-reading-surface
+        onClick={isEditing ? undefined : handleWorkbenchLinkClick}
         ref={docScrollRef}
       >
         <div className="mb-5 min-w-0">

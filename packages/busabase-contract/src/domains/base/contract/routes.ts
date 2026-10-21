@@ -1,6 +1,10 @@
 import { oc } from "@orpc/contract";
 import { z } from "zod";
-import { changeRequestSchema, listByStatusInputSchema } from "../../../contract/schemas";
+import {
+  changeRequestSchema,
+  listByStatusInputSchema,
+  pendingChangeRequestSchema,
+} from "../../../contract/schemas";
 import {
   baseFieldSchema,
   baseLifecycleChangeRequestInputSchema,
@@ -32,6 +36,17 @@ import {
 import { viewChangeRequestInputSchema, viewSchema } from "./view-schemas";
 
 // Base domain oRPC routes (bases / records / views); composed in contract/busabase.ts.
+/**
+ * What a write that merged in the same call returns: the materialized row,
+ * tagged `materialized: true` (the other branch is a pending ChangeRequest).
+ * Declared once rather than inline so the OpenAPI document can name them
+ * (`MaterializedBase`, … in `contract/openapi-components.ts`) and a generated
+ * SDK gets one class per type instead of `BasesCreateResponse200Type0`.
+ */
+export const materializedBaseSchema = baseSchema.extend({ materialized: z.literal(true) });
+export const materializedRecordSchema = recordSchema.extend({ materialized: z.literal(true) });
+export const materializedViewSchema = viewSchema.extend({ materialized: z.literal(true) });
+
 export const baseContract = {
   list: oc
     .route({
@@ -82,7 +97,7 @@ export const baseContract = {
       tags: ["Views"],
       summary: "List views for a Base",
       successDescription:
-        "Saved table views for a Base. `status=archived` returns the soft-deleted ones instead.",
+        "Saved views for a Base, in their shared tab order (`position`, then creation time). The first one is the view the Base opens on. Every Base keeps at least one active view. `status=archived` returns the soft-deleted ones instead.",
     })
     .input(listByStatusInputSchema.extend({ baseId: z.string() }))
     .output(z.array(viewSchema)),
@@ -93,15 +108,10 @@ export const baseContract = {
       tags: ["Bases"],
       summary: "Create Base",
       successDescription:
-        "Merged in the same call when the actor has write access on the parent node — the materialized Base comes back (`materialized: true`). Review-first when the actor lacks write access or passes `autoMerge: false`: a pending ChangeRequest proposing the Base (`materialized: false`).",
+        'Merged in the same call when the actor has write access on the parent node — the materialized Base comes back (`materialized: true`). Review-first when the actor lacks write access or passes `autoMerge: false`: a pending ChangeRequest proposing the Base (`materialized: false`). The Base is created with one view, "Grid view" (every record and field), unless `defaultView: false` — a Base must keep at least one view, so only opt out when you add your own views right away.',
     })
     .input(createBaseInputSchema)
-    .output(
-      z.union([
-        baseSchema.extend({ materialized: z.literal(true) }),
-        changeRequestSchema.extend({ materialized: z.literal(false) }),
-      ]),
-    ),
+    .output(z.union([materializedBaseSchema, pendingChangeRequestSchema])),
   createChangeRequest: oc
     .route({
       method: "POST",
@@ -112,12 +122,7 @@ export const baseContract = {
         "Merged in the same call when the actor has write access on the Base's node — the materialized record comes back (`materialized: true`). Review-first when the actor lacks write access or passes `autoMerge: false`: a pending ChangeRequest proposing the record (`materialized: false`).",
     })
     .input(createChangeRequestInputSchema.extend({ baseId: z.string() }))
-    .output(
-      z.union([
-        recordSchema.extend({ materialized: z.literal(true) }),
-        changeRequestSchema.extend({ materialized: z.literal(false) }),
-      ]),
-    ),
+    .output(z.union([materializedRecordSchema, pendingChangeRequestSchema])),
   createBulkChangeRequest: oc
     .route({
       method: "POST",
@@ -279,12 +284,7 @@ export const recordContract = {
         "Creates a record change request selected by `operation`. All three operations are permission-aware: they merge immediately when the actor has write access on the Base's node, and land as a pending Change Request otherwise or when `autoMerge: false` is passed.",
     })
     .input(recordChangeRequestInputSchema)
-    .output(
-      z.union([
-        recordSchema.extend({ materialized: z.literal(true) }),
-        changeRequestSchema.extend({ materialized: z.literal(false) }),
-      ]),
-    ),
+    .output(z.union([materializedRecordSchema, pendingChangeRequestSchema])),
   listChangeRequests: oc
     .route({
       method: "GET",
@@ -329,13 +329,8 @@ export const viewContract = {
       tags: ["Views", "Change Requests"],
       summary: "Create view change request",
       successDescription:
-        "Proposes a view change. `operation` selects what to propose: `create` (addressed by `baseId`), or `update` / `delete` / `restore` (addressed by `viewId`). Review-first when the actor lacks write access or passes `autoMerge: false` — a pending ChangeRequest (`materialized: false`). Otherwise the change is approved and merged in the same call and the materialized View comes back instead (`materialized: true`).",
+        "Proposes a view change. `operation` selects what to propose: `create` (addressed by `baseId`), or `update` / `delete` / `restore` (addressed by `viewId`). Review-first when the actor lacks write access or passes `autoMerge: false` — a pending ChangeRequest (`materialized: false`). Otherwise the change is approved and merged in the same call and the materialized View comes back instead (`materialized: true`). View order is shared: `create` appends to the end, `update` with `position` moves a view, and the leftmost view is the one the Base opens on. A Base must keep at least one view, so deleting its last active view is rejected (400).",
     })
     .input(viewChangeRequestInputSchema)
-    .output(
-      z.union([
-        viewSchema.extend({ materialized: z.literal(true) }),
-        changeRequestSchema.extend({ materialized: z.literal(false) }),
-      ]),
-    ),
+    .output(z.union([materializedViewSchema, pendingChangeRequestSchema])),
 };

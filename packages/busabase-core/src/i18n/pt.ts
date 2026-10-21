@@ -1343,6 +1343,7 @@ export const dashboardPt: CoreI18nMessages = {
     impactRecordVariant: "Variantes de {id}",
     impactViewCreate: "Adiciona uma nova visualização",
     impactViewUpdate: "Atualiza a visualização {id}",
+    impactViewMove: "Move a visualização {id} para a posição {position}",
     impactViewDelete: "Exclui a visualização {id}",
     impactFile: "{operation} {file}",
     impactNodeCreate: "Cria {nodeType}",
@@ -1453,7 +1454,14 @@ export const dashboardPt: CoreI18nMessages = {
     searchMembers: "Pesquisar membros",
     noMembersAvailable: "Nenhum membro para escolher",
     unassignedMember: "Sem responsável",
-    all: "Todos",
+    lastViewCannotBeDeleted:
+      "Uma Base precisa manter pelo menos uma visualização. Crie outra visualização antes de excluir esta.",
+    viewTabDragInstructions:
+      "Para mover uma aba de visualização, pressione Espaço. Use as setas para mudar a posição e pressione Espaço ou Enter para soltar, ou Esc para cancelar. A visualização mais à esquerda é a que abre com a Base.",
+    viewTabDragOutside: "A visualização está fora das abas. Solte para cancelar.",
+    reorderViewFailed: "Não foi possível mover a visualização. Tente novamente.",
+    reorderViewProposed: "A nova ordem das visualizações foi enviada para revisão.",
+    moveViewMessage: "Mover a visualização {view} para a posição {position}",
     newView: "Nova visualização",
     editView: "Editar visualização",
     deleteView: "Excluir visualização",
@@ -1950,6 +1958,7 @@ export const dashboardPt: CoreI18nMessages = {
   operationDiff: {
     name: "Nome",
     configuration: "Configuração",
+    position: "Posição",
     description: "Descrição",
     sort: "ordenação",
     filter: "filtro",
@@ -2115,12 +2124,15 @@ export const dashboardPt: CoreI18nMessages = {
   },
   emptyGuide: {
     title: "Deixe um agente ajudar a preencher este espaço de trabalho",
-    body: "O Busabase pode ser usado manualmente, mas foi projetado para que agentes escrevam nele — cada alteração feita por eles traz uma mensagem, um diff e um histórico completo que você pode revisar ou reverter.",
-    itemStructuredData: "Crie dados estruturados e popule exemplos úteis",
-    itemChangeRequests:
-      "Escreva por meio de Change Requests, para que cada alteração seja explicada e reversível",
-    itemAgentDatabase:
-      "Adicione registros, atualize campos e evolua um banco de dados com um agente de IA",
+    body: "O Busabase pode ser usado manualmente, mas foi feito para agentes: o que eles produzem não se perde em históricos de chat, fica neste espaço de trabalho. Toda escrita fica registrada e todo o seu time pode reutilizar.",
+    baseDataName: "Base de Dados",
+    baseDataDesc: "Clientes, projetos e estoque em tabelas com colunas fixas",
+    baseKnowledgeName: "Base de Conhecimento",
+    baseKnowledgeDesc: "As respostas do time, fáceis de achar e com fonte",
+    baseAppsName: "Base de Apps",
+    baseAppsDesc: "Ferramentas internas sobre os mesmos dados",
+    baseSkillsName: "Base de Skills",
+    baseSkillsDesc: "Um fluxo salvo uma vez como skill, que qualquer agente pode rodar",
     startFromTemplate: "Começar com um modelo",
     startFromTemplateHint:
       "Instale um espaço de trabalho pronto em cerca de um minuto — Bases, linhas de exemplo e o manual do agente que acompanha tudo isso.",
@@ -2225,7 +2237,9 @@ export const dashboardPt: CoreI18nMessages = {
     readOnly: "Somente leitura",
     mayMakeChanges: "Pode fazer alterações",
     promptTemplate: "Modelo de prompt",
-    targetHint: "Use {target} para inserir este nó automaticamente.",
+    fixedTargetLabel: "Sempre vai primeiro",
+    targetHint:
+      "O Busabase adiciona esta linha para você, então o agente de IA sempre sabe em qual nó trabalhar. Escreva abaixo apenas a tarefa.",
     byteCount: "{count} / {limit} bytes",
     addScenario: "Adicionar cenário",
     saveChanges: "Salvar alterações",

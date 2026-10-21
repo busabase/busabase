@@ -20,11 +20,13 @@ import {
   initializeNodeAcl,
   shouldAutoMerge,
 } from "../../logic/node-acl";
-import { assertContainerParent } from "../../logic/node-parent";
+import { assertContainerParent, invalidParentNodeType } from "../../logic/node-parent";
+import { resolveVisibleNodeOfTypes } from "../../logic/node-resolve";
 import { registerNodeRuntime } from "../../logic/node-runtime";
 import {
   findActiveNodeByTypeAndSlug,
   isNodeSlugUniqueViolation,
+  NODE_SLUG_CONFLICT_REASON,
   nodeSlugConflict,
 } from "../../logic/node-slug";
 import { ensureReady } from "../../logic/seed";
@@ -246,6 +248,67 @@ const toDocVO = async (node: NodePO): Promise<DocVO> => {
   };
 };
 
+/**
+ * `docs.create`'s parent: the space root when omitted, otherwise a node id OR a
+ * folder slug (the same id-or-slug convention as `nodes.get`). An id is looked
+ * up directly, as it always was; anything else goes through the shared node
+ * resolver among folders, and a ref naming a visible node of another type is
+ * the same 422 `assertContainerParent` gives an id.
+ */
+const resolveDocParentNode = async (
+  db: Awaited<ReturnType<typeof getDb>>,
+  parentNodeRef: string | undefined,
+): Promise<NodePO> => {
+  const spaceId = getContextSpaceId();
+  const parentNodeId = parentNodeRef ?? rootNodeIdForSpace(spaceId);
+  const [byId] = await db
+    .select()
+    .from(busabaseNodes)
+    .where(and(eq(busabaseNodes.id, parentNodeId), eq(busabaseNodes.spaceId, spaceId)))
+    .limit(1);
+  if (byId || !parentNodeRef) return assertContainerParent(byId, "doc", parentNodeId);
+  const bySlug = await resolveVisibleNodeOfTypes(parentNodeRef, ["folder"], (other) =>
+    invalidParentNodeType("doc", other.type),
+  ).catch((error: unknown) => {
+    if (error instanceof ORPCError && error.code === "NOT_FOUND") return undefined;
+    throw error;
+  });
+  return assertContainerParent(bySlug, "doc", parentNodeRef);
+};
+
+/**
+ * A `docs.create` whose slug is already taken by a Doc in the SAME folder.
+ *
+ * Deliberately idempotent for a true retry (a client that timed out and sent
+ * the same request again gets the Doc it created, not an error). But only when
+ * the retry IS the same request — same name and same body. It used to return
+ * the existing Doc for ANY name/body, marked `materialized: true`, so a caller
+ * that picked a taken slug saw "created" while its name and body were silently
+ * dropped. A different submission is a conflict that names the existing Doc.
+ * Same rule as `bases.create`'s retry shortcut (`createBase` in record-ops.ts).
+ */
+const existingDocForRetry = async (
+  existing: NodePO,
+  parentNodeId: string,
+  parsed: { slug: string; name: string; body: string },
+): Promise<DocVO> => {
+  if (existing.parentId !== parentNodeId) throw nodeSlugConflict("doc", parsed.slug);
+  const doc = await toDocVO(existing);
+  if (doc.node.name === parsed.name && doc.body === parsed.body) return doc;
+  throw new ORPCError("CONFLICT", {
+    message:
+      `A doc with slug "${parsed.slug}" already exists in this folder (${existing.id}, "${existing.name}") ` +
+      `with a different ${doc.node.name === parsed.name ? "body" : "name"}. ` +
+      `To change it use PUT /nodes/${existing.id}/content; to create another doc choose a different slug.`,
+    data: {
+      reason: NODE_SLUG_CONFLICT_REASON,
+      nodeType: "doc",
+      slug: parsed.slug,
+      existingNodeId: existing.id,
+    },
+  });
+};
+
 export const createDoc = async (
   input: z.input<typeof createDocInputSchema>,
 ): Promise<(DocVO & { materialized: true }) | (ChangeRequestVO & { materialized: false })> => {
@@ -253,19 +316,14 @@ export const createDoc = async (
   const db = await getDb();
   const parsed = createDocInputSchema.parse(input);
   assertDocBodySize(parsed.body);
-  const parentNodeId = parsed.parentNodeId ?? rootNodeIdForSpace(getContextSpaceId());
+  const parentNode = await resolveDocParentNode(db, parsed.parentNodeId);
   const existing = await getDocNode(parsed.slug);
   if (existing) {
-    if (existing.parentId !== parentNodeId) throw nodeSlugConflict("doc", parsed.slug);
-    return { ...(await toDocVO(existing)), materialized: true as const };
+    return {
+      ...(await existingDocForRetry(existing, parentNode.id, parsed)),
+      materialized: true as const,
+    };
   }
-
-  const [parentNodeRow] = await db
-    .select()
-    .from(busabaseNodes)
-    .where(eq(busabaseNodes.id, parentNodeId))
-    .limit(1);
-  const parentNode = assertContainerParent(parentNodeRow, "doc", parentNodeId);
 
   // Permission-aware default: merge immediately if the actor has `write` on
   // the parent node; otherwise (or with explicit `autoMerge: false`) propose
@@ -312,8 +370,11 @@ export const createDoc = async (
         nodeType: "doc",
         slug: parsed.slug,
       });
-      if (concurrent?.parentId === parentNode.id) {
-        return { ...(await toDocVO(concurrent)), materialized: true as const };
+      if (concurrent) {
+        return {
+          ...(await existingDocForRetry(concurrent, parentNode.id, parsed)),
+          materialized: true as const,
+        };
       }
       throw nodeSlugConflict("doc", parsed.slug);
     }

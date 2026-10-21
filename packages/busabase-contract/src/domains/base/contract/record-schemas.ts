@@ -127,7 +127,8 @@ export const listRecordsInputSchema = z
       .string()
       .optional()
       .describe(
-        "Restrict to one Base. OMITTING it lists records across the WHOLE SPACE, which is " +
+        "Restrict to one Base — its id or slug; an unknown one is a 404, never an empty page. " +
+          "OMITTING it lists records across the WHOLE SPACE, which is " +
           "rarely what a caller means and is easy to miss — every other parameter still applies, " +
           "so an unscoped query looks like it worked.",
       ),
@@ -299,7 +300,7 @@ const countRecordsShapeSchema = z
       .string()
       .optional()
       .describe(
-        "Restrict to one Base. Omitting it counts every record in the space. " +
+        "Restrict to one Base — its id or slug; an unknown one is a 404, not a 0. Omitting it counts every record in the space. " +
           "Required as soon as `viewId`, `filters` or `valueFilters` is given — a field slug " +
           "only means something within one Base.",
       ),
@@ -541,7 +542,7 @@ export const createChangeRequestInputSchema = z.object({
   fields: z
     .record(z.string(), z.unknown())
     .describe(
-      "Record field values keyed by field slug. The base's PRIMARY field (its first field) becomes the record's display name and the change request title everywhere — always give it a short, human-readable value, never an id or placeholder.",
+      "Record field values keyed by field slug. A field id or its exact display name (any language, unambiguous) is mapped to the slug; a write in which no key names a field of the Base is a 400 listing the valid slugs. The base's PRIMARY field (its first field) becomes the record's display name and the change request title everywhere — always give it a short, human-readable value, never an id or placeholder.",
     ),
   message: z
     .string()
@@ -573,7 +574,7 @@ export const createBulkChangeRequestInputSchema = z.object({
     .min(1)
     .max(1000)
     .describe(
-      "Field-value maps, one per record to create, each keyed by field slug. All records are proposed as a SINGLE change request (one review, one merge) — use this to import/seed many rows at once instead of one change request per record. Capped at 1000; for very large loads prefer a dedicated import job. Always give each record's PRIMARY field a short human-readable value.",
+      "Field-value maps, one per record to create, each keyed by field slug. A field id or its exact display name (any language, unambiguous) is mapped to the slug; a write in which no key names a field of the Base is a 400 listing the valid slugs. All records are proposed as a SINGLE change request (one review, one merge) — use this to import/seed many rows at once instead of one change request per record. Capped at 1000; for very large loads prefer a dedicated import job. Always give each record's PRIMARY field a short human-readable value.",
     ),
   message: z
     .string()
@@ -601,7 +602,10 @@ const bulkRecordUpdateSchema = z.object({
   recordId: z.string().min(1),
   fields: z
     .record(z.string(), z.unknown())
-    .refine((fields) => Object.keys(fields).length > 0, "fields must contain at least one field"),
+    .refine((fields) => Object.keys(fields).length > 0, "fields must contain at least one field")
+    .describe(
+      "The fields to change, keyed by field slug. A field id or its exact display name (any language, unambiguous) is mapped to the slug; an update in which no key names a field of the Base is a 400 listing the valid slugs.",
+    ),
   baseCommitId: z.string().min(1).optional(),
   message: z.string().min(1).optional(),
 });
@@ -632,11 +636,15 @@ export const recordFieldFilterInputSchema = z.object({
   baseId: z
     .string()
     .optional()
-    .describe("Restrict to one Base. Omitting it searches the whole space."),
+    .describe(
+      "Restrict to one Base — its id or slug; an unknown one is a 404. Omitting it searches the whole space.",
+    ),
   fieldSlug: z
     .string()
     .min(1)
-    .describe("The field's SLUG, not its display name — visible in the Base's field settings."),
+    .describe(
+      "The field's SLUG, not its display name — visible in the Base's field settings. With `baseId`, a slug the Base does not have is a 400 listing its fields.",
+    ),
   valueText: z
     .string()
     .min(1)

@@ -106,6 +106,7 @@ const view = {
   type: "calendar",
   config: { filters: [], sorts: [], dateFieldSlug: "publish_date" },
   status: "active",
+  position: 0,
   createdBy: "usr_test",
   archivedAt: null,
   createdAt: "2026-10-01T00:00:00Z",

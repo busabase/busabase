@@ -65,8 +65,9 @@ describe("Boundary P16 — node/view merge state guards", () => {
       submittedBy: "alice",
       mergeImmediately: true,
     });
-    const view = (await raw.bases.listViews({ baseId: base.id }))[0];
-    expect(view).toBeTruthy();
+    // By name, not `[0]`: a new Base already has its default "Grid view" first.
+    const view = (await raw.bases.listViews({ baseId: base.id })).find((v) => v.name === "Grid");
+    if (!view) throw new Error('Expected the "Grid" view created above');
 
     // The view is active — restoring it is nonsensical and is rejected at the
     // change-request boundary (the merge handler keeps a matching guard as

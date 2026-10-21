@@ -1211,6 +1211,8 @@ export const hydrateChangeRequests = async (
             name: view.name,
             description: view.description,
             config: normalizeViewConfig(view.config),
+            // So a reorder (`{ position }` payload) diffs as before → after.
+            position: view.position,
           }
         : null;
     }
@@ -3157,6 +3159,7 @@ export const recordPendingNodeCreate = async (args: {
   body?: string;
   initialFiles?: NodeCreateFields["initialFiles"];
   mergeMode?: NodeCreateFields["mergeMode"];
+  defaultView?: NodeCreateFields["defaultView"];
   /** Extra keys merged into this CR's `sourceMeta` bag (e.g. upload-safety's
    * `skippedGitignorePaths` — see `logic/upload-safety.ts`). */
   sourceMeta?: Record<string, unknown>;
@@ -3190,6 +3193,7 @@ export const recordPendingNodeCreate = async (args: {
     ...(args.body !== undefined ? { body: args.body } : {}),
     ...(args.initialFiles ? { initialFiles: args.initialFiles } : {}),
     ...(args.mergeMode ? { mergeMode: args.mergeMode } : {}),
+    ...(args.defaultView !== undefined ? { defaultView: args.defaultView } : {}),
   };
 
   await db.insert(busabaseChangeRequests).values({

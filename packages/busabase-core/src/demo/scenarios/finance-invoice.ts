@@ -549,6 +549,17 @@ export const FINANCE_RECORDS: SeedRecordDef[] = [
 
 export const FINANCE_VIEWS: SeedViewDef[] = [
   {
+    id: "viw_seed_invoice_board",
+    baseId: DEMO_INVOICES_BASE_ID,
+    slug: "board",
+    name: "AP board",
+    description: "Every invoice stacked by status — drag a card as it moves through AP.",
+    type: "kanban",
+    config: { filters: [], sorts: [], stackByFieldSlug: "status" },
+    minutesAgo: 109,
+    useCases: ["finance"],
+  },
+  {
     id: "viw_seed_invoice_review",
     baseId: DEMO_INVOICES_BASE_ID,
     slug: "needs-ap-review",
@@ -568,17 +579,6 @@ export const FINANCE_VIEWS: SeedViewDef[] = [
       ],
     },
     minutesAgo: 110,
-    useCases: ["finance"],
-  },
-  {
-    id: "viw_seed_invoice_board",
-    baseId: DEMO_INVOICES_BASE_ID,
-    slug: "board",
-    name: "AP board",
-    description: "Every invoice stacked by status — drag a card as it moves through AP.",
-    type: "kanban",
-    config: { filters: [], sorts: [], stackByFieldSlug: "status" },
-    minutesAgo: 109,
     useCases: ["finance"],
   },
   {

@@ -48,6 +48,7 @@ import {
   filterVisibleChangeRequestRows,
 } from "../../../logic/cr-lifecycle";
 import { buildNodeVisibilityCondition } from "../../../logic/node-acl";
+import { resolveVisibleNode, resolveVisibleNodeOfTypes } from "../../../logic/node-resolve";
 import {
   ancestorsOf,
   loadNodeTree,
@@ -662,28 +663,16 @@ export const getPlaybook = async (input: PlaybookGetInputDTO): Promise<PlaybookG
   const spaceId = getContextSpaceId();
   const parsed = PlaybookGetInputSchema.parse(input);
 
-  // A node the caller cannot read is "not found", same as every other node
-  // read — its existence is not the caller's business.
-  const [node] = await db
-    .select({
-      id: busabaseNodes.id,
-      type: busabaseNodes.type,
-      name: busabaseNodes.name,
-      slug: busabaseNodes.slug,
-      description: busabaseNodes.description,
-    })
-    .from(busabaseNodes)
-    .where(
-      and(
-        eq(busabaseNodes.id, parsed.nodeId),
-        eq(busabaseNodes.spaceId, spaceId),
-        isNull(busabaseNodes.archivedAt),
-        isNull(busabaseNodes.deletedAt),
-        buildNodeVisibilityCondition(db),
-      ),
-    )
-    .limit(1);
-  if (!node) throw notFound(`Playbook node not found: ${parsed.nodeId}`);
+  // `nodeId` takes an id OR a slug, like `nodes.get`, through the same shared
+  // resolver: a node the caller cannot read is "not found", same as every other
+  // node read — its existence is not the caller's business. A skill is looked up
+  // among skills only, so a skill slug that a folder also uses still resolves.
+  const node =
+    parsed.kind === "skill"
+      ? await resolveVisibleNodeOfTypes(parsed.nodeId, ["skill"], (other) =>
+          notFound(`Node ${other.id} is a ${other.type}, not a skill`),
+        )
+      : await resolveVisibleNode(parsed.nodeId);
 
   const { byId, visibleIds } = await loadNodeTree(db, spaceId);
   const location = {
@@ -696,7 +685,6 @@ export const getPlaybook = async (input: PlaybookGetInputDTO): Promise<PlaybookG
   };
 
   if (parsed.kind === "skill") {
-    if (node.type !== "skill") throw notFound(`Node ${node.id} is not a skill`);
     const files = await listSkillFiles(node.id);
     const hasEntry = files.some((file) => file.path === SKILL_ENTRY_FILE);
     const content = hasEntry ? (await readSkillFile(node.id, SKILL_ENTRY_FILE)).content : "";

@@ -599,6 +599,36 @@ export const getChangeRequestReviewMessage = (
   return messages?.review.waitingForReview ?? "Waiting for your review";
 };
 
+const VIEW_UPDATE_CONTENT_KEYS = ["config", "description", "name", "type"] as const;
+
+/**
+ * The 0-based tab position a `view_update` moves its view to, when the update
+ * is ONLY a move (dragging a view tab stores exactly `{ position }`). `null`
+ * for any update that also edits the view, which still reads as an update.
+ */
+export const getViewMoveTargetPosition = (operation: OperationVO): number | null => {
+  if (operation.operation !== "view_update") return null;
+  const payload = operation.headCommit.payload;
+  const position = payload.position;
+  if (typeof position !== "number" || !Number.isFinite(position)) return null;
+  const editsContent = VIEW_UPDATE_CONTENT_KEYS.some((key) => {
+    if (payload[key] === undefined) return false;
+    const before = operation.baseFields?.[key];
+    return before === undefined || stableStringify(before) !== stableStringify(payload[key]);
+  });
+  return editsContent ? null : position;
+};
+
+const stableStringify = (value: unknown): string => {
+  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "undefined";
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`)
+    .join(",")}}`;
+};
+
 export const getOperationImpact = (operation: OperationVO, messages?: CoreI18nMessages) => {
   if (operation.operation === "record_create") {
     return messages?.operation.impactRecordCreate ?? "Adds a new record";
@@ -623,6 +653,14 @@ export const getOperationImpact = (operation: OperationVO, messages?: CoreI18nMe
   }
   if (operation.operation === "view_update") {
     const id = shortIdentifier(operation.targetViewId ?? operation.mergedViewId);
+    const movedTo = getViewMoveTargetPosition(operation);
+    if (movedTo !== null) {
+      // Stored 0-based; people count tabs from 1.
+      const position = movedTo + 1;
+      return messages
+        ? fmt(messages.operation.impactViewMove, { id, position })
+        : `Moves view ${id} to position ${position}`;
+    }
     return messages ? fmt(messages.operation.impactViewUpdate, { id }) : `Updates view ${id}`;
   }
   if (operation.operation === "view_delete") {
