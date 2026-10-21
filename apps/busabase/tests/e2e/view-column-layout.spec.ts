@@ -37,13 +37,11 @@ test("saved view column drag and resize persist through change requests", async 
     throw new Error("Expected the column layout view to be merged");
   }
 
+  // There is no unsaved, read-only "All" grid any more: the bare Base route
+  // opens the leftmost saved view, so column layout is always a view's own.
   await page.goto("/dashboard/local/base/blog");
-  await expect(page.locator('[data-testid^="field-drag-handle-"]')).toHaveCount(0);
-  await expect(page.locator('[data-testid^="field-resize-handle-"]')).toHaveCount(0);
-  await page.getByTestId(`field-header-actions-${initialSlugs[0]}`).click();
-  await expect(
-    page.getByText("Create or open a saved view to sort, filter, resize, reorder, or hide fields."),
-  ).toBeVisible();
+  await expect(page).toHaveURL(/\/dashboard\/local\/base\/blog\/all-records$/);
+  await expect(page.getByTestId("view-control-toolbar-readonly")).toHaveCount(0);
 
   const workflowRequests = { merge: 0, review: 0, update: 0 };
   page.on("request", (browserRequest) => {

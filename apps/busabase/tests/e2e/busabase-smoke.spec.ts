@@ -107,8 +107,11 @@ test("dashboard routes render the review-first seeded experience", async ({ page
   ).toBeVisible();
 
   await page.goto("/dashboard/local/base/blog");
+  // The bare Base route opens the leftmost saved view (no pseudo "All" tab).
+  await expect(page).toHaveURL(/\/dashboard\/local\/base\/blog\/all-records$/);
   await expect(page.locator("[data-topbar-current-item]")).toHaveText("Posts");
-  await expect(page.getByRole("link", { exact: true, name: "All" })).toBeVisible();
+  await expect(page.getByRole("link", { exact: true, name: "All" })).toHaveCount(0);
+  await expect(page.getByRole("link", { exact: true, name: "All records" })).toBeVisible();
   await expect(page.getByRole("link", { exact: true, name: "Ready to publish" })).toBeVisible();
   await expect(page.getByRole("link", { exact: true, name: "Drafts" })).toBeVisible();
   // The seeded blog base renders canonical records; switching saved views changes
@@ -136,6 +139,9 @@ test("dashboard routes render the review-first seeded experience", async ({ page
   await page.getByLabel("Path", { exact: true }).fill("/blog/smoke-test-ai-market-note");
   await page.getByLabel("Slug", { exact: true }).fill("smoke-test-ai-market-note");
   await page.getByLabel("Locale", { exact: true }).selectOption("en");
+  // A required number: since empty numbers stay empty instead of becoming 0
+  // (#8048), leaving it blank fails the form's required check.
+  await page.getByLabel("Schema version", { exact: true }).fill("1");
   await page.getByRole("button", { name: "More submit options" }).click();
   await page.getByRole("menuitem", { name: "Submit Request" }).click();
   await expect(page).toHaveURL(/\/dashboard\/local\/inbox\/crq/);
@@ -155,6 +161,7 @@ test("dashboard routes render the review-first seeded experience", async ({ page
   await page.getByLabel("Path", { exact: true }).fill("/blog/smoke-direct-merge-ai-note");
   await page.getByLabel("Slug", { exact: true }).fill("smoke-direct-merge-ai-note");
   await page.getByLabel("Locale", { exact: true }).selectOption("en");
+  await page.getByLabel("Schema version", { exact: true }).fill("1");
   await page.getByRole("button", { name: "Submit Now" }).click();
   await expect(page).toHaveURL(/\/dashboard\/local\/base\/blog\/rec/);
   await expect(page.getByRole("heading", { name: "Smoke direct merge AI note" })).toBeVisible();

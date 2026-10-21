@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from "@tan
 import { createBusabaseRestApiClient } from "busabase-contract/api-client";
 import { createBusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { AirAppRunnerKind } from "busabase-contract/domains/airapp/contract";
-import { BusabaseDashboard } from "busabase-core/dashboard";
+import { BusabaseDashboard, resolveWorkbenchLinkUnderBase } from "busabase-core/dashboard";
 import { CreateNodeModal } from "busabase-core/dashboard/create-node-modal";
 import { EmptyAgentGuide } from "busabase-core/dashboard/empty-agent-guide";
 import { InstallFromGithubModal } from "busabase-core/dashboard/install-from-github-modal";
@@ -46,6 +46,11 @@ interface DashboardClientProps {
  * — but both halves must derive from THIS constant, not each rely on a default.
  */
 const CACHE_SPACE_KEY = "local";
+
+// Links in a Doc or whiteboard that point into this workbench route in place
+// instead of reloading it. One space, so its router base is the whole match.
+const resolveWorkbenchLink = (url: URL) =>
+  resolveWorkbenchLinkUnderBase(url, getDashboardBasePath(), window.location.origin);
 
 /**
  * Desktop/open-source connection guidance: one local server, no OAuth, and a
@@ -334,6 +339,7 @@ function DashboardClientContent({
         nodes={nodes}
         onCreateNode={openCreateNode}
         provideQueryClient={false}
+        resolveWorkbenchLink={resolveWorkbenchLink}
         records={records}
         readOnlyChangeRequestPreview={readOnlyChangeRequestPreview}
         onSearchOpenChange={setIsSearchOpen}

@@ -8,10 +8,14 @@
  *   1. Folders  — POST /nodes/change-requests (kind: create) → approve → merge
  *   2. Bases    — POST /bases
  *   3. Records  — POST /bases/{id}/change-requests → approve → merge
- *   4. Views    — POST /views/change-requests → approve → merge
+ *   4. Relation fields, then the lookup fields that read through them —
+ *      POST /bases/{id}/fields
+ *   5. Views    — POST /views/change-requests → approve → merge
  *
- * Relation and AI-generated fields are skipped because they require post-hoc ID
- * resolution that the record_insert CR workflow doesn't support inline.
+ * Relation and AI-generated values are skipped because they require post-hoc ID
+ * resolution that the record_insert CR workflow doesn't support inline. Relation
+ * fields themselves are added in a second pass, once every Base exists, and lookup
+ * fields after them: the server rejects a lookup whose relation field is missing.
  *
  * Usage:
  *   BUSABASE_URL=http://localhost:15419 pnpm demo:zh-CN
@@ -22,6 +26,13 @@ import { api, approveMerge, BASE, makeRunner } from "./_client";
 
 // Field types that can't be set via POST /change-requests (record_insert)
 const SKIP_FIELD_TYPES = new Set(["relation", "ai_summary", "ai_tags", "created_time"]);
+
+// Computed from a relation field, so neither created with the Base nor given a
+// value in a record: added after the relation pass (see "Lookup fields" below).
+const LOOKUP_FIELD_TYPES = new Set(["lookup"]);
+
+const isDeferredFieldType = (type: string) =>
+  SKIP_FIELD_TYPES.has(type) || LOOKUP_FIELD_TYPES.has(type);
 
 // scenario nodeId → API-assigned node ID (populated after folder creation)
 const folderNodeMap = new Map<string, string>();
@@ -95,6 +106,7 @@ export async function run() {
   const existingBases = await api<Array<{ id: string; slug: string }>>("GET", "/bases");
   const existingBaseBySlug = new Map(existingBases.map((b) => [b.slug, b.id]));
 
+  const scenarioViewBaseIds = new Set((zhCnScenario.views ?? []).map((view) => view.baseId));
   for (const base of zhCnScenario.bases ?? []) {
     await step(`POST /bases — base "${base.name}"`, async () => {
       const existingId = existingBaseBySlug.get(base.slug);
@@ -105,7 +117,7 @@ export async function run() {
 
       const parentNodeId = folderNodeMap.get(base.folderNodeId);
       const fields = base.fields
-        .filter((f) => !SKIP_FIELD_TYPES.has(f.type))
+        .filter((f) => !isDeferredFieldType(f.type))
         .map((f) => ({
           slug: f.slug,
           name: f.name,
@@ -125,6 +137,10 @@ export async function run() {
         description: base.description ?? "",
         ...(parentNodeId ? { parentNodeId } : {}),
         fields,
+        // A Base this scenario gives its own views opens on the first of them,
+        // so it is created without the default "Grid view"; one with no views
+        // keeps it (every Base keeps at least one view).
+        ...(scenarioViewBaseIds.has(base.id) ? { defaultView: false } : {}),
         // Smoke-testing the API surface, not the review-first policy — opt out
         // the same way a seed script does.
         autoMerge: true,
@@ -146,7 +162,7 @@ export async function run() {
         const safeFields = Object.fromEntries(
           Object.entries(record.fields).filter(([slug]) => {
             const type = fieldTypeMap.get(`${record.baseId}:${slug}`);
-            return type !== undefined && !SKIP_FIELD_TYPES.has(type);
+            return type !== undefined && !isDeferredFieldType(type);
           }),
         );
 
@@ -154,6 +170,11 @@ export async function run() {
           fields: safeFields,
           message: record.message,
           submittedBy: record.author,
+          // Pin the review-first branch, as the views step below does: without
+          // it a write-capable actor's record merges in this call and comes
+          // back as a record, whose id `approveMerge` then fails to find as a
+          // ChangeRequest ("ChangeRequest not found: rec…").
+          autoMerge: false,
         });
         await approveMerge(cr.id);
       },
@@ -198,7 +219,30 @@ export async function run() {
           name: field.name,
           type: "relation",
           required: field.required ?? false,
-          options: { targetBaseId: targetApiBaseId },
+          // Keep the scenario's own options (e.g. `multiple`); only the target
+          // id changes, from the scenario's Base id to the API-assigned one.
+          options: { ...field.options, targetBaseId: targetApiBaseId },
+        });
+      });
+    }
+  }
+
+  // ── Lookup fields (third pass — they read through the relations above) ──────
+
+  for (const base of zhCnScenario.bases ?? []) {
+    const apiBaseId = baseIdMap.get(base.id);
+    if (!apiBaseId) continue;
+
+    for (const field of base.fields.filter((f) => LOOKUP_FIELD_TYPES.has(f.type))) {
+      if (existingFieldSlugs.get(base.id)?.has(field.slug)) continue;
+
+      await step(`POST /bases/${base.id}/fields — lookup "${field.name}"`, async () => {
+        await api("POST", `/bases/${apiBaseId}/fields`, {
+          slug: field.slug,
+          name: field.name,
+          type: field.type,
+          required: field.required ?? false,
+          options: field.options ?? {},
         });
       });
     }
