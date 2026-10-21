@@ -69,6 +69,7 @@ export const getOperationFieldLabel = (
     if (slug === "name") return messages?.operationDiff.name ?? "Name";
     if (slug === "config") return messages?.operationDiff.configuration ?? "Configuration";
     if (slug === "description") return messages?.operationDiff.description ?? "Description";
+    if (slug === "position") return messages?.operationDiff.position ?? "Position";
   }
   return getFieldName(changeRequest, slug);
 };
@@ -79,6 +80,11 @@ export const getOperationFieldChanges = (
   messages?: CoreI18nMessages,
 ): OperationFieldChange[] => {
   const before = operation.baseFields;
+  // A view's tab position is stored 0-based; people count tabs from 1.
+  const display = (slug: string, value: unknown) =>
+    isViewOperation(operation) && slug === "position" && typeof value === "number"
+      ? value + 1
+      : value;
   return Object.entries(operation.headCommit.payload)
     .filter(([slug, value]) => value !== undefined && !isInternalFormulaMetadata(operation, slug))
     .map(([slug, afterValue]): OperationFieldChange => {
@@ -86,8 +92,8 @@ export const getOperationFieldChanges = (
       return {
         slug,
         label: getOperationFieldLabel(changeRequest, operation, slug, messages),
-        beforeValue: hasBefore ? before[slug] : undefined,
-        afterValue,
+        beforeValue: hasBefore ? display(slug, before[slug]) : undefined,
+        afterValue: display(slug, afterValue),
         status: hasBefore ? "changed" : "added",
       };
     })
@@ -362,7 +368,12 @@ export function OperationFieldChangeRow({
 }) {
   const messages = useCoreI18n();
   const isConfig = isViewOperation(operation) && change.slug === "config";
-  const baseField = changeRequest.base?.fields.find((field) => field.slug === change.slug);
+  // A view operation's keys (name, position, …) are view properties, not Base
+  // fields — a Base that happens to have a field slugged "position" must not
+  // render the view's position through that field's type.
+  const baseField = isViewOperation(operation)
+    ? undefined
+    : changeRequest.base?.fields.find((field) => field.slug === change.slug);
 
   return (
     <div className="grid gap-3 px-1 py-3 md:grid-cols-[150px_minmax(0,1fr)]">

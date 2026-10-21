@@ -1,6 +1,6 @@
 import { oc } from "@orpc/contract";
 import { z } from "zod";
-import { changeRequestSchema } from "../../contract/schemas";
+import { pendingChangeRequestSchema } from "../../contract/schemas";
 import { FileNodeVOSchema } from "./types";
 
 export const createFileNodeInputSchema = z.object({
@@ -29,6 +29,11 @@ export const createFileNodeInputSchema = z.object({
 // List File nodes with `GET /nodes?types=file` (lightweight summaries — the old
 // list resolved a full AssetVO per row) and read one with `GET /nodes/{nodeId}`,
 // which returns the same `FileNodeVOSchema` payload under `type: "file"`.
+/** A merged-in-the-same-call create returns this (see `materializedBaseSchema`). */
+export const materializedFileNodeSchema = FileNodeVOSchema.extend({
+  materialized: z.literal(true),
+});
+
 export const fileContract = {
   create: oc
     .route({
@@ -40,10 +45,5 @@ export const fileContract = {
         "Merged in the same call when the actor has write access on the parent node — the materialized File node comes back (`materialized: true`). Review-first when the actor lacks write access or passes `autoMerge: false`: a pending ChangeRequest proposing the File node (`materialized: false`).",
     })
     .input(createFileNodeInputSchema)
-    .output(
-      z.union([
-        FileNodeVOSchema.extend({ materialized: z.literal(true) }),
-        changeRequestSchema.extend({ materialized: z.literal(false) }),
-      ]),
-    ),
+    .output(z.union([materializedFileNodeSchema, pendingChangeRequestSchema])),
 };

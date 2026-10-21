@@ -142,6 +142,9 @@ export const createBaseInputSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional().default(""),
   fields: z.array(fieldSchema).default([]),
+  // Mirrors the contract too: `false` skips the default Grid view (see
+  // domains/base/logic/default-view.ts).
+  defaultView: z.boolean().optional(),
   // Must mirror busabase-contract's createBaseInputSchema (same drift risk as
   // fieldOptionsSchema above) — without this, `autoMerge` from the oRPC layer's
   // contract-validated input is silently stripped by this internal re-parse.
@@ -288,6 +291,8 @@ export const updateViewInputSchema = z.object({
   description: z.string().optional(),
   message: z.string().optional().default("Update view"),
   name: z.string().min(1).optional(),
+  // 0-based index among the Base's active views (mirrors the contract).
+  position: z.number().int().min(0).optional(),
   submittedBy: z.string().optional().default("local-producer"),
   type: viewTypeSchema.optional(),
   autoMerge: z.boolean().optional(),

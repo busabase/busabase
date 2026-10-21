@@ -77,11 +77,14 @@ async function initPglite(dataDir: string): Promise<DbInstance> {
   const client = await new PGlite(dataDir, { extensions: { pg_trgm } });
   const db = drizzlePglite({ client, schema });
 
+  await migrate(db, { migrationsFolder: path.resolve(process.cwd(), "src/db/migrations") });
+
+  // Publish only after migrate() commits: drizzle runs the whole migration set in one
+  // transaction, so a request that grabs state.db earlier queries tables that do not
+  // exist yet (e.g. busabase_vault_items, read on every /api/v1 request).
   const state = getDbState();
   state.client = client;
   state.db = db;
-
-  await migrate(db, { migrationsFolder: path.resolve(process.cwd(), "src/db/migrations") });
 
   console.log(`[Busabase DB] PGLite mode (dataDir: ${dataDir || "in-memory"})`);
   return db;

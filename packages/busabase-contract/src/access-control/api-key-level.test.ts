@@ -4,6 +4,7 @@ import {
   apiKeyPermissionsSchema,
   capApiKeyLevel,
   createApiKeyPermissionsSchema,
+  DEFAULT_NEW_API_KEY_LEVEL,
   hasApiKeyLevel,
   PROCEDURE_PERMISSION_POLICY,
   parseBusabaseRelayPermissionLevel,
@@ -12,6 +13,12 @@ import {
   resolveProcedurePermissionPolicy,
   resolveRequiredLevel,
 } from "./api-key-level";
+
+describe("DEFAULT_NEW_API_KEY_LEVEL", () => {
+  it("pre-fills new keys to write, not the wider manage or the narrower changeRequest", () => {
+    expect(DEFAULT_NEW_API_KEY_LEVEL).toBe("write");
+  });
+});
 
 describe("parseBusabaseRelayPermissionLevel", () => {
   it("accepts only the four permission levels", () => {

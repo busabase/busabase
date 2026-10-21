@@ -235,6 +235,12 @@ export const createBaseInputSchema = z.object({
       }),
     )
     .default([]),
+  defaultView: z
+    .boolean()
+    .optional()
+    .describe(
+      'Whether the new Base gets its default "Grid view" (a table view showing every record and field). Defaults to true. Pass false only when you add your own views right away — a Base must always keep at least one view, and the leftmost one is what it opens on.',
+    ),
   // Permission-aware default: omitted merges immediately if the actor has
   // write access on the parent node, otherwise falls back to a pending
   // ChangeRequest (status "in_review"). Pass explicit `autoMerge: false` to

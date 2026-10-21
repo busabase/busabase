@@ -1,6 +1,6 @@
 import { oc } from "@orpc/contract";
 import { z } from "zod";
-import { changeRequestSchema, nodeSchema } from "../../contract/schemas";
+import { nodeSchema, pendingChangeRequestSchema } from "../../contract/schemas";
 
 // --- Doc domain schemas (storage-backed body) ---
 
@@ -15,7 +15,7 @@ export const createDocInputSchema = z.object({
     .string()
     .optional()
     .describe(
-      "Parent node id. Must be a folder or the space root; container-incapable node types (Base, Doc, AirApp, etc.) cannot hold children.",
+      "Parent folder: a node id or a folder slug (default: the space root). Must be a folder or the space root; container-incapable node types (Base, Doc, AirApp, etc.) cannot hold children.",
     ),
   slug: z
     .string()
@@ -43,6 +43,9 @@ export const createDocInputSchema = z.object({
 // unified into `PUT /nodes/{nodeId}/content` (`contract/node-content-schemas.ts`)
 // with a server-decided `autoMerge`, alongside whiteboard/workflow/html — see
 // `apps/busabase/content/spec/node-content-storage.md` (D3).
+/** A merged-in-the-same-call create returns this (see `materializedBaseSchema`). */
+export const materializedDocSchema = docSchema.extend({ materialized: z.literal(true) });
+
 export const docContract = {
   create: oc
     .route({
@@ -51,13 +54,8 @@ export const docContract = {
       tags: ["Docs"],
       summary: "Create Doc node",
       successDescription:
-        "Merged in the same call when the actor has write access on the parent node — the materialized Doc node comes back (`materialized: true`). Review-first when the actor lacks write access or passes `autoMerge: false`: a pending ChangeRequest proposing the Doc (`materialized: false`).",
+        "Merged in the same call when the actor has write access on the parent node — the materialized Doc node comes back (`materialized: true`). Review-first when the actor lacks write access or passes `autoMerge: false`: a pending ChangeRequest proposing the Doc (`materialized: false`). A retry of the same request (a Doc with this slug already in this folder, same name and body) returns that Doc; a different name or body is a 409 naming the existing Doc — edit it with PUT /nodes/{nodeId}/content or pick another slug. The slug used by a Doc in another folder is a 409 too.",
     })
     .input(createDocInputSchema)
-    .output(
-      z.union([
-        docSchema.extend({ materialized: z.literal(true) }),
-        changeRequestSchema.extend({ materialized: z.literal(false) }),
-      ]),
-    ),
+    .output(z.union([materializedDocSchema, pendingChangeRequestSchema])),
 };

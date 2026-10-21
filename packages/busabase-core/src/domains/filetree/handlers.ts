@@ -880,13 +880,14 @@ export const readFileTreeFile = async (
  * Reads only the metadata: the guard needs to know WHICH kind a path is, not
  * what it contains.
  */
-const findAssetBackedPaths = async (
+/** The mounted paths among `paths` on this node, each with its Asset's content kind. */
+const findMountedPathKinds = async (
   db: Awaited<ReturnType<typeof getDb>>,
   config: FileTreeKindConfig,
   nodeId: string,
   paths: readonly string[],
-): Promise<Set<string>> => {
-  if (paths.length === 0) return new Set();
+): Promise<Map<string, string>> => {
+  if (paths.length === 0) return new Map();
   const rows = await db
     .select({
       path: busabaseAssetUsages.path,
@@ -902,7 +903,7 @@ const findAssetBackedPaths = async (
         inArray(busabaseAssetUsages.path, [...paths]),
       ),
     );
-  return new Set(rows.filter((row) => row.contentKind !== "text").map((row) => row.path));
+  return new Map(rows.map((row) => [row.path, row.contentKind]));
 };
 
 export interface DriveFilePreviewSource {
@@ -1017,6 +1018,43 @@ export const createFileTreeChangeRequest = async (
     (operation) => !hasPath(operation) || keptOperations.has(operation),
   );
 
+  const updateOperations = operations.filter(
+    (operation): operation is Exclude<FileTreeOperation, { kind: "metadata_update" | "delete" }> =>
+      operation.kind === "update",
+  );
+  const mountedKinds = await findMountedPathKinds(
+    db,
+    config,
+    node.id,
+    updateOperations.map((operation) => normalizeUsagePath(operation.path)),
+  );
+
+  // `update` changes a file that EXISTS. It used to merge as an upsert, so an
+  // update aimed at a mistyped or never-created path quietly created a new file
+  // and reported success — while `create` on an existing path is a 409.
+  // Refused up front, naming the fix, before any change request exists. A path
+  // an earlier `create` in this same batch adds counts as existing. (The merge
+  // itself still upserts, so a change request already pending keeps working.)
+  const createdEarlier = new Set<string>();
+  const missingUpdatePaths: string[] = [];
+  for (const operation of operations) {
+    if (!hasPath(operation)) continue;
+    const path = normalizeUsagePath(operation.path);
+    if (operation.kind === "create") createdEarlier.add(path);
+    if (operation.kind === "update" && !mountedKinds.has(path) && !createdEarlier.has(path)) {
+      missingUpdatePaths.push(path);
+    }
+  }
+  if (missingUpdatePaths.length > 0) {
+    const names = missingUpdatePaths.join(", ");
+    throw new ORPCError("NOT_FOUND", {
+      message:
+        `${config.label} file not found: ${names}. \`update\` only changes an existing file — ` +
+        `use \`kind: "create"\` to add ${missingUpdatePaths.length === 1 ? "it" : "them"}.`,
+      data: { missingPaths: missingUpdatePaths },
+    });
+  }
+
   // A TEXT update aimed at a path whose bytes are an Asset replaces the file
   // with that text, and used to be accepted: a real PNG took `content: "oops"`
   // with HTTP 200 and came back `encoding: "utf8"`, content "oops" — the image
@@ -1033,12 +1071,15 @@ export const createFileTreeChangeRequest = async (
   // Replacing an asset with ANOTHER asset stays available — that is what an
   // `assetId` operation is for — and `delete` is untouched, since it does not
   // pretend the bytes were text.
-  const textUpdatePaths = operations
-    .filter(
-      (operation) => hasPath(operation) && operation.kind === "update" && "content" in operation,
-    )
-    .map((operation) => normalizeUsagePath((operation as { path: string }).path));
-  const assetBacked = await findAssetBackedPaths(db, config, node.id, textUpdatePaths);
+  const assetBacked = new Set(
+    updateOperations
+      .filter((operation) => "content" in operation)
+      .map((operation) => normalizeUsagePath(operation.path))
+      .filter((path) => {
+        const kind = mountedKinds.get(path);
+        return kind !== undefined && kind !== "text";
+      }),
+  );
   if (assetBacked.size > 0) {
     const names = [...assetBacked].sort().join(", ");
     throw new ORPCError("BAD_REQUEST", {

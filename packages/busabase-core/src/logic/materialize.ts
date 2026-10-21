@@ -70,6 +70,12 @@ export interface NodeCreateFields {
    * project who does not want unrelated default files mixed in.
    */
   mergeMode?: "merge" | "replace";
+  /**
+   * Base-only: `false` skips the default "Grid view" materializeBaseNode adds
+   * (set by `bases.create({ defaultView: false })`'s review-first path, for
+   * callers that create their own views right after). Absent means true.
+   */
+  defaultView?: boolean;
 }
 
 export interface MaterializeArgs {

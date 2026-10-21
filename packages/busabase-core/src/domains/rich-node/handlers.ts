@@ -15,15 +15,14 @@ import {
   type WorkflowDocument,
 } from "busabase-contract/domains/rich-node/types";
 import type { ChangeRequestVO, NodeVO } from "busabase-contract/types";
-import { and, eq, isNull } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { storage } from "openlib/storage";
 import type { z } from "zod";
-import { getContextSpaceId, resolveActorId, withContextSourceMeta } from "../../context";
+import { resolveActorId, withContextSourceMeta } from "../../context";
 import { getDb } from "../../db";
 import {
   busabaseChangeRequests,
   busabaseCommits,
-  busabaseNodes,
   busabaseOperations,
   type CommitPO,
   type NodePO,
@@ -35,7 +34,8 @@ import {
 } from "../../logic/commit-payload-schemas";
 import { insertCommit } from "../../logic/commits";
 import { id, now } from "../../logic/kernel";
-import { assertNodePermission, buildNodeVisibilityCondition } from "../../logic/node-acl";
+import { assertNodePermission } from "../../logic/node-acl";
+import { resolveVisibleNodeOfTypes } from "../../logic/node-resolve";
 import { registerNodeRuntime } from "../../logic/node-runtime";
 import { ensureReady } from "../../logic/seed";
 import {
@@ -205,9 +205,6 @@ const CONTENT_OPERATION_BY_KIND = {
   html: "html_document_update",
 } as const satisfies Record<string, OperationPO["operation"]>;
 
-const nodeNotFound = (nodeId: string) =>
-  new ORPCError("NOT_FOUND", { message: `Node not found: ${nodeId}` });
-
 /**
  * Bounds the size of any one whiteboard/workflow/html snapshot — same
  * rationale and same caveat as `DOC_BODY_MAX_BYTES`: every edit is also
@@ -255,39 +252,27 @@ export const updateNodeContent = async (
 ): Promise<ChangeRequestVO> => {
   await ensureReady();
   const db = await getDb();
-  const spaceId = getContextSpaceId();
   const parsed = updateNodeContentInputSchema.parse(input);
   const submittedBy = resolveActorId(parsed.submittedBy);
 
-  // Node ACL: a hidden/cross-space node resolves to nothing — indistinguishable
-  // from absent, same as every other node-scoped read/write in this codebase.
-  const visible = buildNodeVisibilityCondition(db);
-  const [node] = await db
-    .select()
-    .from(busabaseNodes)
-    .where(
-      and(
-        eq(busabaseNodes.id, parsed.nodeId),
-        eq(busabaseNodes.spaceId, spaceId),
-        isNull(busabaseNodes.archivedAt),
-        visible,
-      ),
-    )
-    .limit(1);
-  if (!node) {
-    throw nodeNotFound(parsed.nodeId);
-  }
-
+  // `nodeId` takes an id OR a slug, like `nodes.get` — resolved through the
+  // shared resolver, so node ACL applies (a hidden/cross-space node is
+  // indistinguishable from absent) and the slug is looked up among nodes of
+  // `content.kind` only, which is what makes a slug unambiguous here.
+  //
   // `kind` is redundant with the resolved node's real type on purpose (see
   // node-content-schemas.ts's doc comment) — a wrong-shaped document is a
   // named 400 here, before anything is written, not a silently-ignored field.
-  if (node.type !== parsed.content.kind) {
-    throw new ORPCError("BAD_REQUEST", {
-      message:
-        `Content kind "${parsed.content.kind}" does not match node type "${node.type}" ` +
-        `for node ${node.id}.`,
-    });
-  }
+  const node = await resolveVisibleNodeOfTypes(
+    parsed.nodeId,
+    [parsed.content.kind],
+    (other) =>
+      new ORPCError("BAD_REQUEST", {
+        message:
+          `Content kind "${parsed.content.kind}" does not match node type "${other.type}" ` +
+          `for node ${other.id}.`,
+      }),
+  );
 
   let fields: Record<string, unknown>;
   if (parsed.content.kind === "doc") {

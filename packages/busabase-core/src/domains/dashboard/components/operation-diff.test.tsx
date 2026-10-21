@@ -56,3 +56,20 @@ it("hides formula merge guards on field proposals while retaining same-named rec
     "formulaBaseExpression",
   ]);
 });
+
+it("labels a view's tab position and shows it counted from 1", () => {
+  const operation = {
+    operation: "view_update",
+    baseFields: { name: "Board", description: "", config: { filters: [], sorts: [] }, position: 2 },
+    headCommit: { payload: { position: 0 } },
+  } as unknown as OperationVO;
+  expect(getOperationFieldChanges(changeRequest, operation, coreMessagesEn)).toEqual([
+    {
+      slug: "position",
+      label: "Position",
+      beforeValue: 3,
+      afterValue: 1,
+      status: "changed",
+    },
+  ]);
+});

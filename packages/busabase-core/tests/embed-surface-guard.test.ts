@@ -187,11 +187,14 @@ describe("embed visitor procedure surface", () => {
           surface.records.search({ baseId: readable.id, fieldSlug: "name", valueText: "row-0" }),
         ).resolves.toHaveLength(1);
 
-        // Hidden Base: same answers as `records.list` gives it — nothing.
-        await expect(surface.records.list({ baseId: hidden.id })).resolves.toMatchObject({
-          records: [],
+        // Hidden Base: a 404 from every record read, exactly as for a Base that
+        // does not exist — never an empty page that reads as "no records".
+        await expect(surface.records.list({ baseId: hidden.id })).rejects.toMatchObject({
+          code: "NOT_FOUND",
         });
-        await expect(surface.records.count({ baseId: hidden.id })).resolves.toEqual({ total: 0 });
+        await expect(surface.records.count({ baseId: hidden.id })).rejects.toMatchObject({
+          code: "NOT_FOUND",
+        });
         await expect(
           surface.records.groupBy({ baseId: hidden.id, fieldSlug: "stage" }),
         ).rejects.toMatchObject({ code: "NOT_FOUND" });
@@ -200,7 +203,7 @@ describe("embed visitor procedure surface", () => {
         ).rejects.toMatchObject({ code: "NOT_FOUND" });
         await expect(
           surface.records.search({ baseId: hidden.id, fieldSlug: "name", valueText: "row-0" }),
-        ).resolves.toEqual([]);
+        ).rejects.toMatchObject({ code: "NOT_FOUND" });
         // Unscoped: the whole-space count is the readable Base alone.
         await expect(surface.records.count({})).resolves.toEqual({ total: 3 });
       }

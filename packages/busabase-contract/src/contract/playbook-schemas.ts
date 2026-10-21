@@ -49,7 +49,7 @@ const localeSchema = z
     'Locale for prompt labels and the rendered prompt body, e.g. "en" or "zh-CN". Falls back to English, then to whatever locale the prompt has.',
   );
 
-export const PlaybookSearchInputSchema = z.object({
+const playbookSearchInputShape = {
   queries: z
     .array(z.string().max(PLAYBOOK_SEARCH_LIMITS.maxQueryChars))
     .max(PLAYBOOK_SEARCH_LIMITS.maxQueries)
@@ -83,6 +83,24 @@ export const PlaybookSearchInputSchema = z.object({
     .optional()
     .describe("Max items (1–50). Default 10 for a search; 30 for a browse."),
   locale: localeSchema.optional(),
+};
+
+/**
+ * Closed on purpose (`strictObject`), unlike most inputs. Here an unknown key is
+ * not harmless: `{ "query": "…" }` (singular) used to be stripped, leaving
+ * `queries` at its `[]` default — browse mode — so a misspelled search came back
+ * as a full, plausible-looking list of every playbook. An agent cannot tell that
+ * from a real answer. The 400 names the unknown key and the accepted ones.
+ */
+export const PlaybookSearchInputSchema = z.strictObject(playbookSearchInputShape, {
+  error: (issue) =>
+    issue.code === "unrecognized_keys"
+      ? `Unknown key${issue.keys.length === 1 ? "" : "s"} ${issue.keys
+          .map((key) => `"${key}"`)
+          .join(", ")}. playbooks search accepts: ${Object.keys(playbookSearchInputShape).join(
+          ", ",
+        )}${issue.keys.includes("query") ? ' (did you mean "queries", an array of phrasings?)' : ""}.`
+      : undefined,
 });
 export type PlaybookSearchInputDTO = z.input<typeof PlaybookSearchInputSchema>;
 

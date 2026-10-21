@@ -88,15 +88,19 @@ describe("anonymous allowlist (unit)", () => {
   it("allows exactly the public read surface", () => {
     expect(anonymousAllowlistSnapshot().read).toEqual([
       "bases.get",
+      "bases.list",
       "bases.listViews",
       "forms.getByNode",
       // `docs.get` / `files.get` / `folders.get` collapsed into this one route.
       "nodes.get",
       "nodes.list",
       "nodes.resolveRouteState",
+      "records.count",
       "records.get",
+      "records.groupBy",
       "records.list",
       "records.listPage",
+      "records.search",
     ]);
   });
 
@@ -164,6 +168,7 @@ describe("embed allowlist (unit)", () => {
   it("allows exactly the embed read surface", () => {
     expect(anonymousAllowlistSnapshot().embed).toEqual([
       "bases.get",
+      "bases.list",
       "bases.listViews",
       "changeRequests.get",
       "fileTrees.get",
@@ -214,12 +219,12 @@ describe("embed allowlist (unit)", () => {
     }
   });
 
-  it("does not widen the guest (public share) surface", () => {
-    // The guest list is a separate decision; adding the aggregates to the embed
-    // list must not have leaked them onto public shares.
-    for (const key of ["records.count", "records.groupBy", "records.search"]) {
-      expect(isAnonymousProcedureAllowed(key.split(".")), key).toBe(false);
+  it("allows ACL-filtered reads for public shares without exposing ordinary auth", () => {
+    for (const key of ["bases.list", "records.count", "records.groupBy", "records.search"]) {
+      expect(isAnonymousProcedureAllowed(key.split(".")), key).toBe(true);
     }
+    expect(isAnonymousProcedureAllowed(["auth", "verify"])).toBe(false);
+    expect(isEmbedProcedureAllowed(["auth", "verify"])).toBe(false);
   });
 });
 

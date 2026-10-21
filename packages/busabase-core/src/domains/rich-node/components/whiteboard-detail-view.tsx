@@ -31,6 +31,7 @@ import { useReportLoadedNode } from "../../dashboard/hooks/use-report-loaded-nod
 import type { NodeDetailProps } from "../../dashboard/node-detail-registry";
 import type { SidePanelTabProps } from "../../dashboard/side-panel-registry";
 import { useIsAnonymousVisitor } from "../../dashboard/visitor-context";
+import { useWorkbenchLinkOpenHandler } from "../../dashboard/workbench-link-context";
 import {
   RichNodeNotFound,
   RichNodeShell,
@@ -94,6 +95,7 @@ function WhiteboardCanvas({
   readOnly: boolean;
 }) {
   const locale = useCoreLocale();
+  const handleLinkOpen = useWorkbenchLinkOpenHandler();
   const Editor = excalidraw?.Excalidraw ?? null;
 
   return (
@@ -124,6 +126,7 @@ function WhiteboardCanvas({
           name={name}
           viewModeEnabled={readOnly}
           onChange={onChange}
+          onLinkOpen={handleLinkOpen}
         />
       ) : (
         <WhiteboardContentSkeleton />

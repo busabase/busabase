@@ -3,7 +3,7 @@ import "server-only";
 import { ORPCError } from "@orpc/server";
 import type { NodeDetailVO } from "busabase-contract/contract/node-detail-schemas";
 import type { NodeType } from "busabase-contract/domains";
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { getContextSpaceId, isAnonymousVisitor } from "../context";
 import { getDb } from "../db";
 import { busabaseNodes, type NodePO } from "../db/schema";
@@ -14,7 +14,7 @@ import { denyAnonymousNodeType, isAnonymousReadableNodeType } from "./anonymous-
 // the one barrel (rather than hand-listing domains here) is deliberate — see
 // that module for the silent-fallback bug hand-listing caused.
 import "./builtin-node-runtimes";
-import { buildNodeVisibilityCondition } from "./node-acl";
+import { resolveVisibleNode } from "./node-resolve";
 import { getNodeRuntime } from "./node-runtime";
 import { ensureReady } from "./seed";
 import { loadNodesByIds, toNodeVO } from "./store";
@@ -34,75 +34,6 @@ import { loadNodesByIds, toNodeVO } from "./store";
  * node the caller cannot see is a data leak even if the response is discarded.
  * A hidden or cross-space node must look exactly like an absent one (404).
  */
-
-const nodeNotFound = (nodeIdOrSlug: string) =>
-  new ORPCError("NOT_FOUND", { message: `Node not found: ${nodeIdOrSlug}` });
-
-/**
- * Resolve `nodeIdOrSlug` to a single visible, ACTIVE node row.
- *
- * Active-only is not an oversight: all four retired gets filtered on
- * `archivedAt IS NULL`, so an archived node was a 404 through every one of
- * them. Trash is listed through `nodes.list({ status: "archived" })`, which is
- * where an archived node is meant to be found.
- */
-const resolveVisibleNode = async (nodeIdOrSlug: string, typeHint?: NodeType): Promise<NodePO> => {
-  const db = await getDb();
-  const spaceId = getContextSpaceId();
-  // Node ACL: a hidden node resolves to nothing — indistinguishable from absent.
-  const visible = buildNodeVisibilityCondition(db);
-
-  const [byId] = await db
-    .select()
-    .from(busabaseNodes)
-    .where(
-      and(
-        eq(busabaseNodes.id, nodeIdOrSlug),
-        eq(busabaseNodes.spaceId, spaceId),
-        isNull(busabaseNodes.archivedAt),
-        visible,
-      ),
-    )
-    .limit(1);
-  if (byId) {
-    // A node id is unambiguous — one row, one type. A `type` that contradicts it
-    // is a caller mistake, not something to silently ignore.
-    if (typeHint && byId.type !== typeHint) {
-      throw nodeNotFound(nodeIdOrSlug);
-    }
-    return byId;
-  }
-
-  // Not an id — treat it as a slug. A slug is only unique WITHIN a type, so a
-  // slug that exists under several types is refused rather than resolved to
-  // whichever row happens to sort first: picking one would silently hand the
-  // caller (or an agent proposing an edit) the wrong resource.
-  const bySlug = await db
-    .select()
-    .from(busabaseNodes)
-    .where(
-      and(
-        eq(busabaseNodes.slug, nodeIdOrSlug),
-        eq(busabaseNodes.spaceId, spaceId),
-        isNull(busabaseNodes.archivedAt),
-        visible,
-        ...(typeHint ? [eq(busabaseNodes.type, typeHint)] : []),
-      ),
-    )
-    .orderBy(asc(busabaseNodes.position), asc(busabaseNodes.createdAt));
-
-  const first = bySlug[0];
-  if (!first) {
-    throw nodeNotFound(nodeIdOrSlug);
-  }
-  const types = [...new Set(bySlug.map((row) => row.type))];
-  if (types.length > 1) {
-    throw new ORPCError("BAD_REQUEST", {
-      message: `Slug "${nodeIdOrSlug}" exists as ${types.join(" and ")}; pass \`type\` to choose one.`,
-    });
-  }
-  return first;
-};
 
 /**
  * The plain node row, for a type whose detail is just that (`base`, `form`).

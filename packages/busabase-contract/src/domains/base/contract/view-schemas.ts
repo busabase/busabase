@@ -79,6 +79,9 @@ export const viewSchema = z.object({
   type: viewTypeSchema,
   config: viewConfigSchema,
   status: z.enum(["active", "archived"]),
+  // Shared tab order within the Base. Lists come back sorted by it (ties broken
+  // by creation time); the lowest one is the view the Base opens on.
+  position: z.number().int(),
   createdBy: z.string(),
   createdByUser: userRefSchema.nullable().optional().default(null),
   archivedAt: z.string().nullable(),
@@ -129,6 +132,14 @@ export const updateViewInputSchema = z.object({
   message: z.string().optional().default("Update view"),
   name: z.string().min(1).optional(),
   type: viewTypeSchema.optional(),
+  position: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe(
+      "Move the view to this 0-based index among the Base's active views; the others shift to make room. The order is shared by everyone, and the leftmost view (0) is the one the Base opens on. Out-of-range values clamp to the end.",
+    ),
   submittedBy: z.string().optional().default("local-producer"),
   autoMerge: autoMergeSchema,
 });

@@ -34,6 +34,7 @@ const view = (
   type: "table",
   config,
   status,
+  position: 0,
   createdBy: "user",
   archivedAt: null,
   createdAt: "2026-10-09T00:00:00.000Z",

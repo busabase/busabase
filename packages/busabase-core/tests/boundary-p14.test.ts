@@ -35,8 +35,9 @@ describe("Boundary P14 — cross-tenant get-by-id is space-scoped", () => {
       submittedBy: "alice",
       mergeImmediately: true,
     });
-    const view = (await raw.bases.listViews({ baseId: base.id }))[0];
-    expect(view).toBeTruthy();
+    // By name, not `[0]`: a new Base already has its default "Grid view" first.
+    const view = (await raw.bases.listViews({ baseId: base.id })).find((v) => v.name === "Grid");
+    if (!view) throw new Error('Expected the "Grid" view created above');
     const doc = await raw.docs.create({ slug: "notes", name: "Notes", autoMerge: true });
     if ("status" in doc) throw new Error("Expected materialized DocVO");
 

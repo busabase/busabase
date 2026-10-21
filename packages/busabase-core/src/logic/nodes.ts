@@ -12,7 +12,7 @@ import {
   updateNodeMetadataInputSchema,
   updateNodeSettingsInputSchema,
 } from "busabase-contract/contract/schemas";
-import { CREATABLE_NODE_TYPES } from "busabase-contract/domains";
+import { CREATABLE_NODE_TYPES, hasCapability, NODE_TYPES } from "busabase-contract/domains";
 import { fieldNameSchema } from "busabase-contract/domains/base/contract/base-schemas";
 import type { NodeSearchResultVO, NodeVO } from "busabase-contract/types";
 import { NodeIconSchema } from "busabase-contract/types";
@@ -28,6 +28,7 @@ import {
   busabaseFavorites,
   busabaseNodes,
   busabaseOperations,
+  type NodePO,
   nodeListColumns,
 } from "../db/schema";
 import { docBodyKey } from "../domains/doc/handlers";
@@ -41,6 +42,7 @@ import {
   buildNodeVisibilityCondition,
   hasNodePermission,
 } from "./node-acl";
+import { resolveVisibleNodeOfTypes } from "./node-resolve";
 import { listOwnLiveShareNodeIds } from "./node-share";
 import { assertNodeSlugAvailable, nodeSlugConflict } from "./node-slug";
 import { buildNodeTree, ensureReady } from "./seed";
@@ -320,7 +322,85 @@ export const listNodes = async (input?: ListNodesInput): Promise<NodeVO[]> => {
     return buildNodeTree(nodeRows, baseRows, { sharedNodeIds });
   }
 
-  return listNodesBounded(db, spaceId, input.parentId ?? null, input.depth);
+  const parentId = input.parentId ? (await resolveListParentNode(input.parentId)).id : null;
+  return listNodesBounded(db, spaceId, parentId, input.depth);
+};
+
+/** Node types that can hold children (today: folder, which the space root also is). */
+const CONTAINER_NODE_TYPES = NODE_TYPES.filter((type) => hasCapability(type, "container"));
+
+/**
+ * `nodes.list`'s `parentId`: a node id OR a folder slug, like `nodes.get`.
+ *
+ * It used to be matched as a raw `parent_id`, so a slug, a mistyped id, or a
+ * Doc's id all came back as `[]` — indistinguishable from an empty folder. Now
+ * an unknown ref is a 404 and a node that cannot hold children is a 400 that
+ * says what it is.
+ */
+const resolveListParentNode = async (parentRef: string): Promise<NodePO> =>
+  resolveVisibleNodeOfTypes(
+    parentRef,
+    CONTAINER_NODE_TYPES,
+    (other) =>
+      new ORPCError("BAD_REQUEST", {
+        message: `parentId ${parentRef} is a ${other.type} (${other.id}), not a folder — only folders have children. Open it with GET /nodes/${other.id}.`,
+        data: { nodeId: other.id, nodeType: other.type },
+      }),
+  );
+
+/**
+ * How many levels `nodes.list({ types, parentId })` walks when no `depth` is
+ * given: the whole subtree, in practice. Only folders are walked into (nothing
+ * else has children), one query per level; the bound only stops a corrupt
+ * parent cycle from looping forever.
+ */
+const MAX_SUBTREE_WALK_LEVELS = 32;
+
+/** Every visible, active node under `parentId`, up to `levels` deep — flat. */
+const listSubtreeRows = async (
+  db: Awaited<ReturnType<typeof getDb>>,
+  spaceId: string,
+  parentId: string,
+  levels: number,
+) => {
+  const rows: Awaited<ReturnType<typeof fetchChildNodeRows>>[number][] = [];
+  let frontier = [parentId];
+  for (let level = 0; level < levels && frontier.length > 0; level++) {
+    const children = await fetchChildNodeRows(db, spaceId, frontier);
+    rows.push(...children);
+    frontier = children.filter((row) => hasCapability(row.type, "container")).map((row) => row.id);
+  }
+  return rows;
+};
+
+/**
+ * `nodes.list` as the router receives it: picks the tree, bounded-tree, flat
+ * summary, or Trash listing. Combinations the listing cannot honour are a 400
+ * rather than a silently ignored parameter.
+ */
+export const listNodesForInput = async (input?: {
+  parentId?: string | null;
+  depth?: number;
+  status?: "active" | "archived";
+  types?: readonly string[];
+}): Promise<NodeVO[]> => {
+  const status = input?.status ?? "active";
+  if (status === "archived" && input?.parentId) {
+    throw new ORPCError("BAD_REQUEST", {
+      message:
+        "parentId cannot be combined with status=archived: the Trash is one flat list. Omit parentId (and filter by `parentId` on the results).",
+    });
+  }
+  // `types` opts into the flat summary projection that replaced the four
+  // narrow listings. With `parentId` it is that projection scoped to the
+  // parent's subtree (`depth` levels, the whole subtree when omitted).
+  if (input?.types && input.types.length > 0) {
+    return listNodeSummaries(input.types, status, {
+      parentId: input.parentId ?? undefined,
+      depth: input.depth,
+    });
+  }
+  return status === "archived" ? listArchivedNodes() : listNodes(input);
 };
 
 /**
@@ -343,27 +423,43 @@ export const listNodes = async (input?: ListNodesInput): Promise<NodeVO[]> => {
 export const listNodeSummaries = async (
   types: readonly string[],
   status: "active" | "archived" = "active",
+  scope: { parentId?: string; depth?: number } = {},
 ): Promise<NodeVO[]> => {
   await ensureReady();
   const db = await getDb();
   const spaceId = getContextSpaceId();
 
-  const rows = await db
-    .select(nodeListColumns)
-    .from(busabaseNodes)
-    .where(
-      and(
-        eq(busabaseNodes.spaceId, spaceId),
-        inArray(busabaseNodes.type, [...types]),
-        // Same active/archived predicate the tree and Trash listings use, so a
-        // type filter never quietly changes which lifecycle state you get.
-        status === "archived"
-          ? and(isNotNull(busabaseNodes.archivedAt), isNull(busabaseNodes.deletedAt))
-          : isNull(busabaseNodes.archivedAt),
-        buildNodeVisibilityCondition(db),
-      ),
-    )
-    .orderBy(asc(busabaseNodes.position), asc(busabaseNodes.createdAt));
+  // Scoped to one parent: walk its subtree (ACL applies per level, so a hidden
+  // folder hides what is inside it, as in the tree) and keep the wanted types.
+  // `parentId` used to be ignored entirely whenever `types` was set, so
+  // "the Skills in this folder" came back as every Skill in the space.
+  const rows = scope.parentId
+    ? (
+        await listSubtreeRows(
+          db,
+          spaceId,
+          (
+            await resolveListParentNode(scope.parentId)
+          ).id,
+          scope.depth === undefined ? MAX_SUBTREE_WALK_LEVELS : clampDepth(scope.depth),
+        )
+      ).filter((row) => types.includes(row.type))
+    : await db
+        .select(nodeListColumns)
+        .from(busabaseNodes)
+        .where(
+          and(
+            eq(busabaseNodes.spaceId, spaceId),
+            inArray(busabaseNodes.type, [...types]),
+            // Same active/archived predicate the tree and Trash listings use, so a
+            // type filter never quietly changes which lifecycle state you get.
+            status === "archived"
+              ? and(isNotNull(busabaseNodes.archivedAt), isNull(busabaseNodes.deletedAt))
+              : isNull(busabaseNodes.archivedAt),
+            buildNodeVisibilityCondition(db),
+          ),
+        )
+        .orderBy(asc(busabaseNodes.position), asc(busabaseNodes.createdAt));
 
   if (rows.length === 0) return [];
 

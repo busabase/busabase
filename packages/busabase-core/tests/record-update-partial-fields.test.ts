@@ -185,6 +185,30 @@ describe("record_update — partial-field submissions preserve untouched fields"
     expect(afterOmit.title).toBe("B1");
     expect(afterOmit.score).toBeNull();
     expect(afterOmit.note).toBe("still-here");
+
+    // Zero is a meaningful number, not an empty value, and must survive a
+    // later partial update that does not mention the numeric field.
+    const zeroCr = await client.records.changeRequest({
+      operation: "update",
+      recordId,
+      fields: { score: 0 },
+      autoMerge: false,
+    });
+    await approveAndMerge(zeroCr.id);
+    expect(await getFields(recordId)).toMatchObject({ title: "B1", score: 0, note: "still-here" });
+
+    const keepZeroCr = await client.records.changeRequest({
+      operation: "update",
+      recordId,
+      fields: { note: "zero-preserved" },
+      autoMerge: false,
+    });
+    await approveAndMerge(keepZeroCr.id);
+    expect(await getFields(recordId)).toMatchObject({
+      title: "B1",
+      score: 0,
+      note: "zero-preserved",
+    });
   });
 
   // ── Scenario 4: same-field concurrent edits still correctly CONFLICT ───────
@@ -278,8 +302,16 @@ describe("record_update — partial-field submissions preserve untouched fields"
 
     // The unknown slug is dropped from the searchable field-value projection
     // (existing behavior, unrelated to this fix) — it must not be findable.
+    // Scoped to the Base, searching a slug it does not have is a 400 naming it;
+    // unscoped, it simply finds nothing.
+    await expect(
+      client.records.search({
+        baseId,
+        fieldSlug: "ghostField",
+        valueText: "should not break anything",
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
     const byGhost = await client.records.search({
-      baseId,
       fieldSlug: "ghostField",
       valueText: "should not break anything",
     });

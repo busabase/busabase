@@ -1800,38 +1800,80 @@ const RECORD_SCENARIOS: PromptDef[] = [
 const CORE_LOCALES = Object.keys(TARGET_LINE) as CoreLocale[];
 
 /**
- * Adapt one validated custom prompt (`CustomPromptDef` — iString label/body, a
- * literal `"{target}"` placeholder) into the same `PromptDef` shape the curated
- * `SCENARIOS_BY_TYPE` arrays use, so it flows through the exact `buildCuratedPrompt`
- * assembly below unchanged. `iStringParse` resolves each locale once, with the
- * same fallback behavior already used for Base field names; `{target}` is
- * substituted at render time with the identical target string a curated
- * prompt's `body(target)` receives.
- *
- * **The target line is not optional.** A prompt that never names the node is a
- * prompt the agent has to guess the target of — it is the one part of a prompt
- * that is load-bearing rather than stylistic. Curated prompts get it for free
- * because every hand-written body starts with `${t}`; a custom body is author
- * text, and an author who simply did not know about `{target}` used to ship a
- * prompt with no target at all, silently. So the placeholder now controls
- * PLACEMENT, not presence: write `{target}` and it goes exactly where you put
- * it, omit it and the target line is prepended as its own paragraph. Decided
- * per locale, because a half-translated body (placeholder in `zh-CN`, forgotten
- * in `en`) must not lose the target on the locale that forgot it.
+ * How a custom prompt refers to its node inside a sentence: the node's name,
+ * quoted the way `TARGET_LINE` quotes it for the same locale.
  */
-const customPromptDefToPromptDef = (custom: CustomPromptDef): PromptDef => {
+const NODE_NAME_REFERENCE: Record<CoreLocale, (name: string) => string> = {
+  en: (name) => `"${name}"`,
+  "zh-CN": (name) => `「${name}」`,
+  "zh-TW": (name) => `「${name}」`,
+  ja: (name) => `「${name}」`,
+  ko: (name) => `"${name}"`,
+  es: (name) => `«${name}»`,
+  pt: (name) => `“${name}”`,
+  vi: (name) => `“${name}”`,
+  fr: (name) => `« ${name} »`,
+  de: (name) => `„${name}“`,
+};
+
+/** A line that is nothing but the retired placeholder, optionally closed by a full stop. */
+const PLACEHOLDER_LINE = /^[ \t]*\{target\}[ \t]*[.。．]?[ \t]*$/;
+
+/**
+ * Drop every line that is only the retired `{target}` placeholder, together
+ * with the blank line it leaves behind. Prompts written before the target line
+ * became fixed open with exactly that line (it was the editor's starting text
+ * and what every guide told authors to write), and the target is now added
+ * ahead of the body anyway — keeping the line would name the node twice.
+ *
+ * Exported so the editor can show an existing prompt without the placeholder:
+ * authors no longer place the target, so it should not appear in their draft.
+ */
+export const stripTargetPlaceholderLines = (body: string): string => {
+  const lines = body.split("\n");
+  const kept: string[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    if (PLACEHOLDER_LINE.test(lines[index] as string)) {
+      const previousIsBlank = kept.length === 0 || !(kept[kept.length - 1] as string).trim();
+      if (previousIsBlank && !(lines[index + 1] ?? "x").trim()) index += 1;
+      continue;
+    }
+    kept.push(lines[index] as string);
+  }
+  return kept.join("\n").trim();
+};
+
+/**
+ * Adapt one validated custom prompt (`CustomPromptDef` — iString label/body)
+ * into the same `PromptDef` shape the curated `SCENARIOS_BY_TYPE` arrays use, so
+ * it flows through the exact `buildCuratedPrompt` assembly below unchanged.
+ * `iStringParse` resolves each locale once, with the same fallback behavior
+ * already used for Base field names.
+ *
+ * **The target line is fixed, not authored.** It is the one part of a prompt
+ * that is load-bearing rather than stylistic: a prompt that does not name its
+ * node is one the agent has to guess the target of. So every custom prompt
+ * opens with the same target sentence a curated prompt does, as its own first
+ * paragraph, and the author writes only the task. Bodies saved while authors
+ * still placed `{target}` themselves keep working: a line that is only the
+ * placeholder is dropped (see `stripTargetPlaceholderLines`), and one used
+ * inside a sentence reads as the node's quoted name — the full target sentence,
+ * with its ids, is already the paragraph above.
+ */
+const customPromptDefToPromptDef = (custom: CustomPromptDef, nodeName: string): PromptDef => {
   const label = Object.fromEntries(
     CORE_LOCALES.map((locale) => [locale, iStringParse(custom.label, locale)]),
   ) as Record<CoreLocale, string>;
   const body = Object.fromEntries(
     CORE_LOCALES.map((locale) => {
-      const template = iStringParse(custom.body, locale);
-      const placed = template.includes("{target}");
-      return [
-        locale,
-        (target: string) =>
-          placed ? template.replaceAll("{target}", target) : `${target}\n\n${template}`,
-      ];
+      const reference = NODE_NAME_REFERENCE[locale](nodeName);
+      // A function replacer, so a node named e.g. `Budget $$` is inserted
+      // literally instead of being read as a `$` replacement pattern.
+      const task = stripTargetPlaceholderLines(iStringParse(custom.body, locale)).replaceAll(
+        "{target}",
+        () => reference,
+      );
+      return [locale, (target: string) => (task ? `${target}\n\n${task}` : target)];
     }),
   ) as Record<CoreLocale, (target: string) => string>;
   return { key: custom.key, intent: custom.intent, label, body };
@@ -1852,6 +1894,7 @@ const customPromptDefToPromptDef = (custom: CustomPromptDef): PromptDef => {
  */
 const readCustomAgentPrompts = (
   customPrompts: CustomAgentPrompts | undefined,
+  nodeName: string,
 ): PromptDef[] | undefined => {
   if (!Array.isArray(customPrompts) || customPrompts.length === 0) return undefined;
   // Validated a second time on purpose. The server parses what it stores, but
@@ -1860,7 +1903,7 @@ const readCustomAgentPrompts = (
   // defaults rather than render garbage — wherever it came from.
   const parsed = customAgentPromptsSchema.safeParse(customPrompts);
   if (!parsed.success) return undefined;
-  return parsed.data.map(customPromptDefToPromptDef);
+  return parsed.data.map((custom) => customPromptDefToPromptDef(custom, nodeName));
 };
 
 // ── Assembly ──────────────────────────────────────────────────────────────────
@@ -1944,7 +1987,9 @@ export function buildNodeAgentPrompts(
       ? (SCENARIOS_BY_TYPE[context.nodeType] ?? [])
       : (SCENARIOS_BY_SCOPE[scope.kind] ?? SCENARIOS_BY_TYPE[context.nodeType] ?? []);
   const customScenarioDefs =
-    scope.kind === "node" ? (readCustomAgentPrompts(context.customPrompts) ?? []) : [];
+    scope.kind === "node"
+      ? (readCustomAgentPrompts(context.customPrompts, context.nodeName) ?? [])
+      : [];
 
   const scenarios = [
     ...builtInScenarioDefs.map((scenario) =>

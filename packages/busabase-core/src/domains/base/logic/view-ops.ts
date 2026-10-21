@@ -1,7 +1,7 @@
 import "server-only";
 
 import { ORPCError } from "@orpc/server";
-import { and, eq } from "drizzle-orm";
+import { and, count, eq, ne } from "drizzle-orm";
 import type { z } from "zod";
 import { getContextSpaceId, resolveActorId, withContextSourceMeta } from "../../../context";
 import { getDb } from "../../../db";
@@ -29,7 +29,7 @@ import {
   updateViewInputSchema,
 } from "../../../logic/store";
 import { normalizeViewConfig } from "../../../logic/vo";
-import { baseNotFound } from "./errors";
+import { baseNotFound, lastViewDeleteRejected } from "./errors";
 import { getBase, listViews } from "./queries";
 
 export {
@@ -223,12 +223,25 @@ export const createUpdateViewChangeRequest = async (
   const operationId = id("opr");
   const commitId = id("cmt");
   const timestamp = now();
-  const fields = {
-    config: { ...normalizeViewConfig(view.config), ...parsed.config },
-    description: parsed.description ?? view.description,
-    name: parsed.name ?? view.name,
-    type: parsed.type ?? view.type,
-  };
+  const isPureMove =
+    parsed.position !== undefined &&
+    parsed.config === undefined &&
+    parsed.description === undefined &&
+    parsed.name === undefined &&
+    parsed.type === undefined;
+  // A pure reorder records ONLY the move. Snapshotting config/name/type too
+  // would let a reorder that merges after a concurrent config edit silently
+  // write the stale config back, and would make the review diff list
+  // unchanged keys next to the one thing that actually moved.
+  const fields = isPureMove
+    ? { position: parsed.position }
+    : {
+        config: { ...normalizeViewConfig(view.config), ...parsed.config },
+        description: parsed.description ?? view.description,
+        name: parsed.name ?? view.name,
+        type: parsed.type ?? view.type,
+        ...(parsed.position !== undefined ? { position: parsed.position } : {}),
+      };
 
   await insertCommit(db, {
     id: commitId,
@@ -312,6 +325,24 @@ export const createDeleteViewChangeRequest = async (
   if (!base) {
     // Internal FK, not client input — see comment in createUpdateViewChangeRequest.
     throw new Error(`Base not found: ${view.baseId}`);
+  }
+
+  // A Base keeps at least one view (it opens on the leftmost). Checked here so
+  // the caller hears it immediately instead of after a reviewer approves, and
+  // again inside the merge transaction (mergeViewDelete) for the race where two
+  // pending deletes would each remove one of the last two views.
+  const [remaining] = await db
+    .select({ total: count() })
+    .from(busabaseViews)
+    .where(
+      and(
+        eq(busabaseViews.baseId, view.baseId),
+        eq(busabaseViews.status, "active"),
+        ne(busabaseViews.id, view.id),
+      ),
+    );
+  if (Number(remaining?.total ?? 0) === 0) {
+    throw lastViewDeleteRejected();
   }
 
   const parsed = deleteViewInputSchema.parse(input);

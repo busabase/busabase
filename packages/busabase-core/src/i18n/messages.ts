@@ -1412,6 +1412,7 @@ export const coreMessagesEn = {
     impactRecordVariant: "Variants {id}",
     impactViewCreate: "Adds a new view",
     impactViewUpdate: "Updates view {id}",
+    impactViewMove: "Moves view {id} to position {position}",
     impactViewDelete: "Deletes view {id}",
     impactFile: "{operation} {file}",
     impactNodeCreate: "Creates {nodeType}",
@@ -1558,7 +1559,14 @@ export const coreMessagesEn = {
     searchMembers: "Search members",
     noMembersAvailable: "No members to choose from",
     unassignedMember: "Unassigned",
-    all: "All",
+    lastViewCannotBeDeleted:
+      "A Base must keep at least one view. Create another view before deleting this one.",
+    viewTabDragInstructions:
+      "To move a view tab, press Space. While moving, use the arrow keys to change its place. Press Space or Enter to drop it, or Escape to cancel. The leftmost view is the one the Base opens on.",
+    viewTabDragOutside: "The view is outside the view tabs. Drop to cancel.",
+    reorderViewFailed: "Couldn't move the view. Please try again.",
+    reorderViewProposed: "The new view order was submitted for review.",
+    moveViewMessage: "Move {view} view to position {position}",
     newView: "New view",
     editView: "Edit view",
     deleteView: "Delete view",
@@ -2046,6 +2054,7 @@ export const coreMessagesEn = {
   operationDiff: {
     name: "Name",
     configuration: "Configuration",
+    position: "Position",
     description: "Description",
     sort: "sort",
     filter: "filter",
@@ -2212,11 +2221,15 @@ export const coreMessagesEn = {
   },
   emptyGuide: {
     title: "Let an agent help fill this workspace",
-    body: "Busabase can stay manual, but it is designed for agents to write into — every change they make carries a message, a diff, and a full history you can review or roll back.",
-    itemStructuredData: "Create structured data and seed useful examples",
-    itemChangeRequests:
-      "Write through Change Requests, so every change is explained and reversible",
-    itemAgentDatabase: "Add records, update fields, and evolve a Database with an AI agent",
+    body: "Busabase can stay manual, but it is built for agents: what they produce stays in this workspace instead of scattered chat histories, every write is on the record, and your whole team can reuse it.",
+    baseDataName: "Data Base",
+    baseDataDesc: "Customers, projects, and inventory in tables with fixed columns",
+    baseKnowledgeName: "Knowledge Base",
+    baseKnowledgeDesc: "The team's answers, findable and sourced",
+    baseAppsName: "Apps Base",
+    baseAppsDesc: "Internal tools built on the same data",
+    baseSkillsName: "Skills Base",
+    baseSkillsDesc: "A workflow saved once as a skill that any agent can run",
     startFromTemplate: "Start from a template",
     startFromTemplateHint:
       "Install a working workspace in about a minute — Bases, sample rows, and the agent manual that ships with them.",
@@ -2319,7 +2332,9 @@ export const coreMessagesEn = {
     readOnly: "Read only",
     mayMakeChanges: "May make changes",
     promptTemplate: "Prompt template",
-    targetHint: "Use {target} to insert this node automatically.",
+    fixedTargetLabel: "Always sent first",
+    targetHint:
+      "Busabase adds this line for you, so the agent always knows which node to work on. Write only the task below.",
     byteCount: "{count} / {limit} bytes",
     addScenario: "Add scenario",
     saveChanges: "Save changes",

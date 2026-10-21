@@ -11,7 +11,11 @@ import { dashboardPt } from "../../../i18n/pt";
 import { dashboardVi } from "../../../i18n/vi";
 import { dashboardZhCN } from "../../../i18n/zh-CN";
 import { dashboardZhTW } from "../../../i18n/zh-TW";
-import { buildNodeAgentPrompts, type NodePromptContext } from "./node-agent-prompts";
+import {
+  buildNodeAgentPrompts,
+  type NodePromptContext,
+  stripTargetPlaceholderLines,
+} from "./node-agent-prompts";
 
 /**
  * Scoping of the Agent-prompt set.
@@ -398,20 +402,24 @@ describe("buildNodeAgentPrompts custom scenario prompts", () => {
     expect(scenarios.every((prompt) => prompt.source !== "custom-scenario")).toBe(true);
   });
 
-  it("substitutes {target} with the same target line a curated prompt receives", () => {
+  it("opens every custom prompt with the same target line a curated prompt receives", () => {
     const { scenarios } = buildNodeAgentPrompts(
       { ...BASE_CONTEXT, customPrompts: CUSTOM_PROMPTS },
       "en",
       coreMessagesEn,
     );
     const summary = scenarios.find((prompt) => prompt.key === "custom:weekly-severity-summary");
+    expect(summary?.target).toBe(TARGET_LINE_EN);
+    // The author wrote `{target}` mid-sentence before the target became fixed:
+    // the sentence now reads with the node's name, and the full target line
+    // (with its ids) is the paragraph above it.
     expect(summary?.body).toContain(
-      'Summarize tickets opened in Target: the Busabase Base "Posts" (nodeId: nod_base_blog)',
+      `${TARGET_LINE_EN}\n\nSummarize tickets opened in "Posts" in the last 7 days, grouped by severity.`,
     );
     expect(summary?.body).not.toContain("{target}");
   });
 
-  it("prepends the target line when the author's body omits {target}", () => {
+  it("prepends the target line when the author's body has no placeholder", () => {
     const { scenarios } = buildNodeAgentPrompts(
       {
         ...BASE_CONTEXT,
@@ -431,7 +439,37 @@ describe("buildNodeAgentPrompts custom scenario prompts", () => {
     expect(triage?.body).toContain("let Busabase apply my permissions");
   });
 
-  it("decides placement per locale, so a half-translated body keeps its target everywhere", () => {
+  it("drops a line that is only the old placeholder, so the node is never named twice", () => {
+    const { scenarios } = buildNodeAgentPrompts(
+      {
+        ...BASE_CONTEXT,
+        customPrompts: [
+          { key: "own-line", label: "Own line", body: "{target}\n\nTriage today." },
+          { key: "own-line-stop", label: "With stop", body: "  {target}.  \nTriage today." },
+          { key: "only", label: "Only", body: "{target}" },
+        ],
+      },
+      "en",
+      coreMessagesEn,
+    );
+    const body = (key: string) => scenarios.find((prompt) => prompt.key === key)?.body ?? "";
+    for (const key of ["custom:own-line", "custom:own-line-stop"]) {
+      expect(body(key)).toContain(`${TARGET_LINE_EN}\n\nTriage today.`);
+      expect(body(key).split(TARGET_LINE_EN)).toHaveLength(2);
+      expect(body(key)).not.toContain('"Posts".');
+    }
+    // A body that was nothing but the placeholder still names its node.
+    expect(body("custom:only").startsWith(TARGET_LINE_EN)).toBe(true);
+    expect(body("custom:only")).not.toContain("{target}");
+  });
+
+  it("keeps the author's own paragraphs when it drops a placeholder line", () => {
+    expect(stripTargetPlaceholderLines("{target}\n\nFirst.\n\nSecond.")).toBe("First.\n\nSecond.");
+    expect(stripTargetPlaceholderLines("First.\n\n{target}\n\nSecond.")).toBe("First.\n\nSecond.");
+    expect(stripTargetPlaceholderLines("Inspect {target} today.")).toBe("Inspect {target} today.");
+  });
+
+  it("opens every locale with the target line, even a half-translated body", () => {
     const customPrompts = [
       {
         key: "half-translated",
@@ -444,14 +482,44 @@ describe("buildNodeAgentPrompts custom scenario prompts", () => {
     const zh = buildNodeAgentPrompts({ ...BASE_CONTEXT, customPrompts }, "zh-CN", dashboardZhCN);
     const enCustom = en.scenarios.find((prompt) => prompt.key === "custom:half-translated");
     const zhCustom = zh.scenarios.find((prompt) => prompt.key === "custom:half-translated");
-    // en placed it inline, exactly where the author put it — unchanged behavior.
-    expect(enCustom?.body).toContain(
-      'Triage Target: the Busabase Base "Posts" (nodeId: nod_base_blog)',
-    );
-    // zh-CN forgot it, so it is prepended rather than lost.
+    expect(enCustom?.body).toContain(`${TARGET_LINE_EN}\n\nTriage "Posts" now.`);
     expect(zhCustom?.body.startsWith("目标：Busabase 的 ")).toBe(true);
     expect(zhCustom?.body).toContain("（nodeId: nod_base_blog）");
     expect(zhCustom?.body).toContain("现在分诊。");
+  });
+
+  it("reads a mid-sentence placeholder as the quoted name, so a closing stop stays single", () => {
+    const customPrompts = [
+      {
+        key: "inspect",
+        label: "Inspect",
+        body: { en: "1. Inspect {target}.\n2. Report back.", "zh-CN": "检查{target}。然后汇报。" },
+      },
+    ];
+    const en = buildNodeAgentPrompts({ ...BASE_CONTEXT, customPrompts }, "en", coreMessagesEn);
+    const zh = buildNodeAgentPrompts({ ...BASE_CONTEXT, customPrompts }, "zh-CN", dashboardZhCN);
+    const enBody = en.scenarios.find((prompt) => prompt.key === "custom:inspect")?.body ?? "";
+    const zhBody = zh.scenarios.find((prompt) => prompt.key === "custom:inspect")?.body ?? "";
+
+    expect(enBody).toContain(`${TARGET_LINE_EN}\n\n1. Inspect "Posts".\n2. Report back.`);
+    expect(enBody).not.toContain("..");
+    expect(zhBody).toContain("\n\n检查「Posts」。然后汇报。");
+    expect(zhBody).not.toContain("。。");
+  });
+
+  it("inserts a node name containing `$` literally", () => {
+    const { scenarios } = buildNodeAgentPrompts(
+      {
+        ...BASE_CONTEXT,
+        nodeName: "Budget $$ $&",
+        customPrompts: [{ key: "audit", label: "Audit", body: "Audit {target}" }],
+      },
+      "en",
+      coreMessagesEn,
+    );
+    const audit = scenarios.find((prompt) => prompt.key === "custom:audit");
+    expect(audit?.body).toContain('Target: the Busabase Base "Budget $$ $&"');
+    expect(audit?.body).toContain('\n\nAudit "Budget $$ $&"');
   });
 
   it("resolves the plain-string iString form for every locale (no translation supplied)", () => {

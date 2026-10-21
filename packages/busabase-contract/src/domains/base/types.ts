@@ -150,6 +150,8 @@ export interface ViewVO {
   type: ViewType;
   config: ViewConfigVO;
   status: "active" | "archived";
+  /** Shared tab order within the Base; the lowest is the view the Base opens on. */
+  position: number;
   createdBy: string;
   createdByUser?: UserRefVO | null;
   archivedAt: string | null;

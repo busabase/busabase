@@ -429,6 +429,17 @@ export const financeInvoiceZhCnScenario: SeedScenario = {
 
   views: [
     {
+      id: "viw_seed_invoice_board",
+      baseId: DEMO_INVOICES_BASE_ID,
+      slug: "board",
+      name: "财务看板",
+      description: "所有发票按状态分栏——拖动卡片推进审核流程。",
+      type: "kanban",
+      config: { filters: [], sorts: [], stackByFieldSlug: "status" },
+      minutesAgo: 109,
+      useCases: ["finance"],
+    },
+    {
       id: "viw_seed_invoice_review",
       baseId: DEMO_INVOICES_BASE_ID,
       slug: "needs-ap-review",
@@ -448,17 +459,6 @@ export const financeInvoiceZhCnScenario: SeedScenario = {
         ],
       },
       minutesAgo: 110,
-      useCases: ["finance"],
-    },
-    {
-      id: "viw_seed_invoice_board",
-      baseId: DEMO_INVOICES_BASE_ID,
-      slug: "board",
-      name: "财务看板",
-      description: "所有发票按状态分栏——拖动卡片推进审核流程。",
-      type: "kanban",
-      config: { filters: [], sorts: [], stackByFieldSlug: "status" },
-      minutesAgo: 109,
       useCases: ["finance"],
     },
     {

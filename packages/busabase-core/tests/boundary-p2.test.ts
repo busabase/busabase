@@ -243,12 +243,13 @@ describe("Boundary P2 — oRPC", () => {
     });
     await approveAndMerge(delCr.id);
 
-    const after = await client.records.search({
-      baseId: base.id,
-      fieldSlug: "tag",
-      valueText: marker,
-    });
-    expect(after.length).toBe(0);
+    // Not searchable any more — and scoped to the Base, the search says why
+    // instead of answering an empty list for a field that no longer exists.
+    await expect(
+      client.records.search({ baseId: base.id, fieldSlug: "tag", valueText: marker }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST", message: expect.stringContaining('"tag"') });
+    const unscoped = await client.records.search({ fieldSlug: "tag", valueText: marker });
+    expect(unscoped.length).toBe(0);
   });
 
   // ── Fix 6: View Filter migration to fieldId ─────────────────────────────────

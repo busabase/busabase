@@ -19,10 +19,9 @@ import { ORPCError } from "@orpc/server";
  * contract package is imported into the browser bundle and the mobile client's
  * generated types, where neither belongs.
  */
-import { and, eq, isNull, or } from "drizzle-orm";
-import { getContextSpaceId } from "../context";
-import { getDb } from "../db";
-import { busabaseNodeContentSearch, busabaseNodes } from "../db/schema";
+import { FILE_TREE_NODE_TYPES } from "busabase-contract/domains/filetree/contract";
+import type { getDb } from "../db";
+import { busabaseNodeContentSearch } from "../db/schema";
 import type { MutableTextSource } from "../domains/assets/logic/text-cache";
 import { openMutableTextSource } from "../domains/assets/logic/text-cache";
 import {
@@ -36,7 +35,7 @@ import {
   extractWhiteboardSearchableText,
   extractWorkflowSearchableText,
 } from "../domains/rich-node/utils/searchable-text";
-import { buildNodeVisibilityCondition } from "./node-acl";
+import { resolveVisibleNodeOfTypes } from "./node-resolve";
 import { ensureReady } from "./seed";
 import { VALUE_TEXT_INDEX_LIMIT } from "./vo";
 
@@ -150,32 +149,42 @@ export async function* linesFromText(text: string): AsyncGenerator<string> {
 }
 
 /**
- * Resolve a content-bearing node by id OR slug, honouring node ACL — the
- * generic counterpart to `domains/doc/handlers.ts`'s `getDocNode`, which
- * hardcodes `type: "doc"` on both of its lookup paths.
+ * Which endpoint to read instead, for a node `nodes.readLines` cannot read.
+ * Read by an agent that just got the error, so it names the next call.
+ */
+const readLinesWrongTypeHint = (type: string): string => {
+  if (FILE_TREE_NODE_TYPES.includes(type as (typeof FILE_TREE_NODE_TYPES)[number])) {
+    return `it is a file tree (${type}). List its files with GET /file-trees/{nodeId}/files and read one with GET /file-trees/{nodeId}/files/{path}`;
+  }
+  if (type === "base") return "it is a Base. Read its records with GET /records?baseId=...";
+  if (type === "folder") return "it is a folder. List what is inside with GET /nodes?parentId=...";
+  if (type === "file") {
+    return "it is a file node. Read its text with GET /assets/{assetId}/text/lines (the assetId is on GET /nodes/{nodeId})";
+  }
+  return `node type "${type}" stores no text lines. Open it with GET /nodes/{nodeId}`;
+};
+
+/**
+ * Resolve a content-bearing node by id OR slug through the shared node
+ * resolver (node ACL, slug-ambiguity guard).
  *
- * A node that exists but whose type stores no content is reported as not
- * found rather than as a distinct error: to a caller asking "read me lines
- * from this node", a Base or a Folder simply has no lines, and saying so in
- * more detail would leak the existence of nodes the ACL may be hiding.
+ * A VISIBLE node of a type that stores no content is a 400 that says what the
+ * node is and where to read it. It used to be "Node not found", which an agent
+ * reasonably took to mean the id was wrong — for a Skill it had just been given.
+ * Saying so leaks nothing: the caller can already open that node with
+ * `nodes.get`. A hidden node is still indistinguishable from an absent one.
  */
 const resolveContentNode = async (nodeIdOrSlug: string) => {
-  const db = await getDb();
-  const spaceId = getContextSpaceId();
-  const visible = buildNodeVisibilityCondition(db);
-  const [node] = await db
-    .select({ id: busabaseNodes.id, type: busabaseNodes.type })
-    .from(busabaseNodes)
-    .where(
-      and(
-        or(eq(busabaseNodes.id, nodeIdOrSlug), eq(busabaseNodes.slug, nodeIdOrSlug)),
-        eq(busabaseNodes.spaceId, spaceId),
-        isNull(busabaseNodes.archivedAt),
-        visible,
-      ),
-    )
-    .limit(1);
-  return node && isSearchableNodeType(node.type) ? { id: node.id, type: node.type } : null;
+  const node = await resolveVisibleNodeOfTypes(
+    nodeIdOrSlug,
+    SEARCHABLE_NODE_TYPES,
+    (other) =>
+      new ORPCError("BAD_REQUEST", {
+        message: `Node ${other.id} has no lines to read: ${readLinesWrongTypeHint(other.type)}.`,
+        data: { nodeId: other.id, nodeType: other.type },
+      }),
+  );
+  return { id: node.id, type: node.type as SearchableNodeType };
 };
 
 /**
@@ -200,9 +209,6 @@ export const readNodeLines = async (
 ): Promise<DocLinesResult> => {
   await ensureReady();
   const node = await resolveContentNode(nodeIdOrSlug);
-  if (!node) {
-    throw new ORPCError("NOT_FOUND", { message: `Node not found: ${nodeIdOrSlug}` });
-  }
   // Read in full: `sliceDocLinesRange` reports `totalLines`, so stopping the
   // stream at `endLine` would make that number a lie. Bounded by the same
   // content-size caps every write path already enforces.

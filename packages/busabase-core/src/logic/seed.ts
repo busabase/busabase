@@ -37,6 +37,7 @@ import {
   COVER_IMAGE_FIXTURE_ASSET_ID,
   COVER_IMAGE_FIXTURE_ATTACHMENT_ID,
   DEMO_BLOG_BASE_NODE_ID,
+  seedViewPositionById,
 } from "../demo/dataset";
 import { DEMO_GREP_FILE_NODE_ICON, DEMO_ROOT_NODE_ICON, seedNodeIcon } from "../demo/node-icons";
 import type {
@@ -49,6 +50,7 @@ import type {
   SeedRichNodeDef,
   SeedScenario,
 } from "../demo/seed-types";
+import { insertDefaultGridView } from "../domains/base/logic/default-view";
 import { writeDocBody } from "../domains/doc/handlers";
 import { writeFileTreeTextFile } from "../domains/filetree/handlers";
 import { mentionSpansFromLabels } from "./comment-mentions";
@@ -142,6 +144,8 @@ interface SeedViewInput {
   description: string;
   type?: ViewType;
   config: ViewConfigVO;
+  /** Tab order within the Base; only written when the view is first inserted. */
+  position: number;
   createdAt: Date;
 }
 
@@ -162,6 +166,9 @@ const seedViewIfMissing = async (input: SeedViewInput) => {
         description: input.description,
         name: input.name,
         type: input.type ?? "table",
+        // `position` deliberately not re-applied: the tab order is the
+        // workspace's own once seeded (users reorder tabs, and the upgrade
+        // migration put a Grid view in front of pre-existing seeded views).
         updatedAt: input.createdAt,
       })
       .where(eq(busabaseViews.id, input.id));
@@ -177,6 +184,7 @@ const seedViewIfMissing = async (input: SeedViewInput) => {
     type: input.type ?? "table",
     config: input.config,
     status: "active",
+    position: input.position,
     createdBy: CURRENT_USER_ID,
     archivedAt: null,
     createdAt: input.createdAt,
@@ -1832,6 +1840,9 @@ const applySeedScenario = async (scenario: SeedScenario) => {
     });
   }
 
+  // Views: each Base gets exactly the views the scenario authored, in the order
+  // it lists them (the first is what the Base opens on) — no extra Grid view.
+  const viewPositions = seedViewPositionById(scenario.views ?? []);
   for (const view of scenario.views ?? []) {
     await seedViewIfMissing({
       id: view.id,
@@ -1841,7 +1852,30 @@ const applySeedScenario = async (scenario: SeedScenario) => {
       description: view.description,
       type: view.type,
       config: remapSeedIds(view.config, actualRecordIdBySeedId) as ViewConfigVO,
+      position: viewPositions.get(view.id) ?? 0,
       createdAt: minutesBefore(createdAt, view.minutesAgo),
+    });
+  }
+  // A Base the scenario ships no views for still has to open on a real view, so
+  // it gets the default Grid view — but only while it has no active view at
+  // all, so re-seeding an existing workspace never adds one next to views its
+  // users made (or that the upgrade migration backfilled).
+  const basesWithAuthoredViews = new Set((scenario.views ?? []).map((view) => view.baseId));
+  for (const base of scenario.bases ?? []) {
+    if (basesWithAuthoredViews.has(base.id)) continue;
+    const actualBaseId = actualBaseIdBySeedId.get(base.id) ?? base.id;
+    const [anyActiveView] = await db
+      .select({ id: busabaseViews.id })
+      .from(busabaseViews)
+      .where(and(eq(busabaseViews.baseId, actualBaseId), eq(busabaseViews.status, "active")))
+      .limit(1);
+    if (anyActiveView) continue;
+    await insertDefaultGridView(db, {
+      spaceId: getContextSpaceId(),
+      baseId: actualBaseId,
+      createdBy: CURRENT_USER_ID,
+      timestamp: createdAt,
+      name: scenario.defaultViewName,
     });
   }
 

@@ -171,6 +171,10 @@ export const busabaseViews = pgTable(
       .notNull()
       .default({}),
     status: text("status").notNull().default("active"),
+    // Shared tab order within the Base: lists sort by
+    // (position, createdAt) and the lowest is the view the Base opens on. A
+    // reorder renumbers every active sibling to 0..n-1 (see mergeViewUpdate).
+    position: integer("position").notNull().default(0),
     createdBy: text("created_by").notNull(),
     archivedAt: timestamp("archived_at", { mode: "date" }),
     createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
@@ -180,7 +184,9 @@ export const busabaseViews = pgTable(
     uniqueIndex("busabase_views_base_slug_uniq")
       .on(base.baseId, base.slug)
       .where(sql`${base.archivedAt} IS NULL`),
-    index("busabase_views_base_status_position_idx").on(base.baseId, base.status, base.createdAt),
+    // Named for position from the start but keyed on createdAt until views had
+    // a position; now it backs the (baseId, status) listing in tab order.
+    index("busabase_views_base_status_position_idx").on(base.baseId, base.status, base.position),
   ],
 );
 

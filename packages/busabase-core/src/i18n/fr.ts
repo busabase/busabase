@@ -1357,6 +1357,7 @@ export const dashboardFr: CoreI18nMessages = {
     impactRecordVariant: "Variantes de {id}",
     impactViewCreate: "Ajoute une nouvelle vue",
     impactViewUpdate: "Met à jour la vue {id}",
+    impactViewMove: "Déplace la vue {id} en position {position}",
     impactViewDelete: "Supprime la vue {id}",
     impactFile: "{operation} {file}",
     impactNodeCreate: "Crée {nodeType}",
@@ -1470,7 +1471,14 @@ export const dashboardFr: CoreI18nMessages = {
     searchMembers: "Rechercher des membres",
     noMembersAvailable: "Aucun membre à choisir",
     unassignedMember: "Non attribué",
-    all: "Tous",
+    lastViewCannotBeDeleted:
+      "Une Base doit garder au moins une vue. Créez une autre vue avant de supprimer celle-ci.",
+    viewTabDragInstructions:
+      "Pour déplacer un onglet de vue, appuyez sur Espace. Utilisez les flèches pour changer sa place, puis Espace ou Entrée pour le déposer, ou Échap pour annuler. La vue la plus à gauche est celle qui s’ouvre avec la Base.",
+    viewTabDragOutside: "La vue est hors des onglets. Déposez pour annuler.",
+    reorderViewFailed: "Impossible de déplacer la vue. Veuillez réessayer.",
+    reorderViewProposed: "Le nouvel ordre des vues a été soumis pour révision.",
+    moveViewMessage: "Déplacer la vue {view} en position {position}",
     newView: "Nouvelle vue",
     editView: "Modifier la vue",
     deleteView: "Supprimer la vue",
@@ -1970,6 +1978,7 @@ export const dashboardFr: CoreI18nMessages = {
   operationDiff: {
     name: "Nom",
     configuration: "Configuration",
+    position: "Position",
     description: "Description",
     sort: "tri",
     filter: "filtre",
@@ -2137,12 +2146,16 @@ export const dashboardFr: CoreI18nMessages = {
   },
   emptyGuide: {
     title: "Laissez un agent vous aider à remplir cet espace de travail",
-    body: "Busabase peut rester manuel, mais il est conçu pour que les agents y écrivent — chaque modification qu'ils font s'accompagne d'un message, d'un diff et d'un historique complet que vous pouvez relire ou annuler.",
-    itemStructuredData: "Créer des données structurées et semer des exemples utiles",
-    itemChangeRequests:
-      "Écrire via des demandes de modification, pour que chaque changement soit expliqué et réversible",
-    itemAgentDatabase:
-      "Ajouter des enregistrements, mettre à jour des champs et faire évoluer une base de données avec un agent IA",
+    body: "Busabase peut rester manuel, mais il est conçu pour les agents : ce qu'ils produisent ne se perd pas dans des historiques de chat, il reste dans cet espace de travail. Chaque écriture est tracée, et toute votre équipe peut le réutiliser.",
+    baseDataName: "Base de Données",
+    baseDataDesc: "Clients, projets et stocks dans des tables aux colonnes fixes",
+    baseKnowledgeName: "Base de Connaissances",
+    baseKnowledgeDesc: "Les réponses de l'équipe, faciles à trouver et sourcées",
+    baseAppsName: "Base d'Applications",
+    baseAppsDesc: "Des outils internes construits sur les mêmes données",
+    baseSkillsName: "Base de Compétences",
+    baseSkillsDesc:
+      "Un workflow enregistré une fois comme compétence, que n'importe quel agent peut exécuter",
     startFromTemplate: "Partir d'un modèle",
     startFromTemplateHint:
       "Installez un espace de travail opérationnel en une minute environ — Bases, lignes d'exemple et le manuel d'agent livré avec.",
@@ -2250,7 +2263,9 @@ export const dashboardFr: CoreI18nMessages = {
     readOnly: "Lecture seule",
     mayMakeChanges: "Peut effectuer des modifications",
     promptTemplate: "Modèle d'invite",
-    targetHint: "Utilisez {target} pour insérer ce nœud automatiquement.",
+    fixedTargetLabel: "Toujours en premier",
+    targetHint:
+      "Busabase ajoute cette ligne pour vous, afin que l'agent IA sache toujours sur quel nœud travailler. Écrivez seulement la tâche ci-dessous.",
     byteCount: "{count} / {limit} octets",
     addScenario: "Ajouter le scénario",
     saveChanges: "Enregistrer les modifications",

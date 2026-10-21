@@ -1319,6 +1319,7 @@ export const dashboardKo: CoreI18nMessages = {
     impactRecordVariant: "{id}의 변형",
     impactViewCreate: "새 뷰를 추가합니다",
     impactViewUpdate: "뷰 {id}을(를) 수정합니다",
+    impactViewMove: "뷰 {id}을(를) {position}번째로 이동합니다",
     impactViewDelete: "뷰 {id}을(를) 삭제합니다",
     impactFile: "{operation} {file}",
     impactNodeCreate: "{nodeType}을(를) 생성합니다",
@@ -1425,7 +1426,14 @@ export const dashboardKo: CoreI18nMessages = {
     searchMembers: "멤버 검색",
     noMembersAvailable: "선택할 수 있는 멤버가 없습니다",
     unassignedMember: "미지정",
-    all: "전체",
+    lastViewCannotBeDeleted:
+      "베이스에는 뷰가 하나 이상 있어야 합니다. 이 뷰를 삭제하기 전에 다른 뷰를 만드세요.",
+    viewTabDragInstructions:
+      "뷰 탭을 옮기려면 Space 키를 누르고 화살표 키로 위치를 바꾸세요. Space 또는 Enter 키로 놓고, Esc 키로 취소합니다. 가장 왼쪽 뷰가 베이스를 열 때 표시됩니다.",
+    viewTabDragOutside: "뷰가 탭 영역 밖에 있습니다. 놓으면 취소됩니다.",
+    reorderViewFailed: "뷰를 옮기지 못했습니다. 다시 시도하세요.",
+    reorderViewProposed: "새 뷰 순서를 검토 요청으로 제출했습니다.",
+    moveViewMessage: "{view} 뷰를 {position}번째로 이동",
     newView: "새 뷰",
     editView: "뷰 편집",
     deleteView: "뷰 삭제",
@@ -1909,6 +1917,7 @@ export const dashboardKo: CoreI18nMessages = {
   operationDiff: {
     name: "이름",
     configuration: "설정",
+    position: "위치",
     description: "설명",
     sort: "정렬",
     filter: "필터",
@@ -2067,11 +2076,15 @@ export const dashboardKo: CoreI18nMessages = {
   },
   emptyGuide: {
     title: "에이전트와 함께 이 워크스페이스를 채워 보세요",
-    body: "Busabase는 직접 작성해서 쓸 수도 있지만, 에이전트가 기록하도록 설계되었습니다. 에이전트가 만드는 모든 변경에는 메시지, diff, 리뷰하거나 되돌릴 수 있는 전체 이력이 함께 남습니다.",
-    itemStructuredData: "구조화된 데이터를 만들고 유용한 예시를 채웁니다",
-    itemChangeRequests: "변경 요청을 통해 기록하므로 모든 변경에 설명이 남고 되돌릴 수 있습니다",
-    itemAgentDatabase:
-      "AI 에이전트와 함께 레코드를 추가하고 필드를 수정하며 데이터베이스를 발전시킵니다",
+    body: "Busabase는 직접 작성해서 쓸 수도 있지만, 에이전트를 위해 설계되었습니다. 에이전트가 만든 결과는 각자의 채팅 기록에 흩어지지 않고 이 워크스페이스에 남습니다. 모든 쓰기가 기록에 남고, 팀 전체가 다시 쓸 수 있습니다.",
+    baseDataName: "데이터 베이스",
+    baseDataDesc: "고객, 프로젝트, 재고를 열이 정해진 테이블로",
+    baseKnowledgeName: "지식 베이스",
+    baseKnowledgeDesc: "출처가 있어 바로 찾을 수 있는 팀의 답",
+    baseAppsName: "앱 베이스",
+    baseAppsDesc: "같은 데이터 위에 만든 사내 도구",
+    baseSkillsName: "스킬 베이스",
+    baseSkillsDesc: "한 번 저장한 워크플로를 어떤 에이전트든 실행",
     startFromTemplate: "템플릿으로 시작",
     startFromTemplateHint:
       "약 1분 만에 바로 사용할 수 있는 워크스페이스를 설치합니다. 베이스, 샘플 행, 함께 제공되는 에이전트 매뉴얼이 포함됩니다.",
@@ -2175,7 +2188,9 @@ export const dashboardKo: CoreI18nMessages = {
     readOnly: "읽기 전용",
     mayMakeChanges: "변경 가능",
     promptTemplate: "프롬프트 템플릿",
-    targetHint: "{target}을(를) 사용하면 이 노드가 자동으로 삽입됩니다.",
+    fixedTargetLabel: "항상 맨 앞에 들어갑니다",
+    targetHint:
+      "이 줄은 Busabase가 자동으로 추가하므로 AI 에이전트는 어떤 노드를 다룰지 항상 알 수 있습니다. 아래에는 작업 내용만 적어 주세요.",
     byteCount: "{count} / {limit}바이트",
     addScenario: "시나리오 추가",
     saveChanges: "변경 사항 저장",

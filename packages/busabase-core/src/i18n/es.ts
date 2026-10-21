@@ -1346,6 +1346,7 @@ export const dashboardEs: CoreI18nMessages = {
     impactRecordVariant: "Variantes de {id}",
     impactViewCreate: "Añade una vista nueva",
     impactViewUpdate: "Actualiza la vista {id}",
+    impactViewMove: "Mueve la vista {id} a la posición {position}",
     impactViewDelete: "Elimina la vista {id}",
     impactFile: "{operation} {file}",
     impactNodeCreate: "Crea {nodeType}",
@@ -1457,7 +1458,14 @@ export const dashboardEs: CoreI18nMessages = {
     searchMembers: "Buscar miembros",
     noMembersAvailable: "No hay miembros para elegir",
     unassignedMember: "Sin asignar",
-    all: "Todos",
+    lastViewCannotBeDeleted:
+      "Una Base debe conservar al menos una vista. Crea otra vista antes de eliminar esta.",
+    viewTabDragInstructions:
+      "Para mover una pestaña de vista, pulsa Espacio. Usa las flechas para cambiar su lugar y pulsa Espacio o Intro para soltarla, o Escape para cancelar. La vista de más a la izquierda es la que se abre con la Base.",
+    viewTabDragOutside: "La vista está fuera de las pestañas. Suelta para cancelar.",
+    reorderViewFailed: "No se pudo mover la vista. Inténtalo de nuevo.",
+    reorderViewProposed: "El nuevo orden de las vistas se envió a revisión.",
+    moveViewMessage: "Mover la vista {view} a la posición {position}",
     newView: "Nueva vista",
     editView: "Editar vista",
     deleteView: "Eliminar vista",
@@ -1956,6 +1964,7 @@ export const dashboardEs: CoreI18nMessages = {
   operationDiff: {
     name: "Nombre",
     configuration: "Configuración",
+    position: "Posición",
     description: "Descripción",
     sort: "orden",
     filter: "filtro",
@@ -2122,12 +2131,15 @@ export const dashboardEs: CoreI18nMessages = {
   },
   emptyGuide: {
     title: "Deja que un agente te ayude a llenar este espacio de trabajo",
-    body: "Busabase puede usarse a mano, pero está pensado para que los agentes escriban en él: cada cambio que hacen lleva un mensaje, un diff y un historial completo que puedes revisar o revertir.",
-    itemStructuredData: "Crea datos estructurados y añade ejemplos útiles",
-    itemChangeRequests:
-      "Escribe mediante solicitudes de cambio, para que cada cambio quede explicado y sea reversible",
-    itemAgentDatabase:
-      "Añade registros, actualiza campos y haz evolucionar una base de datos con un agente de IA",
+    body: "Busabase puede usarse a mano, pero está pensado para agentes: lo que producen no se pierde en historiales de chat, sino que se queda en este espacio de trabajo. Cada escritura queda registrada y todo tu equipo puede reutilizarlo.",
+    baseDataName: "Base de datos",
+    baseDataDesc: "Clientes, proyectos e inventario en tablas con columnas fijas",
+    baseKnowledgeName: "Base de conocimiento",
+    baseKnowledgeDesc: "Las respuestas del equipo, fáciles de encontrar y con su fuente",
+    baseAppsName: "Base de apps",
+    baseAppsDesc: "Herramientas internas sobre los mismos datos",
+    baseSkillsName: "Base de habilidades",
+    baseSkillsDesc: "Un flujo guardado una vez como habilidad que cualquier agente puede ejecutar",
     startFromTemplate: "Empezar desde una plantilla",
     startFromTemplateHint:
       "Instala un espacio de trabajo funcional en un minuto: Bases, filas de ejemplo y el manual de agente que las acompaña.",
@@ -2232,7 +2244,9 @@ export const dashboardEs: CoreI18nMessages = {
     readOnly: "Solo lectura",
     mayMakeChanges: "Puede hacer cambios",
     promptTemplate: "Plantilla de prompt",
-    targetHint: "Usa {target} para insertar este nodo automáticamente.",
+    fixedTargetLabel: "Siempre va primero",
+    targetHint:
+      "Busabase añade esta línea por ti, así el agente de IA siempre sabe en qué nodo trabajar. Escribe solo la tarea debajo.",
     byteCount: "{count} / {limit} bytes",
     addScenario: "Añadir escenario",
     saveChanges: "Guardar cambios",

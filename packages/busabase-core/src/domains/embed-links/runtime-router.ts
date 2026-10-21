@@ -1,11 +1,14 @@
 import "server-only";
 
-import { ORPCError, os } from "@orpc/server";
+import { implement, ORPCError, os } from "@orpc/server";
 import { resolveRequiredLevel } from "busabase-contract/access-control/api-key-level";
+import { busabaseContract } from "busabase-contract/contract/busabase";
 import { FILE_TREE_NODE_TYPES } from "busabase-contract/domains/filetree/contract";
 import { busabaseRouter } from "../../router";
+import { getAirAppRuntimeAuthInfo } from "./logic/runtime-auth";
 
 const READABLE_PROCEDURES = new Set([
+  "auth.verify",
   "search",
   "nodes.list",
   // The unified typed-detail read. It replaced `docs.get` / `files.get` /
@@ -129,7 +132,16 @@ const {
   dump: _dump,
   changeRequests: _changeRequests,
   operations: _operations,
-  ...airAppEmbedDataRouter
-} = readOnlyProcedure.router(busabaseRouter);
+  ...dataRouter
+} = busabaseRouter;
+
+// Reuse the wire contract only. The ordinary auth handler reveals member /
+// creator identity and deliberately remains off both public allowlists.
+const airAppEmbedDataRouter = readOnlyProcedure.router({
+  ...dataRouter,
+  auth: {
+    verify: implement(busabaseContract).auth.verify.handler(() => getAirAppRuntimeAuthInfo()),
+  },
+});
 
 export { airAppEmbedDataRouter };

@@ -50,6 +50,8 @@ export interface NodeCreateInput {
   submittedBy?: string;
   /** Base fields — `--type base` only. */
   fields?: unknown;
+  /** Skip the Base's default "Grid view" — `--type base` only. */
+  skipDefaultView?: boolean;
   /** Doc body — `--type doc` only. */
   body?: string;
   /** Backing Asset id — `--type file` only. */
@@ -76,6 +78,7 @@ const rejectMismatchedPayload = (input: NodeCreateInput): void => {
   const type = input.type;
   const wrong: string[] = [];
   if (input.fields !== undefined && type !== "base") wrong.push("fields");
+  if (input.skipDefaultView !== undefined && type !== "base") wrong.push("skipDefaultView");
   if (input.body !== undefined && type !== "doc") wrong.push("body");
   if (input.assetId !== undefined && type !== "file") wrong.push("assetId");
   if ((input.files !== undefined || input.mergeMode !== undefined) && !FILE_TREE_TYPES.has(type)) {
@@ -237,7 +240,11 @@ const createNode = async (client: BusabaseTaskClient, input: NodeCreateInput): P
   }
 
   if (type === "base") {
-    const payload: BaseCreateInput = { ...common, fields: asFieldArray(input.fields) ?? [] };
+    const payload: BaseCreateInput = {
+      ...common,
+      fields: asFieldArray(input.fields) ?? [],
+      ...(input.skipDefaultView ? { defaultView: false } : {}),
+    };
     return client.bases.create(payload);
   }
 
@@ -335,6 +342,13 @@ export const nodeCreateTask: TaskDefinition<NodeCreateInput> = {
       },
     },
     {
+      name: "skipDefaultView",
+      appliesWhen: { param: "type", values: ["base"] },
+      kind: "boolean",
+      description:
+        'Base only. Create the Base WITHOUT its default "Grid view" (a table of every record and field). Only when you add your own views right after with view_change_request — a Base must keep at least one view, and the first one is what it opens on.',
+    },
+    {
       name: "body",
       kind: "string",
       appliesWhen: { param: "type", values: ["doc"] },
@@ -404,10 +418,10 @@ export const nodeCreateTask: TaskDefinition<NodeCreateInput> = {
       kind: "json",
       description:
         "Scenario prompts shown when someone opens this node and asks an agent for something: " +
-        '[{"key":"log-visit","label":"Log a customer visit","body":"{target}\\n\\nAdd a visit record with today\u0027s date, the contact I name, and a one-line summary.","intent":"change"}]. ' +
+        '[{"key":"log-visit","label":"Log a customer visit","body":"Add a visit record with today\u0027s date, the contact I name, and a one-line summary.","intent":"change"}]. ' +
         'Write what the PERSON wants in their own words ("Log a customer visit"), not the operation ("Create a record in Visits") — the node type already covers the operations. ' +
-        "These REPLACE the node type\u0027s default scenario prompts, so 2-5 real recurring jobs help and a generic pair is worse than none: omit this when you cannot name one. " +
-        "`{target}` expands to a complete sentence naming the node and space, so give it its own line. " +
+        "These are added after the node type\u0027s built-in scenario prompts, so 2-5 real recurring jobs help and a generic pair only repeats the defaults: omit this when you cannot name one. " +
+        "Write only the task: Busabase opens every prompt with a line naming the node and space, so do not write `{target}`. " +
         "Stored in a second call after the node exists, so they are skipped (and reported) when this call proposes a ChangeRequest instead of creating the node; add them afterwards with `nodes set-agent-prompts`.",
     },
   ],

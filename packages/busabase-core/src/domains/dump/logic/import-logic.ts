@@ -9,19 +9,22 @@ import type {
 } from "busabase-contract/domains/dump/types";
 import { and, eq, getTableColumns, inArray, ne } from "drizzle-orm";
 import { storage } from "openlib/storage";
-import { getContextSpaceId } from "../../../context";
+import { getContextSpaceId, resolveActorId } from "../../../context";
 import { getDb } from "../../../db";
 import {
   attachments,
   busabaseAssets,
   busabaseAssetTexts,
+  busabaseBases,
   busabaseFieldValues,
   busabaseNodes,
   busabaseRecordLinks,
   busabaseRecords,
+  busabaseViews,
 } from "../../../db/schema";
-import { id as generateId, rootNodeIdForSpace } from "../../../logic/kernel";
+import { CURRENT_USER_ID, id as generateId, now, rootNodeIdForSpace } from "../../../logic/kernel";
 import { ensureReady } from "../../../logic/seed";
+import { insertDefaultGridView } from "../../base/logic/default-view";
 import { writeDocBody } from "../../doc/handlers";
 import { requireSpaceManagerForDump } from "./_guard";
 import { DUMP_IMPORT_ORDER, DUMP_TABLE_REGISTRY } from "./table-registry";
@@ -615,6 +618,76 @@ const checkAssetTextBlobCompleteness = async (
     : [];
 };
 
+/**
+ * Bring a restored space up to the view invariants archives may predate:
+ *
+ * - An archive written before views had a `position` restores every view at
+ *   the column default 0, so a Base's tab order would fall back to the
+ *   creation-time tie-break by accident. Renumber those Bases explicitly, by
+ *   creation time — the order they always showed in.
+ * - A Base that comes back with no active view gets the default Grid view, so
+ *   it opens on a real view like every other Base. Except an archived Base
+ *   whose views were archived along with it (same archive timestamp): restoring
+ *   the Base brings those back, so adding one now would only duplicate them.
+ *
+ * Scoped to the whole target space, not just this session's inserts: the
+ * space was validated empty at `importBegin`, so every Base in it came from a
+ * restore — including ones a killed run landed before a `--resume`.
+ */
+const normalizeRestoredViews = async (
+  db: Awaited<ReturnType<typeof getDb>>,
+  spaceId: string,
+): Promise<void> => {
+  const bases = await db
+    .select({ id: busabaseBases.id, archivedAt: busabaseBases.archivedAt })
+    .from(busabaseBases)
+    .where(eq(busabaseBases.spaceId, spaceId));
+  if (bases.length === 0) return;
+  const views = await db
+    .select({
+      id: busabaseViews.id,
+      baseId: busabaseViews.baseId,
+      status: busabaseViews.status,
+      position: busabaseViews.position,
+      archivedAt: busabaseViews.archivedAt,
+      createdAt: busabaseViews.createdAt,
+    })
+    .from(busabaseViews)
+    .where(eq(busabaseViews.spaceId, spaceId));
+  const viewsByBase = new Map<string, typeof views>();
+  for (const view of views) {
+    const list = viewsByBase.get(view.baseId) ?? [];
+    list.push(view);
+    viewsByBase.set(view.baseId, list);
+  }
+  const timestamp = now();
+  for (const base of bases) {
+    const baseViews = viewsByBase.get(base.id) ?? [];
+    if (baseViews.length > 1 && baseViews.every((view) => view.position === 0)) {
+      const ordered = [...baseViews].sort(
+        (left, right) =>
+          left.createdAt.getTime() - right.createdAt.getTime() ||
+          (left.id < right.id ? -1 : left.id > right.id ? 1 : 0),
+      );
+      for (const [position, view] of ordered.entries()) {
+        if (position === 0) continue;
+        await db.update(busabaseViews).set({ position }).where(eq(busabaseViews.id, view.id));
+      }
+    }
+    if (baseViews.some((view) => view.status === "active")) continue;
+    const archivedWithBase =
+      base.archivedAt !== null &&
+      baseViews.some((view) => view.archivedAt?.getTime() === base.archivedAt?.getTime());
+    if (archivedWithBase) continue;
+    await insertDefaultGridView(db, {
+      spaceId,
+      baseId: base.id,
+      createdBy: resolveActorId(CURRENT_USER_ID),
+      timestamp,
+    });
+  }
+};
+
 export const commitImportSession = async (sessionId: string): Promise<ImportCommitVO> => {
   requireSpaceManagerForDump();
   const session = requireSession(sessionId);
@@ -656,6 +729,7 @@ export const commitImportSession = async (sessionId: string): Promise<ImportComm
     ...(await checkBlobCompleteness(db, attachmentIds)),
     ...(await checkAssetTextBlobCompleteness(db, spaceId, assetTextIds)),
   );
+  await normalizeRestoredViews(db, spaceId);
 
   sessions.delete(sessionId);
   return { ok: true, warnings };

@@ -223,6 +223,9 @@ export interface BusabaseDashboardApiClient {
       type?: BaseVO["fields"][number]["type"];
       required?: boolean;
     }>;
+    // `false` skips the default "Grid view" — only when adding your own views
+    // right away, since a Base must keep at least one view.
+    defaultView?: boolean;
     // Review-first by default: without `autoMerge: true`, returns a pending
     // ChangeRequestVO instead of the materialized BaseVO.
     autoMerge?: boolean;
@@ -444,6 +447,8 @@ export interface BusabaseDashboardApiClient {
       description?: string;
       message?: string;
       name?: string;
+      /** Move to this 0-based index among the Base's active views (shared order). */
+      position?: number;
       submittedBy?: string;
       type?: ViewType;
       autoMerge?: boolean;

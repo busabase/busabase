@@ -132,6 +132,7 @@ import {
 import { retryUnlessNotFound, shouldShowInitialLoadingState } from "./helpers/query-state";
 import { readRecordPagination, writeRecordPagination } from "./helpers/record-pagination-url";
 import { isConflictErrorMessage } from "./helpers/search";
+import { resolveDefaultViewPath, sortViewsByPosition } from "./helpers/view-order";
 import type {
   BusabaseBreadcrumbItem,
   CreateBaseFieldPayload,
@@ -144,11 +145,19 @@ import { useAttachmentUpload } from "./hooks/use-attachment-upload";
 import { useDashboardRoutes } from "./hooks/use-dashboard-routes";
 import { useKeyboardShortcut } from "./hooks/use-keyboard-shortcut";
 import { useBusabaseLiveSync } from "./hooks/use-live-sync";
+import { useReorderView } from "./hooks/use-reorder-view";
 import { getNodeDetail, type LoadedNode } from "./node-detail-registry";
 import { DashboardOrpcProvider } from "./orpc-context";
 import { useCurrentNodeStore } from "./store/current-node-store";
 import { mergeFreshRecords } from "./utils/merge-records";
+import type { WorkbenchLinkResolver } from "./utils/workbench-link";
 import { type DashboardVisitorKind, DashboardVisitorProvider } from "./visitor-context";
+import { WorkbenchLinkProvider } from "./workbench-link-context";
+
+export {
+  resolveWorkbenchLinkUnderBase,
+  type WorkbenchLinkResolver,
+} from "./utils/workbench-link";
 
 const EMPTY_BASES: BaseVO[] = [];
 
@@ -275,6 +284,12 @@ interface BusabaseDashboardProps {
    * up yet. The host owns that modal, so the callback has to come from it.
    */
   onCreateNode?: () => void;
+  /**
+   * Which links in user content (Doc Markdown, whiteboard elements) are routes
+   * of this workbench, so following one routes in place instead of reloading
+   * the page. Omit it and every such link stays a native navigation.
+   */
+  resolveWorkbenchLink?: WorkbenchLinkResolver;
   /** Active UI locale (e.g. "en", "zh-CN"). Host-injected; defaults to English. */
   locale?: string;
   /**
@@ -355,6 +370,7 @@ function BusabaseDashboardContent({
   currentUserId = null,
   emptyGuide,
   onCreateNode,
+  resolveWorkbenchLink,
   bases: initialBases = EMPTY_BASES,
   nodes: nodeTree,
   views: initialViews = [],
@@ -718,16 +734,49 @@ function BusabaseDashboardContent({
   const viewsList = orpc.bases.listViews.queryOptions({
     input: { baseId: activeBase?.id ?? "" },
   });
+  // Host-seeded views count as loaded only when the seed actually has this
+  // Base's views: an empty seed used to be handed over as `initialData: []`,
+  // which a host with a non-zero staleTime (Busabase Cloud: 30s) treats as a
+  // fresh answer and never fetches — and "no views" now means something (the
+  // bare Base route waits for them to pick the view it opens on).
+  const seededBaseViews = useMemo(
+    () => (activeBase ? initialViews.filter((view) => view.baseId === activeBase.id) : []),
+    [activeBase, initialViews],
+  );
   const viewsQuery = useQuery({
     ...viewsList,
     enabled: Boolean(activeBase?.id),
-    initialData: activeBase ? initialViews.filter((view) => view.baseId === activeBase.id) : [],
+    initialData: seededBaseViews.length > 0 ? seededBaseViews : undefined,
   });
-  const views = viewsQuery.data ?? [];
+  const views = useMemo(() => sortViewsByPosition(viewsQuery.data ?? []), [viewsQuery.data]);
   const baseViews = useMemo(
     () => views.filter((view) => view.baseId === activeBase?.id),
     [activeBase?.id, views],
   );
+  // Whether the active Base's view list is known. Until it is, a
+  // `/base/:slug/:childId` segment cannot be told apart from a record id (a
+  // view slug and a record id share the same alphabet), and a bare
+  // `/base/:slug` does not know which view to open. A failed fetch settles it
+  // too (on the first failure, not after retries) so the page falls back to
+  // the plain grid instead of spinning. A read-only record preview only ever
+  // shows a record.
+  const baseViewsSettled =
+    readOnlyRecordPreview ||
+    baseViews.length > 0 ||
+    viewsQuery.isFetched ||
+    viewsQuery.failureCount > 0;
+  // Bare `/base/:slug` opens the Base's leftmost view.
+  // Every link in the app keeps pointing at the bare route; it is resolved
+  // here, once the views are known, with a history replace so Back skips it.
+  const defaultViewPath =
+    baseParams?.slug && activeBase && baseViewsSettled
+      ? resolveDefaultViewPath({ baseSlug: activeBase.slug, search, views: baseViews })
+      : null;
+  useEffect(() => {
+    if (defaultViewPath) {
+      setLocation(defaultViewPath, { replace: true });
+    }
+  }, [defaultViewPath, setLocation]);
   const selectedBaseView = useMemo(() => {
     const childId = baseChildParams?.childId;
     if (!childId || childId === "new" || childId === "design" || childId === "setup") {
@@ -735,6 +784,22 @@ function BusabaseDashboardContent({
     }
     return baseViews.find((view) => view.slug === childId || view.id === childId) ?? null;
   }, [baseChildParams?.childId, baseViews]);
+  // The Base page is still working out what to show: which view a bare
+  // `/base/:slug` opens (or it is about to redirect there), or whether a child
+  // segment is a view or a record. The page shows a skeleton meanwhile — no
+  // flash of the plain grid or of "record not found" — and does not fetch a
+  // records page for a view it has not picked yet.
+  const isResolvingBaseRoute = Boolean(
+    activeBase &&
+      (defaultViewPath !== null ||
+        (!baseViewsSettled &&
+          (Boolean(baseParams?.slug) ||
+            (isBaseChildRoute &&
+              !selectedBaseView &&
+              !isBaseSetupRoute &&
+              !isBaseActivityRoute &&
+              baseChildParams?.childId !== "new")))),
+  );
   const recordPaginationUrl = useMemo(() => readRecordPagination(search), [search]);
   // Kanban and Calendar are listed here not because they show a pagination
   // bar, but because neither needs the whole Base anymore: Kanban's columns
@@ -759,7 +824,9 @@ function BusabaseDashboardContent({
   const paginationScope = `${activeBase?.id ?? ""}:${baseChildParams?.childId ?? "all"}`;
   const previousPaginationScope = useRef<string | null>(null);
   useEffect(() => {
-    if (!activeBase?.id) return;
+    // Not while the bare route is still resolving to its default view: that
+    // redirect is the same page, so a deep-linked `?recordPage` must survive it.
+    if (!activeBase?.id || isResolvingBaseRoute) return;
     if (previousPaginationScope.current === null) {
       previousPaginationScope.current = paginationScope;
       return;
@@ -772,6 +839,7 @@ function BusabaseDashboardContent({
     }
   }, [
     activeBase?.id,
+    isResolvingBaseRoute,
     paginationScope,
     recordPaginationUrl.page,
     recordPaginationUrl.pageSize,
@@ -826,7 +894,11 @@ function BusabaseDashboardContent({
       initialPageParam: undefined as string | undefined,
       getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
     }),
-    enabled: Boolean(activeBase?.id) && !usesPagePagination && !readOnlyRecordPreview,
+    enabled:
+      Boolean(activeBase?.id) &&
+      !usesPagePagination &&
+      !readOnlyRecordPreview &&
+      !isResolvingBaseRoute,
   });
   const recordsPageQuery = useQuery({
     ...orpc.records.listPage.queryOptions({
@@ -837,7 +909,11 @@ function BusabaseDashboardContent({
         pageSize: recordPaginationUrl.pageSize,
       },
     }),
-    enabled: Boolean(activeBase?.id) && usesPagePagination && !readOnlyRecordPreview,
+    enabled:
+      Boolean(activeBase?.id) &&
+      usesPagePagination &&
+      !readOnlyRecordPreview &&
+      !isResolvingBaseRoute,
     placeholderData: (previousData, previousQuery) => {
       const previousInput = (
         previousQuery?.queryKey[1] as { input?: { baseId?: string; viewId?: string } } | undefined
@@ -940,8 +1016,14 @@ function BusabaseDashboardContent({
     usesPagePagination,
   ]);
   const isRecordRoute = Boolean(
-    isBaseChildRoute && !selectedBaseView && !isBaseSetupRoute && !isBaseActivityRoute,
+    isBaseChildRoute &&
+      !selectedBaseView &&
+      !isBaseSetupRoute &&
+      !isBaseActivityRoute &&
+      // A view slug must not be misread as a record id while views load.
+      (baseViewsSettled || baseChildParams?.childId === "new"),
   );
+
   const selectedRecordId =
     isEditRecordRoute && editRecordParams?.recordId
       ? editRecordParams.recordId
@@ -2373,6 +2455,35 @@ function BusabaseDashboardContent({
     [client, refresh, setLocation],
   );
 
+  // Dragging a view tab persists the shared order straight away (merged in the
+  // same call when the actor can write) — no navigation, unlike the dialog's
+  // update path above. Only the views and the change-request/activity lists
+  // move, so this does not reload the records the way `refresh` does.
+  const reorderViewMutation = useReorderView({
+    apiClient: client,
+    queryClient,
+    viewsQueryKey: viewsList.queryKey,
+    messages: {
+      changeRequestMessage: ({ view, position }) =>
+        fmt(messages.base.moveViewMessage, { view: view.name, position: position + 1 }),
+      failed: messages.base.reorderViewFailed,
+      proposed: messages.base.reorderViewProposed,
+    },
+    onSettled: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: listKeys.changeRequests }),
+        queryClient.invalidateQueries({ queryKey: listKeys.changeRequestsPaged }),
+        queryClient.invalidateQueries({ queryKey: listKeys.inboxSnapshot }),
+        queryClient.invalidateQueries({ queryKey: listKeys.changeRequestCounts }),
+        queryClient.invalidateQueries({ queryKey: listKeys.auditEvents }),
+      ]),
+  });
+  const reorderView = reorderViewMutation.mutate;
+  const submitReorderView = useCallback(
+    (view: ViewVO, position: number) => reorderView({ view, position }),
+    [reorderView],
+  );
+
   const submitRestoreView = useCallback(
     async (view: ViewVO) => {
       setError(null);
@@ -2611,7 +2722,10 @@ function BusabaseDashboardContent({
 
     const showBaseTabs =
       Boolean(activeBase) &&
+      // A Base now always opens on one of its views, so the view route is
+      // where the Records/Design switch lives most of the time.
       (Boolean(baseParams?.slug) ||
+        isBaseViewRoute ||
         isBaseSetupRoute ||
         isBaseDesignRoute ||
         isLegacyBaseSetupRoute) &&
@@ -2632,6 +2746,7 @@ function BusabaseDashboardContent({
     baseParams?.slug,
     isBaseDesignRoute,
     isBaseSetupRoute,
+    isBaseViewRoute,
     isEditRecordRoute,
     isLegacyBaseSetupRoute,
     isNewRecordRoute,
@@ -2959,6 +3074,10 @@ function BusabaseDashboardContent({
       );
     }
 
+    if (isResolvingBaseRoute) {
+      return <BaseTableSkeleton />;
+    }
+
     if (isRecordRoute) {
       if (shouldShowInitialLoadingState(activeRecord, fallbackRecordQuery.isLoading)) {
         return <NodeDetailSkeleton variant="doc" />;
@@ -2996,6 +3115,7 @@ function BusabaseDashboardContent({
           onRestoreRecord={submitRestoreRecord}
           onMoveRecord={submitMoveRecord}
           onPatchRecord={submitPatchRecord}
+          onReorderView={submitReorderView}
           onUpdateView={submitUpdateView}
           views={views}
         />
@@ -3111,6 +3231,8 @@ function BusabaseDashboardContent({
     submitUpdateField,
     submitUpdateRecord,
     submitUpdateView,
+    submitReorderView,
+    isResolvingBaseRoute,
     uploadAttachment,
     views,
     archivedBases,
@@ -3265,7 +3387,11 @@ function BusabaseDashboardContent({
               side-panel's AgentChatSidePanelTab, which otherwise has no route
               to this information through the generic SidePanelTabProps. */}
           <AgentModelScopeProvider workspaceKey={cacheSpaceKey} actorId={currentUserId}>
-            {content}
+            {/* Same reach again: the Doc reader and whiteboards render user
+                links from deep inside node detail and side-panel views. */}
+            <WorkbenchLinkProvider resolveWorkbenchLink={resolveWorkbenchLink}>
+              {content}
+            </WorkbenchLinkProvider>
           </AgentModelScopeProvider>
         </AgentIntegrationProvider>
       </FileUploadTaskProvider>

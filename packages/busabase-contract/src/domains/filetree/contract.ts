@@ -1,6 +1,10 @@
 import { oc } from "@orpc/contract";
 import { z } from "zod";
-import { changeRequestSchema, nodeSchema } from "../../contract/schemas";
+import {
+  changeRequestSchema,
+  nodeSchema,
+  pendingChangeRequestSchema,
+} from "../../contract/schemas";
 
 export interface FileTreeKindConfig {
   type: string;
@@ -262,6 +266,11 @@ const fileTreeRefSchema = z.object({
 // (lightweight summaries — the old list built a full file inventory per node)
 // and read one with `GET /nodes/{nodeId}`, which returns the same
 // `fileTreeNodeSchema` payload under `type: "skill" | "drive" | "airapp"`.
+/** A merged-in-the-same-call create returns this (see `materializedBaseSchema`). */
+export const materializedFileTreeNodeSchema = fileTreeNodeSchema.extend({
+  materialized: z.literal(true),
+});
+
 export const fileTreeContract = {
   previewConfig: oc
     .route({
@@ -300,12 +309,7 @@ export const fileTreeContract = {
         "Merged in the same call when the actor has write access on the target node — the materialized node comes back (`materialized: true`). Review-first when the actor lacks write access or passes `autoMerge: false`: a pending ChangeRequest proposing the node (`materialized: false`).",
     })
     .input(createFileTreeInputSchema.extend({ type: fileTreeNodeTypeSchema }))
-    .output(
-      z.union([
-        fileTreeNodeSchema.extend({ materialized: z.literal(true) }),
-        changeRequestSchema.extend({ materialized: z.literal(false) }),
-      ]),
-    ),
+    .output(z.union([materializedFileTreeNodeSchema, pendingChangeRequestSchema])),
   listFiles: oc
     .route({
       method: "GET",
@@ -344,7 +348,8 @@ export const fileTreeContract = {
       path: "/file-trees/{nodeId}/change-requests",
       tags: ["File Trees", "Change Requests"],
       summary: "Create file-tree change request",
-      successDescription: "Created file-tree change request for the node.",
+      successDescription:
+        "Created file-tree change request for the node. `create` adds a path that must not exist yet; `update` changes a path that must already exist — an `update` of a missing path is a 404 telling you to use `create` (a path an earlier `create` in the same batch adds counts as existing).",
     })
     .input(createFileTreeChangeRequestInputSchema.extend(fileTreeRefSchema.shape))
     .output(changeRequestSchema),

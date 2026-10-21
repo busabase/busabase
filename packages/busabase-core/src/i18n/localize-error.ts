@@ -12,6 +12,9 @@ const NODE_PERMISSION_PATTERN = /^Requires (read|changeRequest|write|manage) acc
 const FORM_ALREADY_EXISTS_MESSAGE =
   "A form already exists for this node. Use the update form endpoint instead.";
 const INVALID_FORM_CURSOR_MESSAGE = "The form cursor is invalid.";
+// Thrown (BAD_REQUEST) when proposing or merging the deletion of a Base's last view.
+const LAST_VIEW_DELETE_MESSAGE =
+  "A Base must keep at least one view. Create another view before deleting this one.";
 const MAX_PRESENTED_ERROR_LENGTH = 300;
 
 export function localizeCoreErrorMessage(messages: CoreI18nMessages, message: string): string {
@@ -20,6 +23,9 @@ export function localizeCoreErrorMessage(messages: CoreI18nMessages, message: st
   }
   if (message === INVALID_FORM_CURSOR_MESSAGE) {
     return messages.form.invalidCursor;
+  }
+  if (message === LAST_VIEW_DELETE_MESSAGE) {
+    return messages.base.lastViewCannotBeDeleted;
   }
   const permissionMatch = NODE_PERMISSION_PATTERN.exec(message);
   if (permissionMatch) {
