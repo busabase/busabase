@@ -1,6 +1,7 @@
 import { skipToken, useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
+import { orderViews, resolveActiveView } from "../utils/base-views";
 import {
   FIRST_RECORD_PAGE,
   fetchRecordPage,
@@ -15,7 +16,8 @@ export type BaseDisplayMode = "list" | "table";
 
 export function useBaseDetailController(slug: string) {
   const busabase = useBusabaseOrpc();
-  const [activeViewId, setActiveViewId] = useState<string | null>(null);
+  // The view the user picked. `null` = not picked yet → the Base's first view.
+  const [selectedViewId, setActiveViewId] = useState<string | null>(null);
   const [viewPickerOpen, setViewPickerOpen] = useState(false);
   const [displayMode, setDisplayMode] = useState<BaseDisplayMode>("list");
   const [actionsOpen, setActionsOpen] = useState(false);
@@ -30,6 +32,22 @@ export function useBaseDetailController(slug: string) {
     [basesQuery.data, slug],
   );
 
+  const viewsQuery = useQuery(
+    busabase && base
+      ? busabase.orpc.bases.listViews.queryOptions({ input: { baseId: base.id } })
+      : { queryKey: ["no-connection", "views", slug], queryFn: skipToken },
+  );
+  const views = useMemo(() => orderViews(viewsQuery.data ?? []), [viewsQuery.data]);
+  // Every Base has at least one saved view and opens on its first (leftmost)
+  // one — there is no unsaved "All" option. `null` only for a Base with no
+  // views at all, which then lists every record unfiltered rather than crash.
+  const activeView = resolveActiveView(views, selectedViewId);
+  const activeViewId = activeView?.id ?? null;
+  // Records wait for the view list: fetching before it arrives would load the
+  // unfiltered Base first and then refetch for the first view — a flash of the
+  // wrong rows. A failed view list still settles, falling back to all records.
+  const viewsSettled = Boolean(base) && !viewsQuery.isPending;
+
   // The active View is part of the key AND part of the request: the server
   // filters and sorts by it before computing totals and slicing pages, so a
   // different View is a different result set, not a narrowing of this one.
@@ -43,21 +61,13 @@ export function useBaseDetailController(slug: string) {
       RECORDS_PAGE_SIZE,
     ],
     queryFn:
-      busabase && base
+      busabase && base && viewsSettled
         ? ({ pageParam }: { pageParam: RecordPageParam }) =>
             fetchRecordPage(busabase.client.records, base.id, activeViewId, pageParam)
         : skipToken,
     initialPageParam: FIRST_RECORD_PAGE,
     getNextPageParam: nextRecordPageParam,
   });
-
-  const viewsQuery = useQuery(
-    busabase && base
-      ? busabase.orpc.bases.listViews.queryOptions({ input: { baseId: base.id } })
-      : { queryKey: ["no-connection", "views", slug], queryFn: skipToken },
-  );
-  const views = viewsQuery.data ?? [];
-  const activeView = views.find((view) => view.id === activeViewId) ?? null;
   const records = useMemo(() => {
     const pages = recordsQuery.data?.pages ?? [];
     // Still scoped to this Base: `records.list` may span the space when the
@@ -107,8 +117,8 @@ export function useBaseDetailController(slug: string) {
     recordsQuery,
     recordTotal,
     refresh,
-    selectedViewId: activeView?.id ?? null,
-    selectedViewLabel: activeView?.name ?? "All",
+    selectedViewId: activeViewId,
+    selectedViewLabel: activeView?.name ?? "",
     setActionsOpen,
     setActiveViewId,
     setDisplayMode,

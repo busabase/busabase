@@ -82,7 +82,7 @@ describe("fetchRecordPage", () => {
     expect(client.list).not.toHaveBeenCalled();
   });
 
-  it("omits viewId when no View is active rather than sending a blank one", async () => {
+  it("omits viewId for a Base with no views (the all-records fallback) rather than sending a blank one", async () => {
     const client = stub();
     await fetchRecordPage(client, "base_1", null, FIRST_RECORD_PAGE);
 

@@ -82,19 +82,21 @@ export const en = {
     activityTitle: "Recent activity",
     activityViewAll: "View all activity",
     activityEmptyBody: "Changes made across this workspace will show up here.",
-    emptyTitle: "Nothing here yet",
-    emptyBody:
-      "Create a Base, Doc, or Skill from the drawer — anything an agent proposes lands in your Inbox for review.",
     // The brand-new-workspace guide. Explanatory copy is shared word-for-word
     // with the web dashboard's EmptyAgentGuide so the two platforms read the
     // same; only the call to action differs (web opens Agent Skills, which this
     // app has no surface for, so it opens the create sheet instead).
     guideTitle: "Let an agent help fill this workspace",
     guideBody:
-      "Busabase can stay manual, but it is designed so agents open Change Requests and humans approve what becomes canonical.",
-    guideStructuredData: "Create structured data and seed useful examples",
-    guideChangeRequests: "Open Change Requests for review instead of writing directly",
-    guideAgentDatabase: "Add records, update fields, and evolve a Database with an AI agent",
+      "Busabase can stay manual, but it is built for agents: what they produce stays in this workspace instead of scattered chat histories, every write is on the record, and your whole team can reuse it.",
+    guideBaseDataName: "Data Base",
+    guideBaseDataDesc: "Customers, projects, and inventory in tables with fixed columns",
+    guideBaseKnowledgeName: "Knowledge Base",
+    guideBaseKnowledgeDesc: "The team's answers, findable and sourced",
+    guideBaseAppsName: "Apps Base",
+    guideBaseAppsDesc: "Internal tools built on the same data",
+    guideBaseSkillsName: "Skills Base",
+    guideBaseSkillsDesc: "A workflow saved once as a skill that any agent can run",
     guideManualHint: "Or create manually from here.",
   },
   assets: {

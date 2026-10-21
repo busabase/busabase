@@ -29,8 +29,8 @@ export function BaseDesignSections({ controller }: { controller: BaseDesignContr
         />
       </NativeSection>
 
-      <NativeSection title="Views" caption={`${controller.viewsQuery.data?.length ?? 0}`}>
-        {(controller.viewsQuery.data ?? []).map((view) => (
+      <NativeSection title="Views" caption={`${controller.views.length}`}>
+        {controller.views.map((view) => (
           <NativeRow
             key={view.id}
             title={view.name}
