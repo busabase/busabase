@@ -63,7 +63,7 @@ Add to your app's `global.css`:
   #nprogress .bar {
     background: oklch(0.646 0.222 41.116); /* Light mode */
   }
-  
+
   .dark #nprogress .bar {
     background: oklch(0.769 0.188 70.08); /* Dark mode */
   }

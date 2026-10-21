@@ -858,6 +858,11 @@ const createBase = async (
     name: node.name,
     description: node.description,
     fields: immediateFields,
+    // The package's views ARE the Base's views, in the author's order — no extra
+    // default "Grid view" in front of them. A package that ships none lets the
+    // server add the default one, so the Base still opens on a real view.
+    // (Servers that predate the flag ignore it and never add a default view.)
+    ...(node.base.views.length > 0 ? { defaultView: false } : {}),
     // A Base's schema is structure, so it is created immediately even on a
     // review-first install — the same reasoning as folders (see createFolderNode).
     // This is load-bearing, not a shortcut: a PENDING Base has no id, and without
@@ -881,6 +886,8 @@ const createBase = async (
   await stampResource(client, app, result.nodeId, node.slug, state);
   await applyAgentPrompts(client, result.nodeId, node, state);
 
+  // Created one at a time, in package order: each new view joins the end of
+  // the Base's tab order, so the first one listed is the one the Base opens on.
   for (const view of node.base.views) {
     const created = await client.views.changeRequest({
       operation: "create",

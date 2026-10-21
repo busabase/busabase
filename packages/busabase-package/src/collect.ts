@@ -396,7 +396,19 @@ const collectBase = async (
   // parses as invalid, so EVERY later `install` of it fails outright, far
   // from the export that actually produced it. Drop just that one view with
   // a warning rather than shipping a package `install` can never read.
-  const views = allViews.filter((view) => view.slug.length > 0);
+  // Exported in the Base's shared tab order, so install recreates the same
+  // order (the first view is the one the Base opens on). listViews already
+  // returns that order; the stable sort only guards a server that sends
+  // positions without sorting by them — one that predates `position` sends
+  // none, and its own order is kept as-is.
+  const views = allViews
+    .filter((view) => view.slug.length > 0)
+    .map((view, index) => ({ view, index }))
+    .sort(
+      (left, right) =>
+        (left.view.position ?? 0) - (right.view.position ?? 0) || left.index - right.index,
+    )
+    .map(({ view }) => view);
   if (views.length !== allViews.length) {
     options.warn(
       `Base "${common.slug}" has ${allViews.length - views.length} view(s) with no slug — they were dropped (predates the slug requirement; rename it in the UI to keep it).`,
