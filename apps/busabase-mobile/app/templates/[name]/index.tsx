@@ -1,4 +1,5 @@
 import { skipToken, useQuery } from "@tanstack/react-query";
+import { pickTemplateMedia } from "busabase-contract/domains/templates/media";
 import { useLocalSearchParams } from "expo-router";
 import { Bot, ExternalLink, MessageSquare, PackageOpen, Play } from "lucide-react-native";
 import { iStringParse } from "openlib/i18n/i-string";
@@ -43,6 +44,10 @@ function TemplateDetailContent() {
       ? iStringParse(template.displayName, locale)
       : template.name
     : "";
+
+  // Gallery and clip for the viewer's locale, falling back to the English
+  // defaults — the same locale the title and description are resolved with.
+  const media = template ? pickTemplateMedia(template, locale) : null;
 
   const contents = template
     ? ([
@@ -102,20 +107,20 @@ function TemplateDetailContent() {
             ) : null}
           </View>
 
-          {template.screenshots.length > 0 || template.video ? (
+          {media && (media.screenshots.length > 0 || media.video) ? (
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.shelf}
             >
-              {template.video ? (
+              {media.video ? (
                 <VideoTile
-                  src={template.video}
+                  src={media.video}
                   label={t.templates.playVideo}
-                  poster={template.screenshots[1] ?? template.screenshots[0]}
+                  poster={media.screenshots[1] ?? media.screenshots[0]}
                 />
               ) : null}
-              {template.screenshots.map((src, index) => (
+              {media.screenshots.map((src, index) => (
                 <Image
                   // biome-ignore lint/suspicious/noArrayIndexKey: the source list itself has no stable id
                   key={index}

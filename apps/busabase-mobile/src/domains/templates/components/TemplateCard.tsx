@@ -1,3 +1,4 @@
+import { pickTemplateMedia } from "busabase-contract/domains/templates/media";
 import type { TemplateCardVO } from "busabase-contract/domains/templates/types";
 import { AppWindow, Bot, FileText, Rows3, Sparkles, Table2 } from "lucide-react-native";
 import { iStringParse } from "openlib/i18n/i-string";
@@ -26,7 +27,9 @@ export function TemplateCard({ template, onPress }: TemplateCardProps) {
   const tokens = useTokens();
   const { t, locale } = useI18n();
   const [imageFailed, setImageFailed] = useState(false);
-  const [screenshot] = template.screenshots;
+  // The viewer's own locale's cover, English when the template made none —
+  // the same rule (and locale) the title and description below use.
+  const [screenshot] = pickTemplateMedia(template, locale).screenshots;
   const title = template.displayName ? iStringParse(template.displayName, locale) : template.name;
   const description = iStringParse(template.description, locale);
 
