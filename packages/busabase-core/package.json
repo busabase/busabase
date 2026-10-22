@@ -1,7 +1,7 @@
 {
   "name": "busabase-core",
   "description": "Shared Busabase open-core protocol, local store, API helpers, and dashboard components.",
-  "version": "0.97.0",
+  "version": "0.98.0",
   "private": true,
   "type": "module",
   "exports": {
@@ -24,6 +24,10 @@
     "./logic/store": {
       "types": "./src/logic/store.ts",
       "default": "./src/logic/store.ts"
+    },
+    "./logic/request-attribution": {
+      "types": "./src/logic/request-attribution.ts",
+      "default": "./src/logic/request-attribution.ts"
     },
     "./logic/node-share": {
       "types": "./src/logic/node-share.ts",
