@@ -1,7 +1,7 @@
 import { OpenAPIHandler } from "@orpc/openapi/fetch";
 import { runWithBusabaseContext, runWithLocalContext } from "busabase-core/context";
 import { resolveOssFilePreviewRuntimeConfig } from "busabase-core/domains/filetree/preview-config";
-import { withDeclaredPlaybook } from "busabase-core/domains/playbooks/logic/playbook-attribution";
+import { withRequestAttribution } from "busabase-core/logic/request-attribution";
 import { getBusabaseOpenApiSpec } from "busabase-core/openapi";
 import { BUSABASE_API_ALLOW_HEADERS, BUSABASE_API_METHODS } from "busabase-core/openapi/cors";
 import { encodeBusabaseOpenApiError } from "busabase-core/openapi/error-envelope";
@@ -47,9 +47,10 @@ async function handle(request: Request) {
       embedOrigin: url.origin,
       aclOverride: resolveRelayPermissionContext(request.headers),
     },
-    // Only a request carrying `x-busabase-playbook` gets any source provenance
-    // here; every other local request stays exactly as before (no provenance).
-    () => withDeclaredPlaybook(request, run),
+    // Only a write carrying `x-busabase-playbook` / `x-busabase-agent` gets any
+    // source provenance here; every other local request stays exactly as before
+    // (no provenance). Cloud runs the same function, so both record alike.
+    () => withRequestAttribution(request, run),
   );
 }
 

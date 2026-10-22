@@ -52,19 +52,33 @@ async function sweep(): Promise<void> {
   if (pruned > 0) console.info(`[agents] pruned ${pruned} expired session(s)`);
 }
 
+// Boot-time housekeeping must not take the process's unhandled-rejection path
+// when the database cannot start (e.g. a migration failed): the database layer
+// already reports why, and every request surfaces the error on its own.
+const reportSkipped = (job: string) => (error: unknown) => {
+  console.error(
+    `[agents] ${job} skipped: ${error instanceof Error ? error.message : String(error)}`,
+  );
+};
+
 void resumeCloudTunnelOnBoot();
 
-void endOrphanedLocalSessions().then((ended) => {
-  if (ended > 0) console.info(`[agents] marked ${ended} session(s) ended after restart`);
-});
+void endOrphanedLocalSessions()
+  .then((ended) => {
+    if (ended > 0) console.info(`[agents] marked ${ended} session(s) ended after restart`);
+  })
+  .catch(reportSkipped("ending sessions orphaned by the restart"));
 
-void sweep();
+void sweep().catch(reportSkipped("pruning expired sessions"));
 
 // `globalThis`-guarded for the same reason the live-session map is: Next's
 // dev-mode re-evaluation would otherwise stack a new timer per reload. `unref`
 // so a pending sweep never keeps the process alive on shutdown.
 const globalWithSweep = globalThis as GlobalWithSweep;
 if (!globalWithSweep.__busabaseAgentSweepTimer) {
-  globalWithSweep.__busabaseAgentSweepTimer = setInterval(() => void sweep(), SWEEP_INTERVAL_MS);
+  globalWithSweep.__busabaseAgentSweepTimer = setInterval(
+    () => void sweep().catch(reportSkipped("pruning expired sessions")),
+    SWEEP_INTERVAL_MS,
+  );
   globalWithSweep.__busabaseAgentSweepTimer.unref();
 }
