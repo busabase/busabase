@@ -1,4 +1,4 @@
-FROM node:24.18.0-bookworm AS base
+FROM node:24.22.1-bookworm AS base
 ENV PNPM_HOME=/root/.local/share/pnpm \
     PATH=/root/.local/share/pnpm:$PATH \
     NEXT_TELEMETRY_DISABLED=1
@@ -63,7 +63,7 @@ RUN set -e; \
     POSTGRES_VERSION=$(node -pe "const p=require('$APP_JSON'); (p.devDependencies?.postgres || p.dependencies?.postgres || '').replace(/^[^0-9]*/, '')"); \
     pnpm add drizzle-kit@${DRIZZLE_VERSION} drizzle-orm@${DRIZZLE_ORM_VERSION} postgres@${POSTGRES_VERSION} --save-prod --allow-build=esbuild
 
-FROM node:24.18.0-bookworm-slim AS runner
+FROM node:24.22.1-bookworm-slim AS runner
 ENV NODE_ENV=production \
     PORT=15419 \
     HOSTNAME=0.0.0.0 \
