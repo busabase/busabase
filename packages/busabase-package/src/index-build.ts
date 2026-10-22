@@ -14,7 +14,10 @@
  *
  * Spec: `apps/busabase/content/spec/template-center.md` §6.4.
  */
-import type { TemplateRiskLevel } from "busabase-contract/domains/package/template";
+import type {
+  TemplateLocales,
+  TemplateRiskLevel,
+} from "busabase-contract/domains/package/template";
 import type { iString } from "openlib/i18n/i-string";
 import { type DiscoveredPackage, discoverPackages } from "./discover";
 import type { PackageFiles } from "./layout-read";
@@ -39,6 +42,13 @@ export interface TemplateIndexEntry {
    * the screenshots — clips are Git LFS and raw.githubusercontent serves the
    * pointer file rather than the bytes. */
   video?: string;
+  /**
+   * Per-locale `screenshots` / `video`, package-relative like the defaults and
+   * resolved the same way (screenshots on the raw host, clips on the LFS media
+   * host). Absent when the package declares none, so a catalog with no
+   * localized media is byte-identical to one built before this field existed.
+   */
+  locales?: TemplateLocales;
   /** Ready-made prompts an installed app suggests. */
   agentPrompts: string[];
   version?: string;
@@ -86,6 +96,7 @@ const toEntry = (found: DiscoveredPackage, airapps: number): TemplateIndexEntry 
   tags: found.tags ?? [],
   screenshots: found.screenshots,
   ...(found.video ? { video: found.video } : {}),
+  ...(found.locales ? { locales: found.locales } : {}),
   agentPrompts: found.agentPrompts ?? [],
   ...(found.version ? { version: found.version } : {}),
   ...(found.author ? { author: found.author } : {}),

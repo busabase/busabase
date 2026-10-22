@@ -150,6 +150,33 @@ describe("discoverPackages", () => {
     expect(entry?.risk).toBe("read-only");
   });
 
+  it("carries per-locale media through, and omits locales when none are declared", () => {
+    const files = skillsRepo({
+      "skills/kelly-email/busabase.json": JSON.stringify({
+        format: PACKAGE_FORMAT,
+        name: "kelly-email",
+        description: "The kelly-email desk.",
+        template: {
+          category: "ops",
+          screenshots: ["assets/screenshots/cover.webp"],
+          locales: {
+            "zh-CN": { screenshots: ["assets/screenshots/cover-zh-CN.webp"] },
+            ja: { screenshots: [] },
+          },
+        },
+      }),
+    });
+    const found = discoverPackages(files);
+    const email = found.find((entry) => entry.name === "kelly-email");
+    expect(email?.screenshots).toEqual(["assets/screenshots/cover.webp"]);
+    // `ja` declared nothing usable, so it would only ever fall back — dropped.
+    expect(email?.locales).toEqual({
+      "zh-CN": { screenshots: ["assets/screenshots/cover-zh-CN.webp"] },
+    });
+    const crm = found.find((entry) => entry.name === "kelly-crm");
+    expect(crm && Object.hasOwn(crm, "locales")).toBe(false);
+  });
+
   it("leaves risk undefined for an unrecognized declared value", () => {
     const files = skillsRepo({
       "skills/kelly-email/SKILL.md": skillMd("kelly-email", "review-first"),

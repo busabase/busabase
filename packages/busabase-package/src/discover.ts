@@ -18,8 +18,12 @@
  * Spec: `apps/busabase/content/spec/template-center.md` §6.2a.
  */
 
-import type { TemplateRiskLevel } from "busabase-contract/domains/package/template";
+import type {
+  TemplateLocales,
+  TemplateRiskLevel,
+} from "busabase-contract/domains/package/template";
 import { PACKAGE_MANIFEST_FILENAME } from "busabase-contract/domains/package/types";
+import { parseTemplateLocales } from "busabase-contract/domains/templates/media";
 import type { iString } from "openlib/i18n/i-string";
 import { type PackageFiles, readPackageTree } from "./layout-read";
 import { countTree, type PlanCounts } from "./plan";
@@ -55,6 +59,12 @@ export interface DiscoveredPackage {
   screenshots: string[];
   /** Package-relative demo clip path, when the manifest declares one. */
   video?: string;
+  /**
+   * Per-locale `screenshots` / `video`, package-relative, when the manifest
+   * declares any. Empty entries are dropped here so the catalog never carries
+   * a locale that would only ever fall back to the defaults.
+   */
+  locales?: TemplateLocales;
   /** Manifest tags merged with the template's own — what a catalog filters on. */
   tags: string[];
   agentPrompts: string[];
@@ -110,6 +120,7 @@ export const discoverPackages = (files: PackageFiles): DiscoveredPackage[] => {
     const validation = validateTemplate(tree);
     // A package that never opted in is not "failing" — see `templateErrors`.
     const claimsTemplate = Boolean(tree.rootSkill) || Boolean(tree.manifest.template);
+    const locales = parseTemplateLocales(tree.manifest.template?.locales);
     found.push({
       subdir,
       name: tree.manifest.name,
@@ -123,6 +134,7 @@ export const discoverPackages = (files: PackageFiles): DiscoveredPackage[] => {
       ...(validation.risk ? { risk: validation.risk } : {}),
       screenshots: tree.manifest.template?.screenshots ?? [],
       ...(tree.manifest.template?.video ? { video: tree.manifest.template.video } : {}),
+      ...(locales ? { locales } : {}),
       // Both sets: the manifest's own tags describe the package, the template's
       // describe the app. A catalog filters on one list, not two.
       tags: [...new Set([...tree.manifest.tags, ...(tree.manifest.template?.tags ?? [])])],

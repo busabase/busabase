@@ -29,7 +29,14 @@ STORAGE_DSN="r2://accesskey:secretkey@account.r2.cloudflarestorage.com/mybucket"
 - `accessKey:secretKey` - 访问凭证
 - `@endpoint[:port]` - 服务器地址（port 可选）
 - `/bucket` - Bucket 名称
-- `?params` - 可选参数: `ssl=false`, `region=us-east-1`, `force_path_style=true`, `auto_create=true`
+- `?params` - 可选参数: `ssl=true|false`, `region=us-east-1`, `force_path_style=true`, `auto_create=true`, `internal_endpoint=<url>`
+
+`ssl` 是三态开关：不写时跟随 provider 默认值（`minio://` 为 `false`，`s3://`/`r2://` 为 `true`），
+显式 `ssl=true` / `ssl=false` 覆盖默认值。注意它决定的是**下发到浏览器的预签名 URL 的协议**：
+HTTPS 站点上如果解析出 `http://`，上传会被浏览器当作 Mixed Content 直接拦截，且服务端不会报错。
+
+`internal_endpoint` 用于服务端回源与公网签名地址分离的场景（自托管把对象存储挂在同域子路径下时，
+应用自身的管理类调用可以走内网，而预签名 URL 仍按公网 host 签发）。
 
 ### 2. 使用便捷函数
 

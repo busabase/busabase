@@ -145,8 +145,18 @@ export const parseStorageUrl = (url: string): StorageConfig => {
   const defaults =
     providerDefaults[provider as keyof typeof providerDefaults] || providerDefaults.s3;
 
-  // 解析 SSL 配置
-  const useSSL = urlObj.searchParams.get("ssl") !== "false" && defaults.defaultSSL;
+  // 解析 SSL 配置。
+  //
+  // Three states, not two: an explicit `ssl=true` must be able to turn TLS ON
+  // for a provider whose default is off (`minio://`). Previously the flag was
+  // only ever read as "is it exactly the string 'false'?", so `ssl=true` was
+  // silently ignored and the endpoint stayed `http://`. That is invisible on
+  // the server side (it signs and fetches fine over plain HTTP), but the
+  // presigned URLs handed to the browser are then `http://` too — and an HTTPS
+  // deployment has every upload blocked as Mixed Content, with no error that
+  // points back at STORAGE_URL.
+  const sslParam = urlObj.searchParams.get("ssl");
+  const useSSL = sslParam === null ? defaults.defaultSSL : sslParam !== "false";
 
   // 构建 endpoint
   let endpoint: string | undefined;

@@ -6,7 +6,7 @@
 
 import { PACKAGE_FORMAT } from "busabase-contract/domains/package/types";
 import { describe, expect, it } from "vitest";
-import { buildTemplateIndex } from "./index-build";
+import { buildTemplateIndex, renderTemplateIndex } from "./index-build";
 import type { PackageFiles } from "./layout-read";
 
 const utf8 = (text: string) => Buffer.from(text, "utf8");
@@ -86,6 +86,38 @@ describe("buildTemplateIndex", () => {
       en: "The gated desk.",
       "zh-CN": "受限工作台。",
     });
+  });
+
+  it("writes per-locale media into templates.json, and omits the key when none is declared", () => {
+    const locales = {
+      "zh-CN": {
+        screenshots: ["assets/screenshots/cover-zh-CN.webp"],
+        video: "assets/recordings/gated-zh-CN.mp4",
+      },
+      ja: { video: "assets/recordings/gated-ja.mp4" },
+    };
+    const localizedMedia = JSON.stringify({
+      format: PACKAGE_FORMAT,
+      name: "gated",
+      description: "The gated desk.",
+      template: {
+        category: "ops",
+        screenshots: ["assets/screenshots/cover.webp"],
+        video: "assets/recordings/gated.mp4",
+        locales,
+      },
+    });
+    const index = buildTemplateIndex(repo({ "templates/gated/busabase.json": localizedMedia }), {
+      repo: "busabase/templates",
+      ref: "main",
+    });
+    expect(index.templates[0].screenshots).toEqual(["assets/screenshots/cover.webp"]);
+    expect(index.templates[0].video).toBe("assets/recordings/gated.mp4");
+    expect(index.templates[0].locales).toEqual(locales);
+    expect(JSON.parse(renderTemplateIndex(index)).templates[0].locales).toEqual(locales);
+
+    const plain = buildTemplateIndex(repo(), { repo: "busabase/templates", ref: "main" });
+    expect(Object.hasOwn(plain.templates[0], "locales")).toBe(false);
   });
 
   it("carries a locale-keyed manifest displayName onto the index entry, and omits it when absent", () => {
