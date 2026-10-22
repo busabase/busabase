@@ -474,6 +474,91 @@ describe("busabase-cli commands", () => {
     ]);
   });
 
+  describe("agent client attribution", () => {
+    const AGENT_VARS = [
+      "BUSABASE_AGENT",
+      "CLAUDECODE",
+      "CODEX_SESSION_ID",
+      "CODEX_THREAD_ID",
+      "OPENCODE",
+      "GEMINI_CLI",
+      "PI_CODING_AGENT",
+      "AI_AGENT",
+    ];
+    // This suite itself usually runs inside an agent: start every test from a clean slate.
+    const clearAgentEnv = () => {
+      for (const name of AGENT_VARS) vi.stubEnv(name, "");
+    };
+    afterEach(() => vi.unstubAllEnvs());
+
+    const captureAgent = () => {
+      const seen: Array<{ method: string; agent: string | null }> = [];
+      global.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = input instanceof Request ? input : new Request(input, init);
+        seen.push({ method: request.method, agent: request.headers.get("x-busabase-agent") });
+        return jsonResponse({ id: "crq_9", status: "in_review" });
+      }) as typeof fetch;
+      vi.spyOn(console, "log").mockImplementation(() => undefined);
+      return seen;
+    };
+
+    const typedWrite = [
+      "--base-url",
+      "http://localhost:15419",
+      "--output",
+      "json",
+      "records",
+      "update-change-request",
+      "--record-id",
+      "rec_1",
+      "--fields-json",
+      '{"title":"Updated"}',
+    ];
+    const rawWrite = [
+      "--base-url",
+      "http://localhost:15419",
+      "api",
+      "--method",
+      "post",
+      "--path",
+      "/records/rec_1/change-requests",
+      "--body-json",
+      '{"operation":"update","fields":{"title":"x"}}',
+    ];
+
+    it("sends the detected agent on typed and raw requests", async () => {
+      clearAgentEnv();
+      vi.stubEnv("CODEX_SESSION_ID", "019a-session");
+      const seen = captureAgent();
+      expect(await runCli(typedWrite)).toBe(0);
+      expect(await runCli(rawWrite)).toBe(0);
+      expect(seen).toEqual([
+        { method: "POST", agent: "codex" },
+        { method: "POST", agent: "codex" },
+      ]);
+    });
+
+    it("BUSABASE_AGENT overrides detection", async () => {
+      clearAgentEnv();
+      vi.stubEnv("CLAUDECODE", "1");
+      vi.stubEnv("BUSABASE_AGENT", "Night Shift Bot");
+      const seen = captureAgent();
+      expect(await runCli(typedWrite)).toBe(0);
+      expect(seen).toEqual([{ method: "POST", agent: "night-shift-bot" }]);
+    });
+
+    it("sends no header outside an agent", async () => {
+      clearAgentEnv();
+      const seen = captureAgent();
+      expect(await runCli(typedWrite)).toBe(0);
+      expect(await runCli(rawWrite)).toBe(0);
+      expect(seen).toEqual([
+        { method: "POST", agent: null },
+        { method: "POST", agent: null },
+      ]);
+    });
+  });
+
   describe("--playbook attribution", () => {
     const originalPlaybookEnv = process.env.BUSABASE_PLAYBOOK;
     afterEach(() => {
