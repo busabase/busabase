@@ -24,6 +24,7 @@ import {
   Option,
   type OptionValues,
 } from "commander";
+import { agentClientHeaders } from "./agent-client.js";
 import {
   activateLoggedInProfile,
   collectProfileStatus,
@@ -205,6 +206,9 @@ function resolveConfig(
       file.BUSABASE_SPACE_ID,
     sourceChannel: "cli",
     playbook: resolvePlaybook(opts.playbook as string | undefined, strict),
+    // `x-busabase-agent`: which agent client (Claude Code, Codex…) is running
+    // this CLI, so a key shared by several agents still says who did what.
+    headers: agentClientHeaders(process.env),
     output: (opts.output as OutputFormat | undefined) ?? configuredOutput() ?? "text",
     // One wrapper serves the typed client (`createBusabaseClient` takes a
     // `fetch`) and `rawFetch`, so health / openapi / `api` retry the same way
@@ -475,6 +479,7 @@ async function rawFetch(
       ...(config.spaceId ? { "x-busabase-space": config.spaceId } : {}),
       "x-busabase-channel": "cli",
       ...(config.playbook ? { [BUSABASE_PLAYBOOK_HEADER]: config.playbook } : {}),
+      ...(typeof config.headers === "object" ? config.headers : {}),
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
