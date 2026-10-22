@@ -139,6 +139,7 @@ pnpm --filter busabase dev
 | **Agent Skill** | ワークスペースの手順に従える coding agent / ローカル CLI |
 | **MCP** | 型付きのワークスペース操作が必要なツール対応エージェント / IDE |
 | **OpenAPI / CLI** | アプリ、スクリプト、自動化、独自エージェント |
+| **SDK** | TypeScript（[`busabase-sdk`](https://www.npmjs.com/package/busabase-sdk)）と Python（[`pip install busabase`](https://pypi.org/project/busabase/)）のアプリ、スクリプト、ノートブック |
 | **Agents view (ACP)** | ツール操作と権限確認をインラインで表示する対話セッション |
 
 ガイド：[Claude Code](./claude-code.md) · [DeepSeek Harness](./deepseek-harness.md) · [Bring Your Own Agent](./bring-your-agent.md)。サイドバーの **Agent Skills** を開くと、起動中のインスタンスの MCP エンドポイントと OpenAPI spec（`/api/v1/doc`）を確認できます。[Glama の MCP ディレクトリ](https://glama.ai/mcp/connectors/com.busabase/busabase)にも掲載されています。
