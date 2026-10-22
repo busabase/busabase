@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { NodeDetailVO } from "busabase-contract/contract/node-detail-schemas";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { CoreI18nProvider, fmt } from "../../../i18n";
 import { coreMessagesByLocale } from "../../../i18n/catalog";
 import { isPinnableNode } from "../../dashboard/components/side-panel-sources";
@@ -65,6 +65,8 @@ const orpc = {
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
+  Reflect.deleteProperty(navigator, "userActivation");
   window.history.replaceState(null, "", "/");
 });
 
@@ -92,7 +94,9 @@ describe("HtmlDetailView preview", () => {
         "inactive",
       );
       const frame = screen.getByTitle(fmt(messages.previewFrame, { name: detail.node.name }));
-      expect(frame.getAttribute("srcdoc")).toBe("<main>你好</main>");
+      expect(frame.getAttribute("srcdoc")).toContain("<main>你好</main>");
+      expect(frame.getAttribute("sandbox")).toContain("allow-popups-to-escape-sandbox");
+      expect(frame.getAttribute("sandbox")).not.toContain("allow-same-origin");
       expect(container.querySelectorAll("iframe")).toHaveLength(1);
       expect(screen.queryByRole("textbox", { name: messages.htmlSource })).toBeNull();
     },
@@ -151,14 +155,14 @@ describe("HtmlDetailView preview", () => {
       screen
         .getByTitle(fmt(messages.previewFrame, { name: detail.node.name }))
         .getAttribute("srcdoc"),
-    ).toBe("<main>未保存の変更</main>");
+    ).toContain("<main>未保存の変更</main>");
 
     rerender(view(secondDetail.node.id));
 
     const frame = await screen.findByTitle(
       fmt(messages.previewFrame, { name: secondDetail.node.name }),
     );
-    expect(frame.getAttribute("srcdoc")).toBe(secondDetail.document.source);
+    expect(frame.getAttribute("srcdoc")).toContain(secondDetail.document.source);
     expect(container.querySelectorAll("iframe")).toHaveLength(1);
     expect(screen.getByRole("tab", { name: messages.preview }).getAttribute("data-state")).toBe(
       "active",
@@ -222,6 +226,56 @@ describe("HtmlDetailView preview", () => {
 
   it("registers HTML as a pinnable side-panel node", () => {
     expect(isPinnableNode("html")).toBe(true);
+  });
+
+  it("accepts only the active opaque preview's bridge during a user gesture", async () => {
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    const activation = { isActive: false };
+    Object.defineProperty(navigator, "userActivation", { configurable: true, value: activation });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { unmount } = render(
+      <QueryClientProvider client={client}>
+        <DashboardVisitorProvider visitorKind="anonymous">
+          <HtmlDetailView orpc={orpc} slug="html-1" />
+        </DashboardVisitorProvider>
+      </QueryClientProvider>,
+    );
+    const frame = await screen.findByTitle(
+      fmt(coreMessagesByLocale.en.richNodes.previewFrame, { name: detail.node.name }),
+    );
+    const sessionId = /"sessionId":"([^"]+)"/.exec(frame.getAttribute("srcdoc") ?? "")?.[1];
+    expect(sessionId).toBeTruthy();
+    const message = {
+      type: "busabase:html-preview:navigate",
+      sessionId,
+      href: "https://example.com/guide",
+    };
+    const send = (overrides: MessageEventInit = {}) =>
+      window.dispatchEvent(
+        new MessageEvent("message", {
+          source: (frame as HTMLIFrameElement).contentWindow,
+          origin: "null",
+          data: message,
+          ...overrides,
+        }),
+      );
+    send();
+    expect(open).not.toHaveBeenCalled();
+    activation.isActive = true;
+    send({ source: window });
+    send({ origin: window.location.origin });
+    send({ data: { ...message, sessionId: "expired" } });
+    send({ data: { ...message, href: "javascript:alert(1)" } });
+    expect(open).not.toHaveBeenCalled();
+    send();
+    expect(open).toHaveBeenCalledExactlyOnceWith(
+      "https://example.com/guide",
+      "_blank",
+      "noopener,noreferrer",
+    );
+    unmount();
+    send();
+    expect(open).toHaveBeenCalledTimes(1);
   });
 
   it("keeps source read-only and write actions hidden for anonymous visitors", async () => {

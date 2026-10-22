@@ -27,6 +27,11 @@ import {
  */
 const WorkbenchLinkContext = createContext<WorkbenchLinkResolver | undefined>(undefined);
 
+/** HTML previews need the same host-owned space check before document navigation. */
+export function useWorkbenchLinkResolver(): WorkbenchLinkResolver | undefined {
+  return useContext(WorkbenchLinkContext);
+}
+
 export function WorkbenchLinkProvider({
   children,
   resolveWorkbenchLink,

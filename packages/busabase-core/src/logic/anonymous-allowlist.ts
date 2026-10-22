@@ -4,7 +4,7 @@
  *
  * Why this exists at all: busabase-core's node ACL is per-node, but a large part
  * of the RPC surface is space-scoped only — `dump.*`, `vault.*`, `webhooks.*`,
- * `assets.*`, `changeRequests.*`, `auditEvents.*`, `comments.*`, `activity.*`,
+ * `assets.list`, `changeRequests.*`, `auditEvents.*`, `comments.*`, `activity.*`,
  * `agent.*`, `auth.verify` consult NO node ACL whatsoever. Reaching any one of
  * them as an anonymous visitor is a full-space data leak, not a scoped one. So
  * the anonymous surface cannot be "whatever isn't obviously dangerous": it has
@@ -60,13 +60,20 @@ const ANONYMOUS_READ_ALLOWLIST: ReadonlySet<string> = new Set([
   // Reachability alone is NOT the whole gate here: merging four procedures into
   // one collapsed a distinction this list used to make by procedure name —
   // `fileTrees.get` was deliberately absent, so a public link could never be
-  // used to read a Skill/Drive/AirApp's source. `ANONYMOUS_READABLE_NODE_TYPES`
+  // used to read a file tree's source. The registry's public node-type policy
   // below carries that boundary, and `logic/node-detail.ts` enforces it on the
   // RESOLVED node type before any hydration happens.
   "nodes.get",
   // Lightweight route guard. Active rows still pass through the public-share
   // ACL; archived rows deliberately collapse to `unavailable`.
   "nodes.resolveRouteState",
+  // Public Skill/Drive file browsing. The procedure resolves the actual node
+  // through the ACL and applies the same public type gate as nodes.get BEFORE
+  // reading bytes. AirApp sources stay available only to the runtime relay.
+  "fileTrees.readFile",
+  // Text File previews. Asset permission follows at least one visible mount
+  // on a public-detail node; AirApp-only and unmounted assets remain denied.
+  "assets.readTextLines",
   "bases.get",
   // Both active and archived listings filter through buildNodeVisibilityExists.
   "bases.list",
@@ -161,7 +168,7 @@ const ANONYMOUS_SUBMIT_ALLOWLIST: ReadonlySet<string> = new Set(["forms.submit"]
  * The node registry is the single source of truth for this decision. New and
  * plugin-provided types still fail closed because `publicAccess` is opt-in;
  * setting it is the deliberate review point for public behavior. Only `detail`
- * and `submit` enter this hydration gate; runtime and source types stay out.
+ * and `submit` enter this hydration gate; isolated runtime types stay out.
  */
 /** Whether an anonymous visitor may read this node type's detail at all. */
 export const isAnonymousReadableNodeType = (type: string): boolean =>

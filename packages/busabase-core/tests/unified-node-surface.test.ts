@@ -99,8 +99,8 @@ describe("unified Node surface — oRPC integration", () => {
       name: "Shared Skill",
     });
 
-    // Public shares used by the anonymous-boundary block below. BOTH are
-    // shared, so a refusal there can only come from the node-type rule.
+    // Public shares used by the anonymous-boundary block below. Both types
+    // deliberately expose their read-only detail when their node is shared.
     const publicDoc = await client.docs.create({
       autoMerge: true,
       slug: "public-doc",
@@ -263,7 +263,7 @@ describe("unified Node surface — oRPC integration", () => {
       runWithAnonymousContext({}, () =>
         client.nodes.resolveRouteState({ nodeId: publicSkillId, type: "skill" }),
       ),
-    ).resolves.toEqual({ status: "unavailable" });
+    ).resolves.toEqual({ status: "active", nodeId: publicSkillId });
 
     const created = await client.docs.create({
       autoMerge: true,
@@ -529,9 +529,9 @@ describe("unified Node surface — oRPC integration", () => {
   //
   // Merging four procedures into one collapsed a distinction the allowlist used
   // to make by procedure NAME: `folders.get`/`docs.get`/`files.get` were public,
-  // `fileTrees.get` deliberately was not. These prove the boundary survived the
-  // merge — on the node TYPE instead — and that it is enforced through the real
-  // router, not only in the pure allowlist helper.
+  // `fileTrees.get` deliberately was not. Public-detail capability now covers
+  // Skill/Drive too; the ACL must still refuse every unshared node before its
+  // content is hydrated.
 
   it("lets an anonymous visitor open a publicly shared Doc", async () => {
     const detail = await runWithAnonymousContext({}, () =>
@@ -549,11 +549,10 @@ describe("unified Node surface — oRPC integration", () => {
     ).rejects.toThrow(/Node not found/);
   });
 
-  it("refuses a publicly shared Skill to an anonymous visitor", async () => {
-    // A public link must never become a way to read an agent's source.
+  it("opens a deliberately shared Skill to an anonymous visitor", async () => {
     await expect(
       runWithAnonymousContext({}, () => client.nodes.get({ nodeId: publicSkillId })),
-    ).rejects.toThrow(/anonymous/i);
+    ).resolves.toMatchObject({ type: "skill", node: { id: publicSkillId } });
   });
 
   it("still serves that same Skill to a member", async () => {

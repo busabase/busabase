@@ -5,10 +5,10 @@ import {
   createFileTreeNode,
   listFileTreeFiles,
   listFileTreeKinds,
-  readFileTreeFile,
   resolveFileTreeKind,
 } from "./handlers";
 import { getFilePreviewConfiguration, prepareDriveFilePreview } from "./logic/file-preview";
+import { readVisitorFileTreeFile } from "./logic/file-read";
 // Registers skill/drive/airapp as file-tree kinds (side-effect import).
 import "./kinds";
 
@@ -33,13 +33,7 @@ export const fileTreeRouter = {
   listFiles: os.fileTrees.listFiles.handler(async ({ input }) =>
     listFileTreeFiles(await resolveFileTreeKind(input.nodeId, input.type), input.nodeId),
   ),
-  readFile: os.fileTrees.readFile.handler(async ({ input }) =>
-    readFileTreeFile(
-      await resolveFileTreeKind(input.nodeId, input.type),
-      input.nodeId,
-      input.filePath,
-    ),
-  ),
+  readFile: os.fileTrees.readFile.handler(({ input }) => readVisitorFileTreeFile(input)),
   createChangeRequest: os.fileTrees.createChangeRequest.handler(async ({ input }) => {
     const { nodeId, type, ...rest } = input;
     return createFileTreeChangeRequest(await resolveFileTreeKind(nodeId, type), nodeId, rest);

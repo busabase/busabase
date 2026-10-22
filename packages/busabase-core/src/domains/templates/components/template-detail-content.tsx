@@ -1,3 +1,4 @@
+import { pickTemplateMedia } from "busabase-contract/domains/templates/media";
 import type { TemplateCardVO } from "busabase-contract/domains/templates/types";
 import { Badge } from "kui/badge";
 import { ExternalLink, MessageSquare, PackageOpen } from "lucide-react";
@@ -70,7 +71,8 @@ interface TemplateDetailContentProps {
   labels?: TemplateDetailLabels;
   actions?: ReactNode;
   /** See the identical note on `TemplateCardSummaryProps` — a prop, not a
-   * hook, because this renders in a Server Component tree too. */
+   * hook, because this renders in a Server Component tree too. Also picks the
+   * gallery and clip for this locale, falling back to the English defaults. */
   descriptionLocale?: LocaleType;
 }
 
@@ -96,7 +98,8 @@ export function TemplateDetailContent({
     [labels.files, stats.files],
     [labels.folders, stats.folders],
   ] as const;
-  const screenshots = template.screenshots.map((src, index) => ({
+  const media = pickTemplateMedia(template, descriptionLocale);
+  const screenshots = media.screenshots.map((src, index) => ({
     src,
     alt: `${title} ${labels.screenshot(index + 1)}`,
   }));
@@ -136,14 +139,17 @@ export function TemplateDetailContent({
       {/* The clip lives in the shelf, so the shelf has to render for a template
           that has one even with no screenshots — otherwise a declared clip
           silently disappears. */}
-      {screenshots.length > 0 || template.video ? (
+      {screenshots.length > 0 || media.video ? (
         <TemplateScreenshotShowcase
-          key={template.id}
+          // Keyed by locale too: switching language can swap in a gallery of a
+          // different length, and the shelf's current/preview index must not
+          // outlive the list it indexed.
+          key={`${template.id}:${descriptionLocale}`}
           screenshots={screenshots}
           videoTile={
-            template.video ? (
+            media.video ? (
               <TemplateVideoPreview
-                src={template.video}
+                src={media.video}
                 // The first NON-cover shot, not the cover. The clip tile sits
                 // directly beside the cover tile, and postering it with the
                 // same image makes the shelf look like it is showing one

@@ -5,13 +5,16 @@ import {
   type ApiKeyPermissionLevel,
   hasApiKeyLevel,
 } from "busabase-contract/access-control/api-key-level";
+import { isPubliclyReadableNodeType } from "busabase-contract/domains";
 import { and, eq } from "drizzle-orm";
 import {
   getContextCredentialPermissionCeiling,
   getContextSpaceId,
+  isAnonymousVisitor,
   resolveActorId,
 } from "../../../context";
 import { getDb } from "../../../db";
+import { busabaseNodes } from "../../../db/schema";
 import { hasNodePermission, hasWorkspacePermission } from "../../../logic/node-acl";
 import { busabaseAssets, busabaseAssetUsages } from "../schema/assets";
 
@@ -38,12 +41,19 @@ export const assertAssetPermission = async (
   if (!asset) throw assetNotFound(assetId);
 
   const usages = await db
-    .select({ nodeId: busabaseAssetUsages.nodeId })
+    .select({
+      nodeId: busabaseAssetUsages.nodeId,
+      nodeType: busabaseNodes.type,
+      archivedAt: busabaseNodes.archivedAt,
+      deletedAt: busabaseNodes.deletedAt,
+    })
     .from(busabaseAssetUsages)
+    .innerJoin(busabaseNodes, eq(busabaseNodes.id, busabaseAssetUsages.nodeId))
     .where(and(eq(busabaseAssetUsages.assetId, assetId), eq(busabaseAssetUsages.spaceId, spaceId)));
   const nodeIds = [...new Set(usages.map((usage) => usage.nodeId))];
   if (nodeIds.length === 0) {
     const creatorMayStageForChangeRequest =
+      !isAnonymousVisitor() &&
       asset.createdBy === resolveActorId("local-producer") &&
       hasApiKeyLevel("changeRequest", required) &&
       hasApiKeyLevel(getContextCredentialPermissionCeiling(), required);
@@ -58,6 +68,21 @@ export const assertAssetPermission = async (
 
   const visible = new Set<string>();
   for (const nodeId of nodeIds) {
+    // Public runtime access does not grant generic access to AirApp source
+    // assets. A shared asset may still be read through a legitimate public
+    // File/Drive/Doc mount; use the actual mount type and active state, never a
+    // caller hint. Public scopes can remain materialized on archived rows.
+    if (
+      isAnonymousVisitor() &&
+      !usages.some(
+        (usage) =>
+          usage.nodeId === nodeId &&
+          !usage.archivedAt &&
+          !usage.deletedAt &&
+          isPubliclyReadableNodeType(usage.nodeType),
+      )
+    )
+      continue;
     if (await hasNodePermission(nodeId, required, undefined, db)) visible.add(nodeId);
   }
   if (required === "read" ? visible.size === 0 : visible.size !== nodeIds.length) {

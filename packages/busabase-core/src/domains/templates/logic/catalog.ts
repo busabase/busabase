@@ -1,6 +1,10 @@
 import "server-only";
 
-import { parseTemplateRisk } from "busabase-contract/domains/package/template";
+import {
+  parseTemplateRisk,
+  type TemplateLocales,
+} from "busabase-contract/domains/package/template";
+import { parseTemplateLocales } from "busabase-contract/domains/templates/media";
 import type { TemplateCardVO, TemplateCatalogVO } from "busabase-contract/domains/templates/types";
 
 /**
@@ -48,6 +52,12 @@ interface RawTemplate {
   tags?: string[];
   screenshots?: string[];
   video?: string;
+  /**
+   * Untrusted, and absent from every catalog built before the field existed —
+   * normalized through `parseTemplateLocales`, which ignores anything malformed
+   * rather than throwing.
+   */
+  locales?: unknown;
   agentPrompts?: string[];
   version?: string;
   author?: string;
@@ -103,9 +113,37 @@ const screenshotUrl = (repo: string, ref: string, subdir: string, file: string):
 const videoUrl = (repo: string, ref: string, subdir: string, file: string): string =>
   `https://media.githubusercontent.com/media/${repo}/${ref}/${subdir ? `${subdir}/` : ""}${file}`;
 
+/**
+ * Each locale's media, resolved exactly like the defaults: screenshots on the
+ * raw host, the clip on the LFS media host. `undefined` when nothing usable is
+ * declared, so a card from an old-shape catalog carries no `locales` key at all
+ * and is identical to what this server produced before the field existed.
+ */
+const localeUrls = (
+  raw: unknown,
+  repo: string,
+  ref: string,
+  subdir: string,
+): TemplateLocales | undefined => {
+  const locales = parseTemplateLocales(raw);
+  if (!locales) return undefined;
+  return Object.fromEntries(
+    Object.entries(locales).map(([locale, media]) => [
+      locale,
+      {
+        ...(media.screenshots
+          ? { screenshots: media.screenshots.map((file) => screenshotUrl(repo, ref, subdir, file)) }
+          : {}),
+        ...(media.video ? { video: videoUrl(repo, ref, subdir, media.video) } : {}),
+      },
+    ]),
+  );
+};
+
 const toCard = (raw: RawTemplate, repo: string, ref: string): TemplateCardVO => {
   const { sourceUrl, repoUrl } = githubUrls(repo, ref, raw.subdir);
   const risk = parseTemplateRisk(raw.risk);
+  const locales = localeUrls(raw.locales, repo, ref, raw.subdir);
   return {
     id: `${repo}/${raw.subdir}`,
     name: raw.name,
@@ -116,6 +154,7 @@ const toCard = (raw: RawTemplate, repo: string, ref: string): TemplateCardVO => 
     tags: raw.tags ?? [],
     screenshots: (raw.screenshots ?? []).map((file) => screenshotUrl(repo, ref, raw.subdir, file)),
     ...(raw.video ? { video: videoUrl(repo, ref, raw.subdir, raw.video) } : {}),
+    ...(locales ? { locales } : {}),
     agentPrompts: raw.agentPrompts ?? [],
     ...(raw.version ? { version: raw.version } : {}),
     ...(raw.author ? { author: raw.author } : {}),

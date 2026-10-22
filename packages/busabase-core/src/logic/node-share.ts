@@ -16,9 +16,10 @@ import { assertNodePermission, buildNodeVisibilityCondition } from "./node-acl";
  * next to node principals: this decides whether an ANONYMOUS visitor may reach
  * a node over its own canonical URL, and what they may do there.
  *
- * Everything here writes `busabase_nodes.effective_public_scope`, which is what
- * the read gates in node-acl.ts actually consult — the tree is walked on write,
- * never on read.
+ * Share changes write `busabase_nodes.effective_public_scope`, which the read
+ * gates in node-acl.ts consult. Password-unlock validation additionally reads a
+ * batched topology snapshot to propagate proven folder access to its current
+ * inheriting descendants.
  */
 
 export type NodeShareScope = "none" | "public";
@@ -620,26 +621,88 @@ export async function unlockPublicShare(
 }
 
 /**
- * Keep only unlock proofs bound to the password that currently gates each
- * node. Changing a password creates a fresh salted hash, so every previously
- * issued proof stops matching immediately, including proofs inherited from a
- * shared ancestor.
+ * Expand valid proofs to the public subtree each proven node opens. A folder
+ * password unlocks its inheriting children too, but a child proof never opens
+ * siblings or an ancestor. A nearer live share starts a different boundary.
+ *
+ * Read the current space's topology and shares in two queries, not one ancestor
+ * walk per child. Rechecking the current gating share and password version on
+ * every request makes moves, overrides, revocation and password changes take
+ * effect immediately without changing the signed cookie.
  */
 export async function validatePublicShareUnlockProofs(
   proofs: readonly { nodeId: string; passwordVersion: string }[],
 ): Promise<string[]> {
-  const valid: string[] = [];
+  if (proofs.length === 0) return [];
+  const db = await getDb();
+  const spaceId = getContextSpaceId();
+  const [nodes, shares] = await Promise.all([
+    db
+      .select({
+        id: busabaseNodes.id,
+        parentId: busabaseNodes.parentId,
+        archivedAt: busabaseNodes.archivedAt,
+        deletedAt: busabaseNodes.deletedAt,
+        publicScope: busabaseNodes.effectivePublicScope,
+      })
+      .from(busabaseNodes)
+      .where(eq(busabaseNodes.spaceId, spaceId)),
+    db
+      .select()
+      .from(busabaseNodeShares)
+      .where(and(eq(busabaseNodeShares.spaceId, spaceId), eq(busabaseNodeShares.scope, "public"))),
+  ]);
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const shareByNodeId = new Map(shares.filter(isShareLive).map((share) => [share.nodeId, share]));
+  const childrenByParent = new Map<string, string[]>();
+  for (const node of nodes) {
+    if (!node.parentId) continue;
+    const children = childrenByParent.get(node.parentId) ?? [];
+    children.push(node.id);
+    childrenByParent.set(node.parentId, children);
+  }
+
+  const valid = new Set<string>();
   for (const proof of proofs) {
-    const share = await resolveGatingShare(proof.nodeId);
+    const node = nodeById.get(proof.nodeId);
+    if (!node || node.archivedAt || node.deletedAt || !node.publicScope) continue;
+    let cursor: string | null = proof.nodeId;
+    const ancestors = new Set<string>();
+    let gatingShare: (typeof shares)[number] | undefined;
+    while (cursor && !ancestors.has(cursor)) {
+      ancestors.add(cursor);
+      const ancestor = nodeById.get(cursor);
+      if (!ancestor || ancestor.archivedAt || ancestor.deletedAt) break;
+      const share = shareByNodeId.get(cursor);
+      if (share) {
+        gatingShare = share;
+        break;
+      }
+      cursor = ancestor.parentId;
+    }
     if (
-      share?.passwordHash &&
-      passwordVersionOf(share.passwordHash) === proof.passwordVersion &&
-      !valid.includes(proof.nodeId)
+      !gatingShare?.passwordHash ||
+      passwordVersionOf(gatingShare.passwordHash) !== proof.passwordVersion
     ) {
-      valid.push(proof.nodeId);
+      continue;
+    }
+
+    const pending = [proof.nodeId];
+    const visited = new Set<string>();
+    while (pending.length > 0) {
+      const nodeId = pending.pop();
+      if (!nodeId || visited.has(nodeId)) continue;
+      visited.add(nodeId);
+      const descendant = nodeById.get(nodeId);
+      if (!descendant || descendant.archivedAt || descendant.deletedAt || !descendant.publicScope)
+        continue;
+      const ownShare = shareByNodeId.get(nodeId);
+      if (ownShare && ownShare.id !== gatingShare.id) continue;
+      valid.add(nodeId);
+      for (const childId of childrenByParent.get(nodeId) ?? []) pending.push(childId);
     }
   }
-  return valid;
+  return [...valid];
 }
 
 /**

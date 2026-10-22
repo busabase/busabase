@@ -87,9 +87,11 @@ describe("anonymous allowlist (unit)", () => {
 
   it("allows exactly the public read surface", () => {
     expect(anonymousAllowlistSnapshot().read).toEqual([
+      "assets.readTextLines",
       "bases.get",
       "bases.list",
       "bases.listViews",
+      "fileTrees.readFile",
       "forms.getByNode",
       // `docs.get` / `files.get` / `folders.get` collapsed into this one route.
       "nodes.get",
@@ -107,25 +109,38 @@ describe("anonymous allowlist (unit)", () => {
   /**
    * The distinction that used to be carried by WHICH procedure was allowlisted:
    * `folders.get` / `docs.get` / `files.get` were public, `fileTrees.get`
-   * deliberately was not — a public share must never become a way to read a
-   * Skill/Drive/AirApp's source. One merged procedure cannot express that, so
-   * the boundary moved onto the resolved node type. If this list ever grows a
-   * file-tree type, that protection is gone.
+   * deliberately was not. Skill/Drive now expose their files when deliberately
+   * shared, while AirApp continues to use its isolated runtime. Keep that
+   * boundary on the resolved node type rather than trusting caller hints.
    */
-  it("keeps source nodes private while exposing every public-detail type", () => {
+  it("exposes shared detail types while keeping AirApp source behind its relay", () => {
     expect(anonymousAllowlistSnapshot().nodeTypes).toEqual([
       "base",
       "doc",
+      "drive",
       "file",
       "folder",
       "form",
+      "html",
+      "skill",
       "whiteboard",
       "workflow",
     ]);
-    for (const type of ["skill", "drive", "airapp"]) {
+    for (const type of ["airapp"]) {
       expect(isAnonymousReadableNodeType(type), `${type} must stay non-anonymous`).toBe(false);
     }
-    for (const type of ["folder", "doc", "file", "base", "form", "whiteboard", "workflow"]) {
+    for (const type of [
+      "folder",
+      "doc",
+      "file",
+      "base",
+      "form",
+      "whiteboard",
+      "workflow",
+      "html",
+      "skill",
+      "drive",
+    ]) {
       expect(isAnonymousReadableNodeType(type), `${type} must stay anonymous-readable`).toBe(true);
     }
   });
@@ -133,7 +148,7 @@ describe("anonymous allowlist (unit)", () => {
   it("fails closed on a node type nobody has decided about", () => {
     // A late `registerNodeType()` plugin type must not inherit public access.
     expect(isAnonymousReadableNodeType("brand-new-plugin-type")).toBe(false);
-    expect(isAnonymousReadableNodeType("skill")).toBe(false);
+    expect(isAnonymousReadableNodeType("airapp")).toBe(false);
   });
 
   it("classifies forms.submit as submit-only, never as read", () => {

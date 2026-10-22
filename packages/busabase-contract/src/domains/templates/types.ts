@@ -4,15 +4,16 @@
  * The catalog is the file `busabase-cli index` builds from a skills repository
  * — see `busabase-package/index-build`. Most shapes are re-declared here rather
  * than imported because that module is Node-only (it reads packages) and these
- * are rendered in a browser; `TemplateRiskLevelSchema` is the one exception,
- * imported from the package domain because it is already pure zod and a third
- * copy of the same enum is a worse outcome than the cross-domain import.
+ * are rendered in a browser; `TemplateRiskLevelSchema` and
+ * `TemplateLocalesSchema` are the exceptions, imported from the package domain
+ * because they are already pure zod and a second copy of the same shape is a
+ * worse outcome than the cross-domain import.
  *
  * Spec: `apps/busabase/content/spec/template-center.md` §6.4.
  */
 import { iStringSchema } from "openlib/i18n/i-string";
 import { z } from "zod";
-import { TemplateRiskLevelSchema } from "../package/template";
+import { TemplateLocalesSchema, TemplateRiskLevelSchema } from "../package/template";
 
 export const TemplateStatsVOSchema = z.object({
   folders: z.number().int(),
@@ -63,6 +64,17 @@ export const TemplateCardVOSchema = z.object({
    * than the screenshots — see `videoUrl` in the catalog logic.
    */
   video: z.string().optional(),
+  /**
+   * Per-locale screenshots/clip, absolute URLs like the two fields above,
+   * keyed by locale. Absent when the template declares none — and on every
+   * card an older catalog produced. Never read it directly: render through
+   * `pickTemplateMedia(card, locale)` (`domains/templates/media`), which owns
+   * the fallback to `screenshots` / `video`.
+   *
+   * Declared here because this is a plain `z.object`: an undeclared key would
+   * be stripped by `.output()` before it ever reached a client.
+   */
+  locales: TemplateLocalesSchema.optional(),
   agentPrompts: z.array(z.string()).default([]),
   version: z.string().optional(),
   author: z.string().optional(),

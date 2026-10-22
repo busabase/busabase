@@ -69,6 +69,17 @@ export interface BusabaseSourceProvenance {
    * input directly.
    */
   playbook?: BusabasePlaybookProvenance | null;
+  /**
+   * The agent client the caller named (`x-busabase-agent`), ALREADY normalized
+   * by the server (`normalizeAgentClient`). Self-reported: a label, not identity.
+   */
+  agent?: BusabaseAgentProvenance | null;
+}
+
+/** Stored shape of a normalized agent client (`sourceMeta.provenance.agent`). */
+export interface BusabaseAgentProvenance {
+  id: string;
+  name: string;
 }
 
 /** Stored shape of a validated playbook declaration (`sourceMeta.provenance.playbook`). */
@@ -674,6 +685,25 @@ export function runWithContextPlaybook<T>(
   return storage.run({ ...store, sourceProvenance }, fn);
 }
 
+/**
+ * Re-enter the CURRENT context with a normalized agent client added to its
+ * source provenance — the `x-busabase-agent` twin of `runWithContextPlaybook`,
+ * with the same no-context and `extra.channel` rules.
+ */
+export function runWithContextAgent<T>(
+  agent: BusabaseAgentProvenance,
+  fn: () => Promise<T>,
+  extra?: Pick<BusabaseSourceProvenance, "channel">,
+): Promise<T> {
+  const store = storage.getStore();
+  if (!store) return fn();
+  const current = store.sourceProvenance;
+  const sourceProvenance: BusabaseSourceProvenance = current
+    ? { ...current, agent }
+    : { ...(extra?.channel ? { channel: extra.channel } : {}), agent };
+  return storage.run({ ...store, sourceProvenance }, fn);
+}
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -707,6 +737,9 @@ export function withContextSourceMeta(
   // one carried in by an explicit sourceMeta.
   if (isRecord(contextProvenance.playbook)) mergedProvenance.playbook = contextProvenance.playbook;
   else delete mergedProvenance.playbook;
+  // Same for the agent client: only the server-normalized one from the context.
+  if (isRecord(contextProvenance.agent)) mergedProvenance.agent = contextProvenance.agent;
+  else delete mergedProvenance.agent;
 
   return {
     ...sourceMeta,

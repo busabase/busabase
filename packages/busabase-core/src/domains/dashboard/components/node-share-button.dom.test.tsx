@@ -93,11 +93,6 @@ const renderDialog = (nodeType: string, nodeSlug = "thing") =>
 
 const shareToWebSwitch = () => document.getElementById("node-share-public");
 
-/** Wait until the dialog has rendered SOMETHING for this type, so "absent" means absent, not "not yet". */
-const settled = async () => {
-  await waitFor(() => expect(document.querySelector('[role="dialog"]')).not.toBeNull());
-};
-
 afterEach(cleanup);
 
 describe("NodeShareDialog: share-to-web availability follows the registry", () => {
@@ -110,16 +105,23 @@ describe("NodeShareDialog: share-to-web availability follows the registry", () =
     expect(screen.getByText(/run/i, { selector: "span.text-xs" })).toBeTruthy();
   });
 
-  it.each(["drive", "skill"])(
-    "does not offer share-to-web for %s (declared publicAccess: no)",
+  it.each(["html", "drive", "skill"])(
+    "offers share-to-web for %s through its read-only public detail",
     async (type) => {
       renderDialog(type);
 
-      await settled();
-      expect(publicAccessOf(type)).toBe("no");
-      expect(shareToWebSwitch()).toBeNull();
+      expect(publicAccessOf(type)).toBe("detail");
+      await waitFor(() => expect(shareToWebSwitch()).not.toBeNull());
     },
   );
+
+  it("does not offer sharing for an unknown plugin node type", () => {
+    const unknownType = "undecided-plugin-node";
+    expect(publicAccessOf(unknownType)).toBe("no");
+    renderDialog(unknownType);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(shareToWebSwitch()).toBeNull();
+  });
 
   it("agrees with publicAccessOf for every built-in node type", async () => {
     // Data-driven so a newly added type cannot ship with the switch and the

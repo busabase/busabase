@@ -18,7 +18,11 @@ describe("Busabase OpenAPI asset upload routes", () => {
 
   it("documents FileNode creation through the Node Change Request schema", async () => {
     const spec = await getBusabaseOpenApiSpec();
-    const serialized = JSON.stringify(spec.paths?.["/api/v1/nodes/change-requests"] ?? {});
+    // The `create` operation is the named `CreateNodeOperation` component.
+    expect(JSON.stringify(spec.paths?.["/api/v1/nodes/change-requests"] ?? {})).toContain(
+      '"#/components/schemas/CreateNodeOperation"',
+    );
+    const serialized = JSON.stringify(spec.components?.schemas?.CreateNodeOperation ?? {});
 
     expect(serialized).toContain('"nodeType"');
     expect(serialized).toContain('"file"');

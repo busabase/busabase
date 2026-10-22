@@ -195,3 +195,77 @@ describe("TemplateDetailContent — clip without screenshots", () => {
     expect(markup).toContain("Play the demo");
   });
 });
+
+/**
+ * Media follows the same locale the text does, with the same English
+ * fallback — and a card with no `locales` (every card an older catalog
+ * produced) renders exactly as it did before.
+ */
+describe("TemplateDetailContent — localized media", () => {
+  const EN_COVER = "https://cdn.example/cover.webp";
+  const EN_SHOT = "https://cdn.example/overview.webp";
+  const EN_CLIP = "https://cdn.example/demo.mp4";
+  const ZH_COVER = "https://cdn.example/cover-zh-CN.webp";
+  const ZH_SHOT = "https://cdn.example/overview-zh-CN.webp";
+  const ZH_CLIP = "https://cdn.example/demo-zh-CN.mp4";
+
+  const localized: TemplateCardVO = {
+    ...template,
+    screenshots: [EN_COVER, EN_SHOT],
+    video: EN_CLIP,
+    locales: {
+      "zh-CN": { screenshots: [ZH_COVER, ZH_SHOT], video: ZH_CLIP },
+      ko: { video: "https://cdn.example/demo-ko.mp4" },
+    },
+  };
+
+  it("shows a zh-CN viewer the zh-CN gallery and nothing from the English one", () => {
+    const markup = renderToStaticMarkup(
+      <TemplateDetailContent template={localized} descriptionLocale="zh-CN" />,
+    );
+    expect(markup).toContain(ZH_COVER);
+    expect(markup).toContain(ZH_SHOT);
+    expect(markup).not.toContain(EN_COVER);
+    expect(markup).not.toContain(EN_SHOT);
+  });
+
+  it("shows a ja viewer, who has no entry, the English gallery", () => {
+    const markup = renderToStaticMarkup(
+      <TemplateDetailContent template={localized} descriptionLocale="ja" />,
+    );
+    expect(markup).toContain(EN_COVER);
+    expect(markup).not.toContain(ZH_COVER);
+  });
+
+  it("keeps the English screenshots for a locale that only localized its clip", () => {
+    const markup = renderToStaticMarkup(
+      <TemplateDetailContent template={localized} descriptionLocale="ko" />,
+    );
+    expect(markup).toContain(EN_COVER);
+    expect(markup).toContain("Play the demo");
+  });
+
+  it("puts the viewer's own cover on the catalog card", () => {
+    const zh = renderToStaticMarkup(
+      <TemplateCardSummary template={localized} screenshotAlt="" descriptionLocale="zh-CN" />,
+    );
+    expect(zh).toContain(ZH_COVER);
+    expect(zh).not.toContain(EN_COVER);
+
+    const ja = renderToStaticMarkup(
+      <TemplateCardSummary template={localized} screenshotAlt="" descriptionLocale="ja" />,
+    );
+    expect(ja).toContain(EN_COVER);
+  });
+
+  it("renders a card without locales identically in every language", () => {
+    const { locales: _locales, ...plain } = localized;
+    const en = renderToStaticMarkup(<TemplateDetailContent template={plain} />);
+    const zh = renderToStaticMarkup(
+      <TemplateDetailContent template={plain} descriptionLocale="zh-CN" />,
+    );
+    expect(en).toContain(EN_COVER);
+    expect(zh).toContain(EN_COVER);
+    expect(zh).toContain(EN_SHOT);
+  });
+});

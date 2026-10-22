@@ -100,7 +100,7 @@ import {
   FileTreeRenameDialog,
   FileTreeUploadControl,
 } from "./file-tree-file-actions";
-import { useFileUploadTasks } from "./file-upload-tasks";
+import { useOptionalFileUploadTasks } from "./file-upload-tasks";
 import { NodeActionsMenu } from "./node-actions-menu";
 import { NodeAgentPromptsButton } from "./node-agent-prompts-button";
 import { NodePinButton, nodeSidePanelTabId } from "./node-pin-button";
@@ -204,7 +204,7 @@ export function FileTreeDetailView({
     hasApiKeyLevel(permissionLevel, "changeRequest");
   const canSelectDrive =
     nodeType === "drive" && !hideActions && !isAnonymous && hasApiKeyLevel(permissionLevel, "read");
-  const uploadTasks = useFileUploadTasks();
+  const uploadTasks = useOptionalFileUploadTasks();
 
   const fileTreeQuery = useQuery({
     ...orpc.nodes.get.queryOptions({ input: { nodeId: slug ?? "", type: nodeType } }),
@@ -217,7 +217,7 @@ export function FileTreeDetailView({
   // same component (rendered with `hideActions`) from ever touching the
   // shared topbar slot that the real page's instance owns.
   useRegisterTopbarNodeActions(
-    fileTree ? (
+    fileTree && !isAnonymous ? (
       <>
         {agentPromptsTab ? null : (
           <NodeAgentPromptsButton
@@ -242,7 +242,7 @@ export function FileTreeDetailView({
         />
       </>
     ) : null,
-    !hideActions,
+    !hideActions && !isAnonymous,
   );
   useRegisterTopbarNodeInfo(
     fileTree
@@ -277,7 +277,7 @@ export function FileTreeDetailView({
   }, [slug]);
 
   useEffect(() => {
-    const completed = uploadTasks.lastCompleted;
+    const completed = uploadTasks?.lastCompleted;
     if (!completed?.merged || completed.nodeId !== fileTree?.node.id) return;
     if (completed.folder) {
       setExpandedPaths((current) => {
@@ -287,7 +287,7 @@ export function FileTreeDetailView({
       });
     }
     if (completed.firstPath) setOpenPath(completed.firstPath);
-  }, [fileTree?.node.id, uploadTasks.lastCompleted]);
+  }, [fileTree?.node.id, uploadTasks?.lastCompleted]);
 
   const fileQuery = useQuery({
     ...orpc.fileTrees.readFile.queryOptions({
@@ -297,7 +297,7 @@ export function FileTreeDetailView({
   });
   const previewConfigQuery = useQuery({
     ...orpc.fileTrees.previewConfig.queryOptions({}),
-    enabled: nodeType === "drive" && Boolean(slug),
+    enabled: nodeType === "drive" && Boolean(slug) && !isAnonymous,
   });
   const createCr = useMutation(orpc.fileTrees.createChangeRequest.mutationOptions());
   const { mutateAsync: preparePreviewAsync } = useMutation(
@@ -310,6 +310,7 @@ export function FileTreeDetailView({
   // visible in Settings > File Preview and in the server logs. The server
   // enforces the same rule for the Embed and public API surfaces.
   const remotePreviewEnabled =
+    !isAnonymous &&
     previewConfigQuery.data?.provider === "previewfile" &&
     previewConfigQuery.data.status === "ready";
   // Same predicate the server enforces, so a Markdown/code/image/PDF file never
@@ -391,7 +392,7 @@ export function FileTreeDetailView({
   );
 
   useEffect(() => {
-    if (nodeType !== "drive" || hideActions || !parsedTextTabId || !fileTree) return;
+    if (nodeType !== "drive" || hideActions || isAnonymous || !parsedTextTabId || !fileTree) return;
     const panel = useSidePanelStore.getState();
     if (!panel.tabs.some((tab) => tab.id === parsedTextTabId)) return;
     const file = openPath ? filesByPath.get(openPath) : null;
@@ -400,7 +401,7 @@ export function FileTreeDetailView({
       return;
     }
     panel.updateTabPayload(parsedTextTabId, { assetId: file.assetId, filePath: openPath });
-  }, [fileTree, filesByPath, hideActions, nodeType, openPath, parsedTextTabId]);
+  }, [fileTree, filesByPath, hideActions, isAnonymous, nodeType, openPath, parsedTextTabId]);
   const selectedFilePaths = useMemo(
     () => resolveFileTreeSelectedPaths(selectedKeys, fileTree?.files ?? []),
     [fileTree?.files, selectedKeys],
@@ -559,6 +560,7 @@ export function FileTreeDetailView({
     replacePaths: string[],
   ) => {
     if (!fileTree) return;
+    if (!uploadTasks) throw new Error("File uploads require FileUploadTaskProvider");
     // Pin each replaced file to the hash we read now, so the merge rejects the
     // overwrite if someone else changed that file in the meantime.
     const currentFiles = await Promise.all(replacePaths.map((path) => readFileForAction(path)));
@@ -1087,7 +1089,7 @@ export function FileTreeDetailView({
             </div>
             {openPath && fileQuery.data && !fileQuery.isError ? (
               <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-                {nodeType === "drive" && !hideActions && fileQuery.data.assetId ? (
+                {nodeType === "drive" && !hideActions && !isAnonymous && fileQuery.data.assetId ? (
                   <Button
                     className="h-8 gap-1.5 px-2 text-muted-foreground"
                     onClick={() => {
@@ -1160,7 +1162,7 @@ export function FileTreeDetailView({
                     </Tooltip>
                   </TooltipProvider>
                 ) : null}
-                {fileQuery.data.encoding === "utf8" ? (
+                {fileQuery.data.encoding === "utf8" && !isAnonymous ? (
                   isEditing ? (
                     <div className="flex shrink-0 flex-wrap items-center gap-2">
                       <button
@@ -1473,6 +1475,7 @@ export function SkillDetailView({
   hideActions,
 }: NodeDetailProps & { hideActions?: boolean }) {
   const messages = useCoreI18n();
+  const isAnonymous = useIsAnonymousVisitor();
   const [loadedNode, setLoadedNode] = useState<LoadedNode | null>(null);
   const reportLoaded = useCallback(
     (node: LoadedNode) => {
@@ -1485,7 +1488,7 @@ export function SkillDetailView({
   return (
     <FileTreeDetailView
       agentPromptsTab={
-        loadedNode ? (
+        isAnonymous ? undefined : loadedNode ? (
           <SkillAgentPromptsTab node={loadedNode} orpc={orpc} />
         ) : (
           <div className="flex h-full items-center justify-center text-muted-foreground text-sm">

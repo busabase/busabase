@@ -1,3 +1,4 @@
+import { pickTemplateMedia } from "busabase-contract/domains/templates/media";
 import type { TemplateCardVO } from "busabase-contract/domains/templates/types";
 import { AppWindow, Bot, FileText, Rows3, Table2 } from "lucide-react";
 import { iStringParse, type LocaleType } from "openlib/i18n/i-string";
@@ -29,7 +30,9 @@ interface TemplateCardSummaryProps {
   children?: ReactNode;
   /**
    * `description` and `displayName` are both iString; this resolves them to
-   * one language. A prop, not `useCoreLocale()` called internally — this
+   * one language — and picks that language's cover from `locales` (via
+   * `pickTemplateMedia`), so the card's picture and text always agree. A prop,
+   * not `useCoreLocale()` called internally — this
    * component renders in both a Dashboard client tree and a marketing Server
    * Component tree (see the note below), and a hook would break the second
    * one outright.
@@ -54,7 +57,7 @@ export function TemplateCardSummary({
   children,
   descriptionLocale = "en",
 }: TemplateCardSummaryProps) {
-  const [screenshot] = template.screenshots;
+  const [screenshot] = pickTemplateMedia(template, descriptionLocale).screenshots;
   const title = template.displayName
     ? iStringParse(template.displayName, descriptionLocale)
     : template.name;

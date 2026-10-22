@@ -221,17 +221,46 @@ describe("public node sharing", () => {
       nodeId: folderNodeId,
       passwordVersion: unlocked?.passwordVersion ?? "",
     };
-    await runWithAnonymousContext({}, async () => {
-      expect(await validatePublicShareUnlockProofs([oldProof])).toEqual([folderNodeId]);
+    const unlockedShareNodeIds = await runWithAnonymousContext({}, () =>
+      validatePublicShareUnlockProofs([oldProof]),
+    );
+    expect(unlockedShareNodeIds).toEqual([folderNodeId, childNodeId]);
+    await runWithAnonymousContext({ unlockedShareNodeIds }, async () => {
+      for (const nodeId of [folderNodeId, childNodeId]) {
+        expect(await getEffectiveNodeLevel(nodeId)).toBe("read");
+        await expect(client.nodes.get({ nodeId })).resolves.toMatchObject({ node: { id: nodeId } });
+      }
     });
 
     await runWithBusabaseContext({}, () =>
       setNodeShare(folderNodeId, { scope: "public", password: "new-password" }),
     );
-    await runWithAnonymousContext({}, async () => {
-      expect(await validatePublicShareUnlockProofs([oldProof])).toEqual([]);
+    const invalidatedIds = await runWithAnonymousContext({}, () =>
+      validatePublicShareUnlockProofs([oldProof]),
+    );
+    expect(invalidatedIds).toEqual([]);
+    await runWithAnonymousContext({ unlockedShareNodeIds: invalidatedIds }, async () => {
+      for (const nodeId of [folderNodeId, childNodeId]) {
+        expect(await getEffectiveNodeLevel(nodeId)).toBeNull();
+        await expect(client.nodes.get({ nodeId })).rejects.toThrow(/not found/i);
+      }
       expect(await unlockPublicShare(folderNodeId, "old-password", "folder")).toBeNull();
-      expect(await unlockPublicShare(folderNodeId, "new-password", "folder")).not.toBeNull();
+    });
+    const freshUnlock = await runWithAnonymousContext({}, () =>
+      unlockPublicShare(folderNodeId, "new-password", "folder"),
+    );
+    expect(freshUnlock?.passwordVersion).toBeTruthy();
+    const freshIds = await runWithAnonymousContext({}, () =>
+      validatePublicShareUnlockProofs([
+        { nodeId: folderNodeId, passwordVersion: freshUnlock?.passwordVersion ?? "" },
+      ]),
+    );
+    expect(freshIds).toEqual([folderNodeId, childNodeId]);
+    await runWithAnonymousContext({ unlockedShareNodeIds: freshIds }, async () => {
+      for (const nodeId of [folderNodeId, childNodeId]) {
+        expect(await getEffectiveNodeLevel(nodeId)).toBe("read");
+        await expect(client.nodes.get({ nodeId })).resolves.toMatchObject({ node: { id: nodeId } });
+      }
     });
   });
 
