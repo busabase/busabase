@@ -404,6 +404,35 @@ describe("round trip", () => {
     expect(manifest.displayName).toEqual({ en: "Kelly Email", "zh-CN": "Kelly 邮件" });
   });
 
+  it("carries per-locale media through export next to the untouched defaults", () => {
+    const locales = {
+      "zh-CN": {
+        screenshots: ["assets/screenshots/overview-zh-CN.webp"],
+        video: "assets/recordings/kelly-email-zh-CN.mp4",
+      },
+    };
+    const files = templateFiles({
+      "busabase.json": JSON.stringify({
+        format: PACKAGE_FORMAT,
+        name: "kelly-email",
+        description: "Inbox triage desk",
+        template: {
+          category: "email",
+          airapp: "kelly-email-app",
+          agentPrompts: ["triage today's mail"],
+          screenshots: ["assets/screenshots/overview.webp"],
+          video: "assets/recordings/kelly-email.mp4",
+          locales,
+        },
+      }),
+    });
+    const rendered = renderPackageTree(readPackageTree(files));
+    const manifest = JSON.parse(rendered.get("busabase.json")?.toString("utf8") ?? "{}");
+    expect(manifest.template.screenshots).toEqual(["assets/screenshots/overview.webp"]);
+    expect(manifest.template.video).toBe("assets/recordings/kelly-email.mp4");
+    expect(manifest.template.locales).toEqual(locales);
+  });
+
   it("keeps the skill at the root on re-render, never under content/", () => {
     const rendered = renderPackageTree(readPackageTree(templateFiles()));
     expect(rendered.has("SKILL.md")).toBe(true);

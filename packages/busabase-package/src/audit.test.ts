@@ -142,6 +142,89 @@ describe("identity and the catalog card", () => {
   });
 });
 
+describe("localized gallery media", () => {
+  const withLocales = (template: Record<string, unknown>) =>
+    JSON.stringify({ ...MANIFEST, template: { ...MANIFEST.template, ...template } });
+
+  const ZH_CN = {
+    locales: {
+      "zh-CN": {
+        screenshots: ["assets/screenshots/overview-zh-CN.webp"],
+        video: "assets/recordings/fixture-zh-CN.mp4",
+      },
+    },
+  };
+
+  it("is silent when every localized file ships with the package", () => {
+    const findings = audit({
+      "busabase.json": withLocales(ZH_CN),
+      "assets/screenshots/overview-zh-CN.webp": "not really a webp",
+      "assets/recordings/fixture-zh-CN.mp4": "not really an mp4",
+    });
+    expect(rules(findings)).toEqual([]);
+    expect(rules(findings, "warning")).toEqual([]);
+  });
+
+  it("catches a localized screenshot and clip that are not in the package", () => {
+    const findings = audit({ "busabase.json": withLocales(ZH_CN) });
+    const missing = findings.filter((finding) => finding.severity === "error");
+    expect(missing.map((finding) => finding.rule)).toEqual([
+      "package/screenshot-missing",
+      "package/video-missing",
+    ]);
+    // Same rule ids as the defaults, but the message names where it was declared.
+    expect(missing[0].message).toContain("template.locales.zh-CN.screenshots");
+    expect(missing[1].message).toContain("template.locales.zh-CN.video");
+  });
+
+  it("warns about a locale key Busabase never serves, without failing the package", () => {
+    const findings = audit({
+      "busabase.json": withLocales({ locales: { zh: { video: "assets/recordings/fixture.mp4" } } }),
+      "assets/recordings/fixture.mp4": "not really an mp4",
+    });
+    expect(rules(findings)).toEqual([]);
+    expect(rules(findings, "warning")).toEqual(["package/locale-unknown"]);
+  });
+
+  it("warns about locales.en, which would drift from the English defaults", () => {
+    const findings = audit({
+      "busabase.json": withLocales({
+        locales: { en: { screenshots: ["assets/screenshots/overview.webp"] } },
+      }),
+    });
+    expect(rules(findings, "warning")).toEqual(["package/locale-default-language"]);
+  });
+
+  it("warns when a file named for one locale sits in the default list", () => {
+    const findings = audit({
+      "busabase.json": withLocales({
+        screenshots: ["assets/screenshots/overview.webp", "assets/screenshots/overview-zh-CN.webp"],
+        video: "assets/recordings/fixture-ja.mp4",
+      }),
+      "assets/screenshots/overview-zh-CN.webp": "not really a webp",
+      "assets/recordings/fixture-ja.mp4": "not really an mp4",
+    });
+    expect(rules(findings)).toEqual([]);
+    const warnings = findings.filter((finding) => finding.severity === "warning");
+    expect(warnings.map((finding) => finding.rule)).toEqual([
+      "package/localized-default-media",
+      "package/localized-default-media",
+    ]);
+    expect(warnings[0].message).toContain("template.locales.zh-CN.screenshots");
+    expect(warnings[1].message).toContain("template.locales.ja.video");
+  });
+
+  it("does not mistake an English-marked or unmarked default for a localized one", () => {
+    const findings = audit({
+      "busabase.json": withLocales({
+        screenshots: ["assets/screenshots/overview.webp", "assets/screenshots/cover-en.webp"],
+      }),
+      "assets/screenshots/cover-en.webp": "not really a webp",
+    });
+    expect(rules(findings, "warning")).toEqual([]);
+  });
+});
+
 describe("what must never be published", () => {
   it("catches a committed .env", () => {
     expect(rules(audit({ "content/reviews/.env": "KEY=live" }))).toContain("package/dotenv");

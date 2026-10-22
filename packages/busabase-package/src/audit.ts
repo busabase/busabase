@@ -28,6 +28,7 @@ import {
   PACKAGE_SKILL_SIDECAR_DIRS,
 } from "busabase-contract/domains/package/template";
 import { SkillFrontmatterSchema } from "busabase-contract/domains/skill/frontmatter";
+import { i18n } from "openlib/i18n/i18n";
 
 import { parseFrontmatter } from "./frontmatter";
 import type { PackageFiles } from "./layout-read";
@@ -76,6 +77,31 @@ const IS_ASSERTION_CODE = /(?:^|\/)(?:scripts\/check\.mjs|tests?\/|[^/]*\.test\.
 
 /** Lockfiles carry integrity hashes that are not ours to interpret. */
 const NOT_SOURCE = /(?:^|\/)(?:package-lock\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb)$/;
+
+/**
+ * The locales Busabase renders its interface in — the same list `iStringParse`'s
+ * `LocaleSchema` is built from, never a second copy. A `template.locales` key
+ * outside it is legal (the schema accepts any string so an install never fails
+ * over one) but no viewer is ever served it.
+ */
+const SUPPORTED_LOCALES: readonly string[] = i18n.locales;
+
+/**
+ * A file name that marks itself as one non-English locale's media —
+ * `cover-zh-CN.webp`, `busa-rnd-ja.mp4` — following the `<name>-<locale>.<ext>`
+ * convention. Case-insensitive because file systems and authors disagree on
+ * `zh-cn` versus `zh-CN`; the separator may be `-`, `_` or `.`.
+ */
+const LOCALIZED_FILE = new RegExp(
+  `[-_.](${SUPPORTED_LOCALES.filter((locale) => locale !== i18n.defaultLocale).join("|")})\\.[a-z0-9]+$`,
+  "i",
+);
+
+const localeMarkedIn = (path: string): string | undefined => {
+  const match = LOCALIZED_FILE.exec(path);
+  if (!match) return undefined;
+  return SUPPORTED_LOCALES.find((locale) => locale.toLowerCase() === match[1].toLowerCase());
+};
 
 const relativePaths = (files: PackageFiles, root = ""): string[] => {
   const prefix = root ? `${root.replace(/\/+$/, "")}/` : "";
@@ -136,6 +162,55 @@ export const auditPackage = (
     error(
       "package/video-missing",
       `busabase.json declares video "${video}", which is not in the package. The Template Center detail page would show a play button that leads nowhere.`,
+    );
+  }
+
+  // ── Localized media: the same promise, once per locale ─────────────────────
+  //
+  // Missing files reuse the two rules above rather than new ids: the defect and
+  // the fix are identical wherever the path was declared, and a caller grouping
+  // or allowlisting by rule should not have to learn a second name for it.
+  for (const [locale, media] of Object.entries(tree.manifest.template?.locales ?? {})) {
+    if (!SUPPORTED_LOCALES.includes(locale)) {
+      warn(
+        "package/locale-unknown",
+        `busabase.json declares media for locale "${locale}", which is not one Busabase shows its interface in (${SUPPORTED_LOCALES.join(", ")}). It still installs, but no viewer is ever served it — check the spelling (keys are exact, e.g. "zh-CN", not "zh").`,
+      );
+    } else if (locale === i18n.defaultLocale) {
+      warn(
+        "package/locale-default-language",
+        `busabase.json declares \`template.locales.${locale}\`, but the default \`screenshots\` / \`video\` already are the English set — and they, not \`locales.${locale}\`, are what every language without its own entry falls back to. Put English media in the defaults and drop \`locales.${locale}\`, or the two drift apart.`,
+      );
+    }
+    for (const screenshot of media.screenshots ?? []) {
+      if (!present.has(screenshot)) {
+        error(
+          "package/screenshot-missing",
+          `busabase.json declares ${locale} screenshot "${screenshot}" (template.locales.${locale}.screenshots), which is not in the package. A ${locale} viewer's Template Center card would render a broken image.`,
+        );
+      }
+    }
+    if (media.video && !present.has(media.video)) {
+      error(
+        "package/video-missing",
+        `busabase.json declares ${locale} video "${media.video}" (template.locales.${locale}.video), which is not in the package. A ${locale} viewer's detail page would show a play button that leads nowhere.`,
+      );
+    }
+  }
+
+  // The default lists are what every language without its own entry sees, so a
+  // file named for one locale there is shown to all the others — the mixed
+  // gallery `locales` exists to replace.
+  const defaults = [
+    ...(tree.manifest.template?.screenshots ?? []).map((path) => ({ path, field: "screenshots" })),
+    ...(video ? [{ path: video, field: "video" }] : []),
+  ];
+  for (const { path, field } of defaults) {
+    const locale = localeMarkedIn(path);
+    if (!locale) continue;
+    warn(
+      "package/localized-default-media",
+      `"${path}" is in the default \`template.${field}\`, but its name marks it ${locale}. The defaults are the English set every language without its own entry falls back to; move it to \`template.locales.${locale}.${field}\`.`,
     );
   }
 
