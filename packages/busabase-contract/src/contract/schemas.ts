@@ -14,6 +14,7 @@ import {
   OPERATION_KINDS,
 } from "../domains/registry";
 import { type NodeIcon, NodeIconSchema } from "../types/node-icon";
+import { AgentClientVOSchema } from "./agent-client";
 import { destructiveAutoMerge } from "./auto-merge";
 import { customAgentPromptsSchema } from "./node-agent-prompt-schemas";
 import { PlaybookAttributionVOSchema } from "./playbook-schemas";
@@ -439,6 +440,11 @@ const sourceAttributionSchema = z.object({
   channel: sourceChannelSchema.nullable(),
   /** Present only when the write declared a playbook the server could validate. */
   playbook: PlaybookAttributionVOSchema.nullable().optional(),
+  /**
+   * Present only when the write named its agent client (`x-busabase-agent`;
+   * busabase-cli sends it automatically). Self-reported — a label, not identity.
+   */
+  agent: AgentClientVOSchema.nullable().optional(),
 });
 
 const commitSchema = z.object({

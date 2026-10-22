@@ -18,15 +18,15 @@ describe("node public sharing capabilities", () => {
     ).toEqual({
       folder: "detail",
       base: "detail",
-      skill: "no",
-      drive: "no",
+      skill: "detail",
+      drive: "detail",
       airapp: "runtime",
       file: "detail",
       doc: "detail",
       form: "submit",
       whiteboard: "detail",
       workflow: "detail",
-      html: "no",
+      html: "detail",
     });
   });
 

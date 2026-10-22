@@ -103,9 +103,10 @@ export const getNodeDetail = async (
   // 2. Anonymous (public-link) visitors reach a NARROWER set of node types than
   //    members do. Before the merge this was expressed by which procedures were
   //    on the anonymous allowlist — `folders.get`/`files.get`/`docs.get` were,
-  //    `fileTrees.get` deliberately was not. One procedure cannot carry that
-  //    distinction, so it moves here, onto the resolved type, and it is checked
-  //    before hydration for the same reason the ACL is.
+  //    `fileTrees.get` deliberately was not. Skill/Drive have since opted into
+  //    public read-only detail, while AirApp still requires its runtime relay.
+  //    One procedure cannot carry that distinction, so the resolved type is
+  //    checked before hydration for the same reason the ACL is.
   if (isAnonymousVisitor() && !isAnonymousReadableNodeType(node.type)) {
     denyAnonymousNodeType(node.type);
   }

@@ -11,7 +11,7 @@ export const htmlNodeType = {
   type: "html",
   label: "HTML",
   icon: "code-xml",
-  capabilities: { hasDetail: true, creatable: true, publicAccess: "no" },
+  capabilities: { hasDetail: true, creatable: true, publicAccess: "detail" },
   operations: [
     {
       kind: "html_document_update",

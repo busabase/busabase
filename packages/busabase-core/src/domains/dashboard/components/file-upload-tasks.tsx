@@ -136,6 +136,11 @@ export function useFileUploadTasks(): FileUploadTaskContextValue {
   return value;
 }
 
+/** Read-only detail hosts do not mount the workspace's upload queue. */
+export function useOptionalFileUploadTasks(): FileUploadTaskContextValue | null {
+  return useContext(FileUploadTaskContext);
+}
+
 export function FileUploadTaskProvider({
   children,
   orpc,

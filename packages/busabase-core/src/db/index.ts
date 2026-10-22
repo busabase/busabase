@@ -67,15 +67,50 @@ function initSync(): DbInstance {
   return state.db;
 }
 
-async function initPglite(dataDir: string): Promise<DbInstance> {
+type PgliteClient = import("@electric-sql/pglite").PGlite;
+
+/**
+ * Open the PGLite data dir and wait until PGLite has finished opening it.
+ *
+ * `PGlite.create`, not `new PGlite`: the constructor returns before PGLite has
+ * touched the directory and keeps initializing in the background. An instance
+ * abandoned in that state goes on running PGLite's own `existsSync(dir) ||
+ * mkdirSync(dir)` later — against a directory that may have been moved and
+ * re-created meanwhile — and its failure surfaces as an unhandled `EEXIST`.
+ */
+async function openPglite(dataDir: string): Promise<PgliteClient> {
   await ensureLocalDir(dataDir);
   const { PGlite } = await import("@electric-sql/pglite");
   // pg_trgm backs the trigram indexes in domains/base/schema.ts (busabase_field_values
   // text/slug) — without registering it here, `CREATE EXTENSION pg_trgm` in the
   // enable_pg_trgm migration has nothing to load and fails on PGLite.
   const { pg_trgm } = await import("@electric-sql/pglite/contrib/pg_trgm");
-  const client = await new PGlite(dataDir, { extensions: { pg_trgm } });
+  return PGlite.create(dataDir, { extensions: { pg_trgm } });
+}
+
+/**
+ * Migrate an opened PGLite database and make it the shared client.
+ *
+ * Published only once migrations succeed: a database whose migrations failed is
+ * closed, not handed to later callers as if it were ready.
+ */
+async function migratePglite(client: PgliteClient, dataDir: string): Promise<DbInstance> {
   const db = drizzlePglite({ client, schema });
+  try {
+    await migrate(db, { migrationsFolder: path.resolve(process.cwd(), "src/db/migrations") });
+  } catch (error) {
+    await client.close().catch(() => undefined);
+    // drizzle's message is the failed SQL; Postgres's reason is in `cause`.
+    const reason = [error, (error as { cause?: unknown }).cause]
+      .filter((part): part is Error => part instanceof Error)
+      .map((part) => part.message.trim())
+      .join(" — ");
+    console.error(
+      `[Busabase DB] Migrations failed, so the database did not start: ${reason}. ` +
+        `The data dir ${dataDir} was left exactly as it was — fix the migration and restart.`,
+    );
+    throw error;
+  }
 
   await migrate(db, { migrationsFolder: path.resolve(process.cwd(), "src/db/migrations") });
 
@@ -97,27 +132,32 @@ async function initAsync(): Promise<DbInstance> {
   const url = getDatabaseUrl();
   if (isPgliteUrl(url)) {
     const dataDir = parsePgliteDataDir(url);
+    let client: PgliteClient;
     try {
-      return await initPglite(dataDir);
+      client = await openPglite(dataDir);
     } catch (error) {
       const isFileBased = dataDir && !dataDir.startsWith("memory://");
-      if (isFileBased && existsSync(dataDir)) {
-        // Never destroy an unreadable data dir outright — a crash mid-write (OOM,
-        // kill -9, container restart) can leave PGLite unable to start, and this
-        // is the only local copy of a "review-first, local-first" database. Move
-        // it aside (recoverable) instead of rmSync (irrecoverable) so the app can
-        // still boot with a fresh dir, and the old one is there to inspect/restore.
-        const quarantineDir = `${dataDir}.quarantined-${Date.now()}`;
-        console.error(
-          `[Busabase DB] PGLite failed to start (${(error as Error).message}). ` +
-            `Moving the unreadable data dir to ${quarantineDir} and starting a fresh one — ` +
-            `your previous local data was NOT deleted; recover it by inspecting/restoring that folder.`,
-        );
-        renameSync(dataDir, quarantineDir);
-        return initPglite(dataDir);
-      }
-      throw error;
+      if (!isFileBased || !existsSync(dataDir)) throw error;
+      // Never destroy an unreadable data dir outright — a crash mid-write (OOM,
+      // kill -9, container restart) can leave PGLite unable to start, and this
+      // is the only local copy of a "review-first, local-first" database. Move
+      // it aside (recoverable) instead of rmSync (irrecoverable) so the app can
+      // still boot with a fresh dir, and the old one is there to inspect/restore.
+      //
+      // Only when PGLite itself cannot open the directory. A migration failure
+      // (a missing migrations folder, a migration that rejects existing rows)
+      // says nothing about the data; moving it aside there would boot the user
+      // into an empty database over a bug in the code.
+      const quarantineDir = `${dataDir}.quarantined-${Date.now()}`;
+      console.error(
+        `[Busabase DB] PGLite failed to start (${(error as Error).message}). ` +
+          `Moving the unreadable data dir to ${quarantineDir} and starting a fresh one — ` +
+          `your previous local data was NOT deleted; recover it by inspecting/restoring that folder.`,
+      );
+      renameSync(dataDir, quarantineDir);
+      client = await openPglite(dataDir);
     }
+    return migratePglite(client, dataDir);
   }
 
   return initSync();

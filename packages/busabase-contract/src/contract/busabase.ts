@@ -132,7 +132,7 @@ const embedLinkErrors = {
 
 // Per-item outcomes carry the full successful value so higher-level clients can
 // preserve their ergonomic single-item methods while the raw API stays batched.
-const changeRequestReviewBatchResultSchema = z.object({
+export const changeRequestReviewBatchResultSchema = z.object({
   results: z.array(
     z.discriminatedUnion("ok", [
       z.object({
@@ -146,7 +146,7 @@ const changeRequestReviewBatchResultSchema = z.object({
   ),
 });
 
-const changeRequestMergeBatchResultSchema = z.object({
+export const changeRequestMergeBatchResultSchema = z.object({
   results: z.array(
     z.discriminatedUnion("ok", [
       z.object({

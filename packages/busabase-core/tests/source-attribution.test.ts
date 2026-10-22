@@ -110,4 +110,59 @@ describe("public source attribution", () => {
       });
     });
   });
+
+  describe("agent client", () => {
+    const withAgent = (agent: unknown, extra: Record<string, unknown> = {}) => ({
+      subject: "record",
+      provenance: { ...rawSourceMeta.provenance, channel: "cli", agent, ...extra },
+    });
+
+    it("adds the recorded agent next to the key name", () => {
+      expect(toPublicSourceMetadata(withAgent({ id: "codex", name: "Codex" }))).toEqual({
+        sourceAttribution: {
+          displayName: "Codex",
+          ownerName: "Leon",
+          channel: "cli",
+          agent: { id: "codex", name: "Codex" },
+        },
+        sourceMeta: { subject: "record" },
+      });
+    });
+
+    it("leaves the old shape untouched when no agent was recorded", () => {
+      const { sourceAttribution } = toPublicSourceMetadata(rawSourceMeta);
+      expect(sourceAttribution).not.toHaveProperty("agent");
+    });
+
+    it("re-normalizes a stored agent from its id instead of trusting the stored name", () => {
+      const { sourceAttribution } = toPublicSourceMetadata(
+        withAgent({ id: "<b>Claude Code</b>", name: "<script>alert(1)</script>" }),
+      );
+      expect(sourceAttribution?.agent).toEqual({ id: "b-claude-code-b", name: "B Claude Code B" });
+      expect(
+        toPublicSourceMetadata(withAgent({ id: "claude-code", name: "evil" })).sourceAttribution
+          ?.agent,
+      ).toEqual({ id: "claude-code", name: "Claude Code" });
+    });
+
+    it("ignores an unusable stored agent", () => {
+      for (const agent of [null, "codex", { id: "" }, { id: 42 }, { id: "!!!" }]) {
+        expect(toPublicSourceMetadata(withAgent(agent)).sourceAttribution).not.toHaveProperty(
+          "agent",
+        );
+      }
+    });
+
+    it("an agent-only provenance (open-source host, plain curl) does not claim a channel", () => {
+      expect(
+        toPublicSourceMetadata({ provenance: { agent: { id: "codex", name: "Codex" } } })
+          .sourceAttribution,
+      ).toEqual({
+        displayName: null,
+        ownerName: null,
+        channel: null,
+        agent: { id: "codex", name: "Codex" },
+      });
+    });
+  });
 });

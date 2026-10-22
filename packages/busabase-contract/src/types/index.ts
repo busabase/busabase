@@ -36,6 +36,7 @@ export type LookupRollup = "values" | "count" | "sum" | "average" | "min" | "max
 import type { NodeType, OperationKind } from "../domains/registry";
 export type { NodeType, OperationKind };
 
+import type { AgentClientVO } from "../contract/agent-client";
 import type { PlaybookAttributionVO } from "../contract/playbook-schemas";
 // The node custom-avatar shape (emoji or cropped/uploaded image) — single
 // source of truth is `NodeIconSchema`; re-exported here so `NodeVO` below (and
@@ -43,6 +44,7 @@ import type { PlaybookAttributionVO } from "../contract/playbook-schemas";
 // without reaching into `./node-icon` directly.
 import type { NodeIcon } from "./node-icon";
 
+export type { AgentClientVO } from "../contract/agent-client";
 export type { PlaybookAttributionVO } from "../contract/playbook-schemas";
 
 export type { NodeIcon } from "./node-icon";
@@ -112,6 +114,11 @@ export interface SourceAttributionVO {
   channel: BusabaseSourceChannel | null;
   /** Present only when the write declared a playbook the server could validate. */
   playbook?: PlaybookAttributionVO | null;
+  /**
+   * Present only when the write named its agent client (`x-busabase-agent`).
+   * Self-reported by the caller — a label for readers, not identity.
+   */
+  agent?: AgentClientVO | null;
 }
 
 /**

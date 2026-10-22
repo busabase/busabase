@@ -45,6 +45,45 @@ describe("TemplateManifestSchema", () => {
   });
 });
 
+describe("TemplateManifestSchema — locales", () => {
+  it("leaves locales undefined when the manifest declares none", () => {
+    const parsed = TemplateManifestSchema.parse({
+      category: "ops",
+      screenshots: ["assets/screenshots/cover.webp"],
+      video: "assets/recordings/desk.mp4",
+    });
+    expect(parsed.locales).toBeUndefined();
+    expect(parsed.screenshots).toEqual(["assets/screenshots/cover.webp"]);
+    expect(parsed.video).toBe("assets/recordings/desk.mp4");
+  });
+
+  it("keeps per-locale screenshots and video next to the untouched defaults", () => {
+    const parsed = TemplateManifestSchema.parse({
+      category: "ops",
+      screenshots: ["assets/screenshots/cover.webp"],
+      video: "assets/recordings/desk.mp4",
+      locales: {
+        "zh-CN": {
+          screenshots: ["assets/screenshots/cover-zh-CN.webp"],
+          video: "assets/recordings/desk-zh-CN.mp4",
+        },
+        ja: { video: "assets/recordings/desk-ja.mp4" },
+      },
+    });
+    expect(parsed.screenshots).toEqual(["assets/screenshots/cover.webp"]);
+    expect(parsed.locales?.["zh-CN"]?.screenshots).toEqual(["assets/screenshots/cover-zh-CN.webp"]);
+    expect(parsed.locales?.ja).toEqual({ video: "assets/recordings/desk-ja.mp4" });
+  });
+
+  it("accepts a locale key the server does not know rather than failing the install", () => {
+    const parsed = TemplateManifestSchema.parse({
+      category: "ops",
+      locales: { "tlh-KL": { screenshots: ["assets/screenshots/cover-tlh-KL.webp"] } },
+    });
+    expect(Object.keys(parsed.locales ?? {})).toEqual(["tlh-KL"]);
+  });
+});
+
 describe("SkillFrontmatterSchema", () => {
   it("treats a skill with no busabase metadata as not-a-template", () => {
     const parsed = SkillFrontmatterSchema.parse({ name: "busabase", description: "drive it" });

@@ -1,4 +1,6 @@
+import { normalizeAgentClient } from "busabase-contract/contract/agent-client";
 import type {
+  AgentClientVO,
   BusabaseSourceChannel,
   PlaybookAttributionVO,
   SourceAttributionVO,
@@ -119,6 +121,36 @@ const extractPlaybook = (provenance: Record<string, unknown>): PlaybookAttributi
   };
 };
 
+/**
+ * The stored agent client (`provenance.agent`), re-normalized from its id on
+ * every read: the stored name is never echoed back as-is, so a row written by
+ * an older or buggy writer cannot put arbitrary text in front of a reader.
+ */
+const extractAgent = (provenance: Record<string, unknown>): AgentClientVO | null => {
+  const agent = provenance.agent;
+  if (!isRecord(agent) || typeof agent.id !== "string") return null;
+  return normalizeAgentClient(agent.id);
+};
+
+/**
+ * How the open-source host (which has no provenance of its own) names the
+ * channel next to a playbook or agent client. Mirrors Cloud's header sniff:
+ * explicit channel first, then the client / user agent.
+ */
+export const sniffSourceChannel = (headers: Headers): BusabaseSourceChannel | null => {
+  const explicit = normalizeSourceChannel(headers.get("x-busabase-channel"));
+  if (explicit) return explicit;
+  const client = (
+    headers.get("x-busabase-client") ??
+    headers.get("user-agent") ??
+    ""
+  ).toLowerCase();
+  if (client.includes("busabase-cli")) return "cli";
+  if (client.includes("mcp")) return "mcp";
+  if (client.includes("sdk")) return "sdk";
+  return null;
+};
+
 export const extractSourceAttribution = (
   sourceMeta: Record<string, unknown>,
 ): SourceAttributionVO | null => {
@@ -138,10 +170,12 @@ export const extractSourceAttribution = (
     firstString(credential, ["channel"]);
 
   const playbook = extractPlaybook(provenance);
+  const agent = extractAgent(provenance);
   // "openapi" is the default for a provenance that names a caller (an owner, a
   // key, a channel) without saying how it came in. A provenance that carries
-  // ONLY a playbook (the open-source local host, which has no caller identity)
-  // says nothing about the channel, so it must not suddenly read "API".
+  // ONLY a playbook and/or an agent client (the open-source local host, which
+  // has no caller identity) says nothing about the channel, so it must not
+  // suddenly read "API".
   const identifiesCaller =
     owner !== undefined ||
     credential !== undefined ||
@@ -149,7 +183,8 @@ export const extractSourceAttribution = (
     displayName !== null ||
     rawChannel !== null;
   const channel =
-    normalizeSourceChannel(rawChannel) ?? (identifiesCaller || !playbook ? "openapi" : null);
+    normalizeSourceChannel(rawChannel) ??
+    (identifiesCaller || (!playbook && !agent) ? "openapi" : null);
 
   return {
     displayName,
@@ -157,6 +192,8 @@ export const extractSourceAttribution = (
     channel,
     // Emitted only when present, so an attribution without a playbook keeps its exact old shape.
     ...(playbook ? { playbook } : {}),
+    // Same rule: only when a write named its agent client.
+    ...(agent ? { agent } : {}),
   };
 };
 

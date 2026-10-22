@@ -69,6 +69,107 @@ describe("Busabase OpenAPI shared component schemas", () => {
     expect(JSON.stringify(spec).length).toBeLessThan(500_000);
   });
 
+  it("names every union member, so generated SDKs get no positional `…Type0` classes", async () => {
+    const spec = await getBusabaseOpenApiSpec();
+    // An object schema written inline as a member of anyOf/oneOf is what a
+    // generator can only call `NodesCreateChangeRequestBodyOperationsItemType0`.
+    const inlineMembers: string[] = [];
+    const walk = (node: unknown, path: string): void => {
+      if (Array.isArray(node)) {
+        for (const [index, item] of node.entries()) walk(item, `${path}/${index}`);
+        return;
+      }
+      if (!node || typeof node !== "object") return;
+      for (const key of ["anyOf", "oneOf"]) {
+        const members = (node as Record<string, unknown>)[key];
+        if (!Array.isArray(members)) continue;
+        for (const [index, member] of members.entries()) {
+          if (member && typeof member === "object" && "properties" in member) {
+            inlineMembers.push(`${path}/${key}/${index}`);
+          }
+        }
+      }
+      for (const [key, value] of Object.entries(node)) walk(value, `${path}/${key}`);
+    };
+    walk(spec, "#");
+    expect(inlineMembers, "register these variants in openapi-components.ts").toEqual([]);
+  });
+
+  it("names the request shapes callers build: operations, content, filters, policies", async () => {
+    const spec = await getBusabaseOpenApiSpec();
+    type Schema = Record<string, unknown> & {
+      properties?: Record<string, Schema>;
+      items?: Schema;
+      anyOf?: Schema[];
+    };
+    const body = (path: string, method: string): Schema =>
+      (
+        (spec.paths?.[`/api/v1${path}`] as Record<string, { requestBody?: unknown }>)[method]
+          .requestBody as {
+          content: Record<string, { schema: Schema }>;
+        }
+      ).content["application/json"].schema;
+    const query = (path: string, name: string): Schema =>
+      (
+        (spec.paths?.[`/api/v1${path}`]?.get?.parameters ?? []) as Array<{
+          name: string;
+          schema: Schema;
+        }>
+      ).find((parameter) => parameter.name === name)?.schema ?? {};
+    const refNames = (schemas: Schema[] | undefined) =>
+      (schemas ?? []).map((schema) => String(schema.$ref).slice(REF_PREFIX.length)).sort();
+
+    expect(
+      refNames(body("/nodes/change-requests", "post").properties?.operations?.items?.anyOf),
+    ).toEqual([
+      "CreateNodeOperation",
+      "DeleteNodeOperation",
+      "MoveNodeOperation",
+      "RenameNodeOperation",
+      "RestoreNodeOperation",
+    ]);
+    expect(refNames(body("/views/change-requests", "post").anyOf)).toEqual([
+      "CreateViewOperation",
+      "DeleteViewOperation",
+      "RestoreViewOperation",
+      "UpdateViewOperation",
+    ]);
+    expect(
+      refNames(
+        body("/file-trees/{nodeId}/change-requests", "post").properties?.operations?.items?.anyOf,
+      ),
+    ).toEqual([
+      "AssetFileOperation",
+      "DeleteFileOperation",
+      "FileTreeMetadataOperation",
+      "TextFileOperation",
+    ]);
+    expect(refNames(body("/nodes/{nodeId}/content", "put").properties?.content?.anyOf)).toEqual([
+      "DocNodeContent",
+      "HtmlNodeContent",
+      "WhiteboardNodeContent",
+      "WorkflowNodeContent",
+    ]);
+    expect(refNames(body("/webhooks", "post").anyOf)).toEqual([
+      "HttpWebhookRuleInput",
+      "NotifyAgentWebhookRuleInput",
+      "RunFunctionWebhookRuleInput",
+    ]);
+    expect(refNames(body("/embed-links", "post").properties?.framePolicy?.anyOf)).toEqual([
+      "EmbedFramePolicyAnywhere",
+      "EmbedFramePolicyOrigins",
+      "EmbedFramePolicyTopLevelOnly",
+    ]);
+    for (const path of ["/records", "/records/count", "/records/group-by"]) {
+      expect(query(path, "filters").items).toEqual({ $ref: `${REF_PREFIX}RecordFilter` });
+      expect(query(path, "valueFilters").items).toEqual({ $ref: `${REF_PREFIX}RecordValueFilter` });
+    }
+    // The field-update patch shares FieldOptions instead of carrying a copy.
+    expect(
+      body("/bases/{baseId}/fields/change-requests", "post").properties?.patch?.properties?.options,
+    ).toEqual({ $ref: `${REF_PREFIX}FieldOptions` });
+  });
+
   it("documents the { error, code, data } envelope the server sends for errors", async () => {
     const spec = await getBusabaseOpenApiSpec();
     const errorResponses = Object.values(spec.paths ?? {}).flatMap((pathItem) =>

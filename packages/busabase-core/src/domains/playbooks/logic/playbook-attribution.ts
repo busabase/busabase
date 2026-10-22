@@ -29,7 +29,6 @@ import { and, eq, inArray, isNull } from "drizzle-orm";
 import { iStringParse } from "openlib/i18n/i-string";
 import {
   type BusabasePlaybookProvenance,
-  type BusabaseSourceChannel,
   getContextSourceProvenance,
   getContextSpaceId,
   runWithContextPlaybook,
@@ -37,7 +36,7 @@ import {
 import { getDb } from "../../../db";
 import { busabaseNodes } from "../../../db/schema";
 import { buildNodeVisibilityCondition } from "../../../logic/node-acl";
-import { normalizeSourceChannel } from "../../../logic/source-attribution";
+import { sniffSourceChannel } from "../../../logic/source-attribution";
 
 /**
  * Validate a declared playbook against the CURRENT context (space + reader
@@ -96,25 +95,6 @@ export const resolveDeclaredPlaybook = async (
 const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
 /**
- * How the open-source host names the channel alongside a playbook — it has no
- * other provenance. Mirrors Cloud's header sniff: explicit channel first, then
- * the client / user agent.
- */
-const sniffChannel = (headers: Headers): BusabaseSourceChannel | null => {
-  const explicit = normalizeSourceChannel(headers.get("x-busabase-channel"));
-  if (explicit) return explicit;
-  const client = (
-    headers.get("x-busabase-client") ??
-    headers.get("user-agent") ??
-    ""
-  ).toLowerCase();
-  if (client.includes("busabase-cli")) return "cli";
-  if (client.includes("mcp")) return "mcp";
-  if (client.includes("sdk")) return "sdk";
-  return null;
-};
-
-/**
  * Run `fn` with the request's declared playbook (if any, and valid) recorded
  * in the source provenance. Call once per request, INSIDE the resolved
  * member/local context. Reads (GET) skip validation entirely — they write
@@ -136,7 +116,7 @@ export const withDeclaredPlaybook = async <T>(
     console.warn("[busabase] could not validate x-busabase-playbook; dropping it", error);
   }
   if (!playbook) return fn();
-  const channel = getContextSourceProvenance() ? null : sniffChannel(request.headers);
+  const channel = getContextSourceProvenance() ? null : sniffSourceChannel(request.headers);
   return runWithContextPlaybook(playbook, fn, channel ? { channel } : undefined);
 };
 

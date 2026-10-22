@@ -8,6 +8,8 @@
  * is real (so a gallery opened three times costs one round trip), and the flag
  * genuinely bypasses it.
  */
+import { pickTemplateMedia } from "busabase-contract/domains/templates/media";
+import { TemplateCatalogVOSchema } from "busabase-contract/domains/templates/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { __resetTemplateCatalogCache, listTemplates } from "../src/domains/templates/logic/catalog";
 
@@ -85,6 +87,32 @@ describe("listTemplates", () => {
     expect(catalog.templates[0].install.repoUrl).toBe(
       "https://github.com/busabase/templates/tree/main/busa-email",
     );
+  });
+
+  /**
+   * The card VO is a plain `z.object`, and oRPC's `.output()` parses through it
+   * — an undeclared `locales` would be stripped right here, before any
+   * Dashboard, mobile or marketing reader could pick a locale from it.
+   */
+  it("keeps per-locale media through the contract's output schema", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        ...CATALOG,
+        templates: [
+          {
+            ...CATALOG.templates[0],
+            locales: { "zh-CN": { screenshots: ["assets/screenshots/overview-zh-CN.webp"] } },
+          },
+        ],
+      }),
+    );
+
+    const [card] = TemplateCatalogVOSchema.parse(await listTemplates()).templates;
+
+    expect(pickTemplateMedia(card, "zh-CN").screenshots).toEqual([
+      "https://raw.githubusercontent.com/busabase/templates/main/busa-email/assets/screenshots/overview-zh-CN.webp",
+    ]);
+    expect(pickTemplateMedia(card, "ja").screenshots).toEqual(card.screenshots);
   });
 
   it("says why it is empty when the catalog cannot be reached", async () => {

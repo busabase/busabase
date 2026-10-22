@@ -129,3 +129,80 @@ describe("listTemplates — asset URLs", () => {
     expect(result.templates[0]?.video).toBeUndefined();
   });
 });
+
+/**
+ * Per-locale media resolves exactly like the defaults, and — because every
+ * deployed catalog predates it — its absence or a malformed value must leave a
+ * card byte-for-byte what it was.
+ */
+describe("listTemplates — localized media", () => {
+  const RAW = "https://raw.githubusercontent.com/busabase/templates/main/templates/gated";
+  const MEDIA = "https://media.githubusercontent.com/media/busabase/templates/main/templates/gated";
+
+  it("resolves each locale's screenshots on the raw host and its clip on the media host", async () => {
+    mockCatalog([
+      {
+        ...baseEntry,
+        screenshots: ["assets/screenshots/cover.webp"],
+        video: "assets/recordings/gated.mp4",
+        locales: {
+          "zh-CN": {
+            screenshots: ["assets/screenshots/cover-zh-CN.webp"],
+            video: "assets/recordings/gated-zh-CN.mp4",
+          },
+          ja: { video: "assets/recordings/gated-ja.mp4" },
+        },
+      },
+    ]);
+    const [card] = (await listTemplates()).templates;
+    expect(card.screenshots).toEqual([`${RAW}/assets/screenshots/cover.webp`]);
+    expect(card.video).toBe(`${MEDIA}/assets/recordings/gated.mp4`);
+    expect(card.locales).toEqual({
+      "zh-CN": {
+        screenshots: [`${RAW}/assets/screenshots/cover-zh-CN.webp`],
+        video: `${MEDIA}/assets/recordings/gated-zh-CN.mp4`,
+      },
+      ja: { video: `${MEDIA}/assets/recordings/gated-ja.mp4` },
+    });
+  });
+
+  it("produces the same card as before for an old-shape catalog with no locales", async () => {
+    mockCatalog([{ ...baseEntry, screenshots: ["assets/screenshots/cover.webp"] }]);
+    const [card] = (await listTemplates()).templates;
+    expect(Object.hasOwn(card, "locales")).toBe(false);
+    expect(card).toEqual({
+      id: "busabase/templates/templates/gated",
+      name: "gated",
+      description: "The gated desk.",
+      category: "ops",
+      tags: [],
+      screenshots: [`${RAW}/assets/screenshots/cover.webp`],
+      agentPrompts: [],
+      stats: baseEntry.stats,
+      install: {
+        repoUrl: "https://github.com/busabase/templates/tree/main/templates/gated",
+        intoFolder: "gated",
+      },
+      sourceUrl: "https://github.com/busabase/templates/tree/main/templates/gated",
+    });
+  });
+
+  it("ignores a malformed locales value instead of failing the gallery", async () => {
+    mockCatalog([
+      { ...baseEntry, subdir: "templates/a", name: "a", locales: "zh-CN" },
+      { ...baseEntry, subdir: "templates/b", name: "b", locales: ["cover-zh-CN.webp"] },
+      {
+        ...baseEntry,
+        subdir: "templates/c",
+        name: "c",
+        locales: { "zh-CN": { screenshots: "cover-zh-CN.webp", video: 7 }, ja: null },
+      },
+    ]);
+    const catalog = await listTemplates();
+    expect(catalog.error).toBeUndefined();
+    expect(catalog.templates).toHaveLength(3);
+    for (const card of catalog.templates) {
+      expect(Object.hasOwn(card, "locales")).toBe(false);
+    }
+  });
+});

@@ -114,6 +114,31 @@ export const TemplateSecretSchema = z.object({
 });
 export type TemplateSecret = z.infer<typeof TemplateSecretSchema>;
 
+/**
+ * One locale's own gallery media — the value side of `template.locales`.
+ *
+ * Both fields optional and independent: a locale that only re-recorded the clip
+ * declares just `video` and keeps the default screenshots. Paths are
+ * package-relative in `busabase.json` and absolute URLs on the catalog card;
+ * the shape is the same, which is why the card VO reuses this schema.
+ */
+export const TemplateLocaleMediaSchema = z.object({
+  /** Replaces the default list WHOLE for this locale — never merged per index. */
+  screenshots: z.array(z.string()).optional(),
+  video: z.string().optional(),
+});
+export type TemplateLocaleMedia = z.infer<typeof TemplateLocaleMediaSchema>;
+
+/**
+ * Per-locale media keyed by locale (`"zh-CN"`, `"ja"`).
+ *
+ * Keys are plain strings on purpose, not the supported-locale enum: a template
+ * written for a locale this server does not know yet must still install. The
+ * audit warns about such keys; the schema never rejects them.
+ */
+export const TemplateLocalesSchema = z.record(z.string(), TemplateLocaleMediaSchema);
+export type TemplateLocales = z.infer<typeof TemplateLocalesSchema>;
+
 export const TemplateManifestSchema = z.object({
   /** Template Center category, e.g. `"crm"`, `"email"`, `"content"`. */
   category: z.string().min(1),
@@ -133,6 +158,21 @@ export const TemplateManifestSchema = z.object({
    * it just vanishes, with no error from `busabase-cli check`.
    */
   video: z.string().optional(),
+  /**
+   * Localized gallery media, the App Store / Google Play rule: a viewer whose
+   * locale has an entry sees that entry's `screenshots` / `video`; anything the
+   * entry leaves out, and every locale without an entry, falls back to the two
+   * fields above. Those stay the English/default set — they are what every
+   * deployed server and CLI already reads, so their meaning cannot change.
+   *
+   * `{ "zh-CN": { "screenshots": ["assets/screenshots/cover-zh-CN.webp"],
+   *               "video": "assets/recordings/busa-rnd-zh-CN.mp4" } }`
+   *
+   * Additive by construction: an older parser strips the key (see the note on
+   * `video`), so an older server simply shows the defaults. Selection lives in
+   * one place — `pickTemplateMedia` in `domains/templates/media`.
+   */
+  locales: TemplateLocalesSchema.optional(),
   /**
    * Ready-made prompts shown after install ("Ask agent" prefills the first).
    *

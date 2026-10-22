@@ -63,12 +63,9 @@ export function NodeShareDialog({
   const t = messages.share;
   const queryClient = useQueryClient();
 
-  // The two halves of this dialog have independent NODE-CAPABILITY gates, and
-  // most node types qualify for only one of them. A Form can be shared to the
-  // web but never embedded; a Drive / Skill is the reverse (their registry
-  // definitions declare `publicAccess: "no"` because an anonymous detail route
-  // wouldn't work, yet `embedLinks.create` accepts both and the
-  // `/embed/[publicId]` route tree serves them). An AirApp qualifies for BOTH:
+  // Public sharing and Embed Links have independent node-capability gates.
+  // A Form can be shared to the web but never embedded. Drive and Skill support
+  // both public detail pages and Embed Links. An AirApp qualifies for both too:
   // its `publicAccess: "runtime"` resolves a public link through the relayed
   // runtime rather than an anonymous detail route (see the history note on
   // `airappNodeType`), and it is embeddable too. So neither gate may hide the
