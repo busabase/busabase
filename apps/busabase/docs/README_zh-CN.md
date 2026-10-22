@@ -139,6 +139,7 @@ pnpm --filter busabase dev
 | **Agent Skill** | 能遵循工作区说明的编码 Agent 与本地 CLI |
 | **MCP** | 需要类型化工作区操作的 Agent 与 IDE |
 | **OpenAPI / CLI** | 应用、脚本、自动化与自研 Agent |
+| **SDK** | TypeScript（[`busabase-sdk`](https://www.npmjs.com/package/busabase-sdk)）与 Python（[`pip install busabase`](https://pypi.org/project/busabase/)）应用、脚本和 Notebook |
 | **Agents 视图（ACP）** | 带内联工具步骤和权限确认的对话式 session |
 
 指南：[Claude Code](./claude-code.md) · [DeepSeek Harness](./deepseek-harness.md) · [Bring Your Own Agent](./bring-your-agent.md)。在侧边栏打开 **Agent Skills**，即可查看当前运行实例的 MCP endpoint 和 OpenAPI spec（`/api/v1/doc`）。Busabase 也收录在 [Glama MCP 连接器目录](https://glama.ai/mcp/connectors/com.busabase/busabase)中。

@@ -145,6 +145,7 @@ Works with **Claude Code · Codex · Cursor · Gemini CLI · OpenCode · OpenCla
 | **Agent Skill** | Coding agents and local CLIs that can follow workspace instructions |
 | **MCP** | Tool-aware agents and IDEs that need typed workspace operations |
 | **OpenAPI / CLI** | Apps, scripts, automations, and custom agents |
+| **SDKs** | TypeScript ([`busabase-sdk`](https://www.npmjs.com/package/busabase-sdk)) and Python ([`pip install busabase`](https://pypi.org/project/busabase/)) apps, scripts, and notebooks |
 | **Agents view (ACP)** | Conversational sessions with inline tool activity and permission requests |
 
 Guides: [Claude Code](./apps/busabase/docs/claude-code.md) · [DeepSeek Harness](./apps/busabase/docs/deepseek-harness.md) · [Bring Your Own Agent](./apps/busabase/docs/bring-your-agent.md). Open **Agent Skills** in the sidebar for the MCP endpoint and OpenAPI spec of your running instance (`/api/v1/doc`). Also on [Glama's MCP directory](https://glama.ai/mcp/connectors/com.busabase/busabase).
