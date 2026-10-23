@@ -107,19 +107,25 @@ function TemplateDetailContent() {
             ) : null}
           </View>
 
-          {media && (media.screenshots.length > 0 || media.video) ? (
+          {media && (media.screenshots.length > 0 || media.videos.length > 0) ? (
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.shelf}
             >
-              {media.video ? (
+              {media.videos.map((clip) => (
                 <VideoTile
-                  src={media.video}
-                  label={t.templates.playVideo}
+                  key={clip.src}
+                  src={clip.src}
+                  label={
+                    clip.title ? `${t.templates.playVideo}: ${clip.title}` : t.templates.playVideo
+                  }
+                  // Only when there are several: titles tell clips apart, and a
+                  // lone clip's tile stays as it always was.
+                  caption={media.videos.length > 1 ? clip.title : undefined}
                   poster={media.screenshots[1] ?? media.screenshots[0]}
                 />
-              ) : null}
+              ))}
               {media.screenshots.map((src, index) => (
                 <Image
                   // biome-ignore lint/suspicious/noArrayIndexKey: the source list itself has no stable id
@@ -198,7 +204,17 @@ function TemplateDetailContent() {
  * inline video — not a shared component because the visual shells differ (a
  * shelf tile here, a text row there), but the same reasoning.
  */
-function VideoTile({ src, poster, label }: { src: string; poster?: string; label: string }) {
+function VideoTile({
+  src,
+  poster,
+  label,
+  caption,
+}: {
+  src: string;
+  poster?: string;
+  label: string;
+  caption?: string;
+}) {
   const tokens = useTokens();
   return (
     <Pressable
@@ -217,6 +233,13 @@ function VideoTile({ src, poster, label }: { src: string; poster?: string; label
       <View style={[styles.playBadge, { backgroundColor: tokens.background }]}>
         <Play size={20} color={tokens.foreground} />
       </View>
+      {caption ? (
+        <View style={[styles.videoCaption, { backgroundColor: tokens.foreground }]}>
+          <Text numberOfLines={1} style={[typography.caption, { color: tokens.background }]}>
+            {caption}
+          </Text>
+        </View>
+      ) : null}
     </Pressable>
   );
 }
@@ -237,6 +260,16 @@ const styles = StyleSheet.create({
   shelf: { paddingHorizontal: 14, paddingVertical: spacing[3], gap: spacing[2] },
   screenshot: { width: SCREENSHOT_WIDTH, aspectRatio: 16 / 10, borderRadius: radius.lg },
   videoTile: { alignItems: "center", justifyContent: "center", overflow: "hidden" },
+  videoCaption: {
+    position: "absolute",
+    left: spacing[2],
+    right: spacing[2],
+    bottom: spacing[2],
+    paddingHorizontal: spacing[2],
+    paddingVertical: 4,
+    borderRadius: radius.md,
+    opacity: 0.85,
+  },
   playBadge: {
     width: 40,
     height: 40,
