@@ -23,6 +23,121 @@ const expectNoHorizontalOverflow = async (page: import("@playwright/test").Page)
   ).toBeLessThanOrEqual(1);
 };
 
+test("right panel: connecting an agent keeps the catalog readable through resize and restore", async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(120_000);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.addInitScript(() => window.localStorage.setItem("busabaseLocale", "en"));
+  await page.goto("/dashboard/local/home?demo=1", { waitUntil: "commit" });
+  await page.getByRole("button", { name: "Open side panel", exact: true }).click();
+  const panel = page.getByRole("region", { name: "Side panel", exact: true });
+  await panel.getByRole("button", { name: /Agents/ }).click();
+  await panel.getByRole("button", { name: "Connect an agent", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Add agent", exact: true })).toBeVisible();
+
+  const cards = page.getByTestId("agent-catalog-card");
+  await expect(cards).toHaveCount(4);
+  const canvas = page.locator("[data-dashboard-active-view]");
+  const expectReadableCatalog = async () => {
+    await expect
+      .poll(async () => {
+        const bounds = await cards.evaluateAll((elements) =>
+          elements.map((element) => ({
+            width: element.getBoundingClientRect().width,
+            overflow: element.scrollWidth - element.clientWidth,
+          })),
+        );
+        return bounds.every((box) => box.width >= 255 && box.overflow <= 1);
+      })
+      .toBe(true);
+    await expectNoHorizontalOverflow(page);
+  };
+  await expectReadableCatalog();
+  await capture(page, testInfo, "06-panel-connect-keeps-catalog-readable");
+
+  // Save a wide preference, then shrink the window without changing it.
+  const handle = panel.getByRole("button", { name: "Resize side panel", exact: true });
+  const handleBounds = await handle.boundingBox();
+  expect(handleBounds).not.toBeNull();
+  await page.mouse.move(handleBounds!.x + handleBounds!.width / 2, 300);
+  await page.mouse.down();
+  await page.mouse.move(20, 300, { steps: 12 });
+  await page.mouse.up();
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await expect
+    .poll(async () => (await canvas.boundingBox())?.width ?? 0)
+    .toBeGreaterThanOrEqual(359);
+  await expectReadableCatalog();
+  await capture(page, testInfo, "07-resized-panel-preserves-main-column");
+  await page.reload({ waitUntil: "commit" });
+  await expect(cards).toHaveCount(4);
+  await expect
+    .poll(async () => (await canvas.boundingBox())?.width ?? 0)
+    .toBeGreaterThanOrEqual(359);
+  await expectReadableCatalog();
+
+  // Resizing a restored, clamped preference starts from its visible width.
+  const restoredHandle = await handle.boundingBox();
+  const restoredWidth = (await panel.boundingBox())!.width;
+  expect(restoredHandle).not.toBeNull();
+  await page.mouse.move(restoredHandle!.x + restoredHandle!.width / 2, 300);
+  await page.mouse.down();
+  await page.mouse.move(restoredHandle!.x + restoredHandle!.width / 2 + 24, 300, { steps: 4 });
+  await page.mouse.up();
+  await expect
+    .poll(async () => (await panel.boundingBox())?.width ?? 0)
+    .toBeCloseTo(restoredWidth - 24, 0);
+
+  await panel.getByRole("button", { name: "Maximize side panel", exact: true }).click();
+  await expect.poll(async () => (await panel.boundingBox())?.width ?? 0).toBe(1280);
+  await panel.getByRole("button", { name: "Restore side panel", exact: true }).click();
+  await expectReadableCatalog();
+  await panel.getByRole("button", { name: "Collapse side panel", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Open side panel", exact: true })).toBeVisible();
+  await expectReadableCatalog();
+  await capture(page, testInfo, "08-collapse-restores-catalog-space");
+
+  // Navigation width also changes the workspace without a viewport breakpoint.
+  await page.setViewportSize({ width: 1024, height: 900 });
+  const navigationHandle = page.getByRole("button", { name: "Resize sidebar", exact: true });
+  const navigationBounds = await navigationHandle.boundingBox();
+  expect(navigationBounds).not.toBeNull();
+  await page.mouse.move(navigationBounds!.x + navigationBounds!.width / 2, 300);
+  await page.mouse.down();
+  await page.mouse.move(480, 300, { steps: 12 });
+  await page.mouse.up();
+  await page.getByRole("button", { name: "Open side panel", exact: true }).click();
+  await expect.poll(async () => (await panel.boundingBox())?.width ?? 0).toBe(1024);
+  await capture(page, testInfo, "10-wide-navigation-uses-full-width-panel");
+  const collapse = panel.getByRole("button", { name: "Collapse side panel", exact: true });
+  await collapse.focus();
+  await page.keyboard.press("Enter");
+  await expectReadableCatalog();
+  const expandedNavigation = await navigationHandle.boundingBox();
+  expect(expandedNavigation).not.toBeNull();
+  await page.mouse.move(expandedNavigation!.x + expandedNavigation!.width / 2, 300);
+  await page.mouse.down();
+  await page.mouse.move(256, 300, { steps: 12 });
+  await page.mouse.up();
+
+  for (const width of [1024, 768, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.getByRole("button", { name: "Open side panel", exact: true }).click();
+    if (width < 1024) {
+      await expect.poll(async () => (await panel.boundingBox())?.width ?? 0).toBe(width);
+    } else {
+      await expect
+        .poll(async () => (await canvas.boundingBox())?.width ?? 0)
+        .toBeGreaterThanOrEqual(359);
+    }
+    await expectNoHorizontalOverflow(page);
+    await panel.getByRole("button", { name: "Collapse side panel", exact: true }).click();
+    await expectReadableCatalog();
+  }
+  await capture(page, testInfo, "09-mobile-return-to-readable-catalog");
+});
+
 test.describe
   .serial("Agent List and Add Agent", () => {
     test("desktop: moves from the inventory through Add Agent and into Agent Detail", async ({

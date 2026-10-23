@@ -46,12 +46,14 @@ export const resolveAirAppEmbedOrigins = ({
 };
 
 // Nodepod (the in-browser Node runtime behind the AirApp Run panel) lazy-loads
-// WASM tools it doesn't bundle — esbuild-wasm from esm.sh, wa-sqlite and
-// brotli-wasm from jsdelivr — the moment a Vite/SQLite AirApp actually runs.
-// Without these two origins in script-src, esbuild's WASM init throws
-// (`Cannot destructure property 'createServer'`) before the dev server binds
-// a port; verified against a real vite@7.3.1 AirApp both failing with these
-// origins absent and succeeding once they're allowed.
+// tools it doesn't bundle the moment a Vite/SQLite AirApp actually runs. As of
+// 1.11.2: esbuild (`@r1ck404/fast-esbuild-wasm`), brotli-wasm and wa-sqlite
+// from jsdelivr; `@rollup/browser` and lightningcss-wasm from esm.sh. Without
+// these two origins in script-src, esbuild's init threw
+// (`Cannot destructure property 'createServer'`) before the dev server bound
+// a port — verified on Nodepod 1.9.x (when esbuild-wasm still came from
+// esm.sh) against a real vite@7.3.1 AirApp, both failing with these origins
+// absent and succeeding once they're allowed.
 const NODEPOD_TOOL_CDN_ORIGINS = ["https://esm.sh", "https://cdn.jsdelivr.net"];
 
 export const createAirAppContentSecurityPolicy = (embedOrigins) =>

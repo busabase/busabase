@@ -61,7 +61,8 @@ RUN set -e; \
     DRIZZLE_VERSION=$(node -pe "const p=require('$APP_JSON'); (p.devDependencies?.['drizzle-kit'] || p.dependencies?.['drizzle-kit'] || '').replace(/^[^0-9]*/, '')"); \
     DRIZZLE_ORM_VERSION=$(node -pe "const p=require('$APP_JSON'); (p.devDependencies?.['drizzle-orm'] || p.dependencies?.['drizzle-orm'] || '').replace(/^[^0-9]*/, '')"); \
     POSTGRES_VERSION=$(node -pe "const p=require('$APP_JSON'); (p.devDependencies?.postgres || p.dependencies?.postgres || '').replace(/^[^0-9]*/, '')"); \
-    pnpm add drizzle-kit@${DRIZZLE_VERSION} drizzle-orm@${DRIZZLE_ORM_VERSION} postgres@${POSTGRES_VERSION} --save-prod --allow-build=esbuild
+    pnpm add drizzle-kit@${DRIZZLE_VERSION} drizzle-orm@${DRIZZLE_ORM_VERSION} postgres@${POSTGRES_VERSION} --save-prod --allow-build=esbuild; \
+    test -d node_modules/drizzle-kit
 
 FROM node:24.22.1-bookworm-slim AS runner
 ENV NODE_ENV=production \

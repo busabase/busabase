@@ -1,10 +1,9 @@
-import { OpenAPIHandler } from "@orpc/openapi/fetch";
 import { runWithBusabaseContext, runWithLocalContext } from "busabase-core/context";
 import { resolveOssFilePreviewRuntimeConfig } from "busabase-core/domains/filetree/preview-config";
 import { withRequestAttribution } from "busabase-core/logic/request-attribution";
 import { getBusabaseOpenApiSpec } from "busabase-core/openapi";
 import { BUSABASE_API_ALLOW_HEADERS, BUSABASE_API_METHODS } from "busabase-core/openapi/cors";
-import { encodeBusabaseOpenApiError } from "busabase-core/openapi/error-envelope";
+import { createBusabaseOpenApiHandler } from "busabase-core/openapi/handler";
 import { busabaseRouter } from "busabase-core/router";
 import { busabaseDemoRouter } from "busabase-core/router-demo";
 import { addCorsHeaders, createCorsHeaders } from "openlib/cors";
@@ -15,16 +14,13 @@ import { getLocalUserName } from "~/lib/local-user";
 import { resolveRelayPermissionContext } from "~/lib/relay-permission";
 
 // Shared with busabase-cloud on purpose: both servers mount the same contract,
-// so an SDK or agent talking to either has to see the same error shape. This
-// file's own copy used to return a self-shaped `{ error, … }` body verbatim,
-// which dropped `code` — see `busabase-core/src/openapi/error-envelope.ts`.
-const openApiHandler = new OpenAPIHandler(busabaseRouter, {
-  customErrorResponseBodyEncoder: encodeBusabaseOpenApiError,
-});
+// so an SDK or agent talking to either has to see the same error shape and the
+// same query-string coercion. This file's own copy used to return a self-shaped
+// `{ error, … }` body verbatim, which dropped `code` — see
+// `busabase-core/src/openapi/error-envelope.ts` and `.../openapi/handler.ts`.
+const openApiHandler = createBusabaseOpenApiHandler(busabaseRouter);
 
-const demoOpenApiHandler = new OpenAPIHandler(busabaseDemoRouter, {
-  customErrorResponseBodyEncoder: encodeBusabaseOpenApiError,
-});
+const demoOpenApiHandler = createBusabaseOpenApiHandler(busabaseDemoRouter);
 
 async function handle(request: Request) {
   const url = new URL(request.url);

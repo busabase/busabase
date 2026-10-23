@@ -17,9 +17,11 @@ test("lookup columns are offered as view filter and sort conditions", async ({ p
   const filters = page.getByTestId("shared-view-filters");
   // Add a row rather than relying on the view already having one — otherwise
   // this passes or fails on seed state instead of on the picker's contents.
-  await page.getByRole("button", { name: /add filter/i }).click();
+  await page.getByRole("button", { name: /^add filter$/i }).click();
   await expect(
-    filters.locator("select").first().locator("option", { hasText: "PO Budget" }),
+    filters
+      .getByLabel("Filter 1 field", { exact: true })
+      .locator("option", { hasText: "PO Budget" }),
   ).toHaveCount(1);
 
   // Escape is intentionally swallowed once the draft is dirty, so discard

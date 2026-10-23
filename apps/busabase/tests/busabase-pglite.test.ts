@@ -3,7 +3,11 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-describe("busabase pglite integration flow", () => {
+// This story includes cold module imports, PGlite migration, the full demo seed,
+// and many review/merge, view and search round-trips. The generic 30s budget
+// expired on shared CI; use the same bounded budget as package-roundtrip.test.ts.
+// Every assertion still runs, without retries or skipped initialization.
+describe("busabase pglite integration flow", { timeout: 90_000 }, () => {
   let dataDir = "";
   let storageDir = "";
 

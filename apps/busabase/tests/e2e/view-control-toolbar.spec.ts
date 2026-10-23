@@ -115,7 +115,7 @@ test("staged view controls recover a hidden conditioned field with one update CR
   const filterRow = panel.locator(`[data-condition-field-slug="${hiddenField.slug}"]`);
   await expect(filterRow).toContainText("Hidden");
   await panel.getByLabel("Filter 1 operator").selectOption("not_empty");
-  await panel.getByRole("button", { name: "Add filter" }).click();
+  await panel.getByRole("button", { name: "Add filter", exact: true }).click();
   await panel.getByLabel("Filter 2 field").selectOption(visibleFields[0].id);
   await panel.getByLabel("Filter 2 value").fill("E2E shared editor");
 
