@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
   resolveEmbedFramePolicy: vi.fn(),
 }));
 
-vi.mock("@scelar/nodepod/next", () => ({ nodepodProxy: mocks.nodepodProxy }));
+vi.mock("@r1ck404/nodepod/next", () => ({ nodepodProxy: mocks.nodepodProxy }));
 vi.mock("busabase-core/domains/embed-links/logic", () => ({
   resolveEmbedCapabilityMetadata: mocks.resolveEmbedCapabilityMetadata,
   resolveEmbedFramePolicy: mocks.resolveEmbedFramePolicy,

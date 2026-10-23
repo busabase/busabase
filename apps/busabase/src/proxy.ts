@@ -1,4 +1,4 @@
-import { nodepodProxy } from "@scelar/nodepod/next";
+import { nodepodProxy } from "@r1ck404/nodepod/next";
 import {
   decodeEmbedCapability,
   type EmbedFramePolicy,

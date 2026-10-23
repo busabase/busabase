@@ -1,7 +1,7 @@
 import { type APIRequestContext, expect, json, type Page, test, unique } from "./_fixtures";
 
 // AirApp's Run panel is a real in-browser sandboxed Node.js runtime
-// (@scelar/nodepod, see packages/busabase-core/src/domains/airapp/components/
+// (@r1ck404/nodepod, see packages/busabase-core/src/domains/airapp/components/
 // runners/nodepod-runner.ts) — opening an AirApp genuinely does `npm install` +
 // `npm run dev` inside a virtual filesystem and serves a real preview over an
 // iframe `src`. That's slow (a real npm install, real network fetches for
