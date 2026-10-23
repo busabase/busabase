@@ -11,7 +11,7 @@ if (!existsSync(builtCli)) {
       "If you are running from source, build it first:\n" +
       "  pnpm --filter busabase-cli build\n\n" +
       "For one-off npm usage, prefer:\n" +
-      "  npm exec -y --package busabase-cli@latest -- busabase-cli <command>\n",
+      "  npx --yes busabase-cli@latest <command>\n",
   );
   process.exit(1);
 }
@@ -43,7 +43,7 @@ try {
         "If you are running from source, build the SDK first:\n" +
         "  pnpm --filter busabase-sdk build\n\n" +
         "For one-off npm usage, prefer:\n" +
-        "  npm exec -y --package busabase-cli@latest -- busabase-cli <command>\n",
+        "  npx --yes busabase-cli@latest <command>\n",
     );
     process.exit(1);
   }

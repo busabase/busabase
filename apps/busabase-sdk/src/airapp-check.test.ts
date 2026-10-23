@@ -7,7 +7,15 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { type AirAppSources, checkAirApp, scanAirAppConfig, stripComments } from "./airapp-check";
+import {
+  type AirAppSources,
+  checkAirApp,
+  codeOnly,
+  findForcedReview,
+  isAirAppWriteRuleSource,
+  scanAirAppConfig,
+  stripComments,
+} from "./airapp-check";
 
 const PACKAGE_JSON = JSON.stringify({
   name: "my-desk-airapp",
@@ -253,6 +261,30 @@ if (!runtime.hosted) showConnectGate();
     expect(reported).toContain("airapp/runtime-route");
   });
 
+  /**
+   * An app that moved its probe onto the SDK no longer carries the literal path —
+   * the SDK does. Treating that as "never probes" would punish the migration.
+   */
+  it("accepts the SDK's detectAirAppRuntime as the probe", () => {
+    const browserLogic = `
+import { createBusabaseClient } from "busabase-sdk";
+import { detectAirAppRuntime, shouldUseLocalAirAppGateway } from "../vendor/busabase-airapp.js";
+const client = createBusabaseClient({ baseUrl: window.location.origin });
+export const runtime = await detectAirAppRuntime();
+export const shouldUseLocalGateway = () => shouldUseLocalAirAppGateway(runtime);
+`;
+    expect(rules(sources({ browserLogic }))).toEqual([]);
+  });
+
+  it("still holds the host to serving the route the SDK probe asks", () => {
+    const browserLogic = "export const runtime = await detectAirAppRuntime();";
+    const server = 'app.get("/api/health", (c) => c.json({ ok: true }));';
+    const reported = rules(sources({ browserLogic, server }));
+    expect(reported).toContain("airapp/runtime-env");
+    expect(reported).toContain("airapp/runtime-route");
+    expect(reported).not.toContain("airapp/runtime-probe");
+  });
+
   it("catches browser code that never probes the runtime", () => {
     const browserLogic = BROWSER_LOGIC.replace('fetch("__airapp/runtime"', 'fetch("/status"');
     expect(rules(sources({ browserLogic }))).toContain("airapp/runtime-probe");
@@ -407,5 +439,168 @@ describe("stripComments", () => {
 
   it("leaves a protocol-relative URL alone", () => {
     expect(stripComments('const u = "https://example.com";')).toContain("https://example.com");
+  });
+});
+
+// The two halves of busabase/templates#38, verbatim from busa-crm's provider: the
+// upsert as it shipped before the fix (review forced from where the app runs),
+// and as it ships now (`autoMerge` left to the person's permission).
+const UPSERT_BEFORE_FIX = `
+import { isStandaloneLocalRuntime } from "../runtime.js";
+async function upsert(key, idFieldSlug, idValue, fields, message) {
+  const declared = base(key);
+  const existing = await findRecord(key, idFieldSlug, idValue);
+  const normalized = toBusabaseFields(fields);
+  const autoMerge = isStandaloneLocalRuntime();
+  if (!existing) {
+    return runtimeClient.bases.createChangeRequest({
+      baseId: declared.baseId,
+      fields: normalized,
+      message,
+      submittedBy: appConfig.appId,
+      autoMerge,
+    });
+  }
+  return runtimeClient.records.changeRequest({
+    recordId: existing.id,
+    operation: "update",
+    fields: normalized,
+    message,
+    author: appConfig.appId,
+    baseCommitId: existing.headCommitId,
+    autoMerge,
+  });
+}
+`;
+
+const UPSERT_AFTER_FIX = `
+// A person's write from this app leaves \`autoMerge\` unset, so Busabase decides
+// from that person's own permission.
+const isQueued = (result) => result?.materialized === false || result?.status === "in_review";
+async function upsert(key, idFieldSlug, idValue, fields, message) {
+  const declared = base(key);
+  const existing = await findRecord(key, idFieldSlug, idValue);
+  const normalized = toBusabaseFields(fields);
+  if (!existing) {
+    return runtimeClient.bases.createChangeRequest({
+      baseId: declared.baseId,
+      fields: normalized,
+      message,
+      submittedBy: appConfig.appId,
+    });
+  }
+  return runtimeClient.records.changeRequest({
+    recordId: existing.id,
+    operation: "update",
+    fields: normalized,
+    message,
+    author: appConfig.appId,
+    baseCommitId: existing.headCommitId,
+  });
+}
+`;
+
+const lines = (source: string) => findForcedReview(source).map((finding) => finding.line);
+
+describe("airapp/forced-review", () => {
+  it("fails the provider as it shipped before busabase/templates#38", () => {
+    // Red half of the control: the derived value, then both pass-throughs.
+    expect(lines(UPSERT_BEFORE_FIX)).toEqual([7, 14, 24]);
+    const provider = `${BROWSER_LOGIC}\n${UPSERT_BEFORE_FIX}`;
+    expect(rules(sources({ browserLogic: provider }))).toEqual([
+      "airapp/forced-review",
+      "airapp/forced-review",
+      "airapp/forced-review",
+    ]);
+  });
+
+  it("passes the same provider once autoMerge is left unset", () => {
+    // Green half: same sources, the one difference being the fix.
+    expect(lines(UPSERT_AFTER_FIX)).toEqual([]);
+    expect(rules(sources({ browserLogic: `${BROWSER_LOGIC}\n${UPSERT_AFTER_FIX}` }))).toEqual([]);
+  });
+
+  it("flags an explicit false and a value worked out at runtime", () => {
+    expect(lines("client.records.changeRequest({ recordId, autoMerge: false });")).toEqual([1]);
+    expect(lines("let written = { autoMerge: false };")).toEqual([1]);
+    const source = [
+      "const autoMerge = isStandaloneLocalRuntime();",
+      "await client.bases.createChangeRequest({ baseId, fields, autoMerge });",
+      "await client.records.changeRequest({ recordId, autoMerge: isStandaloneLocalRuntime() });",
+      "const merge = { autoMerge: !isAirAppRequest() };",
+    ].join("\n");
+    expect(lines(source)).toEqual([1, 2, 3, 4]);
+  });
+
+  it("lets an omitted or literal-true autoMerge through", () => {
+    expect(lines("await client.records.changeRequest({ recordId, fields });")).toEqual([]);
+    expect(
+      lines("await client.nodes.createChangeRequest({ operations, autoMerge: true });"),
+    ).toEqual([]);
+  });
+
+  it("ignores the word in comments, strings, template text and regexes", () => {
+    const source = [
+      "// autoMerge is omitted: the workspace's permissions decide.",
+      "/* never pass autoMerge: false here */",
+      'const hint = "pass autoMerge: false to force review";',
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: the fixture IS a template literal.
+      "const label = `autoMerge = ${String(flag)}`;",
+      "const rule = /autoMerge:\\s*false/;",
+      "const ok = rule.test(source); // autoMerge: false",
+    ].join("\n");
+    expect(lines(source)).toEqual([]);
+    // An interpolation is code, so a real use inside one still counts.
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the fixture IS a template literal.
+    expect(codeOnly("const label = `x ${autoMerge} y`;")).toMatch(/autoMerge/);
+  });
+
+  it("accepts forced review only with a stated reason", () => {
+    const reason = "drafts an outgoing contract that legal must approve before it is sent";
+    expect(lines(`autoMerge: false, // allow-forced-review: ${reason}`)).toEqual([]);
+    expect(lines(`// allow-forced-review: ${reason}\nautoMerge: false,`)).toEqual([]);
+    const bare = findForcedReview("autoMerge: false, // allow-forced-review: risky");
+    expect(bare).toHaveLength(1);
+    expect(bare[0].problem).toMatch(/reason of at least/);
+  });
+
+  it("scans the app's own files, not vendored bundles, tests or dev scripts", () => {
+    const appSources = [
+      {
+        path: "app/js/providers/busabase-provider.js",
+        content: "export const save = (c) => c.records.changeRequest({ autoMerge: false });\n",
+      },
+      { path: "app/vendor/busabase-airapp.js", content: "publish({ autoMerge: false });\n" },
+      { path: "test/provider.test.mjs", content: "assert.equal(input.autoMerge, false);\n" },
+      { path: "scripts/check.mjs", content: "if (source.autoMerge === false) fail();\n" },
+      { path: "app/js/model.test.js", content: "expect({ autoMerge: false });\n" },
+      { path: "app/i18n/messages.json", content: '{ "autoMerge": false }\n' },
+      { path: "lib/client.ts", content: "const autoMerge = !isAirAppRequest();\n" },
+    ];
+    const messages = checkAirApp({ appSources })
+      .filter((finding) => finding.rule === "airapp/forced-review")
+      .map((finding) => finding.message.split(": ")[0]);
+    expect(messages).toEqual(["app/js/providers/busabase-provider.js:1", "lib/client.ts:1"]);
+  });
+
+  it("prefers per-file sources over the concatenated corpora, never both", () => {
+    // A caller handing both must not get every finding twice.
+    const findings = checkAirApp({
+      browserLogic: UPSERT_BEFORE_FIX,
+      appSources: [{ path: "app/js/providers/busabase-provider.js", content: UPSERT_BEFORE_FIX }],
+    }).filter((finding) => finding.rule === "airapp/forced-review");
+    expect(findings).toHaveLength(3);
+    expect(findings[0].message).toMatch(/^app\/js\/providers\/busabase-provider\.js:7: /);
+  });
+
+  it("classifies paths the way busabase/templates' check-app-writes does", () => {
+    expect(isAirAppWriteRuleSource("server.js")).toBe(true);
+    expect(isAirAppWriteRuleSource("server/hono.ts")).toBe(true);
+    expect(isAirAppWriteRuleSource("app/js/app.js")).toBe(true);
+    expect(isAirAppWriteRuleSource("app/vendor/busabase-sdk.js")).toBe(false);
+    expect(isAirAppWriteRuleSource("node_modules/x/index.js")).toBe(false);
+    expect(isAirAppWriteRuleSource("tests/a.mjs")).toBe(false);
+    expect(isAirAppWriteRuleSource("app/js/a.test.ts")).toBe(false);
+    expect(isAirAppWriteRuleSource("app/index.html")).toBe(false);
   });
 });

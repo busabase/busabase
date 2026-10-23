@@ -122,6 +122,64 @@ An app that ships its own AirApp node inside the Folder declares it too — `air
 
 Failures are an `AirAppSetupError` carrying a `code`: `SETUP_REQUIRED` (offer to initialize), `SETUP_PENDING` (submitted, awaiting approval — the permission model working as designed), `SETUP_CONFLICT`, `SETUP_PERMISSION`, `SCHEMA_INCOMPLETE`. `message` keeps the `"CODE: detail"` shape so code that parses the prefix keeps working.
 
+### `busabase-sdk/airapp` — where am I running? (browser)
+
+The app's own server answers at `__airapp/runtime` (build the body with `describeBusabaseAirAppRuntime()` from `busabase-sdk/airapp-node`); `detectAirAppRuntime()` asks it.
+
+```js
+// app/js/runtime.js
+import { detectAirAppRuntime, shouldUseLocalAirAppGateway } from "../vendor/busabase-airapp.js";
+
+export const runtime = await detectAirAppRuntime(); // { runtime, hosted, devProxy, determined }
+export const shouldUseLocalGateway = () => shouldUseLocalAirAppGateway(runtime);
+```
+
+It never rejects. The probe uses the relative path (a leading slash 404s under the Local Node sub-path), accepts only a JSON content-type (a hosted catch-all can answer 200 with HTML), gives up after 3 s, and takes `hosted` from the server's own boolean — never from a list of engine names. Anything else resolves to `unknown` (`hosted: false, determined: false`), and `shouldUseLocalAirAppGateway` shows the connect gate for it: an unnecessary gate is closed by the operator, a missing one strands them. The answer is shared page-wide, so the gate, the provider and a settings panel can each ask without three round trips. Never classify the runtime from the URL.
+
+### `busabase-sdk/airapp` — reading and writing records (browser)
+
+`createAirAppRecords(client, { appId })` binds the record plumbing every provider used to copy:
+
+```js
+import { airAppWriteMessage, createAirAppRecords } from "../vendor/busabase-airapp.js";
+
+const records = createAirAppRecords(createRuntimeClient(), { appId: "busa-crm" });
+
+// One page per call — the next page is the next user action.
+const { records: rows, nextCursor } = await records.readPage({ baseId, limit: base.readLimit, cursor });
+rows[0].fields; // the record's current values by slug, already out of headCommit
+
+// Exact match on one field; null when there is none.
+const deal = await records.findRecord({ baseId, fieldSlug: "deal-id", valueText: "deal-42" });
+
+// Update the match against the head it just read, or create it.
+const outcome = await records.upsert({
+  baseId,
+  fieldSlug: "followup-id",
+  valueText: "fu-7",
+  fields: { "followup-id": "fu-7", status: "approved" },
+  message: "Approve follow-up fu-7",
+});
+outcome; // { status: "saved" | "queued", recordId?, changeRequestId?, action: "create" | "update", response }
+notice = airAppWriteMessage(outcome, { locale });
+```
+
+`createRecord` and `updateRecord` are there too, for the apps that only ever do one of the two. **None of them passes `autoMerge`.** A person's write follows their own permission: Busabase merges it for someone with write access and opens a ChangeRequest for someone without. Both are correct; the outcome says which happened, and the app says so instead of assuming either. Per-app rules — which procedures the app allows itself, how a record maps onto its own row shape, how its keys are spelled — stay in the app; pass `fields` keyed by the Base's slugs.
+
+`toAirAppWriteOutcome(response)` normalizes any write response the same way, including the bulk endpoints (`bases.createBulkChangeRequest` / `createBulkUpdateChangeRequest`), whose merged ChangeRequest lists every record in `recordIds`. Queued means `materialized: false` or `status: "in_review"`, and a ChangeRequest that did not merge is never reported as saved. `isAirAppWriteQueued(response)` is the bare predicate.
+
+`airAppWriteMessage(outcome, { locale, messages })` returns the sentence to show — "Saved." or "Sent for review. You don't have write access here, so this waits until someone who does approves it." — in `en`, `zh-CN`, `zh-TW` and `ja` (other locales fall back to `en`). Pass `messages: { saved, queued }` to use the app's own wording.
+
+### `busabase-sdk/airapp-check` — the contract as rules
+
+`checkAirApp(sources)` returns findings; `busabase-cli check` runs it on every AirApp in a package. `airapp/forced-review` fails any `autoMerge` in the app's own code that is not a literal `true` — an explicit `false`, a value worked out at runtime, or a variable passed through. Comments and strings never match, and vendored bundles, tests and `scripts/` are not scanned. When a write genuinely needs a second person before it goes out, say why on the line or the line above:
+
+```js
+autoMerge: false, // allow-forced-review: drafts an outgoing contract that legal must approve
+```
+
+Pass `appSources` (every file, path relative to the app) to get `path:line` in each finding; without it the rule scans `browserLogic` and `server`.
+
 ### `busabase-sdk/airapp-gate` — the connect UI (browser)
 
 The three screens the operator sees before the app mounts: choose a server and connect, choose a Space, and initialize the workspace.
@@ -131,7 +189,7 @@ import { createAirAppConnectGate } from "busabase-sdk/airapp-gate";
 
 const gate = createAirAppConnectGate({
   appName: "Kelly CRM",
-  shouldGate: () => !isDemo() && shouldUseLocalGateway(), // see below
+  shouldGate: () => !isDemo() && shouldUseLocalAirAppGateway(runtime), // see below
   onProvision: () => provisionDeclaredResources(client, config),
   demoHref: "?demo=1",
 });
@@ -143,7 +201,7 @@ gate.renderSetupRequired(error, start);
 
 `pass()` returns `true` when the app may load data.
 
-**Pass `shouldGate`.** Where an app runs is a fact its host states: Busabase injects `BUSABASE_AIRAPP_RUNTIME` into the process it spawns, and the app's own server surfaces that to the browser. Never classify it by hostname, iframe nesting, or path — a hosted AirApp can be served from `localhost`, and a standalone run can be reached over a dev tunnel, so both directions of that guess are wrong. Omitted, `pass()` falls back to probing `/auth/status` and treating an unreachable or non-JSON answer as hosted; that works, but it infers something you already know.
+**Pass `shouldGate`.** Where an app runs is a fact its host states: Busabase injects `BUSABASE_AIRAPP_RUNTIME` into the process it spawns, and the app's own server surfaces that to the browser. Never classify it by hostname, iframe nesting, or path — a hosted AirApp can be served from `localhost`, and a standalone run can be reached over a dev tunnel, so both directions of that guess are wrong. Omitted, `pass()` falls back to probing `/auth/status` and treating an unreachable or non-JSON answer as hosted; that works, but it infers something you already know. `runtime` is the `detectAirAppRuntime()` answer from the section above.
 
 Import `busabase-sdk/airapp-gate.css` for the default look; every colour, radius, and font is a `--bb-gate-*` custom property, so an app themes it by overriding them rather than forking. To replace the markup entirely, pass `render` — `selectAirAppGateScreen()` and `describeAirAppSetupError()` are exported so a custom renderer reuses the state machine instead of re-deriving it.
 

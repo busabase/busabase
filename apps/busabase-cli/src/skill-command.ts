@@ -321,8 +321,9 @@ export interface PointerStubInput extends SkillIdentity {
  * (a 40 KB skill comes back as ~400 bytes ending in an ellipsis), so a stub that
  * omitted it would hand the agent a truncated procedure and no error.
  *
- * `@latest` — `npx` will reuse whatever copy of the CLI it already cached, which may
- * predate the subcommand entirely.
+ * `@latest` — a bare `npx busabase-cli` runs any busabase-cli it already finds (a
+ * global install, or a node_modules in a parent directory) without a version check,
+ * which may predate the subcommand entirely.
  *
  * The fetch-first wording is equally deliberate. A stub whose fetch fails must stop,
  * not improvise from the one-line description; that failure mode is the whole reason
@@ -341,13 +342,14 @@ The body of this skill lives in Busabase, in the same folder as the resources it
 works with, so it moves when they move. **Fetch it before doing anything:**
 
 \`\`\`bash
-npx busabase-cli@latest skills read-file --node-id ${input.nodeId} \\
+npx --yes busabase-cli@latest skills read-file --node-id ${input.nodeId} \\
   --file-path SKILL.md --output json
 \`\`\`
 
 \`--output json\` is required — the default text output truncates the body to a
-one-line preview. \`@latest\` is required too: \`npx\` will otherwise reuse a cached
-older CLI that may not have this subcommand.
+one-line preview. \`@latest\` is required too: without it \`npx\` runs any
+\`busabase-cli\` it already finds (a global install, or a \`node_modules\` in a parent
+directory), which may be an older CLI without this subcommand.
 
 If the fetch fails — no access, the node moved, the network is down — **stop and say
 so.** Do not improvise the procedure from the description above; the body is hosted in

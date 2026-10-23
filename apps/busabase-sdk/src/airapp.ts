@@ -48,6 +48,48 @@ import {
 import { uploadAsset } from "./asset-upload.js";
 import type { BusabaseClient } from "./client.js";
 
+// The rest of what every AirApp's browser code needs, on the subpath apps
+// already bundle into `app/vendor/busabase-airapp.js` — a new subpath would
+// make every app change its `build:sdk` script just to reach these.
+export {
+  AIRAPP_RUNTIME_PATH,
+  AIRAPP_RUNTIME_TIMEOUT_MS,
+  AIRAPP_RUNTIME_UNKNOWN,
+  type AirAppRuntimeInfo,
+  type DetectAirAppRuntimeOptions,
+  detectAirAppRuntime,
+  normalizeAirAppRuntime,
+  shouldUseLocalAirAppGateway,
+} from "./airapp-browser-runtime.js";
+export {
+  type AirAppCreateRecordInput,
+  type AirAppFindRecordInput,
+  type AirAppReadPageInput,
+  type AirAppRecord,
+  type AirAppRecordPage,
+  type AirAppRecords,
+  type AirAppRecordsClient,
+  type AirAppRecordsOptions,
+  type AirAppUpdateRecordInput,
+  type AirAppUpsertRecordInput,
+  type AirAppUpsertResult,
+  type AirAppWriteResult,
+  airAppRecordFields,
+  createAirAppRecords,
+} from "./airapp-records.js";
+export {
+  AIRAPP_WRITE_MESSAGES,
+  type AirAppWriteMessageOptions,
+  type AirAppWriteMessages,
+  type AirAppWriteOutcome,
+  type AirAppWriteResponseLike,
+  type AirAppWriteStatus,
+  airAppWriteMessage,
+  isAirAppWriteQueued,
+  resolveAirAppWriteLocale,
+  toAirAppWriteOutcome,
+} from "./airapp-write-outcome.js";
+
 type NodeChangeRequestInput = Parameters<BusabaseClient["nodes"]["createChangeRequest"]>[0];
 type NodeOperationInput = NodeChangeRequestInput["operations"][number];
 type CreateNodeOperationInput = Extract<NodeOperationInput, { kind: "create" }>;

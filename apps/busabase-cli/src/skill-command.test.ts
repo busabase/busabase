@@ -303,7 +303,7 @@ describe("buildPointerStub", () => {
     // also names both flags, so a document-wide `toContain` passes even when the
     // command is broken. (It did, on the first version of this test.)
     const command = /```bash\n([\s\S]*?)```/.exec(stub)?.[1] ?? "";
-    expect(command).toContain("npx busabase-cli@latest skills read-file --node-id nod123");
+    expect(command).toContain("npx --yes busabase-cli@latest skills read-file --node-id nod123");
     expect(command).toContain("--output json");
     expect(command).toContain("--file-path SKILL.md");
   });
