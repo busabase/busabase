@@ -210,6 +210,9 @@ jobs:
         working-directory: apps/busabase
         env:
           CI: true
+          # Declare host-process capability before Next starts, so every server
+          # process inherits it without relying on a boot-time env mutation.
+          APP_ENV: SELF-HOSTED
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
