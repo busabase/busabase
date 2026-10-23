@@ -2,13 +2,17 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   buildCmsCacheKeyPrefix,
   cmsPostToBlogCard,
+  cmsPostToBlogCardWithTags,
   createCmsIntegration,
   hasOwnLocalPage,
+  localFrontmatterTags,
   localPageToBlogCard,
   mergeBlogCardsByPath,
   readCmsEnvConfig,
   resolveCmsCacheTags,
+  resolveCmsPostTags,
 } from "../src/integration";
+import type { PostVO, TagVO } from "../src/types";
 
 const APP_SLUGS = {
   posts: "productready-blog-posts",
@@ -247,6 +251,83 @@ describe("Blog card mappers", () => {
       author: undefined,
       image: undefined,
     });
+  });
+});
+
+describe("Blog tags", () => {
+  const tag = (id: string, name: string, slug: string, locale = "en"): TagVO => ({
+    id,
+    name,
+    slug,
+    locale,
+    description: null,
+    updatedAt: "2026-09-01T00:00:00.000Z",
+    rawFields: {},
+  });
+  const tags = [
+    tag("t-mcp", "MCP", "mcp"),
+    tag("t-dev", "Developer Tools", "developer-tools"),
+    tag("t-ja", "開発ツール", "developer-tools", "ja"),
+  ];
+  const post = (tagIds: string[], locale = "en") =>
+    ({
+      path: locale === "en" ? "/blog/a" : `/${locale}/blog/a`,
+      title: "A",
+      description: null,
+      publishedAt: "2026-09-01T00:00:00.000Z",
+      updatedAt: "2026-09-01T00:00:00.000Z",
+      author: null,
+      coverImage: null,
+      locale,
+      tagIds,
+    }) as unknown as PostVO;
+  const href = (record: TagVO) =>
+    `${record.locale === "en" ? "" : `/${record.locale}`}/blog/tag/${record.slug}`;
+
+  it("maps a local page's frontmatter tags to plain chips (no taxonomy, so no link)", () => {
+    expect(
+      localPageToBlogCard({
+        url: "/blog/b",
+        data: { title: "B", tags: ["Product Thinking", " MCP ", "MCP", "", "Developer Tools"] },
+      }).tags,
+    ).toEqual([{ name: "Product Thinking" }, { name: "MCP" }, { name: "Developer Tools" }]);
+    expect(localFrontmatterTags("MCP")).toEqual([]);
+    expect(localFrontmatterTags([1, "MCP", null])).toEqual([{ name: "MCP" }]);
+  });
+
+  it("leaves `tags` off an untagged card, so it is the same card as before", () => {
+    expect(localPageToBlogCard({ url: "/blog/b", data: { title: "B" } })).not.toHaveProperty(
+      "tags",
+    );
+    expect(
+      localPageToBlogCard({ url: "/blog/b", data: { title: "B", tags: [] } }),
+    ).not.toHaveProperty("tags");
+    expect(cmsPostToBlogCardWithTags(tags)(post([]))).not.toHaveProperty("tags");
+    expect(cmsPostToBlogCardWithTags(tags)(post(["t-gone"]))).not.toHaveProperty("tags");
+  });
+
+  it("resolves a CMS Post's tag relation against the Tags records, in the Post's order", () => {
+    expect(cmsPostToBlogCardWithTags(tags)(post(["t-dev", "t-gone", "t-mcp"]))).toEqual({
+      ...cmsPostToBlogCard(post([])),
+      tags: [{ name: "Developer Tools" }, { name: "MCP" }],
+    });
+  });
+
+  it("links a tag to its archive only when given an href builder and the locales match", () => {
+    expect(resolveCmsPostTags(post(["t-mcp", "t-dev"]), tags, href)).toEqual([
+      { name: "MCP", href: "/blog/tag/mcp" },
+      { name: "Developer Tools", href: "/blog/tag/developer-tools" },
+    ]);
+    // The ja archive lists only ja Posts, so an en Post's link to it would not list this Post.
+    expect(resolveCmsPostTags(post(["t-ja"]), tags, href)).toEqual([{ name: "開発ツール" }]);
+    expect(resolveCmsPostTags(post(["t-ja"], "ja"), tags, href)).toEqual([
+      { name: "開発ツール", href: "/ja/blog/tag/developer-tools" },
+    ]);
+    // No archive route (or it cannot form a path) → plain chips.
+    expect(resolveCmsPostTags(post(["t-mcp"]), tags)).toEqual([{ name: "MCP" }]);
+    expect(resolveCmsPostTags(post(["t-mcp"]), tags, () => null)).toEqual([{ name: "MCP" }]);
+    // The Tags read failed (fallback `[]`) → no tags at all, never raw ids.
+    expect(resolveCmsPostTags(post(["t-mcp"]), [], href)).toEqual([]);
   });
 });
 

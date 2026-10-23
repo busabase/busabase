@@ -40,23 +40,28 @@ export {
 } from "./pages";
 export {
   type BlogCardContent,
+  type BlogTag,
   type CmsPostJsonLdLabel,
   type CmsPostReads,
   type CmsPostResolver,
   type CmsPostResolverDependencies,
   type CmsPostResolverIntegration,
   type CmsPostResolverOptions,
+  type CmsTagHref,
   cmsPostToBlogCard,
+  cmsPostToBlogCardWithTags,
   createCmsPostReads,
   createCmsPostResolver,
   hasOwnLocalPage,
   type LocalBlogCardPage,
   type LocalPostJsonLdFields,
   type LocalPostSourceLike,
+  localFrontmatterTags,
   localPageToBlogCard,
   mergeBlogCardsByPath,
   type ResolvedCmsPostPage,
   type ResolvePostMetadataInputOptions,
+  resolveCmsPostTags,
 } from "./posts";
 export { type CmsTaxonomyReads, createCmsTaxonomyReads } from "./taxonomy";
 
