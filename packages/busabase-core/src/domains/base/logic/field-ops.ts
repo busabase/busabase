@@ -51,6 +51,13 @@ import {
   assertRelationOnlyOptionsOrThrow,
   resolveRelationFieldOptions,
 } from "./relation-options";
+import {
+  assertForwardFieldDeletableOrThrow,
+  isReverseRelationField,
+  pairReverseRelationFields,
+  resolveReverseRelationOptions,
+  resolveReverseRelationPatch,
+} from "./reverse-relations";
 
 export {
   convertFieldChangeRequestInputSchema,
@@ -204,9 +211,20 @@ export const createBaseField = async (baseId: string, input: z.infer<typeof fiel
   }
   assertRelationOnlyOptionsOrThrow(parsed.type, parsed.slug, parsed.options);
   assertValidDateFieldOptionsOrThrow(parsed.type, parsed.slug, parsed.options);
-  const relationResolved = await resolveRelationFieldOptions(db, parsed.options);
+  const relationResolved = await resolveReverseRelationOptions(db, {
+    baseId: base.id,
+    slug: parsed.slug,
+    type: parsed.type,
+    options: await resolveRelationFieldOptions(db, parsed.options),
+  });
   if (parsed.type === "relation" && !relationResolved.targetBaseId) {
     throw relationRequiresTargetBase();
+  }
+  if (parsed.required && typeof relationResolved.reverseOfFieldId === "string") {
+    throw new ORPCError("BAD_REQUEST", {
+      message: `Field "${parsed.slug}" is a read-only reverse relation and cannot be required.`,
+      data: { slug: parsed.slug, reason: "reverse_relation_read_only" },
+    });
   }
   assertValidFormulaFieldOrThrow(parsed.type, parsed.slug, relationResolved, base.fields);
   const options = await resolveLookupFieldOptions(
@@ -230,8 +248,9 @@ export const createBaseField = async (baseId: string, input: z.infer<typeof fiel
     throw new ORPCError("CONFLICT", { message: `Field already exists: ${parsed.slug}` });
   }
   const fieldCount = base.fields.length;
+  const newFieldId = id("bsf");
   await db.insert(busabaseBaseFields).values({
-    id: id("bsf"),
+    id: newFieldId,
     baseId: base.id,
     slug: parsed.slug,
     name: iStringToText(parsed.name),
@@ -240,6 +259,9 @@ export const createBaseField = async (baseId: string, input: z.infer<typeof fiel
     position: fieldCount,
     options,
   });
+  if (typeof options.reverseOfFieldId === "string") {
+    await pairReverseRelationFields(db, newFieldId, options.reverseOfFieldId);
+  }
   const updatedBase = await getBase(base.id);
   if (!updatedBase) {
     throw new Error("Failed to create field");
@@ -280,9 +302,20 @@ export const createFieldChangeRequest = async (
   const parsed = createFieldChangeRequestInputSchema.parse(input);
   assertRelationOnlyOptionsOrThrow(parsed.type, parsed.slug, parsed.options);
   assertValidDateFieldOptionsOrThrow(parsed.type, parsed.slug, parsed.options);
-  const relationResolved = await resolveRelationFieldOptions(db, parsed.options);
+  const relationResolved = await resolveReverseRelationOptions(db, {
+    baseId: base.id,
+    slug: parsed.slug,
+    type: parsed.type,
+    options: await resolveRelationFieldOptions(db, parsed.options),
+  });
   if (parsed.type === "relation" && !relationResolved.targetBaseId) {
     throw relationRequiresTargetBase();
+  }
+  if (parsed.required && typeof relationResolved.reverseOfFieldId === "string") {
+    throw new ORPCError("BAD_REQUEST", {
+      message: `Field "${parsed.slug}" is a read-only reverse relation and cannot be required.`,
+      data: { slug: parsed.slug, reason: "reverse_relation_read_only" },
+    });
   }
   assertValidFormulaFieldOrThrow(parsed.type, parsed.slug, relationResolved, base.fields);
   const options = await resolveLookupFieldOptions(
@@ -413,6 +446,9 @@ export const createDeleteFieldChangeRequest = async (
   }
   if (isPrimaryField(base, field.id)) {
     throw new ORPCError("BAD_REQUEST", { message: PRIMARY_FIELD_DELETE_MESSAGE });
+  }
+  if (field.type === "relation") {
+    await assertForwardFieldDeletableOrThrow(db, field);
   }
 
   const changeRequestId = id("crq");
@@ -552,8 +588,18 @@ export const createUpdateFieldChangeRequest = async (
   }
   let options =
     patch.options !== undefined
-      ? await resolveRelationFieldOptions(db, patch.options)
+      ? await resolveReverseRelationPatch(
+          db,
+          field,
+          await resolveRelationFieldOptions(db, patch.options),
+        )
       : field.options;
+  if (patch.required === true && isReverseRelationField(field)) {
+    throw new ORPCError("BAD_REQUEST", {
+      message: `Field "${field.slug}" is a read-only reverse relation and cannot be required.`,
+      data: { slug: field.slug, reason: "reverse_relation_read_only" },
+    });
+  }
   if (patch.options !== undefined) {
     assertValidFormulaFieldOrThrow(field.type, field.slug, options, base.fields);
     options = await resolveLookupFieldOptions(field.type, field.slug, options, base.fields);

@@ -73,3 +73,26 @@ it("labels a view's tab position and shows it counted from 1", () => {
     },
   ]);
 });
+
+it("describes grouped filter precedence and conjunction-only changes", () => {
+  const filters = [
+    { fieldSlug: "title", operator: "not_empty" },
+    {
+      conjunction: "or",
+      conditions: [
+        { fieldSlug: "status", operator: "equals", value: "pending" },
+        { fieldSlug: "status", operator: "equals", value: "active" },
+      ],
+    },
+  ];
+  const andRule = describeViewConfig(changeRequest, { filters, sorts: [] }, coreMessagesEn).find(
+    (rule) => rule.kind === "filter",
+  );
+  const orRule = describeViewConfig(
+    changeRequest,
+    { filters, filterConjunction: "or", sorts: [] },
+    coreMessagesEn,
+  ).find((rule) => rule.kind === "filter");
+  expect(andRule?.label).toMatch(/Title.* AND \(Status.* OR Status.*\)/);
+  expect(andRule?.key).not.toEqual(orRule?.key);
+});

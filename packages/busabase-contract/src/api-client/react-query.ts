@@ -38,12 +38,15 @@ const createDemoFetch =
 /**
  * Procedures that must NEVER be folded into a batch request.
  *
- * These are Event Iterators backed by long-lived SSE responses. A batch
+ * Event Iterators are backed by long-lived SSE responses. A batch
  * completes only after all its members complete, so a stream would hold the
  * batch open for the lifetime of the run or subscription and stall every
- * sibling call in it.
+ * sibling call in it. Search also stays independent so superseded input can
+ * abort its request without waiting for sibling dashboard reads.
  */
 const UNBATCHABLE_PROCEDURES = new Set([
+  // A superseded search must abort independently of unrelated dashboard reads.
+  "search",
   "agents.sessions.subscribe",
   "airapps.runLocal",
   "live.subscribe",

@@ -7,7 +7,7 @@ import { Switch } from "kui/switch";
 import { useState } from "react";
 import { fmt, useCoreI18n, useIString } from "../../../i18n";
 import { localizeCoreErrorMessage } from "../../../i18n/localize-error";
-import { isSystemFieldType } from "../../base/field-types";
+import { isReadOnlyFieldDef } from "../../base/field-types";
 import type { RecordSubmitOptions } from "../helpers/view-types";
 import { normalizeEditorFieldValue, RecordFieldInput } from "./record-views";
 import { SplitSubmitButton } from "./split-submit-button";
@@ -56,7 +56,7 @@ export function BulkEditRecordsDialog({
 
   // Computed/system columns are written server-side and are rejected outright,
   // so they are absent rather than offered-then-refused.
-  const editableFields = base.fields.filter((field) => !isSystemFieldType(field.type));
+  const editableFields = base.fields.filter((field) => !isReadOnlyFieldDef(field));
 
   const reset = () => {
     setEnabledSlugs(new Set());

@@ -893,7 +893,7 @@ export const buildGuides = ({
     title: "Set up a Busabase workspace",
     kind: "walkthrough",
     summary:
-      "Guided first-run setup for a new workspace: pick a space, choose a blueprint, build the structure, and seed records through one real review. Needs no terminal.",
+      "Guided first-run setup for a new workspace: pick a space, choose a blueprint, build the structure, and seed records in one change you can read back. Needs no terminal.",
     build: buildBusabaseMcpSetupPrompt,
   },
   "create-app": {

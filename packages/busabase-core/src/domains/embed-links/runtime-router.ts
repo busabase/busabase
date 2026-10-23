@@ -1,9 +1,10 @@
 import "server-only";
 
-import { implement, ORPCError, os } from "@orpc/server";
+import { type Context, type EnhancedRouter, implement, ORPCError, os } from "@orpc/server";
 import { resolveRequiredLevel } from "busabase-contract/access-control/api-key-level";
 import { busabaseContract } from "busabase-contract/contract/busabase";
 import { FILE_TREE_NODE_TYPES } from "busabase-contract/domains/filetree/contract";
+import type { ImplementedContractRouter } from "../../logic/implemented-router-type";
 import { busabaseRouter } from "../../router";
 import { getAirAppRuntimeAuthInfo } from "./logic/runtime-auth";
 
@@ -137,7 +138,19 @@ const {
 
 // Reuse the wire contract only. The ordinary auth handler reveals member /
 // creator identity and deliberately remains off both public allowlists.
-const airAppEmbedDataRouter = readOnlyProcedure.router({
+type AirAppEmbedContract = Omit<
+  typeof busabaseContract,
+  "airapps" | "vault" | "webhooks" | "dump" | "changeRequests" | "operations"
+>;
+
+// Annotated for the same reason as `busabaseRouterImpl` in ../../router.ts: the
+// inferred type is past TypeScript's declaration serialization limit (TS7056).
+const airAppEmbedDataRouter: EnhancedRouter<
+  ImplementedContractRouter<AirAppEmbedContract>,
+  Context,
+  Context,
+  Record<never, never>
+> = readOnlyProcedure.router({
   ...dataRouter,
   auth: {
     verify: implement(busabaseContract).auth.verify.handler(() => getAirAppRuntimeAuthInfo()),

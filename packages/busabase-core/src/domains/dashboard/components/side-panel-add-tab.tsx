@@ -35,7 +35,7 @@ export interface SidePanelAddTabProps {
   nodeCache: KnownNodeCache;
   /** Opens the command palette in "pin" mode. */
   onOpenSearch: () => void;
-  /** Navigates, e.g. to `/agents/new` when nothing is connected yet. */
+  /** Navigates, e.g. to `/agents/new` to connect another agent. */
   onNavigate: (path: string) => void;
 }
 
@@ -158,26 +158,24 @@ export function SidePanelAddTab({
             <span className="flex-1">{messages.sidePanel.agents}</span>
           </DropdownMenuSubTrigger>
           <DropdownMenuSubContent className="max-h-80 w-56 overflow-y-auto">
-            {agents.length === 0 ? (
-              <DropdownMenuItem onSelect={() => onNavigate("/agents/new")}>
+            {agents.map((agent) => (
+              <DropdownMenuItem
+                key={agent.slug}
+                onSelect={() =>
+                  openAgentChatTab(agent.slug, agent.agentName, {
+                    sessionId: agent.latest?.id,
+                  })
+                }
+              >
                 <Bot className="size-4" />
-                <span className="flex-1">{messages.sidePanel.noAgents}</span>
+                <span className="flex-1 truncate">{agent.agentName}</span>
               </DropdownMenuItem>
-            ) : (
-              agents.map((agent) => (
-                <DropdownMenuItem
-                  key={agent.slug}
-                  onSelect={() =>
-                    openAgentChatTab(agent.slug, agent.agentName, {
-                      sessionId: agent.latest?.id,
-                    })
-                  }
-                >
-                  <Bot className="size-4" />
-                  <span className="flex-1 truncate">{agent.agentName}</span>
-                </DropdownMenuItem>
-              ))
-            )}
+            ))}
+            {agents.length > 0 ? <DropdownMenuSeparator /> : null}
+            <DropdownMenuItem onSelect={() => onNavigate("/agents/new")}>
+              <Plus className="size-4" />
+              <span className="flex-1">{messages.sidePanel.agentPickerConnect}</span>
+            </DropdownMenuItem>
           </DropdownMenuSubContent>
         </DropdownMenuSub>
       </DropdownMenuContent>

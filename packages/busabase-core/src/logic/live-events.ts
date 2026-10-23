@@ -97,10 +97,12 @@ export const publishNodeMetadataUpdated = async (args: {
   nodeId: string;
   actorId: string;
   baseId: string | null;
+  reason?: "acl";
 }): Promise<void> => {
   try {
     await publishBusabaseLiveEvent({
       kind: "node.metadata_updated",
+      ...(args.reason ? { reason: args.reason } : {}),
       spaceId: args.spaceId,
       actorId: args.actorId,
       changeRequestId: null,
@@ -116,6 +118,14 @@ export const publishNodeMetadataUpdated = async (args: {
     // throwing subscriber (local) must never turn a successful save into an error.
   }
 };
+
+/** ACL recomputation must refresh derived values, unlike ordinary content saves. */
+export const publishNodeAclUpdated = async (args: {
+  spaceId: string;
+  nodeId: string;
+  actorId: string;
+  baseId: string | null;
+}): Promise<void> => publishNodeMetadataUpdated({ ...args, reason: "acl" });
 
 export async function* subscribeBusabaseLiveEvents(
   spaceId: string,

@@ -326,7 +326,11 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
   const [workflowSettings, setWorkflowSettings] = useState<WorkflowSettings>(
     workflowDocument.settings,
   );
-  const { error, markDirty, save, status } = useNodeContentSave(orpc, node, "workflow");
+  const { error, markDirty, reviewRequestId, save, status } = useNodeContentSave(
+    orpc,
+    node,
+    "workflow",
+  );
   // React Flow's `useNodesState`/`useEdgesState` (and `workflowSettings`) are
   // seeded from the server document only at mount, so a workflow edited
   // elsewhere — another tab, an agent's OpenAPI write — used to stay stale on
@@ -494,6 +498,7 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
 
   return (
     <RichNodeShell
+      reviewRequestId={reviewRequestId}
       actions={
         <>
           {/* Icon-only, like the rest of this cluster. A visible label used to

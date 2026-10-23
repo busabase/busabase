@@ -1,7 +1,7 @@
-import type { BaseFieldVO, RecordVO, UserRefVO } from "busabase-contract/types";
+import type { BaseFieldVO, LookupComputedVO, RecordVO, UserRefVO } from "busabase-contract/types";
 import { CodeBlock } from "kui/ai-elements/code-block";
-import { Dialog, DialogHeader, DialogTitle } from "kui/dialog";
-import { ExternalLink, FileText, Film, Maximize2, Music, PlaySquare } from "lucide-react";
+import { Dialog, DialogDescription, DialogHeader, DialogTitle } from "kui/dialog";
+import { ExternalLink, FileText, Film, List, Maximize2, Music, PlaySquare } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { type ComponentProps, type ReactNode, useState } from "react";
 import { Streamdown, type Components as StreamdownComponents } from "streamdown";
@@ -23,6 +23,8 @@ import {
 } from "../helpers/field";
 import { fieldValueToString, shortIdentifier } from "../helpers/format";
 import {
+  HTML_DOCUMENT_SANDBOX,
+  isFullHtmlDocument,
   isSafeUrl,
   safeFetchableUrl,
   sanitizeHtml,
@@ -30,6 +32,7 @@ import {
   stripHtmlTags,
 } from "../helpers/html";
 import { mergeSearchIntoHref } from "../helpers/link-search";
+import { lookupDisplayField, lookupItemValue } from "../helpers/lookup";
 import { markdownPreviewSource } from "../helpers/markdown-preview";
 import type { FieldChip } from "../helpers/view-types";
 import { DateFieldValue } from "./date-field";
@@ -177,18 +180,21 @@ export const mdComponents: StreamdownComponents = {
  */
 function SourceTogglePreview({
   className = "",
+  fill = false,
   preview,
   source,
 }: {
   className?: string;
+  /** Stretch to the parent's height (fullscreen dialog) instead of sizing to content. */
+  fill?: boolean;
   preview: ReactNode;
   source: string;
 }) {
   const messages = useCoreI18n();
   const [mode, setMode] = useState<"preview" | "source">("preview");
   return (
-    <div className={`min-w-0 ${className}`}>
-      <div className="mb-2 flex">
+    <div className={`min-w-0 ${fill ? "flex h-full flex-col" : ""} ${className}`}>
+      <div className="mb-2 flex shrink-0">
         <div className="flex rounded-md border bg-muted/40 p-0.5 text-xs">
           {(["preview", "source"] as const).map((m) => (
             <button
@@ -209,7 +215,11 @@ function SourceTogglePreview({
       {mode === "preview" ? (
         preview
       ) : (
-        <div className="min-w-0 whitespace-pre-wrap break-words font-mono text-sm leading-6 text-muted-foreground">
+        <div
+          className={`min-w-0 whitespace-pre-wrap break-words font-mono text-sm leading-6 text-muted-foreground ${
+            fill ? "min-h-0 flex-1 overflow-auto" : ""
+          }`}
+        >
           {source}
         </div>
       )}
@@ -237,7 +247,51 @@ export function MarkdownFieldPreview({
   );
 }
 
-export function HtmlFieldPreview({ className = "", value }: { className?: string; value: string }) {
+/**
+ * A whole HTML page stored in an HTML field, rendered as the page it is: its own
+ * stylesheet and CSS-only interactions (tabs built from radio inputs) intact.
+ * The frame is sandboxed without scripts or same-origin access — see
+ * `HTML_DOCUMENT_SANDBOX`.
+ */
+export function HtmlDocumentFrame({ className = "", html }: { className?: string; html: string }) {
+  const messages = useCoreI18n();
+  return (
+    <iframe
+      className={`block w-full min-w-0 rounded-md border ${className}`}
+      data-testid="html-document-frame"
+      referrerPolicy="no-referrer"
+      sandbox={HTML_DOCUMENT_SANDBOX}
+      srcDoc={html}
+      title={messages.recordView.preview}
+    />
+  );
+}
+
+export function HtmlFieldPreview({
+  className = "",
+  fill = false,
+  value,
+}: {
+  className?: string;
+  /** Fill the parent's height — used by the fullscreen dialog. */
+  fill?: boolean;
+  value: string;
+}) {
+  if (isFullHtmlDocument(value)) {
+    return (
+      <SourceTogglePreview
+        className={className}
+        fill={fill}
+        preview={
+          <HtmlDocumentFrame
+            className={fill ? "min-h-0 flex-1" : "h-[min(70vh,640px)]"}
+            html={value}
+          />
+        }
+        source={value}
+      />
+    );
+  }
   return (
     <SourceTogglePreview
       className={className}
@@ -398,6 +452,7 @@ export function FieldValuePreview({
   className = "",
   field,
   fieldUsers,
+  computed,
   records = [],
   record,
   value,
@@ -410,6 +465,7 @@ export function FieldValuePreview({
    * to an id-based label, which is what a public surface shows by design.
    */
   fieldUsers?: Record<string, UserRefVO>;
+  computed?: LookupComputedVO;
   records?: RecordVO[];
   record?: RecordVO;
   value: unknown;
@@ -421,6 +477,17 @@ export function FieldValuePreview({
   const fieldName = field ? resolveIString(field.name) : undefined;
   const kind = field ? fieldDisplayKind(field.type) : "plain";
 
+  if (field?.type === "lookup") {
+    return (
+      <LookupFieldValue
+        computed={computed}
+        field={field}
+        fieldUsers={fieldUsers}
+        records={records}
+        value={value}
+      />
+    );
+  }
   if (field?.type === "formula")
     return <FormulaValue field={field} value={value} record={record} />;
 
@@ -604,8 +671,15 @@ export function FieldValuePreview({
 
   if (kind === "html") {
     const html = fieldValueToString(value);
+    // A whole page scrolls inside its own frame, so it never collapses; in the
+    // fullscreen dialog the frame stretches to the dialog's height.
+    const isDocument = isFullHtmlDocument(html);
     return (
-      <MultilineFieldPreview collapsible={shouldCollapse} title={fieldName}>
+      <MultilineFieldPreview
+        collapsible={shouldCollapse && !isDocument}
+        fullscreenChildren={isDocument ? <HtmlFieldPreview fill value={html} /> : undefined}
+        title={fieldName}
+      >
         <HtmlFieldPreview className={className} value={html} />
       </MultilineFieldPreview>
     );
@@ -657,6 +731,147 @@ export function FieldValuePreview({
   );
 }
 
+export function LookupFieldValue({
+  field,
+  computed,
+  value,
+  fieldUsers,
+  records = [],
+  draft = false,
+}: {
+  field: BaseFieldVO;
+  computed?: LookupComputedVO;
+  value: unknown;
+  fieldUsers?: Record<string, UserRefVO>;
+  records?: RecordVO[];
+  draft?: boolean;
+}) {
+  const messages = useCoreI18n();
+  const locale = useCoreLocale();
+  const resolveIString = useIString();
+  const search = useSearch();
+  const [open, setOpen] = useState(false);
+  const result = computed ? computed.value : value;
+  const status = computed?.status;
+  const unavailable = status === "invalid" || status === "inaccessible";
+  const empty = status === "empty" || status === "unlinked";
+  const target = computed?.targetField;
+  const rollup = field.options.lookup?.rollup ?? "values";
+  const displayField = target ? lookupDisplayField(target, rollup) : undefined;
+  const values = Array.isArray(result) ? result : [result];
+  const renderValue = (item: unknown, index: number) =>
+    displayField ? (
+      <FieldValuePreview
+        field={displayField}
+        fieldUsers={fieldUsers}
+        key={index}
+        records={records}
+        value={rollup === "values" ? lookupItemValue(displayField, item) : item}
+      />
+    ) : (
+      <span className="max-w-full truncate" key={index}>
+        {getFieldPreviewText(field, item, messages, locale) || "-"}
+      </span>
+    );
+  const canExpand = !unavailable && (Boolean(computed?.sources.length) || values.length > 3);
+  return (
+    <div
+      className="flex min-w-0 flex-wrap items-center gap-1.5"
+      data-testid={`lookup-field-${field.slug}`}
+    >
+      {draft ? (
+        <span className="w-full text-muted-foreground text-[11px]">{messages.lookup.draft}</span>
+      ) : null}
+      {unavailable || empty ? (
+        <>
+          <span className="text-sm">
+            {!unavailable && typeof result === "number" ? renderValue(result, 0) : null}
+          </span>
+          <span
+            className={
+              unavailable ? "text-muted-foreground text-xs" : "text-muted-foreground text-xs"
+            }
+            role="status"
+          >
+            {status === "invalid" && computed?.reason
+              ? messages.lookup.reasons[computed.reason]
+              : messages.lookup[status as "invalid" | "inaccessible" | "empty" | "unlinked"]}
+          </span>
+        </>
+      ) : values.length === 0 || result === null || result === undefined || result === "" ? (
+        <span className="text-muted-foreground">-</span>
+      ) : (
+        values.slice(0, 3).map(renderValue)
+      )}
+      {canExpand ? (
+        <button
+          aria-label={messages.lookup.details}
+          className="inline-flex h-6 shrink-0 items-center gap-1 rounded px-1.5 text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground"
+          data-testid={`lookup-sources-${field.slug}`}
+          onClick={() => setOpen(true)}
+          title={messages.lookup.details}
+          type="button"
+        >
+          {values.length > 3 ? `+${values.length - 3}` : <List size={13} />}
+        </button>
+      ) : null}
+      <Dialog onOpenChange={setOpen} open={open}>
+        <DialogContent
+          className="max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-lg overflow-y-auto"
+          data-testid="lookup-source-dialog"
+        >
+          <DialogHeader>
+            <DialogTitle>
+              {resolveIString(field.name)} · {messages.lookup.source}
+            </DialogTitle>
+            <DialogDescription>{messages.lookup.readOnly}</DialogDescription>
+          </DialogHeader>
+          {computed?.sources.length ? (
+            <div className="divide-y divide-border/50">
+              {computed.sources.map((source) => (
+                <div
+                  className="grid min-w-0 grid-cols-[minmax(0,1fr)_minmax(0,2fr)] items-start gap-3 py-3"
+                  key={source.recordId}
+                >
+                  {computed.sourceBaseSlug ? (
+                    <Link
+                      className="flex min-w-0 items-start gap-1 text-primary text-sm hover:underline"
+                      href={mergeSearchIntoHref(
+                        `/base/${computed.sourceBaseSlug}/${source.recordId}`,
+                        search,
+                      )}
+                      onClick={() => setOpen(false)}
+                    >
+                      <span className="break-words">{source.title}</span>
+                      <ExternalLink className="mt-1 shrink-0" size={12} />
+                    </Link>
+                  ) : (
+                    <span className="break-words text-sm">{source.title}</span>
+                  )}
+                  <div className="min-w-0 break-words">
+                    {target ? (
+                      <FieldValuePreview
+                        field={target}
+                        fieldUsers={fieldUsers}
+                        records={records}
+                        value={source.value}
+                      />
+                    ) : (
+                      <span>{getFieldPreviewText(undefined, source.value, messages, locale)}</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="flex min-w-0 flex-wrap gap-2">{values.map(renderValue)}</div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
 /**
  * Chrome for multi-line field values (html / markdown / code / longtext): keeps the inline
  * "Show full" collapse and adds a hover "Expand to fullscreen" button that opens the value in a
@@ -665,10 +880,13 @@ export function FieldValuePreview({
 export function MultilineFieldPreview({
   children,
   collapsible,
+  fullscreenChildren,
   title,
 }: {
   children: ReactNode;
   collapsible: boolean;
+  /** What the fullscreen dialog shows, when it differs from the inline preview. */
+  fullscreenChildren?: ReactNode;
   title?: string;
 }) {
   const messages = useCoreI18n();
@@ -710,7 +928,9 @@ export function MultilineFieldPreview({
               {title ?? messages.recordView.preview}
             </DialogTitle>
           </DialogHeader>
-          <div className="min-h-0 flex-1 overflow-auto px-5 py-4">{children}</div>
+          <div className="min-h-0 flex-1 overflow-auto px-5 py-4">
+            {fullscreenChildren ?? children}
+          </div>
         </DialogContent>
       </Dialog>
     </div>

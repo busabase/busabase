@@ -1,6 +1,8 @@
 import type { CoreI18nMessages } from "./messages";
 
 export const dashboardDe: CoreI18nMessages = {
+  lookup: lookupDe,
+  reverseRelation: reverseRelationDe,
   fieldHelp: {
     inherit: "Feldhinweise verwenden",
     override: "Hinweise für dieses Formular anpassen",
@@ -836,17 +838,12 @@ export const dashboardDe: CoreI18nMessages = {
     install: "Installieren",
     installRestricted:
       "Nur für Space-Eigentümer und Admins – eine Vorlage kann eine App und einen Skill enthalten, also Code, den die Agents dieses Space ausführen.",
-    cardBases: "{count} Tabelle(n)",
-    cardApps: "{count} App(s)",
-    cardDocs: "{count} Dokument(e)",
-    cardRows: "{count} Beispielzeile(n)",
-    cardManual: "Agent-Handbuch",
     promptsTitle: "Was Sie einen Agent fragen können, sobald sie installiert ist",
     promptsDescription:
       "Der Agent kann diese Fragen beantworten, weil die Vorlage das Handbuch ihres Autors zusammen mit ihren Bases installiert. Er muss Ihr Schema nicht raten.",
     contentsTitle: "Was die Installation erstellt",
-    contentsDescription:
-      "Wenn Sie diesen Space bearbeiten können, werden Bases, Felder, Beispielzeilen, App und Agent-Handbuch sofort erstellt. Aktivieren Sie beim Installieren „Inhalte zuerst zum Review schicken“, um App-Code und Handbuch stattdessen als Change Requests zu erhalten.",
+    permissionNote:
+      "Installieren dürfen nur Eigentümer oder Admins dieses Space. Alles, was dabei entsteht, ist sofort nutzbar; Sie können den Inhalt auch zuerst prüfen.",
     bases: "Bases",
     apps: "Apps",
     documents: "Dokumente",
@@ -1639,6 +1636,13 @@ export const dashboardDe: CoreI18nMessages = {
       "Das Feld befindet sich außerhalb des Neuanordnungsbereichs. Ablegen bricht ab.",
     noViewFilters: "Keine Filter in dieser Ansicht.",
     noViewSorts: "Keine Sortierungen in dieser Ansicht.",
+    filterMatch: "Übereinstimmung",
+    filterMatchAll: "Alle Bedingungen (UND)",
+    filterMatchAny: "Eine Bedingung (ODER)",
+    filterConjunction: "Bedingungen verknüpfen",
+    addFilterGroup: "Bedingungsgruppe hinzufügen",
+    removeFilterGroup: "Bedingungsgruppe entfernen",
+    filterMissingField: "Feld nicht mehr verfügbar",
     viewFilterCount: "{count} Filter",
     viewSortCount: "{count} Sortierungen",
     clearAllFilters: "Alle Filter zurücksetzen",
@@ -2588,3 +2592,6 @@ export const dashboardDe: CoreI18nMessages = {
       "Erstellen Sie den Ordner, die Tabellen und die App in diesem Space. Ihr Agent lernt auf diese Weise nichts – Sie können ihm das Handbuch jederzeit im Tab „Agent-Installation“ geben.",
   },
 };
+
+import { lookupDe } from "./lookup";
+import { reverseRelationDe } from "./reverse-relation";

@@ -1,33 +1,13 @@
 import { pickTemplateMedia } from "busabase-contract/domains/templates/media";
 import type { TemplateCardVO } from "busabase-contract/domains/templates/types";
-import { AppWindow, Bot, FileText, Rows3, Table2 } from "lucide-react";
 import { iStringParse, type LocaleType } from "openlib/i18n/i-string";
-import type { ReactNode } from "react";
 import { TemplateCardImage } from "./template-card-image";
-
-export interface TemplateStatLabels {
-  bases: (count: number) => string;
-  airapps: (count: number) => string;
-  docs: (count: number) => string;
-  records: (count: number) => string;
-  skill?: string;
-}
-
-const defaultStatLabels: TemplateStatLabels = {
-  bases: (count) => `${count} table${count === 1 ? "" : "s"}`,
-  airapps: (count) => `${count} app${count === 1 ? "" : "s"}`,
-  docs: (count) => `${count} doc${count === 1 ? "" : "s"}`,
-  records: (count) => `${count} sample row${count === 1 ? "" : "s"}`,
-};
 
 interface TemplateCardSummaryProps {
   template: TemplateCardVO;
   screenshotAlt: string;
   density?: "compact" | "comfortable";
   headingLevel?: "h2" | "h3";
-  statLabels?: TemplateStatLabels;
-  headingHref?: string;
-  children?: ReactNode;
   /**
    * `description` and `displayName` are both iString; this resolves them to
    * one language — and picks that language's cover from `locales` (via
@@ -41,20 +21,24 @@ interface TemplateCardSummaryProps {
 }
 
 /**
- * The shared, non-interactive template card body.
+ * The shared, non-interactive template card body: the cover, the name, and a
+ * line or two of what it is for.
  *
- * A Dashboard caller can wrap it in a button while a public page can wrap it in
- * an article. Keeping events out of this component lets the same markup render
- * in both a client tree and a server component tree.
+ * That is all a card says. Table, app and sample-row counts used to sit under
+ * the description and a row of buttons under those; the counts are reference
+ * material (the detail page keeps them in its side column) and the buttons
+ * split one decision — "show me this one" — into three. The caller makes the
+ * whole card the one target instead.
+ *
+ * Keeping events out of this component lets the same markup render in both a
+ * client tree (the Dashboard wraps it in a button) and a server component tree
+ * (the public gallery wraps it in a link).
  */
 export function TemplateCardSummary({
   template,
   screenshotAlt,
   density = "compact",
   headingLevel = "h3",
-  statLabels = defaultStatLabels,
-  headingHref,
-  children,
   descriptionLocale = "en",
 }: TemplateCardSummaryProps) {
   const [screenshot] = pickTemplateMedia(template, descriptionLocale).screenshots;
@@ -62,22 +46,6 @@ export function TemplateCardSummary({
     ? iStringParse(template.displayName, descriptionLocale)
     : template.name;
   const Heading = headingLevel;
-  const stats = [
-    template.stats.bases > 0
-      ? { label: statLabels.bases(template.stats.bases), icon: Table2 }
-      : null,
-    template.stats.airapps > 0
-      ? { label: statLabels.airapps(template.stats.airapps), icon: AppWindow }
-      : null,
-    template.stats.docs > 0
-      ? { label: statLabels.docs(template.stats.docs), icon: FileText }
-      : null,
-    template.stats.records > 0
-      ? { label: statLabels.records(template.stats.records), icon: Rows3 }
-      : null,
-    template.stats.skill && statLabels.skill ? { label: statLabels.skill, icon: Bot } : null,
-  ].filter((item) => item !== null);
-
   const comfortable = density === "comfortable";
 
   return (
@@ -86,49 +54,30 @@ export function TemplateCardSummary({
         <TemplateCardImage src={screenshot} alt={screenshotAlt} comfortable={comfortable} />
       </div>
 
-      <div className={comfortable ? "flex flex-1 flex-col p-5" : "flex flex-1 flex-col gap-2 p-4"}>
+      <div
+        className={
+          comfortable ? "flex flex-1 flex-col gap-2 p-5" : "flex flex-1 flex-col gap-1.5 p-4"
+        }
+      >
         <Heading
           className={
-            comfortable ? "min-w-0 font-serif text-xl font-semibold" : "min-w-0 text-sm font-medium"
+            comfortable
+              ? "min-w-0 font-serif text-2xl font-semibold leading-tight"
+              : "min-w-0 text-base font-semibold leading-snug"
           }
         >
-          {headingHref ? (
-            <a href={headingHref} className="hover:text-primary hover:underline">
-              {title}
-            </a>
-          ) : (
-            title
-          )}
+          {title}
         </Heading>
 
         <p
           className={
             comfortable
-              ? "mt-2 line-clamp-3 text-sm leading-6 text-muted-foreground"
-              : "line-clamp-2 flex-1 text-xs text-muted-foreground"
+              ? "line-clamp-2 text-base leading-7 text-muted-foreground"
+              : "line-clamp-2 text-sm leading-6 text-muted-foreground"
           }
         >
           {iStringParse(template.description, descriptionLocale)}
         </p>
-
-        {stats.length > 0 ? (
-          <div
-            className={
-              comfortable
-                ? "mt-3 flex flex-wrap gap-x-4 gap-y-1.5"
-                : "flex flex-wrap items-center gap-x-2 gap-y-1"
-            }
-          >
-            {stats.map(({ label, icon: Icon }) => (
-              <span key={label} className="inline-flex items-center gap-1.5 text-xs">
-                <Icon className="size-3.5 text-muted-foreground" aria-hidden="true" />
-                <span className="text-muted-foreground">{label}</span>
-              </span>
-            ))}
-          </div>
-        ) : null}
-
-        {children}
       </div>
     </div>
   );

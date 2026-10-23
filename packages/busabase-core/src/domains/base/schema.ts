@@ -2,7 +2,11 @@
 // into the kernel tables (busabaseNodes / busabaseCommits / change-requests / operations);
 // those refs are lazy `() =>` thunks, so the cross-module import cycle with
 // ../../db/schema resolves safely at runtime.
-import type { LookupRollup } from "busabase-contract/types";
+import type {
+  LookupRollup,
+  ViewFilterConditionVO,
+  ViewFilterConjunction,
+} from "busabase-contract/types";
 import { sql } from "drizzle-orm";
 import {
   boolean,
@@ -108,6 +112,7 @@ export const busabaseBaseFields = pgTable(
         targetBaseId?: string;
         multiple?: boolean;
         inverseFieldId?: string;
+        reverseOfFieldId?: string;
         choices?: Array<{ id: string; name: string; color?: string }>;
         ai?: {
           sourceFieldIds?: string[];
@@ -158,12 +163,8 @@ export const busabaseViews = pgTable(
     type: text("type").notNull().default("table"),
     config: jsonb("config")
       .$type<{
-        filters?: Array<{
-          fieldSlug: string;
-          fieldId?: string;
-          operator: "contains" | "equals" | "not_empty" | "is_empty" | "is_true" | "is_false";
-          value?: unknown;
-        }>;
+        filters?: ViewFilterConditionVO[];
+        filterConjunction?: ViewFilterConjunction;
         sorts?: Array<{ direction: "asc" | "desc"; fieldSlug: string; fieldId?: string }>;
         visibleFieldSlugs?: string[] | null;
         fieldWidths?: Record<string, number>;

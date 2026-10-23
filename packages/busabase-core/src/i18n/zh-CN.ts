@@ -3,6 +3,8 @@ import type { CoreI18nMessages } from "./messages";
 // Simplified Chinese translations for the shared dashboard catalog. Must mirror
 // the shape of `coreMessagesEn`; the `CoreI18nMessages` type enforces it.
 export const dashboardZhCN: CoreI18nMessages = {
+  lookup: lookupZhCN,
+  reverseRelation: reverseRelationZhCN,
   fieldHelp: {
     inherit: "使用字段说明",
     override: "为此表单自定义说明",
@@ -779,16 +781,11 @@ export const dashboardZhCN: CoreI18nMessages = {
     install: "安装",
     installRestricted:
       "仅空间站所有者和管理员可安装。模板可能包含供本空间站 Agent 运行的应用和技能代码。",
-    cardBases: "{count} 张表格",
-    cardApps: "{count} 个应用",
-    cardDocs: "{count} 篇文档",
-    cardRows: "{count} 行示例数据",
-    cardManual: "Agent 手册",
     promptsTitle: "安装后，你可以向 Agent 提问",
     promptsDescription: "模板会连同 Base 一起安装作者编写的手册，Agent 因此无需猜测数据结构。",
     contentsTitle: "安装后会创建的内容",
-    contentsDescription:
-      "你能编辑这个空间时，Base、字段、示例数据、应用和 Agent 手册都会立即创建。安装时勾选「先送审内容，再生效」，应用代码和手册就会改为变更请求，供你先审核。",
+    permissionNote:
+      "安装需要这个空间的所有者或管理员权限。创建的内容会立即可用；也可以在安装时选择先审核内容。",
     bases: "Base",
     apps: "应用",
     documents: "文档",
@@ -1547,6 +1544,13 @@ export const dashboardZhCN: CoreI18nMessages = {
     viewFieldDragOutside: "字段已移出排序区域，松开将取消调整。",
     noViewFilters: "此视图没有筛选条件。",
     noViewSorts: "此视图没有排序条件。",
+    filterMatch: "满足",
+    filterMatchAll: "全部条件（并且）",
+    filterMatchAny: "任一条件（或者）",
+    filterConjunction: "条件组合方式",
+    addFilterGroup: "添加条件组",
+    removeFilterGroup: "删除条件组",
+    filterMissingField: "字段已不可用",
     viewFilterCount: "{count} 个筛选条件",
     viewSortCount: "{count} 个排序条件",
     clearAllFilters: "清除全部筛选",
@@ -2428,3 +2432,6 @@ export const dashboardZhCN: CoreI18nMessages = {
       "在这个空间里创建文件夹、数据表和 App。这样装 Agent 学不到任何东西——你随时可以从「Agent 安装」标签页把手册给它。",
   },
 };
+
+import { lookupZhCN } from "./lookup";
+import { reverseRelationZhCN } from "./reverse-relation";

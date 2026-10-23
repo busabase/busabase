@@ -46,7 +46,13 @@ function gate() {
 }
 
 function fakeAgent(
-  options: { loadGate?: Promise<void>; permission?: boolean; model?: boolean } = {},
+  options: {
+    loadGate?: Promise<void>;
+    permission?: boolean;
+    /** Tool titles whose permission requests are all in flight at once. */
+    parallelPermissions?: string[];
+    model?: boolean;
+  } = {},
 ) {
   const aToB = new TransformStream();
   const bToA = new TransformStream();
@@ -57,6 +63,7 @@ function fakeAgent(
   const loaded = gate();
   const prompts: string[] = [];
   const configChanges: string[] = [];
+  const permissionOutcomes: Array<{ title: string; outcome: acp.RequestPermissionOutcome }> = [];
   let configOptions: acp.SessionConfigOption[] = options.model
     ? [
         {
@@ -104,12 +111,35 @@ function fakeAgent(
           options: [{ optionId: "allow", name: "Allow", kind: "allow_once" }],
         });
       }
+      if (options.parallelPermissions) {
+        await Promise.all(
+          options.parallelPermissions.map(async (title, index) => {
+            const response = await ctx.client.request(
+              acp.methods.client.session.requestPermission,
+              {
+                sessionId: ctx.params.sessionId,
+                toolCall: {
+                  toolCallId: `lease-parallel-${index}`,
+                  title,
+                  kind: "read",
+                  status: "pending",
+                },
+                options: [
+                  { optionId: "allow", name: "Allow", kind: "allow_once" },
+                  { optionId: "deny", name: "Deny", kind: "reject_once" },
+                ],
+              },
+            );
+            permissionOutcomes.push({ title, outcome: response.outcome });
+          }),
+        );
+      }
       return { stopReason: "end_turn" as const };
     })
     .onNotification(acp.methods.agent.session.cancel, () => {})
     .connectWith({ readable: aToB.readable, writable: bToA.writable }, () => new Promise(() => {}))
     .catch(() => {});
-  return { loaded: loaded.promise, prompts, configChanges };
+  return { loaded: loaded.promise, prompts, configChanges, permissionOutcomes };
 }
 
 describe("operation lease lifecycle with real ACP and PGLite persistence", () => {
@@ -272,6 +302,44 @@ describe("operation lease lifecycle with real ACP and PGLite persistence", () =>
       leaseExpiresAt: null,
     });
     expect(await inScope(() => acquireSessionLease(id, "next-worker"))).not.toBeNull();
+  });
+
+  it("answers concurrent permission requests in any order under the real lease fence", async () => {
+    const id = "ags_lease_parallel_permissions";
+    await insertSession(id);
+    const agent = fakeAgent({ parallelPermissions: ["Read the base", "List the records"] });
+    const operation = inScope(() => promptAgentSession(id, "two tools at once"));
+    const requestIds = () =>
+      (
+        (
+          globalThis as typeof globalThis & {
+            __busabaseAgentSessions?: Map<string, { buffer: AgentSessionEventVO[] }>;
+          }
+        ).__busabaseAgentSessions?.get(id)?.buffer ?? []
+      )
+        .filter((event) => event.kind === "permissionRequest")
+        .map((event) => event.permissionRequest?.requestId ?? "missing");
+    await vi.waitFor(() => expect(requestIds()).toHaveLength(2));
+    await vi.waitFor(async () => expect((await row(id)).status).toBe("waiting_permission"));
+    const [first, second] = requestIds();
+
+    await inScope(async () => respondToAgentPermission(id, second ?? "missing", "deny"));
+    await vi.waitFor(() => expect(agent.permissionOutcomes).toHaveLength(1));
+    // Durable state too: still waiting on the first card, same lease owner.
+    expect(await row(id)).toMatchObject({ status: "waiting_permission" });
+    expect((await row(id)).leaseOwnerId).not.toBeNull();
+
+    await inScope(async () => respondToAgentPermission(id, first ?? "missing", "allow"));
+    await operation;
+    expect(agent.permissionOutcomes).toEqual([
+      { title: "List the records", outcome: { outcome: "selected", optionId: "deny" } },
+      { title: "Read the base", outcome: { outcome: "selected", optionId: "allow" } },
+    ]);
+    expect(await row(id)).toMatchObject({
+      status: "idle",
+      leaseOwnerId: null,
+      leaseExpiresAt: null,
+    });
   });
 
   it.each(["prompt", "config"] as const)(

@@ -52,7 +52,7 @@ export const buildAgentInstallCommand = (source: AgentInstallSource): string => 
     const localSkillSource =
       encodedRef === ref ? `${repoUrl}/${subdir}` : `${repo}/${subdir}#${encodedRef}`;
     return [
-      `npx busabase-cli install ${repoUrl} --skill ${skillNameForSource(source)}`,
+      `npx --yes busabase-cli@latest install ${repoUrl} --skill ${skillNameForSource(source)}`,
       `npx skills add ${localSkillSource}`,
     ].join("\n");
   }

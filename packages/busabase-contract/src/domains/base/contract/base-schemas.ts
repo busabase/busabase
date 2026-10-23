@@ -141,6 +141,17 @@ export const fieldOptionsSchema = z
       })
       .optional(),
     inverseFieldId: z.string().optional(),
+    // A `relation` field with `reverseOfFieldId` is a READ-ONLY reverse column:
+    // it stores nothing, and its value is every record on the target Base whose
+    // relation field `reverseOfFieldId` links to this record — resolved at read
+    // time from the record-link table, so both sides can never disagree. Edit the
+    // relationship on the forward field instead.
+    reverseOfFieldId: z
+      .string()
+      .optional()
+      .describe(
+        "Relation fields only. Makes this a read-only reverse column of the relation field with this id on the target Base, which must point back at this Base. Its value is computed from that field's links; edit the forward field instead.",
+      ),
     // `lookup` fields pull a field's values across a `relation` field on the same
     // Base, optionally rolling them up into one scalar. Unlike every other computed
     // type they are NOT stored on the commit: a lookup's value depends on OTHER

@@ -12,7 +12,7 @@ import type {
   ViewType,
   ViewVO,
 } from "busabase-contract/types";
-import { VIEW_FIELD_MIN_WIDTH } from "busabase-contract/types";
+import { flattenViewFilters, VIEW_FIELD_MIN_WIDTH } from "busabase-contract/types";
 import { Dialog, DialogTitle } from "kui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "kui/popover";
 import { Skeleton } from "kui/skeleton";
@@ -108,7 +108,7 @@ import { BaseViewTabs } from "./base-view-tabs";
 import { BulkEditRecordsDialog } from "./bulk-edit-records-dialog";
 import { DateFieldValue } from "./date-field";
 import { FieldHelpPopover } from "./field-help";
-import { FieldBadge, WhiteboardThumbnail } from "./field-preview";
+import { FieldBadge, LookupFieldValue, WhiteboardThumbnail } from "./field-preview";
 import { FormulaValue } from "./formula-value";
 import { ImportRecordsDialog } from "./import-records-dialog";
 import { DialogContent } from "./localized-dialog-content";
@@ -238,7 +238,9 @@ function FieldColumnHeader({
   const Icon = FIELD_TYPE_ICONS[field.type];
   const metadata = `${name} - ${fieldLabel(field.type)} (${field.slug})`;
   const activeSort = activeView?.config.sorts.find((sort) => matchesViewField(sort, field));
-  const activeFilter = activeView?.config.filters.find((filter) => matchesViewField(filter, field));
+  const activeFilter = (activeView ? flattenViewFilters(activeView.config.filters) : []).find(
+    (filter) => matchesViewField(filter, field),
+  );
   const [open, setOpen] = useState(false);
   const [promptsOpen, setPromptsOpen] = useState(false);
   const isAnonVisitor = useIsAnonymousVisitor();
@@ -2264,6 +2266,18 @@ function RecordTableCellContent({
   const rawValue = record.headCommit.payload[field.slug];
   const chips = getFieldChipEntries(field, rawValue);
   const kind = fieldDisplayKind(field.type);
+
+  if (field.type === "lookup") {
+    return (
+      <LookupFieldValue
+        computed={record.computedFields?.[field.slug]}
+        field={field}
+        fieldUsers={record.fieldUsers}
+        records={records}
+        value={rawValue}
+      />
+    );
+  }
 
   if (field.type === "formula") {
     return (

@@ -214,3 +214,65 @@ describe("applyViewConfigToRecords", () => {
     });
   });
 });
+
+describe("saved boolean view expressions", () => {
+  const rows = [
+    record("1", "Me", "pending"),
+    record("2", "Me", "in-progress"),
+    record("3", "Other", "pending"),
+    record("4", "Me", "done"),
+  ];
+  it("matches owner AND (pending OR in-progress), preserving legacy AND", () => {
+    const owner = { fieldSlug: "name", operator: "equals" as const, value: "Me" };
+    const pending = { fieldSlug: "status", operator: "equals" as const, value: "pending" };
+    expect(
+      applyViewConfigToRecords(rows, { filters: [owner, pending], sorts: [] }).map((row) => row.id),
+    ).toEqual(["1"]);
+    expect(
+      applyViewConfigToRecords(rows, {
+        filters: [
+          owner,
+          { conjunction: "or", conditions: [pending, { ...pending, value: "in-progress" }] },
+        ],
+        sorts: [],
+      })
+        .map((row) => row.id)
+        .sort(),
+    ).toEqual(["1", "2"]);
+    expect(
+      applyViewConfigToRecords(rows, {
+        filters: [owner, pending],
+        filterConjunction: "or",
+        sorts: [],
+      }),
+    ).toHaveLength(4);
+  });
+  it("fails closed on missing identities and empty nested groups", () => {
+    const missing = { fieldSlug: "name", fieldId: "deleted-id", operator: "is_empty" as const };
+    expect(
+      applyViewConfigToRecords(rows, {
+        filters: [{ conjunction: "and", conditions: [missing] }],
+        sorts: [],
+      }),
+    ).toEqual([]);
+    expect(
+      applyViewConfigToRecords(rows, {
+        filters: [
+          {
+            conjunction: "or",
+            conditions: [missing, { fieldSlug: "status", operator: "equals", value: "pending" }],
+          },
+        ],
+        sorts: [],
+      })
+        .map((row) => row.id)
+        .sort(),
+    ).toEqual(["1", "3"]);
+    expect(
+      applyViewConfigToRecords(rows, {
+        filters: [{ conjunction: "and", conditions: [] }],
+        sorts: [],
+      }),
+    ).toEqual([]);
+  });
+});

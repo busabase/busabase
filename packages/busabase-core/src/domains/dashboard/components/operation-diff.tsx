@@ -1,3 +1,4 @@
+import { isViewFilterGroup, type ViewFilterConditionVO } from "busabase-contract/types";
 // ============================================================================
 // Operation field-change rendering — before → after hybrid for records + views.
 // `operation.baseFields` carries the canonical prior values (null for creations),
@@ -137,18 +138,34 @@ export const describeViewConfig = (
       label: `${getFieldName(changeRequest, sort.fieldSlug)} ${sort.direction === "desc" ? "Z → A" : "A → Z"}`,
     });
   }
-  for (const filter of value.filters ?? []) {
+  const describeCondition = (filter: ViewFilterConditionVO): string => {
+    if (isViewFilterGroup(filter))
+      return `(${filter.conditions.map(describeCondition).join(filter.conjunction === "or" ? " OR " : " AND ")})`;
     const operator = getFilterOperatorLabel(messages, filter.operator);
     const detail =
       filter.value === undefined || filter.value === null || filter.value === ""
         ? ""
         : ` ${fieldValueToString(filter.value)}`;
+    return `${getFieldName(changeRequest, filter.fieldSlug)} ${operator}${detail}`;
+  };
+  const grouped = value.filterConjunction === "or" || value.filters?.some(isViewFilterGroup);
+  if (grouped) {
     rules.push({
-      key: `filter:${filter.fieldSlug}:${filter.operator}:${stableStringify(filter.value)}`,
+      key: `filter-expression:${stableStringify({ filters: value.filters, conjunction: value.filterConjunction ?? "and" })}`,
       kind: "filter",
-      label: `${getFieldName(changeRequest, filter.fieldSlug)} ${operator}${detail}`,
+      label: (value.filters ?? [])
+        .map(describeCondition)
+        .join(value.filterConjunction === "or" ? " OR " : " AND "),
     });
-  }
+  } else
+    for (const filter of value.filters ?? []) {
+      if (isViewFilterGroup(filter)) continue;
+      rules.push({
+        key: `filter:${filter.fieldSlug}:${filter.operator}:${stableStringify(filter.value)}`,
+        kind: "filter",
+        label: describeCondition(filter),
+      });
+    }
   const visible = value.visibleFieldSlugs;
   if (visible === undefined || visible === null) {
     rules.push({ key: "field:*", kind: "field", label: messages.operationDiff.allFields });

@@ -3,8 +3,11 @@
 import { useQuery } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import { CodeBlock } from "kui/ai-elements/code-block";
+import { Button } from "kui/button";
+import { Download } from "lucide-react";
 import { useEffect } from "react";
 import { fmt, useCoreI18n } from "../../../i18n";
+import { buildAssetDownloadUrl } from "../../assets/utils/asset-content-url";
 import {
   FILE_NODE_TEXT_PREVIEW_MAX_LINES,
   type FileNodeTextAsset,
@@ -29,6 +32,25 @@ export function isFileFullscreenMime(mimeType: string) {
   );
 }
 
+/**
+ * Saves a File node's asset under its own name: the same request a Drive's
+ * download makes, which the raw-content route answers with an attachment (a
+ * browser ignores `download` once a response redirects to another origin).
+ * Every preview of a File node needs it, whatever the viewer that draws the
+ * file: PDFs, documents, audio and a video the browser cannot play have no
+ * other way out.
+ */
+export function FileDownloadButton({ assetId, fileName }: { assetId: string; fileName: string }) {
+  const label = useCoreI18n().nodeDetail.downloadFile;
+  return (
+    <Button asChild size="icon-sm" title={label} variant="outline">
+      <a aria-label={label} download={fileName} href={buildAssetDownloadUrl(assetId, fileName)}>
+        <Download aria-hidden className="size-3.5" />
+      </a>
+    </Button>
+  );
+}
+
 /** Native media that can go fullscreen, plus anything a host viewer renders. */
 export function useFileFullscreenAvailable(file: HostFileViewerFile | null) {
   const hostViewer = useAssetHostViewer(file);
@@ -44,6 +66,8 @@ export interface FilePreviewTextSource {
 type FilePreviewText = { kind: FileNodeTextKind; content: string };
 
 interface FilePreviewSurfaceProps {
+  /** The File node's asset, to offer its download in the toolbar (`showToolbar`). */
+  assetId?: string;
   fullscreenState: PreviewFullscreenState;
   mimeType: string;
   name: string;
@@ -101,6 +125,7 @@ export function FilePreviewSurface(props: FilePreviewSurfaceProps) {
 }
 
 function FilePreviewFrame({
+  assetId,
   fullscreenState,
   hostViewer,
   mimeType,
@@ -148,11 +173,14 @@ function FilePreviewFrame({
             <span className="min-w-0 truncate font-medium text-muted-foreground text-xs">
               {name}
             </span>
-            <PreviewFullscreenButton
-              available={fullscreenAvailable}
-              fullscreenState={fullscreenState}
-              label={messages.airapp.enterFullscreen}
-            />
+            <div className="flex shrink-0 items-center gap-1.5">
+              {assetId ? <FileDownloadButton assetId={assetId} fileName={name} /> : null}
+              <PreviewFullscreenButton
+                available={fullscreenAvailable}
+                fullscreenState={fullscreenState}
+                label={messages.airapp.enterFullscreen}
+              />
+            </div>
           </div>
         ) : null
       }

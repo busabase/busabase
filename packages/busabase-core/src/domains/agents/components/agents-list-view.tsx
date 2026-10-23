@@ -205,14 +205,14 @@ function AgentsListViewContent({ orpc, onSelectAgent, onAddAgent }: AgentsListVi
     scope === "mine" ? messages.agents.mineEmptyBody : messages.agents.spaceEmptyBody;
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <header className="flex flex-col gap-3 border-b px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-        <div className="min-w-0">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-4 sm:px-6">
+        <div className="min-w-0 flex-1 basis-64">
           <h1 className="font-medium text-lg">{messages.agents.title}</h1>
           <p className="max-w-2xl text-muted-foreground text-sm">{messages.agents.description}</p>
         </div>
         <Button
-          className="min-h-11 self-start sm:min-h-9 sm:self-auto"
+          className="min-h-11 shrink-0 sm:min-h-9"
           disabled={hasAllLocalAgents}
           onClick={onAddAgent}
           size="sm"
@@ -261,10 +261,10 @@ function AgentsListViewContent({ orpc, onSelectAgent, onAddAgent }: AgentsListVi
               </Button>
             </div>
           ) : (
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,16rem),1fr))] gap-3">
               {connectionItems.map((group) => (
                 <div
-                  className="relative flex flex-col rounded-lg border transition-colors hover:bg-accent"
+                  className="relative flex min-w-0 flex-col break-words rounded-lg border transition-colors hover:bg-accent"
                   data-agent-slug={group.slug}
                   data-testid="agent-connection-card"
                   key={group.slug}
@@ -274,8 +274,8 @@ function AgentsListViewContent({ orpc, onSelectAgent, onAddAgent }: AgentsListVi
                     onClick={() => onSelectAgent(group.slug)}
                     type="button"
                   >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="flex min-w-0 items-center gap-2 font-medium text-sm">
+                    <div className="flex w-full flex-wrap items-center justify-between gap-2">
+                      <span className="flex min-w-0 flex-1 basis-40 items-center gap-2 font-medium text-sm">
                         <Bot className="size-4 shrink-0" />
                         <span className="min-w-0 break-words">{group.agentName}</span>
                       </span>

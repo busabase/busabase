@@ -60,7 +60,7 @@ describe("AgentInstallPanel", () => {
     );
 
     expect(markup).toContain(
-      "npx busabase-cli install https://github.com/busabase/templates/tree/main --skill busa-drama",
+      "npx --yes busabase-cli@latest install https://github.com/busabase/templates/tree/main --skill busa-drama",
     );
     expect(markup).toContain(
       "npx skills add https://github.com/busabase/templates/tree/main/templates/busa-drama",

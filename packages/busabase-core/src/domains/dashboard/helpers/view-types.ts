@@ -53,6 +53,12 @@ export interface ViewSubmitOptions {
  * choice ids are the stored cell values, so a renamed choice keeps its id.
  */
 export interface UpdateBaseFieldPatch {
+  lookup?: {
+    relationFieldSlug: string;
+    targetFieldSlug: string;
+    rollup?: LookupRollup;
+    limit?: "all" | "first";
+  };
   help?: { description?: string; example?: string } | null;
   name?: iString;
   choices?: Array<{ color?: string; id: string; name: string }>;

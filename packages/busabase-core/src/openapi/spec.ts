@@ -70,7 +70,7 @@ export async function getBusabaseOpenApiSpec(): Promise<OpenAPI.Document> {
       { name: "ChangeRequests", description: "Human review workflow for proposed changes." },
       {
         name: "Records",
-        description: "Canonical records after approved changeRequests are merged.",
+        description: "The current rows of a Base, each written through a changeRequest.",
       },
       {
         name: "Guides",

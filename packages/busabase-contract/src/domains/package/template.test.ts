@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { resolvePrimaryAirApp, SkillFrontmatterSchema, TemplateManifestSchema } from "./template";
+import {
+  resolvePrimaryAirApp,
+  SkillFrontmatterSchema,
+  TEMPLATE_VIDEO_LIMIT,
+  TemplateManifestSchema,
+} from "./template";
 import { PACKAGE_FORMAT, PackageManifestSchema } from "./types";
 
 const manifest = (extra: Record<string, unknown> = {}) => ({
@@ -42,6 +47,59 @@ describe("TemplateManifestSchema", () => {
       description: "mailbox password",
       required: true,
     });
+  });
+});
+
+describe("TemplateManifestSchema — videos", () => {
+  it("keeps a clip list as objects, next to the untouched single video", () => {
+    const parsed = TemplateManifestSchema.parse({
+      category: "ops",
+      video: "assets/recordings/tour.mp4",
+      videos: [
+        { src: "assets/recordings/tour.mp4", title: "30-second tour" },
+        { src: "assets/recordings/full.mp4" },
+      ],
+    });
+    expect(parsed.video).toBe("assets/recordings/tour.mp4");
+    expect(parsed.videos).toEqual([
+      { src: "assets/recordings/tour.mp4", title: "30-second tour" },
+      { src: "assets/recordings/full.mp4" },
+    ]);
+  });
+
+  it("leaves videos undefined for a manifest that only ever had `video`", () => {
+    const parsed = TemplateManifestSchema.parse({
+      category: "ops",
+      video: "assets/recordings/a.mp4",
+    });
+    expect(parsed.videos).toBeUndefined();
+  });
+
+  it("keeps a locale's own clip list", () => {
+    const parsed = TemplateManifestSchema.parse({
+      category: "ops",
+      locales: {
+        "zh-CN": { videos: [{ src: "assets/recordings/tour-zh-CN.mp4", title: "30 秒看懂" }] },
+      },
+    });
+    expect(parsed.locales?.["zh-CN"]?.videos).toEqual([
+      { src: "assets/recordings/tour-zh-CN.mp4", title: "30 秒看懂" },
+    ]);
+  });
+
+  it("does not reject a list over the limit: the catalog must still parse, `check` reports it", () => {
+    const clips = Array.from({ length: TEMPLATE_VIDEO_LIMIT + 1 }, (_, i) => ({
+      src: `v${i}.mp4`,
+    }));
+    expect(TemplateManifestSchema.parse({ category: "ops", videos: clips }).videos).toHaveLength(
+      TEMPLATE_VIDEO_LIMIT + 1,
+    );
+  });
+
+  it("rejects a bare path in the list: clips are objects from the first release", () => {
+    expect(() =>
+      TemplateManifestSchema.parse({ category: "ops", videos: ["assets/recordings/a.mp4"] }),
+    ).toThrow();
   });
 });
 

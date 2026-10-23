@@ -1,13 +1,14 @@
 "use client";
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { NodeContentInput } from "busabase-contract/contract/node-content-schemas";
-import type { NodeVO } from "busabase-contract/types";
+import type { ChangeRequestStatus, NodeVO } from "busabase-contract/types";
 import { Button } from "kui/button";
 import { Save } from "lucide-react";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Link } from "wouter";
 import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
 import { presentCoreError } from "../../../i18n/localize-error";
 import { NodeActionsMenu } from "../../dashboard/components/node-actions-menu";
@@ -18,12 +19,34 @@ import {
   PreviewFullscreenButton,
   type PreviewFullscreenState,
 } from "../../dashboard/components/preview-fullscreen";
+import { changeRequestStatusLabel } from "../../dashboard/helpers/change-request";
+import { useHrefWithCurrentSearch } from "../../dashboard/helpers/link-search";
 import { useRegisterTopbarNodeActions } from "../../dashboard/hooks/use-register-topbar-node-actions";
 import { useRegisterTopbarNodeInfo } from "../../dashboard/hooks/use-register-topbar-node-info";
 import { useIsAnonymousVisitor } from "../../dashboard/visitor-context";
 import { stableStringify } from "../utils/stable-json";
 
-export type SaveStatus = "saved" | "dirty" | "saving" | "error";
+export type SaveStatus =
+  | "saved"
+  | "dirty"
+  | "saving"
+  | "error"
+  | Exclude<ChangeRequestStatus, "merged">;
+
+const isReviewStatus = (status: SaveStatus) =>
+  status !== "saved" && status !== "dirty" && status !== "saving" && status !== "error";
+
+export const richNodeSaveStatusLabel = (
+  status: SaveStatus,
+  messages: ReturnType<typeof useCoreI18n>,
+) =>
+  status === "saving"
+    ? messages.richNodes.saving
+    : status === "saved"
+      ? messages.richNodes.saved
+      : isReviewStatus(status)
+        ? changeRequestStatusLabel(status, messages)
+        : messages.richNodes.unsaved;
 
 export function useNodeContentSave(
   orpc: BusabaseQueryUtils,
@@ -34,44 +57,151 @@ export function useNodeContentSave(
   const locale = useCoreLocale();
   const queryClient = useQueryClient();
   const mutation = useMutation(orpc.nodes.updateContent.mutationOptions());
-  const [status, setStatus] = useState<SaveStatus>("saved");
-  const [error, setError] = useState<string | null>(null);
+  const nodeId = node?.id ?? null;
+  const sessionRef = useRef({ nodeId, revision: 0, pending: false });
+  if (sessionRef.current.nodeId !== nodeId) {
+    sessionRef.current = { nodeId, revision: 0, pending: false };
+  }
+  const session = sessionRef.current;
+  const [state, setState] = useState<{
+    session: typeof session;
+    status: SaveStatus;
+    error: string | null;
+    reviewRequestId: string | null;
+  }>({ session, status: "saved", error: null, reviewRequestId: null });
+  const status = state.session === session ? state.status : "saved";
+  const error = state.session === session ? state.error : null;
+  const reviewRequestId = state.session === session ? state.reviewRequestId : null;
+  const reviewQuery = useQuery({
+    ...(reviewRequestId
+      ? orpc.changeRequests.get.queryOptions({ input: { changeRequestId: reviewRequestId } })
+      : { queryKey: ["rich-node-save-review", nodeId], queryFn: async () => null, enabled: false }),
+    refetchInterval: (query) =>
+      reviewRequestId &&
+      (!query.state.data?.status || ["in_review", "approved"].includes(query.state.data.status))
+        ? 5_000
+        : false,
+  });
+
+  useEffect(() => {
+    const reviewedStatus = reviewQuery.data?.status;
+    if (!nodeId || !reviewRequestId || !reviewedStatus) return;
+    if (reviewedStatus !== "merged") {
+      setState((current) =>
+        current.session === session &&
+        current.reviewRequestId === reviewRequestId &&
+        isReviewStatus(current.status) &&
+        current.status !== reviewedStatus
+          ? { ...current, status: reviewedStatus }
+          : current,
+      );
+      return;
+    }
+    let active = true;
+    const finishReview = async () => {
+      await queryClient.invalidateQueries({ queryKey: orpc.nodes.get.key() });
+      if (!active || sessionRef.current !== session) return;
+      setState((current) =>
+        current.session === session && current.reviewRequestId === reviewRequestId
+          ? {
+              ...current,
+              status: isReviewStatus(current.status) ? "saved" : current.status,
+              reviewRequestId: null,
+            }
+          : current,
+      );
+    };
+    void finishReview();
+    return () => {
+      active = false;
+    };
+  }, [nodeId, orpc, queryClient, reviewQuery.data?.status, reviewRequestId, session]);
 
   const markDirty = useCallback(() => {
-    setStatus((current) => (current === "saving" ? current : "dirty"));
-    setError(null);
-  }, []);
+    if (sessionRef.current !== session) return;
+    session.revision += 1;
+    setState((current) => ({
+      session,
+      status: session.pending ? "saving" : "dirty",
+      error: null,
+      reviewRequestId: current.session === session ? current.reviewRequestId : null,
+    }));
+  }, [session]);
 
   const save = useCallback(
     async (document: unknown) => {
-      if (!node || mutation.isPending) return false;
-      setStatus("saving");
-      setError(null);
+      if (!node || session.pending || sessionRef.current !== session) return false;
+      session.pending = true;
+      const savedRevision = session.revision;
+      setState((current) => ({
+        session,
+        status: "saving",
+        error: null,
+        reviewRequestId: current.session === session ? current.reviewRequestId : null,
+      }));
       try {
         // `kind` is one of three literals here (not narrowed to a single one,
         // since this hook is shared by all three rich-node editors), so `{
         // kind, document }` doesn't line up with `content`'s discriminated
         // union on its own — the caller is what guarantees `document` actually
         // matches `kind`'s shape (each editor only ever calls its own `save`).
-        await mutation.mutateAsync({
+        const result = await mutation.mutateAsync({
           nodeId: node.id,
           content: { kind, document } as NodeContentInput,
         });
-        await queryClient.invalidateQueries({
-          queryKey: orpc.nodes.list.queryOptions({}).queryKey,
-        });
-        setStatus("saved");
+        // Rich-node editors read the detail query, not the sidebar tree. Mark
+        // both stale so returning to a board cannot mount its pre-save scene.
+        await Promise.all([
+          queryClient.invalidateQueries({
+            queryKey: orpc.nodes.list.queryOptions({}).queryKey,
+          }),
+          queryClient.invalidateQueries({
+            // Detail URLs may use either the ID or slug of the same node.
+            queryKey: orpc.nodes.get.key(),
+          }),
+        ]);
+        if (sessionRef.current === session) {
+          setState({
+            session,
+            status:
+              session.revision !== savedRevision
+                ? "dirty"
+                : result.status === "merged"
+                  ? "saved"
+                  : "in_review",
+            error: null,
+            reviewRequestId: result.status === "merged" ? null : result.id,
+          });
+        }
         return true;
       } catch (caught) {
-        setStatus("error");
-        setError(presentCoreError(messages, locale, caught, messages.richNodes.saveFailed));
+        if (sessionRef.current === session) {
+          setState({
+            session,
+            status: "error",
+            error: presentCoreError(messages, locale, caught, messages.richNodes.saveFailed),
+            reviewRequestId: null,
+          });
+        }
         return false;
+      } finally {
+        session.pending = false;
       }
     },
-    [messages, locale, kind, mutation, node, orpc, queryClient],
+    [messages, locale, kind, mutation, node, orpc, queryClient, session],
   );
 
-  return { error, markDirty, save, status };
+  return { error, markDirty, reviewRequestId, save, status };
+}
+
+export function RichNodeReviewLink({ requestId }: { requestId: string }) {
+  const messages = useCoreI18n();
+  const href = useHrefWithCurrentSearch(`/inbox/${requestId}`);
+  return (
+    <Link className="text-primary text-xs underline-offset-2 hover:underline" href={href}>
+      {messages.inbox.title}
+    </Link>
+  );
 }
 
 interface ServerDocumentSyncOptions<TDocument> {
@@ -80,7 +210,7 @@ interface ServerDocumentSyncOptions<TDocument> {
   /** The document as the editor currently holds it, in the same shape as `serverDocument`. */
   getLocalDocument: () => unknown;
   node: NodeVO | null;
-  /** The document as it currently exists on the server (parsed from `node.metadata`). */
+  /** The document returned by the node detail query. */
   serverDocument: TDocument;
   status: SaveStatus;
 }
@@ -88,10 +218,10 @@ interface ServerDocumentSyncOptions<TDocument> {
 /**
  * Keep an open rich-node editor in step with the server when the document
  * changes underneath it — another browser tab, another member, an agent
- * calling `PATCH /api/v1/nodes/{nodeId}/metadata`, or an MCP tool.
+ * saving node content through the API, or an MCP tool.
  *
  * Every rich-node editor (whiteboard/workflow/HTML) seeds its state from
- * `node.metadata` exactly ONCE, at mount: Excalidraw is uncontrolled and reads
+ * the detail document exactly ONCE, at mount: Excalidraw is uncontrolled and reads
  * `initialData` only when it mounts, and the workflow/HTML editors pass their
  * parsed document straight into `useState`/`useNodesState` initializers. So a
  * refetched node tree updated the React Query cache and the canvas kept
@@ -101,10 +231,10 @@ interface ServerDocumentSyncOptions<TDocument> {
  * Three guards, each earning its place:
  *  - `status === "saved"`: local unsaved work always wins. A background
  *    refetch must never overwrite something the user is still drawing.
- *  - `updatedAt` must be strictly newer than the last version we synced. This
- *    covers the window right after a save, where the mutation has committed but
- *    the tree query still holds the pre-save node — without it, that stale copy
- *    would be applied straight back over the just-saved work.
+ *  - The server document must change from the last server version we observed.
+ *    Immediately after a save the cache may still hold the old document. It
+ *    must not overwrite the newly saved local scene. Content is stored outside
+ *    the node row, so a fresh document can have the SAME node.updatedAt.
  *  - the incoming document must differ from what the editor already holds
  *    (compared with `stableStringify`, since jsonb reorders keys). Re-applying
  *    an identical document would needlessly reset selection and undo history.
@@ -123,7 +253,9 @@ export function useServerDocumentSync<TDocument>({
 
   const nodeId = node?.id ?? null;
   const updatedAt = node?.updatedAt ?? null;
+  const serverVersion = stableStringify(serverDocument);
   const syncedNodeIdRef = useRef(nodeId);
+  const syncedServerVersionRef = useRef<string | null>(serverVersion);
   // ISO-8601 UTC strings compare correctly lexicographically, so no Date parse.
   const syncedUpdatedAtRef = useRef<string | null>(updatedAt);
   if (syncedNodeIdRef.current !== nodeId) {
@@ -132,16 +264,19 @@ export function useServerDocumentSync<TDocument>({
     // well be OLDER than the previous node's).
     syncedNodeIdRef.current = nodeId;
     syncedUpdatedAtRef.current = null;
+    syncedServerVersionRef.current = null;
   }
 
   useEffect(() => {
-    if (!updatedAt || status !== "saved") return;
+    if (!nodeId || !updatedAt || status !== "saved") return;
     const syncedUpdatedAt = syncedUpdatedAtRef.current;
-    if (syncedUpdatedAt !== null && updatedAt <= syncedUpdatedAt) return;
+    if (syncedUpdatedAt !== null && updatedAt < syncedUpdatedAt) return;
     syncedUpdatedAtRef.current = updatedAt;
-    if (stableStringify(serverDocument) === stableStringify(getLocalDocumentRef.current())) return;
+    if (serverVersion === syncedServerVersionRef.current) return;
+    syncedServerVersionRef.current = serverVersion;
+    if (serverVersion === stableStringify(getLocalDocumentRef.current())) return;
     applyRef.current(serverDocument);
-  }, [serverDocument, status, updatedAt]);
+  }, [nodeId, serverDocument, serverVersion, status, updatedAt]);
 }
 
 interface RichNodeShellProps {
@@ -150,6 +285,7 @@ interface RichNodeShellProps {
   orpc: BusabaseQueryUtils;
   status: SaveStatus;
   error?: string | null;
+  reviewRequestId?: string | null;
   onSave: () => void;
   children: ReactNode;
   actions?: ReactNode;
@@ -162,6 +298,7 @@ export function RichNodeShell({
   orpc,
   status,
   error,
+  reviewRequestId,
   onSave,
   children,
   actions,
@@ -169,12 +306,7 @@ export function RichNodeShell({
 }: RichNodeShellProps) {
   const messages = useCoreI18n();
   const isAnonymous = useIsAnonymousVisitor();
-  const statusLabel =
-    status === "saving"
-      ? messages.richNodes.saving
-      : status === "saved"
-        ? messages.richNodes.saved
-        : messages.richNodes.unsaved;
+  const statusLabel = richNodeSaveStatusLabel(status, messages);
 
   useRegisterTopbarNodeActions(
     isAnonymous ? null : (
@@ -191,6 +323,7 @@ export function RichNodeShell({
             {error ?? statusLabel}
           </span>
         )}
+        {reviewRequestId ? <RichNodeReviewLink requestId={reviewRequestId} /> : null}
         {!isAnonymous && actions}
         <NodePinButton
           payload={{ nodeId: node.id }}
@@ -228,7 +361,12 @@ export function RichNodeShell({
             />
             <Button
               aria-label={messages.richNodes.save}
-              disabled={status === "saving" || status === "saved"}
+              disabled={
+                status === "saving" ||
+                status === "saved" ||
+                status === "in_review" ||
+                status === "approved"
+              }
               onClick={onSave}
               size="icon-sm"
               title={messages.richNodes.save}

@@ -16,8 +16,10 @@
  */
 import { createRouterClient } from "@orpc/server";
 import type { ApiKeyPermissionLevel } from "busabase-contract/access-control/api-key-level";
+import { subscribeRealtimeMessages } from "openlib/realtime";
 import { describe, expect, it } from "vitest";
 import { LOCAL_SPACE_ID, runWithBusabaseContext } from "../src/context";
+import type { BusabaseLiveEvent } from "../src/logic/live-events";
 import { getEffectiveNodeLevel } from "../src/logic/node-acl";
 import { busabaseRouter } from "../src/router";
 import { seedScenario } from "./helpers/seed-scenario";
@@ -51,6 +53,64 @@ const asMember = <T>(
   );
 
 describe("node ACL", () => {
+  it("notifies already-open clients after visibility and direct grant changes", async () => {
+    await seedScenario("acl-live-invalidation");
+    const raw: RawClient = createRouterClient(busabaseRouter);
+    const base = await asManager("alice", () =>
+      raw.bases.create({ name: "Source", slug: "source", autoMerge: true }),
+    );
+    if ("status" in base) throw new Error("expected materialized base");
+    const events: BusabaseLiveEvent[] = [];
+    const unsubscribe = subscribeRealtimeMessages<BusabaseLiveEvent>(
+      `busabase:live:${LOCAL_SPACE_ID}`,
+      (event) => events.push(event),
+    );
+    try {
+      await asManager("alice", () =>
+        raw.nodes.updateVisibility({ nodeId: base.nodeId, visibility: "private" }),
+      );
+      await asManager("alice", () =>
+        raw.nodes.principals.add({
+          nodeId: base.nodeId,
+          principalType: "user",
+          principalId: "bob",
+          role: "read",
+        }),
+      );
+      expect(await asMember("bob", () => getEffectiveNodeLevel(base.nodeId))).toBe("read");
+      await asManager("alice", () =>
+        raw.nodes.principals.remove({
+          nodeId: base.nodeId,
+          principalType: "user",
+          principalId: "bob",
+        }),
+      );
+      expect(await asMember("bob", () => getEffectiveNodeLevel(base.nodeId))).toBeNull();
+      expect(events).toHaveLength(3);
+      for (const event of events) {
+        expect(event).toMatchObject({
+          kind: "node.metadata_updated",
+          reason: "acl",
+          spaceId: LOCAL_SPACE_ID,
+          actorId: "alice",
+          nodeIds: [base.nodeId],
+          baseId: null,
+        });
+      }
+      await asManager("alice", () =>
+        raw.nodes.updateMetadata({
+          nodeId: base.nodeId,
+          metadata: { description: "Content only" },
+        }),
+      );
+      expect(events).toHaveLength(4);
+      expect(events[3]).toMatchObject({ kind: "node.metadata_updated", nodeIds: [base.nodeId] });
+      expect(events[3]?.reason).toBeUndefined();
+    } finally {
+      unsubscribe();
+    }
+  });
+
   it("separates manager visibility from an API-key action ceiling and rejects cross-space ids", async () => {
     await seedScenario("acl-manager-credential-ceiling");
     const raw: RawClient = createRouterClient(busabaseRouter);

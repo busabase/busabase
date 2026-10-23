@@ -220,16 +220,24 @@ export type {
   GalleryCardSize,
   GalleryCoverFit,
   GanttScale,
+  LookupComputedVO,
   RecordLinkVO,
   RecordVO,
   ViewConfigVO,
+  ViewFilterConditionVO,
+  ViewFilterConjunction,
+  ViewFilterGroupVO,
   ViewFilterOperator,
   ViewFilterVO,
   ViewSortVO,
   ViewType,
   ViewVO,
 } from "../domains/base/types";
-export { VIEW_FIELD_MAX_WIDTH, VIEW_FIELD_MIN_WIDTH } from "../domains/base/types";
+export {
+  LOOKUP_SOURCE_LIMIT,
+  VIEW_FIELD_MAX_WIDTH,
+  VIEW_FIELD_MIN_WIDTH,
+} from "../domains/base/types";
 
 export type {
   CreateFormDTO,
@@ -554,3 +562,10 @@ export interface AuditEventVO {
   metadata: Record<string, unknown>;
   createdAt: string;
 }
+
+export {
+  combineViewFilters,
+  flattenViewFilters,
+  isViewFilterGroup,
+  mapViewFilters,
+} from "../domains/base/types";

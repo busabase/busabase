@@ -28,8 +28,10 @@ import {
   materializedViewSchema,
 } from "../domains/base/contract/routes";
 import {
+  deepestViewFilterGroupSchema,
   viewChangeRequestInputSchema,
   viewConfigSchema,
+  viewFilterGroupSchema,
   viewFilterSchema,
   viewSchema,
   viewSortSchema,
@@ -451,6 +453,8 @@ export const busabaseOpenApiCommonSchemas = {
   View: { strategy: "output", schema: viewSchema },
   ViewConfig: { strategy: "output", schema: viewConfigSchema },
   ViewFilter: { strategy: "output", schema: viewFilterSchema },
+  ViewFilterGroup: { strategy: "output", schema: viewFilterGroupSchema },
+  ViewFilterInnerGroup: { strategy: "output", schema: deepestViewFilterGroupSchema },
   ViewSort: { strategy: "output", schema: viewSortSchema },
   // `views.changeRequest`, by `operation`.
   CreateViewOperation: {

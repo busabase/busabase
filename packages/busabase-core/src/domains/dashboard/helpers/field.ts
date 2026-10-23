@@ -217,6 +217,20 @@ export const getRelationRecordIds = (value: unknown) => {
   return [];
 };
 
+export const getFetchableRelationRecordIds = (records: RecordVO[], visibleBaseIds: Set<string>) => [
+  ...new Set(
+    records.flatMap((record) =>
+      record.base.fields
+        .filter(
+          (field) =>
+            field.type === "relation" &&
+            (!field.options.targetBaseId || visibleBaseIds.has(field.options.targetBaseId)),
+        )
+        .flatMap((field) => getRelationRecordIds(record.headCommit.payload[field.slug])),
+    ),
+  ),
+];
+
 type AnyAttachmentRef = AttachmentRef & {
   attachmentId?: string;
   assetId?: string;

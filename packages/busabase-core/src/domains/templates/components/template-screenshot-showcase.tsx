@@ -30,14 +30,14 @@ export interface TemplateScreenshot {
 interface TemplateScreenshotShowcaseProps {
   screenshots: TemplateScreenshot[];
   /**
-   * The demo clip's tile, rendered second — right after the cover — so the
-   * shelf reads cover → clip → the rest.
+   * The demo clips' tiles, rendered right after the cover in the order given —
+   * the shelf reads cover → clips → the rest.
    *
-   * Passed as a node rather than a src because playback is the clip tile's own
+   * Passed as nodes rather than srcs because playback is each clip tile's own
    * business: this shelf owns scrolling, counting and the image lightbox, and
    * has no reason to also own a <video> and a second dialog.
    */
-  videoTile?: ReactNode;
+  videoTiles?: ReactNode[];
   label: string;
   previousLabel: string;
   nextLabel: string;
@@ -91,7 +91,7 @@ const clickDownloadLink = (href: string, filename: string, openInNewTab = false)
 /** Compact, touch-friendly screenshot shelf shared by website and Dashboard details. */
 export function TemplateScreenshotShowcase({
   screenshots,
-  videoTile,
+  videoTiles = [],
   label,
   previousLabel,
   nextLabel,
@@ -110,14 +110,16 @@ export function TemplateScreenshotShowcase({
   const [rotation, setRotation] = useState(0);
 
   /**
-   * What the shelf actually scrolls through: the screenshots, with the clip
-   * spliced in second. Kept separate from `screenshots` because the lightbox
-   * still indexes into the screenshots alone — a clip is not something you
-   * zoom, rotate or download.
+   * What the shelf actually scrolls through: the screenshots, with the clips
+   * spliced in after the cover. Kept separate from `screenshots` because the
+   * lightbox still indexes into the screenshots alone — a clip is not something
+   * you zoom, rotate or download.
    */
-  const tiles: Array<{ kind: "image"; imageIndex: number } | { kind: "video" }> = [
+  const tiles: Array<
+    { kind: "image"; imageIndex: number } | { kind: "video"; videoIndex: number }
+  > = [
     ...(screenshots[0] ? [{ kind: "image" as const, imageIndex: 0 }] : []),
-    ...(videoTile ? [{ kind: "video" as const }] : []),
+    ...videoTiles.map((_, videoIndex) => ({ kind: "video" as const, videoIndex })),
     ...screenshots.slice(1).map((_, index) => ({ kind: "image" as const, imageIndex: index + 1 })),
   ];
   const tileCount = tiles.length;
@@ -225,16 +227,20 @@ export function TemplateScreenshotShowcase({
           const screenshot = tile.kind === "image" ? screenshots[tile.imageIndex] : undefined;
           return (
             <div
-              key={tile.kind === "image" ? `${screenshot?.src}-${tile.imageIndex}` : "clip"}
+              key={
+                tile.kind === "image"
+                  ? `${screenshot?.src}-${tile.imageIndex}`
+                  : `clip-${tile.videoIndex}`
+              }
               ref={(frame) => {
                 frameRefs.current[index] = frame;
               }}
               className="w-[88%] shrink-0 snap-start overflow-hidden rounded-md border border-border bg-muted sm:w-[46%]"
               role="listitem"
             >
-              {tile.kind === "video" || !screenshot ? (
-                videoTile
-              ) : (
+              {tile.kind === "video" ? (
+                videoTiles[tile.videoIndex]
+              ) : screenshot ? (
                 <button
                   type="button"
                   className="group relative block w-full cursor-zoom-in overflow-hidden text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
@@ -249,7 +255,7 @@ export function TemplateScreenshotShowcase({
                     <Expand className="size-4" aria-hidden="true" />
                   </span>
                 </button>
-              )}
+              ) : null}
             </div>
           );
         })}

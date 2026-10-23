@@ -29,7 +29,8 @@ import type {
   RecordVO,
   ViewVO,
 } from "busabase-contract/types";
-import { SidebarTrigger, useSidebar } from "kui/sidebar";
+import { flattenViewFilters } from "busabase-contract/types";
+import { useSidebar } from "kui/sidebar";
 // Demo-aware navigation (the shared `openlib/ui/dashboard` helpers):
 // `SPALink` appends `?demo=1` on <Link> clicks; `useAddDemoParam` wraps
 // programmatic `setLocation` targets — together they keep the demo across all
@@ -103,11 +104,11 @@ import {
   SubmitPermissionProvider,
   useWorkspacePermissionLevel,
 } from "./components/split-submit-button";
-import { BusabaseTopbarBreadcrumb, TopbarNodeActionsSlot } from "./components/topbar";
+import { BusabaseTopbar, TopbarNodeActionsSlot } from "./components/topbar";
 import { getNodeDetailBreadcrumbItems } from "./helpers/breadcrumbs";
 import { shouldQueryGlobalChangeRequests } from "./helpers/change-request-data-source";
 import { createChangeRequestQueryKeys } from "./helpers/change-request-query-keys";
-import { getRelationRecordIds } from "./helpers/field";
+import { getFetchableRelationRecordIds } from "./helpers/field";
 import { homePendingListInput } from "./helpers/home";
 import {
   getLocationPath,
@@ -131,6 +132,7 @@ import {
 } from "./helpers/node-route-guard";
 import { retryUnlessNotFound, shouldShowInitialLoadingState } from "./helpers/query-state";
 import { readRecordPagination, writeRecordPagination } from "./helpers/record-pagination-url";
+import { mergeRecordSnapshots } from "./helpers/record-snapshots";
 import { isConflictErrorMessage } from "./helpers/search";
 import { resolveDefaultViewPath, sortViewsByPosition } from "./helpers/view-order";
 import type {
@@ -149,11 +151,12 @@ import { useReorderView } from "./hooks/use-reorder-view";
 import { getNodeDetail, type LoadedNode } from "./node-detail-registry";
 import { DashboardOrpcProvider } from "./orpc-context";
 import { useCurrentNodeStore } from "./store/current-node-store";
-import { mergeFreshRecords } from "./utils/merge-records";
 import type { WorkbenchLinkResolver } from "./utils/workbench-link";
 import { type DashboardVisitorKind, DashboardVisitorProvider } from "./visitor-context";
 import { WorkbenchLinkProvider } from "./workbench-link-context";
 
+export { BusabaseTopbar } from "./components/topbar";
+export type { BusabaseBreadcrumbItem } from "./helpers/view-types";
 export {
   resolveWorkbenchLinkUnderBase,
   type WorkbenchLinkResolver,
@@ -257,6 +260,13 @@ interface BusabaseDashboardProps {
    * every existing browser consumer is unaffected.
    */
   chromeless?: boolean;
+  /**
+   * For a chromeless render whose host DOES wrap it in a sidebar (Cloud's
+   * public shared-folder page): keep the topbar's sidebar toggle and
+   * breadcrumb — nothing else — with this trail in place of the leading
+   * Workspace crumb. Needs a `SidebarProvider` above the dashboard.
+   */
+  chromelessBreadcrumbTrail?: BusabaseBreadcrumbItem[];
   /** Reuses the Change Request detail surface without exposing mutation controls. */
   readOnlyChangeRequestPreview?: boolean;
   /** Reuses the Record detail surface from server-seeded data without broader Base reads. */
@@ -376,6 +386,7 @@ function BusabaseDashboardContent({
   views: initialViews = [],
   embedded = false,
   chromeless = false,
+  chromelessBreadcrumbTrail,
   readOnlyChangeRequestPreview = false,
   readOnlyRecordPreview = false,
   // Normal Base views still load records per page. A read-only record embed is
@@ -508,7 +519,13 @@ function BusabaseDashboardContent({
   // Base (`bases.get`, inside BaseSetupView).
   const baseCatalogQuery = useQuery({
     ...orpc.bases.list.queryOptions({ input: isGraphRoute ? {} : { fields: "links" } }),
-    enabled: !isAnon && (isGraphRoute || isBaseSetupRoute),
+    // Relation labels are hydrated only for visible target Bases. Their ACL
+    // check also needs the links-only catalog on an ordinary record/Grid route.
+    enabled:
+      !isAnon &&
+      (isGraphRoute ||
+        isBaseSetupRoute ||
+        Boolean(activeBaseQuery.data?.fields.some((field) => field.type === "relation"))),
   });
   // The Trash page is their only reader, so they load there and nowhere else.
   // Every other page used to download the whole Trash on first paint: ~225KB
@@ -848,7 +865,14 @@ function BusabaseDashboardContent({
   // Carry the active view's filters (tagged with each field's type) to the server
   // for best-effort push-down; the client filter below stays the exact authority.
   const activeViewFilters = useMemo(() => {
-    const filters = selectedBaseView?.config.filters ?? [];
+    // Flattening OR branches into the old AND-only SQL hint would lose rows.
+    const config = selectedBaseView?.config;
+    if (
+      config?.filterConjunction === "or" ||
+      config?.filters.some((filter) => "conditions" in filter)
+    )
+      return undefined;
+    const filters = flattenViewFilters(config?.filters ?? []);
     if (filters.length === 0) {
       return undefined;
     }
@@ -1038,6 +1062,8 @@ function BusabaseDashboardContent({
   const fallbackRecordQuery = useQuery({
     ...orpc.records.get.queryOptions({ input: { recordId: selectedRecordId ?? "" } }),
     initialData: initialRecords.find((record) => record.id === selectedRecordId),
+    // The initial page snapshot is not a new read of cross-record dependencies.
+    initialDataUpdatedAt: 0,
     enabled:
       !readOnlyRecordPreview &&
       Boolean(selectedRecordId) &&
@@ -1045,33 +1071,52 @@ function BusabaseDashboardContent({
   });
   const [relationRecordIds, setRelationRecordIds] = useState<string[]>([]);
   const relationRecordQueries = useQueries({
-    queries: (readOnlyRecordPreview ? [] : relationRecordIds).map((recordId) => ({
-      ...orpc.records.get.queryOptions({ input: { recordId } }),
-    })),
+    queries: (readOnlyRecordPreview ? [] : relationRecordIds).map((recordId) => {
+      const options = orpc.records.get.queryOptions({ input: { recordId } });
+      const cached = queryClient.getQueryData<RecordVO>(options.queryKey);
+      return {
+        ...options,
+        enabled: !cached || baseCatalog.some((base) => base.id === cached.baseId),
+      };
+    }),
   });
   const records = useMemo(() => {
-    return mergeFreshRecords([
-      fallbackRecordQuery.data,
-      ...relationRecordQueries.map((query) => query.data),
-      ...baseRecords,
+    const listFetchedAt = usesPagePagination
+      ? recordsPageQuery.dataUpdatedAt
+      : recordsInfiniteQuery.dataUpdatedAt;
+    return mergeRecordSnapshots([
+      { record: fallbackRecordQuery.data, fetchedAt: fallbackRecordQuery.dataUpdatedAt },
+      ...relationRecordQueries
+        .filter(
+          (query) => !query.data || baseCatalog.some((base) => base.id === query.data?.baseId),
+        )
+        .map((query) => ({
+          record: query.data,
+          fetchedAt: query.dataUpdatedAt,
+        })),
+      ...baseRecords.map((record) => ({ record, fetchedAt: listFetchedAt })),
     ]);
-  }, [baseRecords, fallbackRecordQuery.data, relationRecordQueries]);
+  }, [
+    baseRecords,
+    baseCatalog,
+    fallbackRecordQuery.data,
+    fallbackRecordQuery.dataUpdatedAt,
+    relationRecordQueries,
+    usesPagePagination,
+    recordsPageQuery.dataUpdatedAt,
+    recordsInfiniteQuery.dataUpdatedAt,
+  ]);
   const activeRecord = useMemo(
     () => records.find((record) => record.id === selectedRecordId) ?? null,
     [records, selectedRecordId],
   );
   const missingRelationRecordIds = useMemo(() => {
     const existingRecordIds = new Set(records.map((record) => record.id));
-    return [
-      ...new Set(
-        records.flatMap((record) =>
-          record.base.fields
-            .filter((field) => field.type === "relation")
-            .flatMap((field) => getRelationRecordIds(record.headCommit.payload[field.slug])),
-        ),
-      ),
-    ].filter((recordId) => !existingRecordIds.has(recordId));
-  }, [records]);
+    return getFetchableRelationRecordIds(
+      records,
+      new Set(baseCatalog.map((base) => base.id)),
+    ).filter((recordId) => !existingRecordIds.has(recordId));
+  }, [baseCatalog, records]);
   // Queue newly-discovered relation ids for fetching; append-only (see above).
   useEffect(() => {
     const fresh = missingRelationRecordIds.filter((id) => !relationRecordIds.includes(id));
@@ -1469,6 +1514,7 @@ function BusabaseDashboardContent({
       queryClient.invalidateQueries({ queryKey: ["busabase", "relation-selected"] }),
       queryClient.invalidateQueries({ queryKey: ["busabase", "relation-bases"] }),
       queryClient.invalidateQueries({ queryKey: listKeys.recordsCount }),
+      queryClient.invalidateQueries({ queryKey: listKeys.recordDetail }),
       queryClient.invalidateQueries({ queryKey: listKeys.bases }),
       queryClient.invalidateQueries({ queryKey: listKeys.baseDetail }),
       queryClient.invalidateQueries({ queryKey: listKeys.deletedFields }),
@@ -2090,17 +2136,22 @@ function BusabaseDashboardContent({
       // keep whatever else a select field carries alongside `choices`.
       // A date field's time settings ride along the same way.
       const nextOptions =
-        patch.choices !== undefined || patch.date !== undefined || patch.formula !== undefined
+        patch.choices !== undefined ||
+        patch.date !== undefined ||
+        patch.lookup !== undefined ||
+        patch.formula !== undefined
           ? {
               ...fieldOptions,
               ...(patch.choices !== undefined ? { choices: patch.choices } : {}),
               ...(patch.date !== undefined ? { date: patch.date } : {}),
+              ...(patch.lookup !== undefined ? { lookup: patch.lookup } : {}),
               ...(patch.formula !== undefined ? { formula: patch.formula } : {}),
             }
           : undefined;
       const renameOnly =
         patch.choices === undefined &&
         patch.date === undefined &&
+        patch.lookup === undefined &&
         patch.formula === undefined &&
         patch.help === undefined;
       const displayName = iStringParse(patch.name ?? field?.name ?? fieldId);
@@ -3285,6 +3336,15 @@ function BusabaseDashboardContent({
   if (chromeless) {
     return (
       <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-background">
+        {chromelessBreadcrumbTrail ? (
+          // Every node route's trail opens with the Workspace crumb; the host's
+          // trail takes its place, so record titles and view names still come
+          // from the same per-route logic the member topbar uses.
+          <BusabaseTopbar
+            items={[...chromelessBreadcrumbTrail, ...breadcrumbItems.slice(1)]}
+            showNodeInfo={false}
+          />
+        ) : null}
         {error ? (
           isConflictErrorMessage(error) ? (
             <ReviewConflictPanel message={error} />
@@ -3309,21 +3369,12 @@ function BusabaseDashboardContent({
   const content = (
     <div className="flex h-full min-h-0 bg-background">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <div
-          className="flex h-10 shrink-0 items-center gap-2 border-b bg-background/80 px-4 py-1.5 backdrop-blur-sm md:h-12"
-          data-dashboard-topbar
-        >
-          <SidebarTrigger
-            aria-label={messages.shell.toggleSidebar}
-            className="h-8 w-8 shrink-0"
-            title={messages.shell.toggleSidebar}
-          />
-          <BusabaseTopbarBreadcrumb items={breadcrumbItems} showNodeInfo={showNodeTopbarSlots} />
+        <BusabaseTopbar items={breadcrumbItems} showNodeInfo={showNodeTopbarSlots}>
           {titlebar.badge ? <div className="ml-1 shrink-0">{titlebar.badge}</div> : null}
           {topbarActions ? <div className="shrink-0">{topbarActions}</div> : null}
           {showNodeTopbarSlots ? <TopbarNodeActionsSlot /> : null}
           <SidePanelToggle />
-        </div>
+        </BusabaseTopbar>
         {error ? (
           isConflictErrorMessage(error) ? (
             <ReviewConflictPanel message={error} />

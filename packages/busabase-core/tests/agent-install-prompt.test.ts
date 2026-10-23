@@ -31,19 +31,19 @@ describe("agent install prompt", () => {
 
   it("installs template resources and the local skill from the same main ref", () => {
     expect(buildAgentInstallCommand(templateSource)).toBe(
-      "npx busabase-cli install https://github.com/busabase/templates/tree/main --skill busa-email\nnpx skills add https://github.com/busabase/templates/tree/main/templates/busa-email",
+      "npx --yes busabase-cli@latest install https://github.com/busabase/templates/tree/main --skill busa-email\nnpx skills add https://github.com/busabase/templates/tree/main/templates/busa-email",
     );
     expect(buildAgentInstallCommand({ ...templateSource, ref: undefined })).toBe(
-      "npx busabase-cli install https://github.com/busabase/templates/tree/main --skill busa-email\nnpx skills add https://github.com/busabase/templates/tree/main/templates/busa-email",
+      "npx --yes busabase-cli@latest install https://github.com/busabase/templates/tree/main --skill busa-email\nnpx skills add https://github.com/busabase/templates/tree/main/templates/busa-email",
     );
     expect(buildAgentInstallCommand({ ...templateSource, subdir: "/templates/busa-email/" })).toBe(
-      "npx busabase-cli install https://github.com/busabase/templates/tree/main --skill busa-email\nnpx skills add https://github.com/busabase/templates/tree/main/templates/busa-email",
+      "npx --yes busabase-cli@latest install https://github.com/busabase/templates/tree/main --skill busa-email\nnpx skills add https://github.com/busabase/templates/tree/main/templates/busa-email",
     );
   });
 
   it("preserves non-default template versions with the CLI's GitHub tree URL", () => {
     expect(buildAgentInstallCommand({ ...templateSource, ref: "v1.2.3" })).toBe(
-      "npx busabase-cli install https://github.com/busabase/templates/tree/v1.2.3 --skill busa-email\nnpx skills add https://github.com/busabase/templates/tree/v1.2.3/templates/busa-email",
+      "npx --yes busabase-cli@latest install https://github.com/busabase/templates/tree/v1.2.3 --skill busa-email\nnpx skills add https://github.com/busabase/templates/tree/v1.2.3/templates/busa-email",
     );
   });
 
@@ -55,7 +55,7 @@ describe("agent install prompt", () => {
         subdir: "templates/busa-drama",
       }),
     ).toBe(
-      "npx busabase-cli install https://github.com/busabase/templates/tree/chore%2Fdeclare-template-video --skill busa-drama\nnpx skills add busabase/templates/templates/busa-drama#chore%2Fdeclare-template-video",
+      "npx --yes busabase-cli@latest install https://github.com/busabase/templates/tree/chore%2Fdeclare-template-video --skill busa-drama\nnpx skills add busabase/templates/templates/busa-drama#chore%2Fdeclare-template-video",
     );
   });
 

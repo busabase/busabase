@@ -15,6 +15,7 @@ import { resolveCoverField } from "../../base/utils/view-field-resolution";
 import { getRecordTitle } from "../helpers/change-request";
 import { getAttachmentRefs, getFieldPreviewText, getSafeAttachmentUrl } from "../helpers/field";
 import { mergeSearchIntoHref } from "../helpers/link-search";
+import { LookupFieldValue } from "./field-preview";
 
 // Card min-width per size preset — column count is left to CSS `auto-fill`
 // (responsive reflow), matching Airtable/Notion which don't let you drag a
@@ -115,6 +116,23 @@ function GalleryCard({
           {title}
         </Link>
         {bodyFields.map((field) => {
+          if (field.type === "lookup") {
+            return (
+              <div className="min-w-0 text-xs" key={field.id}>
+                {showFieldLabels ? (
+                  <div className="truncate text-[10px] text-muted-foreground uppercase tracking-wide">
+                    {resolveIString(field.name)}
+                  </div>
+                ) : null}
+                <LookupFieldValue
+                  computed={record.computedFields?.[field.slug]}
+                  field={field}
+                  fieldUsers={record.fieldUsers}
+                  value={record.headCommit.payload[field.slug]}
+                />
+              </div>
+            );
+          }
           const preview = getFieldPreviewText(
             field,
             record.headCommit.payload[field.slug],

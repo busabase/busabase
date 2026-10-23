@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import { cn } from "kui/utils";
 import type { LucideIcon } from "lucide-react";
-import { Bot, ChevronLeft, ChevronRight, Loader2, Pin, Search } from "lucide-react";
+import { Bot, ChevronLeft, ChevronRight, Loader2, Pin, Plus, Search } from "lucide-react";
 import { useSyncExternalStore } from "react";
 import { useCoreI18n } from "../../../i18n";
 import type { KnownNodeCache } from "../helpers/known-node-cache";
@@ -175,7 +175,7 @@ export interface SidePanelAgentPickerProps {
   orpc: BusabaseQueryUtils;
   /** Returns to the empty-state launcher without picking an agent. */
   onBack: () => void;
-  /** Navigates, e.g. to `/agents/new` when nothing is connected yet. */
+  /** Navigates, e.g. to `/agents/new` to connect another agent. */
   onNavigate: (path: string) => void;
 }
 
@@ -185,9 +185,8 @@ export interface SidePanelAgentPickerProps {
  * Reads the same `agents.connections.list` query (scope: "space") the "+"
  * Agents submenu uses, and selecting a row calls the same `openAgentChatTab`
  * — so a conversation opened from either entry point lands in the identical
- * tab, never a second chat implementation. `onBack` is the only way out
- * other than actually picking one, mirroring the disclosure pattern the "+"
- * submenu already gets for free from being a menu.
+ * tab, never a second chat implementation. A persistent connect action opens
+ * the existing agent setup page, even when other agents are already connected.
  */
 export function SidePanelAgentPicker({ orpc, onBack, onNavigate }: SidePanelAgentPickerProps) {
   const messages = useCoreI18n();
@@ -235,16 +234,7 @@ export function SidePanelAgentPicker({ orpc, onBack, onNavigate }: SidePanelAgen
           </button>
         </div>
       ) : agents.length === 0 ? (
-        <div className="space-y-2 px-1">
-          <p className="text-muted-foreground text-xs">{messages.sidePanel.agentPickerEmpty}</p>
-          <button
-            className="text-primary text-xs underline-offset-2 hover:underline"
-            onClick={() => onNavigate("/agents/new")}
-            type="button"
-          >
-            {messages.sidePanel.agentPickerConnect}
-          </button>
-        </div>
+        <p className="px-1 text-muted-foreground text-xs">{messages.sidePanel.agentPickerEmpty}</p>
       ) : (
         <div className="flex flex-col gap-2">
           {agents.map((agent) => (
@@ -266,6 +256,17 @@ export function SidePanelAgentPicker({ orpc, onBack, onNavigate }: SidePanelAgen
           ))}
         </div>
       )}
+
+      <button
+        className="flex items-center gap-3 rounded-lg border border-border/60 border-dashed p-3 text-left transition-colors hover:border-border hover:bg-accent/50"
+        onClick={() => onNavigate("/agents/new")}
+        type="button"
+      >
+        <Plus className="size-4 shrink-0 text-muted-foreground" />
+        <span className="min-w-0 flex-1 font-medium text-foreground text-xs">
+          {messages.sidePanel.agentPickerConnect}
+        </span>
+      </button>
     </div>
   );
 }

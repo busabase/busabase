@@ -1,6 +1,8 @@
 import type { CoreI18nMessages } from "./messages";
 
 export const dashboardJa: CoreI18nMessages = {
+  lookup: lookupJa,
+  reverseRelation: reverseRelationJa,
   fieldHelp: {
     inherit: "フィールドの説明を使用",
     override: "このフォームの説明を設定",
@@ -810,17 +812,12 @@ export const dashboardJa: CoreI18nMessages = {
     install: "インストール",
     installRestricted:
       "インストールできるのはスペースの所有者と管理者のみです。エージェントが実行するアプリやスキルのコードが含まれる場合があります。",
-    cardBases: "テーブル {count} 件",
-    cardApps: "アプリ {count} 件",
-    cardDocs: "ドキュメント {count} 件",
-    cardRows: "サンプル行 {count} 件",
-    cardManual: "エージェントのマニュアル",
     promptsTitle: "インストール後にエージェントへ依頼できること",
     promptsDescription:
       "テンプレートには作者のマニュアルも含まれ、Base と一緒にインストールされます。エージェントがスキーマを推測する必要はありません。",
     contentsTitle: "インストールで作成されるもの",
-    contentsDescription:
-      "このスペースを編集できる場合、Base、フィールド、サンプル行、アプリ、エージェントのマニュアルはすぐに作成されます。インストール時に「先にレビューに回す」をオンにすると、アプリのコードとマニュアルは変更リクエストとして届きます。",
+    permissionNote:
+      "インストールにはこのスペースの所有者または管理者の権限が必要です。作成された内容はすぐに使えます。先に内容をレビューすることもできます。",
     bases: "Base",
     apps: "アプリ",
     documents: "ドキュメント",
@@ -1596,6 +1593,13 @@ export const dashboardJa: CoreI18nMessages = {
       "フィールドは並べ替え領域の外にあります。ドロップするとキャンセルします。",
     noViewFilters: "このビューにフィルターはありません。",
     noViewSorts: "このビューに並べ替えはありません。",
+    filterMatch: "一致条件",
+    filterMatchAll: "すべての条件（AND）",
+    filterMatchAny: "いずれかの条件（OR）",
+    filterConjunction: "条件の組み合わせ",
+    addFilterGroup: "条件グループを追加",
+    removeFilterGroup: "条件グループを削除",
+    filterMissingField: "フィールドは利用できません",
     viewFilterCount: "{count} 件のフィルター",
     viewSortCount: "{count} 件の並べ替え",
     clearAllFilters: "すべてのフィルターをクリア",
@@ -2520,3 +2524,6 @@ export const dashboardJa: CoreI18nMessages = {
       "このスペースにフォルダ・テーブル・アプリを作成します。この方法ではエージェントは何も覚えません——マニュアルはいつでも「エージェントに導入」タブから渡せます。",
   },
 };
+
+import { lookupJa } from "./lookup";
+import { reverseRelationJa } from "./reverse-relation";

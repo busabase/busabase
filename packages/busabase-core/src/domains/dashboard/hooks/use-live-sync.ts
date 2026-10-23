@@ -59,6 +59,7 @@ interface UseBusabaseLiveSyncOptions {
     // an open URL from active to archived (or back) without changing the URL.
     nodeRouteState: QueryKey;
     records: QueryKey;
+    recordDetail: QueryKey;
     recordsPage: QueryKey;
     recordsCount: QueryKey;
   };
@@ -154,6 +155,7 @@ export function useBusabaseLiveSync({
       listKeys.nodeDetail,
       listKeys.nodeRouteState,
       listKeys.records,
+      listKeys.recordDetail,
       listKeys.recordsPage,
       listKeys.recordsCount,
       listKeys,
@@ -190,6 +192,7 @@ export function useBusabaseLiveSync({
       void queryClient.invalidateQueries({
         queryKey: orpc.records.listPage.key(),
       });
+      void queryClient.invalidateQueries({ queryKey: stableListKeys.recordDetail });
       void queryClient.invalidateQueries({
         queryKey: orpc.bases.listDeletedFields.queryOptions({ input: { baseId } }).queryKey,
       });
@@ -221,6 +224,8 @@ export function useBusabaseLiveSync({
           return stableListKeys.nodes;
         case "records":
           return stableListKeys.records;
+        case "recordDetail":
+          return stableListKeys.recordDetail;
         case "recordsCount":
           return stableListKeys.recordsCount;
         case "recordsPage":
@@ -265,6 +270,7 @@ export function useBusabaseLiveSync({
       void queryClient.invalidateQueries({ queryKey: stableListKeys.baseDetail });
       void queryClient.invalidateQueries({ queryKey: stableListKeys.archivedBases });
       void queryClient.invalidateQueries({ queryKey: stableListKeys.records });
+      void queryClient.invalidateQueries({ queryKey: stableListKeys.recordDetail });
       void queryClient.invalidateQueries({ queryKey: stableListKeys.recordsPage });
       void queryClient.invalidateQueries({ queryKey: stableListKeys.recordsCount });
       void queryClient.invalidateQueries({ queryKey: stableListKeys.changeRequests });

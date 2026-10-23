@@ -19,7 +19,7 @@ import type {
   ReviewVO,
   UserRefVO,
   ViewConfigVO,
-  ViewFilterVO,
+  ViewFilterConditionVO,
   ViewSortVO,
   ViewType,
   ViewVO,
@@ -178,7 +178,8 @@ const normalizeFieldWidths = (value: unknown): Record<string, number> | undefine
 };
 
 export const normalizeViewConfig = (config: ViewPO["config"] | ViewConfigVO): ViewConfigVO => ({
-  filters: (config.filters ?? []) as ViewFilterVO[],
+  filters: (config.filters ?? []) as ViewFilterConditionVO[],
+  filterConjunction: (config as ViewConfigVO).filterConjunction,
   sorts: (config.sorts ?? []) as ViewSortVO[],
   visibleFieldSlugs: config.visibleFieldSlugs,
   fieldWidths: normalizeFieldWidths((config as ViewConfigVO).fieldWidths),

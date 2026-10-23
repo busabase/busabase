@@ -1,6 +1,8 @@
 import type { CoreI18nMessages } from "./messages";
 
 export const dashboardVi: CoreI18nMessages = {
+  lookup: lookupVi,
+  reverseRelation: reverseRelationVi,
   fieldHelp: {
     inherit: "Dùng hướng dẫn của trường",
     override: "Tùy chỉnh cho biểu mẫu này",
@@ -812,17 +814,12 @@ export const dashboardVi: CoreI18nMessages = {
     install: "Cài đặt",
     installRestricted:
       "Chỉ chủ sở hữu và quản trị viên không gian — mẫu có thể chứa một ứng dụng và một kỹ năng, tức là mã mà các tác nhân AI của không gian này sẽ chạy.",
-    cardBases: "{count} bảng{plural}",
-    cardApps: "{count} ứng dụng{plural}",
-    cardDocs: "{count} tài liệu{plural}",
-    cardRows: "{count} bản ghi mẫu{plural}",
-    cardManual: "Hướng dẫn cho tác nhân AI",
     promptsTitle: "Những gì bạn có thể hỏi tác nhân AI sau khi cài đặt",
     promptsDescription:
       "Tác nhân AI trả lời được những câu này vì mẫu cài kèm cuốn hướng dẫn của tác giả cùng các cơ sở dữ liệu. Nó không phải đoán lược đồ của bạn.",
     contentsTitle: "Cài đặt mẫu này sẽ tạo ra gì",
-    contentsDescription:
-      'Nếu bạn có quyền chỉnh sửa không gian này, cơ sở dữ liệu, trường, bản ghi mẫu, ứng dụng và hướng dẫn cho tác nhân AI được tạo ngay. Chọn "Gửi nội dung đi xét duyệt trước" khi cài đặt để nhận mã ứng dụng và hướng dẫn dưới dạng yêu cầu thay đổi.',
+    permissionNote:
+      "Cần quyền chủ sở hữu hoặc quản trị viên của không gian này để cài đặt. Mọi thứ được tạo ra dùng được ngay; bạn cũng có thể chọn xét duyệt nội dung trước.",
     bases: "Cơ sở dữ liệu",
     apps: "Ứng dụng",
     documents: "Tài liệu",
@@ -1602,6 +1599,13 @@ export const dashboardVi: CoreI18nMessages = {
     viewFieldDragOutside: "Trường đang ở ngoài vùng sắp xếp lại. Thả để hủy.",
     noViewFilters: "Chế độ xem này không có bộ lọc.",
     noViewSorts: "Chế độ xem này không có thứ tự sắp xếp.",
+    filterMatch: "Khớp",
+    filterMatchAll: "Tất cả điều kiện (VÀ)",
+    filterMatchAny: "Bất kỳ điều kiện (HOẶC)",
+    filterConjunction: "Kết hợp điều kiện",
+    addFilterGroup: "Thêm nhóm điều kiện",
+    removeFilterGroup: "Xóa nhóm điều kiện",
+    filterMissingField: "Trường không còn khả dụng",
     viewFilterCount: "{count} bộ lọc",
     viewSortCount: "{count} thứ tự sắp xếp",
     clearAllFilters: "Xóa tất cả bộ lọc",
@@ -2527,3 +2531,6 @@ export const dashboardVi: CoreI18nMessages = {
       "Tạo thư mục, các bảng và ứng dụng trong không gian này. Cách này không giúp tác nhân AI của bạn biết gì — bạn có thể trao hướng dẫn cho nó từ tab Cài đặt qua tác nhân AI bất cứ lúc nào.",
   },
 };
+
+import { lookupVi } from "./lookup";
+import { reverseRelationVi } from "./reverse-relation";

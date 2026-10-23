@@ -18,7 +18,6 @@ import { useSearch } from "wouter";
 import { fmt, useCoreI18n, useCoreLocale, useIString } from "../../../i18n";
 import { localizeCoreErrorMessage, presentCoreError } from "../../../i18n/localize-error";
 import { isSystemFieldType } from "../../base/field-types";
-import { isRollupCompatible, LOOKUP_ROLLUPS } from "../../base/lookup/rollup";
 import { type DateFieldOptions, getDateFieldOptions } from "../../base/utils/date-value";
 import { isUnconvertibleFieldType } from "../../base/utils/field-conversion";
 import { getPrimaryField } from "../../base/utils/primary-field";
@@ -36,6 +35,7 @@ import {
   writeFormulaFieldDraft,
 } from "../helpers/formula-field";
 import { mergeSearchIntoHref } from "../helpers/link-search";
+import { sameLookupConfig } from "../helpers/lookup";
 import { retryUnlessNotFound } from "../helpers/query-state";
 import {
   buildSelectChoices,
@@ -62,6 +62,7 @@ import { FieldHelpSettings, type FieldHelpValue, hasFieldHelp } from "./field-he
 import { FormulaFieldEditor } from "./formula-field-editor";
 import { IStringNameInput } from "./i-string-input";
 import { DialogContent } from "./localized-dialog-content";
+import { type LookupConfigDraft, LookupFieldConfig } from "./lookup-field-config";
 import { NodeActionsMenu } from "./node-actions-menu";
 import { NodeAgentPromptsButton } from "./node-agent-prompts-button";
 import { NodePinButton, nodeSidePanelTabId } from "./node-pin-button";
@@ -404,37 +405,16 @@ export function BaseSetupView({
   const [lookupRelationSlug, setLookupRelationSlug] = useState("");
   const [lookupTargetSlug, setLookupTargetSlug] = useState("");
   const [lookupRollup, setLookupRollup] = useState<LookupRollup>("values");
+  const [lookupDraftBeforeRelation, setLookupDraftBeforeRelation] = useState<{
+    name: iString;
+    slug: string;
+    required: boolean;
+  } | null>(null);
+  const [lookupAwaitingReview, setLookupAwaitingReview] = useState(false);
   const [isRequired, setIsRequired] = useState(false);
   const [isMultiple, setIsMultiple] = useState(true);
   // Choices typed into the add-field dialog for a select / multiselect field.
   const [choiceDrafts, setChoiceDrafts] = useState<ChoiceDraft[]>([]);
-  // ── lookup field cascade (relation hop → target field → rollup) ────────────
-  // Only relation fields with a resolved target Base can be hopped through.
-  const lookupRelationFields = (base?.fields ?? []).filter(
-    (field) => field.type === "relation" && Boolean(field.options.targetBaseId),
-  );
-  // Its full schema, from `bases.get`: the page's catalog of other Bases only
-  // carries their relation and lookup fields.
-  const lookupTargetBaseId = lookupRelationFields.find((field) => field.slug === lookupRelationSlug)
-    ?.options.targetBaseId;
-  const lookupTargetBaseQuery = useQuery({
-    ...orpc.bases.get.queryOptions({ input: { baseId: lookupTargetBaseId ?? "" } }),
-    enabled: Boolean(lookupTargetBaseId),
-  });
-  const lookupTargetBase = lookupTargetBaseId ? lookupTargetBaseQuery.data : undefined;
-  // Chained lookups are rejected server-side (see field-ops.ts's
-  // assertValidLookupField) — don't offer them here either.
-  const lookupTargetFields = (lookupTargetBase?.fields ?? []).filter(
-    (field) => field.type !== "lookup",
-  );
-  const lookupTargetType = lookupTargetFields.find(
-    (field) => field.slug === lookupTargetSlug,
-  )?.type;
-  // Numeric rollups need a numeric target; hide the ones that would be rejected
-  // rather than letting the user pick one and eat a server error.
-  const availableRollups = lookupTargetType
-    ? LOOKUP_ROLLUPS.filter((rollup) => isRollupCompatible(rollup, lookupTargetType))
-    : LOOKUP_ROLLUPS;
   const [isSaving, setIsSaving] = useState(false);
   const [isAddFieldOpen, setIsAddFieldOpen] = useState(false);
   const addFieldNameInputRef = useRef<HTMLInputElement>(null);
@@ -453,6 +433,11 @@ export function BaseSetupView({
   const [editingChoiceDrafts, setEditingChoiceDrafts] = useState<ChoiceDraft[]>([]);
   // The edit dialog's working copy of a date field's time settings.
   const [editingDateOptions, setEditingDateOptions] = useState<DateFieldOptions>({});
+  const [editingLookup, setEditingLookup] = useState<LookupConfigDraft>({
+    relationFieldSlug: "",
+    targetFieldSlug: "",
+    rollup: "values",
+  });
   const [editingFormulaOptions, setEditingFormulaOptions] = useState<FormulaFieldOptions>({
     expression: "",
   });
@@ -639,6 +624,8 @@ export function BaseSetupView({
     setLookupRelationSlug("");
     setLookupTargetSlug("");
     setLookupRollup("values");
+    setLookupDraftBeforeRelation(null);
+    setLookupAwaitingReview(false);
     setIsRequired(false);
     setIsMultiple(true);
     setChoiceDrafts([]);
@@ -720,7 +707,16 @@ export function BaseSetupView({
       );
       if (draftKey) writeFormulaFieldDraft(draftKey, null);
       resetAddFieldForm();
-      setIsAddFieldOpen(false);
+      if (fieldType === "relation" && lookupDraftBeforeRelation) {
+        setFieldName(lookupDraftBeforeRelation.name);
+        setFieldSlug(lookupDraftBeforeRelation.slug);
+        setIsRequired(lookupDraftBeforeRelation.required);
+        setFieldType("lookup");
+        setLookupRelationSlug(options?.mergeImmediately ? slug : "");
+        setLookupAwaitingReview(!options?.mergeImmediately);
+      } else {
+        setIsAddFieldOpen(false);
+      }
     } catch (error) {
       const msg = presentCoreError(messages, locale, error, messages.base.failedAddField);
       setFormError(msg);
@@ -742,6 +738,7 @@ export function BaseSetupView({
     setEditingFieldHelp({});
     setEditingChoiceDrafts([]);
     setEditingDateOptions({});
+    setEditingLookup({ relationFieldSlug: "", targetFieldSlug: "", rollup: "values" });
     setEditingFormulaOptions({ expression: "" });
     setIsEditingFormulaValid(false);
     setDraftRestored(false);
@@ -814,6 +811,15 @@ export function BaseSetupView({
     if (JSON.stringify(field?.options.help ?? {}) !== JSON.stringify(editingFieldHelp)) {
       patch.help = hasFieldHelp(editingFieldHelp) ? editingFieldHelp : null;
     }
+    if (field?.type === "lookup") {
+      if (!editingLookup.relationFieldSlug || !editingLookup.targetFieldSlug) {
+        setFieldRenameError(messages.base.lookupConfigRequired);
+        return;
+      }
+      if (!sameLookupConfig(field.options.lookup, editingLookup)) {
+        patch.lookup = editingLookup;
+      }
+    }
     const previousChoices = field ? fieldChoices(field) : [];
     if (field && isChoiceField(field)) {
       const built = buildSelectChoices(
@@ -867,7 +873,7 @@ export function BaseSetupView({
             messages,
             locale,
             error,
-            patch.choices || patch.date
+            patch.choices || patch.date || patch.lookup || patch.formula
               ? messages.base.failedUpdateField
               : messages.base.failedRenameField,
           ),
@@ -959,6 +965,11 @@ export function BaseSetupView({
     isEditingDateOptions && editingField
       ? !sameDateOptions(getDateFieldOptions(editingField.options), editingDateOptions)
       : false;
+  const isEditingLookup = editingField?.type === "lookup" && !conversionTargetType;
+  const editingLookupChanged =
+    isEditingLookup &&
+    editingField &&
+    !sameLookupConfig(editingField.options.lookup, editingLookup);
   const isEditingFormula = editingField?.type === "formula" && !conversionTargetType;
   const editingFormulaChanged =
     isEditingFormula &&
@@ -966,6 +977,7 @@ export function BaseSetupView({
   const editingOptionsChanged =
     editingChoicesChanged ||
     editingDateOptionsChanged ||
+    editingLookupChanged ||
     editingFormulaChanged ||
     JSON.stringify(editingField?.options.help ?? {}) !== JSON.stringify(editingFieldHelp);
   const primaryField = getPrimaryField(base);
@@ -1085,6 +1097,12 @@ export function BaseSetupView({
                               fieldChoices(field).map((choice) => ({ ...choice })),
                             );
                             setEditingDateOptions(getDateFieldOptions(field.options));
+                            setEditingLookup({
+                              relationFieldSlug: field.options.lookup?.relationFieldSlug ?? "",
+                              targetFieldSlug: field.options.lookup?.targetFieldSlug ?? "",
+                              rollup: field.options.lookup?.rollup ?? "values",
+                              limit: field.options.lookup?.limit,
+                            });
                             setEditingFormulaOptions(field.options.formula ?? { expression: "" });
                             setIsEditingFormulaValid(false);
                             setFieldRenameError(null);
@@ -1307,6 +1325,20 @@ export function BaseSetupView({
                         disabled={isFieldRenameSaving}
                         onChange={setEditingDateOptions}
                         value={editingDateOptions}
+                      />
+                    </div>
+                  ) : null}
+                  {isEditingLookup ? (
+                    <div className="mt-4">
+                      <LookupFieldConfig
+                        base={base}
+                        bases={bases}
+                        disabled={isFieldRenameSaving}
+                        key={editingFieldId}
+                        mode="edit"
+                        onChange={setEditingLookup}
+                        orpc={orpc}
+                        value={editingLookup}
                       />
                     </div>
                   ) : null}
@@ -1636,80 +1668,41 @@ export function BaseSetupView({
                       </label>
                     ) : null}
                     {fieldType === "lookup" ? (
-                      <>
-                        <label className="block">
-                          <span className="text-muted-foreground text-xs">
-                            {messages.base.lookupVia}
-                          </span>
-                          <select
-                            className="mt-1 h-8 w-full rounded-md border border-border/70 bg-card px-2.5 text-sm outline-none transition-colors focus:border-primary"
-                            data-testid="add-field-lookup-relation"
-                            onChange={(event) => {
-                              setLookupRelationSlug(event.target.value);
-                              // The target-field list is scoped to the related
-                              // Base, so a stale pick from the previous hop must go.
-                              setLookupTargetSlug("");
-                            }}
-                            value={lookupRelationSlug}
-                          >
-                            <option value="">{messages.base.lookupSelectRelation}</option>
-                            {lookupRelationFields.map((field) => (
-                              <option key={field.id} value={field.slug}>
-                                {resolveIString(field.name)}
-                              </option>
-                            ))}
-                          </select>
-                          {lookupRelationFields.length === 0 ? (
-                            <span className="mt-1 block text-muted-foreground text-[10px]">
-                              {messages.base.lookupNeedsRelationField}
-                            </span>
-                          ) : null}
-                        </label>
-                        <label className="block">
-                          <span className="text-muted-foreground text-xs">
-                            {messages.base.lookupTargetField}
-                          </span>
-                          <select
-                            className="mt-1 h-8 w-full rounded-md border border-border/70 bg-card px-2.5 text-sm outline-none transition-colors focus:border-primary"
-                            data-testid="add-field-lookup-target"
-                            disabled={!lookupRelationSlug}
-                            onChange={(event) => {
-                              setLookupTargetSlug(event.target.value);
-                              // A rollup valid for the previous target may be
-                              // invalid for this one (SUM over a text column) —
-                              // fall back to the always-valid default.
-                              setLookupRollup("values");
-                            }}
-                            value={lookupTargetSlug}
-                          >
-                            <option value="">{messages.base.lookupSelectTargetField}</option>
-                            {lookupTargetFields.map((field) => (
-                              <option key={field.id} value={field.slug}>
-                                {resolveIString(field.name)}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label className="block">
-                          <span className="text-muted-foreground text-xs">
-                            {messages.base.lookupRollup}
-                          </span>
-                          <select
-                            className="mt-1 h-8 w-full rounded-md border border-border/70 bg-card px-2.5 text-sm outline-none transition-colors focus:border-primary"
-                            data-testid="add-field-lookup-rollup"
-                            onChange={(event) =>
-                              setLookupRollup(event.target.value as LookupRollup)
-                            }
-                            value={lookupRollup}
-                          >
-                            {availableRollups.map((rollup) => (
-                              <option key={rollup} value={rollup}>
-                                {rollup}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      </>
+                      <div className="min-w-0 sm:col-span-2">
+                        <LookupFieldConfig
+                          base={base}
+                          bases={bases}
+                          disabled={isSaving}
+                          mode="add"
+                          onChange={(draft) => {
+                            setLookupRelationSlug(draft.relationFieldSlug);
+                            setLookupTargetSlug(draft.targetFieldSlug);
+                            setLookupRollup(draft.rollup);
+                          }}
+                          onCreateRelation={() => {
+                            setLookupDraftBeforeRelation({
+                              name: fieldName,
+                              slug: fieldSlug,
+                              required: isRequired,
+                            });
+                            setFieldName("");
+                            setFieldSlug("");
+                            setIsRequired(false);
+                            setFieldType("relation");
+                          }}
+                          orpc={orpc}
+                          value={{
+                            relationFieldSlug: lookupRelationSlug,
+                            targetFieldSlug: lookupTargetSlug,
+                            rollup: lookupRollup,
+                          }}
+                        />
+                        {lookupAwaitingReview ? (
+                          <p className="text-muted-foreground text-xs" role="status">
+                            {messages.common.requestReviewHint}
+                          </p>
+                        ) : null}
+                      </div>
                     ) : null}
                     {fieldType === "number" ? (
                       <label className="block">

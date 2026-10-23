@@ -1,6 +1,6 @@
 import type { BaseFieldVO, FieldType } from "busabase-contract/types";
 import { iStringParse } from "openlib/i18n/i-string";
-import { isSystemFieldType } from "../../base/field-types";
+import { isReverseRelationDef, isSystemFieldType } from "../../base/field-types";
 import { fromText, isUnconvertibleFieldType } from "../../base/utils/field-conversion";
 
 /**
@@ -89,7 +89,7 @@ export function parsePastedTable(
   const columns: PasteColumn[] = headers.map((header) => {
     const field = matchField(header, fields);
     if (!field) return { header, field: null, unsupportedReason: "unmatched" };
-    if (isSystemFieldType(field.type)) {
+    if (isSystemFieldType(field.type) || isReverseRelationDef(field)) {
       return { header, field: null, unsupportedReason: "system" };
     }
     // Never re-list the unconvertible types by hand — ask the converter. A stale

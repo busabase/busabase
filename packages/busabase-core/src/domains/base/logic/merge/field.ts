@@ -1,3 +1,4 @@
+import { isViewFilterGroup, type ViewFilterConditionVO } from "busabase-contract/types";
 import "server-only";
 
 import { and, asc, eq, gt, inArray, isNull, ne } from "drizzle-orm";
@@ -13,6 +14,7 @@ import { mergeFieldHelpOptions } from "../../utils/field-help-options";
 import { PRIMARY_FIELD_DELETE_MESSAGE } from "../../utils/primary-field";
 import { assertFormulaMergeValid, recalculateFormulaRecords } from "../formula-recalculation";
 import { getPrimaryFieldIdFromDb } from "../queries";
+import { pairReverseRelationFields } from "../reverse-relations";
 
 export const mergeBaseAddField = async (ctx: MergeCtx, item: OperationPO, headCommit: CommitPO) => {
   const { db, timestamp } = ctx;
@@ -35,8 +37,9 @@ export const mergeBaseAddField = async (ctx: MergeCtx, item: OperationPO, headCo
     .where(eq(busabaseBases.id, baseId))
     .limit(1);
   const spaceId = baseRow?.spaceId ?? getContextSpaceId();
+  const fieldId = id("bsf");
   await db.insert(busabaseBaseFields).values({
-    id: id("bsf"),
+    id: fieldId,
     baseId,
     spaceId,
     slug: fieldData.slug,
@@ -48,6 +51,11 @@ export const mergeBaseAddField = async (ctx: MergeCtx, item: OperationPO, headCo
   });
   if (type === "formula") {
     await recalculateFormulaRecords(ctx, baseId, fieldData.slug, item.id);
+  }
+  const reverseOfFieldId = (fieldData.options as { reverseOfFieldId?: unknown } | undefined)
+    ?.reverseOfFieldId;
+  if (type === "relation" && typeof reverseOfFieldId === "string") {
+    await pairReverseRelationFields(db, fieldId, reverseOfFieldId);
   }
   await db
     .update(busabaseOperations)
@@ -101,7 +109,8 @@ export const mergeBaseDeleteField = async (
     const deletedFieldId = fieldData.fieldId;
     for (const view of views) {
       const config = view.config as {
-        filters?: Array<{ fieldSlug: string; fieldId?: string }>;
+        filters?: ViewFilterConditionVO[];
+        filterConjunction?: "and" | "or";
         sorts?: Array<{ fieldSlug: string; fieldId?: string }>;
         visibleFieldSlugs?: string[];
         fieldWidths?: Record<string, number>;
@@ -114,7 +123,12 @@ export const mergeBaseDeleteField = async (
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const updatedConfig: any = {
         ...config,
-        filters: config.filters?.filter((f) => !matchesDeleted(f)),
+        // Keep grouped references as nonmatching leaves: removing an AND child
+        // would silently broaden the saved expression. Legacy flat cleanup stays unchanged.
+        filters:
+          config.filterConjunction || config.filters?.some(isViewFilterGroup)
+            ? config.filters
+            : config.filters?.filter((f) => isViewFilterGroup(f) || !matchesDeleted(f)),
         sorts: config.sorts?.filter((s) => !matchesDeleted(s)),
         visibleFieldSlugs: config.visibleFieldSlugs?.filter((s) => s !== slug),
         fieldWidths: config.fieldWidths
@@ -161,6 +175,16 @@ export const mergeBaseUpdateField = async (
     fieldData.options as BaseFieldPO["options"] | undefined,
     fieldData.help,
   );
+  // A relation's pairing is structural, not part of what an options editor
+  // round-trips: keep the reverse-column link and the pair's inverse id when a
+  // patch leaves them out (an options patch replaces the whole bag).
+  if (currentField.type === "relation") {
+    for (const key of ["reverseOfFieldId", "inverseFieldId"] as const) {
+      if (nextOptions[key] === undefined && currentField.options[key] !== undefined) {
+        nextOptions[key] = currentField.options[key];
+      }
+    }
+  }
   if (
     currentField.type === "formula" &&
     typeof fieldData.formulaBaseExpression === "string" &&
@@ -336,6 +360,13 @@ export const mergeBaseUpdateField = async (
       .update(busabaseBaseFields)
       .set(updateSet as Partial<BaseFieldPO>)
       .where(eq(busabaseBaseFields.id, fieldData.fieldId));
+  }
+  if (
+    currentField.type === "relation" &&
+    typeof nextOptions.reverseOfFieldId === "string" &&
+    currentField.options.reverseOfFieldId === undefined
+  ) {
+    await pairReverseRelationFields(db, currentField.id, nextOptions.reverseOfFieldId);
   }
   if (
     currentField.type === "formula" &&

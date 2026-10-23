@@ -1,8 +1,11 @@
 import {
   type BaseFieldVO,
+  flattenViewFilters,
+  isViewFilterGroup,
   VIEW_FIELD_MAX_WIDTH,
   VIEW_FIELD_MIN_WIDTH,
   type ViewConfigVO,
+  type ViewFilterConditionVO,
   type ViewFilterOperator,
   type ViewFilterVO,
   type ViewSortVO,
@@ -41,27 +44,63 @@ export const replaceFirstViewFilter = (
   field: Pick<BaseFieldVO, "id" | "slug">,
   nextFilter: ViewFilterVO,
 ): ViewConfigVO => {
-  const firstIndex = config.filters.findIndex((filter) => matchesViewField(filter, field));
-  if (firstIndex === -1) {
-    return { ...config, filters: [...config.filters, nextFilter] };
-  }
-  return {
-    ...config,
-    filters: config.filters.map((filter, index) => (index === firstIndex ? nextFilter : filter)),
-  };
+  let replaced = false;
+  const replace = (conditions: ViewFilterConditionVO[]): ViewFilterConditionVO[] =>
+    conditions.map((condition) => {
+      if (isViewFilterGroup(condition))
+        return { ...condition, conditions: replace(condition.conditions) };
+      if (!replaced && matchesViewField(condition, field)) {
+        replaced = true;
+        return nextFilter;
+      }
+      return condition;
+    });
+  const filters = replace(config.filters);
+  return { ...config, filters: replaced ? filters : [...filters, nextFilter] };
 };
 
 export const clearFirstViewFilter = (
   config: ViewConfigVO,
   field: Pick<BaseFieldVO, "id" | "slug">,
 ): ViewConfigVO => {
-  const firstIndex = config.filters.findIndex((filter) => matchesViewField(filter, field));
-  return firstIndex === -1
-    ? config
-    : {
-        ...config,
-        filters: config.filters.filter((_, index) => index !== firstIndex),
-      };
+  let removed = false;
+  const remove = (conditions: ViewFilterConditionVO[]): ViewFilterConditionVO[] =>
+    conditions.flatMap<ViewFilterConditionVO>((condition) => {
+      if (isViewFilterGroup(condition)) {
+        const children = remove(condition.conditions);
+        return children.length ? [{ ...condition, conditions: children }] : [];
+      }
+      if (!removed && matchesViewField(condition, field)) {
+        removed = true;
+        return [];
+      }
+      return [condition];
+    });
+  const filters = remove(config.filters);
+  return removed ? { ...config, filters } : config;
+};
+
+export const getViewFilterCount = (config: ViewConfigVO): number =>
+  flattenViewFilters(config.filters).length;
+
+/** Immutable path update shared by nested UI controls. Empty groups are pruned. */
+export const updateViewFilterPath = (
+  config: ViewConfigVO,
+  path: readonly number[],
+  update: (condition: ViewFilterConditionVO) => ViewFilterConditionVO | null,
+): ViewConfigVO => {
+  const visit = (conditions: ViewFilterConditionVO[], depth: number): ViewFilterConditionVO[] =>
+    conditions.flatMap<ViewFilterConditionVO>((condition, index) => {
+      if (index !== path[depth]) return [condition];
+      const next =
+        depth === path.length - 1
+          ? update(condition)
+          : isViewFilterGroup(condition)
+            ? { ...condition, conditions: visit(condition.conditions, depth + 1) }
+            : condition;
+      return next && (!isViewFilterGroup(next) || next.conditions.length) ? [next] : [];
+    });
+  return { ...config, filters: visit(config.filters, 0) };
 };
 
 export const getVisibleViewFieldSlugs = (
@@ -154,10 +193,13 @@ export const addViewFilter = (
   config: ViewConfigVO,
   field: Pick<BaseFieldVO, "id" | "slug">,
   operator: ViewFilterOperator,
-): ViewConfigVO => ({
-  ...config,
-  filters: [...config.filters, { fieldId: field.id, fieldSlug: field.slug, operator }],
-});
+): ViewConfigVO =>
+  flattenViewFilters(config.filters).length >= 100
+    ? config
+    : {
+        ...config,
+        filters: [...config.filters, { fieldId: field.id, fieldSlug: field.slug, operator }],
+      };
 
 export const updateViewFilterAt = (
   config: ViewConfigVO,

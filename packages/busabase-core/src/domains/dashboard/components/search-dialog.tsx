@@ -1,4 +1,10 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import {
+  hashKey,
+  type QueryKey,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { NodeType } from "busabase-contract/domains";
 import type { NodeSearchResultVO, NodeVO, SearchResultVO } from "busabase-contract/types";
@@ -312,35 +318,71 @@ export function SearchDialog({
   // a helper would be a hook, and a hook called in a loop or behind a condition
   // is a rules-of-hooks bug waiting for the next person to introduce. Four
   // explicit calls cannot drift into that shape.
-  const scopedInput = (source: "records" | "files" | "nodes" | "names") => ({
-    query: debouncedQuery,
-    limit: QUICK_RESULT_LIMIT,
-    mode: "quick" as const,
-    surface: "quick" as const,
-    offset: 0,
-    sources: [source] as [typeof source],
-  });
+  const queryClient = useQueryClient();
+  const searchOptions = useMemo(() => {
+    const options = (source: "records" | "files" | "nodes" | "names") => ({
+      ...orpc.search.queryOptions({
+        input: {
+          query: debouncedQuery,
+          limit: QUICK_RESULT_LIMIT,
+          mode: "quick",
+          surface: "quick",
+          offset: 0,
+          sources: [source],
+        },
+      }),
+      retry: false as const,
+      retryOnMount: false,
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: false,
+    });
+    return {
+      records: options("records"),
+      files: options("files"),
+      nodes: options("nodes"),
+      names: options("names"),
+    };
+  }, [orpc, debouncedQuery]);
   const canSearch = open && debouncedQuery.length > 0;
   const normalizedDebouncedQuery = normalizeSearchText(debouncedQuery);
   const isDebouncedQueryCurrent = normalizedDebouncedQuery === normalizedQuery;
+  const searchQueryKeysHash = hashKey(
+    Object.values(searchOptions).map((options) => options.queryKey),
+  );
+
+  useEffect(() => {
+    const queryKeys = JSON.parse(searchQueryKeysHash) as readonly QueryKey[];
+    const cancel = () => {
+      for (const queryKey of queryKeys) {
+        void queryClient.cancelQueries({ queryKey, exact: true });
+      }
+    };
+    // Changing enabled does not abort an observed TanStack query. Cancel as
+    // soon as typing supersedes it, when closing, and when unmounting.
+    // oRPC utility proxies change identity on property access; React Compiler
+    // can recreate query options on any render. Cleanup must follow the actual
+    // query keys, never those incidental option/proxy identities.
+    if (!open || !isDebouncedQueryCurrent) cancel();
+    return cancel;
+  }, [queryClient, searchQueryKeysHash, open, isDebouncedQueryCurrent]);
 
   // `changeRequests` deliberately has no request of its own: the change
   // requests `search` returns are the ones the matching RECORDS came from, so
   // they arrive on the records response and are split out by kind below.
   const recordsQuery = useQuery({
-    ...orpc.search.queryOptions({ input: scopedInput("records") }),
+    ...searchOptions.records,
     enabled: canSearch && (shows("records") || shows("changeRequests")),
   });
   const filesQuery = useQuery({
-    ...orpc.search.queryOptions({ input: scopedInput("files") }),
+    ...searchOptions.files,
     enabled: canSearch && shows("files"),
   });
   const docContentQuery = useQuery({
-    ...orpc.search.queryOptions({ input: scopedInput("nodes") }),
+    ...searchOptions.nodes,
     enabled: canSearch && shows("docContent"),
   });
   const baseNamesQuery = useQuery({
-    ...orpc.search.queryOptions({ input: scopedInput("names") }),
+    ...searchOptions.names,
     enabled: canSearch && shows("bases"),
   });
   const contentQueries = useMemo(

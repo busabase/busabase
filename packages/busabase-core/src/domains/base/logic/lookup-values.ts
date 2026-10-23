@@ -1,117 +1,101 @@
 import "server-only";
 
-// Read-time resolution of `lookup` field values.
-//
-// Why read time and not write time (unlike `formula`, which is baked into the
-// commit at merge): a lookup's value is derived from OTHER records. Editing the
-// linked record changes what this record's lookup should show, without this
-// record ever being written — so a stored value would go stale silently and
-// there is no commit to attach the refresh to. Storing it would also mean
-// fabricating commits for records nobody edited, which is exactly the thing
-// Busabase's commit history is not supposed to contain.
-//
-// Vika/APITable made the same call (lazy `getCellValue`, never materialized);
-// bika materializes via a full-column `reloadCells()` sweep, which only works
-// because it has no commit chain to respect.
-//
-// Everything here is BATCHED: one links query, one records query, one commits
-// query for the whole page of records, no matter how many lookup fields or
-// linked records are involved.
-import type { FieldType } from "busabase-contract/types";
-import { and, asc, inArray, isNull } from "drizzle-orm";
+import { createHash } from "node:crypto";
+import type { BaseVO, LookupComputedVO } from "busabase-contract/types";
+import { LOOKUP_SOURCE_LIMIT } from "busabase-contract/types";
+import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import { getContextSpaceId } from "../../../context";
 import type { getDb } from "../../../db";
-import { busabaseCommits, busabaseRecordLinks, busabaseRecords } from "../../../db/schema";
-import { applyRollup } from "../lookup/rollup";
+import {
+  busabaseBaseFields,
+  busabaseBases,
+  busabaseCommits,
+  busabaseRecordLinks,
+  busabaseRecords,
+} from "../../../db/schema";
+import { buildBaseVisibilityExists, buildNodeVisibilityExists } from "../../../logic/node-acl";
+import { toBaseVO } from "../../../logic/vo";
+import { applyRollup, isRollupCompatible, LOOKUP_ROLLUPS } from "../lookup/rollup";
+
+import { lookupDependentFieldSlugs } from "./lookup-formulas";
+import { resolveReverseRelationValues } from "./reverse-relations";
 
 type Db = Awaited<ReturnType<typeof getDb>>;
-
-/** Minimal shape of a field definition this module needs (VO or PO both satisfy it). */
-interface FieldLike {
-  slug: string;
-  type: FieldType;
-  options?: {
-    lookup?: {
-      relationFieldSlug: string;
-      targetFieldSlug: string;
-      rollup?: string;
-      limit?: "all" | "first";
-    } | null;
-  } | null;
+type RecordLike = { id: string; baseId: string };
+const versionOf = (value: unknown) =>
+  createHash("sha256").update(JSON.stringify(value)).digest("hex");
+const hasValue = (value: unknown): boolean =>
+  Array.isArray(value)
+    ? value.some((item) => hasValue(item))
+    : value !== null && value !== undefined && (typeof value !== "string" || value.trim() !== "");
+export interface LookupResolution {
+  values: Record<string, unknown>;
+  computedFields: Record<string, LookupComputedVO>;
 }
 
-interface BaseLike {
-  id: string;
-  fields: ReadonlyArray<FieldLike>;
-}
-
-interface RecordLike {
-  id: string;
-  baseId: string;
-}
-
-/** A lookup field paired with the relation field it hops through. */
-interface ResolvedPlan {
-  slug: string;
-  relationFieldSlug: string;
-  targetFieldSlug: string;
-  rollup: string;
-  limit: "all" | "first";
-}
-
-/**
- * Lookup fields on `base` that are fully configured AND whose relation field
- * actually exists and is a `relation`. A half-configured lookup (relation field
- * since deleted or retyped) resolves to null rather than throwing — same
- * fail-soft posture as `computeFormula` on a stale expression.
- */
-const planLookupFields = (base: BaseLike): ResolvedPlan[] => {
-  const plans: ResolvedPlan[] = [];
-  for (const field of base.fields) {
-    if (field.type !== "lookup") continue;
-    const config = field.options?.lookup;
-    if (!config?.relationFieldSlug || !config.targetFieldSlug) continue;
-    const relationField = base.fields.find((f) => f.slug === config.relationFieldSlug);
-    if (!relationField || relationField.type !== "relation") continue;
-    plans.push({
-      slug: field.slug,
-      relationFieldSlug: config.relationFieldSlug,
-      targetFieldSlug: config.targetFieldSlug,
-      rollup: config.rollup ?? "values",
-      limit: config.limit ?? "all",
-    });
-  }
-  return plans;
-};
-
-/**
- * Resolve every `lookup` field for `records`, returning
- * `recordId → { lookupSlug: value }`. Records whose base has no configured
- * lookup field are absent from the map (callers leave their fields untouched).
- *
- * Returns an empty map — with ZERO queries — when no base in the set has a
- * lookup field, so adding this to the record read path costs nothing for the
- * overwhelming majority of bases that don't use one.
- */
+/** Resolve latest merged dependencies in batches, without manufacturing source commits. */
 export const resolveLookupValues = async (
   db: Db,
   records: ReadonlyArray<RecordLike>,
-  basesById: ReadonlyMap<string, BaseLike>,
-): Promise<Map<string, Record<string, unknown>>> => {
-  const out = new Map<string, Record<string, unknown>>();
-  if (records.length === 0) return out;
-
-  const plansByBaseId = new Map<string, ResolvedPlan[]>();
-  for (const [baseId, base] of basesById) {
-    const plans = planLookupFields(base);
-    if (plans.length > 0) plansByBaseId.set(baseId, plans);
-  }
-  // Fast path: nothing to do, and crucially no queries issued.
-  if (plansByBaseId.size === 0) return out;
-
-  const lookupRecords = records.filter((record) => plansByBaseId.has(record.baseId));
-  if (lookupRecords.length === 0) return out;
-
-  // 1. One query: every outbound link from every record in the page.
+  basesById: ReadonlyMap<string, BaseVO>,
+  dependencyReadAt = performance.timeOrigin + performance.now(),
+): Promise<Map<string, LookupResolution>> => {
+  const out = new Map<string, LookupResolution>();
+  const lookupRecords = records.filter((record) =>
+    basesById.get(record.baseId)?.fields.some((field) => field.type === "lookup"),
+  );
+  if (!lookupRecords.length) return out;
+  const spaceId = getContextSpaceId();
+  const targetBaseIds = [
+    ...new Set(
+      lookupRecords.flatMap((record) =>
+        (basesById.get(record.baseId)?.fields ?? []).flatMap((field) =>
+          field.type === "relation" && field.options.targetBaseId
+            ? [field.options.targetBaseId]
+            : [],
+        ),
+      ),
+    ),
+  ];
+  // Apply ACL before loading any target schema, payload, or identity.
+  const targetBases = targetBaseIds.length
+    ? await db
+        .select()
+        .from(busabaseBases)
+        .where(
+          and(
+            inArray(busabaseBases.id, targetBaseIds),
+            eq(busabaseBases.spaceId, spaceId),
+            isNull(busabaseBases.deletedAt),
+            isNull(busabaseBases.archivedAt),
+            buildNodeVisibilityExists(db, busabaseBases.nodeId),
+          ),
+        )
+    : [];
+  const visibleBaseIds = targetBases.map((base) => base.id);
+  const targetFields = visibleBaseIds.length
+    ? await db
+        .select()
+        .from(busabaseBaseFields)
+        .where(
+          and(
+            inArray(busabaseBaseFields.baseId, visibleBaseIds),
+            isNull(busabaseBaseFields.deletedAt),
+          ),
+        )
+    : [];
+  const targetBaseMap = new Map(
+    targetBases.map((base) => [
+      base.id,
+      toBaseVO(
+        base,
+        targetFields.filter((field) => field.baseId === base.id),
+      ),
+    ]),
+  );
+  const dynamicTargetFields = new Map(
+    [...targetBaseMap].map(([id, base]) => [id, lookupDependentFieldSlugs(base.fields)]),
+  );
   const links = await db
     .select({
       sourceRecordId: busabaseRecordLinks.sourceRecordId,
@@ -125,73 +109,236 @@ export const resolveLookupValues = async (
           busabaseRecordLinks.sourceRecordId,
           lookupRecords.map((record) => record.id),
         ),
-        // Links into archived records are tombstoned at merge time, so this also
-        // excludes archived targets from every rollup.
+        eq(busabaseRecordLinks.spaceId, spaceId),
         isNull(busabaseRecordLinks.deletedAt),
       ),
     )
     .orderBy(asc(busabaseRecordLinks.position), asc(busabaseRecordLinks.createdAt));
-
-  if (links.length === 0) {
-    // Still emit per-record entries so an unlinked record shows an empty rollup
-    // (COUNT → 0) rather than a stale/absent cell.
-    for (const record of lookupRecords) {
-      out.set(record.id, emptyLookupValues(plansByBaseId.get(record.baseId) ?? []));
-    }
-    return out;
-  }
-
-  // `sourceRecordId|fieldSlug` → ordered target record ids.
   const targetsByLink = new Map<string, string[]>();
   for (const link of links) {
     const key = `${link.sourceRecordId}|${link.fieldSlug}`;
-    const list = targetsByLink.get(key);
-    if (list) list.push(link.targetRecordId);
-    else targetsByLink.set(key, [link.targetRecordId]);
+    targetsByLink.set(key, [...(targetsByLink.get(key) ?? []), link.targetRecordId]);
   }
-
-  // 2 + 3. Two queries: the linked records, then their head commits (which hold
-  // the field values). Deduped across every source record and lookup field.
-  const targetRecordIds = [...new Set(links.map((link) => link.targetRecordId))];
-  const targetRecords = await db
-    .select({ id: busabaseRecords.id, headCommitId: busabaseRecords.headCommitId })
-    .from(busabaseRecords)
-    .where(inArray(busabaseRecords.id, targetRecordIds));
-  const headCommitIds = [...new Set(targetRecords.map((record) => record.headCommitId))];
-  const commits =
-    headCommitIds.length === 0
-      ? []
-      : await db
-          .select({ id: busabaseCommits.id, payload: busabaseCommits.payload })
-          .from(busabaseCommits)
-          .where(inArray(busabaseCommits.id, headCommitIds));
-  const fieldsByCommitId = new Map(commits.map((commit) => [commit.id, commit.payload]));
-  const fieldsByRecordId = new Map(
-    targetRecords.map((record) => [record.id, fieldsByCommitId.get(record.headCommitId) ?? {}]),
+  // A lookup over a reverse relation column walks the link table backwards:
+  // its "targets" are the records whose forward field links to this one.
+  const reverseValues = await resolveReverseRelationValues(
+    db,
+    lookupRecords,
+    new Map(
+      lookupRecords.flatMap((record) => {
+        const fields = basesById.get(record.baseId)?.fields;
+        return fields ? [[record.baseId, fields] as const] : [];
+      }),
+    ),
   );
+  for (const [recordId, values] of reverseValues) {
+    for (const [slug, ids] of Object.entries(values)) {
+      targetsByLink.set(`${recordId}|${slug}`, ids);
+    }
+  }
+  const targetRecordIds = [...new Set([...targetsByLink.values()].flat())];
+  const targetRecords =
+    targetRecordIds.length && visibleBaseIds.length
+      ? await db
+          .select({
+            id: busabaseRecords.id,
+            baseId: busabaseRecords.baseId,
+            headCommitId: busabaseRecords.headCommitId,
+          })
+          .from(busabaseRecords)
+          .where(
+            and(
+              inArray(busabaseRecords.id, targetRecordIds),
+              inArray(busabaseRecords.baseId, visibleBaseIds),
+              eq(busabaseRecords.spaceId, spaceId),
+              isNull(busabaseRecords.archivedAt),
+              buildBaseVisibilityExists(db, busabaseRecords.baseId),
+            ),
+          )
+      : [];
+  // Diagnose missing active rows only after the expected source schema passed ACL
+  // and configuration checks. Archived listing already permits these identities,
+  // but unavailable or unauthorized identities must remain indistinguishable.
+  const activeRecordIds = new Set(targetRecords.map((record) => record.id));
+  const diagnosticIds = new Set<string>();
+  for (const record of lookupRecords) {
+    const base = basesById.get(record.baseId);
+    for (const field of base?.fields ?? []) {
+      if (field.type !== "lookup" || !field.options.lookup) continue;
+      const config = field.options.lookup;
+      const relation = base?.fields.find(
+        (candidate) => candidate.type === "relation" && candidate.slug === config.relationFieldSlug,
+      );
+      const source = targetBaseMap.get(relation?.options.targetBaseId ?? "");
+      const target = source?.fields.find((candidate) => candidate.slug === config.targetFieldSlug);
+      const rollup = config.rollup ?? "values";
+      if (
+        !source ||
+        !target ||
+        dynamicTargetFields.get(source.id)?.has(target.slug) ||
+        !LOOKUP_ROLLUPS.includes(rollup) ||
+        !isRollupCompatible(rollup, target.type)
+      )
+        continue;
+      const ids = targetsByLink.get(`${record.id}|${relation?.slug}`) ?? [];
+      for (const id of config.limit === "first" ? ids.slice(0, 1) : ids)
+        if (!activeRecordIds.has(id)) diagnosticIds.add(id);
+    }
+  }
+  const visibleDiagnostics = diagnosticIds.size
+    ? await db
+        .select({
+          id: busabaseRecords.id,
+          baseId: busabaseRecords.baseId,
+          archivedAt: busabaseRecords.archivedAt,
+        })
+        .from(busabaseRecords)
+        .innerJoin(busabaseBases, eq(busabaseBases.id, busabaseRecords.baseId))
+        .where(
+          and(
+            inArray(busabaseRecords.id, [...diagnosticIds]),
+            eq(busabaseRecords.spaceId, spaceId),
+            eq(busabaseBases.spaceId, spaceId),
+            isNull(busabaseBases.deletedAt),
+            isNull(busabaseBases.archivedAt),
+            buildNodeVisibilityExists(db, busabaseBases.nodeId),
+          ),
+        )
+    : [];
+  const diagnosticById = new Map(visibleDiagnostics.map((record) => [record.id, record]));
+  const headIds = [...new Set(targetRecords.map((record) => record.headCommitId))];
+  const commits = headIds.length
+    ? await db
+        .select({ id: busabaseCommits.id, payload: busabaseCommits.payload })
+        .from(busabaseCommits)
+        .where(inArray(busabaseCommits.id, headIds))
+    : [];
+  const payloadByHead = new Map(commits.map((commit) => [commit.id, commit.payload]));
+  const recordById = new Map(targetRecords.map((record) => [record.id, record]));
 
   for (const record of lookupRecords) {
-    const plans = plansByBaseId.get(record.baseId) ?? [];
-    const values: Record<string, unknown> = {};
-    for (const plan of plans) {
-      const targets = targetsByLink.get(`${record.id}|${plan.relationFieldSlug}`) ?? [];
-      const limited = plan.limit === "first" ? targets.slice(0, 1) : targets;
-      const raw = limited.map((targetId) => {
-        const fields = fieldsByRecordId.get(targetId);
-        return fields ? (fields as Record<string, unknown>)[plan.targetFieldSlug] : undefined;
-      });
-      values[plan.slug] = applyRollup(raw, plan.rollup as Parameters<typeof applyRollup>[1]);
+    const base = basesById.get(record.baseId);
+    if (!base) continue;
+    const result: LookupResolution = { values: {}, computedFields: {} };
+    for (const field of base.fields.filter((candidate) => candidate.type === "lookup")) {
+      const config = field.options.lookup;
+      const relation = base.fields.find(
+        (candidate) =>
+          candidate.slug === config?.relationFieldSlug && candidate.type === "relation",
+      );
+      const targetBaseId = relation?.options.targetBaseId;
+      const targetBase = targetBaseId ? targetBaseMap.get(targetBaseId) : undefined;
+      const targetField = targetBase?.fields.find(
+        (candidate) => candidate.slug === config?.targetFieldSlug,
+      );
+      const rollup = config?.rollup ?? "values";
+      let computed: LookupComputedVO = {
+        status: "invalid",
+        value: null,
+        sources: [],
+        sourcesTruncated: false,
+        dependencyVersion: versionOf(field.options),
+        dependencyReadAt,
+      };
+      if (!config) {
+        computed.reason = "missing_configuration";
+      } else if (!relation) {
+        computed.reason = "missing_relation";
+      } else if (!targetBaseId) {
+        computed.reason = "missing_source_configuration";
+      } else {
+        if (!targetBase) {
+          // Missing and inaccessible origins deliberately have the same public response.
+          computed.status = "inaccessible";
+        } else if (!targetField) {
+          computed.reason = "missing_target_field";
+        } else if (dynamicTargetFields.get(targetBase.id)?.has(targetField.slug)) {
+          computed.reason = "unsupported_source";
+        } else if (
+          !LOOKUP_ROLLUPS.includes(rollup) ||
+          !isRollupCompatible(rollup, targetField.type)
+        ) {
+          computed.reason = "unsupported_rollup";
+        } else {
+          const ids = targetsByLink.get(`${record.id}|${relation.slug}`) ?? [];
+          const limited = config.limit === "first" ? ids.slice(0, 1) : ids;
+          const complete = limited.every(
+            (id) =>
+              recordById.get(id)?.baseId === targetBaseId &&
+              payloadByHead.has(recordById.get(id)?.headCommitId ?? ""),
+          );
+          if (!complete) {
+            const identities = limited.map((id) => recordById.get(id) ?? diagnosticById.get(id));
+            const allVisible = identities.every((identity) => identity !== undefined);
+            const missingPayload = limited.some((id) => {
+              const active = recordById.get(id);
+              return active && !payloadByHead.has(active.headCommitId);
+            });
+            if (
+              allVisible &&
+              !missingPayload &&
+              identities.some((identity) => identity?.baseId !== targetBaseId)
+            ) {
+              computed.reason = "source_base_mismatch";
+            } else if (
+              allVisible &&
+              !missingPayload &&
+              identities.some(
+                (identity) => identity && "archivedAt" in identity && identity.archivedAt !== null,
+              )
+            ) {
+              computed.reason = "source_record_archived";
+            } else {
+              computed.status = "inaccessible";
+            }
+          } else {
+            const sources = limited.flatMap((id) => {
+              const target = recordById.get(id);
+              if (!target) return [];
+              const payload = payloadByHead.get(target.headCommitId) as Record<string, unknown>;
+              const primary = targetBase.fields[0];
+              const titleValue = primary ? payload[primary.slug] : undefined;
+              return [
+                {
+                  recordId: id,
+                  title:
+                    typeof titleValue === "string" || typeof titleValue === "number"
+                      ? String(titleValue)
+                      : id,
+                  value: payload[targetField.slug] ?? null,
+                  headCommitId: target.headCommitId,
+                },
+              ];
+            });
+            const raw = sources.map((source) => source.value);
+            computed = {
+              status: !ids.length ? "unlinked" : raw.some(hasValue) ? "ready" : "empty",
+              value: applyRollup(raw, rollup),
+              targetField,
+              sourceBaseId: targetBaseId,
+              sourceBaseSlug: targetBase.slug,
+              sources: sources.slice(0, LOOKUP_SOURCE_LIMIT),
+              sourcesTruncated: sources.length > LOOKUP_SOURCE_LIMIT,
+              dependencyReadAt,
+              dependencyVersion: versionOf([
+                field.options,
+                targetField,
+                sources.map((source) => [source.recordId, source.headCommitId, source.title]),
+              ]),
+            };
+          }
+        }
+      }
+      computed.dependencyVersion = versionOf([
+        computed.dependencyVersion,
+        computed.status,
+        computed.reason,
+        relation?.options,
+      ]);
+      result.values[field.slug] = computed.value;
+      result.computedFields[field.slug] = computed;
     }
-    out.set(record.id, values);
+    out.set(record.id, result);
   }
   return out;
 };
-
-/** Rollup result for a record with no links at all (COUNT → 0, SUM → null, …). */
-const emptyLookupValues = (plans: ResolvedPlan[]): Record<string, unknown> =>
-  Object.fromEntries(
-    plans.map((plan) => [
-      plan.slug,
-      applyRollup([], plan.rollup as Parameters<typeof applyRollup>[1]),
-    ]),
-  );

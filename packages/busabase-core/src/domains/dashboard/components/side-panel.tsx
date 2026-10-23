@@ -25,6 +25,8 @@ import { SidePanelAddTab } from "./side-panel-add-tab";
 import { SidePanelAgentPicker, SidePanelEmptyState } from "./side-panel-empty-state";
 import type { PinnableNode } from "./side-panel-sources";
 
+const MIN_MAIN_CONTENT_WIDTH = 360;
+
 /**
  * Topbar toggle for the side panel — lives in the dashboard topbar (see
  * `dashboard/index.tsx`) so it's reachable on every page.
@@ -126,6 +128,7 @@ export function SidePanel({
   const pendingWidthRef = useRef<number | null>(null);
   const resizeFrameRef = useRef<number | null>(null);
   const [isResizing, setIsResizing] = useState(false);
+  const [isWorkspaceNarrow, setIsWorkspaceNarrow] = useState(false);
   const draggedTabIdRef = useRef<string | null>(null);
   const [dragOverTabId, setDragOverTabId] = useState<string | null>(null);
   // Suppressed during drag-resize and maximize/restore so those feel 1:1 /
@@ -138,6 +141,24 @@ export function SidePanel({
   // flag lets the chat's Back action return to this picker; the picker's own
   // Back action then returns to the launcher.
   const [showAgentPicker, setShowAgentPicker] = useState(false);
+
+  useEffect(() => {
+    const workspace = panelRef.current?.parentElement;
+    if (!workspace) return;
+
+    // The navigation can resize independently of the viewport. Reuse the
+    // existing overlay when the remaining workspace cannot fit both columns.
+    const updateWorkspaceWidth = () => {
+      const availableWidth = workspace.clientWidth;
+      setIsWorkspaceNarrow(
+        availableWidth > 0 && availableWidth < MIN_MAIN_CONTENT_WIDTH + MIN_SIDE_PANEL_WIDTH,
+      );
+    };
+    updateWorkspaceWidth();
+    const observer = new ResizeObserver(updateWorkspaceWidth);
+    observer.observe(workspace);
+    return () => observer.disconnect();
+  }, []);
 
   const commitResizeFrame = useCallback(() => {
     resizeFrameRef.current = null;
@@ -163,7 +184,7 @@ export function SidePanel({
   // On narrow viewports the panel always behaves as a full-screen overlay,
   // regardless of the persisted `layout` — there's no useful "docked at a
   // clamped width" state below the mobile breakpoint.
-  const isFullScreen = isMaximized || isMobile;
+  const isFullScreen = isMaximized || isMobile || isWorkspaceNarrow;
 
   const rearmTransitions = () => {
     requestAnimationFrame(() => {
@@ -202,7 +223,8 @@ export function SidePanel({
         isOpen && !isFullScreen
           ? ({
               "--side-panel-width": `${width}px`,
-              width: "min(var(--side-panel-width), 100vw)",
+              width: "var(--side-panel-width)",
+              maxWidth: `calc(100% - ${MIN_MAIN_CONTENT_WIDTH}px)`,
             } as CSSProperties)
           : undefined
       }
@@ -217,8 +239,11 @@ export function SidePanel({
           onPointerDown={(event) => {
             event.preventDefault();
             event.currentTarget.setPointerCapture(event.pointerId);
-            resizeStartRef.current = { pointerX: event.clientX, width };
-            pendingWidthRef.current = width;
+            // A saved preference can be larger than the CSS-constrained panel.
+            // Begin from its displayed width so the first drag does not jump.
+            const displayedWidth = panelRef.current?.getBoundingClientRect().width ?? width;
+            resizeStartRef.current = { pointerX: event.clientX, width: displayedWidth };
+            pendingWidthRef.current = null;
             document.body.style.cursor = "col-resize";
             document.body.style.userSelect = "none";
             setAnimateTransitions(false);
@@ -229,10 +254,14 @@ export function SidePanel({
             if (!start) {
               return;
             }
-            const viewportMax = Math.max(MIN_SIDE_PANEL_WIDTH, window.innerWidth - 280);
+            const workspaceWidth = panelRef.current?.parentElement?.clientWidth ?? 0;
+            const workspaceMax = Math.max(
+              MIN_SIDE_PANEL_WIDTH,
+              workspaceWidth - MIN_MAIN_CONTENT_WIDTH,
+            );
             const rawWidth = start.width + start.pointerX - event.clientX;
             pendingWidthRef.current = Math.min(
-              viewportMax,
+              workspaceMax,
               MAX_SIDE_PANEL_WIDTH,
               Math.max(120, rawWidth),
             );

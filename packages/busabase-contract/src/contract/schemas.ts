@@ -801,6 +801,8 @@ const liveEventSchema = z.object({
     "node.metadata_updated",
     "node.settings_updated",
   ]),
+  // Optional for compatibility with existing metadata publishers and subscribers.
+  reason: z.literal("acl").optional(),
   spaceId: z.string(),
   actorId: z.string(),
   // Null for events that aren't about a change request at all
