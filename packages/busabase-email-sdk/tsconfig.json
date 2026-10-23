@@ -10,7 +10,11 @@
     "forceConsistentCasingInFileNames": true,
     "noEmit": true,
     "isolatedModules": true,
-    "types": ["node"]
+    "types": ["node"],
+    "paths": {
+      "busabase-sdk": ["../../apps/busabase-sdk/src/index.ts"],
+      "busabase-contract/*": ["../busabase-contract/src/*"]
+    }
   },
   "include": ["src/**/*.ts", "tests/**/*.ts", "tsdown.config.ts", "vitest.config.ts"]
 }
