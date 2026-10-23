@@ -1,0 +1,75 @@
+name: Publish Email SDK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "packages/busabase-email-sdk/**"
+      - ".github/scripts/check-email-package.mjs"
+      - ".github/workflows/publish-email-sdk.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: publish-email-sdk
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          registry-url: "https://registry.npmjs.org"
+          cache: pnpm
+      - name: Check whether this exact version already exists
+        id: version
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync, appendFileSync } from 'node:fs';
+          const { name, version } = JSON.parse(readFileSync('packages/busabase-email-sdk/package.json', 'utf8'));
+          const response = await fetch(`https://registry.npmjs.org/${encodeURIComponent(name)}/${encodeURIComponent(version)}`, { signal: AbortSignal.timeout(30000) });
+          if (response.status === 404) {
+            appendFileSync(process.env.GITHUB_OUTPUT, 'exists=false\n');
+          } else {
+            if (!response.ok) throw new Error(`Registry lookup failed: HTTP ${response.status}`);
+            const published = await response.json();
+            if (published.name !== name || published.version !== version) throw new Error('Registry returned unexpected package metadata');
+            appendFileSync(process.env.GITHUB_OUTPUT, 'exists=true\n');
+            console.log(`${name}@${version} is already published; skipping this run.`);
+          }
+          NODE
+      - name: Install the email subtree and root tooling
+        if: steps.version.outputs.exists == 'false'
+        run: pnpm install --frozen-lockfile --filter "busabase-email-sdk..." --filter busabase-repo
+      - name: Build the Busabase SDK dependency
+        if: steps.version.outputs.exists == 'false'
+        run: pnpm --filter busabase-sdk build
+      - name: Check and build Email SDK
+        if: steps.version.outputs.exists == 'false'
+        working-directory: packages/busabase-email-sdk
+        run: |
+          pnpm typecheck
+          pnpm test
+          pnpm lint:err
+          pnpm build
+      - name: Verify packed artifacts in a clean consumer
+        if: steps.version.outputs.exists == 'false'
+        run: node .github/scripts/check-email-package.mjs
+      - name: Publish with npm provenance
+        if: steps.version.outputs.exists == 'false'
+        working-directory: packages/busabase-email-sdk
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: "true"
+        # All lifecycle checks ran above; do not run the entire suite a second time.
+        run: |
+          printf '%s\n' '//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}' 'registry=https://registry.npmjs.org/' >> "$GITHUB_WORKSPACE/.npmrc"
+          pnpm publish --access public --no-git-checks --ignore-scripts

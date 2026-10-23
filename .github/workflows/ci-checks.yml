@@ -27,7 +27,7 @@ env:
   # apps/busabase-mobile (Expo/RN) are excluded from CI installs the same way
   # publish-npm.yml excludes them: nothing here needs native toolchains or RN
   # postinstall scripts, and installing them would just slow every job down.
-  INSTALL_FILTER: --filter "busabase..." --filter "busabase-cli..." --filter "busabase-sdk..."
+  INSTALL_FILTER: --filter "busabase..." --filter "busabase-cli..." --filter "busabase-sdk..." --filter "busabase-email-sdk..."
 
 jobs:
   lint:
@@ -56,6 +56,8 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile ${{ env.INSTALL_FILTER }}
+      # SDK exports resolve to dist even when the consumer is checked from source.
+      - run: pnpm --filter busabase-sdk build
       # Deliberately mirrors INSTALL_FILTER (not `pnpm -r`, which ignores the
       # install filter and would also try to typecheck busabase-desktop /
       # busabase-mobile — their react-native/tauri deps were never installed
@@ -78,6 +80,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile ${{ env.INSTALL_FILTER }}
+      - run: pnpm --filter busabase-sdk build
       # Same INSTALL_FILTER scoping as typecheck above (not `pnpm -r`) —
       # busabase-mobile/busabase-desktop don't define a `test` script today
       # so `-r` would happen to skip them too, but scoping explicitly means
@@ -86,6 +89,24 @@ jobs:
       # and busabase's own vitest tests. All PGLite-backed, no external
       # services.
       - run: pnpm ${{ env.INSTALL_FILTER }} --if-present run test
+
+  email-artifact:
+    name: Email SDK package
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --filter "busabase-email-sdk..." --filter busabase-repo
+      - run: pnpm --filter busabase-sdk build
+      - run: pnpm --filter busabase-email-sdk build
+      # The shared test job already runs the Email SDK suite. This job verifies
+      # actual published artifacts and their public declaration graph instead.
+      - run: node .github/scripts/check-email-package.mjs
 
   # Regenerates the coverage badge SVG that apps/busabase/public/assets/readme/
   # coverage.svg — linked from the root README — points at, and commits it back
@@ -189,6 +210,9 @@ jobs:
         working-directory: apps/busabase
         env:
           CI: true
+          # Declare host-process capability before Next starts, so every server
+          # process inherits it without relying on a boot-time env mutation.
+          APP_ENV: SELF-HOSTED
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
