@@ -9,7 +9,7 @@ import {
   type LocalContentMetadataFields,
 } from "../metadata";
 import { type CmsCanonicalPath, normalizeCmsPath } from "../routing";
-import type { PostVO } from "../types";
+import type { PostVO, TagVO } from "../types";
 import type { CmsClientProvider } from "./client";
 
 // ── Post reads ─────────────────────────────────────────────────────────────────
@@ -49,6 +49,60 @@ export const createCmsPostReads = (
   },
 });
 
+// ── Blog tags ──────────────────────────────────────────────────────────────────
+
+/** A post tag as the Blog UI shows it: a link to its archive when `href` is set, else a chip. */
+export interface BlogTag {
+  name: string;
+  href?: string;
+}
+
+/**
+ * Tags from local MDX frontmatter (`tags: [...]`). They are plain names with no taxonomy record
+ * behind them — and the Tag archive lists CMS Posts only — so they never carry an `href`.
+ */
+export const localFrontmatterTags = (tags: unknown): BlogTag[] => {
+  if (!Array.isArray(tags)) return [];
+  const names = tags
+    .filter((tag): tag is string => typeof tag === "string")
+    .map((tag) => tag.trim())
+    .filter(Boolean);
+  return [...new Set(names)].map((name) => ({ name }));
+};
+
+/** The archive URL of a Tag record, or nothing when the app has no Tag archive to link to. */
+export type CmsTagHref = (tag: TagVO) => string | null | undefined;
+
+/**
+ * A CMS Post's tags: its `tags` relation (`tagIds`) resolved against the Tags Base records, in
+ * the Post's own order. Ids with no record (deleted, or the Tags read failed) are dropped, and
+ * so is a repeated name.
+ *
+ * `tagHref` turns a tag into a link — but only for a record in the Post's own locale, because
+ * the Tag archive lists only Posts of the tag's locale; anything else would link to an archive
+ * that does not list this Post.
+ */
+export const resolveCmsPostTags = (
+  post: Pick<PostVO, "tagIds" | "locale">,
+  tags: readonly TagVO[],
+  tagHref?: CmsTagHref,
+): BlogTag[] => {
+  if (post.tagIds.length === 0) return [];
+  const byId = new Map(tags.map((tag) => [tag.id, tag]));
+  const seen = new Set<string>();
+  return post.tagIds.flatMap((id) => {
+    const tag = byId.get(id);
+    if (!tag || seen.has(tag.name)) return [];
+    seen.add(tag.name);
+    const href = tag.locale === post.locale ? tagHref?.(tag) : null;
+    return [href ? { name: tag.name, href } : { name: tag.name }];
+  });
+};
+
+// Leave `tags` off an untagged card entirely, so it is the exact object it was before tags.
+const withTags = <T extends object>(item: T, tags: BlogTag[]): T & { tags?: BlogTag[] } =>
+  tags.length > 0 ? { ...item, tags } : item;
+
 // ── Blog index cards ───────────────────────────────────────────────────────────
 
 export interface BlogCardContent {
@@ -58,9 +112,11 @@ export interface BlogCardContent {
   date?: string | Date;
   author?: string;
   image?: string;
+  /** Shown as chips (never links — the whole card is already one link). */
+  tags?: BlogTag[];
 }
 
-/** A CMS Post as a Blog index card. */
+/** A CMS Post as a Blog index card (without tags — see `cmsPostToBlogCardWithTags`). */
 export const cmsPostToBlogCard = (post: PostVO): BlogCardContent => ({
   url: post.path,
   title: post.title,
@@ -69,6 +125,12 @@ export const cmsPostToBlogCard = (post: PostVO): BlogCardContent => ({
   author: post.author ?? undefined,
   image: post.coverImage?.url ?? undefined,
 });
+
+/** `cmsPostToBlogCard` plus the Post's tags, resolved against the Tags Base records. */
+export const cmsPostToBlogCardWithTags =
+  (tags: readonly TagVO[]) =>
+  (post: PostVO): BlogCardContent =>
+    withTags(cmsPostToBlogCard(post), resolveCmsPostTags(post, tags));
 
 /** The frontmatter a local (fumadocs) Blog page may carry, read as a Blog index card. */
 export interface LocalBlogCardPage {
@@ -79,18 +141,23 @@ export interface LocalBlogCardPage {
     date?: string | Date;
     author?: string;
     image?: string;
+    tags?: string[];
   };
 }
 
 /** A local (fumadocs) Blog page as a Blog index card. */
-export const localPageToBlogCard = (page: LocalBlogCardPage): BlogCardContent => ({
-  url: page.url,
-  title: page.data.title,
-  description: page.data.description,
-  date: page.data.date,
-  author: page.data.author,
-  image: page.data.image,
-});
+export const localPageToBlogCard = (page: LocalBlogCardPage): BlogCardContent =>
+  withTags(
+    {
+      url: page.url,
+      title: page.data.title,
+      description: page.data.description,
+      date: page.data.date,
+      author: page.data.author,
+      image: page.data.image,
+    },
+    localFrontmatterTags(page.data.tags),
+  );
 
 /**
  * Merge Post card sources in priority order, using canonical paths as identity — the earliest
