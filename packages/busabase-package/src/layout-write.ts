@@ -34,6 +34,7 @@ import {
   type PackageRecordLine,
   type PackageView,
 } from "busabase-contract/domains/package/types";
+import { mapViewFilters } from "busabase-contract/types";
 import { docAssetBytesPath } from "./doc-asset-refs";
 import { serializeDoc } from "./frontmatter";
 import {
@@ -111,13 +112,12 @@ const serializeView = (view: PackageView): Record<string, unknown> =>
     description: view.description || undefined,
     type: view.type,
     config: compact({
-      filters: view.config.filters.map((filter) =>
-        compact({
-          fieldSlug: filter.fieldSlug,
-          operator: filter.operator,
-          value: filter.value,
-        }),
-      ),
+      filterConjunction: view.config.filterConjunction,
+      filters: mapViewFilters(view.config.filters, (filter) => ({
+        fieldSlug: filter.fieldSlug,
+        operator: filter.operator,
+        ...(filter.value !== undefined ? { value: filter.value } : {}),
+      })),
       sorts: view.config.sorts.map((sort) => ({
         direction: sort.direction,
         fieldSlug: sort.fieldSlug,

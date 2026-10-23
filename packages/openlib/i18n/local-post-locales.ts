@@ -28,3 +28,43 @@ export const getLocalPostLocales = (
     return locale === defaultLocale || page.data !== fallbackData;
   });
 };
+
+/** The i18n facts a locale resolution needs — fumadocs' `I18nConfig` satisfies it. */
+export interface LocalPageI18n {
+  languages: readonly string[];
+  defaultLanguage: string;
+}
+
+export interface LocalPageLocales {
+  /** Locales that really have their own file for this page (fallback copies excluded). */
+  availableLocales: string[];
+  /**
+   * The locale whose file is rendered at the requested URL: `lang` when it has its own file,
+   * otherwise the default locale fumadocs falls back to. Feed it to both `canonicalLang` and
+   * `contentLang` of `generateContentPageMetadata`.
+   */
+  contentLocale: string;
+  /** True when `lang` has no file of its own and the default-locale file is served instead. */
+  isLocaleFallback: boolean;
+}
+
+/**
+ * Everything a locally-authored (MDX) page route needs to describe its locales honestly:
+ * the hreflang set, which file is actually rendered, and whether this is a fallback. Shared by
+ * the docs and release-notes routes (share-domains/cms) so every app gets the same rule blog
+ * posts follow (PR #7652).
+ */
+export const getLocalPageLocales = (
+  source: LocalPostSource,
+  i18n: LocalPageI18n,
+  slugs: string[],
+  lang: string,
+): LocalPageLocales => {
+  const availableLocales = getLocalPostLocales(source, i18n.languages, i18n.defaultLanguage, slugs);
+  const isLocaleFallback = !availableLocales.includes(lang);
+  return {
+    availableLocales,
+    contentLocale: isLocaleFallback ? i18n.defaultLanguage : lang,
+    isLocaleFallback,
+  };
+};

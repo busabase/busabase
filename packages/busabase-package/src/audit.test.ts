@@ -6,6 +6,7 @@
  * silent on things `validateTemplate` already owns. Duplicating a rule across the two
  * would mean one of them eventually disagrees with the other.
  */
+import { TEMPLATE_VIDEO_LIMIT } from "busabase-contract/domains/package/template";
 import { describe, expect, it } from "vitest";
 
 import { auditPackage, auditSkill } from "./audit";
@@ -222,6 +223,107 @@ describe("localized gallery media", () => {
       "assets/screenshots/cover-en.webp": "not really a webp",
     });
     expect(rules(findings, "warning")).toEqual([]);
+  });
+});
+
+describe("several demo clips", () => {
+  const withTemplate = (template: Record<string, unknown>) =>
+    JSON.stringify({ ...MANIFEST, template: { ...MANIFEST.template, ...template } });
+  const clip = (name: string, title?: string) => ({
+    src: `assets/recordings/${name}.mp4`,
+    ...(title ? { title } : {}),
+  });
+  const files = (...names: string[]) =>
+    Object.fromEntries(names.map((name) => [`assets/recordings/${name}.mp4`, "not really an mp4"]));
+
+  it("is silent for two titled clips that ship with the package", () => {
+    const findings = audit({
+      "busabase.json": withTemplate({
+        videos: [clip("tour", "30-second tour"), clip("full", "Full")],
+      }),
+      ...files("tour", "full"),
+    });
+    expect(rules(findings)).toEqual([]);
+    expect(rules(findings, "warning")).toEqual([]);
+  });
+
+  it("names the list index of a clip that is not in the package", () => {
+    const findings = audit({
+      "busabase.json": withTemplate({ videos: [clip("tour", "Tour"), clip("full", "Full")] }),
+      ...files("tour"),
+    });
+    const missing = findings.filter((finding) => finding.rule === "package/video-missing");
+    expect(missing).toHaveLength(1);
+    expect(missing[0].message).toContain("template.videos[1]");
+  });
+
+  it("fails a list longer than the Template Center shows", () => {
+    const names = Array.from({ length: TEMPLATE_VIDEO_LIMIT + 1 }, (_, i) => `v${i}`);
+    const findings = audit({
+      "busabase.json": withTemplate({ videos: names.map((name) => clip(name, name)) }),
+      ...files(...names),
+    });
+    expect(rules(findings)).toEqual(["package/videos-over-limit"]);
+  });
+
+  it("warns when several clips are not all titled, because their tiles look alike", () => {
+    const findings = audit({
+      "busabase.json": withTemplate({ videos: [clip("tour", "Tour"), clip("full")] }),
+      ...files("tour", "full"),
+    });
+    expect(rules(findings)).toEqual([]);
+    expect(rules(findings, "warning")).toEqual(["package/video-untitled"]);
+  });
+
+  it("does not ask a lone clip for a title", () => {
+    const findings = audit({
+      "busabase.json": withTemplate({ videos: [clip("tour")] }),
+      ...files("tour"),
+    });
+    expect(rules(findings, "warning")).toEqual([]);
+  });
+
+  it("warns when `video` disagrees with the first clip, and stays quiet when it matches", () => {
+    const disagree = audit({
+      "busabase.json": withTemplate({
+        video: "assets/recordings/old.mp4",
+        videos: [clip("tour", "Tour")],
+      }),
+      ...files("tour", "old"),
+    });
+    expect(rules(disagree, "warning")).toEqual(["package/video-shadowed"]);
+
+    const agree = audit({
+      "busabase.json": withTemplate({
+        video: "assets/recordings/tour.mp4",
+        videos: [clip("tour", "Tour")],
+      }),
+      ...files("tour"),
+    });
+    expect(rules(agree, "warning")).toEqual([]);
+  });
+
+  it("applies the same rules to a locale's own list", () => {
+    const findings = audit({
+      "busabase.json": withTemplate({
+        locales: { "zh-CN": { videos: [clip("tour-zh-CN", "30 秒看懂"), clip("full-zh-CN")] } },
+      }),
+      ...files("tour-zh-CN"),
+    });
+    const missing = findings.filter((finding) => finding.rule === "package/video-missing");
+    expect(missing).toHaveLength(1);
+    expect(missing[0].message).toContain("template.locales.zh-CN.videos[1]");
+    expect(rules(findings, "warning")).toEqual(["package/video-untitled"]);
+  });
+
+  it("warns when a clip named for one locale sits in the default list", () => {
+    const findings = audit({
+      "busabase.json": withTemplate({ videos: [clip("tour-zh-CN", "Tour"), clip("full", "Full")] }),
+      ...files("tour-zh-CN", "full"),
+    });
+    const warnings = findings.filter((finding) => finding.severity === "warning");
+    expect(warnings.map((finding) => finding.rule)).toEqual(["package/localized-default-media"]);
+    expect(warnings[0].message).toContain("template.locales.zh-CN.videos");
   });
 });
 

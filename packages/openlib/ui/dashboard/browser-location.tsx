@@ -7,38 +7,25 @@ import { navigate } from "wouter/use-browser-location";
 /**
  * wouter's browser location hooks, safe to run under the Next.js App Router.
  *
- * wouter patches `history.pushState`/`replaceState` to dispatch a same-named
- * event synchronously, and its hooks notify React from that event. The App
- * Router writes its own bookkeeping with `history.replaceState` from inside a
- * `useInsertionEffect` (on every back/forward navigation), so each component
- * subscribed to the location scheduled a React update during an insertion
- * effect: "useInsertionEffect must not schedule updates", logged once per
- * subscriber (about a hundred per Back in the Busabase dashboard) and shown as
- * an Issue in the Next dev overlay.
+ * wouter dispatches history events synchronously. Next's HistoryUpdater writes
+ * both pushState and replaceState from useInsertionEffect, and other callers
+ * can navigate during a commit without Next's __NA marker. Notifying React in
+ * either case schedules an update inside an insertion effect.
  *
- * Those writes keep the URL as it is, and the navigation they follow was
- * already announced by `popstate`, so they are delivered a microtask later,
- * after the commit. Every other event (popstate, pushState, any other
- * replaceState, hashchange) is delivered synchronously, as wouter does.
+ * Keep the URL/history writes synchronous, but notify location subscribers in
+ * a microtask after the current commit. Coalesce events within that turn; hooks
+ * read the latest URL, including query-only and back/forward navigation.
  */
-
 const events = ["popstate", "pushState", "replaceState", "hashchange"] as const;
-
-/** Next.js marks the history entries it writes with `__NA` (see its HistoryUpdater). */
-const isNextRouterBookkeeping = (event: Event) => {
-  if (event.type !== "replaceState") return false;
-  const state = (event as Event & { arguments?: unknown[] }).arguments?.[0];
-  return Boolean(state && typeof state === "object" && "__NA" in state);
-};
 
 const subscribeToLocationUpdates = (callback: () => void) => {
   let active = true;
-  const onEvent = (event: Event) => {
-    if (!isNextRouterBookkeeping(event)) {
-      callback();
-      return;
-    }
+  let queued = false;
+  const onEvent = () => {
+    if (queued) return;
+    queued = true;
     queueMicrotask(() => {
+      queued = false;
       if (active) callback();
     });
   };

@@ -620,6 +620,38 @@ describe("the five passes", () => {
     }
   });
 
+  it("wires a reverse column to the forward field's real id in pass 3", async () => {
+    const { calls, client } = createFakeServer();
+    const opportunities = relationBase("opportunities", "companies", "deals");
+    const companies = relationBase("companies", "opportunities", "link");
+    const reverse = companies.base.fields.find((field) => field.slug === "link");
+    if (!reverse) throw new Error("fixture lost its relation field");
+    reverse.slug = "deals";
+    reverse.options = {
+      multiple: true,
+      targetBaseSlug: "opportunities",
+      reverseOfFieldSlug: "link",
+    };
+    await applyInstall(client, planFor([opportunities, companies]), { autoMerge: true });
+
+    // Pass 2 creates the reverse column as a plain (empty) relation — the
+    // package-only slug never reaches the server.
+    const created = calls
+      .filter((call) => call.method === "bases.createField")
+      .map((call) => call.input as { slug: string; options: Record<string, unknown> });
+    const createdReverse = created.find((input) => input.slug === "deals");
+    expect(createdReverse?.options).not.toHaveProperty("reverseOfFieldSlug");
+    expect(createdReverse?.options).not.toHaveProperty("reverseOfFieldId");
+
+    // Pass 3 turns it into the reverse of opportunities.link by real id.
+    const patch = calls
+      .filter((call) => call.method === "bases.fieldChangeRequest:update")
+      .map((call) => (call.input as { patch: { options: Record<string, unknown> } }).patch.options)
+      .find((options) => "reverseOfFieldId" in options);
+    expect(patch?.reverseOfFieldId).toMatch(/^bsf_/);
+    expect(patch).not.toHaveProperty("reverseOfFieldSlug");
+  });
+
   it("omits relation values from pass 4 and sets them in pass 5", async () => {
     const { calls, client } = createFakeServer();
     const a = relationBase("a", "b", "link");

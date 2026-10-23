@@ -571,3 +571,28 @@ describe("guessMimeType — source files must not take the binary path", () => {
     }
   });
 });
+
+it("round-trips nested AND/OR view filters with portable field references", () => {
+  const tree = buildFixture();
+  const node = tree.nodes.find((item) => item.type === "base");
+  if (!node || node.type !== "base") throw new Error("missing fixture Base");
+  const config = {
+    filters: [
+      { fieldSlug: "title", operator: "not_empty" as const },
+      {
+        conjunction: "or" as const,
+        conditions: [
+          { fieldSlug: "title", operator: "equals" as const, value: "Acme" },
+          { fieldSlug: "title", operator: "equals" as const, value: "Beta" },
+        ],
+      },
+    ],
+    filterConjunction: "and" as const,
+    sorts: [],
+  };
+  node.base.views[0].config = config;
+  const parsed = readPackageTree(renderPackageTree(tree));
+  const imported = parsed.nodes.find((item) => item.type === "base");
+  if (!imported || imported.type !== "base") throw new Error("missing imported Base");
+  expect(imported.base.views[0].config).toEqual(config);
+});

@@ -120,6 +120,48 @@ describe("buildTemplateIndex", () => {
     expect(Object.hasOwn(plain.templates[0], "locales")).toBe(false);
   });
 
+  it("writes the clip list into templates.json, with `video` as its first entry for older servers", () => {
+    const tour = { src: "assets/recordings/gated-tour.mp4", title: "30-second tour" };
+    const full = { src: "assets/recordings/gated-full.mp4", title: "Full walkthrough" };
+    const zh = { src: "assets/recordings/gated-tour-zh-CN.mp4", title: "30 秒看懂" };
+    const manifest = JSON.stringify({
+      format: PACKAGE_FORMAT,
+      name: "gated",
+      description: "The gated desk.",
+      template: {
+        category: "ops",
+        screenshots: ["assets/screenshots/cover.webp"],
+        // A stale single `video` must lose to the list, as it does at runtime.
+        video: "assets/recordings/stale.mp4",
+        videos: [tour, full],
+        locales: { "zh-CN": { videos: [zh] } },
+      },
+    });
+    const [entry] = buildTemplateIndex(repo({ "templates/gated/busabase.json": manifest }), {
+      repo: "busabase/templates",
+      ref: "main",
+    }).templates;
+    expect(entry.videos).toEqual([tour, full]);
+    // Servers deployed before `videos` read only `video`: it must be a real clip.
+    expect(entry.video).toBe(tour.src);
+    expect(entry.locales?.["zh-CN"]).toEqual({ videos: [zh], video: zh.src });
+  });
+
+  it("leaves `videos` out for a template that only declares a single `video`", () => {
+    const manifest = JSON.stringify({
+      format: PACKAGE_FORMAT,
+      name: "gated",
+      description: "The gated desk.",
+      template: { category: "ops", video: "assets/recordings/gated.mp4" },
+    });
+    const [entry] = buildTemplateIndex(repo({ "templates/gated/busabase.json": manifest }), {
+      repo: "busabase/templates",
+      ref: "main",
+    }).templates;
+    expect(entry.video).toBe("assets/recordings/gated.mp4");
+    expect(Object.hasOwn(entry, "videos")).toBe(false);
+  });
+
   it("carries a locale-keyed manifest displayName onto the index entry, and omits it when absent", () => {
     const withDisplayName = JSON.stringify({
       format: PACKAGE_FORMAT,

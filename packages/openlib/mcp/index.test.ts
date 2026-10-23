@@ -1,3 +1,4 @@
+import { ORPCError } from "@orpc/server";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import {
@@ -798,6 +799,80 @@ describe("asMcpError", () => {
       content: [{ type: "text", text: "unavailable" }],
       isError: true,
     });
+  });
+
+  // `@orpc/openapi-client` throws this for a JSON error body that is not in oRPC's own error
+  // shape: the message is the bare status text and the readable sentence survives only in data.body.
+  const upstreamError = (body: unknown) =>
+    new ORPCError("BAD_REQUEST", {
+      status: 400,
+      data: { body, headers: { "set-cookie": "session-secret" } },
+    });
+
+  it("appends the server's own error text instead of a bare status message", () => {
+    const result = asMcpError(
+      upstreamError({
+        error:
+          "records[0]: None of the keys in `fields` is a field of Base leads. Key fields by slug.",
+        code: "BAD_REQUEST",
+        data: { problem: { kind: "none-matched", keys: ["fields"] } },
+      }),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toEqual([
+      {
+        type: "text",
+        text: "Bad Request: records[0]: None of the keys in `fields` is a field of Base leads. Key fields by slug.",
+      },
+    ]);
+  });
+
+  it("reads message when the body has no error field, and never echoes headers", () => {
+    const result = asMcpError(upstreamError({ message: "Space not found" }));
+
+    expect(result.content[0]?.text).toBe("Bad Request: Space not found");
+    expect(JSON.stringify(result)).not.toContain("session-secret");
+  });
+
+  it("leaves the message alone when it already says the same thing or the body has no text", () => {
+    expect(
+      asMcpError(
+        new ORPCError("BAD_REQUEST", {
+          message: "Space not found",
+          data: { body: { error: "Space not found" } },
+        }),
+      ).content[0]?.text,
+    ).toBe("Space not found");
+    expect(
+      asMcpError(upstreamError({ code: "BAD_REQUEST", data: { a: 1 } })).content[0]?.text,
+    ).toBe("Bad Request");
+    expect(asMcpError(upstreamError("<html>502</html>")).content[0]?.text).toBe("Bad Request");
+  });
+
+  it("caps a very long server message", () => {
+    const text = asMcpError(upstreamError({ error: "x".repeat(5000) })).content[0]?.text ?? "";
+
+    expect(text.length).toBeLessThan(1100);
+    expect(text.endsWith("…")).toBe(true);
+  });
+
+  it("reaches the model when a registered tool's operation rejects", async () => {
+    const { server, callTool } = createTestServer();
+    registerOpenApiMcpTools({
+      server,
+      contract: testContract,
+      createClient: () => ({
+        things: {
+          get: vi.fn().mockRejectedValue(upstreamError({ error: "id must be a thing slug" })),
+        },
+      }),
+    });
+
+    const result = await callTool("things_get", { id: "nope" });
+
+    expect(result?.isError).toBe(true);
+    expect(result?.content[0]?.text).toBe("Bad Request: id must be a thing slug");
   });
 });
 
