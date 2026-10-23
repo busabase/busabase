@@ -17,6 +17,7 @@
 import type {
   TemplateLocales,
   TemplateRiskLevel,
+  TemplateVideo,
 } from "busabase-contract/domains/package/template";
 import type { iString } from "openlib/i18n/i-string";
 import { type DiscoveredPackage, discoverPackages } from "./discover";
@@ -43,7 +44,14 @@ export interface TemplateIndexEntry {
    * pointer file rather than the bytes. */
   video?: string;
   /**
-   * Per-locale `screenshots` / `video`, package-relative like the defaults and
+   * Every default clip in display order, package-relative like `video`, which
+   * is always its first entry. Absent unless the package declares `videos`, so
+   * a catalog with single clips only is byte-identical to one built before this
+   * field existed.
+   */
+  videos?: TemplateVideo[];
+  /**
+   * Per-locale `screenshots` / `video` / `videos`, package-relative like the defaults and
    * resolved the same way (screenshots on the raw host, clips on the LFS media
    * host). Absent when the package declares none, so a catalog with no
    * localized media is byte-identical to one built before this field existed.
@@ -96,6 +104,7 @@ const toEntry = (found: DiscoveredPackage, airapps: number): TemplateIndexEntry 
   tags: found.tags ?? [],
   screenshots: found.screenshots,
   ...(found.video ? { video: found.video } : {}),
+  ...(found.videos ? { videos: found.videos } : {}),
   ...(found.locales ? { locales: found.locales } : {}),
   agentPrompts: found.agentPrompts ?? [],
   ...(found.version ? { version: found.version } : {}),

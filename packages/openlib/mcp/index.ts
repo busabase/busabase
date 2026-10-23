@@ -956,15 +956,44 @@ export const asMcpJson = (value: unknown): CallToolResult => ({
   ],
 });
 
-export const asMcpError = (error: unknown): CallToolResult => ({
-  content: [
-    {
-      type: "text",
-      text: error instanceof Error ? error.message : String(error),
-    },
-  ],
-  isError: true,
-});
+const MAX_UPSTREAM_ERROR_DETAIL_CHARS = 1_000;
+
+/**
+ * `@orpc/openapi-client` throws an `ORPCError` whose message is only the status text ("Bad
+ * Request") when the server's JSON error body is not in oRPC's own error shape. The sentence that
+ * tells the caller what to fix survives only inside `data.body`. Surface that text and nothing else
+ * from `data`, which also carries the response headers.
+ */
+const readUpstreamErrorDetail = (error: unknown): string | undefined => {
+  const data = (error as { data?: unknown } | null)?.data;
+  const body = data && typeof data === "object" ? (data as { body?: unknown }).body : undefined;
+  if (!body || typeof body !== "object") return undefined;
+
+  const { error: errorText, message } = body as { error?: unknown; message?: unknown };
+  const text = [errorText, message]
+    .find((value): value is string => typeof value === "string" && value.trim() !== "")
+    ?.trim();
+  if (!text) return undefined;
+
+  return text.length > MAX_UPSTREAM_ERROR_DETAIL_CHARS
+    ? `${text.slice(0, MAX_UPSTREAM_ERROR_DETAIL_CHARS)}…`
+    : text;
+};
+
+export const asMcpError = (error: unknown): CallToolResult => {
+  const message = error instanceof Error ? error.message : String(error);
+  const detail = readUpstreamErrorDetail(error);
+
+  return {
+    content: [
+      {
+        type: "text",
+        text: detail && !message.includes(detail) ? `${message}: ${detail}` : message,
+      },
+    ],
+    isError: true,
+  };
+};
 
 export const withMcpNotificationAccepted =
   (handler: McpRouteHandler): McpRouteHandler =>

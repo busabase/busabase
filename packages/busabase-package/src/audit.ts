@@ -26,6 +26,7 @@
 import {
   PACKAGE_SKILL_ENTRY,
   PACKAGE_SKILL_SIDECAR_DIRS,
+  TEMPLATE_VIDEO_LIMIT,
 } from "busabase-contract/domains/package/template";
 import { SkillFrontmatterSchema } from "busabase-contract/domains/skill/frontmatter";
 import { i18n } from "openlib/i18n/i18n";
@@ -165,6 +166,43 @@ export const auditPackage = (
     );
   }
 
+  // One level's clip list — the defaults, or one locale's. The shape rules are
+  // the same everywhere a list can be declared, so they live in one place.
+  const auditClips = (
+    where: string,
+    single: string | undefined,
+    clips: readonly { src: string; title?: string }[] | undefined,
+  ) => {
+    if (!clips || clips.length === 0) return;
+    for (const [index, clip] of clips.entries()) {
+      if (!present.has(clip.src)) {
+        error(
+          "package/video-missing",
+          `busabase.json declares video "${clip.src}" (${where}.videos[${index}]), which is not in the package. The Template Center detail page would show a play button that leads nowhere.`,
+        );
+      }
+    }
+    if (clips.length > TEMPLATE_VIDEO_LIMIT) {
+      error(
+        "package/videos-over-limit",
+        `${where}.videos declares ${clips.length} clips; the Template Center shows at most ${TEMPLATE_VIDEO_LIMIT} (the first ${TEMPLATE_VIDEO_LIMIT}), so the rest would never be seen.`,
+      );
+    }
+    if (clips.length > 1 && clips.some((clip) => !clip.title)) {
+      warn(
+        "package/video-untitled",
+        `${where}.videos declares ${clips.length} clips but not every one has a \`title\`. The tiles all look alike (same cover, same play badge), so a viewer cannot tell which clip is which.`,
+      );
+    }
+    if (single && single !== clips[0]?.src) {
+      warn(
+        "package/video-shadowed",
+        `${where} declares both \`video\` ("${single}") and \`videos\` (first clip "${clips[0]?.src}"). \`videos\` wins and \`video\` is ignored — drop \`video\`, or make it the first clip.`,
+      );
+    }
+  };
+  auditClips("template", video, tree.manifest.template?.videos);
+
   // ── Localized media: the same promise, once per locale ─────────────────────
   //
   // Missing files reuse the two rules above rather than new ids: the defect and
@@ -196,6 +234,7 @@ export const auditPackage = (
         `busabase.json declares ${locale} video "${media.video}" (template.locales.${locale}.video), which is not in the package. A ${locale} viewer's detail page would show a play button that leads nowhere.`,
       );
     }
+    auditClips(`template.locales.${locale}`, media.video, media.videos);
   }
 
   // The default lists are what every language without its own entry sees, so a
@@ -204,6 +243,7 @@ export const auditPackage = (
   const defaults = [
     ...(tree.manifest.template?.screenshots ?? []).map((path) => ({ path, field: "screenshots" })),
     ...(video ? [{ path: video, field: "video" }] : []),
+    ...(tree.manifest.template?.videos ?? []).map((clip) => ({ path: clip.src, field: "videos" })),
   ];
   for (const { path, field } of defaults) {
     const locale = localeMarkedIn(path);

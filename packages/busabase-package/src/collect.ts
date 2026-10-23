@@ -1,3 +1,8 @@
+import {
+  mapViewFilters,
+  type ViewFilterConditionVO,
+  type ViewFilterConjunction,
+} from "busabase-contract/types";
 /**
  * `export`'s read half: a space subtree → the in-memory package tree, entirely via
  * the public read API. The inverse of `apply`.
@@ -499,12 +504,14 @@ const toPackageField = (
   const {
     targetBaseId,
     inverseFieldId,
+    reverseOfFieldId,
     ai,
     targetBaseSlug: existingTargetBaseSlug,
     ...rest
   } = field.options as Record<string, unknown> & {
     targetBaseId?: string;
     inverseFieldId?: string;
+    reverseOfFieldId?: string;
     targetBaseSlug?: string;
     ai?: Record<string, unknown> & { sourceFieldIds?: string[] };
   };
@@ -534,6 +541,18 @@ const toPackageField = (
       // Warn rather than drop it silently — a lost inverse is invisible damage.
       context.warn(
         `Field "${context.baseSlug}.${field.slug}" names an inverse field (${inverseFieldId}) that no longer exists; the package ships the relation without its inverse link.`,
+      );
+    }
+  }
+
+  if (typeof reverseOfFieldId === "string") {
+    // The forward field lives in the TARGET base, like an inverse.
+    const forwardSlug = context.fieldSlugById.get(reverseOfFieldId);
+    if (forwardSlug) {
+      options.reverseOfFieldSlug = forwardSlug;
+    } else {
+      context.warn(
+        `Field "${context.baseSlug}.${field.slug}" is the reverse of a field (${reverseOfFieldId}) that no longer exists; the package ships it as a plain relation.`,
       );
     }
   }
@@ -571,7 +590,8 @@ const toPackageView = (view: {
   name: string;
   description: string;
   config: {
-    filters: { fieldSlug: string; fieldId?: string; operator: string; value?: unknown }[];
+    filters: ViewFilterConditionVO[];
+    filterConjunction?: ViewFilterConjunction;
     sorts: { direction: "asc" | "desc"; fieldSlug: string; fieldId?: string }[];
     visibleFieldSlugs?: string[] | null;
     fieldWidths?: Record<string, number>;
@@ -582,9 +602,10 @@ const toPackageView = (view: {
   description: view.description ?? "",
   type: "table",
   config: {
-    filters: view.config.filters.map((filter) => ({
+    filterConjunction: view.config.filterConjunction,
+    filters: mapViewFilters(view.config.filters, (filter) => ({
       fieldSlug: filter.fieldSlug,
-      operator: filter.operator as PackageView["config"]["filters"][number]["operator"],
+      operator: filter.operator,
       value: filter.value,
     })),
     sorts: view.config.sorts.map((sort) => ({
@@ -599,10 +620,17 @@ const toPackageView = (view: {
 const collectRecords = async (
   client: PackageClient,
   baseId: string,
-  fields: readonly { slug: string; type: string }[],
+  fields: readonly { slug: string; type: string; options?: Record<string, unknown> | null }[],
   options: CollectOptions,
 ): Promise<PackageRecordLine[]> => {
   const typeBySlug = new Map(fields.map((field) => [field.slug, field.type]));
+  // Reverse relation columns are computed from the forward field's links, which
+  // the package already carries — exporting them would only be rejected on install.
+  const reverseSlugs = new Set(
+    fields
+      .filter((field) => field.type === "relation" && field.options?.reverseOfFieldId)
+      .map((field) => field.slug),
+  );
   const records: PackageRecordLine[] = [];
   let droppedAttachments = 0;
   let cursor: string | undefined;
@@ -616,6 +644,7 @@ const collectRecords = async (
         const type = typeBySlug.get(slug);
         if (!type) continue;
         if (PACKAGE_COMPUTED_FIELD_TYPES.includes(type)) continue;
+        if (reverseSlugs.has(slug)) continue;
         if (type === "attachment") {
           if (value !== null && value !== undefined) droppedAttachments++;
           continue;

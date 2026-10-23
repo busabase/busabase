@@ -1087,6 +1087,7 @@ const isDeferredField = (field: PackageBaseField): boolean =>
 
 const needsFieldIdPatch = (field: PackageBaseField): boolean =>
   Boolean(field.options.inverseFieldSlug) ||
+  Boolean(field.options.reverseOfFieldSlug) ||
   Boolean(field.options.ai?.sourceFieldSlugs && field.options.ai.sourceFieldSlugs.length > 0);
 
 /**
@@ -1095,7 +1096,12 @@ const needsFieldIdPatch = (field: PackageBaseField): boolean =>
  * ids in pass 3. `targetBaseSlug` is NOT stripped — it is the API's own native alias.
  */
 export const toApiFieldOptions = (options: PackageFieldOptions): Record<string, unknown> => {
-  const { inverseFieldSlug: _inverseFieldSlug, ai, ...rest } = options;
+  const {
+    inverseFieldSlug: _inverseFieldSlug,
+    reverseOfFieldSlug: _reverseOfFieldSlug,
+    ai,
+    ...rest
+  } = options;
   const apiOptions: Record<string, unknown> = { ...rest };
   if (ai) {
     const { sourceFieldSlugs: _sourceFieldSlugs, ...aiRest } = ai;
@@ -1130,6 +1136,24 @@ export const resolveFieldIdOptions = (
     } else {
       warnings.push(
         `Could not resolve the inverse field "${inverseFieldSlug}" of ${baseSlug}.${field.slug} in base "${targetBaseSlug ?? "?"}" — the relation is installed, but its inverse link is not set.`,
+      );
+    }
+  }
+
+  const reverseOfFieldSlug = field.options.reverseOfFieldSlug;
+  if (reverseOfFieldSlug) {
+    // A reverse column reads the forward relation that lives in its TARGET base.
+    // The field was created empty in pass 2, so it can still become a reverse.
+    const targetBaseSlug = field.options.targetBaseSlug;
+    const forwardId = targetBaseSlug
+      ? fieldIds.get(fieldKey(targetBaseSlug, reverseOfFieldSlug))
+      : undefined;
+    if (forwardId) {
+      options.reverseOfFieldId = forwardId;
+      resolvedAny = true;
+    } else {
+      warnings.push(
+        `Could not resolve the forward field "${reverseOfFieldSlug}" of reverse column ${baseSlug}.${field.slug} in base "${targetBaseSlug ?? "?"}" — it is installed as an empty plain relation.`,
       );
     }
   }
