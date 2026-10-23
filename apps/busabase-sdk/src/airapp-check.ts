@@ -76,6 +76,18 @@ export interface AirAppSources {
   config?: string;
   /** The slug the package ships this app under, for the `resourceKey` rule. */
   shippedSlug?: string;
+  /**
+   * The app's files, one entry each, paths relative to the app's root — for the
+   * rules that report a file and line (`airapp/forced-review`).
+   *
+   * Pass every file; the rule picks its own corpus with
+   * {@link isAirAppWriteRuleSource} (script sources only, never `vendor/`,
+   * `node_modules/`, tests, or `scripts/`), so a caller cannot widen it by
+   * accident. Omitted, the rule falls back to `browserLogic` + `server`, which
+   * still covers the provider and the host but can only quote the offending
+   * line, not name its file.
+   */
+  appSources?: readonly { path: string; content: string }[];
 }
 
 /** A `busabase-sdk` version must be exact. A range is not the app that was reviewed. */
@@ -97,6 +109,13 @@ const FORBIDDEN_DEPENDENCIES = [
   "parcel",
 ];
 
+/** Code that branches on where the app is running. */
+const RUNTIME_BRANCH =
+  /createAirAppConnectGate|getRuntime\s*\(|detectAirAppRuntime\s*\(|shouldUseLocalAirAppGateway|\bhosted\b/;
+
+/** The SDK's browser probe of `__airapp/runtime` (`busabase-sdk/airapp`). */
+const SDK_RUNTIME_PROBE = /\bdetectAirAppRuntime\s*\(/;
+
 /**
  * The documented interactive page budget. A higher one may be justified — say so in
  * review — so this is a warning rather than a hard bound. A generator checking its
@@ -115,6 +134,185 @@ export const AIRAPP_DEFAULT_READ_LIMIT = 50;
  */
 export const stripComments = (source: string): string =>
   source.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/(^|[^:'"`\\])\/\/[^\n]*/g, "$1 ");
+
+// Characters after which a `/` starts a regular expression rather than a division.
+const REGEX_PREFIX = /[(,=:[!&|?{};+\-*%<>~^]$/;
+const REGEX_KEYWORD =
+  /\b(?:return|typeof|instanceof|in|of|new|delete|void|throw|case|do|else|yield|await)$/;
+
+/**
+ * The source with every comment, string, template-literal text, and regex
+ * literal blanked to spaces — newlines kept, so an offset still maps to its line.
+ *
+ * Stricter than {@link stripComments}, and for a rule that matches an
+ * identifier that has to be: the prose and messages explaining `autoMerge` name
+ * it constantly (`"pass autoMerge: false to force review"`), and a rule that
+ * fires on its own explanation stops being read. Template-literal
+ * *interpolations* stay code — `${autoMerge}` is a real use.
+ */
+export const codeOnly = (source: string): string => {
+  const out = source.split("");
+  const blank = (from: number, to: number) => {
+    for (let index = from; index < to; index += 1) if (out[index] !== "\n") out[index] = " ";
+  };
+  // One entry per open `${`: the brace depth inside that interpolation.
+  const templateDepth: number[] = [];
+  let index = 0;
+  while (index < source.length) {
+    const char = source[index];
+    const next = source[index + 1];
+    if (char === "/" && next === "/") {
+      const end = source.indexOf("\n", index);
+      const stop = end === -1 ? source.length : end;
+      blank(index, stop);
+      index = stop;
+      continue;
+    }
+    if (char === "/" && next === "*") {
+      const end = source.indexOf("*/", index + 2);
+      const stop = end === -1 ? source.length : end + 2;
+      blank(index, stop);
+      index = stop;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      let cursor = index + 1;
+      while (cursor < source.length && source[cursor] !== char && source[cursor] !== "\n") {
+        cursor += source[cursor] === "\\" ? 2 : 1;
+      }
+      blank(index + 1, cursor);
+      index = cursor + 1;
+      continue;
+    }
+    if (char === "`" || (char === "}" && templateDepth.at(-1) === 0)) {
+      if (char === "}") templateDepth.pop();
+      let cursor = index + 1;
+      while (cursor < source.length && source[cursor] !== "`") {
+        if (source[cursor] === "\\") {
+          cursor += 2;
+          continue;
+        }
+        if (source[cursor] === "$" && source[cursor + 1] === "{") break;
+        cursor += 1;
+      }
+      blank(index + 1, cursor);
+      if (source[cursor] === "$") {
+        templateDepth.push(0);
+        index = cursor + 2;
+      } else {
+        index = cursor + 1;
+      }
+      continue;
+    }
+    if (char === "/") {
+      const before = source.slice(Math.max(0, index - 12), index).trimEnd();
+      if (!before || REGEX_PREFIX.test(before) || REGEX_KEYWORD.test(before)) {
+        let cursor = index + 1;
+        let inClass = false;
+        while (cursor < source.length && source[cursor] !== "\n") {
+          const current = source[cursor];
+          if (current === "\\") {
+            cursor += 2;
+            continue;
+          }
+          if (current === "[") inClass = true;
+          else if (current === "]") inClass = false;
+          else if (current === "/" && !inClass) break;
+          cursor += 1;
+        }
+        blank(index + 1, cursor);
+        index = cursor + 1;
+        continue;
+      }
+    }
+    if (templateDepth.length) {
+      if (char === "{") templateDepth[templateDepth.length - 1] += 1;
+      else if (char === "}") templateDepth[templateDepth.length - 1] -= 1;
+    }
+    index += 1;
+  }
+  return out.join("");
+};
+
+/** The reason an `allow-forced-review` comment has to give, at minimum, in characters. */
+export const AIRAPP_FORCED_REVIEW_MIN_REASON = 20;
+
+const ALLOW_FORCED_REVIEW = /allow-forced-review:\s*(.*)$/;
+
+/** Where `autoMerge` was set to something other than literal `true`. */
+export interface AirAppForcedReview {
+  /** 1-based. */
+  line: number;
+  /** The offending line, trimmed. */
+  text: string;
+  problem: string;
+}
+
+/**
+ * Every `autoMerge` in `source`'s code that is not a literal `true`, with the
+ * line it is on — an explicit `false`, a value worked out at runtime
+ * (`autoMerge: isStandaloneLocalRuntime()`), or a variable passed through
+ * (`{ autoMerge }`). Comments, strings, template text, and regexes never match.
+ *
+ * Why it is a rule: a person's own write follows their permission. The app
+ * leaves `autoMerge` unset; Busabase merges it for someone with write access and
+ * opens a ChangeRequest for someone without. An app that forces review makes
+ * every owner approve their own click in the inbox — a fix that had to be
+ * applied to 49 shipped copies by hand.
+ *
+ * Forcing review is still right when the write is something outgoing a second
+ * person must approve before it is sent. Say so on the line, or the line above,
+ * and the rule lets it through:
+ *
+ * ```js
+ * autoMerge: false, // allow-forced-review: drafts an outgoing contract that legal must approve
+ * ```
+ *
+ * The reason must be at least {@link AIRAPP_FORCED_REVIEW_MIN_REASON} characters.
+ */
+export const findForcedReview = (source: string): AirAppForcedReview[] => {
+  const code = codeOnly(source);
+  const lines = source.split("\n");
+  const allowReason = (line: string | undefined) =>
+    line?.match(ALLOW_FORCED_REVIEW)?.[1]?.trim() ?? null;
+  const findings: AirAppForcedReview[] = [];
+  for (const match of code.matchAll(/\bautoMerge\b/g)) {
+    const offset = match.index ?? 0;
+    const after = code.slice(offset + match[0].length);
+    // `autoMerge: true` / `autoMerge = true` is what Busabase treats as unset.
+    if (/^\s*[:=](?!=)\s*true\b/.test(after)) continue;
+    const lineIndex = code.slice(0, offset).split("\n").length - 1;
+    const reason =
+      allowReason(lines[lineIndex]) ?? (lineIndex > 0 ? allowReason(lines[lineIndex - 1]) : null);
+    if (reason !== null && reason.length >= AIRAPP_FORCED_REVIEW_MIN_REASON) continue;
+    findings.push({
+      line: lineIndex + 1,
+      text: (lines[lineIndex] ?? "").trim(),
+      problem:
+        reason === null
+          ? "forces review on a person's own write (leave autoMerge unset), or says why with an allow-forced-review comment"
+          : `allow-forced-review needs a reason of at least ${AIRAPP_FORCED_REVIEW_MIN_REASON} characters`,
+    });
+  }
+  return findings;
+};
+
+/** Directories that are not the app's runtime: third-party bundles, the app's own tests and dev checks. */
+const NOT_APP_RUNTIME = new Set(["node_modules", "vendor", "test", "tests", "scripts", ".git"]);
+
+/**
+ * Whether `path` (relative to the app's root, `/`-separated) belongs to the
+ * corpus `airapp/forced-review` scans: a script source of the app's own, not a
+ * vendored bundle, a test, or a dev script. The same corpus as
+ * `scripts/check-app-writes.mjs` in busabase/templates.
+ */
+export const isAirAppWriteRuleSource = (path: string): boolean => {
+  const segments = path.split(/[\\/]/).filter(Boolean);
+  const name = segments.at(-1) ?? "";
+  if (!/\.(?:[cm]?js|jsx|ts|tsx)$/.test(name)) return false;
+  if (/\.test\.[cm]?[jt]sx?$/.test(name)) return false;
+  return !segments.slice(0, -1).some((segment) => NOT_APP_RUNTIME.has(segment));
+};
 
 /**
  * Objects inside a `bases: [ ... ]` literal, brace-matched rather than regexed across
@@ -278,9 +476,10 @@ export const checkAirApp = (sources: AirAppSources): AirAppFinding[] => {
 
     // ── Runtime detection ─────────────────────────────────────────────────────
     // Does this app have a hosted/standalone branch at all? A connect gate, a
-    // `getRuntime()` call, or a `hosted` flag it reads are the shapes that branch.
+    // `getRuntime()` / `detectAirAppRuntime()` call, or a `hosted` flag it reads
+    // are the shapes that branch.
     const branches =
-      /createAirAppConnectGate|getRuntime\s*\(|\bhosted\b/.test(code) ||
+      RUNTIME_BRANCH.test(code) ||
       (sources.server !== undefined && /createAirAppConnectGate/.test(sources.server));
     if (/location\s*\.\s*(?:hostname|host)\b/.test(code)) {
       error(
@@ -303,7 +502,9 @@ export const checkAirApp = (sources: AirAppSources): AirAppFinding[] => {
     // server proxy when standalone — is not missing a probe, it has nothing to ask.
     // Requiring one anyway told a correctly-designed template it was broken, which is
     // how a checker stops being read.
-    if (branches && !logic.includes("__airapp/runtime")) {
+    // `detectAirAppRuntime()` is the SDK's own probe of the same relative path, so
+    // calling it is probing — the literal no longer has to appear in the app.
+    if (branches && !logic.includes("__airapp/runtime") && !SDK_RUNTIME_PROBE.test(code)) {
       error(
         "airapp/runtime-probe",
         "This app branches on where it is running but never probes `__airapp/runtime`, so that branch is deciding on something else.",
@@ -336,9 +537,7 @@ export const checkAirApp = (sources: AirAppSources): AirAppFinding[] => {
     // something is going to branch on it.
     const clientBranches =
       sources.browserLogic !== undefined &&
-      /createAirAppConnectGate|getRuntime\s*\(|\bhosted\b/.test(
-        stripComments(sources.browserLogic),
-      );
+      RUNTIME_BRANCH.test(stripComments(sources.browserLogic));
     if (clientBranches && !readsRuntimeEnv) {
       error(
         "airapp/runtime-env",
@@ -384,6 +583,25 @@ export const checkAirApp = (sources: AirAppSources): AirAppFinding[] => {
       error(
         "airapp/credential",
         "Browser code builds an Authorization header. A deployed AirApp uses the viewer's ambient same-origin session and needs none.",
+      );
+    }
+  }
+
+  // ── A person's write follows their permission ───────────────────────────────
+  //
+  // Per file when the caller hands files (so a finding names `path:line`);
+  // otherwise over the logic + server corpora, which hold the provider and the
+  // host — where every forced-review write that shipped actually lived.
+  const forcedReviewCorpus: { path?: string; content: string }[] = sources.appSources
+    ? sources.appSources.filter((file) => isAirAppWriteRuleSource(file.path))
+    : [sources.browserLogic, sources.server]
+        .filter((content): content is string => content !== undefined)
+        .map((content) => ({ content }));
+  for (const file of forcedReviewCorpus) {
+    for (const found of findForcedReview(file.content)) {
+      error(
+        "airapp/forced-review",
+        `${file.path ? `${file.path}:${found.line}: ` : ""}\`${found.text}\` ${found.problem}. Leave \`autoMerge\` unset: Busabase merges a person's write when they have write access and opens a ChangeRequest when they do not.`,
       );
     }
   }

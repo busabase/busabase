@@ -142,6 +142,10 @@ const airAppSources = (
     browserDownloads: join_(isDownload),
     ...(text(at("app/js/config.js")) !== undefined ? { config: text(at("app/js/config.js")) } : {}),
     shippedSlug: slug,
+    // Every file, one entry each, for the rules that name a file and line. The SDK
+    // picks each rule's own corpus from these (e.g. never `app/vendor/`), so this
+    // collector does not have to agree with it on a second filter.
+    appSources: files.map((file) => ({ path: file.path, content: file.bytes.toString("utf8") })),
   };
 };
 
