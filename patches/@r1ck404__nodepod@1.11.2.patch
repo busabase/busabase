@@ -1,8 +1,8 @@
 diff --git a/dist/__sw__.js b/dist/__sw__.js
-index f8f637919cdb6e9792d0b91d079402be751f2734..d78101f6c85df974ab11dd7d10a95fbde56c8b04 100644
+index b8f403b2e343e908f710b7da8da51ac1a90b1e28..0c11730d765646e1f0438318f7f5c7cf49a5a7ec 100644
 --- a/dist/__sw__.js
 +++ b/dist/__sw__.js
-@@ -650,6 +650,24 @@ self.addEventListener("message", (event) => {
+@@ -743,6 +743,25 @@ self.addEventListener("message", (event) => {
    const data = event.data;
    if (!data) return;
  
@@ -12,10 +12,11 @@ index f8f637919cdb6e9792d0b91d079402be751f2734..d78101f6c85df974ab11dd7d10a95fbd
 +  // this already-active worker to claim the page before Nodepod boots. This is
 +  // deliberately separate from `init`: it creates no MessagePort or pod state.
 +  //
-+  // NOT covered by any upstream API, including 1.10.x's `reservedHostPaths`.
-+  // Upstream 1.10.x does call `self.clients.claim()`, but only inside the
-+  // `init` branch below, which requires a MessagePort and registers pod state
-+  // for the tab. Our host must be able to claim BEFORE `Nodepod.boot()` runs
++  // NOT covered by any upstream API, including `reservedHostPaths` (re-checked
++  // on 1.11.2). Upstream calls `self.clients.claim()` only on `activate` (a
++  // fresh install) and inside the `init` branch below, which requires a
++  // MessagePort and registers pod state for the tab. Our host must be able to
++  // claim an already-active worker BEFORE `Nodepod.boot()` runs
 +  // (see registerActivateAndClaim() in
 +  // packages/busabase-core/src/domains/airapp/utils/nodepod-service-worker.ts,
 +  // constant NODEPOD_HOST_CLAIM_MESSAGE) — the two are not interchangeable.
@@ -27,7 +28,7 @@ index f8f637919cdb6e9792d0b91d079402be751f2734..d78101f6c85df974ab11dd7d10a95fbd
    // register a new tab's MessagePort. if the same tab reinits (same token,
    // new channel from controllerchange) drop the old port first so stale
    // entries don't accumulate. RequestProxy resends claim-instance after.
-@@ -1040,6 +1058,64 @@ self.addEventListener("fetch", (event) => {
+@@ -1135,6 +1154,65 @@ self.addEventListener("fetch", (event) => {
      return;
    }
  
@@ -52,8 +53,9 @@ index f8f637919cdb6e9792d0b91d079402be751f2734..d78101f6c85df974ab11dd7d10a95fbd
 +  // MUST STAY WHERE IT IS — read before deleting or moving it:
 +  //   * `reservedHostPaths` only ever BYPASSES a path to the host. It has no
 +  //     notion of "an embed pod is alive, so refuse instead". The 403 half of
-+  //     this guard has no upstream equivalent in 1.10.1; removing this block
-+  //     silently removes a defence against leaking the viewer's session.
++  //     this guard has no upstream equivalent (re-checked on 1.11.2);
++  //     removing this block silently removes a defence against leaking the
++  //     viewer's session.
 +  //   * For that reason `/api/v1` is deliberately NOT listed in the host's
 +  //     reserveHostPaths() call (see NODEPOD_RESERVED_HOST_PATHS in
 +  //     packages/busabase-core/src/domains/airapp/components/runners/nodepod-runner.ts).
@@ -92,7 +94,7 @@ index f8f637919cdb6e9792d0b91d079402be751f2734..d78101f6c85df974ab11dd7d10a95fbd
    // Host-reserved infrastructure documents are always served by the host.
    if (url.origin === self.location.origin && isReservedHostPath(url.pathname)) {
      return;
-@@ -1101,6 +1177,31 @@ self.addEventListener("fetch", (event) => {
+@@ -1196,6 +1274,31 @@ self.addEventListener("fetch", (event) => {
      } catch {}
    }
  
@@ -124,7 +126,7 @@ index f8f637919cdb6e9792d0b91d079402be751f2734..d78101f6c85df974ab11dd7d10a95fbd
    // 2. only same-origin (and localhost-alias) URLs can belong to a pod;
    //    cross-origin (fonts, CDNs) always passes through
    const sameOrigin =
-@@ -1184,6 +1285,21 @@ self.addEventListener("fetch", (event) => {
+@@ -1279,6 +1382,21 @@ self.addEventListener("fetch", (event) => {
            if (!pod && client && client.url) {
              try {
                const clientPath = stripPreviewPrefix(new URL(client.url).pathname);

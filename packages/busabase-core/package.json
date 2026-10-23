@@ -1,7 +1,7 @@
 {
   "name": "busabase-core",
   "description": "Shared Busabase open-core protocol, local store, API helpers, and dashboard components.",
-  "version": "0.98.0",
+  "version": "0.99.0",
   "private": true,
   "type": "module",
   "exports": {
@@ -293,6 +293,10 @@
       "types": "./src/domains/dashboard/helpers/node-icons.ts",
       "default": "./src/domains/dashboard/helpers/node-icons.ts"
     },
+    "./dashboard/nav-tree": {
+      "types": "./src/domains/dashboard/helpers/nav-tree.ts",
+      "default": "./src/domains/dashboard/helpers/nav-tree.ts"
+    },
     "./dashboard/brand-icons": {
       "types": "./src/domains/dashboard/helpers/brand-icons.tsx",
       "default": "./src/domains/dashboard/helpers/brand-icons.tsx"
@@ -380,6 +384,10 @@
     "./openapi/error-envelope": {
       "types": "./src/openapi/error-envelope.ts",
       "default": "./src/openapi/error-envelope.ts"
+    },
+    "./openapi/handler": {
+      "types": "./src/openapi/handler.ts",
+      "default": "./src/openapi/handler.ts"
     },
     "./router": {
       "types": "./src/router.ts",
@@ -494,13 +502,14 @@
     "@milkdown/react": "^7.21.3",
     "@orpc/client": "^1.14.6",
     "@orpc/contract": "^1.14.6",
+    "@orpc/json-schema": "^1.14.6",
     "@orpc/openapi": "^1.14.6",
     "@orpc/openapi-client": "^1.14.6",
     "@orpc/server": "^1.14.6",
     "@orpc/tanstack-query": "1.14.6",
     "@orpc/zod": "^1.14.6",
+    "@r1ck404/nodepod": "^1.11.2",
     "@radix-ui/react-dialog": "^1.1.23",
-    "@scelar/nodepod": "^1.10.1",
     "@tanstack/react-query": "^5.101.0",
     "@tanstack/react-virtual": "^3.13.12",
     "@xyflow/react": "^12.10.0",
