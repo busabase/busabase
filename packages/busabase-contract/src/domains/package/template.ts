@@ -115,17 +115,47 @@ export const TemplateSecretSchema = z.object({
 export type TemplateSecret = z.infer<typeof TemplateSecretSchema>;
 
 /**
+ * The most clips a template's gallery shows — App Store Connect's rule (three
+ * app previews per language). Not a schema `.max()`: the catalog is fetched JSON
+ * from a repository the server does not control, and one template over the
+ * limit must not make every card fail to parse. `busabase-cli check` reports it
+ * as an error instead, and `pickTemplateMedia` renders only the first
+ * `TEMPLATE_VIDEO_LIMIT` either way.
+ */
+export const TEMPLATE_VIDEO_LIMIT = 3;
+
+/**
+ * One demo clip in a template's gallery.
+ *
+ * An object rather than a bare path, on purpose, and from the first release: the
+ * catalog is read at runtime by servers that were deployed before this existed,
+ * so a list of strings that later became a list of objects would break exactly
+ * the servers in between. `title` is what tells two clips of one template apart
+ * ("30-second tour", "Full walkthrough"); a locale that wants the title in its
+ * own language declares its own `videos` list.
+ *
+ * `src` is package-relative in `busabase.json` and an absolute URL on the card.
+ */
+export const TemplateVideoSchema = z.object({
+  src: z.string().min(1),
+  title: z.string().optional(),
+});
+export type TemplateVideo = z.infer<typeof TemplateVideoSchema>;
+
+/**
  * One locale's own gallery media — the value side of `template.locales`.
  *
- * Both fields optional and independent: a locale that only re-recorded the clip
- * declares just `video` and keeps the default screenshots. Paths are
- * package-relative in `busabase.json` and absolute URLs on the catalog card;
+ * All fields optional and independent: a locale that only re-recorded the clip
+ * declares just `video` (or `videos`) and keeps the default screenshots. Paths
+ * are package-relative in `busabase.json` and absolute URLs on the catalog card;
  * the shape is the same, which is why the card VO reuses this schema.
  */
 export const TemplateLocaleMediaSchema = z.object({
   /** Replaces the default list WHOLE for this locale — never merged per index. */
   screenshots: z.array(z.string()).optional(),
   video: z.string().optional(),
+  /** Replaces the default clips WHOLE for this locale; wins over `video` here. */
+  videos: z.array(TemplateVideoSchema).optional(),
 });
 export type TemplateLocaleMedia = z.infer<typeof TemplateLocaleMediaSchema>;
 
@@ -159,8 +189,18 @@ export const TemplateManifestSchema = z.object({
    */
   video: z.string().optional(),
   /**
+   * Several demo clips, in the order they are shown (cover first, then these,
+   * then the screenshots), at most `TEMPLATE_VIDEO_LIMIT`.
+   *
+   * `video` stays the one-clip shorthand and is unchanged. When `videos` is
+   * declared it wins, and the catalog index still writes `video` as the first
+   * entry's path so servers deployed before this field existed keep showing one
+   * clip instead of none.
+   */
+  videos: z.array(TemplateVideoSchema).optional(),
+  /**
    * Localized gallery media, the App Store / Google Play rule: a viewer whose
-   * locale has an entry sees that entry's `screenshots` / `video`; anything the
+   * locale has an entry sees that entry's `screenshots` / `video` / `videos`; anything the
    * entry leaves out, and every locale without an entry, falls back to the two
    * fields above. Those stay the English/default set — they are what every
    * deployed server and CLI already reads, so their meaning cannot change.

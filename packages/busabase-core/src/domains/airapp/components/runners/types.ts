@@ -11,7 +11,7 @@ export type { AirAppRunnerKind } from "busabase-contract/domains/airapp/contract
 /**
  * Engine-agnostic contract for "run this AirApp's files and show me a
  * preview". Two implementations ship: `nodepod-runner.ts` (in-browser,
- * backed by the `@scelar/nodepod` Web Worker runtime) and
+ * backed by the `@r1ck404/nodepod` Web Worker runtime) and
  * `local-runner.ts` (server-side, a real `npm install` + `npm run dev`
  * OS process via the `airapps.runLocal` oRPC endpoint). This interface
  * is kept intentionally narrow and transport-agnostic so a third engine

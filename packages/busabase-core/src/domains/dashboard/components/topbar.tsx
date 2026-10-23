@@ -6,15 +6,49 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "kui/breadcrumb";
+import { SidebarTrigger } from "kui/sidebar";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "kui/tooltip";
 import { Info } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
-import { Fragment, useState } from "react";
+import { Fragment, type ReactNode, useState } from "react";
 import { useCoreI18n } from "../../../i18n";
 import type { BusabaseBreadcrumbItem } from "../helpers/view-types";
 import { useTopbarNodeActionsStore } from "../store/topbar-node-actions-store";
 import { useTopbarNodeInfoStore } from "../store/topbar-node-info-store";
 import { NodeSettingsDialog } from "./node-settings-dialog";
+
+/**
+ * The workbench topbar row: sidebar toggle, breadcrumb, then whatever the
+ * caller appends. The member workbench appends its node actions; a host that
+ * wraps a chromeless dashboard in its own sidebar (Cloud's public shared
+ * folder) renders it bare, so both get the same toggle and the same trail.
+ * Needs a `SidebarProvider` above it, as `SidebarTrigger` does.
+ */
+export function BusabaseTopbar({
+  items,
+  showNodeInfo,
+  children,
+}: {
+  items: BusabaseBreadcrumbItem[];
+  showNodeInfo?: boolean;
+  children?: ReactNode;
+}) {
+  const messages = useCoreI18n();
+  return (
+    <div
+      className="flex h-10 shrink-0 items-center gap-2 border-b bg-background/80 px-4 py-1.5 backdrop-blur-sm md:h-12"
+      data-dashboard-topbar
+    >
+      <SidebarTrigger
+        aria-label={messages.shell.toggleSidebar}
+        className="h-8 w-8 shrink-0"
+        title={messages.shell.toggleSidebar}
+      />
+      <BusabaseTopbarBreadcrumb items={items} showNodeInfo={showNodeInfo} />
+      {children}
+    </div>
+  );
+}
 
 export function BusabaseTopbarBreadcrumb({
   items,

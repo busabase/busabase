@@ -10,6 +10,7 @@ import {
   busabaseRecordLinks,
   busabaseRecords,
 } from "../db/schema";
+import { isReverseRelationDef } from "../domains/base/field-types";
 import { id, now } from "./kernel";
 import { normalizeFieldValue } from "./vo";
 
@@ -99,7 +100,11 @@ export const projectCommitFields = async (input: {
       .where(
         and(eq(busabaseBaseFields.baseId, input.baseId), isNull(busabaseBaseFields.deletedAt)),
       ));
-  const fieldsBySlug = new Map(fieldRows.map((field) => [field.slug, field]));
+  // Reverse relation columns store nothing: no values, no links. Treating them
+  // as unknown slugs here drops any value that slipped past input stripping.
+  const fieldsBySlug = new Map(
+    fieldRows.filter((field) => !isReverseRelationDef(field)).map((field) => [field.slug, field]),
+  );
   const sourceRecordId = input.recordId ?? null;
   const relationEntries = sourceRecordId
     ? Object.entries(input.fields).flatMap(([fieldSlug, value]) => {

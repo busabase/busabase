@@ -11,6 +11,7 @@ import {
 const searchRequestMetricSchema = z
   .object({
     name: z.literal("search.request.completed"),
+    outcome: z.enum(["success", "failed", "timeout", "canceled"]).optional().default("success"),
     durationMs: z.number().int().nonnegative(),
     mode: z.enum(["quick", "full"]),
     surface: z.enum(["quick", "advanced", "api"]),

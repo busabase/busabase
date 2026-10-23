@@ -192,7 +192,7 @@ describe("buildAgentInstallPrompt", () => {
       subdir: "templates/busa-drama",
     };
     const command =
-      "npx busabase-cli install https://github.com/busabase/templates/tree/main --skill busa-drama\nnpx skills add https://github.com/busabase/templates/tree/main/templates/busa-drama";
+      "npx --yes busabase-cli@latest install https://github.com/busabase/templates/tree/main --skill busa-drama\nnpx skills add https://github.com/busabase/templates/tree/main/templates/busa-drama";
 
     expect(buildAgentInstallCommand(source)).toBe(command);
     expect(
@@ -217,7 +217,7 @@ describe("buildAgentInstallPrompt", () => {
         subdir: "templates/busa-drama",
       }),
     ).toBe(
-      "npx busabase-cli install https://github.com/busabase/templates/tree/release --skill busa-drama\nnpx skills add https://github.com/busabase/templates/tree/release/templates/busa-drama",
+      "npx --yes busabase-cli@latest install https://github.com/busabase/templates/tree/release --skill busa-drama\nnpx skills add https://github.com/busabase/templates/tree/release/templates/busa-drama",
     );
     expect(
       buildAgentInstallCommand({

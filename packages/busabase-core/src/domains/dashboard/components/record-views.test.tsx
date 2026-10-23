@@ -154,19 +154,23 @@ describe("Record editor draft", () => {
     onError = vi.fn(),
   ) {
     return (
-      <Router hook={useStaticLocation} searchHook={() => ""}>
-        <CoreI18nProvider locale="en">
-          <RecordEditorView
-            base={recordValue.base}
-            client={client}
-            mode="edit"
-            record={recordValue}
-            records={[recordValue]}
-            onSubmitError={onError}
-            onSubmitUpdate={submit}
-          />
-        </CoreI18nProvider>
-      </Router>
+      <QueryClientProvider
+        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+      >
+        <Router hook={useStaticLocation} searchHook={() => ""}>
+          <CoreI18nProvider locale="en">
+            <RecordEditorView
+              base={recordValue.base}
+              client={client}
+              mode="edit"
+              record={recordValue}
+              records={[recordValue]}
+              onSubmitError={onError}
+              onSubmitUpdate={submit}
+            />
+          </CoreI18nProvider>
+        </Router>
+      </QueryClientProvider>
     );
   }
   it.each([

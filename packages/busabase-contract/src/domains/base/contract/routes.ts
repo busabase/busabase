@@ -315,9 +315,20 @@ export const recordContract = {
       path: "/records/{recordId}/links",
       tags: ["Records"],
       summary: "List record links",
-      successDescription: "Active outbound links from a canonical record.",
+      successDescription:
+        "Active links of a canonical record: outbound (this record's relation fields) by default, or inbound (other records whose relation fields link here).",
     })
-    .input(z.object({ recordId: z.string() }))
+    .input(
+      z.object({
+        recordId: z.string(),
+        direction: z
+          .enum(["outbound", "inbound"])
+          .optional()
+          .describe(
+            "`outbound` (default): links stored on this record. `inbound`: links from other live records that point at this record — the reverse side of a relation, i.e. 'who links here'.",
+          ),
+      }),
+    )
     .output(z.array(recordLinkSchema)),
 };
 

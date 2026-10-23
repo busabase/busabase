@@ -25,6 +25,8 @@ export interface FieldDef {
     choices?: ReadonlyArray<{ id: string; name: string; color?: string }>;
     multiple?: boolean;
     targetBaseId?: string;
+    /** `relation` only — read-only reverse column of this forward field id. */
+    reverseOfFieldId?: string;
     /** Per-field limits for `attachment` columns (all optional; see attachmentValidator). */
     attachment?: {
       maxFiles?: number;
@@ -717,6 +719,26 @@ export const fieldColumnWidth = (type: FieldType): string => FIELD_TYPES[type].c
 /** A field whose value the server computes — read-only in the UI, stripped from input. */
 export const isSystemFieldType = (type: FieldType): boolean =>
   Boolean(FIELD_TYPES[type].compute) || FIELD_TYPES[type].readOnly === true;
+
+/**
+ * A `relation` field that is the read-only reverse column of another relation
+ * field (`options.reverseOfFieldId`). Like a lookup, its value is resolved at
+ * read time and never accepted as input — but it stays type `relation`, so it
+ * renders as linked-record chips.
+ */
+export const isReverseRelationDef = (def: {
+  type: string;
+  options?: { reverseOfFieldId?: unknown } | null;
+}): boolean =>
+  def.type === "relation" &&
+  typeof def.options?.reverseOfFieldId === "string" &&
+  def.options.reverseOfFieldId.length > 0;
+
+/** Read-only for record input: system-computed types plus reverse relation columns. */
+export const isReadOnlyFieldDef = (def: {
+  type: FieldType;
+  options?: { reverseOfFieldId?: unknown } | null;
+}): boolean => isSystemFieldType(def.type) || isReverseRelationDef(def);
 
 /** AI-generated fields (manually overridable, but not user-entered on create). */
 export const isAiFieldType = (type: FieldType): boolean =>

@@ -23,6 +23,7 @@ export type LiveInvalidationTarget =
   | "nodeRouteState"
   | "nodes"
   | "records"
+  | "recordDetail"
   | "recordsCount"
   | "recordsPage";
 
@@ -49,6 +50,16 @@ export const classifyLiveInvalidation = (event: BusabaseLiveEvent): LiveInvalida
     targets.add("nodeDetail");
     targets.add("nodeRouteState");
     targets.add("archivedNodes");
+    // Only access changes invalidate derived cells across the workspace.
+    // Ordinary rich-node saves must not trigger full-table record queries.
+    if (event.reason === "acl") {
+      targets.add("bases");
+      targets.add("archivedBases");
+      targets.add("records");
+      targets.add("recordDetail");
+      targets.add("recordsPage");
+      targets.add("recordsCount");
+    }
     return { baseIds, targets };
   }
 
@@ -77,6 +88,7 @@ export const classifyLiveInvalidation = (event: BusabaseLiveEvent): LiveInvalida
     }
     if (event.recordIds.length > 0) {
       targets.add("records");
+      targets.add("recordDetail");
       targets.add("recordsPage");
       targets.add("recordsCount");
     }
@@ -90,6 +102,7 @@ export const classifyLiveInvalidation = (event: BusabaseLiveEvent): LiveInvalida
     // invalidation unless every operation is explained by record/view ids.
     if (event.baseId && !isPureRecordOrViewMerge) {
       targets.add("records");
+      targets.add("recordDetail");
       targets.add("recordsPage");
       targets.add("recordsCount");
       targets.add("bases");

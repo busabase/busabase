@@ -55,7 +55,13 @@ import {
 } from "./node-acl";
 import { isSearchableNodeType, reindexNodeContent, SEARCHABLE_NODE_TYPES } from "./node-content";
 import { collectSubtreeIds } from "./nodes";
+import {
+  getSearchExecutionOutcome,
+  type SearchExecution,
+  withSearchExecution,
+} from "./search-execution";
 import { recordSearchRequest } from "./search-metrics";
+import { literalSearchPattern, recordSearchSource } from "./search-record-query";
 import { ensureReady } from "./seed";
 import { toBaseVO } from "./vo";
 
@@ -376,25 +382,33 @@ const NODE_KIND_LABEL: Record<string, string> = {
  * feature (spec D3). Fail-soft per node: a missing content object leaves that
  * node unindexed and retried next time rather than failing the search.
  */
-const selfHealNodeProjections = async (db: DbInstance, spaceId: string): Promise<void> => {
-  const stale = await db
-    .select({ id: busabaseNodes.id, type: busabaseNodes.type })
-    .from(busabaseNodes)
-    .where(
-      and(
-        eq(busabaseNodes.spaceId, spaceId),
-        isNull(busabaseNodes.archivedAt),
-        inArray(busabaseNodes.type, SEARCHABLE_NODE_TYPES),
-        notExists(
-          db
-            .select({ one: sql`1` })
-            .from(busabaseNodeContentSearch)
-            .where(eq(busabaseNodeContentSearch.nodeId, busabaseNodes.id)),
+const selfHealNodeProjections = async (
+  db: DbInstance,
+  spaceId: string,
+  execution: SearchExecution,
+): Promise<void> => {
+  await execution.beforeQuery();
+  const stale = await execution.query(async (queryDb) =>
+    queryDb
+      .select({ id: busabaseNodes.id, type: busabaseNodes.type })
+      .from(busabaseNodes)
+      .where(
+        and(
+          eq(busabaseNodes.spaceId, spaceId),
+          isNull(busabaseNodes.archivedAt),
+          inArray(busabaseNodes.type, SEARCHABLE_NODE_TYPES),
+          notExists(
+            db
+              .select({ one: sql`1` })
+              .from(busabaseNodeContentSearch)
+              .where(eq(busabaseNodeContentSearch.nodeId, busabaseNodes.id)),
+          ),
         ),
-      ),
-    )
-    .limit(NODE_SELF_HEAL_BATCH);
+      )
+      .limit(NODE_SELF_HEAL_BATCH),
+  );
   for (const node of stale) {
+    await execution.beforeQuery();
     if (!isSearchableNodeType(node.type)) continue;
     await reindexNodeContent(db, { nodeId: node.id, spaceId, nodeType: node.type });
   }
@@ -411,70 +425,78 @@ const searchNodeContent = async (
   query: string,
   limit: number,
   narrow: SearchNarrowing,
+  execution: SearchExecution,
 ): Promise<{ results: SortableResult[]; truncated: boolean }> => {
-  await selfHealNodeProjections(db, spaceId);
-  const pattern = `%${query}%`;
-  const rows = await db
-    .select({
-      nodeId: busabaseNodeContentSearch.nodeId,
-      nodeType: busabaseNodeContentSearch.nodeType,
-      contentText: busabaseNodeContentSearch.contentText,
-      truncated: busabaseNodeContentSearch.truncated,
-      name: busabaseNodes.name,
-      slug: busabaseNodes.slug,
-      createdAt: busabaseNodes.createdAt,
-      updatedAt: busabaseNodes.updatedAt,
-      createdBy: busabaseNodes.createdBy,
-    })
-    .from(busabaseNodeContentSearch)
-    .innerJoin(busabaseNodes, eq(busabaseNodeContentSearch.nodeId, busabaseNodes.id))
-    .where(
-      and(
-        eq(busabaseNodeContentSearch.spaceId, spaceId),
-        isNull(busabaseNodes.archivedAt),
-        buildNodeVisibilityCondition(db),
-        dateRangeCondition(busabaseNodes.updatedAt, narrow),
-        createdByCondition(busabaseNodes.createdBy, narrow),
-        narrow.subtreeIds ? inArray(busabaseNodes.id, narrow.subtreeIds) : undefined,
-        or(
-          // Whole-lexeme match. Contributes nothing for CJK — Postgres has no
-          // segmenter there, so a Chinese run becomes one oversized lexeme that
-          // is dropped from the index entirely (spec D2a). Kept because it IS
-          // the good branch for English/mixed content.
-          sql`to_tsvector('simple', coalesce(${busabaseNodeContentSearch.contentText}, '')) @@ plainto_tsquery('simple', ${query})`,
-          // Substring match, trigram-indexed. This is the branch that carries
-          // CJK search entirely — never drop its index to save space.
-          ilike(busabaseNodeContentSearch.contentText, pattern),
+  await selfHealNodeProjections(db, spaceId, execution);
+  await execution.beforeQuery();
+  const pattern = literalSearchPattern(query);
+  // One budgeted scope for both statements: the matches and the truncation
+  // probe below. Separate scopes would each pay BEGIN + set_config + COMMIT.
+  const { rows, truncatedInScope } = await execution.query(async (queryDb) => {
+    const rows = await queryDb
+      .select({
+        nodeId: busabaseNodeContentSearch.nodeId,
+        nodeType: busabaseNodeContentSearch.nodeType,
+        contentText: busabaseNodeContentSearch.contentText,
+        truncated: busabaseNodeContentSearch.truncated,
+        name: busabaseNodes.name,
+        slug: busabaseNodes.slug,
+        createdAt: busabaseNodes.createdAt,
+        updatedAt: busabaseNodes.updatedAt,
+        createdBy: busabaseNodes.createdBy,
+      })
+      .from(busabaseNodeContentSearch)
+      .innerJoin(busabaseNodes, eq(busabaseNodeContentSearch.nodeId, busabaseNodes.id))
+      .where(
+        and(
+          eq(busabaseNodeContentSearch.spaceId, spaceId),
+          isNull(busabaseNodes.archivedAt),
+          buildNodeVisibilityCondition(db),
+          dateRangeCondition(busabaseNodes.updatedAt, narrow),
+          createdByCondition(busabaseNodes.createdBy, narrow),
+          narrow.subtreeIds ? inArray(busabaseNodes.id, narrow.subtreeIds) : undefined,
+          or(
+            // Whole-lexeme match. Contributes nothing for CJK — Postgres has no
+            // segmenter there, so a Chinese run becomes one oversized lexeme that
+            // is dropped from the index entirely (spec D2a). Kept because it IS
+            // the good branch for English/mixed content.
+            sql`to_tsvector('simple', coalesce(${busabaseNodeContentSearch.contentText}, '')) @@ plainto_tsquery('simple', ${query})`,
+            // Substring match, trigram-indexed. This is the branch that carries
+            // CJK search entirely — never drop its index to save space.
+            ilike(busabaseNodeContentSearch.contentText, pattern),
+          ),
         ),
-      ),
-    )
-    .orderBy(
-      orderForSort(
-        narrow.sort,
-        { createdAt: busabaseNodes.createdAt, updatedAt: busabaseNodes.updatedAt },
-        desc(busabaseNodes.updatedAt),
-      ),
-    )
-    .limit(limit);
+      )
+      .orderBy(
+        orderForSort(
+          narrow.sort,
+          { createdAt: busabaseNodes.createdAt, updatedAt: busabaseNodes.updatedAt },
+          desc(busabaseNodes.updatedAt),
+        ),
+      )
+      .limit(limit);
 
-  // Whether the ANSWER may be incomplete — deliberately NOT derived from the
-  // matched rows. The case this exists for is precisely the one with zero
-  // matches: a phrase living past the cap of some in-scope document produces no
-  // hits at all, so asking the hits whether anything was truncated always says
-  // "no" exactly when the user most needs to be told otherwise.
-  const [truncatedInScope] = await db
-    .select({ nodeId: busabaseNodeContentSearch.nodeId })
-    .from(busabaseNodeContentSearch)
-    .innerJoin(busabaseNodes, eq(busabaseNodeContentSearch.nodeId, busabaseNodes.id))
-    .where(
-      and(
-        eq(busabaseNodeContentSearch.spaceId, spaceId),
-        eq(busabaseNodeContentSearch.truncated, true),
-        isNull(busabaseNodes.archivedAt),
-        buildNodeVisibilityCondition(db),
-      ),
-    )
-    .limit(1);
+    // Whether the ANSWER may be incomplete — deliberately NOT derived from the
+    // matched rows. The case this exists for is precisely the one with zero
+    // matches: a phrase living past the cap of some in-scope document produces no
+    // hits at all, so asking the hits whether anything was truncated always says
+    // "no" exactly when the user most needs to be told otherwise.
+    execution.checkpoint();
+    const [truncatedInScope] = await queryDb
+      .select({ nodeId: busabaseNodeContentSearch.nodeId })
+      .from(busabaseNodeContentSearch)
+      .innerJoin(busabaseNodes, eq(busabaseNodeContentSearch.nodeId, busabaseNodes.id))
+      .where(
+        and(
+          eq(busabaseNodeContentSearch.spaceId, spaceId),
+          eq(busabaseNodeContentSearch.truncated, true),
+          isNull(busabaseNodes.archivedAt),
+          buildNodeVisibilityCondition(db),
+        ),
+      )
+      .limit(1);
+    return { rows, truncatedInScope };
+  });
 
   return {
     results: rows.map((row) => ({
@@ -684,30 +706,43 @@ const scanFileContents = async (
   limit: number,
   identityMatchedKeys: Set<string>,
   narrow: SearchNarrowing,
+  execution: SearchExecution,
 ): Promise<{ results: SortableResult[]; scannedAllEligible: boolean }> => {
-  const rows = await queryAssetUsageRows(db, spaceId, undefined, MAX_ASSET_USAGE_SCAN_ROWS, narrow);
+  await execution.beforeQuery();
+  // One budgeted scope for the usage scan and the beyond-cap probe.
+  const { rows, beyondCap } = await execution.query(async (queryDb) => {
+    const rows = await queryAssetUsageRows(
+      queryDb,
+      spaceId,
+      undefined,
+      MAX_ASSET_USAGE_SCAN_ROWS,
+      narrow,
+    );
 
-  // Cheap existence check, independent of `rows` above: answers "did the cap
-  // leave anything out", which the matched rows can never answer on their own
-  // — the case this exists for is exactly zero content matches, where asking
-  // the (empty) hit set whether anything was capped always says "no" exactly
-  // when the caller most needs to be told otherwise (mirrors `searchNodeContent`'s
-  // `truncatedInScope`, spec D2b).
-  const [beyondCap] = await db
-    .select({ id: busabaseAssetUsages.id })
-    .from(busabaseAssetUsages)
-    .innerJoin(busabaseNodes, eq(busabaseAssetUsages.nodeId, busabaseNodes.id))
-    .where(
-      and(
-        eq(busabaseNodes.spaceId, spaceId),
-        eq(busabaseAssetUsages.spaceId, spaceId),
-        isNull(busabaseNodes.archivedAt),
-        buildNodeVisibilityCondition(db),
-      ),
-    )
-    .orderBy(desc(busabaseAssetUsages.updatedAt))
-    .offset(MAX_ASSET_USAGE_SCAN_ROWS)
-    .limit(1);
+    // Cheap existence check, independent of `rows` above: answers "did the cap
+    // leave anything out", which the matched rows can never answer on their own
+    // — the case this exists for is exactly zero content matches, where asking
+    // the (empty) hit set whether anything was capped always says "no" exactly
+    // when the caller most needs to be told otherwise (mirrors `searchNodeContent`'s
+    // `truncatedInScope`, spec D2b).
+    execution.checkpoint();
+    const [beyondCap] = await queryDb
+      .select({ id: busabaseAssetUsages.id })
+      .from(busabaseAssetUsages)
+      .innerJoin(busabaseNodes, eq(busabaseAssetUsages.nodeId, busabaseNodes.id))
+      .where(
+        and(
+          eq(busabaseNodes.spaceId, spaceId),
+          eq(busabaseAssetUsages.spaceId, spaceId),
+          isNull(busabaseNodes.archivedAt),
+          buildNodeVisibilityCondition(db),
+        ),
+      )
+      .orderBy(desc(busabaseAssetUsages.updatedAt))
+      .offset(MAX_ASSET_USAGE_SCAN_ROWS)
+      .limit(1);
+    return { rows, beyondCap };
+  });
   const overCap = beyondCap !== undefined;
 
   // Same "one source of truth for what text an asset has" infrastructure the
@@ -717,7 +752,8 @@ const scanFileContents = async (
   // yet — mirrors grep's exact self-heal pattern so legacy assets stay
   // content-searchable without a backfill job.
   const assetIds = [...new Set(rows.map((row) => row.assetId))];
-  let textRows = await loadAssetTextRows(db, assetIds);
+  // Bounded id-list lookup: no budgeted transaction needed.
+  let textRows = await execution.read(async (readDb) => loadAssetTextRows(readDb, assetIds));
   const toSelfHeal = [
     ...new Set(
       rows
@@ -731,7 +767,7 @@ const scanFileContents = async (
         autoRegisterAssetText(assetId, db, { knownContentKind: "text", knownMissing: true }),
       ),
     );
-    textRows = await loadAssetTextRows(db, assetIds);
+    textRows = await execution.read(async (readDb) => loadAssetTextRows(readDb, assetIds));
   }
 
   // Wall-clock budget for the WHOLE body-scan phase below (not per file) —
@@ -740,6 +776,7 @@ const scanFileContents = async (
   const results: SortableResult[] = [];
 
   for (const row of rows) {
+    execution.checkpoint();
     if (identityMatchedKeys.has(rowResultKey(row))) {
       // Phase 1 (SQL, uncapped) already matched and returned this exact row —
       // scanning its body too would just re-find the same result a second time.
@@ -761,6 +798,7 @@ const scanFileContents = async (
     try {
       const source = await openAssetTextSource(textRow);
       for await (const line of source.iterateLines()) {
+        execution.checkpoint();
         if (fileMatchesQuery(query, line)) {
           matchedLine = line;
           break;
@@ -771,6 +809,7 @@ const scanFileContents = async (
       // failure (deleted mid-flight, corrupt cache, etc.) is treated as no
       // match on this file rather than failing the whole search.
     }
+    execution.checkpoint();
     if (matchedLine === undefined) {
       continue;
     }
@@ -789,22 +828,20 @@ const searchAssetBackedFiles = async (
   limit: number,
   narrow: SearchNarrowing,
   scanContent: boolean,
+  execution: SearchExecution,
 ): Promise<{ results: SortableResult[]; truncated: boolean }> => {
+  await execution.beforeQuery();
   const db = await getDb();
   const spaceId = getContextSpaceId();
-  const pattern = `%${query}%`;
+  const pattern = literalSearchPattern(query);
 
   // Phase 1: identity match, pushed into SQL, NOT subject to
   // `MAX_ASSET_USAGE_SCAN_ROWS` — an indexed string comparison over the whole
   // space costs nothing like a body scan, so there is no reason to let an
   // exact filename match go missing just because other, newer, unrelated
   // usages outrank it by recency (spec S2).
-  const identityRows = await queryAssetUsageRows(
-    db,
-    spaceId,
-    fileIdentitySqlCondition(pattern),
-    limit,
-    narrow,
+  const identityRows = await execution.query(async (queryDb) =>
+    queryAssetUsageRows(queryDb, spaceId, fileIdentitySqlCondition(pattern), limit, narrow),
   );
   const identityResults = identityRows.map((row) =>
     toSortableFileResult(
@@ -837,6 +874,7 @@ const searchAssetBackedFiles = async (
     limit - identityResults.length,
     identityMatchedKeys,
     narrow,
+    execution,
   );
 
   return {
@@ -852,11 +890,10 @@ const searchAssetBackedFiles = async (
   };
 };
 
-export const searchBusabase = async (
-  input?: z.input<typeof searchInputSchema>,
+const searchWithinBudget = async (
+  input: z.input<typeof searchInputSchema>,
+  execution: SearchExecution,
 ): Promise<SearchResponseVO> => {
-  const startedAt = Date.now();
-  await ensureReady();
   const db = await getDb();
   const parsed = searchInputSchema.parse(input);
   const query = parsed.query.trim();
@@ -869,17 +906,6 @@ export const searchBusabase = async (
       query,
       results: [],
     };
-    recordSearchRequest({
-      name: "search.request.completed",
-      durationMs: Date.now() - startedAt,
-      mode: parsed.mode,
-      surface: parsed.surface ?? "api",
-      resultCount: 0,
-      emptyPage: true,
-      hasMore: false,
-      offset: parsed.offset,
-      sourceCount: parsed.sources ? new Set(parsed.sources).size : SEARCH_SOURCES.length,
-    });
     return response;
   }
 
@@ -889,9 +915,8 @@ export const searchBusabase = async (
   // each source is sufficient: no item below that prefix can enter this page
   // after the source lists are merged, and the extra row answers `hasMore`.
   const candidateWindow = parsed.offset + parsed.limit + 1;
-  const pattern = `%${query}%`;
+  const pattern = literalSearchPattern(query);
   const spaceId = getContextSpaceId();
-  const textSearch = sql`to_tsvector('simple', coalesce(${busabaseFieldValues.valueText}, '')) @@ plainto_tsquery('simple', ${query})`;
 
   // No `sources` means every caller before this parameter existed — search
   // everything, unchanged behavior.
@@ -909,7 +934,11 @@ export const searchBusabase = async (
    * the caller passed no `inNodeId`, which every condition below treats as
    * "no restriction" rather than "restrict to nothing".
    */
-  const subtreeIds = parsed.inNodeId ? await collectSubtreeIds(db, parsed.inNodeId) : undefined;
+  await execution.beforeQuery();
+  const inNodeId = parsed.inNodeId;
+  const subtreeIds = inNodeId
+    ? await execution.query(async (queryDb) => collectSubtreeIds(queryDb, inNodeId))
+    : undefined;
   const narrowing: SearchNarrowing = {
     sort: parsed.sort,
     updatedAfter: parsed.updatedAfter,
@@ -918,123 +947,143 @@ export const searchBusabase = async (
     createdBy: parsed.createdBy,
   };
 
-  const projectionRows = wantsRecords
-    ? await db
-        .select({
-          changeRequestId: busabaseFieldValues.changeRequestId,
-          recordId: busabaseFieldValues.recordId,
-        })
-        .from(busabaseFieldValues)
-        .where(
-          and(
-            eq(busabaseFieldValues.spaceId, spaceId),
-            isNotNull(busabaseFieldValues.valueText),
-            isNull(busabaseFieldValues.deletedAt),
-            // Node ACL, applied IN the candidate SQL (not post-filtered) so
-            // pagination/hasMore never over-counts hidden rows — a mismatch
-            // there would both break paging and leak that private rows exist.
-            buildBaseVisibilityExists(db, busabaseFieldValues.baseId),
-            or(
-              textSearch,
-              ilike(busabaseFieldValues.valueText, pattern),
-              ilike(busabaseFieldValues.fieldSlug, pattern),
+  const projectionEligibility = and(
+    eq(busabaseFieldValues.spaceId, spaceId),
+    isNotNull(busabaseFieldValues.valueText),
+    isNull(busabaseFieldValues.deletedAt),
+    // Node ACL, applied IN the candidate SQL (not post-filtered) so
+    // pagination/hasMore never over-counts hidden rows — a mismatch
+    // there would both break paging and leak that private rows exist.
+    buildBaseVisibilityExists(db, busabaseFieldValues.baseId),
+    // Canonical record projections can outlive an archived record.
+    // Exclude those rows BEFORE LIMIT so they cannot consume the
+    // candidate window and make a page short after hydration. Change
+    // request projections remain searchable regardless of status.
+    or(
+      isNotNull(busabaseFieldValues.changeRequestId),
+      exists(
+        db
+          .select({ one: sql`1` })
+          .from(busabaseRecords)
+          .where(
+            and(
+              eq(busabaseRecords.id, busabaseFieldValues.recordId),
+              eq(busabaseRecords.status, "active"),
             ),
-            // Canonical record projections can outlive an archived record.
-            // Exclude those rows BEFORE LIMIT so they cannot consume the
-            // candidate window and make a page short after hydration. Change
-            // request projections remain searchable regardless of status.
-            or(
-              isNotNull(busabaseFieldValues.changeRequestId),
-              exists(
-                db
-                  .select({ one: sql`1` })
-                  .from(busabaseRecords)
-                  .where(
-                    and(
-                      eq(busabaseRecords.id, busabaseFieldValues.recordId),
-                      eq(busabaseRecords.status, "active"),
-                    ),
-                  ),
+          ),
+      ),
+    ),
+    // "A field value edited inside the window" — filtered before the
+    // GROUP BY, so it reads as "this record was touched then" rather
+    // than needing a HAVING over the aggregate.
+    dateRangeCondition(busabaseFieldValues.updatedAt, parsed),
+    // Creator, for the two things this projection can produce. A field
+    // value has no creator of its own — it is a cell, not an authored
+    // object — so the question is asked of whichever parent this row
+    // belongs to: the RECORD's `created_by`, or the CHANGE REQUEST's
+    // `submitted_by`. `or` rather than two branches because a single
+    // projection row carries exactly one of the two ids and the other
+    // EXISTS simply finds nothing.
+    parsed.createdBy
+      ? or(
+          exists(
+            db
+              .select({ one: sql`1` })
+              .from(busabaseRecords)
+              .where(
+                and(
+                  eq(busabaseRecords.id, busabaseFieldValues.recordId),
+                  eq(busabaseRecords.createdBy, parsed.createdBy),
+                ),
               ),
-            ),
-            // "A field value edited inside the window" — filtered before the
-            // GROUP BY, so it reads as "this record was touched then" rather
-            // than needing a HAVING over the aggregate.
-            dateRangeCondition(busabaseFieldValues.updatedAt, parsed),
-            // Creator, for the two things this projection can produce. A field
-            // value has no creator of its own — it is a cell, not an authored
-            // object — so the question is asked of whichever parent this row
-            // belongs to: the RECORD's `created_by`, or the CHANGE REQUEST's
-            // `submitted_by`. `or` rather than two branches because a single
-            // projection row carries exactly one of the two ids and the other
-            // EXISTS simply finds nothing.
-            parsed.createdBy
-              ? or(
-                  exists(
-                    db
-                      .select({ one: sql`1` })
-                      .from(busabaseRecords)
-                      .where(
-                        and(
-                          eq(busabaseRecords.id, busabaseFieldValues.recordId),
-                          eq(busabaseRecords.createdBy, parsed.createdBy),
-                        ),
-                      ),
-                  ),
-                  exists(
-                    db
-                      .select({ one: sql`1` })
-                      .from(busabaseChangeRequests)
-                      .where(
-                        and(
-                          eq(busabaseChangeRequests.id, busabaseFieldValues.changeRequestId),
-                          eq(busabaseChangeRequests.submittedBy, parsed.createdBy),
-                        ),
-                      ),
-                  ),
-                )
-              : undefined,
-            // A field value knows its Base, and a Base knows its node — which
-            // is what `inNodeId` is expressed in.
-            subtreeIds
-              ? exists(
-                  db
-                    .select({ one: sql`1` })
-                    .from(busabaseBases)
-                    .where(
-                      and(
-                        eq(busabaseBases.id, busabaseFieldValues.baseId),
-                        inArray(busabaseBases.nodeId, subtreeIds),
-                      ),
-                    ),
-                )
-              : undefined,
+          ),
+          exists(
+            db
+              .select({ one: sql`1` })
+              .from(busabaseChangeRequests)
+              .where(
+                and(
+                  eq(busabaseChangeRequests.id, busabaseFieldValues.changeRequestId),
+                  eq(busabaseChangeRequests.submittedBy, parsed.createdBy),
+                ),
+              ),
           ),
         )
-        .groupBy(busabaseFieldValues.recordId, busabaseFieldValues.changeRequestId)
-        .orderBy(
-          ...(parsed.sort === "relevance"
-            ? [
-                desc(
-                  sql`max(ts_rank(to_tsvector('simple', coalesce(${busabaseFieldValues.valueText}, '')), plainto_tsquery('simple', ${query})))`,
-                ),
-                desc(sql`max(${busabaseFieldValues.updatedAt})`),
-              ]
-            : // Grouped, so the sort column has to be an aggregate too. `max`
-              // for the newest-first orders and `min` for oldest-first, so a
-              // record with many edited values sorts by the edge the caller
-              // actually asked about rather than an arbitrary one.
-              [
-                parsed.sort === "updated_desc"
-                  ? desc(sql`max(${busabaseFieldValues.updatedAt})`)
-                  : parsed.sort === "updated_asc"
-                    ? asc(sql`min(${busabaseFieldValues.updatedAt})`)
-                    : parsed.sort === "created_desc"
-                      ? desc(sql`max(${busabaseFieldValues.createdAt})`)
-                      : asc(sql`min(${busabaseFieldValues.createdAt})`),
-              ]),
+      : undefined,
+    // A field value knows its Base, and a Base knows its node — which
+    // is what `inNodeId` is expressed in.
+    subtreeIds
+      ? exists(
+          db
+            .select({ one: sql`1` })
+            .from(busabaseBases)
+            .where(
+              and(
+                eq(busabaseBases.id, busabaseFieldValues.baseId),
+                inArray(busabaseBases.nodeId, subtreeIds),
+              ),
+            ),
         )
-        .limit(candidateWindow)
+      : undefined,
+  );
+  const recordSource = recordSearchSource({
+    query,
+    eligibility: projectionEligibility,
+    eligibleBases: db
+      .select({ id: busabaseBases.id })
+      .from(busabaseBases)
+      .where(
+        and(
+          eq(busabaseBases.spaceId, spaceId),
+          buildNodeVisibilityExists(db, busabaseBases.nodeId),
+        ),
+      ),
+  });
+  const textSearch = sql`${recordSource.vector} @@ plainto_tsquery('simple', ${query})`;
+  await execution.beforeQuery();
+  const projectionRows = wantsRecords
+    ? await execution.query(async (queryDb) =>
+        queryDb
+          .select({
+            changeRequestId: sql<string | null>`${busabaseFieldValues.changeRequestId}`,
+            recordId: sql<string | null>`${busabaseFieldValues.recordId}`,
+          })
+          .from(recordSource.source)
+          .where(
+            and(
+              recordSource.eligibility,
+              or(
+                textSearch,
+                ilike(busabaseFieldValues.valueText, pattern),
+                ilike(busabaseFieldValues.fieldSlug, pattern),
+              ),
+            ),
+          )
+          .groupBy(busabaseFieldValues.recordId, busabaseFieldValues.changeRequestId)
+          .orderBy(
+            ...(parsed.sort === "relevance"
+              ? [
+                  desc(
+                    sql`max(ts_rank(${recordSource.vector}, plainto_tsquery('simple', ${query})))`,
+                  ),
+                  desc(sql`max(${busabaseFieldValues.updatedAt})`),
+                ]
+              : // Grouped, so the sort column has to be an aggregate too. `max`
+                // for the newest-first orders and `min` for oldest-first, so a
+                // record with many edited values sorts by the edge the caller
+                // actually asked about rather than an arbitrary one.
+                [
+                  parsed.sort === "updated_desc"
+                    ? desc(sql`max(${busabaseFieldValues.updatedAt})`)
+                    : parsed.sort === "updated_asc"
+                      ? asc(sql`min(${busabaseFieldValues.updatedAt})`)
+                      : parsed.sort === "created_desc"
+                        ? desc(sql`max(${busabaseFieldValues.createdAt})`)
+                        : asc(sql`min(${busabaseFieldValues.createdAt})`),
+                ]),
+          )
+          .limit(candidateWindow),
+      )
     : [];
 
   const recordIds = projectionRows
@@ -1044,105 +1093,120 @@ export const searchBusabase = async (
     .map((row) => row.changeRequestId)
     .filter((changeRequestId): changeRequestId is string => Boolean(changeRequestId));
 
+  await execution.beforeQuery();
   const [recordRows, changeRequestRows, baseRows] = await Promise.all([
+    // Hydration by primary key, bounded by the candidate window: plain reads.
     recordIds.length > 0
-      ? db
-          .select()
-          .from(busabaseRecords)
-          .where(and(inArray(busabaseRecords.id, recordIds), eq(busabaseRecords.status, "active")))
+      ? execution.read(async (readDb) =>
+          readDb
+            .select()
+            .from(busabaseRecords)
+            .where(
+              and(inArray(busabaseRecords.id, recordIds), eq(busabaseRecords.status, "active")),
+            ),
+        )
       : Promise.resolve([]),
     changeRequestIds.length > 0
-      ? db
-          .select()
-          .from(busabaseChangeRequests)
-          .where(inArray(busabaseChangeRequests.id, changeRequestIds))
+      ? execution.read(async (readDb) =>
+          readDb
+            .select()
+            .from(busabaseChangeRequests)
+            .where(inArray(busabaseChangeRequests.id, changeRequestIds)),
+        )
       : Promise.resolve([]),
     wantsNames
-      ? db
-          // `getTableColumns` keeps the row FLAT. A bare `.select()` with a
-          // join returns `{ busabase_bases: {...}, busabase_nodes: {...} }`,
-          // which every consumer of these rows below would have to unwrap —
-          // the join exists only to reach the node's timestamps, not to add
-          // columns to the result.
-          .select({
-            ...getTableColumns(busabaseBases),
-            // The node's timestamps, NOT the Base's `createdAt`. This query
-            // both filters and orders by `busabaseNodes.updatedAt` (see below),
-            // so the global merge has to be handed the same value — sorting the
-            // merged list by a column the row was not selected on is how a
-            // "sorted" list ends up in an order nobody asked for.
-            nodeCreatedAt: busabaseNodes.createdAt,
-            nodeUpdatedAt: busabaseNodes.updatedAt,
-            nodeCreatedBy: busabaseNodes.createdBy,
-          })
-          .from(busabaseBases)
-          // `busabase_bases` carries only `createdAt` — no `updatedAt`, no
-          // creator. Its owning NODE has both, so date, author and sort all
-          // resolve through the node rather than being faked from `createdAt`
-          // or silently dropping Bases whenever one of those filters is used.
-          // Dropping them would look like "no Bases matched", which is the
-          // failure mode this whole series exists to remove.
-          .innerJoin(busabaseNodes, eq(busabaseNodes.id, busabaseBases.nodeId))
-          .where(
-            and(
-              eq(busabaseBases.spaceId, spaceId),
-              isNull(busabaseBases.archivedAt),
-              buildNodeVisibilityExists(db, busabaseBases.nodeId),
-              dateRangeCondition(busabaseNodes.updatedAt, narrowing),
-              // A Base has no creator column of its own; it answers through the
-              // owning node this query already joins for its dates and sort.
-              createdByCondition(busabaseNodes.createdBy, narrowing),
-              subtreeIds ? inArray(busabaseBases.nodeId, subtreeIds) : undefined,
-              or(
-                ilike(busabaseBases.name, pattern),
-                ilike(busabaseBases.description, pattern),
-                ilike(busabaseBases.slug, pattern),
-                exists(
-                  db
-                    .select({ one: sql`1` })
-                    .from(busabaseBaseFields)
-                    .where(
-                      and(
-                        eq(busabaseBaseFields.baseId, busabaseBases.id),
-                        eq(busabaseBaseFields.spaceId, spaceId),
-                        or(
-                          ilike(busabaseBaseFields.name, pattern),
-                          ilike(busabaseBaseFields.slug, pattern),
+      ? execution.query(async (queryDb) =>
+          queryDb
+            // `getTableColumns` keeps the row FLAT. A bare `.select()` with a
+            // join returns `{ busabase_bases: {...}, busabase_nodes: {...} }`,
+            // which every consumer of these rows below would have to unwrap —
+            // the join exists only to reach the node's timestamps, not to add
+            // columns to the result.
+            .select({
+              ...getTableColumns(busabaseBases),
+              // The node's timestamps, NOT the Base's `createdAt`. This query
+              // both filters and orders by `busabaseNodes.updatedAt` (see below),
+              // so the global merge has to be handed the same value — sorting the
+              // merged list by a column the row was not selected on is how a
+              // "sorted" list ends up in an order nobody asked for.
+              nodeCreatedAt: busabaseNodes.createdAt,
+              nodeUpdatedAt: busabaseNodes.updatedAt,
+              nodeCreatedBy: busabaseNodes.createdBy,
+            })
+            .from(busabaseBases)
+            // `busabase_bases` carries only `createdAt` — no `updatedAt`, no
+            // creator. Its owning NODE has both, so date, author and sort all
+            // resolve through the node rather than being faked from `createdAt`
+            // or silently dropping Bases whenever one of those filters is used.
+            // Dropping them would look like "no Bases matched", which is the
+            // failure mode this whole series exists to remove.
+            .innerJoin(busabaseNodes, eq(busabaseNodes.id, busabaseBases.nodeId))
+            .where(
+              and(
+                eq(busabaseBases.spaceId, spaceId),
+                isNull(busabaseBases.archivedAt),
+                buildNodeVisibilityExists(db, busabaseBases.nodeId),
+                dateRangeCondition(busabaseNodes.updatedAt, narrowing),
+                // A Base has no creator column of its own; it answers through the
+                // owning node this query already joins for its dates and sort.
+                createdByCondition(busabaseNodes.createdBy, narrowing),
+                subtreeIds ? inArray(busabaseBases.nodeId, subtreeIds) : undefined,
+                or(
+                  ilike(busabaseBases.name, pattern),
+                  ilike(busabaseBases.description, pattern),
+                  ilike(busabaseBases.slug, pattern),
+                  exists(
+                    db
+                      .select({ one: sql`1` })
+                      .from(busabaseBaseFields)
+                      .where(
+                        and(
+                          eq(busabaseBaseFields.baseId, busabaseBases.id),
+                          eq(busabaseBaseFields.spaceId, spaceId),
+                          or(
+                            ilike(busabaseBaseFields.name, pattern),
+                            ilike(busabaseBaseFields.slug, pattern),
+                          ),
                         ),
                       ),
-                    ),
+                  ),
                 ),
               ),
-            ),
-          )
-          .orderBy(
-            orderForSort(
-              narrowing.sort,
-              { createdAt: busabaseNodes.createdAt, updatedAt: busabaseNodes.updatedAt },
-              desc(busabaseNodes.updatedAt),
-            ),
-          )
-          .limit(candidateWindow)
+            )
+            .orderBy(
+              orderForSort(
+                narrowing.sort,
+                { createdAt: busabaseNodes.createdAt, updatedAt: busabaseNodes.updatedAt },
+                desc(busabaseNodes.updatedAt),
+              ),
+            )
+            .limit(candidateWindow),
+        )
       : Promise.resolve([]),
   ]);
 
   const baseRowsById = new Map(baseRows.map((base) => [base.id, base]));
   const allBaseIds = [...new Set([...baseRowsById.keys()])];
+  await execution.beforeQuery();
   const allBaseFields =
     allBaseIds.length > 0
-      ? await db
-          .select()
-          .from(busabaseBaseFields)
-          .where(inArray(busabaseBaseFields.baseId, allBaseIds))
+      ? await execution.read(async (readDb) =>
+          readDb
+            .select()
+            .from(busabaseBaseFields)
+            .where(inArray(busabaseBaseFields.baseId, allBaseIds)),
+        )
       : [];
 
   const recordsById = new Map(recordRows.map((record) => [record.id, record]));
   const changeRequestsById = new Map(
     changeRequestRows.map((changeRequest) => [changeRequest.id, changeRequest]),
   );
+  await execution.beforeQuery();
   const [projectionResults, fileSearch] = await Promise.all([
     Promise.all(
       projectionRows.flatMap((row) => {
+        execution.checkpoint();
         if (row.recordId) {
           const record = recordsById.get(row.recordId);
           return record
@@ -1169,12 +1233,13 @@ export const searchBusabase = async (
       }),
     ),
     wantsFiles
-      ? searchAssetBackedFiles(query, candidateWindow, narrowing, parsed.mode === "full")
+      ? searchAssetBackedFiles(query, candidateWindow, narrowing, parsed.mode === "full", execution)
       : Promise.resolve({ results: [] as SortableResult[], truncated: false }),
   ]);
 
+  await execution.beforeQuery();
   const nodeContent = wantsNodes
-    ? await searchNodeContent(db, spaceId, query, candidateWindow, narrowing)
+    ? await searchNodeContent(db, spaceId, query, candidateWindow, narrowing, execution)
     : { results: [] as SortableResult[], truncated: false };
 
   const baseResults = [...baseRowsById.values()].map((base) => ({
@@ -1223,16 +1288,40 @@ export const searchBusabase = async (
     query,
     results,
   };
-  recordSearchRequest({
-    name: "search.request.completed",
-    durationMs: Date.now() - startedAt,
-    mode: parsed.mode,
-    surface: parsed.surface ?? "api",
-    resultCount: results.length,
-    emptyPage: results.length === 0,
-    hasMore: response.hasMore,
-    offset: parsed.offset,
-    sourceCount: parsed.sources ? new Set(parsed.sources).size : SEARCH_SOURCES.length,
-  });
   return response;
+};
+
+/** Candidate SQL has a statement budget; hydration and host callbacks run after its transaction releases. */
+export const searchBusabase = async (
+  input?: z.input<typeof searchInputSchema>,
+  options: { signal?: AbortSignal } = {},
+): Promise<SearchResponseVO> => {
+  const startedAt = Date.now();
+  const parsed = searchInputSchema.parse(input);
+  let response: SearchResponseVO | undefined;
+  let failure: unknown;
+  try {
+    await ensureReady();
+    const db = await getDb();
+    response = await withSearchExecution(db, parsed.mode, options.signal, (_tx, execution) =>
+      searchWithinBudget(parsed, execution),
+    );
+    return response;
+  } catch (error) {
+    failure = error;
+    throw error;
+  } finally {
+    recordSearchRequest({
+      name: "search.request.completed",
+      outcome: failure ? getSearchExecutionOutcome(failure) : "success",
+      durationMs: Date.now() - startedAt,
+      mode: parsed.mode,
+      surface: parsed.surface ?? "api",
+      resultCount: response?.results.length ?? 0,
+      emptyPage: (response?.results.length ?? 0) === 0,
+      hasMore: response?.hasMore ?? false,
+      offset: parsed.offset,
+      sourceCount: parsed.sources ? new Set(parsed.sources).size : SEARCH_SOURCES.length,
+    });
+  }
 };

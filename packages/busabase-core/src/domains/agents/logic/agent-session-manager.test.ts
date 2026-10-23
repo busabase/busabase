@@ -282,6 +282,12 @@ function serveFakeAgent(
     promptGate?: Promise<void>;
     requestPermission?: boolean;
     /**
+     * Tool titles to request permission for all at once, the way Claude Code
+     * asks for parallel tool calls: every `session/request_permission` is in
+     * flight before any is answered.
+     */
+    parallelPermissions?: string[];
+    /**
      * When set, the fake agent does not resolve `session/prompt` on its own —
      * it waits for `session/cancel` and then resolves the *original* pending
      * prompt request with `stopReason: "cancelled"`, per ACP's cancellation
@@ -303,6 +309,8 @@ function serveFakeAgent(
   const cancelledSessionIds: string[] = [];
   const cancelledRequestSessionIds: string[] = [];
   const cancelWaiters = new Map<string, () => void>();
+  /** What the client answered, in the order the answers arrived. */
+  const permissionOutcomes: Array<{ title: string; outcome: acp.RequestPermissionOutcome }> = [];
   let connected: acp.AgentContext | undefined;
   const ready = new Promise<void>((resolve) => {
     acp
@@ -351,20 +359,26 @@ function serveFakeAgent(
         promptSessionIds.push(ctx.params.sessionId);
         const text = ctx.params.prompt.find((block) => block.type === "text");
         if (text?.type === "text") promptTexts.push(text.text);
-        if (options?.requestPermission) {
-          await ctx.client.request(acp.methods.client.session.requestPermission, {
+        const askPermission = async (toolCallId: string, title: string) => {
+          const response = await ctx.client.request(acp.methods.client.session.requestPermission, {
             sessionId: ctx.params.sessionId,
-            toolCall: {
-              toolCallId: "tc-test-permission",
-              title: "Run a test command",
-              kind: "execute",
-              status: "pending",
-            },
+            toolCall: { toolCallId, title, kind: "execute", status: "pending" },
             options: [
               { optionId: "allow", name: "Allow", kind: "allow_once" },
               { optionId: "deny", name: "Deny", kind: "reject_once" },
             ],
           });
+          permissionOutcomes.push({ title, outcome: response.outcome });
+        };
+        if (options?.requestPermission) {
+          await askPermission("tc-test-permission", "Run a test command");
+        }
+        if (options?.parallelPermissions) {
+          await Promise.all(
+            options.parallelPermissions.map((title, index) =>
+              askPermission(`tc-parallel-${index}`, title),
+            ),
+          );
         }
         if (options?.promptChunkText) {
           await ctx.client.notify(acp.methods.client.session.update, {
@@ -424,6 +438,7 @@ function serveFakeAgent(
     promptContents: () => promptContents,
     cancelledSessionIds: () => cancelledSessionIds,
     cancelledRequestSessionIds: () => cancelledRequestSessionIds,
+    permissionOutcomes: () => permissionOutcomes,
     setConfigOptionsSilently: (nextConfigOptions: acp.SessionConfigOption[]) => {
       configOptions = nextConfigOptions;
     },
@@ -1303,7 +1318,7 @@ describe("promptAgentSession", () => {
       flushPending: Promise.resolve(),
       buffer: [],
       listeners: new Set([listener]),
-      pendingPermission: null,
+      pendingPermissions: new Map(),
       permissionCounter: 0,
     };
     (
@@ -1358,7 +1373,7 @@ describe("promptAgentSession", () => {
       flushPending: Promise.resolve(),
       buffer: [],
       listeners: new Set(),
-      pendingPermission: null,
+      pendingPermissions: new Map(),
       permissionCounter: 0,
     };
     (
@@ -1405,7 +1420,7 @@ describe("promptAgentSession", () => {
       flushPending: Promise.resolve(),
       buffer: [],
       listeners: new Set(),
-      pendingPermission: null,
+      pendingPermissions: new Map(),
       permissionCounter: 0,
     };
     (
@@ -1576,7 +1591,7 @@ describe("promptAgentSession", () => {
         globalThis as typeof globalThis & {
           __busabaseAgentSessions?: Map<
             string,
-            { buffer: AgentSessionEventVO[]; pendingPermission: unknown }
+            { buffer: AgentSessionEventVO[]; pendingPermissions: unknown }
           >;
         }
       ).__busabaseAgentSessions?.get(session.id);
@@ -1666,7 +1681,7 @@ describe("promptAgentSession", () => {
       flushPending: Promise.resolve(),
       buffer: [],
       listeners: new Set(),
-      pendingPermission: null,
+      pendingPermissions: new Map(),
       permissionCounter: 0,
     };
     (
@@ -1706,7 +1721,7 @@ describe("promptAgentSession", () => {
       flushPending: Promise.resolve(),
       buffer: [],
       listeners: new Set(),
-      pendingPermission: null,
+      pendingPermissions: new Map(),
       permissionCounter: 0,
     };
     (
@@ -1863,6 +1878,226 @@ describe("cancelAgentSession", () => {
     expect(agent.promptTexts()).toEqual(["still usable after startup stop"]);
 
     await closeAgentSessions([session.id]);
+  });
+});
+
+describe("respondToAgentPermission — concurrent requests", () => {
+  let agentSide: Stream;
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+    resetStoreMocks();
+    mocks.storedSessions.length = 0;
+    mocks.storedScopes.clear();
+    (
+      globalThis as typeof globalThis & { __busabaseAgentSessions?: Map<string, unknown> }
+    ).__busabaseAgentSessions = new Map();
+    const [clientSide, side] = linkedStreams();
+    agentSide = side;
+    mocks.createWebSocketStream.mockReturnValue(clientSide);
+  });
+
+  type PendingEntry = { resolve: (outcome: acp.RequestPermissionOutcome) => void };
+  const liveSession = (sessionId: string) => {
+    const live = (
+      globalThis as typeof globalThis & {
+        __busabaseAgentSessions?: Map<
+          string,
+          { buffer: AgentSessionEventVO[]; pendingPermissions: Map<string, PendingEntry> }
+        >;
+      }
+    ).__busabaseAgentSessions?.get(sessionId);
+    if (!live) throw new Error(`No live session ${sessionId}`);
+    return live;
+  };
+  const permissionCards = (sessionId: string) =>
+    liveSession(sessionId)
+      .buffer.filter((event) => event.kind === "permissionRequest")
+      .map((event) => ({
+        requestId: event.permissionRequest?.requestId ?? "missing",
+        title: event.permissionRequest?.title,
+      }));
+  /** Status events of the current turn, i.e. after the user's prompt was echoed. */
+  const turnStatuses = (sessionId: string) => {
+    const { buffer } = liveSession(sessionId);
+    const promptIndex = buffer.findLastIndex(
+      (event) =>
+        event.kind === "acpUpdate" &&
+        (event.acpUpdate as { sessionUpdate?: string } | undefined)?.sessionUpdate ===
+          "user_message",
+    );
+    return buffer
+      .slice(promptIndex + 1)
+      .filter((event) => event.kind === "status")
+      .map((event) => event.status);
+  };
+  const statusOf = async (sessionId: string) =>
+    (await listAgentSessions()).find((candidate) => candidate.id === sessionId)?.status;
+
+  it("answers two concurrent requests independently, last answer first", async () => {
+    const agent = serveFakeAgent(agentSide, [], {
+      parallelPermissions: ["Read the base", "List the records"],
+    });
+    const session = await createAgentSession({ slug: "test-agent", spaceId: LOCAL_SPACE_ID });
+    await waitUntilSettled(session.id);
+
+    try {
+      await startAgentSessionPrompt(session.id, "use two tools at once");
+      await vi.waitFor(() => expect(permissionCards(session.id)).toHaveLength(2));
+      await vi.waitFor(async () => expect(await statusOf(session.id)).toBe("waiting_permission"));
+      const [first, second] = permissionCards(session.id);
+      expect(first?.title).toBe("Read the base");
+      expect(second?.title).toBe("List the records");
+      expect(first?.requestId).not.toBe(second?.requestId);
+
+      // The second card first — the one a single-slot implementation kept.
+      respondToAgentPermission(session.id, second?.requestId ?? "missing", "deny");
+      await vi.waitFor(() =>
+        expect(agent.permissionOutcomes()).toEqual([
+          { title: "List the records", outcome: { outcome: "selected", optionId: "deny" } },
+        ]),
+      );
+      // The first is still the human's to answer, so the turn stays paused on it.
+      expect(await statusOf(session.id)).toBe("waiting_permission");
+      expect(turnStatuses(session.id)).toEqual(["busy", "waiting_permission"]);
+      expect(() =>
+        respondToAgentPermission(session.id, second?.requestId ?? "missing", "allow"),
+      ).toThrow("This permission request is no longer pending.");
+      expect(() => respondToAgentPermission(session.id, "perm_unknown", "allow")).toThrow(
+        "This permission request is no longer pending.",
+      );
+
+      // The card the old code rejected outright now resolves its own request.
+      respondToAgentPermission(session.id, first?.requestId ?? "missing", "allow");
+      await vi.waitFor(() =>
+        expect(agent.permissionOutcomes()).toEqual([
+          { title: "List the records", outcome: { outcome: "selected", optionId: "deny" } },
+          { title: "Read the base", outcome: { outcome: "selected", optionId: "allow" } },
+        ]),
+      );
+      await vi.waitFor(async () => expect(await statusOf(session.id)).toBe("idle"));
+      expect(turnStatuses(session.id)).toEqual(["busy", "waiting_permission", "busy", "idle"]);
+      expect(() =>
+        respondToAgentPermission(session.id, first?.requestId ?? "missing", "allow"),
+      ).toThrow("No permission request is pending for this session.");
+
+      // Client side: each card keeps its own answer, matched by its own id.
+      const blocks = reduceAcpEvents(
+        [],
+        liveSession(session.id).buffer.flatMap(translateAgentSessionEvent),
+      );
+      expect(
+        blocks
+          .filter((block) => block.kind === "permission")
+          .map((block) => ({ title: block.title, resolution: block.resolution })),
+      ).toEqual([
+        { title: "Read the base", resolution: { optionId: "allow" } },
+        { title: "List the records", resolution: { optionId: "deny" } },
+      ]);
+    } finally {
+      await closeAgentSessions([session.id]);
+    }
+  });
+
+  it("keeps a single request's behaviour unchanged", async () => {
+    const agent = serveFakeAgent(agentSide, [], { requestPermission: true });
+    const session = await createAgentSession({ slug: "test-agent", spaceId: LOCAL_SPACE_ID });
+    await waitUntilSettled(session.id);
+
+    try {
+      await startAgentSessionPrompt(session.id, "one tool");
+      await vi.waitFor(async () => expect(await statusOf(session.id)).toBe("waiting_permission"));
+      const [card] = permissionCards(session.id);
+      expect(() => respondToAgentPermission(session.id, "perm_unknown", "allow")).toThrow(
+        "This permission request is no longer pending.",
+      );
+      expect(() =>
+        respondToAgentPermission(session.id, card?.requestId ?? "missing", "never-offered"),
+      ).toThrow('"never-offered" is not one of the offered options.');
+
+      respondToAgentPermission(session.id, card?.requestId ?? "missing", "allow");
+      await vi.waitFor(async () => expect(await statusOf(session.id)).toBe("idle"));
+      expect(agent.permissionOutcomes()).toEqual([
+        { title: "Run a test command", outcome: { outcome: "selected", optionId: "allow" } },
+      ]);
+      expect(turnStatuses(session.id)).toEqual(["busy", "waiting_permission", "busy", "idle"]);
+      expect(
+        liveSession(session.id).buffer.filter((event) => event.kind === "permissionResolved"),
+      ).toMatchObject([{ permissionRequestId: card?.requestId, permissionOptionId: "allow" }]);
+    } finally {
+      await closeAgentSessions([session.id]);
+    }
+  });
+
+  it("answers every pending request cancelled on session/cancel and ends the turn idle", async () => {
+    const agent = serveFakeAgent(agentSide, [], {
+      parallelPermissions: ["Read the base", "List the records"],
+      cancelFirstPromptOnNotify: true,
+    });
+    const session = await createAgentSession({ slug: "test-agent", spaceId: LOCAL_SPACE_ID });
+    await waitUntilSettled(session.id);
+
+    try {
+      await startAgentSessionPrompt(session.id, "stop while both cards are up");
+      await vi.waitFor(() => expect(permissionCards(session.id)).toHaveLength(2));
+      const [first] = permissionCards(session.id);
+
+      await cancelAgentSession(session.id);
+      // Both answered; the order their responses reach the agent is not fixed.
+      await vi.waitFor(() =>
+        expect(
+          [...agent.permissionOutcomes()].sort((a, b) => a.title.localeCompare(b.title)),
+        ).toEqual([
+          { title: "List the records", outcome: { outcome: "cancelled" } },
+          { title: "Read the base", outcome: { outcome: "cancelled" } },
+        ]),
+      );
+      await vi.waitFor(async () => expect(await statusOf(session.id)).toBe("idle"));
+      // Nobody is asked anymore, so the turn winds down as busy until the
+      // agent answers the prompt; no card is published as answered.
+      expect(turnStatuses(session.id)).toEqual(["busy", "waiting_permission", "busy", "idle"]);
+      expect(
+        liveSession(session.id).buffer.some((event) => event.kind === "permissionResolved"),
+      ).toBe(false);
+      // A card clicked after Stop cannot reopen the finished turn.
+      expect(() =>
+        respondToAgentPermission(session.id, first?.requestId ?? "missing", "allow"),
+      ).toThrow("No permission request is pending for this session.");
+      expect(await statusOf(session.id)).toBe("idle");
+    } finally {
+      await closeAgentSessions([session.id]);
+    }
+  });
+
+  it("settles every parked request when the session closes", async () => {
+    serveFakeAgent(agentSide, [], {
+      parallelPermissions: ["Read the base", "List the records"],
+    });
+    const session = await createAgentSession({ slug: "test-agent", spaceId: LOCAL_SPACE_ID });
+    await waitUntilSettled(session.id);
+
+    await startAgentSessionPrompt(session.id, "close while both cards are up");
+    await vi.waitFor(() => expect(permissionCards(session.id)).toHaveLength(2));
+    const live = liveSession(session.id);
+    const settled: acp.RequestPermissionOutcome[] = [];
+    for (const entry of live.pendingPermissions.values()) {
+      const resolve = entry.resolve;
+      entry.resolve = (outcome) => {
+        settled.push(outcome);
+        resolve(outcome);
+      };
+    }
+
+    // Not under test here: `close()`'s own fire-and-forget "ended" write is
+    // fenced on a `busy` row mid-turn and would reject against this
+    // `waiting_permission` one (pre-existing, unrelated to permissions).
+    mocks.persistSessionState.mockResolvedValue(true);
+    await closeAgentSessions([session.id]);
+
+    expect(settled).toEqual([{ outcome: "cancelled" }, { outcome: "cancelled" }]);
+    expect(live.pendingPermissions.size).toBe(0);
+    // Teardown is not a human answer: nothing is published as "resolved".
+    expect(live.buffer.some((event) => event.kind === "permissionResolved")).toBe(false);
   });
 });
 

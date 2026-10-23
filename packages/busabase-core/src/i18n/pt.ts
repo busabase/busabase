@@ -1,6 +1,8 @@
 import type { CoreI18nMessages } from "./messages";
 
 export const dashboardPt: CoreI18nMessages = {
+  lookup: lookupPt,
+  reverseRelation: reverseRelationPt,
   fieldHelp: {
     inherit: "Usar instruções do campo",
     override: "Personalizar para este formulário",
@@ -821,17 +823,12 @@ export const dashboardPt: CoreI18nMessages = {
     install: "Instalar",
     installRestricted:
       "Somente proprietários e administradores do espaço — um modelo pode incluir um app e uma skill, que é código que os agentes deste espaço vão executar.",
-    cardBases: "{count} tabela{plural}",
-    cardApps: "{count} app{plural}",
-    cardDocs: "{count} documento{plural}",
-    cardRows: "{count} registro{plural} de exemplo",
-    cardManual: "Manual do agente",
     promptsTitle: "O que você pode pedir a um agente depois de instalado",
     promptsDescription:
       "O agente consegue responder a isso porque o modelo instala o manual do autor junto com as Bases. Ele não precisa adivinhar o seu esquema.",
     contentsTitle: "O que a instalação cria",
-    contentsDescription:
-      'Se você pode editar este espaço, Bases, campos, registros de exemplo, o app e o manual do agente são criados imediatamente. Marque "Enviar o conteúdo para revisão primeiro" ao instalar para receber o código do app e o manual como Change Requests.',
+    permissionNote:
+      "Instalar exige ser proprietário ou administrador deste espaço. Tudo o que ele cria fica pronto na hora; você também pode optar por revisar o conteúdo antes.",
     bases: "Bases",
     apps: "Apps",
     documents: "Documentos",
@@ -1615,6 +1612,13 @@ export const dashboardPt: CoreI18nMessages = {
     viewFieldDragOutside: "O campo está fora da área de reordenação. Solte para cancelar.",
     noViewFilters: "Nenhum filtro nesta visualização.",
     noViewSorts: "Nenhuma ordenação nesta visualização.",
+    filterMatch: "Corresponder",
+    filterMatchAll: "Todas as condições (E)",
+    filterMatchAny: "Qualquer condição (OU)",
+    filterConjunction: "Combinação de condições",
+    addFilterGroup: "Adicionar grupo de condições",
+    removeFilterGroup: "Remover grupo de condições",
+    filterMissingField: "Campo indisponível",
     viewFilterCount: "{count} filtros",
     viewSortCount: "{count} ordenações",
     clearAllFilters: "Limpar todos os filtros",
@@ -2556,3 +2560,6 @@ export const dashboardPt: CoreI18nMessages = {
       "Crie a pasta, as tabelas e o app neste espaço. Por este caminho, seu agente não aprende nada — você pode entregar o manual a ele pela aba Instalação por agente a qualquer momento.",
   },
 };
+
+import { lookupPt } from "./lookup";
+import { reverseRelationPt } from "./reverse-relation";

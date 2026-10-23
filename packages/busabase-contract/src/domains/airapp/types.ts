@@ -9,7 +9,7 @@ export type {
  * code — and nothing else, which is what keeps the three values comparable:
  *
  * - `"browser"` runs the app inside the viewer's own tab, on the
- *   `@scelar/nodepod` Web Worker runtime: a virtual, browser-side filesystem +
+ *   `@r1ck404/nodepod` Web Worker runtime: a virtual, browser-side filesystem +
  *   process. Nothing is installed and nothing is spawned on any server, so it
  *   is the one engine every deployment can always offer — and the only one
  *   restricted to JavaScript.

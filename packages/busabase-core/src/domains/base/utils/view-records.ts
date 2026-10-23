@@ -3,8 +3,11 @@ import type {
   FieldType,
   RecordVO,
   ViewConfigVO,
+  ViewFilterConditionVO,
+  ViewFilterConjunction,
   ViewFilterVO,
 } from "busabase-contract/types";
+import { isViewFilterGroup } from "busabase-contract/types";
 import { getDateFieldOptions, getDateFieldSortKey } from "./date-value";
 import { resolveEmbedPreview } from "./embed";
 
@@ -251,8 +254,12 @@ const recordMatchesViewFilter = (
   fields: ReadonlyArray<BaseFieldVO>,
   filter: ViewFilterVO,
 ): boolean => {
-  const value = record.fields[filter.fieldSlug];
-  const field = fields.find((item) => item.slug === filter.fieldSlug);
+  const field = fields.find((item) =>
+    filter.fieldId ? item.id === filter.fieldId : item.slug === filter.fieldSlug,
+  );
+  // A deleted/stale field must not turn an OR branch into a match or bind to a reused slug.
+  if (!field) return false;
+  const value = record.fields[field.slug];
   const text = getViewFieldPreviewText(field, value).toLowerCase();
   const expected = getViewFieldPreviewText(field, filter.value).toLowerCase();
 
@@ -305,23 +312,42 @@ const compareRecordsByViewSort = (
  * always sorts, falling back to `updatedAt desc`. Same matcher as the full
  * apply below, so a filter means the same thing on both paths.
  */
+/** Empty root means no filter. Empty nested groups fail closed. */
+const recordMatchesViewFilters = (
+  record: ViewEvaluableRecord,
+  fields: ReadonlyArray<BaseFieldVO>,
+  conditions: ReadonlyArray<ViewFilterConditionVO>,
+  conjunction: ViewFilterConjunction,
+): boolean => {
+  if (conditions.length === 0) return true;
+  const matches = (condition: ViewFilterConditionVO): boolean =>
+    isViewFilterGroup(condition)
+      ? condition.conditions.length > 0 &&
+        recordMatchesViewFilters(record, fields, condition.conditions, condition.conjunction)
+      : recordMatchesViewFilter(record, fields, condition);
+  return conjunction === "or" ? conditions.some(matches) : conditions.every(matches);
+};
+
 export const filterEvaluableRecordsByViewFilters = <T extends ViewEvaluableRecord>(
   records: T[],
   baseFields: ReadonlyArray<BaseFieldVO>,
-  filters: ReadonlyArray<ViewFilterVO>,
+  filters: ReadonlyArray<ViewFilterConditionVO>,
+  conjunction: ViewFilterConjunction = "and",
 ): T[] =>
-  records.filter((record) =>
-    filters.every((filter) => recordMatchesViewFilter(record, baseFields, filter)),
-  );
+  records.filter((record) => recordMatchesViewFilters(record, baseFields, filters, conjunction));
 
 /** `filterEvaluableRecordsByViewFilters` over hydrated VOs (lookup values already merged in). */
 export const filterRecordsByViewFilters = (
   records: RecordVO[],
-  filters: ReadonlyArray<ViewFilterVO>,
+  filters: ReadonlyArray<ViewFilterConditionVO>,
+  conjunction: ViewFilterConjunction = "and",
 ): RecordVO[] =>
   records.filter((record) =>
-    filters.every((filter) =>
-      recordMatchesViewFilter(toViewEvaluableRecord(record), record.base.fields, filter),
+    recordMatchesViewFilters(
+      toViewEvaluableRecord(record),
+      record.base.fields,
+      filters,
+      conjunction,
     ),
   );
 
@@ -333,7 +359,7 @@ export const applyViewConfigToRecords = (
   if (!config) {
     return records;
   }
-  const filtered = filterRecordsByViewFilters(records, config.filters);
+  const filtered = filterRecordsByViewFilters(records, config.filters, config.filterConjunction);
   return [...filtered].sort((left, right) =>
     compareRecordsByViewSort(
       toViewEvaluableRecord(left),
@@ -358,7 +384,12 @@ export const applyViewConfigToEvaluableRecords = <T extends ViewEvaluableRecord>
   if (!config) {
     return records;
   }
-  const filtered = filterEvaluableRecordsByViewFilters(records, baseFields, config.filters);
+  const filtered = filterEvaluableRecordsByViewFilters(
+    records,
+    baseFields,
+    config.filters,
+    config.filterConjunction,
+  );
   return [...filtered].sort((left, right) =>
     compareRecordsByViewSort(left, right, baseFields, config),
   );

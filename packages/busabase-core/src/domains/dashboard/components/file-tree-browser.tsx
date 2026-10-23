@@ -68,6 +68,25 @@ import type { SkillCodeLanguage } from "./field-preview";
 import { ConfirmActionDialog } from "./primitives";
 
 /**
+ * Drop `nodeId` (and with it, its subtree) from a cached node tree. The delete
+ * dialog closes before the node lists refetch, so without this the archived row
+ * would sit in the sidebar until the refetch lands.
+ */
+const pruneNodeFromTree = (tree: unknown, nodeId: string): unknown => {
+  if (!Array.isArray(tree)) {
+    return tree;
+  }
+  return tree
+    .filter((node) => (node as { id?: string })?.id !== nodeId)
+    .map((node) => {
+      const children = (node as { children?: unknown })?.children;
+      return Array.isArray(children)
+        ? { ...(node as object), children: pruneNodeFromTree(children, nodeId) }
+        : node;
+    });
+};
+
+/**
  * The confirm-and-archive half of the delete flow, with no trigger of its own —
  * the caller owns `open`. Delete used to be a standalone toolbar button sitting
  * next to the "•••" menu; it now lives as an item *inside* that menu
@@ -165,10 +184,16 @@ export function NodeDeleteDialog({
       queryClient.removeQueries({ queryKey: orpc.nodes.get.key() });
       queryClient.removeQueries({ queryKey: orpc.forms.getByNode.key() });
       queryClient.removeQueries({ queryKey: orpc.nodes.resolveRouteState.key() });
-      await queryClient.invalidateQueries({
+      queryClient.setQueriesData({ queryKey: orpc.nodes.list.key() }, (tree) =>
+        pruneNodeFromTree(tree, nodeId),
+      );
+      // The delete has already landed, so close right away. Awaiting the node
+      // list refetches here kept the dialog open for as long as a big
+      // workspace's tree took to reload; the lists refresh in the background.
+      void queryClient.invalidateQueries({
         queryKey: orpc.nodes.list.queryOptions({}).queryKey,
       });
-      await queryClient.invalidateQueries({
+      void queryClient.invalidateQueries({
         queryKey: orpc.nodes.list.queryOptions({ input: { status: "archived" } }).queryKey,
       });
       toast.success(fmt(messages.nodeDetail.movedToTrash, { type: label }));

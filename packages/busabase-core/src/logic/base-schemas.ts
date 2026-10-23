@@ -4,6 +4,10 @@ import {
   fieldNameSchema,
   lookupRollupSchema,
 } from "busabase-contract/domains/base/contract/base-schemas";
+import {
+  viewFilterConjunctionSchema,
+  viewFiltersSchema,
+} from "busabase-contract/domains/base/contract/view-schemas";
 import { VIEW_FIELD_MAX_WIDTH, VIEW_FIELD_MIN_WIDTH } from "busabase-contract/types";
 import { z } from "zod";
 
@@ -101,6 +105,8 @@ const fieldOptionsSchema = z
       })
       .optional(),
     inverseFieldId: z.string().optional(),
+    // Must mirror the contract's fieldOptionsSchema — see base-schemas.ts there.
+    reverseOfFieldId: z.string().optional(),
     // Must mirror the contract's fieldOptionsSchema — see base-schemas.ts there.
     lookup: z
       .object({
@@ -214,21 +220,6 @@ export const createNodeChangeRequestInputSchema = z.object({
   operations: z.array(nodeOperationInputSchema).min(1),
 });
 
-const viewFilterOperatorSchema = z.enum([
-  "contains",
-  "equals",
-  "not_empty",
-  "is_empty",
-  "is_true",
-  "is_false",
-]);
-
-const viewFilterSchema = z.object({
-  fieldSlug: z.string().min(1),
-  operator: viewFilterOperatorSchema,
-  value: z.unknown().optional(),
-});
-
 const viewSortSchema = z.object({
   direction: z.enum(["asc", "desc"]),
   fieldSlug: z.string().min(1),
@@ -240,7 +231,8 @@ const viewSortSchema = z.object({
 const viewTypeSchema = z.enum(["table", "gallery", "kanban", "calendar", "gantt"]);
 
 const viewConfigObjectSchema = z.object({
-  filters: z.array(viewFilterSchema).optional().default([]),
+  filters: viewFiltersSchema.optional().default([]),
+  filterConjunction: viewFilterConjunctionSchema.optional(),
   sorts: z.array(viewSortSchema).optional().default([]),
   visibleFieldSlugs: z.array(z.string()).nullable().optional(),
   fieldWidths: z
@@ -263,7 +255,7 @@ export const viewConfigSchema = viewConfigObjectSchema
 
 // Mirror the contract patch: .partial() alone would still apply nested defaults.
 const viewConfigPatchSchema = viewConfigObjectSchema.omit({ filters: true, sorts: true }).extend({
-  filters: z.array(viewFilterSchema).optional(),
+  filters: viewFiltersSchema.optional(),
   sorts: z.array(viewSortSchema).optional(),
 });
 

@@ -1,3 +1,4 @@
+import { mapViewFilters } from "busabase-contract/types";
 import type {
   SeedBaseDef,
   SeedFieldDef,
@@ -645,7 +646,7 @@ const standardizeBlogViews = (view: SeedViewDef): SeedViewDef => {
     ...view,
     config: {
       ...view.config,
-      filters: view.config.filters.map((filter) =>
+      filters: mapViewFilters(view.config.filters, (filter) =>
         filter.fieldSlug === "status" && filter.value === "drafting"
           ? { ...filter, value: "in-review" }
           : filter,

@@ -22,9 +22,13 @@ import type {
   BaseFieldVO,
   FieldType,
   ViewConfigVO,
+  ViewFilterConditionVO,
+  ViewFilterConjunction,
   ViewFilterOperator,
+  ViewFilterVO,
   ViewVO,
 } from "busabase-contract/types";
+import { flattenViewFilters, isViewFilterGroup } from "busabase-contract/types";
 import { useReducedMotion } from "framer-motion";
 import { Dialog, DialogTitle } from "kui/dialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "kui/tooltip";
@@ -76,7 +80,6 @@ import {
   addViewSort,
   clearAllViewFilters,
   clearAllViewSorts,
-  clearViewFilterAt,
   clearViewSortAt,
   getVisibleViewFieldSlugs,
   hideViewField,
@@ -87,7 +90,7 @@ import {
   resetViewFieldWidth,
   showAllViewFields,
   showViewField,
-  updateViewFilterAt,
+  updateViewFilterPath,
   updateViewSortAt,
 } from "../helpers/view-config";
 import type { ViewSubmitOptions } from "../helpers/view-types";
@@ -185,8 +188,8 @@ export function ViewConfigToolbar({ config, fields, onOpen }: ViewConfigToolbarP
       section: "fields" as const,
     },
     {
-      active: config.filters.length > 0,
-      count: String(config.filters.length),
+      active: flattenViewFilters(config.filters).length > 0,
+      count: String(flattenViewFilters(config.filters).length),
       icon: Filter,
       label: messages.base.viewFilters,
       section: "filters" as const,
@@ -261,7 +264,9 @@ function ViewFieldRowContent({
   dragHandle,
 }: ViewFieldRowProps & { dragHandle?: ReactNode }) {
   const messages = useCoreI18n();
-  const hasFilter = config.filters.some((filter) => matchesViewField(filter, field));
+  const hasFilter = flattenViewFilters(config.filters).some((filter) =>
+    matchesViewField(filter, field),
+  );
   const hasSort = config.sorts.some((sort) => matchesViewField(sort, field));
 
   return (
@@ -583,7 +588,7 @@ const withContextCondition = (
   }
   if (
     request.section === "filters" &&
-    !config.filters.some((item) => matchesViewField(item, field))
+    !flattenViewFilters(config.filters).some((item) => matchesViewField(item, field))
   ) {
     return addViewFilter(config, field, getFieldFilterOperators(field.type)[0]);
   }
@@ -594,7 +599,7 @@ const withContextCondition = (
 };
 
 const hasInvalidFilters = (config: ViewConfigVO) =>
-  config.filters.some(
+  flattenViewFilters(config.filters).some(
     (filter) =>
       viewFilterOperatorNeedsValue(filter.operator) &&
       (filter.value === undefined || filter.value === null || String(filter.value).trim() === ""),
@@ -723,7 +728,11 @@ export function ViewConfigEditorDialog({
           {(
             [
               ["fields", messages.base.viewFields, `${visibleCount}/${fields.length}`],
-              ["filters", messages.base.viewFilters, String(draft.filters.length)],
+              [
+                "filters",
+                messages.base.viewFilters,
+                String(flattenViewFilters(draft.filters).length),
+              ],
               ["sorts", messages.base.viewSorts, String(draft.sorts.length)],
             ] as const
           ).map(([value, label, count]) => (
@@ -817,7 +826,7 @@ const findField = (fields: BaseFieldVO[], condition: { fieldId?: string; fieldSl
     condition.fieldId ? field.id === condition.fieldId : field.slug === condition.fieldSlug,
   );
 
-function ViewFiltersEditor({
+export function ViewFiltersEditor({
   client,
   config,
   fields,
@@ -827,149 +836,244 @@ function ViewFiltersEditor({
   const messages = useCoreI18n();
   const resolveIString = useIString();
   const visibleSet = new Set(getVisibleViewFieldSlugs(config, fields));
-
+  const count = flattenViewFilters(config.filters).length;
+  const makeFilter = (): ViewFilterVO | undefined => {
+    const field = fields[0];
+    return field
+      ? {
+          fieldId: field.id,
+          fieldSlug: field.slug,
+          operator: getFieldFilterOperators(field.type)[0],
+        }
+      : undefined;
+  };
+  const append = (path: number[], group: boolean) => {
+    const filter = makeFilter();
+    if (!filter || count >= 100) return;
+    const condition: ViewFilterConditionVO = group
+      ? { conjunction: "or", conditions: [filter] }
+      : filter;
+    onChange(
+      path.length
+        ? updateViewFilterPath(config, path, (current) =>
+            isViewFilterGroup(current)
+              ? { ...current, conditions: [...current.conditions, condition] }
+              : current,
+          )
+        : { ...config, filters: [...config.filters, condition] },
+    );
+  };
+  const groupControls = (conjunction: ViewFilterConjunction, path: number[]) => (
+    <div className="flex flex-wrap items-center gap-2 px-3 py-2 text-xs">
+      <label className="flex items-center gap-2">
+        <span>{messages.base.filterMatch}</span>
+        <select
+          aria-label={messages.base.filterConjunction}
+          className="h-8 rounded-md border border-border/70 bg-card px-2 text-xs"
+          value={conjunction}
+          onChange={(event) => {
+            const next = event.target.value as ViewFilterConjunction;
+            onChange(
+              path.length
+                ? updateViewFilterPath(config, path, (current) =>
+                    isViewFilterGroup(current) ? { ...current, conjunction: next } : current,
+                  )
+                : { ...config, filterConjunction: next },
+            );
+          }}
+        >
+          <option value="and">{messages.base.filterMatchAll}</option>
+          <option value="or">{messages.base.filterMatchAny}</option>
+        </select>
+      </label>
+      <button
+        className="rounded px-2 py-1 hover:bg-accent disabled:opacity-50"
+        disabled={!fields.length || count >= 100}
+        onClick={() => append(path, false)}
+        type="button"
+      >
+        {messages.base.addFilter}
+      </button>
+      {path.length < 2 ? (
+        <button
+          className="rounded px-2 py-1 hover:bg-accent disabled:opacity-50"
+          disabled={!fields.length || count >= 100}
+          onClick={() => append(path, true)}
+          type="button"
+        >
+          {messages.base.addFilterGroup}
+        </button>
+      ) : null}
+      {path.length ? (
+        <button
+          className="ml-auto rounded px-2 py-1 text-muted-foreground hover:bg-accent hover:text-destructive"
+          aria-label={messages.base.removeFilterGroup}
+          onClick={() => onChange(updateViewFilterPath(config, path, () => null))}
+          type="button"
+        >
+          <Trash2 className="size-3.5" />
+        </button>
+      ) : null}
+    </div>
+  );
+  const renderConditions = (conditions: ViewFilterConditionVO[], parentPath: number[]): ReactNode =>
+    conditions.map((filter, index) => {
+      const path = [...parentPath, index];
+      if (isViewFilterGroup(filter))
+        return (
+          <div
+            key={path.join("-")}
+            data-testid="view-filter-group"
+            className="mx-3 my-2 rounded-md border border-border bg-muted/20"
+          >
+            {groupControls(filter.conjunction, path)}
+            <div className="border-border/40 border-t">
+              {renderConditions(filter.conditions, path)}
+            </div>
+          </div>
+        );
+      const field = findField(fields, filter);
+      if (!field)
+        return (
+          <div
+            key={path.join("-")}
+            className="flex items-center justify-between gap-2 px-3 py-2 text-destructive text-xs"
+          >
+            <span>
+              {messages.base.filterMissingField}: {filter.fieldSlug}
+            </span>
+            <button
+              type="button"
+              onClick={() => onChange(updateViewFilterPath(config, path, () => null))}
+            >
+              {messages.base.removeFilter}
+            </button>
+          </div>
+        );
+      const operators = getFieldFilterOperators(field.type);
+      const operator = operators.includes(filter.operator) ? filter.operator : operators[0];
+      const focused = field.id === focusedFieldId;
+      return (
+        <div
+          className={`grid gap-2 px-3 py-2.5 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] ${
+            focused ? "bg-primary/5" : ""
+          }`}
+          data-condition-field-slug={field.slug}
+          data-focused-condition={focused ? "true" : undefined}
+          key={`${filter.fieldId ?? filter.fieldSlug}-${index}`}
+        >
+          <label className="min-w-0">
+            <span className="sr-only">
+              {fmt(messages.base.filterFieldAt, { index: index + 1 })}
+            </span>
+            <select
+              aria-label={fmt(messages.base.filterFieldAt, { index: index + 1 })}
+              className="h-8 w-full rounded-md border border-border/70 bg-card px-2 text-xs"
+              onChange={(event) => {
+                const nextField = fields.find((item) => item.id === event.target.value);
+                if (nextField) {
+                  onChange(
+                    updateViewFilterPath(config, path, () => ({
+                      fieldId: nextField.id,
+                      fieldSlug: nextField.slug,
+                      operator: getFieldFilterOperators(nextField.type)[0],
+                    })),
+                  );
+                }
+              }}
+              value={field.id}
+            >
+              {fields.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {resolveIString(item.name)}
+                </option>
+              ))}
+            </select>
+            {!visibleSet.has(field.slug) ? (
+              <span className="mt-1 flex items-center gap-1 text-muted-foreground text-[10px]">
+                <EyeOff className="size-3" />
+                {messages.base.hiddenField}
+              </span>
+            ) : null}
+          </label>
+          <select
+            aria-label={fmt(messages.base.filterOperatorAt, { index: index + 1 })}
+            className="h-8 w-full rounded-md border border-border/70 bg-card px-2 text-xs"
+            onChange={(event) => {
+              const nextOperator = event.target.value as ViewFilterOperator;
+              onChange(
+                updateViewFilterPath(config, path, () => ({
+                  fieldId: field.id,
+                  fieldSlug: field.slug,
+                  operator: nextOperator,
+                  ...(viewFilterOperatorNeedsValue(nextOperator) && filter.value !== undefined
+                    ? { value: filter.value }
+                    : {}),
+                })),
+              );
+            }}
+            value={operator}
+          >
+            {operators.map((item) => (
+              <option key={item} value={item}>
+                {messages.base.filterOperators[item]}
+              </option>
+            ))}
+          </select>
+          <button
+            aria-label={fmt(messages.base.removeFilterAt, { index: index + 1 })}
+            className="inline-flex size-8 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-destructive"
+            onClick={() => onChange(updateViewFilterPath(config, path, () => null))}
+            title={messages.base.removeFilter}
+            type="button"
+          >
+            <Trash2 className="size-3.5" />
+          </button>
+          {viewFilterOperatorNeedsValue(operator) ? (
+            <div className="sm:col-span-3">
+              <FilterValueControl
+                client={client}
+                field={field}
+                index={index}
+                onChange={(value) =>
+                  onChange(
+                    updateViewFilterPath(config, path, () => ({
+                      fieldId: field.id,
+                      fieldSlug: field.slug,
+                      operator,
+                      value,
+                    })),
+                  )
+                }
+                value={filter.value}
+              />
+            </div>
+          ) : null}
+        </div>
+      );
+    });
   return (
     <div data-testid="shared-view-filters">
       <div className="flex items-center justify-between border-border/50 border-b px-3 py-2">
         <span className="text-muted-foreground text-xs">
-          {fmt(messages.base.viewFilterCount, { count: config.filters.length })}
+          {fmt(messages.base.viewFilterCount, { count })}
         </span>
-        <div className="flex gap-1">
-          <button
-            className="inline-flex h-7 items-center gap-1 rounded px-2 text-xs transition-colors hover:bg-accent disabled:opacity-50"
-            disabled={fields.length === 0}
-            onClick={() => {
-              const field = fields[0];
-              if (field)
-                onChange(addViewFilter(config, field, getFieldFilterOperators(field.type)[0]));
-            }}
-            type="button"
-          >
-            <Plus className="size-3" />
-            {messages.base.addFilter}
-          </button>
-          <button
-            className="h-7 rounded px-2 text-muted-foreground text-xs transition-colors hover:bg-accent disabled:opacity-50"
-            disabled={config.filters.length === 0}
-            onClick={() => onChange(clearAllViewFilters(config))}
-            type="button"
-          >
-            {messages.base.clearAllFilters}
-          </button>
-        </div>
+        <button
+          className="h-7 rounded px-2 text-muted-foreground text-xs hover:bg-accent disabled:opacity-50"
+          disabled={!count}
+          onClick={() => onChange(clearAllViewFilters(config))}
+          type="button"
+        >
+          {messages.base.clearAllFilters}
+        </button>
       </div>
-      {config.filters.length === 0 ? (
+      {groupControls(config.filterConjunction ?? "and", [])}
+      {count === 0 ? (
         <div className="px-4 py-8 text-center text-muted-foreground text-xs">
           {messages.base.noViewFilters}
         </div>
       ) : (
-        <div className="divide-y divide-border/40">
-          {config.filters.map((filter, index) => {
-            const field = findField(fields, filter) ?? fields[0];
-            if (!field) return null;
-            const operators = getFieldFilterOperators(field.type);
-            const operator = operators.includes(filter.operator) ? filter.operator : operators[0];
-            const focused = field.id === focusedFieldId;
-            return (
-              <div
-                className={`grid gap-2 px-3 py-2.5 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] ${
-                  focused ? "bg-primary/5" : ""
-                }`}
-                data-condition-field-slug={field.slug}
-                data-focused-condition={focused ? "true" : undefined}
-                key={`${filter.fieldId ?? filter.fieldSlug}-${index}`}
-              >
-                <label className="min-w-0">
-                  <span className="sr-only">
-                    {fmt(messages.base.filterFieldAt, { index: index + 1 })}
-                  </span>
-                  <select
-                    aria-label={fmt(messages.base.filterFieldAt, { index: index + 1 })}
-                    className="h-8 w-full rounded-md border border-border/70 bg-card px-2 text-xs"
-                    onChange={(event) => {
-                      const nextField = fields.find((item) => item.id === event.target.value);
-                      if (nextField) {
-                        onChange(
-                          updateViewFilterAt(config, index, {
-                            fieldId: nextField.id,
-                            fieldSlug: nextField.slug,
-                            operator: getFieldFilterOperators(nextField.type)[0],
-                          }),
-                        );
-                      }
-                    }}
-                    value={field.id}
-                  >
-                    {fields.map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {resolveIString(item.name)}
-                      </option>
-                    ))}
-                  </select>
-                  {!visibleSet.has(field.slug) ? (
-                    <span className="mt-1 flex items-center gap-1 text-muted-foreground text-[10px]">
-                      <EyeOff className="size-3" />
-                      {messages.base.hiddenField}
-                    </span>
-                  ) : null}
-                </label>
-                <select
-                  aria-label={fmt(messages.base.filterOperatorAt, { index: index + 1 })}
-                  className="h-8 w-full rounded-md border border-border/70 bg-card px-2 text-xs"
-                  onChange={(event) => {
-                    const nextOperator = event.target.value as ViewFilterOperator;
-                    onChange(
-                      updateViewFilterAt(config, index, {
-                        fieldId: field.id,
-                        fieldSlug: field.slug,
-                        operator: nextOperator,
-                        ...(viewFilterOperatorNeedsValue(nextOperator) && filter.value !== undefined
-                          ? { value: filter.value }
-                          : {}),
-                      }),
-                    );
-                  }}
-                  value={operator}
-                >
-                  {operators.map((item) => (
-                    <option key={item} value={item}>
-                      {messages.base.filterOperators[item]}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  aria-label={fmt(messages.base.removeFilterAt, { index: index + 1 })}
-                  className="inline-flex size-8 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-destructive"
-                  onClick={() => onChange(clearViewFilterAt(config, index))}
-                  title={messages.base.removeFilter}
-                  type="button"
-                >
-                  <Trash2 className="size-3.5" />
-                </button>
-                {viewFilterOperatorNeedsValue(operator) ? (
-                  <div className="sm:col-span-3">
-                    <FilterValueControl
-                      client={client}
-                      field={field}
-                      index={index}
-                      onChange={(value) =>
-                        onChange(
-                          updateViewFilterAt(config, index, {
-                            fieldId: field.id,
-                            fieldSlug: field.slug,
-                            operator,
-                            value,
-                          }),
-                        )
-                      }
-                      value={filter.value}
-                    />
-                  </div>
-                ) : null}
-              </div>
-            );
-          })}
-        </div>
+        <div className="divide-y divide-border/40">{renderConditions(config.filters, [])}</div>
       )}
     </div>
   );

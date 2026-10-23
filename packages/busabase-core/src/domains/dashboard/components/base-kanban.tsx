@@ -10,6 +10,8 @@ import { getPrimaryField } from "../../base/utils/primary-field";
 import { getRecordTitle } from "../helpers/change-request";
 import { getFieldPreviewText } from "../helpers/field";
 import { mergeSearchIntoHref } from "../helpers/link-search";
+import { useDashboardOrpc } from "../orpc-context";
+import { LookupFieldValue } from "./field-preview";
 import { MemberChips } from "./member-field";
 
 type Choice = { id: string; name: string; color?: string };
@@ -74,11 +76,28 @@ function KanbanCard({
       className={`rounded-md border border-border/60 bg-background p-2.5 shadow-sm transition-shadow hover:shadow-md ${
         draggable ? "cursor-grab active:cursor-grabbing" : ""
       }`}
+      data-record-id={record.id}
       draggable={draggable}
-      onDragStart={draggable ? onDragStart : undefined}
+      onDragStart={
+        draggable
+          ? (event) => {
+              // Interactive field content must not start moving the whole card.
+              const control =
+                event.target instanceof Element
+                  ? event.target.closest("button, a, input, [role='dialog']")
+                  : null;
+              if (control && !control.matches("[data-kanban-record-title]")) {
+                event.preventDefault();
+                return;
+              }
+              onDragStart();
+            }
+          : undefined
+      }
     >
       <Link
         className="block truncate font-medium text-foreground text-sm hover:underline"
+        data-kanban-record-title
         href={mergeSearchIntoHref(`/base/${baseSlug}/${record.id}`, currentSearch)}
         title={title}
       >
@@ -86,6 +105,18 @@ function KanbanCard({
       </Link>
       {bodyFields.slice(0, 3).map((field) => {
         const rawValue = record.headCommit.payload[field.slug];
+        if (field.type === "lookup") {
+          return (
+            <div className="mt-1 min-w-0 text-xs" key={field.id}>
+              <LookupFieldValue
+                computed={record.computedFields?.[field.slug]}
+                field={field}
+                fieldUsers={record.fieldUsers}
+                value={rawValue}
+              />
+            </div>
+          );
+        }
         // A card is scanned, not read — the whole point of a board is
         // recognising an owner at a glance, which a joined list of user ids does
         // not do. People render as avatar chips here, not as preview text.
@@ -163,6 +194,7 @@ function KanbanColumn({
   const messages = useCoreI18n();
   const resolveIString = useIString();
   const baseId = base?.id ?? "";
+  const orpc = useDashboardOrpc();
 
   const cardsQuery = useInfiniteQuery({
     enabled: Boolean(baseId),
@@ -186,7 +218,16 @@ function KanbanColumn({
         pageSize: COLUMN_PAGE_SIZE,
         ...(viewId ? { viewId } : {}),
       }),
-    queryKey: ["busabase", "kanban-column", baseId, viewId ?? "", stackField.slug, column.id],
+    // The shared live-sync invalidates this workspace's canonical record prefix
+    // on source/ACL changes. A custom top-level key misses those refreshes.
+    queryKey: [
+      ...(orpc?.records.listPage.key() ?? ["busabase"]),
+      "kanban-column",
+      baseId,
+      viewId ?? "",
+      stackField.slug,
+      column.id,
+    ],
   });
 
   const records = (cardsQuery.data?.pages ?? []).flatMap((page) => page.records);
@@ -201,6 +242,7 @@ function KanbanColumn({
       className={`flex max-h-[70vh] w-64 shrink-0 flex-col rounded-lg border bg-muted/15 transition-colors ${
         isOver ? "border-primary bg-primary/5" : "border-border/50"
       }`}
+      data-testid={`kanban-column-${column.id}`}
       onDragOver={
         canDrag
           ? (event) => {
@@ -291,6 +333,7 @@ export function BusaBaseKanban({
   const [overColumn, setOverColumn] = useState<string | null>(null);
   const stackField = resolveStackByField(base, fields, activeView?.config.stackByFieldSlug);
   const baseId = base?.id ?? "";
+  const orpc = useDashboardOrpc();
 
   const countsQuery = useQuery({
     enabled: Boolean(baseId) && Boolean(stackField),
@@ -300,7 +343,13 @@ export function BusaBaseKanban({
         fieldSlug: stackField?.slug ?? "",
         ...(activeView?.id ? { viewId: activeView.id } : {}),
       }),
-    queryKey: ["busabase", "kanban-counts", baseId, activeView?.id ?? "", stackField?.slug ?? ""],
+    queryKey: [
+      ...(orpc?.records.count.key() ?? ["busabase"]),
+      "kanban-counts",
+      baseId,
+      activeView?.id ?? "",
+      stackField?.slug ?? "",
+    ],
   });
 
   if (!stackField) {

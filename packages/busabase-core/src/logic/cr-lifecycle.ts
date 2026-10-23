@@ -97,7 +97,12 @@ import "../domains/drive/handlers";
 import "../domains/file-node/handlers";
 import "../domains/folder/handlers";
 import { rebaselineFormulaOperation } from "../domains/base/logic/formula-recalculation";
+import {
+  applyLookupFormulas,
+  lookupDependentFieldSlugs,
+} from "../domains/base/logic/lookup-formulas";
 import { resolveLookupValues } from "../domains/base/logic/lookup-values";
+import { resolveReverseRelationValues } from "../domains/base/logic/reverse-relations";
 import {
   LIST_OMITTED_FIELD_VALUE,
   LIST_OMITTED_LONG_TEXT_VALUE,
@@ -186,7 +191,6 @@ import { ensureReady, loadBasesByIds } from "./seed";
 import { toPublicSourceMetadata } from "./source-attribution";
 import {
   normalizeViewConfig,
-  toBaseVO,
   toCommentVO,
   toCommitVO,
   toIso,
@@ -1338,19 +1342,23 @@ export const hydrateRecords = async (
   records: RecordPO[],
   options?: { summary?: boolean },
 ): Promise<RecordVO[]> => {
+  // Include source schema/config reads, not only the later target resolution.
+  const dependencyReadAt = performance.timeOrigin + performance.now();
   if (records.length === 0) {
     return [];
   }
   const db = await getDb();
   const baseIds = [...new Set(records.map((record) => record.baseId))];
   // Activity audit rows need a record's route and identity, without expanding its cells.
-  const baseMap = options?.summary
-    ? new Map(
-        (await db.select().from(busabaseBases).where(inArray(busabaseBases.id, baseIds))).map(
-          (base) => [base.id, toBaseVO({ ...base, description: "" }, [])],
-        ),
-      )
-    : await loadBasesByIds(baseIds);
+  const baseMap = await loadBasesByIds(baseIds);
+  const dynamicFormulaBases = new Set(
+    [...baseMap.values()]
+      .filter((base) => {
+        const dynamic = lookupDependentFieldSlugs(base.fields);
+        return base.fields.some((field) => field.type === "formula" && dynamic.has(field.slug));
+      })
+      .map((base) => base.id),
+  );
   const headCommitIds = [...new Set(records.map((record) => record.headCommitId))];
   const commitRows = options?.summary
     ? await db
@@ -1359,14 +1367,55 @@ export const hydrateRecords = async (
         .where(inArray(busabaseCommits.id, headCommitIds))
     : await db.select().from(busabaseCommits).where(inArray(busabaseCommits.id, headCommitIds));
   const commitsById = new Map(commitRows.map((commit) => [commit.id, commit]));
+  // Derived values are refreshed on read, without changing the source commit.
+  const lookupRecords = options?.summary
+    ? records.filter((record) => dynamicFormulaBases.has(record.baseId))
+    : records;
+  const lookupValues = await resolveLookupValues(db, lookupRecords, baseMap, dependencyReadAt);
+  // Reverse relation columns store nothing; read who links here from the
+  // record-link table, for summaries too (ids only, so it stays cheap).
+  const reverseValues = await resolveReverseRelationValues(
+    db,
+    records,
+    new Map([...baseMap].map(([baseId, base]) => [baseId, base.fields])),
+  );
+  // Compact summaries still need complete inputs to calculate dynamic formulas;
+  // only those Bases pay for a full payload read. Large outputs stay compact.
+  const fullSummaryCommits =
+    options?.summary && lookupRecords.length
+      ? await db
+          .select()
+          .from(busabaseCommits)
+          .where(
+            inArray(
+              busabaseCommits.id,
+              lookupRecords.map((record) => record.headCommitId),
+            ),
+          )
+      : [];
+  const fullSummaryPayloads = new Map(
+    fullSummaryCommits.map((commit) => [commit.id, commit.payload]),
+  );
   // Ids named by people-typed CELLS (`member`, `created_by`, `updated_by`),
   // computed once per record so the resolve below stays a single batched call
   // rather than one per record.
   const peopleIdsByRecord = new Map<string, string[]>(
     records.map((record) => {
-      const fields = baseMap.get(record.baseId)?.fields ?? [];
+      const fields = options?.summary ? [] : (baseMap.get(record.baseId)?.fields ?? []);
       const payload = commitsById.get(record.headCommitId)?.payload ?? {};
-      return [record.id, collectPeopleFieldIds(fields, payload as Record<string, unknown>)];
+      const lookupPeople = Object.values(
+        options?.summary ? {} : (lookupValues.get(record.id)?.computedFields ?? {}),
+      ).flatMap((computed) =>
+        computed.targetField
+          ? collectPeopleFieldIds([computed.targetField], {
+              [computed.targetField.slug]: computed.sources.flatMap((source) => source.value),
+            })
+          : [],
+      );
+      return [
+        record.id,
+        [...collectPeopleFieldIds(fields, payload as Record<string, unknown>), ...lookupPeople],
+      ];
     }),
   );
   const users = await resolveUserRefs([
@@ -1374,13 +1423,6 @@ export const hydrateRecords = async (
     ...commitRows.map((commit) => commit.author),
     ...[...peopleIdsByRecord.values()].flat(),
   ]);
-  // `lookup` fields are the one computed type NOT baked into the commit — they
-  // derive from other records, so they're resolved here, on read. No-ops (and
-  // issues no queries) unless a base in this set actually has a lookup field.
-  const lookupValues = options?.summary
-    ? new Map<string, Record<string, unknown>>()
-    : await resolveLookupValues(db, records, baseMap);
-
   return records.map((record) => {
     const base = baseMap.get(record.baseId);
     const headCommit = commitsById.get(record.headCommitId);
@@ -1389,6 +1431,29 @@ export const hydrateRecords = async (
     }
     const commitVO = toCommitVO(headCommit, users);
     const lookups = lookupValues.get(record.id);
+    const resolvedPayload = lookups
+      ? applyLookupFormulas(
+          base.fields,
+          fullSummaryPayloads.get(record.headCommitId) ?? commitVO.payload,
+          lookups,
+          record,
+        )
+      : commitVO.payload;
+    let payload = resolvedPayload;
+    if (options?.summary && lookups) {
+      const dynamic = lookupDependentFieldSlugs(base.fields);
+      payload = { ...commitVO.payload };
+      for (const field of base.fields) {
+        if (field.type !== "formula" || !dynamic.has(field.slug)) continue;
+        const value = resolvedPayload[field.slug];
+        payload[field.slug] =
+          Buffer.byteLength(JSON.stringify(value) ?? "null", "utf8") > LIST_MAX_FIELD_VALUE_BYTES
+            ? typeof value === "string"
+              ? LIST_OMITTED_LONG_TEXT_VALUE
+              : LIST_OMITTED_FIELD_VALUE
+            : value;
+      }
+    }
     return {
       id: record.id,
       baseId: record.baseId,
@@ -1409,10 +1474,9 @@ export const hydrateRecords = async (
       archivedAt: toIso(record.archivedAt),
       createdAt: record.createdAt.toISOString(),
       updatedAt: record.updatedAt.toISOString(),
-      base,
-      headCommit: lookups
-        ? { ...commitVO, payload: { ...commitVO.payload, ...lookups } }
-        : commitVO,
+      base: options?.summary ? { ...base, description: "", fields: [] } : base,
+      ...(lookups && !options?.summary ? { computedFields: lookups.computedFields } : {}),
+      headCommit: { ...commitVO, payload: { ...payload, ...reverseValues.get(record.id) } },
     };
   });
 };
@@ -2232,7 +2296,11 @@ const resolveChangeRequestScopeNodeIds = async (
   const db = await getDb();
   const spaceId = getContextSpaceId();
   const [changeRequest] = await db
-    .select({ id: busabaseChangeRequests.id })
+    .select({
+      id: busabaseChangeRequests.id,
+      status: busabaseChangeRequests.status,
+      updatedAt: busabaseChangeRequests.updatedAt,
+    })
     .from(busabaseChangeRequests)
     .where(
       and(
@@ -2242,72 +2310,13 @@ const resolveChangeRequestScopeNodeIds = async (
     )
     .limit(1);
   if (!changeRequest) return null;
-  const rows = await db
-    .select({
-      nodeId: busabaseOperations.nodeId,
-      baseId: busabaseOperations.baseId,
-      fields: busabaseCommits.payload,
-      operation: busabaseOperations.operation,
-      position: busabaseOperations.position,
-    })
-    .from(busabaseOperations)
-    .leftJoin(busabaseCommits, eq(busabaseCommits.id, busabaseOperations.headCommitId))
-    .where(
-      and(
-        eq(busabaseOperations.changeRequestId, changeRequestId),
-        eq(busabaseOperations.spaceId, spaceId),
-      ),
-    )
-    .orderBy(asc(busabaseOperations.position));
-  if (rows.length === 0) return null;
 
-  const nodeIds = new Set<string>();
-  const baseIds = new Set<string>();
-  const declaredRefs = new Set<string>();
-  for (const row of rows) {
-    if (row.nodeId) {
-      nodeIds.add(row.nodeId);
-      continue;
-    }
-    if (row.baseId) {
-      baseIds.add(row.baseId);
-      continue;
-    }
-    // Deliberately NOT `parseCommitPayload`. This query is kind-agnostic — it
-    // walks every operation of a change request, including ones already merged
-    // and ones written long before payload validation existed — purely to work
-    // out node-visibility scope. A strict per-kind parse here would turn a
-    // legacy-shaped row into a 500 on a *listing* page. Same reasoning as the
-    // loose `CommitVO.payload`; the `typeof` guards below are the safety.
-    const fields = row.fields as {
-      parentNodeId?: unknown;
-      parentNodeRef?: unknown;
-      ref?: unknown;
-    } | null;
-    const parentNodeId = fields?.parentNodeId;
-    if (typeof parentNodeId === "string" && parentNodeId) {
-      nodeIds.add(parentNodeId);
-    } else if (typeof fields?.parentNodeRef === "string" && fields.parentNodeRef) {
-      if (!declaredRefs.has(fields.parentNodeRef)) return null;
-    } else if (row.operation === "node_create") {
-      // A top-level pending create is authorized against the workspace root.
-      nodeIds.add(rootNodeIdForSpace(spaceId));
-    } else {
-      return null;
-    }
-    if (typeof fields?.ref === "string" && fields.ref) declaredRefs.add(fields.ref);
-  }
-
-  if (baseIds.size > 0) {
-    const baseRows = await db
-      .select({ id: busabaseBases.id, nodeId: busabaseBases.nodeId })
-      .from(busabaseBases)
-      .where(and(eq(busabaseBases.spaceId, spaceId), inArray(busabaseBases.id, [...baseIds])));
-    if (baseRows.length !== baseIds.size) return null;
-    for (const row of baseRows) nodeIds.add(row.nodeId);
-  }
-
-  return nodeIds.size > 0 ? [...nodeIds] : null;
+  // Share the narrow, actor-independent loader with inbox lists. Reading a
+  // single CR (comments, detail, approval) must not fetch every commit payload
+  // merely to resolve the same Base/node scope over and over.
+  const scopes = await loadCachedChangeRequestScopes(db, [changeRequest]);
+  const scope = scopes.get(changeRequestId);
+  return scope && !scope.unresolved ? [...scope.nodeIds] : null;
 };
 
 const canViewChangeRequest = async (changeRequestId: string): Promise<boolean> => {
@@ -2518,20 +2527,13 @@ const scopeCacheCandidateOf = (row: { id: string }): ScopeCacheCandidate => {
   };
 };
 
-// Constrained to `{ id }` rather than the full ChangeRequestPO on purpose: the
-// body only ever reads `row.id`, and callers that are merely tallying should be
-// free to select three columns instead of paying for whole rows. Rows that also
-// carry `status` + `updatedAt` let settled, terminal change requests reuse a
-// cached node scope (see change-request-scope-cache.ts) instead of re-reading
-// their operations; node VISIBILITY is still evaluated fresh on every call.
-export const filterVisibleChangeRequestRows = async <T extends { id: string }>(
-  rows: T[],
-): Promise<T[]> => {
-  if (rows.length === 0 || getContextIsSpaceManager()) return rows;
-  const db = await getDb();
+/** Reuse only settled terminal scopes; node ACLs are always checked by callers. */
+const loadCachedChangeRequestScopes = async (
+  db: Awaited<ReturnType<typeof getDb>>,
+  rows: readonly { id: string }[],
+): Promise<Map<string, ChangeRequestScope>> => {
   const spaceId = getContextSpaceId();
   const nowMs = Date.now();
-
   const scopes = new Map<string, ChangeRequestScope>();
   const cacheKeys = new Map<string, string>();
   const missingIds: string[] = [];
@@ -2558,6 +2560,23 @@ export const filterVisibleChangeRequestRows = async <T extends { id: string }>(
       if (key) setCachedChangeRequestScope(key, scope);
     }
   }
+
+  return scopes;
+};
+
+// Constrained to `{ id }` rather than the full ChangeRequestPO on purpose: the
+// body only ever reads `row.id`, and callers that are merely tallying should be
+// free to select three columns instead of paying for whole rows. Rows that also
+// carry `status` + `updatedAt` let settled, terminal change requests reuse a
+// cached node scope (see change-request-scope-cache.ts) instead of re-reading
+// their operations; node VISIBILITY is still evaluated fresh on every call.
+export const filterVisibleChangeRequestRows = async <T extends { id: string }>(
+  rows: T[],
+): Promise<T[]> => {
+  if (rows.length === 0 || getContextIsSpaceManager()) return rows;
+  const db = await getDb();
+  const spaceId = getContextSpaceId();
+  const scopes = await loadCachedChangeRequestScopes(db, rows);
 
   const allNodeIds = [
     ...new Set([...scopes.values()].flatMap((scope) => (scope.unresolved ? [] : scope.nodeIds))),
@@ -2605,18 +2624,6 @@ export const assertChangeRequestPermission = async (
   changeRequestId: string,
   required: "read" | "changeRequest" | "write" | "manage",
 ): Promise<void> => {
-  const db = await getDb();
-  const [changeRequest] = await db
-    .select({ id: busabaseChangeRequests.id })
-    .from(busabaseChangeRequests)
-    .where(
-      and(
-        eq(busabaseChangeRequests.id, changeRequestId),
-        eq(busabaseChangeRequests.spaceId, getContextSpaceId()),
-      ),
-    )
-    .limit(1);
-  if (!changeRequest) throw changeRequestNotFound(changeRequestId);
   const scope = await resolveChangeRequestScopeNodeIds(changeRequestId);
   if (!scope) throw changeRequestNotFound(changeRequestId);
   for (const nodeId of scope) {

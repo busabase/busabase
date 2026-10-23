@@ -10,10 +10,8 @@ import type {
 } from "@excalidraw/excalidraw/types";
 import { useQuery } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
-import {
-  EMPTY_WHITEBOARD_DOCUMENT,
-  type WhiteboardDocument,
-} from "busabase-contract/domains/rich-node/types";
+import type { NodeDetailVO } from "busabase-contract/contract/node-detail-schemas";
+import type { WhiteboardDocument } from "busabase-contract/domains/rich-node/types";
 import { useEffect, useRef, useState } from "react";
 import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
 import { presentCoreError } from "../../../i18n/localize-error";
@@ -143,24 +141,46 @@ interface WhiteboardDetailViewProps {
 
 export function WhiteboardDetailView({ orpc, slug, onNodeLoaded }: WhiteboardDetailViewProps) {
   const messages = useCoreI18n();
-  const isAnonymous = useIsAnonymousVisitor();
-  const fullscreenState = usePreviewFullscreen({ syncWithUrl: true });
   const detailQuery = useQuery({
     ...orpc.nodes.get.queryOptions({ input: { nodeId: slug ?? "", type: "whiteboard" } }),
     enabled: Boolean(slug),
   });
   const detail = asNodeDetail(detailQuery.isError ? undefined : detailQuery.data, "whiteboard");
   useReportLoadedNode(detail?.node, onNodeLoaded);
-  const node = detail?.node ?? null;
-  const initialScene = detail?.document ?? EMPTY_WHITEBOARD_DOCUMENT;
+  if (!detail) {
+    return detailQuery.isLoading ? (
+      <NodeDetailSkeleton />
+    ) : (
+      <RichNodeNotFound type={messages.nodeDetail.whiteboard} />
+    );
+  }
+  // Excalidraw reads initialData once. Its scene baseline, API, and save state
+  // must share the same lifetime, including when a cached second board opens.
+  return <WhiteboardEditor detail={detail} key={detail.node.id} orpc={orpc} />;
+}
+
+function WhiteboardEditor({
+  detail,
+  orpc,
+}: {
+  detail: Extract<NodeDetailVO, { type: "whiteboard" }>;
+  orpc: BusabaseQueryUtils;
+}) {
+  const isAnonymous = useIsAnonymousVisitor();
+  const fullscreenState = usePreviewFullscreen({ syncWithUrl: true });
+  const node = detail.node;
+  const initialScene = detail.document;
   const sceneRef = useRef<WhiteboardDocument>(initialScene);
-  const savedSceneRef = useRef(JSON.stringify(initialScene));
   const sceneInitializedRef = useRef(false);
   // The whole module, not just the component: `restoreElements` below is what
   // makes an externally-written scene safe to hand to `updateScene`.
   const { editorError, excalidraw } = useExcalidrawModule();
   const [editorApi, setEditorApi] = useState<ExcalidrawImperativeAPI | null>(null);
-  const { error, markDirty, save, status } = useNodeContentSave(orpc, node, "whiteboard");
+  const { error, markDirty, reviewRequestId, save, status } = useNodeContentSave(
+    orpc,
+    node,
+    "whiteboard",
+  );
 
   // Excalidraw is uncontrolled — `initialData` below is read once, at mount —
   // so a scene that changed on the server (another tab, an agent's OpenAPI
@@ -171,7 +191,6 @@ export function WhiteboardDetailView({ orpc, slug, onNodeLoaded }: WhiteboardDet
   useServerDocumentSync({
     apply: (scene: WhiteboardDocument) => {
       sceneRef.current = scene;
-      savedSceneRef.current = JSON.stringify(scene);
       sceneInitializedRef.current = false;
       if (!editorApi || !excalidraw) return;
       editorApi.updateScene({
@@ -210,7 +229,10 @@ export function WhiteboardDetailView({ orpc, slug, onNodeLoaded }: WhiteboardDet
   });
 
   useEffect(() => {
-    if (!editorApi || initialScene.elements.length === 0) return;
+    // Fit once when this board's editor mounts. A save refetch changes the
+    // detail document too, but must preserve the author's current viewport.
+    // Actual remote scene replacements fit inside useServerDocumentSync above.
+    if (!editorApi || sceneRef.current.elements.length === 0) return;
     const frame = requestAnimationFrame(() => {
       editorApi.scrollToContent(undefined, {
         animate: false,
@@ -219,18 +241,10 @@ export function WhiteboardDetailView({ orpc, slug, onNodeLoaded }: WhiteboardDet
       });
     });
     return () => cancelAnimationFrame(frame);
-  }, [editorApi, initialScene.elements.length]);
-
-  if (!detail) {
-    return detailQuery.isLoading ? (
-      <NodeDetailSkeleton />
-    ) : (
-      <RichNodeNotFound type={messages.nodeDetail.whiteboard} />
-    );
-  }
+  }, [editorApi]);
 
   const saveScene = async () => {
-    if (await save(sceneRef.current)) savedSceneRef.current = JSON.stringify(sceneRef.current);
+    await save(sceneRef.current);
   };
 
   return (
@@ -241,6 +255,7 @@ export function WhiteboardDetailView({ orpc, slug, onNodeLoaded }: WhiteboardDet
       nodeType="whiteboard"
       onSave={saveScene}
       orpc={orpc}
+      reviewRequestId={reviewRequestId}
       status={status}
     >
       <WhiteboardCanvas
@@ -257,13 +272,16 @@ export function WhiteboardDetailView({ orpc, slug, onNodeLoaded }: WhiteboardDet
             elements: elements.filter((element) => element.type !== "image"),
             appState: persistentAppState(appState),
           };
+          const serializedScene = JSON.stringify(nextScene);
+          const sceneChanged = serializedScene !== JSON.stringify(sceneRef.current);
           sceneRef.current = nextScene;
           if (!sceneInitializedRef.current) {
             sceneInitializedRef.current = true;
-            savedSceneRef.current = JSON.stringify(nextScene);
             return;
           }
-          if (JSON.stringify(nextScene) !== savedSceneRef.current) markDirty();
+          // Excalidraw also calls onChange for selection and viewport changes.
+          // Those must not count as new edits while the submitted scene saves.
+          if (sceneChanged) markDirty();
         }}
       />
     </RichNodeShell>

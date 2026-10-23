@@ -1,6 +1,8 @@
 import type { CoreI18nMessages } from "./messages";
 
 export const dashboardFr: CoreI18nMessages = {
+  lookup: lookupFr,
+  reverseRelation: reverseRelationFr,
   fieldHelp: {
     inherit: "Utiliser les instructions du champ",
     override: "Personnaliser pour ce formulaire",
@@ -829,17 +831,12 @@ export const dashboardFr: CoreI18nMessages = {
     install: "Installer",
     installRestricted:
       "Réservé aux propriétaires et administrateurs de l'espace : un modèle peut inclure une application et une compétence, c'est-à-dire du code que les agents de cet espace exécuteront.",
-    cardBases: "{count} tableau{plural}",
-    cardApps: "{count} application{plural}",
-    cardDocs: "{count} document{plural}",
-    cardRows: "{count} ligne{plural} d'exemple",
-    cardManual: "Manuel de l'agent",
     promptsTitle: "Ce que vous pouvez demander à un agent, une fois le modèle installé",
     promptsDescription:
       "L'agent peut y répondre car le modèle installe le manuel de son auteur à côté de ses Bases. Il n'a pas à deviner votre schéma.",
     contentsTitle: "Ce que crée l'installation",
-    contentsDescription:
-      "Si vous pouvez modifier cet espace, les Bases, les champs, les lignes d'exemple, l'application et le manuel de l'agent sont créés immédiatement. Cochez « Soumettre d'abord le contenu à une revue » lors de l'installation pour recevoir le code de l'application et le manuel sous forme de demandes de modification.",
+    permissionNote:
+      "L'installation est réservée aux propriétaires et administrateurs de cet espace. Tout ce qu'elle crée est utilisable immédiatement ; vous pouvez aussi choisir de relire le contenu d'abord.",
     bases: "Bases",
     apps: "Applications",
     documents: "Documents",
@@ -1632,6 +1629,13 @@ export const dashboardFr: CoreI18nMessages = {
     viewFieldDragOutside: "Le champ est hors de la zone de réorganisation. Déposez pour annuler.",
     noViewFilters: "Aucun filtre dans cette vue.",
     noViewSorts: "Aucun tri dans cette vue.",
+    filterMatch: "Correspondance",
+    filterMatchAll: "Toutes les conditions (ET)",
+    filterMatchAny: "Une condition au moins (OU)",
+    filterConjunction: "Combinaison des conditions",
+    addFilterGroup: "Ajouter un groupe",
+    removeFilterGroup: "Supprimer le groupe",
+    filterMissingField: "Champ indisponible",
     viewFilterCount: "{count} filtres",
     viewSortCount: "{count} tris",
     clearAllFilters: "Effacer tous les filtres",
@@ -2587,3 +2591,6 @@ export const dashboardFr: CoreI18nMessages = {
       "Créez le dossier, les tableaux et l'application dans cet espace. Votre agent n'apprend rien ainsi — vous pouvez lui donner le manuel à tout moment depuis l'onglet Installation par agent.",
   },
 };
+
+import { lookupFr } from "./lookup";
+import { reverseRelationFr } from "./reverse-relation";

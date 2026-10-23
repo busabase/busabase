@@ -6,6 +6,7 @@ import {
   createLiveInvalidationBatcher,
   LIVE_INVALIDATION_WINDOW_MS,
   type LiveInvalidationBatch,
+  NODE_METADATA_INVALIDATION_WINDOW_MS,
 } from "./live-invalidation";
 
 type BusabaseLiveEvent = z.infer<typeof liveEventSchema>;
@@ -46,6 +47,30 @@ describe("live invalidation classification", () => {
       "nodeRouteState",
       "nodes",
     ]);
+    expect(batch.targets).not.toContain("records");
+    expect(batch.targets).not.toContain("bases");
+  });
+
+  it("refreshes permission-dependent data only for explicitly marked ACL changes", () => {
+    const batch = classifyLiveInvalidation(
+      event("node.metadata_updated", {
+        nodeIds: ["node-1"],
+        reason: "acl",
+      }),
+    );
+    expect([...batch.targets].sort()).toEqual([
+      "archivedBases",
+      "archivedNodes",
+      "auditEvents",
+      "bases",
+      "nodeDetail",
+      "nodeRouteState",
+      "nodes",
+      "recordDetail",
+      "records",
+      "recordsCount",
+      "recordsPage",
+    ]);
   });
 
   it("refreshes materialized resources only for merge events", () => {
@@ -69,6 +94,22 @@ describe("live invalidation classification", () => {
 });
 
 describe("live invalidation batching", () => {
+  it("refreshes ACL-dependent records on the fast metadata window without review queries", () => {
+    vi.useFakeTimers();
+    const flush = vi.fn();
+    const batcher = createLiveInvalidationBatcher(flush, NODE_METADATA_INVALIDATION_WINDOW_MS);
+    batcher.push(event("node.metadata_updated", { reason: "acl", nodeIds: ["node-1"] }));
+    vi.advanceTimersByTime(NODE_METADATA_INVALIDATION_WINDOW_MS - 1);
+    expect(flush).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(flush).toHaveBeenCalledTimes(1);
+    const batch = flush.mock.calls[0]?.[0] as LiveInvalidationBatch;
+    expect(batch.targets).toContain("recordDetail");
+    expect(batch.targets).toContain("recordsPage");
+    expect(batch.targets).not.toContain("changeRequests");
+    expect(batch.targets).not.toContain("inboxSnapshot");
+  });
+
   it("refreshes the review queue when pending_review is the only received event", () => {
     vi.useFakeTimers();
     const flush = vi.fn();

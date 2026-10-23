@@ -8,7 +8,7 @@ import { NODEPOD_HOST_CLAIM_MESSAGE } from "../src/domains/airapp/utils/nodepod-
 
 /**
  * BEHAVIOURAL tests for our patch on Nodepod's Service Worker
- * (`patches/@scelar__nodepod@*.patch`, applied to `dist/__sw__.js`).
+ * (`patches/@r1ck404__nodepod@*.patch`, applied to `dist/__sw__.js`).
  *
  * `tests/nodepod-service-worker.test.ts` covers the HOST-side lifecycle helpers
  * and the Busabase Cloud app's `nodepod-preview-host-route.test.ts` asserts that
@@ -25,7 +25,7 @@ import { NODEPOD_HOST_CLAIM_MESSAGE } from "../src/domains/airapp/utils/nodepod-
  * It also reaches into upstream internals (`pathClaims`, `previewScripts`,
  * `previewClients`, `reservedHostPaths`, `proxyToVirtualServer`). That is
  * deliberate: our patch already depends on those exact names, so if a future
- * @scelar/nodepod renames one, this file failing at load is the upgrade canary
+ * @r1ck404/nodepod renames one, this file failing at load is the upgrade canary
  * telling you which hunk to re-port — cheaper than finding out from a leaked
  * session.
  */
@@ -34,15 +34,15 @@ const require = createRequire(import.meta.url);
 
 /**
  * `NODEPOD_SW_UNDER_TEST=/path/to/__sw__.js` runs this suite against another
- * build of the worker. Two uses: (1) before bumping @scelar/nodepod, point it at
- * the RAW upstream file (`npm pack @scelar/nodepod@x.y.z`) — every case that
+ * build of the worker. Two uses: (1) before bumping @r1ck404/nodepod, point it at
+ * the RAW upstream file (`npm pack @r1ck404/nodepod@x.y.z`) — every case that
  * fails is a hunk you still have to carry, every case that passes is one
  * upstream now covers; (2) red/green proof that these cases really exercise the
  * patch. Unset = the patched copy pnpm installed, which is what CI runs.
  */
 const installedServiceWorker = readFileSync(
   process.env.NODEPOD_SW_UNDER_TEST ??
-    join(dirname(require.resolve("@scelar/nodepod")), "__sw__.js"),
+    join(dirname(require.resolve("@r1ck404/nodepod")), "__sw__.js"),
   "utf8",
 );
 

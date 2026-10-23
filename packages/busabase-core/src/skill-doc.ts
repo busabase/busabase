@@ -147,9 +147,9 @@ curl ${base}/api/v1/playbooks/skill/<NODE_ID>${H}
 With \`busabase-cli\` the same two calls are:
 
 \`\`\`bash
-npx busabase-cli playbooks search --query "记录客户拜访" --query "log customer visit" --near-node-id <NODE_ID>
-npx busabase-cli playbooks get --kind prompt --node-id <NODE_ID> --key <KEY>
-npx busabase-cli playbooks get --kind skill --node-id <NODE_ID>
+${BUSABASE_CLI} playbooks search --query "记录客户拜访" --query "log customer visit" --near-node-id <NODE_ID>
+${BUSABASE_CLI} playbooks get --kind prompt --node-id <NODE_ID> --key <KEY>
+${BUSABASE_CLI} playbooks get --kind skill --node-id <NODE_ID>
 \`\`\`
 ${
   authHeader
@@ -383,7 +383,7 @@ API, uploads the bytes, confirms them, and prints a ref you can store directly
 in an attachment field array:
 
 \`\`\`bash
-npx busabase-cli assets upload --file ./cover.svg --context record-field --output json
+${BUSABASE_CLI} assets upload --file ./cover.svg --context record-field --output json
 # Put the JSON output directly into an attachment field array:
 # {"cover_image":[{"id":"...","assetId":"...","attachmentId":"...","url":"...","fileName":"cover.svg","mimeType":"image/svg+xml","size":1234}]}
 \`\`\`
@@ -444,10 +444,10 @@ ${authLine}  -H 'content-type: application/json' \\
 curl "${base}/api/v1/assets/:assetId/text/lines?startLine=120&endLine=160"${H}
 
 # Supply text for a binary asset after running your own extractor (inline for small text):
-npx busabase-cli assets put-text --asset-id :assetId --file ./extracted.txt
+${BUSABASE_CLI} assets put-text --asset-id :assetId --file ./extracted.txt
 # Or mark a scanned/image-only file as having no extractable text (so grep stops flagging
 # it as "missing" and instead reports it under "unsearchable"):
-npx busabase-cli assets put-text --asset-id :assetId --none
+${BUSABASE_CLI} assets put-text --asset-id :assetId --none
 # CLI/SDK pick inline vs. presigned upload by size automatically (≤1MB inline, larger
 # goes through POST /assets/text/upload-urls → PUT bytes → putText({storageKey})).
 \`\`\`

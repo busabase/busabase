@@ -147,12 +147,24 @@ interface LiveSession {
   buffer: AgentSessionEventVO[];
   listeners: Set<(event: AgentSessionEventVO) => void>;
   /**
-   * At most one outstanding `session/request_permission` at a time — ACP turns
-   * are sequential per session, so the agent cannot ask a second question
-   * before this one resolves. `respondToAgentPermission` is the only thing
-   * that resolves it; there is no timeout and no auto-approve (spec decision).
+   * Every outstanding `session/request_permission`, keyed by our requestId.
+   * One turn can ask several at once — Claude Code requests permission for
+   * parallel tool calls concurrently — so each entry is answered on its own,
+   * in any order; a single slot let the second request orphan the first and
+   * deadlock the turn. A human answer via `respondToAgentPermission` is the
+   * only thing that selects an option; there is no timeout and no
+   * auto-approve (spec decision). `cancelPendingPermissions` answers the rest
+   * `cancelled` on session/cancel and teardown. `optionIds` is kept here, not
+   * re-read from `buffer`, because a long stream can evict the request event
+   * from that capped buffer while its card is still waiting.
    */
-  pendingPermission: { requestId: string; resolve: (optionId: string) => void } | null;
+  pendingPermissions: Map<
+    string,
+    {
+      optionIds: ReadonlySet<string>;
+      resolve: (outcome: acp.RequestPermissionOutcome) => void;
+    }
+  >;
   permissionCounter: number;
   /**
    * The fencing lease held for the turn currently in flight on
@@ -725,7 +737,7 @@ async function openAgentSession({
     flushPending: Promise.resolve(),
     buffer: [],
     listeners: new Set(),
-    pendingPermission: null,
+    pendingPermissions: new Map(),
     permissionCounter: 0,
     lease: lease ?? null,
   };
@@ -799,10 +811,12 @@ async function openAgentSession({
     const app = acp
       .client({ name: "busabase" })
       .onRequest(acp.methods.client.session.requestPermission, async (ctx) => {
-        // Blocks the ACP turn until a human answers via respondToAgentPermission
-        // — no timeout, no auto-approve (deliberate; see the type comment on
-        // LiveSession.pendingPermission). The agent's own JSON-RPC framing
-        // already holds this request open for however long we take.
+        // Blocks this ACP request until a human answers via
+        // respondToAgentPermission — no timeout, no auto-approve (deliberate;
+        // see the type comment on LiveSession.pendingPermissions). The agent's
+        // own JSON-RPC framing already holds this request open for however
+        // long we take. Other requests from the same turn may be pending
+        // alongside this one; each gets its own entry and its own answer.
         pauseActivePromptDeadline?.();
         const requestId = `perm_${session.id}_${++session.permissionCounter}`;
         const options = ctx.params.options.map((o) => ({
@@ -810,6 +824,14 @@ async function openAgentSession({
           name: o.name,
           kind: o.kind,
         }));
+        // Registered before the card is published, so an answer can never
+        // arrive for a request this map does not know yet.
+        const answered = new Promise<acp.RequestPermissionOutcome>((resolve) => {
+          session.pendingPermissions.set(requestId, {
+            optionIds: new Set(options.map((o) => o.optionId)),
+            resolve,
+          });
+        });
         emit(session, {
           kind: "permissionRequest",
           permissionRequest: {
@@ -818,24 +840,49 @@ async function openAgentSession({
             options,
           },
         });
-        await setStatus(session, "waiting_permission");
-
-        const optionId = await new Promise<string>((resolve) => {
-          session.pendingPermission = { requestId, resolve };
-        });
-
-        session.pendingPermission = null;
-        emit(session, {
-          kind: "permissionResolved",
-          permissionRequestId: requestId,
-          permissionOptionId: optionId,
-        });
-        await setStatus(session, "busy");
-        refreshActivePromptDeadline?.();
-        return { outcome: { outcome: "selected", optionId } };
+        let outcome: acp.RequestPermissionOutcome;
+        try {
+          // A concurrent request already moved the session here; a second
+          // transition would only repeat the status event.
+          if (session.status !== "waiting_permission") {
+            await setStatus(session, "waiting_permission");
+          }
+          outcome = await answered;
+        } finally {
+          // Also when the status write throws: a stranded entry would keep
+          // the session "waiting" after its request is gone.
+          session.pendingPermissions.delete(requestId);
+        }
+        // Teardown: the transport is gone and the close owns the status.
+        if (session.closed) return { outcome };
+        // `cancelled` (session/cancel) is not a human choice, so there is no
+        // answer to show on the card.
+        if (outcome.outcome === "selected") {
+          emit(session, {
+            kind: "permissionResolved",
+            permissionRequestId: requestId,
+            permissionOptionId: outcome.optionId,
+          });
+        }
+        // Still waiting on the human while any sibling request is unanswered;
+        // only the last answer hands the turn back to the agent. After a
+        // cancel too: the turn runs until the agent answers the prompt, and
+        // that answer's busy -> idle transition is what the lease fence
+        // expects. Only from waiting_permission — never over a turn that
+        // already failed or finished.
+        if (session.pendingPermissions.size === 0 && session.status === "waiting_permission") {
+          await setStatus(session, "busy");
+          // Re-checked: a new request may have arrived during that write and
+          // already paused the deadline again.
+          if (session.pendingPermissions.size === 0) refreshActivePromptDeadline?.();
+        }
+        return { outcome };
       })
       .onNotification(acp.methods.client.session.update, async (ctx) => {
-        refreshActivePromptDeadline?.();
+        // With parallel tool calls the agent keeps streaming the work it was
+        // allowed to do while a sibling card still waits; that output must
+        // not restart the deadline the human's pending decision paused.
+        if (session.pendingPermissions.size === 0) refreshActivePromptDeadline?.();
         // `config_option_update` is the agent unilaterally changing a config
         // value (e.g. auto-downgrading the model on a rate limit) rather than
         // busabase asking for it — so the local picker must follow the same
@@ -1169,6 +1216,11 @@ async function openAgentSession({
           // stopping, and a resulting `setStatus` here would fight the one
           // `session.prompt` performs when its request actually settles.
           await ctx.notify(acp.methods.agent.session.cancel, { sessionId: acpSessionId });
+          // ACP: a client that sends session/cancel MUST answer every pending
+          // session/request_permission with the `cancelled` outcome. Left
+          // open, a card clicked after Stop would flip the finished turn back
+          // to busy.
+          cancelPendingPermissions(session);
           // ACP also defines generic request cancellation. Aborting the SDK
           // request sends `$/cancel_request`, giving agents a request-scoped
           // signal in addition to the session-level notification above.
@@ -1244,6 +1296,9 @@ async function openAgentSession({
 
     session.detach = () => {
       session.closed = true;
+      // Nobody can answer a card on a released transport; settle every parked
+      // handler instead of leaving its promise pending forever.
+      cancelPendingPermissions(session);
       logAcpConnection("info", "connection_closing", {
         connectionId,
         sessionId: id,
@@ -1995,10 +2050,23 @@ export async function setAgentSessionConfigOption(
 }
 
 /**
- * Answer a pending `session/request_permission`. `requestId` must match the
- * one currently pending — a stale or wrong id is rejected rather than
- * silently resolving whatever happens to be pending, since a client that
- * raced a reconnect could otherwise answer the wrong question.
+ * Answer every still-pending `session/request_permission` with ACP's
+ * `cancelled` outcome — never `selected`, so this can never approve anything
+ * on the human's behalf. The map is emptied first, so a late click on one of
+ * these cards is rejected as no longer pending.
+ */
+function cancelPendingPermissions(session: LiveSession): void {
+  const pending = [...session.pendingPermissions.values()];
+  session.pendingPermissions.clear();
+  for (const { resolve } of pending) resolve({ outcome: "cancelled" });
+}
+
+/**
+ * Answer one pending `session/request_permission`. Several can be pending at
+ * once (parallel tool calls), and each is answered by its own `requestId`, in
+ * any order. A stale or wrong id is rejected rather than silently resolving
+ * whatever happens to be pending, since a client that raced a reconnect could
+ * otherwise answer the wrong question.
  */
 export function respondToAgentPermission(
   sessionId: string,
@@ -2006,23 +2074,20 @@ export function respondToAgentPermission(
   optionId: string,
 ): void {
   const s = requireLocalSession(sessionId);
-  if (!s.pendingPermission) {
+  if (s.pendingPermissions.size === 0) {
     throw new Error("No permission request is pending for this session.");
   }
-  if (s.pendingPermission.requestId !== requestId) {
+  const pending = s.pendingPermissions.get(requestId);
+  if (!pending) {
     throw new Error("This permission request is no longer pending.");
   }
-  const optionIds = new Set(
-    (
-      s.buffer.findLast(
-        (e) => e.kind === "permissionRequest" && e.permissionRequest?.requestId === requestId,
-      )?.permissionRequest?.options ?? []
-    ).map((o) => o.optionId),
-  );
-  if (!optionIds.has(optionId)) {
+  if (!pending.optionIds.has(optionId)) {
     throw new Error(`"${optionId}" is not one of the offered options.`);
   }
-  s.pendingPermission.resolve(optionId);
+  // Removed here, not only when the handler resumes, so a double click on
+  // the same card cannot resolve it twice.
+  s.pendingPermissions.delete(requestId);
+  pending.resolve({ outcome: "selected", optionId });
 }
 
 /**

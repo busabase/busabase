@@ -30,6 +30,7 @@ describe("merge invalidation scope", () => {
     const batch = classifyLiveInvalidation(mergedEvent({ recordIds: ["record-1"] }));
 
     expect(batch.targets).toContain("records");
+    expect(batch.targets).toContain("recordDetail");
     expect(batch.targets).not.toContain("bases");
     expect(batch.targets).not.toContain("archivedBases");
     expect(batch.baseIds).not.toContain("base-1");
@@ -49,6 +50,7 @@ describe("merge invalidation scope", () => {
     );
 
     expect(batch.targets).toContain("records");
+    expect(batch.targets).toContain("recordDetail");
     expect(batch.targets).toContain("bases");
     expect(batch.targets).toContain("archivedBases");
     expect(batch.baseIds).toContain("base-1");

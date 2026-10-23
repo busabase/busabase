@@ -7,6 +7,8 @@
 // and so busabase-core's own runtime accessor (`fmt`) can interpolate them.
 
 export const coreMessagesEn = {
+  lookup: lookupEn,
+  reverseRelation: reverseRelationEn,
   fieldHelp: {
     inherit: "Use field instructions",
     override: "Customize for this form",
@@ -866,17 +868,12 @@ export const coreMessagesEn = {
     install: "Install",
     installRestricted:
       "Space owners and admins only — a template can carry an app and a skill, which is code this space's agents will run.",
-    cardBases: "{count} table{plural}",
-    cardApps: "{count} app{plural}",
-    cardDocs: "{count} doc{plural}",
-    cardRows: "{count} sample row{plural}",
-    cardManual: "Agent manual",
     promptsTitle: "What you can ask an agent, once it is installed",
     promptsDescription:
       "The agent can answer these because the template installs its author's manual alongside its Bases. It does not have to guess your schema.",
     contentsTitle: "What installing this creates",
-    contentsDescription:
-      'Bases, fields, sample rows, the app and the agent manual are created straight away when you can edit this space. Tick "Send the content for review first" while installing to receive the app code and manual as change requests instead.',
+    permissionNote:
+      "Installing needs an owner or admin of this space. Everything it creates is ready to use straight away; you can also choose to review the content first.",
     bases: "Bases",
     apps: "Apps",
     documents: "Documents",
@@ -1718,6 +1715,13 @@ export const coreMessagesEn = {
     viewFieldDragOutside: "The field is outside the reorder area. Drop to cancel.",
     noViewFilters: "No filters in this view.",
     noViewSorts: "No sorts in this view.",
+    filterMatch: "Match",
+    filterMatchAll: "All conditions (AND)",
+    filterMatchAny: "Any condition (OR)",
+    filterConjunction: "Condition combination",
+    addFilterGroup: "Add condition group",
+    removeFilterGroup: "Remove condition group",
+    filterMissingField: "Field no longer available",
     viewFilterCount: "{count} filters",
     viewSortCount: "{count} sorts",
     clearAllFilters: "Clear all filters",
@@ -2653,3 +2657,6 @@ export const coreMessagesEn = {
 };
 
 export type CoreI18nMessages = typeof coreMessagesEn;
+
+import { lookupEn } from "./lookup";
+import { reverseRelationEn } from "./reverse-relation";

@@ -89,7 +89,7 @@ describe("buildSkillMarkdown advertises the batch/bulk/temp-ref/assets surface",
     for (const doc of [cloud, local]) {
       expect(doc).toContain("/api/v1/assets/upload-urls");
       expect(doc).toContain("/api/v1/assets/confirmations");
-      expect(doc).toContain("busabase-cli assets upload");
+      expect(doc).toContain("npx --yes busabase-cli@latest assets upload");
       expect(doc).toContain("assetId");
       expect(doc).toContain("attachmentId");
     }
@@ -245,6 +245,18 @@ describe("generated Cloud onboarding", () => {
       expect(doc).not.toContain("set -a; . ~/.busabase/.env; set +a");
       expect(doc).not.toMatch(/^npx busabase-cli (?:login|auth status)/m);
     }
+  });
+
+  it("never tells an agent to run an unpinned `npx busabase-cli`", () => {
+    // A bare `npx busabase-cli` runs any busabase-cli npx already finds (a global
+    // install, or a node_modules in a parent directory) without a version check, so an
+    // agent following the doc can silently run an old CLI and miss new commands and
+    // fixes (e.g. a pre-0.98 CLI never sends `x-busabase-agent`).
+    for (const doc of [cloud, local, cloudBootstrap, localBootstrap, cloudDispatcher]) {
+      expect(doc).not.toMatch(/npx (?:-y |--yes )?busabase-cli(?!@latest)/);
+    }
+    expect(cloud).toContain("npx --yes busabase-cli@latest playbooks search");
+    expect(cloud).toContain("npx --yes busabase-cli@latest assets upload");
   });
 
   it("branches on the persistent bootstrap marker instead of Space emptiness", () => {

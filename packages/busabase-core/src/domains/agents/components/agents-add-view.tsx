@@ -243,7 +243,7 @@ export function AgentsAddView({ orpc, onBack, onConnected, spaceId }: AgentsAddV
   }, [createSession, locale, messages, orpc.agents.catalog, queryClient]);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <header className="flex items-start gap-3 border-b px-4 py-4 sm:items-center sm:px-6">
         <Button className="min-h-11 shrink-0 sm:min-h-9" variant="ghost" size="sm" onClick={onBack}>
           <ArrowLeft className="size-4" />
@@ -283,7 +283,7 @@ export function AgentsAddView({ orpc, onBack, onConnected, spaceId }: AgentsAddV
               </Button>
             </div>
           ) : (
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,16rem),1fr))] gap-3">
               {(() => {
                 const entries = [...(catalog.data ?? [])];
                 const localAgents = entries.filter((e) => e.transport === "local-subprocess");
@@ -316,7 +316,7 @@ export function AgentsAddView({ orpc, onBack, onConnected, spaceId }: AgentsAddV
                   !desktopAgentEntry;
                 return (
                   <div
-                    className={`flex h-full flex-col gap-3 rounded-lg border p-4 ${
+                    className={`flex h-full min-w-0 flex-col gap-3 break-words rounded-lg border p-4 ${
                       isUnavailable || isAlreadyAdded
                         ? "opacity-50 bg-muted/40 grayscale-[50%] transition-opacity hover:opacity-70"
                         : ""
@@ -326,12 +326,12 @@ export function AgentsAddView({ orpc, onBack, onConnected, spaceId }: AgentsAddV
                     key={entry.slug}
                   >
                     <div className="flex min-w-0 flex-1 flex-col gap-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="flex min-w-0 items-center gap-2 font-medium text-sm">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="flex min-w-0 flex-1 basis-40 items-center gap-2 font-medium text-sm">
                           <Bot className="size-4 shrink-0" />
                           <span className="min-w-0 break-words">{entry.name}</span>
                         </span>
-                        <span className="flex shrink-0 items-center gap-1">
+                        <span className="flex max-w-full flex-wrap items-center gap-1">
                           <TransportBadge transport={entry.transport} />
                           {entry.comingSoon && (
                             <Badge variant="secondary">{messages.agents.comingSoon}</Badge>

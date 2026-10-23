@@ -35,7 +35,7 @@ describe("assertAirAppRunnable", () => {
   it("allows the one bundler pin verified to actually boot", () => {
     // vite@7.3.1 is not a theoretical exception — it's the exact pin
     // Nodepod's own examples/issue-44-react-dev-server "known good" button
-    // real-boots against the current published @scelar/nodepod: onServerReady
+    // real-boots against Nodepod 1.9.20 (then @scelar/nodepod): onServerReady
     // fires and the dev server answers 200 through the SW proxy. Verified in
     // both devDependencies and dependencies since a caller could reasonably
     // put it in either.

@@ -8,6 +8,7 @@ import type {
   BaseFieldVO,
   BaseVO,
   ChangeRequestVO,
+  LookupComputedVO,
   NodeVO,
   RecordVO,
   UserRefVO,
@@ -26,13 +27,14 @@ import {
   Maximize2,
   MoreHorizontal,
   Paperclip,
+  RotateCcw,
   Share2,
   Sparkles,
   Trash2,
   X,
 } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useLocation, useSearch } from "wouter";
 import { fmt, useCoreI18n, useCoreLocale, useIString } from "../../../i18n";
@@ -44,8 +46,11 @@ import {
   getMemberIds,
   isHiddenOnCreate,
   isPeopleFieldType,
-  isSystemFieldType,
+  isReadOnlyFieldDef,
+  isReverseRelationDef,
 } from "../../base/field-types";
+import { buildFieldGraph } from "../../base/formula/dependency";
+import { applyRollup, isRollupCompatible } from "../../base/lookup/rollup";
 import { getDateFieldOptions } from "../../base/utils/date-value";
 import { parseWhiteboardFieldValue } from "../../base/utils/whiteboard-value";
 import {
@@ -73,6 +78,7 @@ import {
   shortIdentifier,
 } from "../helpers/format";
 import { mergeSearchIntoHref, useHrefWithCurrentSearch } from "../helpers/link-search";
+import { emptyLookupValues } from "../helpers/lookup";
 import type { RecordSubmitOptions } from "../helpers/view-types";
 import { useDashboardOrpc } from "../orpc-context";
 import { registerSidePanelTab, type SidePanelTabProps } from "../side-panel-registry";
@@ -85,6 +91,7 @@ import {
   FieldBadgeList,
   FieldValuePreview,
   HtmlFieldPreview,
+  LookupFieldValue,
   MarkdownFieldPreview,
 } from "./field-preview";
 import { UserRefButton } from "./identity";
@@ -266,6 +273,8 @@ function RecordSidePanelPreview({ orpc, payload }: SidePanelTabProps) {
               <FieldValuePreview
                 className="max-w-full whitespace-pre-wrap"
                 field={field}
+                computed={record.computedFields?.[field.slug]}
+                fieldUsers={record.fieldUsers}
                 records={previewRecords}
                 value={record.headCommit.payload[field.slug]}
               />
@@ -488,6 +497,7 @@ export function RecordDetailView({
         >
           <RecordHero record={record} />
           <RecordFieldPanel record={record} records={records} />
+          <RecordLinkedFromPanel record={record} />
           {!isAnon ? <RecordCommentsPanel client={client} record={record} /> : null}
         </main>
         {!isAnon ? (
@@ -857,14 +867,37 @@ export function RecordEditorView({
         <div className="mt-5">
           <div className="border-border/50 border-t">
             {editorBase.fields
-              // On create there is nothing to enter for system/AI fields yet — hide them.
-              // On edit they show (system read-only, AI editable) so values are visible.
-              .filter((field) => mode === "edit" || !isHiddenOnCreate(field.type))
+              // Lookup can preview the current relation selection before save.
+              // Other system/AI fields, and read-only reverse relation columns,
+              // still have nothing to enter on create.
+              .filter(
+                (field) =>
+                  mode === "edit" ||
+                  field.type === "lookup" ||
+                  (!isHiddenOnCreate(field.type) && !isReverseRelationDef(field)),
+              )
               .map((field) => (
                 <RecordFieldInput
                   client={client}
+                  editorBase={editorBase}
                   editorInstanceKey={mode === "edit" && record ? record.id : "new"}
                   field={field}
+                  computed={record?.computedFields?.[field.slug]}
+                  draftRelationIds={
+                    field.type === "lookup" &&
+                    field.options.lookup &&
+                    (mode === "new" ||
+                      JSON.stringify(
+                        getRelationRecordIds(fields[field.options.lookup.relationFieldSlug]),
+                      ) !==
+                        JSON.stringify(
+                          getRelationRecordIds(
+                            record?.headCommit.payload[field.options.lookup.relationFieldSlug],
+                          ),
+                        ))
+                      ? getRelationRecordIds(fields[field.options.lookup.relationFieldSlug])
+                      : undefined
+                  }
                   key={field.id}
                   memberUsers={record?.fieldUsers}
                   onChange={(value) => {
@@ -916,10 +949,24 @@ export function RecordEditorView({
   );
 }
 
+const lookupDraftClients = new WeakMap<BusabaseDashboardApiClient, number>();
+let nextLookupDraftClient = 0;
+const lookupDraftClientScope = (client: BusabaseDashboardApiClient): number => {
+  let scope = lookupDraftClients.get(client);
+  if (scope === undefined) {
+    scope = ++nextLookupDraftClient;
+    lookupDraftClients.set(client, scope);
+  }
+  return scope;
+};
+
 export function RecordFieldInput({
   client,
+  editorBase,
   editorInstanceKey,
   field,
+  computed,
+  draftRelationIds,
   memberUsers,
   onChange,
   onUploadAttachment,
@@ -927,6 +974,8 @@ export function RecordFieldInput({
   value,
 }: {
   client: BusabaseDashboardApiClient;
+  /** Current editor schema, including the relation a draft Lookup follows. */
+  editorBase?: BaseVO;
   /**
    * Identifies which record's editor session this is ("new" for the create
    * form, otherwise the record id) — `RecordEditorView` reuses the same
@@ -937,6 +986,8 @@ export function RecordFieldInput({
    */
   editorInstanceKey: string;
   field: BaseFieldVO;
+  computed?: LookupComputedVO;
+  draftRelationIds?: string[];
   /** The edited record's already-resolved people, so a set member keeps its name
    *  even when they have since left the space (the roster no longer has them). */
   memberUsers?: Record<string, UserRefVO>;
@@ -966,6 +1017,145 @@ export function RecordFieldInput({
       ? [value]
       : [];
 
+  const orpc = useDashboardOrpc();
+  const draftScope = lookupDraftClientScope(client);
+  const config = field.options.lookup;
+  const relation = editorBase?.fields.find(
+    (candidate) => candidate.type === "relation" && candidate.slug === config?.relationFieldSlug,
+  );
+  const sourceBaseId = relation?.options.targetBaseId;
+  const hasDraft = field.type === "lookup" && draftRelationIds !== undefined;
+  // Use the existing scoped query prefixes so SSE, focus and reconnect refresh
+  // both authorization and source values. A client identity also isolates hosts
+  // without an oRPC context, and credentials changed within the same workspace.
+  const sourceQuery = useQuery({
+    queryKey: [
+      ...(orpc?.bases.get.key() ?? ["busabase", "base-detail"]),
+      "lookup-draft-source",
+      draftScope,
+      sourceBaseId,
+    ],
+    queryFn: async ({ signal }) => {
+      try {
+        const source = await client.getBase(sourceBaseId ?? "");
+        signal.throwIfAborted();
+        return source.id === sourceBaseId ? source : null;
+      } catch {
+        signal.throwIfAborted();
+        // Replace previously authorized schema data on access loss or failure.
+        return null;
+      }
+    },
+    enabled: hasDraft && Boolean(config && relation && sourceBaseId),
+    gcTime: 0,
+    retry: false,
+  });
+  const source =
+    sourceQuery.isFetchedAfterMount && !sourceQuery.isFetching && !sourceQuery.error
+      ? sourceQuery.data
+      : undefined;
+  const dynamicSourceFields = new Set(
+    source?.fields
+      .filter((candidate) => candidate.type === "lookup")
+      .map((candidate) => candidate.slug),
+  );
+  const sourceGraph = source ? buildFieldGraph(source.fields) : undefined;
+  for (const slug of dynamicSourceFields) {
+    for (const dependent of sourceGraph?.neighbors(slug) ?? []) dynamicSourceFields.add(dependent);
+  }
+  const targetField = source?.fields.find(
+    (candidate) => candidate.slug === config?.targetFieldSlug,
+  );
+  const validTarget =
+    targetField &&
+    !dynamicSourceFields.has(targetField.slug) &&
+    isRollupCompatible(config?.rollup ?? "values", targetField.type)
+      ? targetField
+      : undefined;
+  const draftKey = useMemo(
+    () => [
+      ...(orpc?.records.get.key() ?? ["busabase", "record-detail"]),
+      "lookup-draft",
+      draftScope,
+      editorBase?.id,
+      editorInstanceKey,
+      field.id,
+      config,
+      sourceBaseId,
+      sourceQuery.dataUpdatedAt,
+      draftRelationIds,
+    ],
+    [
+      orpc,
+      draftScope,
+      editorBase?.id,
+      editorInstanceKey,
+      field.id,
+      config,
+      sourceBaseId,
+      sourceQuery.dataUpdatedAt,
+      draftRelationIds,
+    ],
+  );
+  const draftQuery = useQuery({
+    queryKey: draftKey,
+    queryFn: async ({ signal }) => {
+      if (!source || !validTarget || !config) return null;
+      const ids =
+        config.limit === "first" ? (draftRelationIds ?? []).slice(0, 1) : (draftRelationIds ?? []);
+      try {
+        const targets = await Promise.all(ids.map((id) => client.getRecord(id)));
+        signal.throwIfAborted();
+        if (
+          targets.some((target, index) => target.id !== ids[index] || target.baseId !== source.id)
+        )
+          return null;
+        const values = targets.map((target) => target.headCommit.payload[validTarget.slug]);
+        return { targets, values, result: applyRollup(values, config.rollup ?? "values") };
+      } catch {
+        signal.throwIfAborted();
+        // Never retain an earlier successful total after a failed revalidation.
+        return null;
+      }
+    },
+    enabled:
+      hasDraft &&
+      Boolean(source && validTarget) &&
+      (config?.limit === "first" || (draftRelationIds?.length ?? 0) <= 25),
+    gcTime: 0,
+    retry: false,
+  });
+  const draftData =
+    source && validTarget && !draftQuery.isFetching && !draftQuery.error
+      ? draftQuery.data
+      : undefined;
+  const draftComputed: LookupComputedVO | undefined =
+    draftData && source && validTarget
+      ? {
+          status:
+            draftData.targets.length === 0
+              ? "unlinked"
+              : emptyLookupValues(draftData.values)
+                ? "empty"
+                : "ready",
+          value: draftData.result,
+          targetField: validTarget,
+          sourceBaseId: source.id,
+          sourceBaseSlug: source.slug,
+          sourcesTruncated: false,
+          dependencyVersion: `draft:${sourceQuery.dataUpdatedAt}:${draftQuery.dataUpdatedAt}`,
+          sources: draftData.targets.map((target, index) => ({
+            recordId: target.id,
+            title: getRecordTitle(target, messages),
+            value: draftData.values[index],
+            headCommitId: target.headCommit.id,
+          })),
+        }
+      : undefined;
+  const draftUsers = draftData
+    ? Object.assign({}, memberUsers, ...draftData.targets.map((target) => target.fieldUsers ?? {}))
+    : memberUsers;
+
   return (
     <div
       role="group"
@@ -988,7 +1178,59 @@ export function RecordFieldInput({
         </div>
         <FieldHelp help={field.options.help} id={helpId} />
       </div>
-      {kind === "computed" ? (
+      {isReverseRelationDef(field) ? (
+        <ReverseRelationReadOnlyValue
+          client={client}
+          field={field}
+          inputId={inputId}
+          records={targetRecords}
+          value={value}
+        />
+      ) : field.type === "lookup" ? (
+        <div
+          className="min-h-9 min-w-0 rounded-md border border-border/40 bg-muted/40 px-2.5 py-1.5"
+          id={inputId}
+        >
+          {draftRelationIds !== undefined && !draftComputed ? (
+            <div className="text-muted-foreground text-xs">
+              <div>{messages.lookup.draft}</div>
+              {field.options.lookup?.limit !== "first" && draftRelationIds.length > 25 ? (
+                messages.lookup.previewLimit
+              ) : !config || !relation || !sourceBaseId || (source && !validTarget) ? (
+                messages.lookup.invalid
+              ) : sourceQuery.data === null ||
+                sourceQuery.error ||
+                draftQuery.data === null ||
+                draftQuery.error ? (
+                <div className="flex items-center gap-2" role="alert">
+                  {messages.lookup.failed}
+                  <button
+                    aria-label={messages.lookup.retry}
+                    onClick={() => {
+                      void sourceQuery.refetch();
+                    }}
+                    title={messages.lookup.retry}
+                    type="button"
+                  >
+                    <RotateCcw size={14} />
+                  </button>
+                </div>
+              ) : (
+                messages.common.loading
+              )}
+            </div>
+          ) : (
+            <LookupFieldValue
+              computed={draftComputed ?? computed}
+              draft={draftRelationIds !== undefined}
+              field={field}
+              fieldUsers={draftUsers}
+              records={records}
+              value={draftComputed?.value ?? value}
+            />
+          )}
+        </div>
+      ) : kind === "computed" ? (
         <div
           className="flex min-h-9 items-center rounded-md border border-border/40 bg-muted/40 px-2.5 py-1.5 text-muted-foreground text-sm"
           id={inputId}
@@ -1655,11 +1897,161 @@ export const normalizeEditorFieldValue = (field: BaseFieldVO, value: unknown): u
   return value ?? "";
 };
 
+/**
+ * A reverse relation column in the record editor: the linking records as chips,
+ * never an editor. The relationship is stored on the forward field of the
+ * linked Base, so the hint names that Base.
+ */
+function ReverseRelationReadOnlyValue({
+  client,
+  field,
+  inputId,
+  records,
+  value,
+}: {
+  client: BusabaseDashboardApiClient;
+  field: BaseFieldVO;
+  inputId: string;
+  records: RecordVO[];
+  value: unknown;
+}) {
+  const messages = useCoreI18n();
+  const targetBaseId = field.options.targetBaseId;
+  const targetBaseQuery = useQuery({
+    enabled: Boolean(targetBaseId),
+    queryFn: () => client.getBase(targetBaseId as string),
+    queryKey: ["busabase", "reverse-relation-base", targetBaseId],
+    staleTime: 60_000,
+  });
+  const baseName = targetBaseQuery.data?.name;
+  return (
+    <div
+      className="min-h-9 min-w-0 rounded-md border border-border/40 bg-muted/40 px-2.5 py-1.5"
+      data-reverse-relation-field={field.slug}
+      id={inputId}
+    >
+      <FieldValuePreview field={field} records={records} value={value} />
+      <p className="mt-1 text-muted-foreground text-xs">
+        {messages.reverseRelation.readOnly} ·{" "}
+        {baseName
+          ? fmt(messages.reverseRelation.editIn, { base: baseName })
+          : messages.reverseRelation.editOnLinked}
+      </p>
+    </div>
+  );
+}
+
+/** At most this many linking records are fetched for the "Linked from" panel. */
+const LINKED_FROM_LIMIT = 50;
+
+/**
+ * "Linked from": records on other Bases (or this one) whose relation fields
+ * point at this record — the backlinks no relation column on this Base shows.
+ * Links already surfaced by a reverse column here are left out so the same
+ * records are not listed twice. Hidden when nothing links here.
+ */
+function RecordLinkedFromPanel({ record }: { record: RecordVO }) {
+  const messages = useCoreI18n();
+  const resolveIString = useIString();
+  const currentSearch = useSearch();
+  // Hosts and tests may mount the record page with a partial client; the panel
+  // is an extra, so it simply stays hidden when `records` is not available.
+  const recordsApi = useDashboardOrpc()?.records;
+  const linksQuery = useQuery({
+    ...(recordsApi?.listLinks.queryOptions({
+      input: { recordId: record.id, direction: "inbound" },
+    }) ?? {
+      queryKey: ["busabase", "record-linked-from", "unavailable", record.id],
+      queryFn: async () => [],
+    }),
+    enabled: Boolean(recordsApi),
+  });
+  const shownByReverseColumns = new Set(
+    record.base.fields.flatMap((field) =>
+      isReverseRelationDef(field) && field.options.reverseOfFieldId
+        ? [field.options.reverseOfFieldId]
+        : [],
+    ),
+  );
+  const links = (linksQuery.data ?? []).filter(
+    (link) => !shownByReverseColumns.has(link.fieldId) && link.sourceRecordId !== record.id,
+  );
+  const sourceIds = [...new Set(links.map((link) => link.sourceRecordId))].slice(
+    0,
+    LINKED_FROM_LIMIT,
+  );
+  const sourceQueries = useQueries({
+    queries: recordsApi
+      ? sourceIds.map((id) => recordsApi.get.queryOptions({ input: { recordId: id } }))
+      : [],
+  });
+  if (!recordsApi || links.length === 0) {
+    return linksQuery.isError ? (
+      <p className="mt-5 text-muted-foreground text-xs" role="alert">
+        {messages.reverseRelation.loadFailed}
+      </p>
+    ) : null;
+  }
+  const sourcesById = new Map(
+    sourceQueries.flatMap((query) => (query.data ? [[query.data.id, query.data] as const] : [])),
+  );
+  const groups = new Map<string, { label: string; records: RecordVO[] }>();
+  for (const link of links) {
+    const source = sourcesById.get(link.sourceRecordId);
+    if (!source) continue;
+    const sourceField = source.base.fields.find((field) => field.id === link.fieldId);
+    const key = `${link.baseId}|${link.fieldId}`;
+    const group = groups.get(key) ?? {
+      label: fmt(messages.reverseRelation.linkedFromGroup, {
+        base: source.base.name,
+        field: sourceField ? resolveIString(sourceField.name) : link.fieldSlug,
+      }),
+      records: [],
+    };
+    if (!group.records.some((item) => item.id === source.id)) group.records.push(source);
+    groups.set(key, group);
+  }
+  if (groups.size === 0) return null;
+  return (
+    <section className="mt-6" data-record-linked-from={record.id}>
+      <div className="font-medium text-muted-foreground text-sm">
+        {messages.reverseRelation.linkedFrom}
+      </div>
+      <div className="mt-2 grid gap-3">
+        {[...groups].map(([key, group]) => (
+          <div className="text-sm" data-linked-from-group={key} key={key}>
+            <div className="text-muted-foreground text-xs">{group.label}</div>
+            <div className="mt-1 flex min-w-0 flex-wrap gap-1.5">
+              {group.records.map((source) => {
+                const label = getRecordTitle(source, messages);
+                return (
+                  <Link
+                    className="max-w-64 truncate rounded-md border bg-card px-2 py-0.5 text-primary text-xs transition-colors hover:border-primary/40 hover:bg-primary/5 hover:underline"
+                    href={mergeSearchIntoHref(
+                      `/base/${source.base.slug}/${source.id}`,
+                      currentSearch,
+                    )}
+                    key={source.id}
+                    title={label}
+                  >
+                    {label}
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 const normalizeEditorFields = (base: BaseVO, fields: Record<string, unknown>) =>
   Object.fromEntries(
     base.fields
-      // System fields are computed server-side; never send them from the editor.
-      .filter((field) => !isSystemFieldType(field.type))
+      // System fields and reverse relation columns are computed server-side;
+      // never send them from the editor.
+      .filter((field) => !isReadOnlyFieldDef(field))
       .map((field) => [field.slug, normalizeEditorFieldValue(field, fields[field.slug])]),
   );
 
@@ -1701,6 +2093,7 @@ function RecordFieldPanel({ record, records }: { record: RecordVO; records: Reco
                         : "whitespace-pre-wrap text-foreground/95"
                     }
                     field={field}
+                    computed={record.computedFields?.[field.slug]}
                     fieldUsers={record.fieldUsers}
                     record={record}
                     records={records}
@@ -1851,6 +2244,7 @@ function RecordPropertyItem({
         <FieldValuePreview
           className="inline text-sm leading-5"
           field={field}
+          computed={record.computedFields?.[field.slug]}
           fieldUsers={record.fieldUsers}
           record={record}
           records={records}

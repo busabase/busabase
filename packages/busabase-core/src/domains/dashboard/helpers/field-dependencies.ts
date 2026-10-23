@@ -1,4 +1,5 @@
 import type { BaseFieldVO, BaseVO, ViewVO } from "busabase-contract/types";
+import { flattenViewFilters } from "busabase-contract/types";
 import type { iString } from "openlib/i18n/i-string";
 import { collectFieldRefs } from "../../base/formula/ast";
 import { parseFormula } from "../../base/formula/parser";
@@ -27,7 +28,8 @@ export function getFieldDependencies(
 
   for (const view of views) {
     if (view.baseId !== field.baseId || view.status !== "active") continue;
-    if (view.config.filters.some(matchesViewField)) add("viewFilter", view.name, ownBase, view);
+    if (flattenViewFilters(view.config.filters).some(matchesViewField))
+      add("viewFilter", view.name, ownBase, view);
     if (view.config.sorts.some(matchesViewField)) add("viewSort", view.name, ownBase, view);
     const config = view.config;
     if (

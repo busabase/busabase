@@ -60,6 +60,8 @@ export interface BaseFieldVO {
       currency?: string;
     };
     inverseFieldId?: string;
+    /** Read-only reverse column of this relation field id on the target Base. */
+    reverseOfFieldId?: string;
     // Must mirror the contract's fieldOptionsSchema — see base-schemas.ts there.
     lookup?: {
       relationFieldSlug: string;
@@ -106,6 +108,48 @@ export interface ViewFilterVO {
   value?: unknown;
 }
 
+export type ViewFilterConjunction = "and" | "or";
+
+export interface ViewFilterGroupVO {
+  conjunction: ViewFilterConjunction;
+  conditions: ViewFilterConditionVO[];
+}
+
+export type ViewFilterConditionVO = ViewFilterVO | ViewFilterGroupVO;
+
+export const isViewFilterGroup = (
+  condition: ViewFilterConditionVO,
+): condition is ViewFilterGroupVO => "conditions" in condition;
+
+export const flattenViewFilters = (conditions: readonly ViewFilterConditionVO[]): ViewFilterVO[] =>
+  conditions.flatMap((condition) =>
+    isViewFilterGroup(condition) ? flattenViewFilters(condition.conditions) : [condition],
+  );
+
+/** Map leaves without losing the enclosing boolean expression. */
+export const mapViewFilters = (
+  conditions: readonly ViewFilterConditionVO[],
+  map: (filter: ViewFilterVO) => ViewFilterVO,
+): ViewFilterConditionVO[] =>
+  conditions.map((condition) =>
+    isViewFilterGroup(condition)
+      ? { ...condition, conditions: mapViewFilters(condition.conditions, map) }
+      : map(condition),
+  );
+
+/** Ad-hoc rules always narrow the complete saved expression. */
+export const combineViewFilters = (
+  config: Pick<ViewConfigVO, "filters" | "filterConjunction"> | undefined,
+  adHocFilters: readonly ViewFilterVO[] = [],
+): ViewFilterConditionVO[] => [
+  ...(config?.filters.length
+    ? config.filterConjunction === "or"
+      ? [{ conjunction: "or" as const, conditions: config.filters }]
+      : config.filters
+    : []),
+  ...adHocFilters,
+];
+
 export interface ViewSortVO {
   direction: "asc" | "desc";
   fieldSlug: string;
@@ -121,7 +165,9 @@ export const VIEW_FIELD_MIN_WIDTH = 92;
 export const VIEW_FIELD_MAX_WIDTH = 640;
 
 export interface ViewConfigVO {
-  filters: ViewFilterVO[];
+  filters: ViewFilterConditionVO[];
+  /** Legacy configs omit this and retain their implicit AND semantics. */
+  filterConjunction?: ViewFilterConjunction;
   sorts: ViewSortVO[];
   visibleFieldSlugs?: string[] | null;
   /** Table-only column widths in pixels, keyed by field slug. */
@@ -159,6 +205,31 @@ export interface ViewVO {
   updatedAt: string;
 }
 
+export const LOOKUP_SOURCE_LIMIT = 25;
+
+export interface LookupComputedVO {
+  status: "ready" | "unlinked" | "empty" | "invalid" | "inaccessible";
+  /** Safe configuration detail; omitted when the source is unavailable or unauthorized. */
+  reason?:
+    | "missing_configuration"
+    | "missing_relation"
+    | "missing_source_configuration"
+    | "missing_target_field"
+    | "unsupported_source"
+    | "unsupported_rollup"
+    | "source_base_mismatch"
+    | "source_record_archived";
+  value: unknown;
+  targetField?: BaseFieldVO;
+  sourceBaseId?: string;
+  sourceBaseSlug?: string;
+  sources: Array<{ recordId: string; title: string; value: unknown; headCommitId: string }>;
+  sourcesTruncated?: boolean;
+  dependencyVersion: string;
+  /** Server read-start time, not a causal database revision. */
+  dependencyReadAt?: number;
+}
+
 export interface RecordVO {
   id: string;
   baseId: string;
@@ -183,6 +254,8 @@ export interface RecordVO {
    * even when the name is gone.
    */
   fieldUsers?: Record<string, UserRefVO>;
+  /** Current read-time derived values, distinct from the stored commit snapshot. */
+  computedFields?: Record<string, LookupComputedVO>;
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string;

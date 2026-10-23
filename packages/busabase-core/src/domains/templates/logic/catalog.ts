@@ -3,8 +3,13 @@ import "server-only";
 import {
   parseTemplateRisk,
   type TemplateLocales,
+  type TemplateVideo,
 } from "busabase-contract/domains/package/template";
-import { parseTemplateLocales } from "busabase-contract/domains/templates/media";
+import {
+  declaredVideos,
+  parseTemplateLocales,
+  parseTemplateVideos,
+} from "busabase-contract/domains/templates/media";
 import type { TemplateCardVO, TemplateCatalogVO } from "busabase-contract/domains/templates/types";
 
 /**
@@ -52,6 +57,12 @@ interface RawTemplate {
   tags?: string[];
   screenshots?: string[];
   video?: string;
+  /**
+   * Untrusted, and absent from every catalog built before the field existed —
+   * normalized through `parseTemplateVideos`, which drops malformed entries
+   * rather than throwing.
+   */
+  videos?: unknown;
   /**
    * Untrusted, and absent from every catalog built before the field existed —
    * normalized through `parseTemplateLocales`, which ignores anything malformed
@@ -119,6 +130,14 @@ const videoUrl = (repo: string, ref: string, subdir: string, file: string): stri
  * declared, so a card from an old-shape catalog carries no `locales` key at all
  * and is identical to what this server produced before the field existed.
  */
+const videoUrls = (
+  videos: readonly TemplateVideo[],
+  repo: string,
+  ref: string,
+  subdir: string,
+): TemplateVideo[] =>
+  videos.map((clip) => ({ ...clip, src: videoUrl(repo, ref, subdir, clip.src) }));
+
 const localeUrls = (
   raw: unknown,
   repo: string,
@@ -135,6 +154,7 @@ const localeUrls = (
           ? { screenshots: media.screenshots.map((file) => screenshotUrl(repo, ref, subdir, file)) }
           : {}),
         ...(media.video ? { video: videoUrl(repo, ref, subdir, media.video) } : {}),
+        ...(media.videos ? { videos: videoUrls(media.videos, repo, ref, subdir) } : {}),
       },
     ]),
   );
@@ -144,6 +164,11 @@ const toCard = (raw: RawTemplate, repo: string, ref: string): TemplateCardVO => 
   const { sourceUrl, repoUrl } = githubUrls(repo, ref, raw.subdir);
   const risk = parseTemplateRisk(raw.risk);
   const locales = localeUrls(raw.locales, repo, ref, raw.subdir);
+  // `video` is always the first clip (what an older client reads); `videos` is
+  // there only when the template declared a list, so a single-clip card is
+  // unchanged from what this server produced before the field existed.
+  const clips = declaredVideos(raw.video, raw.videos);
+  const videos = parseTemplateVideos(raw.videos);
   return {
     id: `${repo}/${raw.subdir}`,
     name: raw.name,
@@ -153,7 +178,8 @@ const toCard = (raw: RawTemplate, repo: string, ref: string): TemplateCardVO => 
     ...(risk ? { risk } : {}),
     tags: raw.tags ?? [],
     screenshots: (raw.screenshots ?? []).map((file) => screenshotUrl(repo, ref, raw.subdir, file)),
-    ...(raw.video ? { video: videoUrl(repo, ref, raw.subdir, raw.video) } : {}),
+    ...(clips?.[0] ? { video: videoUrl(repo, ref, raw.subdir, clips[0].src) } : {}),
+    ...(videos ? { videos: videoUrls(videos, repo, ref, raw.subdir) } : {}),
     ...(locales ? { locales } : {}),
     agentPrompts: raw.agentPrompts ?? [],
     ...(raw.version ? { version: raw.version } : {}),

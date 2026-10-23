@@ -57,6 +57,7 @@ import {
   type KnownNode,
   knownNodeCacheScope,
 } from "../helpers/known-node-cache";
+import { buildNavItems, type NavTreeOptions, nodeHref } from "../helpers/nav-tree";
 import { nodeIconGlyph, resolveNodeIcon } from "../helpers/node-icons";
 import {
   DEFAULT_WORKSPACE_FILTER,
@@ -1475,13 +1476,6 @@ function DashboardShellInner({
 // flat listings that are NOT NodeVOs (the "Shared" filter's `SharedNodeVO`)
 // resolve their route through this one function instead of re-spelling the
 // Base special case somewhere it could drift.
-function nodeHref(node: { type: string; slug: string }): string | null {
-  if (node.type === "base") {
-    return node.slug ? `/base/${node.slug}` : null;
-  }
-  return hasCapability(node.type, "hasDetail") ? `/${node.type}/${node.slug}` : null;
-}
-
 interface NavItemLabels {
   newLabel: string;
   openLabel: string;
@@ -1516,8 +1510,8 @@ interface FavoriteActionContext {
 /**
  * Everything the recursive nav build needs, in one object. Passed unchanged
  * from `buildKnowledgeBaseItems`/`buildFavoriteItems` down through
- * `buildNavItem` → `buildNavChildren` → `buildNavItem` … at every depth, so
- * adding an action means touching `buildNavItem` alone. The previous shape —
+ * `buildNavItems` → `decorateNavItem` at every depth, so adding an action
+ * means touching `decorateNavItem` alone. The previous shape —
  * nine optional positional parameters re-listed at each forwarding site — made
  * a dropped forward both easy to write and impossible for TypeScript to catch
  * (a missing optional argument is just `undefined`); that is precisely how the
@@ -1592,28 +1586,20 @@ export function buildNodeMenuActions({
 }
 
 /**
- * Build the NavItem(s) for a single node — a collapsible folder row (with its
- * own recursively-built `items`) if the node is a container, otherwise a plain
- * clickable leaf row if it has a detail screen, otherwise nothing. Applied at
- * EVERY depth (both at the top of `buildKnowledgeBaseItems` and recursively
- * via `buildNavChildren`), so a folder nested arbitrarily deep gets the exact
- * same chevron/add-child/actions treatment as a top-level one — the sidebar
- * (NavMain) renders `NavItem.items` recursively, so nothing here needs to
- * flatten nested folders away anymore.
- *
- * `node.hasChildren`/`node.children` carry through to `NavItem.hasChildren`
- * regardless of depth: a node sitting at a `nodes.list` depth boundary has
- * `children: []` but `hasChildren: true`, so it still renders as an
- * expandable folder (NavMain) with an `onExpand` affordance instead of
- * silently looking like an empty leaf. `loadingNodeIds` (host-supplied,
- * populated while a lazy per-folder fetch is in flight) drives the row's
- * loading state for exactly that case.
+ * What the member sidebar adds to a node's row on top of its shape (see
+ * `buildNavItems`): the "•••" menu, add-child, and the shared/restricted
+ * marker. Applied at EVERY depth, so a folder nested arbitrarily deep gets the
+ * exact same chevron/add-child/actions treatment as a top-level one.
  */
-function buildNavItem(node: NodeVO, ctx: NavItemContext): NavItem[] {
+function decorateNavItem(
+  node: NodeVO,
+  shape: "container" | "leaf",
+  href: string | null,
+  ctx: NavItemContext,
+): Partial<NavItem> {
   const {
     onCreateChild,
     labels,
-    loadingNodeIds,
     onOpenPermissions,
     favoriteContext,
     onOpenSettings,
@@ -1624,8 +1610,6 @@ function buildNavItem(node: NodeVO, ctx: NavItemContext): NavItem[] {
     onOpenDelete,
     canManageShareSettings,
   } = ctx;
-  if (hasCapability(node.type, "hidden")) return [];
-  const icon = nodeIconGlyph(resolveNodeIcon(node));
   // The "•••" Permissions action, shared by container and leaf rows so every
   // node type surfaced in the sidebar can be managed in place (matches buda's
   // per-agent Permissions menu entry). Only present when the host wired orpc.
@@ -1761,37 +1745,27 @@ function buildNavItem(node: NodeVO, ctx: NavItemContext): NavItem[] {
       : node.explicitVisibility === "private"
         ? { statusIcon: Lock, statusIconTitle: labels.restrictedMarkerLabel }
         : {};
-  if (hasCapability(node.type, "container")) {
-    const url = nodeHref(node) ?? "";
-    return [
-      {
-        title: node.name,
-        url,
-        icon,
-        id: node.id,
-        ...sharedMarker,
-        items: buildNavChildren(node, ctx),
-        hasChildren: node.hasChildren ?? node.children.length > 0,
-        isLoadingChildren: loadingNodeIds?.has(node.id) ?? false,
-        onAddChild: () => onCreateChild(node),
-        addChildTitle: labels.newLabel,
-        actions: buildNodeMenuActions({
-          openAction: url ? { title: labels.openLabel, url, icon: FolderOpen } : null,
-          agentPromptsAction,
-          managementActions: [
-            settingsAction,
-            renameAction,
-            permissionsAction,
-            favoriteAction,
-            moveAction,
-            shareAction,
-          ],
-          deleteAction,
-        }),
-      },
-    ];
+  if (shape === "container") {
+    const url = href ?? "";
+    return {
+      ...sharedMarker,
+      onAddChild: () => onCreateChild(node),
+      addChildTitle: labels.newLabel,
+      actions: buildNodeMenuActions({
+        openAction: url ? { title: labels.openLabel, url, icon: FolderOpen } : null,
+        agentPromptsAction,
+        managementActions: [
+          settingsAction,
+          renameAction,
+          permissionsAction,
+          favoriteAction,
+          moveAction,
+          shareAction,
+        ],
+        deleteAction,
+      }),
+    };
   }
-  const url = nodeHref(node);
   const leafActions = buildNodeMenuActions({
     agentPromptsAction,
     managementActions: [
@@ -1804,30 +1778,20 @@ function buildNavItem(node: NodeVO, ctx: NavItemContext): NavItem[] {
     ],
     deleteAction,
   });
-  return url
-    ? [
-        {
-          title: node.name,
-          url,
-          icon,
-          id: node.id,
-          ...sharedMarker,
-          actions: leafActions.length > 0 ? leafActions : undefined,
-        },
-      ]
-    : [];
+  return { ...sharedMarker, actions: leafActions.length > 0 ? leafActions : undefined };
 }
 
-// Recursively build every child of `node` as a NavItem — a container child
-// becomes its own nested collapsible folder (via `buildNavItem`'s recursive
-// call back into this function for ITS children), a detail-bearing child
-// becomes a plain leaf row, at any depth. `node.children` is `[]` for a node
-// sitting exactly at a `nodes.list` depth boundary (see `buildNavItem`), so
-// this naturally returns `[]` there too — the boundary's `hasChildren: true`
-// is what keeps it rendering as an (empty, expandable) folder rather than
-// collapsing into a leaf.
-function buildNavChildren(node: NodeVO, ctx: NavItemContext): NavItem[] {
-  return node.children.flatMap((child) => buildNavItem(child, ctx));
+/** The row-building options every member-sidebar tree shares: its shape plus these decorations. */
+function navTreeOptions(ctx: NavItemContext): NavTreeOptions {
+  return {
+    loadingNodeIds: ctx.loadingNodeIds,
+    decorate: (node, shape, href) => decorateNavItem(node, shape, href, ctx),
+  };
+}
+
+/** The NavItem(s) for one node and, for a container, its whole subtree. */
+function buildNavItem(node: NodeVO, ctx: NavItemContext): NavItem[] {
+  return buildNavItems([node], navTreeOptions(ctx));
 }
 
 /**
@@ -1837,7 +1801,7 @@ function buildNavChildren(node: NodeVO, ctx: NavItemContext): NavItem[] {
  * is unwrapped without dropping ACL-promoted nodes that may sit beside it.
  */
 function buildKnowledgeBaseItems(nodes: NodeVO[], ctx: NavItemContext): NavItem[] {
-  return getSidebarTopLevelNodes(nodes).flatMap((node) => buildNavItem(node, ctx));
+  return buildNavItems(getSidebarTopLevelNodes(nodes), navTreeOptions(ctx));
 }
 
 // A node's own NavItem stripped of every container-only field

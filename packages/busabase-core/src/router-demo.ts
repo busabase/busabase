@@ -1,9 +1,10 @@
-import { implement, ORPCError } from "@orpc/server";
+import { type EnhancedRouter, implement, ORPCError } from "@orpc/server";
 import { busabaseContract } from "busabase-contract/contract/busabase";
 import {
   PlaybookListInputSchema,
   PlaybookSearchInputSchema,
 } from "busabase-contract/contract/playbook-schemas";
+import { combineViewFilters } from "busabase-contract/types";
 import { getContextDemoLocale, resolveMemberRoster } from "./context";
 import {
   cancelDemoAgentSession,
@@ -78,6 +79,7 @@ import {
   demoSearchNodesByName,
   demoSubmitForm,
 } from "./logic/demo-store";
+import type { ImplementedContractRouter } from "./logic/implemented-router-type";
 
 // Stateless demo router: the request boundary swaps to this
 // when `?demo` is present. It implements the SAME `busabaseContract` as the real
@@ -187,7 +189,15 @@ const getDemoRecordOffset = (cursor?: string) => {
   return Number.isSafeInteger(offset) && offset >= 0 ? offset : 0;
 };
 
-export const busabaseDemoRouter = os.router({
+// Annotated with the contract-derived router type, like `busabaseRouter`: the
+// inferred type is past TypeScript's declaration-serialization limit (TS7056)
+// once the contract grew reverse relation fields.
+export const busabaseDemoRouter: EnhancedRouter<
+  ImplementedContractRouter<typeof busabaseContract, Record<never, never>>,
+  Record<never, never>,
+  Record<never, never>,
+  Record<never, never>
+> = os.router({
   auth: {
     verify: os.auth.verify.handler(() => demoGetAuthInfo()),
   },
@@ -1124,7 +1134,7 @@ export const busabaseDemoRouter = os.router({
           scoped,
           input.filters?.length || view
             ? {
-                filters: [...(view?.config.filters ?? []), ...(input.filters ?? [])],
+                filters: combineViewFilters(view?.config, input.filters),
                 sorts: input.sort ? [] : (view?.config.sorts ?? []),
               }
             : undefined,
@@ -1160,9 +1170,8 @@ export const busabaseDemoRouter = os.router({
       if (input.viewId && !view) {
         throw new ORPCError("NOT_FOUND", { message: `View not found: ${input.viewId}` });
       }
-      const viewFilters = view?.config.filters ?? [];
       const matched = applyViewConfigToRecords(all, {
-        filters: [...viewFilters, ...(input.filters ?? [])],
+        filters: combineViewFilters(view?.config, input.filters),
         sorts: [],
       });
       return { total: matched.length };
@@ -1218,7 +1227,7 @@ export const busabaseDemoRouter = os.router({
         throw new ORPCError("NOT_FOUND", { message: `View not found: ${input.viewId}` });
       }
       const matched = applyViewConfigToRecords(await demoListRecords({ baseId: base.id }), {
-        filters: [...(view?.config.filters ?? []), ...(input.filters ?? [])],
+        filters: combineViewFilters(view?.config, input.filters),
         sorts: [],
       });
       const counts = new Map<string | number | boolean | null, number>();

@@ -22,6 +22,7 @@ import { assertValidDateFieldOptionsOrThrow } from "../date-options";
 import { insertDefaultGridView } from "../default-view";
 import { assertFormulaMergeValid } from "../formula-recalculation";
 import { assertRelationOnlyOptionsOrThrow, resolveRelationFieldOptions } from "../relation-options";
+import { assertNoReverseOnNewBaseOrThrow } from "../reverse-relations";
 
 export const materializeBaseNode = async (
   ctx: MergeCtx,
@@ -82,6 +83,7 @@ export const materializeBaseNode = async (
         // only place the `bases.create --fields-json` path validates them.
         assertRelationOnlyOptionsOrThrow(type, field.slug, field.options);
         assertValidDateFieldOptionsOrThrow(type, field.slug, field.options);
+        assertNoReverseOnNewBaseOrThrow(field.slug, field.options);
         return {
           id: id("bsf"),
           spaceId: getContextSpaceId(),

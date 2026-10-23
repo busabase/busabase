@@ -8,7 +8,7 @@ import {
   type FieldDef,
   fieldDisplayName,
   isEmptyFieldValue,
-  isSystemFieldType,
+  isReadOnlyFieldDef,
 } from "./field-types";
 import { topologicalFieldOrder } from "./formula";
 
@@ -51,7 +51,8 @@ export const validateRecordFields = (
 
   for (const def of defs) {
     // System fields are server-managed; never validate client input for them.
-    if (isSystemFieldType(def.type)) continue;
+    // Reverse relation columns are read-only and resolved at read time.
+    if (isReadOnlyFieldDef(def)) continue;
 
     const value = fields[def.slug];
 

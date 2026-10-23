@@ -131,6 +131,65 @@ describe("listTemplates — asset URLs", () => {
 });
 
 /**
+ * Clip lists resolve like single clips (LFS media host), and a card from a
+ * catalog that never heard of `videos` must come out exactly as before.
+ */
+describe("listTemplates — several clips", () => {
+  const MEDIA = "https://media.githubusercontent.com/media/busabase/templates/main/templates/gated";
+
+  it("resolves every clip, with its title, on the media host", async () => {
+    mockCatalog([
+      {
+        ...baseEntry,
+        video: "assets/recordings/tour.mp4",
+        videos: [
+          { src: "assets/recordings/tour.mp4", title: "30-second tour" },
+          { src: "assets/recordings/full.mp4", title: "Full walkthrough" },
+        ],
+        locales: {
+          "zh-CN": { videos: [{ src: "assets/recordings/tour-zh-CN.mp4", title: "30 秒看懂" }] },
+        },
+      },
+    ]);
+    const [card] = (await listTemplates()).templates;
+    expect(card.video).toBe(`${MEDIA}/assets/recordings/tour.mp4`);
+    expect(card.videos).toEqual([
+      { src: `${MEDIA}/assets/recordings/tour.mp4`, title: "30-second tour" },
+      { src: `${MEDIA}/assets/recordings/full.mp4`, title: "Full walkthrough" },
+    ]);
+    expect(card.locales?.["zh-CN"]?.videos).toEqual([
+      { src: `${MEDIA}/assets/recordings/tour-zh-CN.mp4`, title: "30 秒看懂" },
+    ]);
+  });
+
+  it("derives `video` from the list when a hand-written catalog omits it", async () => {
+    mockCatalog([{ ...baseEntry, videos: [{ src: "assets/recordings/tour.mp4" }] }]);
+    const [card] = (await listTemplates()).templates;
+    expect(card.video).toBe(`${MEDIA}/assets/recordings/tour.mp4`);
+  });
+
+  it("carries no `videos` key for a catalog that only has single clips", async () => {
+    mockCatalog([{ ...baseEntry, video: "assets/recordings/gated.mp4" }]);
+    const [card] = (await listTemplates()).templates;
+    expect(card.video).toBe(`${MEDIA}/assets/recordings/gated.mp4`);
+    expect(Object.hasOwn(card, "videos")).toBe(false);
+  });
+
+  it("drops malformed clips instead of failing the whole catalog", async () => {
+    mockCatalog([
+      {
+        ...baseEntry,
+        videos: [null, "bare.mp4", { title: "no src" }, { src: "assets/recordings/ok.mp4" }],
+        locales: { "zh-CN": { videos: "assets/recordings/x.mp4" } },
+      },
+    ]);
+    const [card] = (await listTemplates()).templates;
+    expect(card.videos).toEqual([{ src: `${MEDIA}/assets/recordings/ok.mp4` }]);
+    expect(card.locales).toBeUndefined();
+  });
+});
+
+/**
  * Per-locale media resolves exactly like the defaults, and — because every
  * deployed catalog predates it — its absence or a malformed value must leave a
  * card byte-for-byte what it was.

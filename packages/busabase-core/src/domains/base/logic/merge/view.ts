@@ -1,7 +1,7 @@
 import "server-only";
 
 import { ORPCError } from "@orpc/server";
-import type { ViewConfigVO } from "busabase-contract/types";
+import { mapViewFilters, type ViewConfigVO } from "busabase-contract/types";
 import { and, count, eq, isNull, max, ne } from "drizzle-orm";
 import { getContextSpaceId, resolveActorId } from "../../../../context";
 import type { CommitPO, OperationPO, ViewPO } from "../../../../db/schema";
@@ -35,11 +35,11 @@ const stampFieldIds = async (
   const idBySlug = new Map(fieldRows.map((f) => [f.slug, f.id]));
   const stamp = <T extends { fieldSlug: string; fieldId?: string }>(entry: T): T => {
     const fieldId = idBySlug.get(entry.fieldSlug);
-    return fieldId ? { ...entry, fieldId } : entry;
+    return entry.fieldId ? entry : fieldId ? { ...entry, fieldId } : entry;
   };
   return {
     ...config,
-    filters: config.filters.map(stamp),
+    filters: mapViewFilters(config.filters, stamp),
     sorts: config.sorts.map(stamp),
   };
 };

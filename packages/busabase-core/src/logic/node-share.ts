@@ -5,11 +5,20 @@ import { promisify } from "node:util";
 import { ORPCError } from "@orpc/server";
 import type { NodeIcon } from "busabase-contract/types";
 import { and, desc, eq, inArray, isNotNull, isNull, lte } from "drizzle-orm";
-import { getContextSpaceId, resolveActorId } from "../context";
+import {
+  getContextSpaceId,
+  getContextUnlockedShareNodeIds,
+  isAnonymousVisitor,
+  resolveActorId,
+} from "../context";
 import { getDb } from "../db";
 import { type BusabaseNodeType, busabaseNodeShares, busabaseNodes } from "../db/schema";
 import { id, now } from "./kernel";
-import { assertNodePermission, buildNodeVisibilityCondition } from "./node-acl";
+import {
+  assertNodePermission,
+  buildNodeVisibilityCondition,
+  getEffectiveNodeLevel,
+} from "./node-acl";
 
 /**
  * Public link sharing (see `busabase_node_shares`). The second, orthogonal axis
@@ -399,6 +408,52 @@ export interface PubliclySharedNode {
    * which treat a locked node as absent.
    */
   requiresPassword: boolean;
+}
+
+export async function resolvePublicNavigation(nodeId: string, shareRoot?: string | null) {
+  if (!isAnonymousVisitor()) return null;
+  const db = await getDb();
+  const spaceId = getContextSpaceId();
+  const path: { id: string; slug: string; type: string; name: string }[] = [];
+  const visited = new Set<string>();
+  let cursor: string | null = nodeId;
+  while (cursor && visited.size < 128 && !visited.has(cursor)) {
+    visited.add(cursor);
+    const [node] = await db
+      .select({
+        id: busabaseNodes.id,
+        slug: busabaseNodes.slug,
+        type: busabaseNodes.type,
+        name: busabaseNodes.name,
+        parentId: busabaseNodes.parentId,
+      })
+      .from(busabaseNodes)
+      .where(
+        and(
+          eq(busabaseNodes.spaceId, spaceId),
+          eq(busabaseNodes.id, cursor),
+          isNull(busabaseNodes.archivedAt),
+          isNull(busabaseNodes.deletedAt),
+        ),
+      )
+      .limit(1);
+    if (!node || !(await getEffectiveNodeLevel(node.id))) return null;
+    if (node.id !== nodeId && node.type !== "folder") return null;
+    const [share] = await db
+      .select()
+      .from(busabaseNodeShares)
+      .where(and(eq(busabaseNodeShares.spaceId, spaceId), eq(busabaseNodeShares.nodeId, node.id)))
+      .limit(1);
+    const liveShare = share && isShareLive(share) ? share : null;
+    if (liveShare?.passwordHash && !getContextUnlockedShareNodeIds().includes(node.id)) return null;
+    path.unshift({ id: node.id, slug: node.slug, type: node.type, name: node.name ?? node.slug });
+    if (shareRoot ? node.id === shareRoot : liveShare != null) {
+      if (!liveShare || node.type !== "folder") return null;
+      return { root: path[0]!, path };
+    }
+    cursor = node.parentId;
+  }
+  return null;
 }
 
 /**

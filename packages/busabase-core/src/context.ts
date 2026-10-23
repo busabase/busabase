@@ -123,6 +123,7 @@ export interface BusabaseFilePreviewPerformanceMetric {
 
 export interface BusabaseSearchRequestMetric {
   name: "search.request.completed";
+  outcome?: "success" | "failed" | "timeout" | "canceled";
   durationMs: number;
   mode: "quick" | "full";
   surface: "quick" | "advanced" | "api";
@@ -471,6 +472,11 @@ const getOpenSourceLocalUserLabel = (id: string, localUserName?: string | null) 
 /** Run `fn` with the given Busabase context bound for its entire async subtree. */
 export function runWithBusabaseContext<T>(ctx: BusabaseContext, fn: () => Promise<T>): Promise<T> {
   return storage.run(ctx, fn);
+}
+
+/** Keep the caller's identity and ACL while binding search reads to one transaction. */
+export function runWithSearchDatabase<T>(db: BusabaseDatabase, fn: () => Promise<T>): Promise<T> {
+  return storage.run({ ...storage.getStore(), db }, fn);
 }
 
 /** Actor id recorded for requests that arrived without a signed-in user. */

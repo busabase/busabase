@@ -33,7 +33,13 @@ import {
   buildHtmlPreviewDocument,
   resolveHtmlPreviewNavigation,
 } from "../utils/html-preview-navigation";
-import { RichNodeNotFound, useNodeContentSave, useServerDocumentSync } from "./rich-node-shell";
+import {
+  RichNodeNotFound,
+  RichNodeReviewLink,
+  richNodeSaveStatusLabel,
+  useNodeContentSave,
+  useServerDocumentSync,
+} from "./rich-node-shell";
 
 function HtmlPreviewSurface({
   fullscreenState,
@@ -139,7 +145,11 @@ function HtmlEditor({ document: htmlDocument, node, orpc }: HtmlEditorProps) {
   const [source, setSource] = useState(htmlDocument.source);
   const [selectedTab, setSelectedTab] = useState("preview");
   const fullscreenState = usePreviewFullscreen({ syncWithUrl: true });
-  const { error, markDirty, save, status } = useNodeContentSave(orpc, node, "html");
+  const { error, markDirty, reviewRequestId, save, status } = useNodeContentSave(
+    orpc,
+    node,
+    "html",
+  );
   // Seed only after the real node document loads, then reconcile later updates
   // from another tab or an agent without replacing unsaved local edits.
   useServerDocumentSync({
@@ -150,12 +160,7 @@ function HtmlEditor({ document: htmlDocument, node, orpc }: HtmlEditorProps) {
     status,
   });
 
-  const statusLabel =
-    status === "saving"
-      ? messages.richNodes.saving
-      : status === "saved"
-        ? messages.richNodes.saved
-        : messages.richNodes.unsaved;
+  const statusLabel = richNodeSaveStatusLabel(status, messages);
 
   useRegisterTopbarNodeActions(
     isAnonymous ? null : (
@@ -170,6 +175,7 @@ function HtmlEditor({ document: htmlDocument, node, orpc }: HtmlEditorProps) {
         >
           {error ?? statusLabel}
         </span>
+        {reviewRequestId ? <RichNodeReviewLink requestId={reviewRequestId} /> : null}
         <NodePinButton
           payload={{ nodeId: node.id }}
           tabId={nodeSidePanelTabId("html", node.id)}
@@ -191,7 +197,12 @@ function HtmlEditor({ document: htmlDocument, node, orpc }: HtmlEditorProps) {
         />
         <Button
           aria-label={messages.richNodes.save}
-          disabled={status === "saving" || status === "saved"}
+          disabled={
+            status === "saving" ||
+            status === "saved" ||
+            status === "in_review" ||
+            status === "approved"
+          }
           onClick={() => save({ version: 1, source })}
           size="icon-sm"
           title={messages.richNodes.save}

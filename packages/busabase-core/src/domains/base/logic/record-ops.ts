@@ -63,6 +63,7 @@ import { baseNotFound } from "./errors";
 import { resolveLookupFieldOptions } from "./field-ops";
 import { getBase } from "./queries";
 import { assertRelationOnlyOptionsOrThrow, resolveRelationFieldOptions } from "./relation-options";
+import { assertNoReverseOnNewBaseOrThrow, stripReverseRelationInput } from "./reverse-relations";
 
 export {
   createBaseInputSchema,
@@ -232,6 +233,7 @@ export const createBase = async (input: z.input<typeof createBaseInputSchema>) =
   for (const field of parsed.fields) {
     assertRelationOnlyOptionsOrThrow(field.type, field.slug, field.options);
     assertValidDateFieldOptionsOrThrow(field.type, field.slug, field.options);
+    assertNoReverseOnNewBaseOrThrow(field.slug, field.options);
   }
   const relationResolvedFields = await Promise.all(
     parsed.fields.map(async (field) => ({
@@ -488,6 +490,9 @@ const createChangeRequestInternal = async (
   if (authorization.kind === "base") {
     parsed.fields = await createRecordFieldKeyResolver(base)(parsed.fields);
   }
+  await stripReverseRelationInput(db, base.id, base.fields, [
+    { recordId: null, fields: parsed.fields },
+  ]);
   assertValidRecordFields(parsed.fields, base.fields);
   await assertRelationTargetsLive(parsed.fields, base.fields);
   const submittedBy = resolveActorId(parsed.submittedBy);
@@ -726,6 +731,12 @@ export const createBulkChangeRequest = async (
   for (const [index, fields] of parsed.records.entries()) {
     parsed.records[index] = await resolveFieldKeys(fields, `records[${index}]`);
   }
+  await stripReverseRelationInput(
+    db,
+    base.id,
+    base.fields,
+    parsed.records.map((fields) => ({ recordId: null, fields })),
+  );
   for (const fields of parsed.records) {
     assertValidRecordFields(fields, base.fields);
     await assertRelationTargetsLive(fields, base.fields);
@@ -916,6 +927,13 @@ export const createBulkUpdateChangeRequest = async (
       });
     }
   }
+
+  await stripReverseRelationInput(
+    db,
+    base.id,
+    base.fields,
+    parsed.updates.map((update) => ({ recordId: update.recordId, fields: update.fields })),
+  );
 
   // One bounded query supplies every current payload and caller-pinned base
   // commit. Ownership comes from the commit's merged operation, avoiding an
@@ -1313,6 +1331,9 @@ export const createUpdateChangeRequest = async (
   // Resolved on the caller's delta only, before it is merged with the stored
   // payload below (which may hold deleted fields' keys).
   parsed.fields = await createRecordFieldKeyResolver(base)(parsed.fields);
+  await stripReverseRelationInput(db, base.id, base.fields, [
+    { recordId: record.id, fields: parsed.fields },
+  ]);
   // `parsed.fields` is only the caller's partial delta — an omitted required
   // field means "leave it alone", not "this record has no value for it".
   // Validate against the MERGED view (current committed fields + delta) so the

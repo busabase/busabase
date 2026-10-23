@@ -1,10 +1,30 @@
 export const stripHtmlTags = (value: string) =>
   value
+    .replace(/<!--[\s\S]*?-->/g, " ")
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
     .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<title[\s\S]*?<\/title>/gi, " ")
     .replace(/<[^>]*>/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+
+/**
+ * True when an HTML field holds a whole page (`<!doctype html>` / `<html>`)
+ * rather than a rich-text fragment. A page carries its own `<style>` and
+ * form-control-driven interactions (CSS tabs built from radio inputs), which
+ * the fragment allowlist in `sanitizeHtml` strips — so a page is rendered in a
+ * sandboxed frame instead of inline. Leading comments and whitespace are allowed.
+ */
+export const isFullHtmlDocument = (value: string) =>
+  /^\s*(?:<!--[\s\S]*?-->\s*)*(?:<!doctype\s+html\b|<html[\s>])/i.test(value);
+
+/**
+ * Sandbox for rendering a full HTML page from a field value. No `allow-scripts`
+ * (nothing in the page runs) and no `allow-same-origin` (the page gets an opaque
+ * origin, so it cannot reach the workbench, its cookies, or the API). Links that
+ * open a new tab still work, and the tab they open is a normal, unsandboxed page.
+ */
+export const HTML_DOCUMENT_SANDBOX = "allow-popups allow-popups-to-escape-sandbox";
 
 export const escapeHtml = (value: string) =>
   value

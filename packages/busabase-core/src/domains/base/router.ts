@@ -195,7 +195,9 @@ export const recordRouter = {
   listChangeRequests: os.records.listChangeRequests.handler(async ({ input }) =>
     listRecordChangeRequests(input.recordId, { limit: input.limit }),
   ),
-  listLinks: os.records.listLinks.handler(async ({ input }) => listRecordLinks(input.recordId)),
+  listLinks: os.records.listLinks.handler(async ({ input }) =>
+    listRecordLinks(input.recordId, input.direction),
+  ),
 };
 
 export const viewRouter = {

@@ -8,8 +8,44 @@ import {
   reviseOperationInputSchema,
   userRefSchema,
 } from "../../../contract/schemas";
-import { baseSchema } from "./base-schemas";
+import type { LookupComputedVO } from "../types";
+import { LOOKUP_SOURCE_LIMIT } from "../types";
+import { baseFieldSchema, baseSchema } from "./base-schemas";
 import { viewFilterOperatorSchema } from "./view-schemas";
+
+export const lookupComputedSchema: z.ZodType<LookupComputedVO> = z.object({
+  status: z.enum(["ready", "unlinked", "empty", "invalid", "inaccessible"]),
+  reason: z
+    .enum([
+      "missing_configuration",
+      "missing_relation",
+      "missing_source_configuration",
+      "missing_target_field",
+      "unsupported_source",
+      "unsupported_rollup",
+      "source_base_mismatch",
+      "source_record_archived",
+    ])
+    .optional(),
+  value: z.unknown(),
+  targetField: baseFieldSchema.optional(),
+  sourceBaseId: z.string().optional(),
+  sourceBaseSlug: z.string().optional(),
+  sources: z
+    .array(
+      z.object({
+        recordId: z.string(),
+        title: z.string(),
+        value: z.unknown(),
+        headCommitId: z.string(),
+      }),
+    )
+    .max(LOOKUP_SOURCE_LIMIT)
+    .default([]),
+  sourcesTruncated: z.boolean().optional(),
+  dependencyVersion: z.string(),
+  dependencyReadAt: z.number().finite().nonnegative().optional(),
+});
 
 export const recordSchema = z.object({
   id: z.string(),
@@ -25,6 +61,7 @@ export const recordSchema = z.object({
   // it decodes to "resolved nobody" instead of failing output validation, and so
   // clients have one shape to read (see `RecordVO.fieldUsers`).
   fieldUsers: z.record(z.string(), userRefSchema).optional().default({}),
+  computedFields: z.record(z.string(), lookupComputedSchema).optional(),
   archivedAt: z.string().nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),

@@ -1,4 +1,4 @@
-import type { Nodepod as NodepodInstance, NodepodProcess, RequestProxy } from "@scelar/nodepod";
+import type { Nodepod as NodepodInstance, NodepodProcess, RequestProxy } from "@r1ck404/nodepod";
 import {
   type RunPlan,
   resolveRunPlan,
@@ -7,13 +7,21 @@ import {
 } from "../../utils/airapp-runtime-descriptor";
 import { type AirAppHostedRuntime, airAppRuntimeEnv } from "../../utils/airapp-runtime-env";
 import { beginPodHeartbeat, ensureRegistered } from "../../utils/nodepod-service-worker";
+import {
+  dependencyCacheKey,
+  dependencyFilesFromSnapshot,
+  evictCachedDependencies,
+  loadCachedDependencies,
+  storeCachedDependencies,
+} from "./dependency-cache";
 import type { AirAppMountedFile, AirAppRunner } from "./types";
 
 /**
  * Same-origin paths that belong to the Busabase host and must never be served
  * by a pod. Handed to Nodepod's official `reservedHostPaths` boot option
- * (`NodepodOptions.reservedHostPaths`, added upstream in 1.10.x) so the host
- * no longer needs hand-written guards in the Service Worker for them.
+ * (`NodepodOptions.reservedHostPaths`, added upstream in 1.10.x, unchanged in
+ * 1.11.2) so the host no longer needs hand-written guards in the Service
+ * Worker for them.
  *
  * A running pod claims a broad path — usually `/` — so without this
  * declaration a live (or stale, post-teardown) claim captures these host
@@ -36,7 +44,7 @@ import type { AirAppMountedFile, AirAppRunner } from "./types";
  *
  * DELIBERATELY ABSENT: `/api/v1`. Busabase's public REST surface is handled
  * end-to-end by the `[busabase patch]` guard in
- * `patches/@scelar__nodepod@1.10.1.patch`, which does something
+ * `patches/@r1ck404__nodepod@1.11.2.patch`, which does something
  * `reservedHostPaths` cannot — it answers **403** while an embed pod is alive,
  * so a request that bypassed the embed runtime's injected fetch override (a
  * raw `XMLHttpRequest`, say) can never reach the backend carrying the viewer's
@@ -57,9 +65,10 @@ export const NODEPOD_RESERVED_HOST_PATHS: readonly string[] = [
 ];
 
 /**
- * `AirAppRunner` implementation backed by the `@scelar/nodepod` in-browser
+ * `AirAppRunner` implementation backed by the `@r1ck404/nodepod` in-browser
  * Node.js runtime (github.com/R1ck404/Nodepod, published to npm as
- * `@scelar/nodepod`). Only ever loaded via a dynamic `import()` inside these
+ * `@r1ck404/nodepod` since 1.11.1; earlier releases were `@scelar/nodepod`,
+ * now deprecated). Only ever loaded via a dynamic `import()` inside these
  * methods — never as a static top-level import — so the runtime's Web
  * Worker/Service Worker bundle is code-split out of the main dashboard bundle
  * and only downloads when a user actually clicks "Run".
@@ -98,6 +107,10 @@ export class NodepodRunner implements AirAppRunner {
    * that resolver may not import anything server-side.
    */
   private plan: RunPlan | null = null;
+  /** See `./dependency-cache.ts`. Null when this run's install is not cacheable. */
+  private dependencyKey: string | null = null;
+  /** How many `node_modules` files `mount()` restored from the cache, if any. */
+  private restoredDependencyFiles: number | null = null;
 
   /**
    * `runtimeKind` is what the running app sees in `BUSABASE_AIRAPP_RUNTIME` —
@@ -208,7 +221,21 @@ export class NodepodRunner implements AirAppRunner {
     }
     this.plan = resolveRunPlan(textFiles);
 
-    const { Nodepod } = await import("@scelar/nodepod");
+    // A cached `node_modules` for exactly this manifest is mounted alongside
+    // the app's files, and `install()` then has nothing to do. The app's own
+    // files win any path clash: they were just read from the server.
+    this.dependencyKey = await dependencyCacheKey(files, this.plan);
+    this.restoredDependencyFiles = null;
+    const cachedDependencies = this.dependencyKey
+      ? await loadCachedDependencies(this.dependencyKey)
+      : null;
+    let bootFiles = files;
+    if (cachedDependencies) {
+      bootFiles = { ...cachedDependencies, ...files };
+      this.restoredDependencyFiles = Object.keys(cachedDependencies).length;
+    }
+
+    const { Nodepod } = await import("@r1ck404/nodepod");
     // Nodepod's own SW registration lives behind a page-lifetime `swReady`
     // flag on its RequestProxy singleton, so it is skipped entirely if the
     // page already booted a pod once. A marketing-route visit in between may
@@ -219,7 +246,7 @@ export class NodepodRunner implements AirAppRunner {
     this.stopHeartbeat?.();
     this.stopHeartbeat = beginPodHeartbeat();
     this.nodepod = await Nodepod.boot({
-      files,
+      files: bootFiles,
       // Pod-level env (used by Nodepod's terminal shell). The dev server gets
       // it via `spawn`'s own options below — verified against the published
       // bundle, whose `spawn()` passes `opts.env` straight through and does
@@ -233,46 +260,64 @@ export class NodepodRunner implements AirAppRunner {
       // Start fetching + compiling esbuild-wasm (~10MB) during boot so it
       // overlaps the npm install instead of stalling the first build step.
       preloadEsbuild: true,
+      // Always serve the preview at `/__virtual__/{pod}/{port}` on the host
+      // origin. Upstream's default ("auto", new in 1.10.x and still the
+      // default in 1.11.2) tries a per-pod origin (`{pod}-{port}.localhost`)
+      // first whenever the page is on localhost — Desktop, OSS self-host,
+      // local dev — by loading
+      // `/__nodepod_bridge__.html` there. We do not serve that document, so the
+      // bridge timed out after 10s and only then fell back to this same path
+      // URL: every start on localhost waited 10s after the app was already
+      // listening. Cloud never paid it (not a loopback hostname). A per-pod
+      // origin would also break the app's same-origin `/api/v1` calls.
+      previewOrigin: false,
     });
     if (this.previewScript) {
       await this.nodepod.setPreviewScript(this.previewScript);
     }
-    // Deliberately NOT using boot's `onServerReady`: Nodepod's RequestProxy is
-    // a page-lifetime singleton that captures only the FIRST boot's callback —
-    // every later boot's callback is silently dropped. After the first runner
-    // is disposed (e.g. on re-run), no runner would ever hear "server ready"
-    // again and the run stays stuck at "starting" with no preview. Subscribing
-    // to the singleton's event stream instead works for every boot; `port()`
-    // is scoped to this instance's id, so events from other AirApp nodes
-    // running on the same page resolve to null and are ignored.
+    // Deliberately NOT using boot's `onServerReady`. The original reason:
+    // Nodepod's RequestProxy is a page-lifetime singleton, and it kept only the
+    // FIRST boot's callback — every later boot's callback was silently
+    // dropped, so after the first runner was disposed (e.g. on re-run) no
+    // runner heard "server ready" again and the run stayed stuck at "starting"
+    // with no preview. 1.10.1 and 1.11.2 also store the callback per instance
+    // (boot() → `configureInstance`, which `_emitServerReady` prefers), so that
+    // exact failure no longer follows from the bundle — but subscribing to the
+    // singleton's event stream works for every boot on every version, so it
+    // stays. `port()` is scoped to this instance's id, so events from other
+    // AirApp nodes running on the same page resolve to null and are ignored.
     this.proxy = this.nodepod.proxy;
     // Explicit re-assertion, redundant with the `watermark: false` boot option
-    // above. On @scelar/nodepod 1.9.20 that option alone stopped reliably
-    // suppressing the SW-injected branding badge (confirmed at the time via
-    // tests/e2e/airapp.spec.ts's watermark regression check) — this calls the
-    // same public RequestProxy API nodepod's own boot() should already be
-    // calling, as a defensive backstop against whatever timing changed
-    // upstream. Safe no-op if boot() already got it right.
+    // above. On Nodepod 1.9.20 (then published as `@scelar/nodepod`) that
+    // option alone stopped reliably suppressing the SW-injected branding badge
+    // (confirmed at the time via tests/e2e/airapp.spec.ts's watermark
+    // regression check) — this calls the same public RequestProxy API
+    // nodepod's own boot() already calls, as a defensive backstop against
+    // whatever timing changed upstream. Safe no-op if boot() already got it
+    // right.
     //
-    // Re-checked on the 1.10.1 upgrade. Static analysis of the bundle first:
-    //   * boot() still forwards the option the same way 1.9.20 did. The guard
-    //     is byte-for-byte the same expression:
-    //     `(headless && watermark !== true || watermark === false) &&
-    //      proxy.setWatermark(false)`.
-    //   * `setWatermark()` still delivers to the SW via
-    //     `navigator.serviceWorker.controller.postMessage(...)` with NO pending
-    //     queue, so the message is silently dropped whenever the page is not
-    //     controlled yet. 1.10.1 only adds a second delivery hop to preview
-    //     bridges; it did not make the SW hop reliable.
-    // boot() makes its call from inside `configureInstance`, mid-boot, i.e.
-    // exactly inside that uncontrolled window. This line runs after boot()
-    // resolved, so it is the call that can actually land. That is the same
-    // failure shape observed on 1.9.20, and nothing upstream fixed it — keep
-    // the backstop. It costs one idempotent call and cannot regress anything.
+    // Re-checked statically on the 1.11.2 upgrade (unchanged from 1.10.1):
+    //   * boot() forwards the option the same way 1.9.20 did. The guard is
+    //     the same expression: `(headless && watermark !== true ||
+    //     watermark === false) && proxy.setWatermark(false)`. It runs right
+    //     after `configureInstance()` (not inside it) and before boot's own
+    //     `initServiceWorker()` handshake.
+    //   * `setWatermark()` posts straight to
+    //     `navigator.serviceWorker.controller` (plus any preview bridges) with
+    //     no pending queue, so that one message is dropped if the page is not
+    //     controlled yet. The SW's `set-watermark` handler needs no token.
+    //   * RequestProxy does keep the flag (`_watermarkEnabled`) and re-sends it
+    //     from its `controllerchange` / `sw-needs-init` re-init handler, so a
+    //     dropped message is normally repaired once the SW takes control.
+    //   * Busabase's `ensureRegistered()` waits for a controller before
+    //     `Nodepod.boot()`, so in this flow boot's own call normally lands.
+    // So this line is belt-and-braces rather than the only delivery that
+    // works. The 1.9.20 regression was never pinned to a cause, so keep it:
+    // one idempotent call that cannot regress anything.
     //
-    // Then re-verified for real: tests/e2e/airapp.spec.ts's watermark
+    // Last verified for real on 1.10.1: tests/e2e/airapp.spec.ts's watermark
     // regression check (`toHaveCount(0)` on the Nodepod GitHub badge anchor)
-    // passed on 1.10.1, in a real browser, against a real dev-server pod.
+    // passed in a real browser, against a real dev-server pod.
     this.proxy.setWatermark(false);
     this.proxyListener = (port: number) => {
       const url = this.nodepod?.port(port);
@@ -290,6 +335,12 @@ export class NodepodRunner implements AirAppRunner {
     }
     const plan = this.requirePlan();
     this.emitLog(`[busabase] ${plan.explanation}\n`);
+    if (this.restoredDependencyFiles !== null) {
+      this.emitLog(
+        `[busabase] Restored ${this.restoredDependencyFiles} dependency files from this device's cache; skipped \`${plan.install}\`.\n`,
+      );
+      return;
+    }
     const argv = tokenizeCommand(plan.install);
     this.emitLog(`$ ${plan.install}\n`);
     const proc = await nodepod.spawn(argv[0], argv.slice(1));
@@ -300,6 +351,25 @@ export class NodepodRunner implements AirAppRunner {
     if (exitCode !== 0) {
       throw new Error(`${plan.install} exited with code ${exitCode}`);
     }
+    this.cacheInstalledDependencies(nodepod);
+  }
+
+  /**
+   * Stores the tree the install just wrote. Taken before the dev server runs,
+   * so nothing it writes into `node_modules` at runtime is captured. The write
+   * itself is not awaited: a failed or slow cache write must never hold up or
+   * fail the run.
+   */
+  private cacheInstalledDependencies(nodepod: NodepodInstance): void {
+    const key = this.dependencyKey;
+    if (!key) return;
+    let files: ReturnType<typeof dependencyFilesFromSnapshot> = null;
+    try {
+      files = dependencyFilesFromSnapshot(nodepod.snapshot({ shallow: false }));
+    } catch {
+      return;
+    }
+    if (files) void storeCachedDependencies(key, files).catch(() => {});
   }
 
   async start(): Promise<void> {
@@ -332,7 +402,19 @@ export class NodepodRunner implements AirAppRunner {
     // of truth, so recover an already-listening port instead of retaining a
     // preview URL for a pod that was already torn down.
     this.recoverReadyFromActivePorts();
-    await this.waitForReadyOrExit(proc);
+    try {
+      await this.waitForReadyOrExit(proc);
+    } catch (error) {
+      // A cached tree that no longer starts must not pin the app in a broken
+      // state run after run: drop it, so the next run installs from scratch.
+      if (this.restoredDependencyFiles !== null && this.dependencyKey) {
+        this.emitLog(
+          "[busabase] The app failed to start from cached dependencies; they were cleared and the next run reinstalls them.\n",
+        );
+        void evictCachedDependencies(this.dependencyKey).catch(() => {});
+      }
+      throw error;
+    }
   }
 
   onLog(cb: (line: string) => void): void {

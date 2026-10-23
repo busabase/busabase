@@ -316,6 +316,7 @@ export interface BusabaseDashboardApiClient {
           name: string;
         }>;
         inverseFieldId?: string;
+        reverseOfFieldId?: string;
         multiple?: boolean;
         targetBaseId?: string;
       };
@@ -341,6 +342,7 @@ export interface BusabaseDashboardApiClient {
         };
         choices?: Array<{ color?: string; id: string; name: string }>;
         inverseFieldId?: string;
+        reverseOfFieldId?: string;
         multiple?: boolean;
         targetBaseId?: string;
       };
@@ -367,6 +369,7 @@ export interface BusabaseDashboardApiClient {
           };
           choices?: Array<{ color?: string; id: string; name: string }>;
           inverseFieldId?: string;
+          reverseOfFieldId?: string;
           multiple?: boolean;
           targetBaseId?: string;
         };

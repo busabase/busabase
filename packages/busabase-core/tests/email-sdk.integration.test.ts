@@ -5,7 +5,6 @@ import os from "node:os";
 import path from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { pg_trgm } from "@electric-sql/pglite/contrib/pg_trgm";
-import { OpenAPIHandler } from "@orpc/openapi/fetch";
 import { createRouterClient } from "@orpc/server";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/pglite";
@@ -23,7 +22,7 @@ import {
 import { type BusabaseDatabase, LOCAL_SPACE_ID, runWithBusabaseContext } from "../src/context";
 import { getDb, getPgliteClient } from "../src/db";
 import * as schema from "../src/db/schema";
-import { encodeBusabaseOpenApiError } from "../src/openapi/error-envelope";
+import { createBusabaseOpenApiHandler } from "../src/openapi/handler";
 import { busabaseRouter } from "../src/router";
 
 /** Real public SDK -> localhost HTTP -> production OpenAPI/router -> file-backed PostgreSQL engine. */
@@ -170,9 +169,7 @@ describe("Email SDK against a durable Busabase backend", () => {
     });
     if (!logs.materialized) throw new Error("Expected canonical email log Base");
     logsBaseId = logs.id;
-    const handler = new OpenAPIHandler(busabaseRouter, {
-      customErrorResponseBodyEncoder: encodeBusabaseOpenApiError,
-    });
+    const handler = createBusabaseOpenApiHandler(busabaseRouter);
     server = createServer(async (request, response) => {
       try {
         const chunks: Buffer[] = [];

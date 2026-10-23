@@ -4,6 +4,8 @@ import type { CoreI18nMessages } from "./messages";
 // Every key is written out explicitly; the terminology matches the Busabase Cloud
 // zh-TW copy (workspace = 工作區, space = 空間, Base = 資料表, review = 審核).
 export const dashboardZhTW: CoreI18nMessages = {
+  lookup: lookupZhTW,
+  reverseRelation: reverseRelationZhTW,
   fieldHelp: {
     inherit: "使用欄位說明",
     override: "為此表單自訂說明",
@@ -780,16 +782,11 @@ export const dashboardZhTW: CoreI18nMessages = {
     install: "安裝",
     installRestricted:
       "只有工作區擁有者和管理員可以安裝。範本可能包含供 Agent 執行的應用和技能程式碼。",
-    cardBases: "{count} 張資料表",
-    cardApps: "{count} 個應用",
-    cardDocs: "{count} 篇文件",
-    cardRows: "{count} 筆範例資料",
-    cardManual: "Agent 手冊",
     promptsTitle: "安裝後，你可以向 Agent 提問",
     promptsDescription: "範本會連同 Base 一起安裝作者撰寫的手冊，Agent 因此無須猜測資料結構。",
     contentsTitle: "安裝後會建立的內容",
-    contentsDescription:
-      "你能編輯這個空間時，Base、欄位、範例資料、應用與 Agent 手冊都會立即建立。安裝時勾選「先送審內容，再生效」，應用程式碼與手冊就會改為變更請求，供你先審查。",
+    permissionNote:
+      "安裝需要這個空間的擁有者或管理員權限。建立的內容會立即可用；也可以在安裝時選擇先審查內容。",
     bases: "Base",
     apps: "應用",
     documents: "文件",
@@ -1548,6 +1545,13 @@ export const dashboardZhTW: CoreI18nMessages = {
     viewFieldDragOutside: "欄位已移出排序區域，放開將取消調整。",
     noViewFilters: "此檢視沒有篩選條件。",
     noViewSorts: "此檢視沒有排序條件。",
+    filterMatch: "符合",
+    filterMatchAll: "全部條件（並且）",
+    filterMatchAny: "任一條件（或者）",
+    filterConjunction: "條件組合方式",
+    addFilterGroup: "新增條件群組",
+    removeFilterGroup: "刪除條件群組",
+    filterMissingField: "欄位已無法使用",
     viewFilterCount: "{count} 個篩選條件",
     viewSortCount: "{count} 個排序條件",
     clearAllFilters: "清除全部篩選",
@@ -2434,3 +2438,6 @@ export const dashboardZhTW: CoreI18nMessages = {
       "在這個空間裡建立資料夾、資料表和 App。這樣裝 Agent 學不到任何東西——你隨時可以從「Agent 安裝」分頁把手冊給它。",
   },
 };
+
+import { lookupZhTW } from "./lookup";
+import { reverseRelationZhTW } from "./reverse-relation";

@@ -13,7 +13,11 @@
  */
 import { iStringSchema } from "openlib/i18n/i-string";
 import { z } from "zod";
-import { TemplateLocalesSchema, TemplateRiskLevelSchema } from "../package/template";
+import {
+  TemplateLocalesSchema,
+  TemplateRiskLevelSchema,
+  TemplateVideoSchema,
+} from "../package/template";
 
 export const TemplateStatsVOSchema = z.object({
   folders: z.number().int(),
@@ -65,7 +69,14 @@ export const TemplateCardVOSchema = z.object({
    */
   video: z.string().optional(),
   /**
-   * Per-locale screenshots/clip, absolute URLs like the two fields above,
+   * Every default clip, absolute URLs, in display order. `video` is always the
+   * first of these (kept for clients built before this field existed — the
+   * mobile app ships separately from the server). Render through
+   * `pickTemplateMedia(card, locale)`, never from this directly.
+   */
+  videos: z.array(TemplateVideoSchema).optional(),
+  /**
+   * Per-locale screenshots/clips, absolute URLs like the fields above,
    * keyed by locale. Absent when the template declares none — and on every
    * card an older catalog produced. Never read it directly: render through
    * `pickTemplateMedia(card, locale)` (`domains/templates/media`), which owns

@@ -18,7 +18,7 @@ import { projectCommitFields } from "../../../../logic/field-values";
 import { CURRENT_USER_ID, id, requireBaseId } from "../../../../logic/kernel";
 import { removeRecordAssetUsages, syncRecordAssetUsages } from "../../../assets/handlers";
 import { computeSystemFieldValues, validateRecordFields } from "../../field-rules";
-import { isSystemFieldType } from "../../field-types";
+import { isReadOnlyFieldDef } from "../../field-types";
 import { recalculateFormulaRecords } from "../formula-recalculation";
 
 /**
@@ -127,7 +127,7 @@ export const applyComputedRecordFields = async (
   const userFields: Record<string, unknown> = {};
   for (const [slug, value] of Object.entries(args.fields)) {
     const def = defsBySlug.get(slug);
-    if (!def || isSystemFieldType(def.type)) continue;
+    if (!def || isReadOnlyFieldDef(def)) continue;
     userFields[slug] = value;
   }
   const overrides = computeSystemFieldValues({

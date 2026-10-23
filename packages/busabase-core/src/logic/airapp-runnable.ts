@@ -32,9 +32,10 @@
  *      both with and without cross-origin isolation. So renaming a Vite scaffold's script to
  *      `dev` is NOT a fix for those versions, and accepting them would only move the failure
  *      one step later. `vite@7.3.1` is the one pin that is NOT theoretical: the same
- *      `issue-44-react-dev-server` page's "known good" button, run against the current
- *      published `@scelar/nodepod`, real-boots it — `onServerReady` fires and the dev server
- *      answers 200 through the SW proxy — so that exact pin (see
+ *      `issue-44-react-dev-server` page's "known good" button, run against the Nodepod release
+ *      current at the time (1.9.20, then published as `@scelar/nodepod`), real-boots it —
+ *      `onServerReady` fires and the dev server answers 200 through the SW proxy — so that
+ *      exact pin (see
  *      `KNOWN_RUNNABLE_BUNDLER_VERSIONS` below) is let through instead of blocked on faith.
  *
  * Native-binary dependencies (esbuild, `@swc/core`, sharp, sqlite3) also cannot load in this

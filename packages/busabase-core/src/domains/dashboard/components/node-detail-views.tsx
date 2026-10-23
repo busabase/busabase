@@ -82,7 +82,11 @@ import { AgentPromptsView } from "./agent-prompts-view";
 import { AssetMediaPreview, useAssetHostViewer } from "./assets";
 import { DriveParsedTextPanel, type DriveParsedTextPayload } from "./drive-parsed-text-panel";
 import { MarkdownFieldPreview } from "./field-preview";
-import { FilePreviewSurface, useFileFullscreenAvailable } from "./file-preview-surface";
+import {
+  FileDownloadButton,
+  FilePreviewSurface,
+  useFileFullscreenAvailable,
+} from "./file-preview-surface";
 import {
   buildFileTree,
   collectFolderPaths,
@@ -1632,6 +1636,7 @@ export function FileNodeDetailView({
           tabType="file-preview"
           title={detail.node.name}
         />
+        <FileDownloadButton assetId={detail.asset.id} fileName={detail.asset.name} />
         <PreviewFullscreenButton
           available={fullscreenAvailable}
           fullscreenState={fullscreenState}
@@ -1719,6 +1724,7 @@ export function FileSidePanelPreview({ orpc, payload }: SidePanelTabProps) {
 
   return (
     <FilePreviewSurface
+      assetId={detail.asset.id}
       fullscreenState={fullscreenState}
       mimeType={detail.asset.mimeType}
       name={detail.asset.name}

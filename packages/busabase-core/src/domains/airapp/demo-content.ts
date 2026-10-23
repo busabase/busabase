@@ -44,7 +44,7 @@
  *      seeded as a known-broken negative example (`[BABEL] .length is not a
  *      valid Plugin property`, reproduced byte-for-byte against Nodepod's own
  *      "known good" example) — re-verified working after bumping
- *      `@scelar/nodepod` 1.9.5 → 1.9.9 (real click-through test: the counter
+ *      Nodepod 1.9.5 → 1.9.9 (real click-through test: the counter
  *      button works and Fast Refresh preserves state on edit). Prefer this
  *      one over #3 unless there's a specific reason to avoid Babel.
  *   6. "Vite + React (SWC, known broken)" — same app again, with
@@ -53,7 +53,7 @@
  *      `@swc/core` ships a platform-native binary, same class of problem as
  *      the original esbuild crash, just a different native tool Nodepod
  *      doesn't polyfill. Re-verified still broken (identical error) as of
- *      `@scelar/nodepod` 1.9.9.
+ *      Nodepod 1.9.9.
  *   7. "SQLite Demo"            — works. Adapted from Nodepod's own
  *      `examples/sqlite-test`: real `node:sqlite` (Node's built-in module,
  *      no external dependency) backing a small list UI, proving an AirApp
@@ -68,7 +68,7 @@
  *      function` inside Nodepod's Node runtime — reproduced identically with
  *      and without `"type": "module"` in package.json, so it isn't a
  *      CJS/ESM config mistake on our end. Re-verified still broken (identical
- *      error) as of `@scelar/nodepod` 1.9.9.
+ *      error) as of Nodepod 1.9.9.
  *
  * Deliberately not ported: most of Nodepod's other `examples/*` are their
  * own internal regression-test harnesses (multi-boot races, native-WASI
@@ -628,7 +628,7 @@ export const AIRAPP_DEMO_HONO_VITE: AirAppDemoDef = {
 // (Babel-based Fast Refresh) left in instead of dropped. Originally seeded as
 // a known-broken negative example — every file request 500'd with `[BABEL]
 // .length is not a valid Plugin property` — but re-verified after bumping
-// `@scelar/nodepod` from 1.9.5 to 1.9.9 (2026-07-13/14 releases) and the bug
+// Nodepod from 1.9.5 to 1.9.9 (2026-07-13/14 releases) and the bug
 // is genuinely fixed upstream: confirmed live, including clicking the
 // counter button and watching Fast Refresh preserve component state on edit.
 // Kept alongside demo #2 (the esbuild-transform version) since this one

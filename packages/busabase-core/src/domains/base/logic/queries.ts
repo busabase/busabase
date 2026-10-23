@@ -8,7 +8,13 @@ import {
   listRecordsPageInputSchema,
   type listRecordsValueFilterNodeSchema,
 } from "busabase-contract/domains/base/contract/record-schemas";
-import type { ViewConfigVO, ViewFilterVO } from "busabase-contract/types";
+import {
+  combineViewFilters,
+  flattenViewFilters,
+  type ViewConfigVO,
+  type ViewFilterConditionVO,
+  type ViewFilterVO,
+} from "busabase-contract/types";
 import {
   and,
   asc,
@@ -52,6 +58,7 @@ import {
   recordFieldGetInputSchema,
 } from "../../../logic/store";
 import {
+  normalizeFieldValue,
   normalizeViewConfig,
   toBaseVO,
   toFieldVO,
@@ -68,6 +75,9 @@ import {
   GROUPABLE_FIELD_TYPES,
   groupKeyForValue,
 } from "../utils/view-records";
+
+import { lookupDependentFieldSlugs } from "./lookup-formulas";
+import { assertNoReverseRelationQueryOrThrow, collectFieldSlugs } from "./reverse-relations";
 
 export { listInputSchema, recordFieldFilterInputSchema, recordFieldGetInputSchema };
 
@@ -581,6 +591,7 @@ const buildValueFilterPredicates = async (
   if (!base) {
     throw new ORPCError("NOT_FOUND", { message: `Base not found: ${baseId}` });
   }
+  assertNoReverseRelationQueryOrThrow(base.fields, collectFieldSlugs(nodes), "filter");
   const fieldFor = (slug: string) => base.fields.find((entry) => entry.slug === slug);
   return nodes.map((node) => buildExactValueFilterNode(db, node, fieldFor));
 };
@@ -603,6 +614,49 @@ const sortColumnFor = (
   }
   return null;
 };
+
+type HydratedRecord = Awaited<ReturnType<typeof hydrateRecord>>;
+type RecordSort = { fieldSlug: string; direction: "asc" | "desc" };
+const hydratedSortValue = (record: HydratedRecord, slug: string, kind: "number" | "date") => {
+  const raw = record.headCommit.payload[slug];
+  if (raw === null || raw === undefined || raw === "") return null;
+  if (kind === "date") {
+    const date = new Date(raw as string | number);
+    return Number.isFinite(date.getTime()) ? date : null;
+  }
+  const value = typeof raw === "number" ? raw : Number(raw);
+  return Number.isFinite(value) ? value : null;
+};
+const compareHydratedSortKey = (
+  record: HydratedRecord,
+  other: { value: number | Date | null; id: string },
+  sort: RecordSort,
+  kind: "number" | "date",
+): number => {
+  const value = hydratedSortValue(record, sort.fieldSlug, kind);
+  if (value === null && other.value !== null) return 1;
+  if (value !== null && other.value === null) return -1;
+  if (value !== null && other.value !== null && +value !== +other.value) {
+    return (+value < +other.value ? -1 : 1) * (sort.direction === "asc" ? 1 : -1);
+  }
+  return record.id < other.id ? -1 : record.id === other.id ? 0 : 1;
+};
+const sortHydratedRecords = (
+  records: HydratedRecord[],
+  sort: RecordSort,
+  kind: "number" | "date",
+) =>
+  records.sort((left, right) =>
+    compareHydratedSortKey(
+      left,
+      {
+        value: hydratedSortValue(right, sort.fieldSlug, kind),
+        id: right.id,
+      },
+      sort,
+      kind,
+    ),
+  );
 
 // Sort cursor = base64 JSON of the row's sort value (null-safe) + its id.
 const encodeSortCursor = (value: number | Date | null, id: string): string =>
@@ -672,12 +726,32 @@ export const listRecordsPaged = async (input?: z.input<typeof listRecordsInputSc
   if (base) {
     filters.push(eq(busabaseRecords.baseId, base.id));
   }
+  const queriedBases =
+    parsed.filters?.length || parsed.sort
+      ? parsed.baseId
+        ? [await getBase(parsed.baseId)].filter((base) => base !== null)
+        : await listBases()
+      : [];
+  const dynamicSlugs = new Set(
+    queriedBases.flatMap((base) => [...lookupDependentFieldSlugs(base.fields)]),
+  );
+  if (parsed.baseId) {
+    for (const queried of queriedBases) {
+      assertNoReverseRelationQueryOrThrow(
+        queried.fields,
+        collectFieldSlugs([parsed.filters, parsed.sort]),
+        "filter or sort",
+      );
+    }
+  }
   // Best-effort server-side view-filter push-down (superset; the client filter
   // stays authoritative). Non-pushable filters are skipped here. Applies to both
   // the sort and default paths below.
   if (parsed.filters) {
     for (const filter of parsed.filters) {
-      const condition = buildPushableRecordFilter(db, filter);
+      const condition = dynamicSlugs.has(filter.fieldSlug)
+        ? null
+        : buildPushableRecordFilter(db, filter);
       if (condition) {
         filters.push(condition);
       }
@@ -696,6 +770,42 @@ export const listRecordsPaged = async (input?: z.input<typeof listRecordsInputSc
   }
 
   const sortInfo = parsed.sort ? sortColumnFor(parsed.sort.fieldType) : null;
+  if (parsed.sort && sortInfo && dynamicSlugs.has(parsed.sort.fieldSlug)) {
+    // No source-Base edit refreshes the stored projection. Resolve first, then
+    // use the same numeric/date NULLS LAST ordering and keyset cursor as SQL.
+    const sort = parsed.sort;
+    const rows = await db
+      .select()
+      .from(busabaseRecords)
+      .where(and(...filters));
+    const ordered = sortHydratedRecords(await hydrateRecords(rows), sort, sortInfo.kind);
+    const cursor = parsed.cursor ? decodeSortCursor(parsed.cursor, sortInfo.kind) : null;
+    const candidates = cursor
+      ? ordered.filter((record) => compareHydratedSortKey(record, cursor, sort, sortInfo.kind) > 0)
+      : ordered;
+    const page = candidates.slice(0, parsed.limit);
+    const last = page.at(-1);
+    let records = page;
+    if (parsed.summary) {
+      const ids = new Set(page.map((record) => record.id));
+      const summaries = await hydrateRecords(
+        rows.filter((row) => ids.has(row.id)),
+        { summary: true },
+      );
+      const byId = new Map(summaries.map((record) => [record.id, record]));
+      records = page.flatMap((record) => {
+        const summary = byId.get(record.id);
+        return summary ? [summary] : [];
+      });
+    }
+    return {
+      records,
+      nextCursor:
+        candidates.length > parsed.limit && last
+          ? encodeSortCursor(hydratedSortValue(last, parsed.sort.fieldSlug, sortInfo.kind), last.id)
+          : null,
+    };
+  }
   if (parsed.sort && sortInfo) {
     // ── Sort-field keyset path (number/date). ORDER BY the typed value column
     // NULLS LAST, id ASC as a stable tiebreaker. The keyset predicate mirrors
@@ -923,20 +1033,30 @@ export const listRecordsPage = async (input: z.input<typeof listRecordsPageInput
   const effectiveViewConfig: ViewConfigVO | undefined =
     parsed.filters?.length || viewConfig
       ? {
-          filters: [...(viewConfig?.filters ?? []), ...(parsed.filters ?? [])],
+          filters: combineViewFilters(viewConfig, parsed.filters),
           // An explicit `sort` replaces the View's — see the doc above.
           sorts: parsed.sort ? [] : (viewConfig?.sorts ?? []),
         }
       : undefined;
-  const sqlSortOrder = buildPageSortOrder(db, parsed.sort);
+  assertNoReverseRelationQueryOrThrow(
+    base.fields,
+    collectFieldSlugs([effectiveViewConfig, parsed.sort, parsed.dateRange]),
+    "filter or sort",
+  );
+  const explicitDynamicSort =
+    parsed.sort && lookupDependentFieldSlugs(base.fields).has(parsed.sort.fieldSlug)
+      ? sortColumnFor(parsed.sort.fieldType)
+      : null;
+  const sqlSortOrder = explicitDynamicSort ? null : buildPageSortOrder(db, parsed.sort);
   // Without an explicit sort this is exactly the order every path used before.
   const candidateOrder = sqlSortOrder ?? [
     desc(busabaseRecords.createdAt),
     desc(busabaseRecords.id),
   ];
   const needsExactViewEvaluation = Boolean(
-    effectiveViewConfig &&
-      (effectiveViewConfig.filters.length > 0 || effectiveViewConfig.sorts.length > 0),
+    explicitDynamicSort ||
+      (effectiveViewConfig &&
+        (effectiveViewConfig.filters.length > 0 || effectiveViewConfig.sorts.length > 0)),
   );
 
   // NOTE: there is deliberately no "all filters are pushable → SQL LIMIT/OFFSET"
@@ -987,16 +1107,21 @@ export const listRecordsPage = async (input: z.input<typeof listRecordsPageInput
   // 10k-record Base that is the difference between building 10,000 VOs (with
   // their bases, commits, users and lookups) and building 50.
   //
-  // One exception keeps the old whole-Base path: a `lookup` field's value is not
-  // in the commit — it is derived from other records at hydration time — so a
-  // view that filters or sorts BY a lookup field can only be evaluated after
-  // hydration. Rather than half-resolve it, that case falls through unchanged.
+  // Lookup values and formulas which depend on them are refreshed from other
+  // records at hydration time. Their stored commits/projections cannot decide
+  // view membership or order; resolve the complete candidate set first.
   const viewFieldSlugs = new Set([
-    ...(effectiveViewConfig?.filters ?? []).map((filter) => filter.fieldSlug),
+    ...flattenViewFilters(effectiveViewConfig?.filters ?? []).map((filter) =>
+      filter.fieldId
+        ? base.fields.find((field) => field.id === filter.fieldId)?.slug
+        : filter.fieldSlug,
+    ),
     ...(effectiveViewConfig?.sorts ?? []).map((sort) => sort.fieldSlug),
+    ...(explicitDynamicSort && parsed.sort ? [parsed.sort.fieldSlug] : []),
   ]);
-  const dependsOnLookup = base.fields.some(
-    (field) => field.type === "lookup" && viewFieldSlugs.has(field.slug),
+  const dynamicSlugs = lookupDependentFieldSlugs(base.fields);
+  const dependsOnLookup = [...viewFieldSlugs].some(
+    (slug) => slug !== undefined && dynamicSlugs.has(slug),
   );
 
   if (!dependsOnLookup) {
@@ -1055,9 +1180,16 @@ export const listRecordsPage = async (input: z.input<typeof listRecordsPageInput
     .where(and(...recordFilters))
     .orderBy(...candidateOrder);
   const candidates = await hydrateRecords(candidateRows);
-  const ordered = sqlSortOrder
-    ? filterRecordsByViewFilters(candidates, effectiveViewConfig?.filters ?? [])
-    : applyViewConfigToRecords(candidates, effectiveViewConfig);
+  const ordered =
+    explicitDynamicSort && parsed.sort
+      ? sortHydratedRecords(
+          filterRecordsByViewFilters(candidates, effectiveViewConfig?.filters ?? []),
+          parsed.sort,
+          explicitDynamicSort.kind,
+        )
+      : sqlSortOrder
+        ? filterRecordsByViewFilters(candidates, effectiveViewConfig?.filters ?? [])
+        : applyViewConfigToRecords(candidates, effectiveViewConfig);
   const total = ordered.length;
   const totalPages = Math.ceil(total / parsed.pageSize);
   const page = totalPages === 0 ? 1 : Math.min(parsed.page, totalPages);
@@ -1333,6 +1465,29 @@ const buildExactRecordFilter = (
   );
 };
 
+/** Preserve the saved expression's grouping once every leaf has passed the
+ * exactness proof below. A partial OR pushdown would silently exclude matching
+ * branches, so callers only use this when the entire expression is exact. */
+const buildExactViewFilterCondition = (
+  db: Awaited<ReturnType<typeof getDb>>,
+  condition: ViewFilterConditionVO,
+  fields: Awaited<ReturnType<typeof resolveListingBase>>["fields"],
+): SQL => {
+  if ("conditions" in condition) {
+    const children = condition.conditions.map((child) =>
+      buildExactViewFilterCondition(db, child, fields),
+    );
+    // Valid saved groups are nonempty; an invalid empty group fails closed.
+    if (children.length === 0) return sql`false`;
+    return (condition.conjunction === "or" ? or(...children) : and(...children)) as SQL;
+  }
+  return buildExactRecordFilter(
+    db,
+    condition,
+    fields.find((field) => field.slug === condition.fieldSlug),
+  );
+};
+
 /**
  * Shared scope resolution for the exactness-sensitive aggregates
  * (`countRecords`, `groupRecords`). Both publish a number a dashboard renders
@@ -1356,7 +1511,7 @@ const resolveAggregateFilterScope = async (
     throw new ORPCError("NOT_FOUND", { message: `Base not found: ${baseId}` });
   }
 
-  let viewFilters: ViewFilterVO[] = [];
+  let viewConfig: ViewConfigVO | undefined;
   if (viewId) {
     const [view] = await db
       .select()
@@ -1373,27 +1528,32 @@ const resolveAggregateFilterScope = async (
     if (!view) {
       throw new ORPCError("NOT_FOUND", { message: `View not found: ${viewId}` });
     }
-    viewFilters = normalizeViewConfig(view.config).filters;
+    viewConfig = normalizeViewConfig(view.config);
   }
   // View filters AND ad-hoc filters when both are given — "this View, further
   // narrowed by these extra conditions" is the only reading that makes sense
   // for a dashboard tile built on top of a saved View.
-  const allFilters: ViewFilterVO[] = [...viewFilters, ...(adHocFilters ?? [])];
+  const allFilters = combineViewFilters(viewConfig, adHocFilters);
+  assertNoReverseRelationQueryOrThrow(base.fields, collectFieldSlugs(allFilters), "filter");
   if (allFilters.length === 0) {
     return { base, allFilters, exactPredicates: [] as SQL[], dependsOnLookup: false };
   }
 
-  const resolved = allFilters.map((filter) => ({
+  const resolved = flattenViewFilters(allFilters).map((filter) => ({
     filter,
     // The whole field, not just its type: proving a `select` filter exact
     // requires that field's own choice list (a label predicate has to be
     // resolved into the set of choice ids that produce it).
-    field: base.fields.find((entry) => entry.slug === filter.fieldSlug),
+    field: base.fields.find((entry) =>
+      filter.fieldId ? entry.id === filter.fieldId : entry.slug === filter.fieldSlug,
+    ),
   }));
-  // A `lookup` field's value is computed at hydration time from other records,
-  // not stored in the commit — so a filter on one can only be evaluated after
-  // hydration, same constraint `listRecordsPage` has.
-  const dependsOnLookup = resolved.some((entry) => entry.field?.type === "lookup");
+  // Lookups and their transitive formula dependents need hydration before
+  // filtering; their committed projections do not track source-record edits.
+  const dynamicSlugs = lookupDependentFieldSlugs(base.fields);
+  const dependsOnLookup = resolved.some(
+    (entry) => entry.field !== undefined && dynamicSlugs.has(entry.field.slug),
+  );
 
   // Truncation probe: for the (fieldSlug) set behind a contains/equals filter
   // on a text type, check once each whether ANY stored value for that field in
@@ -1426,6 +1586,9 @@ const resolveAggregateFilterScope = async (
   const allExact =
     !dependsOnLookup &&
     resolved.every((entry) => {
+      // Identity is authoritative after a rename; SQL predicates address slugs,
+      // so defer a stale slug to the identity-aware shared matcher.
+      if (entry.field?.slug !== entry.filter.fieldSlug) return false;
       if (!isFilterExactlyPushable(entry.filter.operator, entry.field, entry.filter.value)) {
         return false;
       }
@@ -1443,7 +1606,7 @@ const resolveAggregateFilterScope = async (
     allFilters,
     dependsOnLookup,
     exactPredicates: allExact
-      ? resolved.map((entry) => buildExactRecordFilter(db, entry.filter, entry.field))
+      ? allFilters.map((condition) => buildExactViewFilterCondition(db, condition, base.fields))
       : null,
   };
 };
@@ -1593,6 +1756,11 @@ export const groupRecords = async (input: z.input<typeof groupRecordsInputSchema
   // two long values can collide at the projection limit.
   const groupable = sqlBuckets ? SQL_GROUPABLE_FIELD_TYPES : GROUPABLE_FIELD_TYPES;
   const field = groupSlug ? base.fields.find((entry) => entry.slug === groupSlug) : undefined;
+  assertNoReverseRelationQueryOrThrow(
+    base.fields,
+    [...(groupSlug ? [groupSlug] : []), ...collectFieldSlugs(parsed.aggregates ?? [])],
+    "group or aggregate",
+  );
   if (groupSlug) {
     if (!field) {
       throw new ORPCError("NOT_FOUND", {
@@ -1908,9 +2076,36 @@ export const getRecord = async (recordId: string) => {
   return record ? hydrateRecord(record) : null;
 };
 
-export const listRecordLinks = async (recordId: string) => {
+export const listRecordLinks = async (
+  recordId: string,
+  direction: "outbound" | "inbound" = "outbound",
+) => {
   await ensureReady();
   const db = await getDb();
+  if (direction === "inbound") {
+    // Who links HERE: rows whose target is this record, from live source
+    // records through live relation fields. Both ends must be visible — the
+    // source Base because the row reveals a source record, the target Base
+    // because it is this record's own Base.
+    const rows = await db
+      .select({ link: busabaseRecordLinks })
+      .from(busabaseRecordLinks)
+      .innerJoin(busabaseRecords, eq(busabaseRecords.id, busabaseRecordLinks.sourceRecordId))
+      .innerJoin(busabaseBaseFields, eq(busabaseBaseFields.id, busabaseRecordLinks.fieldId))
+      .where(
+        and(
+          eq(busabaseRecordLinks.spaceId, getContextSpaceId()),
+          eq(busabaseRecordLinks.targetRecordId, recordId),
+          isNull(busabaseRecordLinks.deletedAt),
+          eq(busabaseRecords.status, "active"),
+          isNull(busabaseBaseFields.deletedAt),
+          buildBaseVisibilityExists(db, busabaseRecordLinks.baseId),
+          buildBaseVisibilityExists(db, busabaseRecordLinks.targetBaseId),
+        ),
+      )
+      .orderBy(asc(busabaseRecordLinks.createdAt), asc(busabaseRecordLinks.sourceRecordId));
+    return rows.map((row) => toRecordLinkVO(row.link));
+  }
   const links = await db
     .select()
     .from(busabaseRecordLinks)
@@ -1929,13 +2124,55 @@ export const listRecordLinks = async (recordId: string) => {
   return links.map(toRecordLinkVO);
 };
 
+/** Exact field lookup needs current values too, including cross-Base searches. */
+const dynamicFieldMatches = async (
+  baseId: string | undefined,
+  fieldSlug: string,
+  valueText: string,
+) => {
+  const bases = baseId
+    ? [await getBase(baseId)].filter((base) => base !== null)
+    : await listBases();
+  if (baseId) {
+    for (const base of bases) {
+      assertNoReverseRelationQueryOrThrow(base.fields, [fieldSlug], "look up records");
+    }
+  }
+  const dynamicBases = bases.filter((base) =>
+    lookupDependentFieldSlugs(base.fields).has(fieldSlug),
+  );
+  const baseIds = dynamicBases.map((base) => base.id);
+  if (!baseIds.length) return { baseIds, records: [] as HydratedRecord[] };
+  const db = await getDb();
+  const rows = await db
+    .select()
+    .from(busabaseRecords)
+    .where(
+      and(
+        eq(busabaseRecords.spaceId, getContextSpaceId()),
+        inArray(busabaseRecords.baseId, baseIds),
+        eq(busabaseRecords.status, "active"),
+        buildBaseVisibilityExists(db, busabaseRecords.baseId),
+      ),
+    );
+  const records = (await hydrateRecords(rows)).filter((record) => {
+    const field = record.base.fields.find((candidate) => candidate.slug === fieldSlug);
+    return (
+      normalizeFieldValue(record.headCommit.payload[fieldSlug], field?.type).valueText === valueText
+    );
+  });
+  return { baseIds, records };
+};
+
 export const listRecordsByFieldText = async (
   input: z.input<typeof recordFieldFilterInputSchema>,
 ) => {
   await ensureReady();
   const db = await getDb();
   const parsed = recordFieldFilterInputSchema.parse(input);
+  const dynamic = await dynamicFieldMatches(parsed.baseId, parsed.fieldSlug, parsed.valueText);
   const filters: SQL[] = [
+    ...(dynamic.baseIds.length ? [not(inArray(busabaseFieldValues.baseId, dynamic.baseIds))] : []),
     eq(busabaseFieldValues.spaceId, getContextSpaceId()),
     eq(busabaseFieldValues.fieldSlug, parsed.fieldSlug),
     eq(busabaseFieldValues.valueText, parsed.valueText),
@@ -1971,7 +2208,12 @@ export const listRecordsByFieldText = async (
     .filter((recordId): recordId is string => Boolean(recordId));
 
   if (recordIds.length === 0) {
-    return [];
+    return dynamic.records
+      .sort(
+        (left, right) =>
+          right.updatedAt.localeCompare(left.updatedAt) || right.id.localeCompare(left.id),
+      )
+      .slice(0, parsed.limit);
   }
 
   const recordRows = await db
@@ -1979,11 +2221,18 @@ export const listRecordsByFieldText = async (
     .from(busabaseRecords)
     .where(and(inArray(busabaseRecords.id, recordIds), eq(busabaseRecords.status, "active")));
   const recordsById = new Map(recordRows.map((record) => [record.id, record]));
-  return hydrateRecords(
+  const records = await hydrateRecords(
     recordIds
       .map((recordId) => recordsById.get(recordId))
       .filter((record): record is RecordPO => Boolean(record)),
   );
+  if (!dynamic.baseIds.length) return records;
+  return [...records, ...dynamic.records]
+    .sort(
+      (left, right) =>
+        right.updatedAt.localeCompare(left.updatedAt) || right.id.localeCompare(left.id),
+    )
+    .slice(0, parsed.limit);
 };
 
 /**
@@ -1996,6 +2245,15 @@ export const getRecordByField = async (input: z.input<typeof recordFieldGetInput
   await ensureReady();
   const db = await getDb();
   const parsed = recordFieldGetInputSchema.parse(input);
+  const dynamic = await dynamicFieldMatches(parsed.baseId, parsed.fieldSlug, parsed.valueText);
+  if (dynamic.baseIds.length) {
+    return (
+      dynamic.records.sort(
+        (left, right) =>
+          right.updatedAt.localeCompare(left.updatedAt) || right.id.localeCompare(left.id),
+      )[0] ?? null
+    );
+  }
   const filters: SQL[] = [
     eq(busabaseFieldValues.spaceId, getContextSpaceId()),
     eq(busabaseFieldValues.baseId, parsed.baseId),

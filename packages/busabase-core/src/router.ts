@@ -47,6 +47,7 @@ import {
   isEmbedProcedureAllowed,
 } from "./logic/anonymous-allowlist";
 import { grepUnified } from "./logic/grep";
+import type { ImplementedContractRouter } from "./logic/implemented-router-type";
 import { subscribeBusabaseLiveEvents } from "./logic/live-events";
 import { listMentionInbox, markMentionsRead } from "./logic/mention-inbox";
 import {
@@ -149,7 +150,16 @@ const toSharedNodeVO = (row: OwnLiveShareSummary): SharedNodeVO => ({
   createdAt: row.createdAt.toISOString(),
 });
 
-const busabaseRouterImpl = busabase.router({
+// Annotated with the contract-derived router type so declaration emit refers to
+// the contract instead of serializing every procedure's expanded schema — the
+// inferred type sits at TypeScript's serialization limit (TS7056), and one more
+// field option tipped it over.
+const busabaseRouterImpl: EnhancedRouter<
+  ImplementedContractRouter<typeof busabaseContract>,
+  Context,
+  Context,
+  Record<never, never>
+> = busabase.router({
   auth: {
     verify: busabase.auth.verify.handler(async () => getAuthInfo()),
   },
@@ -158,7 +168,7 @@ const busabaseRouterImpl = busabase.router({
     // host seam — this engine has no member table of its own.
     members: busabase.spaces.members.handler(async () => resolveMemberRoster()),
   },
-  search: busabase.search.handler(async ({ input }) => searchBusabase(input)),
+  search: busabase.search.handler(async ({ input, signal }) => searchBusabase(input, { signal })),
   searchMetrics: {
     report: busabase.searchMetrics.report.handler(({ input }) => recordSearchInteraction(input)),
   },

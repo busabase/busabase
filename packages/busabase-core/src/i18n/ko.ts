@@ -1,6 +1,8 @@
 import type { CoreI18nMessages } from "./messages";
 
 export const dashboardKo: CoreI18nMessages = {
+  lookup: lookupKo,
+  reverseRelation: reverseRelationKo,
   fieldHelp: {
     inherit: "필드 안내 사용",
     override: "이 양식의 안내 설정",
@@ -803,17 +805,12 @@ export const dashboardKo: CoreI18nMessages = {
     install: "설치",
     installRestricted:
       "스페이스 소유자와 관리자만 설치할 수 있습니다. 템플릿에는 앱과 스킬이 포함될 수 있으며, 이는 이 스페이스의 에이전트가 실행할 코드입니다.",
-    cardBases: "테이블 {count}개",
-    cardApps: "앱 {count}개",
-    cardDocs: "문서 {count}개",
-    cardRows: "샘플 행 {count}개",
-    cardManual: "에이전트 매뉴얼",
     promptsTitle: "설치한 후 에이전트에게 요청할 수 있는 것",
     promptsDescription:
       "템플릿이 베이스와 함께 작성자의 매뉴얼을 설치하므로 에이전트가 이런 요청에 답할 수 있습니다. 스키마를 추측할 필요가 없습니다.",
     contentsTitle: "설치하면 생성되는 항목",
-    contentsDescription:
-      '이 스페이스를 편집할 수 있으면 베이스, 필드, 샘플 행, 앱, 에이전트 매뉴얼이 바로 생성됩니다. 설치할 때 "먼저 리뷰를 거친 뒤 반영"을 켜면 앱 코드와 매뉴얼이 변경 요청으로 전달됩니다.',
+    permissionNote:
+      "설치하려면 이 스페이스의 소유자 또는 관리자 권한이 필요합니다. 만들어진 내용은 바로 사용할 수 있으며, 먼저 내용을 리뷰하도록 선택할 수도 있습니다.",
     bases: "베이스",
     apps: "앱",
     documents: "문서",
@@ -1583,6 +1580,13 @@ export const dashboardKo: CoreI18nMessages = {
     viewFieldDragOutside: "필드가 순서 변경 영역 밖에 있습니다. 놓으면 취소됩니다.",
     noViewFilters: "이 뷰에는 필터가 없습니다.",
     noViewSorts: "이 뷰에는 정렬이 없습니다.",
+    filterMatch: "일치 조건",
+    filterMatchAll: "모든 조건 (AND)",
+    filterMatchAny: "하나 이상의 조건 (OR)",
+    filterConjunction: "조건 조합",
+    addFilterGroup: "조건 그룹 추가",
+    removeFilterGroup: "조건 그룹 삭제",
+    filterMissingField: "필드를 사용할 수 없습니다",
     viewFilterCount: "필터 {count}개",
     viewSortCount: "정렬 {count}개",
     clearAllFilters: "모든 필터 지우기",
@@ -2501,3 +2505,6 @@ export const dashboardKo: CoreI18nMessages = {
       "이 스페이스에 폴더, 테이블, 앱을 생성합니다. 이 방식으로는 에이전트가 아무것도 배우지 않으며, 에이전트 설치 탭에서 언제든 매뉴얼을 전달할 수 있습니다.",
   },
 };
+
+import { lookupKo } from "./lookup";
+import { reverseRelationKo } from "./reverse-relation";

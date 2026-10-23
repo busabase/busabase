@@ -19,10 +19,10 @@
 
 import type { TemplateCardVO } from "busabase-contract/domains/templates/types";
 import type { ReactNode } from "react";
-import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
+import { useCoreI18n, useCoreLocale } from "../../../i18n";
 import { presentCoreError } from "../../../i18n/localize-error";
 import { ShimmerSkeleton as Skeleton } from "../../dashboard/components/shimmer-skeleton";
-import { TemplateCardSummary, type TemplateStatLabels } from "./template-card-summary";
+import { TemplateCardSummary } from "./template-card-summary";
 
 const TEMPLATE_SKELETON_IDS = [
   "template-skeleton-1",
@@ -37,24 +37,15 @@ export function TemplateCard({
   template,
   onOpen,
   density,
-  statLabels,
 }: {
   template: TemplateCardVO;
   onOpen: () => void;
   density?: "compact" | "comfortable";
-  statLabels?: TemplateStatLabels;
 }) {
   const locale = useCoreLocale();
-  const messages = useCoreI18n();
-  const localizedStatLabels: TemplateStatLabels = {
-    bases: (count) => fmt(messages.templates.cardBases, { count, plural: count === 1 ? "" : "s" }),
-    airapps: (count) => fmt(messages.templates.cardApps, { count, plural: count === 1 ? "" : "s" }),
-    docs: (count) => fmt(messages.templates.cardDocs, { count, plural: count === 1 ? "" : "s" }),
-    records: (count) => fmt(messages.templates.cardRows, { count, plural: count === 1 ? "" : "s" }),
-  };
   return (
     <button
-      className="group flex flex-col overflow-hidden rounded-lg border border-border bg-card text-left transition-colors hover:border-primary/50"
+      className="group flex flex-col overflow-hidden rounded-lg border border-border bg-card text-left transition-colors hover:border-primary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       onClick={onOpen}
       type="button"
     >
@@ -62,7 +53,6 @@ export function TemplateCard({
         density={density}
         descriptionLocale={locale}
         screenshotAlt=""
-        statLabels={statLabels ?? localizedStatLabels}
         template={template}
       />
     </button>
@@ -77,7 +67,6 @@ export function TemplateGrid({
   onOpenTemplate,
   children,
   density,
-  statLabels,
   columnsClassName = "sm:grid-cols-2 lg:grid-cols-3",
   gapClassName = "gap-4",
   skeletonCount = TEMPLATE_SKELETON_IDS.length,
@@ -96,11 +85,11 @@ export function TemplateGrid({
   onOpenTemplate?: (template: TemplateCardVO) => void;
   /**
    * Full control over the cards' markup, pre-rendered by the caller — a
-   * public page needs a real `<a>` (crawlable, works with JS disabled) and
-   * extra body content (tags, a version/author/license table), neither of
-   * which the click-to-open `TemplateCard` supports. `TemplateCardSummary` is
-   * deliberately event-free so callers can wrap it in either a `<button>` or
-   * an `<article>`/`<Link>`; this is the extension point for the latter.
+   * public page needs a real `<a>` per card (crawlable, works with JS
+   * disabled), which the click-to-open `TemplateCard` is not.
+   * `TemplateCardSummary` is deliberately event-free so callers can wrap it in
+   * either a `<button>` or a `<Link>`; this is the extension point for the
+   * latter.
    *
    * Deliberately pre-rendered nodes, not a render-prop function: this
    * component is a Client Component (`"use client"` above) and the public
@@ -111,7 +100,6 @@ export function TemplateGrid({
    */
   children?: ReactNode;
   density?: "compact" | "comfortable";
-  statLabels?: TemplateStatLabels;
   /** Grid columns — the modal is narrower than the page and says so here. */
   columnsClassName?: string;
   gapClassName?: string;
@@ -126,12 +114,9 @@ export function TemplateGrid({
           <div className="overflow-hidden rounded-lg border border-border bg-card" key={id}>
             <Skeleton className="aspect-[16/10] w-full rounded-none" />
             <div className="space-y-3 p-4">
-              <div className="flex items-center justify-between gap-3">
-                <Skeleton className="h-4 w-2/3" />
-                <Skeleton className="h-5 w-16" />
-              </div>
-              <Skeleton className="h-3 w-full" />
-              <Skeleton className="h-3 w-4/5" />
+              <Skeleton className="h-5 w-2/3" />
+              <Skeleton className="h-3.5 w-full" />
+              <Skeleton className="h-3.5 w-4/5" />
             </div>
           </div>
         ))}
@@ -159,7 +144,6 @@ export function TemplateGrid({
             density={density}
             key={template.id}
             onOpen={() => onOpenTemplate?.(template)}
-            statLabels={statLabels}
             template={template}
           />
         ))}

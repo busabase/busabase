@@ -20,8 +20,12 @@ import {
   fieldTypeSchema,
   lookupRollupSchema,
 } from "../base/contract/base-schemas";
-import { viewFilterOperatorSchema } from "../base/contract/view-schemas";
-import { VIEW_FIELD_MAX_WIDTH, VIEW_FIELD_MIN_WIDTH } from "../base/types";
+import {
+  viewFilterConjunctionSchema,
+  viewFilterOperatorSchema,
+  viewFiltersSchema,
+} from "../base/contract/view-schemas";
+import { mapViewFilters, VIEW_FIELD_MAX_WIDTH, VIEW_FIELD_MIN_WIDTH } from "../base/types";
 import { TemplateManifestSchema } from "./template";
 
 export const PACKAGE_FORMAT = "busabase-package@1";
@@ -268,6 +272,7 @@ export type PackageDocFrontmatter = z.infer<typeof PackageDocFrontmatterSchema>;
  * | ------------------------- | ------------------------ | ----------- |
  * | `options.targetBaseId`    | `options.targetBaseSlug` | the SERVER (native alias) |
  * | `options.inverseFieldId`  | `options.inverseFieldSlug`   | install, pass 3 |
+ * | `options.reverseOfFieldId` | `options.reverseOfFieldSlug` | install, pass 3 |
  * | `options.ai.sourceFieldIds` | `options.ai.sourceFieldSlugs` | install, pass 3 |
  *
  * `inverseFieldSlug` and `ai.sourceFieldSlugs` are **package-only** keys — the API
@@ -333,6 +338,9 @@ export const PackageFieldOptionsSchema = z
       .optional(),
     /** Package-only — replaces `inverseFieldId`. */
     inverseFieldSlug: z.string().optional(),
+    /** Package-only — replaces `reverseOfFieldId` (the forward field's slug in the
+     *  target Base). Resolved in install pass 3, like `inverseFieldSlug`. */
+    reverseOfFieldSlug: z.string().optional(),
     /** Carried verbatim: the API's own `lookup` config is already keyed entirely
      *  by slug (`relationFieldSlug` / `targetFieldSlug`), so it survives a
      *  re-id'ing install with no package-only alias. The companion `number`
@@ -387,7 +395,16 @@ export const PackageViewSortSchema = z.object({
 });
 
 export const PackageViewConfigSchema = z.object({
-  filters: z.array(PackageViewFilterSchema).default([]),
+  filters: viewFiltersSchema
+    .transform((conditions) =>
+      mapViewFilters(conditions, (filter) => ({
+        fieldSlug: filter.fieldSlug,
+        operator: filter.operator,
+        ...(filter.value !== undefined ? { value: filter.value } : {}),
+      })),
+    )
+    .default([]),
+  filterConjunction: viewFilterConjunctionSchema.optional(),
   sorts: z.array(PackageViewSortSchema).default([]),
   visibleFieldSlugs: z.array(z.string()).nullable().optional(),
   fieldWidths: z

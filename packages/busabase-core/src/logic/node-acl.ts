@@ -26,6 +26,7 @@ import { getDb } from "../db";
 import { busabaseNodePrincipals, busabaseNodes } from "../db/schema";
 import { busabaseBases } from "../domains/base/schema";
 import { id, now, rootNodeIdForSpace } from "./kernel";
+import { publishNodeAclUpdated } from "./live-events";
 
 /**
  * Node-level access control (see `busabase_node_principals` in db/schema.ts
@@ -674,6 +675,7 @@ export async function grantNodePrincipal(
     });
   }
   await recomputeSpaceNodeAcl(db, spaceId);
+  await publishNodeAclUpdated({ spaceId, nodeId, actorId: grantedBy, baseId: null });
 }
 
 /** Remove one direct grant (and its materialized descendants via recompute). */
@@ -696,6 +698,12 @@ export async function revokeNodePrincipal(
       ),
     );
   await recomputeSpaceNodeAcl(db, getContextSpaceId());
+  await publishNodeAclUpdated({
+    spaceId: getContextSpaceId(),
+    nodeId,
+    actorId,
+    baseId: null,
+  });
 }
 
 /** Direct grants defined on this node (inherited copies are not listed). */
@@ -747,6 +755,7 @@ export async function updateNodeVisibility(
   }
 
   await recomputeSpaceNodeAcl(db, spaceId);
+  await publishNodeAclUpdated({ spaceId, nodeId, actorId, baseId: null });
 }
 
 /**

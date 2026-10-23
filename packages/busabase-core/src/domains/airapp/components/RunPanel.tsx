@@ -5,7 +5,7 @@ import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-quer
 import type { AirAppVO } from "busabase-contract/types";
 import { Button } from "kui/button";
 import { Check, CircleStop, Copy, Loader2, Pin, Play, RotateCcw } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { fmt, useCoreI18n } from "../../../i18n";
 import {
@@ -34,6 +34,7 @@ import {
 } from "../utils/airapp-runtime-descriptor";
 import { NodepodServiceWorkerError } from "../utils/nodepod-service-worker";
 import { AIRAPP_PREVIEW_IFRAME_SANDBOX } from "../utils/preview-sandbox";
+import { renderTerminalOutput } from "../utils/terminal-output";
 import { useAirAppEngineAvailability } from "./engine-availability-context";
 import { createAirAppRunner } from "./runners/runner-factory";
 import type { AirAppMountedFile, AirAppRunnerKind } from "./runners/types";
@@ -766,6 +767,7 @@ export function AirAppRunLogs({ runner }: { runner: AirAppRunnerState }) {
   const messages = useCoreI18n();
   const logRef = useRef<HTMLPreElement | null>(null);
   const { logLines } = runner;
+  const logText = useMemo(() => renderTerminalOutput(logLines.join("")), [logLines]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: scroll-to-bottom on every new log line
   useEffect(() => {
@@ -781,7 +783,7 @@ export function AirAppRunLogs({ runner }: { runner: AirAppRunnerState }) {
         ref={logRef}
         translate="no"
       >
-        {logLines.length === 0 ? messages.airapp.logsEmpty : logLines.join("")}
+        {logLines.length === 0 ? messages.airapp.logsEmpty : logText}
       </pre>
     </div>
   );

@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { userRefSchema } from "../../../contract/schemas";
-import { VIEW_FIELD_MAX_WIDTH, VIEW_FIELD_MIN_WIDTH } from "../types";
+import { VIEW_FIELD_MAX_WIDTH, VIEW_FIELD_MIN_WIDTH, type ViewFilterConditionVO } from "../types";
 
 // Base-owned view Zod schemas. Pure leaf: no kernel imports.
 
@@ -20,6 +20,33 @@ export const viewFilterSchema = z.object({
   operator: viewFilterOperatorSchema,
   value: z.unknown().optional(),
 });
+
+// The root is level 1. Explicit finite schemas keep OpenAPI portable and reject
+// excessive nesting before recursive evaluation. Limits also bound API work.
+export const VIEW_FILTER_MAX_DEPTH = 3;
+export const VIEW_FILTER_MAX_RULES = 100;
+export const viewFilterConjunctionSchema = z.enum(["and", "or"]);
+export const deepestViewFilterGroupSchema = z.object({
+  conjunction: viewFilterConjunctionSchema,
+  conditions: z.array(viewFilterSchema).min(1).max(VIEW_FILTER_MAX_RULES),
+});
+export const viewFilterGroupSchema = z.object({
+  conjunction: viewFilterConjunctionSchema,
+  conditions: z
+    .array(z.union([viewFilterSchema, deepestViewFilterGroupSchema]))
+    .min(1)
+    .max(VIEW_FILTER_MAX_RULES),
+});
+export const viewFilterConditionSchema = z.union([viewFilterSchema, viewFilterGroupSchema]);
+export const viewFiltersSchema: z.ZodType<ViewFilterConditionVO[]> = z
+  .array(viewFilterConditionSchema)
+  .max(VIEW_FILTER_MAX_RULES)
+  .superRefine((conditions, ctx) => {
+    const count = (items: typeof conditions): number =>
+      items.reduce((total, item) => total + ("conditions" in item ? count(item.conditions) : 1), 0);
+    if (count(conditions) > VIEW_FILTER_MAX_RULES)
+      ctx.addIssue({ code: "custom", message: "A view supports at most 100 filter conditions." });
+  });
 
 export const viewSortSchema = z.object({
   direction: z.enum(["asc", "desc"]),
@@ -46,7 +73,8 @@ export const galleryCoverFitSchema = z.enum(["cover", "fit"]);
 export const galleryCardSizeSchema = z.enum(["small", "medium", "large"]);
 
 export const viewConfigSchema = z.object({
-  filters: z.array(viewFilterSchema).default([]),
+  filters: viewFiltersSchema.default([]),
+  filterConjunction: viewFilterConjunctionSchema.optional(),
   sorts: z.array(viewSortSchema).default([]),
   visibleFieldSlugs: z.array(z.string()).nullable().optional(),
   fieldWidths: z
@@ -120,7 +148,7 @@ export const createViewInputSchema = z.object({
 
 // Zod's .partial() retains nested defaults, which would turn omitted keys into clears.
 const viewConfigPatchSchema = viewConfigSchema.omit({ filters: true, sorts: true }).extend({
-  filters: z.array(viewFilterSchema).optional(),
+  filters: viewFiltersSchema.optional(),
   sorts: z.array(viewSortSchema).optional(),
 });
 

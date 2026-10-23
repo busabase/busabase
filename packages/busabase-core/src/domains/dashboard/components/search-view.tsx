@@ -225,6 +225,11 @@ export function SearchView({ orpc }: { orpc: BusabaseQueryUtils }) {
       },
     }),
     enabled: enabled && !isRegex,
+    // Expensive searches retry only through the visible retry action.
+    retry: false,
+    retryOnMount: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
 
   // `maxMatches` rides the same "load more" counter as text search, so the one

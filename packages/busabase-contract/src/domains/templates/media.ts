@@ -11,8 +11,14 @@
  *      whole; it is never merged index by index, because "cover in Chinese,
  *      second shot in English" is a gallery nobody designed.
  *   2. Anything that entry leaves out — and every locale with no entry at all —
- *      falls back to the top-level `screenshots` / `video`, which are the
- *      English/default set.
+ *      falls back to the top-level `screenshots` / `video` / `videos`, which are
+ *      the English/default set.
+ *
+ * Clips follow the same whole-list rule as screenshots: a locale's `videos`
+ * (or its single `video`) replaces the default clips, it is never merged with
+ * them. `videos` wins over `video` within one level, and at most
+ * `TEMPLATE_VIDEO_LIMIT` are returned, so a list over the limit renders its
+ * first three rather than failing.
  *
  * Exact locale keys only, mirroring `iStringParse`: `"zh"` does not match
  * `"zh-CN"`. The callers pass the same resolved locale they already hand to
@@ -20,18 +26,27 @@
  *
  * Spec: `apps/busabase/content/spec/template-center.md` §16.
  */
-import type { TemplateLocaleMedia, TemplateLocales } from "../package/template";
+import {
+  TEMPLATE_VIDEO_LIMIT,
+  type TemplateLocaleMedia,
+  type TemplateLocales,
+  type TemplateVideo,
+} from "../package/template";
 
-/** What a surface renders: one gallery and at most one clip, already chosen. */
+/**
+ * What a surface renders: one gallery and its clips (at most
+ * `TEMPLATE_VIDEO_LIMIT`, in display order), already chosen.
+ */
 export interface TemplateMedia {
   screenshots: string[];
-  video?: string;
+  videos: TemplateVideo[];
 }
 
 /** Anything carrying the default media plus optional per-locale overrides. */
 export interface TemplateMediaSource {
   screenshots: readonly string[];
   video?: string;
+  videos?: readonly TemplateVideo[];
   locales?: Readonly<Record<string, TemplateLocaleMedia | undefined>>;
 }
 
@@ -46,6 +61,36 @@ const nonEmptyString = (value: unknown): string | undefined =>
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
+
+/**
+ * Normalize an untrusted clip list, or `undefined` when nothing usable is left.
+ * Entries without a string `src` are dropped, a non-string `title` is ignored —
+ * one bad clip must not hide the good ones next to it.
+ */
+export const parseTemplateVideos = (raw: unknown): TemplateVideo[] | undefined => {
+  if (!Array.isArray(raw)) return undefined;
+  const videos: TemplateVideo[] = [];
+  for (const item of raw) {
+    if (!isPlainObject(item)) continue;
+    const src = nonEmptyString(item.src);
+    if (!src) continue;
+    const title = nonEmptyString(item.title);
+    videos.push({ src, ...(title ? { title } : {}) });
+  }
+  return videos.length > 0 ? videos : undefined;
+};
+
+/**
+ * The clips one level declares: `videos` when it has any, else its single
+ * `video` as a one-entry list, else `undefined` ("declares none" — the caller
+ * falls back a level). The one place the shorthand and the list meet.
+ */
+export const declaredVideos = (video: unknown, videos: unknown): TemplateVideo[] | undefined => {
+  const list = parseTemplateVideos(videos);
+  if (list) return list;
+  const single = nonEmptyString(video);
+  return single ? [{ src: single }] : undefined;
+};
 
 /**
  * Normalize an untrusted `locales` value, or `undefined` when nothing usable is
@@ -65,8 +110,13 @@ export const parseTemplateLocales = (raw: unknown): TemplateLocales | undefined 
     if (!locale || !isPlainObject(entry)) continue;
     const screenshots = nonEmptyStrings(entry.screenshots);
     const video = nonEmptyString(entry.video);
-    if (!screenshots && !video) continue;
-    locales[locale] = { ...(screenshots ? { screenshots } : {}), ...(video ? { video } : {}) };
+    const videos = parseTemplateVideos(entry.videos);
+    if (!screenshots && !video && !videos) continue;
+    locales[locale] = {
+      ...(screenshots ? { screenshots } : {}),
+      ...(video ? { video } : {}),
+      ...(videos ? { videos } : {}),
+    };
   }
   return Object.keys(locales).length > 0 ? locales : undefined;
 };
@@ -89,6 +139,9 @@ export const pickTemplateMedia = (
     locale && locales ? Object.entries(locales).find(([key]) => key === locale)?.[1] : undefined;
   const entry = isPlainObject(own) ? own : undefined;
   const screenshots = nonEmptyStrings(entry?.screenshots) ?? [...template.screenshots];
-  const video = nonEmptyString(entry?.video) ?? nonEmptyString(template.video);
-  return { screenshots, ...(video ? { video } : {}) };
+  const videos =
+    declaredVideos(entry?.video, entry?.videos) ??
+    declaredVideos(template.video, template.videos) ??
+    [];
+  return { screenshots, videos: videos.slice(0, TEMPLATE_VIDEO_LIMIT) };
 };
