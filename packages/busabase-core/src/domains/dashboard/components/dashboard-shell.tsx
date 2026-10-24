@@ -72,6 +72,7 @@ import { DashboardOrpcProvider } from "../orpc-context";
 import { parseNodeDetailRoute } from "../utils/node-route";
 import { getSidebarTopLevelNodes } from "../utils/sidebar-node-tree";
 import type { AgentIntegrationTarget } from "./agent-install-panel";
+import { CloseMobileSidebarOnNavigate } from "./close-mobile-sidebar-on-navigate";
 import { NodeDeleteDialog } from "./file-tree-browser";
 import { NodeAgentPromptsDialog } from "./node-agent-prompts-dialog";
 import { NodeMoveDialog } from "./node-move-dialog";
@@ -1380,6 +1381,7 @@ function DashboardShellInner({
           pageClassName="gap-0 p-0"
           sidebarClassName="h-full"
         >
+          <CloseMobileSidebarOnNavigate />
           {children}
         </DashboardLayout>
         {orpc && settingsTarget && (

@@ -1,21 +1,17 @@
-import { hasCapability } from "busabase-contract/domains";
 import type { PlaybookAttributionVO } from "busabase-contract/types";
 import { BookOpen } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { fmt, useCoreI18n } from "../../../i18n";
+import { nodeHref } from "../helpers/nav-tree";
 
 /**
  * Dashboard route of the node that carries a playbook — the skill node itself,
- * or for a prompt the node the prompt is defined on. Same rule as the sidebar's
- * `nodeHref`: Bases route by their own slug, other types only when they have a
- * detail screen. Null when the reader cannot see the node or it has no screen.
+ * or for a prompt the node the prompt is defined on. Routed by the sidebar's own
+ * `nodeHref`. Null when the reader cannot see the node or it has no screen.
  */
 export const getPlaybookHref = (playbook: PlaybookAttributionVO): string | null => {
   if (!playbook.accessible || !playbook.nodeType || !playbook.nodeSlug) return null;
-  if (playbook.nodeType === "base") return `/base/${playbook.nodeSlug}`;
-  return hasCapability(playbook.nodeType, "hasDetail")
-    ? `/${playbook.nodeType}/${playbook.nodeSlug}`
-    : null;
+  return nodeHref({ type: playbook.nodeType, slug: playbook.nodeSlug });
 };
 
 /**
