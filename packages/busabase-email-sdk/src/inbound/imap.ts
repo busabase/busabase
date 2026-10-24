@@ -5,6 +5,9 @@ import { parseEmail } from "./parser.js";
 
 export type ImapConfig = ConstructorParameters<typeof ImapFlow>[0] & { mailbox?: string };
 
+/** UIDs per FETCH: one round trip per chunk, while bounding full messages held in memory. */
+const FETCH_CHUNK = 25;
+
 export interface ImapCursor {
   mailbox: string;
   /** Decimal UIDVALIDITY is a string to preserve the server's full integer. */
@@ -18,6 +21,14 @@ export interface ReadImapOptions {
   since?: Date;
   /** Maximum messages scanned, including unrelated messages. Default 100; maximum 1000. */
   limit?: number;
+  /**
+   * `"all"` (default) downloads every message. `"matched"` downloads headers first and the
+   * full message only when the headers already match the watch or it looks like a bounce;
+   * other messages come back with headers only (empty text, html and attachments). No watched
+   * reply or bounce is missed: matching reads only headers, except a bounce's attached
+   * original, and every bounce is downloaded in full.
+   */
+  download?: "all" | "matched";
 }
 
 export interface ImapReplyBatch {
@@ -80,20 +91,51 @@ export const readImapReplies = async (
       .filter((uid) => uid > previousUid)
       .sort((a, b) => a - b)
       .slice(0, limit);
-    const messages: ImapReplyBatch["messages"] = [];
-    let uid = previousUid;
-    for (const candidate of uids) {
-      const result = await client.fetchOne(candidate, { source: true, uid: true }, { uid: true });
-      // A concurrent expunge is safe to acknowledge; it has no remaining body to process.
-      if (result && "source" in result && result.source) {
-        const email = await parseEmail(result.source);
-        messages.push({ email, match: matchReply(email, options.watch), uid: candidate });
-      } else if (result) {
-        throw new Error(`IMAP message UID ${candidate} has no source; cursor was not advanced.`);
+    // Collect a whole FETCH before parsing; IMAP cannot interleave another command.
+    const download = async (wanted: number[], part: "source" | "headers") => {
+      const found = new Map<number, Buffer>();
+      if (wanted.length === 0) return found;
+      for await (const result of client.fetch(wanted, { [part]: true, uid: true }, { uid: true })) {
+        const data = result[part];
+        if (!data) {
+          throw new Error(
+            `IMAP message UID ${result.uid} has no ${part}; cursor was not advanced.`,
+          );
+        }
+        found.set(result.uid, data);
       }
-      uid = candidate;
+      return found;
+    };
+    const messages: ImapReplyBatch["messages"] = [];
+    for (let start = 0; start < uids.length; start += FETCH_CHUNK) {
+      const chunk = uids.slice(start, start + FETCH_CHUNK);
+      const headerOnly = new Map<number, ReceivedEmail>();
+      let full = chunk;
+      if (options.download === "matched") {
+        const headers = await download(chunk, "headers");
+        full = [];
+        for (const uid of chunk) {
+          const raw = headers.get(uid);
+          if (!raw) continue;
+          const email = await parseEmail(raw);
+          if (email.kind === "bounce" || matchReply(email, options.watch)) full.push(uid);
+          else headerOnly.set(uid, email);
+        }
+      }
+      const sources = await download(full, "source");
+      for (const uid of chunk) {
+        const source = sources.get(uid);
+        if (source) {
+          const email = await parseEmail(source);
+          messages.push({ email, match: matchReply(email, options.watch), uid });
+          continue;
+        }
+        const email = headerOnly.get(uid);
+        if (email) messages.push({ email, match: null, uid });
+        // Otherwise it was expunged after SEARCH: safe to acknowledge, nothing left to process.
+      }
     }
-    return { messages, cursor: { mailbox, uidValidity, uid } };
+    return { messages, cursor: { mailbox, uidValidity, uid: uids.at(-1) ?? previousUid } };
   } finally {
     try {
       release?.();

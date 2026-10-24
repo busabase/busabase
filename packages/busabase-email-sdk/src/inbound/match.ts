@@ -8,8 +8,10 @@ export const normalizeMessageId = (id: string): string => {
 export const matchReply = (email: ReceivedEmail, watch: ReplyWatch): ReplyMatch | null => {
   const sent = new Set((watch.messageIds ?? []).map(normalizeMessageId));
   const ses = new Set(watch.sesMessageIds ?? []);
+  // A bounce notice often names the original only inside its report or attached message.
+  const original = email.bounce?.originalMessageId;
   const thread =
-    [...email.inReplyTo, ...email.references].find((id) => {
+    [...email.inReplyTo, ...email.references, ...(original ? [original] : [])].find((id) => {
       const normalized = normalizeMessageId(id);
       if (sent.has(normalized)) return true;
       const parts = normalized.match(/^<([^<>@]+)@([^<>]+)>$/);
@@ -20,7 +22,9 @@ export const matchReply = (email: ReceivedEmail, watch: ReplyWatch): ReplyMatch 
       );
     }) ?? null;
   const senders = new Set((watch.senders ?? []).map((address) => address.trim().toLowerCase()));
-  const bySender = email.from.some((address) => {
+  // For a bounce the watched peer is the failed recipient, not the mailer daemon.
+  const peers = [...email.from, ...(email.bounce?.recipients ?? [])];
+  const bySender = peers.some((address) => {
     const normalized = address.trim().toLowerCase();
     return senders.has(normalized) || senders.has(`@${normalized.split("@")[1] ?? ""}`);
   });

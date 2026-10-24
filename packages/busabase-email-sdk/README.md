@@ -102,7 +102,7 @@ to match your workflow; there are no fixed workspace, Campaign, or Base IDs.
 | `external-key` | text | Stable event identity for deduplication |
 | `type` | select or text | `sent`, `reply`, `auto-reply`, `bounce` |
 | `happened-at` | date | Event time |
-| `contact` | text | Accepted recipient addresses for sent mail; sender for received mail |
+| `contact` | text | Accepted recipient addresses for sent mail; sender for received mail; failed recipients for a bounce |
 | `accepted`, `rejected` | text, optional | Submission receipt addresses; intended To can be mapped separately |
 | `campaign` | relation, optional | Your campaign record |
 | `account-key` | text | Stable mailbox identity |
@@ -194,14 +194,17 @@ use an external worker or scheduler to call it again.
 No background process or automatic reply starts when this package is imported.
 
 IMAP uses read-only selection and BODY.PEEK, leaving Seen flags unchanged. Unmatched
-mail is acknowledged without adding an outreach record. Each matching email is
+mail is acknowledged without adding an outreach record. `syncImapReplies` reads headers
+first and downloads a full message only when its headers match the watch or it looks
+like a bounce, so a busy shared inbox does not have to be downloaded in full. Each matching email is
 persisted before its UID checkpoint advances. Pending proposals are durably retained
 in the state; reconcile their approval/rejection separately. A UIDVALIDITY change
 raises `MailboxResetError`: deliberately restart the scan and rely on event identity
 deduplication. Preserve pending proposal IDs during that recovery.
 
 For manual processing, `readImapReplies` returns both matched and unmatched messages
-and its read cursor. Do not save that cursor before processing the complete batch.
+and its read cursor. It downloads every message by default; pass `download: "matched"`
+to get unmatched messages with headers only (empty `text`, `html` and attachments). Do not save that cursor before processing the complete batch.
 Sender-only matches are candidates, not proof that a message belongs to one particular
 campaign. `syncImapReplies` raises `ReplyNeedsResolutionError` before checkpointing a
 batch containing such a candidate. Pass `resolveContext(entry)` to explicitly return
@@ -212,6 +215,20 @@ records omit pending proposals: include their receipts explicitly in the watch o
 for review before polling; otherwise an early reply could be scanned before its outgoing
 ID is known. Empty watches are rejected. Anonymous mail without Message-ID requires a stable
 account + mailbox + UIDVALIDITY + UID external key.
+
+### Bounces that arrive later
+
+An SMTP server can accept a message and report the failure hours later, in a notice from
+`mailer-daemon` or `postmaster`. Such a notice has `kind: "bounce"` and `email.bounce`:
+`recipients` are the addresses that failed and `originalMessageId` is the outgoing message
+it reports on. They come from the RFC 3464 report (`Final-Recipient`, `Action: failed`),
+`X-Failed-Recipients`, or the attached original message. Tencent Exmail sends no report and
+no thread headers, only an HTML notice with the original attached as `message/rfc822`, so
+matching uses that attached Message-ID. The store records a bounce's `contact` as the failed
+recipients, not the mailer daemon. A report in which no recipient failed (a delay warning or
+a delivery confirmation) is classified `auto-reply`, so a retried address is not marked
+undeliverable. A notice without a report counts as a delay, not a bounce, when it cites only
+temporary 4xx SMTP codes and no 5xx code; a notice citing no code at all stays a bounce.
 
 ## SES notifications and inbound mail
 

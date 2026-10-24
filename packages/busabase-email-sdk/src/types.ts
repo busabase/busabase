@@ -54,6 +54,14 @@ export interface ReceivedAttachment {
   size: number;
 }
 
+/** What a delivery-failure notice says about the message that failed. */
+export interface BounceDetails {
+  /** Lowercase addresses the notice reports as failed, not the mailer daemon that sent it. */
+  recipients: string[];
+  /** RFC Message-ID of the original outgoing message, as the notice quotes it. */
+  originalMessageId: string | null;
+}
+
 export interface ReceivedEmail {
   messageId: string | null;
   from: string[];
@@ -68,6 +76,8 @@ export interface ReceivedEmail {
   replyText?: string;
   html: string | null;
   kind: ReceivedEmailKind;
+  /** Present only when `kind` is `"bounce"`. */
+  bounce?: BounceDetails;
   attachments: ReceivedAttachment[];
 }
 
