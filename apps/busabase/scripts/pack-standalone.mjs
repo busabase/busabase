@@ -11,9 +11,9 @@
 // The app dir is located by search rather than hardcoded: Next derives the
 // standalone layout from its detected workspace root, so the relative path
 // (`apps/busabase/`) can be nested deeper (e.g. inside a git worktree).
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { cp, rm } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { basename, dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -233,6 +233,163 @@ if (hashedPackages.size > 0) {
   console.log(
     `pack-standalone: rewrote ${hashedPackages.size} hashed external(s) across ${rewritten} chunk(s)`,
   );
+}
+
+// --- Repair the dependencies of every external ---------------------------------
+// Next copies into `.next/standalone` only the files it traced. For a package that
+// something imports lazily, or through an `exports` condition it could not follow,
+// that is often nothing but `package.json` (and a package it judged unreachable is
+// not copied at all, which is right: the browser-only variants in the AWS SDK are
+// not needed here). Both are harmless until Node loads the package at runtime.
+//
+// What is not harmless is a dependency of the wrong VERSION, and that is what broke
+// 0.98.0. The workspace holds three shiki: 4.5.0 at the root (fumadocs), and 3.23.0
+// inside packages/kui and @streamdown/code, each with its own 3.23.0 `@shikijs/*`
+// beside it. Next copied shiki 3.23.0 to `node_modules/shiki` but left its
+// `@shikijs/*` dependencies as `package.json`-only stubs of the root's 4.5.0, and
+// `promotePackage` above treats "a package.json already exists" as "already in
+// place". At runtime shiki 3.23.0 then imported `@shikijs/core/dist/index.mjs` from
+// a stub of the wrong major, and every page logged "Failed to load external module
+// shiki".
+//
+// So, for each external, check its runtime dependencies the way Node resolves them
+// from where the package now sits, and repair only what is demonstrably wrong:
+//
+//   - a dependency that resolves to a copy of an INCOMPATIBLE version (another major,
+//     or another minor of 0.x), or to a manifest with no code in it, gets its own
+//     copy, from the workspace, in this package's own `node_modules` where Node finds
+//     it first. The root's other version stays: something else needs it. `pnpm
+//     publish` keeps nested `node_modules`; what it cannot do is hold two versions at
+//     one path. A traced copy of a compatible version (4.14.0 where 4.13.1 was
+//     installed) is left: Node loads it fine, and nesting every such patch drift
+//     would copy the AWS SDK's `@smithy/types` into ten places.
+//   - a package copied here in full was never traced, so nothing about ITS
+//     dependencies is known: all of them are checked the same way, and any that is
+//     missing is copied too.
+//   - an external is certainly loaded, so a dependency of it that is only a manifest
+//     is filled in. A dependency that Next left out of a package it DID trace is left
+//     out: that was Next's judgement, and acting on it would copy ~190 MB of AWS SDK
+//     variants nothing loads.
+const workspaceRoot = resolve(appRoot, "../..");
+const HAS_CODE = /\.(?:[cm]?js|node|wasm)$/;
+
+/** Semver-compatible for a caret range: same major, and for 0.x the same minor. */
+function compatible(a, b) {
+  const [majorA, minorA] = a.split(".").map(Number);
+  const [majorB, minorB] = b.split(".").map(Number);
+  return majorA === majorB && (majorA !== 0 || minorA === minorB);
+}
+
+function versionOf(dir) {
+  try {
+    return JSON.parse(readFileSync(resolve(dir, "package.json"), "utf8")).version;
+  } catch {
+    return undefined;
+  }
+}
+
+/** True once a package directory holds anything Node could execute (not just its manifest). */
+function hasCode(dir) {
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return false;
+  }
+  return entries.some((entry) => {
+    if (entry.name === "node_modules") return false;
+    return entry.isDirectory() ? hasCode(resolve(dir, entry.name)) : HAS_CODE.test(entry.name);
+  });
+}
+
+/** Resolve `name` the way Node does: the nearest `node_modules/<name>` walking up from `fromDir`. */
+function resolveFrom(fromDir, name, stopAt) {
+  for (let current = fromDir; ; current = dirname(current)) {
+    if (basename(current) !== "node_modules") {
+      const candidate = resolve(current, "node_modules", name);
+      if (existsSync(resolve(candidate, "package.json"))) return candidate;
+    }
+    if (current === stopAt || dirname(current) === current) return undefined;
+  }
+}
+
+/**
+ * The workspace copy a traced package was installed as: the copy at the mirrored
+ * path of any traced copy of it that has the same version. The standalone tree
+ * mirrors the workspace layout, except that Next hoists one copy of an external to
+ * the root, so the root copy's own path may point at a different version.
+ */
+function workspaceCopyOf(packageName, version) {
+  for (const traced of findTracedPackages(standaloneRoot, packageName)) {
+    const candidate = resolve(workspaceRoot, relative(standaloneRoot, traced));
+    if (existsSync(candidate) && versionOf(candidate) === version) return realpathSync(candidate);
+  }
+  return undefined;
+}
+
+const repairVisited = new Set();
+let repairCopies = 0;
+
+/**
+ * @param needed  the package must be loadable (something that loads it, or an
+ *                external itself): a manifest-only copy is filled, not left.
+ * @param direct  `targetDir` is an external, so every direct dependency is needed.
+ */
+async function repairPackage(targetDir, sourceDir, needed, direct = false) {
+  if (repairVisited.has(targetDir)) return;
+  repairVisited.add(targetDir);
+
+  let copied = false;
+  if (!hasCode(targetDir)) {
+    if (!needed) return;
+    // Never carry the source's own nested node_modules: each dependency is placed
+    // below, against the version this package needs.
+    await cp(sourceDir, targetDir, {
+      recursive: true,
+      dereference: true,
+      filter: (path) => !relative(sourceDir, path).split(/[\\/]/).includes("node_modules"),
+    });
+    copied = true;
+    repairCopies++;
+    console.log(`pack-standalone: repair ${relative(standaloneRoot, targetDir)} from ${sourceDir}`);
+  }
+
+  const manifest = JSON.parse(readFileSync(resolve(sourceDir, "package.json"), "utf8"));
+  const dependencies = { ...manifest.dependencies, ...manifest.optionalDependencies };
+  for (const dependency of Object.keys(dependencies)) {
+    if (dependency.startsWith("@types/")) continue; // types only: nothing Node loads
+    const dependencySource = resolveFrom(sourceDir, dependency, dirname(workspaceRoot));
+    if (!dependencySource) continue; // optional and not installed on this platform
+    const source = realpathSync(dependencySource);
+    const wanted = versionOf(source);
+    const existing = resolveFrom(targetDir, dependency, standaloneRoot);
+    const have = existing && versionOf(existing);
+    if (have === wanted) {
+      await repairPackage(existing, source, copied || direct);
+    } else if (have && wanted && compatible(have, wanted) && hasCode(existing)) {
+      // Traced, loadable, and what the dependency's range allows: Next's copy stands.
+    } else if (existing || copied) {
+      // An incompatible version or an empty manifest, or missing under a package
+      // that was never traced: this package gets the copy it was installed with.
+      await repairPackage(resolve(targetDir, "node_modules", dependency), source, true);
+    }
+  }
+}
+
+for (const realName of new Set(hashedPackages.values())) {
+  const installed = resolve(nodeModules, realName);
+  const version = versionOf(installed);
+  const source = version ? workspaceCopyOf(realName, version) : undefined;
+  if (!source) {
+    console.warn(
+      `pack-standalone: no workspace copy of ${realName}@${version}; dependencies not checked`,
+    );
+    continue;
+  }
+  await repairPackage(installed, source, true, true);
+}
+if (repairCopies > 0) {
+  console.log(`pack-standalone: repaired ${repairCopies} dependency copy(ies) of the externals`);
 }
 
 console.log(`pack-standalone: assembled ${standaloneApp}`);
