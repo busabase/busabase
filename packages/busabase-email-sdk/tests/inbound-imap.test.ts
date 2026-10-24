@@ -32,6 +32,51 @@ describe("IMAP real socket round-trip", () => {
     expect(fixture.commands.filter((line) => line.includes("LOGOUT"))).toHaveLength(3);
   }, 15000);
 
+  it("downloads a batch in chunked UID FETCH commands, not one round trip per message", async () => {
+    // 33 UIDs listed by SEARCH: the three stored messages plus 30 expunged before FETCH.
+    const expunged = Array.from({ length: 30 }, (_, index) => index + 10);
+    const fixture = await mailboxFixture({ expunged });
+    cleanups.push(fixture.close);
+    const batch = await readImapReplies(fixture.config, {
+      watch: { messageIds: ["<sent@example.com>"] },
+    });
+    expect(batch.messages.map((entry) => entry.uid)).toEqual([2, 5, 9]);
+    expect(batch.messages[1]?.match?.matchedBy).toBe("thread");
+    // Expunged mail is acknowledged, so the cursor still moves past it.
+    expect(batch.cursor.uid).toBe(39);
+    expect(fixture.commands.filter((line) => line.includes("UID FETCH"))).toHaveLength(2);
+  }, 15000);
+
+  it("in matched mode downloads only mail its headers match, plus anything that looks like a bounce", async () => {
+    const bounce =
+      "From: postmaster@example.com\r\nTo: sales@example.com\r\nSubject: Undeliverable\r\nMessage-ID: <notice@example.com>\r\nContent-Type: text/plain\r\n\r\nYour message could not be delivered.";
+    const fixture = await mailboxFixture({ extra: [[12, bounce]] });
+    cleanups.push(fixture.close);
+    const batch = await readImapReplies(fixture.config, {
+      watch: { messageIds: ["<sent@example.com>"] },
+      download: "matched",
+    });
+    expect(batch.messages.map((entry) => entry.uid)).toEqual([2, 5, 9, 12]);
+    expect(batch.messages.map((entry) => entry.match?.matchedBy ?? null)).toEqual([
+      null,
+      "thread",
+      null,
+      null,
+    ]);
+    // Unmatched mail keeps its headers but not its body.
+    expect(batch.messages[0]?.email.subject).toBe("Other");
+    expect(batch.messages[0]?.email.text).toBe("");
+    expect(batch.messages[1]?.email.text).toContain("Yes please.");
+    // A bounce may name the original only in its body, so it is always downloaded.
+    expect(batch.messages[3]?.email.text).toContain("could not be delivered");
+    const fetches = fixture.commands.filter((line) => line.includes("UID FETCH"));
+    expect(fetches.filter((line) => line.includes("BODY.PEEK[HEADER]"))).toHaveLength(1);
+    expect(fetches.filter((line) => line.includes("BODY.PEEK[]"))).toEqual([
+      expect.stringMatching(/UID FETCH 5,12 /),
+    ]);
+    expect(batch.cursor.uid).toBe(12);
+  }, 15000);
+
   it("rejects stale UIDVALIDITY explicitly and disconnects on failure", async () => {
     const fixture = await mailboxFixture();
     cleanups.push(fixture.close);

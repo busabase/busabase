@@ -1,10 +1,16 @@
 import { createServer, type Socket } from "node:net";
 
-/** A real local IMAP protocol fixture. No external mailbox, credentials, or network required. */
-export const mailboxFixture = async () => {
+/**
+ * A real local IMAP protocol fixture. No external mailbox, credentials, or network required.
+ * `expunged` UIDs are listed by SEARCH but gone by FETCH, as after a concurrent expunge.
+ */
+export const mailboxFixture = async ({
+  expunged = [] as number[],
+  extra = [] as [number, string][],
+} = {}) => {
   const commands: string[] = [];
   const sockets = new Set<Socket>();
-  const messages = new Map([
+  const messages = new Map<number, string>([
     [
       2,
       "From: unrelated@example.net\r\nTo: sales@example.com\r\nSubject: Other\r\nMessage-ID: <other@example.net>\r\n\r\nUnrelated",
@@ -18,6 +24,7 @@ export const mailboxFixture = async () => {
       "From: buyer@example.net\r\nTo: sales@example.com\r\nSubject: Re: Hello\r\nMessage-ID: <nine@example.net>\r\n\r\nAnother reply.",
     ],
   ]);
+  for (const [uid, raw] of extra) messages.set(uid, raw);
   const server = createServer((socket) => {
     sockets.add(socket);
     socket.on("close", () => sockets.delete(socket));
@@ -40,16 +47,26 @@ export const mailboxFixture = async () => {
           );
         } else if (/^UID SEARCH/i.test(command)) {
           const start = Number(command.match(/UID (\d+):\*/i)?.[1] ?? 1);
-          socket.write(
-            `* SEARCH ${[...messages.keys()].filter((uid) => uid >= start).join(" ")}\r\n`,
-          );
+          const listed = [...messages.keys(), ...expunged].sort((a, b) => a - b);
+          socket.write(`* SEARCH ${listed.filter((uid) => uid >= start).join(" ")}\r\n`);
         } else if (/^UID FETCH/i.test(command)) {
-          const uid = Number(command.match(/^UID FETCH (\d+)/i)?.[1]);
-          const raw = messages.get(uid);
-          if (raw)
+          // A UID set such as "2,5:9" or "5:*".
+          const set = command.match(/^UID FETCH (\S+)/i)?.[1] ?? "";
+          const wanted = (uid: number) =>
+            set.split(",").some((part) => {
+              const [from, to = from] = part.split(":");
+              const low = Number(from);
+              const high = to === "*" ? Number.POSITIVE_INFINITY : Number(to);
+              return uid >= Math.min(low, high) && uid <= Math.max(low, high);
+            });
+          const headerOnly = /BODY\.PEEK\[HEADER\]/i.test(command);
+          for (const [uid, raw] of messages) {
+            if (!wanted(uid)) continue;
+            const data = headerOnly ? `${raw.split("\r\n\r\n")[0]}\r\n\r\n` : raw;
             socket.write(
-              `* ${[...messages.keys()].indexOf(uid) + 1} FETCH (UID ${uid} BODY[] {${Buffer.byteLength(raw)}}\r\n${raw})\r\n`,
+              `* ${[...messages.keys()].indexOf(uid) + 1} FETCH (UID ${uid} BODY[${headerOnly ? "HEADER" : ""}] {${Buffer.byteLength(data)}}\r\n${data})\r\n`,
             );
+          }
         } else if (/^LOGOUT/i.test(command)) {
           socket.write(`* BYE closing\r\n${tag} OK logout\r\n`);
           socket.end();

@@ -116,6 +116,8 @@ export const syncImapReplies = async (options: {
     cursor: previous?.cursor,
     limit: options.limit,
     since: options.since,
+    // Unmatched mail is only acknowledged, never recorded, so its body is not needed.
+    download: "matched",
   });
   const scope = JSON.stringify([
     options.accountKey,

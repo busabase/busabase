@@ -204,7 +204,9 @@ export const createBusabaseEmailStore = (options: BusabaseEmailStoreOptions) => 
           date: context.date ?? email.date ?? new Date().toISOString(),
           messageId: email.messageId,
           summary: email.text || email.html || "",
-          contact: email.from.join(", "),
+          contact: (email.bounce?.recipients.length ? email.bounce.recipients : email.from).join(
+            ", ",
+          ),
           from: email.from.join(", "),
           to: email.to.join(", "),
         },

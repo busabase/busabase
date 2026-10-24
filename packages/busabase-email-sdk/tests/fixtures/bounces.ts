@@ -1,0 +1,98 @@
+/**
+ * Delivery-failure notices modelled on real ones received by a Tencent Exmail mailbox in
+ * October 2026. Structure, header names and part types follow the originals; every address,
+ * identifier, host and line of text is replaced.
+ */
+
+/** Tencent Exmail: no RFC 3464 report and no thread headers, only HTML plus the original as mail.eml. */
+export const exmailBounce = [
+  "X-QQ-mid: fixturemid0001",
+  "Message-Id: <fixture-notice-0001@example.com>",
+  "From: postmaster@example.com",
+  "To: sales@example.com",
+  "Date: Tue, 13 Oct 2026 15:00:21 +0800",
+  "Subject: =?utf-8?B?5p2l6IeqZXhhbXBsZS5jb23nmoTpgIDkv6E=?=",
+  "Content-type: multipart/report; report-type=delivery-status; boundary=QQ_MAIL_RETURN",
+  "Auto-Submitted: auto-generated",
+  "X-QQ-MAIL-TYPE: 1",
+  "",
+  "--QQ_MAIL_RETURN",
+  "Content-Type: text/html; charset=utf-8",
+  "",
+  "<html><body><div>很抱歉您发送的邮件被退回，以下是该邮件的相关信息：</div>",
+  "<div>主 题：Re: Following up</div><div>时 间：2026-10-13 14:59:51</div>",
+  "<div>无法发送到 <b>Buyer@Example.net</b></div>",
+  "<div>退信原因 host mx.example.net said: 550 5.1.1 mailbox unavailable</div></body></html>",
+  "--QQ_MAIL_RETURN",
+  "Content-Type: message/rfc822",
+  'Content-Disposition: attachment; filename="mail.eml"',
+  "",
+  "X-QQ-mid: fixturemid0000",
+  "From: Sales <sales@example.com>",
+  "To: Buyer@Example.net",
+  "In-Reply-To: <earlier-thread@example.net>",
+  "References: <earlier-thread@example.net>",
+  "Subject: Re: Following up",
+  "Message-ID: <AB12CD34EF56AB78+outgoing-0001@example.com>",
+  "Date: Tue, 13 Oct 2026 14:59:51 +0800",
+  "MIME-Version: 1.0",
+  "Content-Type: text/plain; charset=utf-8",
+  "",
+  "Hi, following up in case this got buried.",
+  "",
+  "--QQ_MAIL_RETURN--",
+  "",
+].join("\r\n");
+
+/** Gmail: RFC 3464 report, X-Failed-Recipients and thread headers naming the rewritten original ID. */
+export const gmailBounce = [
+  "Return-Path: <>",
+  "From: Mail Delivery Subsystem <mailer-daemon@googlemail.com>",
+  "To: sales@example.com",
+  "X-Failed-Recipients: missing@example.org",
+  "Subject: Delivery Status Notification (Failure)",
+  "Message-ID: <fixture-notice-0002@mx.google.com>",
+  "Date: Tue, 13 Oct 2026 00:01:15 -0700",
+  "In-Reply-To: <AB12CD34EF56AB78+outgoing-0002@example.com>",
+  "References: <AB12CD34EF56AB78+outgoing-0002@example.com>",
+  "MIME-Version: 1.0",
+  'Content-Type: multipart/report; boundary="report"; report-type=delivery-status',
+  "",
+  "--report",
+  "Content-Type: text/plain; charset=UTF-8",
+  "",
+  "** Address not found **",
+  "",
+  "Your message wasn't delivered to missing@example.org because the address couldn't be found.",
+  "",
+  "--report",
+  "Content-Type: message/delivery-status",
+  "",
+  "Reporting-MTA: dns; googlemail.com",
+  "Received-From-MTA: dns; sales@example.com",
+  "Arrival-Date: Tue, 13 Oct 2026 00:01:14 -0700 (PDT)",
+  "X-Original-Message-ID: <AB12CD34EF56AB78+outgoing-0002@example.com>",
+  "",
+  "Final-Recipient: rfc822; missing@example.org",
+  "Action: failed",
+  "Status: 5.1.1",
+  "Diagnostic-Code: smtp; The email account that you tried to reach does not exist.",
+  "",
+  "--report",
+  "Content-Type: text/rfc822-headers",
+  "",
+  "From: Sales <sales@example.com>",
+  "To: missing@example.org",
+  "Subject: Following up",
+  "Message-ID: <AB12CD34EF56AB78+outgoing-0002@example.com>",
+  "Date: Tue, 13 Oct 2026 15:00:00 +0800",
+  "",
+  "--report--",
+  "",
+].join("\r\n");
+
+/** RFC 3464 warning: delivery is still being retried, so the address has not failed. */
+export const delayNotice = gmailBounce
+  .replace("Delivery Status Notification (Failure)", "Delivery Status Notification (Delay)")
+  .replace("X-Failed-Recipients: missing@example.org\r\n", "")
+  .replace("Action: failed\r\nStatus: 5.1.1", "Action: delayed\r\nStatus: 4.4.1");
