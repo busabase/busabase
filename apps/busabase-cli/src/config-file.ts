@@ -1,11 +1,14 @@
 import {
-  chmodSync,
+  closeSync,
   existsSync,
+  fchmodSync,
   mkdirSync,
+  openSync,
   readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
+  writeSync,
 } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
@@ -98,18 +101,34 @@ export function readEnvFileAt(path: string): Record<string, string> {
   }
 }
 
-/** Write a `KEY=value` file `0600` (owner-only), creating parent directories. */
+/**
+ * Write a `KEY=value` file `0600` (owner-only), creating parent directories `0700`.
+ *
+ * The file is born `0600` (`open(2)` with a mode), and an existing looser file is
+ * tightened with `fchmod` BEFORE the new secret is written. A `chmod` after the
+ * write would leave a window — with `umask 022` the file exists as `0644` holding the
+ * key — in which another local user could open it, and a descriptor opened in that
+ * window keeps working after the chmod. Writing through the descriptor (rather than
+ * temp-file + rename) keeps a symlinked or hard-linked `.env` pointing where it did.
+ */
 function writeEnvFileAt(path: string, data: Record<string, string>): void {
-  mkdirSync(join(path, ".."), { recursive: true });
+  mkdirSync(join(path, ".."), { recursive: true, mode: 0o700 });
   const body = Object.entries(data)
     .map(([key, value]) => `${key}=${value}`)
     .join("\n");
-  writeFileSync(path, body ? `${body}\n` : "", "utf8");
-  // Credentials — keep the file owner-only (best effort; no-op semantics on Windows).
+  const fd = openSync(path, "w", 0o600);
   try {
-    chmodSync(path, 0o600);
-  } catch {
-    // ignore (e.g. Windows / restricted FS)
+    // Only a filesystem without POSIX modes (Windows, some network mounts) may refuse.
+    try {
+      fchmodSync(fd, 0o600);
+    } catch (error) {
+      if (process.platform !== "win32" && (error as NodeJS.ErrnoException).code !== "ENOSYS") {
+        throw error;
+      }
+    }
+    if (body) writeSync(fd, `${body}\n`);
+  } finally {
+    closeSync(fd);
   }
 }
 
