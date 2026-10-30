@@ -8,7 +8,16 @@ WORKDIR /app
 FROM base AS deps
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
 COPY patches patches
-RUN pnpm fetch
+# The hoisted linker can leave a partial tree after a transient EEXIST error.
+# Retry from a clean tree while retaining pnpm's content-addressed store.
+RUN set -eu; \
+    for attempt in 1 2 3; do \
+      if pnpm fetch; then break; else fetch_status=$?; fi; \
+      if [ "$attempt" -eq 3 ]; then exit "$fetch_status"; fi; \
+      echo "pnpm fetch failed (attempt ${attempt}/3), cleaning the partial dependency tree before retry..."; \
+      rm -rf node_modules; \
+      sleep 5; \
+    done
 
 COPY apps/busabase/package.json apps/busabase/
 COPY packages/busabase-contract/package.json packages/busabase-contract/

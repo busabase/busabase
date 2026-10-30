@@ -182,6 +182,48 @@ test("landing directly on a deep url expands the sidebar down to it", async ({ p
 });
 
 /**
+ * Same cold-load deadlock, for a Base. Bases own a whole family of routes
+ * (`/base/{slug}`, `/base/{slug}/{viewId}`, `/base/{slug}/{recordId}/edit`, ...)
+ * that the generic `/{type}/{slug}` parser deliberately refuses, and the
+ * sidebar used that parser to decide which node to locate — so for a Base it
+ * never asked for ancestors at all, and a Base past the prefetch depth stayed
+ * buried under collapsed folders. Lands on a VIEW url, the shape a shared
+ * Base link actually has.
+ */
+test("landing directly on a deep Base view url expands the sidebar down to it", async ({
+  page,
+  request,
+}) => {
+  const suffix = uniqueSuffix();
+  const chain: CreatedNode[] = [];
+  let parentNodeId: string | undefined;
+  for (const level of [1, 2, 3, 4]) {
+    const node = await createNode(request, {
+      nodeType: "folder",
+      name: `Base Deep L${level} ${suffix}`,
+      slug: `base-deep-l${level}-${suffix}`,
+      parentNodeId,
+    });
+    chain.push(node);
+    parentNodeId = node.id;
+  }
+  const base = await createNode(request, {
+    nodeType: "base",
+    name: `Base Deep Table ${suffix}`,
+    slug: `base-deep-table-${suffix}`,
+    parentNodeId,
+  });
+
+  await page.goto(`/dashboard/local/base/${base.slug}/grid-view`);
+
+  const baseRow = workspaceRow(page, base.name);
+  await expect(baseRow).toBeVisible({ timeout: RENDER_TIMEOUT });
+  for (const ancestor of chain) {
+    await expect(workspaceRow(page, ancestor.name)).toBeVisible();
+  }
+});
+
+/**
  * Regression cover for the sidebar chevron on the folder you are currently
  * inside — a DIFFERENT bug from the two above, though it lives in the same
  * "the sidebar can't tell what to do with the active route" family.

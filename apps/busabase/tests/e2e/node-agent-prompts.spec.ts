@@ -66,6 +66,7 @@ test("sidebar menus prioritize Agent prompts without displacing Open", async ({ 
     (await folderMenu.getByRole("menuitem").allTextContents()).map((text) => text.trim()),
   ).toEqual([
     "Open",
+    "Copy for Agent",
     "Agent prompts",
     "Settings",
     "Rename",
@@ -95,6 +96,7 @@ test("sidebar menus prioritize Agent prompts without displacing Open", async ({ 
   expect(
     (await documentMenu.getByRole("menuitem").allTextContents()).map((text) => text.trim()),
   ).toEqual([
+    "Copy for Agent",
     "Agent prompts",
     "Settings",
     "Rename",
@@ -166,7 +168,10 @@ test("record detail exposes the Agent dropdown without losing the prompts handof
   await primary.click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByRole("button", { name: "Ask Agent", exact: true })).toBeVisible();
+  // No agent is connected in this fixture, so the primary action asks to connect one first.
+  await expect(
+    dialog.getByRole("button", { name: "Connect an agent first", exact: true }),
+  ).toBeVisible();
   const dialogScreenshot = testInfo.outputPath("02-record-prompts-handoff.png");
   await page.screenshot({ path: dialogScreenshot });
   await testInfo.attach("record prompts handoff", {
@@ -333,7 +338,8 @@ test("roomy prompt dialog keeps Ask Agent and Copy inside the detail footer", as
   await dialog.getByRole("button", { name: "Long review", exact: true }).click();
   const preview = dialog.getByTestId("agent-prompts-preview");
   const copy = dialog.getByRole("button", { name: "Copy", exact: true });
-  const askAgent = dialog.getByRole("button", { name: "Ask Agent", exact: true });
+  // No agent is connected here, so this slot reads "Connect an agent first".
+  const askAgent = dialog.getByRole("button", { name: "Connect an agent first", exact: true });
   await expect(dialog.getByText(/^Copying or sending also appends/)).toHaveCount(0);
   const capture = async (name: string) => {
     const path = testInfo.outputPath(`${name}.png`);

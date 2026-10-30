@@ -13,14 +13,23 @@ import { getBusabaseAppLL, getBusabaseLocaleFromAcceptLanguage } from "~/lib/i18
 import { getLocalUserName } from "~/lib/local-user";
 import { resolveRelayPermissionContext } from "~/lib/relay-permission";
 
+// `nodes.purge` (the Trash page's "Delete forever") is UI-only: its route is
+// commented out in the contract, so it is undocumented — but a route-less
+// procedure is still SERVED at the path oRPC infers (`/api/v1/nodes/purge`).
+// Dropping it here makes that path 404; the dashboard calls it over `/api/rpc`.
+const withoutNodePurge = <R extends { nodes: { purge: unknown } }>(router: R) => {
+  const { purge: _rpcOnlyNodePurge, ...nodes } = router.nodes;
+  return { ...router, nodes };
+};
+
 // Shared with busabase-cloud on purpose: both servers mount the same contract,
 // so an SDK or agent talking to either has to see the same error shape and the
 // same query-string coercion. This file's own copy used to return a self-shaped
 // `{ error, … }` body verbatim, which dropped `code` — see
 // `busabase-core/src/openapi/error-envelope.ts` and `.../openapi/handler.ts`.
-const openApiHandler = createBusabaseOpenApiHandler(busabaseRouter);
+const openApiHandler = createBusabaseOpenApiHandler(withoutNodePurge(busabaseRouter));
 
-const demoOpenApiHandler = createBusabaseOpenApiHandler(busabaseDemoRouter);
+const demoOpenApiHandler = createBusabaseOpenApiHandler(withoutNodePurge(busabaseDemoRouter));
 
 async function handle(request: Request) {
   const url = new URL(request.url);

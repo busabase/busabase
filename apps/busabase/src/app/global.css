@@ -13,6 +13,7 @@
 @source "../../content";
 @source "../../../../packages/kui";
 @source "../../../../packages/busabase-core";
+@source "../../../../packages/@acp-ui/web/src";
 @source "../../../../packages/openlib";
 
 /* ── Typography ──────────────────────────────────────────────────────────────

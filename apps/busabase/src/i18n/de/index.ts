@@ -13,7 +13,7 @@ const de = {
   seo: {
     title: "Busabase",
     description:
-      "Busabase ist der Arbeitsbereich, auf dem Ihre KI-Agents aufbauen: eine quelloffene, lokal-first arbeitende Datenbank, Wissensdatenbank, App-Bibliothek und Skill-Registry.",
+      "Busabase ist eine Open-Source-Datenbank und ein Arbeitsbereich für KI-Agents: Daten, Dokumente, Skills und Apps an einem Ort, lokal-first auf Ihrem eigenen Rechner.",
   },
   shell: {
     graphView: "Graphenansicht",

@@ -1,5 +1,8 @@
 "use client";
 
+import { createBusabaseQueryUtils } from "busabase-contract/api-client/react-query";
+import { SpaceInstructionsSettings } from "busabase-core/domains/space-instructions/components/space-instructions-settings";
+import { useCoreI18n } from "busabase-core/i18n";
 import {
   Dialog,
   DialogClose,
@@ -9,8 +12,18 @@ import {
   DialogTitle,
 } from "kui/dialog";
 import type { LucideIcon } from "lucide-react";
-import { Check, Cloud, FileSearch, Languages, Palette, Vault, Webhook, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import {
+  Check,
+  Cloud,
+  FileSearch,
+  Languages,
+  Palette,
+  ScrollText,
+  Vault,
+  Webhook,
+  X,
+} from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import type { AppBrandingSettingsLabels } from "~/domains/settings/components/app-branding-settings-tab";
 import { AppBrandingSettingsTab } from "~/domains/settings/components/app-branding-settings-tab";
 import type { CloudConnectSettingsLabels } from "~/domains/settings/components/cloud-connect-settings-tab";
@@ -31,7 +44,14 @@ interface LanguageOption {
   nativeName: string;
 }
 
-type SettingsTab = "language" | "branding" | "filePreview" | "vault" | "webhook" | "cloudConnect";
+type SettingsTab =
+  | "language"
+  | "spaceInstructions"
+  | "branding"
+  | "filePreview"
+  | "vault"
+  | "webhook"
+  | "cloudConnect";
 
 interface Props {
   labels: SettingsDialogLabels;
@@ -99,6 +119,8 @@ export function SettingsDialog({
   onLocaleChange,
   initialTab,
 }: Props) {
+  const coreMessages = useCoreI18n();
+  const instructionsOrpc = useMemo(() => createBusabaseQueryUtils("/api/rpc"), []);
   const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab ?? "language");
 
   // Jump to the requested tab whenever the dialog is (re-)opened with one —
@@ -110,6 +132,11 @@ export function SettingsDialog({
 
   const tabs: { id: SettingsTab; icon: LucideIcon; label: string }[] = [
     { id: "language", icon: Languages, label: labels.languageTab() },
+    {
+      id: "spaceInstructions",
+      icon: ScrollText,
+      label: coreMessages.spaceInstructions.navLabel,
+    },
     { id: "branding", icon: Palette, label: labels.brandingTab() },
     { id: "filePreview", icon: FileSearch, label: labels.filePreviewTab() },
     { id: "vault", icon: Vault, label: labels.vaultTab() },
@@ -150,6 +177,9 @@ export function SettingsDialog({
                 languagePref={languagePref}
                 onLocaleChange={onLocaleChange}
               />
+            ) : null}
+            {activeTab === "spaceInstructions" ? (
+              <SpaceInstructionsSettings canManage orpc={instructionsOrpc} spaceId="local" />
             ) : null}
             {activeTab === "branding" ? (
               <AppBrandingSettingsTab

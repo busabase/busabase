@@ -13,7 +13,7 @@ const en = {
   seo: {
     title: "Busabase",
     description:
-      "Busabase is the workspace your AI agents build on: an open-source, local-first database, knowledge base, apps library, and skills registry.",
+      "Busabase is the open-source database and workspace for AI agents: data, docs, skills, and apps in one place, local-first on your own machine.",
   },
   shell: {
     graphView: "Graph View",

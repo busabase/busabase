@@ -82,7 +82,7 @@ describe("Desktop RPC embed capability", () => {
 
     expect(response.status).toBe(200);
     expect(mocks.resolveEmbedRequestContext).toHaveBeenCalledWith(publicId, secret);
-    // The route preserves the capability scope and adds only host-owned preview
+    // The route preserves the capability scope and adds host-owned origin/preview
     // configuration. `visitorKind`, `isSpaceManager` and the read ceiling are
     // pinned by `runWithEmbedContext` itself, so no transport can weaken them.
     expect(mocks.runWithEmbedContext).toHaveBeenCalledWith(
@@ -91,6 +91,7 @@ describe("Desktop RPC embed capability", () => {
         spaceId: "local",
         restrictedVisibility: false,
         embedTargetNodeId: "nod_1",
+        embedOrigin: "http://localhost:15419",
         filePreview: expect.objectContaining({
           provider: expect.any(String),
           credentialSource: "none",

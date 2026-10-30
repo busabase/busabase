@@ -13,7 +13,7 @@ const zhCN = {
   seo: {
     title: "Busabase 布沙知识仓 - AI Agent 的本地数据中台与应用中台",
     description:
-      "Busabase（布沙知识仓）是开源、本地优先的 AI Agent 工作区：数据库、知识库、应用库、技能库合在一处。每次改动都带说明、差异和完整历史，把 Agent 的产出沉淀成真正用得上的数据、文档、技能和应用。",
+      "Busabase（布沙知识仓）是面向 AI Agent 的开源数据库与工作区，本地优先：数据、文档、技能和应用合在一处，每次改动都带说明、差异和完整历史。",
   },
   shell: {
     graphView: "图谱视图",

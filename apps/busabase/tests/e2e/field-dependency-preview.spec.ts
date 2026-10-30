@@ -106,7 +106,10 @@ test("reviewer sees structured dependencies before deleting a field and can insp
   await dialog.screenshot({ path: test.info().outputPath("01-field-dependencies.png") });
 
   await dialog.getByRole("link", { name: "Budget review" }).first().click();
-  await expect(page).toHaveURL(new RegExp(`/base/${taskSlug}/${reviewSlug}$`));
+  // The link carries the view it was opened from.
+  await expect(page).toHaveURL(
+    new RegExp(`/base/${taskSlug}/${reviewSlug}(\\?originViewId=viw\\w+)?$`),
+  );
   await expect(page.getByText("Budget review", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Approved change requests appear here after merge.")).toBeVisible();
   await page.screenshot({

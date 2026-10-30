@@ -1,4 +1,4 @@
-import { expect, test } from "./_fixtures";
+import { chooseOption, expect, test } from "./_fixtures";
 
 // The seeded "Field Type Lab" base (slug: field-type-lab) carries one column per
 // Busabase field type. These specs drive the new-record form through the real
@@ -118,7 +118,7 @@ test("creates a Field Type Lab record filling every editable input kind", async 
   // checkbox (the lab has exactly one)
   await page.locator("#record-field-bsf_lab_checkbox").check();
   // single select — choose by its visible option label
-  await page.getByLabel("Select", { exact: true }).selectOption({ label: "In review" });
+  await chooseOption(page, "Select", "In review");
   // url / email / tel
   await page.getByLabel("URL", { exact: true }).fill("https://example.com");
   await page.getByLabel("Email", { exact: true }).fill("qa@example.com");

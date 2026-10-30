@@ -178,8 +178,10 @@ test.describe
       const connectionCard = page
         .getByTestId("agent-connection-card")
         .filter({ hasText: "Demo Agent (scripted)" });
-      await expect(connectionCard).toContainText(/\d+ sessions?/);
-      await expect(connectionCard).toContainText("idle");
+      await expect(connectionCard).toHaveAttribute("data-connection-state", "local");
+      await expect(connectionCard.getByText("Local agent", { exact: true })).toBeVisible();
+      await expect(connectionCard).not.toContainText(/\d+ sessions?/);
+      await expect(connectionCard.getByText("idle", { exact: true })).toHaveCount(0);
       await capture(page, testInfo, "03-desktop-connected-agent-list");
 
       const detailButton = connectionCard.locator("button").first();
@@ -228,7 +230,9 @@ test.describe
       const connectionCard = page.locator(
         '[data-testid="agent-connection-card"][data-agent-slug="busabase-demo-agent"]',
       );
-      await expect(connectionCard).toContainText(/\d+ 个会话/);
+      await expect(connectionCard).toHaveAttribute("data-connection-state", "local");
+      await expect(connectionCard.getByText("本地 Agent", { exact: true })).toBeVisible();
+      await expect(connectionCard).not.toContainText(/\d+ 个会话/);
       const actions = connectionCard.getByRole("button", { name: /的操作$/ });
       const actionBounds = await actions.boundingBox();
       expect(actionBounds?.width).toBeGreaterThanOrEqual(44);

@@ -1,4 +1,9 @@
-import type { BaseVO, ChangeRequestVO, ViewVO } from "busabase-contract/types";
+import {
+  type BaseVO,
+  type ChangeRequestVO,
+  getVisibleViewFieldSlugs,
+  type ViewVO,
+} from "busabase-contract/types";
 import { expect, json, mergeOne, reviewOne, test } from "./_fixtures";
 
 test("saved view column drag and resize persist through change requests", async ({
@@ -18,6 +23,7 @@ test("saved view column drag and resize persist through change requests", async 
         operation: "create",
         baseId: blog.id,
         config: {
+          autoShowNewFields: false,
           filters: [],
           sorts: [],
           visibleFieldSlugs: [initialSlugs[1], initialSlugs[2], initialSlugs[0]],
@@ -116,11 +122,16 @@ test("saved view column drag and resize persist through change requests", async 
       const views = await json<ViewVO[]>(await request.get(`/api/v1/bases/${blog.id}/views`));
       const view = views.find((item) => item.id === merged.view?.id);
       return {
-        order: view?.config.visibleFieldSlugs,
+        order: view?.config.fieldOrderSlugs,
+        visible: view ? getVisibleViewFieldSlugs(view.config, blog.fields) : undefined,
         width: view?.config.fieldWidths?.[resizedSlug] ?? 0,
       };
     })
-    .toEqual({ order: reorderedSlugs, width: Math.round(before.width + 64) });
+    .toEqual({
+      order: [...reorderedSlugs, ...blog.fields.slice(3).map((field) => field.slug)],
+      visible: reorderedSlugs,
+      width: Math.round(before.width + 64),
+    });
 
   await page.reload();
   await expect.poll(fieldSlugs).toEqual(reorderedSlugs);

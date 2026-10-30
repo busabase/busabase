@@ -1,4 +1,9 @@
-import type { BaseVO, ChangeRequestVO, ViewVO } from "busabase-contract/types";
+import {
+  type BaseVO,
+  type ChangeRequestVO,
+  getVisibleViewFieldSlugs,
+  type ViewVO,
+} from "busabase-contract/types";
 import { dragSortableTo, expect, json, mergeOne, reviewOne, test } from "./_fixtures";
 
 test("staged view controls recover a hidden conditioned field with one update CR", async ({
@@ -19,6 +24,7 @@ test("staged view controls recover a hidden conditioned field with one update CR
         operation: "create",
         baseId: blog.id,
         config: {
+          autoShowNewFields: false,
           cardSize: "large",
           fieldWidths: { [visibleFields[0].slug]: 220 },
           filters: [
@@ -165,7 +171,7 @@ test("staged view controls recover a hidden conditioned field with one update CR
         fieldWidths: view?.config.fieldWidths,
         filters: view?.config.filters,
         sorts: view?.config.sorts,
-        visible: view?.config.visibleFieldSlugs,
+        visible: view ? getVisibleViewFieldSlugs(view.config, blog.fields) : undefined,
       };
     })
     .toEqual({
@@ -223,6 +229,7 @@ test("edit view reuses the shared fields editor and preserves unrelated config",
         operation: "create",
         baseId: blog.id,
         config: {
+          autoShowNewFields: false,
           cardSize: "large",
           fieldWidths: { [visibleFields[0].slug]: 240 },
           filters: [
@@ -305,7 +312,7 @@ test("edit view reuses the shared fields editor and preserves unrelated config",
         fieldWidths: view?.config.fieldWidths,
         filters: view?.config.filters,
         sorts: view?.config.sorts,
-        visible: view?.config.visibleFieldSlugs,
+        visible: view ? getVisibleViewFieldSlugs(view.config, blog.fields) : undefined,
       };
     })
     .toEqual({

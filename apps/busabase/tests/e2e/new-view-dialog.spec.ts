@@ -1,5 +1,36 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import type { BaseVO, RecordVO, ViewVO } from "busabase-contract/types";
-import { dragSortableTo, expect, json, test } from "./_fixtures";
+import { type APIRequestContext, dragSortableTo, expect, json, test } from "./_fixtures";
+
+// The server rejects an attachment reference it never stored, so the cover is uploaded for real.
+const uploadCover = async (request: APIRequestContext) => {
+  const fileName = "blog-cms-base.png";
+  const bytes = await readFile(
+    path.resolve(process.cwd(), "public/assets/readme/scenarios", fileName),
+  );
+  const requested = await json<{ storageKey: string; uploadUrl: string }>(
+    await request.post("/api/v1/assets/upload-urls", {
+      data: { fileName, mimeType: "image/png", sizeBytes: bytes.byteLength },
+    }),
+  );
+  const uploaded = await request.put(requested.uploadUrl, {
+    data: bytes,
+    headers: { "content-type": "image/png" },
+  });
+  expect(uploaded.ok(), `Cover upload failed: ${uploaded.status()}`).toBe(true);
+  const confirmed = await json<{ attachmentId: string }>(
+    await request.post("/api/v1/assets/confirmations", {
+      data: {
+        fileName,
+        mimeType: "image/png",
+        sizeBytes: bytes.byteLength,
+        storageKey: requested.storageKey,
+      },
+    }),
+  );
+  return { fileName, size: bytes.byteLength, attachmentId: confirmed.attachmentId };
+};
 
 test("new view opens in a modal without navigating away from the base", async ({ page }) => {
   await page.goto("/dashboard/local/base/blog?demo=blog");
@@ -24,6 +55,10 @@ test("new view opens in a modal without navigating away from the base", async ({
   );
   const firstDraggableSlug = await draggableRows.first().getAttribute("data-view-field-slug");
   const secondDraggableSlug = await draggableRows.nth(1).getAttribute("data-view-field-slug");
+  // The dialog scrolls as a whole and dnd-kit autoscrolls it when the pointer nears the bottom
+  // edge. On a short viewport the first rows sit just above that edge, below the "automatically
+  // show new fields" option, so bring them to the middle before dragging.
+  await draggableRows.first().evaluate((row) => row.scrollIntoView({ block: "center" }));
   await dragSortableTo(
     page,
     draggableRows.first().getByRole("button", { name: /Drag to reorder/ }),
@@ -75,6 +110,7 @@ test("new Gallery view keeps its selected type and Auto cover after immediate cr
       },
     }),
   );
+  const cover = await uploadCover(request);
   await json<RecordVO>(
     await request.post(`/api/v1/bases/${base.id}/change-requests`, {
       data: {
@@ -82,10 +118,10 @@ test("new Gallery view keeps its selected type and Auto cover after immediate cr
         fields: {
           cover: [
             {
-              attachmentId: `att-gallery-cover-${suffix}`,
-              fileName: "blog-cms-base.png",
+              attachmentId: cover.attachmentId,
+              fileName: cover.fileName,
               mimeType: "image/png",
-              size: 1,
+              size: cover.size,
               url: "/assets/readme/scenarios/blog-cms-base.png",
             },
           ],

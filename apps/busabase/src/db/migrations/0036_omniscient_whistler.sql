@@ -1,0 +1,1 @@
+ALTER TABLE "busabase_storage_cleanup_jobs" ADD COLUMN "final_sweep_at" timestamp;

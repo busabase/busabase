@@ -92,9 +92,10 @@ test("field header actions require a saved view and support keyboard quick sorti
 
   const coverHeader = page.locator('[role="columnheader"][data-field-slug="cover_image"]');
   await coverHeader.getByRole("button", { name: "Actions for Cover Image" }).click();
+  // The link carries the view it was opened from, so a field added there is shown in that view.
   await expect(page.getByRole("link", { name: "Edit field" })).toHaveAttribute(
     "href",
-    "/dashboard/local/base/blog/design",
+    /^\/dashboard\/local\/base\/blog\/design\?originViewId=viw\w+$/,
   );
   await page.getByRole("button", { name: "Hide field" }).click();
   await expect(coverHeader).toHaveCount(0);

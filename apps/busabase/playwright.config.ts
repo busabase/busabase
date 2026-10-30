@@ -14,7 +14,18 @@ export default defineConfig({
   // This must stay an array. It was the single string "agent-chat.spec.ts",
   // which does not match "agent-chat-live.spec.ts" — so the live spec also ran
   // in this credential-free sweep, where it can only fail, twice, at 60s each.
-  testIgnore: ["agent-chat.spec.ts", "agent-chat-live.spec.ts"],
+  // tests/playwright-suite-ownership.test.ts keeps this list complete.
+  testIgnore: [
+    "agent-prompt-context.spec.ts",
+    "agent-chat.spec.ts",
+    "agent-context.spec.ts",
+    "agent-chat-live.spec.ts",
+    "agent-context-live.spec.ts",
+    "agent-pdf-live.spec.ts",
+    "agent-fidelity-live.spec.ts",
+    "agent-fidelity.spec.ts",
+    "agent-source-fidelity.spec.ts",
+  ],
   // The dashboard is a client SPA that streams its RSC response, so each full-page
   // navigation reloads the bundle and refetches over RPC before content mounts.
   // Give web-first assertions and whole tests room for that (paired with the
