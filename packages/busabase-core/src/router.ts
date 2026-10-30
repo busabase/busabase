@@ -8,6 +8,7 @@ import {
 } from "@orpc/server";
 import { busabaseContract } from "busabase-contract/contract/busabase";
 import type { SharedNodeVO } from "busabase-contract/contract/schemas";
+import { runWithAttachmentObjectLifecycle } from "open-domains/attachments/logic";
 import {
   getContextEmbedRecordScope,
   getContextSpaceId,
@@ -19,6 +20,7 @@ import {
 import { getDb } from "./db";
 import { agentsRouter } from "./domains/agents/router";
 import { airappRouter } from "./domains/airapp/router";
+import { busabaseAttachmentObjectLifecycle } from "./domains/assets/logic/attachment-object-lifecycle";
 import { assetsRouter } from "./domains/assets/router";
 import {
   confirmNodeIconUpload,
@@ -37,6 +39,7 @@ import { guidesRouter } from "./domains/guides/router";
 import { installRouter } from "./domains/install/router";
 import { getPlaybook, listPlaybooks, searchPlaybooks } from "./domains/playbooks/logic/playbooks";
 import { updateNodeContent } from "./domains/rich-node/handlers";
+import { spaceInstructionsRouter } from "./domains/space-instructions/router";
 import { templatesRouter } from "./domains/templates/router";
 import { vaultRouter } from "./domains/vault/router";
 import { webhookRouter } from "./domains/webhook/router";
@@ -71,6 +74,7 @@ import {
 import { getNodeSubscription, setNodeSubscription } from "./logic/node-subscriptions";
 import { recordSearchInteraction } from "./logic/search-metrics";
 import {
+  canApproveChangeRequest,
   closeChangeRequest,
   countChangeRequests,
   countReviewChangeRequests,
@@ -359,6 +363,7 @@ const busabaseRouterImpl: EnhancedRouter<
   forms: formRouter,
   assets: assetsRouter,
   guides: guidesRouter,
+  spaceInstructions: spaceInstructionsRouter,
   vault: vaultRouter,
   agents: agentsRouter,
   webhooks: webhookRouter,
@@ -387,7 +392,10 @@ const busabaseRouterImpl: EnhancedRouter<
           message: `Change request not found: ${input.changeRequestId}`,
         });
       }
-      return changeRequest;
+      // Same gate review/merge/close enforce, so the client can hide controls
+      // the server would refuse instead of failing on click.
+      const viewerCanApprove = await canApproveChangeRequest(changeRequest.id);
+      return { ...changeRequest, viewerCanApprove };
     }),
     review: busabase.changeRequests.review.handler(async ({ input }) => {
       const { changeRequestIds, ...rest } = input;
@@ -478,6 +486,10 @@ const publicSurfaceGuard = os.middleware(async ({ next, path }, input) => {
   return next();
 });
 
+const attachmentLifecycle = os.middleware(({ next }) =>
+  runWithAttachmentObjectLifecycle(busabaseAttachmentObjectLifecycle, async () => next()),
+);
+
 /**
  * The Busabase RPC surface, with the anonymous default-deny gate applied to
  * every procedure (including the composed per-domain sub-routers).
@@ -494,6 +506,6 @@ export const busabaseRouter: EnhancedRouter<
   Record<never, never>
 > = enhanceRouter(busabaseRouterImpl, {
   errorMap: {},
-  middlewares: [publicSurfaceGuard],
+  middlewares: [publicSurfaceGuard, attachmentLifecycle],
   dedupeLeadingMiddlewares: false,
 });

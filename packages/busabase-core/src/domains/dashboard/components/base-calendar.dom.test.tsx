@@ -6,6 +6,7 @@ import type { BaseFieldVO, BaseVO, RecordVO, ViewVO } from "busabase-contract/ty
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CoreI18nProvider } from "../../../i18n";
+import { SubmitPermissionProvider } from "./split-submit-button";
 
 const query = vi.hoisted(() => ({ records: [] as RecordVO[] }));
 const drag = vi.hoisted(() => ({
@@ -147,6 +148,7 @@ const record = (field: BaseFieldVO): RecordVO => ({
 function renderCalendar(
   field: BaseFieldVO,
   onPatchRecord = vi.fn().mockResolvedValue({ materialized: true }),
+  onOpenRecord?: (record: RecordVO) => void,
 ) {
   query.records = [record(field)];
   const element = () => (
@@ -156,6 +158,7 @@ function renderCalendar(
         base={base(field)}
         client={{} as BusabaseDashboardApiClient}
         fields={[titleField, field]}
+        onOpenRecord={onOpenRecord}
         onPatchRecord={onPatchRecord}
       />
     </CoreI18nProvider>
@@ -173,6 +176,47 @@ beforeEach(() => {
 });
 
 describe("calendar drag to reschedule", () => {
+  it("opens ordinary and keyboard-activated cards in a preview while retaining their full-page href", () => {
+    const onOpenRecord = vi.fn();
+    renderCalendar(dateField(), undefined, onOpenRecord);
+    const link = screen.getByRole("link", { name: "Launch story" });
+    expect(link.getAttribute("href")).toBe("/base/calendar/rec_calendar");
+    expect(fireEvent.click(link)).toBe(false);
+    expect(onOpenRecord).toHaveBeenLastCalledWith(expect.objectContaining({ id: "rec_calendar" }));
+    expect(fireEvent.click(link, { detail: 0 })).toBe(false);
+    expect(onOpenRecord).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    { ctrlKey: true },
+    { metaKey: true },
+    { shiftKey: true },
+    { altKey: true },
+    { button: 1 },
+  ])("preserves native link behavior for modified activation %j", (modifiers) => {
+    const onOpenRecord = vi.fn();
+    renderCalendar(dateField(), undefined, onOpenRecord);
+    expect(fireEvent.click(screen.getByRole("link", { name: "Launch story" }), modifiers)).toBe(
+      true,
+    );
+    expect(onOpenRecord).not.toHaveBeenCalled();
+  });
+
+  it("does not open a record preview when a drag ends with a click", () => {
+    const onOpenRecord = vi.fn();
+    const { refresh } = renderCalendar(dateField(), undefined, onOpenRecord);
+    const link = screen.getByRole("link", { name: "Launch story" });
+    drag.isDragging = true;
+    refresh();
+    drag.isDragging = false;
+    refresh();
+    fireEvent.click(link);
+    expect(onOpenRecord).not.toHaveBeenCalled();
+    fireEvent.mouseDown(link, { button: 0 });
+    fireEvent.click(link);
+    expect(onOpenRecord).toHaveBeenCalledTimes(1);
+  });
+
   it("routes mouse activation across the middle and right of a card and only once on its handle", () => {
     renderCalendar(dateField());
     const link = screen.getByRole("link", { name: "Launch story" });
@@ -274,6 +318,27 @@ describe("calendar drag to reschedule", () => {
     renderCalendar(dateField(), failed);
     fireEvent.click(screen.getByTestId("drop-on-target-day"));
     await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy());
+  });
+
+  it("offers a read grant on the Base no reschedule handle and ignores a drop", () => {
+    const onPatchRecord = vi.fn().mockResolvedValue({ materialized: true });
+    query.records = [record(dateField())];
+    render(
+      <CoreI18nProvider locale="en">
+        <SubmitPermissionProvider permissionLevel="read">
+          <BusaBaseCalendar
+            activeView={view}
+            base={base(dateField())}
+            client={{} as BusabaseDashboardApiClient}
+            fields={[titleField, dateField()]}
+            onPatchRecord={onPatchRecord}
+          />
+        </SubmitPermissionProvider>
+      </CoreI18nProvider>,
+    );
+    expect(screen.queryByRole("button", { name: "Move Launch story to another day" })).toBeNull();
+    fireEvent.click(screen.getByTestId("drop-on-target-day"));
+    expect(onPatchRecord).not.toHaveBeenCalled();
   });
 
   it("shows a review link when write access only submits a change request", async () => {

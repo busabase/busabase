@@ -8,7 +8,14 @@ import {
   type ApiKeyPermissionLevel,
   BUSABASE_RELAY_PERMISSION_LEVEL_HEADER,
 } from "busabase-contract/access-control/api-key-level";
+import type { PromptResourceContextInput } from "busabase-contract/domains/agents/prompt-context";
 import type {
+  AgentContextReferenceInput,
+  AgentContextResourceVO,
+  AgentInputResponse,
+  AgentPromptPresentation,
+  AgentResourceVO,
+  AgentSessionConfigSelectVO,
   AgentSessionEventVO,
   AgentSessionModelOptionVO,
   AgentSessionStatus,
@@ -17,8 +24,28 @@ import type {
   ListAgentSessionsPagedInput,
   PromptAttachmentInput,
 } from "busabase-contract/domains/agents/types";
+import {
+  AgentInputResponseSchema,
+  AgentResourceVOSchema,
+  AgentSessionConfigSelectVOSchema,
+  AgentSessionSnapshotVOSchema,
+} from "busabase-contract/domains/agents/types";
 import WebSocket from "ws";
+import { z } from "zod";
 import { getContextActorId, getContextSpaceId } from "../../../context";
+import {
+  budaMetadata,
+  pendingInputOf,
+  pendingPermissionOf,
+  translateAcpExtension,
+  upstreamSeqOf,
+} from "../utils/acp-fidelity";
+import {
+  contextResourceToContentBlock,
+  promptResourceContextToContentBlock,
+} from "../utils/agent-context-resources";
+import { assertAgentInputResponse } from "../utils/agent-input-validation";
+import { inspectInputReceipt, inspectPermissionReceipt } from "../utils/agent-interaction-receipts";
 import {
   decodeAgentSessionCursor,
   isAgentSessionAfterCursor,
@@ -32,6 +59,8 @@ import {
   describeAcpError,
 } from "./acp-connection-diagnostics";
 import { type ResolvedLaunch, resolveLaunch } from "./agent-catalog";
+import { resolveAgentContextResources } from "./agent-context-resources";
+import { validateAgentPromptResourceContext } from "./agent-prompt-context";
 import {
   type AgentSessionLease,
   type AgentSessionRuntimeRecord,
@@ -73,31 +102,49 @@ import { resolveBusabaseMcpUrl } from "./agent-workspace-guide";
 const MAX_BUFFERED_EVENTS = 500;
 const MAX_CACHED_MODEL_OPTIONS = 500;
 
-/**
- * Reduce the agent's advertised `configOptions` to the one this domain
- * renders a picker for: a flat `type: "select"` entry tagged
- * `category: "model"`. Anything else the agent offers (modes, thought level,
- * boolean toggles) is out of scope for this feature and stays unadvertised
- * rather than mis-rendered.
- *
- * Grouped select options (`SessionConfigSelectGroup[]`) are flattened —
- * dropping groups rather than modelling them keeps `AgentSessionModelOptionVO`
- * a flat list, which is all the current picker needs.
- */
-function findModelOption(
+/** Resolve only supported select categories, preserving the agent's ids and values. */
+function findConfigSelect(
   configOptions: acp.SessionConfigOption[] | null | undefined,
-): AgentSessionModelOptionVO | null {
+  category: "model" | "thought_level",
+  conventionalIds: readonly string[],
+): AgentSessionConfigSelectVO | null {
   const selects = configOptions?.filter((candidate) => candidate.type === "select") ?? [];
   const option =
-    selects.find((candidate) => candidate.category === "model") ??
-    selects.find((candidate) => candidate.id === "model");
+    selects.find((candidate) => candidate.category === category) ??
+    selects.find((candidate) => !candidate.category && conventionalIds.includes(candidate.id));
   if (!option || option.type !== "select") return null;
-  const options = option.options.flatMap((entry) =>
-    "options" in entry
-      ? entry.options.map((grouped) => ({ value: grouped.value, name: grouped.name }))
-      : [{ value: entry.value, name: entry.name }],
-  );
+  const options = option.options
+    .flatMap((entry) => ("options" in entry ? entry.options : [entry]))
+    .map((entry) => {
+      const metadata =
+        category === "model"
+          ? AgentSessionConfigSelectVOSchema.safeParse(entry._meta?.["busabase/thought_level"])
+          : null;
+      const thinking = metadata?.success ? metadata.data : null;
+      return {
+        value: entry.value,
+        name: entry.name,
+        ...(thinking?.id && thinking.options.some((level) => level.value === thinking.currentValue)
+          ? { thinking }
+          : {}),
+      };
+    });
   return { id: option.id, name: option.name, currentValue: option.currentValue, options };
+}
+
+function syncConfigOptions(
+  session: LiveSession,
+  configOptions: acp.SessionConfigOption[] | null | undefined,
+): Promise<void> {
+  return syncModelOption(
+    session,
+    findConfigSelect(configOptions, "model", ["model"]),
+    findConfigSelect(configOptions, "thought_level", [
+      "thought_level",
+      "thinking_level",
+      "reasoning_effort",
+    ]),
+  );
 }
 
 interface LiveSession {
@@ -123,6 +170,8 @@ interface LiveSession {
     text: string,
     attachments?: PromptAttachmentInput[],
     cancellationSignal?: AbortSignal,
+    contextResources?: readonly AgentContextResourceVO[],
+    resourceContext?: readonly PromptResourceContextInput[],
   ) => Promise<void>;
   cancel: () => Promise<void>;
   /** Release transport ownership without ending the durable remote session. */
@@ -135,6 +184,7 @@ interface LiveSession {
    * on creation. Readiness still gates configuration and prompt dispatch.
    */
   modelOption: AgentSessionModelOptionVO | null;
+  thinkingOption: AgentSessionConfigSelectVO | null;
   modelCacheKey?: string;
   /** Serializes model snapshots with remote lease acquisition and release. */
   modelOptionSync: Promise<void>;
@@ -163,9 +213,26 @@ interface LiveSession {
     {
       optionIds: ReadonlySet<string>;
       resolve: (outcome: acp.RequestPermissionOutcome) => void;
+      answering?: boolean;
     }
   >;
   permissionCounter: number;
+  pendingInputs: Map<
+    string,
+    {
+      schema: Record<string, unknown>;
+      resolve: (response: acp.CreateElicitationResponse) => void;
+      answering?: boolean;
+    }
+  >;
+  resolvedInputs: Map<string, AgentInputResponse>;
+  resolvedPermissions: Map<string, acp.RequestPermissionOutcome>;
+  inputCounter: number;
+  upstreamSeq?: number;
+  budaEventStream: boolean;
+  budaInteractionRespond: boolean;
+  currentUserMessageId?: string;
+  requestExtension?: (method: string, params: Record<string, unknown>) => Promise<unknown>;
   /**
    * The fencing lease held for the turn currently in flight on
    * `remote-websocket` sessions; retained through final persistence and
@@ -343,7 +410,7 @@ class LeaseGuard implements OperationLeaseGuard {
 }
 
 /**
- * Update the live model selector AND queue its durable mirror from
+ * Update both live selectors AND queue their atomic durable mirror from
  * one call site, so every place `session.modelOption` changes — initial
  * discovery, an agent-pushed `config_option_update`, a
  * `session/set_config_option` response — preserves protocol order even when
@@ -360,9 +427,11 @@ class LeaseGuard implements OperationLeaseGuard {
 function syncModelOption(
   session: LiveSession,
   modelOption: AgentSessionModelOptionVO | null,
+  thinkingOption: AgentSessionConfigSelectVO | null,
 ): Promise<void> {
   if (session.transport !== "remote-websocket") {
     session.modelOption = modelOption;
+    session.thinkingOption = thinkingOption;
     return Promise.resolve();
   }
   const write = session.modelOptionSync.then(async () => {
@@ -370,12 +439,19 @@ function syncModelOption(
     const fence = session.lease
       ? { ownerId: session.lease.ownerId, fencingToken: session.lease.fencingToken }
       : undefined;
-    const persisted = await persistSessionModelOption(session.id, modelOption, scope, fence);
+    const persisted = await persistSessionModelOption(
+      session.id,
+      modelOption,
+      scope,
+      fence,
+      thinkingOption,
+    );
     if (!persisted) throw new Error("Could not persist the agent's model options. Try again.");
     // Publish only after the durable snapshot succeeds. Keeping persistence
     // and in-memory publication in the same queue entry prevents a lease
     // claim's durable refresh from clobbering a newer queued notification.
     session.modelOption = modelOption;
+    session.thinkingOption = thinkingOption;
     rememberModelOption(session, modelOption);
   });
   // Keep later updates retryable even when this caller observes a rejection.
@@ -529,20 +605,28 @@ function emit(session: LiveSession, event: Omit<AgentSessionEventVO, "sessionId"
     ...event,
   };
   session.buffer.push(full);
-  if (session.buffer.length > MAX_BUFFERED_EVENTS) session.buffer.shift();
-  for (const listener of session.listeners) {
-    try {
-      listener(full);
-    } catch {
-      // A dead subscriber must never take the session down with it.
-    }
-  }
-  if (session.transport === "remote-websocket" && session.lease) {
+  while (
+    session.buffer.length > MAX_BUFFERED_EVENTS &&
+    (session.buffer[0]?.seq ?? Infinity) <= session.persistedSeq
+  )
+    session.buffer.shift();
+  if (session.transport === "local-subprocess") publishEvent(session, full);
+  if (session.transport === "remote-websocket") {
     void flushPendingEvents(session).catch((error: unknown) => {
       session.status = "failed";
       session.error = error instanceof Error ? error.message : "Could not persist remote events.";
       detachRemoteSession(session);
     });
+  }
+}
+
+function publishEvent(session: LiveSession, event: AgentSessionEventVO): void {
+  for (const listener of session.listeners) {
+    try {
+      listener(event);
+    } catch {
+      /* A detached observer cannot fail a run. */
+    }
   }
 }
 
@@ -604,8 +688,13 @@ async function setStatus(
  */
 async function flushPendingEvents(session: LiveSession): Promise<void> {
   const fence = session.lease ?? undefined;
+  // A queued flush must not consume events admitted after it. A later
+  // persist-before-publish write may have reserved an intervening sequence.
+  const throughSeq = session.seq;
   const flush = session.flushPending.then(async () => {
-    const pending = session.buffer.filter((event) => event.seq > session.persistedSeq);
+    const pending = session.buffer.filter(
+      (event) => event.seq > session.persistedSeq && event.seq <= throughSeq,
+    );
     if (pending.length === 0) return;
     const nextPersistedSeq = pending[pending.length - 1]?.seq ?? session.persistedSeq;
     const durableEvents =
@@ -619,6 +708,13 @@ async function flushPendingEvents(session: LiveSession): Promise<void> {
     }
     if (!persisted) return;
     session.persistedSeq = nextPersistedSeq;
+    if (session.transport === "remote-websocket")
+      for (const event of pending) publishEvent(session, event);
+    while (
+      session.buffer.length > MAX_BUFFERED_EVENTS &&
+      (session.buffer[0]?.seq ?? Infinity) <= session.persistedSeq
+    )
+      session.buffer.shift();
   });
   session.flushPending = flush.catch(() => undefined);
   await flush;
@@ -730,6 +826,8 @@ async function openAgentSession({
         : (modelCacheKey && modelOptions().get(modelCacheKey)) || null,
     ),
     modelCacheKey,
+    // Thinking options depend on this session's confirmed model, never the agent cache.
+    thinkingOption: resume?.session.thinkingOption ?? null,
     modelOptionSync: Promise.resolve(),
     setConfigOption: async () => null,
     seq: resume?.lastEventSeq ?? 0,
@@ -739,6 +837,13 @@ async function openAgentSession({
     listeners: new Set(),
     pendingPermissions: new Map(),
     permissionCounter: 0,
+    pendingInputs: new Map(),
+    resolvedInputs: new Map(),
+    resolvedPermissions: new Map(),
+    inputCounter: 0,
+    upstreamSeq: resume?.upstreamSeq,
+    budaEventStream: false,
+    budaInteractionRespond: false,
     lease: lease ?? null,
   };
   guard?.attach(session);
@@ -807,18 +912,82 @@ async function openAgentSession({
     let activePromptController: AbortController | null = null;
     let refreshActivePromptDeadline: (() => void) | null = null;
     let pauseActivePromptDeadline: (() => void) | null = null;
+    let notificationQueue: Promise<void> = Promise.resolve();
+    const receiveNotification = (apply: () => Promise<void>): Promise<void> => {
+      const pending = notificationQueue.then(async () => {
+        if (!session.closed) await apply();
+      });
+      notificationQueue = pending.catch((error: unknown) => {
+        session.error =
+          error instanceof Error ? error.message : "Could not apply the agent update.";
+        session.status = "failed";
+        session.detach();
+      });
+      return pending;
+    };
 
     const app = acp
       .client({ name: "busabase" })
+      .onRequest(acp.methods.client.elicitation.create, async ({ params }) => {
+        await notificationQueue;
+        if (
+          params.mode !== "form" ||
+          !("sessionId" in params) ||
+          params.sessionId !== session.acpSessionId
+        ) {
+          return { action: "decline" as const };
+        }
+        const identity = budaMetadata(params)?.interactionId;
+        const requestId =
+          typeof identity === "string" ? identity : `input_${session.id}_${++session.inputCounter}`;
+        const alreadyResolved = session.resolvedInputs.get(requestId);
+        if (alreadyResolved) return alreadyResolved as acp.CreateElicitationResponse;
+        pauseActivePromptDeadline?.();
+        const schema = params.requestedSchema as Record<string, unknown>;
+        const answered = new Promise<acp.CreateElicitationResponse>((resolve) => {
+          session.pendingInputs.set(requestId, { schema, resolve });
+        });
+        const pendingInput = session.pendingInputs.get(requestId);
+        emit(session, {
+          kind: "inputRequest",
+          inputRequest: {
+            requestId,
+            message: params.message,
+            requestedSchema: schema,
+            ...(typeof params.toolCallId === "string" ? { toolCallId: params.toolCallId } : {}),
+          },
+        });
+        try {
+          const result = await answered;
+          if (!session.closed && !(result.action === "cancel" && pendingInput?.answering))
+            emit(session, {
+              kind: "inputResolved",
+              inputRequestId: requestId,
+              inputResponse: AgentInputResponseSchema.parse(result),
+            });
+          return result;
+        } finally {
+          session.pendingInputs.delete(requestId);
+          if (session.pendingInputs.size === 0 && session.pendingPermissions.size === 0)
+            refreshActivePromptDeadline?.();
+        }
+      })
       .onRequest(acp.methods.client.session.requestPermission, async (ctx) => {
+        await notificationQueue;
         // Blocks this ACP request until a human answers via
         // respondToAgentPermission — no timeout, no auto-approve (deliberate;
         // see the type comment on LiveSession.pendingPermissions). The agent's
         // own JSON-RPC framing already holds this request open for however
         // long we take. Other requests from the same turn may be pending
         // alongside this one; each gets its own entry and its own answer.
+        const interactionId = budaMetadata(ctx.params)?.interactionId;
+        const requestId =
+          typeof interactionId === "string"
+            ? interactionId
+            : `perm_${session.id}_${++session.permissionCounter}`;
+        const alreadyResolved = session.resolvedPermissions.get(requestId);
+        if (alreadyResolved) return { outcome: alreadyResolved };
         pauseActivePromptDeadline?.();
-        const requestId = `perm_${session.id}_${++session.permissionCounter}`;
         const options = ctx.params.options.map((o) => ({
           optionId: o.optionId,
           name: o.name,
@@ -833,11 +1002,21 @@ async function openAgentSession({
           });
         });
         emit(session, {
+          kind: "acpUpdate",
+          acpUpdate: {
+            ...ctx.params.toolCall,
+            sessionUpdate: "tool_call",
+            title: ctx.params.toolCall.title ?? "Tool authorization",
+            status: ctx.params.toolCall.status ?? "pending",
+          },
+        });
+        emit(session, {
           kind: "permissionRequest",
           permissionRequest: {
             requestId,
             title: ctx.params.toolCall.title ?? undefined,
             options,
+            toolCall: ctx.params.toolCall as Record<string, unknown>,
           },
         });
         let outcome: acp.RequestPermissionOutcome;
@@ -870,7 +1049,11 @@ async function openAgentSession({
         // that answer's busy -> idle transition is what the lease fence
         // expects. Only from waiting_permission — never over a turn that
         // already failed or finished.
-        if (session.pendingPermissions.size === 0 && session.status === "waiting_permission") {
+        if (
+          session.pendingPermissions.size === 0 &&
+          session.pendingInputs.size === 0 &&
+          session.status === "waiting_permission"
+        ) {
           await setStatus(session, "busy");
           // Re-checked: a new request may have arrived during that write and
           // already paused the deadline again.
@@ -878,29 +1061,113 @@ async function openAgentSession({
         }
         return { outcome };
       })
-      .onNotification(acp.methods.client.session.update, async (ctx) => {
-        // With parallel tool calls the agent keeps streaming the work it was
-        // allowed to do while a sibling card still waits; that output must
-        // not restart the deadline the human's pending decision paused.
-        if (session.pendingPermissions.size === 0) refreshActivePromptDeadline?.();
-        // `config_option_update` is the agent unilaterally changing a config
-        // value (e.g. auto-downgrading the model on a rate limit) rather than
-        // busabase asking for it — so the local picker must follow the same
-        // notification path `setAgentSessionConfigOption`'s own response
-        // updates it from, or the UI would show a stale selection until the
-        // next full page load.
-        if (ctx.params.update.sessionUpdate === "config_option_update") {
-          await syncModelOption(session, findModelOption(ctx.params.update.configOptions));
-        }
-        // session/load replays the remote transcript. Busabase already has the
-        // outer transcript in its own event table, so emitting message/tool
-        // replay again would duplicate history with new seq values. Command
-        // metadata is different: it is a current full-list replacement and is
-        // needed to restore the composer's slash-command state on reconnect.
-        if (replayingHistory && ctx.params.update.sessionUpdate !== "available_commands_update") {
-          return;
-        }
-        emit(session, { kind: "acpUpdate", acpUpdate: ctx.params.update });
+      .onNotification(
+        "_buda.im/session_event",
+        z
+          .object({
+            sessionId: z.string(),
+            event: z.unknown(),
+            _meta: z.record(z.string(), z.unknown()).optional(),
+          })
+          .passthrough(),
+        ({ params }) =>
+          receiveNotification(async () => {
+            const envelope = params as Record<string, unknown>;
+            if (envelope.sessionId !== session.acpSessionId && session.acpSessionId !== null)
+              return;
+            const event = {
+              kind: "acpExtension" as const,
+              acpExtension: { method: "_buda.im/session_event", params: envelope },
+            };
+            const seq = upstreamSeqOf(event);
+            if (seq !== undefined && seq <= (session.upstreamSeq ?? -1)) return;
+            emit(session, event);
+            for (const update of translateAcpExtension(event.acpExtension)) {
+              if (update.type === "input_answering") {
+                const pending = session.pendingInputs.get(update.requestId);
+                if (pending) pending.answering = true;
+              }
+              if (update.type === "permission_answering") {
+                const pending = session.pendingPermissions.get(update.requestId);
+                if (pending) pending.answering = true;
+              }
+              if (update.type === "input_resolved") {
+                const response = {
+                  action: update.action,
+                  ...(update.content ? { content: update.content } : {}),
+                };
+                session.resolvedInputs.set(update.requestId, response);
+                session.pendingInputs
+                  .get(update.requestId)
+                  ?.resolve(response as acp.CreateElicitationResponse);
+                session.pendingInputs.delete(update.requestId);
+              }
+              if (update.type === "permission_resolved" || update.type === "permission_cancelled") {
+                const outcome: acp.RequestPermissionOutcome =
+                  update.type === "permission_cancelled"
+                    ? { outcome: "cancelled" }
+                    : { outcome: "selected", optionId: update.optionId };
+                session.resolvedPermissions.set(update.requestId, outcome);
+                session.pendingPermissions.get(update.requestId)?.resolve(outcome);
+                session.pendingPermissions.delete(update.requestId);
+              }
+            }
+            if (session.resolvedInputs.size > MAX_BUFFERED_EVENTS)
+              session.resolvedInputs.delete(session.resolvedInputs.keys().next().value as string);
+            if (session.resolvedPermissions.size > MAX_BUFFERED_EVENTS)
+              session.resolvedPermissions.delete(
+                session.resolvedPermissions.keys().next().value as string,
+              );
+            if (seq !== undefined) session.upstreamSeq = seq;
+          }),
+      )
+      .onNotification(acp.methods.client.session.update, (ctx) => {
+        const wasReplaying = replayingHistory;
+        return receiveNotification(async () => {
+          // With parallel tool calls the agent keeps streaming the work it was
+          // allowed to do while a sibling card still waits; that output must
+          // not restart the deadline the human's pending decision paused.
+          if (session.pendingPermissions.size === 0 && session.pendingInputs.size === 0)
+            refreshActivePromptDeadline?.();
+          const sourceSeq = upstreamSeqOf({ acpUpdate: ctx.params.update });
+          if (sourceSeq !== undefined && sourceSeq <= (session.upstreamSeq ?? -1)) return;
+          // `config_option_update` is the agent unilaterally changing a config
+          // value (e.g. auto-downgrading the model on a rate limit) rather than
+          // busabase asking for it — so the local picker must follow the same
+          // notification path `setAgentSessionConfigOption`'s own response
+          // updates it from, or the UI would show a stale selection until the
+          // next full page load.
+          if (ctx.params.update.sessionUpdate === "config_option_update") {
+            await syncConfigOptions(session, ctx.params.update.configOptions);
+          }
+          // session/load replays the remote transcript. Busabase already has the
+          // outer transcript in its own event table, so emitting message/tool
+          // replay again would duplicate history with new seq values. Command
+          // metadata is different: it is a current full-list replacement and is
+          // needed to restore the composer's slash-command state on reconnect.
+          if (
+            wasReplaying &&
+            sourceSeq === undefined &&
+            ctx.params.update.sessionUpdate !== "available_commands_update"
+          ) {
+            return;
+          }
+          const update = ctx.params.update;
+          const isClientEcho =
+            update.sessionUpdate === "user_message_chunk" &&
+            typeof update.messageId === "string" &&
+            update.messageId.startsWith(`busabase-user:${session.id}:`);
+          emit(session, {
+            kind: "acpUpdate",
+            acpUpdate: isClientEcho
+              ? {
+                  ...update,
+                  _meta: { ...update._meta, "busabase.im": { clientEcho: true } },
+                }
+              : update,
+          });
+          if (sourceSeq !== undefined) session.upstreamSeq = sourceSeq;
+        });
       });
 
     const handshakeTimeoutMs = agentHandshakeTimeoutMs();
@@ -946,9 +1213,23 @@ async function openAgentSession({
             protocolVersion: acp.PROTOCOL_VERSION,
             // We serve no filesystem: agents use their own disk, and v2 removes
             // this surface entirely. Declaring false keeps them from asking.
-            clientCapabilities: {},
+            clientCapabilities: {
+              elicitation: { form: {} },
+              _meta: {
+                "buda.im": {
+                  eventStream: 1,
+                  replayCursor: 1,
+                  resourceRead: 1,
+                  interactionRespond: 1,
+                },
+              },
+            },
           }),
         );
+        const capabilities = budaMetadata(initialized.agentCapabilities);
+        session.budaEventStream = capabilities?.eventStream === 1;
+        session.budaInteractionRespond = capabilities?.interactionRespond === 1;
+        session.requestExtension = (method, params) => ctx.request(method, params);
         if (session.closed) {
           clearHandshakeTimeout();
           return;
@@ -1033,8 +1314,12 @@ async function openAgentSession({
                 sessionId: resume.acpSessionId,
                 cwd: workspace,
                 mcpServers,
+                ...(session.budaEventStream && session.upstreamSeq !== undefined
+                  ? { _meta: { "buda.im": { afterSeq: session.upstreamSeq } } }
+                  : {}),
               }),
             );
+            await notificationQueue;
             acpSessionId = resume.acpSessionId;
             configOptions = loaded.configOptions;
           } finally {
@@ -1047,6 +1332,7 @@ async function openAgentSession({
               mcpServers,
             }),
           );
+          await notificationQueue;
           acpSessionId = created.sessionId;
           configOptions = created.configOptions;
         }
@@ -1063,14 +1349,25 @@ async function openAgentSession({
         });
 
         session.acpSessionId = acpSessionId;
-        await syncModelOption(session, findModelOption(configOptions));
+        await syncConfigOptions(session, configOptions);
 
         session.prompt = async (
           text: string,
           attachments?: PromptAttachmentInput[],
           cancellationSignal?: AbortSignal,
+          contextResources?: readonly AgentContextResourceVO[],
+          resourceContext?: readonly PromptResourceContextInput[],
         ) => {
           const promptGuard = requireOperationGuard(session);
+          const turnId = `busabase:${randomUUID()}`;
+          const emitLifecycle = (event: Record<string, unknown>) =>
+            emit(session, {
+              kind: "acpExtension",
+              acpExtension: {
+                method: "_acp-ui/lifecycle",
+                params: { event: { version: 1, turnId, at: nowIso(), ...event } },
+              },
+            });
           if (
             session.status === "waiting_permission" ||
             (session.status === "busy" && !session.promptStarting)
@@ -1082,6 +1379,7 @@ async function openAgentSession({
           // request open for the whole turn. Direct/internal callers that do
           // not reserve through that wrapper still transition here.
           if (session.status !== "busy") await setStatus(session, "busy");
+          if (!session.budaEventStream) emitLifecycle({ type: "turn_started" });
           const promptController = new AbortController();
           activePromptController = promptController;
           const timeoutMessage = `${launch.name} stopped responding. Start a new session to continue.`;
@@ -1141,6 +1439,10 @@ async function openAgentSession({
               text,
               attachments,
               initialized.agentCapabilities?.promptCapabilities ?? {},
+              [
+                ...(resourceContext ?? []).map(promptResourceContextToContentBlock),
+                ...(contextResources ?? []).map(contextResourceToContentBlock),
+              ],
             );
             for (const note of notes) {
               emit(session, {
@@ -1149,19 +1451,46 @@ async function openAgentSession({
               });
             }
             await verifyOperationDispatch(session, promptGuard);
-            await Promise.race([
+            // A stop can arrive while the lease renewal above is in flight.
+            // Do not dispatch a new provider request after that decision.
+            if (promptController.signal.aborted) {
+              throw new DOMException("ACP turn cancelled before dispatch", "AbortError");
+            }
+            const result = await Promise.race([
               ctx.request(
                 acp.methods.agent.session.prompt,
                 {
                   sessionId: acpSessionId,
                   prompt,
+                  ...(session.budaEventStream && session.currentUserMessageId
+                    ? { _meta: { "buda.im": { clientMessageId: session.currentUserMessageId } } }
+                    : {}),
                 },
                 { cancellationSignal: promptController.signal },
               ),
               inactivityFailure,
             ]);
+            await notificationQueue;
+            if (!session.budaEventStream)
+              emitLifecycle({
+                type: "turn_finished",
+                stopReason: promptController.signal.aborted ? "cancelled" : result.stopReason,
+                ...(promptController.signal.aborted
+                  ? { providerStopReason: result.stopReason }
+                  : {}),
+                ...(result.usage ? { usage: result.usage } : {}),
+              });
             await setStatus(session, "idle");
           } catch (error) {
+            if (!session.budaEventStream)
+              emitLifecycle({
+                type: "turn_finished",
+                stopReason: inactivityTimedOut
+                  ? "error"
+                  : promptController.signal.aborted
+                    ? "cancelled"
+                    : "error",
+              });
             if (inactivityTimedOut) {
               logAcpConnection("warn", "prompt_inactivity_timeout", {
                 connectionId,
@@ -1240,7 +1569,7 @@ async function openAgentSession({
           // trusting the agent's complete `configOptions` list is what keeps
           // dependent values current rather than showing a choice the new
           // model no longer honours.
-          await syncModelOption(session, findModelOption(response.configOptions));
+          await syncConfigOptions(session, response.configOptions);
           return session.modelOption;
         };
 
@@ -1355,6 +1684,7 @@ function toVO(s: LiveSession): AgentSessionVO {
     lastActivityAt: s.lastActivityAt,
     error: s.error,
     modelOption: s.modelOption,
+    thinkingOption: s.thinkingOption,
   };
 }
 
@@ -1533,6 +1863,7 @@ async function acquireOperationSession(
         // The queue drained every earlier local config update before the
         // claim, so this durable snapshot is now the cross-worker authority.
         existing.modelOption = claimed.session.modelOption;
+        existing.thinkingOption = claimed.session.thinkingOption ?? null;
         existing.seq = Math.max(existing.seq, claimed.lastEventSeq);
         existing.persistedSeq = Math.max(existing.persistedSeq, claimed.lastEventSeq);
         existing.status = "idle";
@@ -1691,45 +2022,47 @@ export async function listAgentSessionsPaged(
 }
 
 /**
- * Allocate the next seq, persist it fenced to the turn's current lease, and
- * only publish to the buffer/listeners if that persist succeeds.
+ * Reserve a unique seq immediately, then persist and publish on the same
+ * queue as notification flushes. Notifications arriving during the write
+ * receive later sequences and cannot overtake its durable cursor.
  *
- * This is the persist-before-publish half of the ordering the cross-worker reattach review
- * required: without it, a synthetic `user_message` event (or any other event
- * written this way) could be visible to a live subscriber, or already sent to
- * the agent, before it was durably recorded — so a persistence failure would
- * leave a client rendering a message that a retry could then duplicate. On
- * failure, `session.seq`/`persistedSeq`/`buffer` are left completely
- * untouched, so a retry recomputes the same candidate seq and writes exactly
- * one row on success; nothing here is visible to anyone until the write
- * lands.
+ * Failed acceptance leaves a sequence gap, but never buffers or publishes
+ * the failed user event: later flushes and retries cannot revive it.
  */
 async function emitPersistedFirst(
   session: LiveSession,
   event: Omit<AgentSessionEventVO, "sessionId" | "seq" | "at">,
   fence: LeaseFence,
 ): Promise<AgentSessionEventVO | null> {
-  const seq = session.seq + 1;
+  session.seq += 1;
+  const seq = session.seq;
   const at = nowIso();
   const full: AgentSessionEventVO = { sessionId: session.id, seq, at, ...event };
-  const persisted = await persistSessionEvents(collapseForPersistence([full]), fence, {
-    spaceId: session.spaceId,
-    actorId: session.actorId,
+  const write = session.flushPending.then(async () => {
+    const persisted = await persistSessionEvents(collapseForPersistence([full]), fence, {
+      spaceId: session.spaceId,
+      actorId: session.actorId,
+    });
+    if (!persisted) return null;
+    session.persistedSeq = seq;
+    if (session.lastActivityAt < at) session.lastActivityAt = at;
+    // Later notifications may already be buffered while this insert awaited
+    // the database. Preserve replay order without buffering failed prompts.
+    const nextIndex = session.buffer.findIndex((event) => event.seq > seq);
+    session.buffer.splice(nextIndex < 0 ? session.buffer.length : nextIndex, 0, full);
+    while (
+      session.buffer.length > MAX_BUFFERED_EVENTS &&
+      (session.buffer[0]?.seq ?? Infinity) <= session.persistedSeq
+    )
+      session.buffer.shift();
+    publishEvent(session, full);
+    return full;
   });
-  if (!persisted) return null;
-  session.seq = seq;
-  session.persistedSeq = seq;
-  session.lastActivityAt = at;
-  session.buffer.push(full);
-  if (session.buffer.length > MAX_BUFFERED_EVENTS) session.buffer.shift();
-  for (const listener of session.listeners) {
-    try {
-      listener(full);
-    } catch {
-      // A dead subscriber must never take the session down with it.
-    }
-  }
-  return full;
+  session.flushPending = write.then(
+    () => undefined,
+    () => undefined,
+  );
+  return write;
 }
 
 /**
@@ -1743,7 +2076,12 @@ export async function promptAgentSession(
   sessionId: string,
   text: string,
   attachments?: PromptAttachmentInput[],
-  options?: { onAccepted?: () => void },
+  options?: {
+    onAccepted?: () => void;
+    presentation?: AgentPromptPresentation;
+    contextReferences?: readonly AgentContextReferenceInput[];
+    resourceContext?: readonly PromptResourceContextInput[];
+  },
 ): Promise<void> {
   const { session: s, guard } = await acquireOperationSession(sessionId);
   try {
@@ -1762,6 +2100,17 @@ export async function promptAgentSession(
 
   try {
     guard?.assertOwned();
+    const resourceContext = validateAgentPromptResourceContext(options?.resourceContext);
+    // Resolve once, before any user event is recorded or the prompt accepted.
+    // Replay and ACP dispatch must use this exact snapshot, even if the page
+    // changes while the agent is still starting.
+    const contextResources = options?.contextReferences?.length
+      ? await resolveAgentContextResources(options.contextReferences)
+      : [];
+    guard?.assertOwned();
+    if (promptController.signal.aborted) {
+      throw new Error("Message sending cancelled.");
+    }
     // Persist the user's own message before waiting for initialize +
     // session/new, so it is authoritative and visible to current and late
     // clients even though agent startup may take seconds. `attachments`
@@ -1777,7 +2126,10 @@ export async function promptAgentSession(
       acpUpdate: {
         sessionUpdate: "user_message",
         text,
+        ...(options?.presentation ? { presentation: options.presentation } : {}),
         ...(attachments && attachments.length > 0 ? { attachments } : {}),
+        ...(contextResources.length > 0 ? { contextResources } : {}),
+        ...(resourceContext.length > 0 ? { resourceContext } : {}),
       },
     };
     if (s.lease) {
@@ -1788,8 +2140,10 @@ export async function promptAgentSession(
       if (!persistedEvent) {
         throw new Error("Could not persist the prompt. Try again.");
       }
+      s.currentUserMessageId = `busabase-user:${s.id}:${persistedEvent.seq}`;
     } else {
       emit(s, userMessage);
+      s.currentUserMessageId = `busabase-user:${s.id}:${s.seq}`;
       await flushPendingEvents(s);
     }
     // Acceptance means the prompt is durable and the one-turn slot is owned.
@@ -1815,7 +2169,13 @@ export async function promptAgentSession(
     }
     assertSessionCanAcceptPrompt(s, true);
     guard?.assertOwned();
-    await s.prompt(text, attachments, promptController.signal);
+    if (resourceContext.length > 0) {
+      await s.prompt(text, attachments, promptController.signal, contextResources, resourceContext);
+    } else if (contextResources.length > 0) {
+      await s.prompt(text, attachments, promptController.signal, contextResources);
+    } else {
+      await s.prompt(text, attachments, promptController.signal);
+    }
     guard?.assertOwned();
   } catch (error) {
     operationError = error;
@@ -1842,6 +2202,9 @@ export async function startAgentSessionPrompt(
   sessionId: string,
   text: string,
   attachments?: PromptAttachmentInput[],
+  presentation?: AgentPromptPresentation,
+  contextReferences?: readonly AgentContextReferenceInput[],
+  resourceContext?: readonly PromptResourceContextInput[],
 ): Promise<void> {
   let accepted = false;
   let resolveStarted = () => {};
@@ -1852,6 +2215,9 @@ export async function startAgentSessionPrompt(
   });
 
   const completion = promptAgentSession(sessionId, text, attachments, {
+    presentation,
+    contextReferences,
+    resourceContext,
     onAccepted: () => {
       accepted = true;
       resolveStarted();
@@ -1978,11 +2344,11 @@ export async function cancelAgentSession(sessionId: string): Promise<void> {
 }
 
 /**
- * Change the session's model via ACP `session/set_config_option`.
+ * Change the session's model or thinking level via ACP `session/set_config_option`.
  *
  * `configId`/`value` are validated against what THIS session most recently
  * advertised before anything is sent — the picker only ever offers values
- * from `modelOption`, but the RPC is the trust boundary, not the UI, so a
+ * from the confirmed selectors, but the RPC is the trust boundary, not the UI, so a
  * request naming a stale id or a value the agent never listed is rejected
  * here rather than forwarded.
  *
@@ -2026,10 +2392,11 @@ export async function setAgentSessionConfigOption(
     if (s.closed || !s.acpSessionId) {
       throw new Error("This agent session is not connected.");
     }
-    if (!s.modelOption || s.modelOption.id !== configId) {
+    const option = [s.modelOption, s.thinkingOption].find((item) => item?.id === configId);
+    if (!option) {
       throw new Error("This session has no such config option to set.");
     }
-    if (!s.modelOption.options.some((option) => option.value === value)) {
+    if (!option.options.some((choice) => choice.value === value)) {
       throw new Error(`"${value}" is not one of the offered options.`);
     }
     await s.setConfigOption(configId, value);
@@ -2056,9 +2423,34 @@ export async function setAgentSessionConfigOption(
  * these cards is rejected as no longer pending.
  */
 function cancelPendingPermissions(session: LiveSession): void {
-  const pending = [...session.pendingPermissions.values()];
+  const pending = [...session.pendingPermissions.entries()];
   session.pendingPermissions.clear();
-  for (const { resolve } of pending) resolve({ outcome: "cancelled" });
+  for (const [requestId, { resolve, answering }] of pending) {
+    if (!answering) {
+      session.resolvedPermissions.set(requestId, { outcome: "cancelled" });
+      emit(session, {
+        kind: "acpExtension",
+        acpExtension: {
+          method: "_acp-ui/lifecycle",
+          params: { event: { type: "permission_cancelled", requestId } },
+        },
+      });
+    }
+    resolve({ outcome: "cancelled" });
+  }
+  const inputs = [...session.pendingInputs.entries()];
+  session.pendingInputs.clear();
+  for (const [requestId, { resolve, answering }] of inputs) {
+    if (!answering) {
+      session.resolvedInputs.set(requestId, { action: "cancel" });
+      emit(session, {
+        kind: "inputResolved",
+        inputRequestId: requestId,
+        inputResponse: { action: "cancel" },
+      });
+    }
+    resolve({ action: "cancel" });
+  }
 }
 
 /**
@@ -2072,8 +2464,18 @@ export function respondToAgentPermission(
   sessionId: string,
   requestId: string,
   optionId: string,
-): void {
-  const s = requireLocalSession(sessionId);
+): void | Promise<void> {
+  const live = sessions().get(sessionId);
+  if (live && !isLiveSessionVisibleToCurrentRequest(live))
+    throw new Error(`Unknown agent session: ${sessionId}`);
+  const s = live && isLiveSessionVisibleToCurrentRequest(live) ? live : undefined;
+  const previous = s?.resolvedPermissions.get(requestId);
+  if (previous) {
+    if (previous.outcome === "selected" && previous.optionId === optionId) return;
+    throw new Error("A different decision was already recorded for this request.");
+  }
+  if (!s || (s.budaEventStream && !s.pendingPermissions.has(requestId)))
+    return respondToPersistedPermission(sessionId, requestId, optionId);
   if (s.pendingPermissions.size === 0) {
     throw new Error("No permission request is pending for this session.");
   }
@@ -2084,10 +2486,184 @@ export function respondToAgentPermission(
   if (!pending.optionIds.has(optionId)) {
     throw new Error(`"${optionId}" is not one of the offered options.`);
   }
-  // Removed here, not only when the handler resumes, so a double click on
-  // the same card cannot resolve it twice.
+  if (s.budaInteractionRespond) {
+    pending.answering = true;
+    return (async () => {
+      const receipt = await requestScopedAgentExtension(
+        sessionId,
+        "_buda.im/interaction/respond",
+        { requestId, optionId, action: "accept" },
+        "interactionRespond",
+      );
+      if (!receipt || typeof receipt !== "object" || !("ok" in receipt) || receipt.ok !== true)
+        throw new Error("The agent did not confirm this decision.");
+      if (s.pendingPermissions.get(requestId) !== pending) return;
+      s.pendingPermissions.delete(requestId);
+      s.resolvedPermissions.set(requestId, { outcome: "selected", optionId });
+      pending.resolve({ outcome: "selected", optionId });
+    })();
+  }
   s.pendingPermissions.delete(requestId);
+  s.resolvedPermissions.set(requestId, { outcome: "selected", optionId });
   pending.resolve({ outcome: "selected", optionId });
+}
+
+async function respondToPersistedPermission(
+  sessionId: string,
+  requestId: string,
+  optionId: string,
+): Promise<void> {
+  const events = await loadSessionEvents(sessionId, -1);
+  const receiptState = inspectPermissionReceipt(events, requestId, optionId);
+  if (receiptState === "same") return;
+  if (receiptState === "conflict")
+    throw new Error("A different decision was already recorded for this request.");
+  const request = pendingPermissionOf(events, requestId);
+  if (!request || !request.options.some((option) => option.optionId === optionId))
+    throw new Error("This permission request is no longer pending.");
+  const receipt = await requestScopedAgentExtension(
+    sessionId,
+    "_buda.im/interaction/respond",
+    { requestId, optionId, action: "accept" },
+    "interactionRespond",
+  );
+  if (!receipt || typeof receipt !== "object" || !("ok" in receipt) || receipt.ok !== true)
+    throw new Error("The agent did not confirm this decision.");
+}
+
+export async function respondToAgentInput(
+  sessionId: string,
+  requestId: string,
+  response: AgentInputResponse,
+): Promise<void> {
+  if (response.action !== "accept") response = { action: response.action };
+  const session = sessions().get(sessionId);
+  if (session && isLiveSessionVisibleToCurrentRequest(session)) {
+    const previous = session.resolvedInputs.get(requestId);
+    if (previous) {
+      const receipt = inspectInputReceipt(
+        [
+          {
+            sessionId,
+            seq: 0,
+            at: "",
+            kind: "inputResolved",
+            inputRequestId: requestId,
+            inputResponse: previous,
+          },
+        ],
+        requestId,
+        response,
+      );
+      if (receipt === "same") return;
+      throw new Error("A different answer was already recorded for this question.");
+    }
+    const pending = session.pendingInputs.get(requestId);
+    if (pending) {
+      assertAgentInputResponse(pending.schema, response);
+      if (session.budaInteractionRespond) {
+        pending.answering = true;
+        const receipt = await requestScopedAgentExtension(
+          sessionId,
+          "_buda.im/interaction/respond",
+          { requestId, ...response },
+          "interactionRespond",
+        );
+        if (!receipt || typeof receipt !== "object" || !("ok" in receipt) || receipt.ok !== true)
+          throw new Error("The agent did not confirm this answer.");
+        if (session.pendingInputs.get(requestId) !== pending) return;
+      }
+      session.pendingInputs.delete(requestId);
+      session.resolvedInputs.set(requestId, response);
+      pending.resolve(response as acp.CreateElicitationResponse);
+      return;
+    }
+  }
+  const events = await loadSessionEvents(sessionId, -1);
+  const receiptState = inspectInputReceipt(events, requestId, response);
+  if (receiptState === "same") return;
+  if (receiptState === "conflict")
+    throw new Error("A different answer was already recorded for this question.");
+  const request = pendingInputOf(events, requestId);
+  if (!request) throw new Error("This question is no longer pending.");
+  assertAgentInputResponse(request.requestedSchema, response);
+  const receipt = await requestScopedAgentExtension(
+    sessionId,
+    "_buda.im/interaction/respond",
+    { requestId, ...response },
+    "interactionRespond",
+  );
+  if (!receipt || typeof receipt !== "object" || !("ok" in receipt) || receipt.ok !== true)
+    throw new Error("The agent did not confirm this answer.");
+}
+
+/** Authorize from the durable row even when the original socket is owned by another worker. */
+async function requestScopedAgentExtension(
+  sessionId: string,
+  method: string,
+  params: Record<string, unknown>,
+  capability: string,
+): Promise<unknown> {
+  const record = await loadSessionRuntime(sessionId);
+  if (!record?.acpSessionId) throw new Error(`Unknown agent session: ${sessionId}`);
+  const launch = await resolveLaunch(record.session.slug);
+  if (launch.transport !== "remote-websocket" || !launch.url)
+    throw new Error("This agent does not make this operation available in the panel.");
+  const stream = createWebSocketStream(launch.url, {
+    headers: {
+      [ACP_CONNECTION_ID_HEADER]: createAcpConnectionId(),
+      ...(launch.authHeader ? { Authorization: launch.authHeader } : {}),
+    },
+    WebSocket: WebSocket as unknown as never,
+  });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      acp.client({ name: "busabase-resource-interaction" }).connectWith(stream, async (ctx) => {
+        const initialized = await ctx.request(acp.methods.agent.initialize, {
+          protocolVersion: acp.PROTOCOL_VERSION,
+          clientCapabilities: { _meta: { "buda.im": { resourceRead: 1, interactionRespond: 1 } } },
+        });
+        if (budaMetadata(initialized.agentCapabilities)?.[capability] !== 1)
+          throw new Error("This agent does not make this operation available in the panel.");
+        return ctx.request(method, { ...params, sessionId: record.acpSessionId });
+      }),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(
+          () => reject(new Error("The agent did not confirm this operation. Try again.")),
+          30_000,
+        );
+        timer.unref?.();
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+    await stream.writable.close().catch(() => undefined);
+  }
+}
+
+export async function resolveAgentResource(
+  sessionId: string,
+  resource: AgentResourceVO,
+): Promise<AgentResourceVO> {
+  const result = await requestScopedAgentExtension(
+    sessionId,
+    "_buda.im/resource/read",
+    { resourceId: resource.id, uri: resource.uri },
+    "resourceRead",
+  );
+  return AgentResourceVOSchema.parse(result);
+}
+
+export async function getAgentSessionSnapshot(sessionId: string) {
+  return AgentSessionSnapshotVOSchema.parse(
+    await requestScopedAgentExtension(
+      sessionId,
+      "_buda.im/session/snapshot",
+      {},
+      "sessionSnapshot",
+    ),
+  );
 }
 
 /**
@@ -2194,7 +2770,8 @@ export async function* subscribeAgentSession(
     return;
   }
   if (signal?.aborted) return;
-  const queue: AgentSessionEventVO[] = s.buffer.filter((e) => e.seq > afterSeq);
+  let cursor = afterSeq;
+  const queue: AgentSessionEventVO[] = [];
   let notify: (() => void) | undefined;
   const listener = (event: AgentSessionEventVO) => {
     queue.push(event);
@@ -2203,15 +2780,41 @@ export async function* subscribeAgentSession(
   s.listeners.add(listener);
 
   try {
+    const durable = await loadSessionEvents(sessionId, afterSeq);
+    const buffered = s.buffer.filter(
+      (event) =>
+        event.seq > afterSeq && (s.transport === "local-subprocess" || event.seq <= s.persistedSeq),
+    );
+    const combined = new Map(
+      [...durable, ...buffered, ...queue].map((event) => [event.seq, event]),
+    );
+    queue.splice(0, queue.length, ...[...combined.values()].sort((a, b) => a.seq - b.seq));
     while (!signal?.aborted) {
       while (queue.length > 0) {
         const next = queue.shift();
-        if (next) yield next;
+        if (next && next.seq > cursor) {
+          cursor = next.seq;
+          yield next;
+        }
       }
-      if (s.status === "ended" || s.status === "failed") return;
+      if (
+        s.status === "ended" ||
+        s.status === "failed" ||
+        s.closed ||
+        sessions().get(sessionId) !== s
+      )
+        return;
       await new Promise<void>((resolve) => {
-        notify = resolve;
-        signal?.addEventListener("abort", () => resolve(), { once: true });
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const done = () => {
+          if (timer) clearTimeout(timer);
+          signal?.removeEventListener("abort", done);
+          resolve();
+        };
+        notify = done;
+        if (s.transport === "remote-websocket") timer = setTimeout(done, REMOTE_EVENT_POLL_MS);
+        signal?.addEventListener("abort", done, { once: true });
+        if (signal?.aborted) done();
       });
       notify = undefined;
     }

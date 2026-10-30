@@ -12,7 +12,7 @@ export interface RecordBulkUpdateInput {
 
 const mergeIntent = (input: RecordBulkUpdateInput): { autoMerge?: boolean } => {
   if (input.requireReview) return { autoMerge: false };
-  if (input.autoMerge) return { autoMerge: true };
+  if (input.autoMerge !== undefined) return { autoMerge: input.autoMerge };
   return {};
 };
 

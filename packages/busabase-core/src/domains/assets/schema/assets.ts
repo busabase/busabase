@@ -4,7 +4,7 @@
 // with busabase-cloud) and carries library metadata (name, space). Records/Docs
 // reference the stable `assetId`; the underlying `attachmentId` can be repointed
 // to "replace the file everywhere" without touching every reference.
-import { index, jsonb, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { boolean, index, jsonb, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 import { busabaseNodes } from "../../../db/schema";
 import { spaceIdColumn } from "../../../db/space-column";
 
@@ -19,6 +19,9 @@ export const busabaseAssets = pgTable(
     // The deduped physical file (open-domains `attachments.id`). Loose text ref,
     // not an FK — `attachments` is the auth-agnostic shared table.
     attachmentId: text("attachment_id").notNull(),
+    // Independent library retention is server-owned lifecycle state, never a
+    // caller-editable metadata key. Unmounted uploads are not purge candidates.
+    retainInLibrary: boolean("retain_in_library").notNull().default(false),
     name: text("name").notNull(),
     contentKind: text("content_kind").$type<AssetContentKind>().notNull().default("binary"),
     metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),

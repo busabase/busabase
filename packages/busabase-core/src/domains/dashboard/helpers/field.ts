@@ -2,6 +2,7 @@ import type { BaseFieldVO, ChangeRequestVO, FieldType, RecordVO } from "busabase
 import type { AttachmentRef } from "open-domains/attachments/types";
 import { iStringParse } from "openlib/i18n/i-string";
 import type { CoreI18nMessages } from "../../../i18n";
+import { buildAssetContentUrl } from "../../assets/utils/asset-content-url";
 import { getMemberIds } from "../../base/field-types";
 import { formatFormulaValue } from "../../base/formula/field-preview";
 import {
@@ -123,6 +124,11 @@ export const getFieldPreviewText = (
   if (field.type === "multiselect" && Array.isArray(value)) {
     return value.map((item) => getChoiceLabel(field, item)).join(", ");
   }
+  if (field.type === "attachment") {
+    return getAttachmentRefs(value)
+      .map((item) => item.fileName)
+      .join(", ");
+  }
   if (field.type === "number" && field.options.number?.format === "currency") {
     return formatNumberField(value, field.options.number);
   }
@@ -231,6 +237,36 @@ export const getFetchableRelationRecordIds = (records: RecordVO[], visibleBaseId
   ),
 ];
 
+/**
+ * Every record id a set of records renders as a chip, one level deep: their
+ * own relation cells plus Lookups whose target is itself a relation (the
+ * server already resolved those ids into `computedFields`, so the chips only
+ * need the linked records — no walking the chain client-side). Relations into
+ * a Base the viewer cannot open are skipped.
+ */
+export const getLinkedRecordIds = (records: RecordVO[], visibleBaseIds: Set<string>) => [
+  ...new Set([
+    ...getFetchableRelationRecordIds(records, visibleBaseIds),
+    ...records.flatMap((record) =>
+      Object.values(record.computedFields ?? {}).flatMap((computed) => {
+        const target = computed.targetField;
+        if (
+          target?.type !== "relation" ||
+          (target.options.targetBaseId && !visibleBaseIds.has(target.options.targetBaseId))
+        ) {
+          return [];
+        }
+        const values = computed.sources.length
+          ? computed.sources.map((source) => source.value)
+          : [computed.value];
+        return values.flatMap((value) =>
+          (Array.isArray(value) ? value : [value]).flatMap(getRelationRecordIds),
+        );
+      }),
+    ),
+  ]),
+];
+
 type AnyAttachmentRef = AttachmentRef & {
   attachmentId?: string;
   assetId?: string;
@@ -265,8 +301,8 @@ export const getAttachmentRefs = (value: unknown): AnyAttachmentRef[] => {
   return refs;
 };
 
-export const getSafeAttachmentUrl = (item: AttachmentRef): string | null =>
-  safeFetchableUrl(item.url);
+export const getSafeAttachmentUrl = (item: AttachmentRef & { assetId?: string }): string | null =>
+  item.assetId ? buildAssetContentUrl(item.assetId) : safeFetchableUrl(item.url);
 
 export const isRecordLongField = (field: BaseFieldVO) =>
   ["longtext", "markdown", "html", "code", "json", "yaml", "ai_summary", "whiteboard"].includes(

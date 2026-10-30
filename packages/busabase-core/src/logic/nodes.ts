@@ -17,7 +17,6 @@ import { fieldNameSchema } from "busabase-contract/domains/base/contract/base-sc
 import type { NodeSearchResultVO, NodeVO } from "busabase-contract/types";
 import { NodeIconSchema } from "busabase-contract/types";
 import { and, asc, desc, eq, ilike, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
-import { storage } from "openlib/storage";
 import { z } from "zod";
 import { getContextSpaceId, resolveActorId, withContextSourceMeta } from "../context";
 import { getDb } from "../db";
@@ -31,7 +30,8 @@ import {
   type NodePO,
   nodeListColumns,
 } from "../db/schema";
-import { docBodyKey } from "../domains/doc/handlers";
+import { releasePurgedNodeAssets } from "../domains/assets/logic/purge-assets-logic";
+import { processStorageCleanupJobs } from "../domains/assets/logic/storage-cleanup-logic";
 import { insertAuditEvent } from "./audit";
 import { insertCommit } from "./commits";
 import { id, now, rootNodeIdForSpace } from "./kernel";
@@ -638,8 +638,13 @@ export const collectSubtreeIds = async (
     const children = await db
       .select({ id: busabaseNodes.id })
       .from(busabaseNodes)
-      .where(inArray(busabaseNodes.parentId, frontier));
-    frontier = children.map((c) => c.id);
+      .where(
+        and(
+          eq(busabaseNodes.spaceId, getContextSpaceId()),
+          inArray(busabaseNodes.parentId, frontier),
+        ),
+      );
+    frontier = children.map((c) => c.id).filter((id) => !collected.includes(id));
     collected.push(...frontier);
   }
   return collected;
@@ -647,102 +652,89 @@ export const collectSubtreeIds = async (
 
 /**
  * Permanently delete an archived node (and its subtree) from the Trash.
- * Irreversible from the UI's perspective, but implemented as a SOFT delete: every
- * row in the subtree is stamped with `deletedAt` and kept forever (never a real
- * `db.delete()`), so it disappears from every list/tree/search query without
- * touching history (operations/commits/change-requests referencing it are left
- * untouched — they were only ever hard-deleted before to satisfy delete
- * ordering, which no longer applies now that nothing is physically removed).
- * This also sidesteps the Base commit history's FK-restrict on `busabaseBases`
- * that made a hard delete impossible for a Base subtree, so — unlike the old
- * hard-delete path — a subtree containing a Base is now allowed: the Base's
- * `busabase_bases` row (and any nested Bases') is soft-deleted in lockstep via
- * its 1:1 `nodeId`.
- *
- * Doc nodes are the one type backed by an object-storage blob outside this
- * table (`doc/handlers.ts`'s `docBodyKey` — a markdown object keyed by
- * nodeId, not tracked in any DB row). Nothing else in the codebase ever
- * deletes that object (`node_delete`'s soft-archive path must NOT touch it —
- * restore needs the body back), so purge — the one point genuinely never
- * reachable again — is where it's safe to free it: the full body already
- * survives forever in `busabase_commits.payload.body` history, so deleting the
- * live object here is not a loss of the "kept forever" audit guarantee above,
- * just the removal of a copy nothing will ever read again.
+ * Node/Base rows and their audit history remain soft-deleted, preserving the
+ * commit FKs and making retries idempotent. Retained attachment ownership is
+ * reconciled in the same transaction. Only objects with no surviving owner
+ * are retired, through durable exact-key tasks; storage I/O cannot run before
+ * commit. Archived content remains recoverable and is never treated as purged.
  */
 export const purgeNode = async (nodeId: string): Promise<{ purged: boolean }> => {
   await ensureReady();
   const db = await getDb();
   const spaceId = getContextSpaceId();
-  const [node] = await db
-    .select(nodeListColumns)
-    .from(busabaseNodes)
-    .where(and(eq(busabaseNodes.id, nodeId), eq(busabaseNodes.spaceId, spaceId)))
-    .limit(1);
-  if (!node) {
-    throw new ORPCError("NOT_FOUND", { message: `Node not found: ${nodeId}` });
-  }
-  if (!node.archivedAt) {
-    throw new ORPCError("CONFLICT", {
-      message:
-        "Only archived items can be permanently deleted. Archive it first (submit a delete-kind ChangeRequest and merge it), then purge again.",
+  await assertNodePermission(nodeId, "manage", undefined, db);
+  const result = await db.transaction(async (transaction) => {
+    const tx = transaction as unknown as typeof db;
+    const [node] = await tx
+      .select(nodeListColumns)
+      .from(busabaseNodes)
+      .where(and(eq(busabaseNodes.id, nodeId), eq(busabaseNodes.spaceId, spaceId)))
+      .limit(1)
+      .for("update");
+    if (!node) {
+      throw new ORPCError("NOT_FOUND", { message: `Node not found: ${nodeId}` });
+    }
+    if (!node.archivedAt) {
+      throw new ORPCError("CONFLICT", {
+        message:
+          "Only archived items can be permanently deleted. Archive it first (submit a delete-kind ChangeRequest and merge it), then purge again.",
+      });
+    }
+    if (node.deletedAt) {
+      return { purged: true };
+    }
+    const subtreeIds = await collectSubtreeIds(tx, nodeId);
+    await tx
+      .select({ id: busabaseNodes.id })
+      .from(busabaseNodes)
+      .where(and(eq(busabaseNodes.spaceId, spaceId), inArray(busabaseNodes.id, subtreeIds)))
+      .orderBy(busabaseNodes.id)
+      .for("update");
+    const timestamp = now();
+    await releasePurgedNodeAssets(tx, subtreeIds);
+    await tx
+      .update(busabaseNodes)
+      .set({ deletedAt: timestamp, updatedAt: timestamp })
+      .where(and(eq(busabaseNodes.spaceId, spaceId), inArray(busabaseNodes.id, subtreeIds)));
+
+    // Soft-delete any Base(s) in the subtree in lockstep (nodeId is a 1:1 FK to the
+    // node), mirroring how archive/restore keep the two tables in sync elsewhere.
+    const baseRows = await tx
+      .select({ id: busabaseBases.id })
+      .from(busabaseBases)
+      .where(inArray(busabaseBases.nodeId, subtreeIds));
+    if (baseRows.length > 0) {
+      await tx
+        .update(busabaseBases)
+        .set({ deletedAt: timestamp })
+        .where(
+          inArray(
+            busabaseBases.id,
+            baseRows.map((b) => b.id),
+          ),
+        );
+    }
+
+    // No change request — record it so the audit trail is complete (this is the
+    // one mutation the UI treats as irreversible).
+    await insertAuditEvent(tx, {
+      action: "node.purged",
+      metadata: {
+        nodeId,
+        slug: node.slug,
+        type: node.type,
+        purgedNodeCount: subtreeIds.length,
+      },
     });
-  }
-  if (node.deletedAt) {
-    throw new ORPCError("CONFLICT", {
-      message: "This item was already permanently deleted.",
-    });
-  }
-  const subtreeIds = await collectSubtreeIds(db, nodeId);
-  const timestamp = now();
-
-  await db
-    .update(busabaseNodes)
-    .set({ deletedAt: timestamp, updatedAt: timestamp })
-    .where(inArray(busabaseNodes.id, subtreeIds));
-
-  // Free any Doc bodies' storage objects in the purged subtree — see the
-  // module doc above for why this is the one safe point to do it. Best-effort
-  // and non-blocking: a storage hiccup here must never fail the purge itself
-  // (the DB rows are already the source of truth; `deleteObject` on either
-  // provider is itself safe against a missing/already-gone key).
-  const docNodeRows = await db
-    .select({ id: busabaseNodes.id })
-    .from(busabaseNodes)
-    .where(and(inArray(busabaseNodes.id, subtreeIds), eq(busabaseNodes.type, "doc")));
-  if (docNodeRows.length > 0) {
-    await Promise.allSettled(docNodeRows.map((row) => storage.deleteObject(docBodyKey(row.id))));
-  }
-
-  // Soft-delete any Base(s) in the subtree in lockstep (nodeId is a 1:1 FK to the
-  // node), mirroring how archive/restore keep the two tables in sync elsewhere.
-  const baseRows = await db
-    .select({ id: busabaseBases.id })
-    .from(busabaseBases)
-    .where(inArray(busabaseBases.nodeId, subtreeIds));
-  if (baseRows.length > 0) {
-    await db
-      .update(busabaseBases)
-      .set({ deletedAt: timestamp })
-      .where(
-        inArray(
-          busabaseBases.id,
-          baseRows.map((b) => b.id),
-        ),
-      );
-  }
-
-  // No change request — record it so the audit trail is complete (this is the
-  // one mutation the UI treats as irreversible).
-  await insertAuditEvent(db, {
-    action: "node.purged",
-    metadata: {
-      nodeId,
-      slug: node.slug,
-      type: node.type,
-      purgedNodeCount: subtreeIds.length,
-    },
+    return { purged: true };
   });
-  return { purged: true };
+  // Quota was released by the committed registry changes. Failure or process
+  // exit here leaves durable tasks for the next worker; no storage side effect
+  // can run before the purge transaction commits.
+  await processStorageCleanupJobs(db, { limit: 10 }).catch((error) => {
+    console.error("[busabase] Deferred permanent-delete object cleanup failed", error);
+  });
+  return result;
 };
 
 export const createNodeChangeRequest = async (

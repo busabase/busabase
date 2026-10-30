@@ -156,3 +156,52 @@ describe("side panel sources", () => {
     });
   });
 });
+
+describe("structured Agent Chat draft consumption", () => {
+  const context = {
+    id: "context-one",
+    name: "Review · Report",
+    uri: "busabase-agent-prompt:///context-one",
+    mimeType: "text/plain",
+    text: "Complete context. 🌏",
+  };
+  it("retains resource-only drafts until consumption and cannot replay them after a remount", () => {
+    openAgentChatTab("claude", "Claude Code", {
+      sessionId: "session",
+      draft: { id: "draft-one", text: "", resourceContext: [context] },
+    });
+    expect(useSidePanelStore.getState().tabs[0]?.payload).toMatchObject({
+      draft: { id: "draft-one", text: "", resourceContext: [context] },
+    });
+    consumeAgentChatDraft("claude", "draft-one");
+    expect(useSidePanelStore.getState().tabs[0]?.payload).toEqual({
+      agentSlug: "claude",
+      sessionId: "session",
+    });
+    consumeAgentChatDraft("claude", "draft-one");
+    expect(useSidePanelStore.getState().tabs[0]?.payload).toEqual({
+      agentSlug: "claude",
+      sessionId: "session",
+    });
+  });
+
+  it("keeps a later explicit handoff when the previous draft is consumed late", () => {
+    openAgentChatTab("claude", "Claude Code", {
+      draft: { id: "draft-one", text: "", resourceContext: [context] },
+    });
+    const second = {
+      ...context,
+      id: "context-two",
+      uri: "busabase-agent-prompt:///context-two",
+      text: "Second complete context.",
+    };
+    openAgentChatTab("claude", "Claude Code", {
+      draft: { id: "draft-two", text: "", resourceContext: [second] },
+    });
+    consumeAgentChatDraft("claude", "draft-one");
+    expect(useSidePanelStore.getState().tabs).toHaveLength(1);
+    expect(useSidePanelStore.getState().tabs[0]?.payload).toMatchObject({
+      draft: { id: "draft-two", text: "", resourceContext: [second] },
+    });
+  });
+});

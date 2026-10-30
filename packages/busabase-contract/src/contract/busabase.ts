@@ -19,6 +19,7 @@ import { fileTreeContract } from "../domains/filetree/contract";
 import { formContract } from "../domains/form/contract";
 import { guidesContract } from "../domains/guides/contract";
 import { installContract } from "../domains/install/contract";
+import { spaceInstructionsContract } from "../domains/space-instructions/contract";
 import { templatesContract } from "../domains/templates/contract";
 import { vaultContract } from "../domains/vault/contract";
 import { webhookContract } from "../domains/webhook/contract";
@@ -235,7 +236,7 @@ export const busabaseContractRoutes = {
       summary:
         "Search files, node content, Base records, and custom prompts with one pattern (unified grep)",
       successDescription:
-        "Use when you need every exact occurrence of a string or regex, with line and column; for a ranked browse use `search`, and to find a skill or prompt for a job use playbooks search. Streaming regex/literal matches across every in-scope source — Drive/Skill files (each file match carries `owner`: the node it belongs to, e.g. which skill a SKILL.md hit is in, with its folder path), node content (Doc/HTML/whiteboard/workflow), Base records (canonical headCommit.payload, never the truncated search projection), and custom agent prompts (`prompts`: label and body in every locale; a match names nodeId, key, locale, field). Omitted `sources` scans all four. One shared maxMatches budget and one deadline for the whole call: each requested source gets a floor of floor(maxMatches / sources) and unused budget rolls forward, in the fixed order files → nodes → records → prompts. Per-source honest coverage (files keeps missing/stale/unsearchable/errored/notReached; nodes, records and prompts report scanned/errored/notReached). truncated is set when any source truncated or has notReached > 0 — then narrow with `sources`, `scope.records.baseSlugs`, or `scope.files.drivePath` rather than raising maxMatches.",
+        "Use when you need every exact occurrence of a string or regex, with line and column; for a ranked browse use `search`, and to find a skill or prompt for a job use playbooks search. Streaming regex/literal matches across every in-scope source — Drive/Skill files (each file match carries `owner`: the node it belongs to, e.g. which skill a SKILL.md hit is in, with its folder path), node content (Doc, folder readme, HTML, whiteboard, workflow), Base records (canonical headCommit.payload, never the truncated search projection), and custom agent prompts (`prompts`: label and body in every locale; a match names nodeId, key, locale, field). Omitted `sources` scans all four. One shared maxMatches budget and one deadline for the whole call: each requested source gets a floor of floor(maxMatches / sources) and unused budget rolls forward, in the fixed order files → nodes → records → prompts. Per-source honest coverage (files keeps missing/stale/unsearchable/errored/notReached; nodes, records and prompts report scanned/errored/notReached). truncated is set when any source truncated or has notReached > 0 — then narrow with `sources`, `scope.records.baseSlugs`, or `scope.files.drivePath` rather than raising maxMatches.",
     })
     .input(UnifiedGrepInputSchema)
     .output(UnifiedGrepResultVOSchema),
@@ -416,7 +417,7 @@ export const busabaseContractRoutes = {
         tags: ["Nodes", "Change Requests"],
         summary: "Update node content",
         successDescription:
-          "ChangeRequest carrying the proposed content. Merged immediately when the actor holds write access on the node and `autoMerge` was not explicitly `false`; otherwise left `in_review` for a human. Accepts doc, whiteboard, workflow, and html nodes — the types that own exactly one document. `nodeId` takes an id or a slug (looked up among nodes of `content.kind`), same as `nodes.get`.",
+          'ChangeRequest carrying the proposed content. Merged immediately when the actor holds write access on the node and `autoMerge` was not explicitly `false`; otherwise left `in_review` for a human. Accepts doc, folder, whiteboard, workflow, and html nodes — the types that own exactly one document. A folder write is `{ kind: "folder", body }` and lands at `busabase/nodes/{id}/folder/readme.md` (missing readme reads as an empty string; it does not change `description` or children). `nodeId` takes an id or a slug (looked up among nodes of `content.kind`), same as `nodes.get`.',
       })
       .input(updateNodeContentInputSchema)
       .output(changeRequestSchema),
@@ -427,19 +428,35 @@ export const busabaseContractRoutes = {
         tags: ["Nodes"],
         summary: "Read an exact line range from a node's content",
         successDescription:
-          'Lines [startLine, endLine] (range capped at 2000 lines / ~2MB response) from any node type that stores content — doc, html, whiteboard, workflow. The follow-up to a Unified Grep match with `source: "nodes"`, so an agent can read just the lines around a match instead of `nodes.get`\'s entire document. Line numbers mean whatever they mean for that node type: real source lines for doc/html, positions within the extracted text for the JSON-backed types. `nodeId` takes an id or a slug. A node of another type (a Skill, Drive or AirApp file tree, a Base, a folder) is a 400 that names the endpoint to read it with instead. Replaces `GET /docs/{nodeId}/lines`, which resolved doc nodes only.',
+          'Lines [startLine, endLine] (range capped at 2000 lines / ~2MB response) from any node type that stores content — doc, folder, html, whiteboard, workflow. The follow-up to a Unified Grep match with `source: "nodes"`, so an agent can read just the lines around a match instead of `nodes.get`\'s entire document. Line numbers mean whatever they mean for that node type: real source lines for doc/folder/html, positions within the extracted text for the JSON-backed types. A folder with no readme object reads as zero lines. `nodeId` takes an id or a slug. A node of another type (a Skill, Drive or AirApp file tree, a Base) is a 400 that names the endpoint to read it with instead. Replaces `GET /docs/{nodeId}/lines`, which resolved doc nodes only.',
       })
       .input(ReadNodeLinesInputSchema)
       .output(ReadLinesVOSchema),
+    /**
+     * Permanently delete an already-archived node (and its subtree, Bases
+     * included) — the Trash page's "Delete forever". RPC-only on purpose:
+     * emptying a Trash item can never be undone, so only a person clicking
+     * through the UI's confirm dialog may do it, never an API key or an agent.
+     * Archiving (`node_archive` / `bases.lifecycleChangeRequest`) stays public
+     * — it is a reviewable, restorable change request; purge is neither.
+     *
+     * The `.route(...)` below is commented out rather than deleted so it is
+     * obvious what was here: without a route the procedure is left out of the
+     * OpenAPI spec, the Python SDK, every MCP tool catalog, and the CLI's
+     * generated commands. The dashboard calls it over `/api/rpc` and is
+     * unaffected. Each `/api/v1` router also drops it by hand (see the
+     * `_rpcOnlyNodePurge` lines), because a route-less procedure is otherwise
+     * still SERVED at the path oRPC infers.
+     */
     purge: oc
-      .route({
-        method: "DELETE",
-        path: "/nodes/{nodeId}",
-        tags: ["Nodes"],
-        summary: "Permanently delete an archived node",
-        successDescription:
-          "Irreversibly removed an archived folder/doc/skill (and its subtree). Refused unless archived and refused if the subtree contains a Base.",
-      })
+      // .route({
+      //   method: "DELETE",
+      //   path: "/nodes/{nodeId}",
+      //   tags: ["Nodes"],
+      //   summary: "Permanently delete an archived node",
+      //   successDescription:
+      //     "Irreversibly removed an archived folder/doc/skill (and its subtree). Refused unless archived and refused if the subtree contains a Base.",
+      // })
       .input(z.object({ nodeId: z.string() }))
       .output(z.object({ purged: z.boolean() })),
     updateVisibility: oc
@@ -814,6 +831,7 @@ export const busabaseContractRoutes = {
   // (`nodes.list({ types: ["folder"] })` / `nodes.get`).
   forms: formContract,
   assets: assetsContract,
+  spaceInstructions: spaceInstructionsContract,
   vault: vaultContract,
   agents: agentsContract,
   webhooks: webhookContract,

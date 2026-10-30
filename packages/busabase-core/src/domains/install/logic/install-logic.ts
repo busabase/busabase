@@ -24,7 +24,7 @@ import { type PackageNode, type PackageTree, suggestSlug } from "busabase-packag
 import { getContextSpaceId } from "../../../context";
 import { rootNodeIdForSpace } from "../../../logic/kernel";
 import { hasNodePermission, shouldAutoMerge } from "../../../logic/node-acl";
-import { requireSpaceManagerForInstall } from "./_guard";
+import { requireWriteForInstall } from "./_guard";
 import { fetchPackageFiles } from "./github-source";
 
 /**
@@ -74,7 +74,7 @@ interface PreparedInstall {
 const prepareInstall = async (
   input: Pick<InstallPlanFromGithubDTO, "repoUrl" | "intoFolder" | "rename">,
 ): Promise<PreparedInstall> => {
-  requireSpaceManagerForInstall();
+  requireWriteForInstall();
 
   const { source, files } = await fetchPackageFiles(input.repoUrl);
 
@@ -125,16 +125,16 @@ const prepareInstall = async (
  * `autoMerge` + `write` means "just do it", and only an explicit `false` forces
  * review. Content used to be pinned review-first here as a trust boundary
  * against the package author, but that check does not do what it looks like it
- * does: `requireSpaceManagerForInstall` already limits installing to a space
- * owner/admin, so the human approving those change requests was always the same
- * human who chose the repo a moment earlier. Deciding to install IS the trust
+ * does: `requireWriteForInstall` already limits installing to someone who can
+ * write in the space, so the human approving those change requests could always
+ * have written the same content directly, and chose the repo a moment earlier. Deciding to install IS the trust
  * decision; making them re-approve their own import afterwards was ceremony.
  *
  * The workspace root is the right node to ask about: `intoFolder` may not exist
  * yet on a first install, and the root is what every install ultimately hangs
  * off. It is also what keeps the one cap that still bites — a credential with a
  * `changeRequest` permission ceiling resolves below `write` here and therefore
- * still lands its content for review, manager or not.
+ * still lands its content for review, whatever the caller's role.
  */
 const callerMergesDirectly = async (requestedAutoMerge: boolean | undefined): Promise<boolean> =>
   shouldAutoMerge(
@@ -422,17 +422,14 @@ const toPlanVO = (
 
   const manifest = plan.tree.manifest;
 
-  // The root `SKILL.md` becomes a real Skill node on install (`apply.ts`), but
-  // the package tree keeps it BESIDE `nodes` rather than inside it — so a
-  // preview built from `nodes` alone silently omits the one node that decides
-  // whether an agent can use what was just installed, and reports `skills: 0`
-  // for a package that plainly carries a manual. Fold it in here, where the
-  // outline is built for a human to read, rather than in `countTree` (whose
-  // counts also police the file-count cap on the bytes actually walked).
+  // The root `SKILL.md` becomes a real Skill node on install (`apply.ts`) for a
+  // template, but the package tree keeps it BESIDE `nodes` rather than inside
+  // it — so the outline needs the row added here. `plan.counts` already
+  // includes it (`countTree`), so only the row is folded in.
   const rootSkill = plan.tree.rootSkill;
   const nodes = flattenNodes(plan.tree.nodes, "", 0);
-  const counts = { ...plan.counts };
-  if (rootSkill) {
+  const counts = plan.counts;
+  if (rootSkill && plan.isTemplate) {
     nodes.unshift({
       path: rootSkill.slug,
       slug: rootSkill.slug,
@@ -441,8 +438,6 @@ const toPlanVO = (
       depth: 0,
       fileCount: rootSkill.files.length,
     });
-    counts.skills += 1;
-    counts.files += rootSkill.files.length;
   }
 
   return {

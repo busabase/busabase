@@ -13,8 +13,11 @@ import { SPALink as Link } from "openlib/ui/dashboard";
 import { Fragment, type ReactNode, useState } from "react";
 import { useCoreI18n } from "../../../i18n";
 import type { BusabaseBreadcrumbItem } from "../helpers/view-types";
+import { useNodeLocator } from "../hooks/use-copy-locator";
 import { useTopbarNodeActionsStore } from "../store/topbar-node-actions-store";
 import { useTopbarNodeInfoStore } from "../store/topbar-node-info-store";
+import { useIsAnonymousVisitor } from "../visitor-context";
+import { CopyLocatorIconButton } from "./copy-locator-button";
 import { NodeSettingsDialog } from "./node-settings-dialog";
 
 /**
@@ -95,7 +98,9 @@ export function BusabaseTopbarBreadcrumb({
                   }`}
                 />
               ) : null}
-              <BreadcrumbItem className={`min-w-0 ${hideOnMobile ? "hidden sm:inline-flex" : ""}`}>
+              <BreadcrumbItem
+                className={`min-w-0 ${isNodeCrumb ? "group/node-crumb" : ""} ${hideOnMobile ? "hidden sm:inline-flex" : ""}`}
+              >
                 {item.href && !isLast ? (
                   <BreadcrumbLink asChild className={`min-w-0 truncate ${emphasis}`}>
                     <Link
@@ -172,6 +177,11 @@ export function TopbarNodeInfoButton() {
           </TooltipContent>
         </Tooltip>
       </TooltipProvider>
+      <TopbarNodeLocatorButton
+        nodeId={info.nodeId}
+        nodeName={info.nodeName}
+        nodeType={info.nodeType}
+      />
       <NodeSettingsDialog
         initialTab="info"
         nodeId={info.nodeId}
@@ -183,6 +193,32 @@ export function TopbarNodeInfoButton() {
         orpc={info.orpc}
       />
     </>
+  );
+}
+
+/**
+ * Copy this node's locator (target line + connection check) for an agent —
+ * Notion's "copy link" icon, but producing something an agent can act on.
+ * Revealed with the Info marker's row on hover/focus so the resting topbar is
+ * unchanged; always shown where there is no hover (touch).
+ */
+function TopbarNodeLocatorButton({
+  nodeId,
+  nodeName,
+  nodeType,
+}: {
+  nodeId: string;
+  nodeName: string;
+  nodeType: string;
+}) {
+  const isAnon = useIsAnonymousVisitor();
+  const locator = useNodeLocator({ nodeId, nodeName, nodeType });
+  if (isAnon) return null;
+  return (
+    <CopyLocatorIconButton
+      className="opacity-0 focus-visible:opacity-100 group-focus-within/node-crumb:opacity-100 group-hover/node-crumb:opacity-100 [@media(hover:none)]:opacity-100"
+      locator={locator}
+    />
   );
 }
 

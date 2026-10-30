@@ -12,6 +12,7 @@ import { dashboardVi } from "../../../i18n/vi";
 import { dashboardZhCN } from "../../../i18n/zh-CN";
 import { dashboardZhTW } from "../../../i18n/zh-TW";
 import {
+  buildCreateNodePrompts,
   buildNodeAgentPrompts,
   type NodePromptContext,
   stripTargetPlaceholderLines,
@@ -50,6 +51,24 @@ const FIELD = { fieldName: "Title", fieldSlug: "title", fieldType: "text" } as c
 const RECORD = { recordId: "rec_1", recordTitle: "Launch plan" } as const;
 
 describe("buildNodeAgentPrompts scoping", () => {
+  it("keeps structured node target metadata for built-in, custom, and capability prompts", () => {
+    const { scenarios, capabilities } = buildNodeAgentPrompts(
+      {
+        ...BASE_CONTEXT,
+        customPrompts: [{ key: "review", label: "Review", body: "Read every record" }],
+      },
+      "en",
+      coreMessagesEn,
+    );
+    expect(scenarios.some((prompt) => prompt.source === "custom-scenario")).toBe(true);
+    for (const prompt of [...scenarios, ...capabilities]) {
+      expect(prompt.nodeTarget).toEqual({
+        nodeId: BASE_CONTEXT.nodeId,
+        nodeName: BASE_CONTEXT.nodeName,
+        nodeType: BASE_CONTEXT.nodeType,
+      });
+    }
+  });
   it("names the whole node and offers the node's own scenarios by default", () => {
     const { scenarios, capabilities } = build();
     expect(scenarios.map((prompt) => prompt.key)).toContain("base-bulk-import");
@@ -82,6 +101,7 @@ describe("buildNodeAgentPrompts scoping", () => {
   it("record scope pins the row and keeps only record operations", () => {
     const { scenarios, capabilities } = build({ kind: "record", ...RECORD });
     expect(scenarios.map((prompt) => prompt.key)).toEqual([
+      "record-read",
       "record-complete",
       "record-rewrite",
       "record-explain",
@@ -123,6 +143,7 @@ describe("buildNodeAgentPrompts scoping", () => {
     "base-find",
     "base-summarize",
     "field-audit",
+    "record-read",
     "record-explain",
     "cell-explain",
   ]);
@@ -642,6 +663,7 @@ describe("buildNodeAgentPrompts custom scenario prompts", () => {
       coreMessagesEn,
     );
     expect(recordScoped.scenarios.map((p) => p.key)).toEqual([
+      "record-read",
       "record-complete",
       "record-rewrite",
       "record-explain",
@@ -705,4 +727,48 @@ describe("Doc read prompt", () => {
       expect(prompt?.body).not.toContain(expected.approvalInstruction);
     },
   );
+});
+
+// Reading the space's global instructions is the busabase skill's job (SKILL.md,
+// MCP server instructions, generated guides) — every task prompt assumes that
+// skill is installed, so repeating the rule here would only add noise.
+describe("space instructions stay out of task prompts", () => {
+  it("leaves the read rule to the busabase skill on read-only, write, scoped and create prompts", () => {
+    const sets = [
+      buildNodeAgentPrompts(BASE_CONTEXT, "en", coreMessagesEn),
+      buildNodeAgentPrompts(
+        { ...BASE_CONTEXT, scope: { kind: "field", ...FIELD } },
+        "en",
+        coreMessagesEn,
+      ),
+      buildNodeAgentPrompts(
+        { ...BASE_CONTEXT, scope: { kind: "record", ...RECORD } },
+        "en",
+        coreMessagesEn,
+      ),
+      buildNodeAgentPrompts(
+        { ...BASE_CONTEXT, scope: { kind: "cell", ...FIELD, ...RECORD } },
+        "en",
+        coreMessagesEn,
+      ),
+      buildNodeAgentPrompts(
+        {
+          ...BASE_CONTEXT,
+          customPrompts: [
+            { key: "review", label: "Review", body: "Review {target}", intent: "read-only" },
+          ],
+        },
+        "en",
+        coreMessagesEn,
+      ),
+      buildCreateNodePrompts({ spaceId: "spc_acme", spaceName: "Acme" }, "en"),
+    ];
+    for (const { scenarios, capabilities } of sets) {
+      expect(scenarios.length + capabilities.length).toBeGreaterThan(0);
+      for (const prompt of [...scenarios, ...capabilities]) {
+        expect(prompt.body, prompt.key).not.toContain("space_instructions_get");
+        expect(prompt.body, prompt.key).not.toContain("space-instructions");
+      }
+    }
+  });
 });

@@ -192,6 +192,42 @@ describe("node ACL", () => {
     );
   });
 
+  it("bases.get reports the viewer's effective node level on the Base", async () => {
+    await seedScenario("acl-base-viewer-level");
+    const raw: RawClient = createRouterClient(busabaseRouter);
+    const { baseId, nodeId } = await asManager("alice", async () => {
+      const base = await raw.bases.create({ name: "Ledger", slug: "ledger", autoMerge: true });
+      if ("status" in base) throw new Error("expected materialized base");
+      await raw.nodes.updateVisibility({ nodeId: base.nodeId, visibility: "private" });
+      return { baseId: base.id, nodeId: base.nodeId };
+    });
+    await asManager("alice", () =>
+      raw.nodes.principals.add({ nodeId, principalType: "user", principalId: "bob", role: "read" }),
+    );
+
+    await asManager("alice", async () => {
+      expect((await raw.bases.get({ baseId })).viewerPermissionLevel).toBe("manage");
+      // List stays lean: no per-Base ACL lookup.
+      const listed = (await raw.bases.list({})).find((b) => b.id === baseId);
+      expect(listed && "viewerPermissionLevel" in listed).toBe(false);
+    });
+    await asMember("bob", async () => {
+      expect((await raw.bases.get({ baseId })).viewerPermissionLevel).toBe("read");
+    });
+
+    await asManager("alice", () =>
+      raw.nodes.principals.add({
+        nodeId,
+        principalType: "user",
+        principalId: "carol",
+        role: "changeRequest",
+      }),
+    );
+    await asMember("carol", async () => {
+      expect((await raw.bases.get({ baseId })).viewerPermissionLevel).toBe("changeRequest");
+    });
+  });
+
   it("hides a private base from a non-granted member (list + direct get + search)", async () => {
     await seedScenario("acl-private-hide");
     const raw: RawClient = createRouterClient(busabaseRouter);
@@ -417,13 +453,26 @@ describe("node ACL", () => {
         role: "changeRequest",
       }),
     );
-    await asMember("bob", async () => {
+    const crId = await asMember("bob", async () => {
       const cr = await raw.bases.createChangeRequest({
         baseId,
         fields: { title: "ok now" },
         submittedBy: "bob",
       });
       expect(cr.id).toBeTruthy();
+      // A changeRequest grant may propose but not approve — including its own CR.
+      expect((await raw.changeRequests.get({ changeRequestId: cr.id })).viewerCanApprove).toBe(
+        false,
+      );
+      const review = await raw.changeRequests.review({
+        changeRequestIds: [cr.id],
+        verdict: "approved",
+      });
+      expect(review.results[0]).toMatchObject({ ok: false, code: "FORBIDDEN" });
+      return cr.id;
+    });
+    await asManager("alice", async () => {
+      expect((await raw.changeRequests.get({ changeRequestId: crId })).viewerCanApprove).toBe(true);
     });
   });
 

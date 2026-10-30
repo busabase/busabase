@@ -2,11 +2,14 @@
 
 import { useQuery } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
+import { Button } from "kui/button";
 import { cn } from "kui/utils";
 import type { LucideIcon } from "lucide-react";
 import { Bot, ChevronLeft, ChevronRight, Loader2, Pin, Plus, Search } from "lucide-react";
 import { useSyncExternalStore } from "react";
 import { useCoreI18n } from "../../../i18n";
+import { useAgentConnectionActions } from "../../agents/components/agent-connection-actions";
+import { AgentConnectionList } from "../../agents/components/agent-connection-list";
 import type { KnownNodeCache } from "../helpers/known-node-cache";
 import { NodeAvatar } from "../helpers/node-icons";
 import {
@@ -190,10 +193,12 @@ export interface SidePanelAgentPickerProps {
  */
 export function SidePanelAgentPicker({ orpc, onBack, onNavigate }: SidePanelAgentPickerProps) {
   const messages = useCoreI18n();
+  const { renderActions, dialogs } = useAgentConnectionActions(orpc);
 
-  const connections = useQuery(
-    orpc.agents.connections.list.queryOptions({ input: { scope: "space" } }),
-  );
+  const connections = useQuery({
+    ...orpc.agents.connections.list.queryOptions({ input: { scope: "space" } }),
+    refetchInterval: 4000,
+  });
   const agents = connections.data ?? [];
 
   return (
@@ -201,16 +206,27 @@ export function SidePanelAgentPicker({ orpc, onBack, onNavigate }: SidePanelAgen
       <div className="flex items-center gap-2">
         <button
           aria-label={messages.sidePanel.agentPickerBack}
-          className="inline-flex shrink-0 items-center justify-center rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          className="inline-flex size-11 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           onClick={onBack}
           title={messages.sidePanel.agentPickerBack}
           type="button"
         >
           <ChevronLeft className="size-4" />
         </button>
-        <h2 className="font-medium text-foreground text-sm">
+        <h2 className="min-w-0 flex-1 font-medium text-foreground text-sm">
           {messages.sidePanel.agentPickerTitle}
         </h2>
+        <Button
+          aria-label={messages.sidePanel.agentPickerConnect}
+          className="size-11 shrink-0"
+          onClick={() => onNavigate("/agents/new")}
+          size="icon"
+          title={messages.sidePanel.agentPickerConnect}
+          type="button"
+          variant="ghost"
+        >
+          <Plus aria-hidden="true" className="size-4" />
+        </Button>
       </div>
 
       {connections.isPending ? (
@@ -236,37 +252,15 @@ export function SidePanelAgentPicker({ orpc, onBack, onNavigate }: SidePanelAgen
       ) : agents.length === 0 ? (
         <p className="px-1 text-muted-foreground text-xs">{messages.sidePanel.agentPickerEmpty}</p>
       ) : (
-        <div className="flex flex-col gap-2">
-          {agents.map((agent) => (
-            <button
-              className="flex items-center gap-3 rounded-lg border border-border/60 p-3 text-left transition-colors hover:border-border hover:bg-accent/50"
-              key={agent.slug}
-              onClick={() =>
-                openAgentChatTab(agent.slug, agent.agentName, {
-                  sessionId: agent.latest?.id,
-                })
-              }
-              type="button"
-            >
-              <Bot className="size-4 shrink-0 text-muted-foreground" />
-              <span className="min-w-0 flex-1 truncate font-medium text-foreground text-xs">
-                {agent.agentName}
-              </span>
-            </button>
-          ))}
-        </div>
+        <AgentConnectionList
+          connections={agents}
+          onSelect={(agent) =>
+            openAgentChatTab(agent.slug, agent.agentName, { sessionId: agent.latest?.id })
+          }
+          renderActions={renderActions}
+        />
       )}
-
-      <button
-        className="flex items-center gap-3 rounded-lg border border-border/60 border-dashed p-3 text-left transition-colors hover:border-border hover:bg-accent/50"
-        onClick={() => onNavigate("/agents/new")}
-        type="button"
-      >
-        <Plus className="size-4 shrink-0 text-muted-foreground" />
-        <span className="min-w-0 flex-1 font-medium text-foreground text-xs">
-          {messages.sidePanel.agentPickerConnect}
-        </span>
-      </button>
+      {dialogs}
     </div>
   );
 }

@@ -12,11 +12,12 @@ import { and, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
 import {
   confirmUpload,
   deleteAttachmentSafely,
+  getAttachmentUploadPolicy,
   requestUploadUrl,
 } from "open-domains/attachments/logic";
 import type { ConfirmUploadDTO, RequestUploadUrlDTO } from "open-domains/attachments/types";
 import { storage } from "openlib/storage";
-import { getContextSpaceId, resolveActorId } from "../../context";
+import { getContextSpaceId, LOCAL_SPACE_ID, resolveActorId } from "../../context";
 import { db, getDb } from "../../db";
 import { attachments, busabaseBaseFields, busabaseBases, busabaseNodes } from "../../db/schema";
 import { insertAuditEvent } from "../../logic/audit";
@@ -31,6 +32,7 @@ import {
   deriveAssetTextStatus,
   gcTextObjectIfUnreferenced,
 } from "./logic/asset-texts-logic";
+import { withStorageKeyRegistration } from "./logic/storage-cleanup-logic";
 import { type AssetTextStatus, busabaseAssetTexts } from "./schema/asset-texts";
 import {
   type AssetContentKind,
@@ -149,24 +151,47 @@ export const createAsset = async (
     contentKind?: AssetContentKind;
     metadata?: Record<string, unknown>;
     createdBy?: string;
+    retainInLibrary?: boolean;
   },
   tx?: Awaited<ReturnType<typeof getDb>>,
 ): Promise<string> => {
   const db = tx ?? (await getDb());
-  const assetId = id("ast");
-  const [inserted] = await db
-    .insert(busabaseAssets)
-    .values({
-      id: assetId,
-      attachmentId,
-      name,
-      contentKind: options?.contentKind ?? "binary",
-      metadata: options?.metadata ?? {},
-      createdBy: options?.createdBy ?? resolveActorId("local-producer"),
-    })
-    .returning();
-  if (!inserted) throw new Error("Failed to create asset");
-  return inserted.id;
+  if (!tx)
+    return db.transaction((transaction) =>
+      createAsset(attachmentId, name, options, transaction as unknown as typeof db),
+    );
+  const [registered] = await db
+    .select({ storageKey: attachments.storageKey })
+    .from(attachments)
+    .where(eq(attachments.id, attachmentId))
+    .limit(1);
+  if (!registered) throw new ORPCError("NOT_FOUND", { message: "Attachment no longer exists" });
+  return withStorageKeyRegistration(db, registered.storageKey, async (transaction) => {
+    // Serialize adoption with retirement. A deduplicated upload response may
+    // otherwise carry an attachment id that a concurrent purge already removed.
+    const [attachment] = await transaction
+      .select({ id: attachments.id })
+      .from(attachments)
+      .where(eq(attachments.id, attachmentId))
+      .for("update")
+      .limit(1);
+    if (!attachment) throw new ORPCError("NOT_FOUND", { message: "Attachment no longer exists" });
+    const assetId = id("ast");
+    const [inserted] = await transaction
+      .insert(busabaseAssets)
+      .values({
+        id: assetId,
+        attachmentId,
+        retainInLibrary: options?.retainInLibrary ?? false,
+        name,
+        contentKind: options?.contentKind ?? "binary",
+        metadata: options?.metadata ?? {},
+        createdBy: options?.createdBy ?? resolveActorId("local-producer"),
+      })
+      .returning();
+    if (!inserted) throw new Error("Failed to create asset");
+    return inserted.id;
+  });
 };
 
 /**
@@ -181,12 +206,62 @@ export const ensureAsset = async (
 ): Promise<string> => {
   const db = tx ?? (await getDb());
   const spaceId = getContextSpaceId();
+  const policy = getAttachmentUploadPolicy();
+  // The single-tenant OSS library historically accepts producer-owned legacy
+  // rows. Tenant contexts must validate the attachment before adopting it.
+  let attachment: typeof attachments.$inferSelect | undefined;
+  if (policy || spaceId !== LOCAL_SPACE_ID) {
+    [attachment] = await db
+      .select()
+      .from(attachments)
+      .where(eq(attachments.id, attachmentId))
+      .limit(1);
+    const ownsLegacyAttachment =
+      attachment?.spaceId === null && attachment.userId === resolveActorId("local");
+    if (!attachment || (attachment.spaceId !== spaceId && !ownsLegacyAttachment)) {
+      throw new ORPCError("NOT_FOUND", { message: "Attachment is not available in this space" });
+    }
+  }
   const [existing] = await db
     .select({ id: busabaseAssets.id })
     .from(busabaseAssets)
     .where(and(eq(busabaseAssets.spaceId, spaceId), eq(busabaseAssets.attachmentId, attachmentId)))
     .limit(1);
-  return existing?.id ?? createAsset(attachmentId, name, undefined, db);
+  if (existing) return existing.id;
+  if (!policy || !attachment || attachment.spaceId === spaceId) {
+    return createAsset(attachmentId, name, undefined, db);
+  }
+
+  // An unscoped legacy attachment acquires billable ownership when this Asset
+  // is inserted. Apply the same locked, post-insert quota check as an upload;
+  // on rejection the Asset insert rolls back with the caller's transaction.
+  const registered = attachment;
+  let assetId: string | undefined;
+  await policy.confirmUpload(
+    {
+      input: {
+        storageKey: registered.storageKey,
+        fileName: registered.fileName,
+        mimeType: registered.mimeType,
+        sizeBytes: registered.sizeBytes,
+        spaceId,
+      },
+      userId: resolveActorId("local"),
+      db,
+      attachmentsTable: attachments,
+    },
+    async (transaction) => {
+      assetId = await createAsset(attachmentId, name, undefined, transaction);
+      return {
+        success: true,
+        attachmentId,
+        storageKey: registered.storageKey,
+        publicUrl: storage.getPublicUrl(registered.storageKey),
+      };
+    },
+  );
+  if (!assetId) throw new Error("Failed to adopt attachment as an asset");
+  return assetId;
 };
 
 export const requestAssetUploadUrl = async (input: RequestUploadUrlDTO) => {
@@ -613,6 +688,7 @@ export const deleteAssetRow = async (
   const [textRow] = await db
     .select({
       textContentHash: busabaseAssetTexts.textContentHash,
+      textStorageKey: busabaseAssetTexts.textStorageKey,
       writtenBy: busabaseAssetTexts.writtenBy,
     })
     .from(busabaseAssetTexts)
@@ -626,7 +702,7 @@ export const deleteAssetRow = async (
   // — only derived (`putText`-written) text has a content-addressed object
   // that can leak once its row is gone.
   if (textRow && textRow.writtenBy !== "auto" && textRow.textContentHash) {
-    await gcTextObjectIfUnreferenced(textRow.textContentHash, null, db);
+    await gcTextObjectIfUnreferenced(textRow.textContentHash, null, db, textRow.textStorageKey);
   }
 
   const [stillSharedByOtherAsset] = await db
@@ -675,6 +751,34 @@ export interface AssetUsageInput {
   metadata?: Record<string, unknown>;
 }
 
+/** Mounts serialize with permanent deletion and never revive a deleted node. */
+const lockAssetUsageTargets = async (
+  db: Awaited<ReturnType<typeof getDb>>,
+  nodeId: string,
+  assetIds: string[],
+): Promise<void> => {
+  const [node] = await db
+    .select({ deletedAt: busabaseNodes.deletedAt })
+    .from(busabaseNodes)
+    .where(and(eq(busabaseNodes.id, nodeId), eq(busabaseNodes.spaceId, getContextSpaceId())))
+    .for("update")
+    .limit(1);
+  if (!node || node.deletedAt)
+    throw new ORPCError("NOT_FOUND", { message: "Content no longer exists" });
+  const uniqueIds = [...new Set(assetIds)].sort();
+  if (!uniqueIds.length) return;
+  const assets = await db
+    .select({ id: busabaseAssets.id })
+    .from(busabaseAssets)
+    .where(
+      and(eq(busabaseAssets.spaceId, getContextSpaceId()), inArray(busabaseAssets.id, uniqueIds)),
+    )
+    .orderBy(busabaseAssets.id)
+    .for("update");
+  if (assets.length !== uniqueIds.length)
+    throw new ORPCError("NOT_FOUND", { message: "Asset no longer exists" });
+};
+
 export const replaceAssetUsageRows = async (
   where: {
     ownerType: AssetUsageOwnerType;
@@ -688,6 +792,15 @@ export const replaceAssetUsageRows = async (
   tx?: Awaited<ReturnType<typeof getDb>>,
 ): Promise<void> => {
   const db = tx ?? (await getDb());
+  if (!tx)
+    return db.transaction((transaction) =>
+      replaceAssetUsageRows(where, rows, transaction as unknown as typeof db),
+    );
+  await lockAssetUsageTargets(
+    db,
+    where.nodeId,
+    rows.map((row) => row.assetId),
+  );
   const conditions = [
     eq(busabaseAssetUsages.spaceId, getContextSpaceId()),
     eq(busabaseAssetUsages.ownerType, where.ownerType),
@@ -791,6 +904,10 @@ export const syncRecordAssetUsages = async (
   tx?: Awaited<ReturnType<typeof getDb>>,
 ): Promise<void> => {
   const db = tx ?? (await getDb());
+  if (!tx)
+    return db.transaction((transaction) =>
+      syncRecordAssetUsages(baseId, recordId, fields, transaction as unknown as typeof db),
+    );
 
   // A Base with no attachment field — live OR soft-deleted — can never own an
   // asset-usage row, so there is nothing to add and nothing stale to clear.
@@ -850,6 +967,11 @@ export const syncRecordAssetUsages = async (
   }
 
   // Replace usages for this record (idempotent re-merge; dropped files vanish).
+  await lockAssetUsageTargets(
+    db,
+    base.nodeId,
+    rows.map((row) => row.assetId),
+  );
   await db
     .delete(busabaseAssetUsages)
     .where(
@@ -913,6 +1035,10 @@ export const syncDocAssetUsages = async (
   tx?: Awaited<ReturnType<typeof getDb>>,
 ): Promise<void> => {
   const db = tx ?? (await getDb());
+  if (!tx)
+    return db.transaction((transaction) =>
+      syncDocAssetUsages(nodeId, body, transaction as unknown as typeof db),
+    );
   const spaceId = getContextSpaceId();
 
   // Asset ids parsed straight out of the body, then existence-checked. Nothing
@@ -949,6 +1075,11 @@ export const syncDocAssetUsages = async (
   }));
 
   // Replace the Doc's whole-node usages (recordId/fieldSlug both "").
+  await lockAssetUsageTargets(
+    db,
+    nodeId,
+    rows.map((row) => row.assetId),
+  );
   await db
     .delete(busabaseAssetUsages)
     .where(

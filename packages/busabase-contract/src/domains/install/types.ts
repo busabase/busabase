@@ -31,7 +31,10 @@ export type InstallPlanNodeType = z.infer<typeof InstallPlanNodeTypeSchema>;
  * the `z.lazy` that a recursive VO would force on every client).
  */
 export const InstallPlanNodeVOSchema = z.object({
-  /** Package-relative path, e.g. `guides/faq`. Unique within a plan. */
+  /**
+   * Package-relative path, e.g. `guides/faq`. Unique per `type`, not across the
+   * plan: the root skill takes the package slug, which an app can share.
+   */
   path: z.string(),
   slug: z.string(),
   name: z.string(),

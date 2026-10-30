@@ -440,36 +440,66 @@ describe("install.fromGithub — server-side install (real PGLite + synthetic zi
     ).rejects.toThrow(/collide/i);
   });
 
-  // ── security: the admin gate ────────────────────────────────────────────────
+  // ── security: the install gate is workspace `write` ─────────────────────────
   //
-  // These fail if `requireSpaceManagerForInstall()` is removed from either
-  // procedure — a package can carry skills and AirApps, i.e. code the space's
-  // agents will execute, so installing one is an admin act.
-  it("FORBIDS a non-manager from installing", async () => {
+  // Installing performs nothing a writer cannot already do by hand, so a member
+  // (`write`) may install; a read-only member, or a write role held through a
+  // credential capped below `write`, may not — not even the dry run, which
+  // fetches a caller-named repo and reports what already exists in the space.
+  const asMember = {
+    spaceId: "space_install_member",
+    isSpaceManager: false,
+    permissionLevel: "write",
+  } as const;
+  const asReadOnly = {
+    spaceId: "space_install_rbac",
+    isSpaceManager: false,
+    permissionLevel: "read",
+  } as const;
+
+  it("lets a member with write permission install, not just an owner/admin", async () => {
+    const plan = await runWithBusabaseContext(asMember, () =>
+      client.install.planFromGithub({ repoUrl: "https://github.com/acme/test-kb" }),
+    );
+    expect(plan.applicable).toBe(true);
+    const result = await runWithBusabaseContext(asMember, () =>
+      client.install.fromGithub({ repoUrl: "https://github.com/acme/test-kb" }),
+    );
+    expect(result.targetFolderNodeId).toBeTruthy();
+    expect(result.pendingChangeRequests).toBe(0);
+  });
+
+  it("FORBIDS a read-only member from installing", async () => {
     await expect(
-      runWithBusabaseContext({ spaceId: "space_install_rbac", isSpaceManager: false }, () =>
+      runWithBusabaseContext(asReadOnly, () =>
         client.install.fromGithub({
           repoUrl: "https://github.com/acme/test-kb",
           autoMerge: true,
         }),
       ),
-    ).rejects.toThrow(/owner\/admin|does not have access/i);
+    ).rejects.toThrow(/needs edit permission/i);
   });
 
-  it("FORBIDS a non-manager from even dry-running an install", async () => {
-    // The dry run is gated too: it makes the server fetch a caller-named repo and
-    // reports back every colliding slug already in the space.
+  it("FORBIDS a read-only member from even dry-running an install", async () => {
     await expect(
-      runWithBusabaseContext({ spaceId: "space_install_rbac", isSpaceManager: false }, () =>
+      runWithBusabaseContext(asReadOnly, () =>
         client.install.planFromGithub({ repoUrl: "https://github.com/acme/test-kb" }),
       ),
-    ).rejects.toThrow(/owner\/admin|does not have access/i);
+    ).rejects.toThrow(/needs edit permission/i);
   });
 
-  it("does not fetch anything when the caller is not a manager", async () => {
+  it("FORBIDS a member whose credential is capped below write", async () => {
+    await expect(
+      runWithBusabaseContext({ ...asMember, credentialPermissionCeiling: "changeRequest" }, () =>
+        client.install.planFromGithub({ repoUrl: "https://github.com/acme/test-kb" }),
+      ),
+    ).rejects.toThrow(/needs edit permission/i);
+  });
+
+  it("does not fetch anything when the caller cannot write", async () => {
     const before = codeloadRequests;
     await expect(
-      runWithBusabaseContext({ spaceId: "space_install_rbac", isSpaceManager: false }, () =>
+      runWithBusabaseContext(asReadOnly, () =>
         client.install.planFromGithub({ repoUrl: "https://github.com/acme/test-kb" }),
       ),
     ).rejects.toThrow();

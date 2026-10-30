@@ -150,7 +150,7 @@ export const fieldOptionsSchema = z
       .string()
       .optional()
       .describe(
-        "Relation fields only. Makes this a read-only reverse column of the relation field with this id on the target Base, which must point back at this Base. Its value is computed from that field's links; edit the forward field instead.",
+        "Relation fields only. Makes this the reverse column of the relation field with this id on the target Base, which must point back at this Base (a two-way relation). Its value is computed from that field's links. It is editable on record updates: the change is written to the forward field on the linked records, as a separate change request on the target Base. Record creates may only pass an empty value.",
       ),
     // `lookup` fields pull a field's values across a `relation` field on the same
     // Base, optionally rolling them up into one scalar. Unlike every other computed
@@ -220,6 +220,12 @@ export const baseSchema = z.object({
   }),
   createdAt: z.string(),
   fields: z.array(baseFieldSchema),
+  viewerPermissionLevel: z
+    .enum(["read", "changeRequest", "write", "manage"])
+    .optional()
+    .describe(
+      "The caller's effective permission level on this Base's node. Returned by `bases.get` only; omitted elsewhere.",
+    ),
 });
 
 export const createBaseInputSchema = z.object({
@@ -271,6 +277,27 @@ export const createBaseFieldInputSchema = z.object({
   type: fieldTypeSchema.default("text"),
   required: z.boolean().optional().default(false),
   options: fieldOptionsSchema.optional().default({}),
+  originViewId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      "Reveal the new field in this active view of the same Base when the field is merged.",
+    ),
+  reverse: z
+    .object({ name: z.string().trim().min(1).max(200) })
+    .optional()
+    .describe(
+      "Relation fields only. Create the corresponding editable field on the target Base in the same atomic Change Request.",
+    ),
+  requestId: z
+    .string()
+    .min(1)
+    .max(200)
+    .optional()
+    .describe(
+      "Idempotency key for this field creation, scoped to the current actor, space and Base. Reusing it with different field settings is a conflict.",
+    ),
 });
 
 /**

@@ -13,5 +13,11 @@ export const folderNodeType = {
     hasDetail: true,
     publicAccess: "detail",
   },
-  operations: [],
+  operations: [
+    {
+      kind: "folder_update",
+      label: "Update folder",
+      tone: "border-blue-200 bg-blue-50 text-blue-800",
+    },
+  ],
 } as const satisfies NodeTypeDefinition;

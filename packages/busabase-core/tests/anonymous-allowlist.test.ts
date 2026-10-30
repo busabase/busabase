@@ -99,6 +99,7 @@ describe("anonymous allowlist (unit)", () => {
       "nodes.resolveRouteState",
       "records.count",
       "records.get",
+      "records.getMany",
       "records.groupBy",
       "records.list",
       "records.listPage",
@@ -196,6 +197,7 @@ describe("embed allowlist (unit)", () => {
       // Node-ACL'd aggregates an embedded AirApp dashboard renders from.
       "records.count",
       "records.get",
+      "records.getMany",
       "records.groupBy",
       "records.list",
       "records.listPage",

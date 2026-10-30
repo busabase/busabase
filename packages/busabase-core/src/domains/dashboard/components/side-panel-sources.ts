@@ -1,3 +1,4 @@
+import type { AcpComposerDraft } from "@acp-ui/web/composer";
 import type { NodeType } from "busabase-contract/domains";
 import type { KnownNode } from "../helpers/known-node-cache";
 import { getSidePanelTab } from "../side-panel-registry";
@@ -77,7 +78,7 @@ export interface AgentChatTabPayload {
    * the tab clears it via `consumeAgentChatDraft` the moment it lands, so a
    * remount cannot replay it into the user's next draft.
    */
-  draft?: { id: string; text: string };
+  draft?: AcpComposerDraft;
 }
 
 /** The tab id for an agent — one per agent, whatever node the question is about. */
@@ -97,7 +98,7 @@ export const agentChatTabId = (agentSlug: string): string => `agent-${agentSlug}
 export const openAgentChatTab = (
   agentSlug: string,
   agentName: string,
-  options: { sessionId?: string; draft?: { id: string; text: string } } = {},
+  options: { sessionId?: string; draft?: AcpComposerDraft } = {},
 ): void => {
   const id = agentChatTabId(agentSlug);
   const payload: AgentChatTabPayload = {

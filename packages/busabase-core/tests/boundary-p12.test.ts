@@ -68,12 +68,9 @@ describe("Boundary P12 — Trash permanent delete (purge)", () => {
     );
     expect((await raw.nodes.list()).some((n) => n.id === doc.node.id)).toBe(false);
 
-    // A second purge attempt hits the "already permanently deleted" guard
-    // instead of NOT_FOUND — proving the row is still there (soft delete),
-    // never a real `db.delete()`.
-    await expect(raw.nodes.purge({ nodeId: doc.node.id })).rejects.toThrow(
-      /already permanently deleted/i,
-    );
+    // Retrying a successful purge is idempotent, including after a lost HTTP
+    // response. It must not repeat quota changes or resurrect the node.
+    await expect(raw.nodes.purge({ nodeId: doc.node.id })).resolves.toEqual({ purged: true });
   });
 
   it("Fix 2: cannot purge a node that is not archived", async () => {

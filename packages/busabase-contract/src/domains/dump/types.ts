@@ -100,7 +100,8 @@ export type ExportAssetTextVO = z.infer<typeof ExportAssetTextVOSchema>;
 
 /**
  * `POST /dump/export/doc-bodies` — read the raw markdown behind a batch of Doc
- * nodes, straight from object storage.
+ * nodes, straight from object storage. Also serves folder readmes
+ * (`…/folder/readme.md`), the same kind of markdown object.
  *
  * The export side's counterpart to the `docBodies` pseudo-table on
  * `importTables`. Without it a backup has no way to reach a Doc's body except
@@ -125,11 +126,13 @@ export type ExportDocBodiesInput = z.infer<typeof ExportDocBodiesInputSchema>;
 
 export const ExportDocBodiesVOSchema = z.object({
   /**
-   * One entry per requested node that is a Doc in this space. A node id that
-   * does not resolve is simply absent (not an error): the caller asked for a
-   * batch, and one bad id must not cost it the other 24. A Doc that exists but
-   * has no body object yet yields `markdown: ""`, matching what a read through
-   * the Doc domain would return.
+   * One entry per requested node that is a Doc or folder in this space. A node
+   * id that does not resolve is simply absent (not an error): the caller asked
+   * for a batch, and one bad id must not cost it the other 24. A Doc that
+   * exists but has no body object yet yields `markdown: ""`, matching what a
+   * read through the Doc domain would return. A folder with no readme object
+   * is absent instead — most folders never have one, and archiving `""` for
+   * each would restore an empty object where none existed.
    */
   bodies: z.array(z.object({ nodeId: z.string(), markdown: z.string() })),
 });

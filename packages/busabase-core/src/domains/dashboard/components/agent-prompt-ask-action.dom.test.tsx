@@ -1,11 +1,17 @@
 // @vitest-environment jsdom
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
+import {
+  type AgentPromptEnvelope,
+  createAgentPromptEnvelope,
+  joinAgentPromptSegments,
+} from "busabase-contract/domains/agents/prompt-context";
 import type { AgentConnectionVO, AgentSessionVO } from "busabase-contract/domains/agents/types";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CoreI18nProvider } from "../../../i18n";
+import { AgentModelScopeProvider } from "../../agents/agent-model-scope-context";
 import { resetNodeAgentSessions } from "../../agents/utils/node-agent-sessions";
 
 const openAgentChatTab = vi.fn();
@@ -53,7 +59,9 @@ function stubOrpc({
   create?: ReturnType<typeof vi.fn>;
   catalog?: ReturnType<typeof vi.fn>;
 }) {
+  const prompt = vi.fn();
   return {
+    prompt,
     orpc: {
       agents: {
         catalog: {
@@ -76,6 +84,7 @@ function stubOrpc({
             }),
           },
           create: { mutationOptions: () => ({ mutationFn: create }) },
+          prompt: { mutationOptions: () => ({ mutationFn: prompt }) },
         },
       },
     } as unknown as BusabaseQueryUtils,
@@ -87,29 +96,48 @@ function stubOrpc({
 function renderAction({
   orpc,
   promptText = "Review the selected document.",
+  promptEnvelope,
   onHandedOff = vi.fn(),
 }: {
   orpc: BusabaseQueryUtils;
   promptText?: string;
+  promptEnvelope?: AgentPromptEnvelope;
   onHandedOff?: () => void;
 }) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
-  const view = (text: string) => (
+  const view = (
+    text: string,
+    currentOrpc = orpc,
+    scope = { workspaceKey: "space-a", actorId: "user-a" },
+    envelope = promptEnvelope,
+  ) => (
     <CoreI18nProvider locale="en">
       <QueryClientProvider client={client}>
-        <AgentPromptAskAction
-          onHandedOff={onHandedOff}
-          orpc={orpc}
-          promptText={text}
-          sessionScopeId="nod_report"
-        />
+        <AgentModelScopeProvider {...scope}>
+          <AgentPromptAskAction
+            onHandedOff={onHandedOff}
+            orpc={currentOrpc}
+            promptText={text}
+            promptEnvelope={envelope}
+            sessionScopeId="nod_report"
+          />
+        </AgentModelScopeProvider>
       </QueryClientProvider>
     </CoreI18nProvider>
   );
   const rendered = render(view(promptText));
-  return { ...rendered, rerenderPrompt: (text: string) => rendered.rerender(view(text)) };
+  return {
+    ...rendered,
+    rerenderPrompt: (text: string) => rendered.rerender(view(text)),
+    rerenderEnvelope: (envelope: AgentPromptEnvelope) =>
+      rendered.rerender(view(promptText, orpc, undefined, envelope)),
+    rerenderOrpc: (currentOrpc: BusabaseQueryUtils) =>
+      rendered.rerender(view(promptText, currentOrpc)),
+    rerenderScope: (scope: { workspaceKey: string; actorId: string }) =>
+      rendered.rerender(view(promptText, orpc, scope)),
+  };
 }
 
 function openAgentMenu() {
@@ -178,6 +206,53 @@ describe("AgentPromptAskAction", () => {
       draft: { id: expect.stringMatching(/^ask-agent-/), text: "Prompt B" },
     });
   });
+
+  it.each([
+    "unmount",
+    "switch space",
+    "switch away and back",
+    "switch actor",
+    "switch workspace with the same client",
+  ])(
+    "does not reopen the previous space's chat when session creation finishes after %s",
+    async (transition) => {
+      let finishCreate!: (created: AgentSessionVO) => void;
+      const pendingCreate = new Promise<AgentSessionVO>((resolve) => {
+        finishCreate = resolve;
+      });
+      const create = vi.fn(() => pendingCreate);
+      const { orpc } = stubOrpc({
+        connections: async () => [connection("buda:research", "Research")],
+        create,
+      });
+      const onHandedOff = vi.fn();
+      const action = renderAction({ orpc, onHandedOff });
+      const primary = screen.getByRole("button", { name: "Ask Agent" });
+      await waitFor(() => expect((primary as HTMLButtonElement).disabled).toBe(false));
+      fireEvent.click(primary);
+      await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+
+      if (transition === "unmount") {
+        action.unmount();
+      } else if (transition === "switch actor") {
+        action.rerenderScope({ workspaceKey: "space-a", actorId: "user-b" });
+      } else if (transition === "switch workspace with the same client") {
+        action.rerenderScope({ workspaceKey: "space-b", actorId: "user-a" });
+      } else {
+        const next = stubOrpc({ connections: async () => [] });
+        action.rerenderOrpc(next.orpc);
+        if (transition === "switch away and back") action.rerenderOrpc(orpc);
+        expect(next.create).not.toHaveBeenCalled();
+      }
+      await act(async () => {
+        finishCreate(session("session-a-late", "buda:research", "Research"));
+        await pendingCreate;
+      });
+
+      expect(openAgentChatTab).not.toHaveBeenCalled();
+      expect(onHandedOff).not.toHaveBeenCalled();
+    },
+  );
 
   it("lists only connected Agents and hands the current prompt to the selected target", async () => {
     const { orpc, catalog } = stubOrpc({
@@ -260,11 +335,140 @@ describe("AgentPromptAskAction", () => {
     const onHandedOff = vi.fn();
     renderAction({ orpc, onHandedOff });
 
-    const primary = screen.getByRole("button", { name: "Ask Agent" });
+    // While the list loads the label is unchanged; once it is known to be
+    // empty the primary action says what it will actually do.
+    expect(screen.getByRole("button", { name: "Ask Agent" })).toBeTruthy();
+    const primary = await screen.findByRole("button", { name: "Connect an agent first" });
     await waitFor(() => expect((primary as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(primary);
 
     expect(onHandedOff).toHaveBeenCalledTimes(1);
     expect(setLocation).toHaveBeenCalledWith("/agents/new");
   });
+});
+
+const promptEnvelopeFixture = () =>
+  createAgentPromptEnvelope({
+    scenario: { id: "custom:review", title: "Review 运营" },
+    target: { nodeId: "nod_report", nodeName: "Report 🌏", nodeType: "base" },
+    source: { origin: "https://busabase.example", edition: "cloud", spaceId: "space-a" },
+    segments: [
+      { kind: "target", text: "Target report." },
+      { kind: "task", text: "Review every record.  \n保留全文。" },
+    ],
+  });
+
+describe("AgentPromptAskAction structured handoff", () => {
+  it("stages complete context-only drafts on explicit clicks, reuses the session, and never auto-sends", async () => {
+    const { orpc, create, prompt } = stubOrpc({
+      connections: async () => [connection("buda:research", "Research")],
+    });
+    const promptEnvelope = promptEnvelopeFixture();
+    const action = renderAction({
+      orpc,
+      promptEnvelope,
+      promptText: joinAgentPromptSegments(promptEnvelope.segments),
+    });
+    const primary = screen.getByRole("button", { name: "Ask Agent" });
+    await waitFor(() => expect((primary as HTMLButtonElement).disabled).toBe(false));
+    expect(openAgentChatTab).not.toHaveBeenCalled();
+    fireEvent.click(primary);
+    await waitFor(() => expect(openAgentChatTab).toHaveBeenCalledTimes(1));
+    const firstDraft = openAgentChatTab.mock.calls[0][2].draft;
+    expect(firstDraft).toMatchObject({
+      id: expect.stringMatching(/^ask-agent-/),
+      text: "",
+      resourceContext: [
+        {
+          name: "Review 运营 · Report 🌏",
+          mimeType: "text/plain",
+          text: joinAgentPromptSegments(promptEnvelope.segments),
+          metadata: { "busabase.agentPrompt": promptEnvelope },
+        },
+      ],
+    });
+    expect(firstDraft.resourceContext[0].uri).toBe(
+      `busabase-agent-prompt:///${firstDraft.resourceContext[0].id}`,
+    );
+    action.rerenderEnvelope(structuredClone(promptEnvelope));
+    await act(async () => {});
+    expect(openAgentChatTab).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Ask Agent" }));
+    await waitFor(() => expect(openAgentChatTab).toHaveBeenCalledTimes(2));
+    const secondDraft = openAgentChatTab.mock.calls[1][2].draft;
+    expect(secondDraft.id).not.toBe(firstDraft.id);
+    expect(secondDraft.resourceContext[0].id).not.toBe(firstDraft.resourceContext[0].id);
+    expect(secondDraft.resourceContext[0].text).toBe(firstDraft.resourceContext[0].text);
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(prompt).not.toHaveBeenCalled();
+  });
+
+  it("retains the chosen structured snapshot on a failed-session retry", async () => {
+    const create = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("temporarily offline"))
+      .mockResolvedValueOnce(session("retried", "buda:research", "Research"));
+    const { orpc, prompt } = stubOrpc({
+      connections: async () => [connection("buda:research", "Research")],
+      create,
+    });
+    const promptEnvelope = promptEnvelopeFixture();
+    renderAction({
+      orpc,
+      promptEnvelope,
+      promptText: joinAgentPromptSegments(promptEnvelope.segments),
+    });
+    const primary = screen.getByRole("button", { name: "Ask Agent" });
+    await waitFor(() => expect((primary as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(primary);
+    await screen.findByRole("alert");
+    expect(openAgentChatTab).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(openAgentChatTab).toHaveBeenCalledTimes(1));
+    expect(openAgentChatTab.mock.calls[0][2].draft).toMatchObject({
+      text: "",
+      resourceContext: [{ metadata: { "busabase.agentPrompt": promptEnvelope } }],
+    });
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(prompt).not.toHaveBeenCalled();
+  });
+
+  it.each(["text", "envelope"])(
+    "cancels the obsolete in-flight structured snapshot when %s changes",
+    async (change) => {
+      let finishCreate!: (created: AgentSessionVO) => void;
+      const pending = new Promise<AgentSessionVO>((resolve) => {
+        finishCreate = resolve;
+      });
+      const create = vi.fn(() => pending);
+      const { orpc } = stubOrpc({
+        connections: async () => [connection("buda:research", "Research")],
+        create,
+      });
+      const promptEnvelope = promptEnvelopeFixture();
+      const onHandedOff = vi.fn();
+      const action = renderAction({
+        orpc,
+        promptEnvelope,
+        promptText: joinAgentPromptSegments(promptEnvelope.segments),
+        onHandedOff,
+      });
+      const primary = screen.getByRole("button", { name: "Ask Agent" });
+      await waitFor(() => expect((primary as HTMLButtonElement).disabled).toBe(false));
+      fireEvent.click(primary);
+      await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+      if (change === "text") action.rerenderPrompt("A different scenario");
+      else
+        action.rerenderEnvelope({
+          ...promptEnvelope,
+          scenario: { id: "other", title: "Other source, same text" },
+        });
+      await act(async () => {
+        finishCreate(session("late", "buda:research", "Research"));
+        await pending;
+      });
+      expect(openAgentChatTab).not.toHaveBeenCalled();
+      expect(onHandedOff).not.toHaveBeenCalled();
+    },
+  );
 });

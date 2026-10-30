@@ -1,5 +1,6 @@
 import "server-only";
 
+import type { ViewConfigVO } from "busabase-contract/types";
 import { eq } from "drizzle-orm";
 import type { getDb } from "../../../db";
 import { busabaseViews } from "../../../db/schema";
@@ -67,7 +68,11 @@ export const insertDefaultGridView = async (
     type: "table",
     // Exactly what a brand-new unfiltered table view stores (see mergeViewCreate):
     // no filters/sorts and no visibleFieldSlugs, so every field shows in Base order.
-    config: normalizeViewConfig({}),
+    config: normalizeViewConfig({
+      filters: [],
+      sorts: [],
+      autoShowNewFields: true,
+    } satisfies ViewConfigVO),
     status: "active",
     position: args.position ?? 0,
     createdBy: args.createdBy,

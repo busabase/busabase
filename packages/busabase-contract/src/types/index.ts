@@ -46,6 +46,7 @@ import type { NodeIcon } from "./node-icon";
 
 export type { AgentClientVO } from "../contract/agent-client";
 export type { PlaybookAttributionVO } from "../contract/playbook-schemas";
+export { getAutoShowNewFields, getVisibleViewFieldSlugs } from "../domains/base/utils/view-fields";
 
 export type { NodeIcon } from "./node-icon";
 export { NodeIconSchema, type NodeIconSource, resolveNodeIconSource } from "./node-icon";
@@ -338,6 +339,8 @@ export interface ChangeRequestVO {
   primaryOperation: OperationVO | null;
   operationCount: number;
   reviews: ReviewVO[];
+  /** Whether the caller may approve/merge/close. Set by `changeRequests.get` only. */
+  viewerCanApprove?: boolean;
 }
 
 export interface ChangeRequestBatchFailureVO {

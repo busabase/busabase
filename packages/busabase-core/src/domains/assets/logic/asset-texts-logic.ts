@@ -21,7 +21,7 @@ import type {
 import { and, eq, inArray, ne } from "drizzle-orm";
 import { generateNanoID } from "openlib/nanoid";
 import { storage } from "openlib/storage";
-import { getContextSpaceId, resolveActorId } from "../../../context";
+import { type BusabaseDatabase, getContextSpaceId, resolveActorId } from "../../../context";
 import { getDb } from "../../../db";
 import { attachments, busabaseAssets } from "../../../db/schema";
 import { insertAuditEvent } from "../../../logic/audit";
@@ -30,9 +30,15 @@ import { ensureReady } from "../../../logic/seed";
 import { type AssetTextPO, type AssetTextStatus, busabaseAssetTexts } from "../schema/asset-texts";
 import { assertAssetPermission } from "./asset-permissions";
 import { readObjectInChunks } from "./object-stream";
+import {
+  enqueueStorageCleanup,
+  isStorageKeyRetired,
+  withStorageKeyLocks,
+  withStorageKeyRegistration,
+} from "./storage-cleanup-logic";
 import { scanTextBuffer, TextStreamScanner } from "./text-scan";
 
-type Db = Awaited<ReturnType<typeof getDb>>;
+type Db = BusabaseDatabase;
 
 /** ≤ 1 MB inline body cap — larger text must go through the presigned path. */
 export const INLINE_TEXT_MAX_BYTES = 1024 * 1024;
@@ -115,17 +121,25 @@ export const gcTextObjectIfUnreferenced = async (
   hash: string | null | undefined,
   excludeRowId: string | null,
   tx: Db,
+  storageKey = hash ? textContentAddressedKey(hash) : "",
 ): Promise<void> => {
-  if (!hash) return;
+  if (!hash || !storageKey) return;
   const rows = await tx
     .select({ id: busabaseAssetTexts.id })
     .from(busabaseAssetTexts)
     .where(
-      and(eq(busabaseAssetTexts.textContentHash, hash), ne(busabaseAssetTexts.writtenBy, "auto")),
+      and(
+        eq(busabaseAssetTexts.textStorageKey, storageKey),
+        ne(busabaseAssetTexts.writtenBy, "auto"),
+      ),
     );
   const stillReferenced = rows.some((row) => row.id !== excludeRowId);
   if (!stillReferenced) {
-    await storage.deleteObject(textContentAddressedKey(hash)).catch(() => {});
+    await enqueueStorageCleanup(tx, {
+      storageKey,
+      kind: "derived_text",
+      spaceId: getContextSpaceId(),
+    });
   }
 };
 
@@ -385,14 +399,19 @@ export const putAssetText = async (input: PutTextInput): Promise<AssetTextVO> =>
   const actorId = resolveActorId("agent");
 
   if (input.none) {
-    const rowId = await upsertAssetTextRow(
-      db,
-      spaceId,
-      input.assetId,
-      existing,
-      emptyTextFields(actorId),
-    );
-    await gcTextObjectIfUnreferenced(existing?.textContentHash, rowId, db);
+    const previousKey = existing?.writtenBy !== "auto" ? existing?.textStorageKey : undefined;
+    await withStorageKeyLocks(db, previousKey ? [previousKey] : [], async (tx) => {
+      const rowId = await upsertAssetTextRow(
+        tx,
+        spaceId,
+        input.assetId,
+        existing,
+        emptyTextFields(actorId),
+      );
+      if (previousKey) {
+        await gcTextObjectIfUnreferenced(existing?.textContentHash, rowId, tx, previousKey);
+      }
+    });
     await insertAuditEvent(db, {
       action: "asset.text_marked_none",
       actorId,
@@ -456,37 +475,52 @@ export const putAssetText = async (input: PutTextInput): Promise<AssetTextVO> =>
     });
   }
 
-  const finalKey = textContentAddressedKey(scanResult.sha256);
-  const alreadyStored = await storage.objectExists(finalKey).catch(() => false);
-  if (input.text !== undefined) {
-    if (!alreadyStored && inlineBytes) {
-      await storage.uploadFileToKey(inlineBytes, finalKey, "text/plain; charset=utf-8");
+  const canonicalKey = textContentAddressedKey(scanResult.sha256);
+  // A collected key is retired forever. New generations preserve content-hash
+  // identity in the row without allowing a delayed delete to hit new bytes.
+  let finalKey = (await isStorageKeyRetired(db, canonicalKey))
+    ? `${canonicalKey}.${generateNanoID("gen", 16)}`
+    : canonicalKey;
+  const previousKey = existing?.writtenBy !== "auto" ? existing?.textStorageKey : undefined;
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      await withStorageKeyRegistration(
+        db,
+        finalKey,
+        async (tx) => {
+          const alreadyStored = await storage.objectExists(finalKey).catch(() => false);
+          if (!alreadyStored) {
+            if (inlineBytes) {
+              await storage.uploadFileToKey(inlineBytes, finalKey, "text/plain; charset=utf-8");
+            } else {
+              await storage.copyObject(input.storageKey as string, finalKey);
+            }
+          }
+          const rowId = await upsertAssetTextRow(tx, spaceId, input.assetId, existing, {
+            status: "present",
+            textStorageKey: finalKey,
+            textContentHash: scanResult.sha256,
+            sourceContentHash: assetRow.attachmentContentHash ?? null,
+            writtenBy: actorId,
+            lineCount: scanResult.lineCount,
+            charCount: scanResult.charCount,
+            byteCount: scanResult.byteCount,
+            lineCheckpoints: scanResult.checkpoints,
+            statsComputedAt: new Date(),
+          });
+          if (previousKey && previousKey !== finalKey) {
+            await gcTextObjectIfUnreferenced(existing?.textContentHash, rowId, tx, previousKey);
+          }
+        },
+        { additionalLockKeys: previousKey ? [previousKey] : [] },
+      );
+      break;
+    } catch (error) {
+      if (!(error instanceof ORPCError) || error.code !== "CONFLICT" || attempt >= 2) throw error;
+      finalKey = `${canonicalKey}.${generateNanoID("gen", 16)}`;
     }
-  } else {
-    const storageKey = input.storageKey as string;
-    if (!alreadyStored) {
-      await storage.copyObject(storageKey, finalKey);
-    }
-    await storage.deleteObject(storageKey).catch(() => {});
   }
-
-  const rowId = await upsertAssetTextRow(db, spaceId, input.assetId, existing, {
-    status: "present",
-    textStorageKey: finalKey,
-    textContentHash: scanResult.sha256,
-    sourceContentHash: assetRow.attachmentContentHash ?? null,
-    writtenBy: actorId,
-    lineCount: scanResult.lineCount,
-    charCount: scanResult.charCount,
-    byteCount: scanResult.byteCount,
-    lineCheckpoints: scanResult.checkpoints,
-    // Derived rows always compute real stats eagerly, right here — never the
-    // 0/0/0 "unscanned" sentinel an auto row starts with.
-    statsComputedAt: new Date(),
-  });
-  if (existing?.textContentHash && existing.textContentHash !== scanResult.sha256) {
-    await gcTextObjectIfUnreferenced(existing.textContentHash, rowId, db);
-  }
+  await cleanupTemp();
 
   await insertAuditEvent(db, {
     action: "asset.text_written",

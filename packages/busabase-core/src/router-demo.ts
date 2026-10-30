@@ -5,7 +5,7 @@ import {
   PlaybookSearchInputSchema,
 } from "busabase-contract/contract/playbook-schemas";
 import { combineViewFilters } from "busabase-contract/types";
-import { getContextDemoLocale, resolveMemberRoster } from "./context";
+import { getContextDemoLocale, getContextSpaceId, resolveMemberRoster } from "./context";
 import {
   cancelDemoAgentSession,
   closeDemoAgentSession,
@@ -50,6 +50,7 @@ import {
   demoGetPlaybook,
   demoGetRecord,
   demoGetRecordByField,
+  demoGetRecords,
   demoIsDescendant,
   demoListAgentTasks,
   demoListAssets,
@@ -719,6 +720,17 @@ export const busabaseDemoRouter: EnhancedRouter<
       throw demoUnsupported("Edit asset content");
     }),
   },
+  spaceInstructions: {
+    get: os.spaceInstructions.get.handler(() => ({
+      spaceId: getContextSpaceId(),
+      body: "",
+      version: 0,
+      updatedAt: null,
+    })),
+    update: os.spaceInstructions.update.handler(() => {
+      throw demoUnsupported("Update space instructions");
+    }),
+  },
   vault: {
     get: os.vault.get.handler(() => ({
       ownerId: "demo-user",
@@ -789,6 +801,12 @@ export const busabaseDemoRouter: EnhancedRouter<
       demoAgentCatalogEntry(getContextDemoLocale()),
     ]),
     connections: {
+      detail: os.agents.connections.detail.handler(() => {
+        throw demoUnsupported("View a saved agent connection");
+      }),
+      rename: os.agents.connections.rename.handler(() => {
+        throw demoUnsupported("Rename an agent");
+      }),
       list: os.agents.connections.list.handler(() => {
         const sessions = listDemoAgentSessions();
         const latest = sessions[0];
@@ -830,9 +848,23 @@ export const busabaseDemoRouter: EnhancedRouter<
       // a human answers, so awaiting the turn here would hold this HTTP
       // response open indefinitely. Same contract as the real router — "prompt
       // accepted", not "turn finished".
-      prompt: os.agents.sessions.prompt.handler(({ input }) => {
+      prompt: os.agents.sessions.prompt.handler(async ({ input }) => {
         try {
-          promptDemoAgentSession(input.sessionId, input.text);
+          // Load fixture-backed context only for this demo read. Keeping it out
+          // of demo-agent's import graph avoids a cycle through demo/dataset.
+          const contextResources = input.contextReferences?.length
+            ? (
+                await import("./domains/agents/logic/demo-agent-context")
+              ).resolveDemoAgentContextResources(input.contextReferences)
+            : undefined;
+          promptDemoAgentSession(
+            input.sessionId,
+            input.text,
+            input.attachments,
+            input.presentation,
+            contextResources,
+            input.resourceContext,
+          );
           return { accepted: true, sessionId: input.sessionId };
         } catch (error) {
           throw new ORPCError("BAD_REQUEST", {
@@ -853,6 +885,16 @@ export const busabaseDemoRouter: EnhancedRouter<
             message: error instanceof Error ? error.message : String(error),
           });
         }
+      }),
+      // The scripted demo agent never advertises a `modelOption`, so the UI
+      respondToInput: os.agents.sessions.respondToInput.handler(() => {
+        throw demoUnsupported("Answer an agent question");
+      }),
+      resolveResource: os.agents.sessions.resolveResource.handler(() => {
+        throw demoUnsupported("Open an agent resource");
+      }),
+      snapshot: os.agents.sessions.snapshot.handler(() => {
+        throw demoUnsupported("Read an agent workspace snapshot");
       }),
       // The scripted demo agent never advertises a `modelOption`, so the UI
       // never renders a picker to call this from — unreachable in practice.
@@ -1297,6 +1339,7 @@ export const busabaseDemoRouter: EnhancedRouter<
       }
       return record;
     }),
+    getMany: os.records.getMany.handler(({ input }) => demoGetRecords(input.recordIds)),
     search: os.records.search.handler(({ input }) => demoListRecordsByFieldText(input)),
     changeRequest: os.records.changeRequest.handler(({ input }) => {
       switch (input.operation) {

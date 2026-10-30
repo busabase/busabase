@@ -23,18 +23,28 @@ import type { LoadedNode } from "../node-detail-registry";
  */
 export interface CurrentNodeStoreState {
   node: LoadedNode | null;
-  setNode: (node: LoadedNode | null) => void;
+  scopeKey: string | null;
+  setNode: (node: LoadedNode | null, scopeKey: string) => void;
 }
 
 export const useCurrentNodeStore = create<CurrentNodeStoreState>()((set) => ({
   node: null,
-  setNode: (node) =>
+  scopeKey: null,
+  setNode: (node, scopeKey) =>
     set((state) => {
       // Same node, same object identity out — this is fed by a route/tree effect
       // that re-runs on unrelated renders, and every new object here would
       // re-render the composer's context chip for no reason.
       const current = state.node;
-      if (current?.id === node?.id && current?.name === node?.name) return state;
-      return { node };
+      if (
+        state.scopeKey === scopeKey &&
+        current?.id === node?.id &&
+        current?.name === node?.name &&
+        current?.slug === node?.slug &&
+        current?.type === node?.type &&
+        current?.icon === node?.icon
+      )
+        return state;
+      return { node, scopeKey };
     }),
 }));

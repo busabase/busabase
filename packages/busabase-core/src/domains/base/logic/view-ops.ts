@@ -223,25 +223,32 @@ export const createUpdateViewChangeRequest = async (
   const operationId = id("opr");
   const commitId = id("cmt");
   const timestamp = now();
-  const isPureMove =
-    parsed.position !== undefined &&
-    parsed.config === undefined &&
-    parsed.description === undefined &&
-    parsed.name === undefined &&
-    parsed.type === undefined;
-  // A pure reorder records ONLY the move. Snapshotting config/name/type too
-  // would let a reorder that merges after a concurrent config edit silently
-  // write the stale config back, and would make the review diff list
-  // unchanged keys next to the one thing that actually moved.
-  const fields = isPureMove
-    ? { position: parsed.position }
-    : {
-        config: { ...normalizeViewConfig(view.config), ...parsed.config },
-        description: parsed.description ?? view.description,
-        name: parsed.name ?? view.name,
-        type: parsed.type ?? view.type,
-        ...(parsed.position !== undefined ? { position: parsed.position } : {}),
-      };
+  // Persist only the metadata the caller actually changed. In particular a
+  // pending rename must never restore its old field-visibility snapshot.
+  // Keep a full config for review, but retain a merge baseline only for keys
+  // the caller supplied. Undefined means omitted; null and empty arrays clear.
+  const configPatch = parsed.config
+    ? Object.fromEntries(Object.entries(parsed.config).filter(([, value]) => value !== undefined))
+    : undefined;
+  const currentConfig = normalizeViewConfig(view.config);
+  const fields = {
+    ...(configPatch !== undefined
+      ? {
+          config: { ...currentConfig, ...configPatch },
+          configPatch,
+          configBase: Object.fromEntries(
+            Object.keys(configPatch).map((key) => [
+              key,
+              currentConfig[key as keyof typeof currentConfig],
+            ]),
+          ),
+        }
+      : {}),
+    ...(parsed.description !== undefined ? { description: parsed.description } : {}),
+    ...(parsed.name !== undefined ? { name: parsed.name } : {}),
+    ...(parsed.type !== undefined ? { type: parsed.type } : {}),
+    ...(parsed.position !== undefined ? { position: parsed.position } : {}),
+  };
 
   await insertCommit(db, {
     id: commitId,

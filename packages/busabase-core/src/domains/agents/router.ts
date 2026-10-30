@@ -4,14 +4,18 @@ import { getContextSpaceId } from "../../context";
 import { assertWorkspacePermission } from "../../logic/node-acl";
 import { listCatalog } from "./logic/agent-catalog";
 import { deleteAgentHistory, disconnectAgentConnection } from "./logic/agent-connection";
+import { getAgentConnectionDetail, renameAgentConnection } from "./logic/agent-connection-detail";
 import { listAgentConnections } from "./logic/agent-connection-list";
 import {
   AgentSessionTerminalError,
   cancelAgentSession,
   closeAgentSession,
   createAgentSession,
+  getAgentSessionSnapshot,
   listAgentSessions,
   listAgentSessionsPaged,
+  resolveAgentResource,
+  respondToAgentInput,
   respondToAgentPermission,
   setAgentSessionConfigOption,
   startAgentSessionPrompt,
@@ -95,6 +99,12 @@ const agentsRouterImpl = {
 
   connections: {
     list: os.agents.connections.list.handler(({ input }) => listAgentConnections(input.scope)),
+    detail: os.agents.connections.detail.handler(({ input }) =>
+      getAgentConnectionDetail(input.slug),
+    ),
+    rename: os.agents.connections.rename.handler(({ input }) =>
+      renameAgentConnection(input.slug, input.name),
+    ),
   },
 
   disconnect: os.agents.disconnect.handler(async ({ input }) => {
@@ -134,7 +144,14 @@ const agentsRouterImpl = {
 
     prompt: os.agents.sessions.prompt.handler(async ({ input }) => {
       try {
-        await startAgentSessionPrompt(input.sessionId, input.text, input.attachments);
+        await startAgentSessionPrompt(
+          input.sessionId,
+          input.text,
+          input.attachments,
+          input.presentation,
+          input.contextReferences,
+          input.resourceContext,
+        );
         return { accepted: true, sessionId: input.sessionId };
       } catch (error) {
         if (error instanceof AgentSessionTerminalError) {
@@ -172,6 +189,31 @@ const agentsRouterImpl = {
       try {
         await respondToAgentPermission(input.sessionId, input.requestId, input.optionId);
         return { ok: true };
+      } catch (error) {
+        return fail(error);
+      }
+    }),
+
+    respondToInput: os.agents.sessions.respondToInput.handler(async ({ input }) => {
+      try {
+        await respondToAgentInput(input.sessionId, input.requestId, input.response);
+        return { ok: true };
+      } catch (error) {
+        return fail(error);
+      }
+    }),
+
+    resolveResource: os.agents.sessions.resolveResource.handler(async ({ input }) => {
+      try {
+        return await resolveAgentResource(input.sessionId, input.resource);
+      } catch (error) {
+        return fail(error);
+      }
+    }),
+
+    snapshot: os.agents.sessions.snapshot.handler(async ({ input }) => {
+      try {
+        return await getAgentSessionSnapshot(input.sessionId);
       } catch (error) {
         return fail(error);
       }

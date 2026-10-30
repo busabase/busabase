@@ -19,7 +19,8 @@ import {
   type ActivityEventTone,
   buildActivityEventFromItem,
 } from "../helpers/activity-events";
-import { formatFullTime, formatListDateTime } from "../helpers/format";
+import { formatFullTime, formatListDateTime, formatRelativeTime } from "../helpers/format";
+import { ShimmerSkeleton as Skeleton } from "./shimmer-skeleton";
 import { InboxListSkeleton } from "./skeletons";
 import { SourceAttributionInline } from "./source-attribution";
 
@@ -196,6 +197,93 @@ export function NodeActivityPanel({ nodeId, orpc }: { nodeId: string; orpc: Busa
         <ActivityRow event={event} key={event.id} />
       ))}
     </div>
+  );
+}
+
+/**
+ * The last few events for one node, sized for the Settings → Info tab.
+ * Same `activity.listForNode` feed as `NodeActivityPanel`, just a short list:
+ * who did it, what it was, and when. The first row is the latest activity.
+ */
+export function NodeActivitySummary({
+  activityHref,
+  limit = 5,
+  nodeId,
+  orpc,
+}: {
+  activityHref: string | null;
+  limit?: number;
+  nodeId: string;
+  orpc: BusabaseQueryUtils;
+}) {
+  const messages = useCoreI18n();
+  const locale = useCoreLocale();
+  const activityQuery = useQuery(
+    orpc.activity.listForNode.queryOptions({ input: { nodeId, limit } }),
+  );
+  const activityEvents = useMemo(
+    () =>
+      (activityQuery.data ?? [])
+        .map((item) => buildActivityEventFromItem(item, messages))
+        .filter((event): event is ActivityEvent => event !== null),
+    [activityQuery.data, messages],
+  );
+
+  return (
+    <section className="mt-4 border-border/60 border-t pt-4">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <h2 className="font-medium text-muted-foreground text-xs uppercase">
+          {messages.nodeDetail.recentActivity}
+        </h2>
+        {activityHref ? (
+          <Link
+            className="shrink-0 text-primary text-xs underline-offset-2 hover:underline"
+            href={activityHref}
+          >
+            {messages.nodeDetail.viewAllActivity}
+          </Link>
+        ) : null}
+      </div>
+      {activityQuery.isPending ? (
+        <div className="space-y-2" aria-hidden>
+          <Skeleton className="h-4 w-4/5" />
+          <Skeleton className="h-4 w-3/5" />
+          <Skeleton className="h-4 w-2/3" />
+        </div>
+      ) : activityQuery.isError ? (
+        <p className="text-muted-foreground text-xs">
+          {presentCoreError(messages, locale, activityQuery.error, messages.share.failed)}
+        </p>
+      ) : activityEvents.length === 0 ? (
+        <p className="text-muted-foreground text-xs">{messages.nodeDetail.activityEmptyBody}</p>
+      ) : (
+        <div className="flex flex-col">
+          {activityEvents.map((event) => {
+            const detail = event.title && event.title !== event.actionLabel ? event.title : null;
+            return (
+              <Link
+                className="flex min-w-0 items-baseline justify-between gap-3 rounded-md px-1 py-1.5 text-xs hover:bg-accent/40"
+                href={event.href}
+                key={event.id}
+              >
+                <span className="min-w-0 truncate">
+                  <span className="font-medium text-foreground">{event.actorName}</span>
+                  <span className="text-muted-foreground"> {event.actionLabel}</span>
+                  {detail ? <span className="text-foreground/80"> · {detail}</span> : null}
+                </span>
+                <time
+                  className="shrink-0 text-muted-foreground"
+                  dateTime={event.timestamp}
+                  title={formatFullTime(event.timestamp, locale)}
+                >
+                  {formatRelativeTime(event.timestamp, locale)}
+                </time>
+              </Link>
+            );
+          })}
+        </div>
+      )}
+    </section>
   );
 }
 

@@ -1,12 +1,17 @@
 // @vitest-environment jsdom
 
-import type { AcpBlock } from "@acp-ui/core/reduce";
+import type { AcpAttachment, AcpBlock, AcpResourceContext } from "@acp-ui/core/reduce";
+import type { AcpConversationProps } from "@acp-ui/web/transcript";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ApiKeyPermissionLevel } from "busabase-contract/access-control/api-key-level";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
-import type { AgentSessionVO } from "busabase-contract/domains/agents/types";
-import type { ReactNode } from "react";
+import {
+  createAgentPromptEnvelope,
+  createPromptResourceContext,
+} from "busabase-contract/domains/agents/prompt-context";
+import type { AgentConnectionVO, AgentSessionVO } from "busabase-contract/domains/agents/types";
+import { type ReactNode, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CoreI18nProvider } from "../../../i18n";
 import { AgentIntegrationProvider } from "../../dashboard/agent-integration-context";
@@ -43,19 +48,22 @@ Element.prototype.scrollIntoView ??= () => {};
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), info: vi.fn() }));
 vi.mock("sonner", () => ({ toast }));
 
+const historyActions = vi.hoisted(() => ({ copy: vi.fn(), expand: vi.fn() }));
+
 const agentSession = vi.hoisted(() => ({
   blocks: [] as AcpBlock[],
   title: null,
   usage: null,
   sending: false,
-  answerPermission: () => {},
+  answerPermission: vi.fn(),
   cancel: vi.fn(),
 }));
 vi.mock("../hooks/use-agent-session", () => ({
   useAgentSession: () => agentSession,
 }));
 
-vi.mock("@acp-ui/web/composer", () => ({
+vi.mock("@acp-ui/web/composer", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@acp-ui/web/composer")>()),
   AcpComposer: ({
     disabled,
     footerControls,
@@ -64,23 +72,94 @@ vi.mock("@acp-ui/web/composer", () => ({
     onSend,
     onStop,
     sending,
+    addContextAction,
+    workspaceSkills,
+    onWorkspaceSkillSelected,
+    onResourceContextChange,
+    hasAdditionalContent,
   }: {
     disabled?: boolean;
     footerControls?: ReactNode;
     headerControls?: ReactNode;
     labels?: { stopPrompt?: string };
-    onSend: (text: string) => void;
+    onSend: (
+      text: string,
+      attachments?: AcpAttachment[],
+      resourceContext?: AcpResourceContext[],
+    ) => void | Promise<void>;
     onStop?: () => void;
     sending?: boolean;
+    addContextAction?: { label: string; added: boolean; onSelect: () => void };
+    workspaceSkills?: ReadonlyArray<{ nodeId: string; name: string; description: string }>;
+    onWorkspaceSkillSelected?: (skill: {
+      nodeId: string;
+      name: string;
+      description: string;
+    }) => void;
+    onResourceContextChange?: (contexts: AcpResourceContext[]) => void;
+    hasAdditionalContent?: boolean;
   }) => {
     const canStop = sending && onStop;
+    const [resourceContext, setResourceContext] = useState<AcpResourceContext[]>([]);
+    const stageResourceContext = (contexts: AcpResourceContext[]) => {
+      setResourceContext(contexts);
+      onResourceContextChange?.(contexts);
+    };
     return (
-      <div>
+      <div
+        data-testid="composer"
+        data-has-additional-content={String(Boolean(hasAdditionalContent))}
+      >
         <div data-testid="composer-header">{headerControls}</div>
+        <button
+          disabled={disabled}
+          onClick={() => stageResourceContext([promptResourceContext()])}
+          type="button"
+        >
+          Stage prompt resource
+        </button>
+        {resourceContext.length ? (
+          <button disabled={disabled} onClick={() => stageResourceContext([])} type="button">
+            Clear prompt resource
+          </button>
+        ) : null}
+        {addContextAction ? (
+          <button
+            data-testid="composer-context-action"
+            disabled={disabled || addContextAction.added}
+            onClick={addContextAction.onSelect}
+            type="button"
+          >
+            {addContextAction.label}
+          </button>
+        ) : null}
+        <div data-testid="composer-workspace-skills">
+          {(workspaceSkills ?? []).map((skill) => (
+            <button
+              key={skill.nodeId}
+              onClick={() => onWorkspaceSkillSelected?.(skill)}
+              type="button"
+            >
+              {`Pick skill: ${skill.name}`}
+            </button>
+          ))}
+        </div>
         <button
           aria-label={canStop ? (labels?.stopPrompt ?? "Stop") : undefined}
           disabled={canStop ? false : disabled}
-          onClick={canStop ? onStop : () => onSend("Next question")}
+          onClick={
+            canStop
+              ? onStop
+              : () => {
+                  void Promise.resolve(
+                    resourceContext.length
+                      ? onSend("Next question", undefined, resourceContext)
+                      : onSend("Next question"),
+                  )
+                    .then(() => stageResourceContext([]))
+                    .catch(() => undefined);
+                }
+          }
           type="button"
         >
           {canStop ? "Stop" : "Send test prompt"}
@@ -91,14 +170,38 @@ vi.mock("@acp-ui/web/composer", () => ({
   },
 }));
 
-vi.mock("@acp-ui/web/transcript", () => ({
-  AcpConversation: ({ activity }: { activity?: ReactNode }) => (
-    <div data-testid="conversation">{activity}</div>
-  ),
-}));
+vi.mock("@acp-ui/web/transcript", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@acp-ui/web/transcript")>();
+  return {
+    ...original,
+    AcpConversation: ({ activity, blocks, slots, onAnswerPermission }: AcpConversationProps) => {
+      const Permission = slots?.Permission ?? original.AcpPermissionView;
+      return (
+        <div data-testid="conversation">
+          {activity}
+          <button type="button" onClick={historyActions.copy}>
+            Copy transcript
+          </button>
+          <button type="button" onClick={historyActions.expand}>
+            Expand process
+          </button>
+          {blocks.map((block) =>
+            block.kind === "permission" ? (
+              <Permission
+                key={block.id}
+                block={block}
+                onAnswer={(optionId) => onAnswerPermission(block, optionId)}
+              />
+            ) : null,
+          )}
+        </div>
+      );
+    },
+  };
+});
 
 /**
- * `ModelSelectorRow` renders kui's Radix `Select` under the hood, which has
+ * `ModelSelectorRow` renders kui's Radix menu under the hood, which has
  * its own dedicated test file (`model-selector-row.dom.test.tsx`). Mocked
  * here down to the facts these tests care about — which `modelOption` the
  * view handed it, and whether it was told to disable the picker — so a
@@ -109,13 +212,20 @@ vi.mock("@acp-ui/web/transcript", () => ({
 vi.mock("./model-selector-row", () => ({
   ModelSelectorRow: ({
     modelOption,
+    thinkingOption,
     disabled,
   }: {
-    modelOption: { name: string };
+    modelOption: { name: string } | null;
+    thinkingOption?: { name: string } | null;
     disabled?: boolean;
   }) => (
-    <span data-testid="model-selector-row" data-disabled={disabled ? "true" : "false"}>
-      {modelOption.name}
+    <span
+      data-testid="model-selector-row"
+      data-disabled={disabled ? "true" : "false"}
+      data-model={modelOption?.name ?? ""}
+      data-thinking={thinkingOption?.name ?? ""}
+    >
+      {modelOption?.name}
     </span>
   ),
 }));
@@ -134,18 +244,59 @@ const SESSION: AgentSessionVO = {
   modelOption: null,
 };
 
+const promptResourceContext = () =>
+  createPromptResourceContext(
+    createAgentPromptEnvelope({
+      scenario: { id: "find-records", title: "Find matching records" },
+      target: { nodeId: "nod_prompt_target", nodeName: "Prompt target", nodeType: "base" },
+      source: { origin: window.location.origin, edition: "cloud", spaceId: "org_stable_workspace" },
+      segments: [
+        { kind: "target", text: "Target: Prompt target (nod_prompt_target)." },
+        { kind: "task", text: "Find matching records and preserve the complete snapshot. 中文。" },
+      ],
+    }),
+    "prompt-insertion-1",
+  );
+
 const stubOrpc = (
   getItems: () => AgentSessionVO[],
   close: ReturnType<typeof vi.fn>,
   create: ReturnType<typeof vi.fn>,
   prompt: ReturnType<typeof vi.fn>,
   listPage?: () => Promise<{ items: AgentSessionVO[]; nextCursor: null }>,
+  cancel: ReturnType<typeof vi.fn> = vi.fn(async () => ({ ok: true })),
+  listConnections?: () => Promise<AgentConnectionVO[]>,
+  listSkillNodes: () => Promise<
+    Array<{ id: string; name: string; description?: string }>
+  > = async () => [],
 ) =>
   ({
+    nodes: {
+      list: {
+        queryOptions: () => ({
+          queryKey: ["nodes", "list", "skill"],
+          queryFn: listSkillNodes,
+        }),
+      },
+    },
     agents: {
       connections: {
         list: {
-          queryOptions: () => ({ queryKey: ["agents", "connections"], queryFn: async () => [] }),
+          queryOptions: () => ({
+            queryKey: ["agents", "connections"],
+            queryFn:
+              listConnections ??
+              (async () =>
+                getItems().map((session) => ({
+                  slug: session.slug,
+                  agentName: session.agentName,
+                  transport: session.transport,
+                  connected: true,
+                  latest: session,
+                  sessionCount: 1,
+                  ownedByCurrentUser: true,
+                }))),
+          }),
         },
       },
       sessions: {
@@ -160,6 +311,7 @@ const stubOrpc = (
         list: { queryKey: () => ["agents", "sessions", "list"] },
         create: { mutationOptions: () => ({ mutationFn: create }) },
         prompt: { call: prompt },
+        cancel: { call: cancel },
         setConfigOption: {
           mutationOptions: () => ({ mutationFn: async () => getItems()[0] }),
         },
@@ -173,14 +325,19 @@ function renderView(options: {
   close?: ReturnType<typeof vi.fn>;
   create?: ReturnType<typeof vi.fn>;
   prompt?: ReturnType<typeof vi.fn>;
+  cancel?: ReturnType<typeof vi.fn>;
   listPage?: () => Promise<{ items: AgentSessionVO[]; nextCursor: null }>;
   permissionLevel?: ApiKeyPermissionLevel;
   compactSessionNavigation?: boolean;
   contextNode?: LoadedNode | null;
   locale?: string;
   targetSpaceId?: string;
+  agentSlug?: string;
+  listConnections?: () => Promise<AgentConnectionVO[]>;
+  listSkillNodes?: () => Promise<Array<{ id: string; name: string; description?: string }>>;
 }) {
   const close = options.close ?? vi.fn(async () => ({ ok: true }));
+  const cancel = options.cancel ?? vi.fn(async () => ({ ok: true }));
   const sessions = options.sessions;
   const getItems = typeof sessions === "function" ? sessions : () => sessions ?? [SESSION];
   const create =
@@ -205,11 +362,20 @@ function renderView(options: {
         >
           {wrap(
             <AgentDetailView
-              agentSlug="test-agent"
+              agentSlug={options.agentSlug ?? "test-agent"}
               compactSessionNavigation={options.compactSessionNavigation}
               contextNode={options.contextNode}
               onBack={() => {}}
-              orpc={stubOrpc(getItems, close, create, prompt, options.listPage)}
+              orpc={stubOrpc(
+                getItems,
+                close,
+                create,
+                prompt,
+                options.listPage,
+                cancel,
+                options.listConnections,
+                options.listSkillNodes,
+              )}
             />,
           )}
         </AgentIntegrationProvider>
@@ -217,7 +383,7 @@ function renderView(options: {
     </QueryClientProvider>
   );
   const result = render(view());
-  return { client, close, create, prompt, rerender: () => result.rerender(view()) };
+  return { client, close, create, prompt, cancel, rerender: () => result.rerender(view()) };
 }
 
 /** Radix opens its menu on pointerdown, which jsdom does not synthesize from a click. */
@@ -567,7 +733,33 @@ describe("AgentDetailView — end session", () => {
     expect(screen.queryByTestId("agent-activity-indicator")).toBeNull();
   });
 
-  it("keeps a terminal session locked until its continuation is selectable", async () => {
+  it("cancels the replacement session while preserving the original composer until acceptance", async () => {
+    const ended = { ...SESSION, status: "ended" as const };
+    const replacement = { ...SESSION, id: "sess-replacement", status: "idle" as const };
+    let release: ((value: { accepted: true }) => void) | undefined;
+    const prompt = vi.fn(
+      () =>
+        new Promise<{ accepted: true }>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const { cancel } = renderView({
+      sessions: [ended],
+      create: vi.fn(async () => replacement),
+      prompt,
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Send test prompt" }));
+    await waitFor(() => expect(prompt).toHaveBeenCalledTimes(1));
+    fireEvent.click(await screen.findByRole("button", { name: "Stop response" }));
+    await waitFor(() => expect(cancel).toHaveBeenCalledWith({ sessionId: "sess-replacement" }));
+    expect(agentSession.cancel).not.toHaveBeenCalled();
+    release?.({ accepted: true });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Send test prompt" })).toBeTruthy(),
+    );
+  });
+
+  it("keeps the original composer locked until its continuation is accepted", async () => {
     const ended = { ...SESSION, status: "ended" as const };
     const continued = { ...SESSION, id: "sess-2", status: "idle" as const };
     let created = false;
@@ -600,14 +792,11 @@ describe("AgentDetailView — end session", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Send test prompt" }));
     await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
 
-    // The selected id already names the new session, but query data still
-    // contains only the old terminal row. The fallback row must stay locked
-    // until the refetch makes the continuation selectable.
+    // Creating a replacement must not unmount the draft before acceptance.
+    // No session-list refetch is required to send to the known new session.
     expect(await screen.findByRole("button", { name: "Stop response" })).toBeTruthy();
-    expect(prompt).not.toHaveBeenCalled();
-
-    releaseSessionList?.();
     await waitFor(() => expect(prompt).toHaveBeenCalledTimes(1));
+    releaseSessionList?.();
     expect(await screen.findByRole("button", { name: "Stop response" })).toBeTruthy();
 
     releasePrompt?.({ accepted: true });
@@ -842,16 +1031,17 @@ describe("AgentDetailView — node context chip", () => {
 
   const node: LoadedNode = { id: "nod_visits", type: "base", name: "Visits", slug: "visits" };
 
-  it("dispatches node context with the stable workspace ID on a customized address", async () => {
+  it("dispatches an explicit node reference without route-dependent text on a customized address", async () => {
     window.history.replaceState({}, "", "/dashboard/custom-workspace-slug/base/visits");
     try {
       const { prompt } = renderView({ contextNode: node, targetSpaceId: "org_stable_workspace" });
       fireEvent.click(await screen.findByRole("button", { name: "Send test prompt" }));
       await waitFor(() => expect(prompt).toHaveBeenCalled());
-      const text = prompt.mock.calls[0]?.[0].text;
-      expect(text).toContain("spaceId: org_stable_workspace");
-      expect(text).toContain("nodeId: nod_visits");
-      expect(text).not.toContain("spaceId: custom-workspace-slug");
+      expect(prompt.mock.calls[0]?.[0]).toEqual({
+        sessionId: SESSION.id,
+        text: "Next question",
+        contextReferences: [{ nodeId: "nod_visits" }],
+      });
     } finally {
       window.history.replaceState({}, "", "/");
     }
@@ -862,21 +1052,140 @@ describe("AgentDetailView — node context chip", () => {
 
     await screen.findByTestId("agent-detail-view");
     const header = screen.getByTestId("composer-header");
+    const group = within(header).getByRole("group", {
+      name: "Your message will include this page as a reference.",
+    });
+    expect(group.title).toBe("Your message will include this page as a reference.");
     expect(header.textContent).toContain("Visits");
     expect(header.textContent).not.toContain("Context");
-    expect(screen.getByRole("button", { name: "Don't send this as context" })).toBeTruthy();
+    expect(within(group).getByRole("button", { name: "Don't send this as context" })).toBeTruthy();
+    expect((screen.getByTestId("composer-context-action") as HTMLButtonElement).disabled).toBe(
+      true,
+    );
     expect(screen.getByRole("button", { name: "Send test prompt" })).toBeTruthy();
   });
 
+  it("preserves the full node name and reference when the chip label is long", async () => {
+    const longName = "Visits and follow-up appointments for every regional clinic this quarter";
+    const { prompt } = renderView({ contextNode: { ...node, name: longName } });
+
+    const header = await screen.findByTestId("composer-header");
+    expect(within(header).getByText(longName)).toBeTruthy();
+    expect(within(header).getByTitle(longName)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Send test prompt" }));
+    await waitFor(() => expect(prompt).toHaveBeenCalledTimes(1));
+    expect(prompt.mock.calls[0]?.[0].contextReferences).toEqual([{ nodeId: node.id }]);
+  });
+
+  it("keeps the chip's remove control focusable and clickable without a hover gesture", async () => {
+    // Check focus and dismissal here; hover/touch CSS needs a real browser.
+    const { prompt } = renderView({ contextNode: node });
+    const remove = await screen.findByRole("button", { name: "Don't send this as context" });
+
+    remove.focus();
+    expect(document.activeElement).toBe(remove);
+
+    fireEvent.click(remove);
+    fireEvent.click(screen.getByRole("button", { name: "Send test prompt" }));
+    await waitFor(() => expect(prompt).toHaveBeenCalled());
+    expect(prompt.mock.calls[0]?.[0].contextReferences).toBeUndefined();
+  });
+
   it("renders no chip when there is no context node", async () => {
-    renderView({});
+    const { prompt } = renderView({});
 
     await screen.findByTestId("agent-detail-view");
     expect(screen.getByTestId("composer-header").textContent).toBe("");
+    expect(screen.queryByTestId("composer-context-action")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Send test prompt" }));
+    await waitFor(() => expect(prompt).toHaveBeenCalled());
+    expect(prompt.mock.calls[0]?.[0]).toMatchObject({ text: "Next question" });
+    expect(prompt.mock.calls[0]?.[0].contextReferences).toBeUndefined();
+  });
+
+  it("sends only visible references and permits restoring the removed page", async () => {
+    const { prompt } = renderView({ contextNode: node });
+    fireEvent.click(await screen.findByRole("button", { name: "Don't send this as context" }));
+    expect(screen.getByTestId("composer-header").textContent).toBe("");
+    expect((screen.getByTestId("composer-context-action") as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Send test prompt" }));
+    await waitFor(() => expect(prompt).toHaveBeenCalledTimes(1));
+    expect(prompt.mock.calls[0]?.[0]).toEqual({ sessionId: SESSION.id, text: "Next question" });
+    fireEvent.click(screen.getByRole("button", { name: "Reference current page" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send test prompt" }));
+    await waitFor(() => expect(prompt).toHaveBeenCalledTimes(2));
+    expect(prompt.mock.calls[1]?.[0].contextReferences).toEqual([{ nodeId: node.id }]);
+  });
+
+  it("preserves the current page chip and sends its reference with an inserted prompt", async () => {
+    const { prompt } = renderView({ contextNode: node });
+    fireEvent.click(await screen.findByRole("button", { name: "Stage prompt resource" }));
+
+    expect(within(screen.getByTestId("composer-header")).getByText("Visits")).toBeTruthy();
+    expect(screen.getByTestId("composer").dataset.hasAdditionalContent).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "Send test prompt" }));
+
+    await waitFor(() => expect(prompt).toHaveBeenCalledTimes(1));
+    expect(prompt.mock.calls[0]?.[0]).toEqual({
+      sessionId: SESSION.id,
+      text: "Next question",
+      contextReferences: [{ nodeId: node.id }],
+      resourceContext: [promptResourceContext()],
+    });
+  });
+
+  it("keeps a deliberately dismissed page out of an inserted prompt until the user restores it", async () => {
+    const { prompt } = renderView({ contextNode: node });
+    fireEvent.click(await screen.findByRole("button", { name: "Don't send this as context" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stage prompt resource" }));
+    expect(screen.getByTestId("composer-header").textContent).toBe("");
+    expect((screen.getByTestId("composer-context-action") as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Send test prompt" }));
+    await waitFor(() => expect(prompt).toHaveBeenCalledTimes(1));
+    expect(prompt.mock.calls[0]?.[0]).toEqual({
+      sessionId: SESSION.id,
+      text: "Next question",
+      resourceContext: [promptResourceContext()],
+    });
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Clear prompt resource" })).toBeNull(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Stage prompt resource" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reference current page" }));
+    expect(within(screen.getByTestId("composer-header")).getByText("Visits")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Clear prompt resource" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Send test prompt" }));
+    await waitFor(() => expect(prompt).toHaveBeenCalledTimes(2));
+    expect(prompt.mock.calls[1]?.[0]).toMatchObject({
+      contextReferences: [{ nodeId: node.id }],
+      resourceContext: [promptResourceContext()],
+    });
+  });
+
+  it("dismisses references per session and initializes new sessions from the current page", async () => {
+    const sessions = [SESSION, { ...SESSION, id: "sess-2", createdAt: "2026-09-12T00:00:00.000Z" }];
+    const { prompt } = renderView({ contextNode: node, sessions });
+    fireEvent.click(await screen.findByRole("button", { name: "Don't send this as context" }));
+    fireEvent.click((await screen.findAllByTestId("agent-session-item"))[1] as HTMLElement);
+    expect(screen.getByTestId("composer-header").textContent).toContain("Visits");
+    fireEvent.click(screen.getByRole("button", { name: "Send test prompt" }));
+    await waitFor(() => expect(prompt).toHaveBeenCalledTimes(1));
+    expect(prompt.mock.calls[0]?.[0]).toMatchObject({
+      sessionId: "sess-2",
+      contextReferences: [{ nodeId: node.id }],
+    });
+    fireEvent.click((await screen.findAllByTestId("agent-session-item"))[0] as HTMLElement);
+    expect(screen.getByTestId("composer-header").textContent).not.toContain("Visits");
+    expect(screen.getByRole("button", { name: "Reference current page" })).toBeTruthy();
   });
 
   it("removing the chip clears it from the header slot without affecting the rest of the composer", async () => {
-    renderView({ contextNode: node });
+    const { prompt } = renderView({ contextNode: node });
 
     await screen.findByTestId("agent-detail-view");
     const header = screen.getByTestId("composer-header");
@@ -884,10 +1193,227 @@ describe("AgentDetailView — node context chip", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Don't send this as context" }));
 
-    expect(header.textContent).toBe("");
+    expect(header.textContent).not.toContain("Visits");
+    expect(screen.getByRole("button", { name: "Reference current page" })).toBeTruthy();
     expect(
       (screen.getByRole("button", { name: "Send test prompt" }) as HTMLButtonElement).disabled,
     ).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Send test prompt" }));
+    await waitFor(() => expect(prompt).toHaveBeenCalled());
+    expect(prompt.mock.calls[0]?.[0]).toMatchObject({ text: "Next question" });
+    expect(prompt.mock.calls[0]?.[0].contextReferences).toBeUndefined();
+  });
+});
+
+describe("AgentDetailView — workspace Skills in the composer", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    agentSession.blocks = [];
+    agentSession.sending = false;
+  });
+  afterEach(cleanup);
+
+  const skillNode = { id: "nod_weekly_report", name: "weekly-report", description: "Draft it" };
+
+  it("passes discovered skill nodes to the composer as workspaceSkills", async () => {
+    renderView({ listSkillNodes: async () => [skillNode] });
+
+    expect(await screen.findByRole("button", { name: "Pick skill: weekly-report" })).toBeTruthy();
+  });
+
+  it("sends a picked skill as an invocation context reference, tagged apart from a page reference", async () => {
+    const node: LoadedNode = { id: "nod_visits", type: "base", name: "Visits", slug: "visits" };
+    const { prompt } = renderView({ contextNode: node, listSkillNodes: async () => [skillNode] });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Pick skill: weekly-report" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send test prompt" }));
+
+    await waitFor(() => expect(prompt).toHaveBeenCalledTimes(1));
+    expect(prompt.mock.calls[0]?.[0].contextReferences).toEqual([
+      { nodeId: "nod_visits" },
+      { nodeId: "nod_weekly_report", kind: "invocation" },
+    ]);
+  });
+
+  it("adds prompt resources alongside the current page and picked skill invocations", async () => {
+    const node: LoadedNode = { id: "nod_visits", type: "base", name: "Visits", slug: "visits" };
+    const { prompt } = renderView({
+      contextNode: node,
+      targetSpaceId: "org_stable_workspace",
+      listSkillNodes: async () => [skillNode],
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Pick skill: weekly-report" }));
+    expect(screen.getByTestId("composer-header").textContent).toContain("Visits");
+    fireEvent.click(screen.getByRole("button", { name: "Stage prompt resource" }));
+
+    const header = screen.getByTestId("composer-header");
+    expect(within(header).getByText("Visits")).toBeTruthy();
+    expect(within(header).getByText("weekly-report")).toBeTruthy();
+    expect((screen.getByTestId("composer-context-action") as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    expect(screen.getByTestId("composer").dataset.hasAdditionalContent).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "Send test prompt" }));
+
+    await waitFor(() => expect(prompt).toHaveBeenCalledTimes(1));
+    expect(prompt.mock.calls[0]?.[0]).toEqual({
+      sessionId: SESSION.id,
+      text: "Next question",
+      resourceContext: [promptResourceContext()],
+      contextReferences: [{ nodeId: node.id }, { nodeId: skillNode.id, kind: "invocation" }],
+    });
+    await waitFor(() => expect(within(header).queryByText("weekly-report")).toBeNull());
+  });
+
+  it("keeps the current page and explicitly picked skills when prompt resources are cleared", async () => {
+    const node: LoadedNode = { id: "nod_visits", type: "base", name: "Visits", slug: "visits" };
+    const { prompt } = renderView({ contextNode: node, listSkillNodes: async () => [skillNode] });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Pick skill: weekly-report" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stage prompt resource" }));
+    const header = screen.getByTestId("composer-header");
+    expect(within(header).getByText("Visits")).toBeTruthy();
+    expect(within(header).getByText("weekly-report")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Clear prompt resource" }));
+
+    expect(within(header).getByText("Visits")).toBeTruthy();
+    expect(within(header).getByText("weekly-report")).toBeTruthy();
+    expect(screen.getByTestId("composer-context-action")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Send test prompt" }));
+    await waitFor(() => expect(prompt).toHaveBeenCalledTimes(1));
+    expect(prompt.mock.calls[0]?.[0]).toEqual({
+      sessionId: SESSION.id,
+      text: "Next question",
+      contextReferences: [{ nodeId: node.id }, { nodeId: skillNode.id, kind: "invocation" }],
+    });
+  });
+
+  it("retains picked skill invocations and the complete resource snapshot after a failed send", async () => {
+    const node: LoadedNode = { id: "nod_visits", type: "base", name: "Visits", slug: "visits" };
+    const prompt = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("not accepted"))
+      .mockResolvedValue({ accepted: true });
+    renderView({ contextNode: node, listSkillNodes: async () => [skillNode], prompt });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Pick skill: weekly-report" }));
+    fireEvent.click(screen.getByRole("button", { name: "Stage prompt resource" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send test prompt" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("not accepted");
+    const header = screen.getByTestId("composer-header");
+    expect(within(header).getByText("weekly-report")).toBeTruthy();
+    expect(within(header).getByText("Visits")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Clear prompt resource" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Send test prompt" }));
+    await waitFor(() => expect(prompt).toHaveBeenCalledTimes(2));
+    expect(prompt.mock.calls[1]?.[0]).toEqual(prompt.mock.calls[0]?.[0]);
+    expect(prompt.mock.calls[1]?.[0]).toMatchObject({
+      resourceContext: [promptResourceContext()],
+      contextReferences: [{ nodeId: node.id }, { nodeId: skillNode.id, kind: "invocation" }],
+    });
+    await waitFor(() => expect(within(header).queryByText("weekly-report")).toBeNull());
+  });
+
+  it("resolves to a single invocation reference when the current page IS the picked skill", async () => {
+    // The automatic page reference and the explicit skill pick can name the
+    // same node (the user is viewing the Skill and also picks it from the
+    // palette). Invocation must win — sending it as a plain, non-executable
+    // reference would silently downgrade "run this" to "here's some reading".
+    const node: LoadedNode = {
+      id: "nod_weekly_report",
+      type: "skill",
+      name: "weekly-report",
+      slug: "weekly-report",
+    };
+    const { prompt } = renderView({ contextNode: node, listSkillNodes: async () => [skillNode] });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Pick skill: weekly-report" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send test prompt" }));
+
+    await waitFor(() => expect(prompt).toHaveBeenCalledTimes(1));
+    expect(prompt.mock.calls[0]?.[0].contextReferences).toEqual([
+      { nodeId: "nod_weekly_report", kind: "invocation" },
+    ]);
+  });
+
+  it("shows a removable chip for a picked skill and drops it from the next send once removed", async () => {
+    const { prompt } = renderView({ listSkillNodes: async () => [skillNode] });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Pick skill: weekly-report" }));
+    const header = screen.getByTestId("composer-header");
+    expect(within(header).getByText("weekly-report")).toBeTruthy();
+
+    fireEvent.click(within(header).getByRole("button", { name: "Don't send this skill" }));
+    expect(within(header).queryByText("weekly-report")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Send test prompt" }));
+    await waitFor(() => expect(prompt).toHaveBeenCalledTimes(1));
+    expect(prompt.mock.calls[0]?.[0].contextReferences).toBeUndefined();
+  });
+
+  it("picking the same skill twice does not duplicate the chip or the reference", async () => {
+    const { prompt } = renderView({ listSkillNodes: async () => [skillNode] });
+
+    const pick = () =>
+      fireEvent.click(screen.getByRole("button", { name: "Pick skill: weekly-report" }));
+    await screen.findByRole("button", { name: "Pick skill: weekly-report" });
+    pick();
+    pick();
+
+    fireEvent.click(screen.getByRole("button", { name: "Send test prompt" }));
+    await waitFor(() => expect(prompt).toHaveBeenCalledTimes(1));
+    expect(prompt.mock.calls[0]?.[0].contextReferences).toEqual([
+      { nodeId: "nod_weekly_report", kind: "invocation" },
+    ]);
+  });
+
+  it("keeps the ten node-reference limit when a prompt is staged alongside the page and skills", async () => {
+    const node: LoadedNode = { id: "nod_visits", type: "base", name: "Visits", slug: "visits" };
+    const skills = Array.from({ length: 10 }, (_, index) => ({
+      id: `nod_skill_${index}`,
+      name: `skill-${index}`,
+    }));
+    const { prompt } = renderView({ contextNode: node, listSkillNodes: async () => skills });
+    await screen.findByRole("button", { name: "Pick skill: skill-0" });
+    for (const skill of skills) {
+      fireEvent.click(screen.getByRole("button", { name: `Pick skill: ${skill.name}` }));
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Stage prompt resource" }));
+    expect(within(screen.getByTestId("composer-header")).queryByText("skill-9")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Send test prompt" }));
+
+    await waitFor(() => expect(prompt).toHaveBeenCalledTimes(1));
+    expect(prompt.mock.calls[0]?.[0]).toMatchObject({
+      contextReferences: [
+        { nodeId: node.id },
+        ...skills.slice(0, 9).map((skill) => ({ nodeId: skill.id, kind: "invocation" })),
+      ],
+      resourceContext: [promptResourceContext()],
+    });
+  });
+
+  it("clears picked skills after a successful send but keeps them after a failed one", async () => {
+    const failingPrompt = vi.fn(async (): Promise<{ accepted: boolean }> => {
+      throw new Error("boom");
+    });
+    renderView({
+      listSkillNodes: async () => [skillNode],
+      prompt: failingPrompt,
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Pick skill: weekly-report" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send test prompt" }));
+    await waitFor(() => expect(failingPrompt).toHaveBeenCalledTimes(1));
+    expect(within(screen.getByTestId("composer-header")).getByText("weekly-report")).toBeTruthy();
+
+    // Swap in a prompt mock that succeeds, then send again — the failed
+    // attempt must not have silently cleared the pick.
+    failingPrompt.mockResolvedValue({ accepted: true });
+    fireEvent.click(screen.getByRole("button", { name: "Send test prompt" }));
+    await waitFor(() => expect(failingPrompt).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.getByTestId("composer-header").textContent).toBe(""));
   });
 });
 
@@ -966,6 +1492,35 @@ describe("AgentDetailView — storage-first catalog", () => {
     expect(selector.textContent).not.toContain("Cached model");
   });
 
+  it("never attaches confirmed thinking choices to a speculative cached model", async () => {
+    useAgentModelListStore
+      .getState()
+      .setCatalog(agentModelCatalogScope("local", "local", "anonymous", "test-agent"), {
+        configId: "model",
+        name: "Cached model catalog",
+        options: [{ value: "old", name: "Old model" }],
+        updatedAt: SESSION.lastActivityAt,
+      });
+    renderView({
+      sessions: [
+        {
+          ...SESSION,
+          status: "idle",
+          modelOption: null,
+          thinkingOption: {
+            id: "effort",
+            name: "Thinking Level",
+            currentValue: "high",
+            options: [{ value: "high", name: "High" }],
+          },
+        },
+      ],
+    });
+    const selector = await screen.findByTestId("model-selector-row");
+    expect(selector.dataset.model).toBe("");
+    expect(selector.dataset.thinking).toBe("Thinking Level");
+  });
+
   it("does not rewrite the latest catalog when opening an older ready session", async () => {
     const scope = agentModelCatalogScope("local", "local", "anonymous", "test-agent");
     const catalog = {
@@ -991,5 +1546,178 @@ describe("AgentDetailView — storage-first catalog", () => {
     });
     await screen.findByTestId("model-selector-row");
     expect(useAgentModelListStore.getState().getCatalog(scope)).toEqual(catalog);
+  });
+});
+
+describe("AgentDetailView — remote connection availability", () => {
+  afterEach(() => {
+    agentSession.blocks = [];
+    cleanup();
+  });
+  const remote: AgentSessionVO = { ...SESSION, transport: "remote-websocket" };
+  const saved: AgentConnectionVO = {
+    slug: remote.slug,
+    agentName: remote.agentName,
+    transport: remote.transport,
+    connected: true,
+    sessionCount: 1,
+    latest: remote,
+    ownedByCurrentUser: true,
+  };
+
+  it.each(["idle", "ended", "failed"] as const)(
+    "blocks send and automatic continuation from a disconnected %s session",
+    async (status) => {
+      const { create, prompt } = renderView({
+        sessions: [{ ...remote, status }],
+        listConnections: async () => [],
+      });
+      expect(await screen.findByText("Disconnected")).toBeTruthy();
+      const send = screen.getByRole("button", { name: "Send test prompt" }) as HTMLButtonElement;
+      expect(send.disabled).toBe(true);
+      expect(
+        (screen.getByRole("button", { name: "New session" }) as HTMLButtonElement).disabled,
+      ).toBe(true);
+      fireEvent.click(send);
+      expect(create).not.toHaveBeenCalled();
+      expect(prompt).not.toHaveBeenCalled();
+      expect(screen.getByTestId("conversation")).toBeTruthy();
+    },
+  );
+
+  it("keeps history copy and process navigation usable while new messages and permissions are blocked", async () => {
+    historyActions.copy.mockClear();
+    historyActions.expand.mockClear();
+    agentSession.answerPermission.mockClear();
+    agentSession.blocks = [
+      {
+        kind: "permission",
+        id: "permission-1",
+        title: "Run a command",
+        options: [{ optionId: "allow-once", name: "Allow once", kind: "allow_once" }],
+        resolution: "pending",
+      },
+    ];
+    const { create, prompt } = renderView({ sessions: [remote], listConnections: async () => [] });
+    expect(await screen.findByText("Disconnected")).toBeTruthy();
+    const copy = screen.getByRole("button", { name: "Copy transcript" });
+    const expand = screen.getByRole("button", { name: "Expand process" });
+    const permission = screen.getByRole("button", { name: "Allow once" });
+    expect(copy.matches(":disabled")).toBe(false);
+    expect(expand.matches(":disabled")).toBe(false);
+    expect(permission.matches(":disabled")).toBe(true);
+    fireEvent.click(copy);
+    fireEvent.click(expand);
+    fireEvent.click(permission);
+    expect(historyActions.copy).toHaveBeenCalledOnce();
+    expect(historyActions.expand).toHaveBeenCalledOnce();
+    expect(agentSession.answerPermission).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+    expect(prompt).not.toHaveBeenCalled();
+    expect(
+      (screen.getByRole("button", { name: "Send test prompt" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+
+  it("uses the remote slug to guard the empty-state New session button", async () => {
+    const { create } = renderView({
+      sessions: [],
+      agentSlug: "acprouter:removed",
+      listConnections: async () => [],
+    });
+    expect(await screen.findByText("Disconnected")).toBeTruthy();
+    for (const button of screen.getAllByRole("button", { name: "New session" })) {
+      expect((button as HTMLButtonElement).disabled).toBe(true);
+      fireEvent.click(button);
+    }
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("keeps the compact side-panel composer and menu unavailable", async () => {
+    const { create, prompt } = renderView({
+      sessions: [remote],
+      compactSessionNavigation: true,
+      listConnections: async () => [],
+    });
+    expect(await screen.findByText("Disconnected")).toBeTruthy();
+    expect(
+      (screen.getByRole("button", { name: "Send test prompt" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Agent menu" }), {
+      button: 0,
+      ctrlKey: false,
+      pointerType: "mouse",
+    });
+    expect(
+      (await screen.findByRole("menuitem", { name: "New session" })).getAttribute("aria-disabled"),
+    ).toBe("true");
+    expect(create).not.toHaveBeenCalled();
+    expect(prompt).not.toHaveBeenCalled();
+  });
+
+  it("pauses while connection status is loading, then enables sending after confirmation", async () => {
+    let resolve!: (connections: AgentConnectionVO[]) => void;
+    const pending = new Promise<AgentConnectionVO[]>((complete) => {
+      resolve = complete;
+    });
+    const { prompt } = renderView({ sessions: [remote], listConnections: () => pending });
+    expect(await screen.findByText("Checking connection…")).toBeTruthy();
+    expect(
+      (screen.getByRole("button", { name: "Send test prompt" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    await act(async () => {
+      resolve([saved]);
+      await pending;
+    });
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: "Send test prompt" }) as HTMLButtonElement).disabled,
+      ).toBe(false),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Send test prompt" }));
+    await waitFor(() => expect(prompt).toHaveBeenCalledOnce());
+  });
+
+  it("exposes a status-check retry after lookup failure and recovers without losing the conversation", async () => {
+    let failing = true;
+    renderView({
+      sessions: [remote],
+      listConnections: async () => {
+        if (failing) throw new Error("offline");
+        return [saved];
+      },
+    });
+    expect(await screen.findByText("Connection status unavailable")).toBeTruthy();
+    expect(
+      (screen.getByRole("button", { name: "Send test prompt" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    failing = false;
+    fireEvent.click(screen.getByRole("button", { name: "Check again" }));
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: "Send test prompt" }) as HTMLButtonElement).disabled,
+      ).toBe(false),
+    );
+    expect(screen.getByTestId("conversation")).toBeTruthy();
+  });
+
+  it("restores the next send when an unavailable connection is added", async () => {
+    let connected = false;
+    const { client, prompt } = renderView({
+      sessions: [remote],
+      listConnections: async () => (connected ? [saved] : []),
+    });
+    expect(await screen.findByText("Disconnected")).toBeTruthy();
+    connected = true;
+    await act(async () => {
+      await client.invalidateQueries({ queryKey: ["agents", "connections"] });
+    });
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: "Send test prompt" }) as HTMLButtonElement).disabled,
+      ).toBe(false),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Send test prompt" }));
+    await waitFor(() => expect(prompt).toHaveBeenCalledOnce());
   });
 });

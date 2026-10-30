@@ -1,6 +1,10 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from "vitest";
-import { agentModelCatalogScope, useAgentModelListStore } from "./agent-model-list-store";
+import {
+  agentModelCatalogScope,
+  toAgentModelCatalogEntry,
+  useAgentModelListStore,
+} from "./agent-model-list-store";
 
 const key = "busabase-agents-model-list.v1";
 const scope = agentModelCatalogScope("https://host", "space", "actor", "buda");
@@ -42,6 +46,56 @@ describe("Agent model list persistence", () => {
     useAgentModelListStore.getState().setCatalog(scope, entry);
     const saved = JSON.parse(window.localStorage.getItem(key) ?? "{}");
     expect(saved.state.catalogs[scope]).toEqual(entry);
+  });
+
+  it("rehydrates per-model thinking defaults without reviving the previous session's model selection", async () => {
+    const thinking = {
+      id: "effort",
+      name: "Thinking",
+      currentValue: "medium",
+      options: [
+        { value: "medium", name: "Medium" },
+        { value: "high", name: "High" },
+      ],
+    };
+    const model = {
+      id: "model",
+      name: "Model",
+      currentValue: "reasoner",
+      options: [{ value: "reasoner", name: "Reasoner", thinking }],
+    };
+    const catalog = toAgentModelCatalogEntry(model, entry.updatedAt);
+    useAgentModelListStore.getState().setCatalog(scope, catalog);
+    const saved = window.localStorage.getItem(key);
+    expect(saved).not.toBeNull();
+    useAgentModelListStore.setState({ catalogs: {} });
+    window.localStorage.setItem(key, saved ?? "");
+    await useAgentModelListStore.persist.rehydrate();
+    expect(useAgentModelListStore.getState().getCatalog(scope)).toEqual(catalog);
+    expect(useAgentModelListStore.getState().getCatalog(scope)).not.toHaveProperty("currentValue");
+    expect(catalog.options[0]?.thinking?.currentValue).toBe("medium");
+  });
+
+  it.each([
+    { id: "effort", name: "Thinking", currentValue: true, options: [] },
+    {
+      id: "effort",
+      name: "Thinking",
+      currentValue: "missing",
+      options: [{ value: "high", name: "High" }],
+    },
+  ])("drops malformed thinking metadata without discarding the model catalog", async (thinking) => {
+    window.localStorage.setItem(
+      key,
+      JSON.stringify({
+        state: {
+          catalogs: { [scope]: { ...entry, options: [{ ...entry.options[0], thinking }] } },
+        },
+        version: 0,
+      }),
+    );
+    await useAgentModelListStore.persist.rehydrate();
+    expect(useAgentModelListStore.getState().getCatalog(scope)).toEqual(entry);
   });
 
   it("isolates host, workspace, actor and Agent, including separator characters", () => {

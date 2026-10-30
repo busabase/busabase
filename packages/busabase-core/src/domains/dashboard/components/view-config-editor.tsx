@@ -70,17 +70,20 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { fmt, useCoreI18n, useIString } from "../../../i18n";
+import { fmt, useCoreI18n, useCoreLocale, useIString } from "../../../i18n";
+import { fieldVisibilityMessages } from "../../../i18n/field-visibility";
 import { getPrimaryField } from "../../base/utils/primary-field";
 import { formatUserRefLabel } from "../helpers/format";
 import {
   addViewFilter,
   addViewSort,
+  canonicalizeViewFieldConfig,
   clearAllViewFilters,
   clearAllViewSorts,
   clearViewSortAt,
+  getAutoShowNewFields,
   getVisibleViewFieldSlugs,
   hideViewField,
   matchesViewField,
@@ -88,11 +91,13 @@ import {
   moveViewSort,
   resetAllViewFieldWidths,
   resetViewFieldWidth,
+  setAutoShowNewFields,
   showAllViewFields,
   showViewField,
   updateViewFilterPath,
   updateViewSortAt,
 } from "../helpers/view-config";
+import { getViewConfigPatch } from "../helpers/view-config-patch";
 import type { ViewSubmitOptions } from "../helpers/view-types";
 import { DialogContent } from "./localized-dialog-content";
 import { useSpaceMemberRoster } from "./member-field";
@@ -396,6 +401,7 @@ function StaticViewFieldRow(props: ViewFieldRowProps) {
 
 export function ViewFieldsEditor({ config, fields, onChange, testId }: ViewFieldsEditorProps) {
   const messages = useCoreI18n();
+  const visibilityMessages = fieldVisibilityMessages[useCoreLocale()];
   const resolveIString = useIString();
   const reduceMotion = useReducedMotion();
   const [activeSlug, setActiveSlug] = useState<string | null>(null);
@@ -474,6 +480,24 @@ export function ViewFieldsEditor({ config, fields, onChange, testId }: ViewField
 
   return (
     <div data-testid={testId}>
+      <label className="flex cursor-pointer items-start gap-2 border-border/50 border-b px-3 py-3">
+        <input
+          aria-label={visibilityMessages.automatic}
+          checked={getAutoShowNewFields(config)}
+          className="mt-0.5 shrink-0 accent-foreground"
+          data-testid="view-auto-show-new-fields"
+          onChange={(event) => onChange(setAutoShowNewFields(config, fields, event.target.checked))}
+          type="checkbox"
+        />
+        <span className="min-w-0">
+          <span className="block text-xs">{visibilityMessages.automatic}</span>
+          <span className="mt-1 block text-muted-foreground text-xs leading-5">
+            {getAutoShowNewFields(config)
+              ? visibilityMessages.automaticHint
+              : visibilityMessages.manualHint}
+          </span>
+        </span>
+      </label>
       <div className="flex items-center justify-between gap-2 border-border/50 border-b px-3 py-2">
         <span className="text-muted-foreground text-xs">
           {fmt(messages.base.hiddenFieldCount, { count: hiddenCount })}
@@ -572,7 +596,7 @@ interface ViewConfigEditorDialogProps {
   client?: Pick<BusabaseDashboardApiClient, "listSpaceMembers">;
   fields: BaseFieldVO[];
   onClose: () => void;
-  onSubmit: (config: ViewConfigVO, options?: ViewSubmitOptions) => Promise<void>;
+  onSubmit: (config: Partial<ViewConfigVO>, options?: ViewSubmitOptions) => Promise<void>;
   request: ViewConfigEditorRequest | null;
   view: ViewVO | null;
 }
@@ -617,15 +641,24 @@ export function ViewConfigEditorDialog({
   const resolveIString = useIString();
   const [section, setSection] = useState<ViewConfigEditorSection>("fields");
   const [draft, setDraft] = useState<ViewConfigVO>({ filters: [], sorts: [] });
+  const [baseline, setBaseline] = useState<ViewConfigVO>({ filters: [], sorts: [] });
+  const session = useRef<{ request: ViewConfigEditorRequest; viewId: string } | null>(null);
   const [savingMode, setSavingMode] = useState<"request" | "merge" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (request && view) {
-      setSection(request.section);
-      setDraft(withContextCondition(view.config, fields, request));
-      setError(null);
+    if (!request || !view) {
+      session.current = null;
+      return;
     }
+    // Live query updates must neither overwrite an in-progress draft nor move
+    // its comparison baseline forward while this editor session is open.
+    if (session.current?.request === request && session.current.viewId === view.id) return;
+    session.current = { request, viewId: view.id };
+    setSection(request.section);
+    setBaseline(view.config);
+    setDraft(withContextCondition(view.config, fields, request));
+    setError(null);
   }, [fields, request, view]);
 
   useEffect(() => {
@@ -644,7 +677,8 @@ export function ViewConfigEditorDialog({
     return null;
   }
 
-  const dirty = JSON.stringify(draft) !== JSON.stringify(view.config);
+  const patch = getViewConfigPatch(baseline, canonicalizeViewFieldConfig(draft, fields));
+  const dirty = Object.keys(patch).length > 0;
   const invalid = hasInvalidFilters(draft);
   const focusedField = fields.find((field) => field.id === request.focusedFieldId);
   const visibleCount = getVisibleViewFieldSlugs(draft, fields).length;
@@ -656,7 +690,7 @@ export function ViewConfigEditorDialog({
     setSavingMode(options?.mergeImmediately ? "merge" : "request");
     setError(null);
     try {
-      await onSubmit(draft, options);
+      await onSubmit(patch, options);
       onClose();
     } catch (submitError) {
       setError(

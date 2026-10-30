@@ -674,6 +674,12 @@ const changeRequestSchema = z.object({
   primaryOperation: operationSchema.nullable(),
   operationCount: z.number(),
   reviews: z.array(reviewSchema),
+  viewerCanApprove: z
+    .boolean()
+    .optional()
+    .describe(
+      "Whether the caller may approve, request changes on, merge or close this change request. Returned by `changeRequests.get` only; omitted elsewhere.",
+    ),
 });
 
 /**

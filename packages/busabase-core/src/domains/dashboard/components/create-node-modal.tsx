@@ -29,6 +29,8 @@ import { nodeRoutePath } from "../helpers/known-node-cache";
 import { buildCreateNodePrompts } from "../helpers/node-agent-prompts";
 import { nodeIconForId } from "../helpers/node-icons";
 import { useAttachmentUpload } from "../hooks/use-attachment-upload";
+import { createLocator } from "../hooks/use-copy-locator";
+import { toSlugInput } from "../utils/slug-input";
 import type { AgentIntegrationTarget } from "./agent-install-panel";
 import { AgentPromptsView } from "./agent-prompts-view";
 import { DialogContent } from "./localized-dialog-content";
@@ -124,13 +126,6 @@ const toSlug = (value: string, fallbackPrefix = "item") => {
   if (slug) return slug;
   return trimmed ? `${fallbackPrefix}-${hashToken(trimmed)}` : "";
 };
-
-const toSlugInput = (value: string) =>
-  value
-    .toLowerCase()
-    .replace(/[^a-z0-9-]+/g, "-")
-    .replace(/-{2,}/g, "-")
-    .replace(/^-+/g, "");
 
 interface CreateNodeModalProps {
   open: boolean;
@@ -229,19 +224,19 @@ export function CreateNodeModal({
   // because they do not yet know what to create, and filtering would hide the
   // cross-type scenarios ("build me a folder structure") that are the reason to
   // ask an agent at all.
-  const createPrompts = useMemo(
-    () =>
-      buildCreateNodePrompts(
-        {
-          parentNodeId: parent?.id,
-          parentName: parent?.name,
-          spaceId: resolvedSpaceId,
-          spaceName,
-        },
-        locale,
-      ),
-    [parent?.id, parent?.name, resolvedSpaceId, spaceName, locale],
-  );
+  const createPrompts = useMemo(() => {
+    const context = {
+      parentNodeId: parent?.id,
+      parentName: parent?.name,
+      spaceId: resolvedSpaceId,
+      spaceName,
+    };
+    // The locator here is "create under this folder" — same card, same copy.
+    return {
+      ...buildCreateNodePrompts(context, locale),
+      locator: createLocator(context, locale),
+    };
+  }, [parent?.id, parent?.name, resolvedSpaceId, spaceName, locale]);
   /**
    * Browsing and installing stay where they already work: the Template Center
    * route owns the detail view, the screenshots, and the install dialog. This
@@ -653,7 +648,9 @@ export function CreateNodeModal({
                 agentIntegration={agentIntegration}
                 askAgent={orpc ? { orpc, sessionScopeId: askAgentScopeId } : null}
                 capabilities={createPrompts.capabilities}
+                locator={createPrompts.locator}
                 onHandedOff={() => onOpenChange(false)}
+                recents={{ kind: "create" }}
                 scenarios={createPrompts.scenarios}
               />
             </div>

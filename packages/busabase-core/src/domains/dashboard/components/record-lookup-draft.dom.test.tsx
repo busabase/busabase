@@ -88,8 +88,20 @@ const target = {
   base: source,
   headCommit: { id: "commit-1", payload: { title: "Train", amount: 100 } },
 } as unknown as RecordVO;
-const client = (getBase = vi.fn(async () => source), getRecord = vi.fn(async () => target)) =>
-  ({ getBase, getRecord }) as unknown as BusabaseDashboardApiClient;
+// `getRecord` is the per-record resolver behind the batched `getRecords` the
+// preview actually calls; asserting on it still says WHICH ids were read.
+const client = (
+  getBase = vi.fn(async () => source),
+  getRecord: (recordId: string) => Promise<RecordVO> = vi.fn(async (_recordId: string) => target),
+) => {
+  const getRecords = vi.fn(async (ids: string[]) => ({
+    records: await Promise.all(ids.map((id) => getRecord(id))),
+    missingIds: [] as string[],
+  }));
+  return { getBase, getRecord, getRecords } as unknown as BusabaseDashboardApiClient & {
+    getRecords: typeof getRecords;
+  };
+};
 const orpc = createBusabaseQueryUtils("http://localhost/api/rpc", {}, "workspace-a");
 afterEach(cleanup);
 const harness = (
@@ -226,6 +238,8 @@ describe("new record lookup preview", () => {
       ),
     );
     await waitFor(() => expect(preview().textContent).toContain("100"));
+    expect(api.getRecords).toHaveBeenCalledOnce();
+    expect(api.getRecords).toHaveBeenCalledWith(["expense-1"]);
     expect(api.getRecord).toHaveBeenCalledOnce();
     expect(api.getRecord).toHaveBeenCalledWith("expense-1");
   });

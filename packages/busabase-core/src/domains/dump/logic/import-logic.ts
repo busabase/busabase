@@ -8,6 +8,7 @@ import type {
   ImportTablesVO,
 } from "busabase-contract/domains/dump/types";
 import { and, eq, getTableColumns, inArray, ne } from "drizzle-orm";
+import { getAttachmentUploadPolicy } from "open-domains/attachments/logic";
 import { storage } from "openlib/storage";
 import { getContextSpaceId, resolveActorId } from "../../../context";
 import { getDb } from "../../../db";
@@ -24,8 +25,10 @@ import {
 } from "../../../db/schema";
 import { CURRENT_USER_ID, id as generateId, now, rootNodeIdForSpace } from "../../../logic/kernel";
 import { ensureReady } from "../../../logic/seed";
+import { withStorageKeyRegistration } from "../../assets/logic/storage-cleanup-logic";
 import { insertDefaultGridView } from "../../base/logic/default-view";
 import { writeDocBody } from "../../doc/handlers";
+import { writeFolderBody } from "../../folder/handlers";
 import { requireSpaceManagerForDump } from "./_guard";
 import { DUMP_IMPORT_ORDER, DUMP_TABLE_REGISTRY } from "./table-registry";
 
@@ -167,6 +170,33 @@ const coerceDateColumns = <T extends Record<string, unknown>>(
   return coerced as T;
 };
 
+/** A Cloud restore must never overwrite an object another tenant references. */
+const validateAttachmentRestoreKey = async (
+  db: Pick<Awaited<ReturnType<typeof getDb>>, "select">,
+  storageKey: string,
+  spaceId: string,
+) => {
+  if (
+    typeof storageKey !== "string" ||
+    !storageKey.startsWith("attachments/") ||
+    storageKey.split("/").includes("..") ||
+    storageKey.includes("\\") ||
+    storageKey.includes("\0")
+  ) {
+    throw new ORPCError("BAD_REQUEST", { message: "Invalid attachment restore storage key" });
+  }
+  const references = await db
+    .select({ spaceId: attachments.spaceId, sizeBytes: attachments.sizeBytes })
+    .from(attachments)
+    .where(eq(attachments.storageKey, storageKey));
+  if (references.some((row) => row.spaceId !== spaceId)) {
+    throw new ORPCError("FORBIDDEN", {
+      message: "Cannot restore an attachment object referenced by another space",
+    });
+  }
+  return references;
+};
+
 export const importTableRows = async (input: ImportTablesInput): Promise<ImportTablesVO> => {
   requireSpaceManagerForDump();
   const session = requireSession(input.sessionId);
@@ -177,12 +207,51 @@ export const importTableRows = async (input: ImportTablesInput): Promise<ImportT
   if (input.rows.length === 0) return { inserted: 0 };
 
   if (input.table === "docBodies") {
-    for (const row of input.rows) {
-      const nodeId = row.nodeId as string;
-      const markdown = row.markdown as string;
-      await writeDocBody(nodeId, markdown);
+    // Doc bodies AND folder readmes (`dump.exportDocBodies` serves both), so
+    // the node's restored type decides the key. Imported after every table,
+    // so the `nodes` rows already exist here.
+    //
+    // The lookup is scoped to this space on purpose: the key is derived from
+    // a caller-supplied id, and without it the manager of one space could
+    // overwrite another space's Doc body by naming its node id. Same rule
+    // `validateAttachmentRestoreKey` enforces for attachment bytes.
+    //
+    // The source workspace root is never re-inserted (see the `nodes` remap
+    // below), so a readme on it lands on this space's own root.
+    const rootId = rootNodeIdForSpace(spaceId);
+    const sourceRootId = rootNodeIdForSpace(session.sourceSpaceId);
+    const rows = input.rows.map((row) => ({
+      nodeId: row.nodeId === sourceRootId ? rootId : (row.nodeId as string),
+      markdown: row.markdown as string,
+    }));
+    const db = await getDb();
+    const targets = await db
+      .select({ id: busabaseNodes.id, type: busabaseNodes.type })
+      .from(busabaseNodes)
+      .where(
+        and(
+          eq(busabaseNodes.spaceId, spaceId),
+          inArray(
+            busabaseNodes.id,
+            rows.map((row) => row.nodeId),
+          ),
+        ),
+      );
+    const typeById = new Map(targets.map((target) => [target.id, target.type]));
+    const stray = rows.find((row) => {
+      const type = typeById.get(row.nodeId);
+      return type !== "doc" && type !== "folder";
+    });
+    if (stray) {
+      throw new ORPCError("BAD_REQUEST", {
+        message: `docBodies row names node ${stray.nodeId}, which is not a Doc or folder in this space`,
+      });
     }
-    return { inserted: input.rows.length };
+    for (const row of rows) {
+      if (typeById.get(row.nodeId) === "folder") await writeFolderBody(row.nodeId, row.markdown);
+      else await writeDocBody(row.nodeId, row.markdown);
+    }
+    return { inserted: rows.length };
   }
 
   // Attachment bytes (content-addressed object storage, not a DB row): write
@@ -192,11 +261,40 @@ export const importTableRows = async (input: ImportTablesInput): Promise<ImportT
   // — see `full-importer.ts`), so no `busabase_attachments` row ever
   // momentarily dangles without its bytes.
   if (input.table === "attachmentBlobs") {
+    const policy = getAttachmentUploadPolicy();
+    const db = await getDb();
     for (const row of input.rows) {
       const storageKey = row.storageKey as string;
       const mimeType = (row.mimeType as string) ?? "application/octet-stream";
       const base64 = row.base64 as string;
-      await storage.uploadFileToKey(Buffer.from(base64, "base64"), storageKey, mimeType);
+      const bytes = Buffer.from(base64, "base64");
+      if (policy && db) {
+        const references = await validateAttachmentRestoreKey(db, storageKey, spaceId);
+        if (references.length > 0) {
+          // A resumed archive may replay an object already registered in this
+          // space. Replacing it must not invalidate the registered byte count.
+          if (references.some((reference) => reference.sizeBytes !== bytes.length)) {
+            throw new ORPCError("BAD_REQUEST", {
+              message: "Restored object size conflicts with its existing attachment registry",
+            });
+          }
+        } else {
+          await policy.checkUpload({
+            input: {
+              spaceId,
+              fileName: storageKey.split("/").at(-1) || "restored-file",
+              mimeType,
+              sizeBytes: bytes.length,
+            },
+            userId: resolveActorId(CURRENT_USER_ID),
+            db,
+            attachmentsTable: attachments,
+          });
+        }
+      }
+      await withStorageKeyRegistration(db, storageKey, () =>
+        storage.uploadFileToKey(bytes, storageKey, mimeType),
+      );
     }
     return { inserted: input.rows.length };
   }
@@ -327,7 +425,53 @@ export const importTableRows = async (input: ImportTablesInput): Promise<ImportT
   }
 
   try {
-    await db.insert(table as never).values(rowsToInsert as never[]);
+    const policy = input.table === "attachments" ? getAttachmentUploadPolicy() : undefined;
+    if (policy) {
+      // Preserve archive ids/metadata, but apply the host's actual-object check
+      // and serialized quota transaction to every registry row. One outer
+      // transaction makes a rejected batch atomic, including its earlier rows.
+      await db.transaction(async (tx) => {
+        for (const row of rowsToInsert) {
+          const storageKey = row.storageKey as string;
+          await validateAttachmentRestoreKey(tx, storageKey, spaceId);
+          await policy.confirmUpload(
+            {
+              input: {
+                storageKey,
+                fileName: row.fileName as string,
+                mimeType: row.mimeType as string,
+                sizeBytes: row.sizeBytes as number,
+                spaceId,
+              },
+              userId: resolveActorId(CURRENT_USER_ID),
+              db: tx,
+              attachmentsTable: attachments,
+            },
+            async (database) => {
+              await database.insert(attachments).values(row);
+              return {
+                success: true,
+                attachmentId: row.id as string,
+                storageKey,
+                publicUrl: storage.getPublicUrl(storageKey),
+              };
+            },
+          );
+        }
+      });
+    } else if (input.table === "attachments") {
+      await db.transaction(async (tx) => {
+        for (const row of [...rowsToInsert].sort((a, b) =>
+          String(a.storageKey).localeCompare(String(b.storageKey)),
+        )) {
+          await withStorageKeyRegistration(tx, row.storageKey as string, async (guarded) => {
+            await guarded.insert(attachments).values(row as typeof attachments.$inferInsert);
+          });
+        }
+      });
+    } else {
+      await db.insert(table as never).values(rowsToInsert as never[]);
+    }
   } catch (error) {
     const cause = (
       error as { cause?: { code?: string; detail?: string; constraint?: string } } | undefined

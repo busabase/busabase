@@ -81,7 +81,7 @@ import {
   Shield,
   Trash2,
 } from "lucide-react";
-import { useContext, useState } from "react";
+import { useContext, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
 import { fmt, useCoreI18n } from "../../../i18n";
@@ -144,6 +144,7 @@ export function NodeActionsMenu({
   const [shareOpen, setShareOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const menuTriggerRef = useRef<HTMLButtonElement>(null);
   const queryClient = useQueryClient();
   const subscriptionQueryOptions = orpc.nodes.subscription.get.queryOptions({
     input: { nodeId },
@@ -233,6 +234,7 @@ export function NodeActionsMenu({
           <Button
             aria-label={messages.common.moreActions}
             className="size-8 text-muted-foreground shadow-none hover:bg-muted/70 hover:text-foreground data-[state=open]:bg-muted data-[state=open]:text-foreground"
+            ref={menuTriggerRef}
             size="icon"
             title={messages.common.moreActions}
             type="button"
@@ -323,6 +325,7 @@ export function NodeActionsMenu({
           onOpenChange={setDeleteOpen}
           open={deleteOpen}
           orpc={orpc}
+          returnFocusRef={menuTriggerRef}
         />
       )}
       {shareOpen && canShare && nodeSlug && (

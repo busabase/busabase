@@ -7,7 +7,7 @@ import { Badge } from "kui/badge";
 import { Button } from "kui/button";
 import { Dialog, DialogDescription, DialogHeader, DialogTitle } from "kui/dialog";
 import { ArrowLeft, Bot } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   type CoreI18nMessages,
   type CoreLocale,
@@ -16,6 +16,7 @@ import {
   useCoreI18n,
   useCoreLocale,
 } from "../../../i18n";
+import { budaOauthText } from "../../../i18n/buda-oauth-copy";
 import { presentCoreError } from "../../../i18n/localize-error";
 import { DialogContent } from "../../dashboard/components/localized-dialog-content";
 import {
@@ -23,6 +24,7 @@ import {
   type DesktopAgentStatus,
   requestDesktopAgent,
 } from "../utils/desktop-codex";
+import { readRouterOauthOrigin } from "../utils/router-oauth-origin";
 import { AgentLoadingState, AgentQueryErrorState } from "./agent-query-state";
 import { RouterEnrollmentDialog } from "./router-enrollment-dialog";
 import { TransportBadge } from "./transport-badge";
@@ -52,6 +54,35 @@ export const catalogDescription = (entry: AgentCatalogEntryVO, messages: CoreI18
 /** `true` when the reason describes an expected host limitation, not a failure. */
 export const isExpectedLimitation = (reason: string | null): boolean =>
   reason === coreMessagesEn.agents.unavailableOnCloud || reason === "Coming soon.";
+
+/**
+ * `true` when the card renders no usable action — matches the final `else`
+ * branch below (no button, just an unavailable-reason message), plus the two
+ * other branches that intentionally show a disabled control: `comingSoon`
+ * (text only) and an already-added local agent (button present but disabled).
+ * `isDesktopAgentAvailable` mirrors the render's `desktopAgentEntry` check,
+ * which overrides `available` for a locally-detected Codex/Claude install.
+ */
+export const isCardDisabled = (
+  entry: Pick<AgentCatalogEntryVO, "available" | "comingSoon" | "connectionRequired">,
+  isAlreadyAdded: boolean,
+  isDesktopAgentAvailable = false,
+): boolean =>
+  entry.comingSoon ||
+  isAlreadyAdded ||
+  (!entry.available && !isDesktopAgentAvailable && !entry.connectionRequired && !entry.comingSoon);
+
+/**
+ * Actionable cards first, disabled ones last — relative order within each
+ * group is preserved (stable sort), so Buda's existing lead position ahead of
+ * disabled local agents carries through unchanged, and so does catalog order
+ * otherwise.
+ */
+export const sortCatalogEntries = (
+  entries: AgentCatalogEntryVO[],
+  isEntryDisabled: (entry: AgentCatalogEntryVO) => boolean,
+): AgentCatalogEntryVO[] =>
+  [...entries].sort((a, b) => Number(isEntryDisabled(a)) - Number(isEntryDisabled(b)));
 
 export const localizeUnavailableReason = (
   reason: string | null,
@@ -96,6 +127,7 @@ export function AgentsAddView({ orpc, onBack, onConnected, spaceId }: AgentsAddV
   );
   const [showBudaConnect, setShowBudaConnect] = useState(false);
   const [budaError, setBudaError] = useState<string | null>(null);
+  const [budaAuthorizing, setBudaAuthorizing] = useState(false);
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [sessionErrorEntrySlug, setSessionErrorEntrySlug] = useState<string | null>(null);
   const [desktopAgents, setDesktopAgents] = useState<
@@ -104,7 +136,37 @@ export function AgentsAddView({ orpc, onBack, onConnected, spaceId }: AgentsAddV
   const [installSlug, setInstallSlug] = useState<DesktopAgentSlug | null>(null);
   const [agentInstalling, setAgentInstalling] = useState(false);
   const budaTriggerRef = useRef<HTMLElement | null>(null);
+  const budaWorkspace = useRef(spaceId);
+  const budaAuthorization = useRef<{
+    popup: Window;
+    origin: string;
+    flowId: string;
+    expiresAt: number;
+  } | null>(null);
+  const clearBudaAuthorization = useCallback((close = false) => {
+    const attempt = budaAuthorization.current;
+    budaAuthorization.current = null;
+    if (close) attempt?.popup.close();
+    setBudaAuthorizing(false);
+  }, []);
   const addedAgentSlugs = new Set((connections.data ?? []).map((connection) => connection.slug));
+
+  useEffect(() => {
+    if (budaWorkspace.current !== spaceId) {
+      budaWorkspace.current = spaceId;
+      clearBudaAuthorization(true);
+      setShowBudaConnect(false);
+      setBudaError(null);
+    }
+  }, [spaceId, clearBudaAuthorization]);
+
+  useEffect(
+    () => () => {
+      budaAuthorization.current?.popup.close();
+      budaAuthorization.current = null;
+    },
+    [],
+  );
 
   useEffect(() => {
     let active = true;
@@ -179,6 +241,7 @@ export function AgentsAddView({ orpc, onBack, onConnected, spaceId }: AgentsAddV
   };
 
   const openBudaConnect = () => {
+    if (budaAuthorization.current) return;
     if (!showBudaConnect && document.activeElement instanceof HTMLElement) {
       budaTriggerRef.current = document.activeElement;
     }
@@ -186,9 +249,23 @@ export function AgentsAddView({ orpc, onBack, onConnected, spaceId }: AgentsAddV
     setSessionError(null);
     setSessionErrorEntrySlug(null);
     setShowBudaConnect(true);
-    const path = `/api/agents/buda/oauth/start${spaceId ? `?spaceId=${encodeURIComponent(spaceId)}` : ""}`;
-    const popup = window.open(path, "busabase-buda-oauth", "popup,width=560,height=760");
-    if (!popup) setBudaError(messages.agents.allowPopups);
+    const origin = readRouterOauthOrigin(window.location.origin);
+    const flowId = window.crypto.randomUUID();
+    const url = new URL("/api/agents/buda/oauth/start", origin);
+    if (spaceId) url.searchParams.set("spaceId", spaceId);
+    url.searchParams.set("returnOrigin", window.location.origin);
+    url.searchParams.set("flowId", flowId);
+    const popup = window.open(
+      url.toString(),
+      `busabase-buda-oauth-${flowId}`,
+      "popup,width=560,height=760",
+    );
+    if (!popup) {
+      setBudaError(messages.agents.allowPopups);
+      return;
+    }
+    budaAuthorization.current = { popup, origin, flowId, expiresAt: Date.now() + 600_000 };
+    setBudaAuthorizing(true);
   };
 
   const createSession = useMutation({
@@ -216,17 +293,19 @@ export function AgentsAddView({ orpc, onBack, onConnected, spaceId }: AgentsAddV
 
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
-      if (event.origin !== window.location.origin) return;
+      const attempt = budaAuthorization.current;
+      if (
+        !attempt ||
+        event.origin !== attempt.origin ||
+        event.source !== attempt.popup ||
+        event.data?.flowId !== attempt.flowId
+      )
+        return;
       if (event.data?.type === "busabase:buda-error") {
-        setBudaError(
-          presentCoreError(
-            messages,
-            locale,
-            event.data.message ? new Error(String(event.data.message)) : null,
-            messages.agents.budaConnectionFailed,
-          ),
-        );
+        clearBudaAuthorization();
+        setBudaError(budaOauthText(locale, event.data.reason));
       } else if (event.data?.type === "busabase:buda-connected") {
+        clearBudaAuthorization();
         if (typeof event.data.slug !== "string" || !event.data.slug) {
           setBudaError(messages.agents.budaIdentityMissing);
           return;
@@ -238,9 +317,35 @@ export function AgentsAddView({ orpc, onBack, onConnected, spaceId }: AgentsAddV
         createSession.mutate({ slug: event.data.slug });
       }
     };
+    const timer = window.setInterval(() => {
+      const attempt = budaAuthorization.current;
+      if (!attempt) return;
+      if (Date.now() >= attempt.expiresAt) {
+        clearBudaAuthorization(true);
+        setBudaError(budaOauthText(locale, "expired"));
+      } else if (attempt.popup.closed) {
+        clearBudaAuthorization();
+        setBudaError(budaOauthText(locale, "closed"));
+        void queryClient.invalidateQueries({ queryKey: orpc.agents.catalog.queryKey() });
+        void queryClient.invalidateQueries({
+          queryKey: orpc.agents.connections.list.queryKey({ input: { scope: "mine" } }),
+        });
+      }
+    }, 500);
     window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
-  }, [createSession, locale, messages, orpc.agents.catalog, queryClient]);
+    return () => {
+      window.removeEventListener("message", onMessage);
+      window.clearInterval(timer);
+    };
+  }, [
+    clearBudaAuthorization,
+    createSession,
+    locale,
+    messages,
+    orpc.agents.catalog,
+    orpc.agents.connections.list,
+    queryClient,
+  ]);
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -284,22 +389,15 @@ export function AgentsAddView({ orpc, onBack, onConnected, spaceId }: AgentsAddV
             </div>
           ) : (
             <div className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,16rem),1fr))] gap-3">
-              {(() => {
-                const entries = [...(catalog.data ?? [])];
-                const localAgents = entries.filter((e) => e.transport === "local-subprocess");
-                const areLocalAgentsDisabled =
-                  localAgents.length > 0 &&
-                  localAgents.every((e) => !e.available && !e.connectionRequired && !e.comingSoon);
-
-                if (areLocalAgentsDisabled) {
-                  const budaIndex = entries.findIndex((e) => e.slug === "buda");
-                  if (budaIndex > -1) {
-                    const [buda] = entries.splice(budaIndex, 1);
-                    entries.unshift(buda);
-                  }
-                }
-                return entries;
-              })().map((entry: AgentCatalogEntryVO) => {
+              {sortCatalogEntries(catalog.data ?? [], (entry) =>
+                isCardDisabled(
+                  entry,
+                  (entry.slug === "codex-acp" || entry.slug === "claude-acp") &&
+                    addedAgentSlugs.has(entry.slug),
+                  (entry.slug === "codex-acp" || entry.slug === "claude-acp") &&
+                    desktopAgents[entry.slug] !== undefined,
+                ),
+              ).map((entry: AgentCatalogEntryVO) => {
                 const pendingSlug = createSession.isPending
                   ? createSession.variables?.slug
                   : undefined;
@@ -361,7 +459,12 @@ export function AgentsAddView({ orpc, onBack, onConnected, spaceId }: AgentsAddV
                           onConnected={onConnected}
                         />
                       ) : entry.slug === "buda" && entry.connectionRequired ? (
-                        <Button className="min-h-11 sm:min-h-9" onClick={openBudaConnect} size="sm">
+                        <Button
+                          className="min-h-11 sm:min-h-9"
+                          disabled={budaAuthorizing}
+                          onClick={openBudaConnect}
+                          size="sm"
+                        >
                           {messages.agents.connectBuda}
                         </Button>
                       ) : entry.available || desktopAgentEntry ? (
@@ -459,6 +562,7 @@ export function AgentsAddView({ orpc, onBack, onConnected, spaceId }: AgentsAddV
         onOpenChange={(open) => {
           setShowBudaConnect(open);
           if (!open) {
+            clearBudaAuthorization(true);
             window.setTimeout(() => budaTriggerRef.current?.focus(), 0);
           }
         }}
@@ -477,9 +581,18 @@ export function AgentsAddView({ orpc, onBack, onConnected, spaceId }: AgentsAddV
           </DialogHeader>
           <div className="space-y-3 text-sm">
             <p className="text-muted-foreground">{messages.agents.budaConnectDescription}</p>
-            <Button className="min-h-11 sm:min-h-9" onClick={openBudaConnect}>
+            <Button
+              className="min-h-11 sm:min-h-9"
+              disabled={budaAuthorizing}
+              onClick={openBudaConnect}
+            >
               {messages.agents.openBuda}
             </Button>
+            {budaAuthorizing && (
+              <p className="text-muted-foreground" role="status">
+                {budaOauthText(locale, "waiting")}
+              </p>
+            )}
             {budaError && (
               <p className="text-destructive text-xs" role="alert">
                 {budaError}

@@ -6,6 +6,12 @@ import {
 } from "./prompt-activity";
 
 describe("getPromptActivityState", () => {
+  it("keeps Stop available while a restored turn waits for permission without a local send", () => {
+    expect(getPromptActivityState("waiting_permission", false)).toEqual({
+      active: true,
+      starting: false,
+    });
+  });
   it("shows a starting state immediately while a prompt waits for connection readiness", () => {
     expect(getPromptActivityState("connecting", true)).toEqual({ active: true, starting: true });
   });

@@ -2,11 +2,12 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createRouterClient } from "@orpc/server";
-import { getLocalStoragePath } from "openlib/storage";
+import { getLocalStoragePath, storage } from "openlib/storage";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runWithBusabaseContext } from "../src/context";
 import { docBodyKey } from "../src/domains/doc/handlers";
 import { queryInChunks } from "../src/domains/dump/logic/import-logic";
+import { folderReadmeKey } from "../src/domains/folder/handlers";
 import { rootNodeIdForSpace } from "../src/logic/kernel";
 import { busabaseRouter } from "../src/router";
 
@@ -202,6 +203,108 @@ describe("dump domain logic — oRPC integration", () => {
       client.nodes.list({ types: ["folder"] }),
     );
     expect(Array.isArray(restoredNodes)).toBe(true);
+  });
+
+  // ── docBodies: folder readmes ride the same pseudo-table ──────────────
+  it("docBodies restores a folder readme (the workspace root's included) to folder/readme.md, and a Doc body to doc/doc.md", async () => {
+    const sourceSpace = "space_dump_readme_source";
+    const targetSpace = "space_dump_readme_target";
+    const sourceRootId = rootNodeIdForSpace(sourceSpace);
+    const targetRootId = rootNodeIdForSpace(targetSpace);
+    const folderId = "nod_dump_readme_folder";
+    const docId = "nod_dump_readme_doc";
+    const at = new Date().toISOString();
+    const nodeRow = (id: string, parentId: string | null, type: string, slug: string) => ({
+      id,
+      spaceId: sourceSpace,
+      parentId,
+      type,
+      slug,
+      name: slug,
+      description: "",
+      metadata: {},
+      position: 0,
+      archivedAt: null,
+      deletedAt: null,
+      createdAt: at,
+      updatedAt: at,
+    });
+
+    const { sessionId } = await inSpace(targetSpace, () =>
+      client.dump.importBegin({ sourceSpaceId: sourceSpace }),
+    );
+    await inSpace(targetSpace, () =>
+      client.dump.importTables({
+        sessionId,
+        table: "nodes",
+        rows: [
+          nodeRow(sourceRootId, null, "folder", "root"),
+          nodeRow(folderId, sourceRootId, "folder", "readme-folder"),
+          nodeRow(docId, folderId, "doc", "readme-doc"),
+        ],
+      }),
+    );
+    // Exactly what the CLI archives: one `docs/{nodeId}.md` entry per body,
+    // keyed by the SOURCE ids — including the source root, which is never
+    // re-inserted and must land on the target's own root.
+    await inSpace(targetSpace, () =>
+      client.dump.importTables({
+        sessionId,
+        table: "docBodies",
+        rows: [
+          { nodeId: sourceRootId, markdown: "# Workspace readme\n" },
+          { nodeId: folderId, markdown: "# Folder readme\n" },
+          { nodeId: docId, markdown: "# Doc body\n" },
+        ],
+      }),
+    );
+    expect((await inSpace(targetSpace, () => client.dump.importCommit({ sessionId }))).ok).toBe(
+      true,
+    );
+
+    const readFolder = async (nodeId: string) => {
+      const detail = await inSpace(targetSpace, () => client.nodes.get({ nodeId, type: "folder" }));
+      if (detail.type !== "folder") throw new Error(`expected a folder for ${nodeId}`);
+      return detail.body;
+    };
+    expect(await readFolder(targetRootId)).toBe("# Workspace readme\n");
+    expect(await readFolder(folderId)).toBe("# Folder readme\n");
+    expect(
+      (await inSpace(targetSpace, () => client.nodes.get({ nodeId: docId, type: "doc" }))).body,
+    ).toBe("# Doc body\n");
+    // Never Doc's key for a folder, and nothing written under the source root.
+    await expect(storage.objectExists(docBodyKey(folderId))).resolves.toBe(false);
+    await expect(storage.objectExists(folderReadmeKey(sourceRootId))).resolves.toBe(false);
+  });
+
+  // The body key is derived from a caller-supplied node id, so the restore
+  // must prove the node belongs to the space being restored. Without that, the
+  // manager of one space could overwrite another space's Doc.
+  it("docBodies refuses a node outside the space being restored, and leaves that body alone", async () => {
+    const victimSpace = "space_dump_body_victim";
+    const restoringSpace = "space_dump_body_restoring";
+    const victim = await inSpace(victimSpace, () =>
+      client.docs.create({ autoMerge: true, slug: "victim-doc", name: "Victim", body: "# mine\n" }),
+    );
+
+    const { sessionId } = await inSpace(restoringSpace, () =>
+      client.dump.importBegin({ sourceSpaceId: restoringSpace }),
+    );
+    await expect(
+      inSpace(restoringSpace, () =>
+        client.dump.importTables({
+          sessionId,
+          table: "docBodies",
+          rows: [{ nodeId: victim.node.id, markdown: "# overwritten\n" }],
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await inSpace(restoringSpace, () => client.dump.importAbort({ sessionId }));
+
+    expect(
+      (await inSpace(victimSpace, () => client.nodes.get({ nodeId: victim.node.id, type: "doc" })))
+        .body,
+    ).toBe("# mine\n");
   });
 
   // ── cursor pagination termination + no dup/gap across pages ────────────

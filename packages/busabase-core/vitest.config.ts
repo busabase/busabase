@@ -48,6 +48,7 @@ export default defineConfig({
       "src/domains/templates/components/**/*.test.tsx",
       "src/domains/templates/logic/**/*.test.ts",
       "src/domains/vault/components/**/*.test.tsx",
+      "src/domains/space-instructions/components/**/*.test.tsx",
       "src/demo/**/*.test.ts",
       "src/logic/**/*.test.ts",
     ],

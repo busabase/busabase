@@ -1,7 +1,7 @@
 import "server-only";
 
 import { ORPCError } from "@orpc/server";
-import type { BaseVO } from "busabase-contract/types";
+import type { BaseVO, ChangeRequestVO } from "busabase-contract/types";
 import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { iStringToText } from "openlib/i18n/i-string";
 import type { z } from "zod";
@@ -61,9 +61,14 @@ import { assertValidDateFieldOptionsOrThrow } from "./date-options";
 import { insertDefaultGridView } from "./default-view";
 import { baseNotFound } from "./errors";
 import { resolveLookupFieldOptions } from "./field-ops";
-import { getBase } from "./queries";
+import { getBase, getRecord } from "./queries";
 import { assertRelationOnlyOptionsOrThrow, resolveRelationFieldOptions } from "./relation-options";
-import { assertNoReverseOnNewBaseOrThrow, stripReverseRelationInput } from "./reverse-relations";
+import {
+  assertNoReverseOnNewBaseOrThrow,
+  buildForwardRelationUpdates,
+  type ReverseRelationWrite,
+  stripReverseRelationInput,
+} from "./reverse-relations";
 
 export {
   createBaseInputSchema,
@@ -120,6 +125,86 @@ const createRecordFieldKeyResolver = (base: BaseVO) => {
       data: { problem: result.problem, fieldSlugs: [...liveSlugs] },
     });
   };
+};
+
+/**
+ * A reverse-column edit writes the forward field on ANOTHER Base (or this one,
+ * for a self-relation), so the caller needs changeRequest access there too.
+ * Checked before anything is written for the main record, so a refused edit
+ * leaves nothing half-done.
+ */
+const assertReverseRelationWritePermission = async (
+  writes: ReadonlyArray<ReverseRelationWrite>,
+  submittedBy: string,
+) => {
+  const checked = new Set<string>();
+  for (const write of writes) {
+    if (checked.has(write.forwardBaseId)) continue;
+    checked.add(write.forwardBaseId);
+    try {
+      await assertBaseChangeRequestPermission(write.forwardBaseId, submittedBy);
+    } catch (error) {
+      if (
+        error instanceof ORPCError &&
+        (error.code === "FORBIDDEN" || error.code === "NOT_FOUND")
+      ) {
+        throw new ORPCError("FORBIDDEN", {
+          message:
+            `Field "${write.reverseSlug}" is a two-way relation stored in "${write.forwardFieldSlug}" ` +
+            `on another Base, and you cannot propose changes to that Base. / ` +
+            `该双向关联存放在另一张表的「${write.forwardFieldSlug}」字段上，你没有那张表的提交修改权限。`,
+          data: {
+            slug: write.reverseSlug,
+            reason: "reverse_relation_forbidden",
+            forwardBaseId: write.forwardBaseId,
+            forwardFieldSlug: write.forwardFieldSlug,
+          },
+        });
+      }
+      throw error;
+    }
+  }
+};
+
+/**
+ * Submit reverse-column edits as forward-field updates: ONE bulk-update change
+ * request per forward Base, through `createBulkUpdateChangeRequest` so its
+ * permission gate, validation, idempotency and permission-aware auto-merge all
+ * apply. Runs AFTER the caller's own change request, and reads the forward
+ * values at that moment.
+ *
+ * Known limitation: the main and forward change requests are separate (not one
+ * transaction). If the forward one fails after the main one was written, the
+ * main change stays; and with review-first writes the two are reviewed
+ * independently.
+ */
+const applyReverseRelationWrites = async (
+  writes: ReadonlyArray<ReverseRelationWrite>,
+  options: {
+    submittedBy: string;
+    autoMerge: boolean | undefined;
+    idempotencyKey?: string;
+    sourceBaseSlug: string;
+  },
+): Promise<ChangeRequestVO[]> => {
+  if (writes.length === 0) return [];
+  const db = await getDb();
+  const groups = await buildForwardRelationUpdates(db, writes);
+  const results: ChangeRequestVO[] = [];
+  for (const group of groups) {
+    results.push(
+      await createBulkUpdateChangeRequest(group.baseId, {
+        updates: group.updates,
+        submittedBy: options.submittedBy,
+        autoMerge: options.autoMerge,
+        message: `Update two-way relation from ${options.sourceBaseSlug}`,
+        idempotencyKey: options.idempotencyKey
+          ? `${options.idempotencyKey}:reverse:${group.baseId}`
+          : undefined,
+      }),
+    );
+  }
+  return results;
 };
 
 /**
@@ -871,7 +956,7 @@ export const createBulkChangeRequest = async (
 export const createBulkUpdateChangeRequest = async (
   baseId: string,
   input: z.input<typeof createBulkUpdateChangeRequestInputSchema>,
-) => {
+): Promise<ChangeRequestVO> => {
   await ensureReady();
   const db = await getDb();
   const base = await getBase(baseId);
@@ -928,12 +1013,29 @@ export const createBulkUpdateChangeRequest = async (
     }
   }
 
-  await stripReverseRelationInput(
+  const reverseWrites = await stripReverseRelationInput(
     db,
     base.id,
     base.fields,
     parsed.updates.map((update) => ({ recordId: update.recordId, fields: update.fields })),
   );
+  if (reverseWrites.length > 0) {
+    await assertReverseRelationWritePermission(reverseWrites, submittedBy);
+    // Updates left empty once their reverse keys were redirected would be no-op
+    // operations; drop them. If nothing is left, the forward change request is
+    // the whole write — return it (this endpoint always returns a CR).
+    parsed.updates = parsed.updates.filter((update) => Object.keys(update.fields).length > 0);
+    if (parsed.updates.length === 0) {
+      const [forward] = await applyReverseRelationWrites(reverseWrites, {
+        submittedBy,
+        autoMerge: parsed.autoMerge,
+        idempotencyKey: parsed.idempotencyKey,
+        sourceBaseSlug: base.slug,
+      });
+      if (!forward) throw new Error("Reverse relation write produced no change request");
+      return forward;
+    }
+  }
 
   // One bounded query supplies every current payload and caller-pinned base
   // commit. Ownership comes from the commit's merged operation, avoiding an
@@ -1145,7 +1247,7 @@ export const createBulkUpdateChangeRequest = async (
     // The proposal ledger is authoritative; audit delivery is best-effort.
   }
 
-  return finalizeChangeRequest({
+  const finalized = await finalizeChangeRequest({
     changeRequestId,
     nodeId: base.nodeId,
     requestedAutoMerge: parsed.autoMerge,
@@ -1154,6 +1256,14 @@ export const createBulkUpdateChangeRequest = async (
     label: "bulk record update",
     kind: "content",
   });
+  // Forward side of any reverse-column edits, as its own change request(s).
+  await applyReverseRelationWrites(reverseWrites, {
+    submittedBy,
+    autoMerge: parsed.autoMerge,
+    idempotencyKey: parsed.idempotencyKey,
+    sourceBaseSlug: base.slug,
+  });
+  return finalized;
 };
 
 export const createDeleteChangeRequest = async (
@@ -1331,9 +1441,30 @@ export const createUpdateChangeRequest = async (
   // Resolved on the caller's delta only, before it is merged with the stored
   // payload below (which may hold deleted fields' keys).
   parsed.fields = await createRecordFieldKeyResolver(base)(parsed.fields);
-  await stripReverseRelationInput(db, base.id, base.fields, [
+  const reverseWrites = await stripReverseRelationInput(db, base.id, base.fields, [
     { recordId: record.id, fields: parsed.fields },
   ]);
+  if (reverseWrites.length > 0) {
+    await assertReverseRelationWritePermission(reverseWrites, submittedBy);
+    if (Object.keys(parsed.fields).length === 0) {
+      // Only reverse columns changed: no main change request at all (it would be
+      // an empty commit). Return shape, matching this endpoint's union:
+      // - forward CR(s) merged → the re-read record (its reverse column now
+      //   shows the change), `materialized: true`;
+      // - otherwise → the pending forward CR, `materialized: false`. Note it
+      //   lives on the FORWARD Base (its `baseId` is not this record's Base).
+      const forward = await applyReverseRelationWrites(reverseWrites, {
+        submittedBy,
+        autoMerge: parsed.autoMerge,
+        sourceBaseSlug: base.slug,
+      });
+      const pending = forward.find((changeRequest) => changeRequest.status !== "merged");
+      if (pending) return { ...pending, materialized: false as const };
+      const updated = await getRecord(record.id);
+      if (!updated) throw recordNotFound(record.id);
+      return { ...updated, materialized: true as const };
+    }
+  }
   // `parsed.fields` is only the caller's partial delta — an omitted required
   // field means "leave it alone", not "this record has no value for it".
   // Validate against the MERGED view (current committed fields + delta) so the
@@ -1440,19 +1571,26 @@ export const createUpdateChangeRequest = async (
     parsed.autoMerge,
     await hasNodePermission(base.nodeId, "write", submittedBy),
   );
+  const forwardOptions = { submittedBy, autoMerge: parsed.autoMerge, sourceBaseSlug: base.slug };
   if (autoMerge) {
     await reviewChangeRequest(changeRequestId, { verdict: "approved" }, { automatic: true });
     const merged = await mergeChangeRequest(changeRequestId, { automatic: true });
     if (!merged.record) {
       throw new Error("Auto-merge did not produce an updated record");
     }
-    return { ...merged.record, materialized: true as const };
+    if (reverseWrites.length === 0) return { ...merged.record, materialized: true as const };
+    // Main change first, then its forward side; re-read so the returned record's
+    // reverse column reflects the forward change when that merged too.
+    await applyReverseRelationWrites(reverseWrites, forwardOptions);
+    const updated = await getRecord(record.id);
+    return { ...(updated ?? merged.record), materialized: true as const };
   }
   await announceChangeRequestPendingReview({
     changeRequestId,
     baseId: record.baseId,
     submittedBy,
   });
+  await applyReverseRelationWrites(reverseWrites, forwardOptions);
   return { ...changeRequest, materialized: false as const };
 };
 

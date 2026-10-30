@@ -168,7 +168,7 @@ describe("unified Node surface — oRPC integration", () => {
     const detail = await client.nodes.get({ nodeId: base?.id ?? "" });
     expect(detail.type).toBe("base");
     expect(detail.node.id).toBe(base?.id);
-    expect(Object.keys(detail).sort()).toEqual(["node", "type"]);
+    expect(Object.keys(detail).sort()).toEqual(["attribution", "node", "type"]);
   });
 
   it("refuses a slug that exists under more than one type instead of guessing", async () => {

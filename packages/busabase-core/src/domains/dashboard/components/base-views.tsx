@@ -13,7 +13,7 @@ import { Dialog, DialogDescription, DialogHeader, DialogTitle } from "kui/dialog
 import { Pencil, Plus, RotateCcw, Star, Trash2 } from "lucide-react";
 import { type iString, iStringIsEmpty, iStringParse, iStringTrim } from "openlib/i18n/i-string";
 import { SPALink as Link } from "openlib/ui/dashboard";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useSearch } from "wouter";
 import { fmt, useCoreI18n, useCoreLocale, useIString } from "../../../i18n";
 import { localizeCoreErrorMessage, presentCoreError } from "../../../i18n/localize-error";
@@ -26,6 +26,7 @@ import { isDerivedFieldSlug } from "../helpers/change-request";
 import { createDefaultFieldOptions } from "../helpers/field";
 import { getFieldDependencies } from "../helpers/field-dependencies";
 import { fieldTypeOptions } from "../helpers/field-type-options";
+import { fieldDesignHref, fieldRecordsHref } from "../helpers/field-visibility-navigation";
 import { formatFullTime } from "../helpers/format";
 import {
   type FormulaFieldOptions,
@@ -44,19 +45,23 @@ import {
   type SelectChoice,
 } from "../helpers/select-choices";
 import type {
+  BaseTableViewState,
   CreateBaseFieldPayload,
   RecordSubmitOptions,
   RecordsPagination,
   UpdateBaseFieldPatch,
   ViewFormPayload,
   ViewSubmitOptions,
+  ViewUpdatePayload,
 } from "../helpers/view-types";
 import { useRegisterTopbarNodeActions } from "../hooks/use-register-topbar-node-actions";
 import { useRegisterTopbarNodeInfo } from "../hooks/use-register-topbar-node-info";
 import { registerSidePanelTab, type SidePanelTabProps } from "../side-panel-registry";
 import { useIsAnonymousVisitor } from "../visitor-context";
+import type { KanbanMoveRecord } from "./base-kanban";
 import { applyViewConfigToRecords, BusaBaseTable } from "./base-table";
 import { DateFieldOptionsEditor } from "./date-field";
+import { FieldContextLink } from "./field-context-link";
 import { type ConversionPreview, FieldConversionPreview } from "./field-conversion-preview";
 import { FieldHelpSettings, type FieldHelpValue, hasFieldHelp } from "./field-help";
 import { FormulaFieldEditor } from "./formula-field-editor";
@@ -69,9 +74,14 @@ import { NodePinButton, nodeSidePanelTabId } from "./node-pin-button";
 import { NodeSettingsDialog } from "./node-settings-dialog";
 import { EmptyState, PropertyRow, SidebarPanel } from "./primitives";
 import { RecordTitleBadge } from "./record-title-badge";
+import { findReverseColumn, RelationReverseSettings } from "./relation-reverse-settings";
 import { SelectChoicesEditor } from "./select-choices-editor";
 import { NodeDetailSkeleton } from "./skeletons";
-import { SplitSubmitButton } from "./split-submit-button";
+import {
+  SplitSubmitButton,
+  SubmitPermissionProvider,
+  useWorkspacePermissionLevel,
+} from "./split-submit-button";
 
 const isChoiceField = (field: BaseFieldVO) =>
   field.type === "select" || field.type === "multiselect";
@@ -84,6 +94,7 @@ const sameDateOptions = (left: DateFieldOptions, right: DateFieldOptions) =>
 
 export function BaseDetailView({
   activeView,
+  viewState,
   client,
   archivedViews = [],
   archivedRecords = [],
@@ -101,6 +112,7 @@ export function BaseDetailView({
   onRestoreView,
   onRestoreRecord,
   onMoveRecord,
+  onOpenRecord,
   onPatchRecord,
   onReorderView,
   onUpdateView,
@@ -108,6 +120,7 @@ export function BaseDetailView({
 }: {
   client: BusabaseDashboardApiClient;
   activeView: ViewVO | null;
+  viewState?: BaseTableViewState;
   archivedViews?: ViewVO[];
   archivedRecords?: RecordVO[];
   archivedPagination?: { hasMore: boolean; isLoadingMore: boolean; loadMore: () => void };
@@ -147,7 +160,8 @@ export function BaseDetailView({
   ) => Promise<void>;
   onRestoreView?: (view: ViewVO) => Promise<void>;
   onRestoreRecord?: (record: RecordVO) => Promise<void>;
-  onMoveRecord?: (record: RecordVO, fieldSlug: string, value: string | null) => Promise<void>;
+  onMoveRecord?: KanbanMoveRecord;
+  onOpenRecord?: (record: RecordVO) => void;
   onPatchRecord?: (
     record: RecordVO,
     patch: Record<string, unknown>,
@@ -156,12 +170,41 @@ export function BaseDetailView({
   onReorderView?: (view: ViewVO, position: number) => void;
   onUpdateView: (
     view: ViewVO,
-    payload: ViewFormPayload,
+    payload: ViewUpdatePayload,
     options?: ViewSubmitOptions,
   ) => Promise<void>;
   views: ViewVO[];
 }) {
   const scrollElementRef = useRef<HTMLDivElement>(null);
+  // What this viewer may do on THIS Base: the server's effective node level
+  // (workspace baseline + node grants + credential ceiling — exactly what it
+  // enforces). Falls back to the workspace level when the host's Base VO does
+  // not carry it, so older hosts behave as before.
+  const workspacePermissionLevel = useWorkspacePermissionLevel();
+  const basePermissionLevel = base?.viewerPermissionLevel ?? workspacePermissionLevel;
+  useLayoutEffect(() => {
+    const element = scrollElementRef.current;
+    if (!viewState || !element || pagination?.isLoading) return;
+    const savedTop = viewState.scrollTop;
+    let restoring = savedTop > 0;
+    element.scrollTop = savedTop;
+    // Native Back restores its own scroll state after React's layout effects.
+    // Replay once after that step and ignore its transient zero scroll event.
+    const frame = restoring
+      ? requestAnimationFrame(() => {
+          element.scrollTop = savedTop;
+          restoring = false;
+        })
+      : null;
+    const save = () => {
+      if (!restoring) viewState.scrollTop = element.scrollTop;
+    };
+    element.addEventListener("scroll", save, { passive: true });
+    return () => {
+      if (frame !== null) cancelAnimationFrame(frame);
+      element.removeEventListener("scroll", save);
+    };
+  }, [viewState, pagination?.isLoading]);
   const baseViews = views.filter((view) => view.baseId === base?.id);
   const baseArchivedViews = archivedViews.filter((view) => view.baseId === base?.id);
   const baseArchivedRecords = archivedRecords.filter((record) => record.baseId === base?.id);
@@ -182,30 +225,34 @@ export function BaseDetailView({
       <section>
         <BaseTopbarSlots base={base} orpc={orpc} />
         <div className="px-6 py-5">
-          <BusaBaseTable
-            activeView={activeView}
-            client={client}
-            archivedViews={baseArchivedViews}
-            archivedRecords={baseArchivedRecords}
-            archivedPagination={archivedPagination}
-            base={base}
-            onCreateView={onCreateView}
-            onDeleteView={onDeleteView}
-            onDeleteRecords={onDeleteRecords}
-            onImportRecords={onImportRecords}
-            onUpdateRecords={onUpdateRecords}
-            onRestoreView={onRestoreView}
-            onRestoreRecord={onRestoreRecord}
-            onMoveRecord={onMoveRecord}
-            onPatchRecord={onPatchRecord}
-            onReorderView={onReorderView}
-            onUpdateView={onUpdateView}
-            records={filteredRecords}
-            relationRecords={records}
-            pagination={pagination}
-            scrollElementRef={scrollElementRef}
-            views={baseViews}
-          />
+          <SubmitPermissionProvider permissionLevel={basePermissionLevel}>
+            <BusaBaseTable
+              activeView={activeView}
+              viewState={viewState}
+              client={client}
+              archivedViews={baseArchivedViews}
+              archivedRecords={baseArchivedRecords}
+              archivedPagination={archivedPagination}
+              base={base}
+              onCreateView={onCreateView}
+              onDeleteView={onDeleteView}
+              onDeleteRecords={onDeleteRecords}
+              onImportRecords={onImportRecords}
+              onUpdateRecords={onUpdateRecords}
+              onRestoreView={onRestoreView}
+              onRestoreRecord={onRestoreRecord}
+              onMoveRecord={onMoveRecord}
+              onOpenRecord={onOpenRecord}
+              onPatchRecord={onPatchRecord}
+              onReorderView={onReorderView}
+              onUpdateView={onUpdateView}
+              records={filteredRecords}
+              relationRecords={records}
+              pagination={pagination}
+              scrollElementRef={scrollElementRef}
+              views={baseViews}
+            />
+          </SubmitPermissionProvider>
         </div>
       </section>
     </div>
@@ -319,11 +366,13 @@ function FieldTypeConversionPanel({
 export function BaseSetupView({
   base,
   bases,
+  originViewId,
   draftScope = "local",
   deletedFields = [],
   orpc,
   onConvertFieldType,
   onCreateField,
+  onCreateReverseField,
   onDeleteField,
   onRestoreField,
   onSetPrimaryField,
@@ -336,6 +385,7 @@ export function BaseSetupView({
    * (`bases.list({ fields: "links" })`); `base` itself is always complete.
    */
   bases: BaseVO[];
+  originViewId?: string;
   draftScope?: string;
   deletedFields?: BaseFieldVO[];
   /** Wired through to the header's "•••" menu (NodeActionsMenu) AND the
@@ -356,6 +406,17 @@ export function BaseSetupView({
   onCreateField: (
     base: BaseVO,
     payload: CreateBaseFieldPayload,
+    options?: { mergeImmediately?: boolean; reverse?: { name: string }; requestId?: string },
+  ) => Promise<void>;
+  /**
+   * Show an existing relation field on its target Base too: create the reverse
+   * column there (`options.reverseOfFieldId`). Absent → the edit dialog offers
+   * no two-way switch.
+   */
+  onCreateReverseField?: (
+    base: BaseVO,
+    forwardFieldId: string,
+    name: string,
     options?: { mergeImmediately?: boolean },
   ) => Promise<void>;
   /** Soft-delete a field. The undo is `onRestoreField`, which already shipped. */
@@ -413,9 +474,20 @@ export function BaseSetupView({
   const [lookupAwaitingReview, setLookupAwaitingReview] = useState(false);
   const [isRequired, setIsRequired] = useState(false);
   const [isMultiple, setIsMultiple] = useState(true);
+  // Two-way switch for a new relation field; `name: null` means "the default",
+  // this Base's name, which is what Notion and Airtable call the other column.
+  const [reverseDraft, setReverseDraft] = useState<{ enabled: boolean; name: string | null }>({
+    enabled: true,
+    name: null,
+  });
+  const [editingReverseDraft, setEditingReverseDraft] = useState<{
+    enabled: boolean;
+    name: string | null;
+  }>({ enabled: false, name: null });
   // Choices typed into the add-field dialog for a select / multiselect field.
   const [choiceDrafts, setChoiceDrafts] = useState<ChoiceDraft[]>([]);
   const [isSaving, setIsSaving] = useState(false);
+  const fieldCommandRef = useRef<{ fingerprint: string; requestId: string } | null>(null);
   const [isAddFieldOpen, setIsAddFieldOpen] = useState(false);
   const addFieldNameInputRef = useRef<HTMLInputElement>(null);
   const [formError, setFormError] = useState<string | null>(null);
@@ -628,6 +700,8 @@ export function BaseSetupView({
     setLookupAwaitingReview(false);
     setIsRequired(false);
     setIsMultiple(true);
+    setReverseDraft({ enabled: true, name: null });
+    fieldCommandRef.current = null;
     setChoiceDrafts([]);
     setFormError(null);
     setFormErrorDetail(null);
@@ -673,10 +747,26 @@ export function BaseSetupView({
     setFormError(null);
     setFormErrorDetail(null);
     try {
-      await onCreateField(
-        base,
+      const createField = (
+        payload: CreateBaseFieldPayload,
+        createOptions?: { mergeImmediately?: boolean; reverse?: { name: string } },
+      ) => {
+        if (payload.type !== "relation") return onCreateField(base, payload, createOptions);
+        // Retry a failed command with the same key, but never reuse a key for
+        // another field definition or a new dialog operation.
+        const fingerprint = JSON.stringify([base.id, payload, createOptions]);
+        if (fieldCommandRef.current?.fingerprint !== fingerprint) {
+          fieldCommandRef.current = { fingerprint, requestId: crypto.randomUUID() };
+        }
+        return onCreateField(base, payload, {
+          ...createOptions,
+          requestId: fieldCommandRef.current.requestId,
+        });
+      };
+      await createField(
         {
           name,
+          ...(originViewId ? { originViewId } : {}),
           options: {
             ...(hasFieldHelp(fieldHelp) ? { help: fieldHelp } : {}),
             ...(fieldType === "formula"
@@ -703,7 +793,9 @@ export function BaseSetupView({
           slug,
           type: fieldType,
         },
-        options,
+        fieldType === "relation" && reverseDraft.enabled && targetBaseId !== base.id
+          ? { ...options, reverse: { name: reverseDraft.name?.trim() || base.name } }
+          : options,
       );
       if (draftKey) writeFormulaFieldDraft(draftKey, null);
       resetAddFieldForm();
@@ -744,6 +836,7 @@ export function BaseSetupView({
     setDraftRestored(false);
     setEditingFieldType(null);
     setSelectChoiceMode("null_on_missing");
+    setEditingReverseDraft({ enabled: false, name: null });
     setFieldRenameError(null);
   };
 
@@ -860,10 +953,28 @@ export function BaseSetupView({
           return;
       }
     }
+    const targetBase = bases.find((item) => item.id === field?.options.targetBaseId);
+    const createReverse =
+      field?.type === "relation" &&
+      editingReverseDraft.enabled &&
+      Boolean(onCreateReverseField) &&
+      targetBase &&
+      targetBase.id !== base.id &&
+      !findReverseColumn(field, targetBase);
     setIsFieldRenameSaving(true);
     setFieldRenameError(null);
     try {
-      await onUpdateField(base, fieldId, patch, options);
+      if (Object.keys(patch).length > 0 || !createReverse) {
+        await onUpdateField(base, fieldId, patch, options);
+      }
+      if (createReverse) {
+        await onCreateReverseField?.(
+          base,
+          fieldId,
+          editingReverseDraft.name?.trim() || base.name,
+          options,
+        );
+      }
       if (draftKey && field?.type === "formula") writeFormulaFieldDraft(draftKey, null);
       resetFieldRenameForm();
     } catch (error) {
@@ -975,6 +1086,7 @@ export function BaseSetupView({
     isEditingFormula &&
     JSON.stringify(editingField.options.formula) !== JSON.stringify(editingFormulaOptions);
   const editingOptionsChanged =
+    editingReverseDraft.enabled ||
     editingChoicesChanged ||
     editingDateOptionsChanged ||
     editingLookupChanged ||
@@ -1341,6 +1453,20 @@ export function BaseSetupView({
                         value={editingLookup}
                       />
                     </div>
+                  ) : null}
+                  {editingField?.type === "relation" && !conversionTargetType ? (
+                    <RelationReverseSettings
+                      base={base}
+                      bases={bases}
+                      disabled={isFieldRenameSaving || !onCreateReverseField}
+                      field={editingField}
+                      onChange={(next) => setEditingReverseDraft(next)}
+                      targetBaseId={editingField.options.targetBaseId ?? ""}
+                      value={{
+                        enabled: editingReverseDraft.enabled,
+                        name: editingReverseDraft.name ?? base.name,
+                      }}
+                    />
                   ) : null}
                   {fieldRenameError ? (
                     <div className="mt-3 text-rejected-strong text-sm">{fieldRenameError}</div>
@@ -1751,6 +1877,19 @@ export function BaseSetupView({
                       </label>
                     ) : null}
                   </div>
+                  {fieldType === "relation" ? (
+                    <RelationReverseSettings
+                      base={base}
+                      bases={bases}
+                      disabled={isSaving}
+                      onChange={(next) => setReverseDraft(next)}
+                      targetBaseId={targetBaseId}
+                      value={{
+                        enabled: reverseDraft.enabled,
+                        name: reverseDraft.name ?? base.name,
+                      }}
+                    />
+                  ) : null}
                   <div className="mt-4">
                     <FieldHelpSettings
                       disabled={isSaving}
@@ -2098,9 +2237,13 @@ registerSidePanelTab("base-preview", BaseSidePanelPreview);
 export function BaseTopbarActions({
   activeTab,
   base,
+  activeView,
+  originView,
 }: {
   activeTab: "records" | "design";
   base: BaseVO;
+  activeView?: ViewVO | null;
+  originView?: ViewVO | null;
 }) {
   const messages = useCoreI18n();
   const currentSearch = useSearch();
@@ -2110,27 +2253,27 @@ export function BaseTopbarActions({
 
   return (
     <nav className="flex rounded-md bg-muted/60 p-0.5 text-xs">
-      <Link
+      <FieldContextLink
         className={`rounded px-2.5 py-1.5 font-medium transition-colors ${
           activeTab === "records"
             ? "bg-card text-foreground"
             : "text-muted-foreground hover:text-foreground"
         }`}
-        href={mergeSearchIntoHref(`/base/${base.slug}`, currentSearch)}
+        href={fieldRecordsHref(base.slug, currentSearch, activeView ?? originView)}
       >
         {messages.base.recordsTab}
-      </Link>
+      </FieldContextLink>
       {isAnon ? null : (
-        <Link
+        <FieldContextLink
           className={`rounded px-2.5 py-1.5 font-medium transition-colors ${
             activeTab === "design"
               ? "bg-card text-foreground"
               : "text-muted-foreground hover:text-foreground"
           }`}
-          href={mergeSearchIntoHref(`/base/${base.slug}/design`, currentSearch)}
+          href={fieldDesignHref(base.slug, currentSearch, activeView?.id ?? originView?.id)}
         >
           {messages.base.designTab}
-        </Link>
+        </FieldContextLink>
       )}
     </nav>
   );

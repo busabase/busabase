@@ -30,6 +30,8 @@ import {
   recordChangeRequestInputSchema,
   recordFieldFilterInputSchema,
   recordGetInputSchema,
+  recordGetManyInputSchema,
+  recordGetManyResponseSchema,
   recordLinkSchema,
   recordSchema,
 } from "./record-schemas";
@@ -264,6 +266,10 @@ export const recordContract = {
     })
     .input(recordGetInputSchema)
     .output(recordSchema),
+  // The dashboard's linked-record loader: one call per chunk of relation ids
+  // instead of one `records.get` each. RPC-only on purpose (no `.route()`), so
+  // it stays out of the /api/v1 spec, the SDKs and every MCP catalog.
+  getMany: oc.input(recordGetManyInputSchema).output(recordGetManyResponseSchema),
   search: oc
     .route({
       method: "GET",

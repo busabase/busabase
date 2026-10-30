@@ -1,7 +1,8 @@
 import "server-only";
 
+import type { AgentConnectionDetailVO } from "busabase-contract/domains/agents/types";
 import { and, eq } from "drizzle-orm";
-import { getContextActorId, getContextSpaceId } from "../../../context";
+import { getContextActorId, getContextSpaceId, resolveUserRefs } from "../../../context";
 import { getDb } from "../../../db";
 import { decodeVaultValue } from "../../vault/logic/vault-crypto";
 import { busabaseVaultItems } from "../../vault/schema/vault-items";
@@ -11,6 +12,11 @@ import {
 } from "../schema/router-enrollments";
 import { busabaseRouterGrants } from "../schema/router-grants";
 import { resolveAcprouterEnrollmentOrigin } from "./acprouter-origin-config";
+import {
+  connectionDisplayName,
+  connectionNameOwner,
+  listConnectionNames,
+} from "./agent-connection-name";
 import { getRouterGrantTokens, trustedFetch } from "./router-oauth";
 
 export interface RouterConnectionLaunch {
@@ -27,6 +33,58 @@ const connectionSlugPrefix = "acprouter:";
 
 export const getRouterConnectionSlug = (connectionId: string) =>
   `${connectionSlugPrefix}${connectionId}`;
+
+export async function getRouterConnectionDetail(
+  slug: string,
+): Promise<AgentConnectionDetailVO | null> {
+  const found = await readConnectionRow(slug);
+  if (!found) return null;
+  const database = await getDb();
+  const [pending] = await database
+    .select()
+    .from(busabaseRouterPendingEnrollments)
+    .where(
+      and(
+        eq(busabaseRouterPendingEnrollments.grantId, found.grant.id),
+        eq(
+          busabaseRouterPendingEnrollments.acprouterEnrollmentId,
+          found.connection.acprouterEnrollmentId,
+        ),
+      ),
+    );
+  // The grant's own `busabaseActorId` is the connector — not the viewer.
+  // `readConnectionRow` currently only ever returns a grant owned by the
+  // caller (see its query), so this resolves to the viewer today, but it is
+  // the honest, non-inferred source rather than a `getContextActorId()`
+  // shortcut that would silently stop being true if that filter ever loosens.
+  const connectedBy =
+    (await resolveUserRefs([found.grant.busabaseActorId])).get(found.grant.busabaseActorId) ?? null;
+  return {
+    slug,
+    agentName: connectionDisplayName(
+      await listConnectionNames(),
+      connectionNameOwner(),
+      slug,
+      found.connection.agentSlug,
+    ),
+    provider: "acprouter",
+    providerAgentName: found.connection.agentSlug,
+    agentId: found.connection.acprouterAgentId,
+    transport: "remote-websocket",
+    status: found.grant.revokedAt
+      ? "revoked"
+      : found.connection.pendingRevokedAt
+        ? "disconnecting"
+        : pending?.status === "connected"
+          ? "saved"
+          : "activating",
+    ownedByCurrentUser: true,
+    connectedBy,
+    routerWorkspaceName: found.grant.acprouterSpaceName,
+    routerWorkspaceId: found.grant.acprouterSpaceId,
+    deviceId: found.connection.acprouterEnrollmentId,
+  };
+}
 
 /** Block launches before any potentially slow session shutdown/network work. */
 export async function beginRouterConnectionDisconnect(slug: string): Promise<void> {
@@ -84,6 +142,7 @@ export async function listRouterConnections(): Promise<
   {
     slug: string;
     agentSlug: string;
+    agentName: string;
     grantId: string;
     connectionState: "ready" | "activating" | "disconnecting";
   }[]
@@ -116,9 +175,16 @@ export async function listRouterConnections(): Promise<
         eq(busabaseRouterGrants.busabaseActorId, getContextActorId() ?? ""),
       ),
     );
+  const names = await listConnectionNames();
   return connections.map((connection) => ({
     slug: getRouterConnectionSlug(connection.id),
     agentSlug: connection.agentSlug,
+    agentName: connectionDisplayName(
+      names,
+      connectionNameOwner(),
+      getRouterConnectionSlug(connection.id),
+      connection.agentSlug,
+    ),
     grantId: connection.grantId,
     connectionState: connection.pendingRevokedAt
       ? "disconnecting"

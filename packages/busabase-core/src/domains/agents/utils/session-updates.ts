@@ -25,17 +25,26 @@ import type { AgentSessionEventVO } from "busabase-contract/domains/agents/types
 export function collapseForPersistence(events: AgentSessionEventVO[]): AgentSessionEventVO[] {
   const out: AgentSessionEventVO[] = [];
   for (const event of events) {
-    const update = event.acpUpdate as { sessionUpdate?: unknown; content?: unknown } | undefined;
+    const update = event.acpUpdate as
+      | { sessionUpdate?: unknown; content?: unknown; messageId?: unknown; _meta?: unknown }
+      | undefined;
     const isChunk = event.kind === "acpUpdate" && update?.sessionUpdate === "agent_message_chunk";
     const previous = out.at(-1);
     const previousUpdate = previous?.acpUpdate as
-      | { sessionUpdate?: unknown; content?: { text?: unknown } }
+      | {
+          sessionUpdate?: unknown;
+          content?: { type?: unknown; text?: unknown };
+          messageId?: unknown;
+          _meta?: unknown;
+        }
       | undefined;
 
     if (
       isChunk &&
       previous?.kind === "acpUpdate" &&
-      previousUpdate?.sessionUpdate === "agent_message_chunk"
+      previousUpdate?.sessionUpdate === "agent_message_chunk" &&
+      previousUpdate.messageId === update?.messageId &&
+      JSON.stringify(previousUpdate._meta) === JSON.stringify(update?._meta)
     ) {
       const text = (update?.content as { text?: unknown } | undefined)?.text;
       if (typeof text === "string" && typeof previousUpdate.content?.text === "string") {

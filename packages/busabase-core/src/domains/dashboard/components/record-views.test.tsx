@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { BaseFieldVO, RecordVO } from "busabase-contract/types";
@@ -9,6 +9,7 @@ import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Router } from "wouter";
+import { memoryLocation } from "wouter/memory-location";
 import { CoreI18nProvider } from "../../../i18n";
 import { validateRecordFields } from "../../base/field-rules";
 import { DashboardOrpcProvider } from "../orpc-context";
@@ -271,6 +272,144 @@ describe("Record editor draft", () => {
     expect(confirm).toHaveBeenCalledWith("Discard unsaved changes and leave this record?");
     expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Keep me");
     confirm.mockRestore();
+  });
+});
+
+describe("Record source references", () => {
+  const source = {
+    ...record,
+    id: "rec_source",
+    baseId: "bas_deals",
+    base: {
+      ...record.base,
+      id: "bas_deals",
+      slug: "deals",
+      name: "Deals",
+      fields: [
+        record.base.fields[0],
+        { id: "fld_first", slug: "customer", name: "Customer", type: "relation", options: {} },
+        { id: "fld_second", slug: "reviewer", name: "Reviewer", type: "relation", options: {} },
+      ],
+    },
+    headCommit: { ...record.headCommit, payload: { name: "Launch deal" } },
+  } as RecordVO;
+  const target = {
+    ...record,
+    base: {
+      ...record.base,
+      fields: [
+        ...record.base.fields,
+        {
+          id: "fld_inverse",
+          slug: "deals",
+          name: "Deals",
+          type: "relation",
+          options: { targetBaseId: source.baseId, reverseOfFieldId: "fld_first" },
+        },
+      ],
+    },
+  } as RecordVO;
+  const inbound = ["fld_first", "fld_second"].map((fieldId) => ({
+    id: `link_${fieldId}`,
+    fieldId,
+    fieldSlug: fieldId === "fld_first" ? "customer" : "reviewer",
+    baseId: source.baseId,
+    sourceRecordId: source.id,
+    targetRecordId: target.id,
+  }));
+
+  function renderReferences(
+    getSource = vi.fn(async () => source),
+    listLinks = vi.fn(async () => inbound),
+  ) {
+    const location = memoryLocation({
+      path: "/base/customers/rec_preview?space=tnl_test",
+      record: true,
+    });
+    const orpc = {
+      nodes: {
+        list: { queryOptions: () => ({ queryKey: ["nodes"], queryFn: async () => [] }) },
+      },
+      records: {
+        listLinks: {
+          queryOptions: () => ({ queryKey: ["inbound", target.id], queryFn: listLinks }),
+        },
+        get: {
+          queryOptions: ({ input }: { input: { recordId: string } }) => ({
+            queryKey: ["record", input.recordId],
+            queryFn: getSource,
+          }),
+        },
+      },
+    } as unknown as BusabaseQueryUtils;
+    const result = render(
+      <QueryClientProvider
+        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+      >
+        <DashboardOrpcProvider orpc={orpc}>
+          <Router hook={location.hook} searchHook={location.searchHook}>
+            <CoreI18nProvider locale="en">
+              <DashboardVisitorProvider visitorKind="member">
+                <RecordDetailView
+                  baseSlug="customers"
+                  client={client}
+                  onDeleteChangeRequest={async () => undefined}
+                  record={target}
+                  records={[target]}
+                />
+              </DashboardVisitorProvider>
+            </CoreI18nProvider>
+          </Router>
+        </DashboardOrpcProvider>
+      </QueryClientProvider>,
+    );
+    return { ...result, getSource, listLinks, location };
+  }
+
+  it("keeps references collapsed and only offers source navigation for the unpaired field", async () => {
+    const { getSource, location } = renderReferences();
+    const summary = await screen.findByText("References to this record");
+    const details = summary.closest("details");
+    if (!details) throw new Error("Expected a collapsed reference section");
+    expect(details.open).toBe(false);
+    expect(getSource).not.toHaveBeenCalled();
+    fireEvent.click(summary);
+    const link = await screen.findByRole("link", { name: "Go to source record: Launch deal" });
+    expect(details.open).toBe(true);
+    expect(within(details).getByText("Deals · Reviewer")).toBeTruthy();
+    expect(within(details).queryByText("Deals · Customer")).toBeNull();
+    expect(within(details).getByText(/These references are read-only here/)).toBeTruthy();
+    expect(within(details).queryByRole("button")).toBeNull();
+    expect(within(details).queryByRole("combobox")).toBeNull();
+    expect(link.getAttribute("href")).toBe("/base/deals/rec_source?space=tnl_test");
+    fireEvent.click(link);
+    expect(location.history.at(-1)).toBe("/base/deals/rec_source?space=tnl_test");
+  });
+
+  it("keeps the reference section recoverable when fetching a source fails", async () => {
+    const getSource = vi.fn().mockRejectedValueOnce(new Error("offline")).mockResolvedValue(source);
+    renderReferences(getSource);
+    fireEvent.click(await screen.findByText("References to this record"));
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("Could not load the records that link here");
+    fireEvent.click(within(alert).getByRole("button", { name: "Retry" }));
+    expect(
+      await screen.findByRole("link", { name: "Go to source record: Launch deal" }),
+    ).toBeTruthy();
+    expect(getSource).toHaveBeenCalledTimes(2);
+  });
+
+  it("can retry discovery without creating or editing a relation", async () => {
+    const listLinks = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValue(inbound);
+    const { getSource } = renderReferences(undefined, listLinks);
+    const alert = await screen.findByRole("alert");
+    fireEvent.click(within(alert).getByRole("button", { name: "Retry" }));
+    expect(await screen.findByText("References to this record")).toBeTruthy();
+    expect(listLinks).toHaveBeenCalledTimes(2);
+    expect(getSource).not.toHaveBeenCalled();
   });
 });
 

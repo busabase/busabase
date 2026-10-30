@@ -8,6 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { getDb } from "../src/db";
 import { attachments, busabaseAssets, busabaseAssetUsages, busabaseNodes } from "../src/db/schema";
 import { TEXT_TEMP_PREFIX } from "../src/domains/assets/logic/asset-texts-logic";
+import { processStorageCleanupJobs } from "../src/domains/assets/logic/storage-cleanup-logic";
 import { busabaseAssetTexts } from "../src/domains/assets/schema/asset-texts";
 import { busabaseRouter } from "../src/router";
 import { grepFiles } from "./helpers/grep-files";
@@ -115,6 +116,7 @@ describe("Drive Grep Retrieval — putText / grep / readLines", () => {
       await client.assets.putText({ assetId, text: "Different content entirely" });
       const row3 = expectDefined(await getTextRow(assetId));
       expect(row3.textContentHash).not.toBe(row1.textContentHash);
+      await processStorageCleanupJobs(await getDb(), { now: new Date(Date.now() + 1_000) });
       await expect(storage.getObject(oldKey)).rejects.toThrow();
     });
 
@@ -283,6 +285,7 @@ describe("Drive Grep Retrieval — putText / grep / readLines", () => {
       await expect(storage.getObject(sharedKey)).resolves.toBeInstanceOf(Buffer);
 
       await client.assets.putText({ assetId: assetB, none: true });
+      await processStorageCleanupJobs(await getDb(), { now: new Date(Date.now() + 1_000) });
       await expect(storage.getObject(sharedKey)).rejects.toThrow();
     });
 
@@ -303,8 +306,31 @@ describe("Drive Grep Retrieval — putText / grep / readLines", () => {
       await expect(storage.getObject(textKey)).resolves.toBeInstanceOf(Buffer);
 
       await client.assets.delete({ assetId });
-
+      await processStorageCleanupJobs(await getDb(), { now: new Date(Date.now() + 1_000) });
       await expect(storage.getObject(textKey)).rejects.toThrow();
+    });
+
+    it("writes a fresh generation after collection so an old retry cannot delete new text", async () => {
+      const { assetId } = await uploadAsset({
+        fileName: "text-generation.pdf",
+        mimeType: "application/pdf",
+        hashByte: "f",
+      });
+      const text = "Unique text for the permanent collection generation regression.";
+      await client.assets.putText({ assetId, text });
+      const oldRow = expectDefined(await getTextRow(assetId));
+      await client.assets.putText({ assetId, none: true });
+      await processStorageCleanupJobs(await getDb(), { now: new Date(Date.now() + 1_000) });
+      expect(await storage.objectExists(oldRow.textStorageKey)).toBe(false);
+      await client.assets.putText({ assetId, text });
+      const newRow = expectDefined(await getTextRow(assetId));
+      expect(newRow.textContentHash).toBe(oldRow.textContentHash);
+      expect(newRow.textStorageKey).not.toBe(oldRow.textStorageKey);
+      await processStorageCleanupJobs(await getDb(), { now: new Date(Date.now() + 10_000) });
+      expect((await storage.getObject(newRow.textStorageKey)).toString()).toBe(text);
+      await client.assets.delete({ assetId });
+      await processStorageCleanupJobs(await getDb(), { now: new Date(Date.now() + 1_000) });
+      expect(await storage.objectExists(newRow.textStorageKey)).toBe(false);
     });
   });
 

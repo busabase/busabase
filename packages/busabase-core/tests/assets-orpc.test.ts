@@ -130,8 +130,9 @@ describe("Assets + attachment dedup — oRPC integration", () => {
         contentHash: HASH_A,
       });
       // Git/OCI-style content-addressed key (algorithm segment + 2-char fan-out),
-      // namespaced under its owner so nobody else can be handed the same key.
-      expect(req1.storageKey).toMatch(/^attachments\/local\/blobs\/sha256\/aa\//);
+      // namespaced under its owner and Space so independent tenants never
+      // overwrite the same object through separate upload confirmations.
+      expect(req1.storageKey).toMatch(/^attachments\/local\/spaces\/local\/blobs\/sha256\/aa\//);
       expect(req1.storageKey).toMatch(/\.png$/);
       expect(req1.duplicate).toBe(false);
 
@@ -546,7 +547,7 @@ describe("Assets + attachment dedup — oRPC integration", () => {
       expect(usage?.nodeType).toBe("base");
       expect(usage?.nodeSlug).toBe("assets-wu");
 
-      // Deleting the record clears its usage (replace/remove semantics).
+      // Archiving a recoverable record retains its attachment ownership.
       const deleteCr = await client.records.changeRequest({
         operation: "delete",
         recordId: recordId as string,
@@ -555,7 +556,18 @@ describe("Assets + attachment dedup — oRPC integration", () => {
       await client.changeRequests.merge({ changeRequestIds: [deleteCr.id] });
 
       const after = await client.assets.get({ assetId: asset.id });
-      expect(after.usages.find((u) => u.nodeSlug === "assets-wu")).toBeUndefined();
+      expect(after.usages.find((u) => u.nodeSlug === "assets-wu")).toBeDefined();
+      const restoreCr = await client.records.changeRequest({
+        operation: "restore",
+        recordId: recordId as string,
+      });
+      await client.changeRequests.review({ changeRequestIds: [restoreCr.id], verdict: "approved" });
+      await client.changeRequests.merge({ changeRequestIds: [restoreCr.id] });
+      expect(
+        (await client.assets.get({ assetId: asset.id })).usages.filter(
+          (u) => u.nodeSlug === "assets-wu",
+        ),
+      ).toHaveLength(1);
     });
 
     it("indexes legacy attachmentId-only refs into Assets", async () => {

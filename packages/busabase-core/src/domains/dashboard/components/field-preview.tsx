@@ -1,7 +1,7 @@
 import type { BaseFieldVO, LookupComputedVO, RecordVO, UserRefVO } from "busabase-contract/types";
 import { CodeBlock } from "kui/ai-elements/code-block";
 import { Dialog, DialogDescription, DialogHeader, DialogTitle } from "kui/dialog";
-import { ExternalLink, FileText, Film, List, Maximize2, Music, PlaySquare } from "lucide-react";
+import { ExternalLink, List, Maximize2, PlaySquare } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { type ComponentProps, type ReactNode, useState } from "react";
 import { Streamdown, type Components as StreamdownComponents } from "streamdown";
@@ -13,13 +13,11 @@ import { embedAspectRatio, embedHeight, resolveEmbedPreview } from "../../base/u
 import { parseWhiteboardFieldValue } from "../../base/utils/whiteboard-value";
 import { getRecordTitle } from "../helpers/change-request";
 import {
-  getAttachmentRefs,
   getChoiceBadgeClass,
   getCodeFieldPreviewLanguage,
   getFieldChipEntries,
   getFieldPreviewText,
   getRelationRecordIds,
-  getSafeAttachmentUrl,
 } from "../helpers/field";
 import { fieldValueToString, shortIdentifier } from "../helpers/format";
 import {
@@ -35,6 +33,7 @@ import { mergeSearchIntoHref } from "../helpers/link-search";
 import { lookupDisplayField, lookupItemValue } from "../helpers/lookup";
 import { markdownPreviewSource } from "../helpers/markdown-preview";
 import type { FieldChip } from "../helpers/view-types";
+import { AttachmentValuePreview } from "./attachment-value-preview";
 import { DateFieldValue } from "./date-field";
 import { FormulaValue } from "./formula-value";
 import { DialogContent } from "./localized-dialog-content";
@@ -513,83 +512,7 @@ export function FieldValuePreview({
   }
 
   if (kind === "attachment") {
-    const attachments = getAttachmentRefs(value);
-    if (attachments.length === 0) {
-      return <span className="text-muted-foreground">-</span>;
-    }
-    const images = attachments.filter(
-      (a) => a.mimeType?.startsWith("image/") && getSafeAttachmentUrl(a),
-    );
-    const others = attachments.filter(
-      (a) => !a.mimeType?.startsWith("image/") || !getSafeAttachmentUrl(a),
-    );
-    const fileIcon = (mimeType?: string) => {
-      if (mimeType?.startsWith("video/")) return <Film className="shrink-0" size={11} />;
-      if (mimeType?.startsWith("audio/")) return <Music className="shrink-0" size={11} />;
-      return <FileText className="shrink-0" size={11} />;
-    };
-    return (
-      <div className={`flex min-w-0 flex-col gap-2 ${className}`}>
-        {images.length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
-            {images.map((item) => {
-              const safeUrl = getSafeAttachmentUrl(item);
-              return safeUrl ? (
-                <a
-                  className="relative block overflow-hidden rounded border bg-muted transition-opacity hover:opacity-80"
-                  href={safeUrl}
-                  key={item.id}
-                  rel="noreferrer"
-                  target="_blank"
-                  title={item.fileName}
-                >
-                  <img
-                    alt={item.fileName}
-                    className="h-12 w-auto max-w-[10rem] object-cover"
-                    src={safeUrl}
-                  />
-                </a>
-              ) : null;
-            })}
-          </div>
-        )}
-        {others.length > 0 && (
-          <div className="flex min-w-0 flex-wrap gap-1.5">
-            {others.map((item) => {
-              const safeUrl = getSafeAttachmentUrl(item);
-              const className =
-                "inline-flex max-w-64 items-center gap-1.5 truncate rounded-md border bg-card px-2 py-0.5 text-xs";
-              const children = (
-                <>
-                  {fileIcon(item.mimeType)}
-                  <span className="truncate">{item.fileName}</span>
-                </>
-              );
-              return safeUrl ? (
-                <a
-                  className={`${className} text-primary transition-colors hover:border-primary/40 hover:bg-primary/5 hover:underline`}
-                  href={safeUrl}
-                  key={item.id}
-                  rel="noreferrer"
-                  target="_blank"
-                  title={item.fileName}
-                >
-                  {children}
-                </a>
-              ) : (
-                <span
-                  className={`${className} text-foreground`}
-                  key={item.id}
-                  title={item.fileName}
-                >
-                  {children}
-                </span>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    );
+    return <AttachmentValuePreview className={className} value={value} />;
   }
 
   if (kind === "relation") {

@@ -3,10 +3,17 @@ import "server-only";
 import { ORPCError } from "@orpc/server";
 import type { NodeDetailVO } from "busabase-contract/contract/node-detail-schemas";
 import type { NodeType } from "busabase-contract/domains";
-import { and, eq } from "drizzle-orm";
-import { getContextSpaceId, isAnonymousVisitor } from "../context";
+import { and, desc, eq, gte, inArray, or, sql } from "drizzle-orm";
+import { getContextSpaceId, isAnonymousVisitor, isEmbedVisitor, resolveUserRefs } from "../context";
 import { getDb } from "../db";
-import { busabaseNodes, type NodePO } from "../db/schema";
+import {
+  busabaseAuditEvents,
+  busabaseChangeRequests,
+  busabaseCommits,
+  busabaseNodes,
+  busabaseOperations,
+  type NodePO,
+} from "../db/schema";
 import { collectAncestorIds } from "./ancestor-chain";
 import { denyAnonymousNodeType, isAnonymousReadableNodeType } from "./anonymous-allowlist";
 // Side-effect import: guarantees every builtin node type has registered its
@@ -49,6 +56,81 @@ const buildGenericDetail = async (node: NodePO): Promise<NodeDetailVO> => {
     type: node.type,
     node: nodeMap.get(node.id) ?? toNodeVO(node, null),
   } as NodeDetailVO;
+};
+
+/** Resolve identities only for the opened node, after its visibility check. */
+const withAttribution = async (detail: NodeDetailVO, node: NodePO): Promise<NodeDetailVO> => {
+  // A publicly readable document does not expose the workspace's member directory.
+  if (isAnonymousVisitor() || isEmbedVisitor()) return detail;
+  const db = await getDb();
+  const spaceId = getContextSpaceId();
+  const [operations, audits] = await Promise.all([
+    db
+      .select({ author: busabaseCommits.author, updatedAt: busabaseOperations.updatedAt })
+      .from(busabaseOperations)
+      .innerJoin(busabaseCommits, eq(busabaseCommits.id, busabaseOperations.headCommitId))
+      .innerJoin(
+        busabaseChangeRequests,
+        eq(busabaseChangeRequests.id, busabaseOperations.changeRequestId),
+      )
+      .where(
+        and(
+          eq(busabaseOperations.nodeId, node.id),
+          eq(busabaseOperations.spaceId, spaceId),
+          eq(busabaseCommits.spaceId, spaceId),
+          eq(busabaseChangeRequests.spaceId, spaceId),
+          eq(busabaseOperations.status, "merged"),
+          eq(busabaseChangeRequests.status, "merged"),
+          // Record/field/view edits have their own timestamps and attribution;
+          // only the Base's archive/restore operations change the node itself.
+          or(
+            eq(busabaseOperations.targetType, "node"),
+            inArray(busabaseOperations.operation, ["base_archive", "base_restore"]),
+          ),
+        ),
+      )
+      // Submission time can differ from merge order; only applied edits count.
+      .orderBy(desc(busabaseOperations.updatedAt), desc(busabaseOperations.id))
+      .limit(1),
+    db
+      .select({ author: busabaseAuditEvents.actorId, updatedAt: busabaseAuditEvents.createdAt })
+      .from(busabaseAuditEvents)
+      .where(
+        and(
+          eq(busabaseAuditEvents.spaceId, spaceId),
+          gte(busabaseAuditEvents.createdAt, node.updatedAt),
+          inArray(busabaseAuditEvents.action, [
+            "node.metadata_updated",
+            "node.settings_updated",
+            "node.agent_prompts_updated",
+          ]),
+          // JSON member extraction has no native Drizzle column accessor.
+          eq(sql<string>`${busabaseAuditEvents.metadata}->>'nodeId'`, node.id),
+        ),
+      )
+      .orderBy(desc(busabaseAuditEvents.createdAt), desc(busabaseAuditEvents.id))
+      .limit(1),
+  ]);
+  const latest = [...operations, ...audits].sort(
+    (a, b) => b.updatedAt.getTime() - a.updatedAt.getTime(),
+  )[0];
+  // Do not attribute a later unrecorded/imported edit to an earlier author.
+  const updatedBy =
+    latest && latest.updatedAt >= node.updatedAt
+      ? latest.author
+      : node.createdAt.getTime() === node.updatedAt.getTime()
+        ? node.createdBy
+        : null;
+  const users = await resolveUserRefs([node.createdBy, updatedBy]);
+  return {
+    ...detail,
+    attribution: {
+      createdBy: node.createdBy,
+      createdByUser: (node.createdBy && users.get(node.createdBy)) || null,
+      updatedBy,
+      updatedByUser: (updatedBy && users.get(updatedBy)) || null,
+    },
+  };
 };
 
 /**
@@ -127,8 +209,8 @@ export const getNodeDetail = async (
   //    mis-discriminated VO a client would have to guess at. `genericDetail` is
   //    an explicit opt-in precisely so this stays true.
   const runtime = getNodeRuntime(node.type);
-  if (runtime?.hydrateDetail) return runtime.hydrateDetail(node);
-  if (runtime?.genericDetail) return buildGenericDetail(node);
+  if (runtime?.hydrateDetail) return withAttribution(await runtime.hydrateDetail(node), node);
+  if (runtime?.genericDetail) return withAttribution(await buildGenericDetail(node), node);
   throw new ORPCError("NOT_IMPLEMENTED", {
     message: `No detail is available for node type "${node.type}"`,
   });

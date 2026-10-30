@@ -13,6 +13,7 @@ import {
   useSensors,
 } from "@dnd-kit/core";
 import { useInfiniteQuery } from "@tanstack/react-query";
+import { hasApiKeyLevel } from "busabase-contract/access-control/api-key-level";
 import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
 import type { BaseFieldVO, BaseVO, RecordVO, ViewVO } from "busabase-contract/types";
 import { ChevronLeft, ChevronRight, GripVertical } from "lucide-react";
@@ -29,7 +30,9 @@ import {
 import { resolveDateField } from "../../base/utils/view-field-resolution";
 import { getRecordTitle } from "../helpers/change-request";
 import { mergeSearchIntoHref } from "../helpers/link-search";
+import { useIsAnonymousVisitor } from "../visitor-context";
 import { rescheduledCalendarValue } from "./calendar-reschedule";
+import { useWorkspacePermissionLevel } from "./split-submit-button";
 
 // Local YYYY-MM-DD key for a Date (avoids UTC off-by-one from toISOString).
 const dayKey = (d: Date) =>
@@ -109,10 +112,12 @@ function CalendarDayCell({
 function CalendarCard({
   canDrag,
   href,
+  onOpenRecord,
   record,
 }: {
   canDrag: boolean;
   href: string;
+  onOpenRecord?: (record: RecordVO) => void;
   record: RecordVO;
 }) {
   const messages = useCoreI18n();
@@ -174,6 +179,21 @@ function CalendarCard({
         title={title}
         draggable={false}
         onDragStart={(event) => event.preventDefault()}
+        onClick={(event) => {
+          if (
+            !onOpenRecord ||
+            event.defaultPrevented ||
+            event.button !== 0 ||
+            event.metaKey ||
+            event.ctrlKey ||
+            event.shiftKey ||
+            event.altKey
+          ) {
+            return;
+          }
+          event.preventDefault();
+          onOpenRecord(record);
+        }}
       >
         {title}
       </Link>
@@ -186,12 +206,14 @@ export function BusaBaseCalendar({
   base,
   client,
   fields,
+  onOpenRecord,
   onPatchRecord,
 }: {
   activeView: ViewVO | null;
   base: BaseVO | null;
   client: BusabaseDashboardApiClient;
   fields: BaseFieldVO[];
+  onOpenRecord?: (record: RecordVO) => void;
   onPatchRecord?: (
     record: RecordVO,
     patch: Record<string, unknown>,
@@ -208,6 +230,8 @@ export function BusaBaseCalendar({
   const [pendingRecordId, setPendingRecordId] = useState<string | null>(null);
   const [dropError, setDropError] = useState<string | null>(null);
   const [reviewRequestId, setReviewRequestId] = useState<string | null>(null);
+  const isAnon = useIsAnonymousVisitor();
+  const permissionLevel = useWorkspacePermissionLevel();
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
     useSensor(TouchSensor, { activationConstraint: { delay: 220, tolerance: 8 } }),
@@ -277,7 +301,12 @@ export function BusaBaseCalendar({
   }
 
   const records = (rangeQuery.data?.pages ?? []).flatMap((page) => page.records);
-  const canReschedule = dateField.type === "date" && Boolean(onPatchRecord);
+  // A `read` grant on the Base may look at the calendar but not reschedule it.
+  const canReschedule =
+    dateField.type === "date" &&
+    Boolean(onPatchRecord) &&
+    !isAnon &&
+    hasApiKeyLevel(permissionLevel, "changeRequest");
 
   const dropOnDay = async (recordId: string, targetDay: string) => {
     const record = records.find((item) => item.id === recordId);
@@ -451,6 +480,7 @@ export function BusaBaseCalendar({
                       canDrag={canReschedule && !pendingRecordId}
                       href={mergeSearchIntoHref(`/base/${baseSlug}/${record.id}`, currentSearch)}
                       key={record.id}
+                      onOpenRecord={onOpenRecord}
                       record={record}
                     />
                   ))}

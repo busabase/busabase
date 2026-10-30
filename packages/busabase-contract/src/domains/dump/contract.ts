@@ -53,9 +53,9 @@ export const dumpContract = {
       method: "POST",
       path: "/dump/export/doc-bodies",
       tags: ["Dump"],
-      summary: "Read the raw markdown for a batch of Doc nodes",
+      summary: "Read the raw markdown for a batch of Doc nodes and folder readmes",
       successDescription:
-        "The raw body behind each requested Doc, read straight from object storage — archived Docs included, which the ordinary `nodes.get` deliberately refuses. Ids that do not resolve to a Doc in this space are omitted rather than failing the batch.",
+        "The raw body behind each requested Doc, read straight from object storage — archived Docs included, which the ordinary `nodes.get` deliberately refuses — and each requested folder's optional readme. Ids that do not resolve to a Doc or folder in this space are omitted rather than failing the batch, and so is a folder that has no readme.",
     })
     .input(ExportDocBodiesInputSchema)
     .output(ExportDocBodiesVOSchema),
@@ -77,7 +77,7 @@ export const dumpContract = {
       tags: ["Dump"],
       summary: "Import a batch of raw rows into an open session",
       successDescription:
-        "Inserted rows preserving their original ids. `docBodies` ({nodeId, markdown}[]), `attachmentBlobs` ({storageKey, mimeType, base64}[]) and `assetTextBlobs` ({textStorageKey, base64}[]) are pseudo-tables written directly to object storage (none of them are DB rows).",
+        "Inserted rows preserving their original ids. `docBodies` ({nodeId, markdown}[]), `attachmentBlobs` ({storageKey, mimeType, base64}[]) and `assetTextBlobs` ({textStorageKey, base64}[]) are pseudo-tables written directly to object storage (none of them are DB rows). A `docBodies` row is a Doc body or a folder readme, decided by the restored node's type; a row naming a node that is not a Doc or folder in this space is a 400.",
     })
     .input(ImportTablesInputSchema)
     .output(ImportTablesVOSchema),

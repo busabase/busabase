@@ -373,13 +373,35 @@ describe("Doc & Folder domains — oRPC integration", () => {
       expect(read.totalLines).toBe(2); // two text elements, no JSON structure
     });
 
-    it("refuses a node type that stores no content, saying what it is", async () => {
+    it("reads an empty folder readme as zero lines, and refuses a type with no content", async () => {
       const rootId = (await client.nodes.list({}))[0]?.id ?? "";
+      // A folder with no readme object is an empty body, not "no lines".
+      const empty = await client.nodes.readLines({ nodeId: rootId, startLine: 1, endLine: 5 });
+      expect(empty.lines).toEqual([]);
+      expect(empty.totalLines).toBe(0);
+
+      const base = await client.nodes.createChangeRequest({
+        autoMerge: true,
+        operations: [
+          {
+            kind: "create",
+            parentNodeId: rootId,
+            nodeType: "base",
+            slug: "no-lines-base",
+            name: "No Lines",
+            fields: [{ slug: "title", name: "Title", type: "text" }],
+          },
+        ],
+      });
+      expect(base.status).toBe("merged");
+      const bases = await client.nodes.list({ types: ["base"] });
+      const baseId = bases.find((node) => node.slug === "no-lines-base")?.id ?? "";
+      expect(baseId).not.toBe("");
       // A 400 that names the node's type, not "Node not found" for a node the
       // caller can plainly see.
       await expect(
-        client.nodes.readLines({ nodeId: rootId, startLine: 1, endLine: 5 }),
-      ).rejects.toMatchObject({ code: "BAD_REQUEST", message: expect.stringContaining("folder") });
+        client.nodes.readLines({ nodeId: baseId, startLine: 1, endLine: 5 }),
+      ).rejects.toMatchObject({ code: "BAD_REQUEST", message: expect.stringContaining("base") });
     });
 
     it("rejects a non-existent nodeId with NOT_FOUND", async () => {

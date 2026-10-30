@@ -1,6 +1,10 @@
 import { foldAvailableCommands, reduceAcpEvents } from "@acp-ui/core/reduce";
 import type { Stream } from "@agentclientprotocol/sdk";
 import * as acp from "@agentclientprotocol/sdk";
+import {
+  createAgentPromptEnvelope,
+  createPromptResourceContext,
+} from "busabase-contract/domains/agents/prompt-context";
 import type { AgentSessionEventVO, AgentSessionVO } from "busabase-contract/domains/agents/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -26,6 +30,7 @@ import type { AgentSessionRuntimeRecord } from "./agent-session-store";
  */
 
 const mocks = vi.hoisted(() => ({
+  resolveAgentContextResources: vi.fn(),
   resolveLaunch: vi.fn(),
   acquireSessionLease: vi.fn(),
   createWebSocketStream: vi.fn<() => Stream>(),
@@ -46,6 +51,10 @@ const mocks = vi.hoisted(() => ({
   // the reattachment-focused `loadSessionRuntime` mock.
   storedSessions: [] as Array<AgentSessionVO>,
   storedScopes: new Map<string, { spaceId: string; actorId: string | null }>(),
+}));
+
+vi.mock("./agent-context-resources", () => ({
+  resolveAgentContextResources: mocks.resolveAgentContextResources,
 }));
 
 vi.mock("./agent-session-store", () => ({
@@ -127,7 +136,21 @@ const MODEL_CONFIG: acp.SessionConfigOption = {
   ],
 };
 
+const THINKING_CONFIG: acp.SessionConfigOption = {
+  id: "reasoning_effort",
+  name: "Thinking Level",
+  category: "thought_level",
+  type: "select",
+  currentValue: "medium",
+  options: [
+    { value: "low", name: "Low" },
+    { value: "medium", name: "Medium" },
+    { value: "high", name: "High" },
+  ],
+};
+
 const resetStoreMocks = () => {
+  mocks.resolveAgentContextResources.mockResolvedValue([]);
   mocks.resolveLaunch.mockImplementation(async () => ({
     slug: "test-agent",
     name: "Test Agent",
@@ -201,6 +224,7 @@ const resetStoreMocks = () => {
         lastActivityAt: session.lastActivityAt,
         error: session.error,
         modelOption: session.modelOption,
+        thinkingOption: session.thinkingOption,
       },
       acpSessionId: live?.acpSessionId ?? null,
       lastEventSeq: live?.persistedSeq ?? 0,
@@ -213,7 +237,13 @@ const resetStoreMocks = () => {
   mocks.persistSessionAcpIdentity.mockResolvedValue(undefined);
   mocks.persistSessionEvents.mockResolvedValue(true);
   mocks.persistSessionModelOption.mockImplementation(
-    async (sessionId: string, modelOption: AgentSessionVO["modelOption"]) => {
+    async (
+      sessionId: string,
+      modelOption: AgentSessionVO["modelOption"],
+      _scope,
+      _fence,
+      thinkingOption: AgentSessionVO["thinkingOption"] = null,
+    ) => {
       const session = scopedSession(sessionId);
       // Handoff tests supply an existing durable row through
       // `loadSessionRuntime` without duplicating it in `storedSessions`.
@@ -221,6 +251,7 @@ const resetStoreMocks = () => {
       if (session.transport !== "remote-websocket") return false;
       if (session.status === "ended" || session.status === "failed") return false;
       session.modelOption = modelOption;
+      session.thinkingOption = thinkingOption;
       return true;
     },
   );
@@ -273,7 +304,9 @@ function serveFakeAgent(
   options?: {
     initializeGate?: Promise<void>;
     initializeError?: Error;
+    configResponse?: (configId: string, value: string) => acp.SessionConfigOption[];
     imageSupported?: boolean;
+    embeddedContextSupported?: boolean;
     loadError?: Error;
     loadAvailableCommands?: acp.AvailableCommand[];
     loadReplayText?: string;
@@ -281,6 +314,7 @@ function serveFakeAgent(
     promptChunkText?: string;
     promptGate?: Promise<void>;
     requestPermission?: boolean;
+    budaEventStream?: boolean;
     /**
      * Tool titles to request permission for all at once, the way Claude Code
      * asks for parallel tool calls: every `session/request_permission` is in
@@ -295,6 +329,7 @@ function serveFakeAgent(
      * notification alone).
      */
     cancelFirstPromptOnNotify?: boolean;
+    cancelFirstPromptStopReason?: acp.StopReason;
     cancelResponseGate?: Promise<void>;
   },
 ) {
@@ -323,7 +358,13 @@ function serveFakeAgent(
           protocolVersion: acp.PROTOCOL_VERSION,
           agentCapabilities: {
             loadSession: options?.loadSessionSupported !== false,
-            promptCapabilities: { image: options?.imageSupported === true },
+            promptCapabilities: {
+              image: options?.imageSupported === true,
+              ...(options?.embeddedContextSupported !== undefined
+                ? { embeddedContext: options.embeddedContextSupported }
+                : {}),
+            },
+            ...(options?.budaEventStream ? { _meta: { "buda.im": { eventStream: 1 } } } : {}),
           },
         };
       })
@@ -400,7 +441,7 @@ function serveFakeAgent(
             else cancelWaiters.set(ctx.params.sessionId, resolveCancel);
           });
           await options.cancelResponseGate;
-          return { stopReason: "cancelled" as const };
+          return { stopReason: options.cancelFirstPromptStopReason ?? ("cancelled" as const) };
         }
         await options?.promptGate;
         return { stopReason: "end_turn" as const };
@@ -418,6 +459,13 @@ function serveFakeAgent(
             if (!("value" in ctx.params) || typeof ctx.params.value !== "string") return option;
             return { ...option, currentValue: ctx.params.value };
           }) ?? [];
+        if (
+          options?.configResponse &&
+          "value" in ctx.params &&
+          typeof ctx.params.value === "string"
+        ) {
+          configOptions = options.configResponse(ctx.params.configId, ctx.params.value);
+        }
         return { configOptions };
       })
       .connectWith(stream, (ctx) => {
@@ -441,6 +489,10 @@ function serveFakeAgent(
     permissionOutcomes: () => permissionOutcomes,
     setConfigOptionsSilently: (nextConfigOptions: acp.SessionConfigOption[]) => {
       configOptions = nextConfigOptions;
+    },
+    pushNotification: async (method: string, params: Record<string, unknown>) => {
+      await ready;
+      await connected?.notify(method, params);
     },
     /** Push a `session/update` config_option_update notification to the client. */
     pushConfigUpdate: async (nextConfigOptions: acp.SessionConfigOption[]) => {
@@ -507,6 +559,406 @@ describe("agent session manager — Buda confirmed model cache", () => {
     const session = await createAgentSession({ slug: launch.slug, spaceId });
     return { session, agent };
   }
+
+  it.each([1, 3])(
+    "serializes %s Buda notifications behind a pending user-message insert",
+    async (count) => {
+      const { session, agent } = await open(null, { budaEventStream: true });
+      await waitUntilSettled(session.id);
+      const live = (
+        globalThis as typeof globalThis & {
+          __busabaseAgentSessions: Map<
+            string,
+            {
+              seq: number;
+              persistedSeq: number;
+              buffer: AgentSessionEventVO[];
+              flushPending: Promise<void>;
+              listeners: Set<(event: AgentSessionEventVO) => void>;
+            }
+          >;
+        }
+      ).__busabaseAgentSessions.get(session.id);
+      if (!live) throw new Error("Expected the live Buda session");
+      await live.flushPending;
+      const published: AgentSessionEventVO[] = [];
+      live.listeners.add((event) => published.push(event));
+      const initialSeq = live.seq;
+      let releaseWrite = () => {};
+      const blocked = new Promise<void>((resolve) => {
+        releaseWrite = resolve;
+      });
+      let enterWrite = () => {};
+      const entered = new Promise<void>((resolve) => {
+        enterWrite = resolve;
+      });
+      const durable: AgentSessionEventVO[] = [];
+      const callsDuringGate: AgentSessionEventVO[][] = [];
+      let writePending = false;
+      mocks.persistSessionEvents.mockImplementation(async (events: AgentSessionEventVO[]) => {
+        const user = events.some(
+          (event) =>
+            (event.acpUpdate as { sessionUpdate?: string })?.sessionUpdate === "user_message",
+        );
+        if (user) {
+          writePending = true;
+          enterWrite();
+          await blocked;
+          writePending = false;
+        } else if (writePending) {
+          callsDuringGate.push(events);
+        }
+        durable.push(...events);
+        return true;
+      });
+      const onAccepted = vi.fn();
+      const prompt = promptAgentSession(session.id, "PDF prompt", undefined, { onAccepted });
+      try {
+        await entered;
+        for (let index = 0; index < count; index += 1) {
+          await agent.pushNotification(
+            index % 2 === 0 ? acp.methods.client.session.update : "_buda.im/session_event",
+            index % 2 === 0
+              ? {
+                  sessionId: "acp-sess-1",
+                  update: {
+                    sessionUpdate: "user_message_chunk",
+                    messageId: "previous-user-message",
+                    content: { type: "text", text: `echo-${index}` },
+                    _meta: { "buda.im": { seq: 100 + index } },
+                  },
+                }
+              : {
+                  sessionId: "acp-sess-1",
+                  event: {
+                    version: 1,
+                    type: "job_update",
+                    turnId: "old-turn",
+                    at: "2026-10-30T00:00:00Z",
+                    job: { id: `job-${index}`, title: "Background job", status: "completed" },
+                  },
+                  _meta: { "buda.im": { seq: 100 + index } },
+                },
+          );
+        }
+        await vi.waitFor(() =>
+          expect(live.buffer.filter((event) => event.seq > initialSeq)).toHaveLength(count),
+        );
+        const seqBeforeRelease = live.seq;
+        expect(onAccepted).not.toHaveBeenCalled();
+        expect(agent.promptTexts()).toEqual([]);
+        releaseWrite();
+        await prompt;
+        await live.flushPending;
+        expect(callsDuringGate).toEqual([]);
+        const seqs = durable.map((event) => event.seq);
+        expect(new Set(seqs).size).toBe(seqs.length);
+        expect(seqs).toEqual([...seqs].sort((a, b) => a - b));
+        expect(
+          durable.filter((event) => event.kind === "acpUpdate" || event.kind === "acpExtension"),
+        ).toHaveLength(count + 1);
+        expect(published.map((event) => event.seq)).toEqual(seqs);
+        expect(live.seq).toBeGreaterThanOrEqual(seqBeforeRelease);
+        expect(live.persistedSeq).toBe(live.seq);
+        expect(live.buffer.map((event) => event.seq)).toEqual(
+          [...live.buffer].sort((a, b) => a.seq - b.seq).map((event) => event.seq),
+        );
+        expect(onAccepted).toHaveBeenCalledOnce();
+        expect(agent.promptTexts()).toEqual(["PDF prompt"]);
+      } finally {
+        releaseWrite();
+        await prompt.catch(() => {});
+        await closeAgentSessions([session.id]);
+      }
+    },
+  );
+
+  it("waits for an earlier Buda notification insert before admitting the user prompt", async () => {
+    const { session, agent } = await open(null, { budaEventStream: true });
+    await waitUntilSettled(session.id);
+    let releaseWrite = () => {};
+    const blocked = new Promise<void>((resolve) => {
+      releaseWrite = resolve;
+    });
+    let enterWrite = () => {};
+    const entered = new Promise<void>((resolve) => {
+      enterWrite = resolve;
+    });
+    const durable: AgentSessionEventVO[] = [];
+    mocks.persistSessionEvents.mockImplementation(async (events: AgentSessionEventVO[]) => {
+      if (
+        events.some(
+          (event) =>
+            (event.acpUpdate as { sessionUpdate?: string })?.sessionUpdate === "user_message_chunk",
+        )
+      ) {
+        enterWrite();
+        await blocked;
+      }
+      durable.push(...events);
+      return true;
+    });
+    await agent.pushNotification(acp.methods.client.session.update, {
+      sessionId: "acp-sess-1",
+      update: {
+        sessionUpdate: "user_message_chunk",
+        messageId: "earlier-user",
+        content: { type: "text", text: "Earlier message" },
+        _meta: { "buda.im": { seq: 10 } },
+      },
+    });
+    await entered;
+    const onAccepted = vi.fn();
+    const prompt = promptAgentSession(session.id, "Later PDF", undefined, { onAccepted });
+    try {
+      await vi.waitFor(() => expect(mocks.acquireSessionLease).toHaveBeenCalled());
+      expect(durable).toEqual([]);
+      expect(onAccepted).not.toHaveBeenCalled();
+      expect(agent.promptTexts()).toEqual([]);
+      releaseWrite();
+      await prompt;
+      expect(
+        durable
+          .slice(0, 2)
+          .map((event) => (event.acpUpdate as { sessionUpdate?: string })?.sessionUpdate),
+      ).toEqual(["user_message_chunk", "user_message"]);
+      const seqs = durable.map((event) => event.seq);
+      expect(new Set(seqs).size).toBe(seqs.length);
+      expect(seqs).toEqual([...seqs].sort((a, b) => a - b));
+      expect(agent.promptTexts()).toEqual(["Later PDF"]);
+    } finally {
+      releaseWrite();
+      await prompt.catch(() => {});
+      await closeAgentSessions([session.id]);
+    }
+  });
+
+  it("never replays or dispatches a rejected user insert overlapped by Buda notifications", async () => {
+    const { session, agent } = await open(null, { budaEventStream: true });
+    await waitUntilSettled(session.id);
+    let releaseWrite = () => {};
+    const blocked = new Promise<void>((resolve) => {
+      releaseWrite = resolve;
+    });
+    let enterWrite = () => {};
+    const entered = new Promise<void>((resolve) => {
+      enterWrite = resolve;
+    });
+    const durable: AgentSessionEventVO[] = [];
+    mocks.persistSessionEvents.mockImplementation(async (events: AgentSessionEventVO[]) => {
+      if (events.some((event) => (event.acpUpdate as { text?: string })?.text === "rejected PDF")) {
+        enterWrite();
+        await blocked;
+        return false;
+      }
+      durable.push(...events);
+      return true;
+    });
+    const onAccepted = vi.fn();
+    const prompt = promptAgentSession(session.id, "rejected PDF", undefined, { onAccepted });
+    const rejected = expect(prompt).rejects.toThrow(/could not persist/i);
+    try {
+      await entered;
+      await agent.pushNotification(acp.methods.client.session.update, {
+        sessionId: "acp-sess-1",
+        update: {
+          sessionUpdate: "user_message_chunk",
+          messageId: "prior-message",
+          content: { type: "text", text: "Prior turn echo" },
+          _meta: { "buda.im": { seq: 10 } },
+        },
+      });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      releaseWrite();
+      await rejected;
+      await promptAgentSession(session.id, "retry PDF");
+      expect(agent.promptTexts()).toEqual(["retry PDF"]);
+      expect(onAccepted).not.toHaveBeenCalled();
+      expect(JSON.stringify(durable)).not.toContain("rejected PDF");
+      expect(
+        durable.filter(
+          (event) =>
+            (event.acpUpdate as { sessionUpdate?: string })?.sessionUpdate === "user_message",
+        ),
+      ).toHaveLength(1);
+      const seqs = durable.map((event) => event.seq);
+      expect(new Set(seqs).size).toBe(seqs.length);
+    } finally {
+      releaseWrite();
+      await prompt.catch(() => {});
+      await closeAgentSessions([session.id]);
+    }
+  });
+
+  const promptContext = () =>
+    createPromptResourceContext(
+      createAgentPromptEnvelope({
+        scenario: { id: "find", title: "Find records" },
+        target: { nodeId: "nod_private", nodeName: "目标", nodeType: "base" },
+        source: { origin: "https://busa.test", edition: "desktop" },
+        segments: [
+          { kind: "target", text: "Target: 目标" },
+          { kind: "task", text: "完整 immutable task\n " },
+        ],
+      }),
+      "paste-1",
+    );
+
+  it.each([true, false, undefined])(
+    "durably records a context-only prompt before negotiated dispatch %s",
+    async (embeddedContextSupported) => {
+      await runWithBusabaseContext({ embedOrigin: "https://busa.test" }, async () => {
+        const { session, agent } = await open(null, { embeddedContextSupported });
+        await waitUntilSettled(session.id);
+        const context = promptContext();
+        mocks.persistSessionEvents.mockClear();
+        await promptAgentSession(session.id, "", undefined, { resourceContext: [context] });
+        const recorded = mocks.persistSessionEvents.mock.calls
+          .flatMap((call) => call[0] as AgentSessionEventVO[])
+          .find(
+            (event) =>
+              (event.acpUpdate as { sessionUpdate?: string })?.sessionUpdate === "user_message",
+          );
+        expect(recorded?.acpUpdate).toEqual({
+          sessionUpdate: "user_message",
+          text: "",
+          resourceContext: [context],
+        });
+        expect(mocks.resolveAgentContextResources).not.toHaveBeenCalled();
+        const sent = agent.promptContents()[0];
+        expect(sent).toHaveLength(2);
+        expect(sent?.[0]).toEqual({ type: "text", text: "" });
+        expect(sent?.[1]).toMatchObject(
+          embeddedContextSupported
+            ? {
+                type: "resource",
+                resource: { uri: context.uri, mimeType: "text/plain", text: context.text },
+              }
+            : { type: "text", text: context.text },
+        );
+        await closeAgentSessions([session.id]);
+      });
+    },
+  );
+
+  it("rejects mismatched prompt snapshots before recording or dispatch and permits retry", async () => {
+    await runWithBusabaseContext({ embedOrigin: "https://busa.test" }, async () => {
+      const { session, agent } = await open(null);
+      await waitUntilSettled(session.id);
+      mocks.persistSessionEvents.mockClear();
+      await expect(
+        promptAgentSession(session.id, "", undefined, {
+          resourceContext: [{ ...promptContext(), text: "tampered" }],
+        }),
+      ).rejects.toThrow(/exactly match/);
+      expect(agent.promptContents()).toEqual([]);
+      expect(
+        mocks.persistSessionEvents.mock.calls
+          .flatMap((call) => call[0] as AgentSessionEventVO[])
+          .some(
+            (event) =>
+              (event.acpUpdate as { sessionUpdate?: string })?.sessionUpdate === "user_message",
+          ),
+      ).toBe(false);
+      await promptAgentSession(session.id, "Retry");
+      expect(agent.promptTexts()).toEqual(["Retry"]);
+      await closeAgentSessions([session.id]);
+    });
+  });
+
+  it("does not accept or dispatch prompt snapshots when durable user-message persistence fails", async () => {
+    await runWithBusabaseContext({ embedOrigin: "https://busa.test" }, async () => {
+      const { session, agent } = await open(null);
+      await waitUntilSettled(session.id);
+      const onAccepted = vi.fn();
+      mocks.persistSessionEvents.mockResolvedValueOnce(false);
+      await expect(
+        promptAgentSession(session.id, "", undefined, {
+          resourceContext: [promptContext()],
+          onAccepted,
+        }),
+      ).rejects.toThrow();
+      expect(onAccepted).not.toHaveBeenCalled();
+      expect(agent.promptContents()).toEqual([]);
+      await closeAgentSessions([session.id]);
+    });
+  });
+
+  it.each([true, false, undefined])(
+    "persists the same resource snapshot sent through negotiated embeddedContext=%s",
+    async (embeddedContextSupported) => {
+      const { session, agent } = await open(null, { embeddedContextSupported });
+      await waitUntilSettled(session.id);
+      const snapshot = {
+        nodeId: "nod_reference",
+        nodeType: "doc",
+        name: "Reference",
+        slug: "reference",
+        truncated: false,
+        uri: "busabase://spaces/local/nodes/nod_reference",
+        mimeType: "text/markdown",
+        text: "The reference contains SNAPSHOT_ONLY_MARKER.",
+        annotations: { audience: ["user", "assistant"] },
+      };
+      mocks.resolveAgentContextResources.mockResolvedValueOnce([snapshot]);
+      mocks.persistSessionEvents.mockClear();
+      await promptAgentSession(session.id, "Read the reference", undefined, {
+        contextReferences: [{ nodeId: "nod_reference" }],
+      });
+      expect(mocks.resolveAgentContextResources).toHaveBeenCalledOnce();
+      const sent = agent.promptContents()[0] ?? [];
+      expect(sent[0]).toEqual({ type: "text", text: "Read the reference" });
+      if (embeddedContextSupported) {
+        expect(sent[1]).toMatchObject({
+          type: "resource",
+          resource: { text: snapshot.text, uri: snapshot.uri },
+        });
+      } else {
+        expect(sent[1]).toMatchObject({
+          type: "text",
+          text: expect.stringContaining("SNAPSHOT_ONLY_MARKER"),
+        });
+        expect(sent.some((block) => block.type === "resource")).toBe(false);
+      }
+      const recorded = mocks.persistSessionEvents.mock.calls
+        .flatMap((call) => call[0] as AgentSessionEventVO[])
+        .find(
+          (event) =>
+            (event.acpUpdate as { sessionUpdate?: string })?.sessionUpdate === "user_message",
+        );
+      expect(recorded?.acpUpdate).toEqual({
+        sessionUpdate: "user_message",
+        text: "Read the reference",
+        contextResources: [snapshot],
+      });
+      await closeAgentSessions([session.id]);
+    },
+  );
+
+  it("does not record or dispatch a failed reference read and releases the turn for retry", async () => {
+    const { session, agent } = await open(null);
+    await waitUntilSettled(session.id);
+    mocks.persistSessionEvents.mockClear();
+    mocks.resolveAgentContextResources.mockRejectedValueOnce(new Error("Reference unavailable"));
+    await expect(
+      promptAgentSession(session.id, "Read the reference", undefined, {
+        contextReferences: [{ nodeId: "nod_unavailable" }],
+      }),
+    ).rejects.toThrow("Reference unavailable");
+    expect(agent.promptContents()).toEqual([]);
+    expect(
+      mocks.persistSessionEvents.mock.calls
+        .flatMap((call) => call[0] as AgentSessionEventVO[])
+        .some(
+          (event) =>
+            (event.acpUpdate as { sessionUpdate?: string })?.sessionUpdate === "user_message",
+        ),
+    ).toBe(false);
+    expect(mocks.releaseSessionLease).toHaveBeenCalled();
+    await promptAgentSession(session.id, "Retry without the reference");
+    expect(agent.promptTexts()).toEqual(["Retry without the reference"]);
+    await closeAgentSessions([session.id]);
+  });
 
   it("exposes confirmed metadata while connecting and replaces it with fresh metadata or null", async () => {
     const first = await open([MODEL_CONFIG]);
@@ -617,12 +1069,33 @@ describe("agent session manager — Buda confirmed model cache", () => {
     expect((await waitUntilSettled(next.session.id)).status).toBe("failed");
   });
 
-  it("resumes with its own persisted model choice instead of another session's cache", async () => {
+  it("never reuses model-dependent thinking options for a brand-new session", async () => {
+    const first = await open([MODEL_CONFIG, THINKING_CONFIG]);
+    await waitUntilSettled(first.session.id);
+    await closeAgentSessions([first.session.id]);
+    let release = () => {};
+    const initializeGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const next = await open([MODEL_CONFIG], { initializeGate });
+    expect(next.session.modelOption?.currentValue).toBe("auto");
+    expect(next.session.thinkingOption).toBeNull();
+    release();
+    expect((await waitUntilSettled(next.session.id)).thinkingOption).toBeNull();
+    await closeAgentSessions([next.session.id]);
+  });
+
+  it("resumes with its own persisted model and thinking choices instead of another session's cache", async () => {
     const first = await open([MODEL_CONFIG]);
     await waitUntilSettled(first.session.id);
     await closeAgentSessions([first.session.id]);
     const record = runtimeRecord({
       slug: launch.slug,
+      thinkingOption: {
+        ...THINKING_CONFIG,
+        currentValue: "high",
+        options: [{ value: "high", name: "High" }],
+      },
       modelOption: {
         id: "model",
         name: "Model",
@@ -637,15 +1110,23 @@ describe("agent session manager — Buda confirmed model cache", () => {
     });
     const [clientSide, agentSide] = linkedStreams();
     mocks.createWebSocketStream.mockReturnValueOnce(clientSide);
-    const agent = serveFakeAgent(agentSide, [{ ...MODEL_CONFIG, currentValue: "fast" }], {
-      initializeGate,
-    });
+    const agent = serveFakeAgent(
+      agentSide,
+      [
+        { ...MODEL_CONFIG, currentValue: "fast" },
+        { ...THINKING_CONFIG, currentValue: "high" },
+      ],
+      {
+        initializeGate,
+      },
+    );
     const completion = promptAgentSession(record.session.id, "resume");
     await vi.waitFor(() => expect(agent.initializeCallCount()).toBe(1));
     const live = (
       globalThis as typeof globalThis & { __busabaseAgentSessions?: Map<string, AgentSessionVO> }
     ).__busabaseAgentSessions?.get(record.session.id);
     expect(live?.modelOption?.currentValue).toBe("fast");
+    expect(live?.thinkingOption?.currentValue).toBe("high");
     expect(agent.promptTexts()).toEqual([]);
     release();
     await completion;
@@ -755,6 +1236,145 @@ describe("agent session manager — model config option", () => {
       ],
     });
 
+    await closeAgentSessions([session.id]);
+  });
+
+  it("discovers and changes the advertised thinking level, including thinking-only agents", async () => {
+    const agent = serveFakeAgent(agentSide, [THINKING_CONFIG]);
+    const session = await createAgentSession({ slug: "test-agent", spaceId: LOCAL_SPACE_ID });
+    const settled = await waitUntilSettled(session.id);
+    expect(settled.modelOption).toBeNull();
+    expect(settled.thinkingOption).toMatchObject({
+      id: "reasoning_effort",
+      currentValue: "medium",
+    });
+
+    const updated = await setAgentSessionConfigOption(session.id, "reasoning_effort", "high");
+    expect(updated.thinkingOption?.currentValue).toBe("high");
+    expect(agent.setConfigCallCount()).toBe(1);
+    expect(
+      (await listAgentSessions()).find((item) => item.id === session.id)?.thinkingOption
+        ?.currentValue,
+    ).toBe("high");
+    await closeAgentSessions([session.id]);
+  });
+
+  it.each([false, true])(
+    "preserves valid per-model metadata and ignores malformed advertisements (grouped: %s)",
+    async (grouped) => {
+      const thinking = {
+        id: "reasoning_effort",
+        name: "Thinking",
+        currentValue: "high",
+        options: [{ value: "high", name: "High" }],
+      };
+      const entries = [
+        { value: "auto", name: "Auto" },
+        { value: "capable", name: "Capable", _meta: { "busabase/thought_level": thinking } },
+        {
+          value: "invalid",
+          name: "Invalid",
+          _meta: { "busabase/thought_level": { ...thinking, currentValue: true } },
+        },
+        {
+          value: "stale",
+          name: "Stale",
+          _meta: { "busabase/thought_level": { ...thinking, currentValue: "missing" } },
+        },
+      ];
+      serveFakeAgent(agentSide, [
+        {
+          ...MODEL_CONFIG,
+          options: grouped ? [{ group: "family", name: "Family", options: entries }] : entries,
+        },
+      ]);
+      const session = await createAgentSession({ slug: "test-agent", spaceId: LOCAL_SPACE_ID });
+      const settled = await waitUntilSettled(session.id);
+      expect(settled.modelOption?.options).toEqual([
+        { value: "auto", name: "Auto" },
+        { value: "capable", name: "Capable", thinking },
+        { value: "invalid", name: "Invalid" },
+        { value: "stale", name: "Stale" },
+      ]);
+      expect(settled.thinkingOption).toBeNull();
+      await closeAgentSessions([session.id]);
+    },
+  );
+
+  it("uses category precedence, flattens grouped thinking choices and accepts uncategorized conventional ids", async () => {
+    serveFakeAgent(agentSide, [
+      { ...THINKING_CONFIG, id: "thinking_level", category: undefined },
+      {
+        ...THINKING_CONFIG,
+        id: "vendor-effort",
+        options: [{ name: "Effort", group: "effort", options: [{ value: "high", name: "High" }] }],
+      },
+    ]);
+    const session = await createAgentSession({ slug: "test-agent", spaceId: LOCAL_SPACE_ID });
+    const settled = await waitUntilSettled(session.id);
+    expect(settled.thinkingOption).toMatchObject({
+      id: "vendor-effort",
+      options: [{ value: "high", name: "High" }],
+    });
+    await closeAgentSessions([session.id]);
+  });
+
+  it("replaces model-dependent thinking choices from a set response and removes revoked controls", async () => {
+    serveFakeAgent(agentSide, [MODEL_CONFIG, THINKING_CONFIG], {
+      configResponse: (_configId, value) =>
+        value === "fast"
+          ? [
+              { ...MODEL_CONFIG, currentValue: value },
+              { ...THINKING_CONFIG, currentValue: "low", options: [{ value: "low", name: "Low" }] },
+            ]
+          : [{ ...MODEL_CONFIG, currentValue: value }],
+    });
+    const session = await createAgentSession({ slug: "test-agent", spaceId: LOCAL_SPACE_ID });
+    await waitUntilSettled(session.id);
+    const fast = await setAgentSessionConfigOption(session.id, "model", "fast");
+    expect(fast.thinkingOption).toMatchObject({
+      currentValue: "low",
+      options: [{ value: "low", name: "Low" }],
+    });
+    const auto = await setAgentSessionConfigOption(session.id, "model", "auto");
+    expect(auto.thinkingOption).toBeNull();
+    await expect(
+      setAgentSessionConfigOption(session.id, "reasoning_effort", "high"),
+    ).rejects.toThrow(/no such config option/);
+    await closeAgentSessions([session.id]);
+  });
+
+  it("rejects unsupported thinking values before dispatching ACP", async () => {
+    const agent = serveFakeAgent(agentSide, [MODEL_CONFIG, THINKING_CONFIG]);
+    const session = await createAgentSession({ slug: "test-agent", spaceId: LOCAL_SPACE_ID });
+    await waitUntilSettled(session.id);
+    await expect(
+      setAgentSessionConfigOption(session.id, "reasoning_effort", "extreme"),
+    ).rejects.toThrow(/not one of the offered options/);
+    expect(agent.setConfigCallCount()).toBe(0);
+    await closeAgentSessions([session.id]);
+  });
+
+  it("replaces thinking metadata on notifications and removes revoked controls", async () => {
+    const agent = serveFakeAgent(agentSide, [MODEL_CONFIG, THINKING_CONFIG]);
+    const session = await createAgentSession({ slug: "test-agent", spaceId: LOCAL_SPACE_ID });
+    await waitUntilSettled(session.id);
+    await agent.pushConfigUpdate([
+      { ...MODEL_CONFIG, currentValue: "fast" },
+      { ...THINKING_CONFIG, currentValue: "high" },
+    ]);
+    await vi.waitFor(async () =>
+      expect(
+        (await listAgentSessions()).find((item) => item.id === session.id)?.thinkingOption
+          ?.currentValue,
+      ).toBe("high"),
+    );
+    await agent.pushConfigUpdate([MODEL_CONFIG]);
+    await vi.waitFor(async () =>
+      expect(
+        (await listAgentSessions()).find((item) => item.id === session.id)?.thinkingOption,
+      ).toBeNull(),
+    );
     await closeAgentSessions([session.id]);
   });
 
@@ -954,6 +1574,79 @@ describe("agent session manager — model config option", () => {
     await closeAgentSessions([session.id]);
   });
 
+  it("keeps source config, text and lifecycle notifications ordered while a config write is gated", async () => {
+    const agent = serveFakeAgent(agentSide, [MODEL_CONFIG], { budaEventStream: true });
+    const session = await createAgentSession({ slug: "test-agent", spaceId: LOCAL_SPACE_ID });
+    await waitUntilSettled(session.id);
+    let releaseWrite = () => {};
+    const writeGate = new Promise<void>((resolve) => {
+      releaseWrite = resolve;
+    });
+    let writeEntered = () => {};
+    const entered = new Promise<void>((resolve) => {
+      writeEntered = resolve;
+    });
+    mocks.persistSessionModelOption.mockImplementationOnce(async () => {
+      writeEntered();
+      await writeGate;
+      return true;
+    });
+    const sourceSequences = () =>
+      mocks.persistSessionEvents.mock.calls.flatMap((call) =>
+        (call[0] as AgentSessionEventVO[]).flatMap((event) => {
+          const params = event.acpUpdate ?? event.acpExtension?.params;
+          const meta = (params as { _meta?: { "buda.im"?: { seq?: unknown } } } | undefined)
+            ?._meta?.["buda.im"];
+          return typeof meta?.seq === "number" ? [meta.seq] : [];
+        }),
+      );
+    try {
+      await agent.pushNotification(acp.methods.client.session.update, {
+        sessionId: "acp-sess-1",
+        update: {
+          sessionUpdate: "config_option_update",
+          configOptions: [{ ...MODEL_CONFIG, currentValue: "fast" }],
+          _meta: { "buda.im": { seq: 10 } },
+        },
+      });
+      await entered;
+      await agent.pushNotification(acp.methods.client.session.update, {
+        sessionId: "acp-sess-1",
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          messageId: "answer",
+          content: { type: "text", text: "After config" },
+          _meta: { "buda.im": { seq: 11 } },
+        },
+      });
+      await agent.pushNotification("_buda.im/session_event", {
+        sessionId: "acp-sess-1",
+        event: {
+          version: 1,
+          type: "job_update",
+          turnId: "turn",
+          at: "2026-10-26T00:00:00Z",
+          job: { id: "job", title: "Task", status: "completed" },
+        },
+        _meta: { "buda.im": { seq: 12 } },
+      });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      // Later notifications must not overtake a source event awaiting its DB write.
+      expect(sourceSequences()).toEqual([]);
+      releaseWrite();
+      await vi.waitFor(() => expect(sourceSequences()).toEqual([10, 11, 12]));
+      const live = (
+        globalThis as typeof globalThis & {
+          __busabaseAgentSessions?: Map<string, { upstreamSeq?: number }>;
+        }
+      ).__busabaseAgentSessions?.get(session.id);
+      expect(live?.upstreamSeq).toBe(12);
+    } finally {
+      releaseWrite();
+      await closeAgentSessions([session.id]);
+    }
+  });
+
   it("persists an in-turn config update before releasing the prompt lease", async () => {
     let releasePrompt = () => {};
     const promptGate = new Promise<void>((resolve) => {
@@ -1000,6 +1693,7 @@ describe("agent session manager — model config option", () => {
       expect.objectContaining({ currentValue: "auto" }),
       { spaceId: LOCAL_SPACE_ID, actorId: null },
       undefined,
+      null,
     );
 
     await closeAgentSessions([session.id]);
@@ -1775,6 +2469,101 @@ describe("cancelAgentSession", () => {
     mocks.createWebSocketStream.mockReturnValue(clientSide);
   });
 
+  it("does not dispatch a provider prompt after Stop during the final lease renewal and accepts a follow-up", async () => {
+    const agent = serveFakeAgent(agentSide, []);
+    const session = await createAgentSession({ slug: "test-agent", spaceId: LOCAL_SPACE_ID });
+    await waitUntilSettled(session.id);
+    let releaseRenewal = () => {};
+    const renewalGate = new Promise<void>((resolve) => {
+      releaseRenewal = resolve;
+    });
+    let finalRenewalEntered = false;
+    mocks.renewSessionLease.mockClear();
+    // The first renewal claims the operation; the second is immediately
+    // before session/prompt dispatch on the already-connected ACP socket.
+    mocks.renewSessionLease.mockResolvedValueOnce(true).mockImplementationOnce(async () => {
+      finalRenewalEntered = true;
+      await renewalGate;
+      return true;
+    });
+    const prompt = promptAgentSession(session.id, "cancel at final dispatch check").catch(
+      (error: unknown) => error,
+    );
+    try {
+      await vi.waitFor(() => expect(finalRenewalEntered).toBe(true));
+      expect(agent.promptTexts()).toEqual([]);
+      await cancelAgentSession(session.id);
+      releaseRenewal();
+      await expect(prompt).resolves.toBeUndefined();
+      expect(agent.promptTexts()).toEqual([]);
+      expect((await waitUntilSettled(session.id)).status).toBe("idle");
+      await promptAgentSession(session.id, "follow-up after early stop");
+      expect(agent.promptTexts()).toEqual(["follow-up after early stop"]);
+      expect(agent.newSessionCallCount()).toBe(1);
+      expect((await waitUntilSettled(session.id)).status).toBe("idle");
+    } finally {
+      releaseRenewal();
+      await closeAgentSessions([session.id]);
+    }
+  });
+
+  it("records a user-cancelled legacy turn only after its end_turn receipt settles and keeps the provider reason", async () => {
+    let releaseReceipt = () => {};
+    const receiptGate = new Promise<void>((resolve) => {
+      releaseReceipt = resolve;
+    });
+    const agent = serveFakeAgent(agentSide, [], {
+      cancelFirstPromptOnNotify: true,
+      cancelFirstPromptStopReason: "end_turn",
+      cancelResponseGate: receiptGate,
+      promptChunkText: "Real provider progress before Stop",
+    });
+    const session = await createAgentSession({ slug: "test-agent", spaceId: LOCAL_SPACE_ID });
+    await waitUntilSettled(session.id);
+    const live = (
+      globalThis as typeof globalThis & {
+        __busabaseAgentSessions?: Map<string, { buffer: AgentSessionEventVO[] }>;
+      }
+    ).__busabaseAgentSessions?.get(session.id);
+    const finishedEvents = () =>
+      (live?.buffer ?? []).flatMap((event) => {
+        const data = (event.acpExtension?.params as { event?: unknown } | undefined)?.event;
+        return data && typeof data === "object" && "type" in data && data.type === "turn_finished"
+          ? [data as Record<string, unknown>]
+          : [];
+      });
+    const prompt = promptAgentSession(session.id, "legacy Provider stop").catch(
+      (error: unknown) => error,
+    );
+    try {
+      await vi.waitFor(() => expect(agent.promptTexts()).toEqual(["legacy Provider stop"]));
+      await cancelAgentSession(session.id);
+      await vi.waitFor(() => expect(agent.cancelledSessionIds()).toEqual(["acp-sess-1"]));
+      expect(
+        (await listAgentSessions()).find((candidate) => candidate.id === session.id)?.status,
+      ).toBe("busy");
+      expect(finishedEvents()).toEqual([]);
+      releaseReceipt();
+      await expect(prompt).resolves.toBeUndefined();
+      expect(finishedEvents()).toMatchObject([
+        { stopReason: "cancelled", providerStopReason: "end_turn" },
+      ]);
+      const blocks = reduceAcpEvents([], (live?.buffer ?? []).flatMap(translateAgentSessionEvent));
+      expect(blocks.find((block) => block.kind === "turn")).toMatchObject({
+        status: "cancelled",
+        stopReason: "cancelled",
+      });
+      expect((await waitUntilSettled(session.id)).status).toBe("idle");
+      await promptAgentSession(session.id, "follow-up after legacy stop");
+      expect(agent.promptTexts()).toEqual(["legacy Provider stop", "follow-up after legacy stop"]);
+      expect(agent.newSessionCallCount()).toBe(1);
+      expect((await waitUntilSettled(session.id)).status).toBe("idle");
+    } finally {
+      releaseReceipt();
+      await closeAgentSessions([session.id]);
+    }
+  });
+
   it(
     "sends session/cancel, waits for the pending prompt to resolve cancelled, " +
       "returns to idle, and accepts a follow-up prompt in the same session",
@@ -1962,7 +2751,10 @@ describe("respondToAgentPermission — concurrent requests", () => {
       expect(turnStatuses(session.id)).toEqual(["busy", "waiting_permission"]);
       expect(() =>
         respondToAgentPermission(session.id, second?.requestId ?? "missing", "allow"),
-      ).toThrow("This permission request is no longer pending.");
+      ).toThrow("A different decision was already recorded for this request.");
+      expect(() =>
+        respondToAgentPermission(session.id, second?.requestId ?? "missing", "deny"),
+      ).not.toThrow();
       expect(() => respondToAgentPermission(session.id, "perm_unknown", "allow")).toThrow(
         "This permission request is no longer pending.",
       );
@@ -1979,7 +2771,8 @@ describe("respondToAgentPermission — concurrent requests", () => {
       expect(turnStatuses(session.id)).toEqual(["busy", "waiting_permission", "busy", "idle"]);
       expect(() =>
         respondToAgentPermission(session.id, first?.requestId ?? "missing", "allow"),
-      ).toThrow("No permission request is pending for this session.");
+      ).not.toThrow();
+      expect(agent.permissionOutcomes()).toHaveLength(2);
 
       // Client side: each card keeps its own answer, matched by its own id.
       const blocks = reduceAcpEvents(
@@ -2062,7 +2855,7 @@ describe("respondToAgentPermission — concurrent requests", () => {
       // A card clicked after Stop cannot reopen the finished turn.
       expect(() =>
         respondToAgentPermission(session.id, first?.requestId ?? "missing", "allow"),
-      ).toThrow("No permission request is pending for this session.");
+      ).toThrow("A different decision was already recorded for this request.");
       expect(await statusOf(session.id)).toBe("idle");
     } finally {
       await closeAgentSessions([session.id]);
@@ -2208,6 +3001,41 @@ describe("remote session worker handoff", () => {
     ).__busabaseAgentSessionReattachments = new Map();
   });
 
+  it("finishes an idle subscription when its owning socket retires without another event", async () => {
+    const record = runtimeRecord({ id: "ags-retired-observer" });
+    mocks.loadSessionRuntime.mockResolvedValue(record);
+    const [clientSide, agentSide] = linkedStreams();
+    mocks.createWebSocketStream.mockReturnValue(clientSide);
+    serveFakeAgent(agentSide, [MODEL_CONFIG]);
+    await setAgentSessionConfigOption(record.session.id, "model", "fast");
+    const live = (
+      globalThis as typeof globalThis & {
+        __busabaseAgentSessions?: Map<
+          string,
+          { buffer: AgentSessionEventVO[]; listeners: Set<unknown>; detach(): void }
+        >;
+      }
+    ).__busabaseAgentSessions?.get(record.session.id);
+    if (!live) throw new Error("Expected live owner");
+    const controller = new AbortController();
+    const iterator = subscribeAgentSession(
+      record.session.id,
+      live.buffer.at(-1)?.seq ?? 0,
+      controller.signal,
+    );
+    try {
+      const next = iterator.next();
+      await vi.waitFor(() => expect(live.listeners.size).toBe(1));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      live.detach();
+      await expect(next).resolves.toEqual({ done: true, value: undefined });
+    } finally {
+      controller.abort();
+      await iterator.return(undefined);
+      await closeAgentSessions([record.session.id]);
+    }
+  });
+
   it("reattaches with session/load and sends the prompt to the preserved inner session", async () => {
     const record = runtimeRecord();
     mocks.loadSessionRuntime.mockResolvedValue(record);
@@ -2228,6 +3056,7 @@ describe("remote session worker handoff", () => {
       expect.objectContaining({ currentValue: "auto" }),
       { spaceId: LOCAL_SPACE_ID, actorId: null },
       expect.objectContaining({ fencingToken: 1 }),
+      null,
     );
     expect(mocks.releaseSessionLease).toHaveBeenCalledOnce();
     const persisted = mocks.persistSessionEvents.mock.calls.flatMap(
@@ -2519,6 +3348,16 @@ describe("remote session worker handoff", () => {
     );
     const controller = new AbortController();
     const replay = subscribeAgentSession(record.session.id, chunkSeq, controller.signal);
+    await expect(replay.next()).resolves.toMatchObject({
+      value: {
+        kind: "acpExtension",
+        acpExtension: {
+          method: "_acp-ui/lifecycle",
+          params: { event: { type: "turn_finished", stopReason: "end_turn" } },
+        },
+      },
+      done: false,
+    });
     await expect(replay.next()).resolves.toMatchObject({
       value: { kind: "status", status: "idle" },
       done: false,

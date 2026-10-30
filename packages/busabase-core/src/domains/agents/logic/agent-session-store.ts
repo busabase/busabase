@@ -1,11 +1,26 @@
 import {
+  type AgentSessionConfigSelectVO,
   type AgentSessionEventVO,
   type AgentSessionModelOptionVO,
   AgentSessionModelOptionVOSchema,
   type AgentSessionStatus,
   type AgentSessionVO,
 } from "busabase-contract/domains/agents/types";
-import { and, asc, desc, eq, gt, inArray, isNull, lt, lte, notInArray, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  inArray,
+  isNull,
+  lt,
+  lte,
+  notInArray,
+  or,
+  type SQL,
+  sql,
+} from "drizzle-orm";
 import { getContextActorId, getContextSpaceId } from "../../../context";
 import { getDb } from "../../../db";
 import { busabaseAgentSessionEvents } from "../schema/agent-session-events";
@@ -309,7 +324,7 @@ export async function persistSessionState(
 /**
  * Durable mirror of `LiveSession.modelOption` — the one write path
  * every discovery/update site funnels through, so the shape landing in
- * `jsonb` always matches what `parseStoredModelOption` will read back.
+ * `jsonb` always matches what `parseStoredConfigOptions` will read back.
  *
  * Called for `remote-websocket` sessions only, from the three moments the
  * live value itself changes: initial discovery on `session/new`/
@@ -329,12 +344,14 @@ export async function persistSessionModelOption(
   modelOption: AgentSessionModelOptionVO | null,
   scope: AgentSessionScope = currentScope(),
   fence?: LeaseFence,
+  thinkingOption: AgentSessionConfigSelectVO | null = null,
 ): Promise<boolean> {
   const database = await db();
   try {
     const updated = await database
       .update(busabaseAgentSessions)
-      .set({ modelOption })
+      // Keep old model-only snapshots readable; both selectors share one fenced write.
+      .set({ modelOption: thinkingOption ? { modelOption, thinkingOption } : modelOption })
       .where(
         and(
           eq(busabaseAgentSessions.id, sessionId),
@@ -384,11 +401,15 @@ export async function persistSessionEvents(
     kind: event.kind,
     payload: {
       acpUpdate: event.acpUpdate,
+      acpExtension: event.acpExtension,
       status: event.status,
       message: event.message,
       permissionRequest: event.permissionRequest,
       permissionRequestId: event.permissionRequestId,
       permissionOptionId: event.permissionOptionId,
+      inputRequest: event.inputRequest,
+      inputRequestId: event.inputRequestId,
+      inputResponse: event.inputResponse,
     } as Record<string, unknown>,
     at: new Date(event.at),
   }));
@@ -437,13 +458,28 @@ export async function persistSessionEvents(
  * there is no running turn to send `session/set_config_option` to — even if
  * an older write left a value behind.
  */
-function parseStoredModelOption(
+function parseStoredConfigOptions(
   row: Pick<typeof busabaseAgentSessions.$inferSelect, "modelOption" | "status" | "transport">,
-): AgentSessionModelOptionVO | null {
-  if (row.transport !== "remote-websocket") return null;
-  if (row.status === "ended" || row.status === "failed") return null;
-  const parsed = AgentSessionModelOptionVOSchema.nullable().safeParse(row.modelOption ?? null);
-  return parsed.success ? parsed.data : null;
+): Pick<AgentSessionVO, "modelOption" | "thinkingOption"> {
+  const empty = { modelOption: null, thinkingOption: null };
+  if (row.transport !== "remote-websocket") return empty;
+  if (row.status === "ended" || row.status === "failed") return empty;
+  const stored = row.modelOption;
+  if (stored && typeof stored === "object" && "thinkingOption" in stored) {
+    const snapshot = stored as { modelOption?: unknown; thinkingOption?: unknown };
+    const model = AgentSessionModelOptionVOSchema.nullable().safeParse(
+      snapshot.modelOption ?? null,
+    );
+    const thinking = AgentSessionModelOptionVOSchema.nullable().safeParse(
+      snapshot.thinkingOption ?? null,
+    );
+    // A partial/malformed envelope cannot supply authoritative dependent options.
+    return model.success && thinking.success
+      ? { modelOption: model.data, thinkingOption: thinking.data }
+      : empty;
+  }
+  const parsed = AgentSessionModelOptionVOSchema.nullable().safeParse(stored ?? null);
+  return { modelOption: parsed.success ? parsed.data : null, thinkingOption: null };
 }
 
 const toVO = (row: typeof busabaseAgentSessions.$inferSelect): AgentSessionVO => ({
@@ -455,7 +491,7 @@ const toVO = (row: typeof busabaseAgentSessions.$inferSelect): AgentSessionVO =>
   createdAt: row.createdAt.toISOString(),
   lastActivityAt: row.lastActivityAt.toISOString(),
   error: row.error,
-  modelOption: parseStoredModelOption(row),
+  ...parseStoredConfigOptions(row),
 });
 
 export interface AgentSessionRuntimeRecord {
@@ -464,6 +500,8 @@ export interface AgentSessionRuntimeRecord {
   acpSessionId: string | null;
   /** Lets a reattached worker continue the outer session's event sequence. */
   lastEventSeq: number;
+  /** Highest durable Buda source event, committed atomically as part of its payload. */
+  upstreamSeq?: number;
 }
 
 /** Load one session's durable runtime identity within the current space and actor. */
@@ -487,10 +525,27 @@ export async function loadSessionRuntime(
       .orderBy(desc(busabaseAgentSessionEvents.seq))
       .limit(1);
 
+    const validCursor = (value: SQL) => sql`case when jsonb_typeof(${value}) = 'number' then
+      case when (${value})::text::numeric between 0 and 9007199254740991
+        and trunc((${value})::text::numeric) = (${value})::text::numeric
+        then (${value})::text::numeric end end`;
+    const updateCursor = validCursor(
+      sql`${busabaseAgentSessionEvents.payload}->'acpUpdate'->'_meta'->'buda.im'->'seq'`,
+    );
+    const extensionCursor = validCursor(
+      sql`${busabaseAgentSessionEvents.payload}->'acpExtension'->'params'->'_meta'->'buda.im'->'seq'`,
+    );
+    const [source] = await database
+      .select({ seq: sql<string | null>`max(greatest(${updateCursor}, ${extensionCursor}))` })
+      .from(busabaseAgentSessionEvents)
+      .where(eq(busabaseAgentSessionEvents.sessionId, sessionId));
+    const upstreamSeq = source?.seq == null ? undefined : Number(source.seq);
+
     return {
       session: toVO(row),
       acpSessionId: row.acpSessionId,
       lastEventSeq: latestEvent?.seq ?? 0,
+      ...(upstreamSeq === undefined ? {} : { upstreamSeq }),
     };
   } catch (error) {
     warn("loading agent session runtime", error);
@@ -662,11 +717,15 @@ export async function loadSessionEvents(
         seq: row.seq,
         kind: row.kind,
         acpUpdate: payload.acpUpdate,
+        acpExtension: payload.acpExtension,
         status: payload.status,
         message: payload.message,
         permissionRequest: payload.permissionRequest,
         permissionRequestId: payload.permissionRequestId,
         permissionOptionId: payload.permissionOptionId,
+        inputRequest: payload.inputRequest,
+        inputRequestId: payload.inputRequestId,
+        inputResponse: payload.inputResponse,
         at: row.at.toISOString(),
       };
     });

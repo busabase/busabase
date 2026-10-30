@@ -1,6 +1,6 @@
 "use client";
 
-// The single, unified "Node Settings" dialog — General (avatar/name/description)
+// The single, unified "Node Settings" dialog — General (avatar/name/slug/description)
 // / Info (read-only properties) / Permissions (access control, cloud-only).
 // Replaces three previously-separate surfaces: `NodeRenameDialog`, the inline
 // "Info" `Popover` that used to live in `node-detail-views.tsx`, and
@@ -23,7 +23,9 @@ import type { LucideIcon } from "lucide-react";
 import { Info, Shield, SlidersHorizontal } from "lucide-react";
 import { useContext, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { useLocation, useSearch } from "wouter";
 import { useCoreI18n, useCoreLocale } from "../../../i18n";
+import { presentCoreError } from "../../../i18n/localize-error";
 import {
   type AirAppEngineChoice,
   AirAppEngineSetting,
@@ -36,13 +38,12 @@ import {
   AIRAPP_MANIFEST_PATH,
   parseAirAppManifest,
 } from "../../airapp/utils/airapp-runtime-descriptor";
-import { getNodePropertyItems } from "../helpers/node-property-items";
-import { AssetMetadataBlock } from "./assets";
+import { replaceNodeRouteSlug } from "../utils/node-route";
+import { toSlugInput } from "../utils/slug-input";
 import { DialogContent } from "./localized-dialog-content";
 import { NodeIconPicker } from "./node-icon-picker";
+import { NodeInfoPanel } from "./node-info-panel";
 import { NodeSettingsPermissionsSlotContext } from "./node-settings-permissions-slot";
-import { EmptyState } from "./primitives";
-import { ShimmerSkeleton as Skeleton } from "./shimmer-skeleton";
 import { SplitSubmitButton } from "./split-submit-button";
 
 export type NodeSettingsTab = "general" | "info" | "permissions";
@@ -76,7 +77,6 @@ export function NodeSettingsDialog({
   onRenamed,
 }: NodeSettingsDialogProps) {
   const messages = useCoreI18n();
-  const locale = useCoreLocale();
   const t = messages.nodeSettings;
   const renderPermissionsPanel = useContext(NodeSettingsPermissionsSlotContext);
 
@@ -166,7 +166,14 @@ export function NodeSettingsDialog({
               />
             ) : null}
             {activeTab === "info" ? (
-              <InfoTabContent detail={detail} isLoading={detailQuery.isLoading} locale={locale} />
+              <NodeInfoPanel
+                detail={detail}
+                isLoading={detailQuery.isLoading}
+                nodeId={nodeId}
+                nodeSlug={nodeSlug}
+                nodeType={nodeType}
+                orpc={orpc}
+              />
             ) : null}
             {activeTab === "permissions" && renderPermissionsPanel
               ? renderPermissionsPanel(nodeId, nodeName)
@@ -202,6 +209,7 @@ function GeneralTabContent({
   onClose: () => void;
 }) {
   const messages = useCoreI18n();
+  const locale = useCoreLocale();
   // This tab writes name + description + icon in ONE operation, so its copy is
   // "save", not "rename". The `rename` block's strings are still the right ones
   // for the surfaces that really are just a rename — the mobile
@@ -219,6 +227,9 @@ function GeneralTabContent({
   const savedEngine = detail?.node.settings?.airappEngine ?? null;
 
   const [name, setName] = useState(nodeName);
+  // Seeded from `detail`, not the `nodeSlug` prop: a page reached by node id
+  // passes the id there, and the sidebar entry points pass nothing.
+  const [slug, setSlug] = useState("");
   const [description, setDescription] = useState("");
   const [icon, setIcon] = useState<NodeIcon | null>(null);
   const [iconDirty, setIconDirty] = useState(false);
@@ -228,6 +239,8 @@ function GeneralTabContent({
   const [appRequired, setAppRequired] = useState<AirAppRunnerKind | undefined>(undefined);
   const hydratedRef = useRef(false);
   const runnerKindDirtyRef = useRef(false);
+  const [location, setLocation] = useLocation();
+  const search = useSearch();
 
   const updateSettings = useMutation(orpc.nodes.updateSettings.mutationOptions());
 
@@ -296,10 +309,11 @@ function GeneralTabContent({
     };
   }, [nodeId, nodeType, open, orpc]);
 
-  // Seed description/icon once the shared `nodes.get` fetch resolves — guarded
+  // Seed slug/description/icon once the shared `nodes.get` fetch resolves — guarded
   // so a background refetch never clobbers an in-progress edit.
   useEffect(() => {
     if (!open || hydratedRef.current || !detail) return;
+    setSlug(detail.node.slug);
     setDescription(detail.node.description);
     setIcon(detail.node.icon ?? null);
     setIconDirty(false);
@@ -330,9 +344,19 @@ function GeneralTabContent({
       }),
     ]);
 
+  const nextSlug = slug.trim();
+  // Only once hydrated — before that the field is empty because nothing has
+  // loaded yet, not because the user cleared it.
+  const slugMissing = !!detail && !nextSlug;
+
   const submit = async (options?: { mergeImmediately?: boolean }) => {
     const trimmed = name.trim();
-    if (!trimmed) return;
+    // Same gate as the button's `disabled` — Enter in a field bypasses it.
+    if (!trimmed || !nextSlug || !detail) return;
+    const currentSlug = detail.node.slug;
+    // Only sent when it changed: the slug is the node's address, so a Save that
+    // only touched the description must not re-assert it.
+    const slugChanged = nextSlug !== currentSlug;
     try {
       // The intent goes to the endpoint, which applies it in the same request.
       // Omitting it let the permission-aware default answer BOTH modes the same
@@ -345,13 +369,31 @@ function GeneralTabContent({
             kind: "rename",
             nodeId,
             name: trimmed,
+            ...(slugChanged ? { slug: nextSlug } : {}),
             description,
             ...(iconDirty ? { icon } : {}),
           },
         ],
       });
-      await invalidateNodes();
       if (nodeType === "airapp" && runnerKindDirtyRef.current) await saveEngine();
+      // A merged slug change retires the url this page was reached by. Move to
+      // the new one BEFORE invalidating, so the refetch runs against the new
+      // slug rather than 404ing the old one on screen; `replace`, so Back does
+      // not lead to a dead address. Settings opened from the sidebar for a node
+      // that is not on screen leaves the location alone.
+      const slugMerged = changeRequest.status === "merged" && slugChanged;
+      if (slugMerged) {
+        const movedLocation = replaceNodeRouteSlug(location, nodeType, currentSlug, nextSlug);
+        if (movedLocation) {
+          setLocation(search ? `${movedLocation}?${search}` : movedLocation, { replace: true });
+        }
+      }
+      // The slug is baked into every list that links here — the parent
+      // folder's children, Home, search — and those queries are keyed by THEIR
+      // node, not this one, so the id/slug sweep misses them. A stale name
+      // there is cosmetic; a stale slug is a link to nothing. Slug changes are
+      // rare, so refresh everything, same as a template install does.
+      await (slugMerged ? queryClient.invalidateQueries() : invalidateNodes());
       // Report what happened, not what was asked for.
       if (changeRequest.status === "merged") {
         toast.success(t.saved);
@@ -362,7 +404,7 @@ function GeneralTabContent({
       toast.success(t.changeRequestSubmitted);
       onClose();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t.saveFailed);
+      toast.error(presentCoreError(messages, locale, err, t.saveFailed));
     }
   };
 
@@ -396,6 +438,27 @@ function GeneralTabContent({
           ref={nameInputRef}
           value={name}
         />
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="node-settings-slug">{messages.common.slug}</Label>
+        <Input
+          aria-describedby="node-settings-slug-hint"
+          aria-invalid={slugMissing}
+          id="node-settings-slug"
+          onChange={(e) => setSlug(toSlugInput(e.target.value))}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") submit({ mergeImmediately: true });
+          }}
+          placeholder={messages.createNode.slugPlaceholder}
+          value={slug}
+        />
+        <p
+          className={`text-xs ${slugMissing ? "text-destructive" : "text-muted-foreground"}`}
+          id="node-settings-slug-hint"
+        >
+          {slugMissing ? messages.createNode.slugRequired : t.slugHint}
+        </p>
       </div>
 
       <div className="space-y-2">
@@ -435,7 +498,7 @@ function GeneralTabContent({
           // cache (e.g. the sidebar "•••" entry point, which never had this
           // node's detail pre-fetched) would submit the still-default empty
           // `description` and silently blank out the node's real one.
-          disabled={isSaving || !name.trim() || !detail}
+          disabled={isSaving || !name.trim() || !nextSlug || !detail}
           hint={t.requestReviewHint}
           immediateAction={{
             label: t.saveNow,
@@ -445,74 +508,6 @@ function GeneralTabContent({
           }}
         />
       </div>
-    </div>
-  );
-}
-
-function InfoTabContent({
-  detail,
-  isLoading,
-  locale,
-}: {
-  detail: NodeDetailVO | undefined;
-  isLoading: boolean;
-  locale: string;
-}) {
-  const messages = useCoreI18n();
-
-  if (!detail) {
-    return isLoading ? (
-      <div className="space-y-3" aria-hidden>
-        <Skeleton className="h-4 w-4/5" />
-        <Skeleton className="h-4 w-3/5" />
-        <Skeleton className="h-4 w-2/3" />
-        <Skeleton className="h-4 w-1/2" />
-      </div>
-    ) : (
-      <EmptyState body="" title={messages.common.none} />
-    );
-  }
-
-  const items = getNodePropertyItems(detail, messages, locale);
-
-  return (
-    <div>
-      {detail.node.description ? (
-        <p className="mb-3 text-muted-foreground text-sm leading-6">{detail.node.description}</p>
-      ) : null}
-      {detail.type === "file" ? (
-        <h2 className="mb-2 font-medium text-muted-foreground text-xs uppercase">
-          {messages.nodeDetail.backingAsset}
-        </h2>
-      ) : null}
-      <dl className="flex flex-col gap-2 text-xs">
-        {items.map((item) => (
-          <div className="flex min-w-0 items-center justify-between gap-3" key={item.label}>
-            <dt className="shrink-0 text-muted-foreground">{item.label}</dt>
-            <dd className="min-w-0 truncate font-mono text-foreground/80" title={item.value}>
-              {item.value}
-            </dd>
-          </div>
-        ))}
-      </dl>
-      {detail.type === "file" ? (
-        <>
-          <div className="mt-2 flex min-w-0 items-center justify-between gap-3 text-xs">
-            <dt className="shrink-0 text-muted-foreground">{messages.nodeDetail.assetUrl}</dt>
-            <dd className="min-w-0 truncate">
-              <a
-                className="text-primary underline-offset-2 hover:underline"
-                href={detail.asset.url}
-                rel="noreferrer"
-                target="_blank"
-              >
-                {detail.asset.url}
-              </a>
-            </dd>
-          </div>
-          <AssetMetadataBlock compact metadata={detail.asset.metadata} />
-        </>
-      ) : null}
     </div>
   );
 }

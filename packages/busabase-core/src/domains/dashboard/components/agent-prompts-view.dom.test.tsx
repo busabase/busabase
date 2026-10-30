@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { AGENT_PROMPT_CLIPBOARD_MIME } from "busabase-contract/domains/agents/prompt-context";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CoreI18nProvider, type CoreLocale } from "../../../i18n";
 import type { NodePrompt } from "../helpers/node-agent-prompts";
@@ -60,6 +61,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  delete (document as unknown as { execCommand?: unknown }).execCommand;
 });
 
 const renderView = (
@@ -263,6 +265,47 @@ describe("AgentPromptsView keyboard navigation", () => {
 });
 
 describe("AgentPromptsView copy", () => {
+  it("copies one complete preview snapshot with structured scenario, target and source metadata", async () => {
+    const captured: Record<string, string> = {};
+    Object.defineProperty(document, "execCommand", {
+      configurable: true,
+      value: vi.fn(() => {
+        const event = new Event("copy", { bubbles: true, cancelable: true });
+        Object.defineProperty(event, "clipboardData", {
+          value: {
+            setData: (mime: string, value: string) => {
+              captured[mime] = value;
+            },
+          },
+        });
+        document.dispatchEvent(event);
+        return true;
+      }),
+    });
+    renderView({ edition: "cloud", targetSpaceId: "spc_acme" }, [
+      {
+        ...framedPrompt,
+        nodeTarget: { nodeId: "nod_coder", nodeName: "Coder", nodeType: "folder" },
+      },
+    ]);
+    const expectedText = previewSegments()
+      .map((segment) => segment.text)
+      .join("\n\n");
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    await screen.findByRole("button", { name: "Copied" });
+    expect(captured["text/plain"]).toBe(expectedText);
+    expect(JSON.parse(captured[AGENT_PROMPT_CLIPBOARD_MIME])).toEqual({
+      version: 1,
+      kind: "busabase-agent-prompt",
+      scenario: { id: framedPrompt.key, title: framedPrompt.label },
+      target: { nodeId: "nod_coder", nodeName: "Coder", nodeType: "folder" },
+      source: { edition: "cloud", origin: window.location.origin, spaceId: "spc_acme" },
+      segments: previewSegments(),
+    });
+    expect(written).toEqual([]);
+    delete (document as unknown as { execCommand?: unknown }).execCommand;
+  });
+
   it.each([
     ["en", "Copy", "Couldn't copy automatically — select the prompt preview and copy it manually."],
     [
@@ -468,5 +511,174 @@ describe("AgentPromptsView copy", () => {
     renderView({ edition: "cloud", targetSpaceId: "spc_acme" });
 
     expect(screen.queryByText(/also appends a short connection check/)).toBeNull();
+  });
+});
+
+const TARGET = 'Target: the Busabase Base "Posts" (nodeId: nod_posts).';
+const FOOTER = "Reply to me in English.";
+const outcomePrompt: NodePrompt = {
+  key: "base-summarize",
+  tier: "scenario",
+  source: "built-in-scenario",
+  group: "Content",
+  label: "Summarize and report",
+  intent: "read-only",
+  outcome: "A summary at the length you pick.",
+  target: TARGET,
+  footer: FOOTER,
+  body: `${TARGET}\n\nSummarize. Length: a few bullet points.\n\n${FOOTER}`,
+  bodyTemplate: `${TARGET}\n\nSummarize. Length: {{slot:Length|a few bullet points|a few bullet points,one short paragraph}}.\n\n${FOOTER}`,
+};
+
+describe("AgentPromptsView outcome-first preview", () => {
+  it("leads with the outcome and keeps the full prompt one click away", () => {
+    renderView({ edition: "cloud", targetSpaceId: "spc_acme" }, [outcomePrompt]);
+
+    expect(screen.getByTestId("agent-prompts-outcome").textContent).toContain(
+      "A summary at the length you pick.",
+    );
+    const preview = screen.getByTestId("agent-prompts-preview");
+    expect(preview.className).toContain("hidden");
+
+    const toggle = screen.getByRole("button", { name: "Show full prompt" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(toggle);
+    expect(preview.className).not.toContain("hidden");
+    expect(screen.getByRole("button", { name: "Hide full prompt" })).toBeTruthy();
+  });
+
+  it("copies the chosen fill-in value and never the raw slot syntax", async () => {
+    renderView({ edition: "cloud", targetSpaceId: "spc_acme" }, [outcomePrompt]);
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Length" }), {
+      target: { value: "one short paragraph" },
+    });
+    const text = await copy();
+
+    expect(text).toContain("Summarize. Length: one short paragraph.");
+    expect(text).not.toContain("{{slot:");
+    expect(text).not.toContain("a few bullet points");
+  });
+
+  it("copies the default when the blank is left alone", async () => {
+    renderView(undefined, [outcomePrompt]);
+
+    expect(await copy()).toBe(outcomePrompt.body);
+  });
+
+  it("folds reply language and the connection check into one Included line", async () => {
+    renderView({ edition: "cloud", targetSpaceId: "spc_acme" }, [framedPrompt]);
+
+    const included = screen.getByTestId("agent-prompts-included") as HTMLDetailsElement;
+    expect(included.open).toBe(false);
+    expect(included.querySelector("summary")?.textContent).toBe(
+      "Included: merge policy · reply language · connection check",
+    );
+    // Folded, not dropped: Copy still sends every segment.
+    const text = await copy();
+    expect(text).toContain("Reply to me in English.");
+    expect(text).toContain("Before you begin,");
+  });
+
+  it("leaves merge policy out of the Included line for a read-only prompt", () => {
+    renderView({ edition: "cloud", targetSpaceId: "spc_acme" }, [
+      { ...framedPrompt, intent: "read-only" },
+    ]);
+
+    expect(screen.getByTestId("agent-prompts-included").querySelector("summary")?.textContent).toBe(
+      "Included: reply language · connection check",
+    );
+  });
+
+  it("unfolds everything when the clipboard refuses, so it can be copied by hand", async () => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: () => Promise.reject(new Error("denied")) },
+    });
+    renderView({ edition: "cloud", targetSpaceId: "spc_acme" }, [outcomePrompt]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy" }));
+    await screen.findByText(/select the prompt preview and copy it manually/);
+
+    expect(screen.getByTestId("agent-prompts-preview").className).not.toContain("hidden");
+    expect((screen.getByTestId("agent-prompts-included") as HTMLDetailsElement).open).toBe(true);
+    // The manual-copy selection carries the resolved text, not a <select>.
+    expect(screen.queryByRole("combobox", { name: "Length" })).toBeNull();
+    expect(window.getSelection()?.toString()).toContain("Length: a few bullet points.");
+  });
+});
+
+describe("AgentPromptsView locator card", () => {
+  it("copies the target line plus the connection check", async () => {
+    renderView({ edition: "cloud", targetSpaceId: "spc_acme" }, [framedPrompt]);
+
+    const card = screen.getByTestId("agent-prompts-locator-card");
+    expect(card.textContent).toContain(framedPrompt.target);
+    fireEvent.click(screen.getByRole("button", { name: "Copy locator" }));
+
+    await vi.waitFor(() => expect(written).toHaveLength(1));
+    const [target, connection] = (written[0] as string).split("\n\n");
+    expect(target).toBe(framedPrompt.target);
+    expect(connection).toMatch(/^Before you begin, make sure this environment can reach Busabase/);
+  });
+
+  it("is absent when the prompts carry no target", () => {
+    renderView(undefined, [prompt]);
+
+    expect(screen.queryByTestId("agent-prompts-locator-card")).toBeNull();
+  });
+});
+
+describe("AgentPromptsView recently used", () => {
+  const RECENT_KEY = "busabase:agent-prompts:recent:base:node";
+
+  afterEach(() => {
+    window.localStorage.removeItem(RECENT_KEY);
+  });
+
+  const renderWithRecents = () =>
+    render(
+      <CoreI18nProvider locale="en">
+        <AgentPromptsView
+          askAgent={null}
+          capabilities={[capabilityC, capabilityD]}
+          onHandedOff={() => {}}
+          recents={{ kind: "node", nodeType: "base", scopeKind: "node" }}
+          scenarios={[scenarioA, scenarioB]}
+        />
+      </CoreI18nProvider>,
+    );
+
+  it("lists the last used prompt first, under Recently used, and selects it", async () => {
+    window.localStorage.setItem(RECENT_KEY, JSON.stringify(["capability-d"]));
+    renderWithRecents();
+
+    await screen.findByText("Recently used");
+    const buttons = screen
+      .getAllByRole("button")
+      .filter((button) =>
+        ["Scenario A", "Scenario B", "Capability C", "Capability D"].includes(
+          button.textContent ?? "",
+        ),
+      );
+    expect(buttons.map((button) => button.textContent)).toEqual([
+      "Capability D",
+      "Scenario A",
+      "Scenario B",
+      "Capability C",
+    ]);
+    expect(screen.getByRole("button", { name: "Capability D" }).getAttribute("aria-current")).toBe(
+      "true",
+    );
+  });
+
+  it("remembers a copied prompt for next time without reshuffling the open list", async () => {
+    renderWithRecents();
+
+    fireEvent.click(screen.getByRole("button", { name: "Scenario B" }));
+    await copy();
+
+    expect(JSON.parse(window.localStorage.getItem(RECENT_KEY) ?? "[]")).toEqual(["scenario-b"]);
+    expect(screen.queryByText("Recently used")).toBeNull();
   });
 });

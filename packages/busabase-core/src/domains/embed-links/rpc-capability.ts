@@ -9,7 +9,7 @@ export type EmbedCapabilityRequest =
   /** A capability header that is malformed, expired, revoked, or unknown. */
   | { kind: "rejected" }
   /** A live capability; run the request inside `runWithEmbedContext(context)`. */
-  | { kind: "embed"; context: EmbedRequestContext };
+  | { kind: "embed"; context: EmbedRequestContext & { embedOrigin: string } };
 
 /**
  * Read an Embed Link capability off an RPC request, shared by both hosts.
@@ -36,5 +36,9 @@ export const readEmbedCapabilityRequest = async (
   const context = await withHostContext(() =>
     resolveEmbedRequestContext(capability.id, capability.secret),
   );
-  return context ? { kind: "embed", context } : { kind: "rejected" };
+  // Bind host attribution at the transport boundary, after the capability has
+  // resolved. Never derive it from Origin/Forwarded headers or prompt metadata.
+  return context
+    ? { kind: "embed", context: { ...context, embedOrigin: new URL(request.url).origin } }
+    : { kind: "rejected" };
 };

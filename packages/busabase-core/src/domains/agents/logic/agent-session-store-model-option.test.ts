@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
  * like `agent-session-manager.test.ts` cannot exercise, because that suite
  * replaces `./agent-session-store` wholesale and never runs the real `toVO`.
  * This file drives the real store against a fake drizzle query builder that
- * hands back canned rows, so `parseStoredModelOption`'s validation actually
+ * hands back canned rows, so `parseStoredConfigOptions`'s validation actually
  * runs.
  *
  * The fake only needs to satisfy the chains this file's functions call:
@@ -76,6 +76,24 @@ describe("agent session store — durable model option", () => {
     expect(session?.modelOption).toEqual(VALID_MODEL_OPTION);
   });
 
+  it("retains per-model thinking capabilities through durable legacy and dependent snapshot reads", async () => {
+    const thinking = {
+      id: "effort",
+      name: "Thinking",
+      currentValue: "high",
+      options: [{ value: "high", name: "High" }],
+    };
+    const modelOption = {
+      ...VALID_MODEL_OPTION,
+      options: [...VALID_MODEL_OPTION.options, { value: "reasoner", name: "Reasoner", thinking }],
+    };
+    for (const stored of [modelOption, { modelOption, thinkingOption: thinking }]) {
+      mocks.rows = [{ ...baseRow, modelOption: stored }];
+      expect((await loadScopedSession("ags-1"))?.modelOption).toEqual(modelOption);
+      expect((await loadSessions())[0]?.modelOption).toEqual(modelOption);
+    }
+  });
+
   it("never advertises a model option for a local-subprocess row, even if one is stored", async () => {
     // Nothing in this domain ever writes one for local-subprocess (see
     // `syncModelOption`), but a boundary that trusted the column verbatim
@@ -122,5 +140,32 @@ describe("agent session store — durable model option", () => {
     mocks.rows = [{ ...baseRow, modelOption: VALID_MODEL_OPTION }];
     const sessions = await loadSessions();
     expect(sessions[0]?.modelOption).toEqual(VALID_MODEL_OPTION);
+  });
+  it("reads model and thinking together, including a thinking-only snapshot", async () => {
+    const thinkingOption = { ...VALID_MODEL_OPTION, id: "vendor-effort", name: "Thinking Level" };
+    for (const modelOption of [VALID_MODEL_OPTION, null]) {
+      mocks.rows = [{ ...baseRow, modelOption: { modelOption, thinkingOption } }];
+      expect(await loadScopedSession("ags-1")).toMatchObject({ modelOption, thinkingOption });
+    }
+  });
+
+  it("rejects malformed dependent snapshots and clears thinking for terminal/local rows", async () => {
+    const snapshot = { modelOption: VALID_MODEL_OPTION, thinkingOption: VALID_MODEL_OPTION };
+    for (const row of [
+      { ...baseRow, modelOption: { ...snapshot, thinkingOption: { id: "invalid" } } },
+      { ...baseRow, modelOption: snapshot, status: "ended" },
+      { ...baseRow, modelOption: snapshot, transport: "local-subprocess" },
+    ]) {
+      mocks.rows = [row];
+      expect(await loadScopedSession("ags-1")).toMatchObject({
+        modelOption: null,
+        thinkingOption: null,
+      });
+    }
+  });
+
+  it("does not invent a thinking level for legacy model-only snapshots", async () => {
+    mocks.rows = [{ ...baseRow, modelOption: VALID_MODEL_OPTION }];
+    expect((await loadScopedSession("ags-1"))?.thinkingOption).toBeNull();
   });
 });

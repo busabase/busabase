@@ -98,9 +98,9 @@ export const BUSABASE_TASKS: readonly TaskDefinition<any>[] = [
  *     atomically). Excluding it would be a capability regression, not a cleanup.
  *   - `forms_create` — configures an existing node, so it is a second step after
  *     `node_create --type form`, not a duplicate of it.
- *   - `nodes_purge` — permanent delete is a genuinely different operation from
- *     `node_archive`, and `node_archive`'s guidance now tells an agent when each
- *     one applies.
+ *   - `nodes_purge` — no longer a tool at all: permanent delete is UI-only now
+ *     (its route is commented out in the contract), so there is nothing to
+ *     withhold here.
  */
 export const TASK_SUPERSEDED_MCP_TOOLS: readonly string[] = [
   // -> node_create (one call for any node type, with that type's payload)

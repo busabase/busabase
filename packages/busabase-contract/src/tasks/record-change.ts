@@ -29,7 +29,7 @@ export interface RecordChangeInput {
  */
 const mergeIntent = (input: RecordChangeInput): { autoMerge?: boolean } => {
   if (input.requireReview) return { autoMerge: false };
-  if (input.autoMerge) return { autoMerge: true };
+  if (input.autoMerge !== undefined) return { autoMerge: input.autoMerge };
   return {};
 };
 

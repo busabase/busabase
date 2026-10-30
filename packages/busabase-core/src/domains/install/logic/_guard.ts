@@ -1,41 +1,32 @@
 import "server-only";
 
 import { ORPCError } from "@orpc/server";
-import { getContextIsSpaceManager } from "../../../context";
+import { isPublicVisitor } from "../../../context";
+import { hasWorkspacePermission } from "../../../logic/node-acl";
 
 /**
- * Installing a package is an ADMIN operation, and must be gated on the space
- * owner/admin role.
+ * Installing a package needs `write` on the workspace — the same bar as the
+ * transport policy for `install.fromGithub` (`api-key-level.ts`), which also
+ * explains why it is `write` and not `manage`: every operation the five-pass
+ * apply performs, skills and AirApps included, is one a writer can already do
+ * by hand. A role check would gate convenience, not capability.
  *
- * The reason is not the write volume — it is *what* a package can carry. A
- * `busabase-package@1` can contain skill and AirApp nodes, and those are code
- * this space's agents will execute. "Any member can install a GitHub repo" is
- * therefore "any member can introduce agent-executed code into the space",
- * which is a privilege-escalation path dressed up as a content import. This role
- * gate is the whole defence, not a second line behind review: content is
- * permission-aware like every other write, so an owner/admin's install merges on
- * the spot unless they ask for review explicitly, and structure is materialized
- * immediately by design.
+ * The dry run is gated at the same bar, not left at `read`: `planFromGithub`
+ * makes the server fetch an arbitrary caller-named GitHub repo and reports every
+ * colliding node and base slug in the space — an outbound-request primitive plus
+ * a space-contents oracle that a read-only member has no use for.
  *
- * The dry-run path is gated too, not just the write. `planFromGithub` makes the
- * server fetch an arbitrary caller-named GitHub repo and reports back what
- * already exists in the space (every colliding node and base slug) — an
- * outbound-request primitive plus a space-contents oracle. Neither belongs to a
- * read-only member.
- *
- * This lives in busabase-core (not the cloud host) on purpose, exactly like
- * `dump`'s guard: the guard travels with the domain, so every host that mounts
- * the install router is covered without having to remember to gate it. It reuses
- * the same auth-agnostic seam — `isSpaceManager` is host-injected and defaults to
- * "manager" when unset, so the open-source single-user app and the local
- * dev/test harness are unaffected; busabase-cloud injects the real owner/admin
- * role, where this actually bites.
+ * This lives in busabase-core so every host that mounts the install router is
+ * covered. The permission level is host-injected (cloud maps owner/admin →
+ * `manage`, member → `write`, anything else → `read`); with nothing injected
+ * (open-source single-user mode) the baseline is `manage`. A credential ceiling
+ * below `write` refuses too.
  */
-export const requireSpaceManagerForInstall = (): void => {
-  if (!getContextIsSpaceManager()) {
+export const requireWriteForInstall = (): void => {
+  if (isPublicVisitor() || !hasWorkspacePermission("write")) {
     throw new ORPCError("FORBIDDEN", {
       message:
-        "Installing a package is a space owner/admin operation — a package can carry skills and AirApps, which are code this space's agents will execute. Your role does not have access.",
+        "Installing a template needs edit permission in this space. Ask a space owner or admin to raise your role, or to install it for you.",
     });
   }
 };

@@ -1,10 +1,22 @@
 import { createRouterClient } from "@orpc/server";
+import {
+  createAgentPromptEnvelope,
+  createPromptResourceContext,
+  decodeAgentPromptClipboard,
+  joinAgentPromptSegments,
+} from "busabase-contract/domains/agents/prompt-context";
 import { inArray } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { runWithEmbedContext } from "../src/context";
 import { getDb } from "../src/db";
 import { busabaseNodePrincipals } from "../src/db/schema";
+import { validateAgentPromptResourceContext } from "../src/domains/agents/logic/agent-prompt-context";
+import {
+  EMBED_RUNTIME_CAPABILITY_HEADER,
+  encodeEmbedCapability,
+} from "../src/domains/embed-links/capability";
 import { resolveEmbedRequestContext } from "../src/domains/embed-links/logic";
+import { readEmbedCapabilityRequest } from "../src/domains/embed-links/rpc-capability";
 import { airAppEmbedDataRouter } from "../src/domains/embed-links/runtime-router";
 import { busabaseRouter } from "../src/router";
 import { seedScenario } from "./helpers/seed-scenario";
@@ -19,6 +31,88 @@ import { seedScenario } from "./helpers/seed-scenario";
  * Hiding a component cannot be the only thing in the way.
  */
 describe("embed visitor procedure surface", () => {
+  it("binds prompt snapshot validation to the trusted request origin while keeping Agent RPC forbidden", async () => {
+    await seedScenario("embed-prompt-origin-guard");
+    const client = createRouterClient(busabaseRouter);
+    const doc = await client.docs.create({
+      autoMerge: true,
+      slug: "embed-prompt-origin-target",
+      name: "Embed prompt origin target",
+      body: "# Read-only shared target\n",
+    });
+    if (!("node" in doc)) throw new Error("expected a materialized Doc");
+    const link = await client.embedLinks.create({ type: "node", typeId: doc.node.id });
+    const secret = new URL(link.url).searchParams.get("token") ?? "";
+    const request = new Request("https://embed-request.test:9443/api/rpc/agents/sessions/prompt", {
+      headers: {
+        [EMBED_RUNTIME_CAPABILITY_HEADER]: encodeEmbedCapability(link.id, secret),
+        Origin: "https://forged-origin.test",
+        Forwarded: "host=forged-origin.test;proto=https",
+        "X-Forwarded-Host": "forged-origin.test",
+        "X-Forwarded-Proto": "https",
+      },
+    });
+    const auth = await readEmbedCapabilityRequest(request);
+    if (auth.kind !== "embed") throw new Error("expected capability authentication");
+    const source = { origin: new URL(request.url).origin, edition: "desktop" as const };
+    expect(auth.context.embedOrigin).toBe(source.origin);
+    const envelope = createAgentPromptEnvelope({
+      scenario: { id: "doc-review", title: "Review the shared document" },
+      target: { nodeId: doc.node.id, nodeName: doc.node.name, nodeType: "doc" },
+      source,
+      segments: [
+        { kind: "target", text: "Target: the read-only shared document." },
+        { kind: "task", text: "Read the complete text. 保留全文 🌏  \nDo not change it." },
+      ],
+    });
+    const text = joinAgentPromptSegments(envelope.segments);
+    const context = decodeAgentPromptClipboard(
+      JSON.stringify(envelope),
+      text,
+      source,
+      "embed-paste",
+    );
+    if (!context) throw new Error("expected the same-origin Desktop clipboard context to decode");
+
+    // Reproduce the former transport failure without replacing the real resolver:
+    // a valid capability alone lacks the trusted host attribution the validator needs.
+    const { embedOrigin: _origin, ...contextBeforeOriginBinding } = auth.context;
+    await expect(
+      runWithEmbedContext(contextBeforeOriginBinding, async () =>
+        validateAgentPromptResourceContext([context]),
+      ),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+
+    await runWithEmbedContext(auth.context, async () => {
+      await expect(client.nodes.get({ nodeId: doc.node.id })).resolves.toMatchObject({
+        node: { id: doc.node.id },
+      });
+      expect(validateAgentPromptResourceContext([context])).toEqual([context]);
+      const forgedEnvelope = {
+        ...envelope,
+        source: { ...source, origin: "https://forged-origin.test" },
+      };
+      expect(
+        decodeAgentPromptClipboard(JSON.stringify(forgedEnvelope), text, source, "forged-paste"),
+      ).toBeNull();
+      const forged = createPromptResourceContext(forgedEnvelope, "forged-rpc");
+      await expect(
+        Promise.resolve().then(() => validateAgentPromptResourceContext([forged])),
+      ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+
+      // Matching context origin is attribution, never permission to use an Agent.
+      // Exercise the complete router so the public surface guard remains authoritative.
+      for (const input of [
+        { sessionId: "unavailable-to-embed", text: "", resourceContext: [context] },
+        { sessionId: "unavailable-to-embed", text: "Read this document." },
+      ]) {
+        await expect(client.agents.sessions.prompt(input)).rejects.toMatchObject({
+          code: "FORBIDDEN",
+        });
+      }
+    });
+  });
+
   it("serves the link target but refuses space-scoped procedures", async () => {
     await seedScenario("embed-surface-guard");
     const client = createRouterClient(busabaseRouter);

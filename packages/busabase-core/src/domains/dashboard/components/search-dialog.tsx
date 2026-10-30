@@ -39,6 +39,7 @@ import {
   mergeRecentMatches,
   nodeRoutePath,
   partitionByVisited,
+  staleKnownNodeIds,
 } from "../helpers/known-node-cache";
 import { mergeSearchIntoHref } from "../helpers/link-search";
 import { NodeAvatar } from "../helpers/node-icons";
@@ -69,6 +70,7 @@ const NODE_TYPE_FOR_SECTION = { skills: "skill", apps: "airapp" } as const satis
   NodeType
 >;
 const QUICK_RESULT_LIMIT = 6;
+const NODE_NAME_SEARCH_LIMIT = 20;
 
 /**
  * One shared shape every result row renders from, regardless of which tab
@@ -460,7 +462,9 @@ export function SearchDialog({
   // matches still render instantly underneath it (see `recentMatches`).
   const recentWantsNetworkSearch = (shows("recent") || shows("workspace")) && hasQuery;
   const nodeSearchByNameQuery = useQuery({
-    ...orpc.nodes.searchByName.queryOptions({ input: { query: debouncedQuery, limit: 20 } }),
+    ...orpc.nodes.searchByName.queryOptions({
+      input: { query: debouncedQuery, limit: NODE_NAME_SEARCH_LIMIT },
+    }),
     enabled:
       open &&
       recentWantsNetworkSearch &&
@@ -518,6 +522,23 @@ export function SearchDialog({
       pendingCacheMerge.current.set(result.id, nodeSearchResultToKnownNode(result));
     }
   }, [recentNetworkResults]);
+  // The opposite fold, applied at once rather than on close: a cached node the
+  // server's answer proves deleted or archived must not stay on screen as a
+  // clickable dead end. Removing a dead row is the one re-order worth making.
+  // Only a freshly fetched answer counts: a cached one may predate the delete.
+  const nodeSearchByNameData = nodeSearchByNameQuery.isFetching
+    ? undefined
+    : nodeSearchByNameQuery.data;
+  useEffect(() => {
+    if (!isDebouncedQueryCurrent || !nodeSearchByNameData) return;
+    const stale = staleKnownNodeIds(
+      nodeCache.list(),
+      nodeSearchByNameData,
+      debouncedQuery,
+      NODE_NAME_SEARCH_LIMIT,
+    );
+    if (stale.length > 0) nodeCache.forget(stale);
+  }, [debouncedQuery, isDebouncedQueryCurrent, nodeCache, nodeSearchByNameData]);
   useEffect(() => {
     if (open || pendingCacheMerge.current.size === 0) return;
     nodeCache.merge([...pendingCacheMerge.current.values()]);

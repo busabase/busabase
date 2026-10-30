@@ -1,8 +1,10 @@
+import { hasApiKeyLevel } from "busabase-contract/access-control/api-key-level";
 import type { BaseFieldVO, BaseVO, GanttScale, RecordVO, ViewVO } from "busabase-contract/types";
 import { SPALink as Link } from "openlib/ui/dashboard";
 import { useEffect, useState } from "react";
 import { useSearch } from "wouter";
 import { useCoreI18n, useCoreLocale } from "../../../i18n";
+import { presentCoreError } from "../../../i18n/localize-error";
 import {
   calendarDayToLocalDate,
   fromDateTimeInputValue,
@@ -12,6 +14,9 @@ import {
 } from "../../base/utils/date-value";
 import { getRecordTitle } from "../helpers/change-request";
 import { mergeSearchIntoHref } from "../helpers/link-search";
+import { useIsAnonymousVisitor } from "../visitor-context";
+import { DragReviewNotice } from "./base-kanban";
+import { useWorkspacePermissionLevel } from "./split-submit-button";
 
 const DAY_MS = 86_400_000;
 // Pixels per day per scale — month packs tighter, week spreads out.
@@ -102,7 +107,11 @@ export function BusaBaseGantt({
   const messages = useCoreI18n();
   const locale = useCoreLocale();
   const currentSearch = useSearch();
+  const isAnon = useIsAnonymousVisitor();
+  const permissionLevel = useWorkspacePermissionLevel();
   const [drag, setDrag] = useState<DragState | null>(null);
+  const [dropError, setDropError] = useState<string | null>(null);
+  const [reviewRequestId, setReviewRequestId] = useState<string | null>(null);
   // Seeds from the view's saved scale; the toolbar toggle overrides it locally.
   const [scale, setScale] = useState<GanttScale>(activeView?.config.ganttScale ?? "month");
   const dayPx = DAY_PX[scale];
@@ -179,7 +188,9 @@ export function BusaBaseGantt({
     cursor = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1);
   }
 
-  const canDrag = Boolean(onPatchRecord);
+  // A `read` grant on the Base may look at the timeline but not reschedule it.
+  const canDrag =
+    Boolean(onPatchRecord) && !isAnon && hasApiKeyLevel(permissionLevel, "changeRequest");
 
   // Apply the in-flight drag delta to a row for live preview.
   const previewDates = (row: Row): { start: Date; end: Date } => {
@@ -198,7 +209,13 @@ export function BusaBaseGantt({
   };
 
   const commitDrag = (row: Row) => {
-    if (!drag || drag.recordId !== row.record.id || drag.deltaDays === 0 || !onPatchRecord) {
+    if (
+      !drag ||
+      drag.recordId !== row.record.id ||
+      drag.deltaDays === 0 ||
+      !onPatchRecord ||
+      !canDrag
+    ) {
       return;
     }
     const { start, end } = previewDates(row);
@@ -218,7 +235,19 @@ export function BusaBaseGantt({
       );
     }
     if (Object.keys(patch).length > 0) {
-      void onPatchRecord(row.record, { ...row.record.headCommit.payload, ...patch });
+      void submitPatch(row.record, { ...row.record.headCommit.payload, ...patch });
+    }
+  };
+
+  const submitPatch = async (record: RecordVO, fields: Record<string, unknown>) => {
+    if (!onPatchRecord) return;
+    setDropError(null);
+    setReviewRequestId(null);
+    try {
+      const result = await onPatchRecord(record, fields);
+      if (!result.materialized) setReviewRequestId(result.changeRequestId);
+    } catch (error) {
+      setDropError(presentCoreError(messages, locale, error, messages.shell.operationFailed));
     }
   };
 
@@ -255,6 +284,11 @@ export function BusaBaseGantt({
           ))}
         </div>
       </div>
+      <DragReviewNotice
+        currentSearch={currentSearch}
+        error={dropError}
+        reviewRequestId={reviewRequestId}
+      />
 
       <div style={{ width: TITLE_COL_PX + timelineWidth }}>
         {/* Month axis header */}

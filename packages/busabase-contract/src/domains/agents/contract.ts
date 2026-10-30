@@ -2,9 +2,13 @@ import { eventIterator, oc } from "@orpc/contract";
 import { z } from "zod";
 import {
   AgentCatalogEntryVOSchema,
+  AgentConnectionDetailVOSchema,
+  AgentConnectionInputSchema,
   AgentConnectionVOSchema,
+  AgentResourceVOSchema,
   AgentSessionEventVOSchema,
   AgentSessionIdInputSchema,
+  AgentSessionSnapshotVOSchema,
   AgentSessionStatusSchema,
   AgentSessionsPageVOSchema,
   AgentSessionVOSchema,
@@ -14,6 +18,9 @@ import {
   ListAgentConnectionsInputSchema,
   ListAgentSessionsPagedInputSchema,
   PromptAgentSessionInputSchema,
+  RenameAgentConnectionInputSchema,
+  ResolveAgentResourceInputSchema,
+  RespondToAgentInputSchema,
   RespondToAgentPermissionInputSchema,
   RouterEnrollmentCompleteInputSchema,
   RouterEnrollmentConnectionVOSchema,
@@ -63,6 +70,8 @@ export const agentsContract = {
   connections: {
     /** Connected backends in the current user's personal or active-space scope. */
     list: oc.input(ListAgentConnectionsInputSchema).output(AgentConnectionVOSchema.array()),
+    detail: oc.input(AgentConnectionInputSchema).output(AgentConnectionDetailVOSchema),
+    rename: oc.input(RenameAgentConnectionInputSchema).output(AgentConnectionDetailVOSchema),
   },
 
   sessions: {
@@ -105,6 +114,12 @@ export const agentsContract = {
     respondToPermission: oc
       .input(RespondToAgentPermissionInputSchema)
       .output(z.object({ ok: z.boolean() })),
+
+    respondToInput: oc.input(RespondToAgentInputSchema).output(z.object({ ok: z.boolean() })),
+
+    resolveResource: oc.input(ResolveAgentResourceInputSchema).output(AgentResourceVOSchema),
+
+    snapshot: oc.input(AgentSessionIdInputSchema).output(AgentSessionSnapshotVOSchema),
 
     /**
      * Change the session's advertised model via ACP `session/set_config_option`.

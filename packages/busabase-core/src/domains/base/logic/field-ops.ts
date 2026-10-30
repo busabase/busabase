@@ -3,6 +3,7 @@ import "server-only";
 import { ORPCError } from "@orpc/server";
 import {
   convertFieldChangeRequestInputSchema,
+  createBaseFieldInputSchema,
   createFieldChangeRequestInputSchema,
   deleteFieldChangeRequestInputSchema,
   previewFieldConversionInputSchema,
@@ -12,9 +13,9 @@ import {
 } from "busabase-contract/domains/base/contract/base-schemas";
 import type { FieldType, LookupRollup } from "busabase-contract/types";
 import { and, asc, eq, gt, isNotNull, isNull, or, sql } from "drizzle-orm";
-import { iStringFromText, iStringToText } from "openlib/i18n/i-string";
+import { iStringFromText } from "openlib/i18n/i-string";
 import type { z } from "zod";
-import { getContextSpaceId, resolveActorId, withContextSourceMeta } from "../../../context";
+import { resolveActorId, withContextSourceMeta } from "../../../context";
 import { getDb } from "../../../db";
 import {
   busabaseBaseFields,
@@ -24,14 +25,8 @@ import {
 } from "../../../db/schema";
 import { insertAuditEvent } from "../../../logic/audit";
 import { insertCommit } from "../../../logic/commits";
-import {
-  closeChangeRequest,
-  finalizeChangeRequest,
-  getChangeRequest,
-  recordMergedOperation,
-} from "../../../logic/cr-lifecycle";
-import { CURRENT_USER_ID, id, now } from "../../../logic/kernel";
-import { publishChangeRequestPendingReview } from "../../../logic/live-events";
+import { closeChangeRequest, finalizeChangeRequest } from "../../../logic/cr-lifecycle";
+import { id, now } from "../../../logic/kernel";
 import { assertNodePermission } from "../../../logic/node-acl";
 import { ensureReady } from "../../../logic/seed";
 import { fieldSchema } from "../../../logic/store";
@@ -44,6 +39,8 @@ import { convertFieldValue, isUnconvertibleFieldType } from "../utils/field-conv
 import { isPrimaryField, PRIMARY_FIELD_DELETE_MESSAGE } from "../utils/primary-field";
 import { assertValidDateFieldOptionsOrThrow } from "./date-options";
 import { baseNotFound } from "./errors";
+import { createFieldProposal } from "./field-proposal";
+import { assertFieldOriginView } from "./field-visibility";
 import { formulaDependencySnapshot } from "./formula-recalculation";
 import { getBase } from "./queries";
 import {
@@ -54,7 +51,6 @@ import {
 import {
   assertForwardFieldDeletableOrThrow,
   isReverseRelationField,
-  pairReverseRelationFields,
   resolveReverseRelationOptions,
   resolveReverseRelationPatch,
 } from "./reverse-relations";
@@ -187,7 +183,10 @@ export const resolveLookupFieldOptions = async <
   return options;
 };
 
-export const createBaseField = async (baseId: string, input: z.infer<typeof fieldSchema>) => {
+export const createBaseField = async (
+  baseId: string,
+  input: z.input<typeof createBaseFieldInputSchema>,
+) => {
   await ensureReady();
   const db = await getDb();
   const base = await getBase(baseId);
@@ -195,97 +194,27 @@ export const createBaseField = async (baseId: string, input: z.infer<typeof fiel
     throw baseNotFound(baseId);
   }
   await assertNodePermission(base.nodeId, "write");
-  const parsed = fieldSchema.parse(input);
-  // Formula creation must use the transactional schema + historical-value merge,
-  // including on this convenience endpoint which historically inserted directly.
-  if (parsed.type === "formula") {
-    await createFieldChangeRequest(base.id, {
-      ...parsed,
-      required: false,
-      autoMerge: true,
-      submittedBy: CURRENT_USER_ID,
-    });
-    const updated = await getBase(base.id);
-    if (!updated) throw new Error("Failed to create formula field");
-    return updated;
+  const request = createBaseFieldInputSchema.parse(input);
+  if (request.reverse) {
+    const relationOptions = await resolveRelationFieldOptions(db, request.options);
+    const target =
+      typeof relationOptions.targetBaseId === "string"
+        ? await getBase(relationOptions.targetBaseId)
+        : null;
+    if (target) await assertNodePermission(target.nodeId, "write");
   }
-  assertRelationOnlyOptionsOrThrow(parsed.type, parsed.slug, parsed.options);
-  assertValidDateFieldOptionsOrThrow(parsed.type, parsed.slug, parsed.options);
-  const relationResolved = await resolveReverseRelationOptions(db, {
-    baseId: base.id,
-    slug: parsed.slug,
-    type: parsed.type,
-    options: await resolveRelationFieldOptions(db, parsed.options),
-  });
-  if (parsed.type === "relation" && !relationResolved.targetBaseId) {
-    throw relationRequiresTargetBase();
-  }
-  if (parsed.required && typeof relationResolved.reverseOfFieldId === "string") {
-    throw new ORPCError("BAD_REQUEST", {
-      message: `Field "${parsed.slug}" is a read-only reverse relation and cannot be required.`,
-      data: { slug: parsed.slug, reason: "reverse_relation_read_only" },
+  // Use the same merge transaction as reviewed creation: the schema, view
+  // visibility and audit history must either all commit or all roll back.
+  const result = await createFieldChangeRequest(base.id, { ...request, autoMerge: true });
+  if (result.status !== "merged") {
+    throw new ORPCError("CONFLICT", {
+      message: "This field creation requires review before it can appear on the Base.",
+      data: { reason: "field_creation_requires_review", changeRequestId: result.id },
     });
   }
-  assertValidFormulaFieldOrThrow(parsed.type, parsed.slug, relationResolved, base.fields);
-  const options = await resolveLookupFieldOptions(
-    parsed.type,
-    parsed.slug,
-    relationResolved,
-    base.fields,
-  );
-  const [existing] = await db
-    .select()
-    .from(busabaseBaseFields)
-    .where(
-      and(
-        eq(busabaseBaseFields.baseId, base.id),
-        eq(busabaseBaseFields.slug, parsed.slug),
-        isNull(busabaseBaseFields.deletedAt),
-      ),
-    )
-    .limit(1);
-  if (existing) {
-    throw new ORPCError("CONFLICT", { message: `Field already exists: ${parsed.slug}` });
-  }
-  const fieldCount = base.fields.length;
-  const newFieldId = id("bsf");
-  await db.insert(busabaseBaseFields).values({
-    id: newFieldId,
-    baseId: base.id,
-    slug: parsed.slug,
-    name: iStringToText(parsed.name),
-    type: parsed.type,
-    required: parsed.required,
-    position: fieldCount,
-    options,
-  });
-  if (typeof options.reverseOfFieldId === "string") {
-    await pairReverseRelationFields(db, newFieldId, options.reverseOfFieldId);
-  }
-  const updatedBase = await getBase(base.id);
-  if (!updatedBase) {
-    throw new Error("Failed to create field");
-  }
-  // Record the field add as an auto-merged ChangeRequest (audit + history +
-  // rollback), replacing the old bespoke `field.created` audit action.
-  await recordMergedOperation({
-    operation: "base_add_field",
-    targetType: "base",
-    baseId: base.id,
-    fields: {
-      name: parsed.name,
-      slug: parsed.slug,
-      type: parsed.type,
-      required: parsed.required,
-      options: parsed.options,
-    },
-    message: `Add field ${parsed.slug}`,
-    submittedBy: resolveActorId(CURRENT_USER_ID),
-    reviewPolicySnapshot: base.reviewPolicy,
-    sourceMeta: withContextSourceMeta({ subject: "base_field", fieldSlug: parsed.slug }),
-    auditMetadata: { fieldSlug: parsed.slug },
-  });
-  return updatedBase;
+  const updated = await getBase(base.id);
+  if (!updated) throw new Error("Failed to create field");
+  return updated;
 };
 
 export const createFieldChangeRequest = async (
@@ -300,6 +229,12 @@ export const createFieldChangeRequest = async (
   }
 
   const parsed = createFieldChangeRequestInputSchema.parse(input);
+  await assertFieldOriginView(db, base.id, parsed.originViewId);
+  if (parsed.reverse && (parsed.type !== "relation" || parsed.options.reverseOfFieldId)) {
+    throw new ORPCError("BAD_REQUEST", {
+      message: "Only a forward relation field can create a corresponding reverse field.",
+    });
+  }
   assertRelationOnlyOptionsOrThrow(parsed.type, parsed.slug, parsed.options);
   assertValidDateFieldOptionsOrThrow(parsed.type, parsed.slug, parsed.options);
   const relationResolved = await resolveReverseRelationOptions(db, {
@@ -313,7 +248,7 @@ export const createFieldChangeRequest = async (
   }
   if (parsed.required && typeof relationResolved.reverseOfFieldId === "string") {
     throw new ORPCError("BAD_REQUEST", {
-      message: `Field "${parsed.slug}" is a read-only reverse relation and cannot be required.`,
+      message: `Field "${parsed.slug}" is a reverse relation (computed from links) and cannot be required.`,
       data: { slug: parsed.slug, reason: "reverse_relation_read_only" },
     });
   }
@@ -324,6 +259,7 @@ export const createFieldChangeRequest = async (
     relationResolved,
     base.fields,
   );
+  if (parsed.reverse || parsed.requestId) return createFieldProposal(base, { ...parsed, options });
   const [existing] = await db
     .select()
     .from(busabaseBaseFields)
@@ -350,6 +286,7 @@ export const createFieldChangeRequest = async (
     required: parsed.type === "formula" ? false : parsed.required,
     options,
     formulaDependencies: formulaDependencySnapshot(parsed.type, options, base.fields),
+    originViewId: parsed.originViewId,
   };
 
   await insertCommit(db, {
@@ -416,7 +353,6 @@ export const createFieldChangeRequest = async (
     kind: "structural",
   });
 };
-
 export const createDeleteFieldChangeRequest = async (
   baseId: string,
   fieldId: string,
@@ -596,7 +532,7 @@ export const createUpdateFieldChangeRequest = async (
       : field.options;
   if (patch.required === true && isReverseRelationField(field)) {
     throw new ORPCError("BAD_REQUEST", {
-      message: `Field "${field.slug}" is a read-only reverse relation and cannot be required.`,
+      message: `Field "${field.slug}" is a reverse relation (computed from links) and cannot be required.`,
       data: { slug: field.slug, reason: "reverse_relation_read_only" },
     });
   }

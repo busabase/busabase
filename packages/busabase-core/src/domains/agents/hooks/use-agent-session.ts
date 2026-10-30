@@ -7,12 +7,22 @@ import { useAcpSession } from "@acp-ui/core/session";
 import { consumeEventIterator } from "@orpc/client";
 import { type QueryKey, useQueryClient } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
+import { PromptResourceContextListSchema } from "busabase-contract/domains/agents/prompt-context";
 import type {
   AgentSessionEventVO,
   AgentSessionVO,
   PromptAttachmentInput,
 } from "busabase-contract/domains/agents/types";
+import {
+  AgentContextResourceVOSchema,
+  AgentPromptPresentationSchema,
+} from "busabase-contract/domains/agents/types";
 import { useMemo, useRef } from "react";
+import { translateAcpExtension } from "../utils/acp-fidelity";
+import {
+  contextResourceToContentBlock,
+  promptResourceContextToContentBlock,
+} from "../utils/agent-context-resources";
 import { shouldRenderAgentMessage } from "../utils/agent-visible-message";
 
 /**
@@ -50,6 +60,13 @@ export interface AgentSessionStatusUpdate {
  * than one only for a `user_message` that carries attachments — see below.
  */
 export function translateAgentSessionEvent(event: AgentSessionEventVO): AcpUiEvent[] {
+  if (event.kind === "status" && event.status === "failed")
+    return [{ type: "interrupted", at: event.at }];
+  if (event.kind === "acpExtension") return translateAcpExtension(event.acpExtension);
+  if (event.kind === "inputRequest" && event.inputRequest)
+    return [{ type: "input_request", ...event.inputRequest }];
+  if (event.kind === "inputResolved" && event.inputRequestId && event.inputResponse)
+    return [{ type: "input_resolved", requestId: event.inputRequestId, ...event.inputResponse }];
   if (event.kind === "permissionRequest" && event.permissionRequest) {
     return [
       {
@@ -87,6 +104,11 @@ export function translateAgentSessionEvent(event: AgentSessionEventVO): AcpUiEve
 
   const update = event.acpUpdate as Record<string, unknown>;
   const tag = typeof update.sessionUpdate === "string" ? update.sessionUpdate : "";
+  if (tag === "user_message_chunk") {
+    const metadata = update._meta as Record<string, unknown> | undefined;
+    const busabase = metadata?.["busabase.im"] as Record<string, unknown> | undefined;
+    if (busabase?.clientEcho === true) return [];
+  }
 
   // busabase emits its own session-level notes (e.g. an attachment busabase
   // could not send to this agent). Not an ACP tag. Filtered rather than
@@ -110,25 +132,53 @@ export function translateAgentSessionEvent(event: AgentSessionEventVO): AcpUiEve
   // next persisted user event starts a new message even when a cancelled turn
   // produced no intervening agent chunk.
   if (tag === "user_message" && typeof update.text === "string") {
+    // The producer records the user's original text explicitly. Old or
+    // malformed events keep their full text; content is never pattern-matched.
+    const presentation = AgentPromptPresentationSchema.safeParse(update.presentation);
+    const text = presentation.success ? presentation.data.text : update.text;
     const attachments = Array.isArray(update.attachments)
       ? (update.attachments as PromptAttachmentInput[])
       : [];
+    const contextResources = AgentContextResourceVOSchema.array().safeParse(
+      update.contextResources ?? [],
+    );
+    const resourceContext = PromptResourceContextListSchema.safeParse(update.resourceContext ?? []);
     const messageId = `busabase-user:${event.sessionId}:${event.seq}`;
     return [
       {
         type: "session_update",
         update: {
           sessionUpdate: "user_message_chunk",
-          content: { type: "text", text: update.text },
+          content: { type: "text", text },
           messageId,
         } as never,
       },
+      ...(resourceContext.success ? resourceContext.data : []).map(
+        (snapshot): AcpUiEvent => ({
+          type: "session_update",
+          update: {
+            sessionUpdate: "user_message_chunk",
+            content: promptResourceContextToContentBlock(snapshot),
+            messageId,
+          },
+        }),
+      ),
       // Built through the same helper the send path uses, rather than
       // hand-rolling `{ type: attachment.kind }`: that shape is only a valid
       // ACP content block for `image`/`audio`, so a `file` attachment would
       // produce `{ type: "file" }`, be rejected by the reducer, and silently
       // vanish from a replayed transcript — the very failure the comment
       // above warns about, one kind later.
+      ...(contextResources.success ? contextResources.data : []).map(
+        (snapshot): AcpUiEvent => ({
+          type: "session_update",
+          update: {
+            sessionUpdate: "user_message_chunk",
+            content: contextResourceToContentBlock(snapshot),
+            messageId,
+          },
+        }),
+      ),
       ...attachments.map(
         (attachment): AcpUiEvent => ({
           type: "session_update",
@@ -186,6 +236,7 @@ export function useAgentSession(
         let retryTimer: ReturnType<typeof setTimeout> | undefined;
         let lastSeq = -1;
         let readinessRefreshed = false;
+        let terminal = false;
 
         const refreshSessions = () => {
           void queryClient.invalidateQueries({
@@ -205,6 +256,7 @@ export function useAgentSession(
                 if (cancelled || event.seq <= lastSeq) return;
                 lastSeq = Math.max(lastSeq, event.seq);
                 if (event.kind === "status" && event.status) {
+                  terminal = event.status === "ended" || event.status === "failed";
                   callbacks.current.onStatusUpdate?.({
                     sessionId: id,
                     status: event.status as AgentSessionVO["status"],
@@ -235,12 +287,11 @@ export function useAgentSession(
                 }
                 for (const translated of translateAgentSessionEvent(event)) onEvent(translated);
               },
-              onError: () => {
-                // The server ends the stream when a session ends, which arrives
-                // here as an error. Retrying is harmless (the session is gone,
-                // so the next attempt simply fails too) and it is what keeps a
-                // transient network blip from silently freezing the transcript.
-                if (!cancelled && !signal.aborted) {
+              onError: () => {},
+              onFinish: () => {
+                // A retired owning socket may finish normally. Resume the
+                // durable subscription after either kind of transport close.
+                if (!cancelled && !signal.aborted && !terminal) {
                   retryTimer = setTimeout(connect, 3000);
                 }
               },
@@ -270,6 +321,16 @@ export function useAgentSession(
           sessionId: id,
           requestId: block.id,
           optionId,
+        });
+        return true;
+      },
+
+      // The backend has had a complete, working session/cancel path since
+      answerInput: async (id, block, response) => {
+        await orpc.agents.sessions.respondToInput.call({
+          sessionId: id,
+          requestId: block.id,
+          response,
         });
         return true;
       },

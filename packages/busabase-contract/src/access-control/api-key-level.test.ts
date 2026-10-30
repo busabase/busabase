@@ -196,6 +196,48 @@ describe("resolveRequiredLevel", () => {
 
 describe("procedure permission policy", () => {
   it.each(
+    ["respondToInput", "snapshot", "resolveResource"].flatMap((procedure) => [
+      `agents.sessions.${procedure}`,
+      `workbench.agents.sessions.${procedure}`,
+    ]),
+  )("requires workspace manage for %s", (path) => {
+    const segments = path.split(".");
+    const policy = resolveProcedurePermissionPolicy(segments);
+    const barePath = path.replace(/^workbench\./, "");
+    expect(PROCEDURE_PERMISSION_POLICY[barePath]).toEqual({
+      level: "manage",
+      scope: "workspace",
+    });
+    expect(policy).toEqual({ level: "manage", scope: "workspace" });
+    expect(resolveRequiredLevel(segments, undefined)).toBe("manage");
+    for (const level of ["read", "changeRequest", "write"] as const) {
+      expect(hasApiKeyLevel(level, policy.level)).toBe(false);
+    }
+    expect(hasApiKeyLevel("manage", policy.level)).toBe(true);
+  });
+
+  it.each(
+    ["detail", "rename"].flatMap((procedure) => [
+      `agents.connections.${procedure}`,
+      `workbench.agents.connections.${procedure}`,
+    ]),
+  )("requires workspace manage for %s", (path) => {
+    const segments = path.split(".");
+    const policy = resolveProcedurePermissionPolicy(segments);
+    const barePath = path.replace(/^workbench\./, "");
+    expect(PROCEDURE_PERMISSION_POLICY[barePath]).toEqual({
+      level: "manage",
+      scope: "workspace",
+    });
+    expect(policy).toEqual({ level: "manage", scope: "workspace" });
+    expect(resolveRequiredLevel(segments, undefined)).toBe("manage");
+    for (const level of ["read", "changeRequest", "write"] as const) {
+      expect(hasApiKeyLevel(level, policy.level)).toBe(false);
+    }
+    expect(hasApiKeyLevel("manage", policy.level)).toBe(true);
+  });
+
+  it.each(
     ["grants", "mint", "status", "complete", "cancel"].flatMap((procedure) => [
       `agents.routerEnrollment.${procedure}`,
       `workbench.agents.routerEnrollment.${procedure}`,

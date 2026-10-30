@@ -1,0 +1,122 @@
+/*
+ * Attention cue for "connect your agent" (EmptyAgentGuide + sidebar Agent Skills).
+ *
+ * Everything is in the product's AI violet (`--color-ai`), the one colour that
+ * already means "this is the agent" on customer-facing surfaces.
+ *
+ * Motion only runs under `prefers-reduced-motion: no-preference`. With reduced
+ * motion the host keeps the static styles (violet button, static halo, bubble,
+ * solid dot): no bounce, float, shine or ripple. Only box-shadow, transform and
+ * opacity animate, so nothing shifts layout or intercepts pointer events.
+ */
+
+/* ── Primary button: breathing halo + a shine that sweeps across ── */
+[data-agent-cue="ring"] {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--color-ai) 35%, transparent);
+}
+
+[data-agent-cue="ring"]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: linear-gradient(
+    105deg,
+    transparent 30%,
+    color-mix(in oklab, white 38%, transparent) 50%,
+    transparent 70%
+  );
+  transform: translateX(-120%);
+}
+
+@keyframes busabase-agent-cue-halo {
+  0% {
+    box-shadow:
+      0 0 0 3px color-mix(in oklab, var(--color-ai) 40%, transparent),
+      0 0 0 0 color-mix(in oklab, var(--color-ai) 55%, transparent);
+  }
+  70%,
+  100% {
+    box-shadow:
+      0 0 0 3px color-mix(in oklab, var(--color-ai) 40%, transparent),
+      0 0 0 12px color-mix(in oklab, var(--color-ai) 0%, transparent);
+  }
+}
+
+/* One quick sweep, then a rest: ~every 3.6s. */
+@keyframes busabase-agent-cue-shine {
+  0% {
+    transform: translateX(-120%);
+  }
+  28%,
+  100% {
+    transform: translateX(120%);
+  }
+}
+
+/* ── Speech bubble above the button ── */
+@keyframes busabase-agent-cue-bubble-in {
+  0% {
+    opacity: 0;
+    transform: translateY(8px) scale(0.92);
+  }
+  55% {
+    opacity: 1;
+    transform: translateY(-4px) scale(1.03);
+  }
+  80% {
+    transform: translateY(1px) scale(0.99);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes busabase-agent-cue-bubble-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-3px);
+  }
+}
+
+/* ── Sidebar dot: an expanding ripple ── */
+@keyframes busabase-agent-cue-ripple {
+  0% {
+    transform: scale(1);
+    opacity: 0.75;
+  }
+  80%,
+  100% {
+    transform: scale(2.8);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  [data-agent-cue="ring"] {
+    animation: busabase-agent-cue-halo 2.2s ease-out infinite;
+  }
+
+  [data-agent-cue="ring"]::after {
+    animation: busabase-agent-cue-shine 3.6s ease-in-out 0.8s infinite;
+  }
+
+  [data-agent-cue="bubble"] {
+    transform-origin: 1.5rem 100%;
+    animation:
+      busabase-agent-cue-bubble-in 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) both,
+      busabase-agent-cue-bubble-float 2.8s ease-in-out 0.6s infinite;
+  }
+
+  [data-agent-cue="dot"] {
+    animation: busabase-agent-cue-ripple 1.8s ease-out infinite;
+  }
+}

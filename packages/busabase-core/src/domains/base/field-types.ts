@@ -25,7 +25,7 @@ export interface FieldDef {
     choices?: ReadonlyArray<{ id: string; name: string; color?: string }>;
     multiple?: boolean;
     targetBaseId?: string;
-    /** `relation` only — read-only reverse column of this forward field id. */
+    /** `relation` only — reverse column of this forward field id (edits go to the forward field). */
     reverseOfFieldId?: string;
     /** Per-field limits for `attachment` columns (all optional; see attachmentValidator). */
     attachment?: {
@@ -721,10 +721,12 @@ export const isSystemFieldType = (type: FieldType): boolean =>
   Boolean(FIELD_TYPES[type].compute) || FIELD_TYPES[type].readOnly === true;
 
 /**
- * A `relation` field that is the read-only reverse column of another relation
- * field (`options.reverseOfFieldId`). Like a lookup, its value is resolved at
- * read time and never accepted as input — but it stays type `relation`, so it
- * renders as linked-record chips.
+ * A `relation` field that is the reverse column of another relation field
+ * (`options.reverseOfFieldId`). Like a lookup, its value is resolved at read
+ * time and never STORED — but it stays type `relation`, so it renders as
+ * linked-record chips. It is editable: record-update writes to it are
+ * redirected to the forward field (see `logic/reverse-relations.ts`) before
+ * validation, so validation and merge still treat it as never-stored input.
  */
 export const isReverseRelationDef = (def: {
   type: string;
@@ -734,7 +736,10 @@ export const isReverseRelationDef = (def: {
   typeof def.options?.reverseOfFieldId === "string" &&
   def.options.reverseOfFieldId.length > 0;
 
-/** Read-only for record input: system-computed types plus reverse relation columns. */
+/**
+ * Never stored from record input: system-computed types plus reverse relation
+ * columns (whose edits are redirected to the forward field before this runs).
+ */
 export const isReadOnlyFieldDef = (def: {
   type: FieldType;
   options?: { reverseOfFieldId?: unknown } | null;

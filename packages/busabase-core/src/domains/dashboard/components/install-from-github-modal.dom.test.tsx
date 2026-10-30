@@ -170,3 +170,35 @@ describe("InstallFromGithubModal review choice", () => {
     expect(installFromGithubStream.mock.calls[0]?.[0]).not.toHaveProperty("autoMerge");
   });
 });
+
+describe("InstallFromGithubModal plan preview", () => {
+  afterEach(unmountAndFlushTimers);
+
+  it("renders a root skill and an app that share the package slug without a duplicate key", async () => {
+    // Real shape of e.g. b2b-crm: the root SKILL.md is folded in at
+    // `path: <package slug>`, which is also the app's path.
+    const sharedPath: InstallPlanVO = {
+      ...plan,
+      nodes: [
+        { path: "b2b-crm", slug: "b2b-crm", name: "B2B CRM manual", type: "skill", depth: 0 },
+        { path: "b2b-crm", slug: "b2b-crm", name: "B2B CRM app", type: "airapp", depth: 0 },
+      ],
+    };
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      renderInstall("zh-CN", {
+        planInstallFromGithub: vi.fn().mockResolvedValue(sharedPath),
+        installFromGithubStream: vi.fn(),
+      });
+
+      expect(await screen.findByText("B2B CRM manual")).toBeTruthy();
+      expect(screen.getByText("B2B CRM app")).toBeTruthy();
+      const keyWarnings = consoleError.mock.calls.filter((args) =>
+        String(args[0]).includes("same key"),
+      );
+      expect(keyWarnings).toEqual([]);
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+});

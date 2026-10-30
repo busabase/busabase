@@ -13,6 +13,7 @@ import type {
   ViewVO,
 } from "busabase-contract/types";
 import { flattenViewFilters, VIEW_FIELD_MIN_WIDTH } from "busabase-contract/types";
+import { useReducedMotion } from "framer-motion";
 import { Dialog, DialogTitle } from "kui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "kui/popover";
 import { Skeleton } from "kui/skeleton";
@@ -50,6 +51,7 @@ import {
   type CSSProperties,
   type DragEvent,
   type KeyboardEvent,
+  type MouseEvent,
   type PointerEvent,
   type RefObject,
   useCallback,
@@ -59,7 +61,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { useSearch } from "wouter";
+import { useLocation, useSearch } from "wouter";
 import { fmt, useCoreI18n, useCoreLocale, useIString } from "../../../i18n";
 import { presentCoreError } from "../../../i18n/localize-error";
 import {
@@ -80,6 +82,7 @@ import {
   getRelationRecordIds,
   getSafeAttachmentUrl,
 } from "../helpers/field";
+import { fieldDesignHref } from "../helpers/field-visibility-navigation";
 import { fieldValueToString, shortIdentifier } from "../helpers/format";
 import { mergeSearchIntoHref, useHrefWithCurrentSearch } from "../helpers/link-search";
 import {
@@ -92,21 +95,26 @@ import {
   resetViewFieldWidth,
   setViewFieldWidth,
 } from "../helpers/view-config";
+import { getViewConfigPatch, getViewUpdatePayload } from "../helpers/view-config-patch";
 import { isOnlyRemainingView } from "../helpers/view-order";
 import type {
+  BaseTableViewState,
   RecordSubmitOptions,
   RecordsPagination,
   ViewFormPayload,
   ViewSubmitOptions,
+  ViewUpdatePayload,
 } from "../helpers/view-types";
+import { toSlugInput } from "../utils/slug-input";
 import { useIsAnonymousVisitor } from "../visitor-context";
 import { BusaBaseCalendar } from "./base-calendar";
 import { BusaBaseGallery } from "./base-gallery";
 import { BusaBaseGantt } from "./base-gantt";
-import { BusaBaseKanban } from "./base-kanban";
+import { BusaBaseKanban, type KanbanMoveRecord } from "./base-kanban";
 import { BaseViewTabs } from "./base-view-tabs";
 import { BulkEditRecordsDialog } from "./bulk-edit-records-dialog";
 import { DateFieldValue } from "./date-field";
+import { FieldContextLink } from "./field-context-link";
 import { FieldHelpPopover } from "./field-help";
 import { FieldBadge, LookupFieldValue, WhiteboardThumbnail } from "./field-preview";
 import { FormulaValue } from "./formula-value";
@@ -187,6 +195,7 @@ function FieldColumnHeader({
   customWidth,
   dragOver,
   dragging,
+  highlighted,
   name,
   onDragEnd,
   onDragLeave,
@@ -216,6 +225,7 @@ function FieldColumnHeader({
   customWidth?: number;
   dragOver: boolean;
   dragging: boolean;
+  highlighted?: boolean;
   field: BaseFieldVO;
   isPrimary: boolean;
   name: string;
@@ -330,8 +340,9 @@ function FieldColumnHeader({
         sticky
           ? `${baseTableHeaderStickyClassName} ${hasSelectionColumn ? "left-9" : "left-0"}`
           : ""
-      } ${dragOver ? "ring-2 ring-inset ring-primary/60" : ""} ${dragging ? "opacity-55" : ""}`}
+      } ${dragOver || highlighted ? "ring-2 ring-inset ring-primary/60" : ""} ${dragging ? "opacity-55" : ""}`}
       data-field-slug={field.slug}
+      data-new-field={highlighted ? "true" : undefined}
       data-field-width={customWidth}
       data-reorder-target={dragOver ? "true" : undefined}
       onDragLeave={(event) => {
@@ -430,15 +441,15 @@ function FieldColumnHeader({
                 <p className="text-muted-foreground text-xs leading-5">
                   {messages.base.savedViewRequired}
                 </p>
-                <Link
+                <FieldContextLink
                   className="mt-3 inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-md bg-foreground px-3 font-medium text-background text-xs transition-colors hover:bg-foreground/85"
                   data-testid={`header-edit-field-${field.slug}`}
-                  href={mergeSearchIntoHref(`/base/${baseSlug}/design`, currentSearch)}
+                  href={fieldDesignHref(baseSlug, currentSearch)}
                   onClick={() => setOpen(false)}
                 >
                   <PenLine className="size-3.5" />
                   {messages.base.editField}
-                </Link>
+                </FieldContextLink>
               </div>
             ) : (
               <div className="divide-y divide-border/60 text-xs">
@@ -526,15 +537,15 @@ function FieldColumnHeader({
                       {messages.base.hideField}
                     </button>
                   ) : null}
-                  <Link
+                  <FieldContextLink
                     className="flex h-8 w-full items-center gap-2 rounded px-2 transition-colors hover:bg-accent"
                     data-testid={`header-edit-field-${field.slug}`}
-                    href={mergeSearchIntoHref(`/base/${baseSlug}/design`, currentSearch)}
+                    href={fieldDesignHref(baseSlug, currentSearch, activeView.id)}
                     onClick={() => setOpen(false)}
                   >
                     <PenLine className="size-3.5" />
                     {messages.base.editField}
-                  </Link>
+                  </FieldContextLink>
                 </div>
               </div>
             )}
@@ -614,13 +625,6 @@ const toSlug = (value: string) =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
 
-const toSlugInput = (value: string) =>
-  value
-    .toLowerCase()
-    .replace(/[^a-z0-9-]+/g, "-")
-    .replace(/-{2,}/g, "-")
-    .replace(/^-+/g, "");
-
 // Above this many rows the records list is virtualized (windowed).
 const VIRTUALIZE_ROW_THRESHOLD = 100;
 
@@ -637,6 +641,7 @@ function BusaBaseRecordRow({
   selectable,
   selected,
   onToggleSelected,
+  onOpenRecord,
 }: {
   record: RecordVO;
   fields: BaseFieldVO[];
@@ -648,6 +653,7 @@ function BusaBaseRecordRow({
   selectable?: boolean;
   selected?: boolean;
   onToggleSelected?: (record: RecordVO) => void;
+  onOpenRecord?: (record: RecordVO) => void;
 }) {
   const messages = useCoreI18n();
   const currentRecordHref = useHrefWithCurrentSearch(
@@ -685,6 +691,7 @@ function BusaBaseRecordRow({
           hasSelectionColumn={Boolean(selectable)}
           index={index}
           key={field.id}
+          onOpenRecord={onOpenRecord}
           record={record}
           records={relationRecords}
         />
@@ -765,6 +772,7 @@ function BusaBaseTableRowsSkeleton({
 
 export function BusaBaseTable({
   activeView,
+  viewState,
   client,
   archivedViews = [],
   archivedRecords = [],
@@ -778,6 +786,7 @@ export function BusaBaseTable({
   onRestoreView,
   onRestoreRecord,
   onMoveRecord,
+  onOpenRecord,
   onPatchRecord,
   onReorderView,
   onUpdateView,
@@ -789,6 +798,7 @@ export function BusaBaseTable({
 }: {
   client: BusabaseDashboardApiClient;
   activeView: ViewVO | null;
+  viewState?: BaseTableViewState;
   archivedViews?: ViewVO[];
   archivedRecords?: RecordVO[];
   archivedPagination?: { hasMore: boolean; isLoadingMore: boolean; loadMore: () => void };
@@ -831,7 +841,8 @@ export function BusaBaseTable({
   onRestoreView?: (view: ViewVO) => Promise<void>;
   onRestoreRecord?: (record: RecordVO) => Promise<void>;
   /** Kanban drag-to-move: set one field on a record and auto-merge, no navigation. */
-  onMoveRecord?: (record: RecordVO, fieldSlug: string, value: string | null) => Promise<void>;
+  onMoveRecord?: KanbanMoveRecord;
+  onOpenRecord?: (record: RecordVO) => void;
   /** Gantt drag-to-reschedule: patch several fields at once and auto-merge, no navigation. */
   onPatchRecord?: (
     record: RecordVO,
@@ -841,7 +852,7 @@ export function BusaBaseTable({
   onReorderView?: (view: ViewVO, position: number) => void;
   onUpdateView: (
     view: ViewVO,
-    payload: ViewFormPayload,
+    payload: ViewUpdatePayload,
     options?: ViewSubmitOptions,
   ) => Promise<void>;
   records: RecordVO[];
@@ -854,6 +865,9 @@ export function BusaBaseTable({
   const currentSearch = useSearch();
   const resolveIString = useIString();
   const locale = useCoreLocale();
+  const [location, navigate] = useLocation();
+  const reduceMotion = useReducedMotion();
+  const [highlightedFieldSlug, setHighlightedFieldSlug] = useState<string | null>(null);
   const [editingViewMode, setEditingViewMode] = useState<"create" | "edit" | null>(null);
   const [isDeletingView, setIsDeletingView] = useState(false);
   const [confirmDeleteView, setConfirmDeleteView] = useState<ViewVO | null>(null);
@@ -870,7 +884,9 @@ export function BusaBaseTable({
     placement: "before" | "after";
     slug: string;
   } | null>(null);
-  const [selectedRecordIds, setSelectedRecordIds] = useState<Set<string>>(new Set());
+  const [selectedRecordIds, setSelectedRecordIds] = useState<Set<string>>(
+    () => new Set(viewState?.selectedRecordIds ?? []),
+  );
   const [isBulkDeleting, setIsBulkDeleting] = useState<"immediate" | "changeRequest" | null>(null);
   const [bulkDeleteError, setBulkDeleteError] = useState<string | null>(null);
   const [isBulkEditOpen, setIsBulkEditOpen] = useState(false);
@@ -878,11 +894,15 @@ export function BusaBaseTable({
   // A public read-only visitor gets no "New record" affordance — the create
   // route/mutation isn't on the anonymous allowlist, so it could only ever fail.
   const isAnon = useIsAnonymousVisitor();
+  // The viewer's level on THIS Base: BaseDetailView provides the server's
+  // effective node level (`bases.get` → `viewerPermissionLevel`), falling back
+  // to the workspace level. A `read` grant may look but never propose.
+  const basePermissionLevel = useWorkspacePermissionLevel();
+  const canPropose = !isAnon && hasApiKeyLevel(basePermissionLevel, "changeRequest");
   // The view order is shared by everyone on the Base, so only someone who can
   // write may drag the tabs (a proposer would only queue a review per drop).
-  const workspacePermissionLevel = useWorkspacePermissionLevel();
   const canReorderViews =
-    !isAnon && Boolean(onReorderView) && hasApiKeyLevel(workspacePermissionLevel, "write");
+    !isAnon && Boolean(onReorderView) && hasApiKeyLevel(basePermissionLevel, "write");
   // A Base must keep at least one view; the server refuses to delete the last.
   const activeViewIsLastView = activeView ? isOnlyRemainingView(views, activeView) : false;
   const lastViewDeleteHintId = useId();
@@ -900,7 +920,7 @@ export function BusaBaseTable({
   // Multi-select + bulk delete only make sense where there's a delete handler
   // wired in and the visitor can actually write (an anonymous read-only
   // visitor would only ever see the checkboxes fail).
-  const selectionEnabled = Boolean(onDeleteRecords) && !isAnon;
+  const selectionEnabled = Boolean(onDeleteRecords) && canPropose;
   const columnTemplate = [...(selectionEnabled ? ["36px"] : []), ...fieldColumns].join(" ");
   // Archived rows still need the trailing 112px track that the record-status
   // column used to provide — it holds their "Archived" pill and Restore button.
@@ -919,20 +939,31 @@ export function BusaBaseTable({
   // Switching base/view invalidates the current selection entirely; within
   // the same base, prune ids for records no longer in the loaded page (e.g.
   // after a merge/refresh) instead of blowing away the whole selection.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: only base/view identity should reset selection wholesale.
+  const selectionScope = `${base?.id ?? ""}:${activeView?.id ?? ""}`;
+  const previousSelectionScope = useRef(selectionScope);
   useEffect(() => {
-    setSelectedRecordIds(new Set());
-    setBulkDeleteError(null);
-  }, [base?.id, activeView?.id]);
+    if (previousSelectionScope.current !== selectionScope) {
+      previousSelectionScope.current = selectionScope;
+      setSelectedRecordIds(new Set());
+      setBulkDeleteError(null);
+    }
+  }, [selectionScope]);
 
   useEffect(() => {
+    if (viewState) viewState.selectedRecordIds = [...selectedRecordIds];
+  }, [viewState, selectedRecordIds]);
+
+  useEffect(() => {
+    // A returning page may still be loading. Prune against the actual loaded
+    // result, not its temporary empty skeleton, so deleted rows never revive.
+    if (pagination?.isLoading) return;
     setSelectedRecordIds((current) => {
       if (current.size === 0) return current;
       const recordIds = new Set(records.map((record) => record.id));
       const next = new Set([...current].filter((id) => recordIds.has(id)));
       return next.size === current.size ? current : next;
     });
-  }, [records]);
+  }, [records, pagination?.isLoading]);
 
   const toggleRecordSelected = (record: RecordVO) => {
     setSelectedRecordIds((current) => {
@@ -973,10 +1004,10 @@ export function BusaBaseTable({
       await onUpdateView(
         activeView,
         {
-          config: canonicalizeViewFieldConfig(config, allFields),
-          description: activeView.description,
-          name: activeView.name,
-          type: activeView.type,
+          config: getViewConfigPatch(
+            activeView.config,
+            canonicalizeViewFieldConfig(config, allFields),
+          ),
         },
         { mergeImmediately: true },
       );
@@ -991,7 +1022,7 @@ export function BusaBaseTable({
     }
   };
 
-  const submitViewControls = async (config: ViewConfigVO, options?: ViewSubmitOptions) => {
+  const submitViewControls = async (config: Partial<ViewConfigVO>, options?: ViewSubmitOptions) => {
     if (!activeView) {
       return;
     }
@@ -999,10 +1030,7 @@ export function BusaBaseTable({
     await onUpdateView(
       activeView,
       {
-        config: canonicalizeViewFieldConfig(config, allFields),
-        description: activeView.description,
-        name: activeView.name,
-        type: activeView.type,
+        config,
       },
       options,
     );
@@ -1013,6 +1041,67 @@ export function BusaBaseTable({
   // template + sticky first column are preserved.
   const shouldVirtualize = records.length > VIRTUALIZE_ROW_THRESHOLD;
   const tableRootRef = useRef<HTMLDivElement>(null);
+  const horizontalScrollRef = useRef<HTMLDivElement>(null);
+  const requestedHighlight = new URLSearchParams(currentSearch).get("highlightField");
+  const highlightAvailable = fields.some((field) => field.slug === requestedHighlight);
+  useEffect(() => {
+    if (!requestedHighlight) {
+      setHighlightedFieldSlug(null);
+      return;
+    }
+    const consumeLocator = () => {
+      const params = new URLSearchParams(currentSearch);
+      params.delete("highlightField");
+      const query = params.toString();
+      navigate(`${location.split("?")[0]}${query ? `?${query}` : ""}`, { replace: true });
+    };
+    // Card and timeline views have no table column to focus.
+    if (activeView?.type && activeView.type !== "table") {
+      setHighlightedFieldSlug(null);
+      consumeLocator();
+      return;
+    }
+    if (!highlightAvailable) {
+      setHighlightedFieldSlug(null);
+      return;
+    }
+    // The records response can arrive after the schema/header. Wait for it so
+    // the saved-scroll restoration does not reset a newly revealed column.
+    if (pagination?.isLoading) return;
+    const header = Array.from(
+      horizontalScrollRef.current?.querySelectorAll<HTMLElement>("[data-field-slug]") ?? [],
+    ).find((element) => element.dataset.fieldSlug === requestedHighlight);
+    if (!header) return;
+    let timeout: number | undefined;
+    // The layout effect below replays browser-restored scroll in its own frame.
+    // Queue after that replay; explicit new-field navigation takes precedence.
+    const frame = requestAnimationFrame(() => {
+      setHighlightedFieldSlug(requestedHighlight);
+      header.scrollIntoView?.({
+        behavior: reduceMotion ? "instant" : "smooth",
+        block: "nearest",
+        inline: "center",
+      });
+      header.focus({ preventScroll: true });
+      timeout = window.setTimeout(() => {
+        setHighlightedFieldSlug(null);
+        consumeLocator();
+      }, 3500);
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      if (timeout !== undefined) window.clearTimeout(timeout);
+    };
+  }, [
+    activeView?.type,
+    currentSearch,
+    highlightAvailable,
+    location,
+    navigate,
+    pagination?.isLoading,
+    reduceMotion,
+    requestedHighlight,
+  ]);
   const viewTabsRef = useRef<HTMLElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const [listScrollMargin, setListScrollMargin] = useState(0);
@@ -1038,12 +1127,37 @@ export function BusaBaseTable({
     scrollMargin: listScrollMargin,
   });
 
+  useLayoutEffect(() => {
+    if (activeView?.type && activeView.type !== "table") return;
+    const element = horizontalScrollRef.current;
+    if (!viewState || !element || pagination?.isLoading) return;
+    const savedLeft = viewState.scrollLeft;
+    let restoring = savedLeft > 0;
+    element.scrollLeft = savedLeft;
+    const frame = restoring
+      ? requestAnimationFrame(() => {
+          element.scrollLeft = savedLeft;
+          restoring = false;
+        })
+      : null;
+    const save = () => {
+      if (!restoring) viewState.scrollLeft = element.scrollLeft;
+    };
+    element.addEventListener("scroll", save, { passive: true });
+    return () => {
+      if (frame !== null) cancelAnimationFrame(frame);
+      element.removeEventListener("scroll", save);
+    };
+  }, [viewState, pagination?.isLoading, activeView?.type]);
+
   // biome-ignore lint/correctness/useExhaustiveDependencies: route changes must reveal the newly active tab.
   useEffect(() => {
+    // Revealing the tab on a remount would scroll the restored table back up.
+    if (viewState && (viewState.scrollTop > 0 || viewState.scrollLeft > 0)) return;
     viewTabsRef.current
       ?.querySelector<HTMLElement>('[aria-current="page"]')
       ?.scrollIntoView({ block: "nearest", inline: "nearest" });
-  }, [activeView?.id, base?.id]);
+  }, [activeView?.id, base?.id, viewState]);
 
   return (
     <div className="@container/base-toolbar" ref={tableRootRef}>
@@ -1072,7 +1186,7 @@ export function BusaBaseTable({
               />
             ) : null}
           </nav>
-          {base && !isAnon ? (
+          {base && canPropose ? (
             <button
               aria-label={messages.base.newView}
               className="inline-flex size-7 shrink-0 items-center justify-center rounded-md border border-border/70 border-dashed text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
@@ -1099,7 +1213,10 @@ export function BusaBaseTable({
             })()}
           </span>
           <div className="flex shrink-0 items-center gap-2">
-            {!isAnon && (activeView || archivedViews.length > 0 || archivedRecords.length > 0) ? (
+            {!isAnon &&
+            ((activeView && canPropose) ||
+              archivedViews.length > 0 ||
+              archivedRecords.length > 0) ? (
               <details className="relative">
                 <summary
                   aria-label={messages.base.viewActions}
@@ -1110,7 +1227,7 @@ export function BusaBaseTable({
                   <MoreHorizontal size={15} />
                 </summary>
                 <div className="absolute right-0 z-50 mt-1 w-max min-w-48 max-w-72 rounded-md border border-border/70 bg-card p-1 shadow-md">
-                  {activeView ? (
+                  {activeView && canPropose ? (
                     <>
                       <button
                         className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-medium text-foreground text-xs transition-colors hover:bg-accent"
@@ -1153,7 +1270,7 @@ export function BusaBaseTable({
                   {archivedViews.length > 0 ? (
                     <button
                       className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-medium text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground ${
-                        activeView ? "mt-1 border-border/60 border-t pt-2" : ""
+                        activeView && canPropose ? "mt-1 border-border/60 border-t pt-2" : ""
                       }`}
                       data-testid="archived-views-menu-item"
                       onClick={(event) => {
@@ -1172,7 +1289,7 @@ export function BusaBaseTable({
                   {archivedRecords.length > 0 ? (
                     <button
                       className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left font-medium text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground ${
-                        activeView && archivedViews.length === 0
+                        activeView && canPropose && archivedViews.length === 0
                           ? "mt-1 border-border/60 border-t pt-2"
                           : ""
                       }`}
@@ -1194,7 +1311,7 @@ export function BusaBaseTable({
                 </div>
               </details>
             ) : null}
-            {base && !isAnon && onImportRecords ? (
+            {base && canPropose && onImportRecords ? (
               /* Secondary (bordered, not filled) so "New record" stays primary. */
               <button
                 className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-border/70 bg-card px-2.5 font-medium text-xs transition-colors hover:bg-accent"
@@ -1206,7 +1323,7 @@ export function BusaBaseTable({
                 {messages.base.importRecords}
               </button>
             ) : null}
-            {base && !isAnon ? (
+            {base && canPropose ? (
               <Link
                 className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-foreground px-2.5 font-medium text-background text-xs transition-colors hover:bg-foreground/85"
                 href={mergeSearchIntoHref(`/base/${base.slug}/new`, currentSearch)}
@@ -1313,7 +1430,7 @@ export function BusaBaseTable({
                   <span className="min-w-0 truncate text-muted-foreground text-sm">
                     {view.name}
                   </span>
-                  {onRestoreView ? (
+                  {onRestoreView && canPropose ? (
                     <button
                       className="inline-flex shrink-0 items-center gap-1 rounded border border-border/60 bg-card px-2 py-1 text-xs transition-colors hover:bg-accent disabled:opacity-50"
                       disabled={restoringViewId === view.id}
@@ -1341,7 +1458,7 @@ export function BusaBaseTable({
           archivedRecords={archivedRecords}
           base={base}
           fields={fields}
-          onRestoreRecord={onRestoreRecord}
+          onRestoreRecord={canPropose ? onRestoreRecord : undefined}
           records={records}
           showArchivedRecords={showArchivedRecords}
         />
@@ -1352,6 +1469,7 @@ export function BusaBaseTable({
           client={client}
           fields={fields}
           onMoveRecord={onMoveRecord}
+          onOpenRecord={onOpenRecord}
         />
       ) : activeView?.type === "calendar" ? (
         <BusaBaseCalendar
@@ -1359,6 +1477,7 @@ export function BusaBaseTable({
           base={base}
           client={client}
           fields={fields}
+          onOpenRecord={onOpenRecord}
           onPatchRecord={onPatchRecord}
         />
       ) : activeView?.type === "gantt" ? (
@@ -1370,7 +1489,7 @@ export function BusaBaseTable({
           records={records}
         />
       ) : (
-        <div className="overflow-x-auto pb-5">
+        <div className="overflow-x-auto pb-5" data-base-table-scroll ref={horizontalScrollRef}>
           {selectionEnabled && selectedRecords.length > 0 ? (
             <div
               className="mb-2 flex items-center gap-3 rounded-md border border-border/60 bg-muted/40 px-3 py-2 text-xs"
@@ -1482,6 +1601,7 @@ export function BusaBaseTable({
                   baseSlug={base?.slug ?? records[0]?.base.slug ?? ""}
                   busy={quickUpdatingFieldId === field.id}
                   field={field}
+                  highlighted={field.slug === highlightedFieldSlug}
                   isPrimary={field.id === primaryField?.id}
                   hasSelectionColumn={selectionEnabled}
                   canMoveLeft={
@@ -1651,6 +1771,7 @@ export function BusaBaseTable({
                       columnTemplate={columnTemplate}
                       fields={fields}
                       key={record.id}
+                      onOpenRecord={onOpenRecord}
                       onToggleSelected={toggleRecordSelected}
                       record={record}
                       relationRecords={relationRecords}
@@ -1675,6 +1796,7 @@ export function BusaBaseTable({
                   columnTemplate={columnTemplate}
                   fields={fields}
                   key={record.id}
+                  onOpenRecord={onOpenRecord}
                   onToggleSelected={toggleRecordSelected}
                   record={record}
                   relationRecords={relationRecords}
@@ -1711,6 +1833,7 @@ export function BusaBaseTable({
                         hasSelectionColumn={selectionEnabled}
                         index={index}
                         key={field.id}
+                        onOpenRecord={onOpenRecord}
                         record={record}
                         records={relationRecords}
                       />
@@ -1720,7 +1843,7 @@ export function BusaBaseTable({
                         <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-55" />
                         <span className="truncate">{messages.common.archived}</span>
                       </span>
-                      {onRestoreRecord ? (
+                      {onRestoreRecord && canPropose ? (
                         <button
                           aria-label={messages.common.restore}
                           className="ml-auto inline-flex size-7 shrink-0 items-center justify-center rounded border border-border/60 bg-card transition-colors hover:bg-accent disabled:opacity-50"
@@ -1773,7 +1896,7 @@ interface ViewChangeRequestFormProps {
   onSubmitted: () => void;
   onUpdateView: (
     view: ViewVO,
-    payload: ViewFormPayload,
+    payload: ViewUpdatePayload,
     options?: ViewSubmitOptions,
   ) => Promise<void>;
   view: ViewVO | null;
@@ -1829,6 +1952,7 @@ function ViewChangeRequestForm({
   const [name, setName] = useState(view?.name ?? "");
   const [slug, setSlug] = useState(view?.slug ?? "");
   const [description, setDescription] = useState(view?.description ?? "");
+  const [editBaseline] = useState(view);
   const [viewConfigDraft, setViewConfigDraft] = useState<ViewConfigVO>(
     view?.config ?? { filters: [], sorts: [] },
   );
@@ -1839,9 +1963,12 @@ function ViewChangeRequestForm({
   );
   const [coverFit, setCoverFit] = useState<GalleryCoverFit>(view?.config.coverFit ?? "cover");
   const [cardSize, setCardSize] = useState<GalleryCardSize>(view?.config.cardSize ?? "medium");
-  const [showFieldLabels, setShowFieldLabels] = useState<boolean>(
-    view?.config.showFieldLabels ?? false,
+  const [showFieldLabelsSetting, setShowFieldLabels] = useState<boolean | undefined>(
+    view?.config.showFieldLabels,
   );
+  // Resolve an omitted setting against the selected type, including while a new
+  // view switches from table to kanban. Preserve an explicit user preference.
+  const showFieldLabels = showFieldLabelsSetting ?? viewType === "kanban";
   // "" means auto (first field of the right type).
   const [stackByFieldSlug, setStackByFieldSlug] = useState<string>(
     view?.config.stackByFieldSlug ?? "",
@@ -1871,31 +1998,42 @@ function ViewChangeRequestForm({
     const nextConfig = canonicalizeViewFieldConfig(
       {
         ...viewConfigDraft,
-        // Gallery presentation config — only meaningful for gallery views.
-        ...(viewType === "gallery"
+        // Both card views can opt into an attachment cover. Boards deliberately
+        // treat the gallery's automatic setting as no cover.
+        ...(viewType === "gallery" || viewType === "kanban"
           ? {
               coverFieldSlug:
-                coverFieldSlug === "__none__"
+                coverFieldSlug === "__none__" || (viewType === "kanban" && coverFieldSlug === "")
                   ? null
                   : coverFieldSlug === ""
-                    ? undefined
+                    ? mode === "edit"
+                      ? ""
+                      : undefined
                     : coverFieldSlug,
               coverFit,
-              cardSize,
-              showFieldLabels,
+              ...(viewType === "gallery" ? { cardSize } : {}),
             }
           : {}),
+        ...(viewType === "gallery" || viewType === "kanban" ? { showFieldLabels } : {}),
         // Kanban / calendar config — "" means auto-pick the first field of the type.
         ...(viewType === "kanban"
-          ? { stackByFieldSlug: stackByFieldSlug === "" ? undefined : stackByFieldSlug }
+          ? {
+              stackByFieldSlug:
+                stackByFieldSlug === "" ? (mode === "edit" ? null : undefined) : stackByFieldSlug,
+            }
           : {}),
         ...(viewType === "calendar"
-          ? { dateFieldSlug: dateFieldSlug === "" ? undefined : dateFieldSlug }
+          ? {
+              dateFieldSlug:
+                dateFieldSlug === "" ? (mode === "edit" ? null : undefined) : dateFieldSlug,
+            }
           : {}),
         ...(viewType === "gantt"
           ? {
-              startFieldSlug: startFieldSlug === "" ? undefined : startFieldSlug,
-              endFieldSlug: endFieldSlug === "" ? undefined : endFieldSlug,
+              startFieldSlug:
+                startFieldSlug === "" ? (mode === "edit" ? null : undefined) : startFieldSlug,
+              endFieldSlug:
+                endFieldSlug === "" ? (mode === "edit" ? null : undefined) : endFieldSlug,
               ganttScale,
             }
           : {}),
@@ -1918,15 +2056,15 @@ function ViewChangeRequestForm({
           },
           options,
         );
-      } else if (view) {
+      } else if (view && editBaseline) {
         await onUpdateView(
           view,
-          {
+          getViewUpdatePayload(editBaseline, {
             config: nextConfig,
             description: description.trim(),
             name: trimmedName,
             type: viewType,
-          },
+          }),
           options,
         );
       }
@@ -2037,16 +2175,20 @@ function ViewChangeRequestForm({
         </div>
       </div>
 
-      {viewType === "gallery" ? (
-        <div className="mt-3 grid gap-3 rounded-md border border-border/50 bg-muted/15 p-3 md:grid-cols-3">
+      {viewType === "gallery" || viewType === "kanban" ? (
+        <div
+          className={`mt-3 grid gap-3 rounded-md border border-border/50 bg-muted/15 p-3 ${viewType === "gallery" ? "md:grid-cols-3" : "md:grid-cols-2"}`}
+        >
           <label className="block">
             <span className="text-muted-foreground text-xs">{messages.base.coverField}</span>
             <select
               className="mt-1 h-8 w-full rounded-md border border-border/70 bg-card px-2.5 text-sm outline-none transition-colors focus:border-primary"
               onChange={(event) => setCoverFieldSlug(event.target.value)}
-              value={coverFieldSlug}
+              value={viewType === "kanban" && coverFieldSlug === "" ? "__none__" : coverFieldSlug}
             >
-              <option value="">{messages.base.coverFieldAuto}</option>
+              {viewType === "gallery" ? (
+                <option value="">{messages.base.coverFieldAuto}</option>
+              ) : null}
               {attachmentFields.map((field) => (
                 <option key={field.id} value={field.slug}>
                   {resolveIString(field.name)}
@@ -2066,26 +2208,20 @@ function ViewChangeRequestForm({
               <option value="fit">{messages.base.coverFitFit}</option>
             </select>
           </label>
-          <label className="block">
-            <span className="text-muted-foreground text-xs">{messages.base.cardSize}</span>
-            <select
-              className="mt-1 h-8 w-full rounded-md border border-border/70 bg-card px-2.5 text-sm outline-none transition-colors focus:border-primary"
-              onChange={(event) => setCardSize(event.target.value as GalleryCardSize)}
-              value={cardSize}
-            >
-              <option value="small">{messages.base.cardSizeSmall}</option>
-              <option value="medium">{messages.base.cardSizeMedium}</option>
-              <option value="large">{messages.base.cardSizeLarge}</option>
-            </select>
-          </label>
-          <label className="inline-flex items-center gap-2 text-muted-foreground text-sm md:col-span-3">
-            <input
-              checked={showFieldLabels}
-              onChange={(event) => setShowFieldLabels(event.target.checked)}
-              type="checkbox"
-            />
-            {messages.base.showFieldLabels}
-          </label>
+          {viewType === "gallery" ? (
+            <label className="block">
+              <span className="text-muted-foreground text-xs">{messages.base.cardSize}</span>
+              <select
+                className="mt-1 h-8 w-full rounded-md border border-border/70 bg-card px-2.5 text-sm outline-none transition-colors focus:border-primary"
+                onChange={(event) => setCardSize(event.target.value as GalleryCardSize)}
+                value={cardSize}
+              >
+                <option value="small">{messages.base.cardSizeSmall}</option>
+                <option value="medium">{messages.base.cardSizeMedium}</option>
+                <option value="large">{messages.base.cardSizeLarge}</option>
+              </select>
+            </label>
+          ) : null}
         </div>
       ) : null}
 
@@ -2110,6 +2246,17 @@ function ViewChangeRequestForm({
             <div className="mt-2 text-review-strong text-xs">{messages.base.kanbanNoSelect}</div>
           ) : null}
         </div>
+      ) : null}
+
+      {viewType === "gallery" || viewType === "kanban" ? (
+        <label className="mt-3 inline-flex items-center gap-2 text-muted-foreground text-sm">
+          <input
+            checked={showFieldLabels}
+            onChange={(event) => setShowFieldLabels(event.target.checked)}
+            type="checkbox"
+          />
+          {messages.base.showFieldLabels}
+        </label>
       ) : null}
 
       {viewType === "calendar" ? (
@@ -2229,6 +2376,7 @@ function ViewChangeRequestForm({
 }
 
 interface RecordTableCellProps {
+  onOpenRecord?: (record: RecordVO) => void;
   currentRecordHref: string;
   field: BaseFieldVO;
   hasSelectionColumn: boolean;
@@ -2255,6 +2403,7 @@ function RecordTableCell(props: RecordTableCellProps) {
 
 function RecordTableCellContent({
   currentRecordHref,
+  onOpenRecord,
   field,
   index,
   record,
@@ -2266,6 +2415,24 @@ function RecordTableCellContent({
   const rawValue = record.headCommit.payload[field.slug];
   const chips = getFieldChipEntries(field, rawValue);
   const kind = fieldDisplayKind(field.type);
+  // Only this record's existing preview links open the dialog. Field-specific
+  // actions (URLs, relations, attachments and lookup sources) keep their targets.
+  const openRecord = (event: MouseEvent<HTMLAnchorElement>) => {
+    if (
+      !onOpenRecord ||
+      event.defaultPrevented ||
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey ||
+      (event.currentTarget.target && event.currentTarget.target !== "_self")
+    ) {
+      return;
+    }
+    event.preventDefault();
+    onOpenRecord(record);
+  };
 
   if (field.type === "lookup") {
     return (
@@ -2281,7 +2448,7 @@ function RecordTableCellContent({
 
   if (field.type === "formula") {
     return (
-      <Link className="block min-w-0 truncate py-1" href={currentRecordHref}>
+      <Link className="block min-w-0 truncate py-1" href={currentRecordHref} onClick={openRecord}>
         <FormulaValue field={field} value={rawValue} record={record} />
       </Link>
     );
@@ -2293,6 +2460,7 @@ function RecordTableCellContent({
       <Link
         className={`flex min-w-0 items-center py-1 ${index === 0 ? "" : "text-muted-foreground"}`}
         href={currentRecordHref}
+        onClick={openRecord}
         title={checked ? messages.common.yes : messages.common.no}
       >
         <span
@@ -2312,7 +2480,11 @@ function RecordTableCellContent({
     // Wrapped in the row `Link` like every other cell — `MemberChips` renders
     // only spans, so it never nests an interactive element inside the link.
     return (
-      <Link className="flex min-w-0 items-center py-1" href={currentRecordHref}>
+      <Link
+        className="flex min-w-0 items-center py-1"
+        href={currentRecordHref}
+        onClick={openRecord}
+      >
         <MemberChips users={record.fieldUsers} value={rawValue} />
       </Link>
     );
@@ -2323,6 +2495,7 @@ function RecordTableCellContent({
       <Link
         className="flex min-w-0 flex-wrap gap-1.5 py-1"
         href={currentRecordHref}
+        onClick={openRecord}
         title={chips.map((chip) => chip.label).join(", ")}
       >
         {chips.slice(0, 3).map((chip, chipIndex) => (
@@ -2400,6 +2573,7 @@ function RecordTableCellContent({
       <Link
         className="flex min-w-0 items-center py-1"
         href={currentRecordHref}
+        onClick={openRecord}
         title={fieldLabel(field.type)}
       >
         <WhiteboardThumbnail
@@ -2461,6 +2635,7 @@ function RecordTableCellContent({
         <Link
           className="flex min-w-0 items-center py-1 text-muted-foreground"
           href={currentRecordHref}
+          onClick={openRecord}
           title="-"
         >
           -
@@ -2491,6 +2666,7 @@ function RecordTableCellContent({
         <Link
           className="flex min-w-0 items-center py-1 text-muted-foreground"
           href={currentRecordHref}
+          onClick={openRecord}
           title="-"
         >
           -
@@ -2505,6 +2681,7 @@ function RecordTableCellContent({
             : "font-mono text-muted-foreground text-xs"
         }`}
         href={currentRecordHref}
+        onClick={openRecord}
         title={source}
       >
         {summary}
@@ -2519,6 +2696,7 @@ function RecordTableCellContent({
         <Link
           className="flex min-w-0 items-center py-1 text-muted-foreground"
           href={currentRecordHref}
+          onClick={openRecord}
           title="-"
         >
           -
@@ -2531,6 +2709,7 @@ function RecordTableCellContent({
           index === 0 ? "font-medium text-foreground" : "text-muted-foreground"
         }`}
         href={currentRecordHref}
+        onClick={openRecord}
         title={preview.sourceUrl}
       >
         <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded border bg-muted/35 text-muted-foreground">
@@ -2556,6 +2735,7 @@ function RecordTableCellContent({
           index === 0 ? "font-medium text-foreground" : "text-muted-foreground"
         }`}
         href={currentRecordHref}
+        onClick={openRecord}
       >
         <DateFieldValue options={getDateFieldOptions(field.options)} value={rawValue} />
       </Link>
@@ -2570,6 +2750,7 @@ function RecordTableCellContent({
         index === 0 ? "font-medium text-foreground" : "text-muted-foreground"
       }`}
       href={currentRecordHref}
+      onClick={openRecord}
       title={value}
     >
       {index === 0 ? (

@@ -9,13 +9,15 @@
  * `@`-mention feature performs the same sequence from a different trigger.
  */
 
+import type { AcpResourceContext } from "@acp-ui/core/reduce";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { AgentSessionVO } from "busabase-contract/domains/agents/types";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useCoreI18n, useCoreLocale } from "../../../i18n";
 import { presentCoreError } from "../../../i18n/localize-error";
 import { openAgentChatTab } from "../../dashboard/components/side-panel-sources";
+import { useAgentModelScope } from "../agent-model-scope-context";
 import { type AgentTarget, chooseAgentTarget, normalizeAgentTargets } from "../utils/agent-targets";
 import { lookupNodeAgentSession, rememberNodeAgentSession } from "../utils/node-agent-sessions";
 
@@ -40,16 +42,19 @@ export function useAskAgent({ orpc, nodeId, onHandedOff, onNoAgents }: UseAskAge
   const messages = useCoreI18n();
   const locale = useCoreLocale();
   const queryClient = useQueryClient();
+  const { workspaceKey, actorId } = useAgentModelScope();
   // The prompt body the user asked about, held from the click until a target is
   // resolved. Non-null is also what "the flow is running" means — the catalog
   // is only fetched from here, so merely opening the prompts dialog to copy
   // some text never probes the machine for agent binaries.
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
+  const [pendingResourceContext, setPendingResourceContext] = useState<AcpResourceContext[]>();
   const [pendingTarget, setPendingTarget] = useState<AgentTarget | null>(null);
   const [targets, setTargets] = useState<AgentTarget[] | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
   const [retryVersion, setRetryVersion] = useState(0);
   const started = useRef(false);
+  const handoffGeneration = useRef(0);
 
   const enabled = pendingPrompt !== null;
   const needsCatalog = enabled && pendingTarget === null;
@@ -63,12 +68,27 @@ export function useAskAgent({ orpc, nodeId, onHandedOff, onNoAgents }: UseAskAge
   );
 
   const reset = useCallback(() => {
+    // Fence any session creation still completing for the discarded snapshot.
+    handoffGeneration.current += 1;
     started.current = false;
     setPendingPrompt(null);
+    setPendingResourceContext(undefined);
     setPendingTarget(null);
     setTargets(null);
     setStartError(null);
   }, []);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Changing the API, workspace or actor invalidates the handoff boundary.
+  useLayoutEffect(() => {
+    handoffGeneration.current += 1;
+    reset();
+    // A passive resolution effect from this same commit can still hold the
+    // previous prompt. Only a fresh Ask Agent click may start another handoff.
+    started.current = true;
+    return () => {
+      handoffGeneration.current += 1;
+    };
+  }, [actorId, orpc, reset, workspaceKey]);
 
   /**
    * Open the conversation and hand the prompt over.
@@ -81,6 +101,8 @@ export function useAskAgent({ orpc, nodeId, onHandedOff, onNoAgents }: UseAskAge
    */
   const handOff = useCallback(
     async (target: AgentTarget, promptBody: string) => {
+      const generation = handoffGeneration.current;
+      const isCurrent = () => handoffGeneration.current === generation;
       setStartError(null);
       const known = (sessions.data ?? []) as AgentSessionVO[];
       let sessionId = lookupNodeAgentSession(known, nodeId, target.slug);
@@ -88,8 +110,10 @@ export function useAskAgent({ orpc, nodeId, onHandedOff, onNoAgents }: UseAskAge
       if (!sessionId) {
         try {
           const created = await createSession.mutateAsync({ slug: target.slug });
+          if (!isCurrent()) return;
           sessionId = created.id;
         } catch (error) {
+          if (!isCurrent()) return;
           // Stays in the dialog with the prompt still selected: the cause is
           // usually fixable (agent not installed, Buda signed out) and the
           // retry should not cost the user their place.
@@ -106,15 +130,31 @@ export function useAskAgent({ orpc, nodeId, onHandedOff, onNoAgents }: UseAskAge
         await queryClient.invalidateQueries({ queryKey: orpc.agents.sessions.list.queryKey() });
       }
 
+      if (!isCurrent()) return;
       rememberNodeAgentSession(nodeId, target.slug, sessionId);
       openAgentChatTab(target.slug, target.name, {
         sessionId,
-        draft: { id: nextDraftId(), text: promptBody },
+        draft: {
+          id: nextDraftId(),
+          text: promptBody,
+          ...(pendingResourceContext?.length ? { resourceContext: pendingResourceContext } : {}),
+        },
       });
       reset();
       onHandedOff();
     },
-    [createSession, locale, messages, nodeId, onHandedOff, orpc, queryClient, reset, sessions.data],
+    [
+      createSession,
+      locale,
+      messages,
+      nodeId,
+      onHandedOff,
+      orpc,
+      pendingResourceContext,
+      queryClient,
+      reset,
+      sessions.data,
+    ],
   );
 
   /**
@@ -155,6 +195,7 @@ export function useAskAgent({ orpc, nodeId, onHandedOff, onNoAgents }: UseAskAge
     launchable,
     onNoAgents,
     pendingPrompt,
+    pendingResourceContext,
     pendingTarget,
     reset,
     retryVersion,
@@ -163,22 +204,27 @@ export function useAskAgent({ orpc, nodeId, onHandedOff, onNoAgents }: UseAskAge
   ]);
 
   /** The Ask Agent click. `promptBody` is the fully-interpolated prompt text. */
-  const ask = useCallback((promptBody: string) => {
+  const ask = useCallback((promptBody: string, resourceContext?: AcpResourceContext[]) => {
     started.current = false;
     setStartError(null);
     setTargets(null);
     setPendingTarget(null);
     setPendingPrompt(promptBody);
+    setPendingResourceContext(resourceContext);
   }, []);
 
   /** Hand the prompt to a target already chosen by a caller-owned connection list. */
-  const askTarget = useCallback((promptBody: string, target: AgentTarget) => {
-    started.current = false;
-    setStartError(null);
-    setTargets(null);
-    setPendingTarget(target);
-    setPendingPrompt(promptBody);
-  }, []);
+  const askTarget = useCallback(
+    (promptBody: string, target: AgentTarget, resourceContext?: AcpResourceContext[]) => {
+      started.current = false;
+      setStartError(null);
+      setTargets(null);
+      setPendingTarget(target);
+      setPendingPrompt(promptBody);
+      setPendingResourceContext(resourceContext);
+    },
+    [],
+  );
 
   const retry = useCallback(() => {
     started.current = false;

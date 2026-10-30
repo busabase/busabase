@@ -3,8 +3,10 @@
 import { useQuery } from "@tanstack/react-query";
 import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
 import type { BaseFieldVO, UserRefVO } from "busabase-contract/types";
-import { useEffect, useMemo, useState } from "react";
-import { useCoreI18n } from "../../../i18n";
+import { Popover, PopoverContent, PopoverTrigger } from "kui/popover";
+import { Check, ChevronDown, Plus, Search, X } from "lucide-react";
+import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
+import { fmt, useCoreI18n } from "../../../i18n";
 import { getMemberIds } from "../../base/field-types";
 import { formatMemberChipLabel, formatUserRefLabel } from "../helpers/format";
 import { UserAvatar } from "./identity";
@@ -28,6 +30,22 @@ import { UserAvatar } from "./identity";
  */
 
 export const SPACE_MEMBERS_QUERY_KEY = ["busabase", "space-members"] as const;
+// Hosts can share a QueryClient across spaces. The API method is recreated with
+// its scoped transport, so its lifetime safely scopes this otherwise inputless call.
+const rosterScopes = new WeakMap<BusabaseDashboardApiClient["listSpaceMembers"], string>();
+let nextRosterScope = 0;
+const rosterScope = (load: BusabaseDashboardApiClient["listSpaceMembers"]) => {
+  let scope = rosterScopes.get(load);
+  if (!scope) {
+    // This is a cache namespace, not a credential. OSS also runs on LAN HTTP,
+    // where Web Crypto's secure-context randomUUID method may be unavailable.
+    scope =
+      globalThis.crypto?.randomUUID?.() ??
+      `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${++nextRosterScope}`;
+    rosterScopes.set(load, scope);
+  }
+  return scope;
+};
 
 /**
  * The space's member roster. `enabled` is the caller's business (do not fetch it
@@ -45,7 +63,7 @@ export function useSpaceMemberRoster(
   return useQuery({
     enabled: options?.enabled ?? true,
     queryFn: () => client.listSpaceMembers(),
-    queryKey: SPACE_MEMBERS_QUERY_KEY,
+    queryKey: [...SPACE_MEMBERS_QUERY_KEY, rosterScope(client.listSpaceMembers)],
     retry: false,
     staleTime: 60_000,
   });
@@ -112,15 +130,7 @@ export function MemberChips({
   );
 }
 
-/**
- * The `member` field's editor: a filterable `<select>` over the roster.
- *
- * Deliberately the same control shape as `RelationFieldEditor` (search input +
- * native multi/single select) rather than a bespoke popover — it is the shape
- * this package's record editor already uses for "pick ids from a list", it is
- * keyboard- and screen-reader-accessible for free, and the e2e specs can drive
- * it.
- */
+/** A draft-only member picker. Search and roster failures never replace its controlled value. */
 export function MemberFieldEditor({
   ariaDescribedBy,
   client,
@@ -143,85 +153,283 @@ export function MemberFieldEditor({
 }) {
   const messages = useCoreI18n();
   const [query, setQuery] = useState("");
-  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const searchInput = useRef<HTMLInputElement>(null);
+  const list = useRef<HTMLDivElement>(null);
   const rosterQuery = useSpaceMemberRoster(client);
   const selectedIds = getMemberIds(value);
   const isMulti = field.options.multiple !== false;
-
+  const error = rosterQuery.error as { code?: string; status?: number } | null;
+  const denied =
+    error?.code === "FORBIDDEN" ||
+    error?.code === "UNAUTHORIZED" ||
+    error?.status === 403 ||
+    error?.status === 401;
+  // A failed refresh must not offer stale permissions as assignment candidates.
+  const roster = rosterQuery.isError ? undefined : rosterQuery.data;
+  const resolved = useMemo(
+    () => memberUserMap(users, denied ? undefined : rosterQuery.data),
+    [denied, rosterQuery.data, users],
+  );
+  const orderedRoster = useMemo(
+    () =>
+      [...(roster ?? [])].sort((a, b) => {
+        const aName = a.name?.trim() || a.email || a.id;
+        const bName = b.name?.trim() || b.email || b.id;
+        return aName.localeCompare(bName) || a.id.localeCompare(b.id);
+      }),
+    [roster],
+  );
+  const search = query.trim().toLocaleLowerCase();
+  const candidates = orderedRoster.filter(
+    (user) =>
+      !search || `${user.name ?? ""} ${user.email ?? ""}`.toLocaleLowerCase().includes(search),
+  );
+  const choices = [...(!isMulti ? [null] : []), ...candidates];
+  const activeId = choices.length
+    ? `${inputId}-option-${Math.min(activeIndex, choices.length - 1)}`
+    : undefined;
+  const update = (id: string | null) => {
+    if (isMulti && id) {
+      onChange(
+        selectedIds.includes(id)
+          ? selectedIds.filter((selected) => selected !== id)
+          : [...selectedIds, id],
+      );
+    } else if (!isMulti) {
+      onChange(id ?? "");
+    }
+    if (!isMulti) setOpen(false);
+  };
+  const navigate = (event: KeyboardEvent<HTMLInputElement>) => {
+    // Enter can finish a Chinese/Japanese/Korean input composition; it must
+    // not also assign the currently active person.
+    if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+    if (event.key === "Enter") {
+      // Enter belongs to the picker, never the surrounding record form.
+      event.preventDefault();
+      if (!rosterQuery.isError && !rosterQuery.isPending && choices.length)
+        update(choices[Math.min(activeIndex, choices.length - 1)]?.id ?? null);
+    } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      setActiveIndex((current) =>
+        Math.max(0, Math.min(choices.length - 1, current + (event.key === "ArrowDown" ? 1 : -1))),
+      );
+    }
+  };
   useEffect(() => {
-    const timer = setTimeout(() => setDebouncedQuery(query.trim().toLowerCase()), 250);
-    return () => clearTimeout(timer);
-  }, [query]);
-
-  const resolved = useMemo(() => memberUserMap(users, rosterQuery.data), [rosterQuery.data, users]);
-
-  const options = useMemo(() => {
-    const roster = rosterQuery.data ?? [];
-    // A currently-selected person must stay in the list even when they fall
-    // outside the search or have left the space — otherwise picking anyone else
-    // silently drops them from the control's value.
-    const selected = selectedIds.map(
-      (id) => resolved[id] ?? { id, name: null, email: null, image: null, role: null },
-    );
-    const seen = new Set(selected.map((user) => user.id));
-    const rest = roster.filter((user) => {
-      if (seen.has(user.id)) return false;
-      if (!debouncedQuery) return true;
-      const haystack = `${user.name ?? ""} ${user.email ?? ""} ${user.id}`.toLowerCase();
-      return haystack.includes(debouncedQuery);
-    });
-    return [...selected, ...rest];
-  }, [debouncedQuery, resolved, rosterQuery.data, selectedIds]);
-
-  const hasNoOptions = !rosterQuery.isFetching && options.length === 0;
+    if (open && activeId) document.getElementById(activeId)?.scrollIntoView?.({ block: "nearest" });
+  }, [activeId, open]);
+  const visibleSelected = expanded ? selectedIds : selectedIds.slice(0, 4);
 
   return (
-    <div className="grid gap-1.5">
-      <input
-        aria-label={`${messages.base.searchMembers} — ${fieldName}`}
-        className="h-9 w-full rounded-md border border-border/70 bg-card px-2.5 py-1.5 text-sm outline-none transition-colors focus:border-primary"
-        onChange={(event) => setQuery(event.target.value)}
-        placeholder={messages.base.searchMembers}
-        type="search"
-        value={query}
-      />
-      <select
-        aria-label={fieldName}
-        aria-describedby={ariaDescribedBy}
-        className="min-h-9 w-full rounded-md border border-border/70 bg-card px-2.5 py-1.5 text-sm outline-none transition-colors focus:border-primary"
-        data-member-field-editor={field.slug}
-        id={inputId}
-        multiple={isMulti}
-        onChange={(event) => {
-          const picked = Array.from(event.currentTarget.selectedOptions).map(
-            (option) => option.value,
-          );
-          // React needs a scalar for a single-select and an array for a
-          // multi-select; handing an array to a single-select leaves the control
-          // unbound and shows no current value (the bug `relation` hit).
-          onChange(isMulti ? picked : (picked[0] ?? ""));
-        }}
-        value={isMulti ? selectedIds : (selectedIds[0] ?? "")}
-      >
-        {isMulti ? null : <option value="">{messages.base.unassignedMember}</option>}
-        {options.map((user) => (
-          <option key={user.id} value={user.id}>
-            {formatUserRefLabel(user, user.id, messages)}
-            {user.email ? ` · ${user.email}` : ""}
-          </option>
-        ))}
-      </select>
-      {rosterQuery.isFetching ? (
-        <span className="text-muted-foreground text-[11px]">{messages.common.loading}</span>
-      ) : hasNoOptions ? (
-        // Says which of the two it is. "No members" and "the roster call was
-        // refused" look identical otherwise, and the user can act on neither.
-        <span className="text-muted-foreground text-[11px]">
-          {messages.base.noMembersAvailable}
-        </span>
-      ) : debouncedQuery && options.length === selectedIds.length ? (
-        <span className="text-muted-foreground text-[11px]">{messages.search.noMatchesTitle}</span>
+    <div
+      className="min-w-0 rounded-md border border-border/70 bg-card p-1.5"
+      data-member-field-editor={field.slug}
+    >
+      {visibleSelected.length > 0 ? (
+        <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+          {visibleSelected.map((id) => {
+            const user = resolved[id];
+            const label =
+              user?.name?.trim() ||
+              user?.email?.trim() ||
+              formatMemberChipLabel(user, id, messages);
+            const former = rosterQuery.isSuccess && !roster?.some((member) => member.id === id);
+            return (
+              <span
+                className="inline-flex w-fit min-w-0 max-w-full items-center gap-1.5 rounded-full border bg-background py-0.5 pr-1 pl-0.5 text-xs"
+                data-member-id={id}
+                key={id}
+                title={[label, user?.email, former ? messages.base.formerMember : null]
+                  .filter(Boolean)
+                  .join(" · ")}
+              >
+                <UserAvatar className="size-5" fallbackId={id} user={user} />
+                <span className="min-w-0 flex-1 truncate">
+                  {label}
+                  {former ? (
+                    <span className="ml-1 text-muted-foreground">
+                      ({messages.base.formerMember})
+                    </span>
+                  ) : null}
+                </span>
+                <button
+                  aria-label={fmt(messages.base.removeMember, { name: label })}
+                  className="grid size-6 shrink-0 place-items-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-primary"
+                  onClick={() => {
+                    onChange(isMulti ? selectedIds.filter((selected) => selected !== id) : "");
+                    document.getElementById(inputId)?.focus();
+                  }}
+                  type="button"
+                >
+                  <X aria-hidden className="size-3.5" />
+                </button>
+              </span>
+            );
+          })}
+        </div>
       ) : null}
+      <div className="flex flex-wrap items-center gap-1">
+        {selectedIds.length > 4 ? (
+          <button
+            aria-expanded={expanded}
+            className="rounded px-2 py-1 text-muted-foreground text-xs hover:bg-accent focus-visible:outline-primary"
+            onClick={() => setExpanded(!expanded)}
+            type="button"
+          >
+            {expanded
+              ? messages.base.collapseMembers
+              : fmt(messages.base.moreMembers, { count: selectedIds.length - 4 })}
+          </button>
+        ) : null}
+        <Popover
+          onOpenChange={(next) => {
+            setOpen(next);
+            if (next) {
+              setQuery("");
+              setActiveIndex(0);
+            }
+          }}
+          open={open}
+        >
+          <PopoverTrigger asChild>
+            <button
+              aria-describedby={ariaDescribedBy}
+              aria-label={fieldName}
+              className="inline-flex min-h-7 items-center gap-1.5 rounded px-2 text-muted-foreground text-sm hover:bg-accent focus-visible:outline-primary"
+              id={inputId}
+              type="button"
+            >
+              <Plus aria-hidden className="size-4" />
+              {selectedIds.length ? messages.base.addMember : messages.base.selectMembers}
+              <ChevronDown aria-hidden className="size-3.5" />
+            </button>
+          </PopoverTrigger>
+          <PopoverContent
+            align="start"
+            aria-label={fieldName}
+            className="flex max-h-[var(--radix-popover-content-available-height)] w-96 max-w-[calc(100vw-2rem)] flex-col overflow-hidden p-0"
+            collisionPadding={16}
+            onOpenAutoFocus={(event) => {
+              event.preventDefault();
+              searchInput.current?.focus();
+            }}
+          >
+            <div className="flex shrink-0 items-center gap-2 border-b px-3">
+              <Search aria-hidden className="size-4 shrink-0 text-muted-foreground" />
+              <input
+                aria-activedescendant={
+                  rosterQuery.isError || rosterQuery.isPending ? undefined : activeId
+                }
+                aria-autocomplete="list"
+                aria-describedby={ariaDescribedBy}
+                aria-controls={`${inputId}-listbox`}
+                aria-expanded="true"
+                aria-label={`${messages.base.searchMembers} — ${fieldName}`}
+                className="h-10 w-full min-w-0 bg-transparent text-sm outline-none"
+                onChange={(event) => {
+                  setQuery(event.target.value);
+                  setActiveIndex(0);
+                }}
+                onKeyDown={navigate}
+                placeholder={messages.base.searchMembers}
+                ref={searchInput}
+                role="combobox"
+                type="search"
+                value={query}
+              />
+            </div>
+            {rosterQuery.isError ? (
+              <div className="p-3 text-muted-foreground text-sm" role="alert">
+                {denied ? messages.base.membersAccessDenied : messages.base.membersLoadFailed}
+                {!denied ? (
+                  <button
+                    className="ml-2 rounded px-1 underline focus-visible:outline-primary"
+                    onClick={() => void rosterQuery.refetch()}
+                    type="button"
+                  >
+                    {messages.base.paginationRetry}
+                  </button>
+                ) : null}
+              </div>
+            ) : rosterQuery.isPending ? (
+              <div className="p-3 text-muted-foreground text-sm" role="status">
+                {messages.common.loading}
+              </div>
+            ) : null}
+            <div
+              aria-busy={rosterQuery.isFetching}
+              aria-label={fieldName}
+              aria-multiselectable={isMulti}
+              className="min-h-0 max-h-72 overflow-y-auto p-1"
+              id={`${inputId}-listbox`}
+              ref={list}
+              role="listbox"
+            >
+              {!rosterQuery.isError && !rosterQuery.isPending
+                ? choices.map((user, index) => {
+                    const label = user
+                      ? formatUserRefLabel(user, user.id, messages)
+                      : messages.base.unassignedMember;
+                    const checked = user ? selectedIds.includes(user.id) : selectedIds.length === 0;
+                    return (
+                      <div
+                        aria-label={
+                          user?.email && user.email !== label ? `${label} · ${user.email}` : label
+                        }
+                        aria-selected={checked}
+                        className={`flex min-h-12 cursor-pointer items-center gap-2.5 rounded px-2.5 py-2 text-sm ${index === Math.min(activeIndex, choices.length - 1) ? "bg-accent" : "hover:bg-accent/60"}`}
+                        id={`${inputId}-option-${index}`}
+                        key={user?.id ?? "unassigned"}
+                        onClick={() => {
+                          setActiveIndex(index);
+                          update(user?.id ?? null);
+                          searchInput.current?.focus();
+                        }}
+                        onMouseDown={(event) => event.preventDefault()}
+                        role="option"
+                        tabIndex={-1}
+                      >
+                        {user ? (
+                          <UserAvatar className="size-8" fallbackId={user.id} user={user} />
+                        ) : (
+                          <span aria-hidden className="size-8" />
+                        )}
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate font-medium" title={label}>
+                            {label}
+                          </span>
+                          {user?.email && user.email !== label ? (
+                            <span
+                              className="block truncate text-muted-foreground text-xs"
+                              title={user.email}
+                            >
+                              {user.email}
+                            </span>
+                          ) : null}
+                        </span>
+                        <span
+                          aria-hidden
+                          className={`grid size-4 shrink-0 place-items-center rounded border ${checked ? "border-primary bg-primary text-primary-foreground" : "border-border"}`}
+                        >
+                          {checked ? <Check className="size-3" /> : null}
+                        </span>
+                      </div>
+                    );
+                  })
+                : null}
+            </div>
+            {!rosterQuery.isError && !rosterQuery.isPending && candidates.length === 0 ? (
+              <div className="px-3 py-4 text-center text-muted-foreground text-sm" role="status">
+                {search ? messages.search.noMatchesTitle : messages.base.noMembersAvailable}
+              </div>
+            ) : null}
+          </PopoverContent>
+        </Popover>
+      </div>
     </div>
   );
 }

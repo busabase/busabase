@@ -407,6 +407,9 @@ export const PackageViewConfigSchema = z.object({
   filterConjunction: viewFilterConjunctionSchema.optional(),
   sorts: z.array(PackageViewSortSchema).default([]),
   visibleFieldSlugs: z.array(z.string()).nullable().optional(),
+  fieldOrderSlugs: z.array(z.string()).optional(),
+  hiddenFieldSlugs: z.array(z.string()).optional(),
+  autoShowNewFields: z.boolean().optional(),
   fieldWidths: z
     .record(z.string().min(1), z.number().int().min(VIEW_FIELD_MIN_WIDTH).max(VIEW_FIELD_MAX_WIDTH))
     .optional(),

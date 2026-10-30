@@ -464,6 +464,21 @@ describe("Unified Grep — POST /grep (files + docs + records)", () => {
           },
         ],
       });
+      const uploadInput = {
+        fileName: "FLATTENFILEMARKER.png",
+        mimeType: "image/png",
+        sizeBytes: 1000,
+      };
+      const upload = await client.assets.createUploadUrl(uploadInput);
+      await storage.uploadFileToKey(
+        Buffer.alloc(uploadInput.sizeBytes),
+        upload.storageKey,
+        uploadInput.mimeType,
+      );
+      const confirmed = await client.assets.confirm({
+        ...uploadInput,
+        storageKey: upload.storageKey,
+      });
       await createBaseRecord(base.id, {
         f_number: 918273,
         f_checkbox: true,
@@ -471,11 +486,11 @@ describe("Unified Grep — POST /grep (files + docs + records)", () => {
         f_json: JSON.stringify({ note: "FLATTENJSONMARKER" }),
         f_attach: [
           {
-            id: "att_flatten_1",
-            url: "https://cdn.example.com/x.png",
-            fileName: "FLATTENFILEMARKER.png",
-            mimeType: "image/png",
-            size: 1000,
+            id: confirmed.attachmentId,
+            url: upload.publicUrl,
+            fileName: uploadInput.fileName,
+            mimeType: uploadInput.mimeType,
+            size: uploadInput.sizeBytes,
           },
         ],
       });

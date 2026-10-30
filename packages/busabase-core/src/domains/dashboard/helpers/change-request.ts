@@ -139,6 +139,7 @@ export const operationLabelKeys: Record<OperationKind, keyof CoreI18nMessages["o
   base_restore_field: "baseRestoreField",
   base_update_field: "baseUpdateField",
   doc_update: "docUpdate",
+  folder_update: "folderUpdate",
   whiteboard_document_update: "whiteboardDocumentUpdate",
   workflow_document_update: "workflowDocumentUpdate",
   html_document_update: "htmlDocumentUpdate",

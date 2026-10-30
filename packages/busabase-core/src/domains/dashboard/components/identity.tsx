@@ -5,12 +5,21 @@ import { useCoreI18n } from "../../../i18n";
 import { formatUserRefLabel, formatUserRefSubtitle } from "../helpers/format";
 
 const initialsFor = (label: string) => {
-  const clean = label.replace(/[^a-zA-Z0-9]+/g, " ").trim();
+  const clean = label
+    .normalize("NFC")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
   if (!clean) {
     return "?";
   }
-  const parts = clean.split(/\s+/);
-  return (parts.length > 1 ? `${parts[0][0]}${parts[1][0]}` : clean.slice(0, 2)).toUpperCase();
+  // A single full-width glyph fits the compact 20px member-chip avatar.
+  if (/^[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(clean)) {
+    return Array.from(clean)[0];
+  }
+  const parts = clean.split(/\s+/).map((part) => Array.from(part));
+  return (
+    parts.length > 1 ? `${parts[0][0]}${parts[1][0]}` : parts[0].slice(0, 2).join("")
+  ).toUpperCase();
 };
 
 export function UserAvatar({
@@ -24,18 +33,20 @@ export function UserAvatar({
 }) {
   const messages = useCoreI18n();
   const label = formatUserRefLabel(user, fallbackId, messages);
-  if (user?.image) {
+  const [failedImage, setFailedImage] = useState<string | null>(null);
+  if (user?.image && user.image !== failedImage) {
     return (
       <img
         alt={label}
         className={`${className} shrink-0 rounded-full object-cover`}
+        onError={() => setFailedImage(user.image ?? null)}
         src={user.image}
       />
     );
   }
   return (
     <span
-      className={`${className} inline-flex shrink-0 items-center justify-center rounded-full bg-muted font-medium text-[11px] text-muted-foreground`}
+      className={`${className} inline-flex shrink-0 items-center justify-center whitespace-nowrap rounded-full bg-muted font-medium text-[11px] text-muted-foreground`}
     >
       {initialsFor(label)}
     </span>

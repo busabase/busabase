@@ -37,19 +37,29 @@ describe("NodeDetailVO", () => {
     // keeps working after narrowing on `type` — that is what makes this a
     // consolidation rather than a rewrite.
     expect(Object.keys(NODE_DETAIL_VARIANTS.folder.shape).sort()).toEqual([
+      "attribution",
+      "body",
       "children",
       "node",
+      "storagePrefix",
       "type",
     ]);
     expect(Object.keys(NODE_DETAIL_VARIANTS.doc.shape).sort()).toEqual([
+      "attribution",
       "body",
       "node",
       "storagePrefix",
       "type",
     ]);
-    expect(Object.keys(NODE_DETAIL_VARIANTS.file.shape).sort()).toEqual(["asset", "node", "type"]);
+    expect(Object.keys(NODE_DETAIL_VARIANTS.file.shape).sort()).toEqual([
+      "asset",
+      "attribution",
+      "node",
+      "type",
+    ]);
     for (const type of ["skill", "drive", "airapp"] as const) {
       expect(Object.keys(NODE_DETAIL_VARIANTS[type].shape).sort()).toEqual([
+        "attribution",
         "entryFile",
         "files",
         "node",
@@ -63,7 +73,11 @@ describe("NodeDetailVO", () => {
 
   it("gives the not-yet-typed node types the plain node row", () => {
     for (const type of ["base", "form"] as const) {
-      expect(Object.keys(NODE_DETAIL_VARIANTS[type].shape).sort()).toEqual(["node", "type"]);
+      expect(Object.keys(NODE_DETAIL_VARIANTS[type].shape).sort()).toEqual([
+        "attribution",
+        "node",
+        "type",
+      ]);
     }
   });
 
@@ -73,6 +87,7 @@ describe("NodeDetailVO", () => {
     // bare `{ node }` the client has no way to read.
     for (const type of ["whiteboard", "workflow", "html"] as const) {
       expect(Object.keys(NODE_DETAIL_VARIANTS[type].shape).sort()).toEqual([
+        "attribution",
         "document",
         "node",
         "type",
@@ -98,8 +113,11 @@ describe("NodeDetailVO", () => {
         children: [],
       },
       children: [],
+      storagePrefix: "busabase/nodes/nod_1/folder/",
+      body: "",
     });
     expect(parsed.type).toBe("folder");
+    if (parsed.type === "folder") expect(parsed.body).toBe("");
   });
 
   it("rejects a payload whose type is not a registered node type", () => {

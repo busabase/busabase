@@ -16,7 +16,7 @@ import { insertCommit } from "../../../../logic/commits";
 import type { MergeCtx } from "../../../../logic/cr-lifecycle";
 import { projectCommitFields } from "../../../../logic/field-values";
 import { CURRENT_USER_ID, id, requireBaseId } from "../../../../logic/kernel";
-import { removeRecordAssetUsages, syncRecordAssetUsages } from "../../../assets/handlers";
+import { syncRecordAssetUsages } from "../../../assets/handlers";
 import { computeSystemFieldValues, validateRecordFields } from "../../field-rules";
 import { isReadOnlyFieldDef } from "../../field-types";
 import { recalculateFormulaRecords } from "../formula-recalculation";
@@ -303,7 +303,8 @@ export const mergeRecordDelete = async (
         isNull(busabaseRecordLinks.deletedAt),
       ),
     );
-  await removeRecordAssetUsages(targetRecord.id, db);
+  // Archive remains recoverable: its attachments are still retained and must
+  // continue protecting shared bytes from another content item's purge.
   await db
     .update(busabaseOperations)
     .set({ status: "archived", mergedRecordId: targetRecord.id, updatedAt: timestamp })

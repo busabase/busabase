@@ -480,8 +480,107 @@ describe("Base-domain DB lifecycle — oRPC", () => {
       const calendar = views.find((v) => v.slug === "lc-calendar");
       expect(kanban?.type).toBe("kanban");
       expect(kanban?.config.stackByFieldSlug).toBe("status");
+      expect(kanban?.config.showFieldLabels).toBe(true);
+      expect(kanban?.config.coverFieldSlug).toBeUndefined();
       expect(calendar?.type).toBe("calendar");
       expect(calendar?.config.dateFieldSlug).toBe("published_at");
+      expect(calendar?.config.showFieldLabels).toBeUndefined();
+    });
+
+    it("persists opt-in Kanban covers and clears them without losing board configuration", async () => {
+      const createCr = await proposeView({
+        operation: "create",
+        baseId: blogBaseId,
+        slug: "lc-kanban-cover",
+        name: "Board with cover",
+        type: "kanban",
+        config: {
+          filters: [],
+          sorts: [],
+          stackByFieldSlug: "status",
+          coverFieldSlug: "cover",
+          coverFit: "fit",
+        },
+      });
+      await approveAndMerge(createCr.id);
+      let board = (await client.bases.listViews({ baseId: blogBaseId })).find(
+        (item) => item.slug === "lc-kanban-cover",
+      );
+      expect(board?.config.coverFieldSlug).toBe("cover");
+      expect(board?.config.coverFit).toBe("fit");
+      const viewId = board?.id ?? "";
+      const cropCr = await proposeView({
+        operation: "update",
+        viewId,
+        config: { coverFit: "cover" },
+      });
+      await approveAndMerge(cropCr.id);
+      board = (await client.bases.listViews({ baseId: blogBaseId })).find(
+        (item) => item.id === viewId,
+      );
+      expect(board?.config.coverFieldSlug).toBe("cover");
+      expect(board?.config.coverFit).toBe("cover");
+      expect(board?.config.stackByFieldSlug).toBe("status");
+      const clearCr = await proposeView({
+        operation: "update",
+        viewId,
+        config: { coverFieldSlug: null },
+      });
+      await approveAndMerge(clearCr.id);
+      board = (await client.bases.listViews({ baseId: blogBaseId })).find(
+        (item) => item.id === viewId,
+      );
+      expect(board?.config.coverFieldSlug).toBeNull();
+      expect(board?.config.stackByFieldSlug).toBe("status");
+      expect(board?.config.showFieldLabels).toBe(true);
+    });
+
+    it("persists an explicit Kanban label preference through partial updates and reloads", async () => {
+      const createCr = await proposeView({
+        operation: "create",
+        baseId: blogBaseId,
+        slug: "lc-kanban-labels",
+        name: "Board without labels",
+        type: "kanban",
+        config: {
+          filters: [{ fieldSlug: "status", operator: "equals", value: "published" }],
+          sorts: [{ fieldSlug: "title", direction: "desc" }],
+          visibleFieldSlugs: ["title", "status"],
+          stackByFieldSlug: "status",
+          showFieldLabels: false,
+        },
+      });
+      await approveAndMerge(createCr.id);
+      const board = (await client.bases.listViews({ baseId: blogBaseId })).find(
+        (item) => item.slug === "lc-kanban-labels",
+      );
+      expect(board?.config.showFieldLabels).toBe(false);
+      const renameCr = await proposeView({
+        operation: "update",
+        viewId: board?.id ?? "",
+        name: "Renamed board",
+      });
+      await approveAndMerge(renameCr.id);
+      let reloaded = (await client.bases.listViews({ baseId: blogBaseId })).find(
+        (item) => item.id === board?.id,
+      );
+      expect(reloaded?.config.showFieldLabels).toBe(false);
+      const labelsCr = await proposeView({
+        operation: "update",
+        viewId: board?.id ?? "",
+        config: { showFieldLabels: true },
+      });
+      await approveAndMerge(labelsCr.id);
+      reloaded = (await client.bases.listViews({ baseId: blogBaseId })).find(
+        (item) => item.id === board?.id,
+      );
+      expect(reloaded?.config).toMatchObject({
+        showFieldLabels: true,
+        stackByFieldSlug: "status",
+        visibleFieldSlugs: ["title", "status"],
+        filters: [{ fieldSlug: "status", operator: "equals", value: "published" }],
+        sorts: [{ fieldSlug: "title", direction: "desc" }],
+      });
     });
 
     it("round-trips gantt view config through merge", async () => {

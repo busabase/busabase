@@ -2076,6 +2076,39 @@ export const getRecord = async (recordId: string) => {
   return record ? hydrateRecord(record) : null;
 };
 
+/**
+ * Batched `getRecord`: the same space + Base-visibility filters, one row query
+ * and ONE `hydrateRecords` pass for the whole set instead of one per id.
+ * Archived records are returned, exactly as `getRecord` returns them. Ids that
+ * do not resolve (missing, other space, or a Base the caller cannot read) are
+ * reported in `missingIds` rather than failing the batch.
+ */
+export const getRecords = async (recordIds: readonly string[]) => {
+  const ids = [...new Set(recordIds)];
+  if (ids.length === 0) return { records: [], missingIds: [] };
+  await ensureReady();
+  const db = await getDb();
+  const rows = await db
+    .select()
+    .from(busabaseRecords)
+    .where(
+      and(
+        inArray(busabaseRecords.id, ids),
+        eq(busabaseRecords.spaceId, getContextSpaceId()),
+        buildBaseVisibilityExists(db, busabaseRecords.baseId),
+      ),
+    );
+  const hydrated = new Map((await hydrateRecords(rows)).map((record) => [record.id, record]));
+  const records: Awaited<ReturnType<typeof hydrateRecords>> = [];
+  const missingIds: string[] = [];
+  for (const id of ids) {
+    const record = hydrated.get(id);
+    if (record) records.push(record);
+    else missingIds.push(id);
+  }
+  return { records, missingIds };
+};
+
 export const listRecordLinks = async (
   recordId: string,
   direction: "outbound" | "inbound" = "outbound",

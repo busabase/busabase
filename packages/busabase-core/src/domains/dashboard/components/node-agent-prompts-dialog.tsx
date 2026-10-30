@@ -28,6 +28,7 @@ import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-quer
 import { Dialog, DialogDescription, DialogHeader, DialogTitle } from "kui/dialog";
 import { useCoreI18n } from "../../../i18n";
 import type { NodePromptScope } from "../helpers/node-agent-prompts";
+import { useNodeLocator } from "../hooks/use-copy-locator";
 import { useNodeAgentPrompts } from "../hooks/use-node-agent-prompts";
 import { useDashboardOrpc } from "../orpc-context";
 import type { AgentIntegrationTarget } from "./agent-install-panel";
@@ -123,6 +124,15 @@ export function NodeAgentPromptsDialog({
     spaceId: spaceId ?? explicitAgentIntegration?.targetSpaceId,
     spaceName,
   });
+  const locator = useNodeLocator({
+    agentIntegration: explicitAgentIntegration,
+    nodeId,
+    nodeName,
+    nodeType,
+    scope,
+    spaceId: spaceId ?? explicitAgentIntegration?.targetSpaceId,
+    spaceName,
+  });
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       {/* Match Workspace Settings' roomy modal density: 80vh on mobile and a
@@ -147,6 +157,8 @@ export function NodeAgentPromptsDialog({
             askAgent={orpc ? { orpc, sessionScopeId: nodeId } : null}
             capabilities={capabilities}
             loading={promptsLoading}
+            locator={locator}
+            recents={{ kind: "node", nodeType, scopeKind: scope?.kind ?? "node" }}
             management={
               orpc && (!scope || scope.kind === "node")
                 ? {

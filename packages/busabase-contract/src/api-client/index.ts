@@ -160,6 +160,12 @@ export interface BusabaseDashboardApiClient {
   getChangeRequest: (changeRequestId: string) => Promise<ChangeRequestVO>;
   listRecords: (options?: BusabaseListOptions) => Promise<RecordVO[]>;
   getRecord: (recordId: string) => Promise<RecordVO>;
+  /**
+   * Batched `getRecord` (RPC-only `records.getMany`, at most 100 ids). Unknown
+   * or invisible ids land in `missingIds` instead of failing the call. Older
+   * servers do not have it — callers fall back to `getRecord` per id.
+   */
+  getRecords: (recordIds: string[]) => Promise<{ records: RecordVO[]; missingIds: string[] }>;
   listRecordChangeRequests: (
     recordId: string,
     options?: { limit?: number },
@@ -302,6 +308,9 @@ export interface BusabaseDashboardApiClient {
     baseId: string,
     payload: {
       name: iString;
+      originViewId?: string;
+      reverse?: { name: string };
+      requestId?: string;
       options?: {
         help?: FieldHelp;
         ai?: {
@@ -329,6 +338,9 @@ export interface BusabaseDashboardApiClient {
     baseId: string,
     payload: {
       name: iString;
+      originViewId?: string;
+      reverse?: { name: string };
+      requestId?: string;
       slug: string;
       type?: BaseVO["fields"][number]["type"];
       required?: boolean;
@@ -446,7 +458,7 @@ export interface BusabaseDashboardApiClient {
   createUpdateViewChangeRequest: (
     viewId: string,
     payload: {
-      config?: ViewConfigVO;
+      config?: Partial<ViewConfigVO>;
       description?: string;
       message?: string;
       name?: string;
@@ -737,6 +749,7 @@ export const createBusabaseRestApiClient = (
     getChangeRequest: (changeRequestId) => client.changeRequests.get({ changeRequestId }),
     listRecords: async (options) => (await client.records.list(options ?? {})).records,
     getRecord: (recordId) => client.records.get({ recordId }),
+    getRecords: (recordIds) => client.records.getMany({ recordIds }),
     listRecordChangeRequests: (recordId, options) =>
       client.records.listChangeRequests({ recordId, ...options }),
     searchRecords: (filter) => client.records.search(filter),

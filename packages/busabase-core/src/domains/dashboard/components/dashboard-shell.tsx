@@ -32,6 +32,7 @@ import {
   LayoutGrid,
   Link2,
   Lock,
+  MapPin,
   Network,
   Pencil,
   Plus,
@@ -46,18 +47,29 @@ import {
 import type { NavDropPosition, NavItemAction, NavNodeDropParams } from "openlib/ui/dashboard";
 import { DashboardLayout, type NavGroup, type NavItem, NavMain } from "openlib/ui/dashboard";
 import type { ComponentProps, ReactNode } from "react";
-import { useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { toast } from "sonner";
 import { useLocation } from "wouter";
 import { CoreI18nProvider, useCoreMessages } from "../../../i18n";
+import { isCoreLocale } from "../../../i18n/locales";
 import { AirAppEngineAvailabilityProvider } from "../../airapp/components/engine-availability-context";
 import type { AirAppRunnerKind } from "../../airapp/components/runners/types";
+import { locatorExampleKind } from "../helpers/agent-locator";
 import {
   createKnownNodeCache,
   type KnownNode,
   knownNodeCacheScope,
 } from "../helpers/known-node-cache";
 import { buildNavItems, type NavTreeOptions, nodeHref } from "../helpers/nav-tree";
+import { renderNodeLocatorTarget } from "../helpers/node-agent-prompts";
 import { nodeIconGlyph, resolveNodeIcon } from "../helpers/node-icons";
 import {
   DEFAULT_WORKSPACE_FILTER,
@@ -67,12 +79,12 @@ import {
   type WorkspaceFilterKey,
   writeStoredWorkspaceFilter,
 } from "../helpers/sidebar-workspace-filter";
+import { copyAgentLocator } from "../hooks/use-copy-locator";
 import type { MoveNodePayload } from "../hooks/use-move-node";
 import { DashboardOrpcProvider } from "../orpc-context";
-import { parseNodeDetailRoute } from "../utils/node-route";
+import { parseSidebarNodeRoute } from "../utils/node-route";
 import { getSidebarTopLevelNodes } from "../utils/sidebar-node-tree";
 import type { AgentIntegrationTarget } from "./agent-install-panel";
-import { CloseMobileSidebarOnNavigate } from "./close-mobile-sidebar-on-navigate";
 import { NodeDeleteDialog } from "./file-tree-browser";
 import { NodeAgentPromptsDialog } from "./node-agent-prompts-dialog";
 import { NodeMoveDialog } from "./node-move-dialog";
@@ -552,6 +564,7 @@ function DashboardShellInner({
     slug: string;
     type: string;
   } | null>(null);
+  const deleteReturnFocusRef = useRef<HTMLElement | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{
     id: string;
     name: string;
@@ -664,6 +677,8 @@ function DashboardShellInner({
   };
 
   const messages = useCoreMessages(locale);
+  // Same fallback `useCoreMessages` applies, for the locator text it pairs with.
+  const coreLocale = isCoreLocale(locale) ? locale : "en";
   const nav = messages.nav;
   const navMainLabels = {
     dragToReorder: messages.shell.dragToReorder,
@@ -754,7 +769,7 @@ function DashboardShellInner({
   const queryClient = useQueryClient();
   // The node the current route points at — the sidebar's own reading of the
   // location, independent of whichever detail view is rendered.
-  const activeNodeRef = useMemo(() => parseNodeDetailRoute(location), [location]);
+  const activeNodeRef = useMemo(() => parseSidebarNodeRoute(location), [location]);
 
   // Which folders sit on the path to that node. The sidebar cannot work this
   // out from its own tree: the tree is depth-bounded and lazily expanded, so
@@ -853,6 +868,7 @@ function DashboardShellInner({
         favoriteRemoveLabel: messages.favorites.remove,
         moveLabel: messages.move.menuLabel,
         agentPromptsLabel: messages.agentPrompts.title,
+        copyForAgentLabel: messages.agentPrompts.copyForAgent,
         shareLabel: messages.share.title,
         sharedMarkerLabel: messages.share.sharedMarker,
         restrictedMarkerLabel: messages.share.restrictedMarker,
@@ -916,6 +932,27 @@ function DashboardShellInner({
           name: node.name,
           type: node.type,
         }),
+      // Right-click → "Copy for Agent": the node's locator (target line +
+      // connection check) straight to the clipboard, no dialog. This shell sits
+      // outside the dashboard's i18n/integration providers, so it passes what
+      // it holds instead of reading context (same reason the prompts dialog
+      // below takes `agentIntegration` explicitly).
+      onCopyForAgent: (node) =>
+        void copyAgentLocator(
+          { messages, locale: coreLocale, integration: agentIntegration },
+          {
+            target: renderNodeLocatorTarget(
+              {
+                nodeId: node.id,
+                nodeName: node.name,
+                nodeType: node.type,
+                spaceId: agentIntegration?.targetSpaceId,
+              },
+              coreLocale,
+            ),
+            exampleKind: locatorExampleKind(node.type),
+          },
+        ),
       // Share and Delete carry the same orpc gate as Permissions/Rename: both
       // dialogs are pure mutation surfaces (a public link toggle, a node_delete
       // change request) with nothing to call without a wired client.
@@ -925,14 +962,21 @@ function DashboardShellInner({
         : undefined,
       canManageShareSettings,
       onOpenDelete: orpc
-        ? (node) =>
+        ? (node) => {
+            // Capture the stable trigger before selecting the menu item closes
+            // and unmounts its menu. The modal opens after that transition.
+            const focused = document.activeElement;
+            const triggerId = focused?.closest('[role="menu"]')?.getAttribute("aria-labelledby");
+            const trigger = triggerId ? document.getElementById(triggerId) : focused;
+            deleteReturnFocusRef.current = trigger instanceof HTMLElement ? trigger : null;
             setDeleteTarget({
               id: node.id,
               name: node.name,
               type: node.type,
               childCount: node.children.length,
               href: nodeHref(node),
-            })
+            });
+          }
         : undefined,
     }),
     [
@@ -946,6 +990,9 @@ function DashboardShellInner({
       messages.favorites.remove,
       messages.move.menuLabel,
       messages.agentPrompts.title,
+      messages,
+      coreLocale,
+      agentIntegration,
       messages.share.title,
       messages.share.sharedMarker,
       messages.share.restrictedMarker,
@@ -1381,7 +1428,6 @@ function DashboardShellInner({
           pageClassName="gap-0 p-0"
           sidebarClassName="h-full"
         >
-          <CloseMobileSidebarOnNavigate />
           {children}
         </DashboardLayout>
         {orpc && settingsTarget && (
@@ -1445,6 +1491,7 @@ function DashboardShellInner({
               deleteTarget.href &&
                 (location === deleteTarget.href || location.startsWith(`${deleteTarget.href}/`)),
             )}
+            returnFocusRef={deleteReturnFocusRef}
             nodeId={deleteTarget.id}
             nodeName={deleteTarget.name}
             nodeType={deleteTarget.type}
@@ -1488,6 +1535,7 @@ interface NavItemLabels {
   favoriteRemoveLabel: string;
   moveLabel: string;
   agentPromptsLabel: string;
+  copyForAgentLabel: string;
   shareLabel: string;
   /** Tooltip on the always-visible "this node is published" sidebar marker. */
   sharedMarkerLabel: string;
@@ -1534,6 +1582,7 @@ interface NavItemContext {
   onOpenRename?: (node: NodeVO) => void;
   onOpenMove?: (node: NodeVO) => void;
   onOpenAgentPrompts?: (node: NodeVO) => void;
+  onCopyForAgent?: (node: NodeVO) => void;
   onOpenShare?: (node: NodeVO) => void;
   onOpenDelete?: (node: NodeVO) => void;
   /**
@@ -1549,6 +1598,8 @@ interface NodeMenuActions {
   /** Only containers expose Open inside the context menu. */
   openAction?: NavItemAction | null;
   agentPromptsAction?: NavItemAction | null;
+  /** "Copy for Agent" — sits with Agent prompts, ahead of it. */
+  copyForAgentAction?: NavItemAction | null;
   managementActions: Array<NavItemAction | null>;
   deleteAction?: NavItemAction | null;
 }
@@ -1565,14 +1616,18 @@ interface NodeMenuActions {
 export function buildNodeMenuActions({
   openAction,
   agentPromptsAction,
+  copyForAgentAction,
   managementActions,
   deleteAction,
 }: NodeMenuActions): NavItemAction[] {
   const visibleManagementActions = managementActions.filter(
     (action): action is NavItemAction => action !== null,
   );
+  const agentActions = [copyForAgentAction, agentPromptsAction].filter(
+    (action): action is NavItemAction => Boolean(action),
+  );
 
-  if (agentPromptsAction && visibleManagementActions.length > 0) {
+  if (agentActions.length > 0 && visibleManagementActions.length > 0) {
     visibleManagementActions[0] = {
       ...visibleManagementActions[0],
       separatorBefore: true,
@@ -1581,7 +1636,7 @@ export function buildNodeMenuActions({
 
   return [
     ...(openAction ? [openAction] : []),
-    ...(agentPromptsAction ? [agentPromptsAction] : []),
+    ...agentActions,
     ...visibleManagementActions,
     ...(deleteAction ? [deleteAction] : []),
   ];
@@ -1608,6 +1663,7 @@ function decorateNavItem(
     onOpenRename,
     onOpenMove,
     onOpenAgentPrompts,
+    onCopyForAgent,
     onOpenShare,
     onOpenDelete,
     canManageShareSettings,
@@ -1681,6 +1737,16 @@ function decorateNavItem(
         onSelect: () => onOpenAgentPrompts(node),
       }
     : null;
+  // "Copy for Agent" — the node's locator prompt, copied in one step. Same
+  // menu, so the right-click on a row (NavItem.openActionsOnContextMenu)
+  // reaches it too.
+  const copyForAgentAction: NavItemAction | null = onCopyForAgent
+    ? {
+        title: labels.copyForAgentLabel,
+        icon: MapPin,
+        onSelect: () => onCopyForAgent(node),
+      }
+    : null;
   // The "•••" Share action — offered when EITHER half of the Share dialog has
   // something to offer: a public link (types whose registry definition opts
   // into a working anonymous detail route) or an embed link (AirApp / Drive /
@@ -1751,11 +1817,14 @@ function decorateNavItem(
     const url = href ?? "";
     return {
       ...sharedMarker,
+      // Right-click a row → this same menu, "Copy for Agent" included.
+      openActionsOnContextMenu: true,
       onAddChild: () => onCreateChild(node),
       addChildTitle: labels.newLabel,
       actions: buildNodeMenuActions({
         openAction: url ? { title: labels.openLabel, url, icon: FolderOpen } : null,
         agentPromptsAction,
+        copyForAgentAction,
         managementActions: [
           settingsAction,
           renameAction,
@@ -1770,6 +1839,7 @@ function decorateNavItem(
   }
   const leafActions = buildNodeMenuActions({
     agentPromptsAction,
+    copyForAgentAction,
     managementActions: [
       settingsAction,
       renameAction,
@@ -1780,7 +1850,11 @@ function decorateNavItem(
     ],
     deleteAction,
   });
-  return { ...sharedMarker, actions: leafActions.length > 0 ? leafActions : undefined };
+  return {
+    ...sharedMarker,
+    openActionsOnContextMenu: true,
+    actions: leafActions.length > 0 ? leafActions : undefined,
+  };
 }
 
 /** The row-building options every member-sidebar tree shares: its shape plus these decorations. */

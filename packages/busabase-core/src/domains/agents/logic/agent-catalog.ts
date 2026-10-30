@@ -471,7 +471,7 @@ export async function listCatalog(): Promise<AgentCatalogEntryVO[]> {
         spec.slug === "buda"
           ? (budaConnections[0]?.agentName ?? null)
           : spec.slug === "acprouter"
-            ? (routerConnections[0]?.agentSlug ?? null)
+            ? (routerConnections[0]?.agentName ?? routerConnections[0]?.agentSlug ?? null)
             : null,
       connectedAgents:
         spec.slug === "buda"
@@ -482,7 +482,7 @@ export async function listCatalog(): Promise<AgentCatalogEntryVO[]> {
           : spec.slug === "acprouter"
             ? routerConnections.map((connection) => ({
                 slug: connection.slug,
-                name: connection.agentSlug,
+                name: connection.agentName ?? connection.agentSlug,
               }))
             : [],
     };

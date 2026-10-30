@@ -20,6 +20,7 @@ import { ORPCError } from "@orpc/server";
  * generated types, where neither belongs.
  */
 import { FILE_TREE_NODE_TYPES } from "busabase-contract/domains/filetree/contract";
+import { storage } from "openlib/storage";
 import type { getDb } from "../db";
 import { busabaseNodeContentSearch } from "../db/schema";
 import type { MutableTextSource } from "../domains/assets/logic/text-cache";
@@ -30,6 +31,7 @@ import {
   sliceDocLinesRange,
   splitDocLines as splitTextLines,
 } from "../domains/doc/handlers";
+import { folderReadmeKey } from "../domains/folder/handlers";
 import { richNodeDocumentKey } from "../domains/rich-node/handlers";
 import {
   extractWhiteboardSearchableText,
@@ -51,8 +53,8 @@ export interface NodeContentAdapter {
    * scanned as-is — which is the better case in two ways: it can be streamed
    * line by line without ever holding the whole object in memory, and every
    * reported line number is a REAL source line the user can open the file at.
-   * `doc` (markdown) and `html` (raw source, stored unwrapped on purpose) are
-   * both in that camp.
+   * `doc` and `folder` (markdown) and `html` (raw source, stored unwrapped on
+   * purpose) are in that camp.
    *
    * When present, the whole object must be read and converted first, so the
    * scan is not streamed and the resulting line numbers are SYNTHETIC — they
@@ -72,6 +74,7 @@ export const NODE_CONTENT_ADAPTERS = {
   // OTHER node type working (the rich types were already arrows). Calling
   // through an arrow defers the lookup to call time, when the cycle has settled.
   doc: { storageKey: (nodeId: string) => docBodyKey(nodeId) },
+  folder: { storageKey: (nodeId: string) => folderReadmeKey(nodeId) },
   html: { storageKey: (nodeId: string) => richNodeDocumentKey(nodeId, "html") },
   whiteboard: {
     storageKey: (nodeId: string) => richNodeDocumentKey(nodeId, "whiteboard"),
@@ -110,18 +113,32 @@ export const nodeContentAdapter = (type: SearchableNodeType): NodeContentAdapter
  * functions rather than one because `logic/` may import a domain, but a domain
  * importing back out of `logic/` would be a cycle.)
  */
+const emptyMutableTextSource = (): MutableTextSource => ({
+  iterateLines: async function* emptyLines() {},
+  readText: async () => "",
+});
+
 export const openNodeContentSource = async (
   type: SearchableNodeType,
   nodeId: string,
-): Promise<MutableTextSource> =>
-  openMutableTextSource({
+): Promise<MutableTextSource> => {
+  const storageKey = NODE_CONTENT_ADAPTERS[type].storageKey(nodeId);
+  // A folder readme is optional. GET treats a missing object as `""`, and grep
+  // must do the same — otherwise every folder that never had a readme is
+  // reported as a failed scan. Docs and rich nodes always materialize an
+  // object, so a missing object there stays an error.
+  if (type === "folder" && !(await storage.objectExists(storageKey))) {
+    return emptyMutableTextSource();
+  }
+  return openMutableTextSource({
     cacheKey: `${type}:${nodeId}`,
-    storageKey: NODE_CONTENT_ADAPTERS[type].storageKey(nodeId),
+    storageKey,
   });
+};
 
 /**
  * The node's content as scannable lines. Streams straight off the cached file
- * for the text-native types (`doc`/`html`) so a large body never lands in
+ * for the text-native types (`doc`/`folder`/`html`) so a large body never lands in
  * memory whole; buffers-then-extracts only for the JSON types, which have no
  * way around reading the whole object before it means anything.
  */
@@ -157,7 +174,6 @@ const readLinesWrongTypeHint = (type: string): string => {
     return `it is a file tree (${type}). List its files with GET /file-trees/{nodeId}/files and read one with GET /file-trees/{nodeId}/files/{path}`;
   }
   if (type === "base") return "it is a Base. Read its records with GET /records?baseId=...";
-  if (type === "folder") return "it is a folder. List what is inside with GET /nodes?parentId=...";
   if (type === "file") {
     return "it is a file node. Read its text with GET /assets/{assetId}/text/lines (the assetId is on GET /nodes/{nodeId})";
   }
@@ -198,7 +214,7 @@ const resolveContentNode = async (nodeIdOrSlug: string) => {
  * the ENTIRE document, which is exactly what a line range exists to avoid.
  *
  * Line numbers mean whatever they mean for the node's type — real source
- * lines for `doc`/`html`, positions within the extracted text for the JSON
+ * lines for `doc`/`folder`/`html`, positions within the extracted text for the JSON
  * types. Because it reads through the same registry as grep, the two can
  * never disagree about what "line 3" is.
  */

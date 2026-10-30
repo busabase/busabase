@@ -6,7 +6,6 @@ import {
   type QueryKey,
   useInfiniteQuery,
   useMutation,
-  useQueries,
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
@@ -49,6 +48,7 @@ import {
 import { toast } from "sonner";
 import { useLocation, useSearch } from "wouter";
 import { CoreI18nProvider, fmt, useCoreI18n, useCoreLocale } from "../../i18n";
+import { fieldVisibilityMessages } from "../../i18n/field-visibility";
 import { presentCoreError } from "../../i18n/localize-error";
 import { AgentModelScopeProvider } from "../agents/agent-model-scope-context";
 import { AgentDetailView } from "../agents/components/agent-detail-view";
@@ -89,6 +89,7 @@ import { HomeView } from "./components/home";
 import { ActivityView, InboxView } from "./components/inbox";
 import { NodeRouteStateView } from "./components/node-route-state";
 import { PlaybooksView } from "./components/playbooks-view";
+import { RecordDetailDialog } from "./components/record-detail-dialog";
 import { RecordDetailView, RecordEditorView, RecordTopbarActions } from "./components/record-views";
 import { SearchDialog } from "./components/search-dialog";
 import { SearchView } from "./components/search-view";
@@ -105,10 +106,11 @@ import {
   useWorkspacePermissionLevel,
 } from "./components/split-submit-button";
 import { BusabaseTopbar, TopbarNodeActionsSlot } from "./components/topbar";
+import { type AgentEntryContextState, nextAgentEntryContext } from "./helpers/agent-entry-context";
 import { getNodeDetailBreadcrumbItems } from "./helpers/breadcrumbs";
 import { shouldQueryGlobalChangeRequests } from "./helpers/change-request-data-source";
 import { createChangeRequestQueryKeys } from "./helpers/change-request-query-keys";
-import { getFetchableRelationRecordIds } from "./helpers/field";
+import { getLinkedRecordIds } from "./helpers/field";
 import { homePendingListInput } from "./helpers/home";
 import {
   getLocationPath,
@@ -142,10 +144,13 @@ import type {
   UpdateBaseFieldPatch,
   ViewFormPayload,
   ViewSubmitOptions,
+  ViewUpdatePayload,
 } from "./helpers/view-types";
 import { useAttachmentUpload } from "./hooks/use-attachment-upload";
+import { useBaseCollectionState } from "./hooks/use-base-collection-state";
 import { useDashboardRoutes } from "./hooks/use-dashboard-routes";
 import { useKeyboardShortcut } from "./hooks/use-keyboard-shortcut";
+import { useLinkedRecords } from "./hooks/use-linked-records";
 import { useBusabaseLiveSync } from "./hooks/use-live-sync";
 import { useReorderView } from "./hooks/use-reorder-view";
 import { getNodeDetail, type LoadedNode } from "./node-detail-registry";
@@ -294,6 +299,8 @@ interface BusabaseDashboardProps {
    * up yet. The host owns that modal, so the callback has to come from it.
    */
   onCreateNode?: () => void;
+  /** Refresh host-owned usage after a permanent deletion changes retained files. */
+  onStorageChange?: () => void | Promise<void>;
   /**
    * Which links in user content (Doc Markdown, whiteboard elements) are routes
    * of this workbench, so following one routes in place instead of reloading
@@ -380,6 +387,7 @@ function BusabaseDashboardContent({
   currentUserId = null,
   emptyGuide,
   onCreateNode,
+  onStorageChange,
   resolveWorkbenchLink,
   bases: initialBases = EMPTY_BASES,
   nodes: nodeTree,
@@ -454,6 +462,12 @@ function BusabaseDashboardContent({
     [cacheSpaceKey, currentUserId],
   );
   const setCurrentNode = useCurrentNodeStore((state) => state.setNode);
+  const agentEntryContext = useRef<AgentEntryContextState | null>(null);
+  const [agentOriginNode, setAgentOriginNode] = useState<{
+    scopeKey: string;
+    node: LoadedNode | null;
+  } | null>(null);
+  const agentContextScope = JSON.stringify([cacheSpaceKey, currentUserId ?? "anonymous"]);
   const [loadedDetailNode, setLoadedDetailNode] = useState<{
     node: LoadedNode;
     scopeKey: string;
@@ -801,6 +815,10 @@ function BusabaseDashboardContent({
     }
     return baseViews.find((view) => view.slug === childId || view.id === childId) ?? null;
   }, [baseChildParams?.childId, baseViews]);
+  const fieldCreationOriginView = useMemo(() => {
+    const originViewId = new URLSearchParams(search).get("originViewId");
+    return baseViews.find((view) => view.id === originViewId) ?? null;
+  }, [baseViews, search]);
   // The Base page is still working out what to show: which view a bare
   // `/base/:slug` opens (or it is about to redirect there), or whether a child
   // segment is a view or a record. The page shows a skeleton meanwhile — no
@@ -835,33 +853,19 @@ function BusabaseDashboardContent({
     },
     [locationPath, rawSetLocation, recordPaginationUrl.pageSize, search],
   );
-  // Preserve a deep-linked page on first load, but reset when the user moves to
-  // another Base or saved view. The unrelated query parameters are retained by
-  // writeRecordPagination (notably demo and cloud space selection).
-  const paginationScope = `${activeBase?.id ?? ""}:${baseChildParams?.childId ?? "all"}`;
-  const previousPaginationScope = useRef<string | null>(null);
-  useEffect(() => {
-    // Not while the bare route is still resolving to its default view: that
-    // redirect is the same page, so a deep-linked `?recordPage` must survive it.
-    if (!activeBase?.id || isResolvingBaseRoute) return;
-    if (previousPaginationScope.current === null) {
-      previousPaginationScope.current = paginationScope;
-      return;
-    }
-    if (previousPaginationScope.current !== paginationScope) {
-      previousPaginationScope.current = paginationScope;
-      if (recordPaginationUrl.page !== 1) {
-        setRecordPaginationUrl(1, recordPaginationUrl.pageSize, true);
-      }
-    }
-  }, [
-    activeBase?.id,
-    isResolvingBaseRoute,
-    paginationScope,
-    recordPaginationUrl.page,
-    recordPaginationUrl.pageSize,
-    setRecordPaginationUrl,
-  ]);
+  // A record id is not a view switch. Only resolved collection routes own
+  // pagination resets; record/editor routes retain their source view state.
+  const collectionScope =
+    activeBase && !isResolvingBaseRoute && (selectedBaseView || baseParams?.slug)
+      ? `${activeBase.id}:${selectedBaseView?.id ?? "all"}`
+      : null;
+  const baseTableViewState = useBaseCollectionState({
+    identity: JSON.stringify([cacheSpaceKey, currentUserId ?? "anonymous"]),
+    scope: collectionScope,
+    search,
+    pagination: recordPaginationUrl,
+    onPaginationChange: setRecordPaginationUrl,
+  });
   // Carry the active view's filters (tagged with each field's type) to the server
   // for best-effort push-down; the client filter below stays the exact authority.
   const activeViewFilters = useMemo(() => {
@@ -1048,60 +1052,99 @@ function BusabaseDashboardContent({
       (baseViewsSettled || baseChildParams?.childId === "new"),
   );
 
+  // Calendar range reads can contain records outside the Base's first page.
+  // Keep the clicked snapshot while the normal detail query hydrates it.
+  const recordPreviewScope = `${cacheSpaceKey}:${currentUserId ?? "anonymous"}:${location}`;
+  const [recordPreview, setRecordPreview] = useState<{
+    record: RecordVO;
+    scope: string;
+    openedAt: number;
+    trigger: HTMLElement | null;
+  } | null>(null);
+  const previewRecord = recordPreview?.scope === recordPreviewScope ? recordPreview.record : null;
+  const openRecordPreview = useCallback(
+    (record: RecordVO) => {
+      setRecordPreview({
+        record,
+        scope: recordPreviewScope,
+        openedAt: Date.now(),
+        trigger: document.activeElement instanceof HTMLElement ? document.activeElement : null,
+      });
+    },
+    [recordPreviewScope],
+  );
+  // A different route/workspace closes the preview permanently, including when
+  // returning with Back. The underlying calendar stays mounted while it is open.
+  useEffect(() => {
+    setRecordPreview((current) => (current?.scope === recordPreviewScope ? current : null));
+  }, [recordPreviewScope]);
+
   const selectedRecordId =
     isEditRecordRoute && editRecordParams?.recordId
       ? editRecordParams.recordId
       : isRecordRoute && baseChildParams?.childId !== "new"
         ? baseChildParams?.childId
-        : null;
-  // Records reached by a direct link (not in the list query) and the relation
-  // records other records point at are loaded through React Query and folded into
-  // `records`. Relation ids accumulate (append-only) so the query set never shrinks
-  // — which would otherwise loop fetch→merge→drop→refetch — and so transitive
-  // relations resolve as newly-merged records reference further ids.
+        : (previewRecord?.id ?? null);
+  // Records reached by a direct link (not in the list query) are loaded through
+  // React Query and folded into `records`, as are the records they link to.
   const fallbackRecordQuery = useQuery({
     ...orpc.records.get.queryOptions({ input: { recordId: selectedRecordId ?? "" } }),
-    initialData: initialRecords.find((record) => record.id === selectedRecordId),
+    // Hosts can keep ordinary reads fresh for tens of seconds. A reopened
+    // preview must still re-read the record, even when its cache is that young.
+    ...(previewRecord ? { staleTime: 0 } : {}),
+    initialData: previewRecord ?? initialRecords.find((record) => record.id === selectedRecordId),
     // The initial page snapshot is not a new read of cross-record dependencies.
     initialDataUpdatedAt: 0,
     enabled:
       !readOnlyRecordPreview &&
       Boolean(selectedRecordId) &&
-      !baseRecords.some((item) => item.id === selectedRecordId),
+      (Boolean(previewRecord) || !baseRecords.some((item) => item.id === selectedRecordId)),
   });
-  const [relationRecordIds, setRelationRecordIds] = useState<string[]>([]);
-  const relationRecordQueries = useQueries({
-    queries: (readOnlyRecordPreview ? [] : relationRecordIds).map((recordId) => {
-      const options = orpc.records.get.queryOptions({ input: { recordId } });
-      const cached = queryClient.getQueryData<RecordVO>(options.queryKey);
-      return {
-        ...options,
-        enabled: !cached || baseCatalog.some((base) => base.id === cached.baseId),
-      };
-    }),
+  // Linked records are loaded ONE level deep and only for what is on screen:
+  // the current page of the Base plus the open/previewed record. The id set is
+  // derived on every render (not accumulated), so leaving a page drops its
+  // links; `useLinkedRecords` sorts and chunks ids so the batch keys stay
+  // stable while the set is unchanged. Records fetched here never contribute
+  // ids themselves — a lookup-of-a-relation is covered by the ids the server
+  // already put in `computedFields` (see `getLinkedRecordIds`).
+  const linkedRecordIds = useMemo(() => {
+    const sources = [
+      ...baseRecords,
+      ...(previewRecord ? [previewRecord] : []),
+      ...(fallbackRecordQuery.data ? [fallbackRecordQuery.data] : []),
+    ];
+    const loadedIds = new Set(sources.map((record) => record.id));
+    return getLinkedRecordIds(sources, new Set(baseCatalog.map((base) => base.id))).filter(
+      (recordId) => !loadedIds.has(recordId),
+    );
+  }, [baseCatalog, baseRecords, fallbackRecordQuery.data, previewRecord]);
+  const linkedRecords = useLinkedRecords({
+    enabled: !readOnlyRecordPreview,
+    ids: linkedRecordIds,
+    orpc,
   });
   const records = useMemo(() => {
     const listFetchedAt = usesPagePagination
       ? recordsPageQuery.dataUpdatedAt
       : recordsInfiniteQuery.dataUpdatedAt;
     return mergeRecordSnapshots([
+      { record: previewRecord ?? undefined, fetchedAt: recordPreview?.openedAt ?? 0 },
       { record: fallbackRecordQuery.data, fetchedAt: fallbackRecordQuery.dataUpdatedAt },
-      ...relationRecordQueries
-        .filter(
-          (query) => !query.data || baseCatalog.some((base) => base.id === query.data?.baseId),
-        )
-        .map((query) => ({
-          record: query.data,
-          fetchedAt: query.dataUpdatedAt,
-        })),
+      // A Base that left the catalog (access revoked, archived) never renders
+      // a record it linked to, even one still in the cache.
+      ...linkedRecords.snapshots.filter((snapshot) =>
+        baseCatalog.some((base) => base.id === snapshot.record.baseId),
+      ),
       ...baseRecords.map((record) => ({ record, fetchedAt: listFetchedAt })),
     ]);
   }, [
     baseRecords,
+    previewRecord,
+    recordPreview?.openedAt,
     baseCatalog,
     fallbackRecordQuery.data,
     fallbackRecordQuery.dataUpdatedAt,
-    relationRecordQueries,
+    linkedRecords.snapshots,
     usesPagePagination,
     recordsPageQuery.dataUpdatedAt,
     recordsInfiniteQuery.dataUpdatedAt,
@@ -1110,20 +1153,6 @@ function BusabaseDashboardContent({
     () => records.find((record) => record.id === selectedRecordId) ?? null,
     [records, selectedRecordId],
   );
-  const missingRelationRecordIds = useMemo(() => {
-    const existingRecordIds = new Set(records.map((record) => record.id));
-    return getFetchableRelationRecordIds(
-      records,
-      new Set(baseCatalog.map((base) => base.id)),
-    ).filter((recordId) => !existingRecordIds.has(recordId));
-  }, [baseCatalog, records]);
-  // Queue newly-discovered relation ids for fetching; append-only (see above).
-  useEffect(() => {
-    const fresh = missingRelationRecordIds.filter((id) => !relationRecordIds.includes(id));
-    if (fresh.length > 0) {
-      setRelationRecordIds((previous) => [...previous, ...fresh]);
-    }
-  }, [missingRelationRecordIds, relationRecordIds]);
   // The list query caps each CR's `operations` (see LIST_MAX_OPERATIONS_PER_CHANGE_REQUEST)
   // and strips `reviews[].visibleOperationHeads` for payload size — fine for inbox
   // rows, but the single-CR detail view needs the uncapped, un-stripped shape
@@ -1890,7 +1919,7 @@ function BusabaseDashboardContent({
       setError(null);
       // Dragging a card has no "propose it" affordance — it always lands — so
       // this is one call, not create + approve + merge on every drop.
-      await client.createUpdateChangeRequest(record.id, {
+      const result = await client.createUpdateChangeRequest(record.id, {
         author: "local-editor",
         autoMerge: true,
         fields: { ...record.headCommit.payload, [fieldSlug]: value },
@@ -1899,6 +1928,11 @@ function BusabaseDashboardContent({
         }),
       });
       await refresh();
+      // A `changeRequest`-level viewer is not auto-merged: the board tells them
+      // the move is pending review and links to it.
+      return result.materialized
+        ? { materialized: true as const }
+        : { materialized: false as const, changeRequestId: result.id };
     },
     [client, messages, messages.createNode.updateRecordMessage, refresh],
   );
@@ -1938,6 +1972,11 @@ function BusabaseDashboardContent({
         autoMerge: options?.mergeImmediately === true,
       });
       if (result.materialized) {
+        if (previewRecord?.id === record.id) {
+          setRecordPreview((current) => (current?.record.id === record.id ? null : current));
+          await refresh();
+          return;
+        }
         await refresh();
         setLocation(`/base/${record.base.slug}`);
         return;
@@ -1945,7 +1984,7 @@ function BusabaseDashboardContent({
       setLocation(`/inbox/${result.id}`);
       await refresh();
     },
-    [client, refresh, setLocation],
+    [client, previewRecord?.id, refresh, setLocation],
   );
 
   // Bulk delete from the table's multi-select toolbar. There is no batch
@@ -2092,30 +2131,113 @@ function BusabaseDashboardContent({
     ],
   );
 
+  /**
+   * Two-way relation: create the reverse column of `forwardFieldId` (on `base`)
+   * on the field's target Base, the way Notion's "Show on" and Airtable's
+   * linked field do. Its slug follows this Base's slug, made unique there.
+   */
+  const createReverseColumn = useCallback(
+    async (
+      base: BaseVO,
+      forwardFieldId: string,
+      name: string,
+      options?: { mergeImmediately?: boolean },
+    ) => {
+      const forwardField = base.fields.find((field) => field.id === forwardFieldId);
+      const targetBaseId = forwardField?.options.targetBaseId;
+      if (!forwardField || !targetBaseId) return;
+      const targetBase = await client.getBase(targetBaseId);
+      const taken = new Set(targetBase.fields.map((field) => field.slug));
+      const stem =
+        base.slug
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "_")
+          .replace(/^_+|_+$/g, "") || "linked";
+      let slug = stem;
+      for (let suffix = 2; taken.has(slug); suffix += 1) slug = `${stem}_${suffix}`;
+      const payload = {
+        name,
+        options: { reverseOfFieldId: forwardField.id, targetBaseId: base.id },
+        required: false,
+        slug,
+        type: "relation" as const,
+      };
+      if (options?.mergeImmediately) {
+        await client.createBaseField(targetBase.id, payload);
+      } else {
+        await client.createFieldChangeRequest(targetBase.id, {
+          ...payload,
+          message: fmt(messages.createNode.addFieldMessage, { field: name }),
+          submittedBy: "local-editor",
+        });
+      }
+    },
+    [client, messages.createNode.addFieldMessage],
+  );
+
   const submitCreateBaseField = useCallback(
     async (
       base: BaseVO,
       payload: CreateBaseFieldPayload,
-      options?: { mergeImmediately?: boolean },
+      options?: { mergeImmediately?: boolean; reverse?: { name: string }; requestId?: string },
     ) => {
       setError(null);
-      if (options?.mergeImmediately) {
-        await client.createBaseField(base.id, payload);
+      // Persist the relationship intent in the same command as the field.
+      // The server applies both sides atomically, including review-first saves.
+      const fieldPayload = {
+        ...payload,
+        ...(options?.reverse ? { reverse: options.reverse } : {}),
+        ...(options?.requestId ? { requestId: options.requestId } : {}),
+      };
+      const showCreatedField = () => {
+        if (!payload.originViewId) return;
+        toast.success(fieldVisibilityMessages[locale].created);
+        // Stay in Design so another field (or a chained lookup) can be created.
+        // The Records tab returns to the source view and locates this column.
+        setLocation(`${locationPath}?highlightField=${encodeURIComponent(payload.slug)}`, {
+          replace: true,
+        });
+      };
+      // A relation may need the target Base's approval policy even when the
+      // source permits an immediate write. Keep its returned review request
+      // available instead of treating that valid pending state as a failure.
+      if (options?.mergeImmediately && payload.type !== "relation") {
+        await client.createBaseField(base.id, fieldPayload);
         await refresh();
+        showCreatedField();
         return;
       }
       const changeRequest = await client.createFieldChangeRequest(base.id, {
-        ...payload,
-        ...(payload.type === "formula" ? { autoMerge: false } : {}),
+        ...fieldPayload,
+        autoMerge: options?.mergeImmediately === true,
         message: fmt(messages.createNode.addFieldMessage, {
           field: iStringParse(payload.name),
         }),
         submittedBy: "local-editor",
       });
       await refresh();
-      setLocation(`/inbox/${changeRequest.id}`);
+      if (!options?.mergeImmediately || changeRequest.status !== "merged") {
+        toast.success(fieldVisibilityMessages[locale].pending);
+        setLocation(`/inbox/${changeRequest.id}`);
+      } else {
+        showCreatedField();
+      }
     },
-    [client, messages.createNode.addFieldMessage, refresh, setLocation],
+    [client, locale, locationPath, messages.createNode.addFieldMessage, refresh, setLocation],
+  );
+
+  const submitCreateReverseField = useCallback(
+    async (
+      base: BaseVO,
+      forwardFieldId: string,
+      name: string,
+      options?: { mergeImmediately?: boolean },
+    ) => {
+      setError(null);
+      await createReverseColumn(base, forwardFieldId, name, options);
+      await refresh();
+    },
+    [createReverseColumn, refresh],
   );
 
   const submitUpdateField = useCallback(
@@ -2401,16 +2523,32 @@ function BusabaseDashboardContent({
     ],
   );
 
+  const refreshAfterPurge = useCallback(async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: listKeys.archivedNodes }),
+      queryClient.invalidateQueries({ queryKey: listKeys.archivedBases }),
+      queryClient.invalidateQueries({ queryKey: orpc.assets.list.key() }),
+      queryClient.invalidateQueries({ queryKey: orpc.assets.get.key() }),
+      queryClient.invalidateQueries({ queryKey: listKeys.auditEvents }),
+      onStorageChange?.(),
+    ]);
+  }, [
+    listKeys.archivedBases,
+    listKeys.archivedNodes,
+    listKeys.auditEvents,
+    onStorageChange,
+    orpc,
+    queryClient,
+  ]);
+
   const submitPurgeNode = useCallback(
     async (node: NodeVO) => {
       setError(null);
       await client.purgeNode(node.id);
-      await queryClient.invalidateQueries({
-        queryKey: orpc.nodes.list.queryOptions({ input: { status: "archived" } }).queryKey,
-      });
+      await refreshAfterPurge();
       toast.success(fmt(messages.base.nodeDeletedPermanently, { type: node.type }));
     },
-    [client, messages.base.nodeDeletedPermanently, orpc, queryClient],
+    [client, messages.base.nodeDeletedPermanently, refreshAfterPurge],
   );
 
   // Same `nodes.purge` endpoint as submitPurgeNode — a Base's `nodeId` (1:1
@@ -2420,12 +2558,10 @@ function BusabaseDashboardContent({
     async (base: BaseVO) => {
       setError(null);
       await client.purgeNode(base.nodeId);
-      await queryClient.invalidateQueries({
-        queryKey: orpc.bases.list.queryOptions({ input: { status: "archived" } }).queryKey,
-      });
+      await refreshAfterPurge();
       toast.success(fmt(messages.base.nodeDeletedPermanently, { type: "base" }));
     },
-    [client, messages.base.nodeDeletedPermanently, orpc, queryClient],
+    [client, messages.base.nodeDeletedPermanently, refreshAfterPurge],
   );
 
   const submitRestoreField = useCallback(
@@ -2470,7 +2606,7 @@ function BusabaseDashboardContent({
   );
 
   const submitUpdateView = useCallback(
-    async (view: ViewVO, payload: ViewFormPayload, options?: ViewSubmitOptions) => {
+    async (view: ViewVO, payload: ViewUpdatePayload, options?: ViewSubmitOptions) => {
       setError(null);
       const changeRequest = await client.createUpdateViewChangeRequest(view.id, {
         config: payload.config,
@@ -2643,6 +2779,14 @@ function BusabaseDashboardContent({
     nodeCache.merge(flattenNodesForCache(nodeTree));
   }, [nodeCache, nodeTree]);
 
+  // Opening a node that has since been archived is proof it should leave the
+  // quick-jump cache, or search keeps offering it as a dead end.
+  const archivedRouteNodeId =
+    nodeRouteState?.status === "archived" ? nodeRouteState.nodeId : undefined;
+  useEffect(() => {
+    if (archivedRouteNodeId) nodeCache.forget([archivedRouteNodeId]);
+  }, [archivedRouteNodeId, nodeCache]);
+
   // Bases render from the already-resolved bases query rather than the generic
   // node-detail registry, so report their successful route resolution here.
   useEffect(() => {
@@ -2661,37 +2805,41 @@ function BusabaseDashboardContent({
     }
   }, [activeBase, locationPath, recordLoadedNode, selectedBaseSlug]);
 
-  /**
-   * Publish "the node the user is looking at" for the side panel to offer as
-   * context (see `store/current-node-store`).
-   *
-   * Two sources because node detail has two: the generic registry resolves
-   * `activeDetailNode` for every node type, and Bases render from their own
-   * query. Both are already route-gated, so navigating to Home or the agents
-   * list lands here as `null` — which is the point. A stale node offered as
-   * context for an unrelated question is worse than no context at all.
-   */
+  // Current-page context and an explicit Agent-entry origin are distinct:
+  // entering /agents clears the side-panel source but retains its entry node.
   useEffect(() => {
-    if (activeDetailNode) {
-      setCurrentNode({
-        id: activeDetailNode.id,
-        type: activeDetailNode.type,
-        name: activeDetailNode.name,
-        slug: activeDetailNode.slug,
-      });
-      return;
+    const node: LoadedNode | null = activeDetailNode
+      ? {
+          id: activeDetailNode.id,
+          type: activeDetailNode.type,
+          name: activeDetailNode.name,
+          slug: activeDetailNode.slug,
+          icon: activeDetailNode.icon,
+        }
+      : locationPath.startsWith("/base/") && activeBase
+        ? {
+            id: activeBase.nodeId,
+            type: "base",
+            name: activeBase.name,
+            slug: activeBase.slug,
+            icon: flattenNodesForCache(nodeTree).find((item) => item.id === activeBase.nodeId)
+              ?.icon,
+          }
+        : null;
+    const next = nextAgentEntryContext(agentEntryContext.current, {
+      path: locationPath,
+      scopeKey: agentContextScope,
+      node,
+    });
+    if (
+      agentEntryContext.current?.origin !== next.origin ||
+      agentEntryContext.current?.scopeKey !== next.scopeKey
+    ) {
+      setAgentOriginNode({ scopeKey: next.scopeKey, node: next.origin });
     }
-    if (locationPath.startsWith("/base/") && activeBase) {
-      setCurrentNode({
-        id: activeBase.nodeId,
-        type: "base",
-        name: activeBase.name,
-        slug: activeBase.slug,
-      });
-      return;
-    }
-    setCurrentNode(null);
-  }, [activeBase, activeDetailNode, locationPath, setCurrentNode]);
+    agentEntryContext.current = next;
+    setCurrentNode(node, agentContextScope);
+  }, [activeBase, activeDetailNode, agentContextScope, locationPath, nodeTree, setCurrentNode]);
 
   // Global Cmd+K (Mac) / Ctrl+K (Windows/Linux) quick-jump shortcut — opens the
   // search dialog from anywhere in the dashboard. Registered as two separate
@@ -2789,11 +2937,17 @@ function BusabaseDashboardContent({
     }
 
     return (
-      <BaseTopbarActions activeTab={isBaseSetupRoute ? "design" : "records"} base={activeBase} />
+      <BaseTopbarActions
+        activeTab={isBaseSetupRoute ? "design" : "records"}
+        activeView={selectedBaseView}
+        base={activeBase}
+        originView={fieldCreationOriginView}
+      />
     );
   }, [
     activeBase,
     activeRecord,
+    fieldCreationOriginView,
     baseParams?.slug,
     isBaseDesignRoute,
     isBaseSetupRoute,
@@ -2805,6 +2959,7 @@ function BusabaseDashboardContent({
     nodeRouteState?.status,
     routeNodeRef,
     selectedRecordId,
+    selectedBaseView,
   ]);
 
   const queuePosition =
@@ -2944,6 +3099,9 @@ function BusabaseDashboardContent({
         <AgentDetailView
           orpc={orpc}
           agentSlug={decodeAgentRouteSlug(agentDetailParams?.agentSlug ?? "")}
+          contextNode={
+            agentOriginNode?.scopeKey === agentContextScope ? agentOriginNode.node : null
+          }
           onBack={() => setLocation("/agents")}
           // Moving the conversation to the panel means leaving this page — the
           // point is to have it beside something else — so this navigates away
@@ -3051,10 +3209,12 @@ function BusabaseDashboardContent({
           draftScope={`${cacheSpaceKey}:${currentUserId ?? "anonymous"}`}
           base={activeBase}
           bases={baseCatalog}
+          originViewId={fieldCreationOriginView?.id}
           deletedFields={deletedFields}
           orpc={orpc}
           onConvertFieldType={submitConvertFieldType}
           onCreateField={submitCreateBaseField}
+          onCreateReverseField={submitCreateReverseField}
           onDeleteField={submitDeleteField}
           onRestoreField={submitRestoreField}
           onSetPrimaryField={submitSetPrimaryField}
@@ -3147,6 +3307,8 @@ function BusabaseDashboardContent({
     if (locationPath.startsWith("/base/")) {
       return (
         <BaseDetailView
+          key={baseTableViewState?.scope}
+          viewState={baseTableViewState}
           client={client}
           activeView={selectedBaseView}
           archivedViews={archivedViewsForBase}
@@ -3165,6 +3327,7 @@ function BusabaseDashboardContent({
           onRestoreView={submitRestoreView}
           onRestoreRecord={submitRestoreRecord}
           onMoveRecord={submitMoveRecord}
+          onOpenRecord={openRecordPreview}
           onPatchRecord={submitPatchRecord}
           onReorderView={submitReorderView}
           onUpdateView={submitUpdateView}
@@ -3217,6 +3380,8 @@ function BusabaseDashboardContent({
     activeBase,
     activeRecord,
     agentDetailParams,
+    agentContextScope,
+    agentOriginNode,
     approveChangeRequest,
     closeChangeRequest,
     auditEvents,
@@ -3247,6 +3412,7 @@ function BusabaseDashboardContent({
     recordActivityParams,
     selectedBaseView,
     isNewRecordRoute,
+    fieldCreationOriginView,
     pendingReviewAction,
     isBatchPending,
     isChangeRequestsLoaded,
@@ -3278,6 +3444,7 @@ function BusabaseDashboardContent({
     submitRestoreView,
     submitRestoreRecord,
     submitMoveRecord,
+    openRecordPreview,
     submitPatchRecord,
     submitUpdateField,
     submitUpdateRecord,
@@ -3299,11 +3466,13 @@ function BusabaseDashboardContent({
     serverSortedView,
     usesPagePagination,
     baseRecords,
+    baseTableViewState,
     submitDeleteRecords,
     submitUpdateRecords,
     submitImportRecords,
     submitConvertFieldType,
     submitDeleteField,
+    submitCreateReverseField,
     allChangeRequests,
     nodeCache,
     openSearch,
@@ -3319,15 +3488,39 @@ function BusabaseDashboardContent({
   ]);
 
   const dashboardActiveView = (
-    <AirAppKeepAliveHost
-      activeSlug={activeAirappSlug}
-      enabled={keepAirAppsMounted}
-      fallback={activeView}
-      onNodeLoaded={recordLoadedNode}
-      orpc={orpc}
-      renderer={AirAppDetail}
-      scopeKey={airAppKeepAliveScopeKey}
-    />
+    <>
+      <AirAppKeepAliveHost
+        activeSlug={activeAirappSlug}
+        enabled={keepAirAppsMounted}
+        fallback={activeView}
+        onNodeLoaded={recordLoadedNode}
+        orpc={orpc}
+        renderer={AirAppDetail}
+        scopeKey={airAppKeepAliveScopeKey}
+      />
+      {previewRecord ? (
+        <RecordDetailDialog
+          baseSlug={activeBase?.slug ?? activeBase?.nodeId ?? activeBase?.id ?? ""}
+          client={client}
+          error={
+            fallbackRecordQuery.error
+              ? presentCoreError(
+                  messages,
+                  locale,
+                  fallbackRecordQuery.error,
+                  messages.recordView.recordNotFoundBody,
+                )
+              : null
+          }
+          key={previewRecord.id}
+          onClose={() => setRecordPreview(null)}
+          onDeleteChangeRequest={submitDeleteRecord}
+          record={fallbackRecordQuery.error ? null : activeRecord}
+          records={records}
+          returnFocusTo={recordPreview?.trigger ?? null}
+        />
+      ) : null}
+    </>
   );
 
   // Chrome-free: no topbar, no side panel, no search dialog — just the current
@@ -3391,6 +3584,7 @@ function BusabaseDashboardContent({
       </div>
       <SidePanel
         currentNode={sidePanelCurrentNode}
+        scopeKey={knownNodeCacheScope(cacheSpaceKey, currentUserId)}
         nodeCache={nodeCache}
         onNavigate={setLocation}
         onOpenSearch={openSearchToPin}

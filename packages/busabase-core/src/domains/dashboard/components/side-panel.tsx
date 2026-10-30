@@ -10,7 +10,7 @@ import {
 import { cn } from "kui/utils";
 import { GripVertical, Maximize2, Minimize2, PanelRight, X } from "lucide-react";
 import type { CSSProperties } from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useCoreI18n } from "../../../i18n";
 import type { KnownNodeCache } from "../helpers/known-node-cache";
 import { useSidePanelViewport } from "../hooks/use-side-panel-viewport";
@@ -19,6 +19,7 @@ import {
   MAX_SIDE_PANEL_WIDTH,
   MIN_SIDE_PANEL_WIDTH,
   SIDE_PANEL_RESIZE_CLOSE_THRESHOLD,
+  type SidePanelTab,
   useSidePanelStore,
 } from "../store/side-panel-store";
 import { SidePanelAddTab } from "./side-panel-add-tab";
@@ -26,6 +27,7 @@ import { SidePanelAgentPicker, SidePanelEmptyState } from "./side-panel-empty-st
 import type { PinnableNode } from "./side-panel-sources";
 
 const MIN_MAIN_CONTENT_WIDTH = 360;
+const EMPTY_TABS: SidePanelTab[] = [];
 
 /**
  * Topbar toggle for the side panel — lives in the dashboard topbar (see
@@ -82,6 +84,8 @@ export function SidePanelToggle() {
  * AirApp preview.
  */
 export interface SidePanelProps {
+  /** The active workspace and actor, shared with the dashboard's node cache. */
+  scopeKey: string;
   orpc: BusabaseQueryUtils;
   /**
    * The node the user is currently looking at, or null off a node page.
@@ -96,7 +100,14 @@ export interface SidePanelProps {
   onNavigate: (path: string) => void;
 }
 
-export function SidePanel({
+export function SidePanel(props: SidePanelProps) {
+  // Switching spaces also retires transient picker/menu state. Ordinary
+  // navigation and collapsing keep the same mounted tab tree.
+  return <ScopedSidePanel key={props.scopeKey} {...props} />;
+}
+
+function ScopedSidePanel({
+  scopeKey,
   orpc,
   currentNode,
   nodeCache,
@@ -105,10 +116,19 @@ export function SidePanel({
 }: SidePanelProps) {
   const messages = useCoreI18n();
   const isOpen = useSidePanelStore((state) => state.isOpen);
-  const layout = useSidePanelStore((state) => state.layout);
+  const layout = useSidePanelStore((state) =>
+    state.scopeKey === scopeKey ? state.layout : "split",
+  );
   const width = useSidePanelStore((state) => state.width);
-  const activeTabId = useSidePanelStore((state) => state.activeTabId);
-  const tabs = useSidePanelStore((state) => state.tabs);
+  const activeTabId = useSidePanelStore((state) =>
+    state.scopeKey === scopeKey ? state.activeTabId : null,
+  );
+  // Gate the first render too: clearing in an effect alone would let an old
+  // Agent tab subscribe to its previous session through the new space's API.
+  const tabs = useSidePanelStore((state) =>
+    state.scopeKey === scopeKey ? state.tabs : EMPTY_TABS,
+  );
+  const setScope = useSidePanelStore((state) => state.setScope);
   const setActiveTab = useSidePanelStore((state) => state.setActiveTab);
   const closeTab = useSidePanelStore((state) => state.closeTab);
   const closeOtherTabs = useSidePanelStore((state) => state.closeOtherTabs);
@@ -141,6 +161,10 @@ export function SidePanel({
   // flag lets the chat's Back action return to this picker; the picker's own
   // Back action then returns to the launcher.
   const [showAgentPicker, setShowAgentPicker] = useState(false);
+
+  useLayoutEffect(() => {
+    setScope(scopeKey);
+  }, [scopeKey, setScope]);
 
   useEffect(() => {
     const workspace = panelRef.current?.parentElement;
