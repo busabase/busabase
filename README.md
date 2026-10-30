@@ -7,6 +7,8 @@
 
 <h1>Busabase</h1>
 
+<p>Suggested pronunciation: <code>/ˈbuː.sə.beɪs/</code></p>
+
 <h3>The System of Record for AI Agents</h3>
 
 <p>Different agents. One shared base.<br/>
@@ -59,7 +61,7 @@ Busabase keeps the agents stateless and the work durable: connect any agent, and
 ## Quick Start
 
 ```bash
-npx busabase server
+npx -y busabase@latest server
 ```
 
 Open **http://localhost:15419/dashboard/local** — no database, account, or config. It starts with embedded PGlite, local file storage, and a demo workspace.

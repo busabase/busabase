@@ -19,7 +19,7 @@ You connect in two moves: **paste one prompt** to onboard, then **install a perm
 
 5. **It seeds sample records without another approval step.** Versioned starter records are written through audited, idempotent Change Requests. Everyday agent work goes through the same pipeline, merging immediately or waiting for you according to the key's permission level.
 
-   ![The Inbox — every AI submission waits here for your review.](../public/assets/readme/busabase-inbox-review.webp)
+   ![The Inbox — where a submission that is waiting for your review shows up.](../public/assets/readme/busabase-inbox-review.webp)
 
 ## Install the skill for everyday use
 
