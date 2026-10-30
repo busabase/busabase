@@ -1,7 +1,7 @@
 {
   "name": "busabase-core",
   "description": "Shared Busabase open-core protocol, local store, API helpers, and dashboard components.",
-  "version": "0.99.1",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "exports": {
@@ -124,6 +124,14 @@
     "./domains/assets/asset-content-logic": {
       "types": "./src/domains/assets/logic/asset-content-logic.ts",
       "default": "./src/domains/assets/logic/asset-content-logic.ts"
+    },
+    "./domains/assets/storage-cleanup-logic": {
+      "types": "./src/domains/assets/logic/storage-cleanup-logic.ts",
+      "default": "./src/domains/assets/logic/storage-cleanup-logic.ts"
+    },
+    "./domains/assets/attachment-object-lifecycle": {
+      "types": "./src/domains/assets/logic/attachment-object-lifecycle.ts",
+      "default": "./src/domains/assets/logic/attachment-object-lifecycle.ts"
     },
     "./domains/assets/asset-download-response": {
       "types": "./src/domains/assets/logic/asset-download-response.ts",
@@ -292,10 +300,6 @@
     "./dashboard/node-icons": {
       "types": "./src/domains/dashboard/helpers/node-icons.ts",
       "default": "./src/domains/dashboard/helpers/node-icons.ts"
-    },
-    "./dashboard/close-mobile-sidebar-on-navigate": {
-      "types": "./src/domains/dashboard/components/close-mobile-sidebar-on-navigate.tsx",
-      "default": "./src/domains/dashboard/components/close-mobile-sidebar-on-navigate.tsx"
     },
     "./dashboard/nav-tree": {
       "types": "./src/domains/dashboard/helpers/nav-tree.ts",
@@ -484,6 +488,10 @@
     "./domains/agents/hooks/use-agent-session": {
       "types": "./src/domains/agents/hooks/use-agent-session.ts",
       "default": "./src/domains/agents/hooks/use-agent-session.ts"
+    },
+    "./domains/space-instructions/components/space-instructions-settings": {
+      "types": "./src/domains/space-instructions/components/space-instructions-settings.tsx",
+      "default": "./src/domains/space-instructions/components/space-instructions-settings.tsx"
     }
   },
   "dependencies": {
