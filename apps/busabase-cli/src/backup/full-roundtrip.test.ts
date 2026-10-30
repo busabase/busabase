@@ -398,6 +398,54 @@ describe("exportFull -> verifyArchive -> importFull round trip", () => {
     expect(docBodyRows).toEqual([{ nodeId: "nod_live", markdown: "live body\n" }]);
   });
 
+  it("archives folder readmes beside doc bodies, and a folder without one costs no warning", async () => {
+    // `dump.exportDocBodies` also serves folder readmes, and omits a folder
+    // that has none — which is most of them, and what a server older than
+    // readmes does for every folder. Neither may read as a skipped body.
+    const tables: Partial<Record<string, Array<Record<string, unknown>>>> = {};
+    for (const table of DumpTableSchema.options) tables[table] = [];
+    tables.nodes = [
+      { id: "nod_root", parentId: null, type: "folder" },
+      { id: "nod_guide", parentId: "nod_root", type: "folder" },
+      { id: "nod_plain", parentId: "nod_root", type: "folder" },
+      { id: "nod_doc", parentId: "nod_guide", type: "doc" },
+    ];
+    const exportClient = createFakeExportClient(tables, {
+      nod_root: "# Workspace readme\n",
+      nod_guide: "# How to use this folder\n",
+      nod_doc: "# Doc body\n",
+    });
+
+    const messages: string[] = [];
+    const manifest = await exportFull({
+      client: exportClient,
+      outPath: archivePath,
+      spaceId: "spc_test",
+      sourceHost: "http://localhost:15419",
+      includeHistory: true,
+      toolVersion: "0.1.0-test",
+      onProgress: (m) => messages.push(m),
+    });
+
+    expect(messages).toContain("fetched 1 doc bodies, skipped 0");
+    expect(messages).toContain("fetched 2 folder readmes from 3 folders, skipped 0");
+    expect(messages.filter((m) => m.includes("WARNING"))).toEqual([]);
+    await expect(verifyArchive(archivePath)).resolves.toEqual(manifest);
+
+    const recorded: RecordedImport[] = [];
+    await importFull({
+      client: createFakeImportClient(recorded),
+      archivePath,
+      sourceSpaceId: "spc_test",
+    });
+    const docBodyRows = recorded.filter((c) => c.table === "docBodies").flatMap((c) => c.rows);
+    expect(docBodyRows).toEqual([
+      { nodeId: "nod_doc", markdown: "# Doc body\n" },
+      { nodeId: "nod_root", markdown: "# Workspace readme\n" },
+      { nodeId: "nod_guide", markdown: "# How to use this folder\n" },
+    ]);
+  });
+
   it("--no-history keeps the current state restorable: unfinished work stays, finished history goes", async () => {
     // The flag used to omit the history tables wholesale, producing an archive
     // that could never be restored — `records.head_commit_id` is a NOT NULL FK

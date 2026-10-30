@@ -833,6 +833,60 @@ export async function exportFull(options: FullExportOptions): Promise<Manifest> 
   }
   log(`fetched ${docBodyEntries.length} doc bodies, skipped ${skippedDocBodies.length}`);
 
+  // Folder readmes — the optional markdown at `…/folder/readme.md`, served by
+  // the same `dump.exportDocBodies` route and archived under the same
+  // `docs/{nodeId}.md` entries: the server decides on restore whether an entry
+  // is a Doc body or a readme from the node's restored type. Without this pass
+  // a restore brought every readme back EMPTY while its `folder_update`
+  // history survived.
+  //
+  // A separate pass, not folders mixed into `docNodes`: most folders have no
+  // readme, and the route omits those, so an omitted folder is the normal case
+  // here — not the "server returned no body" warning it is for a Doc. A server
+  // older than readmes matches only Docs and omits every folder the same way;
+  // one that predates the route has no readmes to lose, so a missing route
+  // ends this pass quietly rather than taking the legacy per-Doc path.
+  const folderIds = (tableRows.nodes ?? [])
+    .filter((n) => n.type === "folder")
+    .map((n) => n.id as string);
+  let folderReadmeCount = 0;
+  const skippedFolderReadmes: string[] = [];
+  if (batchRouteAvailable) {
+    for (let i = 0; i < folderIds.length; i += EXPORT_DOC_BODIES_MAX_BATCH) {
+      const nodeIds = folderIds.slice(i, i + EXPORT_DOC_BODIES_MAX_BATCH);
+      try {
+        const { bodies } = await fetchPageWithRetry(
+          () => client.dump.exportDocBodies({ nodeIds }),
+          (attempt, error) =>
+            log(
+              `    retrying folder readmes batch (attempt ${attempt}): ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            ),
+          (error) => !isMissingRoute(error),
+          retries,
+        );
+        const requested = new Set(nodeIds);
+        for (const entry of bodies) {
+          if (!requested.has(entry.nodeId)) continue;
+          docBodyEntries.push({ nodeId: entry.nodeId, body: entry.markdown });
+          folderReadmeCount += 1;
+        }
+      } catch (error) {
+        if (isMissingRoute(error)) break;
+        const message = error instanceof Error ? error.message : String(error);
+        skippedFolderReadmes.push(...nodeIds);
+        log(
+          `  WARNING: could not read folder readmes for ${nodeIds.length} folder(s), skipping them (${message})`,
+        );
+      }
+    }
+  }
+  log(
+    `fetched ${folderReadmeCount} folder readmes from ${folderIds.length} folders, ` +
+      `skipped ${skippedFolderReadmes.length}`,
+  );
+
   // Attachment blobs — download every exported Asset's bytes and archive them
   // keyed by the OWNING `busabase_attachments` row's own `storageKey` (written
   // to `attachments.ndjson` next to the `attachments` table dump above), not

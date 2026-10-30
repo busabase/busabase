@@ -51,7 +51,7 @@ describe("explainError", () => {
     ]) {
       const out = explainError(new Error(message), config({ baseUrl: "http://localhost:15419" }));
       expect(out).toContain("Could not reach http://localhost:15419");
-      expect(out).toContain("npx busabase server");
+      expect(out).toContain("npx -y busabase@latest server");
       // The underlying error is preserved for debugging, not swallowed.
       expect(out).toContain(message);
       expect(out).toContain(DOCS);
@@ -91,7 +91,7 @@ describe("runCli surfaces explained errors", () => {
     expect(exitCode).toBe(EXIT_CODES.NETWORK);
     const printed = error.mock.calls.join("\n");
     expect(printed).toContain("Could not reach http://localhost:15419");
-    expect(printed).toContain("npx busabase server");
+    expect(printed).toContain("npx -y busabase@latest server");
     expect(printed).toContain(DOCS);
   });
 
