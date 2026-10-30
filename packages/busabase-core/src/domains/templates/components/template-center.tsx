@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { hasApiKeyLevel } from "busabase-contract/access-control/api-key-level";
 import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { InstallResultVO } from "busabase-contract/domains/install/types";
@@ -10,6 +11,7 @@ import { fmt, useCoreI18n } from "../../../i18n";
 import type { AgentIntegrationTarget } from "../../dashboard/components/agent-install-panel";
 import { InstallFromGithubModal } from "../../dashboard/components/install-from-github-modal";
 import { NodeDetailSkeleton } from "../../dashboard/components/skeletons";
+import { useWorkspacePermissionLevel } from "../../dashboard/components/split-submit-button";
 import { TemplateDetailView } from "./template-detail-view";
 import { TemplatesListView } from "./templates-list-view";
 
@@ -59,10 +61,12 @@ export function TemplateCenter({
   const messages = useCoreI18n();
   const [installing, setInstalling] = useState<TemplateCardVO | null>(null);
 
-  // Installing is a space owner/admin action and the server enforces it. With
-  // no api client there is nothing to install THROUGH, which is the same
-  // answer for the user either way: browse, don't install.
-  const canInstall = Boolean(apiClient);
+  // Installing needs `write` in the space, and the server enforces it; this
+  // mirrors it so a read-only member is told why rather than refused after the
+  // fact. With no api client there is nothing to install THROUGH, which is the
+  // same answer for the user either way: browse, don't install.
+  const permissionLevel = useWorkspacePermissionLevel();
+  const canInstall = Boolean(apiClient) && hasApiKeyLevel(permissionLevel, "write");
 
   // The same query the gallery runs, so arriving on a template URL directly —
   // a fresh tab, a shared link — resolves from cache when the gallery has

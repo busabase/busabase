@@ -8,6 +8,9 @@
  * Codex, a remote Buda agent), NOT one of Busabase's own nodes.
  */
 import { z } from "zod";
+import { userRefSchema } from "../../contract/schemas";
+import { NodeIconSchema } from "../../types/node-icon";
+import { PromptResourceContextListSchema } from "./prompt-context";
 
 export const RouterOauthStartVOSchema = z.object({ redirectUrl: z.string() });
 export const RouterOauthCallbackVOSchema = z.object({
@@ -115,11 +118,72 @@ export const AgentPermissionRequestVOSchema = z.object({
   title: z.string().optional(),
   description: z.string().optional(),
   options: z.array(AgentPermissionOptionVOSchema),
+  /** Exact proposed operation, inspectable before a decision is sent. */
+  toolCall: z.record(z.string(), z.unknown()).optional(),
 });
 export type AgentPermissionRequestVO = z.infer<typeof AgentPermissionRequestVOSchema>;
 
+/** A form requested by the agent, distinct from tool execution authorization. */
+export const AgentInputRequestVOSchema = z.object({
+  requestId: z.string(),
+  message: z.string(),
+  requestedSchema: z.record(z.string(), z.unknown()),
+  toolCallId: z.string().optional(),
+});
+export type AgentInputRequestVO = z.infer<typeof AgentInputRequestVOSchema>;
+
+export const AgentInputResponseSchema = z.object({
+  action: z.enum(["accept", "decline", "cancel"]),
+  content: z.record(z.string(), z.unknown()).optional(),
+});
+export type AgentInputResponse = z.infer<typeof AgentInputResponseSchema>;
+
+/** A resource descriptor, never an agent credential or a local machine file handle. */
+export const AgentResourceVOSchema = z.object({
+  id: z.string(),
+  uri: z.string(),
+  name: z.string(),
+  mimeType: z.string().optional(),
+  description: z.string().optional(),
+  size: z.number().nonnegative().optional(),
+  previewUri: z.string().optional(),
+  status: z.string().optional(),
+  _meta: z.record(z.string(), z.unknown()).optional(),
+});
+export type AgentResourceVO = z.infer<typeof AgentResourceVOSchema>;
+
+export const AgentSessionSnapshotVOSchema = z.object({
+  version: z.literal(1),
+  agentId: z.string(),
+  sessionId: z.string(),
+  runtime: z.object({ runner: z.string(), model: z.string(), workdir: z.string() }),
+  provenance: z
+    .object({
+      source: z.string().optional(),
+      authorId: z.string().optional(),
+      authorName: z.string().optional(),
+    })
+    .optional(),
+  context: z
+    .object({
+      promptMode: z.string().optional(),
+      workdir: z.string().optional(),
+      channelLabel: z.string().optional(),
+    })
+    .optional(),
+  views: z.array(
+    z.object({
+      kind: z.enum(["browser", "terminal"]),
+      status: z.enum(["available", "unavailable"]),
+      resource: AgentResourceVOSchema.optional(),
+      message: z.string().optional(),
+    }),
+  ),
+});
+export type AgentSessionSnapshotVO = z.infer<typeof AgentSessionSnapshotVOSchema>;
+
 /**
- * The agent's `category: "model"` ACP config option, reduced to what the UI
+ * An advertised ACP select, reduced to what the UI
  * needs to render a picker: which value is selected, and what it can become.
  *
  * Deliberately not the raw ACP `SessionConfigOption` — that type carries a
@@ -127,12 +191,23 @@ export type AgentPermissionRequestVO = z.infer<typeof AgentPermissionRequestVOSc
  * and re-exporting it here would leak an SDK shape across the contract
  * boundary for a feature that only needs "id, current value, flat choices".
  */
-export const AgentSessionModelOptionVOSchema = z.object({
+export const AgentSessionConfigSelectVOSchema = z.object({
   /** The ACP `configId` to send back on `session/set_config_option`. */
   id: z.string(),
   name: z.string(),
   currentValue: z.string(),
   options: z.array(z.object({ value: z.string(), name: z.string() })),
+});
+export type AgentSessionConfigSelectVO = z.infer<typeof AgentSessionConfigSelectVOSchema>;
+export const AgentSessionModelOptionVOSchema = AgentSessionConfigSelectVOSchema.extend({
+  options: z.array(
+    z.object({
+      value: z.string(),
+      name: z.string(),
+      /** Agent-advertised capabilities/defaults, never a confirmed session selection. */
+      thinking: AgentSessionConfigSelectVOSchema.optional(),
+    }),
+  ),
 });
 export type AgentSessionModelOptionVO = z.infer<typeof AgentSessionModelOptionVOSchema>;
 
@@ -156,6 +231,8 @@ export const AgentSessionVOSchema = z.object({
    * so there is nothing to render a picker for.
    */
   modelOption: AgentSessionModelOptionVOSchema.nullable().default(null),
+  /** Model-dependent `category: "thought_level"` choices, confirmed by ACP. */
+  thinkingOption: AgentSessionConfigSelectVOSchema.nullable().optional(),
 });
 export type AgentSessionVO = z.infer<typeof AgentSessionVOSchema>;
 
@@ -187,6 +264,37 @@ export const AgentConnectionVOSchema = z.object({
 });
 export type AgentConnectionVO = z.infer<typeof AgentConnectionVOSchema>;
 
+/** Display names are workspace labels, independent of the provider's agent identity. */
+export const AgentConnectionNameSchema = z.string().trim().min(1).max(100);
+export const AgentConnectionInputSchema = z.object({ slug: z.string().min(1) });
+export const RenameAgentConnectionInputSchema = AgentConnectionInputSchema.extend({
+  name: AgentConnectionNameSchema,
+});
+export type AgentConnectionInput = z.infer<typeof AgentConnectionInputSchema>;
+export type RenameAgentConnectionInput = z.infer<typeof RenameAgentConnectionInputSchema>;
+export const AgentConnectionDetailVOSchema = z.object({
+  slug: z.string(),
+  agentName: z.string(),
+  provider: z.enum(["buda", "acprouter"]),
+  providerAgentName: z.string(),
+  agentId: z.string(),
+  transport: AgentTransportSchema,
+  status: z.enum(["saved", "activating", "disconnecting", "revoked"]),
+  ownedByCurrentUser: z.boolean(),
+  /**
+   * The person who actually holds this saved connection — resolved from the
+   * persisted owner (Buda vault row's `userId`, or the ACPRouter grant's
+   * `busabaseActorId`), never inferred from the current viewer. Null when
+   * that identity cannot be resolved to a known user; render a localized
+   * "Unknown connector" fallback rather than substituting the viewer.
+   */
+  connectedBy: userRefSchema.nullable().optional().default(null),
+  routerWorkspaceName: z.string().optional(),
+  routerWorkspaceId: z.string().optional(),
+  deviceId: z.string().optional(),
+});
+export type AgentConnectionDetailVO = z.infer<typeof AgentConnectionDetailVOSchema>;
+
 /**
  * One streamed event from a session.
  *
@@ -205,14 +313,28 @@ export const AgentSessionEventVOSchema = z.object({
   sessionId: z.string(),
   /** Monotonic per session, so a reconnecting client can tell what it missed. */
   seq: z.number().int(),
-  kind: z.enum(["acpUpdate", "status", "error", "permissionRequest", "permissionResolved"]),
+  kind: z.enum([
+    "acpUpdate",
+    "acpExtension",
+    "status",
+    "error",
+    "permissionRequest",
+    "permissionResolved",
+    "inputRequest",
+    "inputResolved",
+  ]),
   acpUpdate: z.unknown().optional(),
+  /** Preserve extension envelopes even when this client cannot render them yet. */
+  acpExtension: z.object({ method: z.string(), params: z.unknown() }).optional(),
   status: AgentSessionStatusSchema.optional(),
   message: z.string().optional(),
   permissionRequest: AgentPermissionRequestVOSchema.optional(),
   /** Present on a `permissionResolved` event — which request, and what the user picked. */
   permissionRequestId: z.string().optional(),
   permissionOptionId: z.string().optional(),
+  inputRequest: AgentInputRequestVOSchema.optional(),
+  inputRequestId: z.string().optional(),
+  inputResponse: AgentInputResponseSchema.optional(),
   at: z.string(),
 });
 export type AgentSessionEventVO = z.infer<typeof AgentSessionEventVOSchema>;
@@ -232,6 +354,16 @@ export const CreateAgentSessionInputSchema = z.object({
   slug: z.string().min(1),
 });
 export type CreateAgentSessionInput = z.infer<typeof CreateAgentSessionInputSchema>;
+
+export const RespondToAgentInputSchema = z.object({
+  sessionId: z.string().min(1),
+  requestId: z.string().min(1),
+  response: AgentInputResponseSchema,
+});
+export const ResolveAgentResourceInputSchema = z.object({
+  sessionId: z.string().min(1),
+  resource: AgentResourceVOSchema,
+});
 
 export const DisconnectAgentInputSchema = z.object({
   /** The exact connected-agent slug shown by the sessions/catalog surfaces. */
@@ -268,6 +400,56 @@ export const PromptAttachmentInputSchema = z.object({
 });
 export type PromptAttachmentInput = z.infer<typeof PromptAttachmentInputSchema>;
 
+/**
+ * Legacy display metadata for older clients and persisted messages.
+ * New clients send explicit contextReferences with the user's unchanged text.
+ * The full `text` remains the Agent's prompt. Never infer this from its wording:
+ * a user can type or paste exactly the same text as an official context line.
+ */
+export const AgentPromptPresentationSchema = z.object({
+  version: z.literal(1),
+  source: z.literal("node-context"),
+  /** Empty for an attachment-only message; absence means legacy full-text display. */
+  text: z.string(),
+});
+export type AgentPromptPresentation = z.infer<typeof AgentPromptPresentationSchema>;
+/**
+ * A selected node, resolved and authorized by the server when this message is sent.
+ *
+ * `kind` defaults to `"reference"` — background material the agent should treat
+ * as data, not instructions (the long-standing behavior). `"invocation"` is for
+ * a Skill the user explicitly picked from the composer's "/" palette: the server
+ * swaps in a wrapper that tells the agent to follow it, instead of the
+ * anti-injection "treat as reference data" wording. Only `skill` nodes may be
+ * marked `"invocation"`; any other node type is rejected rather than silently
+ * downgraded, since picking a doc or Base from the palette can't happen today.
+ */
+export const AgentContextReferenceInputSchema = z.object({
+  nodeId: z.string().min(1),
+  kind: z.enum(["reference", "invocation"]).optional(),
+});
+export type AgentContextReferenceInput = z.infer<typeof AgentContextReferenceInputSchema>;
+
+/** Immutable, client-safe snapshot of the context actually supplied to an agent. */
+export const AgentContextResourceVOSchema = z.object({
+  nodeId: z.string(),
+  nodeType: z.string(),
+  name: z.string(),
+  slug: z.string(),
+  icon: NodeIconSchema.nullable().optional(),
+  /** Mirrors the request's `AgentContextReferenceInput.kind`; absent means `"reference"`. */
+  kind: z.enum(["reference", "invocation"]).optional(),
+  truncated: z.boolean(),
+  uri: z.string(),
+  mimeType: z.string(),
+  text: z.string(),
+  annotations: z.object({
+    audience: z.array(z.enum(["user", "assistant"])),
+    lastModified: z.string().optional(),
+  }),
+});
+export type AgentContextResourceVO = z.infer<typeof AgentContextResourceVOSchema>;
+
 export const PromptAgentSessionInputSchema = z
   .object({
     sessionId: z.string().min(1),
@@ -275,10 +457,23 @@ export const PromptAgentSessionInputSchema = z
     // The refine below is what actually requires SOMETHING to send.
     text: z.string(),
     attachments: z.array(PromptAttachmentInputSchema).optional(),
+    presentation: AgentPromptPresentationSchema.optional(),
+    contextReferences: z.array(AgentContextReferenceInputSchema).max(10).optional(),
+    resourceContext: PromptResourceContextListSchema.optional(),
   })
-  .refine((value) => value.text.trim().length > 0 || (value.attachments?.length ?? 0) > 0, {
-    message: "A prompt needs text, an attachment, or both.",
-  });
+  .refine(
+    (value) => {
+      const hasContext =
+        (value.attachments?.length ?? 0) > 0 ||
+        (value.contextReferences?.length ?? 0) > 0 ||
+        (value.resourceContext?.length ?? 0) > 0;
+      return (
+        (value.text.trim().length > 0 || hasContext) &&
+        ((value.presentation?.text ?? value.text).trim().length > 0 || hasContext)
+      );
+    },
+    { message: "A prompt needs text, an attachment, or context." },
+  );
 export type PromptAgentSessionInput = z.infer<typeof PromptAgentSessionInputSchema>;
 
 export const AgentSessionIdInputSchema = z.object({ sessionId: z.string().min(1) });

@@ -1,9 +1,11 @@
+import type { AgentConnectionDetailVO } from "busabase-contract/domains/agents/types";
 import { and, eq } from "drizzle-orm";
 import { generateNanoID } from "openlib/nanoid";
-import { getContextActorId, getContextSpaceId } from "../../../context";
+import { getContextActorId, getContextSpaceId, resolveUserRefs } from "../../../context";
 import { getDb } from "../../../db";
 import { decodeVaultValue, encodeVaultValue } from "../../vault/logic/vault-crypto";
 import { busabaseVaultItems } from "../../vault/schema/vault-items";
+import { connectionDisplayName, listConnectionNames } from "./agent-connection-name";
 
 const LEGACY_CONNECTION_KEY = "BUDA_ACP_CONNECTION";
 const CONNECTION_KEY_PREFIX = `${LEGACY_CONNECTION_KEY}:`;
@@ -213,13 +215,19 @@ export async function listBudaConnections(
 ): Promise<BudaConnectionSummary[]> {
   const actorId = ownerId();
   const rows = await readRows(scope);
+  const names = await listConnectionNames();
   const byAgentId = new Map<string, BudaConnectionSummary>();
   for (const row of rows) {
     const connection = parseStored(decodeVaultValue(row.valuePayload));
     const summary = {
       slug: getBudaSessionSlug(connection.agentId),
       agentId: connection.agentId,
-      agentName: connection.agentName,
+      agentName: connectionDisplayName(
+        names,
+        row.userId,
+        getBudaSessionSlug(connection.agentId),
+        connection.agentName,
+      ),
       ownedByCurrentUser: row.userId === actorId,
       legacy: row.key === LEGACY_CONNECTION_KEY,
     };
@@ -233,6 +241,36 @@ export async function listBudaConnections(
     }
   }
   return [...byAgentId.values()];
+}
+
+/** Reading details never refreshes credentials or opens a provider connection. */
+export async function getBudaConnectionDetail(
+  slug: string,
+): Promise<AgentConnectionDetailVO | null> {
+  const row = await readUsableRow(slug);
+  if (!row) return null;
+  const connection = parseStored(decodeVaultValue(row.valuePayload));
+  const canonicalSlug = getBudaSessionSlug(connection.agentId);
+  // The selected row's own `userId` is the connector — never the viewer. The
+  // same row also decides `ownedByCurrentUser`, so attribution and ownership
+  // can never disagree about who holds this credential.
+  const connectedBy = (await resolveUserRefs([row.userId])).get(row.userId) ?? null;
+  return {
+    slug: canonicalSlug,
+    agentName: connectionDisplayName(
+      await listConnectionNames(),
+      row.userId,
+      canonicalSlug,
+      connection.agentName,
+    ),
+    provider: "buda",
+    providerAgentName: connection.agentName,
+    agentId: connection.agentId,
+    transport: "remote-websocket",
+    status: "saved",
+    ownedByCurrentUser: row.userId === ownerId(),
+    connectedBy,
+  };
 }
 
 export async function getBudaConnection(slug = "buda"): Promise<BudaConnection | null> {

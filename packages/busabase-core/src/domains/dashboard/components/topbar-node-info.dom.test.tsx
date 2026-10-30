@@ -2,8 +2,10 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
+import type { NodeDetailVO } from "busabase-contract/contract/node-detail-schemas";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { Router } from "wouter";
 import { CoreI18nProvider } from "../../../i18n";
 import { coreMessagesByLocale } from "../../../i18n/catalog";
 import { useRegisterTopbarNodeInfo } from "../hooks/use-register-topbar-node-info";
@@ -12,9 +14,10 @@ import { BusabaseTopbarBreadcrumb } from "./topbar";
 
 const messages = coreMessagesByLocale.en;
 
-const detail = {
+const detail: NodeDetailVO = {
   type: "doc",
   body: "",
+  storagePrefix: "busabase/nodes/nod_handbook/doc/",
   node: {
     id: "nod_handbook",
     parentId: null,
@@ -42,9 +45,25 @@ const orpc = {
         queryFn: async () => detail,
       }),
     },
+    share: {
+      get: {
+        queryOptions: () => ({
+          queryKey: ["nodes", "share", "get", detail.node.id],
+          queryFn: async () => null,
+        }),
+      },
+    },
     list: { queryOptions: () => ({ queryKey: ["nodes", "list"] }) },
     updateSettings: { mutationOptions: () => ({ mutationFn: vi.fn() }) },
     createChangeRequest: { mutationOptions: () => ({ mutationFn: vi.fn() }) },
+  },
+  activity: {
+    listForNode: {
+      queryOptions: () => ({
+        queryKey: ["activity", "listForNode", detail.node.id],
+        queryFn: async () => [],
+      }),
+    },
   },
 } as unknown as BusabaseQueryUtils;
 
@@ -77,10 +96,12 @@ function renderTopbar(children: ReactNode, label = "Handbook") {
   return render(
     <QueryClientProvider client={client}>
       <CoreI18nProvider locale="en">
-        {children}
-        <div data-testid="topbar">
-          <BusabaseTopbarBreadcrumb items={[{ href: "/home", label: "Workspace" }, { label }]} />
-        </div>
+        <Router>
+          {children}
+          <div data-testid="topbar">
+            <BusabaseTopbarBreadcrumb items={[{ href: "/home", label: "Workspace" }, { label }]} />
+          </div>
+        </Router>
       </CoreI18nProvider>
     </QueryClientProvider>,
   );
@@ -88,6 +109,7 @@ function renderTopbar(children: ReactNode, label = "Handbook") {
 
 afterEach(() => {
   cleanup();
+  delete detail.attribution;
   useTopbarNodeInfoStore.getState().setInfo(null);
 });
 
@@ -146,6 +168,17 @@ describe("topbar node info slot", () => {
     await waitFor(() => {
       expect(screen.getAllByText(messages.common.slug).length).toBeGreaterThan(0);
     });
+    expect(screen.getByText(messages.common.created)).toBeTruthy();
+    expect(screen.getByText(messages.common.updated)).toBeTruthy();
+    expect(screen.getByText(detail.node.id)).toBeTruthy();
+    expect(screen.getByText(messages.nodeDetail.workspaceRoot)).toBeTruthy();
+    expect(screen.getAllByText("2026", { exact: false }).length).toBeGreaterThan(0);
+    expect(screen.getByText(messages.nodeDetail.recentActivity)).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getByRole("dialog").textContent ?? "").toContain(
+        messages.nodeDetail.activityEmptyBody,
+      );
+    });
   });
 
   it("does not let a disabled instance claim or clear the slot", async () => {
@@ -166,6 +199,38 @@ describe("topbar node info slot", () => {
     expect(useTopbarNodeInfoStore.getState().info).toBeNull();
   });
 
+  it("shows the creator and latest editor and opens their member details", async () => {
+    detail.attribution = {
+      createdBy: "alice",
+      createdByUser: { id: "alice", name: "Alice", email: null, image: null },
+      updatedBy: "bob",
+      updatedByUser: { id: "bob", name: "Bob", email: null, image: null },
+    };
+    renderTopbar(<RegisterProbe />);
+    fireEvent.click(await screen.findByRole("button", { name: messages.nodeDetail.details }));
+
+    expect(await screen.findByText(messages.fieldTypes.created_by)).toBeTruthy();
+    expect(screen.getByText(messages.fieldTypes.updated_by)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Alice" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Bob" }));
+    expect(await screen.findByText(messages.identity.userId)).toBeTruthy();
+    expect(screen.getByText("bob")).toBeTruthy();
+  });
+
+  it("shows unknown identities without inventing a clickable member", async () => {
+    detail.attribution = {
+      createdBy: null,
+      createdByUser: null,
+      updatedBy: null,
+      updatedByUser: null,
+    };
+    renderTopbar(<RegisterProbe />);
+    fireEvent.click(await screen.findByRole("button", { name: messages.nodeDetail.details }));
+
+    await waitFor(() => expect(screen.getAllByText(messages.identity.unknownUser)).toHaveLength(2));
+    expect(screen.queryByRole("button", { name: messages.identity.unknownUser })).toBeNull();
+  });
+
   it("clears the slot when the registering view unmounts", async () => {
     const view = renderTopbar(<RegisterProbe description="Team reference" />);
     await screen.findByRole("button", { name: messages.nodeDetail.details });
@@ -184,16 +249,18 @@ describe("topbar node info slot", () => {
         client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
       >
         <CoreI18nProvider locale="en">
-          <RegisterProbe description="Team reference" name="Posts" />
-          <div data-testid="topbar">
-            <BusabaseTopbarBreadcrumb
-              items={[
-                { href: "/home", label: "Workspace" },
-                { href: "/base/blog", isNode: true, label: "Posts" },
-                { label: "Ready to publish" },
-              ]}
-            />
-          </div>
+          <Router>
+            <RegisterProbe description="Team reference" name="Posts" />
+            <div data-testid="topbar">
+              <BusabaseTopbarBreadcrumb
+                items={[
+                  { href: "/home", label: "Workspace" },
+                  { href: "/base/blog", isNode: true, label: "Posts" },
+                  { label: "Ready to publish" },
+                ]}
+              />
+            </div>
+          </Router>
         </CoreI18nProvider>
       </QueryClientProvider>,
     );
@@ -214,8 +281,10 @@ describe("topbar node info slot", () => {
     render(
       <QueryClientProvider client={new QueryClient()}>
         <CoreI18nProvider locale="en">
-          <RegisterProbe description="Team reference" />
-          <BusabaseTopbarBreadcrumb items={[{ label: "Handbook" }]} showNodeInfo={false} />
+          <Router>
+            <RegisterProbe description="Team reference" />
+            <BusabaseTopbarBreadcrumb items={[{ label: "Handbook" }]} showNodeInfo={false} />
+          </Router>
         </CoreI18nProvider>
       </QueryClientProvider>,
     );

@@ -16,6 +16,7 @@ const airAppTab = {
 describe("side panel display modes", () => {
   beforeEach(() => {
     useSidePanelStore.setState({
+      scopeKey: null,
       isOpen: false,
       layout: "split",
       width: DEFAULT_SIDE_PANEL_WIDTH,
@@ -23,6 +24,50 @@ describe("side panel display modes", () => {
       tabs: [],
     });
   });
+
+  it("keeps mounted tab state when the workspace and actor stay the same", () => {
+    const store = useSidePanelStore.getState();
+    store.setScope("space-a:user-a");
+    store.openTab(airAppTab);
+    store.setLayout("maximized");
+    const tabs = useSidePanelStore.getState().tabs;
+
+    store.setScope("space-a:user-a");
+
+    expect(useSidePanelStore.getState()).toMatchObject({
+      activeTabId: airAppTab.id,
+      layout: "maximized",
+    });
+    expect(useSidePanelStore.getState().tabs).toBe(tabs);
+  });
+
+  it.each(["space-b:user-a", "space-a:user-b"])(
+    "retires pinned content on a workspace or actor switch to %s, preserving display preferences",
+    (scopeKey) => {
+      const store = useSidePanelStore.getState();
+      store.setScope("space-a:user-a");
+      store.openTab(airAppTab);
+      store.openTab({
+        id: "agent-buda:research",
+        type: "agent-chat",
+        title: "Research",
+        payload: { agentSlug: "buda:research", sessionId: "session-a" },
+      });
+      store.setWidth(560);
+      store.setLayout("maximized");
+
+      store.setScope(scopeKey);
+
+      expect(useSidePanelStore.getState()).toMatchObject({
+        scopeKey,
+        tabs: [],
+        activeTabId: null,
+        layout: "split",
+        isOpen: true,
+        width: 560,
+      });
+    },
+  );
 
   it("opens a pinned AirApp in split mode and can maximize then restore", () => {
     const store = useSidePanelStore.getState();

@@ -68,6 +68,7 @@ import {
 import { getFileUploadFolderSegments } from "../helpers/file-upload-task";
 import { mergeSearchIntoHref } from "../helpers/link-search";
 import { asNodeDetail } from "../helpers/node-detail";
+import { useNodeLocator } from "../hooks/use-copy-locator";
 import { useNodeAgentPrompts } from "../hooks/use-node-agent-prompts";
 import { useRegisterTopbarNodeActions } from "../hooks/use-register-topbar-node-actions";
 import { useRegisterTopbarNodeInfo } from "../hooks/use-register-topbar-node-info";
@@ -105,6 +106,7 @@ import {
   FileTreeUploadControl,
 } from "./file-tree-file-actions";
 import { useOptionalFileUploadTasks } from "./file-upload-tasks";
+import { FolderReadme } from "./folder-readme";
 import { NodeActionsMenu } from "./node-actions-menu";
 import { NodeAgentPromptsButton } from "./node-agent-prompts-button";
 import { NodePinButton, nodeSidePanelTabId } from "./node-pin-button";
@@ -1537,12 +1539,15 @@ function SkillAgentPromptsTab({ node, orpc }: { node: LoadedNode; orpc: Busabase
     nodeType: "skill",
     orpc,
   });
+  const locator = useNodeLocator({ nodeId: node.id, nodeName: node.name, nodeType: "skill" });
 
   return (
     <AgentPromptsView
       askAgent={{ orpc, sessionScopeId: node.id }}
       capabilities={capabilities}
       loading={loading}
+      locator={locator}
+      recents={{ kind: "node", nodeType: "skill", scopeKind: "node" }}
       management={{
         customPrompts,
         canSave: canSaveCustomPrompts,
@@ -2118,16 +2123,24 @@ export function FolderDetailView({
     );
   }
 
+  // The readme sits above the children, not in place of them: it says how to
+  // use the folder, the list is still what is in it.
+  const hasReadme = folder.body.trim() !== "";
   return (
     <div
       className="mx-auto h-full min-h-0 w-full min-w-0 max-w-5xl overflow-auto px-6 py-5"
       data-dashboard-scroll="folder-detail"
     >
+      {hasReadme ? <FolderReadme body={folder.body} /> : null}
       {folder.children.length === 0 ? (
-        <EmptyState
-          title={messages.nodeDetail.emptyFolderTitle}
-          body={messages.nodeDetail.emptyFolderBody}
-        />
+        hasReadme ? (
+          <p className="text-muted-foreground text-sm">{messages.nodeDetail.emptyFolderBody}</p>
+        ) : (
+          <EmptyState
+            title={messages.nodeDetail.emptyFolderTitle}
+            body={messages.nodeDetail.emptyFolderBody}
+          />
+        )
       ) : (
         <>
           <p className="mb-2 font-semibold text-[11px] uppercase tracking-widest text-muted-foreground/60">

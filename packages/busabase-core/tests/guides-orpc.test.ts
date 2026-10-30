@@ -31,6 +31,10 @@ describe("guides — self-hosted", () => {
   it("does not teach targetSpaceId, which this deployment rejects", async () => {
     const guide = await selfHosted(() => client.read({ topic: "workspace" }));
     expect(guide.content).not.toContain("targetSpaceId");
+    expect(guide.content).not.toContain("--space-id");
+    expect(guide.content).not.toContain("x-busabase-space");
+    expect(guide.content).toContain("space_instructions_get");
+    expect(guide.content).toContain("no space selector is needed");
     expect(guide.content.length).toBeGreaterThan(1000);
   });
 

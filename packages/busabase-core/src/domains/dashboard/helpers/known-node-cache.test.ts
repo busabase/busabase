@@ -4,6 +4,7 @@ import {
   type KnownNode,
   mergeRecentMatches,
   partitionByVisited,
+  staleKnownNodeIds,
 } from "./known-node-cache";
 
 /**
@@ -181,5 +182,35 @@ describe("partitionByVisited", () => {
     const input = [unvisited("a"), visited("b")];
     partitionByVisited(input);
     expect(input.map((n) => n.id)).toEqual(["a", "b"]);
+  });
+});
+
+describe("forgetting deleted nodes", () => {
+  it("forget() removes cached entries, visited or not", () => {
+    const cache = freshCache();
+    cache.merge([node({ id: "a" }), node({ id: "b", slug: "b" })]);
+    cache.markVisited("a", "2026-01-01T00:00:00.000Z");
+    cache.forget(["a"]);
+    expect(cache.list().map((n) => n.id)).toEqual(["b"]);
+    expect(cache.listVisited()).toEqual([]);
+  });
+
+  it("staleKnownNodeIds flags cached name matches the server's complete answer left out", () => {
+    const cached = [
+      node({ id: "live", name: "Report live", slug: "live" }),
+      node({ id: "gone", name: "Report gone", slug: "gone" }),
+      node({ id: "other", name: "Unrelated", slug: "other" }),
+    ];
+    expect(staleKnownNodeIds(cached, [{ id: "live" }], "report", 20)).toEqual(["gone"]);
+  });
+
+  it("staleKnownNodeIds proves nothing from a truncated answer", () => {
+    const cached = [node({ id: "gone", name: "Report gone", slug: "gone" })];
+    expect(staleKnownNodeIds(cached, [{ id: "x" }, { id: "y" }], "report", 2)).toEqual([]);
+  });
+
+  it("staleKnownNodeIds never judges subsequence-only matches", () => {
+    const cached = [node({ id: "fuzzy", name: "Remote Port", slug: "rp" })];
+    expect(staleKnownNodeIds(cached, [], "rpt", 20)).toEqual([]);
   });
 });

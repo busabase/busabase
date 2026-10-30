@@ -146,6 +146,7 @@ describe("Busabase OpenAPI shared component schemas", () => {
     ]);
     expect(refNames(body("/nodes/{nodeId}/content", "put").properties?.content?.anyOf)).toEqual([
       "DocNodeContent",
+      "FolderNodeContent",
       "HtmlNodeContent",
       "WhiteboardNodeContent",
       "WorkflowNodeContent",

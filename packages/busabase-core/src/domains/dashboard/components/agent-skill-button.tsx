@@ -31,6 +31,7 @@ import {
   normalizeMcpBaseUrl,
 } from "./agent-mcp-guides";
 import { DialogContent } from "./localized-dialog-content";
+import "./agent-connect-cue.css";
 
 interface BusabaseAgentSkillButtonProps {
   /**
@@ -51,6 +52,14 @@ interface BusabaseAgentSkillButtonProps {
   targetSpaceId?: string;
   /** Host-owned plugin destinations, shared with its public navigation. */
   pluginItems?: readonly AgentIntegrationPluginItem[];
+  /**
+   * Host-supplied "this user has not connected an agent yet". Adds a small
+   * pulsing dot (static under reduced motion) and a hint tooltip, so the
+   * button stays findable once the empty-workspace card is gone.
+   */
+  attention?: boolean;
+  /** Fired when the dialog is opened from this button. */
+  onOpen?: () => void;
 }
 
 export interface AgentIntegrationPluginItem {
@@ -661,9 +670,14 @@ export function BusabaseAgentSkillButton({
   lang,
   targetSpaceId,
   pluginItems,
+  attention = false,
+  onOpen,
 }: BusabaseAgentSkillButtonProps = {}) {
   const messages = useLangMessages(lang);
   const [open, setOpen] = useState(false);
+  const label = attention
+    ? messages.integration.agentSkillsCueLabel
+    : messages.integration.agentSkills;
 
   return (
     <>
@@ -671,10 +685,27 @@ export function BusabaseAgentSkillButton({
         <SidebarMenuItem>
           <SidebarMenuButton
             className="mx-2 w-[calc(100%-1rem)]"
-            onClick={() => setOpen(true)}
-            tooltip={messages.integration.agentSkills}
+            aria-label={attention ? label : undefined}
+            onClick={() => {
+              onOpen?.();
+              setOpen(true);
+            }}
+            tooltip={label}
           >
-            <Sparkles />
+            <span className="relative inline-flex shrink-0">
+              <Sparkles className="size-4" />
+              {attention ? (
+                // Violet dot with an expanding ripple (agent-connect-cue.css);
+                // a solid dot with a card-coloured ring under reduced motion.
+                <span aria-hidden="true" className="-top-1 -right-1 absolute flex size-2.5">
+                  <span
+                    className="absolute inline-flex size-full rounded-full bg-ai"
+                    data-agent-cue="dot"
+                  />
+                  <span className="relative inline-flex size-2.5 rounded-full bg-ai ring-2 ring-sidebar" />
+                </span>
+              ) : null}
+            </span>
             <span>{messages.integration.agentSkills}</span>
           </SidebarMenuButton>
         </SidebarMenuItem>

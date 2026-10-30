@@ -214,7 +214,7 @@ export interface FileTreeChangeRequestInput extends FileTreeGetInput {
  */
 const mergeIntent = (input: FileTreeChangeRequestInput): { autoMerge?: boolean } => {
   if (input.requireReview) return { autoMerge: false };
-  if (input.autoMerge) return { autoMerge: true };
+  if (input.autoMerge !== undefined) return { autoMerge: input.autoMerge };
   return {};
 };
 

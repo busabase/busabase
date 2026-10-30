@@ -14,6 +14,10 @@ import {
   type CustomPromptDef,
   type CustomPromptIntent,
 } from "busabase-contract/contract/node-agent-prompt-schemas";
+import {
+  type AgentPromptEnvelope,
+  AgentPromptEnvelopeSchema,
+} from "busabase-contract/domains/agents/prompt-context";
 import { Button } from "kui/button";
 import { Dialog, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "kui/dialog";
 import {
@@ -28,14 +32,25 @@ import { Label } from "kui/label";
 import { Textarea } from "kui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "kui/tooltip";
 import { cn } from "kui/utils";
-import { Check, ChevronRight, Copy, MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
+import {
+  Check,
+  ChevronRight,
+  Copy,
+  MapPin,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  Trash2,
+} from "lucide-react";
 import { type iString, iStringParse } from "openlib/i18n/i-string";
 import {
+  Fragment,
   type KeyboardEvent,
   type ReactNode,
   type RefObject,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -43,6 +58,7 @@ import {
 import { fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
 import { presentCoreError } from "../../../i18n/localize-error";
 import { useAgentIntegrationTarget } from "../agent-integration-context";
+import { copyAgentPromptSnapshot } from "../helpers/agent-prompt-clipboard";
 import {
   joinPromptSegments,
   type PromptSegment,
@@ -57,6 +73,16 @@ import {
   resolveActivePrompt,
   splitBuiltInSections,
 } from "../helpers/prompt-sections";
+import { fillPromptSlots, type PromptSlot, parsePromptTemplate } from "../helpers/prompt-slots";
+import {
+  partitionRecentPrompts,
+  pushRecentPromptKey,
+  type RecentPromptsContext,
+  readRecentPromptKeys,
+  recentPromptsStorageKey,
+  writeRecentPromptKeys,
+} from "../helpers/recent-prompts";
+import { type AgentLocator, useCopyLocator } from "../hooks/use-copy-locator";
 import type { AgentIntegrationTarget } from "./agent-install-panel";
 import { AgentPromptAskAction } from "./agent-prompt-ask-action";
 import { createSetupSkillUrl } from "./agent-skill-button";
@@ -90,6 +116,147 @@ const writeBuiltInsExpanded = (expanded: boolean) => {
   } catch {
     // Storage unavailable (private mode, quota) — the toggle still works for this session.
   }
+};
+
+const EMPTY_SLOT_VALUES: Record<string, string> = {};
+
+/** Every prompt for one node/scope opens with the same target line. */
+const fixedTargetOf = (...lists: NodePrompt[][]): string | undefined =>
+  lists.flat().find((prompt) => prompt.target)?.target;
+
+/**
+ * The 📍 card above the prompt list: where the agent should work, in full, and
+ * one button that copies just that (with the connection check). What most
+ * people came for — the scenarios below are for when they want a ready task.
+ */
+function LocatorCard({ locator, onCopy }: { locator: AgentLocator; onCopy: () => void }) {
+  const messages = useCoreI18n();
+  return (
+    <div
+      className="flex shrink-0 items-start gap-2.5 rounded-md bg-muted/40 px-3 py-2"
+      data-testid="agent-prompts-locator-card"
+    >
+      <MapPin aria-hidden className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+      <div className="min-w-0 flex-1">
+        <p
+          className="line-clamp-2 break-words text-foreground text-sm leading-snug"
+          title={locator.target}
+        >
+          {locator.target}
+        </p>
+        <p className="mt-0.5 text-muted-foreground text-xs">
+          {messages.agentPrompts.locatorCardHint}
+        </p>
+      </div>
+      <Button
+        aria-label={messages.agentPrompts.copyLocator}
+        className="h-7 shrink-0 gap-1.5 px-2.5 text-xs"
+        data-testid="agent-prompts-copy-locator"
+        onClick={onCopy}
+        size="sm"
+        title={messages.agentPrompts.locatorCardTitle}
+        type="button"
+      >
+        <MapPin aria-hidden />
+        {messages.agentPrompts.copyLocator}
+      </Button>
+    </div>
+  );
+}
+
+/** Inline control for one fill-in blank in the preview. */
+function SlotControl({
+  slot,
+  value,
+  onChange,
+}: {
+  slot: PromptSlot;
+  value: string | undefined;
+  onChange: (value: string) => void;
+}) {
+  const className =
+    "mx-0.5 inline-block max-w-full rounded border border-border bg-background px-1 py-0 align-baseline font-medium text-foreground text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+  if (slot.options.length > 0) {
+    return (
+      <select
+        aria-label={slot.name}
+        className={className}
+        data-slot={slot.name}
+        onChange={(event) => onChange(event.target.value)}
+        value={value || slot.defaultValue}
+      >
+        {slot.options.map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </select>
+    );
+  }
+  return (
+    <input
+      aria-label={slot.name}
+      className={cn(className, "w-40")}
+      data-slot={slot.name}
+      onChange={(event) => onChange(event.target.value)}
+      placeholder={slot.defaultValue}
+      type="text"
+      value={value ?? ""}
+    />
+  );
+}
+
+/** A task segment with its blanks rendered as controls, in place. */
+function renderTemplateText(
+  text: string,
+  values: Record<string, string>,
+  onChange: (name: string, value: string) => void,
+): ReactNode {
+  const parts = parsePromptTemplate(text);
+  if (!parts.some((part) => part.kind === "slot")) return text;
+  return parts.map((part, index) =>
+    part.kind === "text" ? (
+      // biome-ignore lint/suspicious/noArrayIndexKey: parts are positional and never reordered
+      <Fragment key={index}>{part.text}</Fragment>
+    ) : (
+      <SlotControl
+        // biome-ignore lint/suspicious/noArrayIndexKey: parts are positional and never reordered
+        key={index}
+        onChange={(value) => onChange(part.slot.name, value)}
+        slot={part.slot}
+        value={values[part.slot.name]}
+      />
+    ),
+  );
+}
+
+/** The distinct fill-in blanks of the task segment(s). */
+const slotsOf = (segments: PromptSegment[]): PromptSlot[] => {
+  const seen = new Map<string, PromptSlot>();
+  for (const segment of segments) {
+    if (segment.kind !== "task") continue;
+    for (const part of parsePromptTemplate(segment.text)) {
+      if (part.kind === "slot" && !seen.has(part.slot.name)) seen.set(part.slot.name, part.slot);
+    }
+  }
+  return [...seen.values()];
+};
+
+/** What the folded "Included: …" line names, in the order the text has it. */
+const includedParts = (
+  segments: PromptSegment[],
+  active: NodePrompt | undefined,
+  messages: ReturnType<typeof useCoreI18n>,
+): string[] => {
+  const parts: string[] = [];
+  if (segments.some((segment) => segment.kind === "footer")) {
+    if (active?.intent !== "read-only") parts.push(messages.agentPrompts.footerPartMergePolicy);
+    parts.push(messages.agentPrompts.footerPartReplyLanguage);
+  }
+  if (segments.some((segment) => segment.kind === "connection")) {
+    parts.push(messages.agentPrompts.footerPartConnectionCheck);
+  }
+  return parts;
 };
 
 export const utf8ByteLength = (value: string): number => new TextEncoder().encode(value).length;
@@ -154,6 +321,8 @@ export function AgentPromptsView({
   onHandedOff,
   management = null,
   compact = false,
+  locator: locatorProp,
+  recents,
 }: {
   scenarios: NodePrompt[];
   capabilities: NodePrompt[];
@@ -180,6 +349,13 @@ export function AgentPromptsView({
   management?: AgentPromptsManagement | null;
   /** Use the denser dimensions of the standalone Agent prompts dialog. */
   compact?: boolean;
+  /**
+   * What the "Copy locator" card at the top copies. Defaults to the prompts'
+   * shared target line, which every prompt for one node/scope opens with.
+   */
+  locator?: AgentLocator;
+  /** Where "Recently used" is remembered. Omit to not remember anything. */
+  recents?: RecentPromptsContext;
 }) {
   const messages = useCoreI18n();
   const agentIntegrationFromContext = useAgentIntegrationTarget();
@@ -192,6 +368,27 @@ export function AgentPromptsView({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<CustomPromptDef | null>(null);
+  // Fill-in blanks, per prompt so switching back keeps what was chosen.
+  const [slotValues, setSlotValues] = useState<Record<string, Record<string, string>>>({});
+  // "Show full prompt" / "Included: …" are reading preferences, not per-prompt
+  // state: whoever opened them once wants to keep reading prompts that way.
+  const [fullPromptOpen, setFullPromptOpen] = useState(false);
+  const [footerOpen, setFooterOpen] = useState(false);
+  const recentsStorageKey = recents ? recentPromptsStorageKey(recents) : null;
+  // Read once per mount, after hydration. Writes go to storage only: a list
+  // that re-sorted itself under the cursor right after a copy would be worse
+  // than one that remembers next time.
+  const [recentKeys, setRecentKeys] = useState<string[]>([]);
+  useEffect(() => {
+    setRecentKeys(recentsStorageKey ? readRecentPromptKeys(recentsStorageKey) : []);
+  }, [recentsStorageKey]);
+  const rememberUse = (key: string) => {
+    if (!recentsStorageKey) return;
+    writeRecentPromptKeys(
+      recentsStorageKey,
+      pushRecentPromptKey(readRecentPromptKeys(recentsStorageKey), key),
+    );
+  };
   const copyAttemptRef = useRef(0);
   const copyResetTimeoutRef = useRef<number | null>(null);
   const snippetRef = useRef<HTMLDivElement>(null);
@@ -226,9 +423,29 @@ export function AgentPromptsView({
       }),
     [capabilities, management, messages, scenarios],
   );
-  const active = resolveActivePrompt(sections, selected);
+  const { recent: recentPrompts, sections: listSections } = useMemo(
+    () => partitionRecentPrompts(sections, recentKeys),
+    [sections, recentKeys],
+  );
+  const active =
+    (selected
+      ? [...recentPrompts, ...flattenPromptSections(listSections)].find(
+          (prompt) => prompt.key === selected,
+        )
+      : undefined) ??
+    recentPrompts[0] ??
+    resolveActivePrompt(listSections, selected);
 
   const agentIntegration = agentIntegrationProp ?? agentIntegrationFromContext;
+  const { copyLocator } = useCopyLocator(agentIntegrationProp);
+  const locatorTarget = locatorProp?.target ?? fixedTargetOf(scenarios, capabilities);
+  const locator: AgentLocator | undefined =
+    locatorProp ?? (locatorTarget ? { target: locatorTarget, exampleKind: "other" } : undefined);
+  const activeSlotValues = (active && slotValues[active.key]) || EMPTY_SLOT_VALUES;
+  // The body exactly as it will leave: the person's blanks filled in.
+  const activeBody = active?.bodyTemplate
+    ? fillPromptSlots(active.bodyTemplate, activeSlotValues)
+    : active?.body;
   const edition = agentIntegration?.edition;
   // A stray targetSpaceId from a host must never leak into Desktop guidance —
   // same guard `AgentInstallPanel` applies to the same field.
@@ -246,9 +463,9 @@ export function AgentPromptsView({
    */
   const segments = useMemo(
     () =>
-      active
+      active && activeBody !== undefined
         ? renderPromptSegments({
-            body: active.body,
+            body: activeBody,
             connectionCheck: messages.agentPrompts.connectionCheck,
             footer: active.footer,
             fmt,
@@ -264,9 +481,45 @@ export function AgentPromptsView({
             targetSpaceId,
           })
         : [],
-    [active, edition, messages, origin, targetSpaceId],
+    [active, activeBody, edition, messages, origin, targetSpaceId],
+  );
+  // The same split of the UNFILLED body, so the preview can render each blank
+  // as a control in place. Identical to `segments` when there are no blanks.
+  const templateSegments = useMemo(
+    () =>
+      active?.bodyTemplate
+        ? renderPromptSegments({
+            body: active.bodyTemplate,
+            connectionCheck: messages.agentPrompts.connectionCheck,
+            footer: active.footer,
+            fmt,
+            leadIn: messages.agentPrompts.connectionCheckLeadIn,
+            setupUrl:
+              edition && origin
+                ? createSetupSkillUrl(origin, edition, true, targetSpaceId)
+                : undefined,
+            target: active.target,
+            targetSpaceId,
+          })
+        : segments,
+    [active, edition, messages, origin, segments, targetSpaceId],
   );
   const dispatchText = joinPromptSegments(segments);
+  const promptEnvelope = useMemo<AgentPromptEnvelope | undefined>(() => {
+    if (!active?.nodeTarget || !origin || !edition) return undefined;
+    // Cloud tunnels forward into another edition/origin without trusted source attribution.
+    // Keep their existing full-text handoff instead of staging a context the local host rejects.
+    if (edition === "cloud" && targetSpaceId?.startsWith("tnl_")) return undefined;
+    const result = AgentPromptEnvelopeSchema.safeParse({
+      version: 1,
+      kind: "busabase-agent-prompt",
+      scenario: { id: active.key, title: active.label },
+      target: active.nodeTarget,
+      source: { origin, edition, ...(targetSpaceId ? { spaceId: targetSpaceId } : {}) },
+      segments,
+    });
+    return result.success ? result.data : undefined;
+  }, [active, origin, edition, targetSpaceId, segments]);
 
   const copy = async () => {
     if (!active) return;
@@ -279,8 +532,9 @@ export function AgentPromptsView({
     setCopied(false);
     setCopyError(false);
     try {
-      await navigator.clipboard.writeText(dispatchText);
+      await copyAgentPromptSnapshot({ text: dispatchText, envelope: promptEnvelope });
       if (copyAttemptRef.current !== attempt) return;
+      rememberUse(active.key);
       setCopied(true);
       copyResetTimeoutRef.current = window.setTimeout(() => {
         if (copyAttemptRef.current === attempt) setCopied(false);
@@ -290,14 +544,24 @@ export function AgentPromptsView({
       if (copyAttemptRef.current !== attempt) return;
       setCopied(false);
       setCopyError(true);
-      // Hand the user a ready selection to copy by hand.
-      const snippet = snippetRef.current;
-      if (snippet) {
-        snippet.focus();
-        selectPreviewText(snippet);
-      }
+      // Everything that would have been copied must be on screen to copy by
+      // hand: open the full prompt and its footer, then select it (below).
+      setFullPromptOpen(true);
+      setFooterOpen(true);
     }
   };
+
+  // Hand the user a ready selection to copy by hand once the full preview is
+  // rendered (it may have been folded behind the outcome a moment ago). A
+  // layout effect, so focus lands in the same commit that shows the error.
+  useLayoutEffect(() => {
+    if (!copyError) return;
+    const snippet = snippetRef.current;
+    if (snippet) {
+      snippet.focus();
+      selectPreviewText(snippet);
+    }
+  }, [copyError]);
 
   const beginCreate = () => {
     setEditor({ mode: "create", label: "", body: "", intent: "change" });
@@ -398,43 +662,65 @@ export function AgentPromptsView({
 
   return (
     <>
-      <PromptPanel
-        active={active}
-        askAgentSlot={
-          askAgent && canAskAgent ? (
-            <AgentPromptAskAction
-              onHandedOff={onHandedOff}
-              orpc={askAgent.orpc}
-              promptText={active ? dispatchText : undefined}
-              sessionScopeId={askAgent.sessionScopeId}
-            />
-          ) : null
-        }
-        canManage={canManage}
-        compact={compact}
-        copied={copied}
-        copyError={copyError}
-        management={management}
-        managementError={actionError}
-        onCopy={() => void copy()}
-        onCreate={beginCreate}
-        onDelete={setDeleteTarget}
-        onEdit={beginEdit}
-        onSelect={(key) => {
-          setActionError(null);
-          copyAttemptRef.current += 1;
-          if (copyResetTimeoutRef.current !== null) {
-            window.clearTimeout(copyResetTimeoutRef.current);
-            copyResetTimeoutRef.current = null;
+      <div className={cn("flex min-h-0 flex-col gap-2 sm:h-full", compact && "sm:h-auto")}>
+        {locator ? (
+          <LocatorCard locator={locator} onCopy={() => void copyLocator(locator)} />
+        ) : null}
+        <PromptPanel
+          active={active}
+          askAgentSlot={
+            askAgent && canAskAgent ? (
+              <AgentPromptAskAction
+                onHandedOff={onHandedOff}
+                onSent={() => {
+                  if (active) rememberUse(active.key);
+                }}
+                orpc={askAgent.orpc}
+                promptText={active ? dispatchText : undefined}
+                promptEnvelope={promptEnvelope}
+                sessionScopeId={askAgent.sessionScopeId}
+              />
+            ) : null
           }
-          setCopied(false);
-          setCopyError(false);
-          setSelected(key);
-        }}
-        sections={sections}
-        segments={segments}
-        snippetRef={snippetRef}
-      />
+          canManage={canManage}
+          compact={compact}
+          copied={copied}
+          copyError={copyError}
+          management={management}
+          managementError={actionError}
+          onCopy={() => void copy()}
+          onCreate={beginCreate}
+          onDelete={setDeleteTarget}
+          onEdit={beginEdit}
+          onSelect={(key) => {
+            setActionError(null);
+            copyAttemptRef.current += 1;
+            if (copyResetTimeoutRef.current !== null) {
+              window.clearTimeout(copyResetTimeoutRef.current);
+              copyResetTimeoutRef.current = null;
+            }
+            setCopied(false);
+            setCopyError(false);
+            setSelected(key);
+          }}
+          sections={listSections}
+          recentPrompts={recentPrompts}
+          segments={copyError ? segments : templateSegments}
+          slotValues={activeSlotValues}
+          onSlotChange={(name, value) => {
+            if (!active) return;
+            setSlotValues((current) => ({
+              ...current,
+              [active.key]: { ...current[active.key], [name]: value },
+            }));
+          }}
+          fullPromptOpen={fullPromptOpen}
+          onFullPromptOpenChange={setFullPromptOpen}
+          footerOpen={footerOpen}
+          onFooterOpenChange={setFooterOpen}
+          snippetRef={snippetRef}
+        />
+      </div>
 
       <CustomPromptDialog
         editor={editor}
@@ -483,6 +769,13 @@ function PromptPanel({
   onDelete,
   segments,
   snippetRef,
+  recentPrompts,
+  slotValues,
+  onSlotChange,
+  fullPromptOpen,
+  onFullPromptOpenChange,
+  footerOpen,
+  onFooterOpenChange,
 }: {
   sections: PromptSection[];
   active?: NodePrompt;
@@ -502,9 +795,18 @@ function PromptPanel({
   /** The active prompt, split the way `renderPromptSegments` assembles it. */
   segments: PromptSegment[];
   snippetRef: RefObject<HTMLDivElement | null>;
+  /** Shown first, under "Recently used"; already removed from `sections`. */
+  recentPrompts: NodePrompt[];
+  slotValues: Record<string, string>;
+  onSlotChange: (name: string, value: string) => void;
+  fullPromptOpen: boolean;
+  onFullPromptOpenChange: (open: boolean) => void;
+  footerOpen: boolean;
+  onFooterOpenChange: (open: boolean) => void;
 }) {
   const messages = useCoreI18n();
   const builtInsId = useId();
+  const fullPromptId = useId();
 
   const {
     custom: customSections,
@@ -542,8 +844,11 @@ function PromptPanel({
   // would if every button were reachable in document order. Folded built-ins
   // are not reachable, so they drop out of the order too.
   const orderedKeys = useMemo(
-    () => flattenPromptSections(visibleSections).map((prompt) => prompt.key),
-    [visibleSections],
+    () => [
+      ...recentPrompts.map((prompt) => prompt.key),
+      ...flattenPromptSections(visibleSections).map((prompt) => prompt.key),
+    ],
+    [recentPrompts, visibleSections],
   );
   const buttonRefs = useRef(new Map<string, HTMLButtonElement>());
   const activeCustom = active?.customKey
@@ -622,7 +927,7 @@ function PromptPanel({
                   if (node) buttonRefs.current.set(prompt.key, node);
                   else buttonRefs.current.delete(prompt.key);
                 }}
-                title={prompt.label}
+                title={prompt.outcome ?? prompt.label}
                 type="button"
               >
                 {prompt.label}
@@ -637,8 +942,8 @@ function PromptPanel({
   return (
     <div
       className={cn(
-        "grid min-h-0 gap-3 sm:h-full sm:grid-cols-[minmax(0,19.5rem)_minmax(0,1fr)]",
-        compact && "gap-2 sm:h-auto sm:grid-cols-[minmax(0,14rem)_minmax(0,1fr)]",
+        "grid min-h-0 gap-3 sm:flex-1 sm:grid-cols-[minmax(0,19.5rem)_minmax(0,1fr)]",
+        compact && "gap-2 sm:flex-none sm:grid-cols-[minmax(0,14rem)_minmax(0,1fr)]",
       )}
     >
       <div
@@ -647,6 +952,13 @@ function PromptPanel({
           compact && "max-h-[20vh] sm:h-80 sm:max-h-none",
         )}
       >
+        {recentPrompts.length > 0
+          ? renderSection({
+              name: messages.agentPrompts.recentlyUsed,
+              source: "built-in-scenario",
+              items: recentPrompts,
+            })
+          : null}
         {collapsible ? (
           <>
             {customSections.map(renderSection)}
@@ -741,16 +1053,67 @@ function PromptPanel({
             ) : null}
           </div>
         ) : null}
-        {/* Everything that will be copied, weighted by what a person reads:
-            the task at full size, the target line, merge/reply footer and
-            connection check turned down around it. One <p> per segment so a
-            hand-made selection keeps the paragraph breaks. */}
+        {/* Outcome first: what the person gets back, in one sentence, with
+            any fill-in blanks right under it. The prompt text itself is one
+            click away — it is what gets copied, but rarely what someone needs
+            to read to decide. Prompts without an outcome (capabilities,
+            custom prompts) show their full text directly. */}
+        {active?.outcome ? (
+          <div
+            className={cn(
+              "space-y-2 px-3 pt-3",
+              fullPromptOpen ? "pb-1" : "min-h-0 flex-1 overflow-y-auto pb-3",
+            )}
+            data-testid="agent-prompts-outcome"
+          >
+            <p className="text-foreground text-sm leading-relaxed">{active.outcome}</p>
+            {!fullPromptOpen && slotsOf(segments).length > 0 ? (
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-muted-foreground text-xs">
+                {slotsOf(segments).map((slot) => (
+                  <span className="inline-flex items-center gap-1" key={slot.name}>
+                    {slot.name}
+                    <SlotControl
+                      onChange={(value) => onSlotChange(slot.name, value)}
+                      slot={slot}
+                      value={slotValues[slot.name]}
+                    />
+                  </span>
+                ))}
+              </div>
+            ) : null}
+            <button
+              aria-controls={fullPromptId}
+              aria-expanded={fullPromptOpen}
+              className="inline-flex items-center gap-1 rounded text-muted-foreground text-xs hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              data-testid="agent-prompts-full-prompt-toggle"
+              onClick={() => onFullPromptOpenChange(!fullPromptOpen)}
+              type="button"
+            >
+              <ChevronRight
+                aria-hidden
+                className={cn("size-3.5 transition-transform", fullPromptOpen && "rotate-90")}
+              />
+              {fullPromptOpen
+                ? messages.agentPrompts.hideFullPrompt
+                : messages.agentPrompts.showFullPrompt}
+            </button>
+          </div>
+        ) : null}
+        {/* Everything that will be copied: the target line and the task at
+            reading weight; merge/reply policy and the
+            connection check folded into one "Included: …" line. One <p> per
+            segment, folded or not, so a hand-made selection keeps the
+            paragraph breaks and the DOM always holds the full text. */}
         <div
           aria-label={active?.label}
           aria-multiline="true"
           aria-readonly="true"
-          className="min-h-[18vh] w-full flex-1 space-y-3 overflow-y-auto p-3 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset sm:min-h-0"
+          className={cn(
+            "min-h-[18vh] w-full flex-1 space-y-3 overflow-y-auto p-3 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset sm:min-h-0",
+            active?.outcome && !fullPromptOpen && "hidden",
+          )}
           data-testid="agent-prompts-preview"
+          id={fullPromptId}
           ref={snippetRef}
           // A div's Ctrl/Cmd+A selects the whole page; keep it inside the prompt.
           onKeyDown={(event) => {
@@ -762,21 +1125,63 @@ function PromptPanel({
           role="textbox"
           tabIndex={0}
         >
-          {segments.map((segment, index) => (
-            <p
-              className={cn(
-                "whitespace-pre-wrap break-words",
-                segment.kind === "task"
-                  ? "text-foreground text-sm leading-relaxed"
-                  : "text-muted-foreground text-xs leading-relaxed",
-                segment.kind === "connection" && "border-t border-dashed pt-3",
-              )}
-              data-segment={segment.kind}
-              key={`${segment.kind}-${index}`}
+          {/* Not rendered while folded behind the outcome: the outcome row
+              already carries the blanks, and one control per blank is enough. */}
+          {active?.outcome && !fullPromptOpen
+            ? null
+            : segments
+                .filter((segment) => segment.kind === "target" || segment.kind === "task")
+                .map((segment, index) => (
+                  <p
+                    className={cn(
+                      "whitespace-pre-wrap break-words",
+                      segment.kind === "task"
+                        ? "text-foreground text-sm leading-relaxed"
+                        : "text-muted-foreground text-xs leading-relaxed",
+                    )}
+                    data-segment={segment.kind}
+                    key={`${segment.kind}-${index}`}
+                  >
+                    {segment.kind === "task"
+                      ? renderTemplateText(segment.text, slotValues, onSlotChange)
+                      : segment.text}
+                  </p>
+                ))}
+          {(!active?.outcome || fullPromptOpen) &&
+          segments.some((segment) => segment.kind === "footer" || segment.kind === "connection") ? (
+            <details
+              className="group/included"
+              data-testid="agent-prompts-included"
+              onToggle={(event) => onFooterOpenChange(event.currentTarget.open)}
+              open={footerOpen}
             >
-              {segment.text}
-            </p>
-          ))}
+              <summary className="flex cursor-pointer list-none select-none items-center gap-1 text-muted-foreground text-xs hover:text-foreground [&::-webkit-details-marker]:hidden">
+                <ChevronRight
+                  aria-hidden
+                  className="size-3.5 shrink-0 transition-transform group-open/included:rotate-90"
+                />
+                {fmt(messages.agentPrompts.footerIncluded, {
+                  parts: includedParts(segments, active, messages).join(" · "),
+                })}
+              </summary>
+              <div className="mt-2 space-y-3">
+                {segments
+                  .filter((segment) => segment.kind === "footer" || segment.kind === "connection")
+                  .map((segment, index) => (
+                    <p
+                      className={cn(
+                        "whitespace-pre-wrap break-words text-muted-foreground text-xs leading-relaxed",
+                        segment.kind === "connection" && "border-t border-dashed pt-3",
+                      )}
+                      data-segment={segment.kind}
+                      key={`${segment.kind}-${index}`}
+                    >
+                      {segment.text}
+                    </p>
+                  ))}
+              </div>
+            </details>
+          ) : null}
         </div>
         <div
           className="flex min-w-0 items-start justify-end gap-2 border-t bg-card/60 p-2"

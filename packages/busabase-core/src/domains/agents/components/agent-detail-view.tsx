@@ -1,12 +1,29 @@
 "use client";
 
-import type { AcpAttachment, AcpBlock } from "@acp-ui/core/reduce";
-import { AcpComposer, type AcpComposerDraft } from "@acp-ui/web/composer";
+import { AGENT_PROMPT_CONTEXT_TEXT_FALLBACK_NOTE } from "@acp-ui/core/prompt";
+import type { AcpAttachment, AcpBlock, AcpResourceContext } from "@acp-ui/core/reduce";
+import {
+  AcpComposer,
+  type AcpComposerDraft,
+  AcpContextChip,
+  type AcpWorkspaceSkill,
+} from "@acp-ui/web/composer";
 import { AcpSessionMeta } from "@acp-ui/web/session-meta";
-import { AcpConversation } from "@acp-ui/web/transcript";
+import {
+  AcpConversation,
+  AcpNoteView,
+  type AcpNoteViewProps,
+  AcpPermissionView,
+  type AcpPermissionViewProps,
+} from "@acp-ui/web/transcript";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { hasApiKeyLevel } from "busabase-contract/access-control/api-key-level";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
+import {
+  AGENT_PROMPT_CLIPBOARD_MIME,
+  decodeAgentPromptClipboard,
+  PromptResourceContextListSchema,
+} from "busabase-contract/domains/agents/prompt-context";
 import type { AgentSessionVO } from "busabase-contract/domains/agents/types";
 import { Message, MessageContent } from "kui/ai-elements/message";
 import { Button } from "kui/button";
@@ -19,7 +36,6 @@ import {
 } from "kui/dropdown-menu";
 import {
   ArrowLeft,
-  AtSign,
   Bot,
   Check,
   ChevronDown,
@@ -28,11 +44,14 @@ import {
   MoreHorizontal,
   PanelRight,
   PowerOff,
-  X,
+  Wand2,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { type CoreI18nMessages, fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
+import { agentAvailabilityCopy } from "../../../i18n/agent-availability-copy";
+import { agentFidelityLabels } from "../../../i18n/agent-fidelity-copy";
+import { agentPromptContextCopy } from "../../../i18n/agent-prompt-context-copy";
 import { presentCoreError } from "../../../i18n/localize-error";
 import { useAgentIntegrationTarget } from "../../dashboard/agent-integration-context";
 import { ConfirmActionDialog } from "../../dashboard/components/primitives";
@@ -44,6 +63,7 @@ import {
 } from "../../dashboard/components/side-panel-sources";
 import { useWorkspacePermissionLevel } from "../../dashboard/components/split-submit-button";
 import { formatDetailTime, formatFullTime } from "../../dashboard/helpers/format";
+import { NodeAvatar } from "../../dashboard/helpers/node-icons";
 import type { LoadedNode } from "../../dashboard/node-detail-registry";
 import { registerSidePanelTab, type SidePanelTabProps } from "../../dashboard/side-panel-registry";
 import { useCurrentNodeStore } from "../../dashboard/store/current-node-store";
@@ -56,15 +76,23 @@ import {
   toAgentModelCatalogTombstone,
   useAgentModelListStore,
 } from "../store/agent-model-list-store";
-import { withNodeContext } from "../utils/agent-message-context";
+import { getAgentConnectionAvailability } from "../utils/agent-connection-state";
 import { sendOrContinueAgentPrompt } from "../utils/agent-session-continuation";
 import { shouldRenderAgentMessage } from "../utils/agent-visible-message";
+import {
+  applyModelConfigSelection,
+  type ModelConfigSelection,
+} from "../utils/model-config-selection";
 import {
   getPromptActivityState,
   isComposerDisabled,
   isModelSelectorDisabled,
 } from "../utils/prompt-activity";
+import { renderAgentAttachment } from "./agent-attachment-preview";
+import { AgentConnectionStatus } from "./agent-connection-status";
+import { BusabaseAgentMessageView } from "./agent-context-resource-card";
 import { AgentLoadingState, AgentQueryErrorState } from "./agent-query-state";
+import { AgentSessionInformation } from "./agent-session-information";
 import { ModelSelectorRow } from "./model-selector-row";
 import { TransportBadge } from "./transport-badge";
 
@@ -113,6 +141,7 @@ const AGENT_SESSION_PAGE_SIZE = 20;
 interface PendingTurnState {
   operationId: number;
   previousUserBlockIds: string[];
+  targetSessionId?: string;
 }
 
 const hasAgentProgressAfterLatestUserMessage = (blocks: readonly AcpBlock[]): boolean => {
@@ -229,11 +258,8 @@ interface AgentDetailViewProps {
    * The node the user is looking at in the main area, offered as removable
    * context above the composer.
    *
-   * Only the side-panel instance passes this, and deliberately so: "the node
-   * you have open" is a fact that exists when a node is on the left and the
-   * agent is on the right. On the full agent page there is no such node — the
-   * agent IS what the user is looking at — so a chip there could only ever
-   * offer a stale one.
+   * Side panels pass the current main-area node. The full page passes the
+   * explicit source captured when entering the Agent area from a node page.
    */
   contextNode?: LoadedNode | null;
   /**
@@ -272,6 +298,28 @@ function AgentDetailViewContent({
   onOpenInSidePanel,
 }: AgentDetailViewProps) {
   const queryClient = useQueryClient();
+  const messages = useCoreI18n();
+  const locale = useCoreLocale();
+  const availabilityCopy = agentAvailabilityCopy(locale);
+  const promptContextCopy = agentPromptContextCopy(locale);
+  const agentIntegration = useAgentIntegrationTarget();
+  const stagedResourceContexts = useRef<AcpResourceContext[]>([]);
+  const handleResourceContextChange = useCallback((contexts: AcpResourceContext[]) => {
+    stagedResourceContexts.current = contexts;
+  }, []);
+  const NoteView = useCallback(
+    (props: AcpNoteViewProps) => (
+      <AcpNoteView
+        {...props}
+        block={
+          props.block.text === AGENT_PROMPT_CONTEXT_TEXT_FALLBACK_NOTE
+            ? { ...props.block, text: promptContextCopy.fallback }
+            : props.block
+        }
+      />
+    ),
+    [promptContextCopy.fallback],
+  );
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(
     initialSessionId ?? null,
   );
@@ -340,7 +388,7 @@ function AgentDetailViewContent({
     refetchInterval: 4000,
   });
   const connections = useQuery({
-    ...orpc.agents.connections.list.queryOptions({ input: { scope: "mine" } }),
+    ...orpc.agents.connections.list.queryOptions({ input: { scope: "space" } }),
     refetchInterval: 4000,
   });
 
@@ -421,6 +469,33 @@ function AgentDetailViewContent({
     return agentSessions[0]?.id ?? null;
   }, [selectedSessionId, agentSessions]);
   const active = agentSessions.find((s) => s.id === activeSessionId) ?? null;
+  const availability = getAgentConnectionAvailability({
+    slug: agentSlug,
+    transport: active?.transport ?? agentSessions[0]?.transport,
+    connections: connections.data,
+    pending: connections.isPending,
+    error: connections.isError,
+  });
+  const availabilityRef = useRef(availability);
+  availabilityRef.current = availability;
+  const assertConnectionAvailable = useCallback(() => {
+    if (!availabilityRef.current.canChat) {
+      const copy = agentAvailabilityCopy(locale);
+      throw new Error(copy[availabilityRef.current.state]);
+    }
+  }, [locale]);
+  const PermissionView = useCallback(
+    (props: AcpPermissionViewProps) => (
+      <fieldset
+        aria-label={props.block.title}
+        className="min-w-0 border-0 p-0"
+        disabled={!availability.canChat}
+      >
+        <AcpPermissionView {...props} />
+      </fieldset>
+    ),
+    [availability.canChat],
+  );
 
   // SSR and the first client render both see an empty, stable snapshot
   // (`skipHydration: true`); this is what reads the real one in afterward.
@@ -582,8 +657,17 @@ function AgentDetailViewContent({
     },
   });
 
+  // Automatic continuation must retain the original composer until acceptance.
+  // A rejected snapshot read therefore keeps the user's text and files intact.
+  const continueSession = useMutation(orpc.agents.sessions.create.mutationOptions());
+
   const setConfigOption = useMutation({
     ...orpc.agents.sessions.setConfigOption.mutationOptions(),
+    mutationFn: (input: ModelConfigSelection) =>
+      applyModelConfigSelection(
+        (request) => orpc.agents.sessions.setConfigOption.call(request),
+        input,
+      ),
     onSuccess: (session: AgentSessionVO) => {
       if (!mounted.current) return;
       // Bridge the response into the rendered list immediately for the same
@@ -597,6 +681,10 @@ function AgentDetailViewContent({
       bridgeQueryTime.current = sessions.dataUpdatedAt;
       setSessionBridge(session);
       handleMetadataRefresh({ sessionId: session.id, seq: 0 });
+      void refreshSessionLists();
+    },
+    onError: () => {
+      // A model may already be confirmed when its dependent level is rejected.
       void refreshSessionLists();
     },
   });
@@ -614,14 +702,13 @@ function AgentDetailViewContent({
   const turnOperationCounter = useRef(0);
   const activePendingTurn = activeSessionId ? pendingTurns[activeSessionId] : undefined;
   const continuing = activePendingTurn !== undefined;
+  const visibleSessionId = useRef(activeSessionId);
+  visibleSessionId.current = activeSessionId;
   const continuationError = activeSessionId ? (continuationErrors[activeSessionId] ?? null) : null;
 
   // Transcript, prompting and permission answering are all `@acp-ui/core`, the
   // same interaction core acprouter drives — only the transport below it is
   // busabase's own.
-  const messages = useCoreI18n();
-  const locale = useCoreLocale();
-  const targetSpaceId = useAgentIntegrationTarget()?.targetSpaceId;
   const handleStatusUpdate = useCallback((update: AgentSessionStatusUpdate) => {
     // Reject a replayed-but-stale status: the subscription resumes from
     // `afterSeq` on every reconnect, so a seq at or below the last one
@@ -637,6 +724,16 @@ function AgentDetailViewContent({
     sessionListOptions.queryKey,
     handleStatusUpdate,
     handleMetadataRefresh,
+  );
+  // Transport downgrade feedback must remain visible after the process section collapses.
+  const transcriptBlocks = useMemo(
+    () =>
+      chat.blocks.map((block) =>
+        block.kind === "note" && block.text === AGENT_PROMPT_CONTEXT_TEXT_FALLBACK_NOTE
+          ? { ...block, turnId: undefined, stepId: undefined }
+          : block,
+      ),
+    [chat.blocks],
   );
   // A status notification only ever concerns the session the subscription is
   // currently open on. Switching sessions must not let the previous one's
@@ -692,17 +789,80 @@ function AgentDetailViewContent({
     });
   }, [active?.status, activeSessionId]);
 
-  /**
-   * The node whose context the user has waved off, by id.
-   *
-   * Keyed by id rather than a boolean so dismissing is scoped to THAT node:
-   * navigate to a different one and the chip comes back, because the answer to
-   * "did you mean this node?" changed. Nothing about "no, not the Visits table"
-   * implies "and never any node again".
-   */
-  const [dismissedContextId, setDismissedContextId] = useState<string | null>(null);
+  // Dismissing a reference belongs to this conversation, never another one.
+  const [dismissedContexts, setDismissedContexts] = useState<Record<string, string[]>>({});
+  const contextSessionKey = activeSessionId ?? "new";
   const activeContextNode =
-    contextNode && contextNode.id !== dismissedContextId ? contextNode : null;
+    contextNode && !dismissedContexts[contextSessionKey]?.includes(contextNode.id)
+      ? contextNode
+      : null;
+  const dismissContext = () => {
+    if (!activeContextNode) return;
+    setDismissedContexts((previous) => ({
+      ...previous,
+      [contextSessionKey]: [...(previous[contextSessionKey] ?? []), activeContextNode.id],
+    }));
+  };
+  const restoreContext = () => {
+    if (!contextNode) return;
+    setDismissedContexts((previous) => ({
+      ...previous,
+      [contextSessionKey]: (previous[contextSessionKey] ?? []).filter(
+        (id) => id !== contextNode.id,
+      ),
+    }));
+  };
+
+  /**
+   * Workspace Skills, offered in the composer's "/" palette alongside whatever
+   * commands the connected agent advertises. A flat `nodes.list` query, same
+   * precedent as `AppsListView`'s AirApp launcher — no sidebar tree walk, no
+   * per-node file hydration (that only happens lazily, per pick, at send time,
+   * via the existing `contextReferences` → `resolveAgentContextResources`
+   * pipeline `AgentContextChip` already uses for a single page reference).
+   */
+  const workspaceSkillsQuery = useQuery(
+    orpc.nodes.list.queryOptions({ input: { types: ["skill"] } }),
+  );
+  const workspaceSkills: AcpWorkspaceSkill[] = useMemo(
+    () =>
+      (workspaceSkillsQuery.data ?? []).map((node) => ({
+        nodeId: node.id,
+        name: node.name,
+        description: node.description ?? "",
+      })),
+    [workspaceSkillsQuery.data],
+  );
+
+  // Skills picked from the palette, same per-conversation keying as
+  // `dismissedContexts` — a skill added while drafting a reply to session A
+  // must not leak into session B when the user switches the rail selection.
+  const [addedSkillsBySession, setAddedSkillsBySession] = useState<
+    Record<string, AcpWorkspaceSkill[]>
+  >({});
+  const addedSkills = addedSkillsBySession[contextSessionKey] ?? [];
+  // `AgentContextReferenceInputSchema` caps a prompt at 10 references total;
+  // one slot is reserved for `activeContextNode`'s own automatic page
+  // reference, which this count doesn't otherwise see.
+  const MAX_ADDED_SKILLS = 9;
+  const addWorkspaceSkill = (skill: AcpWorkspaceSkill) => {
+    setAddedSkillsBySession((previous) => {
+      const existing = previous[contextSessionKey] ?? [];
+      if (existing.some((added) => added.nodeId === skill.nodeId)) return previous;
+      if (existing.length >= MAX_ADDED_SKILLS) return previous;
+      return { ...previous, [contextSessionKey]: [...existing, skill] };
+    });
+  };
+  const removeWorkspaceSkill = (nodeId: string) => {
+    setAddedSkillsBySession((previous) => {
+      const existing = previous[contextSessionKey];
+      if (!existing) return previous;
+      return {
+        ...previous,
+        [contextSessionKey]: existing.filter((added) => added.nodeId !== nodeId),
+      };
+    });
+  };
 
   const [endConfirmOpen, setEndConfirmOpen] = useState(false);
 
@@ -764,13 +924,37 @@ function AgentDetailViewContent({
     hasApiKeyLevel(permissionLevel, "write");
 
   const send = useCallback(
-    (text: string, attachments?: AcpAttachment[]) => {
+    (text: string, attachments?: AcpAttachment[], resources?: AcpResourceContext[]) => {
       if (!active) return;
-      // The chip is a promise made in the UI ("your message will say which node
-      // you mean"), so it is kept here, at send time, rather than by pre-filling
-      // the textbox — which would make the user delete the line to opt out and
-      // leave them editing our words instead of writing their own.
-      const body = withNodeContext(text, activeContextNode, locale, targetSpaceId);
+      try {
+        assertConnectionAvailable();
+        if (resources?.length) PromptResourceContextListSchema.parse(resources);
+      } catch (error) {
+        setContinuationErrors((previous) => ({
+          ...previous,
+          [active.id]: presentCoreError(
+            messages,
+            locale,
+            error,
+            messages.agents.continueConversationFailed,
+          ),
+        }));
+        return Promise.reject(error);
+      }
+      const resourceContext = resources?.length
+        ? PromptResourceContextListSchema.parse(resources)
+        : undefined;
+      // Prompt snapshots are additional context. Preserve the current page
+      // unless the user dismissed it, alongside explicit skill invocations.
+      // Deduplicate node references within the existing ten-reference limit.
+      const references = [
+        ...(activeContextNode ? [{ nodeId: activeContextNode.id }] : []),
+        ...addedSkills.map((skill) => ({ nodeId: skill.nodeId, kind: "invocation" as const })),
+      ];
+      const contextReferences = [
+        ...new Map(references.map((reference) => [reference.nodeId, reference])).values(),
+      ];
+      let createdSession: AgentSessionVO | null = null;
       const operationId = ++turnOperationCounter.current;
       let operationSessionId = active.id;
       const operationSessionIds = new Set([operationSessionId]);
@@ -784,17 +968,38 @@ function AgentDetailViewContent({
         ...previous,
         [operationSessionId]: { operationId, previousUserBlockIds: currentUserBlockIds },
       }));
-      void sendOrContinueAgentPrompt(
+      return sendOrContinueAgentPrompt(
         {
-          createSession: async (slug) => createSession.mutateAsync({ slug }),
-          sendPrompt: async (sessionId, promptText, promptAttachments) => {
+          createSession: async (slug) => {
+            assertConnectionAvailable();
+            createdSession = await continueSession.mutateAsync({ slug });
+            return createdSession;
+          },
+          sendPrompt: async (
+            sessionId,
+            promptText,
+            promptAttachments,
+            _presentation,
+            promptReferences,
+            promptResourceContext,
+          ) => {
+            assertConnectionAvailable();
             const result = await orpc.agents.sessions.prompt.call({
               sessionId,
               text: promptText,
               ...(promptAttachments && promptAttachments.length > 0
                 ? { attachments: [...promptAttachments] }
                 : {}),
+              ...(promptReferences?.length ? { contextReferences: [...promptReferences] } : {}),
+              ...(promptResourceContext?.length
+                ? { resourceContext: [...promptResourceContext] }
+                : {}),
             });
+            if (result.accepted && createdSession) {
+              bridgeQueryTime.current = sessions.dataUpdatedAt;
+              setSessionBridge(createdSession);
+              if (visibleSessionId.current === active.id) setSelectedSessionId(sessionId);
+            }
             return result.accepted
               ? { accepted: true }
               : {
@@ -804,12 +1009,16 @@ function AgentDetailViewContent({
                 };
           },
           onSessionCreated: async (sessionId) => {
-            const previousSessionId = operationSessionId;
             operationSessionId = sessionId;
             operationSessionIds.add(sessionId);
             setPendingTurns((previous) => {
               return {
                 ...previous,
+                ...(previous[active.id]?.operationId === operationId
+                  ? {
+                      [active.id]: { ...previous[active.id], targetSessionId: sessionId },
+                    }
+                  : {}),
                 [sessionId]: { operationId, previousUserBlockIds: [] },
               };
             });
@@ -819,22 +1028,29 @@ function AgentDetailViewContent({
               delete next[sessionId];
               return next;
             });
-            setSelectedSessionId(sessionId);
-            await refreshSessionLists();
-            setPendingTurns((previous) => {
-              if (previous[previousSessionId]?.operationId !== operationId) return previous;
-              const next = { ...previous };
-              delete next[previousSessionId];
-              return next;
-            });
           },
         },
         { sessionId: active.id, status: active.status },
         agentSlug,
-        body,
+        text,
         attachments,
+        undefined,
+        contextReferences,
+        resourceContext,
       )
-        .then(refreshSessionLists)
+        .then(() => {
+          void refreshSessionLists().catch(() => undefined);
+          // Mirrors a one-shot slash command: once delivered, picking the same
+          // Skill again for the next turn is a deliberate new choice, not an
+          // accidental resend. A failed send leaves it in place so retrying
+          // doesn't require re-picking it from the palette.
+          if (addedSkills.length > 0) {
+            setAddedSkillsBySession((previous) => {
+              if (!previous[contextSessionKey]?.length) return previous;
+              return { ...previous, [contextSessionKey]: [] };
+            });
+          }
+        })
         .catch((error: unknown) => {
           const message = presentCoreError(
             messages,
@@ -844,8 +1060,9 @@ function AgentDetailViewContent({
           );
           setContinuationErrors((previous) => ({
             ...previous,
-            [operationSessionId]: message,
+            [active.id]: message,
           }));
+          throw error;
         })
         .finally(() => {
           setPendingTurns((previous) => {
@@ -863,23 +1080,38 @@ function AgentDetailViewContent({
     [
       active,
       activeContextNode,
+      addedSkills,
+      assertConnectionAvailable,
       agentSlug,
-      createSession,
+      contextSessionKey,
+      continueSession,
       currentUserBlockIds,
       locale,
       messages,
       orpc,
       refreshSessionLists,
-      targetSpaceId,
+      sessions.dataUpdatedAt,
     ],
   );
 
-  const agentName = active?.agentName ?? agentSessions[0]?.agentName ?? agentSlug;
-  const transport = active?.transport ?? agentSessions[0]?.transport ?? "local-subprocess";
-  const remoteNeedsReconnect =
-    transport === "remote-websocket" &&
-    connections.data !== undefined &&
-    !connections.data.some((connection) => connection.slug === agentSlug && connection.connected);
+  const agentName =
+    connections.data?.find((connection) => connection.slug === agentSlug)?.agentName ??
+    active?.agentName ??
+    agentSessions[0]?.agentName ??
+    agentSlug;
+  const transport = availability.transport;
+  const startSession = () => {
+    if (availabilityRef.current.canChat) createSession.mutate({ slug: agentSlug });
+  };
+  const unavailableHint = {
+    saved: availabilityCopy.savedHint,
+    local: "",
+    disconnected: availabilityCopy.disconnectedHint,
+    activating: availabilityCopy.activatingHint,
+    disconnecting: availabilityCopy.disconnectingHint,
+    checking: availabilityCopy.checkingHint,
+    unknown: availabilityCopy.unknownHint,
+  }[availability.state];
 
   /**
    * Shown while no confirmed `modelOption` exists yet (startup, or before any
@@ -891,7 +1123,10 @@ function AgentDetailViewContent({
    */
   const cachedModelPreview = useMemo(
     () =>
-      active?.modelOption || !cachedCatalog || cachedCatalog.configId === null
+      active?.modelOption ||
+      active?.thinkingOption ||
+      !cachedCatalog ||
+      cachedCatalog.configId === null
         ? null
         : {
             id: cachedCatalog.configId,
@@ -906,7 +1141,7 @@ function AgentDetailViewContent({
             currentValue: "",
             options: cachedCatalog.options,
           },
-    [active?.modelOption, cachedCatalog],
+    [active?.modelOption, active?.thinkingOption, cachedCatalog],
   );
   const displayModelOption = active?.modelOption ?? cachedModelPreview;
 
@@ -962,8 +1197,8 @@ function AgentDetailViewContent({
               variant="outline"
               size="sm"
               className="mt-3 min-w-0 shrink-0"
-              disabled={createSession.isPending || remoteNeedsReconnect}
-              onClick={() => createSession.mutate({ slug: agentSlug })}
+              disabled={createSession.isPending || !availability.canChat}
+              onClick={startSession}
             >
               <MessageSquarePlus className="size-4" />
               <span className="truncate">{messages.agents.newSession}</span>
@@ -1025,6 +1260,25 @@ function AgentDetailViewContent({
         )}
 
         <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+          {!availability.canChat ? (
+            <div className="shrink-0 border-b bg-muted/40 px-4 py-3" role="status">
+              <AgentConnectionStatus state={availability.state} />
+              <p className="mt-1 max-w-prose text-muted-foreground text-xs leading-5">
+                {unavailableHint}
+              </p>
+              {availability.state === "unknown" ? (
+                <Button
+                  className="mt-2 min-h-9"
+                  disabled={connections.isFetching}
+                  onClick={() => void connections.refetch()}
+                  size="sm"
+                  variant="outline"
+                >
+                  {availabilityCopy.retry}
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
           {active ? (
             <>
               <header className="flex min-w-0 items-center gap-2 border-b px-4 py-3">
@@ -1056,8 +1310,8 @@ function AgentDetailViewContent({
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       className="min-h-11"
-                      disabled={createSession.isPending || remoteNeedsReconnect}
-                      onSelect={() => createSession.mutate({ slug: agentSlug })}
+                      disabled={createSession.isPending || !availability.canChat}
+                      onSelect={startSession}
                     >
                       <MessageSquarePlus className="size-4" />
                       {messages.agents.newSession}
@@ -1148,6 +1402,9 @@ function AgentDetailViewContent({
                     usage={chat.usage}
                   />
                 </div>
+                {active.transport === "remote-websocket" ? (
+                  <AgentSessionInformation orpc={orpc} sessionId={active.id} />
+                ) : null}
                 {/* Session-scoped actions, at the width where the agent menu
                   above is hidden — the two must never offer the same action
                   twice. `@2xl` is the same breakpoint the rail appears at. */}
@@ -1180,11 +1437,11 @@ function AgentDetailViewContent({
                 ) : null}
                 {onOpenInSidePanel ? (
                   <Button
-                    aria-label={messages.agents.openInSidePanel}
+                    aria-label={availabilityCopy.sidePanel}
                     className="size-11 shrink-0 text-muted-foreground"
                     onClick={() => onOpenInSidePanel(active.id, agentName)}
                     size="icon-sm"
-                    title={messages.agents.openInSidePanel}
+                    title={availabilityCopy.sidePanel}
                     type="button"
                     variant="ghost"
                   >
@@ -1217,7 +1474,16 @@ function AgentDetailViewContent({
               ) : null}
 
               <AcpConversation
+                onAnswerInput={availability.canChat ? chat.answerInput : undefined}
+                resolveResource={async (resource) => {
+                  if (!activeSessionId) throw new Error("Select a conversation first.");
+                  return orpc.agents.sessions.resolveResource.call({
+                    sessionId: activeSessionId,
+                    resource,
+                  });
+                }}
                 labels={{
+                  ...agentFidelityLabels(locale),
                   permissionAnswered: messages.agents.permissionAnswered,
                   permissionTimeout: (count) => fmt(messages.agents.permissionTimeout, { count }),
                   permissionTimingOut: messages.agents.permissionTimingOut,
@@ -1264,7 +1530,12 @@ function AgentDetailViewContent({
                       fmt(messages.agents.reasoningDuration, { count: seconds }),
                   },
                 }}
-                blocks={chat.blocks}
+                slots={{
+                  Message: BusabaseAgentMessageView,
+                  Permission: PermissionView,
+                  Note: NoteView,
+                }}
+                blocks={transcriptBlocks}
                 className="min-h-0 min-w-0 flex-1"
                 streaming={promptActivity.active}
                 activity={
@@ -1272,12 +1543,54 @@ function AgentDetailViewContent({
                     <AgentActivityIndicator label={activityLabel} />
                   ) : undefined
                 }
-                onAnswerPermission={chat.answerPermission}
-                emptyTitle={messages.agents.conversationConnectedTitle}
+                onAnswerPermission={(block, optionId) => {
+                  if (availabilityRef.current.canChat) void chat.answerPermission(block, optionId);
+                }}
+                emptyTitle={
+                  active.status === "failed"
+                    ? messages.agents.statusFailed
+                    : active.status === "ended"
+                      ? messages.agents.statusEnded
+                      : messages.agents.conversationConnectedTitle
+                }
                 emptyDescription={messages.agents.conversationConnectedBody}
               />
 
               <AcpComposer
+                key={active.id}
+                renderAttachment={renderAgentAttachment}
+                hasAdditionalContent={activeContextNode !== null || addedSkills.length > 0}
+                onResourceContextChange={handleResourceContextChange}
+                validateResourceContext={(contexts) =>
+                  PromptResourceContextListSchema.safeParse(contexts).success
+                }
+                decodePaste={(clipboardData) => {
+                  if (!agentIntegration?.edition) return undefined;
+                  if (
+                    agentIntegration.edition === "cloud" &&
+                    agentIntegration.targetSpaceId?.startsWith("tnl_")
+                  )
+                    return undefined;
+                  const context = decodeAgentPromptClipboard(
+                    clipboardData.getData(AGENT_PROMPT_CLIPBOARD_MIME),
+                    clipboardData.getData("text/plain"),
+                    {
+                      origin: window.location.origin,
+                      edition: agentIntegration.edition,
+                      ...(agentIntegration.edition === "cloud"
+                        ? { spaceId: agentIntegration.targetSpaceId }
+                        : {}),
+                    },
+                    crypto.randomUUID(),
+                  );
+                  return context &&
+                    PromptResourceContextListSchema.safeParse([
+                      ...stagedResourceContexts.current,
+                      context,
+                    ]).success
+                    ? [context]
+                    : undefined;
+                }}
                 labels={{
                   attachFile: messages.agents.attachFile,
                   removeAttachment: messages.agents.removeAttachment,
@@ -1286,28 +1599,58 @@ function AgentDetailViewContent({
                   fileTooLarge: (limit) => fmt(messages.agents.fileTooLarge, { limit }),
                   tooManyFiles: (count) => fmt(messages.agents.tooManyFiles, { count }),
                   attachmentFailed: messages.agents.attachmentFailed,
+                  addMenuTitle: messages.agents.addMenuTitle,
+                  uploadFilesMenuItem: messages.agents.uploadFilesMenuItem,
+                  chooseSkillMenuItem: messages.agents.chooseSkillMenuItem,
+                  inspectContext: promptContextCopy.inspect,
+                  removeContext: messages.agents.contextChipRemove,
+                  contextContent: messages.agents.contextSnapshot,
                 }}
+                addContextAction={
+                  contextNode
+                    ? {
+                        label: messages.agents.contextRestore,
+                        added: activeContextNode !== null,
+                        onSelect: restoreContext,
+                      }
+                    : undefined
+                }
                 className="min-w-0 shrink-0 p-3"
                 draft={draft}
                 onDraftApplied={onDraftApplied}
-                disabled={isComposerDisabled(
-                  active.status,
-                  promptActivity.active,
-                  setConfigOption.isPending,
-                )}
+                disabled={
+                  !availability.canChat ||
+                  isComposerDisabled(
+                    active.status,
+                    promptActivity.active,
+                    setConfigOption.isPending,
+                  )
+                }
                 headerControls={
-                  activeContextNode ? (
-                    <AgentContextChip
-                      node={activeContextNode}
-                      onDismiss={() => setDismissedContextId(activeContextNode.id)}
-                    />
+                  activeContextNode || addedSkills.length > 0 ? (
+                    <>
+                      {activeContextNode ? (
+                        <AgentContextChip node={activeContextNode} onDismiss={dismissContext} />
+                      ) : null}
+                      {addedSkills.map((skill) => (
+                        <WorkspaceSkillChip
+                          key={skill.nodeId}
+                          onDismiss={() => removeWorkspaceSkill(skill.nodeId)}
+                          skill={skill}
+                        />
+                      ))}
+                    </>
                   ) : undefined
                 }
                 footerControls={
-                  displayModelOption ? (
+                  displayModelOption || active.thinkingOption ? (
                     <ModelSelectorRow
+                      key={active.id}
                       modelOption={displayModelOption}
+                      thinkingOption={active.thinkingOption}
+                      thinkingLabel={messages.agents.thinkingLevel}
                       disabled={
+                        !availability.canChat ||
                         !active ||
                         isModelSelectorDisabled(
                           active.status,
@@ -1325,10 +1668,22 @@ function AgentDetailViewContent({
                             )
                           : undefined
                       }
-                      onChange={(value) =>
+                      onChange={(value, thinkingValue) =>
+                        availabilityRef.current.canChat &&
+                        displayModelOption &&
                         setConfigOption.mutate({
                           sessionId: active.id,
                           configId: displayModelOption.id,
+                          value,
+                          ...(thinkingValue !== undefined ? { thinkingValue } : {}),
+                        })
+                      }
+                      onThinkingChange={(value) =>
+                        availabilityRef.current.canChat &&
+                        active.thinkingOption &&
+                        setConfigOption.mutate({
+                          sessionId: active.id,
+                          configId: active.thinkingOption.id,
                           value,
                         })
                       }
@@ -1337,16 +1692,37 @@ function AgentDetailViewContent({
                 }
                 onSend={send}
                 placeholder={
-                  active.status === "waiting_permission"
-                    ? messages.agents.composerWaitingPlaceholder
-                    : fmt(messages.agents.composerDefaultPlaceholder, { name: agentName })
+                  !availability.canChat
+                    ? availabilityCopy[availability.state]
+                    : active.status === "waiting_permission"
+                      ? messages.agents.composerWaitingPlaceholder
+                      : fmt(messages.agents.composerDefaultPlaceholder, { name: agentName })
                 }
                 // Available through `starting` too: the backend can cancel a
                 // prompt waiting for ACP readiness without ending the durable
                 // conversation, so every active composer state has a real Stop.
-                onStop={chat.cancel}
+                onStop={
+                  activePendingTurn?.targetSessionId
+                    ? () => {
+                        void orpc.agents.sessions.cancel
+                          .call({ sessionId: activePendingTurn.targetSessionId as string })
+                          .catch((error: unknown) => {
+                            toast.error(
+                              presentCoreError(
+                                messages,
+                                locale,
+                                error,
+                                messages.agents.continueConversationFailed,
+                              ),
+                            );
+                          });
+                      }
+                    : chat.cancel
+                }
                 sending={promptActivity.active}
                 availableCommands={chat.availableCommands}
+                onWorkspaceSkillSelected={addWorkspaceSkill}
+                workspaceSkills={workspaceSkills}
               />
             </>
           ) : (
@@ -1359,8 +1735,8 @@ function AgentDetailViewContent({
                 </p>
                 <Button
                   className="mt-3"
-                  disabled={createSession.isPending}
-                  onClick={() => createSession.mutate({ slug: agentSlug })}
+                  disabled={createSession.isPending || !availability.canChat}
+                  onClick={startSession}
                 >
                   <MessageSquarePlus className="size-4" />
                   {messages.agents.newSession}
@@ -1404,9 +1780,8 @@ function AgentDetailViewContent({
  *
  * Rendered as the shared composer's `headerControls`, inside the same bordered
  * `InputGroup` as the textarea — the composer is shared with acprouter
- * (`@acp-ui/web`), which has no notion of a workspace node, so the chip itself
- * stays here rather than in the shared component, which stays as dumb as its
- * README promises.
+ * (`@acp-ui/web`), which has no notion of a workspace node, so the node content
+ * stays here while `AcpContextChip` supplies the shared chip and removal control.
  *
  * Removable, and says what it does before it does it — the alternative (silently
  * appending a line to what someone wrote) is the kind of helpfulness people
@@ -1415,33 +1790,55 @@ function AgentDetailViewContent({
 function AgentContextChip({ node, onDismiss }: { node: LoadedNode; onDismiss: () => void }) {
   const messages = useCoreI18n();
   return (
-    // No border/padding of its own — `PromptInputHeader`'s addon already
-    // draws the composer's one bordered surface and its own spacing, so a
-    // second divider here would recreate the double-divider this chip moved
-    // inside the composer to avoid.
-    // The hint is the row's `title`, keeping the compact chip focused on the
-    // node name while the tooltip explains what including it will do.
-    // `aria-label` carries the same hint to screen readers and touch, which
-    // never see a `title` tooltip.
     <div
       aria-label={messages.agents.contextChipHint}
-      className="flex w-full min-w-0 items-center gap-2 text-xs"
+      className="inline-flex min-w-0 max-w-full items-center text-xs"
       role="group"
       title={messages.agents.contextChipHint}
     >
-      <span className="flex min-w-0 items-center gap-1 rounded-md border bg-muted/50 px-2 py-0.5">
-        <AtSign className="size-3 shrink-0 text-muted-foreground" />
-        <span className="min-w-0 truncate font-medium">{node.name}</span>
-        <button
-          aria-label={messages.agents.contextChipRemove}
-          className="-my-2 -mr-2 ml-0.5 inline-flex size-11 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-          onClick={onDismiss}
-          title={messages.agents.contextChipRemove}
-          type="button"
-        >
-          <X className="size-3" />
-        </button>
-      </span>
+      <AcpContextChip
+        onRemove={onDismiss}
+        removeLabel={messages.agents.contextChipRemove}
+        title={node.name}
+      >
+        <span className="flex size-4 shrink-0 items-center justify-center overflow-hidden">
+          <NodeAvatar node={node} />
+        </span>
+        <span className="min-w-0 max-w-40 truncate font-medium">{node.name}</span>
+      </AcpContextChip>
+    </div>
+  );
+}
+
+/**
+ * A Skill picked from the composer's "/" palette, shown the same way as
+ * `AgentContextChip` so the user sees — and can undo — everything about to be
+ * sent beyond their own typed text. Distinct wording and icon: this one tells
+ * the agent to follow the Skill, not merely to treat it as reading material.
+ */
+function WorkspaceSkillChip({
+  skill,
+  onDismiss,
+}: {
+  skill: AcpWorkspaceSkill;
+  onDismiss: () => void;
+}) {
+  const messages = useCoreI18n();
+  return (
+    <div
+      aria-label={messages.agents.skillChipHint}
+      className="inline-flex min-w-0 max-w-full items-center text-xs"
+      role="group"
+      title={messages.agents.skillChipHint}
+    >
+      <AcpContextChip
+        onRemove={onDismiss}
+        removeLabel={messages.agents.skillChipRemove}
+        title={skill.name}
+      >
+        <Wand2 className="size-3.5 shrink-0 text-muted-foreground" />
+        <span className="min-w-0 max-w-40 truncate font-medium">{skill.name}</span>
+      </AcpContextChip>
     </div>
   );
 }
@@ -1456,8 +1853,11 @@ function AgentContextChip({ node, onDismiss }: { node: LoadedNode; onDismiss: ()
  */
 function AgentChatSidePanelTab({ orpc, payload }: SidePanelTabProps) {
   const { agentSlug, sessionId, draft } = payload as AgentChatTabPayload;
-  // Only the panel reads this: it is the instance that sits beside an open node.
-  const contextNode = useCurrentNodeStore((state) => state.node);
+  const scope = useAgentModelScope();
+  const contextScope = JSON.stringify([scope.workspaceKey, scope.actorId]);
+  const contextNode = useCurrentNodeStore((state) =>
+    state.scopeKey === contextScope ? state.node : null,
+  );
   const onDraftApplied = useCallback(
     (id: string) => consumeAgentChatDraft(agentSlug, id),
     [agentSlug],

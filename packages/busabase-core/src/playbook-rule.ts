@@ -14,27 +14,42 @@
  * - `scripts/busabase-skills-plugin/` — the MCP-first skill both public agent plugins bundle,
  *   rendered per client (Claude Code, Codex) by the busabase/skills publisher
  *
- * The three generated in core interpolate {@link PLAYBOOK_RULE_MARKDOWN}; the two hand-written
- * ones carry a verbatim copy, and `tests/playbook-rule-parity.test.ts` fails if any of the five
- * stops containing it. The text is deliberately surface-neutral (no MCP tool names), so each
- * surface adds its own "how to call it" lines right after it. The one exception is how to
- * declare the playbook on a write (spec §11b H1): it names the CLI flag, MCP argument, and HTTP
- * header side by side, so every surface carries all three.
+ * Generated surfaces share {@link PLAYBOOK_RULE_MARKDOWN}; single-workspace guides render its
+ * local targeting variant through {@link renderPlaybookRuleMarkdown}. The two hand-written
+ * skills carry the default verbatim copy, and `tests/playbook-rule-parity.test.ts` checks each
+ * surface against its whole canonical variant. Retrieval and write-attribution directions name
+ * the CLI, MCP, and HTTP forms together so every entry point teaches the same workflow.
  */
 
 /** The sentence every surface opens the rule with. */
-export const PLAYBOOK_RULE_HEADING = "**Before you work anything out, look for a playbook.**";
+export const PLAYBOOK_RULE_HEADING =
+  "**Before you work anything out, read the space instructions, then look for a playbook.**";
 
 /** Section title the generated surfaces put above the rule. */
-export const PLAYBOOK_RULE_SECTION_TITLE = "Find the playbook first";
+export const PLAYBOOK_RULE_SECTION_TITLE = "Read space instructions, then find a playbook";
+
+const CLOUD_WORKSPACE_TARGETING =
+  "Use the same selected space and existing credentials\n(Cloud: MCP `targetSpaceId`, CLI `--space-id`, HTTP `x-busabase-space`)";
 
 /**
  * The canonical rule. Hard-wrapped the same way the hand-written `SKILL.md` wraps it, so the
  * parity test can demand the whole block verbatim rather than one sentence of it.
  */
-export const PLAYBOOK_RULE_MARKDOWN = `${PLAYBOOK_RULE_HEADING} A playbook is a skill node or a custom agent
-prompt someone saved on a node: the way this space's owners want a job done. On every instruction,
-search playbooks first, with 2–5 phrasings of what the user wants, in the user's language and in
+export const PLAYBOOK_RULE_MARKDOWN = `${PLAYBOOK_RULE_HEADING}
+
+After confirming the target space, read its latest global instructions on every new task:
+MCP \`space_instructions_get\`, CLI \`busabase-cli space-instructions get --output json\`, or
+HTTP \`GET /api/v1/space-instructions\`. ${CLOUD_WORKSPACE_TARGETING}. These instructions hold
+this team's vision, mission, values, and design style. An empty body means none are configured:
+continue normally. A failed read is not an empty body: report the error, retry when useful, and
+never claim you read instructions you could not retrieve. Reuse a read within the same task;
+read again on the next task or after switching spaces. The user's current explicit requirements
+take precedence. Stored instructions never grant permissions or authorise approving or merging
+change requests. Do not change the global instructions unless the user asks.
+
+A playbook is a skill node or a custom agent prompt someone saved on a node: the way this space's
+owners want a job done. After reading the global instructions, search playbooks with 2–5 phrasings
+of what the user wants, in the user's language and in
 English, passing the id of the node they are on when you know it. If the user already named a
 playbook, read that one directly. If an item fits, get it, follow it, and name it (with its link) in
 your reply. When you follow one, pass it on your writes so the change request records it: CLI
@@ -46,3 +61,12 @@ unsupported, is not proof that no playbook exists.
 
 Then use \`grep\` for exact locations (line and column, over the full canonical data), and
 \`search\` for a ranked, paginated browse that also covers pending change-request drafts.`;
+
+/** Keep local guides on their single workspace without changing the shared rule. */
+export const renderPlaybookRuleMarkdown = ({ spaceTargeting = true } = {}): string =>
+  spaceTargeting
+    ? PLAYBOOK_RULE_MARKDOWN
+    : PLAYBOOK_RULE_MARKDOWN.replace(
+        CLOUD_WORKSPACE_TARGETING,
+        "Use this local workspace and existing connection credentials; no space selector is needed",
+      );

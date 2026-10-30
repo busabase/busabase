@@ -1,3 +1,4 @@
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "kui/dialog";
 import type { LucideIcon } from "lucide-react";
 import {
   ArrowLeft,
@@ -9,8 +10,8 @@ import {
   X,
 } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
-import type { ReactNode } from "react";
-import { useId } from "react";
+import type { ReactNode, RefObject } from "react";
+import { useRef } from "react";
 import { useCoreI18n } from "../../../i18n";
 import { changeRequestStatusLabel, statusTone } from "../helpers/change-request";
 import { useHrefWithCurrentSearch } from "../helpers/link-search";
@@ -130,6 +131,7 @@ export function ConfirmActionDialog({
   onConfirm,
   open,
   pending,
+  returnFocusRef,
   title,
 }: {
   body: string;
@@ -139,36 +141,49 @@ export function ConfirmActionDialog({
   onConfirm: () => void;
   open: boolean;
   pending?: boolean;
+  returnFocusRef?: RefObject<HTMLElement | null>;
   title: string;
 }) {
   const messages = useCoreI18n();
-  const titleId = useId();
-
-  if (!open) {
-    return null;
-  }
+  const cancelButtonRef = useRef<HTMLButtonElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/70 px-4 backdrop-blur-sm">
-      {/* This is a modal, so it says so. Without the role it is an anonymous
-          <div> to a screen reader — and to any test trying to assert that a
-          destructive action asked first, which is exactly what a confirm
-          dialog exists to prove. */}
-      <section
-        aria-labelledby={titleId}
-        aria-modal="true"
-        className="w-full max-w-sm rounded-lg border bg-card p-4 shadow-xl"
-        role="dialog"
+    <Dialog
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen && !pending) onCancel();
+      }}
+      open={open}
+    >
+      <DialogContent
+        className="max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-sm gap-0 overflow-y-auto rounded-lg bg-card p-4"
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          const target = returnFocusRef?.current ?? previousFocusRef.current;
+          if (target?.isConnected) target.focus();
+        }}
+        onEscapeKeyDown={(event) => {
+          if (pending) event.preventDefault();
+        }}
+        onInteractOutside={(event) => event.preventDefault()}
+        onOpenAutoFocus={(event) => {
+          event.preventDefault();
+          previousFocusRef.current =
+            document.activeElement instanceof HTMLElement ? document.activeElement : null;
+          cancelButtonRef.current?.focus();
+        }}
+        showCloseButton={false}
       >
-        <div className="font-semibold text-base" id={titleId}>
-          {title}
-        </div>
-        <p className="mt-2 text-muted-foreground text-sm leading-6">{body}</p>
+        <DialogTitle className="font-semibold text-base leading-normal">{title}</DialogTitle>
+        <DialogDescription className="mt-2 text-muted-foreground text-sm leading-6">
+          {body}
+        </DialogDescription>
         <div className="mt-4 flex justify-end gap-2">
           <button
             className="rounded-md border border-border/70 bg-card px-3 py-1.5 font-medium text-sm transition-colors hover:bg-accent"
             disabled={pending}
             onClick={onCancel}
+            ref={cancelButtonRef}
             type="button"
           >
             {messages.common.cancel}
@@ -186,8 +201,8 @@ export function ConfirmActionDialog({
             {pending ? messages.common.working : confirmLabel}
           </button>
         </div>
-      </section>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

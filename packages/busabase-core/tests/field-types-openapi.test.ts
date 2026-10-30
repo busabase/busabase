@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { OpenAPIHandler } from "@orpc/openapi/fetch";
+import { storage } from "openlib/storage";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { busabaseRouter } from "../src/router";
 
@@ -37,14 +38,23 @@ const ATTACHMENT_OPTS = {
   maxFileSize: 10 * 1024 * 1024,
 };
 
-/** A synthetic inline attachment ref — `attachmentId` is a loose text ref (not an
- *  FK), so the merge's ensureAsset registers it without a real upload. */
-const attachmentRef = (over: Record<string, unknown> = {}) => ({
+/** Legacy inline refs use confirmed attachment ids, populated over REST below. */
+const ATTACH_PNG = {
   id: "att_seed_png",
   url: "https://cdn.example.com/x.png",
   fileName: "x.png",
   mimeType: "image/png",
   size: 142_336,
+};
+const ATTACH_MD = {
+  id: "att_seed_md",
+  url: "https://cdn.example.com/notes.md",
+  fileName: "notes.md",
+  mimeType: "text/markdown",
+  size: 4_096,
+};
+const attachmentRef = (over: Record<string, unknown> = {}) => ({
+  ...ATTACH_PNG,
   ...over,
 });
 
@@ -95,7 +105,8 @@ describe("Base field types — OpenAPI (/api/v1) route round-trip", () => {
     });
     const merged = await ok("POST", "/change-requests/merge", { changeRequestIds: [cr.id] });
     const mergeResult = merged.results[0];
-    if (!mergeResult?.ok || !mergeResult.record?.id) throw new Error("expected a merged record");
+    if (!mergeResult?.ok) throw new Error(mergeResult?.error ?? "Merge returned no result");
+    if (!mergeResult.record?.id) throw new Error("expected a merged record");
     return mergeResult.record.id;
   };
 
@@ -122,15 +133,7 @@ describe("Base field types — OpenAPI (/api/v1) route round-trip", () => {
     f_select: "Open",
     f_multiselect: ["alpha", "beta"],
     f_relation: [relatedRecordId],
-    f_attachment: [
-      attachmentRef(),
-      attachmentRef({
-        id: "att_seed_md",
-        fileName: "notes.md",
-        mimeType: "text/markdown",
-        size: 4_096,
-      }),
-    ],
+    f_attachment: [attachmentRef(), attachmentRef(ATTACH_MD)],
     f_ai_summary: "a summary",
     f_ai_tags: ["x", "y"],
   });
@@ -165,6 +168,18 @@ describe("Base field types — OpenAPI (/api/v1) route round-trip", () => {
     });
     const relMergeResult = relMerged.results[0];
     relatedRecordId = relMergeResult?.ok ? (relMergeResult.record?.id ?? "") : "";
+
+    for (const ref of [ATTACH_PNG, ATTACH_MD]) {
+      const input = { fileName: ref.fileName, mimeType: ref.mimeType, sizeBytes: ref.size };
+      const upload = await ok("POST", "/assets/upload-urls", input);
+      await storage.uploadFileToKey(Buffer.alloc(ref.size), upload.storageKey, ref.mimeType);
+      const confirmed = await ok("POST", "/assets/confirmations", {
+        ...input,
+        storageKey: upload.storageKey,
+      });
+      ref.id = confirmed.attachmentId;
+      ref.url = upload.publicUrl;
+    }
 
     const base = await ok("POST", "/bases", {
       slug: "ftapi-everything",

@@ -182,6 +182,9 @@ export const normalizeViewConfig = (config: ViewPO["config"] | ViewConfigVO): Vi
   filterConjunction: (config as ViewConfigVO).filterConjunction,
   sorts: (config.sorts ?? []) as ViewSortVO[],
   visibleFieldSlugs: config.visibleFieldSlugs,
+  fieldOrderSlugs: (config as ViewConfigVO).fieldOrderSlugs,
+  hiddenFieldSlugs: (config as ViewConfigVO).hiddenFieldSlugs,
+  autoShowNewFields: (config as ViewConfigVO).autoShowNewFields,
   fieldWidths: normalizeFieldWidths((config as ViewConfigVO).fieldWidths),
   // Per-view-type presentation config — passed through untouched for the types
   // that don't use a given field (a table ignores coverFieldSlug, etc.).

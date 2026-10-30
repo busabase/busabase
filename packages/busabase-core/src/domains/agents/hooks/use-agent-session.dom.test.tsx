@@ -17,13 +17,22 @@ const transport = vi.hoisted(() => ({
   streams: [] as {
     onEvent: (event: AgentSessionEventVO) => void;
     onError: () => void;
+    onFinish: () => void;
     unsubscribe: ReturnType<typeof vi.fn>;
   }[],
 }));
 vi.mock("@orpc/client", () => ({
   consumeEventIterator: vi.fn((_iterator, callbacks) => {
     const unsubscribe = vi.fn();
-    transport.streams.push({ ...callbacks, unsubscribe });
+    transport.streams.push({
+      ...callbacks,
+      onError: () => {
+        callbacks.onError?.();
+        callbacks.onFinish?.({ isSuccess: false });
+      },
+      onFinish: () => callbacks.onFinish?.({ isSuccess: true }),
+      unsubscribe,
+    });
     return unsubscribe;
   }),
 }));
@@ -181,6 +190,24 @@ describe("useAgentSession readiness metadata", () => {
     await waitFor(() => expect(h.result.current.flat?.[0].modelOption).toBeNull());
     await waitFor(() => expect(h.result.current.pages?.pages[0].items[0].modelOption).toBeNull());
     expect(h.result.current.flat?.[1].modelOption).toEqual(model);
+  });
+
+  it("resumes a normally finished owner stream but stops retrying a terminal session", async () => {
+    const h = mount();
+    await connected();
+    emit("idle", 7);
+    vi.useFakeTimers();
+    act(() => transport.streams[0].onFinish());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+    expect(h.subscribe.mock.calls[1][0]).toEqual({ sessionId: "a", afterSeq: 7 });
+    emit("failed", 8);
+    act(() => transport.streams[1].onFinish());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(6000);
+    });
+    expect(transport.streams).toHaveLength(2);
   });
 
   it("refreshes on replay, retains its single refresh across reconnect, and resumes afterSeq", async () => {

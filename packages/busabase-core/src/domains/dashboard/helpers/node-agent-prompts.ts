@@ -33,6 +33,7 @@ import { iStringParse } from "openlib/i18n/i-string";
 import type { CoreLocale } from "../../../i18n";
 import type { CoreI18nMessages } from "../../../i18n/messages";
 import { operationLabelKeys } from "./change-request";
+import { fillPromptSlots, hasPromptSlots } from "./prompt-slots";
 
 export type PromptTier = "scenario" | "capability";
 export type NodePromptSource = "built-in-scenario" | "custom-scenario" | "capability";
@@ -88,6 +89,8 @@ export interface NodePromptContext {
 }
 
 export interface NodePrompt {
+  /** Structured existing-node target; create flows without a node keep ordinary text handoff. */
+  nodeTarget?: { nodeId: string; nodeName: string; nodeType: string };
   /** Stable key — used for list selection and as the copy-state key. */
   key: string;
   tier: PromptTier;
@@ -107,6 +110,20 @@ export interface NodePrompt {
    */
   target?: string;
   footer?: string;
+  /**
+   * One short sentence saying what the person gets back — shown instead of the
+   * prompt text, which sits behind "Show full prompt". Built-in scenarios only;
+   * capabilities and custom prompts have none and show their label alone.
+   */
+  outcome?: string;
+  /** `read-only` prompts carry no merge-policy sentence in their footer. */
+  intent?: "read-only" | "change";
+  /**
+   * `body` before its fill-in blanks were resolved, present only when it has
+   * any (see `prompt-slots.ts`). `body` itself always carries the defaults, so
+   * every reader that ignores this field still gets clean, slot-free text.
+   */
+  bodyTemplate?: string;
 }
 
 // ── Shared framing ────────────────────────────────────────────────────────────
@@ -562,7 +579,10 @@ interface PromptDef {
   /** Defaults to `change` so a new prompt cannot silently bypass approval. */
   intent?: "read-only" | "change";
   label: Record<CoreLocale, string>;
+  /** May declare fill-in blanks with `{{slot:…}}` (see `prompt-slots.ts`). */
   body: Record<CoreLocale, (target: string) => string>;
+  /** "What you'll get", one short sentence — see `NodePrompt.outcome`. */
+  outcome?: Record<CoreLocale, string>;
 }
 
 const BASE_SCENARIOS: PromptDef[] = [
@@ -580,6 +600,18 @@ const BASE_SCENARIOS: PromptDef[] = [
       vi: "Tìm các bản ghi tôi cần",
       fr: "Trouver les enregistrements que je veux",
       de: "Die gewünschten Datensätze finden",
+    },
+    outcome: {
+      en: "A list of the matching records, plus how the agent filtered them.",
+      "zh-CN": "列出符合条件的记录，并说明是怎么筛的。",
+      "zh-TW": "列出符合條件的記錄，並說明是怎麼篩的。",
+      ja: "条件に合うレコードの一覧と、その絞り込み方の説明。",
+      ko: "조건에 맞는 레코드 목록과 어떻게 필터링했는지에 대한 설명.",
+      es: "Una lista de los registros que coinciden y cómo se filtraron.",
+      pt: "Uma lista dos registros que batem, e como foram filtrados.",
+      vi: "Danh sách các bản ghi phù hợp, kèm cách Agent đã lọc chúng.",
+      fr: "La liste des enregistrements correspondants, et comment ils ont été filtrés.",
+      de: "Eine Liste der passenden Datensätze und wie gefiltert wurde.",
     },
     body: {
       en: (t) =>
@@ -618,6 +650,18 @@ const BASE_SCENARIOS: PromptDef[] = [
       fr: "Ajouter des enregistrements en masse",
       de: "Datensätze in großer Zahl hinzufügen",
     },
+    outcome: {
+      en: "Your data added as records, with likely duplicates checked with you first.",
+      "zh-CN": "你的数据录入成记录，疑似重复的会先问过你。",
+      "zh-TW": "你的資料錄入成記錄，疑似重複的會先問過你。",
+      ja: "データがレコードとして追加され、重複らしきものは先に確認されます。",
+      ko: "데이터가 레코드로 추가되고, 중복으로 보이는 것은 먼저 확인받습니다.",
+      es: "Tus datos añadidos como registros; los posibles duplicados se consultan antes.",
+      pt: "Seus dados adicionados como registros; possíveis duplicados são confirmados antes.",
+      vi: "Dữ liệu của bạn được thêm thành bản ghi; bản trùng nghi ngờ sẽ được hỏi trước.",
+      fr: "Vos données ajoutées en enregistrements, les doublons probables vous étant soumis d'abord.",
+      de: "Ihre Daten als Datensätze, mögliche Duplikate werden vorher mit Ihnen geklärt.",
+    },
     body: {
       en: (t) =>
         `${t}\n\nI want to bulk-add records. Read the field schema first, then map what I give you onto those fields. Flag anything that looks like a duplicate of an existing record and ask me before writing it.`,
@@ -655,6 +699,18 @@ const BASE_SCENARIOS: PromptDef[] = [
       fr: "Concevoir le schéma pour moi",
       de: "Das Schema für mich entwerfen",
     },
+    outcome: {
+      en: "A proposed set of fields to approve before anything is created.",
+      "zh-CN": "一份字段设计方案，你确认后才会创建。",
+      "zh-TW": "一份欄位設計方案，你確認後才會建立。",
+      ja: "フィールド構成の提案。承認するまで何も作成されません。",
+      ko: "필드 구성 제안. 승인하기 전에는 아무것도 만들지 않습니다.",
+      es: "Una propuesta de campos que apruebas antes de que se cree nada.",
+      pt: "Uma proposta de campos para você aprovar antes de criar qualquer coisa.",
+      vi: "Một đề xuất các trường để bạn duyệt trước khi tạo bất cứ thứ gì.",
+      fr: "Une proposition de champs à approuver avant toute création.",
+      de: "Ein Vorschlag für die Felder, den Sie freigeben, bevor etwas angelegt wird.",
+    },
     body: {
       en: (t) =>
         `${t}\n\nI'll describe what I need to track. Propose a field schema for it — field names, types, and why each one — and show me the proposal before creating or changing any field.`,
@@ -691,6 +747,18 @@ const BASE_SCENARIOS: PromptDef[] = [
       vi: "Tìm và dọn bản ghi trùng lặp",
       fr: "Trouver et nettoyer les doublons",
       de: "Duplikate finden und bereinigen",
+    },
+    outcome: {
+      en: "The duplicate groups found, and a merge plan nothing happens to until you pick.",
+      "zh-CN": "找出的重复组和合并方案，你选定前不会改动。",
+      "zh-TW": "找出的重複組和合併方案，你選定前不會改動。",
+      ja: "見つかった重複グループと統合案。選ぶまで何も変更されません。",
+      ko: "찾아낸 중복 묶음과 병합 계획. 고르기 전에는 아무것도 바뀌지 않습니다.",
+      es: "Los grupos de duplicados y un plan de fusión; nada cambia hasta que elijas.",
+      pt: "Os grupos de duplicados e um plano de mesclagem; nada muda até você escolher.",
+      vi: "Các nhóm trùng lặp và phương án gộp; không gì thay đổi cho đến khi bạn chọn.",
+      fr: "Les groupes de doublons et un plan de fusion ; rien ne change avant votre choix.",
+      de: "Die gefundenen Duplikate und ein Zusammenführungsplan; nichts ändert sich vor Ihrer Wahl.",
     },
     body: {
       en: (t) =>
@@ -730,27 +798,39 @@ const BASE_SCENARIOS: PromptDef[] = [
       fr: "Résumer et faire un rapport",
       de: "Zusammenfassen und Bericht erstellen",
     },
+    outcome: {
+      en: "A summary at the length you pick: key numbers, patterns and anything odd.",
+      "zh-CN": "按你选的篇幅出一份汇总：关键数字、规律和异常。",
+      "zh-TW": "按你選的篇幅出一份彙總：關鍵數字、規律和異常。",
+      ja: "選んだ長さの要約：主要な数字、傾向、気になる点。",
+      ko: "원하는 길이의 요약: 핵심 수치, 패턴, 이상한 부분.",
+      es: "Un resumen con la extensión que elijas: cifras clave, patrones y rarezas.",
+      pt: "Um resumo no tamanho que você escolher: números-chave, padrões e o que destoa.",
+      vi: "Bản tổng hợp theo độ dài bạn chọn: số liệu chính, xu hướng và điểm bất thường.",
+      fr: "Une synthèse à la longueur choisie : chiffres clés, tendances et anomalies.",
+      de: "Eine Zusammenfassung in der gewählten Länge: Kennzahlen, Muster, Auffälliges.",
+    },
     body: {
       en: (t) =>
-        `${t}\n\nRead the records and give me a summary: the key numbers, notable patterns, and anything that looks off. This is read-only — don't modify the data.`,
+        `${t}\n\nRead the records and give me a summary: the key numbers, notable patterns, and anything that looks off. Length: {{slot:Length|a few bullet points|a few bullet points,one short paragraph,a detailed report}}. This is read-only — don't modify the data.`,
       "zh-CN": (t) =>
-        `${t}\n\n请阅读记录并给我一份总结：关键数字、值得注意的规律、以及看起来不对劲的地方。这是只读任务——不要修改数据。`,
+        `${t}\n\n请阅读记录并给我一份总结：关键数字、值得注意的规律、以及看起来不对劲的地方。篇幅：{{slot:篇幅|几个要点|几个要点,一小段话,一份详细报告}}。这是只读任务——不要修改数据。`,
       "zh-TW": (t) =>
-        `${t}\n\n請閱讀記錄並給我一份總結：關鍵數字、值得注意的規律、以及看起來不對勁的地方。這是唯讀任務——不要修改資料。`,
+        `${t}\n\n請閱讀記錄並給我一份總結：關鍵數字、值得注意的規律、以及看起來不對勁的地方。篇幅：{{slot:篇幅|幾個重點|幾個重點,一小段話,一份詳細報告}}。這是唯讀任務——不要修改資料。`,
       ja: (t) =>
-        `${t}\n\nレコードを読んで要約してください：主要な数値、目立つ傾向、そして違和感のある点。これは読み取り専用です——データを変更しないでください。`,
+        `${t}\n\nレコードを読んで要約してください：主要な数値、目立つ傾向、そして違和感のある点。分量：{{slot:分量|箇条書き数点|箇条書き数点,短い段落ひとつ,詳しいレポート}}。これは読み取り専用です——データを変更しないでください。`,
       ko: (t) =>
-        `${t}\n\n레코드를 읽고 요약해 주세요. 핵심 수치, 눈에 띄는 패턴, 이상해 보이는 점을 알려 주세요. 읽기 전용 작업이므로 데이터를 수정하지 마세요.`,
+        `${t}\n\n레코드를 읽고 요약해 주세요. 핵심 수치, 눈에 띄는 패턴, 이상해 보이는 점을 알려 주세요. 분량: {{slot:분량|요점 몇 개|요점 몇 개,짧은 한 단락,자세한 보고서}}. 읽기 전용 작업이므로 데이터를 수정하지 마세요.`,
       es: (t) =>
-        `${t}\n\nLee los registros y hazme un resumen: las cifras clave, los patrones destacables y cualquier cosa que parezca rara. Es solo lectura: no modifiques los datos.`,
+        `${t}\n\nLee los registros y hazme un resumen: las cifras clave, los patrones destacables y cualquier cosa que parezca rara. Extensión: {{slot:Extensión|unos pocos puntos|unos pocos puntos,un párrafo corto,un informe detallado}}. Es solo lectura: no modifiques los datos.`,
       pt: (t) =>
-        `${t}\n\nLeia os registros e me dê um resumo: os números principais, padrões relevantes e qualquer coisa que pareça estranha. É somente leitura — não modifique os dados.`,
+        `${t}\n\nLeia os registros e me dê um resumo: os números principais, padrões relevantes e qualquer coisa que pareça estranha. Tamanho: {{slot:Tamanho|alguns tópicos|alguns tópicos,um parágrafo curto,um relatório detalhado}}. É somente leitura — não modifique os dados.`,
       vi: (t) =>
-        `${t}\n\nHãy đọc các bản ghi và tóm tắt cho tôi: các con số chính, những xu hướng đáng chú ý và bất cứ điều gì trông bất thường. Đây là tác vụ chỉ đọc — đừng sửa dữ liệu.`,
+        `${t}\n\nHãy đọc các bản ghi và tóm tắt cho tôi: các con số chính, những xu hướng đáng chú ý và bất cứ điều gì trông bất thường. Độ dài: {{slot:Độ dài|vài gạch đầu dòng|vài gạch đầu dòng,một đoạn ngắn,một báo cáo chi tiết}}. Đây là tác vụ chỉ đọc — đừng sửa dữ liệu.`,
       fr: (t) =>
-        `${t}\n\nLisez les enregistrements et faites-m'en un résumé : les chiffres clés, les tendances notables et tout ce qui semble anormal. C'est en lecture seule — ne modifiez pas les données.`,
+        `${t}\n\nLisez les enregistrements et faites-m'en un résumé : les chiffres clés, les tendances notables et tout ce qui semble anormal. Longueur : {{slot:Longueur|quelques puces|quelques puces,un court paragraphe,un rapport détaillé}}. C'est en lecture seule — ne modifiez pas les données.`,
       de: (t) =>
-        `${t}\n\nLesen Sie die Datensätze und geben Sie mir eine Zusammenfassung: die wichtigsten Zahlen, auffällige Muster und alles, was seltsam aussieht. Das ist nur lesend – ändern Sie die Daten nicht.`,
+        `${t}\n\nLesen Sie die Datensätze und geben Sie mir eine Zusammenfassung: die wichtigsten Zahlen, auffällige Muster und alles, was seltsam aussieht. Umfang: {{slot:Umfang|ein paar Stichpunkte|ein paar Stichpunkte,ein kurzer Absatz,ein ausführlicher Bericht}}. Das ist nur lesend – ändern Sie die Daten nicht.`,
     },
   },
 ];
@@ -769,6 +849,18 @@ const DOC_READ_PROMPT: PromptDef = {
     vi: "Đọc tài liệu",
     fr: "Lire le document",
     de: "Dokument lesen",
+  },
+  outcome: {
+    en: "The agent reads the whole doc and is ready for your next request.",
+    "zh-CN": "Agent 读完整篇文档，准备好接你的下一个要求。",
+    "zh-TW": "Agent 讀完整篇文件，準備好接你的下一個要求。",
+    ja: "Agent が文書全体を読み、次の依頼に備えます。",
+    ko: "Agent가 문서 전체를 읽고 다음 요청을 기다립니다.",
+    es: "El agente lee todo el documento y queda listo para tu siguiente petición.",
+    pt: "O agente lê o documento inteiro e fica pronto para o seu próximo pedido.",
+    vi: "Agent đọc hết tài liệu và sẵn sàng cho yêu cầu tiếp theo của bạn.",
+    fr: "L'agent lit tout le document et se tient prêt pour votre prochaine demande.",
+    de: "Der Agent liest das ganze Dokument und ist bereit für Ihre nächste Anfrage.",
   },
   body: {
     en: (t) =>
@@ -810,6 +902,18 @@ const DOC_SCENARIOS: PromptDef[] = [
       fr: "Répondre à ma question à partir de ce document",
       de: "Meine Frage anhand dieses Dokuments beantworten",
     },
+    outcome: {
+      en: "An answer drawn only from this doc, with the passage it relies on.",
+      "zh-CN": "只依据这篇文档的回答，并附上引用的原文。",
+      "zh-TW": "只依據這篇文件的回答，並附上引用的原文。",
+      ja: "この文書だけに基づく回答と、その根拠となる箇所。",
+      ko: "이 문서에만 근거한 답변과 근거가 된 부분.",
+      es: "Una respuesta basada solo en este documento, con el fragmento que la respalda.",
+      pt: "Uma resposta baseada só neste documento, com o trecho que a sustenta.",
+      vi: "Câu trả lời chỉ dựa trên tài liệu này, kèm đoạn trích làm căn cứ.",
+      fr: "Une réponse tirée uniquement de ce document, avec le passage cité.",
+      de: "Eine Antwort nur aus diesem Dokument, mit der zitierten Textstelle.",
+    },
     body: {
       en: (t) =>
         `${t}\n\nRead this doc, then answer the question I ask next using only what it actually says. Quote the part you are relying on. If the doc does not answer it, say so instead of filling the gap from your own knowledge. Read-only.`,
@@ -847,6 +951,18 @@ const DOC_SCENARIOS: PromptDef[] = [
       fr: "Rédiger ou développer ce document",
       de: "Dieses Dokument entwerfen bzw. erweitern",
     },
+    outcome: {
+      en: "New or expanded content in the doc's existing structure and tone.",
+      "zh-CN": "按原有结构和语气起草或扩写的新内容。",
+      "zh-TW": "按原有結構和語氣起草或擴寫的新內容。",
+      ja: "既存の構成と文体に沿って下書き・加筆された内容。",
+      ko: "기존 구성과 어조를 살려 새로 쓰거나 늘린 내용.",
+      es: "Contenido nuevo o ampliado, con la estructura y el tono que ya tiene.",
+      pt: "Conteúdo novo ou ampliado, mantendo a estrutura e o tom atuais.",
+      vi: "Nội dung mới hoặc mở rộng, giữ cấu trúc và giọng văn sẵn có.",
+      fr: "Du contenu rédigé ou étoffé, dans la structure et le ton existants.",
+      de: "Neuer oder erweiterter Inhalt in der bestehenden Struktur und im gewohnten Ton.",
+    },
     body: {
       en: (t) =>
         `${t}\n\nRead the current content, then draft or expand it based on what I tell you next. Keep the existing structure and tone unless I ask otherwise.`,
@@ -883,6 +999,18 @@ const DOC_SCENARIOS: PromptDef[] = [
       vi: "Xem xét và đề xuất chỉnh sửa",
       fr: "Relire et suggérer des modifications",
       de: "Prüfen und Änderungen vorschlagen",
+    },
+    outcome: {
+      en: "A list of suggested edits; nothing is rewritten until you choose.",
+      "zh-CN": "一份修改建议清单，你选定前不会改写原文。",
+      "zh-TW": "一份修改建議清單，你選定前不會改寫原文。",
+      ja: "修正案の一覧。選ぶまで本文は書き換えられません。",
+      ko: "수정 제안 목록. 고르기 전에는 본문을 고치지 않습니다.",
+      es: "Una lista de cambios sugeridos; no se reescribe nada hasta que elijas.",
+      pt: "Uma lista de sugestões de edição; nada é reescrito até você escolher.",
+      vi: "Danh sách đề xuất chỉnh sửa; chưa viết lại gì cho đến khi bạn chọn.",
+      fr: "Une liste de modifications suggérées ; rien n'est réécrit avant votre choix.",
+      de: "Eine Liste mit Änderungsvorschlägen; nichts wird umgeschrieben, bevor Sie wählen.",
     },
     body: {
       en: (t) =>
@@ -925,6 +1053,18 @@ const DRIVE_SCENARIOS: PromptDef[] = [
       fr: "Chercher quelque chose dans ces fichiers",
       de: "Etwas in diesen Dateien finden",
     },
+    outcome: {
+      en: "Which file has it and where, with a quote so you can check it.",
+      "zh-CN": "告诉你在哪个文件、哪个位置，并引用原文方便核对。",
+      "zh-TW": "告訴你在哪個檔案、哪個位置，並引用原文方便核對。",
+      ja: "どのファイルのどこにあるかと、確認用の引用。",
+      ko: "어느 파일의 어디에 있는지와 확인할 수 있는 인용.",
+      es: "En qué archivo está y dónde, con una cita para que lo compruebes.",
+      pt: "Em qual arquivo está e onde, com um trecho para você conferir.",
+      vi: "Nó nằm ở tệp nào, chỗ nào, kèm trích dẫn để bạn kiểm tra.",
+      fr: "Le fichier et l'endroit où ça se trouve, avec une citation pour vérifier.",
+      de: "In welcher Datei und wo es steht, mit Zitat zum Nachprüfen.",
+    },
     body: {
       en: (t) =>
         `${t}\n\nI'll tell you what I'm looking for. Search these files and tell me which file it is in and where, quoting enough of it that I can tell you found the right thing. If it is in several places, list them all rather than picking one. Read-only.`,
@@ -961,6 +1101,18 @@ const DRIVE_SCENARIOS: PromptDef[] = [
       vi: "Sắp xếp các tệp này",
       fr: "Organiser ces fichiers",
       de: "Diese Dateien ordnen",
+    },
+    outcome: {
+      en: "A cleaner naming and grouping plan; nothing moves until you approve.",
+      "zh-CN": "一份更清晰的命名和分组方案，你确认前不会移动任何文件。",
+      "zh-TW": "一份更清楚的命名和分組方案，你確認前不會移動任何檔案。",
+      ja: "命名とグループ分けの整理案。承認するまで何も動かしません。",
+      ko: "더 깔끔한 이름·분류 계획. 승인하기 전에는 아무것도 옮기지 않습니다.",
+      es: "Un plan más limpio de nombres y grupos; nada se mueve hasta que lo apruebes.",
+      pt: "Um plano mais limpo de nomes e grupos; nada é movido até você aprovar.",
+      vi: "Phương án đặt tên và nhóm gọn hơn; không di chuyển gì cho đến khi bạn duyệt.",
+      fr: "Un plan de nommage et de classement plus clair ; rien ne bouge sans votre accord.",
+      de: "Ein klarerer Plan für Namen und Gruppen; nichts wird verschoben, bevor Sie zustimmen.",
     },
     body: {
       en: (t) =>
@@ -999,6 +1151,18 @@ const DRIVE_SCENARIOS: PromptDef[] = [
       vi: "Tóm tắt nội dung",
       fr: "Résumer le contenu",
       de: "Den Inhalt zusammenfassen",
+    },
+    outcome: {
+      en: "What each file is for, plus anything outdated or redundant.",
+      "zh-CN": "每个文件是做什么的，以及哪些过时或多余。",
+      "zh-TW": "每個檔案是做什麼的，以及哪些過時或多餘。",
+      ja: "各ファイルの用途と、古いものや重複しているもの。",
+      ko: "각 파일의 용도와 오래되었거나 중복된 파일.",
+      es: "Para qué sirve cada archivo y cuáles están desactualizados o sobran.",
+      pt: "Para que serve cada arquivo e o que está desatualizado ou sobrando.",
+      vi: "Mỗi tệp dùng để làm gì, và tệp nào đã cũ hoặc thừa.",
+      fr: "À quoi sert chaque fichier, et ce qui est obsolète ou redondant.",
+      de: "Wofür jede Datei da ist und was veraltet oder doppelt ist.",
     },
     body: {
       en: (t) =>
@@ -1047,6 +1211,18 @@ const SKILL_SCENARIOS: PromptDef[] = [
       fr: "Utiliser cette compétence",
       de: "Diesen Skill verwenden",
     },
+    outcome: {
+      en: "Your task done the way this Skill says, or a note on what it can't do here.",
+      "zh-CN": "按这个 Skill 的流程完成你的任务，做不到的会说明。",
+      "zh-TW": "按這個 Skill 的流程完成你的任務，做不到的會說明。",
+      ja: "この Skill の手順どおりにタスクを実行。できない点は伝えます。",
+      ko: "이 스킬의 방식대로 작업을 해내고, 여기서 안 되는 부분은 알려 줍니다.",
+      es: "Tu tarea hecha como indica esta skill, o un aviso de lo que no se puede hacer aquí.",
+      pt: "Sua tarefa feita do jeito que esta skill pede, ou um aviso do que não dá aqui.",
+      vi: "Việc của bạn được làm theo đúng kỹ năng này, hoặc báo lại phần không làm được.",
+      fr: "Votre tâche réalisée selon cette compétence, ou ce qui n'est pas faisable ici.",
+      de: "Ihre Aufgabe nach diesem Skill erledigt, oder ein Hinweis, was hier nicht geht.",
+    },
     body: {
       en: (t) =>
         `${t}\n\nRead this skill's \`SKILL.md\` and any reference files it points at, then follow its workflow to do what I describe next. Follow the skill's own rules over your usual habits, and tell me if it says something you cannot do here.`,
@@ -1085,6 +1261,18 @@ const SKILL_SCENARIOS: PromptDef[] = [
       fr: "Que peut-elle faire pour moi ?",
       de: "Was kann er für mich tun?",
     },
+    outcome: {
+      en: "A plain explanation of what it does, when to use it and what it needs from you.",
+      "zh-CN": "用大白话讲清它能做什么、什么时候用、需要你提供什么。",
+      "zh-TW": "用白話講清它能做什麼、什麼時候用、需要你提供什麼。",
+      ja: "何ができるか、いつ使うか、何が必要かのわかりやすい説明。",
+      ko: "무엇을 하는지, 언제 쓰는지, 무엇이 필요한지에 대한 쉬운 설명.",
+      es: "Una explicación sencilla de qué hace, cuándo usarla y qué necesita de ti.",
+      pt: "Uma explicação simples do que faz, quando usar e o que precisa de você.",
+      vi: "Giải thích dễ hiểu: nó làm gì, khi nào dùng và cần gì từ bạn.",
+      fr: "Une explication simple : ce qu'elle fait, quand l'utiliser, ce qu'il lui faut.",
+      de: "Eine einfache Erklärung: was er tut, wann er passt und was er von Ihnen braucht.",
+    },
     body: {
       en: (t) =>
         `${t}\n\nRead this skill and tell me in plain language what it does, when I should reach for it, and what it needs from me before it can run — credentials, data, a decision. Read-only; don't run it or change it yet.`,
@@ -1121,6 +1309,18 @@ const SKILL_SCENARIOS: PromptDef[] = [
       vi: "Cải thiện kỹ năng này",
       fr: "Améliorer cette compétence",
       de: "Diesen Skill verbessern",
+    },
+    outcome: {
+      en: "The unclear spots in its instructions, with fixes to approve before any edit.",
+      "zh-CN": "指出说明里含糊的地方并给出修改建议，你确认后才改。",
+      "zh-TW": "指出說明裡含糊的地方並給出修改建議，你確認後才改。",
+      ja: "指示のあいまいな点と修正案。承認するまで編集しません。",
+      ko: "지침의 모호한 부분과 수정안. 승인하기 전에는 고치지 않습니다.",
+      es: "Los puntos confusos de sus instrucciones, con arreglos que apruebas antes.",
+      pt: "Os pontos confusos das instruções, com correções para você aprovar antes.",
+      vi: "Những chỗ chưa rõ trong hướng dẫn, kèm đề xuất sửa để bạn duyệt trước.",
+      fr: "Les passages ambigus des instructions, avec des corrections à approuver d'abord.",
+      de: "Die unklaren Stellen der Anleitung, mit Korrekturen zur Freigabe vorab.",
     },
     body: {
       en: (t) =>
@@ -1163,6 +1363,18 @@ const AIRAPP_SCENARIOS: PromptDef[] = [
       fr: "Que fait cette application ?",
       de: "Was macht diese App?",
     },
+    outcome: {
+      en: "What the app is for, who uses it and which data it shows or writes.",
+      "zh-CN": "这个应用是做什么的、给谁用、读写哪些数据。",
+      "zh-TW": "這個應用是做什麼的、給誰用、讀寫哪些資料。",
+      ja: "アプリの目的、利用者、表示・書き込みするデータ。",
+      ko: "앱의 용도, 사용 대상, 보여 주거나 기록하는 데이터.",
+      es: "Para qué sirve la app, quién la usa y qué datos muestra o escribe.",
+      pt: "Para que serve o app, quem usa e quais dados ele mostra ou grava.",
+      vi: "Ứng dụng dùng để làm gì, cho ai và hiển thị hay ghi dữ liệu nào.",
+      fr: "À quoi sert l'application, pour qui, et quelles données elle affiche ou écrit.",
+      de: "Wofür die App da ist, wer sie nutzt und welche Daten sie zeigt oder schreibt.",
+    },
     body: {
       en: (t) =>
         `${t}\n\nRead the app's source and the tables it reads, then tell me what it is for, who it is for, and which data it shows or writes. I want to understand it before I change it. Read-only.`,
@@ -1200,6 +1412,18 @@ const AIRAPP_SCENARIOS: PromptDef[] = [
       fr: "Ajouter une fonctionnalité",
       de: "Eine Funktion hinzufügen",
     },
+    outcome: {
+      en: "The new feature in the app, after hearing which files will change.",
+      "zh-CN": "应用里加上新功能，动手前先告诉你会改哪些文件。",
+      "zh-TW": "應用裡加上新功能，動手前先告訴你會改哪些檔案。",
+      ja: "新機能の追加。着手前に変更するファイルを伝えます。",
+      ko: "앱에 새 기능 추가. 시작 전에 바꿀 파일을 알려 줍니다.",
+      es: "La nueva función en la app, tras decirte qué archivos va a tocar.",
+      pt: "O novo recurso no app, depois de te dizer quais arquivos vai mexer.",
+      vi: "Tính năng mới trong ứng dụng, sau khi báo trước sẽ sửa những tệp nào.",
+      fr: "La nouvelle fonctionnalité, après vous avoir dit quels fichiers seront modifiés.",
+      de: "Die neue Funktion in der App, nachdem Sie erfahren, welche Dateien sich ändern.",
+    },
     body: {
       en: (t) =>
         `${t}\n\nRead the app's current source, then add the feature I describe next. Tell me which files you'll touch before you start.`,
@@ -1236,6 +1460,18 @@ const AIRAPP_SCENARIOS: PromptDef[] = [
       vi: "Gỡ lỗi một vấn đề",
       fr: "Déboguer un problème",
       de: "Ein Problem untersuchen",
+    },
+    outcome: {
+      en: "The real cause explained to you before anything gets fixed.",
+      "zh-CN": "先给你讲清真正的原因，再动手修。",
+      "zh-TW": "先跟你講清真正的原因，再動手修。",
+      ja: "修正の前に、本当の原因の説明。",
+      ko: "고치기 전에 진짜 원인에 대한 설명.",
+      es: "La causa real explicada antes de arreglar nada.",
+      pt: "A causa real explicada antes de qualquer correção.",
+      vi: "Nguyên nhân thật được giải thích trước khi sửa bất cứ thứ gì.",
+      fr: "La vraie cause, expliquée avant toute correction.",
+      de: "Die eigentliche Ursache, erklärt, bevor etwas behoben wird.",
     },
     body: {
       en: (t) =>
@@ -1286,6 +1522,18 @@ const FORM_SCENARIOS: PromptDef[] = [
       fr: "Repenser la page de ce formulaire",
       de: "Die Seite dieses Formulars neu gestalten",
     },
+    outcome: {
+      en: "A redesigned form page to preview, with every field still connected.",
+      "zh-CN": "重新设计的表单页面供你预览，原有字段都照常收集。",
+      "zh-TW": "重新設計的表單頁面供你預覽，原有欄位都照常收集。",
+      ja: "確認用の新しいフォームページ。既存フィールドの連携はそのまま。",
+      ko: "미리 볼 수 있는 새 폼 페이지. 기존 필드 연결은 그대로 유지됩니다.",
+      es: "Una página del formulario rediseñada para revisar, con todos los campos conectados.",
+      pt: "Uma página do formulário redesenhada para revisar, com todos os campos ligados.",
+      vi: "Trang biểu mẫu thiết kế lại để bạn xem trước, các trường vẫn được giữ nguyên.",
+      fr: "Une page de formulaire repensée à prévisualiser, tous les champs restant reliés.",
+      de: "Eine neu gestaltete Formularseite zur Vorschau, alle Felder bleiben verbunden.",
+    },
     body: {
       en: (t) =>
         `${t}\n\nRead the form's current page source and its field bindings first. Then redesign the page the way I describe next — layout, wording, grouping, and validation hints. Keep every existing field binding working unless I explicitly ask you to change one, and show me the new page before submitting it.`,
@@ -1323,6 +1571,18 @@ const FORM_SCENARIOS: PromptDef[] = [
       fr: "Changer les champs qu'il collecte",
       de: "Ändern, welche Felder es erfasst",
     },
+    outcome: {
+      en: "Which fields the form collects and skips, then the changes you ask for.",
+      "zh-CN": "列出表单收集和漏掉的字段，再按你的要求调整。",
+      "zh-TW": "列出表單收集和漏掉的欄位，再按你的要求調整。",
+      ja: "フォームが集めるフィールドと漏れているもの、そして依頼どおりの変更。",
+      ko: "폼이 받는 필드와 빠진 필드, 그리고 요청한 대로의 변경.",
+      es: "Qué campos recoge y cuáles ignora el formulario, y luego los cambios que pidas.",
+      pt: "Quais campos o formulário coleta e ignora, e depois as mudanças que pedir.",
+      vi: "Biểu mẫu đang thu và bỏ sót trường nào, rồi thay đổi theo yêu cầu của bạn.",
+      fr: "Les champs collectés ou ignorés par le formulaire, puis les changements demandés.",
+      de: "Welche Felder das Formular erfasst und auslässt, dann Ihre gewünschten Änderungen.",
+    },
     body: {
       en: (t) =>
         `${t}\n\nShow me which fields of the target base this form currently writes to, and which of the base's fields it ignores. Then adjust the bindings as I describe — added fields need a matching input on the page, and a removed one must not leave an orphaned input behind.`,
@@ -1359,6 +1619,18 @@ const FORM_SCENARIOS: PromptDef[] = [
       vi: "Xem xét các bài gửi đang chờ",
       fr: "Examiner les envois en attente",
       de: "Die ausstehenden Einsendungen prüfen",
+    },
+    outcome: {
+      en: "A summary and accept/reject advice per submission; you make the call.",
+      "zh-CN": "逐条总结待审提交并给出通过/拒绝建议，由你决定。",
+      "zh-TW": "逐筆總結待審提交並給出通過／拒絕建議，由你決定。",
+      ja: "送信ごとの要約と承認・却下の提案。判断するのはあなたです。",
+      ko: "제출 건별 요약과 승인/거절 의견. 결정은 직접 하세요.",
+      es: "Un resumen y una recomendación por envío; la decisión es tuya.",
+      pt: "Um resumo e uma recomendação por envio; a decisão é sua.",
+      vi: "Tóm tắt và gợi ý duyệt/từ chối cho từng bài gửi; bạn là người quyết định.",
+      fr: "Un résumé et un avis accepter/refuser par envoi ; c'est vous qui décidez.",
+      de: "Pro Einsendung eine Zusammenfassung und Empfehlung; die Entscheidung liegt bei Ihnen.",
     },
     body: {
       en: (t) =>
@@ -1418,6 +1690,18 @@ const FIELD_SCENARIOS: PromptDef[] = [
       fr: "Nettoyer les valeurs de cette colonne",
       de: "Die Werte dieser Spalte bereinigen",
     },
+    outcome: {
+      en: "A grouped list of planned fixes to check before any value is changed.",
+      "zh-CN": "按问题类型列出打算做的修改，你过目后才会写入。",
+      "zh-TW": "按問題類型列出打算做的修改，你過目後才會寫入。",
+      ja: "問題の種類別にまとめた修正予定。値を変える前に確認できます。",
+      ko: "문제 유형별로 묶은 수정 계획. 값을 바꾸기 전에 확인할 수 있습니다.",
+      es: "Una lista agrupada de correcciones para revisar antes de cambiar ningún valor.",
+      pt: "Uma lista agrupada de correções para conferir antes de mudar qualquer valor.",
+      vi: "Danh sách chỉnh sửa theo nhóm để bạn xem trước khi đổi bất kỳ giá trị nào.",
+      fr: "Une liste groupée des corrections prévues, à vérifier avant toute modification.",
+      de: "Eine gruppierte Liste geplanter Korrekturen, die Sie vor jeder Änderung prüfen.",
+    },
     body: {
       en: (t) =>
         `${t}\n\nRead this column across all records and normalize it: consistent casing, spacing, units and formatting, obvious typos fixed. List the changes you intend to make, grouped by the kind of problem, before writing anything.`,
@@ -1454,6 +1738,18 @@ const FIELD_SCENARIOS: PromptDef[] = [
       vi: "Điền vào chỗ trống",
       fr: "Remplir les blancs",
       de: "Lücken füllen",
+    },
+    outcome: {
+      en: "Empty cells filled from each record's other fields, with sources; no guessing.",
+      "zh-CN": "根据记录里的其它字段补上空值并注明来源，不瞎猜。",
+      "zh-TW": "根據記錄裡的其他欄位補上空值並註明來源，不亂猜。",
+      ja: "他のフィールドから空欄を埋め、根拠も示します。推測はしません。",
+      ko: "다른 필드를 근거로 빈칸을 채우고 출처를 밝힙니다. 추측은 하지 않습니다.",
+      es: "Los huecos rellenados a partir de otros campos, con su origen; sin inventar.",
+      pt: "Os vazios preenchidos a partir de outros campos, com a origem; sem chutes.",
+      vi: "Ô trống được điền từ các trường khác, có nêu nguồn; không đoán bừa.",
+      fr: "Les cases vides remplies d'après les autres champs, sources à l'appui, sans deviner.",
+      de: "Leere Werte aus den anderen Feldern ergänzt, mit Quelle; ohne Raten.",
     },
     body: {
       en: (t) =>
@@ -1493,6 +1789,18 @@ const FIELD_SCENARIOS: PromptDef[] = [
       fr: "Auditer cette colonne à la recherche de données erronées",
       de: "Diese Spalte auf fehlerhafte Daten prüfen",
     },
+    outcome: {
+      en: "A report of odd values, outliers and placeholders; nothing is changed.",
+      "zh-CN": "一份异常值、离群值和占位内容的报告，不做任何改动。",
+      "zh-TW": "一份異常值、離群值和佔位內容的報告，不做任何改動。",
+      ja: "おかしな値・外れ値・仮の値のレポート。何も変更しません。",
+      ko: "이상한 값, 이상치, 임시 값에 대한 보고서. 아무것도 바꾸지 않습니다.",
+      es: "Un informe de valores raros, atípicos y de relleno; no se cambia nada.",
+      pt: "Um relatório de valores estranhos, fora da curva e de preenchimento; nada muda.",
+      vi: "Báo cáo các giá trị lạ, ngoại lệ và giá trị tạm; không thay đổi gì.",
+      fr: "Un rapport des valeurs suspectes, aberrantes ou provisoires ; rien n'est modifié.",
+      de: "Ein Bericht über auffällige Werte, Ausreißer und Platzhalter; nichts wird geändert.",
+    },
     body: {
       en: (t) =>
         `${t}\n\nGo through this column and report what looks wrong: values that don't fit the field's type or intent, outliers, duplicates that should be one value, and anything that reads like a placeholder. Read-only — report first, change nothing.`,
@@ -1529,6 +1837,18 @@ const FIELD_SCENARIOS: PromptDef[] = [
       vi: "Đổi kiểu hoặc tùy chọn của cột này",
       fr: "Changer le type ou les options de cette colonne",
       de: "Typ oder Optionen dieser Spalte ändern",
+    },
+    outcome: {
+      en: "What existing values would be lost or converted, before you say go.",
+      "zh-CN": "先告诉你现有的值会丢失或转换哪些，你同意后才改。",
+      "zh-TW": "先告訴你現有的值會遺失或轉換哪些，你同意後才改。",
+      ja: "既存の値で失われるもの・変換されるもの。了承するまで変更しません。",
+      ko: "기존 값 중 사라지거나 변환될 것. 허락하기 전에는 바꾸지 않습니다.",
+      es: "Qué valores actuales se perderían o convertirían, antes de que des el visto bueno.",
+      pt: "Quais valores atuais seriam perdidos ou convertidos, antes do seu sinal verde.",
+      vi: "Những giá trị hiện có sẽ mất hoặc phải chuyển đổi, trước khi bạn đồng ý.",
+      fr: "Les valeurs existantes perdues ou converties, avant votre feu vert.",
+      de: "Welche vorhandenen Werte verloren gingen oder umgewandelt würden, vor Ihrer Freigabe.",
     },
     body: {
       en: (t) =>
@@ -1576,27 +1896,39 @@ const CELL_SCENARIOS: PromptDef[] = [
       fr: "Réécrire cette valeur",
       de: "Diesen Wert umschreiben",
     },
+    outcome: {
+      en: "The old and new value side by side, in the style you pick, same meaning.",
+      "zh-CN": "按你选的风格改写，新旧对照给你看，意思不变。",
+      "zh-TW": "按你選的風格改寫，新舊對照給你看，意思不變。",
+      ja: "選んだスタイルで書き直し、新旧を並べて表示。意味は変えません。",
+      ko: "고른 스타일로 다시 쓰고, 이전 값과 나란히 보여 줍니다. 의미는 그대로.",
+      es: "El valor antiguo y el nuevo lado a lado, con el estilo que elijas y el mismo sentido.",
+      pt: "O valor antigo e o novo lado a lado, no estilo que escolher, mesmo sentido.",
+      vi: "Giá trị cũ và mới đặt cạnh nhau, theo phong cách bạn chọn, giữ nguyên ý.",
+      fr: "L'ancienne et la nouvelle valeur côte à côte, dans le style choisi, même sens.",
+      de: "Alter und neuer Wert nebeneinander, im gewählten Stil, mit gleicher Bedeutung.",
+    },
     body: {
       en: (t) =>
-        `${t}\n\nRead the current value, then rewrite it the way I describe next. Show me the old and the new value side by side before submitting, and don't change the meaning unless I asked you to.`,
+        `${t}\n\nRead the current value, then rewrite it the way I describe next. Direction: {{slot:Style|more concise|more concise,more formal,friendlier,more detailed}}. Show me the old and the new value side by side before submitting, and don't change the meaning unless I asked you to.`,
       "zh-CN": (t) =>
-        `${t}\n\n先读当前的值，然后按我接下来的要求改写它。提交前把旧值和新值并排给我看；除非我明确要求，不要改变原意。`,
+        `${t}\n\n先读当前的值，然后按我接下来的要求改写它。方向：{{slot:风格|更简洁|更简洁,更正式,更亲切,更详细}}。提交前把旧值和新值并排给我看；除非我明确要求，不要改变原意。`,
       "zh-TW": (t) =>
-        `${t}\n\n先讀目前的值，然後按我接下來的要求改寫它。提交前把舊值和新值並排給我看；除非我明確要求，不要改變原意。`,
+        `${t}\n\n先讀目前的值，然後按我接下來的要求改寫它。方向：{{slot:風格|更簡潔|更簡潔,更正式,更親切,更詳細}}。提交前把舊值和新值並排給我看；除非我明確要求，不要改變原意。`,
       ja: (t) =>
-        `${t}\n\n現在の値を読んだうえで、次に伝える要件どおりに書き直してください。提出前に旧値と新値を並べて見せ、依頼がない限り意味を変えないでください。`,
+        `${t}\n\n現在の値を読んだうえで、次に伝える要件どおりに書き直してください。方向性：{{slot:スタイル|より簡潔に|より簡潔に,よりフォーマルに,より親しみやすく,より詳しく}}。提出前に旧値と新値を並べて見せ、依頼がない限り意味を変えないでください。`,
       ko: (t) =>
-        `${t}\n\n현재 값을 읽은 다음, 제가 이어서 설명하는 대로 다시 써 주세요. 제출하기 전에 이전 값과 새 값을 나란히 보여 주시고, 제가 요청하지 않는 한 의미는 바꾸지 마세요.`,
+        `${t}\n\n현재 값을 읽은 다음, 제가 이어서 설명하는 대로 다시 써 주세요. 방향: {{slot:스타일|더 간결하게|더 간결하게,더 격식 있게,더 친근하게,더 자세하게}}. 제출하기 전에 이전 값과 새 값을 나란히 보여 주시고, 제가 요청하지 않는 한 의미는 바꾸지 마세요.`,
       es: (t) =>
-        `${t}\n\nLee el valor actual y luego reescríbelo como te describa a continuación. Enséñame el valor antiguo y el nuevo lado a lado antes de enviarlo y no cambies el significado salvo que te lo haya pedido.`,
+        `${t}\n\nLee el valor actual y luego reescríbelo como te describa a continuación. Dirección: {{slot:Estilo|más conciso|más conciso,más formal,más cercano,más detallado}}. Enséñame el valor antiguo y el nuevo lado a lado antes de enviarlo y no cambies el significado salvo que te lo haya pedido.`,
       pt: (t) =>
-        `${t}\n\nLeia o valor atual e depois reescreva-o do jeito que eu descrever em seguida. Mostre o valor antigo e o novo lado a lado antes de enviar e não mude o significado, a menos que eu tenha pedido.`,
+        `${t}\n\nLeia o valor atual e depois reescreva-o do jeito que eu descrever em seguida. Direção: {{slot:Estilo|mais conciso|mais conciso,mais formal,mais amigável,mais detalhado}}. Mostre o valor antigo e o novo lado a lado antes de enviar e não mude o significado, a menos que eu tenha pedido.`,
       vi: (t) =>
-        `${t}\n\nHãy đọc giá trị hiện tại, rồi viết lại theo cách tôi mô tả tiếp theo. Trước khi gửi, hãy cho tôi xem giá trị cũ và mới cạnh nhau, và đừng thay đổi ý nghĩa trừ khi tôi yêu cầu.`,
+        `${t}\n\nHãy đọc giá trị hiện tại, rồi viết lại theo cách tôi mô tả tiếp theo. Hướng: {{slot:Phong cách|ngắn gọn hơn|ngắn gọn hơn,trang trọng hơn,thân thiện hơn,chi tiết hơn}}. Trước khi gửi, hãy cho tôi xem giá trị cũ và mới cạnh nhau, và đừng thay đổi ý nghĩa trừ khi tôi yêu cầu.`,
       fr: (t) =>
-        `${t}\n\nLisez la valeur actuelle, puis réécrivez-la comme je le décrirai ensuite. Montrez-moi l'ancienne et la nouvelle valeur côte à côte avant de soumettre, et ne changez pas le sens sauf si je vous l'ai demandé.`,
+        `${t}\n\nLisez la valeur actuelle, puis réécrivez-la comme je le décrirai ensuite. Orientation : {{slot:Style|plus concis|plus concis,plus formel,plus chaleureux,plus détaillé}}. Montrez-moi l'ancienne et la nouvelle valeur côte à côte avant de soumettre, et ne changez pas le sens sauf si je vous l'ai demandé.`,
       de: (t) =>
-        `${t}\n\nLesen Sie den aktuellen Wert und schreiben Sie ihn dann so um, wie ich es als Nächstes beschreibe. Zeigen Sie mir vor dem Einreichen den alten und den neuen Wert nebeneinander und ändern Sie die Bedeutung nicht, es sei denn, ich habe darum gebeten.`,
+        `${t}\n\nLesen Sie den aktuellen Wert und schreiben Sie ihn dann so um, wie ich es als Nächstes beschreibe. Richtung: {{slot:Stil|knapper|knapper,förmlicher,freundlicher,ausführlicher}}. Zeigen Sie mir vor dem Einreichen den alten und den neuen Wert nebeneinander und ändern Sie die Bedeutung nicht, es sei denn, ich habe darum gebeten.`,
     },
   },
   {
@@ -1612,6 +1944,18 @@ const CELL_SCENARIOS: PromptDef[] = [
       vi: "Điền từ các trường khác",
       fr: "La remplir à partir des autres champs",
       de: "Aus den anderen Feldern ableiten",
+    },
+    outcome: {
+      en: "A value worked out from the record's other fields, showing how; no guessing.",
+      "zh-CN": "根据这条记录的其它字段推出的值，并说明推法，不瞎猜。",
+      "zh-TW": "根據這筆記錄的其他欄位推出的值，並說明推法，不亂猜。",
+      ja: "レコードの他のフィールドから導いた値と、その根拠。推測はしません。",
+      ko: "레코드의 다른 필드로 도출한 값과 그 과정. 추측은 하지 않습니다.",
+      es: "Un valor deducido de los otros campos del registro, explicando cómo; sin inventar.",
+      pt: "Um valor deduzido dos outros campos do registro, mostrando como; sem chutes.",
+      vi: "Giá trị suy ra từ các trường khác của bản ghi, kèm cách suy; không đoán bừa.",
+      fr: "Une valeur déduite des autres champs, avec le raisonnement ; sans deviner.",
+      de: "Ein aus den anderen Feldern abgeleiteter Wert, mit Herleitung; ohne Raten.",
     },
     body: {
       en: (t) =>
@@ -1651,6 +1995,18 @@ const CELL_SCENARIOS: PromptDef[] = [
       fr: "Expliquer cette valeur",
       de: "Diesen Wert erklären",
     },
+    outcome: {
+      en: "What this value means, who last changed it, and whether it fits the rest.",
+      "zh-CN": "这个值是什么意思、最近谁改的、和其它数据是否一致。",
+      "zh-TW": "這個值是什麼意思、最近誰改的、和其他資料是否一致。",
+      ja: "この値の意味、最後に誰が変えたか、他と整合しているか。",
+      ko: "이 값의 의미, 마지막으로 누가 바꿨는지, 나머지와 맞는지.",
+      es: "Qué significa este valor, quién lo cambió por última vez y si encaja con el resto.",
+      pt: "O que este valor significa, quem mudou por último e se bate com o resto.",
+      vi: "Giá trị này nghĩa là gì, ai sửa gần nhất và có khớp với phần còn lại không.",
+      fr: "Ce que signifie cette valeur, qui l'a modifiée en dernier, et si elle est cohérente.",
+      de: "Was dieser Wert bedeutet, wer ihn zuletzt geändert hat und ob er zum Rest passt.",
+    },
     body: {
       en: (t) =>
         `${t}\n\nTell me what this value means, when and by whom it last changed, and whether it is consistent with the rest of the record and with the same field on comparable records. Read-only — change nothing.`,
@@ -1679,6 +2035,58 @@ const CELL_SCENARIOS: PromptDef[] = [
 /** Scenarios for a single RECORD, opened from the record detail view. */
 const RECORD_SCENARIOS: PromptDef[] = [
   {
+    // First on purpose: "get this record into the agent's head, then I'll say
+    // what I want" is the most common thing people do from a record.
+    key: "record-read",
+    intent: "read-only",
+    label: {
+      en: "Read this record",
+      "zh-CN": "读取这条记录",
+      "zh-TW": "讀取這筆記錄",
+      ja: "このレコードを読む",
+      ko: "이 레코드 읽기",
+      es: "Leer este registro",
+      pt: "Ler este registro",
+      vi: "Đọc bản ghi này",
+      fr: "Lire cet enregistrement",
+      de: "Diesen Datensatz lesen",
+    },
+    outcome: {
+      en: "A short summary of this record, then the agent waits for what's next.",
+      "zh-CN": "简要总结这条记录的内容，然后等你下一步吩咐。",
+      "zh-TW": "簡要總結這筆記錄的內容，然後等你下一步吩咐。",
+      ja: "このレコードの簡単な要約。そのあと次の指示を待ちます。",
+      ko: "이 레코드의 짧은 요약. 그다음 요청을 기다립니다.",
+      es: "Un breve resumen de este registro; luego el agente espera tu siguiente paso.",
+      pt: "Um breve resumo deste registro; depois o agente aguarda o próximo passo.",
+      vi: "Tóm tắt ngắn bản ghi này, rồi Agent chờ yêu cầu tiếp theo của bạn.",
+      fr: "Un bref résumé de cet enregistrement, puis l'agent attend la suite.",
+      de: "Eine kurze Zusammenfassung dieses Datensatzes; dann wartet der Agent auf Sie.",
+    },
+    body: {
+      en: (t) =>
+        `${t}\n\nRead every field of this one record, including its relations and attachments — and nothing else in the table. Summarize what it says in a few lines, then wait for what I want to do with it next. Read-only; don't change anything.`,
+      "zh-CN": (t) =>
+        `${t}\n\n请读取这一条记录的所有字段，包括它的关联和附件——表里的其他内容一律不用读。用几句话概括它说了什么，然后等我告诉你接下来要拿它做什么。只读，不要改动任何数据。`,
+      "zh-TW": (t) =>
+        `${t}\n\n請讀取這一筆記錄的所有欄位，包括它的關聯和附件——表裡的其他內容一律不用讀。用幾句話概括它說了什麼，然後等我告訴你接下來要拿它做什麼。唯讀，不要改動任何資料。`,
+      ja: (t) =>
+        `${t}\n\nこの 1 件のレコードについて、リレーションと添付ファイルを含むすべてのフィールドを読んでください（テーブルの他の部分は読まなくて構いません）。内容を数行で要約し、次に何をしたいか私が伝えるまで待ってください。読み取り専用——何も変更しないでください。`,
+      ko: (t) =>
+        `${t}\n\n이 레코드 하나의 모든 필드를 관계와 첨부 파일까지 포함해 읽어 주세요. 테이블의 다른 내용은 읽지 않아도 됩니다. 무엇이 담겨 있는지 몇 줄로 요약한 다음, 제가 이걸로 무엇을 할지 말할 때까지 기다려 주세요. 읽기 전용이므로 아무것도 변경하지 마세요.`,
+      es: (t) =>
+        `${t}\n\nLee todos los campos de este único registro, incluidas sus relaciones y adjuntos, y nada más de la tabla. Resume en pocas líneas lo que dice y luego espera a que te diga qué quiero hacer con él. Solo lectura; no cambies nada.`,
+      pt: (t) =>
+        `${t}\n\nLeia todos os campos deste único registro, incluindo suas relações e anexos — e nada mais da tabela. Resuma em poucas linhas o que ele diz e depois espere eu dizer o que quero fazer com ele. Somente leitura; não altere nada.`,
+      vi: (t) =>
+        `${t}\n\nHãy đọc mọi trường của riêng bản ghi này, kể cả các liên kết và tệp đính kèm — không cần đọc gì khác trong bảng. Tóm tắt nội dung của nó trong vài dòng, rồi chờ tôi nói muốn làm gì tiếp với nó. Chỉ đọc; đừng thay đổi gì.`,
+      fr: (t) =>
+        `${t}\n\nLisez tous les champs de ce seul enregistrement, y compris ses relations et ses pièces jointes — et rien d'autre dans la table. Résumez en quelques lignes ce qu'il contient, puis attendez que je vous dise ce que je veux en faire. Lecture seule ; ne modifiez rien.`,
+      de: (t) =>
+        `${t}\n\nLesen Sie alle Felder dieses einen Datensatzes, einschließlich seiner Verknüpfungen und Anhänge – und sonst nichts aus der Tabelle. Fassen Sie in wenigen Zeilen zusammen, was er enthält, und warten Sie dann, bis ich sage, was ich damit tun möchte. Nur lesend; ändern Sie nichts.`,
+    },
+  },
+  {
     key: "record-complete",
     label: {
       en: "Complete this record",
@@ -1691,6 +2099,18 @@ const RECORD_SCENARIOS: PromptDef[] = [
       vi: "Hoàn thiện bản ghi này",
       fr: "Compléter cet enregistrement",
       de: "Diesen Datensatz vervollständigen",
+    },
+    outcome: {
+      en: "Missing fields filled in, each with its source; guesses are left blank.",
+      "zh-CN": "补上缺的字段并注明来源，拿不准的留空。",
+      "zh-TW": "補上缺的欄位並註明來源，拿不準的留空。",
+      ja: "足りないフィールドを根拠付きで補完。推測になるものは空欄のまま。",
+      ko: "빠진 필드를 출처와 함께 채우고, 추측해야 하는 것은 비워 둡니다.",
+      es: "Los campos que faltan rellenados con su origen; lo dudoso queda en blanco.",
+      pt: "Os campos que faltam preenchidos com a origem; o que seria chute fica em branco.",
+      vi: "Các trường còn thiếu được điền kèm nguồn; chỗ phải đoán sẽ để trống.",
+      fr: "Les champs manquants remplis, sources à l'appui ; l'incertain reste vide.",
+      de: "Fehlende Felder ergänzt, jeweils mit Quelle; Unsicheres bleibt leer.",
     },
     body: {
       en: (t) =>
@@ -1729,27 +2149,39 @@ const RECORD_SCENARIOS: PromptDef[] = [
       fr: "Réécrire le contenu de cet enregistrement",
       de: "Den Inhalt dieses Datensatzes umschreiben",
     },
+    outcome: {
+      en: "The record's text rewritten in the style you pick, with the facts unchanged.",
+      "zh-CN": "按你选的风格改写这条记录的文字，事实不变。",
+      "zh-TW": "按你選的風格改寫這筆記錄的文字，事實不變。",
+      ja: "選んだスタイルでレコードの文章を書き直し。事実は変えません。",
+      ko: "고른 스타일로 레코드의 글을 다시 씁니다. 사실은 그대로.",
+      es: "El texto del registro reescrito con el estilo que elijas, sin tocar los hechos.",
+      pt: "O texto do registro reescrito no estilo que escolher, sem mudar os fatos.",
+      vi: "Phần chữ của bản ghi được viết lại theo phong cách bạn chọn, giữ nguyên sự thật.",
+      fr: "Le texte de l'enregistrement réécrit dans le style choisi, faits inchangés.",
+      de: "Die Texte des Datensatzes im gewählten Stil umgeschrieben, Fakten unverändert.",
+    },
     body: {
       en: (t) =>
-        `${t}\n\nRewrite the text fields on this record the way I describe next — tone, length, or structure. Keep the facts identical; if you think a fact is wrong, say so instead of silently changing it.`,
+        `${t}\n\nRewrite the text fields on this record the way I describe next — tone, length, or structure. Direction: {{slot:Style|more concise|more concise,more formal,friendlier,more detailed}}. Keep the facts identical; if you think a fact is wrong, say so instead of silently changing it.`,
       "zh-CN": (t) =>
-        `${t}\n\n请按我接下来的要求改写这条记录的文本字段——语气、长度或结构。事实内容必须保持不变；如果你觉得某个事实有问题，说出来，不要悄悄改掉。`,
+        `${t}\n\n请按我接下来的要求改写这条记录的文本字段——语气、长度或结构。方向：{{slot:风格|更简洁|更简洁,更正式,更亲切,更详细}}。事实内容必须保持不变；如果你觉得某个事实有问题，说出来，不要悄悄改掉。`,
       "zh-TW": (t) =>
-        `${t}\n\n請按我接下來的要求改寫這筆記錄的文字欄位——語氣、長度或結構。事實內容必須保持不變；如果你覺得某個事實有問題，說出來，不要悄悄改掉。`,
+        `${t}\n\n請按我接下來的要求改寫這筆記錄的文字欄位——語氣、長度或結構。方向：{{slot:風格|更簡潔|更簡潔,更正式,更親切,更詳細}}。事實內容必須保持不變；如果你覺得某個事實有問題，說出來，不要悄悄改掉。`,
       ja: (t) =>
-        `${t}\n\nこのレコードのテキストフィールドを、次に伝える要件（トーン・長さ・構成）に沿って書き直してください。事実関係は変えないこと。事実がおかしいと思ったら、黙って直さずに指摘してください。`,
+        `${t}\n\nこのレコードのテキストフィールドを、次に伝える要件（トーン・長さ・構成）に沿って書き直してください。方向性：{{slot:スタイル|より簡潔に|より簡潔に,よりフォーマルに,より親しみやすく,より詳しく}}。事実関係は変えないこと。事実がおかしいと思ったら、黙って直さずに指摘してください。`,
       ko: (t) =>
-        `${t}\n\n이 레코드의 텍스트 필드를 제가 이어서 설명하는 대로(어조, 길이, 구조) 다시 써 주세요. 사실 관계는 그대로 유지하세요. 사실이 틀렸다고 생각되면 몰래 고치지 말고 알려 주세요.`,
+        `${t}\n\n이 레코드의 텍스트 필드를 제가 이어서 설명하는 대로(어조, 길이, 구조) 다시 써 주세요. 방향: {{slot:스타일|더 간결하게|더 간결하게,더 격식 있게,더 친근하게,더 자세하게}}. 사실 관계는 그대로 유지하세요. 사실이 틀렸다고 생각되면 몰래 고치지 말고 알려 주세요.`,
       es: (t) =>
-        `${t}\n\nReescribe los campos de texto de este registro como te describa a continuación: tono, longitud o estructura. Mantén los hechos idénticos; si crees que algún dato es incorrecto, dilo en lugar de cambiarlo en silencio.`,
+        `${t}\n\nReescribe los campos de texto de este registro como te describa a continuación: tono, longitud o estructura. Dirección: {{slot:Estilo|más conciso|más conciso,más formal,más cercano,más detallado}}. Mantén los hechos idénticos; si crees que algún dato es incorrecto, dilo en lugar de cambiarlo en silencio.`,
       pt: (t) =>
-        `${t}\n\nReescreva os campos de texto deste registro do jeito que eu descrever em seguida — tom, tamanho ou estrutura. Mantenha os fatos idênticos; se achar que algum fato está errado, diga isso em vez de alterá-lo em silêncio.`,
+        `${t}\n\nReescreva os campos de texto deste registro do jeito que eu descrever em seguida — tom, tamanho ou estrutura. Direção: {{slot:Estilo|mais conciso|mais conciso,mais formal,mais amigável,mais detalhado}}. Mantenha os fatos idênticos; se achar que algum fato está errado, diga isso em vez de alterá-lo em silêncio.`,
       vi: (t) =>
-        `${t}\n\nHãy viết lại các trường văn bản của bản ghi này theo cách tôi mô tả tiếp theo — giọng điệu, độ dài hoặc cấu trúc. Giữ nguyên các dữ kiện; nếu bạn nghĩ một dữ kiện sai, hãy nói ra thay vì âm thầm sửa.`,
+        `${t}\n\nHãy viết lại các trường văn bản của bản ghi này theo cách tôi mô tả tiếp theo — giọng điệu, độ dài hoặc cấu trúc. Hướng: {{slot:Phong cách|ngắn gọn hơn|ngắn gọn hơn,trang trọng hơn,thân thiện hơn,chi tiết hơn}}. Giữ nguyên các dữ kiện; nếu bạn nghĩ một dữ kiện sai, hãy nói ra thay vì âm thầm sửa.`,
       fr: (t) =>
-        `${t}\n\nRéécrivez les champs texte de cet enregistrement comme je le décrirai ensuite — ton, longueur ou structure. Conservez les faits à l'identique ; si vous pensez qu'un fait est erroné, dites-le au lieu de le changer discrètement.`,
+        `${t}\n\nRéécrivez les champs texte de cet enregistrement comme je le décrirai ensuite — ton, longueur ou structure. Orientation : {{slot:Style|plus concis|plus concis,plus formel,plus chaleureux,plus détaillé}}. Conservez les faits à l'identique ; si vous pensez qu'un fait est erroné, dites-le au lieu de le changer discrètement.`,
       de: (t) =>
-        `${t}\n\nSchreiben Sie die Textfelder dieses Datensatzes so um, wie ich es als Nächstes beschreibe – Ton, Länge oder Struktur. Die Fakten müssen identisch bleiben; wenn Sie glauben, dass ein Fakt falsch ist, sagen Sie es, statt ihn stillschweigend zu ändern.`,
+        `${t}\n\nSchreiben Sie die Textfelder dieses Datensatzes so um, wie ich es als Nächstes beschreibe – Ton, Länge oder Struktur. Richtung: {{slot:Stil|knapper|knapper,förmlicher,freundlicher,ausführlicher}}. Die Fakten müssen identisch bleiben; wenn Sie glauben, dass ein Fakt falsch ist, sagen Sie es, statt ihn stillschweigend zu ändern.`,
     },
   },
   {
@@ -1766,6 +2198,18 @@ const RECORD_SCENARIOS: PromptDef[] = [
       vi: "Giải thích bản ghi này cho tôi",
       fr: "M'expliquer cet enregistrement",
       de: "Mir diesen Datensatz erklären",
+    },
+    outcome: {
+      en: "What this record is, what changed lately and why, and anything inconsistent.",
+      "zh-CN": "这条记录代表什么、最近改了什么及原因，以及不一致之处。",
+      "zh-TW": "這筆記錄代表什麼、最近改了什麼及原因，以及不一致之處。",
+      ja: "このレコードが何か、最近の変更とその理由、矛盾している点。",
+      ko: "이 레코드가 무엇인지, 최근 무엇이 왜 바뀌었는지, 맞지 않는 부분.",
+      es: "Qué representa este registro, qué cambió hace poco y por qué, y qué no cuadra.",
+      pt: "O que este registro representa, o que mudou e por quê, e o que não bate.",
+      vi: "Bản ghi này là gì, gần đây đổi gì và vì sao, và chỗ nào không khớp.",
+      fr: "Ce que représente cet enregistrement, ses derniers changements et ce qui cloche.",
+      de: "Was dieser Datensatz ist, was sich zuletzt warum geändert hat und was nicht passt.",
     },
     body: {
       en: (t) =>
@@ -1931,6 +2375,8 @@ const buildCuratedPrompt = (
 ): NodePrompt => {
   const intent = prompt.intent ?? "change";
   const footer = intent === "read-only" ? reply : `${MERGE_POLICY[locale]} ${reply}`;
+  const template = `${prompt.body[locale](target)}\n\n${footer}`;
+  const outcome = prompt.outcome?.[locale];
 
   return {
     key: source === "custom-scenario" ? `custom:${prompt.key}` : prompt.key,
@@ -1939,11 +2385,25 @@ const buildCuratedPrompt = (
     ...(source === "custom-scenario" ? { customKey: prompt.key } : {}),
     label: prompt.label[locale],
     group,
-    body: `${prompt.body[locale](target)}\n\n${footer}`,
+    // Defaults filled in: playbooks, mobile and every other reader of `body`
+    // must never see raw `{{slot:` syntax.
+    body: fillPromptSlots(template),
+    ...(hasPromptSlots(template) ? { bodyTemplate: template } : {}),
     target,
     footer,
+    intent,
+    ...(outcome ? { outcome } : {}),
   };
 };
+
+/**
+ * The "where to work" sentence for one node, narrowed to a field, record or
+ * cell when `context.scope` says so — the same target line every prompt for
+ * that scope opens with. The locator prompt (`agent-locator.ts`) is this line
+ * plus the connection check.
+ */
+export const renderNodeLocatorTarget = (context: NodePromptContext, locale: CoreLocale): string =>
+  renderNodeTargetLine(context, locale) + scopeLine(locale, context.scope ?? { kind: "node" });
 
 /**
  * Just the "which node am I talking about" sentence, without a prompt around it.
@@ -2068,6 +2528,7 @@ export function buildNodeAgentPrompts(
         body: `${CAPABILITY_TEMPLATE[locale](target, opLabel)}\n\n${footer}`,
         target,
         footer,
+        intent: "change",
       };
     }),
   ];
@@ -2079,7 +2540,15 @@ export function buildNodeAgentPrompts(
     (a, b) => (rank.get(a.group) ?? GROUP_ORDER.length) - (rank.get(b.group) ?? GROUP_ORDER.length),
   );
 
-  return { scenarios, capabilities };
+  const nodeTarget = {
+    nodeId: context.nodeId,
+    nodeName: context.nodeName,
+    nodeType: context.nodeType,
+  };
+  return {
+    scenarios: scenarios.map((prompt) => ({ ...prompt, nodeTarget })),
+    capabilities: capabilities.map((prompt) => ({ ...prompt, nodeTarget })),
+  };
 }
 
 // ── Create prompts ────────────────────────────────────────────────────────────
@@ -2189,6 +2658,12 @@ const CREATE_TARGET_LINE: Record<CoreLocale, (c: CreateNodePromptContext) => str
   },
 };
 
+/** The "create under folder X" target line — the create flow's locator. */
+export const renderCreateTargetLine = (
+  context: CreateNodePromptContext,
+  locale: CoreLocale,
+): string => CREATE_TARGET_LINE[locale](context);
+
 const CREATE_GROUP_LABEL: Record<CoreLocale, string> = {
   en: "Create",
   "zh-CN": "新建",
@@ -2241,6 +2716,18 @@ const CREATE_SCENARIOS: PromptDef[] = [
       fr: "Une Base pour suivre quelque chose",
       de: "Eine Base, um etwas zu erfassen",
     },
+    outcome: {
+      en: "A proposed set of fields; the Base is created only after you approve.",
+      "zh-CN": "一份字段设计方案，你确认后才会建表。",
+      "zh-TW": "一份欄位設計方案，你確認後才會建表。",
+      ja: "フィールド構成の提案。承認後に Base を作成します。",
+      ko: "필드 구성 제안. 승인한 뒤에야 베이스를 만듭니다.",
+      es: "Una propuesta de campos; la Base se crea solo cuando la apruebes.",
+      pt: "Uma proposta de campos; a Base só é criada depois que você aprovar.",
+      vi: "Đề xuất các trường; cơ sở dữ liệu chỉ được tạo sau khi bạn duyệt.",
+      fr: "Une proposition de champs ; la Base n'est créée qu'après votre accord.",
+      de: "Ein Vorschlag für die Felder; die Base wird erst nach Ihrer Freigabe angelegt.",
+    },
     body: {
       en: (t) =>
         `${t}\n\nI want a Base to track something — I'll describe it next. Propose the field schema first (field names, types, and why each one), and create it only after I approve the proposal.`,
@@ -2277,6 +2764,18 @@ const CREATE_SCENARIOS: PromptDef[] = [
       vi: "Biến dữ liệu này thành một cơ sở dữ liệu",
       fr: "Transformer ces données en Base",
       de: "Diese Daten in eine Base verwandeln",
+    },
+    outcome: {
+      en: "A new Base built from your data, with the fields and row count shown first.",
+      "zh-CN": "用你的数据建好新表，先给你看字段和读到的行数。",
+      "zh-TW": "用你的資料建好新表，先給你看欄位和讀到的列數。",
+      ja: "データから新しい Base を作成。先にフィールドと行数を見せます。",
+      ko: "데이터로 만든 새 베이스. 먼저 필드와 읽은 행 수를 보여 줍니다.",
+      es: "Una Base nueva con tus datos, mostrando antes los campos y cuántas filas leyó.",
+      pt: "Uma Base nova com seus dados, mostrando antes os campos e quantas linhas leu.",
+      vi: "Cơ sở dữ liệu mới từ dữ liệu của bạn, có cho xem trước các trường và số dòng.",
+      fr: "Une nouvelle Base à partir de vos données, champs et nombre de lignes montrés d'abord.",
+      de: "Eine neue Base aus Ihren Daten, Felder und Zeilenzahl werden vorher gezeigt.",
     },
     body: {
       en: (t) =>
@@ -2315,6 +2814,18 @@ const CREATE_SCENARIOS: PromptDef[] = [
       fr: "Un Doc, rédigé pour moi",
       de: "Ein Doc, das Sie für mich entwerfen",
     },
+    outcome: {
+      en: "A new Doc with an outline first, then a full first draft.",
+      "zh-CN": "新建一篇文档，先给大纲，再写完整初稿。",
+      "zh-TW": "新建一篇文件，先給大綱，再寫完整初稿。",
+      ja: "新しい Doc。まずアウトライン、次に初稿全体。",
+      ko: "새 문서. 먼저 개요를, 그다음 전체 초안을 씁니다.",
+      es: "Un Doc nuevo: primero un esquema y luego un primer borrador completo.",
+      pt: "Um Doc novo: primeiro um roteiro, depois um primeiro rascunho completo.",
+      vi: "Tài liệu mới: dàn ý trước, rồi bản nháp đầu hoàn chỉnh.",
+      fr: "Un nouveau Doc : d'abord un plan, puis un premier jet complet.",
+      de: "Ein neues Doc: zuerst eine Gliederung, dann ein vollständiger erster Entwurf.",
+    },
     body: {
       en: (t) =>
         `${t}\n\nCreate a Doc and draft its first version from what I describe next. Give me an outline before you write the full draft.`,
@@ -2352,6 +2863,18 @@ const CREATE_SCENARIOS: PromptDef[] = [
       fr: "Toute une arborescence de dossiers",
       de: "Eine ganze Ordnerstruktur",
     },
+    outcome: {
+      en: "A full folder plan to read in one go; it's created only after you approve.",
+      "zh-CN": "一份能一眼看完的文件夹方案，你确认后才会创建。",
+      "zh-TW": "一份能一眼看完的資料夾方案，你確認後才會建立。",
+      ja: "一目で読めるフォルダ構成案。承認後に作成します。",
+      ko: "한눈에 보이는 폴더 구조 계획. 승인한 뒤에야 만듭니다.",
+      es: "Un plan completo de carpetas para leer de una vez; se crea cuando lo apruebes.",
+      pt: "Um plano completo de pastas para ler de uma vez; só é criado após sua aprovação.",
+      vi: "Kế hoạch thư mục đầy đủ, đọc một lượt; chỉ tạo sau khi bạn duyệt.",
+      fr: "Une arborescence complète à lire d'un coup ; créée seulement après votre accord.",
+      de: "Ein vollständiger Ordnerplan auf einen Blick; angelegt erst nach Ihrer Freigabe.",
+    },
     body: {
       en: (t) =>
         `${t}\n\nI'll describe how I want this area organized. Propose the whole tree — folders, and what goes in each — as a plan I can read in one go, then create it once I approve.`,
@@ -2388,6 +2911,18 @@ const CREATE_SCENARIOS: PromptDef[] = [
       vi: "Dựng một bộ từ mẫu có sẵn",
       fr: "En installer un à partir d'un modèle",
       de: "Eines aus einer Vorlage einrichten",
+    },
+    outcome: {
+      en: "A recommended template and what it will create, before anything is installed.",
+      "zh-CN": "推荐一个合适的模板，并在安装前说明它会创建什么。",
+      "zh-TW": "推薦一個合適的範本，並在安裝前說明它會建立什麼。",
+      ja: "おすすめのテンプレートと、インストール前に作成される内容。",
+      ko: "추천 템플릿과 설치 전에 무엇이 만들어지는지에 대한 설명.",
+      es: "Una plantilla recomendada y lo que creará, antes de instalar nada.",
+      pt: "Um modelo recomendado e o que ele vai criar, antes de instalar qualquer coisa.",
+      vi: "Một mẫu được đề xuất và những gì nó sẽ tạo, trước khi cài đặt.",
+      fr: "Un modèle recommandé et ce qu'il va créer, avant toute installation.",
+      de: "Eine empfohlene Vorlage und was sie anlegt, bevor etwas installiert wird.",
     },
     body: {
       en: (t) =>
@@ -2476,6 +3011,7 @@ export function buildCreateNodePrompts(
         body: `${CREATE_CAPABILITY_TEMPLATE[locale](target, typeLabel, definition.type)}\n\n${footer}`,
         target,
         footer,
+        intent: "change",
       };
     });
 

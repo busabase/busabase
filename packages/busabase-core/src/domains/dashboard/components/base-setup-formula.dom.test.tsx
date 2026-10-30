@@ -60,6 +60,7 @@ function renderSetup(
   permission: "manage" | "read" | "changeRequest" = "manage",
   onCreateField = vi.fn().mockResolvedValue(undefined),
   onUpdateField = vi.fn().mockResolvedValue(undefined),
+  originViewId?: string,
 ) {
   const element = (level = permission) => (
     <CoreI18nProvider locale="en">
@@ -68,6 +69,7 @@ function renderSetup(
           base={base}
           bases={[base]}
           draftScope="space:viewer"
+          originViewId={originViewId}
           orpc={orpc}
           onCreateField={onCreateField}
           onUpdateField={onUpdateField}
@@ -109,6 +111,14 @@ afterEach(() => {
 });
 
 describe("formula field settings recovery and permissions", () => {
+  it("retains the originating view when a field is submitted for review", async () => {
+    const result = renderSetup("changeRequest", undefined, undefined, "viw_curated");
+    openNewFormula();
+    fireEvent.click(screen.getByRole("button", { name: "Add Field Request" }));
+    await waitFor(() => expect(result.onCreateField).toHaveBeenCalledOnce());
+    expect(result.onCreateField.mock.calls[0]?.[1]).toMatchObject({ originViewId: "viw_curated" });
+  });
+
   it("requires confirmation to discard changes and keeps the draft when discard is refused", () => {
     renderSetup();
     openNewFormula();

@@ -95,6 +95,7 @@ const changeRequest = {
 
 const client = {
   listComments: vi.fn(async () => []),
+  listSpaceMembers: vi.fn(async () => []),
 } as unknown as BusabaseDashboardApiClient;
 
 const useStaticLocation = (): [string, (path: string) => void] => [

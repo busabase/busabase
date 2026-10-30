@@ -64,6 +64,7 @@ import { sortViewsByOrder } from "../domains/base/utils/view-order";
 import { type DocLinesResult, sliceDocLinesRange, splitDocLines } from "../domains/doc/handlers";
 import { type PlaybookNodeRow, renderPromptPlaybook } from "../domains/playbooks/logic/playbooks";
 import { collectAncestorIds } from "./ancestor-chain";
+import { OPEN_CHANGE_REQUEST_STATUSES } from "./change-request-status";
 import { type NormalizedCommentMention, normalizeCommentMentions } from "./comment-mentions";
 import { isSearchableNodeType, NODE_CONTENT_ADAPTERS } from "./node-content";
 import { type NodeTree, nodePathOf } from "./node-tree";
@@ -313,6 +314,21 @@ export const demoGetRecord = (recordId: string): RecordVO => {
   return record;
 };
 
+/** Demo twin of `records.getMany`: input order, deduped, unknown ids in `missingIds`. */
+export const demoGetRecords = (
+  recordIds: readonly string[],
+): { records: RecordVO[]; missingIds: string[] } => {
+  const byId = new Map(dataset().records.map((record) => [record.id, record]));
+  const records: RecordVO[] = [];
+  const missingIds: string[] = [];
+  for (const id of new Set(recordIds)) {
+    const record = byId.get(id);
+    if (record) records.push(record);
+    else missingIds.push(id);
+  }
+  return { records, missingIds };
+};
+
 export const demoListRecordsByFieldText = (input: {
   baseId?: string;
   fieldSlug: string;
@@ -471,6 +487,10 @@ export const demoReadNodeLines = (
   if (node.type === "doc") {
     return sliceDocLinesRange(splitDocLines(demoGetDoc(node.id).body), startLine, endLine);
   }
+  if (node.type === "folder") {
+    // Demo folders have no stored readme; a missing object is an empty body.
+    return sliceDocLinesRange(splitDocLines(""), startLine, endLine);
+  }
   if (node.type === "html") {
     const source = parseHtmlDocument(node.metadata.htmlDocument).source;
     return sliceDocLinesRange(splitDocLines(source), startLine, endLine);
@@ -618,6 +638,32 @@ export const demoListNodeSummaries = (types: readonly string[]): NodeVO[] =>
     .map((node) => ({ ...node, children: [], hasChildren: false }));
 
 /**
+ * The seeded workspace belongs to Kelly (`local-admin`), the same person the
+ * demo activity feed already names. Demo nodes are written once and never
+ * edited (`createdAt === updatedAt`), so the last editor is the creator —
+ * the same rule the real `getNodeDetail` attribution uses.
+ */
+const DEMO_KELLY = {
+  id: DEMO_ACTOR_ID,
+  name: "Kelly",
+  email: null,
+  image: null,
+} as const;
+
+const withDemoAttribution = (detail: NodeDetailVO): NodeDetailVO => {
+  const unchanged = detail.node.createdAt === detail.node.updatedAt;
+  return {
+    ...detail,
+    attribution: {
+      createdBy: DEMO_ACTOR_ID,
+      createdByUser: DEMO_KELLY,
+      updatedBy: unchanged ? DEMO_ACTOR_ID : null,
+      updatedByUser: unchanged ? DEMO_KELLY : null,
+    },
+  };
+};
+
+/**
  * Demo counterpart to `getNodeDetail`. Same discriminated union, same
  * ambiguous-slug refusal, same fail-closed behaviour for a type with no demo
  * detail builder.
@@ -644,24 +690,30 @@ export const demoGetNodeDetail = (nodeIdOrSlug: string, type?: string): NodeDeta
     // Built straight off the seeded tree rather than via a folders-only lookup,
     // so a NESTED demo folder resolves the same way a top-level one does.
     case "folder":
-      return { type: "folder", node, children: node.children ?? [] };
+      return withDemoAttribution({
+        type: "folder",
+        node,
+        children: node.children ?? [],
+        storagePrefix: `busabase/nodes/${node.id}/folder/`,
+        body: "",
+      });
     case "doc":
-      return { type: "doc", ...demoGetDoc(node.id) };
+      return withDemoAttribution({ type: "doc", ...demoGetDoc(node.id) });
     case "file":
-      return { type: "file", ...demoGetFileNode(node.id) };
+      return withDemoAttribution({ type: "file", ...demoGetFileNode(node.id) });
     case "skill":
     case "drive":
     case "airapp": {
       const fileTree = demoGetFileTree(node.id, node.type);
-      return {
+      return withDemoAttribution({
         type: node.type,
         ...fileTree,
         skippedGitignorePaths: fileTree.skippedGitignorePaths ?? [],
-      };
+      });
     }
     case "base":
     case "form":
-      return { type: node.type, node };
+      return withDemoAttribution({ type: node.type, node });
     // The demo dataset's seed scenarios still carry these three under
     // `metadata.whiteboardDocument`/`workflowDocument`/`htmlDocument`
     // (`demo/scenarios/node-types.*.ts` — untouched by the move to object
@@ -672,19 +724,23 @@ export const demoGetNodeDetail = (nodeIdOrSlug: string, type?: string): NodeDeta
     // the one place a client sees a whiteboard/workflow/html detail with no
     // document at all.
     case "whiteboard":
-      return {
+      return withDemoAttribution({
         type: "whiteboard",
         node,
         document: parseWhiteboardDocument(node.metadata.whiteboardDocument),
-      };
+      });
     case "workflow":
-      return {
+      return withDemoAttribution({
         type: "workflow",
         node,
         document: parseWorkflowDocument(node.metadata.workflowDocument),
-      };
+      });
     case "html":
-      return { type: "html", node, document: parseHtmlDocument(node.metadata.htmlDocument) };
+      return withDemoAttribution({
+        type: "html",
+        node,
+        document: parseHtmlDocument(node.metadata.htmlDocument),
+      });
   }
   // Unreachable for a registered built-in type (the switch above is exhaustive
   // over `NodeType`), but a late `registerNodeType()` plugin can reach it — and
@@ -908,6 +964,11 @@ export const demoSearch = (input: {
   const changeRequestResults: SearchResultVO[] = !wantsRecords
     ? []
     : data.changeRequests
+        // Same rule as the real search: only change requests still awaiting a
+        // decision are results; a merged one already shows up as its record.
+        .filter((changeRequest) =>
+          (OPEN_CHANGE_REQUEST_STATUSES as readonly string[]).includes(changeRequest.status),
+        )
         .filter((changeRequest) =>
           match(
             changeRequest.operations

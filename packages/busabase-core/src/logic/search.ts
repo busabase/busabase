@@ -47,6 +47,7 @@ import {
 } from "../domains/assets/logic/asset-texts-logic";
 import { openAssetTextSource } from "../domains/assets/logic/text-cache";
 import { getPrimaryField } from "../domains/base/utils/primary-field";
+import { OPEN_CHANGE_REQUEST_STATUSES } from "./change-request-status";
 import { hydrateChangeRequest, hydrateRecord } from "./cr-lifecycle";
 import {
   buildBaseVisibilityExists,
@@ -958,9 +959,22 @@ const searchWithinBudget = async (
     // Canonical record projections can outlive an archived record.
     // Exclude those rows BEFORE LIMIT so they cannot consume the
     // candidate window and make a page short after hydration. Change
-    // request projections remain searchable regardless of status.
+    // request projections are searchable only while the request is OPEN:
+    // a merged one is already represented by its record (and kept
+    // matching after that record was deleted or its Base archived), and a
+    // rejected/abandoned one is history, not workspace content.
     or(
-      isNotNull(busabaseFieldValues.changeRequestId),
+      exists(
+        db
+          .select({ one: sql`1` })
+          .from(busabaseChangeRequests)
+          .where(
+            and(
+              eq(busabaseChangeRequests.id, busabaseFieldValues.changeRequestId),
+              inArray(busabaseChangeRequests.status, OPEN_CHANGE_REQUEST_STATUSES),
+            ),
+          ),
+      ),
       exists(
         db
           .select({ one: sql`1` })
@@ -1111,7 +1125,12 @@ const searchWithinBudget = async (
           readDb
             .select()
             .from(busabaseChangeRequests)
-            .where(inArray(busabaseChangeRequests.id, changeRequestIds)),
+            .where(
+              and(
+                inArray(busabaseChangeRequests.id, changeRequestIds),
+                inArray(busabaseChangeRequests.status, OPEN_CHANGE_REQUEST_STATUSES),
+              ),
+            ),
         )
       : Promise.resolve([]),
     wantsNames

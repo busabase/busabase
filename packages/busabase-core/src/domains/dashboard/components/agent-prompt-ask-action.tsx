@@ -2,6 +2,10 @@
 
 import { useQuery } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
+import {
+  type AgentPromptEnvelope,
+  createPromptResourceContext,
+} from "busabase-contract/domains/agents/prompt-context";
 import type { AgentConnectionVO } from "busabase-contract/domains/agents/types";
 import { Button } from "kui/button";
 import {
@@ -28,20 +32,26 @@ const toAgentTarget = (connection: AgentConnectionVO): AgentTarget => ({
 /** Prompt-specific compact split action; the full-size AskAgentAction stays unchanged. */
 export function AgentPromptAskAction({
   onHandedOff,
+  onSent,
   orpc,
   promptText,
+  promptEnvelope,
   sessionScopeId,
 }: {
   onHandedOff: () => void;
+  /** Called when the prompt is actually handed to an agent (not on setup). */
+  onSent?: () => void;
   orpc: BusabaseQueryUtils;
   promptText?: string;
+  promptEnvelope?: AgentPromptEnvelope;
   sessionScopeId: string;
 }) {
   const messages = useCoreI18n();
   const [, setLocation] = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
   const [startingTargetName, setStartingTargetName] = useState<string | null>(null);
-  const promptTextRef = useRef(promptText);
+  const promptSnapshotKey = JSON.stringify([promptText, promptEnvelope]);
+  const promptSnapshotRef = useRef(promptSnapshotKey);
   const connections = useQuery<AgentConnectionVO[]>({
     ...orpc.agents.connections.list.queryOptions({ input: { scope: "space" } }),
   });
@@ -60,21 +70,27 @@ export function AgentPromptAskAction({
 
   const handOffTo = (connection: AgentConnectionVO) => {
     if (!promptText) return;
+    onSent?.();
     setStartingTargetName(connection.agentName);
-    ask.askTarget(promptText, toAgentTarget(connection));
+    ask.askTarget(
+      promptEnvelope ? "" : promptText,
+      toAgentTarget(connection),
+      promptEnvelope
+        ? [createPromptResourceContext(promptEnvelope, crypto.randomUUID())]
+        : undefined,
+    );
   };
 
   // A target choice always belongs to the prompt visible when it was made.
   // Drop an unfinished handoff synchronously if the user selects another prompt.
   useLayoutEffect(() => {
-    if (ask.isStarting) return;
-    const changed = promptTextRef.current !== promptText;
-    promptTextRef.current = promptText;
+    const changed = promptSnapshotRef.current !== promptSnapshotKey;
+    promptSnapshotRef.current = promptSnapshotKey;
     if (changed && ask.isActive) {
       setStartingTargetName(null);
       ask.reset();
     }
-  }, [ask.isActive, ask.isStarting, ask.reset, promptText]);
+  }, [ask.isActive, ask.reset, promptSnapshotKey]);
 
   const handlePrimary = () => {
     if (connections.isError || agents.length > 1) {
@@ -86,11 +102,17 @@ export function AgentPromptAskAction({
     else openSetup();
   };
 
+  // Loaded and genuinely empty: the honest primary action is setting one up,
+  // so say so instead of offering an "Ask Agent" that can only redirect.
+  // Loading and error states keep the usual label.
+  const needsSetup = connections.isSuccess && agents.length === 0;
   const busyLabel = ask.isStarting
     ? messages.agentPrompts.askAgentStarting
     : ask.isLoading
       ? messages.agentPrompts.askAgentLoading
-      : messages.agentPrompts.askAgent;
+      : needsSetup
+        ? messages.agentPrompts.connectAgentFirst
+        : messages.agentPrompts.askAgent;
 
   return (
     <div className="flex min-w-0 flex-col items-end gap-1.5">
@@ -105,6 +127,8 @@ export function AgentPromptAskAction({
         >
           {connections.isPending || ask.isLoading || ask.isStarting ? (
             <Loader2 aria-hidden className="animate-spin" />
+          ) : needsSetup ? (
+            <Bot aria-hidden />
           ) : (
             <Sparkles aria-hidden />
           )}

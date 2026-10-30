@@ -1,4 +1,8 @@
-import { isViewFilterGroup, type ViewFilterConditionVO } from "busabase-contract/types";
+import {
+  getAutoShowNewFields,
+  isViewFilterGroup,
+  type ViewFilterConditionVO,
+} from "busabase-contract/types";
 // ============================================================================
 // Operation field-change rendering — before → after hybrid for records + views.
 // `operation.baseFields` carries the canonical prior values (null for creations),
@@ -15,7 +19,8 @@ import type {
 } from "busabase-contract/types";
 import { ArrowRight, Minus, Plus } from "lucide-react";
 import { iStringParse } from "openlib/i18n/i-string";
-import { type CoreI18nMessages, fmt, useCoreI18n } from "../../../i18n";
+import { type CoreI18nMessages, fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
+import { fieldVisibilityMessages } from "../../../i18n/field-visibility";
 import { getFieldName } from "../helpers/field";
 import { fieldValueToString } from "../helpers/format";
 import { getFieldOrderDiffModel, isFieldReorderOperation } from "../helpers/operation-diff";
@@ -60,6 +65,14 @@ export const isInternalFormulaMetadata = (operation: OperationVO, slug: string) 
   (operation.operation === "base_add_field" || operation.operation === "base_update_field") &&
   (slug === "formulaDependencies" || slug === "formulaBaseExpression");
 
+/** The source-view identity is routing intent, not an editable field setting. */
+const isInternalFieldOrigin = (operation: OperationVO, slug: string) =>
+  operation.operation === "base_add_field" && slug === "originViewId";
+
+/** Review the resulting configuration, not the bookkeeping used to merge it safely. */
+const isInternalViewConfigMetadata = (operation: OperationVO, slug: string) =>
+  operation.operation === "view_update" && (slug === "configPatch" || slug === "configBase");
+
 export const getOperationFieldLabel = (
   changeRequest: ChangeRequestVO,
   operation: OperationVO,
@@ -87,7 +100,13 @@ export const getOperationFieldChanges = (
       ? value + 1
       : value;
   return Object.entries(operation.headCommit.payload)
-    .filter(([slug, value]) => value !== undefined && !isInternalFormulaMetadata(operation, slug))
+    .filter(
+      ([slug, value]) =>
+        value !== undefined &&
+        !isInternalFormulaMetadata(operation, slug) &&
+        !isInternalFieldOrigin(operation, slug) &&
+        !isInternalViewConfigMetadata(operation, slug),
+    )
     .map(([slug, afterValue]): OperationFieldChange => {
       const hasBefore = before != null && slug in before && before[slug] !== undefined;
       return {
@@ -120,7 +139,7 @@ export const getFilterOperatorLabel = (messages: CoreI18nMessages, operator: str
 
 export interface ViewConfigRule {
   key: string;
-  kind: "sort" | "filter" | "field" | "order" | "width";
+  kind: "sort" | "filter" | "field" | "order" | "width" | "policy";
   label: string;
 }
 
@@ -128,6 +147,7 @@ export const describeViewConfig = (
   changeRequest: ChangeRequestVO,
   config: unknown,
   messages: CoreI18nMessages,
+  automaticLabel = fieldVisibilityMessages.en.automatic,
 ): ViewConfigRule[] => {
   const value = (config ?? {}) as ViewConfigVO;
   const rules: ViewConfigRule[] = [];
@@ -167,16 +187,32 @@ export const describeViewConfig = (
       });
     }
   const visible = value.visibleFieldSlugs;
-  if (visible === undefined || visible === null) {
+  const automatic = getAutoShowNewFields(value);
+  rules.push({
+    key: `field-policy:${automatic}`,
+    kind: "policy",
+    label: `${automaticLabel}: ${automatic ? messages.common.yes : messages.common.no}`,
+  });
+  if (automatic || visible === undefined || visible === null) {
     rules.push({ key: "field:*", kind: "field", label: messages.operationDiff.allFields });
+    for (const slug of [...new Set(value.hiddenFieldSlugs ?? [])]) {
+      rules.push({
+        key: `hidden-field:${slug}`,
+        kind: "field",
+        label: `${messages.base.hiddenField} · ${getFieldName(changeRequest, slug)}`,
+      });
+    }
   } else {
     for (const slug of visible) {
       rules.push({ key: `field:${slug}`, kind: "field", label: getFieldName(changeRequest, slug) });
     }
+  }
+  const order = value.fieldOrderSlugs ?? visible;
+  if (Array.isArray(order)) {
     rules.push({
-      key: `order:${visible.join("\u0000")}`,
+      key: `order:${order.join("\u0000")}`,
       kind: "order",
-      label: visible.map((slug) => getFieldName(changeRequest, slug)).join(" → "),
+      label: order.map((slug) => getFieldName(changeRequest, slug)).join(" → "),
     });
   }
   for (const [slug, width] of Object.entries(value.fieldWidths ?? {}).sort(([a], [b]) =>
@@ -209,7 +245,9 @@ export function ViewConfigRuleLine({
           ? messages.operationDiff.width
           : rule.kind === "order"
             ? messages.operationDiff.order
-            : messages.operationDiff.field;
+            : rule.kind === "policy"
+              ? messages.operationDiff.configuration
+              : messages.operationDiff.field;
   const marker =
     status === "added" ? (
       <Plus className="text-merged-strong dark:text-merged-soft" size={13} />
@@ -242,7 +280,13 @@ export function ViewConfigRules({
   config: unknown;
   messages: CoreI18nMessages;
 }) {
-  const rules = describeViewConfig(changeRequest, config, messages);
+  const locale = useCoreLocale();
+  const rules = describeViewConfig(
+    changeRequest,
+    config,
+    messages,
+    fieldVisibilityMessages[locale].automatic,
+  );
   return (
     <div className="flex flex-col gap-1.5">
       {rules.map((rule) => (
@@ -263,8 +307,10 @@ export function ViewConfigDiff({
   after: unknown;
   messages: CoreI18nMessages;
 }) {
-  const beforeRules = describeViewConfig(changeRequest, before, messages);
-  const afterRules = describeViewConfig(changeRequest, after, messages);
+  const locale = useCoreLocale();
+  const automaticLabel = fieldVisibilityMessages[locale].automatic;
+  const beforeRules = describeViewConfig(changeRequest, before, messages, automaticLabel);
+  const afterRules = describeViewConfig(changeRequest, after, messages, automaticLabel);
   const beforeKeys = new Set(beforeRules.map((rule) => rule.key));
   const afterKeys = new Set(afterRules.map((rule) => rule.key));
   const lines: { rule: ViewConfigRule; status: "added" | "removed" | "unchanged" }[] = [

@@ -8,6 +8,7 @@ import type { getDb } from "../../../db";
 import {
   busabaseBaseFields,
   busabaseBases,
+  busabaseCommits,
   busabaseFieldValues,
   busabaseRecordLinks,
   busabaseRecords,
@@ -17,8 +18,8 @@ import { buildBaseVisibilityExists } from "../../../logic/node-acl";
 /**
  * Reverse relation columns.
  *
- * A `relation` field whose options carry `reverseOfFieldId` is the read-only
- * other side of a relation field on its target Base: "Company → Opportunities"
+ * A `relation` field whose options carry `reverseOfFieldId` is the other side
+ * of a relation field on its target Base: "Company → Opportunities"
  * is the reverse of "Opportunity → Company". It stores nothing. Its value is
  * every live record on the target Base whose forward field links to this
  * record, read at query time from `busabase_record_links` (which has an index on
@@ -26,10 +27,15 @@ import { buildBaseVisibilityExists } from "../../../logic/node-acl";
  * side, the two columns can never disagree — the inconsistency a pair of
  * independently-edited `inverseFieldId` fields produces.
  *
- * Editing happens on the forward field. A write that echoes back a reverse
- * column's current value (clients often resubmit the whole record) is dropped;
- * a write that tries to change it is rejected with a pointer to the forward
- * field.
+ * Both sides are editable (two-way relation, like Notion / Airtable); writes to
+ * a reverse column are redirected to the forward field. Changing "Company →
+ * Opportunities" on an existing record becomes one bulk-update change request
+ * on the Opportunities Base that links / unlinks that company in each
+ * opportunity's `company` field (a single-value forward field is MOVED, not
+ * appended). A write that echoes back a reverse column's current value (clients
+ * often resubmit the whole record) is dropped. Storage stays single-sided:
+ * validation and merge never store a reverse value. Record creates may only
+ * carry an empty reverse value.
  */
 
 type Db = Awaited<ReturnType<typeof getDb>>;
@@ -137,7 +143,11 @@ const fieldLabel = (field: { slug: string; name?: unknown }) => {
   return text || field.slug;
 };
 
-/** Error for a write that tries to change a reverse column. */
+/**
+ * Error for a record CREATE that sets a reverse column. A record that does not
+ * exist yet cannot be linked to from the forward side in the same write, so a
+ * create may only carry an empty reverse value; set it with an update instead.
+ */
 export const reverseRelationReadOnlyError = async (
   db: Db,
   field: FieldLike,
@@ -162,12 +172,12 @@ export const reverseRelationReadOnlyError = async (
   const whereSlug = forward ? `${forward.baseSlug}.${forward.slug}` : forwardFieldId;
   return new ORPCError("BAD_REQUEST", {
     message:
-      `Field "${field.slug}" is a read-only reverse relation; its value comes from ${whereSlug}. ` +
-      `Change the link on those records instead. / 「${fieldLabel(field)}」是只读的反向关联，` +
-      `值来自「${where}」，请到那边修改关联。`,
+      `Field "${field.slug}" is a reverse relation of ${whereSlug} and cannot be set while creating a record. ` +
+      `Create the record first, then update "${field.slug}" (or link from ${whereSlug}). / ` +
+      `「${fieldLabel(field)}」是「${where}」的反向关联，新建记录时不能填写，请先建好记录再修改。`,
     data: {
       slug: field.slug,
-      reason: "reverse_relation_read_only",
+      reason: "reverse_relation_on_create",
       reverseOfFieldId: forwardFieldId,
       forwardBaseSlug: forward?.baseSlug ?? null,
       forwardFieldSlug: forward?.slug ?? null,
@@ -175,25 +185,62 @@ export const reverseRelationReadOnlyError = async (
   });
 };
 
+const badReverseValue = (slug: string, reason: string, message: string, data = {}) =>
+  new ORPCError("BAD_REQUEST", {
+    message: `Field "${slug}": ${message}`,
+    data: { slug, reason, ...data },
+  });
+
 /**
- * Drop reverse columns from incoming record writes. An entry whose reverse
- * value equals the current computed value (or, on create, is empty) loses the
- * key silently; any other value throws `reverseRelationReadOnlyError`. Mutates
- * each entry's `fields` in place so every later step — validation, the stored
- * commit, projection — never sees a reverse column.
+ * A change to a reverse column on an existing record, to be written onto the
+ * forward field of the records it names: every `added` source gets `recordId`
+ * linked in its forward field, every `removed` one gets it unlinked.
+ */
+export type ReverseRelationWrite = {
+  /** The record whose reverse column changed (lives on the reverse column's Base). */
+  recordId: string;
+  reverseSlug: string;
+  forwardBaseId: string;
+  forwardFieldId: string;
+  forwardFieldSlug: string;
+  /** Forward field is `multiple: false` — adding a source MOVES its link here. */
+  forwardSingle: boolean;
+  /** Forward field is required — a source may not be left without a value. */
+  forwardRequired: boolean;
+  added: string[];
+  removed: string[];
+};
+
+/**
+ * Take reverse columns out of incoming record writes and return what they ask
+ * for on the forward side. Mutates each entry's `fields` in place (the key is
+ * always deleted) so every later step — validation, the stored commit,
+ * projection — never sees a reverse column; the reverse column itself still
+ * stores nothing.
+ *
+ * - create (`recordId: null`): only an empty value is accepted; anything else
+ *   throws `reverseRelationReadOnlyError`.
+ * - update: a value equal to the current computed value (clients often resubmit
+ *   the whole record) is dropped silently; a different one becomes a
+ *   `ReverseRelationWrite` (added / removed source ids). Added ids must be live
+ *   records on the forward field's Base.
+ * - A non-id value (not a string / string[] / empty) is a BAD_REQUEST.
+ *
+ * Nothing is written here: the caller checks permission on the forward Base
+ * and submits the forward change request (see record-ops.ts).
  */
 export const stripReverseRelationInput = async (
   db: Db,
   baseId: string,
   baseFields: ReadonlyArray<FieldLike>,
   entries: ReadonlyArray<{ recordId: string | null; fields: Record<string, unknown> }>,
-): Promise<void> => {
+): Promise<ReverseRelationWrite[]> => {
   const reverse = reverseRelationFields(baseFields);
-  if (reverse.length === 0) return;
+  if (reverse.length === 0) return [];
   const touched = entries.filter((entry) =>
     reverse.some((field) => Object.hasOwn(entry.fields, field.slug)),
   );
-  if (touched.length === 0) return;
+  if (touched.length === 0) return [];
   const existingIds = touched.flatMap((entry) => (entry.recordId ? [entry.recordId] : []));
   const current = existingIds.length
     ? await resolveReverseRelationValues(
@@ -202,17 +249,263 @@ export const stripReverseRelationInput = async (
         new Map([[baseId, baseFields]]),
       )
     : new Map<string, Record<string, string[]>>();
+  const pending: Array<{ field: FieldLike; recordId: string; added: string[]; removed: string[] }> =
+    [];
   for (const entry of touched) {
     for (const field of reverse) {
       if (!Object.hasOwn(entry.fields, field.slug)) continue;
       const incoming = toIdList(entry.fields[field.slug]);
-      const now = entry.recordId ? (current.get(entry.recordId)?.[field.slug] ?? []) : [];
-      if (incoming === null || !sameIdSet(incoming, now)) {
-        throw await reverseRelationReadOnlyError(db, field);
+      if (incoming === null) {
+        throw badReverseValue(
+          field.slug,
+          "invalid_reverse_value",
+          "a reverse relation value must be a record id or a list of record ids.",
+        );
       }
       delete entry.fields[field.slug];
+      if (!entry.recordId) {
+        if (incoming.length > 0) throw await reverseRelationReadOnlyError(db, field);
+        continue;
+      }
+      const now = current.get(entry.recordId)?.[field.slug] ?? [];
+      if (sameIdSet(incoming, now)) continue;
+      pending.push({
+        field,
+        recordId: entry.recordId,
+        added: incoming.filter((id) => !now.includes(id)),
+        removed: now.filter((id) => !incoming.includes(id)),
+      });
     }
   }
+  if (pending.length === 0) return [];
+
+  const forwardIds = [...new Set(pending.map((item) => reverseOfFieldIdOf(item.field) as string))];
+  const forwardRows = await db
+    .select({
+      id: busabaseBaseFields.id,
+      baseId: busabaseBaseFields.baseId,
+      slug: busabaseBaseFields.slug,
+      required: busabaseBaseFields.required,
+      options: busabaseBaseFields.options,
+    })
+    .from(busabaseBaseFields)
+    .innerJoin(busabaseBases, eq(busabaseBases.id, busabaseBaseFields.baseId))
+    .where(
+      and(
+        inArray(busabaseBaseFields.id, forwardIds),
+        eq(busabaseBases.spaceId, getContextSpaceId()),
+        isNull(busabaseBaseFields.deletedAt),
+      ),
+    );
+  const forwardById = new Map(forwardRows.map((row) => [row.id, row]));
+
+  const writes: ReverseRelationWrite[] = pending.map((item) => {
+    const forward = forwardById.get(reverseOfFieldIdOf(item.field) as string);
+    if (!forward) {
+      throw badReverseValue(
+        item.field.slug,
+        "forward_not_found",
+        "its forward relation field no longer exists, so it cannot be edited.",
+      );
+    }
+    return {
+      recordId: item.recordId,
+      reverseSlug: item.field.slug,
+      forwardBaseId: forward.baseId,
+      forwardFieldId: forward.id,
+      forwardFieldSlug: forward.slug,
+      forwardSingle: forward.options?.multiple === false,
+      forwardRequired: forward.required === true,
+      added: item.added,
+      removed: item.removed,
+    };
+  });
+
+  // Added sources must be live records on the forward Base.
+  const addedIds = [...new Set(writes.flatMap((write) => write.added))];
+  if (addedIds.length > 0) {
+    const live = await db
+      .select({ id: busabaseRecords.id, baseId: busabaseRecords.baseId })
+      .from(busabaseRecords)
+      .where(
+        and(
+          inArray(busabaseRecords.id, addedIds),
+          eq(busabaseRecords.spaceId, getContextSpaceId()),
+          eq(busabaseRecords.status, "active"),
+        ),
+      );
+    const liveBase = new Map(live.map((row) => [row.id, row.baseId]));
+    for (const write of writes) {
+      const bad = write.added.filter((id) => liveBase.get(id) !== write.forwardBaseId);
+      if (bad.length > 0) {
+        throw badReverseValue(
+          write.reverseSlug,
+          "invalid_reverse_target",
+          `${bad.join(", ")} ${bad.length === 1 ? "is not a live record" : "are not live records"} on the Base this column lists.`,
+          { recordIds: bad },
+        );
+      }
+    }
+  }
+
+  // Self-relation (forward field on this same Base): a write that also sets the
+  // forward field on a record this reverse change rewrites would apply two
+  // different values to the same cell. Refuse instead of guessing.
+  const entryById = new Map(
+    entries.flatMap((entry) => (entry.recordId ? [[entry.recordId, entry] as const] : [])),
+  );
+  for (const write of writes) {
+    if (write.forwardBaseId !== baseId) continue;
+    for (const sourceId of [...write.added, ...write.removed]) {
+      if (Object.hasOwn(entryById.get(sourceId)?.fields ?? {}, write.forwardFieldSlug)) {
+        throw badReverseValue(
+          write.reverseSlug,
+          "reverse_relation_conflict",
+          `this change rewrites "${write.forwardFieldSlug}" on ${sourceId}, which the same write also sets. Change one side at a time.`,
+          { recordId: sourceId },
+        );
+      }
+    }
+  }
+  await assertForwardRequiredSatisfiedOrThrow(db, writes);
+  return writes;
+};
+
+/** Human names for an error message: the record's title, its Base, and the field. */
+const describeSourceForError = async (
+  db: Db,
+  baseId: string,
+  recordId: string,
+  fieldSlug: string,
+) => {
+  const [base] = await db
+    .select({ name: busabaseBases.name })
+    .from(busabaseBases)
+    .where(eq(busabaseBases.id, baseId));
+  const fields = await db
+    .select({ slug: busabaseBaseFields.slug, name: busabaseBaseFields.name })
+    .from(busabaseBaseFields)
+    .where(and(eq(busabaseBaseFields.baseId, baseId), isNull(busabaseBaseFields.deletedAt)))
+    .orderBy(asc(busabaseBaseFields.position));
+  const [head] = await db
+    .select({ payload: busabaseCommits.payload })
+    .from(busabaseRecords)
+    .innerJoin(busabaseCommits, eq(busabaseCommits.id, busabaseRecords.headCommitId))
+    .where(eq(busabaseRecords.id, recordId));
+  const primarySlug = fields[0]?.slug;
+  const title = primarySlug
+    ? (head?.payload as Record<string, unknown> | null)?.[primarySlug]
+    : null;
+  const field = fields.find((item) => item.slug === fieldSlug);
+  return {
+    base: base ? `“${iStringToText(base.name)}”` : "its Base",
+    field: field ? iStringToText(field.name) : fieldSlug,
+    record: typeof title === "string" && title ? `“${title}”` : recordId,
+  };
+};
+
+/**
+ * A required forward field cannot be left empty. Merging would refuse it, but
+ * only AFTER the caller's own change was written — so work out the end state
+ * here and refuse up front, leaving nothing half-done.
+ */
+const assertForwardRequiredSatisfiedOrThrow = async (
+  db: Db,
+  writes: ReadonlyArray<ReverseRelationWrite>,
+) => {
+  const required = writes.filter((write) => write.forwardRequired && write.removed.length > 0);
+  if (required.length === 0) return;
+  const groups = await buildForwardRelationUpdates(db, writes);
+  for (const group of groups) {
+    for (const update of group.updates) {
+      for (const [slug, value] of Object.entries(update.fields)) {
+        if (value.length > 0) continue;
+        const write = required.find(
+          (item) => item.forwardBaseId === group.baseId && item.forwardFieldSlug === slug,
+        );
+        if (!write) continue;
+        const label = await describeSourceForError(db, group.baseId, update.recordId, slug);
+        throw badReverseValue(
+          write.reverseSlug,
+          "forward_required",
+          `${label.record} needs a “${label.field}” in ${label.base}, so it cannot be left without one. Move it to another record instead of removing it.`,
+          { recordId: update.recordId, forwardFieldSlug: slug },
+        );
+      }
+    }
+  }
+};
+
+/**
+ * Turn reverse-column writes into per-Base forward field updates, starting from
+ * each source record's CURRENT head payload (read now, so it reflects anything
+ * the caller's own change request just merged). Writes are applied in order;
+ * records whose forward value ends up unchanged are left out.
+ */
+export const buildForwardRelationUpdates = async (
+  db: Db,
+  writes: ReadonlyArray<ReverseRelationWrite>,
+): Promise<
+  Array<{ baseId: string; updates: Array<{ recordId: string; fields: Record<string, string[]> }> }>
+> => {
+  const sourceIds = [...new Set(writes.flatMap((write) => [...write.added, ...write.removed]))];
+  if (sourceIds.length === 0) return [];
+  const heads = await db
+    .select({ id: busabaseRecords.id, payload: busabaseCommits.payload })
+    .from(busabaseRecords)
+    .innerJoin(busabaseCommits, eq(busabaseCommits.id, busabaseRecords.headCommitId))
+    .where(
+      and(inArray(busabaseRecords.id, sourceIds), eq(busabaseRecords.spaceId, getContextSpaceId())),
+    );
+  const payloadById = new Map(
+    heads.map((row) => [row.id, (row.payload ?? {}) as Record<string, unknown>]),
+  );
+  type Cell = { before: string[]; after: string[] };
+  // baseId → recordId → forward slug → cell
+  const byBase = new Map<string, Map<string, Map<string, Cell>>>();
+  const cellOf = (write: ReverseRelationWrite, sourceId: string): Cell => {
+    const records = byBase.get(write.forwardBaseId) ?? new Map<string, Map<string, Cell>>();
+    byBase.set(write.forwardBaseId, records);
+    const cells = records.get(sourceId) ?? new Map<string, Cell>();
+    records.set(sourceId, cells);
+    let cell = cells.get(write.forwardFieldSlug);
+    if (!cell) {
+      const before = toIdList(payloadById.get(sourceId)?.[write.forwardFieldSlug]) ?? [];
+      cell = { before, after: [...before] };
+      cells.set(write.forwardFieldSlug, cell);
+    }
+    return cell;
+  };
+  for (const write of writes) {
+    for (const sourceId of write.removed) {
+      const cell = cellOf(write, sourceId);
+      cell.after = cell.after.filter((id) => id !== write.recordId);
+    }
+    for (const sourceId of write.added) {
+      const cell = cellOf(write, sourceId);
+      if (write.forwardSingle) cell.after = [write.recordId];
+      else if (!cell.after.includes(write.recordId)) cell.after = [...cell.after, write.recordId];
+    }
+  }
+  const out: Array<{
+    baseId: string;
+    updates: Array<{ recordId: string; fields: Record<string, string[]> }>;
+  }> = [];
+  for (const [baseId, records] of byBase) {
+    const updates: Array<{ recordId: string; fields: Record<string, string[]> }> = [];
+    for (const [recordId, cells] of records) {
+      const fields: Record<string, string[]> = {};
+      for (const [slug, cell] of cells) {
+        const same =
+          cell.before.length === cell.after.length &&
+          cell.before.every((id, index) => cell.after[index] === id);
+        if (!same) fields[slug] = cell.after;
+      }
+      if (Object.keys(fields).length > 0) updates.push({ recordId, fields });
+    }
+    if (updates.length > 0) out.push({ baseId, updates });
+  }
+  return out;
 };
 
 const badReverseOptions = (slug: string, reason: string, message: string) =>
@@ -567,7 +860,7 @@ export const assertNoReverseRelationQueryOrThrow = (
     if (!reverseSlugs.has(slug)) continue;
     throw new ORPCError("BAD_REQUEST", {
       message:
-        `Cannot ${action} by "${slug}": it is a read-only reverse relation and is not indexed. ` +
+        `Cannot ${action} by "${slug}": it is a reverse relation (computed from links) and is not indexed. ` +
         `Filter the linked Base by its forward relation field instead. / 反向关联列暂不支持筛选、排序和分组。`,
       data: { slug, reason: "reverse_relation_not_queryable" },
     });

@@ -1,6 +1,8 @@
 import {
   type BaseFieldVO,
   flattenViewFilters,
+  getAutoShowNewFields,
+  getVisibleViewFieldSlugs,
   isViewFilterGroup,
   VIEW_FIELD_MAX_WIDTH,
   VIEW_FIELD_MIN_WIDTH,
@@ -13,6 +15,8 @@ import {
 import { getPrimaryField } from "../../base/utils/primary-field";
 
 type ViewFieldIdentity = Pick<BaseFieldVO, "position" | "slug">;
+
+export { getAutoShowNewFields, getVisibleViewFieldSlugs } from "busabase-contract/types";
 
 export const matchesViewField = (
   item: { fieldId?: string; fieldSlug: string },
@@ -103,34 +107,71 @@ export const updateViewFilterPath = (
   return { ...config, filters: visit(config.filters, 0) };
 };
 
-export const getVisibleViewFieldSlugs = (
-  config: ViewConfigVO,
-  fields: ViewFieldIdentity[],
-): string[] => {
-  const primarySlug = getPrimaryField({ fields })?.slug;
-  if (!Array.isArray(config.visibleFieldSlugs)) {
-    const slugs = fields.map((field) => field.slug);
-    return primarySlug ? [primarySlug, ...slugs.filter((slug) => slug !== primarySlug)] : slugs;
-  }
+const uniqueKnownFieldSlugs = (slugs: string[], fields: ViewFieldIdentity[]): string[] => {
   const known = new Set(fields.map((field) => field.slug));
-  const configured = [...new Set(config.visibleFieldSlugs)].filter(
-    (slug) => known.has(slug) && slug !== primarySlug,
-  );
-  return primarySlug ? [primarySlug, ...configured] : configured;
+  return [...new Set(slugs)].filter((slug) => known.has(slug));
 };
+
+const sameFieldSlugs = (left: string[] | null | undefined, right: string[]): boolean =>
+  Array.isArray(left) &&
+  left.length === right.length &&
+  left.every((slug, index) => slug === right[index]);
 
 export const canonicalizeViewFieldConfig = (
   config: ViewConfigVO,
   fields: ViewFieldIdentity[],
 ): ViewConfigVO => {
-  // `undefined` means "follow the Base schema", including fields added later.
-  // Keep that live-default semantic instead of persisting today's full field list.
-  if (!Array.isArray(config.visibleFieldSlugs)) return config;
-  const visibleFieldSlugs = getVisibleViewFieldSlugs(config, fields);
-  return config.visibleFieldSlugs.length === visibleFieldSlugs.length &&
-    config.visibleFieldSlugs.every((slug, index) => slug === visibleFieldSlugs[index])
-    ? config
-    : { ...config, visibleFieldSlugs };
+  // Never snapshot a live view merely because its order or widths were edited.
+  let canonical = config;
+  if (!getAutoShowNewFields(config) && Array.isArray(config.visibleFieldSlugs)) {
+    const visibleFieldSlugs = getVisibleViewFieldSlugs(config, fields);
+    if (!sameFieldSlugs(config.visibleFieldSlugs, visibleFieldSlugs)) {
+      canonical = { ...canonical, visibleFieldSlugs };
+    }
+  }
+  if (Array.isArray(config.fieldOrderSlugs)) {
+    const primarySlug = getPrimaryField({ fields })?.slug;
+    const ordered = uniqueKnownFieldSlugs(config.fieldOrderSlugs, fields).filter(
+      (slug) => slug !== primarySlug,
+    );
+    const fieldOrderSlugs = primarySlug ? [primarySlug, ...ordered] : ordered;
+    if (!sameFieldSlugs(config.fieldOrderSlugs, fieldOrderSlugs)) {
+      canonical = { ...canonical, fieldOrderSlugs };
+    }
+  }
+  if (Array.isArray(config.hiddenFieldSlugs)) {
+    const primarySlug = getPrimaryField({ fields })?.slug;
+    const hiddenFieldSlugs = uniqueKnownFieldSlugs(config.hiddenFieldSlugs, fields).filter(
+      (slug) => slug !== primarySlug,
+    );
+    if (!sameFieldSlugs(config.hiddenFieldSlugs, hiddenFieldSlugs)) {
+      canonical = { ...canonical, hiddenFieldSlugs };
+    }
+  }
+  return canonical;
+};
+
+export const setAutoShowNewFields = (
+  config: ViewConfigVO,
+  fields: ViewFieldIdentity[],
+  enabled: boolean,
+): ViewConfigVO => {
+  const canonical = canonicalizeViewFieldConfig(config, fields);
+  const visibleFieldSlugs = getVisibleViewFieldSlugs(canonical, fields);
+  const visible = new Set(visibleFieldSlugs);
+  return {
+    ...canonical,
+    autoShowNewFields: enabled,
+    // Turning automatic fields on affects future fields, not existing hidden ones.
+    hiddenFieldSlugs: fields.map((field) => field.slug).filter((slug) => !visible.has(slug)),
+    visibleFieldSlugs,
+    fieldOrderSlugs: [
+      ...visibleFieldSlugs,
+      ...uniqueKnownFieldSlugs(canonical.fieldOrderSlugs ?? [], fields).filter(
+        (slug) => !visible.has(slug),
+      ),
+    ],
+  };
 };
 
 export const hideViewField = (
@@ -139,7 +180,19 @@ export const hideViewField = (
   fields: ViewFieldIdentity[],
 ): ViewConfigVO => {
   const canonical = canonicalizeViewFieldConfig(config, fields);
-  if (getPrimaryField({ fields })?.slug === field.slug) return canonical;
+  if (
+    getPrimaryField({ fields })?.slug === field.slug ||
+    !fields.some((item) => item.slug === field.slug)
+  ) {
+    return canonical;
+  }
+  if (getAutoShowNewFields(canonical)) {
+    return {
+      ...canonical,
+      autoShowNewFields: true,
+      hiddenFieldSlugs: [...new Set([...(canonical.hiddenFieldSlugs ?? []), field.slug])],
+    };
+  }
   return {
     ...canonical,
     visibleFieldSlugs: getVisibleViewFieldSlugs(canonical, fields).filter(
@@ -155,7 +208,17 @@ export const showViewField = (
 ): ViewConfigVO => {
   const canonical = canonicalizeViewFieldConfig(config, fields);
   const visible = getVisibleViewFieldSlugs(canonical, fields);
-  return visible.includes(field.slug)
+  if (getAutoShowNewFields(canonical)) {
+    return visible.includes(field.slug) || !fields.some((item) => item.slug === field.slug)
+      ? canonical
+      : {
+          ...canonical,
+          hiddenFieldSlugs: (canonical.hiddenFieldSlugs ?? []).filter(
+            (slug) => slug !== field.slug,
+          ),
+        };
+  }
+  return visible.includes(field.slug) || !fields.some((item) => item.slug === field.slug)
     ? canonical
     : { ...canonical, visibleFieldSlugs: [...visible, field.slug] };
 };
@@ -168,6 +231,9 @@ export const showAllViewFields = (
   const visible = getVisibleViewFieldSlugs(canonical, fields);
   const visibleSet = new Set(visible);
   const hidden = fields.map((field) => field.slug).filter((slug) => !visibleSet.has(slug));
+  if (getAutoShowNewFields(canonical)) {
+    return hidden.length === 0 ? canonical : { ...canonical, hiddenFieldSlugs: [] };
+  }
   return hidden.length === 0
     ? canonical
     : { ...canonical, visibleFieldSlugs: [...visible, ...hidden] };
@@ -302,5 +368,10 @@ export const moveViewField = (
   const withoutSource = current.filter((slug) => slug !== sourceSlug);
   const targetIndex = withoutSource.indexOf(targetSlug);
   withoutSource.splice(targetIndex + (placement === "after" ? 1 : 0), 0, sourceSlug);
-  return { ...config, visibleFieldSlugs: withoutSource };
+  const visibleSet = new Set(current);
+  const hiddenOrder = uniqueKnownFieldSlugs(
+    [...(config.fieldOrderSlugs ?? []), ...fields.map((field) => field.slug)],
+    fields,
+  ).filter((slug) => !visibleSet.has(slug));
+  return { ...config, fieldOrderSlugs: [...withoutSource, ...hiddenOrder] };
 };

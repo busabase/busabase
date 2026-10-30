@@ -42,6 +42,28 @@ const view = (
 });
 
 describe("field dependency inventory", () => {
+  it("includes independent view order and hidden-field settings in the dependency inventory", () => {
+    const target = field("status-id", "customers", "status");
+    const views = [
+      view("ordered", { filters: [], sorts: [], fieldOrderSlugs: ["title", "status"] }),
+      view("hidden", {
+        filters: [],
+        sorts: [],
+        autoShowNewFields: true,
+        hiddenFieldSlugs: ["status"],
+      }),
+    ];
+    expect(
+      getFieldDependencies(target, [base("customers", [target])], views).map((entry) => [
+        entry.view?.id,
+        entry.kind,
+      ]),
+    ).toEqual([
+      ["ordered", "viewDisplay"],
+      ["hidden", "viewDisplay"],
+    ]);
+  });
+
   it("lists view rules and display settings, preferring stable field IDs over reused slugs", () => {
     const target = field("new-id", "customers", "status");
     const views = [

@@ -1,6 +1,9 @@
 "use client";
 
-import type { AgentSessionModelOptionVO } from "busabase-contract/domains/agents/types";
+import {
+  AgentSessionConfigSelectVOSchema,
+  type AgentSessionModelOptionVO,
+} from "busabase-contract/domains/agents/types";
 import { create } from "zustand";
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
 
@@ -8,7 +11,8 @@ const STORAGE_KEY = "busabase-agents-model-list.v1";
 
 /**
  * One remembered model catalog per scoped agent: the config id, its display
- * name, and the list of selectable options. Never `currentValue` — that is
+ * name, and selectable options with advertised thinking defaults. Never the
+ * model's top-level `currentValue` — that is
  * session-owned state (what THIS conversation currently has selected), not a
  * fact about the agent that is safe to reuse for the next brand-new session.
  * Treating a persisted `currentValue` as confirmed would let a stale choice
@@ -18,7 +22,7 @@ const STORAGE_KEY = "busabase-agents-model-list.v1";
 export interface AgentModelCatalogEntry {
   configId: string;
   name: string;
-  options: Array<{ value: string; name: string }>;
+  options: AgentSessionModelOptionVO["options"];
   updatedAt: string;
 }
 
@@ -70,7 +74,17 @@ const isModelCatalogTombstone = (value: unknown): value is AgentModelCatalogTomb
 const sanitizeModelCatalogEntry = (entry: AgentModelCatalogEntry): AgentModelCatalogEntry => ({
   configId: entry.configId,
   name: entry.name,
-  options: entry.options.map((option) => ({ value: option.value, name: option.name })),
+  options: entry.options.map((option) => {
+    const parsed = AgentSessionConfigSelectVOSchema.safeParse(option.thinking);
+    const thinking = parsed.success ? parsed.data : null;
+    return {
+      value: option.value,
+      name: option.name,
+      ...(thinking?.id && thinking.options.some((level) => level.value === thinking.currentValue)
+        ? { thinking }
+        : {}),
+    };
+  }),
   updatedAt: entry.updatedAt,
 });
 

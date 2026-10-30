@@ -345,6 +345,10 @@ export const busabaseOpenApiCommonSchemas = {
   },
   // `nodes.updateContent` — the new document, by the node's type.
   DocNodeContent: { strategy: "input", schema: variantOf(nodeContentInputSchema, "kind", "doc") },
+  FolderNodeContent: {
+    strategy: "input",
+    schema: variantOf(nodeContentInputSchema, "kind", "folder"),
+  },
   WhiteboardNodeContent: {
     strategy: "input",
     schema: variantOf(nodeContentInputSchema, "kind", "whiteboard"),

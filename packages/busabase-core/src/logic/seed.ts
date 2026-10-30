@@ -10,7 +10,7 @@ import type {
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { iStringToText } from "openlib/i18n/i-string";
 import { storage } from "openlib/storage";
-import { getContextSpaceId, LOCAL_SPACE_ID } from "../context";
+import { getContextSpaceId } from "../context";
 import { getDb } from "../db";
 import type { BasePO, NodeListPO } from "../db/schema";
 import {
@@ -1532,14 +1532,14 @@ export const ensureReady = async () => {
     const createdAt = now();
 
     const rootNodeId = rootNodeIdForSpace(spaceId);
-    const [existingRoot] = await db
-      .select()
-      .from(busabaseNodes)
-      .where(eq(busabaseNodes.id, rootNodeId))
-      .limit(1);
-    if (!existingRoot) {
-      await db.insert(busabaseNodes).values({
+    // Separate server processes do not share readyBySpace. Let the primary key
+    // arbitrate first-request races without overwriting an existing root or
+    // suppressing failures from unrelated constraints.
+    await db
+      .insert(busabaseNodes)
+      .values({
         id: rootNodeId,
+        spaceId,
         parentId: null,
         type: "folder",
         slug: "root",
@@ -1548,27 +1548,16 @@ export const ensureReady = async () => {
         position: 0,
         createdAt,
         updatedAt: createdAt,
-      });
-    }
+      })
+      .onConflictDoNothing({ target: busabaseNodes.id });
 
-    if (spaceId !== LOCAL_SPACE_ID) {
-      return;
-    }
-
-    const existingNodes = await db.select().from(busabaseNodes);
-    const existingNodeById = new Map(existingNodes.map((node) => [node.id, node]));
-    if (!existingNodeById.has(ROOT_NODE_ID)) {
-      await db.insert(busabaseNodes).values({
-        id: ROOT_NODE_ID,
-        parentId: null,
-        type: "folder",
-        slug: "root",
-        name: "Local workspace",
-        description: "The root of this self-hosted Busabase workspace.",
-        position: 0,
-        createdAt,
-        updatedAt: createdAt,
-      });
+    const [root] = await db
+      .select()
+      .from(busabaseNodes)
+      .where(and(eq(busabaseNodes.id, rootNodeId), eq(busabaseNodes.spaceId, spaceId)))
+      .limit(1);
+    if (!root || root.type !== "folder" || root.parentId !== null || root.slug !== "root") {
+      throw new Error(`Invalid workspace root ${rootNodeId} for space ${spaceId}`);
     }
 
     // A fresh workspace starts empty; example content (Bases / records / the
@@ -1583,7 +1572,16 @@ export const ensureReady = async () => {
   })();
 
   readyBySpace.set(spaceId, ready);
-  return ready;
+  try {
+    await ready;
+  } catch (error) {
+    // A transient failure must not poison this space until the server restarts.
+    // Do not evict a newer attempt installed while this one was in flight.
+    if (readyBySpace.get(spaceId) === ready) {
+      readyBySpace.delete(spaceId);
+    }
+    throw error;
+  }
 };
 
 /**

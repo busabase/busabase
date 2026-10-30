@@ -84,6 +84,9 @@ const ANONYMOUS_READ_ALLOWLIST: ReadonlySet<string> = new Set([
   "records.list",
   "records.listPage",
   "records.get",
+  // Batched `records.get` for relation chips: identical per-row Base-visibility
+  // filter, so it reaches nothing `records.get` could not.
+  "records.getMany",
   // Same live-public Base ACL as records.list, including unscoped queries.
   "records.count",
   "records.groupBy",
@@ -133,6 +136,9 @@ const EMBED_READ_ALLOWLIST: ReadonlySet<string> = new Set([
   "records.list",
   "records.listPage",
   "records.get",
+  // Batched `records.get` for relation chips: identical per-row Base-visibility
+  // filter, so it reaches nothing `records.get` could not.
+  "records.getMany",
   // The aggregate and lookup reads an embedded AirApp dashboard renders its
   // summary tiles, board column headers and keyed lookups from. Without them
   // a shared dashboard showed 0 / failed to load while `records.list` worked.

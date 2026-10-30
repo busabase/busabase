@@ -98,7 +98,9 @@ function PlanTree({
         const Icon = nodeIconForType(entry.node.type);
         const summary = summaryFor(entry.node);
         return (
-          <li key={entry.node.path}>
+          // A package's skill and app can share one path (both take the package
+          // slug), so the path alone is not unique among siblings.
+          <li key={`${entry.node.type}:${entry.node.path}`}>
             <div className="flex min-w-0 items-center gap-2 py-0.5 text-sm">
               <Icon className="size-4 shrink-0 text-muted-foreground" />
               <span className="truncate text-foreground">{entry.node.name}</span>

@@ -1,6 +1,8 @@
+import { reduceAcpEvents } from "@acp-ui/core/reduce";
 import type { AgentSessionEventVO } from "busabase-contract/domains/agents/types";
 import { afterEach, describe, expect, it } from "vitest";
 import { runWithBusabaseContext } from "../../../context";
+import { translateAgentSessionEvent } from "../hooks/use-agent-session";
 import {
   cancelDemoAgentSession,
   closeDemoAgentSession,
@@ -99,6 +101,27 @@ describe("sessions", () => {
 });
 
 describe("the scripted turn", () => {
+  it("keeps explicit user presentation and attachments in the demo transcript", async () => {
+    const session = createDemoAgentSession(DEMO_AGENT_SLUG);
+    const attachments = [{ kind: "image" as const, data: "QUJD", mimeType: "image/png" }];
+    const presentation = { version: 1 as const, source: "node-context" as const, text: "" };
+    promptDemoAgentSession(session.id, "Official node context", attachments, presentation);
+
+    const events = await collect(session.id, (seen) =>
+      updates(seen).some((update) => update.sessionUpdate === "user_message"),
+    );
+    const userEvent = events.find(
+      (event) =>
+        (event.acpUpdate as { sessionUpdate?: string } | undefined)?.sessionUpdate ===
+        "user_message",
+    );
+    if (!userEvent) throw new Error("The demo user message is missing");
+    expect(userEvent.acpUpdate).toMatchObject({ text: "Official node context", presentation });
+    expect(reduceAcpEvents([], translateAgentSessionEvent(userEvent))).toMatchObject([
+      { kind: "message", role: "user", text: "", attachments },
+    ]);
+  });
+
   it("streams the reply in chunks, not one blob, through real acpUpdate shapes", async () => {
     const session = createDemoAgentSession(DEMO_AGENT_SLUG);
     promptDemoAgentSession(session.id, "What would you change here?");

@@ -188,7 +188,7 @@ const writeAgentPrompts = async (
 /** `autoMerge` is tri-state: unset (permission-aware default), forced on, forced off. */
 const mergeIntent = (input: NodeCreateInput): { autoMerge?: boolean } => {
   if (input.requireReview) return { autoMerge: false };
-  if (input.autoMerge) return { autoMerge: true };
+  if (input.autoMerge !== undefined) return { autoMerge: input.autoMerge };
   return {};
 };
 

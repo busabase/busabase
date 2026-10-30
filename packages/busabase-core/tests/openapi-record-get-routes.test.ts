@@ -101,7 +101,7 @@ describe("Busabase OpenAPI record get route", () => {
     expect(spec.paths?.["/api/v1/bases/{baseId}/restore/change-requests"]).toBeUndefined();
   });
 
-  it("keeps the compressed public API at 124 operations", async () => {
+  it("keeps the compressed public API at 126 operations", async () => {
     const spec = await getBusabaseOpenApiSpec();
     const operationCount = Object.values(spec.paths ?? {}).reduce(
       (count, pathItem) =>
@@ -204,6 +204,12 @@ describe("Busabase OpenAPI record get route", () => {
     expect(
       spec.paths?.["/api/v1/change-requests/{changeRequestId}/preview-link"]?.post,
     ).toBeDefined();
-    expect(operationCount).toBe(125);
+    // -1 -> 124: `DELETE /nodes/{nodeId}` (permanent purge) is UI-only now —
+    // the route is commented out in the contract and only `/api/rpc` serves it.
+    expect(spec.paths?.["/api/v1/nodes/{nodeId}"]?.delete).toBeUndefined();
+    // +2 -> 126: one shared read/update pair for workspace-wide Agent context.
+    expect(spec.paths?.["/api/v1/space-instructions"]?.get).toBeDefined();
+    expect(spec.paths?.["/api/v1/space-instructions"]?.put).toBeDefined();
+    expect(operationCount).toBe(126);
   });
 });

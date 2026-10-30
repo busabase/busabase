@@ -11,7 +11,12 @@
  */
 
 /** Where a desktop install runs its local server. The bootstrap doc targets this host. */
-import { PLAYBOOK_RULE_MARKDOWN, PLAYBOOK_RULE_SECTION_TITLE } from "./playbook-rule";
+import { PLAYBOOK_RULE_SECTION_TITLE, renderPlaybookRuleMarkdown } from "./playbook-rule";
+import {
+  URL_LOCATOR_RULE_MARKDOWN,
+  URL_LOCATOR_SECTION_TITLE,
+  URL_LOCATOR_TABLE_MARKDOWN,
+} from "./url-locator-rule";
 
 export const LOCAL_RUNTIME_ORIGIN = "http://localhost:15419";
 
@@ -94,16 +99,16 @@ export function buildSkillMarkdown(origin: string, ctx?: SkillMarkdownContext): 
 
   return `---
 name: busabase
-description: Use Busabase as a workspace for AI agents over HTTP — database, knowledge base, apps library, and skills registry. Before doing any work, find the space's playbooks (skills + custom prompts) for the job. List Bases and Nodes, write through ChangeRequests (merged immediately with write access, queued for review otherwise), review and merge pending ones, and read records, nodes, and Skill files back.
+description: Busabase is the open-source database and workspace for AI agents. Use this skill to drive it over HTTP. Before doing any work, read the space's global instructions, then find the space's playbooks (skills + custom prompts) for the job. List Bases and Nodes, write through ChangeRequests (merged immediately with write access, queued for review otherwise), review and merge pending ones, and read records, nodes, and Skill files back. Also use it whenever the user's message contains a Busabase URL: resolve it to its space and object and read that through the API, never by opening the page.
 ---
 
 # Busabase Skill
 
-Busabase is a workspace for AI agents: a database, knowledge base, apps library, and
-skills registry. Agents write through **ChangeRequests**, so every change carries a
-message, a diff, and an audit trail. Whether a change request merges immediately or
-waits for a human is decided by the API key's permission level — a \`write\` key lands
-it in one call, a \`changeRequest\` key leaves it pending in the review inbox.
+Busabase is the open-source database and workspace for AI agents: agents and people share
+the same structured data, docs, skills, and apps. Agents write through **ChangeRequests**, so
+every change carries a message, a diff, and an audit trail. Whether a change request merges
+immediately or waits for a human is decided by the API key's permission level — a \`write\` key
+lands it in one call, a \`changeRequest\` key leaves it pending in the review inbox.
 ${
   needsSetup
     ? `
@@ -123,7 +128,14 @@ Every endpoint below is relative to that base URL.
 
 ## ${PLAYBOOK_RULE_SECTION_TITLE}
 
-${PLAYBOOK_RULE_MARKDOWN}
+${renderPlaybookRuleMarkdown({ spaceTargeting: !isLocal })}
+
+Read the current global instructions before searching (an empty body is a normal unset state):
+
+\`\`\`bash
+curl ${base}/api/v1/space-instructions${H}
+${BUSABASE_CLI} space-instructions get --output json
+\`\`\`
 
 Search with several phrasings (\`queries\`, up to 8), optionally \`nearNodeId\` (the node the user is
 on), \`kinds\` (\`skill\`, \`prompt\`), and \`limit\`. Each item names its \`kind\`, \`nodeId\`,
@@ -198,13 +210,37 @@ curl ${base}/api/v1/auth${HAuthOnly}
    spaces returns 400 with \`data.reason: SPACE_SELECTION_REQUIRED\`.`
 }
 
+## ${URL_LOCATOR_SECTION_TITLE}
+
+${URL_LOCATOR_RULE_MARKDOWN}
+
+${URL_LOCATOR_TABLE_MARKDOWN}
+
+Read the target (any node by type + slug: a Doc's body, a folder's children, a Skill's files; a
+Base; a record; the Base's views, to tell a view id from a record id; a change request) with the
+same headers as every other call${isLocal ? "" : " (`x-busabase-space` = the URL's space id; match a slug against `spaces[].slug` from `GET /api/v1/auth`)"}:
+
+\`\`\`bash
+curl '${base}/api/v1/nodes/<slug>?type=<type>'${H}
+curl ${base}/api/v1/bases/<slug>${H}
+curl '${base}/api/v1/records/get?recordId=<recordId>'${H}
+curl ${base}/api/v1/bases/<baseId>/views${H}
+curl ${base}/api/v1/change-requests/<changeRequestId>${H}
+\`\`\`
+
+With \`busabase-cli\`: \`nodes get --node-id <slug> --type <type>\`, \`bases get --slug <slug>\`,
+\`records get --record-id <id>\`, \`change-requests get --change-request-id <id>\`${isLocal ? "" : " (add `--space-id <id>`)"}. A \`404\`
+means missing, archived, or hidden from this credential: say so rather than guess. An embed link's
+token is not an API credential; with \`manage\` access, \`GET /api/v1/embed-links\` maps its
+\`emb_…\` id to a \`type\` + \`typeId\` you can read.
+
 ## API Surface
 
 Quick reference — every path is relative to the base URL above; worked examples follow.
 
 | Operation | Endpoint | Purpose |
 | --- | --- | --- |
-| Find a playbook | \`POST /api/v1/playbooks/search\` | skills + custom prompts that fit the job — call first |
+| Find a playbook | \`POST /api/v1/playbooks/search\` | skills + custom prompts that fit the job — after reading space instructions |
 | Read a playbook | \`GET /api/v1/playbooks/:kind/:nodeId\` | a prompt (\`?key=\`) or a skill's \`SKILL.md\` |
 | List Bases | \`GET /api/v1/bases\` | tables in this workspace |
 | List Nodes | \`GET /api/v1/nodes\` | folders, Bases, Skills |
@@ -555,7 +591,7 @@ curl ${base}/api/v1/records${H}
 
 ## Full API reference & MCP
 
-The calls above are the everyday approval loop — enough for almost all work. For the complete
+The calls above are the everyday change-request loop — enough for almost all work. For the complete
 surface (every endpoint, its params and schemas), fetch the machine-readable spec **on demand**
 instead of memorising it:
 
@@ -619,7 +655,7 @@ ${
 0. Confirm the target space (see **Space targeting**): \`GET /api/v1/auth\`; one space →
    use it, several → ask the user; then send \`x-busabase-space\` on every call.`
 }
-1. Look for a playbook first (**${PLAYBOOK_RULE_SECTION_TITLE}** above), then list Bases and Nodes
+1. Read space instructions and look for a playbook (**${PLAYBOOK_RULE_SECTION_TITLE}** above), then list Bases and Nodes
    before proposing changes.
 2. Create ChangeRequests instead of mutating canonical data directly.
 3. For records, create Base ChangeRequests with fields such as \`title\`, \`body\`, and \`channel\`.
@@ -635,7 +671,8 @@ ${
 
 ## Write for the reviewer — readability rules
 
-Everything you propose lands in a human's review inbox. Two things decide whether your work
+A human reads what you write — in the review inbox while it waits for review, in the history
+once it has merged. Two things decide whether your work
 reads like "Create Acme Corp" or like "Create cmtmr1th34" — get both right on every write:
 
 1. **The PRIMARY field** — the Base's *first* field (often \`title\` or \`name\`) — is the
@@ -743,10 +780,10 @@ this document.
 Your first reply must follow the model below in the user's language. Adapt it naturally, but do not
 run commands, probe a server, or claim Busabase is already connected. Ask no additional questions.
 
-> 👋 Welcome! This is **Busabase** (${site}) — a workspace built for AI agents: your database,
-> knowledge base, apps library, and skills registry in one place. Your data lives in **Bases** and
-> other nodes, and every change I make goes in as a **ChangeRequest**, so you can always see what
-> changed, undo it, or have changes wait for your review when you want them to.
+> 👋 Welcome! This is **Busabase** (${site}) — the open-source database and workspace for AI agents,
+> where you and I share the same structured data, docs, skills, and apps. Your data lives in
+> **Bases** and other nodes, and every change I make goes in as a **ChangeRequest**, so you can
+> always see what changed, undo it, or have changes wait for your review when you want them to.
 >
 > Before I connect, which edition would you like to use?
 >
@@ -980,7 +1017,7 @@ No download, no GUI. Start the local server for the user and probe until it answ
 returns \`[]\`, which sends you to Step 2):
 
 \`\`\`bash
-npx -y busabase server &     # boots on ${local}; or: docker run -d -p 15419:15419 busabase/busabase
+npx -y busabase@latest server &     # boots on ${local}; or: docker run -d -p 15419:15419 busabase/busabase
 until curl -fsS ${local}/api/v1/bases >/dev/null 2>&1; do sleep 2; done && echo "Busabase is up."
 \`\`\`
 
@@ -995,7 +1032,7 @@ cat > ~/Library/LaunchAgents/com.busabase.server.plist <<'PLIST'
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
   <key>Label</key><string>com.busabase.server</string>
-  <key>ProgramArguments</key><array><string>/bin/sh</string><string>-lc</string><string>npx -y busabase server</string></array>
+  <key>ProgramArguments</key><array><string>/bin/sh</string><string>-lc</string><string>npx -y busabase@latest server</string></array>
   <key>RunAtLoad</key><true/><key>KeepAlive</key><true/>
 </dict></plist>
 PLIST
@@ -1009,7 +1046,7 @@ cat > ~/.config/systemd/user/busabase.service <<'UNIT'
 [Unit]
 Description=Busabase local server
 [Service]
-ExecStart=/usr/bin/env npx -y busabase server
+ExecStart=/usr/bin/env npx -y busabase@latest server
 Restart=on-failure
 [Install]
 WantedBy=default.target
@@ -1020,7 +1057,7 @@ loginctl enable-linger "$USER"   # keep it running without an active login sessi
 
 \`\`\`bash
 # Windows (run at logon)
-schtasks /create /tn Busabase /sc onlogon /tr "npx -y busabase server"
+schtasks /create /tn Busabase /sc onlogon /tr "npx -y busabase@latest server"
 \`\`\`
 
 To undo later: \`launchctl unload …plist\` / \`systemctl --user disable --now busabase.service\` /
@@ -1033,7 +1070,7 @@ question, since some users would rather not install anything:
 
 > How would you like to run Busabase?
 > **A.** 🖥️ **Desktop app** (recommended) — a native app, nothing to run in a terminal
-> **B.** ⌨️ **Terminal server** — I start \`npx busabase server\` for you, no install
+> **B.** ⌨️ **Terminal server** — I start \`npx -y busabase@latest server\` for you, no install
 
 If they have no preference, go with **A (Desktop)**. If they pick **B**, follow **Path A** above
 instead.

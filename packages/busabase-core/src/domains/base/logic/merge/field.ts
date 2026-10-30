@@ -1,6 +1,7 @@
 import { isViewFilterGroup, type ViewFilterConditionVO } from "busabase-contract/types";
 import "server-only";
 
+import { ORPCError } from "@orpc/server";
 import { and, asc, eq, gt, inArray, isNull, ne } from "drizzle-orm";
 import { iStringToText } from "openlib/i18n/i-string";
 import { getContextSpaceId } from "../../../../context";
@@ -12,9 +13,10 @@ import { formulaStaleConflict } from "../../../../logic/formula-merge-conflict";
 import { id, requireBaseId } from "../../../../logic/kernel";
 import { mergeFieldHelpOptions } from "../../utils/field-help-options";
 import { PRIMARY_FIELD_DELETE_MESSAGE } from "../../utils/primary-field";
+import { applyCreatedFieldVisibility } from "../field-visibility";
 import { assertFormulaMergeValid, recalculateFormulaRecords } from "../formula-recalculation";
 import { getPrimaryFieldIdFromDb } from "../queries";
-import { pairReverseRelationFields } from "../reverse-relations";
+import { pairReverseRelationFields, resolveReverseRelationOptions } from "../reverse-relations";
 
 export const mergeBaseAddField = async (ctx: MergeCtx, item: OperationPO, headCommit: CommitPO) => {
   const { db, timestamp } = ctx;
@@ -24,7 +26,16 @@ export const mergeBaseAddField = async (ctx: MergeCtx, item: OperationPO, headCo
     .select()
     .from(busabaseBaseFields)
     .where(and(eq(busabaseBaseFields.baseId, baseId), isNull(busabaseBaseFields.deletedAt)));
+  if (fields.some((field) => field.slug === fieldData.slug)) {
+    throw new ORPCError("CONFLICT", { message: `Field already exists: ${fieldData.slug}` });
+  }
   const type = fieldData.type ?? "text";
+  const options = await resolveReverseRelationOptions(db, {
+    baseId,
+    slug: fieldData.slug,
+    type,
+    options: (fieldData.options ?? {}) as BaseFieldPO["options"],
+  });
   assertFormulaMergeValid(
     { slug: fieldData.slug, type, options: (fieldData.options ?? {}) as BaseFieldPO["options"] },
     fields,
@@ -37,7 +48,7 @@ export const mergeBaseAddField = async (ctx: MergeCtx, item: OperationPO, headCo
     .where(eq(busabaseBases.id, baseId))
     .limit(1);
   const spaceId = baseRow?.spaceId ?? getContextSpaceId();
-  const fieldId = id("bsf");
+  const fieldId = fieldData.fieldId ?? id("bsf");
   await db.insert(busabaseBaseFields).values({
     id: fieldId,
     baseId,
@@ -47,8 +58,16 @@ export const mergeBaseAddField = async (ctx: MergeCtx, item: OperationPO, headCo
     type,
     required: type === "formula" ? false : (fieldData.required ?? false),
     position: fields.length,
-    options: (fieldData.options ?? {}) as BaseFieldPO["options"],
+    options,
   });
+  const updatedViewIds = await applyCreatedFieldVisibility(db, {
+    baseId,
+    fieldSlug: fieldData.slug,
+    originViewId: fieldData.originViewId,
+    fieldsBefore: fields,
+    timestamp,
+  });
+  ctx.mergedViewIds.push(...updatedViewIds);
   if (type === "formula") {
     await recalculateFormulaRecords(ctx, baseId, fieldData.slug, item.id);
   }
@@ -113,6 +132,8 @@ export const mergeBaseDeleteField = async (
         filterConjunction?: "and" | "or";
         sorts?: Array<{ fieldSlug: string; fieldId?: string }>;
         visibleFieldSlugs?: string[];
+        fieldOrderSlugs?: string[];
+        hiddenFieldSlugs?: string[];
         fieldWidths?: Record<string, number>;
       };
       const slug = fieldData.slug;
@@ -131,6 +152,8 @@ export const mergeBaseDeleteField = async (
             : config.filters?.filter((f) => isViewFilterGroup(f) || !matchesDeleted(f)),
         sorts: config.sorts?.filter((s) => !matchesDeleted(s)),
         visibleFieldSlugs: config.visibleFieldSlugs?.filter((s) => s !== slug),
+        fieldOrderSlugs: config.fieldOrderSlugs?.filter((s) => s !== slug),
+        hiddenFieldSlugs: config.hiddenFieldSlugs?.filter((s) => s !== slug),
         fieldWidths: config.fieldWidths
           ? Object.fromEntries(Object.entries(config.fieldWidths).filter(([key]) => key !== slug))
           : undefined,

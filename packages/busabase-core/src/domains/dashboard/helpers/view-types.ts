@@ -28,6 +28,14 @@ export interface RecordSubmitOptions {
   mergeImmediately?: boolean;
 }
 
+/** Transient state owned by one workspace/user collection and exact query. */
+export interface BaseTableViewState {
+  scope: string;
+  selectedRecordIds: string[];
+  scrollTop: number;
+  scrollLeft: number;
+}
+
 // Table pagination controls threaded from the dashboard down to BusaBaseTable.
 export interface RecordsPagination {
   page: number;
@@ -68,6 +76,7 @@ export interface UpdateBaseFieldPatch {
 }
 
 export interface CreateBaseFieldPayload {
+  originViewId?: string;
   name: iString;
   options?: {
     help?: { description?: string; example?: string };
@@ -118,6 +127,11 @@ export interface ViewFormPayload {
   submittedBy?: string;
   type?: ViewType;
 }
+
+export type ViewUpdatePayload = Omit<ViewFormPayload, "config" | "name"> & {
+  config?: Partial<ViewConfigVO>;
+  name?: string;
+};
 
 export interface FieldChip {
   label: string;

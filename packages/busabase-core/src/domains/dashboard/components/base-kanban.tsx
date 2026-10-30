@@ -1,18 +1,48 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { hasApiKeyLevel } from "busabase-contract/access-control/api-key-level";
 import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
-import type { BaseFieldVO, BaseVO, RecordVO, ViewVO } from "busabase-contract/types";
+import type {
+  BaseFieldVO,
+  BaseVO,
+  GalleryCoverFit,
+  RecordVO,
+  ViewVO,
+} from "busabase-contract/types";
+import { ImageOff } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
-import { useState } from "react";
+import { type MouseEvent, type ReactNode, useRef, useState } from "react";
 import { useSearch } from "wouter";
 import { useCoreI18n, useCoreLocale, useIString } from "../../../i18n";
+import { presentCoreError } from "../../../i18n/localize-error";
 import { getMemberIds, isPeopleFieldType } from "../../base/field-types";
 import { getPrimaryField } from "../../base/utils/primary-field";
 import { getRecordTitle } from "../helpers/change-request";
-import { getFieldPreviewText } from "../helpers/field";
+import {
+  getAttachmentRefs,
+  getFieldChipEntries,
+  getFieldPreviewText,
+  getRelationRecordIds,
+  getSafeAttachmentUrl,
+} from "../helpers/field";
 import { mergeSearchIntoHref } from "../helpers/link-search";
+import { useLinkedRecords } from "../hooks/use-linked-records";
 import { useDashboardOrpc } from "../orpc-context";
-import { LookupFieldValue } from "./field-preview";
+import { useIsAnonymousVisitor } from "../visitor-context";
+import { AttachmentValuePreview } from "./attachment-value-preview";
+import { FieldBadgeList, FieldValuePreview, LookupFieldValue } from "./field-preview";
 import { MemberChips } from "./member-field";
+import { useWorkspacePermissionLevel } from "./split-submit-button";
+
+/**
+ * Kanban drag-to-move. Resolves with whether the move landed: a viewer whose
+ * level on the Base is only `changeRequest` gets a pending change request back
+ * instead (the server does not auto-merge for them).
+ */
+export type KanbanMoveRecord = (
+  record: RecordVO,
+  fieldSlug: string,
+  value: string | null,
+) => Promise<{ materialized: true } | { materialized: false; changeRequestId: string }>;
 
 type Choice = { id: string; name: string; color?: string };
 
@@ -28,6 +58,29 @@ const COLOR_DOT: Record<string, string> = {
 };
 
 const UNCATEGORIZED = "__uncategorized__";
+
+function KanbanCardField({
+  children,
+  field,
+  showFieldLabels,
+}: {
+  children: ReactNode;
+  field: BaseFieldVO;
+  showFieldLabels: boolean;
+}) {
+  const resolveIString = useIString();
+  return (
+    <div className="mt-1.5 min-w-0 text-xs">
+      <dt
+        className={showFieldLabels ? "mb-0.5 truncate text-muted-foreground" : "sr-only"}
+        title={resolveIString(field.name)}
+      >
+        {resolveIString(field.name)}
+      </dt>
+      <dd className="min-w-0">{children}</dd>
+    </div>
+  );
+}
 
 /**
  * Resolve which single-select field stacks the board into columns. Honors the
@@ -46,6 +99,53 @@ export const resolveStackByField = (
   return selectFields[0] ?? null;
 };
 
+function KanbanCover({
+  fit,
+  href,
+  onClick,
+  value,
+}: {
+  fit: GalleryCoverFit;
+  href: string;
+  onClick: (event: MouseEvent<HTMLAnchorElement>) => void;
+  value: unknown;
+}) {
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const image = getAttachmentRefs(value).find(
+    (item) => item.mimeType?.startsWith("image/") && getSafeAttachmentUrl(item),
+  );
+  const url = image ? getSafeAttachmentUrl(image) : null;
+  if (!url || !image) return null;
+
+  return (
+    <Link
+      className="mb-2 block aspect-[3/2] overflow-hidden rounded bg-muted/30"
+      data-kanban-cover
+      data-testid="kanban-cover"
+      href={href}
+      onClick={onClick}
+      title={image.fileName}
+    >
+      {failedUrl === url ? (
+        <span className="flex h-full flex-col items-center justify-center gap-2 px-3 text-muted-foreground text-xs">
+          <ImageOff aria-hidden size={20} />
+          <span className="max-w-full truncate">{image.fileName}</span>
+        </span>
+      ) : (
+        <img
+          alt={image.fileName}
+          className={`h-full w-full ${fit === "fit" ? "object-contain" : "object-cover"}`}
+          decoding="async"
+          draggable={false}
+          loading="lazy"
+          onError={() => setFailedUrl(url)}
+          src={url}
+        />
+      )}
+    </Link>
+  );
+}
+
 function KanbanCard({
   record,
   fields,
@@ -53,6 +153,11 @@ function KanbanCard({
   baseSlug,
   draggable,
   onDragStart,
+  onOpenRecord,
+  relationRecords,
+  showFieldLabels,
+  coverField,
+  coverFit,
 }: {
   record: RecordVO;
   fields: BaseFieldVO[];
@@ -60,24 +165,74 @@ function KanbanCard({
   baseSlug: string;
   draggable: boolean;
   onDragStart: () => void;
+  onOpenRecord?: (record: RecordVO) => void;
+  relationRecords: RecordVO[];
+  showFieldLabels: boolean;
+  coverField: BaseFieldVO | null;
+  coverFit: GalleryCoverFit;
 }) {
   const messages = useCoreI18n();
   const locale = useCoreLocale();
   const resolveIString = useIString();
   const currentSearch = useSearch();
+  const suppressDragClick = useRef(false);
   const title = getRecordTitle(record, messages);
   const primaryFieldSlug = getPrimaryField(record.base)?.slug;
   const bodyFields = fields.filter(
     (field) => field.slug !== primaryFieldSlug && field.slug !== stackFieldSlug,
   );
+  const openRecord = (event: MouseEvent<HTMLElement>) => {
+    if (
+      !onOpenRecord ||
+      event.defaultPrevented ||
+      event.button !== 0 ||
+      event.metaKey ||
+      event.ctrlKey ||
+      event.shiftKey ||
+      event.altKey ||
+      (event.currentTarget instanceof HTMLAnchorElement &&
+        event.currentTarget.target !== "" &&
+        event.currentTarget.target !== "_self")
+    ) {
+      return;
+    }
+    event.preventDefault();
+    onOpenRecord(record);
+  };
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: kanban card is a native HTML5 drag source; the title Link remains the keyboard-accessible affordance
     <div
       className={`rounded-md border border-border/60 bg-background p-2.5 shadow-sm transition-shadow hover:shadow-md ${
-        draggable ? "cursor-grab active:cursor-grabbing" : ""
+        draggable ? "cursor-grab active:cursor-grabbing" : onOpenRecord ? "cursor-pointer" : ""
       }`}
       data-record-id={record.id}
       draggable={draggable}
+      onPointerDownCapture={() => {
+        suppressDragClick.current = false;
+      }}
+      onKeyDownCapture={() => {
+        suppressDragClick.current = false;
+      }}
+      onClickCapture={(event) => {
+        if (event.currentTarget.contains(event.target as Node) && suppressDragClick.current) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      }}
+      onClick={(event) => {
+        // React portal events bubble through the card even when the dialog is
+        // mounted elsewhere. Field controls keep their own actions as well.
+        if (
+          !event.currentTarget.contains(event.target as Node) ||
+          (event.target instanceof Element &&
+            event.target.closest(
+              "a, button, input, select, textarea, [role='button'], [role='link'], [role='dialog'], [contenteditable='true']",
+            ))
+        ) {
+          return;
+        }
+        openRecord(event);
+      }}
       onDragStart={
         draggable
           ? (event) => {
@@ -90,58 +245,95 @@ function KanbanCard({
                 event.preventDefault();
                 return;
               }
+              suppressDragClick.current = true;
               onDragStart();
             }
           : undefined
       }
     >
+      {coverField ? (
+        <KanbanCover
+          fit={coverFit}
+          href={mergeSearchIntoHref(`/base/${baseSlug}/${record.id}`, currentSearch)}
+          onClick={openRecord}
+          value={record.headCommit.payload[coverField.slug]}
+        />
+      ) : null}
       <Link
         className="block truncate font-medium text-foreground text-sm hover:underline"
         data-kanban-record-title
         href={mergeSearchIntoHref(`/base/${baseSlug}/${record.id}`, currentSearch)}
+        onClick={openRecord}
         title={title}
       >
         {title}
       </Link>
-      {bodyFields.slice(0, 3).map((field) => {
-        const rawValue = record.headCommit.payload[field.slug];
-        if (field.type === "lookup") {
+      <dl>
+        {bodyFields.map((field) => {
+          const rawValue = record.headCommit.payload[field.slug];
+          if (field.type === "attachment") {
+            return getAttachmentRefs(rawValue).length === 0 ? null : (
+              <KanbanCardField field={field} key={field.id} showFieldLabels={showFieldLabels}>
+                <AttachmentValuePreview compact value={rawValue} />
+              </KanbanCardField>
+            );
+          }
+          if (field.type === "select" || field.type === "multiselect") {
+            const chips = getFieldChipEntries(field, rawValue);
+            return chips.length === 0 ? null : (
+              <KanbanCardField field={field} key={field.id} showFieldLabels={showFieldLabels}>
+                <FieldBadgeList chips={chips} />
+              </KanbanCardField>
+            );
+          }
+          if (field.type === "relation") {
+            return getRelationRecordIds(rawValue).length === 0 ? null : (
+              <KanbanCardField field={field} key={field.id} showFieldLabels={showFieldLabels}>
+                <FieldValuePreview field={field} records={relationRecords} value={rawValue} />
+              </KanbanCardField>
+            );
+          }
+          if (field.type === "lookup") {
+            return (
+              <KanbanCardField field={field} key={field.id} showFieldLabels={showFieldLabels}>
+                <LookupFieldValue
+                  computed={record.computedFields?.[field.slug]}
+                  field={field}
+                  fieldUsers={record.fieldUsers}
+                  value={rawValue}
+                />
+              </KanbanCardField>
+            );
+          }
+          // A card is scanned, not read — the whole point of a board is
+          // recognising an owner at a glance, which a joined list of user ids does
+          // not do. People render as avatar chips here, not as preview text.
+          if (isPeopleFieldType(field.type)) {
+            const memberIds = getMemberIds(rawValue);
+            return memberIds.length === 0 ? null : (
+              <KanbanCardField field={field} key={field.id} showFieldLabels={showFieldLabels}>
+                <div className="flex min-w-0">
+                  <MemberChips users={record.fieldUsers} value={rawValue} />
+                </div>
+              </KanbanCardField>
+            );
+          }
+          const preview = getFieldPreviewText(field, rawValue, messages, locale);
+          if (!preview || preview === "-") {
+            return null;
+          }
           return (
-            <div className="mt-1 min-w-0 text-xs" key={field.id}>
-              <LookupFieldValue
-                computed={record.computedFields?.[field.slug]}
-                field={field}
-                fieldUsers={record.fieldUsers}
-                value={rawValue}
-              />
-            </div>
+            <KanbanCardField field={field} key={field.id} showFieldLabels={showFieldLabels}>
+              <div
+                className="truncate text-muted-foreground"
+                title={`${resolveIString(field.name)}: ${preview}`}
+              >
+                {preview}
+              </div>
+            </KanbanCardField>
           );
-        }
-        // A card is scanned, not read — the whole point of a board is
-        // recognising an owner at a glance, which a joined list of user ids does
-        // not do. People render as avatar chips here, not as preview text.
-        if (isPeopleFieldType(field.type)) {
-          const memberIds = getMemberIds(rawValue);
-          return memberIds.length === 0 ? null : (
-            <div className="mt-1.5 flex min-w-0" key={field.id}>
-              <MemberChips users={record.fieldUsers} value={rawValue} />
-            </div>
-          );
-        }
-        const preview = getFieldPreviewText(field, rawValue, messages, locale);
-        if (!preview || preview === "-") {
-          return null;
-        }
-        return (
-          <div
-            className="mt-1 truncate text-muted-foreground text-xs"
-            key={field.id}
-            title={`${resolveIString(field.name)}: ${preview}`}
-          >
-            {preview}
-          </div>
-        );
-      })}
+        })}
+      </dl>
     </div>
   );
 }
@@ -175,7 +367,11 @@ function KanbanColumn({
   onDragOverColumn,
   onDrop,
   onDragStartRecord,
+  onOpenRecord,
   stackField,
+  showFieldLabels,
+  coverField,
+  coverFit,
   viewId,
 }: {
   base: BaseVO | null;
@@ -188,7 +384,11 @@ function KanbanColumn({
   onDragOverColumn: () => void;
   onDrop: () => void;
   onDragStartRecord: (record: RecordVO) => void;
+  onOpenRecord?: (record: RecordVO) => void;
   stackField: BaseFieldVO;
+  showFieldLabels: boolean;
+  coverField: BaseFieldVO | null;
+  coverFit: GalleryCoverFit;
   viewId: string | undefined;
 }) {
   const messages = useCoreI18n();
@@ -231,6 +431,24 @@ function KanbanColumn({
   });
 
   const records = (cardsQuery.data?.pages ?? []).flatMap((page) => page.records);
+  const primaryFieldSlug = getPrimaryField(base ?? records[0]?.base)?.slug;
+  const relationFields = fields.filter(
+    (field) => field.type === "relation" && field.slug !== primaryFieldSlug,
+  );
+  const relationIds = [
+    ...new Set(
+      records.flatMap((record) =>
+        relationFields.flatMap((field) =>
+          getRelationRecordIds(record.headCommit.payload[field.slug]),
+        ),
+      ),
+    ),
+  ];
+  // One `records.getMany` per 100 linked ids for the whole column, rather than
+  // one `records.get` each. A failed chunk contributes nothing: React Query
+  // keeps the previous value on a failed refetch, and a cached title must never
+  // render after access was revoked or the linked record removed.
+  const { records: relationRecords } = useLinkedRecords({ client, ids: relationIds, orpc });
   const baseSlug = base?.slug ?? records[0]?.base.slug ?? "";
   // The header count comes from the aggregate, not from what is loaded — a
   // number that climbs while you scroll is worse than no number.
@@ -278,11 +496,16 @@ function KanbanColumn({
           records.map((record) => (
             <KanbanCard
               baseSlug={baseSlug}
+              coverField={coverField}
+              coverFit={coverFit}
               draggable={canDrag}
               fields={fields}
               key={record.id}
               onDragStart={() => onDragStartRecord(record)}
+              onOpenRecord={onOpenRecord}
               record={record}
+              relationRecords={relationRecords}
+              showFieldLabels={showFieldLabels}
               stackFieldSlug={stackField.slug}
             />
           ))
@@ -311,7 +534,8 @@ function KanbanColumn({
  * Dragging a card to another column writes the new choice back through
  * `onMoveRecord` (which, per busabase's approval model, opens an auto-merged
  * ChangeRequest — an instant change that still leaves an audit trail).
- * Read-only when no move handler is provided.
+ * Read-only when no move handler is provided, or when the viewer's level on the
+ * Base (see `SubmitPermissionProvider`) is below `changeRequest`.
  */
 export function BusaBaseKanban({
   activeView,
@@ -319,19 +543,34 @@ export function BusaBaseKanban({
   client,
   fields,
   onMoveRecord,
+  onOpenRecord,
 }: {
   activeView: ViewVO | null;
   base: BaseVO | null;
   client: BusabaseDashboardApiClient;
   fields: BaseFieldVO[];
-  onMoveRecord?: (record: RecordVO, fieldSlug: string, value: string | null) => Promise<void>;
+  onMoveRecord?: KanbanMoveRecord;
+  onOpenRecord?: (record: RecordVO) => void;
 }) {
   const messages = useCoreI18n();
+  const locale = useCoreLocale();
+  const currentSearch = useSearch();
+  const isAnon = useIsAnonymousVisitor();
+  const permissionLevel = useWorkspacePermissionLevel();
+  const [moveError, setMoveError] = useState<string | null>(null);
+  const [reviewRequestId, setReviewRequestId] = useState<string | null>(null);
   // The dragged RECORD, not just its id: the board no longer holds an array of
   // every record to look one up in.
   const [dragging, setDragging] = useState<RecordVO | null>(null);
   const [overColumn, setOverColumn] = useState<string | null>(null);
   const stackField = resolveStackByField(base, fields, activeView?.config.stackByFieldSlug);
+  // Covers are opt-in on boards: missing legacy config must not make every
+  // existing card taller merely because it contains an attachment.
+  const coverField = activeView?.config.coverFieldSlug
+    ? ((base?.fields ?? fields).find(
+        (field) => field.type === "attachment" && field.slug === activeView.config.coverFieldSlug,
+      ) ?? null)
+    : null;
   const baseId = base?.id ?? "";
   const orpc = useDashboardOrpc();
 
@@ -375,12 +614,13 @@ export function BusaBaseKanban({
     ]),
   );
 
-  const canDrag = Boolean(onMoveRecord);
+  const canDrag =
+    Boolean(onMoveRecord) && !isAnon && hasApiKeyLevel(permissionLevel, "changeRequest");
   const handleDrop = async (columnId: string) => {
     const record = dragging;
     setDragging(null);
     setOverColumn(null);
-    if (!record || !onMoveRecord) {
+    if (!record || !onMoveRecord || !canDrag) {
       return;
     }
     const current = record.headCommit.payload[stackField.slug];
@@ -388,41 +628,101 @@ export function BusaBaseKanban({
     if (current === nextValue || (current == null && nextValue === null)) {
       return;
     }
-    await onMoveRecord(record, stackField.slug, nextValue);
+    setMoveError(null);
+    setReviewRequestId(null);
+    try {
+      const result = await onMoveRecord(record, stackField.slug, nextValue);
+      if (!result.materialized) setReviewRequestId(result.changeRequestId);
+    } catch (error) {
+      setMoveError(presentCoreError(messages, locale, error, messages.shell.operationFailed));
+    }
   };
 
   return (
-    <div className="flex gap-3 overflow-x-auto pb-5">
-      {columns.map((column) => {
-        // Hide Uncategorized when nothing is unset (keeps the board tidy).
-        // `groupBy` OMITS zero-count buckets, so "no entry" — not a 0 — is what
-        // an empty bucket looks like; waiting for the aggregate to arrive first
-        // keeps the column from flickering away while it loads.
-        if (
-          column.id === UNCATEGORIZED &&
-          countsQuery.data &&
-          (countByColumn.get(UNCATEGORIZED) ?? 0) === 0
-        ) {
-          return null;
-        }
-        return (
-          <KanbanColumn
-            base={base}
-            canDrag={canDrag}
-            client={client}
-            column={column}
-            count={countByColumn.get(column.id)}
-            fields={fields}
-            isOver={overColumn === column.id}
-            key={column.id}
-            onDragOverColumn={() => setOverColumn(column.id)}
-            onDragStartRecord={setDragging}
-            onDrop={() => void handleDrop(column.id)}
-            stackField={stackField}
-            viewId={activeView?.id}
-          />
-        );
-      })}
-    </div>
+    <>
+      <DragReviewNotice
+        currentSearch={currentSearch}
+        error={moveError}
+        reviewRequestId={reviewRequestId}
+      />
+      <div className="flex gap-3 overflow-x-auto pb-5">
+        {columns.map((column) => {
+          // Hide Uncategorized when nothing is unset (keeps the board tidy).
+          // `groupBy` OMITS zero-count buckets, so "no entry" — not a 0 — is what
+          // an empty bucket looks like; waiting for the aggregate to arrive first
+          // keeps the column from flickering away while it loads.
+          if (
+            column.id === UNCATEGORIZED &&
+            countsQuery.data &&
+            (countByColumn.get(UNCATEGORIZED) ?? 0) === 0
+          ) {
+            return null;
+          }
+          return (
+            <KanbanColumn
+              base={base}
+              showFieldLabels={activeView?.config.showFieldLabels ?? true}
+              canDrag={canDrag}
+              client={client}
+              column={column}
+              coverField={coverField}
+              coverFit={activeView?.config.coverFit ?? "cover"}
+              count={countByColumn.get(column.id)}
+              fields={fields}
+              isOver={overColumn === column.id}
+              key={column.id}
+              onDragOverColumn={() => setOverColumn(column.id)}
+              onDragStartRecord={setDragging}
+              onDrop={() => void handleDrop(column.id)}
+              onOpenRecord={onOpenRecord}
+              stackField={stackField}
+              viewId={activeView?.id}
+            />
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
+/**
+ * Feedback after a drag on a board or timeline: the error when the write
+ * failed, or — for a `changeRequest`-level viewer whose move was queued rather
+ * than merged — a note saying so, linking to the pending request.
+ */
+export function DragReviewNotice({
+  currentSearch,
+  error,
+  reviewRequestId,
+}: {
+  currentSearch: string;
+  error: string | null;
+  reviewRequestId: string | null;
+}) {
+  const messages = useCoreI18n();
+  return (
+    <>
+      {error ? (
+        <div className="mb-3 text-destructive text-sm" role="alert">
+          {error}
+        </div>
+      ) : null}
+      {reviewRequestId ? (
+        <div
+          aria-live="polite"
+          className="mb-3 text-muted-foreground text-sm"
+          data-testid="drag-review-notice"
+          role="status"
+        >
+          {messages.base.dragSubmittedForReview}{" "}
+          <Link
+            className="text-primary underline-offset-2 hover:underline"
+            href={mergeSearchIntoHref(`/inbox/${reviewRequestId}`, currentSearch)}
+          >
+            {messages.base.viewSubmittedRequest}
+          </Link>
+        </div>
+      ) : null}
+    </>
   );
 }

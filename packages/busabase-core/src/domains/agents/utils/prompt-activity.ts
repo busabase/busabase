@@ -1,7 +1,7 @@
 import type { AgentSessionVO } from "busabase-contract/domains/agents/types";
 
 export const getPromptActivityState = (status: AgentSessionVO["status"], sending: boolean) => ({
-  active: sending || status === "busy",
+  active: sending || status === "busy" || status === "waiting_permission",
   starting: sending && status === "connecting",
 });
 

@@ -59,4 +59,42 @@ describe("EmptyAgentGuide", () => {
     expect(markup).toContain("新建 Base 或文档");
     expect(markup).toContain("连接你的 Agent");
   });
+
+  it("leads with connecting the agent, with the cue, when the host asks for it", () => {
+    const markup = render(
+      <EmptyAgentGuide
+        agentCue={{ onDismiss: () => {} }}
+        edition="cloud"
+        onCreateNode={() => {}}
+      />,
+    );
+
+    const buttons = [...markup.matchAll(/<button([^>]*)>([\s\S]*?)<\/button>/g)];
+    const connect = buttons.find((match) => match[2]?.includes("Connect your agent"))?.[1] ?? "";
+    // The agent CTA is now the filled primary and carries the attention ring…
+    expect(connect).toContain("bg-ai");
+    expect(connect).toContain('data-agent-cue="ring"');
+    // …and the template is still one tap away, but no longer the primary.
+    const templateLink = markup.match(/<a[^>]*href="\/templates"[^>]*>/)?.[0] ?? "";
+    expect(templateLink).not.toContain("bg-primary");
+    expect(markup).toContain("Create a Base or document");
+    // The user can always say no.
+    expect(buttons.some((match) => match[2]?.includes("Not now"))).toBe(true);
+    // One pulsing button, one bubble pointing at it.
+    expect(markup.match(/data-agent-cue="ring"/g)).toHaveLength(1);
+    expect(markup.match(/data-agent-cue="bubble"/g)).toHaveLength(1);
+  });
+
+  it("keeps the template-first layout, with no cue, when the host omits it", () => {
+    const markup = render(<EmptyAgentGuide onCreateNode={() => {}} />);
+    expect(markup).not.toContain("data-agent-cue");
+    expect(markup).not.toContain("Not now");
+  });
+
+  it("localizes the cue copy", () => {
+    const markup = render(<EmptyAgentGuide agentCue={{ onDismiss: () => {} }} />, "zh-CN");
+    expect(markup).toContain("连接你的 Agent");
+    expect(markup).toContain("推荐的第一步");
+    expect(markup).toContain("以后再说");
+  });
 });

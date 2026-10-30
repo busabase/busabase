@@ -28,8 +28,9 @@ import {
 
 // The node types this endpoint accepts — each owns exactly one document.
 // Multi-file types (skill/drive/airapp) and relational types (base/form) are
-// out of scope by design (spec D4).
-export const NODE_CONTENT_TYPES = ["doc", "whiteboard", "workflow", "html"] as const;
+// out of scope by design (spec D4). Folder is here for its optional readme
+// body only; children and header `description` stay on the node row.
+export const NODE_CONTENT_TYPES = ["doc", "folder", "whiteboard", "workflow", "html"] as const;
 export type NodeContentType = (typeof NODE_CONTENT_TYPES)[number];
 
 /**
@@ -52,6 +53,7 @@ export type NodeContentType = (typeof NODE_CONTENT_TYPES)[number];
  */
 const NODE_CONTENT_VARIANTS = {
   doc: z.object({ kind: z.literal("doc"), body: z.string() }),
+  folder: z.object({ kind: z.literal("folder"), body: z.string() }),
   whiteboard: z.object({ kind: z.literal("whiteboard"), document: WhiteboardDocumentSchema }),
   workflow: z.object({ kind: z.literal("workflow"), document: WorkflowDocumentSchema }),
   html: z.object({ kind: z.literal("html"), document: HtmlDocumentSchema }),
@@ -64,6 +66,7 @@ const NODE_CONTENT_VARIANTS = {
 // arrangement `NodeDetailVOSchema` uses for the same reason.
 export const nodeContentInputSchema = z.discriminatedUnion("kind", [
   NODE_CONTENT_VARIANTS.doc,
+  NODE_CONTENT_VARIANTS.folder,
   NODE_CONTENT_VARIANTS.whiteboard,
   NODE_CONTENT_VARIANTS.workflow,
   NODE_CONTENT_VARIANTS.html,

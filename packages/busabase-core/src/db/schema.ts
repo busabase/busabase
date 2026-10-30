@@ -50,6 +50,10 @@ export const busabaseOperationKindEnum = pgEnum("busabase_operation_kind", [
   "airapp_file_delete",
   "airapp_metadata_update",
   "doc_update",
+  // Folder readme body (`…/folder/readme.md`). Same string-body shape as
+  // `doc_update`, not `*_document_update` — that family is the JSON document
+  // merge for whiteboard/workflow/html.
+  "folder_update",
   // One operation kind per rich-node document type (whiteboard/workflow/html),
   // mirroring the `skill_file_*`/`drive_file_*`/`airapp_file_*` and
   // `*_metadata_update` families above rather than a single generic
@@ -296,7 +300,7 @@ export const busabaseNodes = pgTable(
 
 /**
  * Search projection for node CONTENT — one row per content-bearing node
- * (`doc` / `html` / `whiteboard` / `workflow`).
+ * (`doc` / `folder` / `html` / `whiteboard` / `workflow`).
  *
  * Why a table and not a column on `busabase_nodes`: that table is read on the
  * hot path with a bare `.select()` (the sidebar tree via `listNodes`, and
@@ -893,6 +897,7 @@ export * from "../domains/agents/schema/router-oauth-states";
 export * from "../domains/assets/schema/asset-texts";
 // Assets domain: the deduped Asset library + its where-used reverse index.
 export * from "../domains/assets/schema/assets";
+export * from "../domains/assets/schema/storage-cleanup-jobs";
 // Base-domain tables, enum, and PO types live in the base domain; re-exported
 // here so the db barrel stays the one import surface. Kernel CR tables FK into
 // these via lazy refs (the import cycle resolves at runtime).
@@ -901,6 +906,7 @@ export * from "../domains/base/schema";
 export * from "../domains/embed-links/schema";
 // Form-as-Node: a node bound to a Base; submissions become record-create CRs.
 export * from "../domains/form/schema";
+export { busabaseSpaceInstructions } from "../domains/space-instructions/schema/space-instructions";
 // Vault-managed secrets and variables used by agents, MCP, and API tools.
 export * from "../domains/vault/schema/vault-items";
 export * from "../domains/webhook/schema/webhook-deliveries";

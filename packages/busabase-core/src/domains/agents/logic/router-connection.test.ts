@@ -7,6 +7,7 @@ import { runWithBusabaseContext } from "../../../context";
 import { getDb } from "../../../db";
 import { busabaseRouterConnections } from "../schema/router-enrollments";
 import { busabaseRouterGrants } from "../schema/router-grants";
+import { getAgentConnectionDetail, renameAgentConnection } from "./agent-connection-detail";
 import {
   disconnectRouterConnection,
   listRouterConnections,
@@ -50,6 +51,79 @@ describe("router-connection: resolveLaunch + disconnect", () => {
     if (originalOrigin === undefined) delete process.env.ACPROUTER_ENROLLMENT_ORIGIN;
     else process.env.ACPROUTER_ENROLLMENT_ORIGIN = originalOrigin;
     vi.unstubAllGlobals();
+  });
+
+  it("renames a device without changing the provider agent or its secret-bearing launch", async () => {
+    const slug = await createConnectedAgent(
+      "rename-owner",
+      "rename-space",
+      "rename-device",
+      "claude-acp",
+    );
+    await asActor("rename-owner", "rename-space", async () => {
+      const before = await getAgentConnectionDetail(slug);
+      expect(before).toMatchObject({
+        provider: "acprouter",
+        providerAgentName: "claude-acp",
+        routerWorkspaceName: "Acme",
+        deviceId: "rename-device",
+        status: "saved",
+      });
+      // Connector identity comes from the grant's own `busabaseActorId`, not
+      // from re-deriving the current viewer — this happens to be the same
+      // actor here, but the assertion pins the source, not a coincidence.
+      expect(before?.connectedBy).toEqual({
+        id: "rename-owner",
+        name: null,
+        email: null,
+        image: null,
+        role: null,
+      });
+      const next = await renameAgentConnection(slug, "  Work laptop  ");
+      expect(next).toEqual({ ...before, agentName: "Work laptop" });
+      expect(
+        (await listRouterConnections()).find((connection) => connection.slug === slug),
+      ).toMatchObject({ agentName: "Work laptop", agentSlug: "claude-acp" });
+      expect(JSON.stringify(next)).not.toMatch(/secret|token|wss:/i);
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => new Response(null, { status: 200 })),
+      );
+      expect((await resolveRouterConnectionLaunch(slug)).url).toBe(
+        "wss://acprouter.example/acp/rename-device",
+      );
+    });
+    await expect(
+      asActor("other-user", "rename-space", () => renameAgentConnection(slug, "Other")),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    await expect(
+      asActor("rename-owner", "other-space", () => getAgentConnectionDetail(slug)),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+
+  it("falls back to an honest unresolved identity rather than the viewer when the grant's connector cannot be resolved", async () => {
+    const slug = await createConnectedAgent(
+      "router-owner",
+      "unknown-identity-space",
+      "unknown-identity-device",
+      "claude-acp",
+    );
+    // A host resolver that cannot find the grant's own actor (e.g. a departed
+    // account) must not fall back to naming the current viewer instead.
+    await runWithBusabaseContext(
+      {
+        actorId: "router-owner",
+        spaceId: "unknown-identity-space",
+        resolveUsers: async () => new Map(),
+      },
+      async () => {
+        const detail = await getAgentConnectionDetail(slug);
+        // `resolveUserRefs` leaves an id the resolver doesn't know about out
+        // of its returned map entirely, so `connectedBy` is honestly null —
+        // never a silent substitution of the viewer's own identity.
+        expect(detail.connectedBy).toBeNull();
+      },
+    );
   });
 
   async function createConnectedAgent(

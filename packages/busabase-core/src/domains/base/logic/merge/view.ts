@@ -1,7 +1,14 @@
 import "server-only";
 
+import { isDeepStrictEqual } from "node:util";
 import { ORPCError } from "@orpc/server";
-import { mapViewFilters, type ViewConfigVO } from "busabase-contract/types";
+import {
+  flattenViewFilters,
+  getAutoShowNewFields,
+  getVisibleViewFieldSlugs,
+  mapViewFilters,
+  type ViewConfigVO,
+} from "busabase-contract/types";
 import { and, count, eq, isNull, max, ne } from "drizzle-orm";
 import { getContextSpaceId, resolveActorId } from "../../../../context";
 import type { CommitPO, OperationPO, ViewPO } from "../../../../db/schema";
@@ -18,20 +25,42 @@ import { normalizeViewConfig } from "../../../../logic/vo";
 import { compareViewOrder } from "../../utils/view-order";
 import { lastViewDeleteRejected } from "../errors";
 
+type ViewFieldIdentity = { id: string; slug: string; position: number };
+
+/** Read at most once, and only when policy inference or field-id stamping needs it. */
+const lazyViewFields = (ctx: MergeCtx, baseId: string) => {
+  let result: Promise<ViewFieldIdentity[]> | undefined;
+  return () => {
+    result ??= ctx.db
+      .select({
+        id: busabaseBaseFields.id,
+        slug: busabaseBaseFields.slug,
+        position: busabaseBaseFields.position,
+      })
+      .from(busabaseBaseFields)
+      .where(and(eq(busabaseBaseFields.baseId, baseId), isNull(busabaseBaseFields.deletedAt)))
+      .orderBy(busabaseBaseFields.position)
+      .then((rows) => rows);
+    return result;
+  };
+};
+
 /**
  * Stamp the stable `fieldId` onto every filter/sort entry by resolving each
  * `fieldSlug` against the base's active (non-deleted) fields. This is what makes
  * filter cleanup on field-delete slug-reuse safe (Fix 6).
  */
 const stampFieldIds = async (
-  ctx: MergeCtx,
-  baseId: string,
   config: ViewConfigVO,
+  getFields: () => Promise<ViewFieldIdentity[]>,
 ): Promise<ViewConfigVO> => {
-  const fieldRows = await ctx.db
-    .select({ id: busabaseBaseFields.id, slug: busabaseBaseFields.slug })
-    .from(busabaseBaseFields)
-    .where(and(eq(busabaseBaseFields.baseId, baseId), isNull(busabaseBaseFields.deletedAt)));
+  if (
+    !flattenViewFilters(config.filters).some((filter) => !filter.fieldId) &&
+    !config.sorts.some((sort) => !sort.fieldId)
+  ) {
+    return config;
+  }
+  const fieldRows = await getFields();
   const idBySlug = new Map(fieldRows.map((f) => [f.slug, f.id]));
   const stamp = <T extends { fieldSlug: string; fieldId?: string }>(entry: T): T => {
     const fieldId = idBySlug.get(entry.fieldSlug);
@@ -130,6 +159,23 @@ export const mergeViewCreate = async (ctx: MergeCtx, item: OperationPO, headComm
     .select({ maxPosition: max(busabaseViews.position) })
     .from(busabaseViews)
     .where(and(eq(busabaseViews.baseId, baseId), eq(busabaseViews.status, "active")));
+  const config = normalizeViewConfig(viewFields.config ?? {});
+  const getFields = lazyViewFields(ctx, baseId);
+  if (config.autoShowNewFields === undefined) {
+    config.autoShowNewFields =
+      viewFields.type !== "kanban" &&
+      viewFields.type !== "gallery" &&
+      !Array.isArray(config.visibleFieldSlugs);
+  }
+  if (!config.autoShowNewFields && !Array.isArray(config.visibleFieldSlugs)) {
+    const fields = await getFields();
+    config.visibleFieldSlugs = fields
+      .map((field) => field.slug)
+      .filter((slug) => !config.hiddenFieldSlugs?.includes(slug));
+  }
+  if (viewFields.type === "kanban") {
+    config.showFieldLabels ??= true;
+  }
   await db.insert(busabaseViews).values({
     id: viewId,
     spaceId: getContextSpaceId(),
@@ -138,7 +184,7 @@ export const mergeViewCreate = async (ctx: MergeCtx, item: OperationPO, headComm
     name: viewFields.name,
     description: viewFields.description ?? "",
     type: viewFields.type ?? "table",
-    config: await stampFieldIds(ctx, baseId, normalizeViewConfig(viewFields.config ?? {})),
+    config: await stampFieldIds(config, getFields),
     status: "active",
     position: maxPosition === null ? 0 : maxPosition + 1,
     createdBy: resolveActorId(CURRENT_USER_ID),
@@ -155,11 +201,65 @@ export const mergeViewCreate = async (ctx: MergeCtx, item: OperationPO, headComm
 
 export const mergeViewUpdate = async (ctx: MergeCtx, item: OperationPO, headCommit: CommitPO) => {
   const { db, timestamp } = ctx;
-  const targetView = item.targetViewId ? ctx.targetViewsById.get(item.targetViewId) : undefined;
+  const [targetView] = item.targetViewId
+    ? await db
+        .select()
+        .from(busabaseViews)
+        .where(
+          and(
+            eq(busabaseViews.id, item.targetViewId),
+            eq(busabaseViews.spaceId, getContextSpaceId()),
+            eq(busabaseViews.status, "active"),
+          ),
+        )
+        .for("update")
+    : [];
   if (!targetView) {
     throw targetViewNotFound(item.targetViewId);
   }
   const viewFields = parseCommitPayload("view_update", headCommit.payload);
+  const liveConfig = normalizeViewConfig(targetView.config);
+  const getFields = lazyViewFields(ctx, targetView.baseId);
+  let nextConfig = normalizeViewConfig(viewFields.config ?? targetView.config);
+  if (viewFields.configPatch !== undefined) {
+    const patch = viewFields.configPatch as Partial<ViewConfigVO>;
+    const baseline = viewFields.configBase ?? {};
+    for (const key of Object.keys(patch) as Array<keyof ViewConfigVO>) {
+      if (
+        !isDeepStrictEqual(liveConfig[key], baseline[key]) &&
+        !isDeepStrictEqual(liveConfig[key], patch[key])
+      ) {
+        throw new ORPCError("CONFLICT", {
+          message:
+            "View settings changed while this request was pending. Refresh and retry the change.",
+          data: { reason: "view_config_changed", viewId: targetView.id, configKey: key },
+        });
+      }
+    }
+    nextConfig = { ...liveConfig, ...patch };
+    // Older API clients send only an allowlist to hide fields. Preserve that
+    // intent even when the saved view now has an explicit automatic default.
+    if (Array.isArray(patch.visibleFieldSlugs) && patch.autoShowNewFields === undefined) {
+      nextConfig.autoShowNewFields = false;
+    }
+    if (patch.autoShowNewFields === false && patch.visibleFieldSlugs === undefined) {
+      nextConfig.visibleFieldSlugs = getVisibleViewFieldSlugs(liveConfig, await getFields());
+    }
+    if (
+      patch.autoShowNewFields === true &&
+      patch.hiddenFieldSlugs === undefined &&
+      !getAutoShowNewFields(liveConfig)
+    ) {
+      const fields = await getFields();
+      const visible = new Set(getVisibleViewFieldSlugs(liveConfig, fields));
+      nextConfig.hiddenFieldSlugs = [
+        ...new Set([
+          ...(liveConfig.hiddenFieldSlugs ?? []),
+          ...fields.filter((field) => !visible.has(field.slug)).map((field) => field.slug),
+        ]),
+      ];
+    }
+  }
   if (viewFields.position !== undefined) {
     await moveViewToPosition(ctx, targetView, viewFields.position);
   }
@@ -171,15 +271,17 @@ export const mergeViewUpdate = async (ctx: MergeCtx, item: OperationPO, headComm
     viewFields.description !== undefined ||
     viewFields.name !== undefined ||
     viewFields.type !== undefined;
+  const touchesFieldRules =
+    viewFields.configPatch === undefined ||
+    viewFields.configPatch.filters !== undefined ||
+    viewFields.configPatch.sorts !== undefined;
   if (touchesContent) {
     await db
       .update(busabaseViews)
       .set({
-        config: await stampFieldIds(
-          ctx,
-          targetView.baseId,
-          normalizeViewConfig(viewFields.config ?? targetView.config),
-        ),
+        ...(viewFields.config !== undefined
+          ? { config: touchesFieldRules ? await stampFieldIds(nextConfig, getFields) : nextConfig }
+          : {}),
         description: viewFields.description ?? targetView.description,
         name: viewFields.name ?? targetView.name,
         type: viewFields.type ?? targetView.type,

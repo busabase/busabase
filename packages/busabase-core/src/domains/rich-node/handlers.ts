@@ -48,8 +48,8 @@ import {
 import { assertDocBodySize } from "../doc/handlers";
 
 /**
- * `PUT /nodes/{nodeId}/content` — one content-write endpoint for the four node
- * types that own exactly one document (doc, whiteboard, workflow, html). Takes
+ * `PUT /nodes/{nodeId}/content` — one content-write endpoint for the node
+ * types that own exactly one document (doc, folder readme, whiteboard, workflow, html). Takes
  * over what `updateDocBody` + `createDocChangeRequest` used to do for Doc
  * alone, and gives whiteboard/workflow/html a reviewed content write for the
  * first time — they previously wrote straight to `node.metadata` through
@@ -200,10 +200,11 @@ export const getHtmlDetail = async (
 
 const CONTENT_OPERATION_BY_KIND = {
   doc: "doc_update",
+  folder: "folder_update",
   whiteboard: "whiteboard_document_update",
   workflow: "workflow_document_update",
   html: "html_document_update",
-} as const satisfies Record<string, OperationPO["operation"]>;
+} as const satisfies Record<NodeContentType, OperationPO["operation"]>;
 
 /**
  * Bounds the size of any one whiteboard/workflow/html snapshot — same
@@ -223,7 +224,7 @@ const CONTENT_OPERATION_BY_KIND = {
 const RICH_NODE_DOCUMENT_MAX_BYTES = 1_000_000;
 
 const assertRichNodeDocumentSize = (
-  kind: Exclude<NodeContentType, "doc">,
+  kind: Exclude<NodeContentType, "doc" | "folder">,
   document: unknown,
 ): void => {
   const byteLength = Buffer.byteLength(JSON.stringify(document), "utf8");
@@ -275,10 +276,11 @@ export const updateNodeContent = async (
   );
 
   let fields: Record<string, unknown>;
-  if (parsed.content.kind === "doc") {
+  if (parsed.content.kind === "doc" || parsed.content.kind === "folder") {
     // Same cap as Doc's other write paths (`DOC_BODY_MAX_BYTES`) — rejected
     // before any ChangeRequest exists, mirroring `createDocChangeRequest`'s
-    // "rejected before any CR was ever created" contract.
+    // "rejected before any CR was ever created" contract. Folder readmes share
+    // that cap: they are the same kind of markdown snapshot.
     assertDocBodySize(parsed.content.body);
     fields = { body: parsed.content.body };
   } else {

@@ -7,6 +7,51 @@ import {
   ListEmbedLinksPagedInputSchema,
 } from "./embed-link-schemas";
 
+describe("embed link expiry", () => {
+  it.each(["node", "change-request", "record-detail"] as const)(
+    "supports multi-day %s links through seven days",
+    (type) => {
+      for (const days of [3, 4, 5, 7]) {
+        const expiresInMinutes = days * 24 * 60;
+        const input = { type, typeId: "target_1", expiresInMinutes };
+        expect(CreateEmbedLinkInputSchema.parse(input).expiresInMinutes).toBe(expiresInMinutes);
+        expect(
+          busabaseContractRoutes.embedLinks.create["~orpc"].inputSchema?.parse(input)
+            .expiresInMinutes,
+        ).toBe(expiresInMinutes);
+      }
+    },
+  );
+
+  it.each(["node", "change-request", "record-detail"] as const)(
+    "keeps the existing default and shorter durations for %s links",
+    (type) => {
+      expect(CreateEmbedLinkInputSchema.parse({ type, typeId: "target_1" }).expiresInMinutes).toBe(
+        15,
+      );
+      for (const expiresInMinutes of [1, 60, 1440]) {
+        expect(
+          CreateEmbedLinkInputSchema.parse({ type, typeId: "target_1", expiresInMinutes })
+            .expiresInMinutes,
+        ).toBe(expiresInMinutes);
+      }
+    },
+  );
+
+  it.each(["node", "change-request", "record-detail"] as const)(
+    "rejects invalid and over-seven-day durations for %s links",
+    (type) => {
+      for (const expiresInMinutes of [0, -1, 1.5, 7200.5, 10081, 30 * 24 * 60]) {
+        const input = { type, typeId: "target_1", expiresInMinutes };
+        expect(CreateEmbedLinkInputSchema.safeParse(input).success).toBe(false);
+        expect(
+          busabaseContractRoutes.embedLinks.create["~orpc"].inputSchema?.safeParse(input).success,
+        ).toBe(false);
+      }
+    },
+  );
+});
+
 describe("embed frame policy input", () => {
   it("publishes embed-link CRUD and audit routes on the shared Desktop and tunnel contract", () => {
     expect(busabaseContractRoutes.embedLinks.create["~orpc"].route).toMatchObject({

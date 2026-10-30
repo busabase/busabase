@@ -25,13 +25,21 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from "kui/dropdown-menu";
-import { Bot, ChevronDown, Loader2, Sparkles } from "lucide-react";
+import { Bot, ChevronDown, Loader2, MapPin, Sparkles } from "lucide-react";
 import { useState } from "react";
 import { useLocation } from "wouter";
 import { useCoreI18n } from "../../../i18n";
 import type { NodePromptScope } from "../helpers/node-agent-prompts";
+import { useCopyLocator, useLocatorShortcutLabel, useNodeLocator } from "../hooks/use-copy-locator";
+import {
+  LOCATOR_SHORTCUT_PRIORITY_NODE,
+  LOCATOR_SHORTCUT_PRIORITY_RECORD,
+  useLocatorShortcut,
+} from "../hooks/use-locator-shortcut";
 import { useDashboardOrpc } from "../orpc-context";
 import { useIsAnonymousVisitor } from "../visitor-context";
 import { NodeAgentPromptsDialog } from "./node-agent-prompts-dialog";
@@ -85,6 +93,19 @@ export function NodeAgentPromptsButton({
   // prompt is phrased as an instruction to change it — same self-gate the other
   // action buttons in this domain use.
   const isAnon = useIsAnonymousVisitor();
+  // The primary path most people want: point the agent here, then type their
+  // own request. Copies the target line + connection check without opening
+  // the dialog, and owns the page's copy-locator shortcut for node and record
+  // toolbars (a column or cell button is one of many on screen, so it doesn't).
+  const locator = useNodeLocator({ nodeId, nodeName, nodeType, scope, spaceId, spaceName });
+  const { copyLocator } = useCopyLocator();
+  const shortcutLabel = useLocatorShortcutLabel();
+  const scopeKind = scope?.kind ?? "node";
+  const ownsShortcut = !isAnon && (scopeKind === "node" || scopeKind === "record");
+  useLocatorShortcut(
+    ownsShortcut ? () => void copyLocator(locator) : null,
+    scopeKind === "record" ? LOCATOR_SHORTCUT_PRIORITY_RECORD : LOCATOR_SHORTCUT_PRIORITY_NODE,
+  );
   if (isAnon) {
     return null;
   }
@@ -95,7 +116,7 @@ export function NodeAgentPromptsButton({
         <Button
           aria-label={messages.agentPrompts.title}
           aria-expanded={dialogOpen}
-          className={`h-8 gap-1.5 px-2.5 text-ai-strong shadow-none hover:bg-ai/17 hover:text-ai-strong data-[state=open]:bg-ai/17 dark:text-ai-soft dark:hover:text-ai-soft ${orpcForDropdown ? "rounded-r-none" : ""}`}
+          className="h-8 gap-1.5 rounded-r-none px-2.5 text-ai-strong shadow-none hover:bg-ai/17 hover:text-ai-strong data-[state=open]:bg-ai/17 dark:text-ai-soft dark:hover:text-ai-soft"
           data-testid="node-agent-prompts-button"
           data-state={dialogOpen ? "open" : "closed"}
           onClick={() => setDialogOpen(true)}
@@ -107,24 +128,34 @@ export function NodeAgentPromptsButton({
           <Sparkles aria-hidden="true" className="size-3.5" />
           <span className="hidden sm:inline">{messages.agentPrompts.title}</span>
         </Button>
-        {orpcForDropdown ? (
-          <>
-            <span aria-hidden="true" className="my-1.5 w-px shrink-0 bg-ai/20" />
-            <DropdownMenu onOpenChange={setMenuOpen} open={menuOpen}>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  aria-label={messages.agentPrompts.askAgentOptions}
-                  className="h-8 w-7 rounded-l-none px-0 text-ai-strong shadow-none hover:bg-ai/17 hover:text-ai-strong data-[state=open]:bg-ai/17 dark:text-ai-soft dark:hover:text-ai-soft"
-                  data-testid="node-agent-actions-trigger"
-                  size="icon-sm"
-                  title={messages.agentPrompts.askAgentOptions}
-                  type="button"
-                  variant="ghost"
-                >
-                  <ChevronDown aria-hidden="true" className="size-3.5" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="max-h-80 w-56 overflow-y-auto">
+        <span aria-hidden="true" className="my-1.5 w-px shrink-0 bg-ai/20" />
+        <DropdownMenu onOpenChange={setMenuOpen} open={menuOpen}>
+          <DropdownMenuTrigger asChild>
+            <Button
+              aria-label={messages.agentPrompts.askAgentOptions}
+              className="h-8 w-7 rounded-l-none px-0 text-ai-strong shadow-none hover:bg-ai/17 hover:text-ai-strong data-[state=open]:bg-ai/17 dark:text-ai-soft dark:hover:text-ai-soft"
+              data-testid="node-agent-actions-trigger"
+              size="icon-sm"
+              title={messages.agentPrompts.askAgentOptions}
+              type="button"
+              variant="ghost"
+            >
+              <ChevronDown aria-hidden="true" className="size-3.5" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="max-h-80 w-56 overflow-y-auto">
+            <DropdownMenuItem
+              data-testid="node-agent-copy-locator"
+              onSelect={() => void copyLocator(locator)}
+              title={messages.agentPrompts.locatorCardHint}
+            >
+              <MapPin aria-hidden="true" />
+              <span className="flex-1">{messages.agentPrompts.copyLocator}</span>
+              {ownsShortcut ? <DropdownMenuShortcut>{shortcutLabel}</DropdownMenuShortcut> : null}
+            </DropdownMenuItem>
+            {orpcForDropdown ? (
+              <>
+                <DropdownMenuSeparator />
                 {connections.isPending ? (
                   <DropdownMenuItem disabled>
                     <Loader2 className="animate-spin" />
@@ -158,10 +189,10 @@ export function NodeAgentPromptsButton({
                     ))}
                   </>
                 )}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </>
-        ) : null}
+              </>
+            ) : null}
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
       {dialogOpen && (
         <NodeAgentPromptsDialog

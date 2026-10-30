@@ -9,10 +9,11 @@ import type { BusabaseTaskClient, TaskDefinition } from "./types";
  * 1. The operation kind on the wire is `"delete"`, but its effect is a *soft*
  *    archive (the node lands in the Trash view and can be restored). An agent
  *    reading the contract sees "delete" and reasonably assumes it is permanent.
- * 2. The thing actually named delete — `DELETE /nodes/{nodeId}`, exposed as the
- *    `nodes_purge` tool — is permanent AND only works on a node that is already
- *    archived. So an agent told "delete this folder" tends to reach for purge,
- *    get an error, and have no idea archiving was the missing first step.
+ * 2. The thing actually named delete — `nodes.purge` — is permanent AND only
+ *    works on a node that is already archived. It used to be `DELETE
+ *    /nodes/{nodeId}` and the `nodes_purge` MCP tool, so an agent told "delete
+ *    this folder" reached for it. It is UI-only now (route commented out in the
+ *    contract), so archiving is the only removal an agent can make.
  *
  * `busabase-cli`'s help text has explained this since the command was written.
  * MCP re-derived its catalog from the contract and inherited none of it.
@@ -33,7 +34,7 @@ export interface NodeArchiveInput {
  */
 const mergeIntent = (input: NodeArchiveInput): { autoMerge?: boolean } => {
   if (input.requireReview) return { autoMerge: false };
-  if (input.autoMerge) return { autoMerge: true };
+  if (input.autoMerge !== undefined) return { autoMerge: input.autoMerge };
   return {};
 };
 
@@ -44,7 +45,7 @@ export const nodeArchiveTask: TaskDefinition<NodeArchiveInput> = {
   guidance:
     "This is the only way to move a node into the archived state, and it is reversible — the node appears in the Trash view and can be restored. " +
     "Review is permission-aware, decided server-side: it archives immediately when your key has write access on the node and lands as a pending ChangeRequest otherwise. Pass requireReview to always propose instead. " +
-    "Do NOT use node_purge to remove a node: purge is permanent and only accepts a node that has ALREADY been archived by this task.",
+    "Permanently deleting an archived node (emptying it from Trash) is not available to agents or API keys — only a person can do it, from the Trash page in the Busabase UI.",
   annotations: { readOnly: false, destructive: false },
   params: [
     { name: "nodeId", kind: "string", required: true, description: "Id of the node to archive." },

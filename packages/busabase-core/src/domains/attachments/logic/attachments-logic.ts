@@ -27,6 +27,7 @@ import {
   confirmUpload,
   deleteAttachmentSafely,
   requestUploadUrl,
+  runWithoutAttachmentUploadPolicy,
 } from "open-domains/attachments/logic";
 import { attachments } from "open-domains/attachments/schema";
 import type { ConfirmUploadVO, RequestUploadUrlVO } from "open-domains/attachments/types";
@@ -139,22 +140,26 @@ export const uploadBrandingLogo = async (
   const contentHash = hashBuffer(Buffer.from(input.bytes));
 
   // Reuse the shared request step for the size/MIME policy and key minting.
-  const requested = await requestUploadUrl(
-    {
-      fileName: keyFileName,
-      mimeType: input.mimeType,
-      sizeBytes,
-      contentHash,
-      context: BRANDING_ATTACHMENT_CONTEXT,
-      // No spaceId → the row is written with `spaceId: null`. Required: asset
-      // uploads always pass a space, and same-space scoping is what makes an
-      // asset's dedup lookup unable to select this row (and therefore unable to
-      // delete its bytes when that asset is removed).
-    },
-    BRANDING_USER_ID,
-    db,
-    attachments,
-    { maxFileSize: BRANDING_LOGO_MAX_BYTES, allowedMimeTypes: BRANDING_LOGO_MIME_TYPES },
+  // Only this trusted server entrypoint can opt out: a caller-supplied context
+  // on the general upload endpoint must never disable its host's quota policy.
+  const requested = await runWithoutAttachmentUploadPolicy(() =>
+    requestUploadUrl(
+      {
+        fileName: keyFileName,
+        mimeType: input.mimeType,
+        sizeBytes,
+        contentHash,
+        context: BRANDING_ATTACHMENT_CONTEXT,
+        // No spaceId → the row is written with `spaceId: null`. Required: asset
+        // uploads always pass a space, and same-space scoping is what makes an
+        // asset's dedup lookup unable to select this row (and therefore unable to
+        // delete its bytes when that asset is removed).
+      },
+      BRANDING_USER_ID,
+      db,
+      attachments,
+      { maxFileSize: BRANDING_LOGO_MAX_BYTES, allowedMimeTypes: BRANDING_LOGO_MIME_TYPES },
+    ),
   );
 
   // Dedup hit: the identical logo is already stored and registered, so there is
@@ -171,19 +176,21 @@ export const uploadBrandingLogo = async (
   // storage adapter instead of round-tripping the presigned/relay URL.
   await storage.uploadFileToKey(Buffer.from(input.bytes), requested.storageKey, input.mimeType);
 
-  const confirmed = await confirmUpload(
-    {
-      storageKey: requested.storageKey,
-      fileName: input.fileName || keyFileName,
-      mimeType: input.mimeType,
-      sizeBytes,
-      contentHash,
-      context: BRANDING_ATTACHMENT_CONTEXT,
-      metadata: { type: APP_BRANDING_LOGO_TYPE },
-    },
-    BRANDING_USER_ID,
-    db,
-    attachments,
+  const confirmed = await runWithoutAttachmentUploadPolicy(() =>
+    confirmUpload(
+      {
+        storageKey: requested.storageKey,
+        fileName: input.fileName || keyFileName,
+        mimeType: input.mimeType,
+        sizeBytes,
+        contentHash,
+        context: BRANDING_ATTACHMENT_CONTEXT,
+        metadata: { type: APP_BRANDING_LOGO_TYPE },
+      },
+      BRANDING_USER_ID,
+      db,
+      attachments,
+    ),
   );
 
   return {
@@ -310,12 +317,16 @@ export const requestNodeIconUploadUrl = async (
       message: `A node icon must be one of: ${NODE_ICON_MIME_TYPES.join(", ")}.`,
     });
   }
-  const result = await requestUploadUrl(
-    { ...input, spaceId: undefined, context: NODE_ICON_ATTACHMENT_CONTEXT },
-    nodeIconOwnerId(input.nodeId),
-    db,
-    attachments,
-    { maxFileSize: NODE_ICON_MAX_BYTES, allowedMimeTypes: NODE_ICON_MIME_TYPES },
+  // Node icons intentionally keep their isolated, space-less ownership and
+  // cleanup lifecycle. The owner is minted here, never taken from the client.
+  const result = await runWithoutAttachmentUploadPolicy(() =>
+    requestUploadUrl(
+      { ...input, spaceId: undefined, context: NODE_ICON_ATTACHMENT_CONTEXT },
+      nodeIconOwnerId(input.nodeId),
+      db,
+      attachments,
+      { maxFileSize: NODE_ICON_MAX_BYTES, allowedMimeTypes: NODE_ICON_MIME_TYPES },
+    ),
   );
   return result;
 };
@@ -325,16 +336,18 @@ export const confirmNodeIconUpload = async (
   db: BusabaseDatabase,
   input: NodeIconConfirmInput,
 ): Promise<ConfirmUploadVO> => {
-  const result = await confirmUpload(
-    {
-      ...input,
-      spaceId: undefined,
-      context: NODE_ICON_ATTACHMENT_CONTEXT,
-      metadata: { type: NODE_ICON_TYPE },
-    },
-    nodeIconOwnerId(input.nodeId),
-    db,
-    attachments,
+  const result = await runWithoutAttachmentUploadPolicy(() =>
+    confirmUpload(
+      {
+        ...input,
+        spaceId: undefined,
+        context: NODE_ICON_ATTACHMENT_CONTEXT,
+        metadata: { type: NODE_ICON_TYPE },
+      },
+      nodeIconOwnerId(input.nodeId),
+      db,
+      attachments,
+    ),
   );
   return result;
 };

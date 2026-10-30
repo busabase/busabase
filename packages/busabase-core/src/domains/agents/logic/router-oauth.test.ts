@@ -1,9 +1,18 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { runWithBusabaseContext } from "../../../context";
-import { completeRouterOauth, getRouterGrantTokens, startRouterOauth } from "./router-oauth";
+import { getDb } from "../../../db";
+import { busabaseRouterGrants } from "../schema/router-grants";
+import { busabaseRouterOauthStates } from "../schema/router-oauth-states";
+import {
+  completeRouterOauth,
+  getRouterGrantTokens,
+  RouterOauthError,
+  startRouterOauth,
+} from "./router-oauth";
 
 /**
  * Driven against a real PGLite database rather than a mocked db — the
@@ -65,6 +74,21 @@ describe("router-oauth: Connect via ACPRouter", () => {
     expect(result.redirectUrl).toContain("client_id=busabase-cloud-enrollment");
     expect(result.redirectUrl).toContain("scope=enrollment");
     expect(result.redirectUrl).toContain("code_challenge_method=S256");
+    const authorize = new URL(result.redirectUrl);
+    const database = await getDb();
+    const [state] = await database
+      .select()
+      .from(busabaseRouterOauthStates)
+      .where(
+        eq(busabaseRouterOauthStates.signedState, authorize.searchParams.get("state") as string),
+      );
+    expect(state.busabaseActorId).toBe("usr_b");
+    expect(state.busabaseSpaceId).toBe("space_b");
+    expect(state.status).toBe("pending");
+    expect(state.expiresAt.getTime() - state.createdAt.getTime()).toBe(10 * 60 * 1_000);
+    expect(authorize.searchParams.get("code_challenge")).toBe(
+      createHash("sha256").update(state.pkceVerifier).digest("base64url"),
+    );
   });
 
   function stubTokenAndGrantInfoFetch(spaceName = "Acme") {
@@ -194,10 +218,17 @@ describe("router-oauth: Connect via ACPRouter", () => {
         currentActorId: "usr_d",
         isStillMemberOfFrozenSpace: async () => true,
       }),
-    ).rejects.toThrow("already completed or expired");
+    ).rejects.toMatchObject({ name: "RouterOauthError", reason: "already_completed" });
+
+    const database = await getDb();
+    const grants = await database
+      .select()
+      .from(busabaseRouterGrants)
+      .where(eq(busabaseRouterGrants.busabaseSpaceId, "space_d"));
+    expect(grants).toHaveLength(1);
   });
 
-  it("rejects when a different actor is now signed in and does not persist a grant", async () => {
+  it("rejects a different actor without consuming the legitimate owner's state", async () => {
     const { redirectUrl } = await asActor("usr_e", "space_e", () =>
       startRouterOauth("https://busabase.example/callback"),
     );
@@ -212,7 +243,17 @@ describe("router-oauth: Connect via ACPRouter", () => {
         currentActorId: "someone-else",
         isStillMemberOfFrozenSpace: async () => true,
       }),
-    ).rejects.toThrow("belongs to a different signed-in user");
+    ).rejects.toMatchObject({ name: "RouterOauthError", reason: "forbidden" });
+    expect(fetch).not.toHaveBeenCalled();
+
+    const result = await completeRouterOauth({
+      signedState,
+      code: "auth-code-1",
+      redirectUri: "https://busabase.example/callback",
+      currentActorId: "usr_e",
+      isStillMemberOfFrozenSpace: async (spaceId) => spaceId === "space_e",
+    });
+    expect(result.grantId).toMatch(/^rgr_/);
   });
 
   it("rejects when the actor is no longer a member of the frozen space and does not persist a grant", async () => {
@@ -230,6 +271,151 @@ describe("router-oauth: Connect via ACPRouter", () => {
         currentActorId: "usr_f",
         isStillMemberOfFrozenSpace: async () => false,
       }),
-    ).rejects.toThrow("no longer a member");
+    ).rejects.toMatchObject({ name: "RouterOauthError", reason: "forbidden" });
+    expect(fetch).not.toHaveBeenCalled();
+    const database = await getDb();
+    const grants = await database
+      .select()
+      .from(busabaseRouterGrants)
+      .where(eq(busabaseRouterGrants.busabaseSpaceId, "space_f"));
+    expect(grants).toHaveLength(0);
+    const [state] = await database
+      .select()
+      .from(busabaseRouterOauthStates)
+      .where(eq(busabaseRouterOauthStates.signedState, signedState));
+    expect(state.status).toBe("pending");
+    expect(state.consumedAt).toBeNull();
+  });
+
+  it("distinguishes actual expiry from an invalid state without consuming it", async () => {
+    const { redirectUrl } = await asActor("expired-owner", "expired-space", () =>
+      startRouterOauth("https://busabase.example/callback"),
+    );
+    const signedState = new URL(redirectUrl).searchParams.get("state") as string;
+    const database = await getDb();
+    await database
+      .update(busabaseRouterOauthStates)
+      .set({ expiresAt: new Date(Date.now() - 1_000) })
+      .where(eq(busabaseRouterOauthStates.signedState, signedState));
+    const membership = vi.fn(async () => true);
+    stubTokenAndGrantInfoFetch();
+    const params = {
+      signedState,
+      code: "expired-code",
+      redirectUri: "https://busabase.example/callback",
+      currentActorId: "expired-owner",
+      isStillMemberOfFrozenSpace: membership,
+    };
+    await expect(completeRouterOauth(params)).rejects.toMatchObject({
+      name: "RouterOauthError",
+      reason: "expired",
+    });
+    expect(membership).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+    const [state] = await database
+      .select()
+      .from(busabaseRouterOauthStates)
+      .where(eq(busabaseRouterOauthStates.signedState, signedState));
+    expect(state.status).toBe("pending");
+    expect(state.consumedAt).toBeNull();
+
+    for (const invalidState of [
+      `${signedState}.extra`,
+      `${signedState.split(".")[0]}.${"é".repeat(43)}`,
+      "invalid.signature",
+    ]) {
+      await expect(
+        completeRouterOauth({ ...params, signedState: invalidState }),
+      ).rejects.toMatchObject({ constructor: RouterOauthError, reason: "invalid_state" });
+    }
+  });
+
+  it("checks expiry again after membership resolves", async () => {
+    const { redirectUrl } = await asActor("slow-owner", "slow-space", () =>
+      startRouterOauth("https://busabase.example/callback"),
+    );
+    const signedState = new URL(redirectUrl).searchParams.get("state") as string;
+    const future = new Date(Date.now() + 11 * 60 * 1_000);
+    const params = {
+      signedState,
+      code: "slow-code",
+      redirectUri: "https://busabase.example/callback",
+      currentActorId: "slow-owner",
+      isStillMemberOfFrozenSpace: async () => {
+        vi.useFakeTimers({ toFake: ["Date"] });
+        vi.setSystemTime(future);
+        return true;
+      },
+    };
+    // Mocking the clock only after permission resolution covers the atomic
+    // expiry predicate without a slow wall-clock wait.
+    stubTokenAndGrantInfoFetch();
+    try {
+      await expect(completeRouterOauth(params)).rejects.toMatchObject({ reason: "expired" });
+      expect(fetch).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("claims concurrent callbacks once before exchanging their authorization code", async () => {
+    const { redirectUrl } = await asActor("parallel-owner", "parallel-space", () =>
+      startRouterOauth("https://busabase.example/callback"),
+    );
+    stubTokenAndGrantInfoFetch();
+    const params = {
+      signedState: new URL(redirectUrl).searchParams.get("state") as string,
+      code: "parallel-code",
+      redirectUri: "https://busabase.example/callback",
+      currentActorId: "parallel-owner",
+      isStillMemberOfFrozenSpace: async () => true,
+    };
+    const results = await Promise.allSettled([
+      completeRouterOauth(params),
+      completeRouterOauth(params),
+    ]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    const rejected = results.find((result) => result.status === "rejected");
+    expect(rejected).toMatchObject({ reason: { reason: "already_completed" } });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    const database = await getDb();
+    const grants = await database
+      .select()
+      .from(busabaseRouterGrants)
+      .where(eq(busabaseRouterGrants.busabaseSpaceId, "parallel-space"));
+    expect(grants).toHaveLength(1);
+  });
+
+  it("classifies upstream failures safely and keeps a failed exchange single-use", async () => {
+    const { redirectUrl } = await asActor("upstream-owner", "upstream-space", () =>
+      startRouterOauth("https://busabase.example/callback"),
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("private upstream error", { status: 502 })),
+    );
+    const params = {
+      signedState: new URL(redirectUrl).searchParams.get("state") as string,
+      code: "failed-code",
+      redirectUri: "https://busabase.example/callback",
+      currentActorId: "upstream-owner",
+      isStillMemberOfFrozenSpace: async () => true,
+    };
+    await expect(completeRouterOauth(params)).rejects.toMatchObject({
+      name: "RouterOauthError",
+      reason: "unavailable",
+    });
+    await expect(completeRouterOauth(params)).rejects.toMatchObject({
+      reason: "already_completed",
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const database = await getDb();
+    const grants = await database
+      .select()
+      .from(busabaseRouterGrants)
+      .where(eq(busabaseRouterGrants.busabaseSpaceId, "upstream-space"));
+    expect(grants).toHaveLength(0);
   });
 });
+
+import { createHash } from "node:crypto";

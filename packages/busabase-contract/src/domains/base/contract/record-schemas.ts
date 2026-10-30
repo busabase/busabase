@@ -729,6 +729,29 @@ export const recordGetInputSchema = z.union([
   recordFieldGetInputSchema.strict(),
 ]);
 
+/** Upper bound for one `records.getMany` call — a page of relation chips. */
+export const RECORD_GET_MANY_MAX_IDS = 100;
+
+/**
+ * Batched id read for the dashboard's linked-record chips. RPC-only: the
+ * server dedupes ids and reads them in one query instead of N `records.get`.
+ */
+export const recordGetManyInputSchema = z
+  .object({
+    recordIds: z.array(z.string().min(1)).min(1).max(RECORD_GET_MANY_MAX_IDS),
+  })
+  .strict();
+
+/**
+ * Found records in input order (duplicates collapsed). Ids that do not exist
+ * or sit in a Base the caller cannot read come back in `missingIds` — one
+ * hidden link must not fail the whole batch the way a 404 would.
+ */
+export const recordGetManyResponseSchema = z.object({
+  records: z.array(recordSchema),
+  missingIds: z.array(z.string()),
+});
+
 export const restoreRecordInputSchema = z.object({
   message: z.string().optional(),
   submittedBy: z.string().optional().default("local-editor"),

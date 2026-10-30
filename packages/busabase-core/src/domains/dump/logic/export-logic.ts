@@ -15,6 +15,7 @@ import { getContextSpaceId } from "../../../context";
 import { getDb } from "../../../db";
 import { attachments, busabaseAssets, busabaseAssetTexts, busabaseNodes } from "../../../db/schema";
 import { docBodyKey } from "../../doc/handlers";
+import { folderReadmeKey } from "../../folder/handlers";
 import { requireSpaceManagerForDump } from "./_guard";
 import { DUMP_TABLE_REGISTRY } from "./table-registry";
 
@@ -82,6 +83,14 @@ export const exportTableRows = async (input: ExportTablesInput): Promise<ExportT
  * id, so the node must be proven to be a Doc in the caller's own space first,
  * or a manager in space A could name a node id belonging to space B and read
  * its body back.
+ *
+ * Folder readmes (`…/folder/readme.md`) ride the same route: they are the
+ * same kind of markdown object, and leaving them out restored every readme
+ * EMPTY while its `folder_update` history came back intact. Unlike a Doc, a
+ * folder usually has no readme at all, so a missing object is omitted rather
+ * than archived as `""` — a restore then leaves the object absent, which reads
+ * as the same empty readme. An older server only ever matches `type: "doc"`
+ * here, so it omits folder ids the same way.
  */
 export const exportDocBodies = async (input: ExportDocBodiesInput): Promise<ExportDocBodiesVO> => {
   requireSpaceManagerForDump();
@@ -89,19 +98,20 @@ export const exportDocBodies = async (input: ExportDocBodiesInput): Promise<Expo
   const db = await getDb();
 
   const owned = await db
-    .select({ id: busabaseNodes.id })
+    .select({ id: busabaseNodes.id, type: busabaseNodes.type })
     .from(busabaseNodes)
     .where(
       and(
         eq(busabaseNodes.spaceId, spaceId),
-        eq(busabaseNodes.type, "doc"),
+        inArray(busabaseNodes.type, ["doc", "folder"]),
         inArray(busabaseNodes.id, input.nodeIds),
       ),
     );
 
   const bodies = await Promise.all(
     owned.map(async (row) => {
-      const key = docBodyKey(row.id);
+      const isFolder = row.type === "folder";
+      const key = isFolder ? folderReadmeKey(row.id) : docBodyKey(row.id);
       try {
         return { nodeId: row.id, markdown: (await storage.getObject(key)).toString("utf8") };
       } catch (error) {
@@ -109,14 +119,14 @@ export const exportDocBodies = async (input: ExportDocBodiesInput): Promise<Expo
         // let all other storage failures reach the CLI so it can retry/report
         // an incomplete backup instead of archiving data loss as success.
         if (isMissingStorageObjectError(error, key)) {
-          return { nodeId: row.id, markdown: "" };
+          return isFolder ? null : { nodeId: row.id, markdown: "" };
         }
         throw error;
       }
     }),
   );
 
-  return { bodies };
+  return { bodies: bodies.filter((entry) => entry !== null) };
 };
 
 /**

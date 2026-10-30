@@ -2,6 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createRouterClient } from "@orpc/server";
+import { storage } from "openlib/storage";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { busabaseRouter } from "../src/router";
 
@@ -32,8 +33,8 @@ const ATTACHMENT_OPTS = {
   allowedMimeTypes: ["image/png", "text/markdown"],
   maxFileSize: 10 * 1024 * 1024,
 };
-// Synthetic inline refs — `attachmentId` is a loose text ref (not an FK), so the
-// merge registers them via ensureAsset without a real upload.
+// Legacy inline refs use confirmed attachment ids, rather than Asset ids.
+// Populated through the real upload flow before any record references them.
 const ATTACH_PNG = {
   id: "att_ft_png",
   url: "https://cdn.example.com/x.png",
@@ -84,6 +85,15 @@ describe("Base field types — end-to-end", () => {
     const relMergeResult = relMerged.results[0];
     if (!relMergeResult?.ok) throw new Error(relMergeResult?.error ?? "Merge returned no result");
     relatedRecordId = relMergeResult.record?.id ?? "";
+
+    for (const ref of [ATTACH_PNG, ATTACH_MD]) {
+      const input = { fileName: ref.fileName, mimeType: ref.mimeType, sizeBytes: ref.size };
+      const upload = await client.assets.createUploadUrl(input);
+      await storage.uploadFileToKey(Buffer.alloc(ref.size), upload.storageKey, ref.mimeType);
+      const confirmed = await client.assets.confirm({ ...input, storageKey: upload.storageKey });
+      ref.id = confirmed.attachmentId;
+      ref.url = upload.publicUrl;
+    }
 
     // The base under test: one field per type.
     const base = await client.bases.create({
@@ -154,7 +164,8 @@ describe("Base field types — end-to-end", () => {
     await client.changeRequests.review({ changeRequestIds: [cr.id], verdict: "approved" });
     const merged = await client.changeRequests.merge({ changeRequestIds: [cr.id] });
     const mergeResult = merged.results[0];
-    if (!mergeResult?.ok || !mergeResult.record) throw new Error("expected a created record");
+    if (!mergeResult?.ok) throw new Error(mergeResult?.error ?? "Merge returned no result");
+    if (!mergeResult.record) throw new Error("expected a created record");
     return mergeResult.record.id;
   };
 

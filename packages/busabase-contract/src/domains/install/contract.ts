@@ -17,9 +17,10 @@ import {
  * letting a client hand the server arbitrary fetch targets is precisely the SSRF
  * hole. So the client only ever sends a URL and renders a plan.
  *
- * Both routes are gated on the space owner/admin role in the logic layer
- * (`logic/_guard.ts`): a package can carry skills and AirApps, i.e. code the
- * space's agents will execute. Installing one is an admin act, not a member act.
+ * Both routes are gated on workspace `write` in the logic layer
+ * (`logic/_guard.ts`), the same tier the transport policy assigns them: every
+ * node a package creates, skills and AirApps included, is one a writer could
+ * already create by hand. A read-only member can browse but not install.
  */
 export const installContract = {
   planFromGithub: oc

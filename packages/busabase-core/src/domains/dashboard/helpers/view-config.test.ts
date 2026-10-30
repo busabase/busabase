@@ -11,6 +11,7 @@ import {
   clearViewFilterAt,
   clearViewSort,
   clearViewSortAt,
+  getAutoShowNewFields,
   getVisibleViewFieldSlugs,
   hideViewField,
   matchesViewField,
@@ -19,6 +20,7 @@ import {
   replaceFirstViewFilter,
   resetAllViewFieldWidths,
   resetViewFieldWidth,
+  setAutoShowNewFields,
   setPrimaryViewSort,
   setViewFieldWidth,
   showAllViewFields,
@@ -147,18 +149,17 @@ describe("view config quick updates", () => {
   it("preserves configured order and moves a field without changing global schema order", () => {
     expect(getVisibleViewFieldSlugs(config, fields)).toEqual(["title", "owner", "status"]);
     const next = moveViewField(config, fields, "owner", "status", "after");
-    expect(next.visibleFieldSlugs).toEqual(["title", "status", "owner"]);
+    expect(getVisibleViewFieldSlugs(next, fields)).toEqual(["title", "status", "owner"]);
+    expect(next.visibleFieldSlugs).toEqual(config.visibleFieldSlugs);
     expect(fields.map((item) => item.slug)).toEqual(["title", "status", "owner"]);
     expect(moveViewField(config, fields, "owner", "title", "before").visibleFieldSlugs).toEqual([
       "title",
       "owner",
       "status",
     ]);
-    expect(moveViewField(config, fields, "status", "owner", "before").visibleFieldSlugs).toEqual([
-      "title",
-      "status",
-      "owner",
-    ]);
+    expect(
+      getVisibleViewFieldSlugs(moveViewField(config, fields, "status", "owner", "before"), fields),
+    ).toEqual(["title", "status", "owner"]);
     expect(moveViewField(config, fields, "missing", "owner", "before").visibleFieldSlugs).toEqual([
       "title",
       "owner",
@@ -204,6 +205,115 @@ describe("view config quick updates", () => {
         fields,
       ),
     ).toEqual(["title", "owner"]);
+  });
+
+  it("keeps newly added fields visible after reordering a live view", () => {
+    const liveConfig: ViewConfigVO = { filters: [], sorts: [] };
+    const reordered = moveViewField(liveConfig, fields, "owner", "status", "before");
+    const withAttachment = [...fields, { position: 3, slug: "attachment" }] as BaseFieldVO[];
+
+    expect(getAutoShowNewFields(reordered)).toBe(true);
+    expect(reordered.visibleFieldSlugs).toBeUndefined();
+    expect(getVisibleViewFieldSlugs(reordered, withAttachment)).toEqual([
+      "title",
+      "owner",
+      "status",
+      "attachment",
+    ]);
+  });
+
+  it("keeps explicitly hidden fields hidden while showing future fields", () => {
+    const liveConfig: ViewConfigVO = { filters: [], sorts: [] };
+    const hidden = hideViewField(liveConfig, field, fields);
+    const reordered = moveViewField(hidden, fields, "owner", "title", "after");
+    const withAttachment = [...fields, { position: 3, slug: "attachment" }] as BaseFieldVO[];
+
+    expect(getAutoShowNewFields(reordered)).toBe(true);
+    expect(reordered.visibleFieldSlugs).toBeUndefined();
+    expect(getVisibleViewFieldSlugs(reordered, withAttachment)).toEqual([
+      "title",
+      "owner",
+      "attachment",
+    ]);
+    expect(getVisibleViewFieldSlugs(showViewField(reordered, field, fields), fields)).toEqual([
+      "title",
+      "owner",
+      "status",
+    ]);
+    expect(getVisibleViewFieldSlugs(showAllViewFields(reordered, fields), fields)).toEqual([
+      "title",
+      "owner",
+      "status",
+    ]);
+  });
+
+  it("preserves a legacy curated list after reordering and future schema additions", () => {
+    const curated = { ...config, visibleFieldSlugs: ["title", "owner"] };
+    const reordered = moveViewField(curated, fields, "owner", "title", "after");
+    const withAttachment = [...fields, { position: 3, slug: "attachment" }] as BaseFieldVO[];
+
+    expect(getAutoShowNewFields(reordered)).toBe(false);
+    expect(getVisibleViewFieldSlugs(reordered, withAttachment)).toEqual(["title", "owner"]);
+    expect(getAutoShowNewFields(showAllViewFields(reordered, fields))).toBe(false);
+  });
+
+  it("enables future fields without exposing currently hidden legacy fields", () => {
+    const curated = { ...config, visibleFieldSlugs: ["title", "owner"] };
+    const automatic = setAutoShowNewFields(curated, fields, true);
+    const withAttachment = [...fields, { position: 3, slug: "attachment" }] as BaseFieldVO[];
+
+    expect(getAutoShowNewFields(automatic)).toBe(true);
+    expect(getVisibleViewFieldSlugs(automatic, fields)).toEqual(["title", "owner"]);
+    expect(getVisibleViewFieldSlugs(automatic, withAttachment)).toEqual([
+      "title",
+      "owner",
+      "attachment",
+    ]);
+  });
+
+  it("disables automatic fields by preserving today's selection and independent order", () => {
+    const automatic: ViewConfigVO = {
+      autoShowNewFields: true,
+      fieldOrderSlugs: ["title", "owner", "status"],
+      hiddenFieldSlugs: ["status"],
+      filters: [],
+      sorts: [],
+    };
+    const curated = setAutoShowNewFields(automatic, fields, false);
+    const withAttachment = [...fields, { position: 3, slug: "attachment" }] as BaseFieldVO[];
+
+    expect(getAutoShowNewFields(curated)).toBe(false);
+    expect(getVisibleViewFieldSlugs(curated, withAttachment)).toEqual(["title", "owner"]);
+    const restored = showAllViewFields(curated, withAttachment);
+    expect(getAutoShowNewFields(restored)).toBe(false);
+    expect(getVisibleViewFieldSlugs(restored, withAttachment)).toEqual([
+      "title",
+      "owner",
+      "status",
+      "attachment",
+    ]);
+  });
+
+  it("normalizes malformed independent order and hidden lists with the primary visible first", () => {
+    const malformed: ViewConfigVO = {
+      autoShowNewFields: true,
+      fieldOrderSlugs: ["owner", "missing", "owner", "title"],
+      hiddenFieldSlugs: ["title", "status", "missing", "status"],
+      filters: [],
+      sorts: [],
+    };
+    const canonical = canonicalizeViewFieldConfig(malformed, fields);
+
+    expect(canonical.fieldOrderSlugs).toEqual(["title", "owner"]);
+    expect(canonical.hiddenFieldSlugs).toEqual(["status"]);
+    expect(getVisibleViewFieldSlugs(canonical, fields)).toEqual(["title", "owner"]);
+    expect(hideViewField(canonical, fields[0], fields)).toBe(canonical);
+    expect(showViewField(canonical, { slug: "missing" }, fields)).toBe(canonical);
+    expect(getVisibleViewFieldSlugs({ ...canonical, hiddenFieldSlugs: [] }, fields)).toEqual([
+      "title",
+      "owner",
+      "status",
+    ]);
   });
 
   it("normalizes and stores per-view field widths", () => {

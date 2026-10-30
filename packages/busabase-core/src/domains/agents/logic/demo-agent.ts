@@ -23,13 +23,18 @@
  *  - it asks permission before proposing, because asking first is the product.
  */
 
+import type { PromptResourceContextInput } from "busabase-contract/domains/agents/prompt-context";
 import type {
   AgentCatalogEntryVO,
+  AgentContextResourceVO,
+  AgentPromptPresentation,
   AgentSessionEventVO,
   AgentSessionStatus,
   AgentSessionVO,
+  PromptAttachmentInput,
 } from "busabase-contract/domains/agents/types";
 import { type DemoLocale, getContextDemoLocale } from "../../../context";
+import { validateAgentPromptResourceContext } from "./agent-prompt-context";
 
 export const DEMO_AGENT_SLUG = "busabase-demo-agent";
 
@@ -353,16 +358,34 @@ const runScript = async (session: DemoSession): Promise<void> => {
   setStatus(session, "idle");
 };
 
-export const promptDemoAgentSession = (sessionId: string, text: string): void => {
+export const promptDemoAgentSession = (
+  sessionId: string,
+  text: string,
+  attachments?: PromptAttachmentInput[],
+  presentation?: AgentPromptPresentation,
+  contextResources?: readonly AgentContextResourceVO[],
+  resourceContext?: readonly PromptResourceContextInput[],
+): void => {
   const session = requireDemoSession(sessionId);
   if (session.status === "busy" || session.status === "waiting_permission") {
     throw new Error("The demo agent is still working on the previous message.");
   }
+  const validatedResourceContext = validateAgentPromptResourceContext(resourceContext);
   session.turn += 1;
   // Echo the user's own message in busabase's synthetic `user_message` shape —
   // the client's `translate()` adapter unpacks it, so a late subscriber sees
   // the whole turn rather than a reply to nothing.
-  emit(session, { kind: "acpUpdate", acpUpdate: { sessionUpdate: "user_message", text } });
+  emit(session, {
+    kind: "acpUpdate",
+    acpUpdate: {
+      sessionUpdate: "user_message",
+      text,
+      ...(presentation ? { presentation } : {}),
+      ...(attachments && attachments.length > 0 ? { attachments } : {}),
+      ...(contextResources?.length ? { contextResources } : {}),
+      ...(validatedResourceContext.length ? { resourceContext: validatedResourceContext } : {}),
+    },
+  });
   if (text.trim().toLowerCase() === "/status") {
     emit(session, {
       kind: "acpUpdate",

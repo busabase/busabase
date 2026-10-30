@@ -61,7 +61,7 @@ export async function listAgentConnections(
     for (const connection of await listRouterConnections()) {
       connections.push({
         slug: connection.slug,
-        agentName: connection.agentSlug,
+        agentName: connection.agentName ?? connection.agentSlug,
         transport: "remote-websocket",
         sessionCount: sessions.filter((session) => session.slug === connection.slug).length,
         latest: sessions.find((session) => session.slug === connection.slug) ?? null,

@@ -49,11 +49,13 @@ import {
   type CSSProperties,
   createContext,
   type ReactNode,
+  type RefObject,
   useCallback,
   useContext,
   useMemo,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { useLocation, useSearch } from "wouter";
 import { fmt, useCoreI18n } from "../../../i18n";
@@ -112,6 +114,7 @@ export function NodeDeleteDialog({
   onOpenChange,
   onDeleted,
   navigateHome = true,
+  returnFocusRef,
 }: {
   orpc: BusabaseQueryUtils;
   nodeId: string;
@@ -132,6 +135,7 @@ export function NodeDeleteDialog({
    * passes `false` unless the deleted node is the one currently open.
    */
   navigateHome?: boolean;
+  returnFocusRef?: RefObject<HTMLElement | null>;
 }) {
   const messages = useCoreI18n();
   const [, rawSetLocation] = useLocation();
@@ -143,7 +147,7 @@ export function NodeDeleteDialog({
   // Deleting a node is manage-only; a public read-only visitor never sees it.
   // Self-gating here covers every mount. All hooks run first.
   const isAnon = useIsAnonymousVisitor();
-  if (isAnon) {
+  if (isAnon || !open || typeof document === "undefined") {
     return null;
   }
   const nodeTypeLabels: Record<string, string> = {
@@ -208,7 +212,9 @@ export function NodeDeleteDialog({
     }
   };
 
-  return (
+  // Escape the detail topbar's stacking context so the document cannot cover
+  // the confirmation overlay or intercept its buttons.
+  return createPortal(
     <ConfirmActionDialog
       body={body}
       confirmLabel={messages.nodeDetail.moveToTrash}
@@ -216,8 +222,10 @@ export function NodeDeleteDialog({
       onConfirm={handleConfirm}
       open={open}
       pending={pending}
+      returnFocusRef={returnFocusRef}
       title={fmt(messages.nodeDetail.deleteTitle, { type: label })}
-    />
+    />,
+    document.body,
   );
 }
 

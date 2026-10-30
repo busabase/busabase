@@ -86,6 +86,10 @@ import {
   mergeViewRestore as mergeViewRestoreBase,
   mergeViewUpdate as mergeViewUpdateBase,
 } from "../domains/base/handlers";
+import {
+  relatedFieldApprovalsSatisfied,
+  relatedFieldRequiredApprovals,
+} from "../domains/base/logic/related-field-review";
 // Side-effect imports: each registers a `node_create` materializer at import
 // time (logic/materialize.ts). Merging is the only place they are read, so the
 // merge kernel is what has to guarantee they are loaded — leaving it to whoever
@@ -95,7 +99,6 @@ import {
 import "../domains/airapp/handlers";
 import "../domains/drive/handlers";
 import "../domains/file-node/handlers";
-import "../domains/folder/handlers";
 import { rebaselineFormulaOperation } from "../domains/base/logic/formula-recalculation";
 import {
   applyLookupFormulas,
@@ -109,6 +112,7 @@ import {
 } from "../domains/dashboard/utils/list-payload-preview";
 import { mergeDocUpdate } from "../domains/doc/handlers";
 import { mergeFileTreeFile, mergeFileTreeMetadata } from "../domains/filetree/handlers";
+import { mergeFolderUpdate } from "../domains/folder/handlers";
 import { mergeRichNodeDocumentUpdate } from "../domains/rich-node/handlers";
 import { mergeSkillFile } from "../domains/skill/handlers";
 import { type FormulaStaleConflictTag, isFormulaStaleConflict } from "./formula-merge-conflict";
@@ -2670,6 +2674,22 @@ const assertCanApproveChangeRequest = async (changeRequestId: string): Promise<v
   await assertChangeRequestPermission(changeRequestId, "write");
 };
 
+/**
+ * Non-throwing form of `assertCanApproveChangeRequest`, so the review UI can
+ * hide approve / request-changes / merge / close for a viewer the server would
+ * refuse (e.g. the proposer holding only a `changeRequest` grant). Only a
+ * FORBIDDEN answers `false`; anything else (not found, infra) still throws.
+ */
+export const canApproveChangeRequest = async (changeRequestId: string): Promise<boolean> => {
+  try {
+    await assertCanApproveChangeRequest(changeRequestId);
+    return true;
+  } catch (error) {
+    if (error instanceof ORPCError && error.code === "FORBIDDEN") return false;
+    throw error;
+  }
+};
+
 export const reviewChangeRequest = async (
   changeRequestId: string,
   input: z.infer<typeof reviewInputSchema>,
@@ -2756,7 +2776,12 @@ export const reviewChangeRequest = async (
   await db
     .update(busabaseChangeRequests)
     .set({
-      status: parsed.verdict === "approved" ? "approved" : "changes_requested",
+      status:
+        parsed.verdict === "approved"
+          ? (await relatedFieldApprovalsSatisfied(db, changeRequest))
+            ? "approved"
+            : "in_review"
+          : "changes_requested",
       rejectedReason: null,
       reviewedAt: timestamp,
       updatedAt: timestamp,
@@ -2843,6 +2868,9 @@ export const autoApproveAndMerge = async (
   if (changeRequest.status !== "in_review" && changeRequest.status !== "changes_requested") {
     throw changeRequestConflict(`ChangeRequest is not auto-mergeable: ${changeRequest.status}`);
   }
+  if (relatedFieldRequiredApprovals(changeRequest) > 1) {
+    throw changeRequestBadRequest("This paired relation requires multiple human approvals.");
+  }
 
   const operations = await db
     .select()
@@ -2872,7 +2900,7 @@ export const autoApproveAndMerge = async (
       target: [busabaseReviews.changeRequestId, busabaseReviews.reviewerId],
       set: { verdict: "approved", reason, createdAt: timestamp },
     });
-  await db
+  const claimed = await db
     .update(busabaseChangeRequests)
     .set({
       status: "approved",
@@ -2880,7 +2908,14 @@ export const autoApproveAndMerge = async (
       reviewedAt: timestamp,
       updatedAt: timestamp,
     })
-    .where(eq(busabaseChangeRequests.id, changeRequest.id));
+    .where(
+      and(
+        eq(busabaseChangeRequests.id, changeRequest.id),
+        inArray(busabaseChangeRequests.status, ["in_review", "changes_requested"]),
+      ),
+    )
+    .returning();
+  if (claimed.length === 0) return mergeChangeRequest(changeRequest.id, { automatic: true });
   await insertAuditEvent(db, {
     action: "change_request.reviewed",
     actorId: CURRENT_USER_ID,
@@ -3710,6 +3745,11 @@ const _mergeChangeRequest = async (
         } else if (item.operation === "doc_update") {
           await mergeDocUpdate(ctx, item, node, headCommit);
           await refreshNodeContentSearch(ctx.db, node);
+        } else if (item.operation === "folder_update") {
+          // Folder readme (`…/folder/readme.md`). Not `*_document_update`:
+          // that dispatcher writes a JSON document for whiteboard/workflow/html.
+          await mergeFolderUpdate(ctx, item, node, headCommit);
+          await refreshNodeContentSearch(ctx.db, node);
         } else {
           throw new Error(`Unsupported node operation: ${item.operation}`);
         }
@@ -3960,6 +4000,12 @@ const _mergeChangeRequest = async (
   await db.transaction(async (tx) => {
     await claimChangeRequestForMerge(tx as unknown as MergeCtx["db"], changeRequest.id, timestamp);
 
+    if (!(await relatedFieldApprovalsSatisfied(tx as unknown as MergeCtx["db"], changeRequest))) {
+      throw changeRequestBadRequest(
+        "This paired relation has not received the required approvals for its current fields.",
+      );
+    }
+
     // Formula backfills and source-record writes must serialize on the same Base,
     // otherwise a concurrent write can compute from the schema being replaced.
     // Stable ordering also prevents deadlocks for multi-Base requests.
@@ -3973,6 +4019,24 @@ const _mergeChangeRequest = async (
         .where(inArray(busabaseBases.id, affectedBaseIds))
         .orderBy(asc(busabaseBases.id))
         .for("update");
+      if (changeRequest.sourceMeta?.relatedFieldCreation === true) {
+        const active = await tx
+          .select({ id: busabaseBases.id })
+          .from(busabaseBases)
+          .where(
+            and(
+              inArray(busabaseBases.id, affectedBaseIds),
+              eq(busabaseBases.spaceId, getContextSpaceId()),
+              isNull(busabaseBases.archivedAt),
+              isNull(busabaseBases.deletedAt),
+            ),
+          );
+        if (active.length !== affectedBaseIds.length) {
+          throw changeRequestConflict(
+            "A paired relation Base was archived or deleted before merge.",
+          );
+        }
+      }
     }
     if (targetRecordIds.length > 0) {
       const latest = await tx

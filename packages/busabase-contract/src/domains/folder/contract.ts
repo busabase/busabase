@@ -6,6 +6,9 @@ import { nodeSchema } from "../../contract/schemas";
 export const folderSchema = z.object({
   node: nodeSchema,
   children: z.array(nodeSchema),
+  storagePrefix: z.string(),
+  /** Directory readme. Empty string when no object has been written yet. */
+  body: z.string(),
 });
 
 // The Folder domain has no transport surface of its own any more. `GET /folders`

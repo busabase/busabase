@@ -161,6 +161,8 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   // as `nodes.searchByName`), and get returns a prompt `nodes.getAgentPrompts`
   // would already return, or a SKILL.md `fileTrees.readFile` would. `search` is
   // a POST only because it carries a body, like `grep`.
+  "spaceInstructions.get": workspace("read"),
+  "spaceInstructions.update": workspace("manage"),
   "playbooks.search": node("read"),
   "playbooks.get": node("read"),
   // The dashboard's full catalog. Same filter as `search` (ACL in the SQL), just
@@ -381,6 +383,8 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   // procedure in this family sits at the ceiling, same tier as vault/webhooks.
   "agents.catalog": workspace("manage"),
   "agents.connections.list": workspace("manage"),
+  "agents.connections.detail": workspace("manage"),
+  "agents.connections.rename": workspace("manage"),
   "agents.disconnect": workspace("manage"),
   "agents.deleteHistory": workspace("manage"),
   "agents.routerEnrollment.grants": workspace("manage"),
@@ -397,6 +401,9 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   "agents.sessions.close": workspace("manage"),
   "agents.sessions.subscribe": workspace("manage"),
   "agents.sessions.respondToPermission": workspace("manage"),
+  "agents.sessions.respondToInput": workspace("manage"),
+  "agents.sessions.snapshot": workspace("manage"),
+  "agents.sessions.resolveResource": workspace("manage"),
 
   "changeRequests.list": node("read"),
   // Same data as `list`, addressed by page number instead of cursor — so it must
@@ -418,6 +425,9 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   "records.count": node("read"),
   "records.groupBy": node("read"),
   "records.get": node("read"),
+  // RPC-only batch of `records.get`: same space + Base-visibility filter per id,
+  // so it carries exactly the same node-scoped read floor.
+  "records.getMany": node("read"),
   "records.search": node("read"),
   "records.listChangeRequests": node("read"),
   "records.listLinks": node("read"),

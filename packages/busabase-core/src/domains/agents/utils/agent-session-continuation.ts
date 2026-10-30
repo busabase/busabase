@@ -1,4 +1,7 @@
+import type { PromptResourceContextInput } from "busabase-contract/domains/agents/prompt-context";
 import type {
+  AgentContextReferenceInput,
+  AgentPromptPresentation,
   AgentSessionStatus,
   PromptAttachmentInput,
 } from "busabase-contract/domains/agents/types";
@@ -28,6 +31,9 @@ export interface AgentSessionContinuationDeps {
     sessionId: string,
     text: string,
     attachments?: readonly PromptAttachmentInput[],
+    presentation?: AgentPromptPresentation,
+    contextReferences?: readonly AgentContextReferenceInput[],
+    resourceContext?: readonly PromptResourceContextInput[],
   ) => Promise<AgentPromptAttempt>;
   /**
    * Called with the new session's id as soon as it exists — before the prompt
@@ -64,16 +70,33 @@ export async function sendOrContinueAgentPrompt(
   slug: string,
   text: string,
   attachments?: readonly PromptAttachmentInput[],
+  presentation?: AgentPromptPresentation,
+  contextReferences?: readonly AgentContextReferenceInput[],
+  resourceContext?: readonly PromptResourceContextInput[],
 ): Promise<AgentSessionContinuationResult> {
   if (current && isReusableSession(current.status)) {
-    const attempt = await deps.sendPrompt(current.sessionId, text, attachments);
+    const attempt = await deps.sendPrompt(
+      current.sessionId,
+      text,
+      attachments,
+      presentation,
+      contextReferences,
+      ...(resourceContext?.length ? [resourceContext] : []),
+    );
     if (attempt.accepted) return { outcome: "reused", sessionId: current.sessionId };
     if (attempt.promptRecorded) throw new Error(attempt.message);
   }
 
   const created = await deps.createSession(slug);
   await deps.onSessionCreated?.(created.id);
-  const attempt = await deps.sendPrompt(created.id, text, attachments);
+  const attempt = await deps.sendPrompt(
+    created.id,
+    text,
+    attachments,
+    presentation,
+    contextReferences,
+    ...(resourceContext?.length ? [resourceContext] : []),
+  );
   if (!attempt.accepted) throw new Error(attempt.message);
   return { outcome: "continued", sessionId: created.id };
 }

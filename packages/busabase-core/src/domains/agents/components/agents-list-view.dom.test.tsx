@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type {
+  AgentConnectionDetailVO,
   AgentConnectionScope,
   AgentConnectionVO,
   AgentSessionVO,
@@ -57,12 +58,28 @@ const ROUTER_CONNECTION: AgentConnectionVO = {
   latest: { ...SESSION, slug: "acprouter:device-1", transport: "remote-websocket" },
 };
 
+const ROUTER_DETAIL: AgentConnectionDetailVO = {
+  slug: ROUTER_CONNECTION.slug,
+  agentName: ROUTER_CONNECTION.agentName,
+  provider: "acprouter",
+  providerAgentName: "claude-acp",
+  agentId: "remote-agent-id",
+  transport: "remote-websocket",
+  status: "saved",
+  ownedByCurrentUser: true,
+  connectedBy: null,
+  routerWorkspaceName: "Engineering",
+  deviceId: "work-laptop",
+};
+
 type SlugMutation = (input: { slug: string }) => Promise<{ ok: true }>;
 
 function stubOrpc(options: {
   listConnections?: (scope: AgentConnectionScope) => Promise<AgentConnectionVO[]>;
   disconnect?: ReturnType<typeof vi.fn<SlugMutation>>;
   deleteHistory?: ReturnType<typeof vi.fn<SlugMutation>>;
+  detail?: () => Promise<AgentConnectionDetailVO>;
+  rename?: (input: { slug: string; name: string }) => Promise<AgentConnectionDetailVO>;
 }) {
   const listConnections =
     options.listConnections ?? vi.fn(async (_scope: AgentConnectionScope) => [CONNECTION]);
@@ -75,6 +92,20 @@ function stubOrpc(options: {
     orpc: {
       agents: {
         connections: {
+          detail: {
+            queryOptions: ({ input }: { input: { slug: string } }) => ({
+              queryKey: ["agents", "detail", input.slug],
+              queryFn: options.detail ?? (async () => ROUTER_DETAIL),
+            }),
+            queryKey: ({ input }: { input: { slug: string } }) => ["agents", "detail", input.slug],
+          },
+          rename: {
+            mutationOptions: () => ({
+              mutationFn:
+                options.rename ??
+                (async (input: { name: string }) => ({ ...ROUTER_DETAIL, agentName: input.name })),
+            }),
+          },
           list: {
             queryOptions: ({ input }: { input: { scope: AgentConnectionScope } }) => ({
               queryKey: ["agents", "connections", input.scope],
@@ -104,6 +135,8 @@ function renderView(options: {
   listConnections?: (scope: AgentConnectionScope) => Promise<AgentConnectionVO[]>;
   disconnect?: ReturnType<typeof vi.fn<SlugMutation>>;
   deleteHistory?: ReturnType<typeof vi.fn<SlugMutation>>;
+  detail?: () => Promise<AgentConnectionDetailVO>;
+  rename?: (input: { slug: string; name: string }) => Promise<AgentConnectionDetailVO>;
   onAddAgent?: () => void;
   onSelectAgent?: (slug: string) => void;
 }) {
@@ -137,6 +170,113 @@ const openAgentActions = async (name = "Actions for Claude Code") => {
 describe("AgentsListView", () => {
   beforeEach(() => vi.clearAllMocks());
   afterEach(cleanup);
+
+  it("opens safe connection details from More and renames the selected agent persistently", async () => {
+    let currentName = ROUTER_CONNECTION.agentName;
+    const rename = vi.fn(async ({ name }: { slug: string; name: string }) => {
+      currentName = name;
+      return { ...ROUTER_DETAIL, agentName: name };
+    });
+    const { onSelectAgent } = renderView({
+      listConnections: async () => [{ ...ROUTER_CONNECTION, agentName: currentName }],
+      rename,
+    });
+    await openAgentActions("Actions for Router laptop");
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Connection" }));
+    const dialog = await screen.findByRole("dialog", { name: "Connection details" });
+    expect(await within(dialog).findByText("Engineering")).toBeTruthy();
+    expect(within(dialog).getByText("Authorization saved")).toBeTruthy();
+    expect(onSelectAgent).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Rename" }));
+    const input = within(dialog).getByLabelText("Display name");
+    await waitFor(() => expect(document.activeElement).toBe(input));
+    fireEvent.change(input, { target: { value: "  Work assistant  " } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save name" }));
+    await waitFor(() =>
+      expect(rename).toHaveBeenCalledWith(
+        { slug: ROUTER_CONNECTION.slug, name: "Work assistant" },
+        expect.anything(),
+      ),
+    );
+    expect(await within(dialog).findByText("Work assistant")).toBeTruthy();
+    expect(within(dialog).getByText("claude-acp")).toBeTruthy();
+    fireEvent.click(within(dialog).getAllByRole("button", { name: "Close" })[0]);
+    expect(await screen.findByRole("button", { name: "Actions for Work assistant" })).toBeTruthy();
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("button", { name: "Actions for Work assistant" }),
+      ),
+    );
+  });
+
+  it("shows the resolved connector's name in connection details", async () => {
+    renderView({
+      listConnections: async () => [ROUTER_CONNECTION],
+      detail: async () => ({
+        ...ROUTER_DETAIL,
+        connectedBy: { id: "owner-1", name: "Jordan Lee", email: null, image: null, role: null },
+      }),
+    });
+    await openAgentActions("Actions for Router laptop");
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Connection" }));
+    const dialog = await screen.findByRole("dialog", { name: "Connection details" });
+    expect(await within(dialog).findByText("Jordan Lee")).toBeTruthy();
+  });
+
+  it("falls back to an honest unknown label when the connector cannot be resolved", async () => {
+    renderView({
+      listConnections: async () => [ROUTER_CONNECTION],
+      detail: async () => ({ ...ROUTER_DETAIL, connectedBy: null }),
+    });
+    await openAgentActions("Actions for Router laptop");
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Connection" }));
+    const dialog = await screen.findByRole("dialog", { name: "Connection details" });
+    // A connector the server could not resolve (e.g. a departed account) must
+    // read as honestly unknown, never silently blank or the viewer's own name.
+    expect(await within(dialog).findByText("Unknown user")).toBeTruthy();
+  });
+
+  it("exposes Rename directly, validates blank input, and leaves failures open for retry", async () => {
+    const rename = vi.fn(async () => {
+      throw new Error("Connection changed. Try again.");
+    });
+    renderView({ listConnections: async () => [ROUTER_CONNECTION], rename });
+    await openAgentActions("Actions for Router laptop");
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Rename" }));
+    const input = await screen.findByLabelText("Display name");
+    fireEvent.change(input, { target: { value: "   " } });
+    expect(screen.getByRole("alert").textContent).toContain("Enter a name");
+    expect((screen.getByRole("button", { name: "Save name" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    fireEvent.change(input, { target: { value: "New name" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save name" }));
+    expect(await screen.findByText("Connection changed. Try again.")).toBeTruthy();
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  it("shows a shared connection's details without owner-only controls", async () => {
+    renderView({
+      listConnections: async () => [
+        { ...ROUTER_CONNECTION, slug: "buda:shared", ownedByCurrentUser: false, sessionCount: 0 },
+      ],
+      detail: async () => ({
+        ...ROUTER_DETAIL,
+        provider: "buda",
+        slug: "buda:shared",
+        ownedByCurrentUser: false,
+      }),
+    });
+    await openAgentActions("Actions for Router laptop");
+    expect(screen.queryByRole("menuitem", { name: "Rename" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Disconnect" })).toBeNull();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Connection" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByText(/Only the connection owner/)).toBeTruthy();
+    expect(within(dialog).queryByRole("button", { name: "Rename" })).toBeNull();
+  });
 
   it("keeps primary navigation before secondary actions and switches inventory scope", async () => {
     const listConnections = vi.fn(async (scope: AgentConnectionScope) =>
@@ -265,5 +405,151 @@ describe("AgentsListView", () => {
 
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Unexpected server failure"));
     expect(screen.getByRole("alertdialog", { name: "删除对话历史？" })).toBeTruthy();
+  });
+});
+
+describe("AgentsListView — connection availability", () => {
+  afterEach(cleanup);
+
+  it("reuses compact connection cards without rendering session counts", async () => {
+    renderView({
+      listConnections: async () => [
+        { ...ROUTER_CONNECTION, sessionCount: 17, latest: { ...SESSION, status: "ended" } },
+        {
+          ...ROUTER_CONNECTION,
+          slug: "acprouter:removed",
+          agentName: "Removed desktop",
+          connected: false,
+          sessionCount: 3,
+        },
+      ],
+    });
+    await screen.findByText("Removed desktop");
+    expect(screen.getByTestId("agent-connection-list").getAttribute("role")).toBe("list");
+    const cards = screen.getAllByTestId("agent-connection-card");
+    expect(cards).toHaveLength(2);
+    for (const card of cards) {
+      expect(card.textContent).not.toMatch(/\b\d+\s+sessions?\b/i);
+      expect(within(card).getAllByTestId("agent-connection-indicator")).toHaveLength(1);
+      expect(card.getAttribute("role")).toBe("listitem");
+      expect((card.querySelector("button") as HTMLButtonElement).disabled).toBe(false);
+    }
+    const saved = within(cards[0]).getByTestId("agent-connection-indicator");
+    const disconnected = within(cards[1]).getByTestId("agent-connection-indicator");
+    expect(saved.dataset.state).toBe("saved");
+    expect(saved.classList.contains("bg-merged-strong")).toBe(true);
+    expect(disconnected.dataset.state).toBe("disconnected");
+    expect(disconnected.classList.contains("border-rejected-strong")).toBe(true);
+    expect(within(cards[1]).getByText("View history")).toBeTruthy();
+  });
+
+  it("shows a connecting ring with a reduced-motion fallback and a readable activity label", async () => {
+    renderView({
+      listConnections: async () => [
+        { ...ROUTER_CONNECTION, latest: { ...SESSION, status: "connecting" } },
+      ],
+    });
+    expect(await screen.findByText("Connecting…")).toBeTruthy();
+    expect(screen.getByText("Connection saved")).toBeTruthy();
+    const indicator = screen.getByTestId("agent-connection-indicator");
+    expect(indicator.dataset.connecting).toBe("true");
+    expect(indicator.classList.contains("animate-spin")).toBe(true);
+    expect(indicator.classList.contains("motion-reduce:animate-none")).toBe(true);
+    expect(indicator.getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("uses an amber ring for pairing and a neutral dot for a launchable local agent", async () => {
+    renderView({
+      listConnections: async () => [
+        { ...ROUTER_CONNECTION, connected: false, connectionState: "activating" },
+        { ...CONNECTION, connected: false, latest: { ...SESSION, status: "ended" } },
+      ],
+    });
+    expect(await screen.findByText("Finish pairing")).toBeTruthy();
+    const pairingCard = screen.getByText("Finish pairing").closest("button");
+    const localCard = screen.getByText("Local agent").closest("button");
+    if (!pairingCard || !localCard) throw new Error("Missing connection card");
+    expect(
+      within(pairingCard)
+        .getByTestId("agent-connection-indicator")
+        .classList.contains("border-review-strong"),
+    ).toBe(true);
+    expect(
+      within(localCard)
+        .getByTestId("agent-connection-indicator")
+        .classList.contains("bg-muted-foreground"),
+    ).toBe(true);
+    expect((localCard as HTMLButtonElement).disabled).toBe(false);
+    expect(localCard.textContent).not.toContain("ended");
+  });
+
+  it("identifies saved connections separately from an ended conversation", async () => {
+    renderView({
+      listConnections: async () => [
+        { ...ROUTER_CONNECTION, latest: { ...SESSION, status: "ended" } },
+      ],
+    });
+    const card = (await screen.findByText("Router laptop")).closest("button");
+    if (!card) throw new Error("Missing agent card");
+    expect(within(card).getByText("Connection saved")).toBeTruthy();
+    expect(within(card).queryByText("Open chat")).toBeNull();
+    expect(within(card).queryByText("ended")).toBeNull();
+    expect(card.textContent).not.toContain("Online");
+  });
+
+  it("keeps disconnected history readable even when its last recorded session was idle", async () => {
+    const { onSelectAgent } = renderView({
+      listConnections: async () => [
+        { ...ROUTER_CONNECTION, connected: false, latest: { ...SESSION, status: "idle" } },
+      ],
+    });
+    const card = (await screen.findByText("Router laptop")).closest("button");
+    if (!card) throw new Error("Missing agent card");
+    expect(within(card).getByText("Disconnected")).toBeTruthy();
+    expect(within(card).getByText("View history")).toBeTruthy();
+    expect(within(card).queryByText("idle")).toBeNull();
+    fireEvent.click(card);
+    expect(onSelectAgent).toHaveBeenCalledWith(ROUTER_CONNECTION.slug);
+  });
+
+  it("labels current session activity without replacing the connection state", async () => {
+    renderView({
+      listConnections: async () => [
+        { ...ROUTER_CONNECTION, latest: { ...SESSION, status: "waiting_permission" } },
+      ],
+    });
+    expect(await screen.findByText("Connection saved")).toBeTruthy();
+    expect(screen.getByText("Needs input")).toBeTruthy();
+  });
+
+  it("offers connection details rather than empty history for an unfinished setup", async () => {
+    const { onSelectAgent } = renderView({
+      listConnections: async () => [
+        {
+          ...ROUTER_CONNECTION,
+          connected: false,
+          sessionCount: 0,
+          latest: null,
+          connectionState: "activating",
+        },
+      ],
+    });
+    const action = await screen.findByText("Finish pairing");
+    expect(screen.queryByText("View history")).toBeNull();
+    const card = action.closest("button");
+    if (!card) throw new Error("Missing connection card");
+    fireEvent.click(card);
+    expect(onSelectAgent).toHaveBeenCalledWith(ROUTER_CONNECTION.slug);
+  });
+
+  it("gives unfinished pairing a distinct localized connection state", async () => {
+    renderView({
+      locale: "zh-CN",
+      listConnections: async () => [
+        { ...ROUTER_CONNECTION, connected: false, connectionState: "activating" },
+      ],
+    });
+    expect(await screen.findByText("等待完成配对")).toBeTruthy();
+    expect(screen.queryByText("查看连接")).toBeNull();
   });
 });

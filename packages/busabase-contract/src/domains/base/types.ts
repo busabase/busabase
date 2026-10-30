@@ -1,6 +1,7 @@
 // View objects owned by the base domain (structured records + views).
 import type { AttachmentRef } from "open-domains/attachments/types";
 import type { iString } from "openlib/i18n/i-string";
+import type { ApiKeyPermissionLevel } from "../../access-control/api-key-level";
 import type { CommitVO, FieldType, LookupRollup, UserRefVO } from "../../types";
 import type { FieldHelp } from "./contract/base-schemas";
 
@@ -91,6 +92,12 @@ export interface BaseVO {
   };
   createdAt: string;
   fields: BaseFieldVO[];
+  /**
+   * The viewer's effective node-level permission on this Base (workspace
+   * baseline + node grants + credential ceiling). Only set by `bases.get`;
+   * absent on list/embedded Bases.
+   */
+  viewerPermissionLevel?: ApiKeyPermissionLevel;
 }
 
 export type ViewFilterOperator =
@@ -170,12 +177,20 @@ export interface ViewConfigVO {
   filterConjunction?: ViewFilterConjunction;
   sorts: ViewSortVO[];
   visibleFieldSlugs?: string[] | null;
+  /** Column order is independent of which fields are visible. */
+  fieldOrderSlugs?: string[];
+  /** Explicitly hidden fields when following future Base schema additions. */
+  hiddenFieldSlugs?: string[];
+  /** Omitted legacy allowlists remain manual; omitted live lists remain automatic. */
+  autoShowNewFields?: boolean;
   /** Table-only column widths in pixels, keyed by field slug. */
   fieldWidths?: Record<string, number>;
-  // Gallery-only presentation config (see view-schemas.ts).
+  /** Attachment cover: gallery defaults to automatic; Kanban defaults to no cover. */
   coverFieldSlug?: string | null;
   coverFit?: GalleryCoverFit;
+  /** Gallery-only card size preset. */
   cardSize?: GalleryCardSize;
+  /** Card field labels: Kanban defaults to true, gallery defaults to false. */
   showFieldLabels?: boolean;
   // Kanban-only: single-select field that stacks records into columns.
   stackByFieldSlug?: string | null;

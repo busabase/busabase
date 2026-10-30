@@ -30,11 +30,15 @@ export type SidePanelTab = z.infer<typeof SidePanelTabSchema>;
 export type SidePanelLayout = "split" | "maximized";
 
 export interface SidePanelStoreState {
+  /** Live tab ownership; never persisted with display preferences. */
+  scopeKey: string | null;
   isOpen: boolean;
   layout: SidePanelLayout;
   width: number;
   activeTabId: string | null;
   tabs: SidePanelTab[];
+  /** Drops space-owned content when the workspace or signed-in actor changes. */
+  setScope: (scopeKey: string) => void;
   /** Opens (and activates) `tab`. If a tab with the same `id` is already
    *  open, just activates it instead of adding a duplicate. */
   openTab: (tab: SidePanelTab) => void;
@@ -91,11 +95,17 @@ export const clampSidePanelWidth = (width: number) =>
 export const useSidePanelStore = create<SidePanelStoreState>()(
   persist(
     (set, get) => ({
+      scopeKey: null,
       isOpen: false,
       layout: "split",
       width: DEFAULT_SIDE_PANEL_WIDTH,
       activeTabId: null,
       tabs: [],
+
+      setScope: (scopeKey) => {
+        if (get().scopeKey === scopeKey) return;
+        set({ scopeKey, tabs: [], activeTabId: null, layout: "split" });
+      },
 
       openTab: (input) => {
         const tab = SidePanelTabSchema.parse(input);

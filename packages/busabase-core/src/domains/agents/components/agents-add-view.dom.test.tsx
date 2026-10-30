@@ -100,6 +100,15 @@ function stubOrpc(options: {
   const create = options.create ?? vi.fn(async (_input: { slug: string }) => SESSION);
   return {
     agents: {
+      routerEnrollment: {
+        grants: { queryOptions: () => ({ queryKey: ["router-grants"], queryFn: async () => [] }) },
+        status: {
+          queryOptions: () => ({ queryKey: ["router-status"], queryFn: async () => null }),
+        },
+        mint: { mutationOptions: () => ({ mutationFn: vi.fn() }) },
+        cancel: { mutationOptions: () => ({ mutationFn: vi.fn() }) },
+        complete: { mutationOptions: () => ({ mutationFn: vi.fn() }) },
+      },
       catalog: {
         queryOptions: () => ({ queryKey: ["agents", "catalog"], queryFn: catalogFn }),
         queryKey: () => ["agents", "catalog"],
@@ -131,23 +140,25 @@ function renderView(options: {
   create?: ReturnType<typeof vi.fn<CreateSession>>;
   onBack?: () => void;
   onConnected?: (slug: string) => void;
+  spaceId?: string;
 }) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   const onBack = options.onBack ?? vi.fn();
   const onConnected = options.onConnected ?? vi.fn();
-  render(
+  const orpc = stubOrpc(options);
+  const rendered = render(
     <QueryClientProvider client={client}>
       <AgentsAddView
         onBack={onBack}
         onConnected={onConnected}
-        orpc={stubOrpc(options)}
-        spaceId="space-1"
+        orpc={orpc}
+        spaceId={options.spaceId ?? "space-1"}
       />
     </QueryClientProvider>,
   );
-  return { onBack, onConnected };
+  return { onBack, onConnected, client, orpc, ...rendered };
 }
 
 describe("AgentsAddView — persistent shell", () => {
@@ -289,6 +300,92 @@ describe("AgentsAddView — unavailable local agent styling", () => {
   });
 });
 
+describe("AgentsAddView — card ordering", () => {
+  afterEach(() => {
+    cleanup();
+    desktop.request.mockReset();
+    desktop.request.mockResolvedValue(null);
+  });
+
+  const cardSlugs = () =>
+    Array.from(document.querySelectorAll("[data-agent-slug]")).map((card) =>
+      card.getAttribute("data-agent-slug"),
+    );
+
+  it("moves disabled local agents after an actionable Buda, keeping catalog order within each group", async () => {
+    // Mirrors the reported layout: Buda is actionable, Claude/Codex are
+    // disabled (unavailable on this host), and catalog order already lists
+    // Claude before Codex and Buda last.
+    const claudeDisabled = {
+      ...CLAUDE_ENTRY,
+      available: false,
+      unavailableReason: "Not available in Busabase Cloud.",
+    };
+    const routerEntry = { ...BUDA_ENTRY, slug: "acprouter", name: "ACPRouter Agent" };
+    const catalog = [BUDA_ENTRY, claudeDisabled, UNAVAILABLE_LOCAL_ENTRY, routerEntry];
+    renderView({ catalog: async () => catalog });
+
+    await screen.findByRole("button", { name: "Connect Buda" });
+
+    expect(cardSlugs()).toEqual(["buda", "acprouter", "claude-acp", "codex-acp"]);
+    expect(catalog.map((entry) => entry.slug)).toEqual([
+      "buda",
+      "claude-acp",
+      "codex-acp",
+      "acprouter",
+    ]);
+  });
+
+  it("moves a desktop-detected local agent ahead of unavailable cards", async () => {
+    desktop.request.mockImplementation(async (slug: string) =>
+      slug === "codex-acp"
+        ? { source: "managed", installed: false, codex: "missing", auth: "unknown" }
+        : null,
+    );
+    renderView({
+      catalog: async () => [
+        { ...CLAUDE_ENTRY, available: false },
+        UNAVAILABLE_LOCAL_ENTRY,
+        BUDA_ENTRY,
+      ],
+    });
+    await waitFor(() => expect(cardSlugs()).toEqual(["codex-acp", "buda", "claude-acp"]));
+    expect(screen.getByRole("button", { name: "Connect" })).toBeTruthy();
+  });
+
+  it("leaves order untouched when every card is already actionable", async () => {
+    renderView({ catalog: async () => [CLAUDE_ENTRY, BUDA_ENTRY] });
+
+    await screen.findByText("Claude Code");
+
+    expect(cardSlugs()).toEqual(["claude-acp", "buda"]);
+  });
+
+  it("sinks a comingSoon card below actionable ones regardless of catalog position", async () => {
+    const comingSoonFirst = {
+      ...UNAVAILABLE_LOCAL_ENTRY,
+      comingSoon: true,
+      unavailableReason: null,
+    };
+    renderView({ catalog: async () => [comingSoonFirst, CLAUDE_ENTRY, BUDA_ENTRY] });
+
+    await screen.findByText("Claude Code");
+
+    expect(cardSlugs()).toEqual(["claude-acp", "buda", "codex-acp"]);
+  });
+
+  it("sinks an already-added local agent below still-actionable cards", async () => {
+    renderView({
+      catalog: async () => [CLAUDE_ENTRY, BUDA_ENTRY],
+      connections: async () => [CLAUDE_CONNECTION],
+    });
+
+    await screen.findByRole("button", { name: "Connect Buda" });
+
+    expect(cardSlugs()).toEqual(["buda", "claude-acp"]);
+  });
+});
+
 describe("AgentsAddView — Desktop Codex installation", () => {
   afterEach(() => {
     cleanup();
@@ -365,7 +462,39 @@ describe("AgentsAddView — Desktop Codex installation", () => {
 });
 
 describe("AgentsAddView — Buda connection dialog", () => {
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    vi.useRealTimers();
+  });
+
+  function popup() {
+    return { closed: false, close: vi.fn() } as unknown as Window;
+  }
+
+  async function authorize(options: Parameters<typeof renderView>[0] = {}) {
+    const create = options.create ?? vi.fn(async (_input: { slug: string }) => SESSION);
+    const view = renderView({ ...options, catalog: async () => [BUDA_ENTRY], create });
+    const opened = popup();
+    const open = vi.spyOn(window, "open").mockReturnValue(opened);
+    fireEvent.click(await screen.findByRole("button", { name: "Connect Buda" }));
+    await screen.findByRole("dialog", { name: "Connect Buda" });
+    const url = new URL(String(open.mock.calls[0]?.[0]));
+    const flowId = url.searchParams.get("flowId");
+    const send = (data: Record<string, unknown>, event: Partial<MessageEventInit> = {}) =>
+      fireEvent(
+        window,
+        new MessageEvent("message", {
+          origin: url.origin,
+          source: opened,
+          data: { flowId, ...data },
+          ...event,
+        }),
+      );
+    return { ...view, create, open, opened, url, flowId, send };
+  }
 
   it("opens as an accessible dialog naming Connect Buda and restores focus on close", async () => {
     renderView({ catalog: async () => [BUDA_ENTRY] });
@@ -377,10 +506,13 @@ describe("AgentsAddView — Buda connection dialog", () => {
 
     const dialog = await screen.findByRole("dialog", { name: "Connect Buda" });
     expect(dialog).toBeTruthy();
-    expect(openSpy).toHaveBeenCalledWith(
-      "/api/agents/buda/oauth/start?spaceId=space-1",
-      "busabase-buda-oauth",
-      "popup,width=560,height=760",
+    const url = new URL(String(openSpy.mock.calls[0]?.[0]));
+    expect(url.origin).toBe(window.location.origin);
+    expect(url.pathname).toBe("/api/agents/buda/oauth/start");
+    expect(url.searchParams.get("spaceId")).toBe("space-1");
+    expect(url.searchParams.get("returnOrigin")).toBe(window.location.origin);
+    expect(openSpy.mock.calls[0]?.[1]).toBe(
+      `busabase-buda-oauth-${url.searchParams.get("flowId")}`,
     );
 
     fireEvent.keyDown(dialog, { key: "Escape" });
@@ -413,40 +545,143 @@ describe("AgentsAddView — Buda connection dialog", () => {
   it("closes the dialog and starts a session on a successful OAuth message", async () => {
     const budaSession = { ...SESSION, slug: "buda-agent-1", agentName: "Buda Agent" };
     const create = vi.fn(async (_input: { slug: string }) => budaSession);
-    const { onConnected } = renderView({ catalog: async () => [BUDA_ENTRY], create });
-    vi.spyOn(window, "open").mockReturnValue(null);
-
-    fireEvent.click(await screen.findByRole("button", { name: "Connect Buda" }));
-    await screen.findByRole("dialog", { name: "Connect Buda" });
-
-    fireEvent(
-      window,
-      new MessageEvent("message", {
-        origin: window.location.origin,
-        data: { type: "busabase:buda-connected", slug: "buda-agent-1" },
-      }),
-    );
+    const { onConnected, send } = await authorize({ create });
+    send({ type: "busabase:buda-connected", slug: "buda-agent-1" });
+    send({ type: "busabase:buda-connected", slug: "buda-agent-1" });
 
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     await waitFor(() => expect(create.mock.calls[0]?.[0]).toEqual({ slug: "buda-agent-1" }));
     await waitFor(() => expect(onConnected).toHaveBeenCalledWith("buda-agent-1"));
+    expect(create).toHaveBeenCalledTimes(1);
   });
 
   it("ignores a message from an untrusted origin", async () => {
-    renderView({ catalog: async () => [BUDA_ENTRY] });
-    vi.spyOn(window, "open").mockReturnValue(null);
+    const { send, create } = await authorize();
+    send(
+      { type: "busabase:buda-connected", slug: "buda-agent-1" },
+      { origin: "https://evil.example" },
+    );
+    expect(screen.queryByRole("dialog")).toBeTruthy();
+    expect(create).not.toHaveBeenCalled();
+  });
 
-    fireEvent.click(await screen.findByRole("button", { name: "Connect Buda" }));
-    await screen.findByRole("dialog", { name: "Connect Buda" });
+  it("opens the configured main origin and prevents duplicate authorization", async () => {
+    vi.stubGlobal("__SHARELIB_PUBLIC_ENV__", { appUrl: "https://busabase.com/path" });
+    const { url, flowId, open } = await authorize();
+    expect(url.origin).toBe("https://busabase.com");
+    expect(flowId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Open Buda" }).disabled).toBe(
+      true,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Open Buda" }));
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("status").textContent).toBe(
+      "Complete Buda authorization in the new window…",
+    );
+  });
 
+  it("requires the exact popup and flow, ignoring messages after recovery or completion", async () => {
+    const { send, create, flowId } = await authorize();
+    const success = { type: "busabase:buda-connected", slug: "buda-agent-1" };
+    send(success, { source: popup() });
+    send({ ...success, flowId: "another-flow" });
+    send(success, { source: null });
+    expect(create).not.toHaveBeenCalled();
+    send({ type: "busabase:buda-error", reason: "access_denied" });
+    expect(screen.getByRole("alert").textContent).toBe(
+      "Buda authorization was declined. Try again when ready.",
+    );
+    send({ ...success, flowId });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("uses a fresh flow and popup after rejection and ignores the old callback", async () => {
+    const { send, create, open, url, opened } = await authorize();
+    send({ type: "busabase:buda-error", reason: "access_denied" });
+    const second = popup();
+    open.mockReturnValue(second);
+    fireEvent.click(screen.getByRole("button", { name: "Open Buda" }));
+    const nextUrl = new URL(String(open.mock.calls[1]?.[0]));
+    expect(nextUrl.searchParams.get("flowId")).not.toBe(url.searchParams.get("flowId"));
+    expect(open.mock.calls[1]?.[1]).not.toBe(open.mock.calls[0]?.[1]);
+    send({ type: "busabase:buda-connected", slug: "buda-agent-1" }, { source: opened });
+    expect(create).not.toHaveBeenCalled();
     fireEvent(
       window,
       new MessageEvent("message", {
-        origin: "https://evil.example",
-        data: { type: "busabase:buda-connected", slug: "buda-agent-1" },
+        origin: nextUrl.origin,
+        source: second,
+        data: {
+          type: "busabase:buda-connected",
+          slug: "buda-agent-1",
+          flowId: nextUrl.searchParams.get("flowId"),
+        },
       }),
     );
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+  });
 
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeTruthy());
+  it("does not display server-supplied HTML or prototype keys as error messages", async () => {
+    const { send } = await authorize();
+    send({ type: "busabase:buda-error", reason: "__proto__", message: "<script>unsafe</script>" });
+    expect(screen.getByRole("alert").textContent).toBe(
+      "Buda authorization was not completed. Try again.",
+    );
+  });
+
+  it("recovers after manually closing the popup without inventing a successful connection", async () => {
+    const { opened, create } = await authorize();
+    Object.defineProperty(opened, "closed", { value: true });
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "Authorization window closed. Check your saved connections or try again.",
+    );
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Open Buda" }).disabled).toBe(
+      false,
+    );
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("expires a pending popup and restores retry", async () => {
+    const { opened, create } = await authorize();
+    const now = Date.now();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(now + 600_001);
+    await screen.findByRole("alert");
+    expect(opened.close).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("alert").textContent).toBe(
+      "Buda authorization expired or could not be verified. Try again.",
+    );
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("cancels pending authorization on dialog close and unmount", async () => {
+    const { opened, send, create, unmount } = await authorize();
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(opened.close).toHaveBeenCalledTimes(1);
+    send({ type: "busabase:buda-connected", slug: "buda-agent-1" });
+    expect(create).not.toHaveBeenCalled();
+    unmount();
+  });
+
+  it("discards the old attempt when the workspace changes", async () => {
+    const { opened, send, create, rerender, client, orpc, onBack, onConnected } = await authorize();
+    rerender(
+      <QueryClientProvider client={client}>
+        <AgentsAddView orpc={orpc} onBack={onBack} onConnected={onConnected} spaceId="space-2" />
+      </QueryClientProvider>,
+    );
+    expect(opened.close).toHaveBeenCalledTimes(1);
+    send({ type: "busabase:buda-connected", slug: "buda-agent-1" });
+    expect(create).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("closes an active popup on unmount and ignores its late success", async () => {
+    const { opened, send, create, unmount } = await authorize();
+    unmount();
+    expect(opened.close).toHaveBeenCalledTimes(1);
+    send({ type: "busabase:buda-connected", slug: "buda-agent-1" });
+    expect(create).not.toHaveBeenCalled();
   });
 });

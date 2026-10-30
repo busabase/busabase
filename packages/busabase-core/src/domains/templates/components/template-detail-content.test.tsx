@@ -37,7 +37,7 @@ const getHeading = (markup: string, title: string) =>
   [...markup.matchAll(/<h2([^>]*)>([\s\S]*?)<\/h2>/g)].find((match) => match[2]?.includes(title));
 
 describe("TemplateDetailContent", () => {
-  it("leads with a large title and a readable description, then the action", () => {
+  it("keeps the title and action compact before the gallery", () => {
     const markup = renderToStaticMarkup(
       <TemplateDetailContent
         template={template}
@@ -45,8 +45,8 @@ describe("TemplateDetailContent", () => {
       />,
     );
     const h1 = markup.match(/<h1([^>]*)>/)?.[1] ?? "";
-    expect(h1).toContain("text-4xl");
-    expect(h1).toContain("@4xl:text-6xl");
+    expect(h1).toContain("text-3xl");
+    expect(h1).toContain("@2xl:text-4xl");
     expect(h1).toContain("font-serif");
 
     // The action sits under the description, not in a corner beside the title.
@@ -96,32 +96,39 @@ describe("TemplateDetailContent", () => {
     expect(aside).toContain("What installing this creates");
     expect(aside).toContain(">Bases</dt>");
     expect(aside).not.toContain(">Tables</dt>");
-    expect(aside).toContain("Installing needs an owner or admin of the workspace.");
+    expect(aside).toContain("Anyone who can edit the workspace can install it.");
     expect(aside).toContain("lucide-external-link size-3");
     // Small type, not a full-width table: section labels are text-sm, and the
     // permission note is the smallest print on the page.
     expect(aside).toMatch(
       /<h2 class="font-sans text-sm font-medium">What installing this creates<\/h2>/,
     );
-    expect(aside).toMatch(/<p class="text-xs[^"]*">Installing needs an owner or admin/);
+    expect(aside).toMatch(
+      /<p class="text-xs[^"]*">Anyone who can edit the workspace can install it/,
+    );
     expect(markup).not.toContain("Send the content for review first");
   });
 
-  it("keeps the agent prompts as a secondary section beside the side column", () => {
-    const markup = renderToStaticMarkup(<TemplateDetailContent template={template} />);
-    const heading = getHeading(markup, "What you can ask an agent, once it is installed");
+  it("puts the gallery before agent prompts and the reference column", () => {
+    const markup = renderToStaticMarkup(
+      <TemplateDetailContent
+        template={{ ...template, screenshots: ["https://cdn.example/cover.webp"] }}
+      />,
+    );
+    const heading = getHeading(markup, "Start a conversation. Keep working with your agent.");
     expect(heading?.[1]).toContain("text-base");
     expect(heading?.[1]).not.toContain("text-lg");
     expect(heading?.[2]).toContain("lucide-message-square");
     expect(markup).toContain("@3xl:col-span-2");
     expect(markup.indexOf("Draft a reply")).toBeLessThan(markup.indexOf("<aside"));
+    expect(markup.indexOf("Template screenshots")).toBeLessThan(markup.indexOf("Draft a reply"));
   });
 
   it("gives the side column the full width when there are no prompts", () => {
     const markup = renderToStaticMarkup(
       <TemplateDetailContent template={{ ...template, agentPrompts: [] }} />,
     );
-    expect(markup).not.toContain("What you can ask an agent");
+    expect(markup).not.toContain("Start a conversation");
     expect(markup).not.toContain("@3xl:grid-cols-3");
     expect(markup).toContain("<aside");
   });

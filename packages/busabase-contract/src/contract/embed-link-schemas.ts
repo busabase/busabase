@@ -13,7 +13,7 @@ import { z } from "zod";
  */
 
 export const EMBED_LINK_DEFAULT_MINUTES = 15;
-export const EMBED_LINK_MAX_MINUTES = 24 * 60;
+export const EMBED_LINK_MAX_MINUTES = 7 * 24 * 60;
 
 export const EmbedNodeTypeSchema = z.enum([
   "base",

@@ -59,6 +59,7 @@ const makeClient = (
     getBase: vi.fn().mockResolvedValue(base),
     listRecordsPage,
     getRecord: vi.fn().mockResolvedValue(math),
+    getRecords: vi.fn().mockResolvedValue({ records: [math], missingIds: [] }),
   }) as unknown as BusabaseDashboardApiClient;
 
 describe("RelationFieldEditor", () => {
@@ -145,12 +146,14 @@ describe("RelationFieldEditor", () => {
     const client = makeClient();
     mount(client, { loaded: [] });
     await screen.findByRole("button", { name: "Remove link to Mathematics" });
-    expect(client.getRecord).toHaveBeenCalledWith("math");
+    // One batched read for the unseen selection, not one getRecord per id.
+    expect(client.getRecords).toHaveBeenCalledWith(["math"]);
+    expect(client.getRecord).not.toHaveBeenCalled();
   });
 
   it("keeps unseen links when selecting more, with a neutral unavailable label", async () => {
     const client = makeClient();
-    vi.mocked(client.getRecord).mockRejectedValue(new Error("forbidden"));
+    vi.mocked(client.getRecords).mockResolvedValue({ records: [], missingIds: ["hidden"] });
     mount(client, { initial: ["hidden"], loaded: [] });
     await screen.findByRole("button", { name: "Remove link to Unavailable record" });
     fireEvent.click(screen.getByRole("button", { name: "Subjects" }));

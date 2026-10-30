@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import type { BaseFieldVO, ViewConfigVO } from "busabase-contract/types";
+import type { BaseFieldVO, ViewConfigVO, ViewVO } from "busabase-contract/types";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CoreI18nProvider } from "../../../i18n";
-import { ViewFieldsEditor } from "./view-config-editor";
+import { ViewConfigEditorDialog, ViewFieldsEditor } from "./view-config-editor";
 
 const fields: BaseFieldVO[] = [
   {
@@ -56,13 +56,19 @@ const initialConfig: ViewConfigVO = {
   visibleFieldSlugs: ["title", "status", "owner"],
 };
 
-function Harness({ onChange = () => {} }: { onChange?: (config: ViewConfigVO) => void }) {
+function Harness({
+  onChange = () => {},
+  availableFields = fields,
+}: {
+  onChange?: (config: ViewConfigVO) => void;
+  availableFields?: BaseFieldVO[];
+}) {
   const [config, setConfig] = useState(initialConfig);
   return (
     <CoreI18nProvider locale="en">
       <ViewFieldsEditor
         config={config}
-        fields={fields}
+        fields={availableFields}
         onChange={(next) => {
           setConfig(next);
           onChange(next);
@@ -103,6 +109,94 @@ afterEach(() => {
 });
 
 describe("ViewFieldsEditor field reordering", () => {
+  it("keeps a width draft across a live field addition and submits only the width patch", async () => {
+    const onSubmit = vi.fn().mockResolvedValue(undefined);
+    const onClose = vi.fn();
+    const request = { section: "fields", source: "toolbar" } as const;
+    const view: ViewVO = {
+      id: "view_test",
+      baseId: "bas_test",
+      slug: "grid",
+      name: "Grid",
+      description: "",
+      type: "table",
+      config: { ...initialConfig, fieldWidths: { title: 280 } },
+      status: "active",
+      position: 0,
+      createdBy: "user_test",
+      archivedAt: null,
+      createdAt: "2026-10-27T00:00:00.000Z",
+      updatedAt: "2026-10-27T00:00:00.000Z",
+    };
+    const props = { fields, onSubmit, onClose, request, view };
+    const result = render(
+      <CoreI18nProvider locale="en">
+        <ViewConfigEditorDialog {...props} />
+      </CoreI18nProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Reset widths" }));
+    const added = {
+      ...fields[3],
+      id: "attachment-id",
+      slug: "attachment",
+      name: "Attachment",
+      type: "attachment" as const,
+      position: 4,
+    };
+    result.rerender(
+      <CoreI18nProvider locale="en">
+        <ViewConfigEditorDialog
+          {...props}
+          fields={[...fields, added]}
+          view={{
+            ...view,
+            config: {
+              ...view.config,
+              visibleFieldSlugs: [...(initialConfig.visibleFieldSlugs ?? []), "attachment"],
+            },
+          }}
+        />
+      </CoreI18nProvider>,
+    );
+    // A background refetch must not restore the old saved widths over our draft.
+    expect(
+      (screen.getByRole("button", { name: "Reset widths" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Update View Now" }));
+    await waitFor(() =>
+      expect(onSubmit).toHaveBeenCalledWith({ fieldWidths: {} }, { mergeImmediately: true }),
+    );
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("lets a curated view opt into new fields without revealing previously hidden fields", () => {
+    const result = render(<Harness />);
+    const automatic = screen.getByRole("checkbox", { name: "Automatically show new fields" });
+    expect((automatic as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(automatic);
+    expect((automatic as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole("checkbox", { name: "Show Notes" }) as HTMLInputElement).checked).toBe(
+      false,
+    );
+    const attachment: BaseFieldVO = {
+      baseId: "bas_test",
+      id: "fld_files",
+      slug: "files",
+      name: "Files",
+      type: "attachment",
+      position: 4,
+      options: {},
+      required: false,
+    };
+    result.rerender(<Harness availableFields={[...fields, attachment]} />);
+    expect((screen.getByRole("checkbox", { name: "Show Files" }) as HTMLInputElement).checked).toBe(
+      true,
+    );
+    expect((screen.getByRole("checkbox", { name: "Show Notes" }) as HTMLInputElement).checked).toBe(
+      false,
+    );
+  });
+
   it("shows drag handles only for visible non-primary fields and enables one when revealed", () => {
     const { container } = render(<Harness />);
 

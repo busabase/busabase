@@ -41,12 +41,12 @@ export interface TemplateDetailLabels {
 }
 
 const defaultLabels: TemplateDetailLabels = {
-  promptsTitle: "What you can ask an agent, once it is installed",
+  promptsTitle: "Start a conversation. Keep working with your agent.",
   promptsDescription:
-    "The agent can answer these because the template installs its author's manual alongside its Bases. It does not have to guess your schema.",
+    "Start with one of these requests, then keep giving your agent feedback and follow-up tasks. The template provides context and working instructions; the agent operates the workspace, and you use its views to inspect results and review changes.",
   contentsTitle: "What installing this creates",
   permissionNote:
-    "Installing needs an owner or admin of the workspace. Everything is ready to use once installed; you can also choose to review the content first.",
+    "Anyone who can edit the workspace can install it. Everything is ready to use once installed; you can also choose to review the content first.",
   bases: "Bases",
   apps: "Apps",
   documents: "Documents",
@@ -84,11 +84,9 @@ interface TemplateDetailContentProps {
  * Server-safe template detail body shared by the public site and Dashboard.
  * Interactive install and navigation controls stay in each caller's shell.
  *
- * Read top to bottom the way a visitor decides: what it is (a large title and
- * one readable sentence), the one thing to do about it (`actions`, directly
- * under the sentence), what it looks like (the screenshot and clip shelf),
- * and only then the detail. The detail is split by who it is for — example
- * questions to an agent in the main column, and in a quiet side column
+ * Read top to bottom the way a visitor decides: the title and description,
+ * the action, then the screenshot and clip shelf. Conversation prompts follow
+ * the gallery; a quiet side column holds
  * everything that is reference rather than pitch: what installing creates, the
  * tags, version, licence, source, and who may install. Category and version
  * used to sit beside the title and the internal `prefix:value` tags under it;
@@ -126,16 +124,16 @@ export function TemplateDetailContent({
   }));
 
   return (
-    <div className="flex flex-col gap-12">
+    <div className="flex flex-col gap-8">
       {/* A size container, so the title scales with the column it is given —
           the public page and the Dashboard pane are different widths at the
           same viewport, and a viewport breakpoint would size them alike. */}
       <header className="@container">
-        <div className="flex max-w-3xl flex-col gap-4 @2xl:gap-5">
-          <h1 className="font-serif text-4xl font-semibold leading-tight tracking-tight @2xl:text-5xl @4xl:text-6xl">
+        <div className="flex max-w-3xl flex-col gap-3">
+          <h1 className="font-serif text-3xl font-semibold leading-tight tracking-tight @2xl:text-4xl">
             {title}
           </h1>
-          <p className="text-base leading-7 text-muted-foreground @2xl:text-lg @2xl:leading-8">
+          <p className="text-sm leading-6 text-muted-foreground @2xl:text-base @2xl:leading-7">
             {iStringParse(template.description, descriptionLocale)}
           </p>
           {actions ? <div className="pt-1">{actions}</div> : null}

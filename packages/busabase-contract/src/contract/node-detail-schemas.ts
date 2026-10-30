@@ -28,7 +28,19 @@ import {
   WhiteboardDocumentSchema,
   WorkflowDocumentSchema,
 } from "../domains/rich-node/types";
-import { nodeSchema } from "./schemas";
+import { nodeSchema, userRefSchema } from "./schemas";
+
+/** Detail-only identities; omitted on public reads and by older servers. */
+const attributionFields = {
+  attribution: z
+    .object({
+      createdBy: z.string().nullable(),
+      createdByUser: userRefSchema.nullable(),
+      updatedBy: z.string().nullable(),
+      updatedByUser: userRefSchema.nullable(),
+    })
+    .optional(),
+};
 
 /**
  * The fallback shape for a registered node type that has no richer typed detail
@@ -38,6 +50,7 @@ import { nodeSchema } from "./schemas";
  */
 const genericNodeDetailSchema = <T extends NodeType>(type: T) =>
   z.object({
+    ...attributionFields,
     type: z.literal(type),
     node: nodeSchema,
   });
@@ -64,6 +77,7 @@ const richNodeDetailSchema = <T extends "whiteboard" | "workflow" | "html", TDoc
   documentSchema: z.ZodType<TDocument>,
 ) =>
   z.object({
+    ...attributionFields,
     type: z.literal(type),
     node: nodeSchema,
     document: documentSchema,
@@ -80,15 +94,15 @@ const richNodeDetailSchema = <T extends "whiteboard" | "workflow" | "html", TDoc
  * "unknown node type -> malformed VO" failure this union exists to prevent.
  */
 export const NODE_DETAIL_VARIANTS = {
-  folder: folderSchema.extend({ type: z.literal("folder") }),
-  doc: docSchema.extend({ type: z.literal("doc") }),
-  file: FileNodeVOSchema.extend({ type: z.literal("file") }),
+  folder: folderSchema.extend({ ...attributionFields, type: z.literal("folder") }),
+  doc: docSchema.extend({ ...attributionFields, type: z.literal("doc") }),
+  file: FileNodeVOSchema.extend({ ...attributionFields, type: z.literal("file") }),
   // Skills, Drives, and AirApps are one server-side shape (`fileTreeNodeSchema`)
   // but three real node types — there is no synthetic "file-tree" node type, so
   // each gets its own discriminated variant rather than a shared alias.
-  skill: fileTreeNodeSchema.extend({ type: z.literal("skill") }),
-  drive: fileTreeNodeSchema.extend({ type: z.literal("drive") }),
-  airapp: fileTreeNodeSchema.extend({ type: z.literal("airapp") }),
+  skill: fileTreeNodeSchema.extend({ ...attributionFields, type: z.literal("skill") }),
+  drive: fileTreeNodeSchema.extend({ ...attributionFields, type: z.literal("drive") }),
+  airapp: fileTreeNodeSchema.extend({ ...attributionFields, type: z.literal("airapp") }),
   base: genericNodeDetailSchema("base"),
   form: genericNodeDetailSchema("form"),
   whiteboard: richNodeDetailSchema("whiteboard", WhiteboardDocumentSchema),

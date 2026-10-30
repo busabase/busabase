@@ -303,9 +303,7 @@ describe("bootstrap edition confirmation", () => {
       expect(doc).toContain("## Step 0 — Welcome and confirm the edition");
       expect(doc).toContain("Your first reply must follow the model below");
       expect(doc).toContain("👋 Welcome! This is **Busabase** (https://busabase.com)");
-      expect(doc).toContain(
-        "every change I make goes in as a **ChangeRequest**, so you can always see what",
-      );
+      expect(doc).toContain("every change I make goes in as a **ChangeRequest**, so you can");
       expect(doc).toContain("Before I connect, which edition would you like to use?");
       expect(doc).toContain("**A. Busabase Cloud**");
       expect(doc).toContain("**B. Busabase Personal Desktop**");

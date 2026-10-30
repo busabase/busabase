@@ -806,6 +806,21 @@ export function FinishReviewComposer({
     setSummary("");
   }, [changeRequest.status]);
 
+  // Approve / request changes / merge / close all share one server gate. When
+  // the detail read says the viewer fails it, offer none of them — a button
+  // that only ever answers FORBIDDEN is not an action. `undefined` (a list row
+  // without the field) keeps the controls; the server still enforces.
+  const isActionable = ["in_review", "changes_requested", "approved", "conflict"].includes(
+    changeRequest.status,
+  );
+  if (isActionable && changeRequest.viewerCanApprove === false) {
+    return (
+      <div className="text-muted-foreground text-sm leading-6" data-testid="review-not-permitted">
+        {messages.review.cannotApproveHint}
+      </div>
+    );
+  }
+
   if (changeRequest.status === "approved") {
     return (
       <div className="flex flex-col gap-2">

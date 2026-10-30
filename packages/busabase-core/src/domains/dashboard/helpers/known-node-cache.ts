@@ -208,6 +208,49 @@ const recordVisitForScope = (scope: string, node: KnownNode, at: string): void =
   mergeForScope(scope, [{ ...node, lastVisitedAt: at }]);
 };
 
+/** Drop `ids` — nodes the server says no longer exist (deleted, archived, or now hidden). */
+const forgetForScope = (scope: string, ids: readonly string[]): void => {
+  const cache = readStorage(scope);
+  let changed = false;
+  for (const id of ids) changed = cache.delete(id) || changed;
+  if (!changed) return;
+  writeStorage(scope, cache);
+  publishForScope(scope);
+};
+
+/**
+ * Cached nodes the server has just proven gone, given one `nodes.searchByName`
+ * answer for `query`.
+ *
+ * The cache only ever ADDS: it absorbs the sidebar tree, visits, and past
+ * search hits, but nothing removes a node that was deleted or archived since —
+ * so the search dialog kept offering them. `searchByName` is the same
+ * case-insensitive name/slug substring test as the cache's own rank-0 match,
+ * already filtered to live, visible nodes, so a cached node that substring-
+ * matches yet is missing from a COMPLETE answer is not there any more.
+ *
+ * Only a complete answer proves absence: one that hit `limit` may simply have
+ * cut the node off, so it proves nothing and returns no ids. Subsequence-only
+ * matches are never judged either — the server does not match those.
+ */
+export const staleKnownNodeIds = (
+  cached: readonly KnownNode[],
+  network: readonly { id: string }[],
+  query: string,
+  limit: number,
+): string[] => {
+  const needle = query.trim().toLowerCase();
+  if (!needle || network.length >= limit) return [];
+  const live = new Set(network.map((node) => node.id));
+  return cached
+    .filter(
+      (node) =>
+        !live.has(node.id) &&
+        (node.name.toLowerCase().includes(needle) || node.slug.toLowerCase().includes(needle)),
+    )
+    .map((node) => node.id);
+};
+
 /** Every cached node, in no particular order (callers sort/filter as needed). */
 const listForScope = (scope: string): KnownNode[] => [...readStorage(scope).values()];
 
@@ -355,6 +398,7 @@ export interface KnownNodeCache {
   merge: (nodes: KnownNode[]) => void;
   markVisited: (id: string, at: string) => void;
   recordVisit: (node: KnownNode, at: string) => void;
+  forget: (ids: readonly string[]) => void;
   subscribe: (listener: () => void) => () => void;
   getSnapshot: () => KnownNodeCacheSnapshot;
   list: () => KnownNode[];
@@ -381,6 +425,7 @@ export const createKnownNodeCache = (scope: string): KnownNodeCache => ({
   merge: (nodes) => mergeForScope(scope, nodes),
   markVisited: (id, at) => markVisitedForScope(scope, id, at),
   recordVisit: (node, at) => recordVisitForScope(scope, node, at),
+  forget: (ids) => forgetForScope(scope, ids),
   subscribe: (listener) => subscribeForScope(scope, listener),
   getSnapshot: () => getSnapshotForScope(scope),
   list: () => listForScope(scope),

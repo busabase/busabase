@@ -228,7 +228,11 @@ export const COMMIT_PAYLOAD_SCHEMAS = {
 
   // ── Views ─────────────────────────────────────────────────────────────────
   view_create: z.looseObject({ ...viewSnapshot, name: z.string(), slug: z.string() }),
-  view_update: z.looseObject(viewSnapshot),
+  view_update: z.looseObject({
+    ...viewSnapshot,
+    configPatch: viewConfig.optional(),
+    configBase: viewConfig.optional(),
+  }),
   view_delete: z.looseObject({ ...viewSnapshot, slug: z.string() }),
   view_restore: z.looseObject({ ...viewSnapshot, slug: z.string() }),
 
@@ -280,6 +284,7 @@ export const COMMIT_PAYLOAD_SCHEMAS = {
 
   // ── Rich-node content ─────────────────────────────────────────────────────
   doc_update: z.looseObject({ body: z.string() }),
+  folder_update: z.looseObject({ body: z.string() }),
   whiteboard_document_update: richNodeDocumentPayload,
   workflow_document_update: richNodeDocumentPayload,
   html_document_update: richNodeDocumentPayload,
@@ -290,6 +295,7 @@ export const COMMIT_PAYLOAD_SCHEMAS = {
     ...fieldDefinition,
     name: iStringSchema,
     slug: z.string(),
+    originViewId: z.string().min(1).optional(),
   }),
   // `mergeBaseDeleteField` requires fieldId.
   base_delete_field: z.looseObject({ ...fieldDefinition, fieldId: z.string() }),

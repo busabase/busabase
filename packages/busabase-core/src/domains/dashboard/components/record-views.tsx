@@ -46,8 +46,8 @@ import {
   getMemberIds,
   isHiddenOnCreate,
   isPeopleFieldType,
-  isReadOnlyFieldDef,
   isReverseRelationDef,
+  isSystemFieldType,
 } from "../../base/field-types";
 import { buildFieldGraph } from "../../base/formula/dependency";
 import { applyRollup, isRollupCompatible } from "../../base/lookup/rollup";
@@ -78,13 +78,17 @@ import {
   shortIdentifier,
 } from "../helpers/format";
 import { mergeSearchIntoHref, useHrefWithCurrentSearch } from "../helpers/link-search";
+import { fetchRecordsByIds } from "../helpers/linked-records";
 import { emptyLookupValues } from "../helpers/lookup";
 import type { RecordSubmitOptions } from "../helpers/view-types";
+import { useNodeLocator } from "../hooks/use-copy-locator";
 import { useDashboardOrpc } from "../orpc-context";
 import { registerSidePanelTab, type SidePanelTabProps } from "../side-panel-registry";
 import { dashboardNodeShareUrl } from "../utils/share-url";
 import { useIsAnonymousVisitor } from "../visitor-context";
+import { ChoiceFieldEditor } from "./choice-field";
 import { renderMentionedText } from "./comments";
+import { CopyLocatorText } from "./copy-locator-button";
 import { DateFieldInput } from "./date-field";
 import { FieldHelp, hasFieldHelp } from "./field-help";
 import {
@@ -345,6 +349,17 @@ export function RecordDetailView({
     queryKey: ["busabase", "record-change-requests", record?.id, { limit: 5 }],
   });
   const historyChangeRequests = historyQuery.data ?? [];
+  const recordTitle = record ? getRecordTitle(record, messages) : undefined;
+  const recordScope = useMemo(
+    () => ({ kind: "record" as const, recordId: record?.id ?? "", recordTitle }),
+    [record?.id, recordTitle],
+  );
+  const recordLocator = useNodeLocator({
+    nodeId: record?.base.nodeId ?? "",
+    nodeName: record?.base.name ?? "",
+    nodeType: "base",
+    scope: recordScope,
+  });
   const historyError = historyQuery.error
     ? presentCoreError(messages, locale, historyQuery.error, messages.recordView.failedLoadHistory)
     : null;
@@ -497,7 +512,7 @@ export function RecordDetailView({
         >
           <RecordHero record={record} />
           <RecordFieldPanel record={record} records={records} />
-          <RecordLinkedFromPanel record={record} />
+          <RecordLinkedFromPanel key={record.id} record={record} />
           {!isAnon ? <RecordCommentsPanel client={client} record={record} /> : null}
         </main>
         {!isAnon ? (
@@ -554,7 +569,13 @@ export function RecordDetailView({
                   {messages.recordView.technicalIds}
                 </summary>
                 <div className="mt-2 space-y-1.5">
-                  <SidebarRow label={messages.common.record} value={record.id} />
+                  {/* The id people look for when they want to point an agent
+                      at this record — so clicking it hands over the locator
+                      prompt, not a bare id the agent cannot act on. */}
+                  <SidebarRow
+                    label={messages.common.record}
+                    value={<CopyLocatorText locator={recordLocator}>{record.id}</CopyLocatorText>}
+                  />
                   <SidebarRow label={messages.recordView.creatorId} value={record.createdBy} />
                   <SidebarRow
                     label={messages.recordView.authorId}
@@ -1011,13 +1032,19 @@ export function RecordFieldInput({
     field.type === "relation"
       ? records.filter((record) => record.baseId === field.options.targetBaseId)
       : [];
-  const choiceValue = Array.isArray(value)
-    ? value.filter((item): item is string => typeof item === "string")
-    : typeof value === "string" && value
-      ? [value]
-      : [];
-
   const orpc = useDashboardOrpc();
+  // A reverse column (two-way relation) is edited like any relation when the
+  // viewer can open the Base whose records it lists; otherwise it stays a
+  // read-only list. The server still checks write access on that Base.
+  const isReverse = isReverseRelationDef(field);
+  const reverseSourceQuery = useQuery({
+    enabled: isReverse && Boolean(field.options.targetBaseId),
+    queryFn: () => client.getBase(field.options.targetBaseId as string),
+    queryKey: ["busabase", "reverse-relation-base", field.options.targetBaseId],
+    retry: false,
+    staleTime: 60_000,
+  });
+  const reverseEditable = isReverse && reverseSourceQuery.isSuccess;
   const draftScope = lookupDraftClientScope(client);
   const config = field.options.lookup;
   const relation = editorBase?.fields.find(
@@ -1104,12 +1131,25 @@ export function RecordFieldInput({
       const ids =
         config.limit === "first" ? (draftRelationIds ?? []).slice(0, 1) : (draftRelationIds ?? []);
       try {
-        const targets = await Promise.all(ids.map((id) => client.getRecord(id)));
+        // One batched read (per-id on servers without `records.getMany`). An
+        // unresolved id — hidden or removed — invalidates the whole preview,
+        // exactly as a failed per-id read used to.
+        const loaded = await fetchRecordsByIds(
+          {
+            getMany: (recordIds) => client.getRecords(recordIds),
+            getOne: (recordId) => client.getRecord(recordId),
+          },
+          ids,
+          signal,
+        );
         signal.throwIfAborted();
-        if (
-          targets.some((target, index) => target.id !== ids[index] || target.baseId !== source.id)
-        )
-          return null;
+        if (loaded.missingIds.length > 0) return null;
+        const byId = new Map(loaded.records.map((record) => [record.id, record]));
+        const targets = ids.flatMap((id) => {
+          const target = byId.get(id);
+          return target ? [target] : [];
+        });
+        if (targets.some((target) => target.baseId !== source.id)) return null;
         const values = targets.map((target) => target.headCommit.payload[validTarget.slug]);
         return { targets, values, result: applyRollup(values, config.rollup ?? "values") };
       } catch {
@@ -1178,7 +1218,7 @@ export function RecordFieldInput({
         </div>
         <FieldHelp help={field.options.help} id={helpId} />
       </div>
-      {isReverseRelationDef(field) ? (
+      {isReverse && !reverseEditable ? (
         <ReverseRelationReadOnlyValue
           client={client}
           field={field}
@@ -1256,16 +1296,23 @@ export function RecordFieldInput({
           value={value}
         />
       ) : kind === "relation" ? (
-        <RelationFieldEditor
-          ariaDescribedBy={helpId}
-          client={client}
-          field={field}
-          fieldName={fieldName}
-          inputId={inputId}
-          loadedRecords={targetRecords}
-          onChange={onChange}
-          value={relationValue}
-        />
+        <div className="min-w-0" data-reverse-relation-field={isReverse ? field.slug : undefined}>
+          <RelationFieldEditor
+            ariaDescribedBy={helpId}
+            client={client}
+            field={field}
+            fieldName={fieldName}
+            inputId={inputId}
+            loadedRecords={targetRecords}
+            onChange={onChange}
+            value={relationValue}
+          />
+          {isReverse ? (
+            <p className="mt-1 text-muted-foreground text-xs">
+              {messages.reverseRelation.syncHint}
+            </p>
+          ) : null}
+        </div>
       ) : kind === "member" ? (
         <MemberFieldEditor
           ariaDescribedBy={helpId}
@@ -1277,40 +1324,16 @@ export function RecordFieldInput({
           users={memberUsers}
           value={value}
         />
-      ) : kind === "select" ? (
-        <select
-          aria-describedby={helpId}
-          aria-label={fieldName}
-          className="h-9 w-full rounded-md border border-border/70 bg-card px-2.5 py-1.5 text-sm outline-none transition-colors focus:border-primary"
-          id={inputId}
-          onChange={(event) => onChange(event.target.value)}
-          value={fieldValueToString(value)}
-        >
-          <option value="">-</option>
-          {(field.options.choices ?? []).map((choice) => (
-            <option key={choice.id} value={choice.id}>
-              {choice.name}
-            </option>
-          ))}
-        </select>
-      ) : kind === "multiselect" ? (
-        <select
-          aria-describedby={helpId}
-          aria-label={fieldName}
-          className="min-h-9 w-full rounded-md border border-border/70 bg-card px-2.5 py-1.5 text-sm outline-none transition-colors focus:border-primary"
-          id={inputId}
-          multiple
-          onChange={(event) =>
-            onChange(Array.from(event.currentTarget.selectedOptions).map((option) => option.value))
-          }
-          value={choiceValue}
-        >
-          {(field.options.choices ?? []).map((choice) => (
-            <option key={choice.id} value={choice.id}>
-              {choice.name}
-            </option>
-          ))}
-        </select>
+      ) : kind === "select" || kind === "multiselect" ? (
+        <ChoiceFieldEditor
+          ariaDescribedBy={helpId}
+          field={field}
+          fieldName={fieldName}
+          inputId={inputId}
+          key={`${editorInstanceKey}-${field.id}`}
+          onChange={onChange}
+          value={value}
+        />
       ) : kind === "tags" ? (
         <TagFieldEditor
           ariaDescribedBy={helpId}
@@ -1954,6 +1977,7 @@ function RecordLinkedFromPanel({ record }: { record: RecordVO }) {
   const messages = useCoreI18n();
   const resolveIString = useIString();
   const currentSearch = useSearch();
+  const [expanded, setExpanded] = useState(false);
   // Hosts and tests may mount the record page with a partial client; the panel
   // is an extra, so it simply stays hidden when `records` is not available.
   const recordsApi = useDashboardOrpc()?.records;
@@ -1981,15 +2005,19 @@ function RecordLinkedFromPanel({ record }: { record: RecordVO }) {
     LINKED_FROM_LIMIT,
   );
   const sourceQueries = useQueries({
-    queries: recordsApi
-      ? sourceIds.map((id) => recordsApi.get.queryOptions({ input: { recordId: id } }))
-      : [],
+    queries:
+      recordsApi && expanded
+        ? sourceIds.map((id) => recordsApi.get.queryOptions({ input: { recordId: id } }))
+        : [],
   });
   if (!recordsApi || links.length === 0) {
     return linksQuery.isError ? (
-      <p className="mt-5 text-muted-foreground text-xs" role="alert">
-        {messages.reverseRelation.loadFailed}
-      </p>
+      <div className="mt-5 text-muted-foreground text-xs" role="alert">
+        <p>{messages.reverseRelation.loadFailed}</p>
+        <button className="mt-1 underline" onClick={() => void linksQuery.refetch()} type="button">
+          {messages.reverseRelation.retry}
+        </button>
+      </div>
     ) : null;
   }
   const sourcesById = new Map(
@@ -2011,12 +2039,41 @@ function RecordLinkedFromPanel({ record }: { record: RecordVO }) {
     if (!group.records.some((item) => item.id === source.id)) group.records.push(source);
     groups.set(key, group);
   }
-  if (groups.size === 0) return null;
   return (
-    <section className="mt-6" data-record-linked-from={record.id}>
-      <div className="font-medium text-muted-foreground text-sm">
+    <details
+      className="mt-6 rounded-md border border-border/60 p-3"
+      data-record-linked-from={record.id}
+      key={record.id}
+      onToggle={(event) => setExpanded(event.currentTarget.open)}
+      open={expanded}
+    >
+      <summary className="cursor-pointer font-medium text-muted-foreground text-sm">
         {messages.reverseRelation.linkedFrom}
-      </div>
+      </summary>
+      <p className="mt-2 text-muted-foreground text-xs">
+        {messages.reverseRelation.referencesHint}
+      </p>
+      {sourceQueries.some((query) => query.isPending) ? (
+        <p className="mt-2 text-muted-foreground text-xs" role="status">
+          {messages.common.loading}
+        </p>
+      ) : null}
+      {sourceQueries.some((query) => query.isError) ? (
+        <div className="mt-2 text-muted-foreground text-xs" role="alert">
+          <p>{messages.reverseRelation.loadFailed}</p>
+          <button
+            className="mt-1 underline"
+            onClick={() => {
+              for (const query of sourceQueries) {
+                if (query.isError) void query.refetch();
+              }
+            }}
+            type="button"
+          >
+            {messages.reverseRelation.retry}
+          </button>
+        </div>
+      ) : null}
       <div className="mt-2 grid gap-3">
         {[...groups].map(([key, group]) => (
           <div className="text-sm" data-linked-from-group={key} key={key}>
@@ -2026,6 +2083,7 @@ function RecordLinkedFromPanel({ record }: { record: RecordVO }) {
                 const label = getRecordTitle(source, messages);
                 return (
                   <Link
+                    aria-label={fmt(messages.reverseRelation.openSource, { record: label })}
                     className="max-w-64 truncate rounded-md border bg-card px-2 py-0.5 text-primary text-xs transition-colors hover:border-primary/40 hover:bg-primary/5 hover:underline"
                     href={mergeSearchIntoHref(
                       `/base/${source.base.slug}/${source.id}`,
@@ -2042,16 +2100,17 @@ function RecordLinkedFromPanel({ record }: { record: RecordVO }) {
           </div>
         ))}
       </div>
-    </section>
+    </details>
   );
 }
 
 const normalizeEditorFields = (base: BaseVO, fields: Record<string, unknown>) =>
   Object.fromEntries(
     base.fields
-      // System fields and reverse relation columns are computed server-side;
-      // never send them from the editor.
-      .filter((field) => !isReadOnlyFieldDef(field))
+      // System fields are computed server-side; never send them from the
+      // editor. Reverse relation columns ARE sent: the server redirects a
+      // change to the forward field and ignores an unchanged echo.
+      .filter((field) => !isSystemFieldType(field.type))
       .map((field) => [field.slug, normalizeEditorFieldValue(field, fields[field.slug])]),
   );
 

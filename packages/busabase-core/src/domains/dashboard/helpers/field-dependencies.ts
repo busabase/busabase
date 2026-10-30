@@ -34,6 +34,8 @@ export function getFieldDependencies(
     const config = view.config;
     if (
       config.visibleFieldSlugs?.includes(field.slug) ||
+      config.fieldOrderSlugs?.includes(field.slug) ||
+      config.hiddenFieldSlugs?.includes(field.slug) ||
       config.fieldWidths?.[field.slug] !== undefined ||
       [
         config.coverFieldSlug,

@@ -9,6 +9,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useCoreLocale } from "../../../i18n";
 import { routerEnrollmentText } from "../../../i18n/router-enrollment-copy";
 import { DialogContent } from "../../dashboard/components/localized-dialog-content";
+import { readRouterOauthOrigin } from "../utils/router-oauth-origin";
 
 interface Props {
   orpc: BusabaseQueryUtils;
@@ -22,6 +23,27 @@ interface PairingResume {
   enrollmentId: string;
   expiresAt: string;
 }
+
+interface AuthorizationAttempt {
+  popup: Window;
+  flowId: string;
+  origin: string;
+  expiresAt: number;
+  recovering?: boolean;
+}
+
+const authorizationErrors: Record<string, string> = {
+  missing_state: "Router authorization expired or could not be verified. Try again.",
+  state_missing: "Router authorization expired or could not be verified. Try again.",
+  invalid_state: "Router authorization expired or could not be verified. Try again.",
+  expired: "Router authorization expired or could not be verified. Try again.",
+  already_completed: "This Router authorization was already used. Try again.",
+  access_denied: "Router authorization was declined. Try again when ready.",
+  missing_code: "Router authorization was not completed. Try again.",
+  session_expired: "Your session expired. Sign in again, then retry Router authorization.",
+  forbidden: "You no longer have permission to authorize this workspace.",
+  unavailable: "Router is temporarily unavailable. Try authorization again.",
+};
 
 function readPairingResume(key: string): PairingResume | null {
   if (typeof window === "undefined") return null;
@@ -62,7 +84,8 @@ export function RouterEnrollmentDialog({ orpc, spaceId, onConnected }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [now, setNow] = useState(Date.now());
-  const popup = useRef<Window | null>(null);
+  const [authorizing, setAuthorizing] = useState(false);
+  const authorization = useRef<AuthorizationAttempt | null>(null);
   const api = orpc.agents.routerEnrollment;
   const grants = useQuery({ ...api.grants.queryOptions(), enabled: open });
   const mint = useMutation(api.mint.mutationOptions());
@@ -110,24 +133,78 @@ export function RouterEnrollmentDialog({ orpc, spaceId, onConnected }: Props) {
     return () => window.clearInterval(timer);
   }, [open]);
   useEffect(() => {
+    if (!open) return;
     const receive = (event: MessageEvent) => {
-      if (event.origin !== window.location.origin || event.source !== popup.current) return;
+      const attempt = authorization.current;
+      if (
+        !attempt ||
+        event.origin !== attempt.origin ||
+        event.source !== attempt.popup ||
+        event.data?.flowId !== attempt.flowId
+      )
+        return;
       if (
         event.data?.type === "busabase:router-authorized" &&
-        typeof event.data.grantId === "string"
+        typeof event.data.grantId === "string" &&
+        event.data.grantId
       ) {
+        authorization.current = null;
+        setAuthorizing(false);
         setGrantId(event.data.grantId);
         setError(null);
         void grants.refetch();
       } else if (event.data?.type === "busabase:router-error") {
+        authorization.current = null;
+        setAuthorizing(false);
+        const reason = event.data.reason;
         setError(
-          t("Router authorization was not completed. Try again.", "Router 授权未完成，请重试。"),
+          t(
+            typeof reason === "string" && Object.hasOwn(authorizationErrors, reason)
+              ? authorizationErrors[reason]
+              : "Router authorization was not completed. Try again.",
+            "Router 授权未完成，请重试。",
+          ),
         );
       }
     };
+    const timer = window.setInterval(() => {
+      const attempt = authorization.current;
+      if (!attempt || attempt.recovering) return;
+      if (Date.now() >= attempt.expiresAt) {
+        authorization.current = null;
+        setAuthorizing(false);
+        attempt.popup.close();
+        setError(t(authorizationErrors.expired, "Router 授权已过期，请重试。"));
+      } else if (attempt.popup.closed) {
+        // COOP or a lost opener can prevent a successful callback message. Refresh
+        // saved grants without treating another tab's grant as this attempt's result.
+        attempt.recovering = true;
+        void grants.refetch().finally(() => {
+          if (authorization.current !== attempt) return;
+          authorization.current = null;
+          setAuthorizing(false);
+          setError(
+            t(
+              "Authorization window closed. Choose a saved workspace or try authorization again.",
+              "授权窗口已关闭。请选择已保存的工作空间，或重新授权。",
+            ),
+          );
+        });
+      }
+    }, 500);
     window.addEventListener("message", receive);
-    return () => window.removeEventListener("message", receive);
-  }, [grants.refetch, t]);
+    return () => {
+      window.removeEventListener("message", receive);
+      window.clearInterval(timer);
+    };
+  }, [open, grants.refetch, t]);
+  useEffect(
+    () => () => {
+      authorization.current?.popup.close();
+      authorization.current = null;
+    },
+    [],
+  );
 
   const run = async (action: () => Promise<void>) => {
     setError(null);
@@ -143,21 +220,39 @@ export function RouterEnrollmentDialog({ orpc, spaceId, onConnected }: Props) {
     }
   };
   const authorize = () => {
+    if (authorization.current) return;
     setError(null);
-    popup.current = window.open(
-      `/api/agents/acprouter/oauth/start${spaceId ? `?spaceId=${encodeURIComponent(spaceId)}` : ""}`,
-      "busabase-router-oauth",
+    const origin = readRouterOauthOrigin(window.location.origin);
+    const flowId = window.crypto.randomUUID();
+    const url = new URL("/api/agents/acprouter/oauth/start", origin);
+    if (spaceId) url.searchParams.set("spaceId", spaceId);
+    url.searchParams.set("flowId", flowId);
+    url.searchParams.set("returnOrigin", window.location.origin);
+    const popup = window.open(
+      url.toString(),
+      `busabase-router-oauth-${flowId}`,
       "popup,width=560,height=760",
     );
-    if (!popup.current)
+    if (!popup) {
       setError(t("Allow pop-ups, then try authorization again.", "请允许弹出窗口后重新授权。"));
+      return;
+    }
+    authorization.current = { popup, flowId, origin, expiresAt: Date.now() + 600_000 };
+    setAuthorizing(true);
   };
   const selectedGrant = grantId || grants.data?.[0]?.grantId || "";
   return (
     <Dialog
       open={open}
       onOpenChange={(value) => {
-        if (!busy) setOpen(value);
+        if (!busy) {
+          if (!value) {
+            authorization.current?.popup.close();
+            authorization.current = null;
+            setAuthorizing(false);
+          }
+          setOpen(value);
+        }
       }}
     >
       <DialogTrigger asChild>
@@ -178,6 +273,11 @@ export function RouterEnrollmentDialog({ orpc, spaceId, onConnected }: Props) {
           </DialogDescription>
         </DialogHeader>
         <div className="min-w-0 space-y-5 text-sm leading-6">
+          {authorizing && (
+            <p className="text-muted-foreground" role="status">
+              {t("Complete Router authorization in the new window…", "请在新窗口完成 Router 授权…")}
+            </p>
+          )}
           {grants.isPending && (
             <p className="text-muted-foreground" role="status">
               {t("Loading authorizations…", "正在加载授权…")}
@@ -202,6 +302,7 @@ export function RouterEnrollmentDialog({ orpc, spaceId, onConnected }: Props) {
                     size="sm"
                     className="h-auto min-h-11 shrink-0 whitespace-normal px-2 text-xs text-muted-foreground sm:min-h-9"
                     onClick={authorize}
+                    disabled={authorizing}
                   >
                     {t("Authorize Router workspace", "授权 Router 工作空间")}
                   </Button>
@@ -236,7 +337,7 @@ export function RouterEnrollmentDialog({ orpc, spaceId, onConnected }: Props) {
                 <div className="flex justify-end border-t border-border/40 pt-4">
                   <Button
                     className="h-auto min-h-11 w-full whitespace-normal sm:w-auto"
-                    disabled={busy}
+                    disabled={busy || authorizing}
                     onClick={() =>
                       void run(async () => {
                         setGrantId(selectedGrant);
@@ -250,7 +351,11 @@ export function RouterEnrollmentDialog({ orpc, spaceId, onConnected }: Props) {
                 </div>
               </>
             ) : (
-              <Button className="h-auto min-h-11 whitespace-normal" onClick={authorize}>
+              <Button
+                className="h-auto min-h-11 whitespace-normal"
+                onClick={authorize}
+                disabled={authorizing}
+              >
                 {t("Authorize Router workspace", "授权 Router 工作空间")}
               </Button>
             ))}

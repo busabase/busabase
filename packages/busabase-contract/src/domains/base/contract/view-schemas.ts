@@ -77,15 +77,20 @@ export const viewConfigSchema = z.object({
   filterConjunction: viewFilterConjunctionSchema.optional(),
   sorts: z.array(viewSortSchema).default([]),
   visibleFieldSlugs: z.array(z.string()).nullable().optional(),
+  fieldOrderSlugs: z.array(z.string()).optional(),
+  hiddenFieldSlugs: z.array(z.string()).optional(),
+  autoShowNewFields: z.boolean().optional(),
   fieldWidths: z
     .record(z.string().min(1), z.number().int().min(VIEW_FIELD_MIN_WIDTH).max(VIEW_FIELD_MAX_WIDTH))
     .optional(),
-  // ── Gallery-only presentation config (ignored by table views) ──
-  // Which attachment field supplies the cover image (null = no cover).
+  // Gallery and Kanban: attachment cover (null = no cover). Omitted means
+  // automatic in gallery views and no cover in Kanban views.
   coverFieldSlug: z.string().nullable().optional(),
   coverFit: galleryCoverFitSchema.optional(),
+  // Gallery-only size preset.
   cardSize: galleryCardSizeSchema.optional(),
-  // Whether to render the field label above each value on a card.
+  // Gallery and Kanban: labels above card values. Omitted defaults are resolved
+  // by view type (gallery: false, Kanban: true), never globally by the schema.
   showFieldLabels: z.boolean().optional(),
   // ── Kanban-only: which single-select field stacks records into columns.
   stackByFieldSlug: z.string().nullable().optional(),

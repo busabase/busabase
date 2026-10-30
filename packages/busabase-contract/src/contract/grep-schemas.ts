@@ -31,8 +31,10 @@ import {
  */
 /**
  * BREAKING (renamed from "docs" in 0.18.0): this source scans the content of
- * EVERY node type that stores a content object — `doc`, `html`, `whiteboard`
- * and `workflow` — not just Docs. The old name described the only type that
+ * EVERY node type that stores a content object — `doc`, `folder`, `html`,
+ * `whiteboard` and `workflow` — not just Docs. A folder's optional readme is
+ * that object (`…/folder/readme.md`); a missing object is an empty body, not
+ * an error. The old name described the only type that
  * had been implemented, not the category, and kept the other three silently
  * unsearchable. Narrow with `scope.nodes.types` to get the old doc-only
  * behaviour back explicitly.
@@ -54,7 +56,7 @@ export const UnifiedGrepFilesScopeSchema = z.object({
 export type UnifiedGrepFilesScope = z.infer<typeof UnifiedGrepFilesScopeSchema>;
 
 /** Node-content scope — narrow by node id and/or node type; omitted scans every non-archived node that has content. */
-export const SearchableNodeTypeSchema = z.enum(["doc", "html", "whiteboard", "workflow"]);
+export const SearchableNodeTypeSchema = z.enum(["doc", "folder", "html", "whiteboard", "workflow"]);
 export type SearchableNodeType = z.infer<typeof SearchableNodeTypeSchema>;
 
 export const UnifiedGrepNodesScopeSchema = z.object({
@@ -142,8 +144,8 @@ export type UnifiedGrepFileMatchVO = z.infer<typeof UnifiedGrepFileMatchVOSchema
 export const UnifiedGrepNodeMatchVOSchema = z.object({
   source: z.literal("nodes"),
   /**
-   * Which node type matched. Also tells you how to read `line`: for `doc` and
-   * `html` it is a real source line; for `whiteboard` and `workflow` the stored
+   * Which node type matched. Also tells you how to read `line`: for `doc`,
+   * `folder` and `html` it is a real source line; for `whiteboard` and `workflow` the stored
    * object is JSON, so it indexes the EXTRACTED text (one line per authored
    * string, document order) and is not a position to open the file at.
    */

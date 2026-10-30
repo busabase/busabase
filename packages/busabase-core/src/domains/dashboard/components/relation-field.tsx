@@ -1,4 +1,4 @@
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import type { BusabaseDashboardApiClient } from "busabase-contract/api-client";
 import type { BaseFieldVO, RecordVO } from "busabase-contract/types";
 import { ChevronLeft, ChevronRight, Plus, X } from "lucide-react";
@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { fmt, useCoreI18n } from "../../../i18n";
 import { getPrimaryField } from "../../base/utils/primary-field";
 import { getRecordTitle } from "../helpers/change-request";
+import { useLinkedRecords } from "../hooks/use-linked-records";
 
 // Client instances are scoped to their host/workspace, unlike bare Base IDs.
 const clientScopes = new WeakMap<BusabaseDashboardApiClient, number>();
@@ -128,18 +129,14 @@ export function RelationFieldEditor({
   });
   for (const record of optionsQuery.data?.records ?? [])
     knownRecords.current.set(record.id, record);
-  const selectedQueries = useQueries({
-    queries: value
-      .filter((id) => !knownRecords.current.has(id))
-      .map((id) => ({
-        queryKey: ["busabase", "relation-selected", scope, id],
-        queryFn: () => client.getRecord(id),
-        retry: false,
-      })),
+  // Selected links not already on screen resolve in one batched read. A link
+  // that stays unresolved (hidden, removed, or the read failed) keeps its id
+  // and renders as unavailable rather than being dropped from the value.
+  const selected = useLinkedRecords({
+    client,
+    ids: value.filter((id) => !knownRecords.current.has(id)),
   });
-  for (const selected of selectedQueries) {
-    if (selected.data) knownRecords.current.set(selected.data.id, selected.data);
-  }
+  for (const record of selected.records) knownRecords.current.set(record.id, record);
   const multiple = field.options.multiple !== false;
   const update = (id: string) => {
     if (value.includes(id)) onChange(multiple ? value.filter((item) => item !== id) : "");
@@ -159,7 +156,7 @@ export function RelationFieldEditor({
           const record = knownRecords.current.get(id);
           const title = record
             ? getRecordTitle(record, messages)
-            : selectedQueries.some((item) => item.isPending)
+            : selected.isPending
               ? messages.common.loading
               : messages.base.relationUnavailable;
           return (

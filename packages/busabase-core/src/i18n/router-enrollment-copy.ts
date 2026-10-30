@@ -366,6 +366,117 @@ const translations: Record<CoreLocale, readonly string[]> = {
   ],
 };
 
+const authorizationEnglish = [
+  "Router authorization expired or could not be verified. Try again.",
+  "This Router authorization was already used. Try again.",
+  "Router authorization was declined. Try again when ready.",
+  "Your session expired. Sign in again, then retry Router authorization.",
+  "You no longer have permission to authorize this workspace.",
+  "Router is temporarily unavailable. Try authorization again.",
+  "Authorization window closed. Choose a saved workspace or try authorization again.",
+  "Complete Router authorization in the new window…",
+];
+
+const authorizationTranslations: Record<CoreLocale, readonly string[]> = {
+  en: authorizationEnglish,
+  "zh-CN": [
+    "Router 授权已过期或无法验证，请重新授权。",
+    "此 Router 授权已使用，请重新授权。",
+    "已拒绝 Router 授权，准备好后可重新授权。",
+    "登录已过期，请重新登录后再进行 Router 授权。",
+    "你已无权授权此工作空间。",
+    "Router 暂时不可用，请重新授权。",
+    "授权窗口已关闭。请选择已保存的工作空间，或重新授权。",
+    "请在新窗口完成 Router 授权…",
+  ],
+  "zh-TW": [
+    "Router 授權已過期或無法驗證，請重新授權。",
+    "此 Router 授權已使用，請重新授權。",
+    "已拒絕 Router 授權，準備好後可重新授權。",
+    "登入已過期，請重新登入後再進行 Router 授權。",
+    "你已無權授權此工作空間。",
+    "Router 暫時無法使用，請重新授權。",
+    "授權視窗已關閉。請選擇已儲存的工作空間，或重新授權。",
+    "請在新視窗完成 Router 授權…",
+  ],
+  ja: [
+    "Router の認可が期限切れか検証できません。再度認可してください。",
+    "この Router 認可は使用済みです。再度認可してください。",
+    "Router の認可が拒否されました。準備ができたら再試行してください。",
+    "セッションの期限が切れました。再ログインして Router を認可してください。",
+    "このワークスペースを認可する権限がありません。",
+    "Router は一時的に利用できません。認可を再試行してください。",
+    "認可ウィンドウが閉じました。保存済みのワークスペースを選ぶか、再度認可してください。",
+    "新しいウィンドウで Router の認可を完了してください…",
+  ],
+  ko: [
+    "Router 승인이 만료되었거나 확인할 수 없습니다. 다시 승인하세요.",
+    "이미 사용된 Router 승인입니다. 다시 승인하세요.",
+    "Router 승인이 거부되었습니다. 준비되면 다시 시도하세요.",
+    "세션이 만료되었습니다. 다시 로그인한 뒤 Router를 승인하세요.",
+    "이 워크스페이스를 승인할 권한이 없습니다.",
+    "Router를 일시적으로 사용할 수 없습니다. 승인을 다시 시도하세요.",
+    "승인 창이 닫혔습니다. 저장된 워크스페이스를 선택하거나 다시 승인하세요.",
+    "새 창에서 Router 승인을 완료하세요…",
+  ],
+  es: [
+    "La autorización de Router caducó o no se pudo verificar. Reinténtalo.",
+    "Esta autorización de Router ya se utilizó. Reinténtalo.",
+    "Se rechazó la autorización de Router. Reinténtalo cuando quieras.",
+    "Tu sesión caducó. Inicia sesión de nuevo y vuelve a autorizar Router.",
+    "Ya no tienes permiso para autorizar este espacio.",
+    "Router no está disponible temporalmente. Vuelve a autorizar.",
+    "Se cerró la ventana de autorización. Elige un espacio guardado o vuelve a autorizar.",
+    "Completa la autorización de Router en la nueva ventana…",
+  ],
+  pt: [
+    "A autorização do Router expirou ou não pôde ser verificada. Tente novamente.",
+    "Esta autorização do Router já foi usada. Tente novamente.",
+    "A autorização do Router foi recusada. Tente novamente quando estiver pronto.",
+    "Sua sessão expirou. Entre novamente e autorize o Router.",
+    "Você não tem mais permissão para autorizar este espaço.",
+    "O Router está temporariamente indisponível. Tente autorizar novamente.",
+    "A janela de autorização foi fechada. Escolha um espaço salvo ou autorize novamente.",
+    "Conclua a autorização do Router na nova janela…",
+  ],
+  vi: [
+    "Ủy quyền Router đã hết hạn hoặc không thể xác minh. Hãy thử lại.",
+    "Ủy quyền Router này đã được sử dụng. Hãy thử lại.",
+    "Ủy quyền Router đã bị từ chối. Hãy thử lại khi sẵn sàng.",
+    "Phiên đã hết hạn. Đăng nhập lại rồi ủy quyền Router.",
+    "Bạn không còn quyền ủy quyền không gian này.",
+    "Router tạm thời không khả dụng. Hãy ủy quyền lại.",
+    "Cửa sổ ủy quyền đã đóng. Chọn không gian đã lưu hoặc ủy quyền lại.",
+    "Hoàn tất ủy quyền Router trong cửa sổ mới…",
+  ],
+  fr: [
+    "L’autorisation Router a expiré ou ne peut pas être vérifiée. Réessayez.",
+    "Cette autorisation Router a déjà été utilisée. Réessayez.",
+    "L’autorisation Router a été refusée. Réessayez quand vous le souhaitez.",
+    "Votre session a expiré. Reconnectez-vous, puis autorisez Router.",
+    "Vous n’avez plus la permission d’autoriser cet espace.",
+    "Router est temporairement indisponible. Réessayez l’autorisation.",
+    "La fenêtre d’autorisation est fermée. Choisissez un espace enregistré ou autorisez à nouveau.",
+    "Terminez l’autorisation Router dans la nouvelle fenêtre…",
+  ],
+  de: [
+    "Die Router-Autorisierung ist abgelaufen oder konnte nicht geprüft werden. Erneut versuchen.",
+    "Diese Router-Autorisierung wurde bereits verwendet. Erneut versuchen.",
+    "Die Router-Autorisierung wurde abgelehnt. Versuchen Sie es später erneut.",
+    "Ihre Sitzung ist abgelaufen. Melden Sie sich erneut an und autorisieren Sie Router.",
+    "Sie dürfen diesen Arbeitsbereich nicht mehr autorisieren.",
+    "Router ist vorübergehend nicht verfügbar. Autorisierung erneut versuchen.",
+    "Das Autorisierungsfenster wurde geschlossen. Wählen Sie einen gespeicherten Arbeitsbereich oder autorisieren Sie erneut.",
+    "Schließen Sie die Router-Autorisierung im neuen Fenster ab…",
+  ],
+};
+
+for (const [locale, values] of Object.entries(authorizationTranslations)) {
+  if (values.length !== authorizationEnglish.length || values.some((value) => !value)) {
+    throw new Error(`Incomplete Router authorization copy for ${locale}`);
+  }
+}
+
 for (const [locale, values] of Object.entries(translations)) {
   if (values.length !== english.length || values.some((value) => !value)) {
     throw new Error(`Incomplete Router enrollment copy for ${locale}`);
@@ -374,5 +485,9 @@ for (const [locale, values] of Object.entries(translations)) {
 
 export function routerEnrollmentText(locale: CoreLocale, message: string): string {
   const index = english.indexOf(message);
-  return index < 0 ? message : (translations[locale][index] ?? message);
+  if (index >= 0) return translations[locale][index] ?? message;
+  const authorizationIndex = authorizationEnglish.indexOf(message);
+  return authorizationIndex < 0
+    ? message
+    : (authorizationTranslations[locale][authorizationIndex] ?? message);
 }

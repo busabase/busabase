@@ -1,7 +1,7 @@
 import "server-only";
 
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { and, eq, isNull, lt } from "drizzle-orm";
+import { and, eq, gt, isNull, lt } from "drizzle-orm";
 import { getContextActorId, getContextSpaceId } from "../../../context";
 import { getDb } from "../../../db";
 import { assertWorkspacePermission } from "../../../logic/node-acl";
@@ -23,6 +23,24 @@ const STATE_TTL_MS = 10 * 60 * 1000;
 const ENROLLMENT_RESOURCE_PATH = "/api/busabase-enrollment";
 const CLIENT_ID = "busabase-cloud-enrollment";
 
+export type RouterOauthErrorReason =
+  | "invalid_state"
+  | "expired"
+  | "already_completed"
+  | "forbidden"
+  | "unavailable";
+
+/** Safe callback classification without exposing upstream responses or credentials. */
+export class RouterOauthError extends Error {
+  constructor(
+    public readonly reason: RouterOauthErrorReason,
+    message: string,
+  ) {
+    super(message);
+    this.name = "RouterOauthError";
+  }
+}
+
 function signingSecret(): string {
   const key = process.env.BETTER_AUTH_SECRET || process.env.BUSABASE_VAULT_ENCRYPTION_KEY;
   if (!key) {
@@ -42,13 +60,11 @@ function buildSignedState(): { nonce: string; signedState: string } {
 }
 
 function verifySignedState(signedState: string): boolean {
-  const [nonce, signature] = signedState.split(".");
-  if (!nonce || !signature) return false;
-  const expected = signState(nonce);
-  return (
-    signature.length === expected.length &&
-    timingSafeEqual(Buffer.from(signature), Buffer.from(expected))
-  );
+  const [nonce, signature, extra] = signedState.split(".");
+  if (!nonce || !signature || extra !== undefined) return false;
+  const expected = Buffer.from(signState(nonce));
+  const actual = Buffer.from(signature);
+  return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 
 /**
@@ -216,15 +232,12 @@ export interface CompleteRouterOauthResult {
  *
  * Order of operations is deliberate and every step must pass before the
  * grant row is persisted:
- * 1. Consume the signed one-use state exactly once (atomic claim via
+ * 1. Verify the signature, frozen actor, expiry and current workspace membership
+ *    before claiming the state, so another signed-in user cannot burn a valid flow.
+ * 2. Consume the signed one-use state exactly once (atomic claim via
  *    `UPDATE ... WHERE status = 'pending' RETURNING` — a second call with
  *    the same `signedState` finds zero rows and is rejected, which is what
  *    makes a replayed callback request a no-op rather than a double-grant).
- * 2. Re-verify the CURRENTLY signed-in actor matches the actor the flow was
- *    STARTED under, and is still a member of the frozen space — a
- *    different actor completing someone else's callback (e.g. a shared
- *    browser, or a stolen callback URL) must not succeed just because the
- *    state signature itself is valid.
  * 3. Only then exchange the code and call grant-info.
  *
  * `currentActorId`/`isStillMemberOfFrozenSpace` are caller-supplied rather
@@ -242,10 +255,42 @@ export async function completeRouterOauth(params: {
   isStillMemberOfFrozenSpace: (spaceId: string) => Promise<boolean>;
 }): Promise<CompleteRouterOauthResult> {
   if (!verifySignedState(params.signedState)) {
-    throw new Error("This ACPRouter connection request is invalid or was tampered with.");
+    throw new RouterOauthError(
+      "invalid_state",
+      "This ACPRouter connection request is invalid or was tampered with.",
+    );
   }
 
   const database = await getDb();
+  const [pending] = await database
+    .select()
+    .from(busabaseRouterOauthStates)
+    .where(eq(busabaseRouterOauthStates.signedState, params.signedState));
+  if (!pending) {
+    throw new RouterOauthError("invalid_state", "This ACPRouter connection request is invalid.");
+  }
+  if (pending.busabaseActorId !== params.currentActorId) {
+    throw new RouterOauthError(
+      "forbidden",
+      "This ACPRouter connection request belongs to a different signed-in user.",
+    );
+  }
+  if (pending.status !== "pending") {
+    throw new RouterOauthError(
+      "already_completed",
+      "This ACPRouter connection request already completed. Start a new connection.",
+    );
+  }
+  if (pending.expiresAt.getTime() <= Date.now()) {
+    throw new RouterOauthError("expired", "This ACPRouter connection request expired. Try again.");
+  }
+  if (!(await params.isStillMemberOfFrozenSpace(pending.busabaseSpaceId))) {
+    throw new RouterOauthError(
+      "forbidden",
+      "You are no longer a member of the workspace that started this connection.",
+    );
+  }
+
   const now = new Date();
 
   const [consumed] = await database
@@ -254,32 +299,46 @@ export async function completeRouterOauth(params: {
     .where(
       and(
         eq(busabaseRouterOauthStates.signedState, params.signedState),
+        eq(busabaseRouterOauthStates.busabaseActorId, params.currentActorId),
+        eq(busabaseRouterOauthStates.busabaseSpaceId, pending.busabaseSpaceId),
         eq(busabaseRouterOauthStates.status, "pending"),
+        gt(busabaseRouterOauthStates.expiresAt, now),
       ),
     )
     .returning();
 
   if (!consumed) {
-    throw new Error("This ACPRouter connection request already completed or expired.");
-  }
-  if (consumed.expiresAt.getTime() <= now.getTime()) {
-    throw new Error("This ACPRouter connection request expired. Try again.");
-  }
-  if (consumed.busabaseActorId !== params.currentActorId) {
-    throw new Error("This ACPRouter connection request belongs to a different signed-in user.");
-  }
-  if (!(await params.isStillMemberOfFrozenSpace(consumed.busabaseSpaceId))) {
-    throw new Error("You are no longer a member of the workspace that started this connection.");
+    if (pending.expiresAt.getTime() <= now.getTime()) {
+      throw new RouterOauthError(
+        "expired",
+        "This ACPRouter connection request expired. Try again.",
+      );
+    }
+    throw new RouterOauthError(
+      "already_completed",
+      "This ACPRouter connection request already completed. Start a new connection.",
+    );
   }
 
-  const acprouterOrigin = resolveAcprouterEnrollmentOrigin();
-  const token = await exchangeAuthorizationCode(
-    acprouterOrigin,
-    params.code,
-    consumed.pkceVerifier,
-    params.redirectUri,
-  );
-  const grantInfo = await fetchGrantInfo(acprouterOrigin, token.access_token);
+  let token: TokenResponse;
+  let grantInfo: GrantInfoResponse;
+  try {
+    const acprouterOrigin = resolveAcprouterEnrollmentOrigin();
+    token = await exchangeAuthorizationCode(
+      acprouterOrigin,
+      params.code,
+      consumed.pkceVerifier,
+      params.redirectUri,
+    );
+    grantInfo = await fetchGrantInfo(acprouterOrigin, token.access_token);
+  } catch {
+    // The authorization code may already have been exchanged. Keep the state
+    // consumed and require a fresh flow instead of allowing a token replay.
+    throw new RouterOauthError(
+      "unavailable",
+      "ACPRouter could not complete authorization. Start a new connection and try again.",
+    );
+  }
 
   const grantId = `rgr_${randomBytes(16).toString("base64url")}`;
   const stored: StoredRouterGrantTokens = {
