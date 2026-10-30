@@ -9,6 +9,7 @@ import { TextInput } from "~/components/ui/TextInput";
 import { useI18n } from "~/i18n";
 import { typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
+import { localizeSlugConflict, toSlugInput } from "../utils/node-slug";
 
 interface NodeRenameSheetProps {
   visible: boolean;
@@ -30,6 +31,9 @@ interface NodeRenameSheetProps {
  * effective permission level client-side. A "Rename now" the actor isn't
  * allowed to perform fails server-side and surfaces in the inline error, same
  * as any other over-privileged call from this app.
+ *
+ * The sheet also edits the slug, as web's Settings dialog does. It is sent only
+ * when it changed, so a name-only save never re-asserts the node's address.
  */
 export function NodeRenameSheet({ visible, node, onClose, onBack }: NodeRenameSheetProps) {
   const tokens = useTokens();
@@ -37,6 +41,7 @@ export function NodeRenameSheet({ visible, node, onClose, onBack }: NodeRenameSh
   const buda = useBusabaseOrpc();
   const queryClient = useQueryClient();
   const [name, setName] = useState(node.name);
+  const [slug, setSlug] = useState(node.slug);
 
   // Invalidates BOTH the drawer's whole-tree query (`nodes.list` — the one
   // query every rename MUST refresh) AND every detail-screen query keyed by
@@ -61,7 +66,10 @@ export function NodeRenameSheet({ visible, node, onClose, onBack }: NodeRenameSh
     mutationFn: async ({ mergeImmediately }: { mergeImmediately: boolean }) => {
       const trimmed = name.trim();
       if (!buda) throw new Error(t.common.notConnected);
+      const nextSlug = slug.trim();
       if (!trimmed) throw new Error(t.rename.nameRequired);
+      if (!nextSlug) throw new Error(t.rename.slugRequired);
+      const slugChanged = nextSlug !== node.slug;
       // `autoMerge` has to be sent. Without it the endpoint's permission-aware
       // default answered BOTH buttons the same way: "Request rename" renamed the
       // node on the spot for a write-capable user and this still reported
@@ -70,12 +78,28 @@ export function NodeRenameSheet({ visible, node, onClose, onBack }: NodeRenameSh
       // gets a pending request back either way.
       const changeRequest = await buda.client.nodes.createChangeRequest({
         autoMerge: mergeImmediately,
-        operations: [{ kind: "rename", nodeId: node.id, name: trimmed }],
+        operations: [
+          {
+            kind: "rename",
+            nodeId: node.id,
+            name: trimmed,
+            ...(slugChanged ? { slug: nextSlug } : {}),
+          },
+        ],
       });
-      return { changeRequest, merged: changeRequest.status === "merged" };
+      return {
+        changeRequest,
+        merged: changeRequest.status === "merged",
+        slugMerged: changeRequest.status === "merged" && slugChanged,
+      };
     },
-    onSuccess: async () => {
-      await invalidateNodes();
+    onSuccess: async ({ slugMerged }) => {
+      // The slug is baked into the drawer tree and every list that links here,
+      // none of which are keyed by this node, so refresh everything. No route
+      // change is needed: this sheet is never offered for a Base (the only type
+      // addressed by slug), and every other type opens by node id.
+      if (slugMerged) await queryClient.invalidateQueries();
+      else await invalidateNodes();
       onClose();
     },
   });
@@ -84,10 +108,13 @@ export function NodeRenameSheet({ visible, node, onClose, onBack }: NodeRenameSh
     if (renameMutation.isPending) return;
     renameMutation.reset();
     setName(node.name);
+    setSlug(node.slug);
     onBack();
   };
 
   const trimmed = name.trim();
+  const slugMissing = slug.trim().length === 0;
+  const canSubmit = trimmed.length > 0 && !slugMissing;
 
   return (
     <NativeBottomSheet
@@ -100,21 +127,24 @@ export function NodeRenameSheet({ visible, node, onClose, onBack }: NodeRenameSh
         <NativeActionBar>
           {renameMutation.error ? (
             <NativeInlineError
-              message={renameMutation.error.message || t.rename.failed}
+              message={
+                localizeSlugConflict(t.rename.slugTaken, renameMutation.error.message) ||
+                t.rename.failed
+              }
               onReset={() => renameMutation.reset()}
             />
           ) : null}
           <Button
             label={t.rename.renameNow}
             loading={renameMutation.isPending}
-            disabled={trimmed.length === 0}
+            disabled={!canSubmit}
             fullWidth
             onPress={() => renameMutation.mutate({ mergeImmediately: true })}
           />
           <Button
             label={t.rename.requestRename}
             variant="secondary"
-            disabled={renameMutation.isPending || trimmed.length === 0}
+            disabled={renameMutation.isPending || !canSubmit}
             fullWidth
             onPress={() => renameMutation.mutate({ mergeImmediately: false })}
           />
@@ -130,6 +160,22 @@ export function NodeRenameSheet({ visible, node, onClose, onBack }: NodeRenameSh
         autoCapitalize="sentences"
         onChangeText={setName}
       />
+      <TextInput
+        label={t.rename.slugLabel}
+        placeholder={t.rename.slugPlaceholder}
+        value={slug}
+        autoCapitalize="none"
+        autoCorrect={false}
+        onChangeText={(value) => setSlug(toSlugInput(value))}
+      />
+      <Text
+        style={[
+          typography.small,
+          { color: slugMissing ? tokens.destructive : tokens.mutedForeground },
+        ]}
+      >
+        {slugMissing ? t.rename.slugRequired : t.rename.slugHint}
+      </Text>
       <Text style={[typography.small, { color: tokens.mutedForeground }]}>
         {t.rename.requestReviewHint}
       </Text>

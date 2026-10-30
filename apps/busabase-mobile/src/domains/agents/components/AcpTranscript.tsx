@@ -1,8 +1,19 @@
 import { groupConsecutiveToolCalls } from "@acp-ui/core/group";
-import type { AcpBlock, AcpPermissionBlock } from "@acp-ui/core/reduce";
+import type {
+  AcpBlock,
+  AcpInputBlock,
+  AcpInputResponse,
+  AcpPermissionBlock,
+} from "@acp-ui/core/reduce";
 import { Fragment } from "react";
 import { View } from "react-native";
 import { spacing } from "~/theme/tokens";
+import {
+  AcpInputCard,
+  AcpObservationCard,
+  AcpResourceCard,
+  type AcpResourceResolver,
+} from "./AcpFidelityBlocks";
 import { AcpMessageBlockView } from "./AcpMessageBlockView";
 import { AcpNoteBanner } from "./AcpNoteBanner";
 import { AcpPermissionCard } from "./AcpPermissionCard";
@@ -14,6 +25,8 @@ interface AcpTranscriptProps {
   /** True while a turn is in flight — only the LAST block gets its live state. */
   streaming: boolean;
   onAnswerPermission: (block: AcpPermissionBlock, optionId: string) => void;
+  onAnswerInput?: (block: AcpInputBlock, response: AcpInputResponse) => void;
+  resolveResource?: AcpResourceResolver;
 }
 
 /**
@@ -27,7 +40,13 @@ interface AcpTranscriptProps {
  * the chat screen owns scrolling here, because it also owns the
  * auto-scroll-to-latest behaviour a plain list does not need.
  */
-export function AcpTranscript({ blocks, streaming, onAnswerPermission }: AcpTranscriptProps) {
+export function AcpTranscript({
+  blocks,
+  streaming,
+  onAnswerPermission,
+  onAnswerInput,
+  resolveResource,
+}: AcpTranscriptProps) {
   const tail = blocks.length > 0 ? blocks[blocks.length - 1] : undefined;
 
   const renderSingle = (block: AcpBlock) => {
@@ -51,6 +70,27 @@ export function AcpTranscript({ blocks, streaming, onAnswerPermission }: AcpTran
         );
       case "note":
         return <AcpNoteBanner key={block.id} block={block} />;
+      case "input_request":
+        return (
+          <AcpInputCard
+            key={block.id}
+            block={block}
+            onAnswer={onAnswerInput ? (response) => onAnswerInput(block, response) : undefined}
+          />
+        );
+      case "resource":
+        return (
+          <AcpResourceCard
+            key={block.id}
+            resource={block.resource}
+            resolveResource={resolveResource}
+          />
+        );
+      case "plan":
+      case "step":
+      case "turn":
+      case "job":
+        return <AcpObservationCard key={block.id} block={block} />;
       default: {
         // `AcpBlock` is a closed union — this is unreachable. The `never`
         // assignment turns a new block kind added to the core into a

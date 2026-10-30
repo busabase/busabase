@@ -30,12 +30,28 @@ export function AcpPermissionCard({
   return (
     <View style={[styles.card, { borderColor: tokens.border, backgroundColor: tokens.card }]}>
       <Text style={[typography.bodyEm, { color: tokens.foreground }]}>{block.title}</Text>
-      {typeof resolution === "object" ? (
+      {resolution === "cancelled" ? (
+        <Text style={[typography.small, { color: tokens.mutedForeground }]}>
+          {t.agents.cancelled}
+        </Text>
+      ) : typeof resolution === "object" ? (
         <Text style={[typography.small, { color: tokens.mutedForeground }]}>
           {t.agents.permissionAnswered}{" "}
           {block.options.find((option) => option.optionId === resolution.optionId)?.name ??
             resolution.optionId}
         </Text>
+      ) : block.confirmationUnknown ? (
+        <View style={styles.options}>
+          <Text style={[typography.small, { color: tokens.mutedForeground }]}>
+            {t.agents.confirmationUnknown}
+          </Text>
+          {resolution === "pending" && block.submittedOptionId ? (
+            <Button
+              label={t.agents.retryDecision}
+              onPress={() => block.submittedOptionId && onAnswer(block.submittedOptionId)}
+            />
+          ) : null}
+        </View>
       ) : (
         <View style={styles.options}>
           {block.options.map((option) => (
@@ -49,6 +65,11 @@ export function AcpPermissionCard({
           ))}
         </View>
       )}
+      {block.error ? (
+        <Text accessibilityRole="alert" style={{ color: tokens.destructive }}>
+          {block.error}
+        </Text>
+      ) : null}
     </View>
   );
 }

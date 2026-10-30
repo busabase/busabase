@@ -94,9 +94,9 @@ function AgentChatContent({ buda }: { buda: Buda }) {
     },
   });
 
-  const tail = chat.blocks.length > 0 ? chat.blocks[chat.blocks.length - 1] : undefined;
-  const waitingOnPermission = tail?.kind === "permission" && tail.resolution === "pending";
-  const composerDisabled = !chat.sessionId || chat.sending || chat.ended;
+  const waitingOnPermission = status === "waiting_permission";
+  const active = chat.sending || status === "busy" || waitingOnPermission;
+  const composerDisabled = !chat.sessionId || active || chat.ended;
 
   return (
     <SafeAreaView edges={["top"]} style={[styles.safe, { backgroundColor: tokens.background }]}>
@@ -155,6 +155,10 @@ function AgentChatContent({ buda }: { buda: Buda }) {
             blocks={chat.blocks}
             streaming={chat.sending}
             onAnswerPermission={(block, optionId) => void chat.answerPermission(block, optionId)}
+            onAnswerInput={(block, response) => void chat.answerInput(block, response)}
+            resolveResource={(resource) =>
+              buda.orpc.agents.sessions.resolveResource.call({ sessionId, resource })
+            }
           />
         </ScrollView>
 
@@ -163,7 +167,7 @@ function AgentChatContent({ buda }: { buda: Buda }) {
         >
           <AcpComposer
             disabled={composerDisabled}
-            sending={chat.sending}
+            sending={active}
             placeholder={
               waitingOnPermission
                 ? t.agents.composerWaitingPlaceholder

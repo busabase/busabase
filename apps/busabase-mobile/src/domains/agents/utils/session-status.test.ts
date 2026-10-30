@@ -49,6 +49,31 @@ describe("deriveAgentSessionStatus", () => {
   it("is busy while a prompt is in flight", () => {
     expect(deriveAgentSessionStatus({ ...base, sending: true })).toBe("busy");
   });
+  it("keeps a restored active turn busy without a local prompt request", () => {
+    const blocks: AcpBlock[] = [
+      { kind: "turn", id: "t", startedAt: "2026-10-27T01:00:00Z", status: "running" },
+    ];
+    expect(deriveAgentSessionStatus({ ...base, blocks })).toBe("busy");
+  });
+  it("finds pending questions before a later tool or background update", () => {
+    const blocks: AcpBlock[] = [
+      {
+        kind: "input_request",
+        id: "q",
+        message: "Choose",
+        requestedSchema: {},
+        resolution: "pending",
+      },
+      { kind: "job", id: "job", job: { id: "job", title: "Render", status: "running" } },
+    ];
+    expect(deriveAgentSessionStatus({ ...base, blocks })).toBe("waiting_permission");
+  });
+  it("does not keep a cancelled authorization busy", () => {
+    const blocks: AcpBlock[] = [
+      { kind: "permission", id: "p", title: "Write", options: [], resolution: "cancelled" },
+    ];
+    expect(deriveAgentSessionStatus({ ...base, blocks })).toBe("idle");
+  });
 
   it("falls back to idle", () => {
     expect(deriveAgentSessionStatus(base)).toBe("idle");
