@@ -5,7 +5,10 @@ import type { AcpToolCallBlock } from "@acp-ui/core/reduce";
 import type { ToolPart } from "kui/ai-elements/tool";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "kui/collapsible";
 import { CheckIcon, ChevronDownIcon, Loader2Icon } from "lucide-react";
+import type { ReactNode } from "react";
+import type { AcpResourceLabels, AcpResourceResolver } from "./resource-view";
 import { AcpToolCallView } from "./tool-call-view";
+import { parentToolCallId } from "./tool-parent";
 
 /**
  * The strings a tool-run summary is built from — English defaults, matching
@@ -19,6 +22,7 @@ export interface AcpToolRunLabels {
   edited: (count: number) => string;
   ran: (count: number) => string;
   usedTools: (count: number) => string;
+  subtasks?: (count: number) => string;
 }
 
 const plural = (count: number, singular: string, plural: string) =>
@@ -52,6 +56,9 @@ export interface AcpToolRunViewProps {
   blocks: AcpToolCallBlock[];
   labels?: AcpToolRunLabels;
   statusLabels?: Partial<Record<ToolPart["state"], string>>;
+  outcomeLabels?: { cancelled?: string; interrupted?: string };
+  resolveResource?: AcpResourceResolver;
+  resourceLabels?: Partial<AcpResourceLabels>;
 }
 
 /**
@@ -63,9 +70,55 @@ export function AcpToolRunView({
   blocks,
   labels = defaultLabels,
   statusLabels,
+  outcomeLabels,
+  resolveResource,
+  resourceLabels,
 }: AcpToolRunViewProps) {
   const isRunning = hasActiveToolCall(blocks);
   const title = formatToolRunTitle(blocks, labels);
+  const byId = new Map(blocks.map((block) => [block.id, block]));
+  const rendered = new Set<string>();
+  const renderTool = (block: AcpToolCallBlock): ReactNode => {
+    if (rendered.has(block.id)) return null;
+    rendered.add(block.id);
+    const children = blocks.filter(
+      (candidate) => parentToolCallId(candidate) === block.id && !rendered.has(candidate.id),
+    );
+    return (
+      <div key={block.id} data-tool-call-id={block.id}>
+        <AcpToolCallView
+          block={block}
+          statusLabels={statusLabels}
+          outcomeLabels={outcomeLabels}
+          resolveResource={resolveResource}
+          resourceLabels={resourceLabels}
+        />
+        {children.length ? (
+          <Collapsible
+            defaultOpen={isRunning}
+            className="ml-3 border-l pl-3"
+            data-testid="acp-subtasks"
+            data-parent-tool-call-id={block.id}
+          >
+            <CollapsibleTrigger className="py-1 text-muted-foreground text-xs">
+              {labels.subtasks?.(children.length) ?? `${children.length} subtask tools`}
+            </CollapsibleTrigger>
+            <CollapsibleContent className="space-y-1">
+              {children.map(renderTool)}
+            </CollapsibleContent>
+          </Collapsible>
+        ) : null}
+      </div>
+    );
+  };
+  const tree = blocks
+    .filter((block) => {
+      const parent = parentToolCallId(block);
+      return !parent || !byId.has(parent);
+    })
+    .map(renderTool);
+  // Malformed parent cycles must not hide tool calls.
+  tree.push(...blocks.filter((block) => !rendered.has(block.id)).map(renderTool));
 
   return (
     <Collapsible className="group inline-flex max-w-full flex-col" defaultOpen={isRunning}>
@@ -83,11 +136,7 @@ export function AcpToolRunView({
         <span className="min-w-0 truncate font-medium">{title}</span>
         <ChevronDownIcon className="size-3 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
       </CollapsibleTrigger>
-      <CollapsibleContent className="mt-1 space-y-1 py-1 pl-1">
-        {blocks.map((block) => (
-          <AcpToolCallView block={block} key={block.id} statusLabels={statusLabels} />
-        ))}
-      </CollapsibleContent>
+      <CollapsibleContent className="mt-1 space-y-1 py-1 pl-1">{tree}</CollapsibleContent>
     </Collapsible>
   );
 }

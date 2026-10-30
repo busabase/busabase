@@ -1,4 +1,7 @@
-import "@testing-library/jest-dom/vitest";
+import * as matchers from "@testing-library/jest-dom/matchers";
+import { expect } from "vitest";
+
+expect.extend(matchers);
 
 // jsdom has no real object URL implementation. kui's PromptInput calls
 // URL.createObjectURL for every staged attachment, then (on submit) fetches

@@ -14,6 +14,8 @@ import {
 import { Skeleton } from "kui/skeleton";
 import Image from "next/image";
 import type * as React from "react";
+import { useEffect } from "react";
+import { useLocation } from "wouter";
 import { NavMain } from "./NavMain";
 import { NavUser } from "./NavUser";
 import { SpaceSelector } from "./SpaceSelector";
@@ -113,6 +115,15 @@ function SidebarFrame({
   mobileSidebarLabels?: { title: string; description: string };
 }) {
   const { isMobile, openMobile, setOpenMobile } = useSidebar();
+  const [location] = useLocation();
+  // On a phone the sidebar is a drawer laid over the page, so picking a page in it
+  // must reveal that page: close the drawer when the route's PATH changes. Keyed on
+  // the path alone, so a filter or view-state change in the query string leaves an
+  // open drawer be. On desktop the drawer state is unused and this is a no-op.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: closes on every path change
+  useEffect(() => {
+    setOpenMobile(false);
+  }, [location, setOpenMobile]);
   if (!isMobile || !mobileSidebarLabels) {
     return <Sidebar {...props}>{children}</Sidebar>;
   }

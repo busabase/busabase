@@ -57,15 +57,28 @@ back to (role, variant) adjacency, which is what both prior implementations used
 waits indefinitely and *deliberately never auto-approves* — that's a security property, not
 an oversight. The model expresses both rather than hard-coding either.
 
-**Unhandled ACP kinds are ignored, not leaked.** Six of the eight — `plan`, `plan_update`,
-`plan_removed`, `available_commands_update`, `current_mode_update`, `config_option_update` —
-produce no block, and a test pins that: raw JSON never reaches the user, and adding a renderer
-later is a deliberate decision, not a gap discovered by accident. The other two,
-`usage_update` and `session_info_update`, ARE handled — as session-level state
-(`reduce/session-info.ts`'s `usageOf`/`sessionTitleOf`/`foldUsage`/`foldSessionTitle`), not as
-a transcript block, because real agents sent `usage_update` three times in one turn; folding it
-into the message list would flood the transcript with a fact that belongs at the session level,
-next to `sending`/`ended`.
+**ACP facts keep their own shapes.** Tool calls retain structured content, diffs,
+locations, raw values and metadata. Message content stays ordered, including embedded
+resources and resource links; `text` and `attachments` remain available for existing hosts.
+V1 `plan` updates replace the current full plan for the turn. Experimental plan variants
+are not enabled implicitly. Session title, context-window usage and commands are folded
+separately as session state. A turn's token usage remains distinct from context occupancy.
+
+**Lifecycle transport belongs to the host.** A host translates its negotiated extension
+into `{ type: "lifecycle", event }` with version 1, a stable `turnId`, source timestamps
+and real step identifiers. The reducer tracks started/finished turns and steps, resource
+updates and background job snapshots without inferring missing execution steps.
+
+**Questions are separate from permissions.** `input_request` carries a flat primitive
+form schema; `input_answering`, `input_resolved` and `input_failed` retain delivery state.
+The optional `AcpSessionPort.answerInput` submits answers separately from permission
+options. Pending requests close on turn completion. An in-flight decision stays disabled
+until its receipt arrives, since execution may finish before delivery acknowledgement.
+Explicit cancellation is terminal. An ambiguous failure records the original decision so
+retry cannot silently change it.
+
+Unknown updates remain available in the host's durable event journal and do not become
+unreadable transcript JSON. Live and serialized-replay reduction use the same functions.
 
 ## `group/` — tool-run grouping
 
@@ -83,3 +96,13 @@ wording and pluralization are `@acp-ui/web`'s job, same split as `@kaiui/core`.
 `reduce/`, `session/`, and `group/` are implemented, and so is [`@acp-ui/web`](../web) — the
 `kui`-based binding layer that renders this view model, including a composer and tool-run
 grouping. Both `acprouter` and `busabase` are wired to this package now.
+
+### Host-validated text context
+
+`AcpResourceContext` (exported from `./reduce` and `./prompt`) is the generic snapshot
+`{ id, name, uri, mimeType, text, metadata?: Record<string, unknown> }`. Hosts validate
+it and negotiate transport; it does not add a top-level ACP wire property or authorize
+resource fetching. Replay can use ordinary `user_message_chunk` embedded text resources
+with `_meta["acp-ui.resourceContext"]: { id, name }`. Canonical content and the attachment
+projection retain the full text and metadata, allowing compact inspectable web chips
+without changing old events or dropping renderer overrides.

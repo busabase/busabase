@@ -59,6 +59,7 @@ describe("message chunks", () => {
         role: "agent",
         variant: "message",
         text: "Hello world",
+        content: [text("Hello world")],
       },
     ]);
   });
@@ -74,7 +75,7 @@ describe("message chunks", () => {
     expect(blocks).toHaveLength(2);
   });
 
-  it("ignores content this core has no representation for (resource_link) rather than emitting an empty bubble", () => {
+  it("retains a resource link as ordered message content", () => {
     const blocks = fold([
       {
         type: "session_update",
@@ -84,7 +85,7 @@ describe("message chunks", () => {
         } as never,
       },
     ]);
-    expect(blocks).toEqual([]);
+    expect(blocks).toMatchObject([{ kind: "message", content: [{ type: "resource_link" }] }]);
   });
 
   describe("messageId is authoritative when present", () => {
@@ -118,6 +119,7 @@ describe("attachments", () => {
         variant: "message",
         text: "",
         attachments: [{ kind: "image", data: "abc123", mimeType: "image/jpeg" }],
+        content: [image("abc123", "image/jpeg")],
       },
     ]);
   });
@@ -184,7 +186,7 @@ describe("attachments", () => {
         text: "# hi",
       }),
     ]);
-    expect((blocks[0] as AcpMessageBlock).attachments).toEqual([
+    expect((blocks[0] as AcpMessageBlock).attachments).toMatchObject([
       {
         kind: "file",
         data: Buffer.from("# hi", "utf8").toString("base64"),
@@ -202,7 +204,7 @@ describe("attachments", () => {
         blob: "JVBERi0=",
       }),
     ]);
-    expect((blocks[0] as AcpMessageBlock).attachments).toEqual([
+    expect((blocks[0] as AcpMessageBlock).attachments).toMatchObject([
       { kind: "file", data: "JVBERi0=", mimeType: "application/pdf", filename: "report.pdf" },
     ]);
   });
@@ -214,7 +216,7 @@ describe("attachments", () => {
     );
   });
 
-  it("still ignores resource_link, which names a file rather than carrying one", () => {
+  it("retains resource links even when they carry no inline bytes", () => {
     const blocks = fold([
       {
         type: "session_update",
@@ -224,7 +226,7 @@ describe("attachments", () => {
         } as never,
       },
     ]);
-    expect(blocks).toEqual([]);
+    expect(blocks).toMatchObject([{ kind: "message", content: [{ type: "resource_link" }] }]);
   });
 });
 
@@ -319,12 +321,12 @@ describe("tool calls", () => {
       expect(blocks[0]).toMatchObject({ rawInput: { path: "README.md" }, rawOutput: "done" });
     });
 
-    it("treats an explicitly-sent null as a real replacement, not an omission", () => {
+    it("treats optional null fields as unchanged in ACP v1", () => {
       const blocks = fold([
         toolCall("t1", { rawOutput: "first" }),
         toolCallUpdate("t1", { rawOutput: null }),
       ]);
-      expect((blocks[0] as { rawOutput: unknown }).rawOutput).toBeNull();
+      expect((blocks[0] as { rawOutput: unknown }).rawOutput).toBe("first");
     });
 
     it("has no rawInput/rawOutput keys at all when neither was ever sent", () => {

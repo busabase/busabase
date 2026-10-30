@@ -18,6 +18,10 @@ export interface BuiltPrompt {
   notes: string[];
 }
 
+/** Stable note hosts may translate when presenting a negotiated context downgrade. */
+export const AGENT_PROMPT_CONTEXT_TEXT_FALLBACK_NOTE =
+  "This agent does not accept embedded prompt context, so the complete prompt context was sent as plain text instead.";
+
 /**
  * Text + staged attachments → ACP's `PromptRequest.prompt` content-block
  * array, negotiated against what the agent actually said it can accept.
@@ -47,6 +51,7 @@ export function buildPromptContent(
   text: string,
   attachments: readonly AcpAttachment[] | undefined,
   capabilities?: acp.PromptCapabilities | null,
+  resources?: readonly Extract<acp.ContentBlock, { type: "resource" }>[],
 ): BuiltPrompt {
   const negotiated = capabilities != null;
   const supports = (capability: keyof acp.PromptCapabilities) =>
@@ -57,6 +62,9 @@ export function buildPromptContent(
   const rejectedMedia: string[] = [];
   const rejectedBinary: string[] = [];
   const inlinedNames: string[] = [];
+  const hasPromptContext = Boolean(
+    resources?.some((block) => block._meta?.["acp-ui.resourceContext"]),
+  );
 
   for (const attachment of attachments ?? []) {
     if (attachment.kind === "image" || attachment.kind === "audio") {
@@ -107,8 +115,41 @@ export function buildPromptContent(
   // The text block stays first and is emitted even when empty: an
   // attachment-only prompt is valid, and both hosts' contracts already
   // guarantee at least one of text/attachments is present.
-  const promptText = [text, ...inlined].filter((part) => part.length > 0).join("\n\n");
-  return { prompt: [{ type: "text", text: promptText }, ...blocks], notes };
+  const promptText = [text, ...(hasPromptContext ? [] : inlined)]
+    .filter((part) => part.length > 0)
+    .join("\n\n");
+  const contextBlocks = (resources ?? []).map((block): acp.ContentBlock => {
+    // Explicit context has no legacy unnegotiated mode: embedding requires
+    // an affirmative capability. Text is always readable by an ACP agent.
+    if (capabilities?.embeddedContext === true) return block;
+    const resource = block.resource;
+    const resourceText =
+      "text" in resource
+        ? resource.text
+        : attachmentText(resource.mimeType ?? "application/octet-stream", resource.blob);
+    if (resourceText === null) {
+      throw new Error("This agent cannot read embedded binary context.");
+    }
+    return {
+      type: "text",
+      text: resourceText,
+      ...(block.annotations ? { annotations: block.annotations } : {}),
+    };
+  });
+  if (capabilities?.embeddedContext !== true && hasPromptContext) {
+    notes.push(AGENT_PROMPT_CONTEXT_TEXT_FALLBACK_NOTE);
+  }
+  return {
+    prompt: [
+      { type: "text", text: promptText },
+      ...contextBlocks,
+      ...blocks,
+      ...(hasPromptContext
+        ? inlined.map((text): acp.ContentBlock => ({ type: "text", text }))
+        : []),
+    ],
+    notes,
+  };
 }
 
 function formatList(names: string[]): string {

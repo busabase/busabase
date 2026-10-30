@@ -46,6 +46,9 @@ export function AcpPermissionView({
   block,
   onAnswer,
   answeredLabel = "Answered:",
+  cancelledLabel = "Cancelled",
+  confirmationUnknownLabel = "Delivery could not be confirmed. Retry the same decision.",
+  retryLabel = "Retry the same decision",
   timeoutLabel = (count) => `Times out in ${count}s if left unanswered.`,
   timingOutLabel = "Timing out…",
 }: AcpPermissionViewProps) {
@@ -55,12 +58,29 @@ export function AcpPermissionView({
 
   return (
     <Alert data-testid="acp-permission">
-      <AlertTitle>{block.title}</AlertTitle>
-      {answered ? (
+      <AlertTitle className="whitespace-normal [overflow-wrap:anywhere]">{block.title}</AlertTitle>
+      {resolution === "cancelled" ? (
+        <AlertDescription data-testid="acp-permission-cancelled">{cancelledLabel}</AlertDescription>
+      ) : answered ? (
         <AlertDescription data-testid="acp-permission-answer">
           {answeredLabel}{" "}
           {block.options.find((o) => o.optionId === resolution.optionId)?.name ??
             resolution.optionId}
+        </AlertDescription>
+      ) : block.confirmationUnknown ? (
+        <AlertDescription className="flex flex-col gap-2">
+          <p role="status">{confirmationUnknownLabel}</p>
+          {block.error ? <p role="alert">{block.error}</p> : null}
+          <Button
+            type="button"
+            size="sm"
+            disabled={!block.submittedOptionId}
+            onClick={() => {
+              if (block.submittedOptionId) onAnswer(block.submittedOptionId);
+            }}
+          >
+            {retryLabel}
+          </Button>
         </AlertDescription>
       ) : (
         <AlertDescription className="flex flex-col gap-2">

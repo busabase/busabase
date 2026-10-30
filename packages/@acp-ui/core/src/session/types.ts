@@ -2,6 +2,8 @@ import type {
   AcpAttachment,
   AcpAvailableCommand,
   AcpBlock,
+  AcpInputBlock,
+  AcpInputResponse,
   AcpPermissionBlock,
   AcpUiEvent,
   AcpUsage,
@@ -62,6 +64,13 @@ export interface AcpSessionPort {
     sessionId: string,
     block: AcpPermissionBlock,
     optionId: string,
+  ): Promise<boolean>;
+
+  /** Submit a structured elicitation separately from a tool permission. */
+  answerInput?(
+    sessionId: string,
+    block: AcpInputBlock,
+    response: AcpInputResponse,
   ): Promise<boolean>;
 
   /** Optional teardown, so a conversation nobody prompted still gets cleaned up. */
@@ -127,6 +136,7 @@ export interface AcpSessionState {
   availableCommands: AcpAvailableCommand[];
   sendPrompt: (text: string, attachments?: readonly AcpAttachment[]) => Promise<void>;
   answerPermission: (block: AcpPermissionBlock, optionId: string) => Promise<void>;
+  answerInput: (block: AcpInputBlock, response: AcpInputResponse) => Promise<void>;
   /** No-op when the port supplied no `cancel`, or before a session exists. */
   cancel: () => Promise<void>;
 }

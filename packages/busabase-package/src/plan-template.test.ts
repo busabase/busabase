@@ -3,10 +3,10 @@
  * it, and the auto-merge gate that must NOT fire for templates.
  */
 
-import { PACKAGE_FORMAT } from "busabase-contract/domains/package/types";
+import { PACKAGE_FORMAT, PACKAGE_MAX_FILE_COUNT } from "busabase-contract/domains/package/types";
 import { describe, expect, it } from "vitest";
 import { type PackageFiles, readPackageTree } from "./layout-read";
-import { buildInstallPlan, type TargetState } from "./plan";
+import { buildInstallPlan, countTree, renderPlan, type TargetState } from "./plan";
 import { collectBaseNodes } from "./tree";
 
 const SKILL_MD = `---
@@ -57,6 +57,85 @@ const slugs = (result: ReturnType<typeof plan>) =>
   collectBaseNodes(result.tree.nodes)
     .map((node) => node.slug)
     .sort();
+
+describe("root Skill counts", () => {
+  it("includes a template's root Skill and sidecar files without any content nodes", () => {
+    const result = plan({
+      "content/reviews/base.json": null,
+      "content/settings/base.json": null,
+      "references/workflow.md": "# Workflow\n",
+      "scripts/check.mjs": "console.log('check');\n",
+    });
+
+    expect(result.isTemplate).toBe(true);
+    expect(result.counts).toMatchObject({ bases: 0, skills: 1, files: 3 });
+    expect(renderPlan(result)).toContain("1 skill(s), 0 airapp(s), 0 drive(s), 3 file(s)");
+    expect(countTree(readPackageTree(files())).skills).toBe(1);
+  });
+
+  it("adds nested Skills and their files without counting the root twice", () => {
+    const result = plan({
+      "content/guides/_folder.json": JSON.stringify({ name: "Guides" }),
+      "content/guides/research/_node.json": JSON.stringify({ type: "skill", name: "Research" }),
+      "content/guides/research/SKILL.md": "---\nname: research\ndescription: Research.\n---\n",
+      "content/guides/research/references/search.md": "# Search\n",
+      "references/workflow.md": "# Workflow\n",
+    });
+
+    expect(result.counts).toMatchObject({ folders: 1, skills: 2, files: 4 });
+  });
+
+  it("keeps the original template decision after Base slugs are prefixed", () => {
+    const result = plan({
+      "SKILL.md": SKILL_MD.replace(
+        "    template: true",
+        "    template: true\n    resources: [reviews]",
+      ),
+    });
+
+    expect(slugs(result)).toContain("kelly-email-reviews");
+    expect(result.isTemplate).toBe(true);
+    expect(result.counts).toMatchObject({ skills: 1, files: 1 });
+  });
+
+  it.each([
+    ["missing opt-in", SKILL_MD.replace("    template: true", "    template: false")],
+    ["invalid identity", SKILL_MD.replace("name: kelly-email", "name: another-template")],
+  ])("does not count a root Skill that will not be installed (%s)", (_, skill) => {
+    const packageFiles = files({
+      "SKILL.md": skill,
+      "content/helper/_node.json": JSON.stringify({ type: "skill", name: "Helper" }),
+      "content/helper/SKILL.md": "---\nname: helper\ndescription: Helper.\n---\n",
+    });
+    const tree = readPackageTree(packageFiles);
+    const result = buildInstallPlan(tree, emptyTarget);
+
+    expect(tree.rootSkill).toBeDefined();
+    expect(result.isTemplate).toBe(false);
+    expect(result.counts).toMatchObject({ skills: 1, files: 1 });
+    expect(countTree(tree)).toEqual(result.counts);
+  });
+
+  it("enforces the file limit across root Skill and node files together", () => {
+    const packageFiles = files();
+    packageFiles.set(
+      "content/manual/_node.json",
+      Buffer.from(JSON.stringify({ type: "skill", name: "Manual" })),
+    );
+    for (let index = 0; index < PACKAGE_MAX_FILE_COUNT - 1; index++) {
+      packageFiles.set(`content/manual/notes/${index}.md`, Buffer.from("note"));
+    }
+    packageFiles.set("content/manual/SKILL.md", Buffer.from("# Manual\n"));
+
+    expect(() => buildInstallPlan(readPackageTree(packageFiles), emptyTarget)).toThrow(
+      `Package has ${PACKAGE_MAX_FILE_COUNT + 1} files, above the ${PACKAGE_MAX_FILE_COUNT}-file limit. Nothing was installed.`,
+    );
+    packageFiles.delete("content/manual/notes/0.md");
+    expect(buildInstallPlan(readPackageTree(packageFiles), emptyTarget).counts.files).toBe(
+      PACKAGE_MAX_FILE_COUNT,
+    );
+  });
+});
 
 describe("Base-slug prefixing", () => {
   it("prefixes a template's Bases with the target folder", () => {

@@ -4,6 +4,8 @@ import type {
   AcpAttachment,
   AcpAvailableCommand,
   AcpBlock,
+  AcpInputBlock,
+  AcpInputResponse,
   AcpPermissionBlock,
   AcpUiEvent,
   AcpUsage,
@@ -51,6 +53,10 @@ export function useAcpSession(port: AcpSessionPort, key: string | null): AcpSess
   // `port` is typically an object literal rebuilt every render. Holding it in a
   // ref keeps it out of the effect's dependencies, so a re-render cannot tear
   // down and restart a live session.
+  const inputAnswersInFlight = useRef(new Set<string>());
+  const permissionAnswersInFlight = useRef(new Set<string>());
+  const ownerKeyRef = useRef(key);
+  ownerKeyRef.current = key;
   const portRef = useRef(port);
   portRef.current = port;
 
@@ -133,7 +139,7 @@ export function useAcpSession(port: AcpSessionPort, key: string | null): AcpSess
       unsubscribe = portRef.current.subscribe(
         id,
         (event) => {
-          if (cancelledRef.current) return;
+          if (!invocationAlive || cancelledRef.current) return;
           setBlocks((prev) => reduceAcpEvent(prev, event));
           if (event.type === "note" && event.ended) setEnded(true);
           const eventUsage = usageOf(event);
@@ -148,7 +154,7 @@ export function useAcpSession(port: AcpSessionPort, key: string | null): AcpSess
     };
 
     const reportStartFailure = (err: unknown) => {
-      if (!cancelledRef.current) {
+      if (invocationAlive && !cancelledRef.current) {
         setError(err instanceof Error ? err.message : "Could not start a session.");
       }
     };
@@ -231,26 +237,39 @@ export function useAcpSession(port: AcpSessionPort, key: string | null): AcpSess
 
   const answerPermission = useCallback(async (block: AcpPermissionBlock, optionId: string) => {
     const id = sessionIdRef.current;
+    const ownerKey = ownerKeyRef.current;
+    const requestKey = `${id}:${block.id}`;
     // Only an unanswered request can be answered — this is what stops a second
     // click, or a click on an already-resolved card, from being sent.
-    if (!id || block.resolution !== "pending") return;
+    if (!id || block.resolution !== "pending" || permissionAnswersInFlight.current.has(requestKey))
+      return;
+    permissionAnswersInFlight.current.add(requestKey);
 
+    const deliveredOptionId =
+      block.confirmationUnknown && block.submittedOptionId ? block.submittedOptionId : optionId;
     // Optimistic, so the buttons disable immediately rather than after the round
     // trip. The reducer treats a real `permission_resolved` as authoritative
     // from either state, so the answer that arrives moments later still lands.
     setBlocks((prev) =>
-      reduceAcpEvent(prev, { type: "permission_answering", requestId: block.id }),
+      reduceAcpEvent(prev, {
+        type: "permission_answering",
+        requestId: block.id,
+        optionId: deliveredOptionId,
+      }),
     );
 
     const restore = () =>
       setBlocks((prev) =>
         prev.map((b) =>
-          b.kind === "permission" && b.id === block.id ? { ...b, resolution: "pending" } : b,
+          b.kind === "permission" && b.id === block.id && b.resolution === "answering"
+            ? { ...b, resolution: "pending" }
+            : b,
         ),
       );
 
     try {
-      const answered = await portRef.current.answerPermission(id, block, optionId);
+      const answered = await portRef.current.answerPermission(id, block, deliveredOptionId);
+      if (sessionIdRef.current !== id || ownerKeyRef.current !== ownerKey) return;
       if (!answered) {
         // Too late — the host resolved it on its own (acprouter's 5-minute
         // timeout). Put the card back rather than showing a choice that was
@@ -258,8 +277,71 @@ export function useAcpSession(port: AcpSessionPort, key: string | null): AcpSess
         restore();
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not send that answer.");
-      restore();
+      if (sessionIdRef.current !== id || ownerKeyRef.current !== ownerKey) return;
+      const message = err instanceof Error ? err.message : "Could not send that answer.";
+      setError(message);
+      setBlocks((previous) =>
+        reduceAcpEvent(previous, {
+          type: "permission_failed",
+          requestId: block.id,
+          error: message,
+          confirmationUnknown: true,
+        }),
+      );
+    } finally {
+      permissionAnswersInFlight.current.delete(requestKey);
+    }
+  }, []);
+
+  const answerInput = useCallback(async (block: AcpInputBlock, response: AcpInputResponse) => {
+    const id = sessionIdRef.current;
+    const answer = portRef.current.answerInput;
+    const ownerKey = ownerKeyRef.current;
+    const requestKey = `${id}:${block.id}`;
+    if (
+      !id ||
+      !answer ||
+      block.resolution !== "pending" ||
+      inputAnswersInFlight.current.has(requestKey)
+    )
+      return;
+    const deliveredResponse =
+      block.confirmationUnknown && block.submittedResponse ? block.submittedResponse : response;
+    inputAnswersInFlight.current.add(requestKey);
+    setBlocks((previous) =>
+      reduceAcpEvent(previous, {
+        type: "input_answering",
+        requestId: block.id,
+        response: deliveredResponse,
+      }),
+    );
+    try {
+      const accepted = await answer(id, block, deliveredResponse);
+      if (sessionIdRef.current !== id || ownerKeyRef.current !== ownerKey) return;
+      setBlocks((previous) =>
+        reduceAcpEvent(
+          previous,
+          accepted
+            ? { type: "input_resolved", requestId: block.id, ...deliveredResponse }
+            : {
+                type: "input_failed",
+                requestId: block.id,
+                error: "This request is no longer available.",
+              },
+        ),
+      );
+    } catch (failure) {
+      if (sessionIdRef.current !== id || ownerKeyRef.current !== ownerKey) return;
+      setBlocks((previous) =>
+        reduceAcpEvent(previous, {
+          type: "input_failed",
+          requestId: block.id,
+          error: failure instanceof Error ? failure.message : "Could not send the answer.",
+          confirmationUnknown: true,
+        }),
+      );
+    } finally {
+      inputAnswersInFlight.current.delete(requestKey);
     }
   }, []);
 
@@ -294,6 +376,7 @@ export function useAcpSession(port: AcpSessionPort, key: string | null): AcpSess
     availableCommands: availableCommands?.key === key ? availableCommands.commands : [],
     sendPrompt,
     answerPermission,
+    answerInput,
     cancel,
   };
 }

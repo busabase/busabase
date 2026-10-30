@@ -106,3 +106,22 @@ describe("falsy but present raw output is not dropped (KUI ToolOutput follow-up)
     expect(screen.queryByText("Result")).not.toBeInTheDocument();
   });
 });
+
+describe("structured output rendering contract", () => {
+  it("uses the same discoverable output region as the raw fallback exactly once", async () => {
+    render(
+      <AcpToolCallView
+        block={block({
+          content: [{ type: "content", content: { type: "text", text: "alpha\n\nbeta" } }],
+          rawOutput: { content: "alpha\n\nbeta" },
+        })}
+      />,
+    );
+    await userEvent.click(screen.getByText("Read file"));
+    expect(screen.getAllByTestId("acp-tool-output")).toHaveLength(1);
+    expect(screen.getByTestId("acp-tool-output")).toBeVisible();
+    expect(screen.getByTestId("acp-tool-output")).toHaveTextContent("alpha");
+    expect(screen.getByTestId("acp-tool-output")).toHaveTextContent("beta");
+    expect(screen.getByTestId("acp-tool-raw-output")).toBeInTheDocument();
+  });
+});

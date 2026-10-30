@@ -1,36 +1,38 @@
 "use client";
 
-import type { AcpAttachment, AcpAvailableCommand } from "@acp-ui/core/reduce";
-import {
-  Attachment,
-  AttachmentInfo,
-  AttachmentPreview,
-  AttachmentRemove,
-  Attachments,
-} from "kui/ai-elements/attachments";
+import type { AcpAttachment, AcpAvailableCommand, AcpResourceContext } from "@acp-ui/core/reduce";
 import {
   PromptInput,
+  PromptInputActionMenu,
+  PromptInputActionMenuContent,
+  PromptInputActionMenuTrigger,
   PromptInputBody,
   PromptInputFooter,
-  PromptInputHeader,
   type PromptInputMessage,
   PromptInputSubmit,
   PromptInputTextarea,
   PromptInputTools,
   usePromptInputAttachments,
 } from "kui/ai-elements/prompt-input";
-import { PaperclipIcon } from "lucide-react";
+import { DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator } from "kui/dropdown-menu";
+import { AppWindowIcon, FileIcon, PaperclipIcon, Wand2 } from "lucide-react";
 import {
   type ChangeEvent,
+  type ClipboardEvent,
   type FormEvent,
   type KeyboardEvent,
   type ReactNode,
+  useCallback,
   useEffect,
   useId,
   useMemo,
   useRef,
   useState,
 } from "react";
+
+import { AcpContextChip, AcpResourceContextChip } from "./context-chip";
+
+export { AcpContextChip } from "./context-chip";
 
 /** 10 MB. Base64 inflates a payload by a third, and the whole prompt travels
  * as one JSON-RPC message — a cap here is what keeps a stray 200 MB video
@@ -49,6 +51,15 @@ const DEFAULT_MAX_FILES = 10;
 export interface AcpComposerDraft {
   id: string;
   text: string;
+  resourceContext?: AcpResourceContext[];
+}
+
+/** A locally staged file. Its object URL belongs to the composer until removal or send. */
+export interface AcpComposerAttachment {
+  id: string;
+  url: string;
+  mediaType: string;
+  filename?: string;
 }
 
 export interface AcpComposerLabels {
@@ -59,6 +70,12 @@ export interface AcpComposerLabels {
   fileTooLarge: (limit: number) => string;
   tooManyFiles: (count: number) => string;
   attachmentFailed: string;
+  addMenuTitle: string;
+  uploadFilesMenuItem: string;
+  chooseSkillMenuItem: string;
+  inspectContext: string;
+  removeContext: string;
+  contextContent: string;
 }
 
 /**
@@ -86,9 +103,65 @@ export const insertCommand = (text: string, command: AcpAvailableCommand): strin
     return `${prefix}/${command.name}${command.input ? " " : ""}`;
   });
 
+/**
+ * A space/workspace Skill (a `SKILL.md`-backed node) the host offers from the
+ * same "/" palette as ACP-advertised commands. Unlike `AcpAvailableCommand`,
+ * this is not an ACP protocol type — it is host data (busabase's own
+ * filetree nodes), so it lives here rather than in `@acp-ui/core`. `nodeId`
+ * is what lets the host turn a pick into a context reference; the composer
+ * itself never reads the skill's content.
+ */
+export interface AcpWorkspaceSkill {
+  nodeId: string;
+  name: string;
+  description: string;
+}
+
+/** The slash palette merges two namespaces; each row remembers which one it came from. */
+type PaletteItem =
+  | { kind: "command"; key: string; command: AcpAvailableCommand }
+  | { kind: "skill"; key: string; skill: AcpWorkspaceSkill };
+
+const toPaletteItems = (
+  commands: readonly AcpAvailableCommand[],
+  skills: readonly AcpWorkspaceSkill[],
+): PaletteItem[] => [
+  ...commands.map(
+    (command): PaletteItem => ({ kind: "command", key: `command:${command.name}`, command }),
+  ),
+  ...skills.map((skill): PaletteItem => ({ kind: "skill", key: `skill:${skill.nodeId}`, skill })),
+];
+
+const paletteItemName = (item: PaletteItem) =>
+  item.kind === "command" ? item.command.name : item.skill.name;
+const paletteItemDescription = (item: PaletteItem) =>
+  item.kind === "command" ? item.command.description : item.skill.description;
+const paletteItemHint = (item: PaletteItem) =>
+  item.kind === "command" ? item.command.input?.hint : undefined;
+
+export const insertPaletteItem = (text: string, item: PaletteItem): string =>
+  item.kind === "command"
+    ? insertCommand(text, item.command)
+    : text.replace(/(?:^|\s)\/([^\s]*)$/, (match) => {
+        const prefix = match.startsWith("/") ? "" : match.slice(0, 1);
+        return `${prefix}/${item.skill.name} `;
+      });
+
 export interface AcpComposerProps {
   /** Called with the trimmed text, and any attachments, once the user submits. */
-  onSend: (text: string, attachments?: AcpAttachment[]) => void;
+  onSend: (
+    text: string,
+    attachments?: AcpAttachment[],
+    resourceContext?: AcpResourceContext[],
+  ) => void | Promise<void>;
+  /** Decode and validate host metadata during an explicit paste. Undefined/empty keeps native paste. */
+  decodePaste?: (clipboardData: DataTransfer) => AcpResourceContext[] | undefined;
+  /** Host limits for the complete staged context list. Rejected handoffs retain full text. */
+  validateResourceContext?: (contexts: readonly AcpResourceContext[]) => boolean;
+  /** Current staged context, including removal and successful submission. */
+  onResourceContextChange?: (contexts: AcpResourceContext[]) => void;
+  /** Allows a host-owned context reference to be submitted without a caption. */
+  hasAdditionalContent?: boolean;
   /** Host-computed: acprouter derives this from session lifecycle, busabase
    * from its richer session status (busy / waiting_permission / ended /
    * failed). The composer stays dumb on purpose — see @acp-ui/web's README. */
@@ -136,10 +209,28 @@ export interface AcpComposerProps {
    * row.
    */
   headerControls?: ReactNode;
+  /** Host-owned preview around the file's content; the remove control stays separate. */
+  renderAttachment?: (file: AcpComposerAttachment, content: ReactNode) => ReactNode;
   /** The host's UI copy; omitted to keep the existing English defaults. */
   labels?: Partial<AcpComposerLabels>;
   /** Per-session ACP commands, updated dynamically by `available_commands_update`. */
   availableCommands?: readonly AcpAvailableCommand[];
+  /**
+   * Space/workspace Skills the host offers from the same "/" palette as
+   * `availableCommands`, listed under their own section when both are
+   * present. busabase passes the current space's `skill` nodes here; the
+   * composer never reads their content — it only inserts `/<name>` and, via
+   * `onWorkspaceSkillSelected`, lets the host decide what picking one means
+   * (busabase adds it as a context reference, resolved lazily at send time).
+   */
+  workspaceSkills?: readonly AcpWorkspaceSkill[];
+  /** Fired when the user picks a `workspaceSkills` entry from the palette. */
+  onWorkspaceSkillSelected?: (skill: AcpWorkspaceSkill) => void;
+  addContextAction?: {
+    label: string;
+    added: boolean;
+    onSelect: () => void;
+  };
 }
 
 /** Images and audio have dedicated ACP content blocks; everything else is a file. */
@@ -185,86 +276,141 @@ export function toAttachments(files: PromptInputMessage["files"]): AcpAttachment
 }
 
 /**
- * Opens the file picker directly — no dropdown menu, since attach is this
- * composer's only built-in action. Also carries `footerControls`: both sit in
- * the same `PromptInputTools` group so `PromptInputFooter`'s `justify-between`
- * keeps them together on the left, with submit alone on the right, instead of
- * spreading three items across the row.
+ * A "+" dropdown — upload (the same file picker this composer always had),
+ * an entry that adds the host's current node as context when the host offers
+ * one, and, when the session has advertised any ACP commands, an entry that
+ * opens the exact same "/" command palette a typed slash would. Also carries
+ * `footerControls`: both sit in the same `PromptInputTools` group so
+ * `PromptInputFooter`'s `justify-between` keeps them together on the left,
+ * with submit alone on the right, instead of spreading three items across
+ * the row.
  */
 function AttachButton({
   disabled,
   footerControls,
-  label,
+  labels,
+  hasCommands,
+  onChooseSkill,
+  addContextAction,
 }: {
   disabled: boolean;
   footerControls?: ReactNode;
-  label?: string;
+  labels?: Partial<AcpComposerLabels>;
+  hasCommands: boolean;
+  onChooseSkill: () => void;
+  addContextAction?: AcpComposerProps["addContextAction"];
 }) {
   const attachments = usePromptInputAttachments();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const chooseSkillOnClose = useRef(false);
+
+  const handleUpload = (event: Event) => {
+    attachments.openFileDialog();
+    event.preventDefault();
+    setMenuOpen(false);
+  };
+
+  const handleAddContext = (event: Event) => {
+    event.preventDefault();
+    setMenuOpen(false);
+    addContextAction?.onSelect();
+  };
+
+  const handleChooseSkill = (event: Event) => {
+    event.preventDefault();
+    chooseSkillOnClose.current = true;
+    setMenuOpen(false);
+  };
+
   return (
     <PromptInputTools>
-      <button
-        aria-label={label ?? "Attach a file"}
-        className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-        disabled={disabled}
-        onClick={() => attachments.openFileDialog()}
-        type="button"
-      >
-        <PaperclipIcon className="size-4" />
-      </button>
+      <PromptInputActionMenu onOpenChange={setMenuOpen} open={menuOpen}>
+        <PromptInputActionMenuTrigger
+          aria-label={labels?.attachFile ?? "Attach a file"}
+          className="size-8 rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+          disabled={disabled}
+        />
+        <PromptInputActionMenuContent
+          className="w-56"
+          onCloseAutoFocus={(event) => {
+            if (!chooseSkillOnClose.current) return;
+            chooseSkillOnClose.current = false;
+            event.preventDefault();
+            onChooseSkill();
+          }}
+        >
+          <DropdownMenuLabel className="text-muted-foreground text-xs">
+            {labels?.addMenuTitle ?? "Add to message"}
+          </DropdownMenuLabel>
+          <DropdownMenuItem onSelect={handleUpload}>
+            <PaperclipIcon className="mr-2 size-4" />
+            {labels?.uploadFilesMenuItem ?? "Upload files"}
+          </DropdownMenuItem>
+          {addContextAction ? (
+            <DropdownMenuItem disabled={addContextAction.added} onSelect={handleAddContext}>
+              <AppWindowIcon className="mr-2 size-4" />
+              {addContextAction.label}
+            </DropdownMenuItem>
+          ) : null}
+          {hasCommands ? (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={handleChooseSkill}>
+                <Wand2 className="mr-2 size-4" />
+                {labels?.chooseSkillMenuItem ?? "Choose a skill"}
+              </DropdownMenuItem>
+            </>
+          ) : null}
+        </PromptInputActionMenuContent>
+      </PromptInputActionMenu>
       {footerControls}
     </PromptInputTools>
   );
 }
 
-/**
- * What's staged before send — cleared by `PromptInput` itself once `onSubmit`
- * accepts.
- *
- * Split by kind rather than rendered as one list, because kui's `grid`
- * variant deliberately drops `AttachmentInfo`: a thumbnail identifies an
- * image on its own, but a document rendered that way is a nameless file icon,
- * and two attached PDFs would be indistinguishable. Documents therefore use
- * the `inline` variant, which keeps the filename visible.
- *
- * `w-full` is load-bearing. `PromptInputFooter` renders with
- * `data-align="block-end"`, which switches kui's `InputGroup` to
- * `flex-col` — and it is `items-center`, so in a column that centres every
- * child horizontally. A width-less wrapper therefore shrinks to its content
- * and floats in the middle of the composer instead of sitting above the
- * textarea. (The previous single `grid` strip escaped this only because that
- * variant carries its own `ml-auto w-fit`.)
- */
-function StagedAttachments({ removeLabel }: { removeLabel?: string }) {
+function StagedAttachments({
+  removeLabel,
+  children,
+  renderAttachment,
+}: {
+  removeLabel?: string;
+  children?: ReactNode;
+  renderAttachment?: AcpComposerProps["renderAttachment"];
+}) {
   const attachments = usePromptInputAttachments();
-  if (attachments.files.length === 0) return null;
-
-  const images = attachments.files.filter((file) => (file.mediaType ?? "").startsWith("image/"));
-  const rest = attachments.files.filter((file) => !(file.mediaType ?? "").startsWith("image/"));
+  if (attachments.files.length === 0 && !children) return null;
 
   return (
-    <div className="w-full space-y-2 px-3 pt-2">
-      {images.length > 0 ? (
-        <Attachments variant="grid">
-          {images.map((file) => (
-            <Attachment data={file} key={file.id} onRemove={() => attachments.remove(file.id)}>
-              <AttachmentPreview />
-              <AttachmentRemove label={removeLabel} />
-            </Attachment>
-          ))}
-        </Attachments>
-      ) : null}
-      {rest.length > 0 ? (
-        <Attachments variant="inline">
-          {rest.map((file) => (
-            <Attachment data={file} key={file.id} onRemove={() => attachments.remove(file.id)}>
-              <AttachmentPreview />
-              <AttachmentInfo className="max-w-40" />
-              <AttachmentRemove label={removeLabel} />
-            </Attachment>
-          ))}
-        </Attachments>
-      ) : null}
+    <div className="flex w-full flex-wrap items-center gap-2 px-3 pt-3">
+      {children}
+      {attachments.files.map((file) => {
+        const content = (
+          <>
+            {(file.mediaType ?? "").startsWith("image/") && file.url ? (
+              <img
+                alt={file.filename || "Image"}
+                className="size-4 shrink-0 rounded-sm object-cover"
+                src={file.url}
+              />
+            ) : (
+              <FileIcon className="size-4 shrink-0 text-muted-foreground" />
+            )}
+            <span className="min-w-0 max-w-40 truncate font-medium">
+              {file.filename || "Attachment"}
+            </span>
+          </>
+        );
+        return (
+          <AcpContextChip
+            key={file.id}
+            onRemove={() => attachments.remove(file.id)}
+            removeLabel={removeLabel}
+            title={file.filename || "Attachment"}
+          >
+            {renderAttachment ? renderAttachment(file, content) : content}
+          </AcpContextChip>
+        );
+      })}
     </div>
   );
 }
@@ -300,47 +446,92 @@ export function AcpComposer({
   maxFiles = DEFAULT_MAX_FILES,
   footerControls,
   headerControls,
+  renderAttachment,
   labels,
   availableCommands = [],
+  workspaceSkills = [],
+  onWorkspaceSkillSelected,
+  hasAdditionalContent = false,
+  addContextAction,
+  decodePaste,
+  validateResourceContext,
+  onResourceContextChange,
 }: AcpComposerProps) {
   const [attachError, setAttachError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
   // The field is uncontrolled (kui's `PromptInput` reads it out of the form on
   // submit and resets the form afterwards), so an insertion is a DOM write, not
   // a state update. There is no React state to keep in sync — which is also why
   // this cannot be done from outside the composer without reaching through it.
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const appliedDraftId = useRef<string | null>(null);
+  const appliedDraftIds = useRef(new Set<string>());
+  const [resourceContext, setResourceContext] = useState<AcpResourceContext[]>([]);
+  const resourceContextRef = useRef<AcpResourceContext[]>([]);
+  const changeContexts = useCallback((contexts: AcpResourceContext[]) => {
+    resourceContextRef.current = contexts;
+    setResourceContext(contexts);
+  }, []);
+  const acceptsContexts = useCallback(
+    (contexts: readonly AcpResourceContext[]) => {
+      try {
+        return validateResourceContext?.(contexts) ?? true;
+      } catch {
+        return false;
+      }
+    },
+    [validateResourceContext],
+  );
+  useEffect(() => {
+    onResourceContextChange?.(resourceContext);
+  }, [resourceContext, onResourceContextChange]);
   const commandImeComposingRef = useRef(false);
   const [commandQuery, setCommandQuery] = useState<string | null>(null);
-  const [activeCommandName, setActiveCommandName] = useState<string | null>(null);
+  const [activeItemKey, setActiveItemKey] = useState<string | null>(null);
   const commandListId = useId();
-  const filteredCommands = useMemo(() => {
+  const paletteItems = useMemo(
+    () => toPaletteItems(availableCommands, workspaceSkills),
+    [availableCommands, workspaceSkills],
+  );
+  const filteredItems = useMemo(() => {
     if (commandQuery === null) return [];
     const query = commandQuery.toLowerCase();
-    return availableCommands.filter(
-      (command) =>
-        command.name.toLowerCase().includes(query) ||
-        command.description.toLowerCase().includes(query),
+    return paletteItems.filter(
+      (item) =>
+        paletteItemName(item).toLowerCase().includes(query) ||
+        paletteItemDescription(item).toLowerCase().includes(query),
     );
-  }, [availableCommands, commandQuery]);
-  const showCommandPalette = commandQuery !== null && filteredCommands.length > 0;
-  const activeCommand =
-    filteredCommands.find((command) => command.name === activeCommandName) ?? filteredCommands[0];
-  const activeCommandIndex = activeCommand ? filteredCommands.indexOf(activeCommand) : -1;
-  const commandOptionId = (command: AcpAvailableCommand) =>
-    `${commandListId}-option-${encodeURIComponent(command.name)}`;
+  }, [paletteItems, commandQuery]);
+  const showCommandPalette = commandQuery !== null && filteredItems.length > 0;
+  const activeItem = filteredItems.find((item) => item.key === activeItemKey) ?? filteredItems[0];
+  const activeItemIndex = activeItem ? filteredItems.indexOf(activeItem) : -1;
+  const commandOptionId = (item: PaletteItem) =>
+    `${commandListId}-option-${encodeURIComponent(item.key)}`;
 
   useEffect(() => {
     const field = textareaRef.current;
-    if (!draft || !field || appliedDraftId.current === draft.id) return;
-    appliedDraftId.current = draft.id;
-    field.value = mergeDraft(field.value, draft.text);
+    if (!draft || !field || appliedDraftIds.current.has(draft.id)) return;
+    appliedDraftIds.current.add(draft.id);
+    if (draft.text) field.value = mergeDraft(field.value, draft.text);
+    if (draft.resourceContext?.length) {
+      const combined = [...resourceContextRef.current, ...draft.resourceContext];
+      if (acceptsContexts(combined)) {
+        changeContexts(combined);
+      } else {
+        // A handoff has no native paste to fall back to. Keep its complete
+        // snapshot visible as ordinary text without disturbing staged content.
+        field.value = mergeDraft(
+          field.value,
+          draft.resourceContext.map((context) => context.text).join("\n\n"),
+        );
+      }
+    }
     field.focus();
     // Caret at the end: the insertion is a starting point to edit, and landing
     // the cursor anywhere else would make the user press End before typing.
     field.setSelectionRange(field.value.length, field.value.length);
     onDraftApplied?.(draft.id);
-  }, [draft, onDraftApplied]);
+  }, [draft, onDraftApplied, changeContexts, acceptsContexts]);
 
   useEffect(() => {
     const inputGroup = textareaRef.current?.closest<HTMLElement>("[data-slot=input-group]");
@@ -364,23 +555,84 @@ export function AcpComposer({
     event.preventDefault();
     const text = message.text.trim();
     const attachments = toAttachments(message.files);
-    if ((!text && attachments.length === 0) || disabled) return;
+    const contexts = resourceContextRef.current;
+    if (
+      (!text && attachments.length === 0 && contexts.length === 0 && !hasAdditionalContent) ||
+      disabled ||
+      submittingRef.current
+    ) {
+      return;
+    }
     setAttachError(null);
-    onSend(text, attachments.length > 0 ? attachments : undefined);
+    // PromptInput clears the uncontrolled field without dispatching a change.
+    // Its slash palette must leave with the submitted draft as well.
+    setCommandQuery(null);
+    setActiveItemKey(null);
+    const submittedField = textareaRef.current;
+    const restoreDraft = () => {
+      // PromptInput resets an uncontrolled field before calling us. A failed
+      // acceptance must restore it, while preserving anything inserted later.
+      if (!submittedField || textareaRef.current !== submittedField) return;
+      submittedField.value = submittedField.value
+        ? mergeDraft(message.text, submittedField.value)
+        : message.text;
+      setCommandQuery(getCommandQuery(submittedField.value));
+      setActiveItemKey(null);
+    };
+    try {
+      const files = attachments.length > 0 ? attachments : undefined;
+      // Keep the original two-argument call contract for all existing hosts.
+      const result = contexts.length ? onSend(text, files, contexts) : onSend(text, files);
+      const accepted = () => {
+        const submitted = new Set(contexts);
+        changeContexts(resourceContextRef.current.filter((context) => !submitted.has(context)));
+      };
+      if (result instanceof Promise) {
+        submittingRef.current = true;
+        setSubmitting(true);
+        return result
+          .then(accepted)
+          .catch((error: unknown) => {
+            restoreDraft();
+            throw error;
+          })
+          .finally(() => {
+            submittingRef.current = false;
+            setSubmitting(false);
+          });
+      }
+      accepted();
+    } catch (error) {
+      restoreDraft();
+      throw error;
+    }
   };
 
-  const applyCommand = (command: AcpAvailableCommand) => {
+  const applyPaletteItem = (item: PaletteItem) => {
     const field = textareaRef.current;
     if (!field) return;
-    field.value = insertCommand(field.value, command);
+    field.value = insertPaletteItem(field.value, item);
     field.focus();
     field.setSelectionRange(field.value.length, field.value.length);
     setCommandQuery(null);
+    if (item.kind === "skill") onWorkspaceSkillSelected?.(item.skill);
+  };
+
+  const handleChooseSkill = () => {
+    const field = textareaRef.current;
+    if (!field) return;
+    if (getCommandQuery(field.value) === null) {
+      field.value = `${field.value}${field.value && !/\s$/.test(field.value) ? " " : ""}/`;
+    }
+    field.focus();
+    field.setSelectionRange(field.value.length, field.value.length);
+    setCommandQuery(getCommandQuery(field.value));
+    setActiveItemKey(null);
   };
 
   const handleTextareaChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
     setCommandQuery(getCommandQuery(event.currentTarget.value));
-    setActiveCommandName(null);
+    setActiveItemKey(null);
   };
 
   const handleTextareaKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -389,22 +641,18 @@ export function AcpComposer({
       event.preventDefault();
       return;
     }
-    if (!showCommandPalette || !activeCommand) return;
+    if (!showCommandPalette || !activeItem) return;
     if (event.key === "ArrowDown") {
       event.preventDefault();
-      setActiveCommandName(
-        filteredCommands[(activeCommandIndex + 1) % filteredCommands.length].name,
-      );
+      setActiveItemKey(filteredItems[(activeItemIndex + 1) % filteredItems.length].key);
     } else if (event.key === "ArrowUp") {
       event.preventDefault();
-      setActiveCommandName(
-        filteredCommands[
-          (activeCommandIndex - 1 + filteredCommands.length) % filteredCommands.length
-        ].name,
+      setActiveItemKey(
+        filteredItems[(activeItemIndex - 1 + filteredItems.length) % filteredItems.length].key,
       );
     } else if (event.key === "Enter" || event.key === "Tab") {
       event.preventDefault();
-      applyCommand(activeCommand);
+      applyPaletteItem(activeItem);
     } else if (event.key === "Escape") {
       event.preventDefault();
       setCommandQuery(null);
@@ -415,7 +663,23 @@ export function AcpComposer({
   // it), which would otherwise make a freshly-shown stop button unclickable
   // the instant it appears. Carve out exactly that one case.
   const canStop = sending && Boolean(onStop);
-  const submitDisabled = disabled && !canStop;
+  const inputDisabled = disabled || submitting;
+  const submitDisabled = inputDisabled && !canStop;
+  const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    if (inputDisabled || !decodePaste) return;
+    let contexts: AcpResourceContext[] | undefined;
+    try {
+      contexts = decodePaste(event.clipboardData);
+    } catch {
+      return; // Invalid metadata must never prevent ordinary text/file paste.
+    }
+    if (!contexts?.length) return;
+    const combined = [...resourceContextRef.current, ...contexts];
+    if (!acceptsContexts(combined)) return;
+    changeContexts(combined);
+    event.preventDefault();
+    event.stopPropagation();
+  };
 
   return (
     <PromptInput
@@ -446,8 +710,28 @@ export function AcpComposer({
       }
       onSubmit={handleSubmit}
     >
-      {headerControls ? <PromptInputHeader>{headerControls}</PromptInputHeader> : null}
-      <StagedAttachments removeLabel={labels?.removeAttachment} />
+      <StagedAttachments removeLabel={labels?.removeAttachment} renderAttachment={renderAttachment}>
+        {headerControls || resourceContext.length > 0 ? (
+          <>
+            {headerControls}
+            {resourceContext.map((context, index) => (
+              <AcpResourceContextChip
+                key={`${context.id}:${index}`}
+                context={context}
+                disabled={inputDisabled}
+                inspectLabel={labels?.inspectContext}
+                removeLabel={labels?.removeContext}
+                contentLabel={labels?.contextContent}
+                onRemove={() =>
+                  changeContexts(
+                    resourceContextRef.current.filter((_, itemIndex) => itemIndex !== index),
+                  )
+                }
+              />
+            ))}
+          </>
+        ) : undefined}
+      </StagedAttachments>
       {attachError ? (
         // `w-full` for the same reason as `StagedAttachments` — a direct
         // `InputGroup` child without it is centred, not left-aligned.
@@ -464,26 +748,29 @@ export function AcpComposer({
               id={commandListId}
               role="listbox"
             >
-              {filteredCommands.map((command, index) => (
+              {filteredItems.map((item, index) => (
                 <button
-                  aria-selected={index === activeCommandIndex}
+                  aria-selected={index === activeItemIndex}
                   className={`flex w-full items-start gap-2 rounded-sm px-2 py-1.5 text-left text-sm ${
-                    index === activeCommandIndex
+                    index === activeItemIndex
                       ? "bg-accent text-accent-foreground"
                       : "hover:bg-accent/70"
                   }`}
-                  id={commandOptionId(command)}
-                  key={command.name}
+                  id={commandOptionId(item)}
+                  key={item.key}
                   onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => applyCommand(command)}
-                  onMouseEnter={() => setActiveCommandName(command.name)}
+                  onClick={() => applyPaletteItem(item)}
+                  onMouseEnter={() => setActiveItemKey(item.key)}
                   role="option"
                   type="button"
                 >
-                  <span className="shrink-0 font-medium">/{command.name}</span>
+                  {item.kind === "skill" ? (
+                    <Wand2 className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+                  ) : null}
+                  <span className="shrink-0 font-medium">/{paletteItemName(item)}</span>
                   <span className="min-w-0 truncate text-muted-foreground">
-                    {command.description}
-                    {command.input?.hint ? ` - ${command.input.hint}` : ""}
+                    {paletteItemDescription(item)}
+                    {paletteItemHint(item) ? ` - ${paletteItemHint(item)}` : ""}
                   </span>
                 </button>
               ))}
@@ -491,11 +778,11 @@ export function AcpComposer({
           ) : null}
           <PromptInputTextarea
             aria-activedescendant={
-              showCommandPalette && activeCommand ? commandOptionId(activeCommand) : undefined
+              showCommandPalette && activeItem ? commandOptionId(activeItem) : undefined
             }
             aria-autocomplete="list"
             aria-controls={showCommandPalette ? commandListId : undefined}
-            disabled={disabled}
+            disabled={inputDisabled}
             onChange={handleTextareaChange}
             onCompositionEndCapture={() => {
               commandImeComposingRef.current = false;
@@ -504,6 +791,7 @@ export function AcpComposer({
               commandImeComposingRef.current = true;
             }}
             onKeyDown={handleTextareaKeyDown}
+            onPasteCapture={handlePaste}
             placeholder={placeholder}
             ref={textareaRef}
           />
@@ -511,9 +799,12 @@ export function AcpComposer({
       </PromptInputBody>
       <PromptInputFooter>
         <AttachButton
-          disabled={disabled}
+          disabled={inputDisabled}
           footerControls={footerControls}
-          label={labels?.attachFile}
+          labels={labels}
+          hasCommands={availableCommands.length > 0 || workspaceSkills.length > 0}
+          onChooseSkill={handleChooseSkill}
+          addContextAction={addContextAction}
         />
         <PromptInputSubmit
           aria-label={sending ? (labels?.stopPrompt ?? "Stop") : (labels?.submitPrompt ?? "Submit")}

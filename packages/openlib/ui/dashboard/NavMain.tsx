@@ -43,6 +43,7 @@ import {
   type CSSProperties,
   Fragment,
   memo,
+  type MouseEvent as ReactMouseEvent,
   type ReactNode,
   useCallback,
   useEffect,
@@ -308,6 +309,9 @@ function NavMainComponent({
   const isPathActive = (url?: string) =>
     !!url && (location === url || (url !== "/" && location.startsWith(`${url}/`)));
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+  // Which row's "•••" menu is open. Controlled so a right-click on the row
+  // (NavItem.openActionsOnContextMenu) can open the very same menu.
+  const [openActionsKey, setOpenActionsKey] = useState<string | null>(null);
   // Per-folder manual expand/collapse override, by nav-item key.
   //
   // A COLLAPSE carries the location it was made at and expires the moment
@@ -632,6 +636,17 @@ function NavMainComponent({
     return "";
   };
 
+  /** Row `onContextMenu`: open the row's actions menu, if it opted in. */
+  const rowContextMenuHandler = (item: NavItem, itemKey: string) =>
+    item.openActionsOnContextMenu && item.actions && item.actions.length > 0
+      ? (event: ReactMouseEvent) => {
+          // Shift+right-click keeps the browser's own menu (open in new tab…).
+          if (event.shiftKey) return;
+          event.preventDefault();
+          setOpenActionsKey(itemKey);
+        }
+      : undefined;
+
   const toggleGroupCollapse = (groupKey: string) => {
     setCollapsedGroups((prev) => ({
       ...prev,
@@ -787,7 +802,12 @@ function NavMainComponent({
         </button>
       )}
       {item.actions && item.actions.length > 0 && (
-        <DropdownMenu>
+        <DropdownMenu
+          onOpenChange={(open) =>
+            setOpenActionsKey((current) => (open ? itemKey : current === itemKey ? null : current))
+          }
+          open={openActionsKey === itemKey}
+        >
           <DropdownMenuTrigger asChild>
             <button
               className={`${NAV_ROW_ACTION_BUTTON} text-sidebar-foreground/70 data-[state=open]:bg-sidebar-accent`}
@@ -908,6 +928,7 @@ function NavMainComponent({
           className="group/collapsible"
         >
           <ItemWrapper>
+            {/* biome-ignore lint/a11y/noStaticElementInteractions: the right-click only re-opens this row's own "•••" menu, which keyboard users reach through that button */}
             <div
               ref={dragProps?.setNodeRef}
               data-nav-url={item.url || undefined}
@@ -920,6 +941,7 @@ function NavMainComponent({
               // expanded children) can out-compete its own children as the
               // "closest" drop target, making it nearly impossible to drop
               // between two rows inside an open folder.
+              onContextMenu={rowContextMenuHandler(item, itemKey)}
               className={`group/nav-row relative flex h-8 min-w-0 items-center rounded-md transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground ${
                 isPathActive(item.url) ? "bg-sidebar-accent text-sidebar-accent-foreground" : ""
               } ${dropIndicatorClass(item.id)}`}
@@ -1080,6 +1102,7 @@ function NavMainComponent({
           data-nav-url={item.url || undefined}
           style={dragProps?.style}
           className={`group/nav-row ${dropIndicatorClass(item.id)}`}
+          onContextMenu={rowContextMenuHandler(item, itemKey)}
         >
           {item.onClick ? (
             // Items with onClick trigger a callback instead of navigation
@@ -1158,6 +1181,7 @@ function NavMainComponent({
         data-nav-url={item.url || undefined}
         style={dragProps?.style}
         className={`group/nav-row relative ${dropIndicatorClass(item.id)}`}
+        onContextMenu={rowContextMenuHandler(item, itemKey)}
       >
         <SidebarMenuSubButton
           asChild

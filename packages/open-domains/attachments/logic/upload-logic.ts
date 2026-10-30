@@ -7,6 +7,7 @@
  * userId (real id or "local"), and the `attachments` table instance.
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import { ORPCError } from "@orpc/server";
 import { and, desc, eq } from "drizzle-orm";
 import { generateNanoID } from "openlib/nanoid";
@@ -33,7 +34,7 @@ export const MAX_FILE_SIZE = 200 * 1024 * 1024;
  */
 export const ATTACHMENT_KEY_PREFIX = "attachments";
 
-const UPLOAD_EXPIRES_IN = 3600;
+export const ATTACHMENT_UPLOAD_EXPIRES_IN_SECONDS = 3600;
 
 export interface RequestUploadUrlInput {
   fileName: string;
@@ -75,18 +76,27 @@ function ownerSegment(userId: string): string {
  * computed by the client and the bytes go straight to the bucket, so the
  * server never verifies it: a key shared across owners would let anyone who
  * knows a file's hash (it is in the file's URL) get a presigned PUT for it and
- * overwrite another user's object. Owner-scoping keeps store-once per owner —
- * and scoped dedup (below) still reuses one row's object for the whole space —
+ * overwrite another user's object. Owner + space scoping keeps new uploads
+ * isolated between spaces, and scoped dedup still reuses an existing row —
  * while no caller is ever handed a key that belongs to someone else.
  */
-function contentAddressedKey(contentHash: string, fileName: string, userId: string): string {
+function contentAddressedKey(
+  contentHash: string,
+  fileName: string,
+  userId: string,
+  spaceId?: string,
+): string {
   const ext = extractFileExtension(fileName);
   const hashHex = contentHash.replace(/^sha256:/, "");
   // Git/OCI-style: algorithm segment + 2-char fan-out (filesystem-friendly for the
   // local adapter; harmless on S3/R2). Keep the extension so direct-serve + the dev
   // proxy infer the right Content-Type (mime is also in the registry row).
   const shard = hashHex.slice(0, 2);
-  return `${ATTACHMENT_KEY_PREFIX}/${ownerSegment(userId)}/blobs/sha256/${shard}/${hashHex}${ext ? `.${ext}` : ""}`;
+  // Different spaces have independent quota/dedup scopes. A new presign in one
+  // must never overwrite a stored object registered in another. Encode the
+  // entire opaque id as one segment, including dots to avoid traversal.
+  const spacePrefix = spaceId ? `spaces/${encodeURIComponent(spaceId).replace(/\./g, "%2E")}/` : "";
+  return `${ATTACHMENT_KEY_PREFIX}/${ownerSegment(userId)}/${spacePrefix}blobs/sha256/${shard}/${hashHex}${ext ? `.${ext}` : ""}`;
 }
 
 function assertValidContentHash(contentHash: string | undefined): void {
@@ -152,6 +162,73 @@ export interface UploadPolicyOptions {
   allowedMimeTypes?: string[];
 }
 
+/** Hosts supply differently typed Drizzle clients, including transaction clients. */
+export type AttachmentUploadDatabase = any;
+
+export interface RequestAttachmentUploadPolicyArgs {
+  input: RequestUploadUrlInput;
+  userId: string;
+  db: AttachmentUploadDatabase;
+  attachmentsTable: typeof attachments;
+}
+
+export interface ConfirmAttachmentUploadPolicyArgs {
+  input: ConfirmUploadInput;
+  userId: string;
+  db: AttachmentUploadDatabase;
+  attachmentsTable: typeof attachments;
+}
+
+/** Optional host policy; shared upload logic does not depend on host billing. */
+export interface AttachmentUploadPolicy {
+  checkUpload(args: RequestAttachmentUploadPolicyArgs): Promise<void>;
+  /** Hosts with garbage collection must never issue a PUT for a retired key. */
+  resolveUploadKey?(db: AttachmentUploadDatabase, storageKey: string): Promise<string>;
+  confirmUpload(
+    args: ConfirmAttachmentUploadPolicyArgs,
+    persist: (database: AttachmentUploadDatabase) => Promise<ConfirmUploadResult>,
+  ): Promise<ConfirmUploadResult>;
+}
+
+const uploadPolicy = new AsyncLocalStorage<AttachmentUploadPolicy>();
+
+/** Object lifetime protection is independent of billing (including trusted uploads). */
+export interface AttachmentObjectLifecycle {
+  resolveUploadKey(db: AttachmentUploadDatabase, storageKey: string): Promise<string>;
+  register<T>(
+    db: AttachmentUploadDatabase,
+    storageKey: string,
+    persist: (database: AttachmentUploadDatabase) => Promise<T>,
+  ): Promise<T>;
+}
+
+const objectLifecycle = new AsyncLocalStorage<AttachmentObjectLifecycle>();
+
+export function runWithAttachmentObjectLifecycle<T>(
+  lifecycle: AttachmentObjectLifecycle,
+  fn: () => Promise<T>,
+): Promise<T> {
+  return objectLifecycle.run(lifecycle, fn);
+}
+
+/** Server integrations that register existing objects reuse the active policy. */
+export function getAttachmentUploadPolicy(): AttachmentUploadPolicy | undefined {
+  return uploadPolicy.getStore();
+}
+
+/** Isolate policy to this request and its async descendants, never other hosts. */
+export function runWithAttachmentUploadPolicy<T>(
+  policy: AttachmentUploadPolicy,
+  fn: () => Promise<T>,
+): Promise<T> {
+  return uploadPolicy.run(policy, fn);
+}
+
+/** Trusted server-owned chrome uploads have a separate, non-space lifecycle. */
+export function runWithoutAttachmentUploadPolicy<T>(fn: () => Promise<T>): Promise<T> {
+  return uploadPolicy.exit(fn);
+}
+
 export async function requestUploadUrl(
   input: RequestUploadUrlInput,
   userId: string,
@@ -176,6 +253,18 @@ export async function requestUploadUrl(
   }
 
   assertValidContentHash(input.contentHash);
+
+  // Authorize the requested scope before returning an existing object's URL.
+  // Hosts may allow dedup at capacity, but must still validate space access.
+  const policy = uploadPolicy.getStore();
+  if (policy) {
+    if (!db || !attachmentsTable) {
+      throw new ORPCError("INTERNAL_SERVER_ERROR", {
+        message: "Attachment upload policy requires a database and attachments table.",
+      });
+    }
+    await policy.checkUpload({ input, userId, db, attachmentsTable });
+  }
 
   // Dedup short-circuit: identical bytes already stored → reuse, skip upload.
   if (input.contentHash && db && attachmentsTable) {
@@ -202,9 +291,15 @@ export async function requestUploadUrl(
   // otherwise the legacy per-owner random key (backward compatible).
   const ext = extractFileExtension(input.fileName);
   const context = input.context || "general";
-  const storageKey = input.contentHash
-    ? contentAddressedKey(input.contentHash, input.fileName, userId)
+  let storageKey = input.contentHash
+    ? contentAddressedKey(input.contentHash, input.fileName, userId, input.spaceId)
     : `${ATTACHMENT_KEY_PREFIX}/${ownerSegment(userId)}/${context}/${generateNanoID()}${ext ? `.${ext}` : ""}`;
+
+  const lifecycle = objectLifecycle.getStore();
+  const resolveUploadKey = lifecycle?.resolveUploadKey ?? policy?.resolveUploadKey;
+  if (resolveUploadKey && db) {
+    storageKey = await resolveUploadKey(db, storageKey);
+  }
 
   // The storage adapter returns the right target: an s3/r2/minio presign for a
   // direct browser→bucket PUT, or the local dev relay URL carrying ?key=. Either
@@ -212,14 +307,15 @@ export async function requestUploadUrl(
   const uploadUrl = await storage.generateUploadPresignedUrl(
     storageKey,
     input.mimeType,
-    UPLOAD_EXPIRES_IN,
+    ATTACHMENT_UPLOAD_EXPIRES_IN_SECONDS,
+    { contentLength: input.sizeBytes },
   );
 
   return {
     uploadUrl,
     storageKey,
     publicUrl: storage.getPublicUrl(storageKey),
-    expiresIn: UPLOAD_EXPIRES_IN,
+    expiresIn: ATTACHMENT_UPLOAD_EXPIRES_IN_SECONDS,
     duplicate: false,
   };
 }
@@ -270,6 +366,25 @@ export async function confirmUpload(
   }
   assertValidContentHash(input.contentHash);
 
+  const lifecycle = objectLifecycle.getStore();
+  const persist = (database: AttachmentUploadDatabase) =>
+    lifecycle
+      ? lifecycle.register(database, input.storageKey, (transaction) =>
+          persistConfirmedUpload(input, userId, transaction, attachmentsTable),
+        )
+      : persistConfirmedUpload(input, userId, database, attachmentsTable);
+  const policy = uploadPolicy.getStore();
+  return policy
+    ? policy.confirmUpload({ input, userId, db, attachmentsTable }, persist)
+    : persist(db);
+}
+
+async function persistConfirmedUpload(
+  input: ConfirmUploadInput,
+  userId: string,
+  db: AttachmentUploadDatabase,
+  attachmentsTable: typeof attachments,
+): Promise<ConfirmUploadResult> {
   // Safety-net dedup: if the same content was registered concurrently (or the
   // host didn't wire request-time dedup), reuse the existing row instead of
   // inserting a duplicate registry entry.
@@ -289,6 +404,25 @@ export async function confirmUpload(
         publicUrl: storage.getPublicUrl(existing.storageKey),
       };
     }
+  }
+
+  // Retried confirms without a hash must also be idempotent. The host policy
+  // can serialize this lookup and insertion inside its quota transaction.
+  const scope = input.spaceId
+    ? eq(attachmentsTable.spaceId, input.spaceId)
+    : eq(attachmentsTable.userId, userId);
+  const [existing] = await db
+    .select({ id: attachmentsTable.id, storageKey: attachmentsTable.storageKey })
+    .from(attachmentsTable)
+    .where(and(eq(attachmentsTable.storageKey, input.storageKey), scope))
+    .limit(1);
+  if (existing) {
+    return {
+      success: true,
+      attachmentId: existing.id,
+      storageKey: existing.storageKey,
+      publicUrl: storage.getPublicUrl(existing.storageKey),
+    };
   }
 
   const [attachment] = await db
@@ -345,8 +479,13 @@ export async function deleteAttachmentSafely(
     .where(eq(attachmentsTable.storageKey, row.storageKey))
     .limit(1);
   if (others.length === 0) {
-    await storage.deleteObject(row.storageKey).catch(() => {});
-    return { deletedRow: true, deletedObject: true };
+    try {
+      await storage.deleteObject(row.storageKey);
+      return { deletedRow: true, deletedObject: true };
+    } catch {
+      // Callers must not mistake a failed physical deletion for reclaimed bytes.
+      return { deletedRow: true, deletedObject: false };
+    }
   }
   return { deletedRow: true, deletedObject: false };
 }

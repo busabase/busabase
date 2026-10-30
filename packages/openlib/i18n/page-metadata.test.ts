@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createPageMetadataHelpers } from "./page-metadata";
+import { createPageMetadataHelpers, FALLBACK_SELF_ALTERNATES } from "./page-metadata";
 
 const LOCALES = ["en", "zh-CN", "zh-TW", "ja"] as const;
 
@@ -567,5 +567,74 @@ describe("static vs content entry points", () => {
     // @ts-expect-error — getPageAlternates takes (locale, path) only
     const { alternates } = getPageAlternates("en", "/blog/x", ["en"]);
     expect(Object.keys(alternates.languages)).toHaveLength(LOCALES.length + 1);
+  });
+});
+
+describe("root layout fallback alternates", () => {
+  it("never names a URL: a relative self-reference, with no hreflang of its own", () => {
+    // A layout cannot know its page. An absolute URL here is the home page's, inherited by
+    // every page that sets no `alternates` of its own.
+    expect(FALLBACK_SELF_ALTERNATES).toEqual({ canonical: "./" });
+    expect(FALLBACK_SELF_ALTERNATES.canonical).not.toMatch(/^https?:\/\//);
+    expect(FALLBACK_SELF_ALTERNATES).not.toHaveProperty("languages");
+  });
+});
+
+describe("a static route translated into only some locales", () => {
+  const { generateTranslatedPageMetadata } = helpers;
+  const base = { title: "Plans", description: "About plans", path: "/plans" };
+
+  it("a translated locale canonicalizes to itself and lists exactly the translated set", () => {
+    const meta = generateTranslatedPageMetadata({
+      ...base,
+      lang: "zh-CN",
+      translatedLocales: ["en", "zh-CN"],
+    });
+    expect(meta.alternates.canonical).toBe("https://example.com/zh-CN/plans");
+    expect(meta.alternates.languages).toEqual({
+      en: "https://example.com/plans",
+      "zh-CN": "https://example.com/zh-CN/plans",
+      "x-default": "https://example.com/plans",
+    });
+    expect(meta.openGraph.locale).toBe("zh_CN");
+  });
+
+  it("an untranslated locale is a fallback: canonical is the default-locale page, hreflang omits it", () => {
+    const meta = generateTranslatedPageMetadata({
+      ...base,
+      lang: "ja",
+      translatedLocales: ["en", "zh-CN"],
+    });
+    // /ja/plans serves the English body — it is a copy of /plans, not a Japanese page.
+    expect(meta.alternates.canonical).toBe("https://example.com/plans");
+    expect(Object.keys(meta.alternates.languages)).toEqual(["en", "zh-CN", "x-default"]);
+    expect(meta.openGraph.locale).toBe("en_US");
+  });
+
+  it("an English-only page canonicalizes every locale to the English URL", () => {
+    for (const lang of ["en", "zh-CN", "ja"]) {
+      const meta = generateTranslatedPageMetadata({ ...base, lang, translatedLocales: ["en"] });
+      expect(meta.alternates.canonical).toBe("https://example.com/plans");
+      expect(meta.alternates.languages).toEqual({
+        en: "https://example.com/plans",
+        "x-default": "https://example.com/plans",
+      });
+    }
+  });
+
+  it("keeps the site identity that Next would otherwise drop", () => {
+    const meta = generateTranslatedPageMetadata({
+      ...base,
+      lang: "ja",
+      translatedLocales: ["en"],
+    });
+    expect(meta.openGraph.siteName).toBe("Example");
+    expect(meta.twitter.site).toBe("@example");
+  });
+
+  it("refuses a set without the default locale: there is no body to fall back to", () => {
+    expect(() =>
+      generateTranslatedPageMetadata({ ...base, lang: "ja", translatedLocales: ["zh-CN"] }),
+    ).toThrow(/default locale/);
   });
 });

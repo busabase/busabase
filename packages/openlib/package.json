@@ -5,6 +5,14 @@
   "description": "Open-source utility library for busabase and openbuda apps",
   "type": "module",
   "exports": {
+    "./model-provider-logos": {
+      "types": "./model-provider-logos.ts",
+      "default": "./model-provider-logos.ts"
+    },
+    "./ui/model-provider-icons": {
+      "types": "./ui/model-provider-icons.tsx",
+      "default": "./ui/model-provider-icons.tsx"
+    },
     "./cors": {
       "types": "./cors/index.ts",
       "default": "./cors/index.ts"

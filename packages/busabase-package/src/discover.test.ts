@@ -58,7 +58,7 @@ describe("discoverPackages", () => {
     const found = discoverPackages(skillsRepo());
     expect(found.map((entry) => entry.subdir)).toEqual(["skills/kelly-crm", "skills/kelly-email"]);
     expect(found.every((entry) => entry.isTemplate)).toBe(true);
-    expect(found[0].counts.bases).toBe(1);
+    expect(found[0].counts).toMatchObject({ bases: 1, skills: 1, files: 1 });
   });
 
   it("finds the repository itself when it is the package", () => {
@@ -123,6 +123,7 @@ describe("discoverPackages", () => {
     const entry = discoverPackages(files).find((item) => item.subdir === "skills/kelly-email");
     expect(entry?.isTemplate).toBe(false);
     expect(entry?.templateErrors.join()).toContain("Name mismatch");
+    expect(entry?.counts).toMatchObject({ bases: 1, skills: 0, files: 0 });
   });
 
   it("skips an unreadable package instead of failing the whole repository", () => {

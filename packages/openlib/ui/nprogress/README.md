@@ -8,21 +8,31 @@ Shared NProgress components for consistent navigation feedback across all apps.
 
 ## Usage
 
-Just wrap your app with `NProgressProvider`:
+Render `NavigationProgress` next to the page, not around it:
 
 ```tsx
-import { NProgressProvider } from "sharelib/ui/nprogress";
+import { NavigationProgress } from "openlib/ui/nprogress";
 
-export default function DashboardLayout({ children }) {
+export default function PublicLayout({ children }) {
   return (
-    <TRPCProvider>
-      <NProgressProvider>{children}</NProgressProvider>
-    </TRPCProvider>
+    <ORPCProvider>
+      <NavigationProgress />
+      {children}
+    </ORPCProvider>
   );
 }
 ```
 
 That's it! All `<a>` tags pointing to internal routes will automatically show NProgress.
+
+Don't wrap the page in `NProgressProvider` inside a layout. It reads
+`useSearchParams()`, so a static page bails out to client rendering up to the
+nearest Suspense boundary, and the boundary you add around it costs you either
+way: `<Suspense fallback={children}>` streams every page twice (two `<h1>`s for
+crawlers), and a bare `<Suspense>` streams the page before `notFound()` runs (a
+404 goes out as HTTP 200). `NavigationProgress` keeps the listener in a
+boundary of its own. `NProgressProvider` stays exported for client-only trees
+(a dashboard SPA) where neither problem applies.
 
 ## What Gets Intercepted
 
@@ -74,11 +84,19 @@ Add to your app's `global.css`:
 
 ```
 App Layout
-  └─ NProgressProvider (global click interceptor + pathname tracking)
-      └─ Your App
-          └─ Any links work automatically
+  ├─ NavigationProgress
+  │   └─ Suspense (fallback: nothing)
+  │       └─ NProgressProvider (global click interceptor + pathname tracking)
+  └─ Your page (rendered once, outside the boundary)
 ```
 
 The provider:
 1. Intercepts clicks on internal `<a>` tags → calls `NProgress.start()`
 2. Tracks `usePathname()` + `useSearchParams()` → calls `NProgress.done()` on route change
+
+## Links handled without navigation
+
+Mark an enhanced link with `data-nprogress="ignore"` when its normal click opens
+an in-page dialog instead of navigating. This lets the capture-phase listener
+skip the navigation indicator while the link retains a real URL for fallback
+navigation. Ordinary links and custom destinations keep their existing behavior.

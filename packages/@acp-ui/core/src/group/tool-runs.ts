@@ -39,7 +39,7 @@ const CATEGORY_BY_TOOL_KIND: Record<Exclude<ToolKind, "other">, ToolCategory> = 
 /** `null` — the agent sent no `kind` on the tool call — falls to `"other"`. */
 export function getToolCategory(toolKind: ToolKind | null): ToolCategory {
   if (toolKind === null || toolKind === "other") return "other";
-  return CATEGORY_BY_TOOL_KIND[toolKind];
+  return CATEGORY_BY_TOOL_KIND[toolKind] ?? "other";
 }
 
 export interface ToolRunSummary {

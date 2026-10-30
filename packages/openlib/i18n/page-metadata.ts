@@ -10,7 +10,9 @@
  *   1. A page that returns Metadata with no `alternates` key at all still
  *      INHERITS the parent layout's `alternates.canonical` verbatim — typically
  *      the site root — so every child page (docs article, blog post, ...)
- *      would otherwise claim the homepage as its own canonical URL.
+ *      would otherwise claim the homepage as its own canonical URL. The layout
+ *      half of the fix is `FALLBACK_SELF_ALTERNATES`: a root layout must use it
+ *      instead of naming a URL.
  *   2. A page that returns `alternates: { canonical }` without `languages`
  *      silently WIPES OUT the hreflang tags the parent layout set up (Next
  *      does not merge `languages` in from the parent).
@@ -66,6 +68,26 @@
  */
 
 import { createCanonicalUrlHelpers } from "./canonical-url";
+
+/**
+ * The `alternates` a ROOT LAYOUT sets as the fallback for every page beneath it.
+ *
+ * A layout cannot know which page renders under it, so it must never name a URL. Bug (1)
+ * above was exactly that: layouts set `canonical: getLocalizedUrl(baseUrl, locale)` — the
+ * HOME page's URL — plus an hreflang set for the home page, and every page that did not set
+ * its own `alternates` (/about, /pricing, /brand, ...) inherited both. Those pages told
+ * search engines they were duplicates of the homepage, and their share cards got the
+ * homepage title too. The helpers above only protect pages that call them.
+ *
+ * `"./"` is resolved by Next against the URL being requested (using `metadataBase`), so a
+ * page that sets nothing canonicalizes to itself, under the locale prefix it was requested
+ * with. hreflang is deliberately absent: only the page knows which translations exist, so
+ * it comes from `getPageAlternates` / `generatePageMetadata` / `generateContentPageMetadata`.
+ * The home page is a page like any other and sets its own.
+ *
+ * Needs `metadataBase` in the same metadata (every app's root layout spreads it in).
+ */
+export const FALLBACK_SELF_ALTERNATES: { canonical: string } = { canonical: "./" };
 
 /**
  * Minimal shape of the subset of Next.js's `Metadata` type this module
@@ -349,6 +371,18 @@ export interface GenerateContentPageMetadataOptions
   coverImageUrl?: string;
 }
 
+/**
+ * Options for a STATIC route whose body is translated into only SOME locales.
+ */
+export interface GenerateTranslatedPageMetadataOptions
+  extends Omit<GeneratePageMetadataOptions, "canonicalLang" | "contentLang" | "availableLocales"> {
+  /**
+   * The locales whose BODY really is translated — the page's own copy, not a UI shell around an
+   * English body. Must include the default locale: it is the body every other locale is served.
+   */
+  translatedLocales: readonly string[];
+}
+
 export interface PageMetadataHelpers extends PageAlternatesHelpers {
   /**
    * STATIC route: OpenGraph/Twitter/alternates metadata for a page translated into
@@ -363,6 +397,16 @@ export interface PageMetadataHelpers extends PageAlternatesHelpers {
    * the hreflang set can only come from the content source, never from a default.
    */
   generateContentPageMetadata(options: GenerateContentPageMetadataOptions): PageMetadata;
+  /**
+   * STATIC route translated into only SOME locales (a landing page with copy for five languages,
+   * an English-only legal page): every other locale is served the default-locale body.
+   *
+   * That is a locale fallback, so the page canonicalizes to the default-locale URL, hreflang lists
+   * exactly `translatedLocales`, and `og:locale` follows the body — the same facts
+   * `canonicalLang` / `contentLang` / `availableLocales` carry, derived here from the one thing the
+   * caller actually knows.
+   */
+  generateTranslatedPageMetadata(options: GenerateTranslatedPageMetadataOptions): PageMetadata;
   /**
    * Locale → OpenGraph locale (`zh-CN` → `zh_CN`), for pages that assemble their
    * own `openGraph` block instead of calling `generatePageMetadata`.
@@ -478,11 +522,33 @@ export function createPageMetadataHelpers<T extends string>(
       availableLocales: alternatesConfig.supportedLocales,
     });
 
+  const generateTranslatedPageMetadata = ({
+    translatedLocales,
+    ...options
+  }: GenerateTranslatedPageMetadataOptions): PageMetadata => {
+    const { defaultLocale } = alternatesConfig;
+    if (!translatedLocales.includes(defaultLocale)) {
+      // Every other locale is served the default-locale body, so without it there is no page to
+      // canonicalize to. A caller bug — fail on the first render rather than ship a wrong <head>.
+      throw new Error(
+        `generateTranslatedPageMetadata: translatedLocales must include the default locale "${defaultLocale}"`,
+      );
+    }
+    const contentLang = translatedLocales.includes(options.lang) ? options.lang : defaultLocale;
+    return generateContentPageMetadata({
+      ...options,
+      canonicalLang: contentLang,
+      contentLang,
+      availableLocales: translatedLocales,
+    });
+  };
+
   return {
     getPageAlternates,
     getContentPageAlternates,
     generatePageMetadata,
     generateContentPageMetadata,
+    generateTranslatedPageMetadata,
     getOpenGraphLocale,
     getOpenGraphAlternateLocales,
   };

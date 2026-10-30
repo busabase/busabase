@@ -148,6 +148,7 @@ export function attachmentUri(filename: string | undefined): string {
  * object that is not a valid content block at all for a `file`.
  */
 export function attachmentToContentBlock(attachment: AcpAttachment): acp.ContentBlock {
+  if (attachment.resource) return attachment.resource;
   if (attachment.kind === "image" || attachment.kind === "audio") {
     return { type: attachment.kind, data: attachment.data, mimeType: attachment.mimeType };
   }

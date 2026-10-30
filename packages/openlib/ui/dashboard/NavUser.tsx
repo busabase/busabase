@@ -56,6 +56,16 @@ interface NavUserProps {
   labels?: NavUserLabels;
 }
 
+function accountIdentity(name: string, email: string) {
+  const trimmedName = name.trim();
+  const trimmedEmail = email.trim();
+  return {
+    name: trimmedName || trimmedEmail,
+    email: trimmedEmail,
+    showEmail: trimmedName && trimmedName.toLowerCase() !== trimmedEmail.toLowerCase(),
+  };
+}
+
 export function NavUser({
   user,
   onSignOut,
@@ -93,6 +103,7 @@ export function NavUser({
 
   // Only a second account makes "switching" and "which one am I?" meaningful.
   const hasMultipleAccounts = (accounts?.length ?? 0) > 1;
+  const identity = accountIdentity(user.name, user.email);
 
   return (
     <SidebarMenu>
@@ -105,13 +116,13 @@ export function NavUser({
             >
               <AvatarLogo
                 src={user.avatar}
-                fallback={user.name}
+                fallback={identity.name}
                 size={isCollapsed ? "xs" : "sm"}
                 className="shrink-0"
               />
-              <div className="grid flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:!hidden">
-                <span className="truncate font-semibold">{user.name}</span>
-                <span className="truncate text-xs">{user.email}</span>
+              <div className="grid min-w-0 flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:!hidden">
+                <span className="truncate font-semibold">{identity.name}</span>
+                {identity.showEmail && <span className="truncate text-xs">{identity.email}</span>}
               </div>
               <ChevronsUpDown className="ml-auto size-4 group-data-[collapsible=icon]:!hidden" />
             </SidebarMenuButton>
@@ -133,49 +144,57 @@ export function NavUser({
               // submenu — mis-acting as the wrong account is the real risk of
               // multi-account, not slow switching.
               <DropdownMenuGroup>
-                {accounts?.map((account) => (
-                  <DropdownMenuItem
-                    key={account.sessionToken}
-                    onSelect={(event) => {
-                      if (account.isActive) return;
-                      // Keep the menu open so the spinner is visible.
-                      event.preventDefault();
-                      onSwitchAccount?.(account.sessionToken);
-                    }}
-                    className={`gap-2 ${account.isActive ? "bg-accent" : ""}`}
-                    aria-current={account.isActive ? "true" : undefined}
-                  >
-                    <AvatarLogo
-                      src={account.image ?? undefined}
-                      fallback={account.name}
-                      size="sm"
-                      className={account.isActive ? "" : "opacity-60"}
-                    />
-                    <div className="grid min-w-0 flex-1 text-left leading-tight">
-                      <span
-                        className={`truncate text-sm ${account.isActive ? "font-medium" : "font-normal text-muted-foreground"}`}
-                      >
-                        {account.name}
-                      </span>
-                      <span className="truncate text-muted-foreground text-xs">
-                        {account.email}
-                      </span>
-                    </div>
-                    {switchingTo === account.sessionToken ? (
-                      <Loader2 className="size-4 shrink-0 animate-spin" />
-                    ) : account.isActive ? (
-                      <Check className="size-4 shrink-0" />
-                    ) : null}
-                  </DropdownMenuItem>
-                ))}
+                {accounts?.map((account) => {
+                  const identity = accountIdentity(account.name, account.email);
+                  return (
+                    <DropdownMenuItem
+                      key={account.sessionToken}
+                      onSelect={(event) => {
+                        if (account.isActive) return;
+                        // Keep the menu open so the spinner is visible.
+                        event.preventDefault();
+                        onSwitchAccount?.(account.sessionToken);
+                      }}
+                      className={`gap-2 ${account.isActive ? "bg-accent" : ""}`}
+                      aria-current={account.isActive ? "true" : undefined}
+                    >
+                      <AvatarLogo
+                        src={account.image ?? undefined}
+                        fallback={identity.name}
+                        size="sm"
+                        className={account.isActive ? "shrink-0" : "shrink-0 opacity-60"}
+                      />
+                      <div className="grid min-w-0 flex-1 whitespace-normal break-all text-left leading-tight">
+                        <span
+                          className={`text-sm ${account.isActive ? "font-medium" : "font-normal text-muted-foreground"}`}
+                        >
+                          {identity.name}
+                        </span>
+                        {identity.showEmail && (
+                          <span className="text-muted-foreground text-xs">{identity.email}</span>
+                        )}
+                      </div>
+                      {switchingTo === account.sessionToken ? (
+                        <Loader2 className="size-4 shrink-0 animate-spin" />
+                      ) : account.isActive ? (
+                        <Check className="size-4 shrink-0" />
+                      ) : null}
+                    </DropdownMenuItem>
+                  );
+                })}
               </DropdownMenuGroup>
             ) : (
               <DropdownMenuLabel className="p-0 font-normal">
                 <div className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
-                  <AvatarLogo src={user.avatar} fallback={user.name} size="sm" />
-                  <div className="grid flex-1 text-left text-sm leading-tight">
-                    <span className="truncate font-medium">{user.name}</span>
-                    <span className="truncate text-xs">{user.email}</span>
+                  <AvatarLogo
+                    src={user.avatar}
+                    fallback={identity.name}
+                    size="sm"
+                    className="shrink-0"
+                  />
+                  <div className="grid min-w-0 flex-1 whitespace-normal break-all text-left text-sm leading-tight">
+                    <span className="font-medium">{identity.name}</span>
+                    {identity.showEmail && <span className="text-xs">{identity.email}</span>}
                   </div>
                 </div>
               </DropdownMenuLabel>

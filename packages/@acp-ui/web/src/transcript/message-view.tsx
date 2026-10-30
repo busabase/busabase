@@ -10,6 +10,10 @@ import {
 import { Message, MessageContent } from "kui/ai-elements/message";
 import { Reasoning, ReasoningContent, ReasoningTrigger } from "kui/ai-elements/reasoning";
 import { Shimmer } from "kui/ai-elements/shimmer";
+import { Fragment, type ReactNode } from "react";
+import { AcpResourceContextChip } from "../composer/context-chip";
+import { citationMarkdown, citationPresentation } from "./citations";
+import { AcpContentView } from "./content-view";
 import type { AcpMessageViewProps } from "./slots";
 
 /**
@@ -30,9 +34,11 @@ import type { AcpMessageViewProps } from "./slots";
 function AcpAttachmentsView({
   messageId,
   attachments,
+  renderAttachment,
 }: {
   messageId: string;
   attachments: AcpAttachment[];
+  renderAttachment?: AcpMessageViewProps["renderAttachment"];
 }) {
   const toData = (attachment: AcpAttachment, index: number) => {
     const isImage = attachment.mimeType.startsWith("image/");
@@ -45,12 +51,22 @@ function AcpAttachmentsView({
     };
   };
 
-  const indexed = attachments.map((attachment, index) => ({ attachment, index }));
-  const images = indexed.filter(({ attachment }) => attachment.mimeType.startsWith("image/"));
-  const rest = indexed.filter(({ attachment }) => !attachment.mimeType.startsWith("image/"));
+  const indexed = attachments.map((attachment, index) => ({
+    attachment,
+    index,
+    custom: renderAttachment?.(attachment, index),
+  }));
+  const defaults = indexed.filter(({ custom }) => custom === undefined);
+  const images = defaults.filter(({ attachment }) => attachment.mimeType.startsWith("image/"));
+  const rest = defaults.filter(({ attachment }) => !attachment.mimeType.startsWith("image/"));
 
   return (
     <div className="mt-2 space-y-2">
+      {indexed
+        .filter(({ custom }) => custom !== undefined)
+        .map(({ custom, index }) => (
+          <Fragment key={`${messageId}-attachment-${index}`}>{custom}</Fragment>
+        ))}
       {images.length > 0 ? (
         <Attachments variant="grid">
           {images.map(({ attachment, index }) => (
@@ -87,7 +103,110 @@ export function AcpMessageView({
   streaming = false,
   Markdown,
   reasoningLabel,
+  citationLabels,
+  resolveResource,
+  resourceLabels,
+  renderAttachment,
 }: AcpMessageViewProps) {
+  if (
+    !block.text &&
+    !block.attachments?.length &&
+    !block.content?.some((item) => item.type !== "text" || item.text.length > 0)
+  )
+    return null;
+  const citations = streaming
+    ? { kind: "absent" as const, citations: [] }
+    : citationPresentation(block);
+  let textOffset = 0;
+  let runOffset = 0;
+  let runIndex = 0;
+  let textRun = "";
+  const content: ReactNode[] | undefined = block.content ? [] : undefined;
+  const flushText = () => {
+    if (!textRun) return;
+    const projected =
+      citations.kind === "valid"
+        ? citationMarkdown(textRun, citations.citations, runOffset)
+        : textRun;
+    content?.push(<Markdown key={`${block.id}:${runIndex}`}>{projected}</Markdown>);
+    textRun = "";
+  };
+  let attachmentIndex = 0;
+  block.content?.forEach((item, index) => {
+    if (item.type === "text") {
+      if (!textRun) {
+        runOffset = textOffset;
+        runIndex = index;
+      }
+      textRun += item.text;
+      textOffset += item.text.length;
+      return;
+    }
+    if (
+      citations.kind === "valid" &&
+      item.type === "resource_link" &&
+      citations.citations.some(
+        (citation) => citation.sourceId === item._meta?.["bunny-agent/sourceId"],
+      )
+    )
+      return;
+    flushText();
+    // The reducer keeps the attachment projection in the same order as the
+    // corresponding media/resources in canonical content. Use that projection
+    // for host cards while retaining content order and the fidelity defaults.
+    const isAttachment = item.type === "image" || item.type === "audio" || item.type === "resource";
+    const projectedIndex = attachmentIndex;
+    if (isAttachment) attachmentIndex += 1;
+    const attachment = isAttachment ? block.attachments?.[projectedIndex] : undefined;
+    const marker = item.type === "resource" ? item._meta?.["acp-ui.resourceContext"] : undefined;
+    const context =
+      item.type === "resource" &&
+      "text" in item.resource &&
+      marker &&
+      typeof marker === "object" &&
+      "id" in marker &&
+      typeof marker.id === "string" &&
+      "name" in marker &&
+      typeof marker.name === "string"
+        ? {
+            id: marker.id,
+            name: marker.name,
+            uri: item.resource.uri,
+            mimeType: item.resource.mimeType ?? "text/plain",
+            text: item.resource.text,
+          }
+        : undefined;
+    const hostAttachment = attachment ? renderAttachment?.(attachment, projectedIndex) : undefined;
+    const custom =
+      hostAttachment !== undefined ? (
+        hostAttachment
+      ) : context ? (
+        <div
+          key={`${block.id}:context:${index}`}
+          className="my-2 flex min-w-0 flex-wrap items-center gap-2"
+        >
+          <AcpResourceContextChip
+            context={context}
+            inspectLabel={resourceLabels?.preview}
+            contentLabel={resourceLabels?.preview}
+          />
+        </div>
+      ) : undefined;
+    content?.push(
+      custom !== undefined ? (
+        <Fragment key={`${block.id}:${index}`}>{custom}</Fragment>
+      ) : (
+        <AcpContentView
+          key={`${block.id}:${index}`}
+          content={item}
+          Markdown={Markdown}
+          resolveResource={resolveResource}
+          resourceLabels={resourceLabels}
+        />
+      ),
+    );
+  });
+  flushText();
   if (block.variant === "thought") {
     return (
       <Reasoning isStreaming={streaming} data-testid="acp-thought">
@@ -118,13 +237,52 @@ export function AcpMessageView({
       from={block.role === "user" ? "user" : "assistant"}
       data-testid={`acp-message-${block.role}`}
     >
-      <MessageContent>
+      <MessageContent className="[overflow-wrap:anywhere] [&_p]:[overflow-wrap:anywhere]">
         {/* An attachment-only message has empty text — skip the markdown
             render rather than let it emit an empty paragraph node. */}
-        {block.text && <Markdown>{block.text}</Markdown>}
-        {block.attachments && block.attachments.length > 0 && (
-          <AcpAttachmentsView attachments={block.attachments} messageId={block.id} />
+        {content ? (
+          content
+        ) : (
+          <>
+            {block.text && <Markdown>{block.text}</Markdown>}
+            {block.attachments && block.attachments.length > 0 && (
+              <AcpAttachmentsView
+                attachments={block.attachments}
+                messageId={block.id}
+                renderAttachment={renderAttachment}
+              />
+            )}
+          </>
         )}
+        {citations.kind === "valid" && citations.citations.length > 0 ? (
+          <details className="mt-2 text-xs" data-testid="acp-citations">
+            <summary className="cursor-pointer text-muted-foreground">
+              {citationLabels?.sources ?? "Sources"}
+              {citations.partial ? ` · ${citationLabels?.partial ?? "Partial"}` : ""}
+            </summary>
+            <ol className="mt-2 space-y-2">
+              {citations.citations.map((citation, index) => (
+                <li
+                  key={`${citation.sourceId}:${index}`}
+                  data-citation-start={citation.start}
+                  data-citation-end={citation.end}
+                >
+                  <a
+                    href={citation.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="break-words text-primary underline"
+                  >
+                    {citation.title || citation.url}
+                  </a>
+                  <blockquote className="mt-1 whitespace-pre-wrap break-words border-l pl-2 text-muted-foreground">
+                    {citation.quote}
+                  </blockquote>
+                </li>
+              ))}
+            </ol>
+          </details>
+        ) : null}
       </MessageContent>
     </Message>
   );
