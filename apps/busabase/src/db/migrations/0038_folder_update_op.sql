@@ -1,0 +1,1 @@
+ALTER TYPE "public"."busabase_operation_kind" ADD VALUE 'folder_update' BEFORE 'whiteboard_document_update';

@@ -7,17 +7,19 @@ const fixtureAgentId = "agt_agent_chat_e2e";
 
 export default defineConfig({
   testDir: "./tests/e2e",
-  testMatch: "agent-chat.spec.ts",
+  testMatch: ["agent-chat.spec.ts", "agent-context.spec.ts", "agent-prompt-context.spec.ts"],
   timeout: 120_000,
   expect: { timeout: 30_000 },
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   workers: 1,
-  reporter: [["html", { outputFolder: "playwright-report" }], ["list"]],
+  reporter: [["html", { outputFolder: "playwright-report/agent-chat" }], ["list"]],
   outputDir: "test-results/agent-chat",
   use: {
     ...devices["Desktop Chrome"],
+    channel: process.env.PLAYWRIGHT_BROWSER_CHANNEL,
     baseURL: `http://localhost:${appPort}`,
+    launchOptions: { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH },
     screenshot: "only-on-failure",
     trace: "retain-on-failure",
     video: "retain-on-failure",

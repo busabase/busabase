@@ -43,7 +43,9 @@ test("record review preview stays bounded and opens pageable record activity", a
   const recordPath = `/dashboard/local/base/${base.slug}/${record.id}`;
   await page.goto(`/dashboard/local/base/${base.slug}`);
   await page.getByText(title, { exact: true }).dblclick();
-  await expect(page.getByRole("heading", { name: title, exact: true })).toBeVisible();
+  // The record opens in a detail dialog whose title bar repeats the record's title as an
+  // h2, so name the page-level h1.
+  await expect(page.getByRole("heading", { name: title, exact: true, level: 1 })).toBeVisible();
   const history = page
     .locator("section")
     .filter({
@@ -108,7 +110,9 @@ test("record review preview stays bounded and opens pageable record activity", a
   await activity.screenshot({ path: testInfo.outputPath("record-history-end.png") });
 
   await page.goBack();
-  await expect(page.getByRole("heading", { name: title, exact: true })).toBeVisible();
+  // The detail dialog is not a history entry, so back lands on the grid: open the record again.
+  await page.getByText(title, { exact: true }).dblclick();
+  await expect(page.getByRole("heading", { name: title, exact: true, level: 1 })).toBeVisible();
   await expect(reviewLinks).toHaveCount(5);
   await page.setViewportSize({ width: 390, height: 844 });
   await more.scrollIntoViewIfNeeded();

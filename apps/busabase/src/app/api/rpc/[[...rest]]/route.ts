@@ -54,7 +54,10 @@ async function handle(request: Request) {
 
   try {
     if (demoUseCase) {
-      return await runWithBusabaseContext({ isDemo: true, demoUseCase, demoLocale }, run);
+      return await runWithBusabaseContext(
+        { isDemo: true, demoUseCase, demoLocale, embedOrigin: url.origin },
+        run,
+      );
     }
 
     // Read Vault runtime values before branching so an OSS Embed Link resolves

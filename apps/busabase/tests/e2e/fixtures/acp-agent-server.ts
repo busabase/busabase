@@ -1,5 +1,7 @@
 import { createServer } from "node:http";
+import type { PromptRequest } from "@agentclientprotocol/sdk";
 import { type WebSocket, WebSocketServer } from "ws";
+import { type AcpFixtureState, AcpPromptRequestSchema } from "./acp-fixture-protocol";
 
 const port = Number(process.env.BUSABASE_ACP_FIXTURE_PORT ?? 15430);
 const expectedToken = process.env.BUSABASE_ACP_FIXTURE_TOKEN ?? "sk_busabase_agent_chat_e2e";
@@ -31,7 +33,7 @@ interface PreparedPrompt {
 const asRecord = (value: unknown): Record<string, unknown> =>
   typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
 
-const modelOptions = (currentValue: string) => [
+const modelOptions = (currentValue: string, thinkingLevel = "medium") => [
   {
     id: "model",
     name: "Model",
@@ -43,6 +45,22 @@ const modelOptions = (currentValue: string) => [
       { value: "gpt-5.6", name: "GPT-5.6" },
     ],
   },
+  ...(currentValue === "gpt-5.6"
+    ? [
+        {
+          id: "reasoning_effort",
+          name: "Thinking Level",
+          category: "thought_level",
+          type: "select",
+          currentValue: thinkingLevel,
+          options: [
+            { value: "low", name: "Low" },
+            { value: "medium", name: "Medium" },
+            { value: "high", name: "High" },
+          ],
+        },
+      ]
+    : []),
 ];
 
 const sendResult = (socket: WebSocket, id: JsonRpcId, result: unknown) => {
@@ -57,6 +75,10 @@ const wait = (milliseconds: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
 
 const preparedPrompts = new Map<string, PreparedPrompt>();
+// Local test-only inspection: assert what crossed the ACP boundary, separately
+// from what the browser chose to display.
+const receivedPrompts: PromptRequest[] = [];
+let embeddedContext: boolean | undefined = false;
 
 const readJsonBody = async (request: import("node:http").IncomingMessage) => {
   const chunks: Buffer[] = [];
@@ -165,7 +187,23 @@ const httpServer = createServer((request, response) => {
       return;
     }
     if (request.method === "GET" && request.url === "/control/state") {
-      sendJson(response, 200, { sessions: sessionModels.size });
+      const state: AcpFixtureState = {
+        sessions: sessionModels.size,
+        prompts: receivedPrompts,
+        configurations: [...sessionModels].map(([id, model]) => ({
+          id,
+          model,
+          thinkingLevel: sessionThinkingLevels.get(id) ?? null,
+        })),
+      };
+      sendJson(response, 200, state);
+      return;
+    }
+    if (request.method === "POST" && request.url === "/control/capabilities") {
+      const body = await readJsonBody(request);
+      embeddedContext =
+        typeof body.embeddedContext === "boolean" ? body.embeddedContext : undefined;
+      sendJson(response, 200, { ok: true });
       return;
     }
     if (request.method === "POST" && request.url === "/control/prepare") {
@@ -212,6 +250,7 @@ const httpServer = createServer((request, response) => {
 
 const webSocketServer = new WebSocketServer({ noServer: true });
 const sessionModels = new Map<string, string>();
+const sessionThinkingLevels = new Map<string, string>();
 
 httpServer.on("upgrade", (request, socket, head) => {
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
@@ -233,6 +272,7 @@ httpServer.on("upgrade", (request, socket, head) => {
 webSocketServer.on("connection", (socket) => {
   let sessionId = `acp_agent_chat_${crypto.randomUUID()}`;
   let currentModel = "auto";
+  let currentThinkingLevel = "medium";
 
   socket.on("message", (frame) => {
     void (async () => {
@@ -266,7 +306,11 @@ webSocketServer.on("connection", (socket) => {
           protocolVersion: 1,
           agentCapabilities: {
             loadSession: true,
-            promptCapabilities: { image: false, audio: false, embeddedContext: false },
+            promptCapabilities: {
+              image: false,
+              audio: false,
+              ...(embeddedContext === undefined ? {} : { embeddedContext }),
+            },
           },
           authMethods: [],
         });
@@ -277,7 +321,7 @@ webSocketServer.on("connection", (socket) => {
         sessionModels.set(sessionId, currentModel);
         sendResult(socket, request.id, {
           sessionId,
-          configOptions: modelOptions(currentModel),
+          configOptions: modelOptions(currentModel, currentThinkingLevel),
         });
         return;
       }
@@ -290,45 +334,57 @@ webSocketServer.on("connection", (socket) => {
         }
         sessionId = savedSessionId;
         currentModel = sessionModels.get(savedSessionId) ?? "auto";
-        sendResult(socket, request.id, { configOptions: modelOptions(currentModel) });
+        currentThinkingLevel = sessionThinkingLevels.get(savedSessionId) ?? "medium";
+        sendResult(socket, request.id, {
+          configOptions: modelOptions(currentModel, currentThinkingLevel),
+        });
         return;
       }
 
       if (request.method === "session/set_config_option") {
         const params = asRecord(request.params);
-        const nextModel = params.value;
-        if (
-          params.sessionId !== sessionId ||
-          params.configId !== "model" ||
-          (nextModel !== "auto" && nextModel !== "gpt-5.6")
-        ) {
-          sendError(socket, request.id, -32602, "Invalid model selection");
+        const value = params.value;
+        const selectingModel = params.configId === "model";
+        const validSelection = selectingModel
+          ? value === "auto" || value === "gpt-5.6"
+          : params.configId === "reasoning_effort" &&
+            currentModel === "gpt-5.6" &&
+            (value === "low" || value === "medium" || value === "high");
+        if (params.sessionId !== sessionId || !validSelection || typeof value !== "string") {
+          sendError(socket, request.id, -32602, "Invalid session configuration selection");
           return;
         }
         // Keep this response pending long enough for the browser test to prove
         // that the composer is disabled while model selection is in flight. If
         // a prompt races this request, the reply still identifies the old model.
         await wait(1_000);
-        currentModel = nextModel;
+        if (selectingModel) {
+          currentModel = value;
+          currentThinkingLevel = "medium";
+        } else {
+          currentThinkingLevel = value;
+        }
         sessionModels.set(sessionId, currentModel);
-        sendResult(socket, request.id, { configOptions: modelOptions(currentModel) });
+        sessionThinkingLevels.set(sessionId, currentThinkingLevel);
+        sendResult(socket, request.id, {
+          configOptions: modelOptions(currentModel, currentThinkingLevel),
+        });
         return;
       }
 
       if (request.method === "session/prompt") {
-        const params = asRecord(request.params);
-        const prompt = Array.isArray(params.prompt) ? params.prompt : [];
-        const textBlock = prompt.map(asRecord).find((block) => block.type === "text");
-        const promptText = typeof textBlock?.text === "string" ? textBlock.text : "";
-
-        if (params.sessionId !== sessionId || !promptText) {
+        const parsed = AcpPromptRequestSchema.safeParse(request.params);
+        if (!parsed.success || parsed.data.sessionId !== sessionId) {
           sendError(socket, request.id, -32602, "Invalid prompt");
           return;
         }
+        const params = parsed.data;
+        receivedPrompts.push(params);
+        const promptText = params.prompt.find((block) => block.type === "text")?.text ?? "";
 
         const currentModelName = currentModel === "gpt-5.6" ? "GPT-5.6" : "Auto";
-        // Node-context prompts include a host prefix. Match the prepared user
-        // instruction without dropping the real context from the request.
+        // Text-file attachments include a wrapper. Match the prepared suffix
+        // while retaining every content block in the captured request.
         const prepared =
           preparedPrompts.get(promptText) ??
           [...preparedPrompts.entries()].find(([text]) => promptText.endsWith(text))?.[1];
@@ -342,13 +398,15 @@ webSocketServer.on("connection", (socket) => {
           return;
         }
         const responseText =
-          promptText === "Show a long answer"
-            ? Array.from(
-                { length: 40 },
-                (_, index) =>
-                  `Paragraph ${index + 1}: enough content to require transcript scrolling.`,
-              ).join("\n\n")
-            : `${currentModelName} received the first prompt: ${promptText}`;
+          promptText === "Confirm thinking configuration"
+            ? `${currentModelName} used Thinking Level: ${currentThinkingLevel}`
+            : promptText === "Show a long answer"
+              ? Array.from(
+                  { length: 40 },
+                  (_, index) =>
+                    `Paragraph ${index + 1}: enough content to require transcript scrolling.`,
+                ).join("\n\n")
+              : `${currentModelName} received the first prompt: ${promptText}`;
         socket.send(
           JSON.stringify({
             jsonrpc: "2.0",

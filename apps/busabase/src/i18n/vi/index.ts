@@ -13,7 +13,7 @@ const vi = {
   seo: {
     title: "Busabase",
     description:
-      "Busabase là không gian làm việc nơi các tác nhân AI của bạn xây dựng nên mọi thứ: một cơ sở dữ liệu mã nguồn mở, ưu tiên cục bộ, cùng với kho kiến thức, thư viện ứng dụng và kho kỹ năng.",
+      "Busabase là cơ sở dữ liệu và không gian làm việc mã nguồn mở dành cho các tác nhân AI: dữ liệu, tài liệu, kỹ năng và ứng dụng trong một nơi, ưu tiên cục bộ ngay trên máy của bạn.",
   },
   shell: {
     graphView: "Chế độ xem đồ thị",

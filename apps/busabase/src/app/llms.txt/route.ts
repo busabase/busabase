@@ -26,10 +26,11 @@ export async function GET(request: Request) {
 
 This is a self-hosted Busabase instance, running at ${origin}.
 
-Busabase is a workspace built for AI agents — a database, a knowledge base, an apps library, and a
-skills registry in one place. Agents write into it through change requests, so every change carries
-a message, a diff, an author, and a history you can roll back. This server is the open-source
-edition, so the data lives on the machine that serves this page and nowhere else.
+Busabase is the system of record for AI agents — an open-source (MIT) database and workspace where
+agents and people share the same data, docs, skills, and apps. Agents write into it through change
+requests, so every change carries a message, a diff, an author, and a history you can roll back.
+This server is the open-source edition, so the data lives on the machine that serves this page and
+nowhere else.
 
 ## How an agent connects
 

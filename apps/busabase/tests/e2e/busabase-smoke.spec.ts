@@ -1,4 +1,4 @@
-import { expect, test } from "./_fixtures";
+import { chooseOption, expect, test } from "./_fixtures";
 
 test("REST OPTIONS advertises node change-request methods", async ({ request }, testInfo) => {
   const baseURL = String(testInfo.project.use.baseURL ?? "http://localhost:15419");
@@ -135,10 +135,10 @@ test("dashboard routes render the review-first seeded experience", async ({ page
   await page
     .getByLabel("Body", { exact: true })
     .fill("A browser smoke test creates this change request note.");
-  await page.getByLabel("Status", { exact: true }).selectOption("draft");
+  await chooseOption(page, "Status", "Draft / 草稿");
   await page.getByLabel("Path", { exact: true }).fill("/blog/smoke-test-ai-market-note");
   await page.getByLabel("Slug", { exact: true }).fill("smoke-test-ai-market-note");
-  await page.getByLabel("Locale", { exact: true }).selectOption("en");
+  await chooseOption(page, "Locale", "English / 英文");
   // A required number: since empty numbers stay empty instead of becoming 0
   // (#8048), leaving it blank fails the form's required check.
   await page.getByLabel("Schema version", { exact: true }).fill("1");
@@ -157,10 +157,10 @@ test("dashboard routes render the review-first seeded experience", async ({ page
   await page
     .getByLabel("Body", { exact: true })
     .fill("A browser smoke test creates and merges this note.");
-  await page.getByLabel("Status", { exact: true }).selectOption("draft");
+  await chooseOption(page, "Status", "Draft / 草稿");
   await page.getByLabel("Path", { exact: true }).fill("/blog/smoke-direct-merge-ai-note");
   await page.getByLabel("Slug", { exact: true }).fill("smoke-direct-merge-ai-note");
-  await page.getByLabel("Locale", { exact: true }).selectOption("en");
+  await chooseOption(page, "Locale", "English / 英文");
   await page.getByLabel("Schema version", { exact: true }).fill("1");
   await page.getByRole("button", { name: "Submit Now" }).click();
   await expect(page).toHaveURL(/\/dashboard\/local\/base\/blog\/rec/);

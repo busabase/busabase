@@ -107,6 +107,14 @@ export const json = async <T>(response: APIResponse): Promise<T> => {
   return response.json() as Promise<T>;
 };
 
+// Single and multi select fields are a choice picker, not a native <select>: a trigger
+// button labelled with the field name opens a listbox, and a single select closes on
+// pick. `option` is the choice's full display name, e.g. "Draft / 草稿" for the bilingual CMS demo.
+export const chooseOption = async (page: Page, field: string, option: string) => {
+  await page.getByLabel(field, { exact: true }).click();
+  await page.getByRole("option", { name: option, exact: true }).click();
+};
+
 type ChangeRequestFailure = { changeRequestId: string; ok: false; error: string };
 
 export const reviewOne = async (

@@ -13,7 +13,7 @@ const pt = {
   seo: {
     title: "Busabase",
     description:
-      "Busabase é o espaço de trabalho onde seus agentes de IA constroem: um banco de dados open-source e local-first, base de conhecimento, biblioteca de apps e registro de skills.",
+      "O Busabase é uma base de dados e espaço de trabalho open source para agentes de IA: dados, documentos, skills e apps em um só lugar, local-first na sua própria máquina.",
   },
   shell: {
     graphView: "Visualização em Grafo",
