@@ -41,7 +41,14 @@ export function deriveAgentSessionStatus(chat: {
   if (chat.error) return "failed";
   if (chat.ended) return "ended";
   if (!chat.sessionId) return "connecting";
-  const tail = chat.blocks[chat.blocks.length - 1];
-  if (tail?.kind === "permission" && tail.resolution === "pending") return "waiting_permission";
-  return chat.sending ? "busy" : "idle";
+  if (
+    chat.blocks.some(
+      (block) =>
+        (block.kind === "permission" || block.kind === "input_request") &&
+        (block.resolution === "pending" || block.resolution === "answering"),
+    )
+  )
+    return "waiting_permission";
+  const turn = chat.blocks.findLast((block) => block.kind === "turn");
+  return chat.sending || (turn?.kind === "turn" && turn.status === "running") ? "busy" : "idle";
 }

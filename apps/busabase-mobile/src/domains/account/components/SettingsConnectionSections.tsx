@@ -8,6 +8,7 @@ import { fmt } from "~/i18n";
 import type { CoreMessages } from "~/i18n/messages";
 import { useTokens } from "~/theme/use-tokens";
 import type { SettingsCloudAccount } from "../types/settings";
+import { settingsAccountIdentity } from "../utils/settings";
 
 interface SettingsConnectionSectionsProps {
   t: CoreMessages;
@@ -78,12 +79,16 @@ export function SettingsConnectionSections({
           caption={`${accounts.length}/${MAX_CLOUD_ACCOUNTS}`}
         >
           {accounts.map((account) => {
-            const profile = account.user;
+            const identity = settingsAccountIdentity(account.user);
             return (
               <NativeRow
                 key={account.id}
-                title={profile?.name || profile?.email || t.settings.savedAccount}
-                subtitle={profile?.email ?? t.settings.cloudAccount}
+                title={
+                  identity.name ||
+                  (identity.email ? t.settings.cloudAccount : t.settings.savedAccount)
+                }
+                subtitle={identity.email || t.settings.cloudAccount}
+                subtitleLines={0}
                 meta={
                   switchingAccount === account.id
                     ? t.settings.working

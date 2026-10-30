@@ -29,3 +29,9 @@ export const buildLanguageOptions = (
 
 export const sortCloudAccounts = <Account extends SettingsCloudAccount>(accounts: Account[]) =>
   [...accounts].sort((left, right) => Number(right.isActive) - Number(left.isActive));
+
+export function settingsAccountIdentity(user: SettingsCloudAccount["user"]) {
+  const name = user?.name.trim() ?? "";
+  const email = user?.email.trim() ?? "";
+  return { name: name.toLowerCase() === email.toLowerCase() ? "" : name, email };
+}

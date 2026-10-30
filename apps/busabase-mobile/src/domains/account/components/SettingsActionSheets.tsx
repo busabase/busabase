@@ -4,6 +4,7 @@ import { Button } from "~/components/ui/Button";
 import type { CoreMessages } from "~/i18n/messages";
 import { useTokens } from "~/theme/use-tokens";
 import type { SettingsCloudAccount } from "../types/settings";
+import { settingsAccountIdentity } from "../utils/settings";
 
 interface SettingsActionSheetsProps {
   t: CoreMessages;
@@ -43,13 +44,14 @@ export function SettingsActionSheets({
   onDisconnect,
 }: SettingsActionSheetsProps) {
   const tokens = useTokens();
+  const accountIdentity = settingsAccountIdentity(selectedAccount?.user);
 
   return (
     <>
       <NativeBottomSheet
         visible={!!selectedAccount}
-        title={selectedAccount?.user?.name || t.settings.cloudAccount}
-        description={selectedAccount?.user?.email ?? t.settings.savedOnDevice}
+        title={accountIdentity.name || t.settings.cloudAccount}
+        description={accountIdentity.email || t.settings.savedOnDevice}
         showCloseButton
         onClose={onCloseAccount}
         footer={

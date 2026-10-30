@@ -1,4 +1,5 @@
 import { skipToken, useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import { getVisibleViewFieldSlugs } from "busabase-contract/types";
 import { useMemo, useState } from "react";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { orderViews, resolveActiveView } from "../utils/base-views";
@@ -85,13 +86,10 @@ export function useBaseDetailController(slug: string) {
   );
   const visibleFields = useMemo(() => {
     const allFields = base?.fields ?? [];
-    const visibleSlugs = activeView?.config.visibleFieldSlugs;
-    if (Array.isArray(visibleSlugs) && visibleSlugs.length > 0) {
-      return visibleSlugs
-        .map((fieldSlug) => allFields.find((field) => field.slug === fieldSlug))
-        .filter((field): field is NonNullable<typeof field> => Boolean(field));
-    }
-    return allFields;
+    if (!activeView) return allFields;
+    return getVisibleViewFieldSlugs(activeView.config, allFields)
+      .map((fieldSlug) => allFields.find((field) => field.slug === fieldSlug))
+      .filter((field): field is NonNullable<typeof field> => Boolean(field));
   }, [base?.fields, activeView]);
   const previewFields = useMemo(() => {
     const primaryFieldId = base?.fields[0]?.id;
