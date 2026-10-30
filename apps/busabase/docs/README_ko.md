@@ -53,7 +53,7 @@ Busabase는 에이전트는 상태 없이, 일은 오래 남도록 합니다. �
 ## 빠른 시작
 
 ```bash
-npx busabase server
+npx -y busabase@latest server
 ```
 
 **http://localhost:15419/dashboard/local** 을 여세요. 데이터베이스, 계정, 설정이 필요하지 않습니다. 내장 PGlite, 로컬 파일 저장소, 데모 워크스페이스로 시작합니다.

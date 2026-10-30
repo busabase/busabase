@@ -7,6 +7,8 @@
 
 <h1>Busabase</h1>
 
+<p>中文近似读音：布萨贝斯</p>
+
 <h3>面向 AI Agent 的记录系统</h3>
 
 <p>不同 Agent，同一个共享底座。<br/>
@@ -53,7 +55,7 @@ Busabase 让 Agent 保持无状态，让工作留得住：接入任意 Agent，�
 ## 快速开始
 
 ```bash
-npx busabase server
+npx -y busabase@latest server
 ```
 
 打开 **http://localhost:15419/dashboard/local**——不需要数据库、账号或任何配置。Busabase 会用内嵌的 PGlite、本地文件存储和一个示例工作区启动。

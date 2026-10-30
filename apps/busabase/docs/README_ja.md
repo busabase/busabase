@@ -53,7 +53,7 @@ Busabase はエージェントをステートレスのまま、仕事だけを�
 ## クイックスタート
 
 ```bash
-npx busabase server
+npx -y busabase@latest server
 ```
 
 **http://localhost:15419/dashboard/local** を開きます。データベース、アカウント、設定は不要です。組み込み PGlite、ローカルファイルストレージ、デモ用ワークスペースで起動します。
