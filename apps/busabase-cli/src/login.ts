@@ -640,7 +640,7 @@ interface LoginTarget {
  */
 async function chooseTarget(): Promise<LoginTarget> {
   const cloud = normalizeBaseUrl(DEFAULT_BASE_URL);
-  say("Busabase is your AI agents' database, knowledge base, apps library, and skills registry.");
+  say("Busabase is the open-source database and workspace for AI agents.");
   say("Every change goes in as a change request, so it keeps a message, a diff, and a history.");
   say("This login connects the CLI to the Busabase instance you want to use.");
   say("");

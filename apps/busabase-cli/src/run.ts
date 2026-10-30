@@ -1900,6 +1900,49 @@ that server serves. For the offline, no-credential version of the everyday manua
   registerSkillCommand(program, state);
   registerDoctorCommand(program, state);
 
+  const spaceInstructions = program
+    .command("space-instructions")
+    .description("Shared workspace background for agents");
+  addGlobalFlags(spaceInstructions.command("update"))
+    .description("Save this space's global instructions (space managers only)")
+    .option("--body <text>", "inline Markdown; an empty string clears the instructions")
+    .option("--file <path>", "read Markdown from a UTF-8 file instead of --body")
+    .requiredOption(
+      "--expected-version <n>",
+      "version returned by the latest get",
+      parseNonNegativeInt,
+    )
+    .option("--dry-run", "print the request this would send and send nothing")
+    .addHelpText(
+      "after",
+      `
+Read the current version first, then save using that version. A concurrent edit
+returns CONFLICT without overwriting the other editor's changes. Global
+instructions are workspace configuration, not a Change Request.
+
+Examples:
+  busabase-cli space-instructions get --output json
+  busabase-cli space-instructions update --file ./instructions.md --expected-version 3
+  busabase-cli space-instructions update --body "" --expected-version 4
+
+OpenAPI: PUT /api/v1/space-instructions
+Requires API key level: manage`,
+    )
+    .action(
+      runAction(state, (client, opts) => {
+        state.procedureId = "spaceInstructions.update";
+        const hasBody = opts.body !== undefined;
+        const hasFile = opts.file !== undefined;
+        if (hasBody === hasFile) {
+          throw new Error("Pass exactly one of --body <text> or --file <path>.");
+        }
+        return client.spaceInstructions.update({
+          body: hasFile ? readFileSync(opts.file as string, "utf8") : (opts.body as string),
+          expectedVersion: opts.expectedVersion as number,
+        });
+      }),
+    );
+
   addGlobalFlags(program.command("login"))
     .description("Connect the CLI to Busabase — Personal/local, Cloud, or self-hosted")
     .option("--device-code", "force device authorization and skip the method prompt")
@@ -1914,7 +1957,7 @@ that server serves. For the offline, no-credential version of the everyday manua
     .addHelpText(
       "after",
       `
-Busabase is your AI agents' database, knowledge base, apps library, and skills registry.
+Busabase is the open-source database and workspace for AI agents.
 Every change goes in as a change request, so it keeps a message, a diff, and a history.
 
 Run interactively, login explains the connection choices and writes the selected
@@ -2162,15 +2205,22 @@ than as a 403 later. The choice is stored in the active profile and mirrored to
       ),
     );
 
-  addGlobalFlags(nodes.command("purge"))
-    .description(
-      "Permanently delete an ALREADY-archived node and its subtree (irreversible). Archive it first with `nodes archive` if it isn't archived yet.",
-    )
-    .requiredOption("--node-id <id>", "archived node id to purge")
-    .option("--dry-run", "print the request this would send and send nothing")
-    .action(
-      runAction(state, (client, opts) => client.nodes.purge({ nodeId: opts.nodeId as string })),
-    );
+  // `nodes purge` is commented out, not deleted: permanently emptying a Trash
+  // item is UI-only now (the dashboard's "Delete forever" confirm dialog). The
+  // contract no longer gives `nodes.purge` a REST route, so `/api/v1` does not
+  // serve it to an API key any more and this command could only fail. Archive
+  // stays — `nodes archive` / `bases archive-lifecycle-change-request` are
+  // reviewable and restorable; purge is neither.
+  //
+  // addGlobalFlags(nodes.command("purge"))
+  //   .description(
+  //     "Permanently delete an ALREADY-archived node and its subtree (irreversible). Archive it first with `nodes archive` if it isn't archived yet.",
+  //   )
+  //   .requiredOption("--node-id <id>", "archived node id to purge")
+  //   .option("--dry-run", "print the request this would send and send nothing")
+  //   .action(
+  //     runAction(state, (client, opts) => client.nodes.purge({ nodeId: opts.nodeId as string })),
+  //   );
 
   addGlobalFlags(nodes.command("move"))
     .description("Move or reorder a node (applied immediately, no review needed)")
@@ -2510,7 +2560,7 @@ Examples:
     .addOption(
       new Option(
         "--sources <sources...>",
-        'sources to scan: "files", "nodes" (Doc/HTML/whiteboard/workflow content), "records", and/or "prompts" (custom agent prompts, every locale) (default: all four)',
+        'sources to scan: "files", "nodes" (Doc/folder/HTML/whiteboard/workflow content), "records", and/or "prompts" (custom agent prompts, every locale) (default: all four)',
       ).choices(["files", "nodes", "records", "prompts"]),
     )
     .option("--asset-ids <ids...>", "files scope: specific asset ids")
@@ -2519,7 +2569,7 @@ Examples:
     .option("--node-ids <ids...>", "nodes scope: specific node ids")
     .option(
       "--node-types <types...>",
-      'nodes scope: narrow to "doc", "html", "whiteboard" and/or "workflow"',
+      'nodes scope: narrow to "doc", "folder", "html", "whiteboard" and/or "workflow"',
     )
     .option("--base-ids <ids...>", "records scope: specific Base ids")
     .option("--base-slugs <slugs...>", "records scope: specific Base slugs")
@@ -2557,7 +2607,9 @@ records or --drive-path for files.`,
           opts.nodeIds || opts.nodeTypes
             ? {
                 nodeIds: opts.nodeIds as string[] | undefined,
-                types: opts.nodeTypes as ("doc" | "html" | "whiteboard" | "workflow")[] | undefined,
+                types: opts.nodeTypes as
+                  | ("doc" | "folder" | "html" | "whiteboard" | "workflow")[]
+                  | undefined,
               }
             : undefined;
         const recordsScope =
@@ -3318,7 +3370,7 @@ export function explainError(error: unknown, config: ResolvedConfig): string {
     body = [
       `Could not reach ${base}.`,
       "  • Cloud: check your internet connection and that the URL is correct.",
-      "  • Local: start it with `npx busabase server` (http://localhost:15419), then add --base-url http://localhost:15419 (or export BUSABASE_BASE_URL=…).",
+      "  • Local: start it with `npx -y busabase@latest server` (http://localhost:15419), then add --base-url http://localhost:15419 (or export BUSABASE_BASE_URL=…).",
       `  (underlying error: ${msg})`,
     ].join("\n");
   } else {

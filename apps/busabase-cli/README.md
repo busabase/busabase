@@ -90,7 +90,7 @@ interactively and it asks **where** your Busabase is — every option boils down
 same saved config, differing only in base URL and how (if at all) it gets a token:
 
 ```
-Busabase is your AI agents' database, knowledge base, apps library, and skills registry.
+Busabase is the open-source database and workspace for AI agents.
 Every change goes in as a change request, so it keeps a message, a diff, and a history.
 
 How should this CLI connect?
@@ -139,6 +139,30 @@ explicit `--space-id` always wins over the default.
 `--refresh` applies only to standard OAuth token sets created by `login --oauth`. API keys are
 not refreshable; if a key expires or is revoked, run `busabase-cli login` again and select or
 create another key. Credentials are saved with restricted file permissions.
+
+## Space instructions
+
+The workspace's shared vision, mission, values, and design style are available to
+agents through `space-instructions get`. Read the current version before
+updating them. A Cloud write needs a workspace owner/admin and a `manage` key;
+a `read` key can fetch the text but cannot change it.
+
+```bash
+busabase-cli --space-id spc_acme space-instructions get --output json
+busabase-cli --space-id spc_acme space-instructions update --file ./instructions.md --expected-version 3
+busabase-cli --space-id spc_acme space-instructions update --body "" --expected-version 4
+```
+
+Replace the example versions with the version from the latest read. `--file`
+preserves the complete UTF-8 Markdown file; `--body` accepts inline text, including
+an empty string to clear it. Pass exactly one of the two. `--dry-run` prints the
+request without saving. A stale version returns `CONFLICT` without overwriting
+another editor's work.
+
+The same configuration is served by `GET` and `PUT /api/v1/space-instructions`,
+and MCP tools `space_instructions_get` / `space_instructions_update`.
+The update input is `{ body, expectedVersion }`; the response contains
+`{ spaceId, body, version, updatedAt }`. Clearing keeps the version token.
 
 ## Getting the instructions, when the CLI is all you have
 
