@@ -156,7 +156,7 @@ export const discoverPackages = (files: PackageFiles): DiscoveredPackage[] => {
       ...(tree.manifest.displayName ? { displayName: tree.manifest.displayName } : {}),
       isTemplate: validation.ok,
       templateErrors: validation.ok || !claimsTemplate ? [] : validation.errors,
-      counts: countTree(tree),
+      counts: countTree(tree, validation.ok),
       ...(validation.primaryAirApp ? { primaryAirApp: validation.primaryAirApp } : {}),
       ...(tree.manifest.template?.category ? { category: tree.manifest.template.category } : {}),
       ...(validation.risk ? { risk: validation.risk } : {}),

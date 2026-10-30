@@ -31,8 +31,8 @@ import type { Translations } from "fumadocs-ui/i18n";
 import { RootProvider } from "fumadocs-ui/provider/next";
 import { usePathname } from "next/navigation";
 import type React from "react";
-import { Suspense, useEffect } from "react";
-import { NProgressProvider } from "../ui/nprogress";
+import { useEffect } from "react";
+import { NavigationProgress } from "../ui/nprogress";
 
 export interface LangLayoutClientProps<Locale extends string> {
   lang: Locale;
@@ -90,11 +90,9 @@ export function LangLayoutClient<Locale extends string>({
 
   return (
     <RootProvider i18n={i18nConfig} {...(theme ? { theme } : {})}>
-      <Suspense fallback={children}>
-        <NProgressProvider>
-          {children as React.ComponentProps<typeof NProgressProvider>["children"]}
-        </NProgressProvider>
-      </Suspense>
+      {/* Sibling of the page, not a wrapper — see NavigationProgress for why. */}
+      <NavigationProgress />
+      {children}
     </RootProvider>
   );
 }

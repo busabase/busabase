@@ -163,11 +163,17 @@ export class LocalStorage implements IStorage {
   async deleteObject(key: string): Promise<void> {
     const filePath = path.join(this.rootDir, key);
     try {
-      if (await this.objectExists(key)) {
-        await unlink(filePath);
-      }
+      await unlink(filePath);
     } catch (error) {
-      console.warn(`Failed to delete local file ${key}:`, error);
+      if (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === "ENOENT"
+      ) {
+        return;
+      }
+      throw error;
     }
   }
 

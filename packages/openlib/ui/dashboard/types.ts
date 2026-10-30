@@ -100,6 +100,12 @@ export interface NavItem {
    */
   statusIconTone?: "default" | "muted";
   /**
+   * Right-clicking the row opens its `actions` menu (the same "•••" list)
+   * instead of the browser's context menu. Opt-in, because it takes away the
+   * native "Open link in new tab" — Shift+right-click still reaches it.
+   */
+  openActionsOnContextMenu?: boolean;
+  /**
    * Optional space name for recent task items
    */
   spaceName?: string;

@@ -42,23 +42,10 @@ export function foldAvailableCommands(
 }
 
 /**
- * `usage_update` and `session_info_update` — 2 of the 8 `sessionUpdate` kinds
- * this core previously dropped entirely. The other 6
- * (`plan`/`plan_update`/`plan_removed`/`available_commands_update`/
- * `current_mode_update`/`config_option_update`) stay unhandled: checked
- * against real usage (busabase's own dev logs from actual `claude-agent-acp`
- * sessions) and buda's own ACP server implementation (which emits only
- * message/thought/tool_call updates), neither sends any of the 6 — building
- * renderers for events nothing produces is exactly the "renders unreadable
- * JSON nobody asked for" failure mode this package's default branch already
- * guards against elsewhere.
- *
- * `usage_update` and `session_info_update` are session-level facts (current
- * token usage, the agent's own title for the conversation), not something
- * that belongs inline in the message list — real usage showed 3
- * `usage_update`s in a single turn, which would flood a chat transcript if
- * rendered as blocks. They live on `AcpSessionState` instead (see
- * `session/use-acp-session.ts`), the same way `sending`/`ended` do.
+ * Title, context-window usage and advertised commands are session snapshots.
+ * Plans and process lifecycle belong to the transcript reducer instead. Keeping
+ * session metadata out of the block list avoids adding a row for every usage
+ * update while preserving the latest value on both live and replay paths.
  */
 
 export interface AcpUsage {

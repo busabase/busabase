@@ -1,8 +1,15 @@
-import type { AcpBlock, AcpPermissionBlock } from "@acp-ui/core/reduce";
+import {
+  type AcpBlock,
+  type AcpPermissionBlock,
+  type AcpUiEvent,
+  type ContentBlock,
+  reduceAcpEvents,
+} from "@acp-ui/core/reduce";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { AcpConversation, AcpTranscript } from "./acp-transcript";
+import { AcpMessageView } from "./message-view";
 
 class ResizeObserverStub {
   observe() {}
@@ -30,6 +37,134 @@ const message = (over: Partial<AcpBlock> = {}): AcpBlock =>
   }) as AcpBlock;
 
 describe("messages", () => {
+  it("renders a host resource card inside the message while ordinary files keep their default view", () => {
+    renderBlocks(
+      [
+        message({
+          role: "user",
+          text: "inspect the page",
+          attachments: [
+            {
+              kind: "file",
+              data: "eA==",
+              mimeType: "text/markdown",
+              filename: "node-1",
+              resource: {
+                type: "resource",
+                resource: { uri: "context:///node-1", text: "Reference snapshot" },
+                _meta: { title: "My node" },
+              },
+            },
+            { kind: "file", data: "eA==", mimeType: "text/plain", filename: "notes.txt" },
+          ],
+        }),
+      ],
+      noop,
+      {
+        slots: {
+          Message: (props) => (
+            <AcpMessageView
+              {...props}
+              renderAttachment={(attachment) =>
+                attachment.resource ? <div data-testid="resource-card">My node</div> : undefined
+              }
+            />
+          ),
+        },
+      },
+    );
+    const bubble = screen.getByTestId("acp-message-user");
+    expect(bubble).toContainElement(screen.getByTestId("resource-card"));
+    expect(bubble).toHaveTextContent("inspect the page");
+    expect(bubble).toHaveTextContent("notes.txt");
+    expect(bubble).not.toHaveTextContent("node-1");
+  });
+
+  it.each([false, true])(
+    "renders custom cards in canonical content order with repeated URIs (replay=%s)",
+    (replay) => {
+      const content: ContentBlock[] = [
+        { type: "text", text: "Before reference" },
+        {
+          type: "resource",
+          resource: {
+            uri: "context:///same-node",
+            text: "Original snapshot",
+            mimeType: "text/markdown",
+          },
+        },
+        { type: "image", data: "aGVsbG8=", mimeType: "image/png" },
+        { type: "text", text: "Between references" },
+        {
+          type: "resource",
+          resource: {
+            uri: "context:///same-node",
+            text: "Updated snapshot",
+            mimeType: "text/markdown",
+          },
+        },
+        {
+          type: "resource",
+          resource: {
+            uri: "context:///ordinary.txt",
+            text: "Default resource content",
+            mimeType: "text/plain",
+          },
+        },
+        { type: "text", text: "After reference" },
+      ];
+      const events: AcpUiEvent[] = content.map((item) => ({
+        type: "session_update",
+        update: { sessionUpdate: "user_message_chunk", content: item },
+      }));
+      const blocks = reduceAcpEvents([], events);
+      const renderAttachment = vi.fn((attachment: import("@acp-ui/core/reduce").AcpAttachment) => {
+        const resource = attachment.resource?.resource;
+        return resource?.uri === "context:///same-node" && "text" in resource ? (
+          <div data-testid="resource-card">{resource.text}</div>
+        ) : undefined;
+      });
+      // Persistence removes object identity; ordered snapshots must still match.
+      const savedBlocks: AcpBlock[] = replay
+        ? blocks.map((block) =>
+            block.kind === "message"
+              ? {
+                  ...block,
+                  content: structuredClone(block.content),
+                  attachments: structuredClone(block.attachments),
+                }
+              : structuredClone(block),
+          )
+        : blocks;
+      renderBlocks(savedBlocks, noop, {
+        slots: {
+          Message: (props) => <AcpMessageView {...props} renderAttachment={renderAttachment} />,
+        },
+      });
+      const cards = screen.getAllByTestId("resource-card");
+      expect(cards).toHaveLength(2);
+      expect(cards[0]).toHaveTextContent("Original snapshot");
+      expect(cards[1]).toHaveTextContent("Updated snapshot");
+      const ordered = [
+        screen.getByText("Before reference"),
+        cards[0],
+        screen.getByRole("img"),
+        screen.getByText("Between references"),
+        cards[1],
+        screen.getByText("Default resource content"),
+        screen.getByText("After reference"),
+      ];
+      for (let index = 1; index < ordered.length; index += 1) {
+        expect(
+          ordered[index - 1].compareDocumentPosition(ordered[index]) &
+            Node.DOCUMENT_POSITION_FOLLOWING,
+        ).toBeTruthy();
+      }
+      expect(renderAttachment).toHaveBeenCalledTimes(4);
+      expect(screen.getByRole("img")).toHaveAttribute("src", "data:image/png;base64,aGVsbG8=");
+    },
+  );
+
   // The headline capability neither prior ACP implementation had: both rendered
   // raw text, so an agent replying with a list or a code fence showed literal
   // asterisks and backticks.

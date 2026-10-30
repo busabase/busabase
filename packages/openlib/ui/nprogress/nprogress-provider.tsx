@@ -43,6 +43,7 @@ export function NProgressProvider({ children }: { children: React.ReactNode }) {
       // - Download links
       // - Modified clicks (ctrl/cmd/shift/alt + click)
       if (
+        anchor.dataset.nprogress === "ignore" ||
         e.defaultPrevented ||
         href.startsWith("http") ||
         href.startsWith("mailto:") ||

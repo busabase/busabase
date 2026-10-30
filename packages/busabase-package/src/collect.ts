@@ -594,6 +594,9 @@ const toPackageView = (view: {
     filterConjunction?: ViewFilterConjunction;
     sorts: { direction: "asc" | "desc"; fieldSlug: string; fieldId?: string }[];
     visibleFieldSlugs?: string[] | null;
+    fieldOrderSlugs?: string[];
+    hiddenFieldSlugs?: string[];
+    autoShowNewFields?: boolean;
     fieldWidths?: Record<string, number>;
   };
 }): PackageView => ({
@@ -613,6 +616,9 @@ const toPackageView = (view: {
       fieldSlug: sort.fieldSlug,
     })),
     visibleFieldSlugs: view.config.visibleFieldSlugs ?? undefined,
+    fieldOrderSlugs: view.config.fieldOrderSlugs,
+    hiddenFieldSlugs: view.config.hiddenFieldSlugs,
+    autoShowNewFields: view.config.autoShowNewFields,
     fieldWidths: view.config.fieldWidths,
   },
 });

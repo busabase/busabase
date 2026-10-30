@@ -217,7 +217,7 @@ export const buildInstallPlan = (
   buildRecordCreateLayers(planned.nodes);
 
   collectWarnings(planned, warnings);
-  const counts = countTree(planned);
+  const counts = countTree(planned, isTemplate);
   if (counts.files > PACKAGE_MAX_FILE_COUNT) {
     throw new Error(
       `Package has ${counts.files} files, above the ${PACKAGE_MAX_FILE_COUNT}-file limit. Nothing was installed.`,
@@ -493,7 +493,15 @@ const collectWarnings = (tree: PackageTree, warnings: string[]): void => {
   }
 };
 
-export const countTree = (tree: PackageTree): PlanCounts => {
+/**
+ * Count what install will create, including a valid template's root Skill.
+ * Callers that already validated the original tree must carry that decision
+ * through slug rewrites, just as apply does, rather than validate it again.
+ */
+export const countTree = (
+  tree: PackageTree,
+  isTemplate = validateTemplate(tree).ok,
+): PlanCounts => {
   const counts: PlanCounts = {
     folders: 0,
     docs: 0,
@@ -532,6 +540,11 @@ export const countTree = (tree: PackageTree): PlanCounts => {
         counts.files++;
         break;
     }
+  }
+  // This Skill is outside tree.nodes and apply installs it only for templates.
+  if (isTemplate && tree.rootSkill) {
+    counts.skills++;
+    counts.files += tree.rootSkill.files.length;
   }
   // Doc images are real files in the package and real uploads on install, so the
   // file-count cap has to see them — a package could otherwise carry 5000 images

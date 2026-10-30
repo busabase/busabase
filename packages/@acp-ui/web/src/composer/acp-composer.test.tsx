@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import {
   AcpComposer,
+  AcpContextChip,
   getCommandQuery,
   insertCommand,
   mergeDraft,
@@ -12,7 +13,136 @@ import {
 const submitButton = () => screen.getByRole("button", { name: /Submit|Stop/ });
 const attachButton = () => screen.getByRole("button", { name: "Attach a file" });
 
+describe("plus menu", () => {
+  const commands = [{ name: "plan", description: "Plan the next task", input: { hint: "task" } }];
+
+  it("opens the existing file input from Upload files and hides unavailable actions", async () => {
+    render(<AcpComposer disabled={false} onSend={vi.fn()} />);
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const click = vi.spyOn(fileInput, "click");
+    await userEvent.click(attachButton());
+    expect(screen.queryByRole("menuitem", { name: "Choose a skill" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("menuitem", { name: "Reference current page" }),
+    ).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("menuitem", { name: "Upload files" }));
+    expect(click).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it.each(["", "Keep this draft", "/pl"])(
+    "opens the existing slash picker from the menu without losing draft %j or focus",
+    async (draft) => {
+      const onSend = vi.fn();
+      render(<AcpComposer availableCommands={commands} disabled={false} onSend={onSend} />);
+      const box = screen.getByRole("textbox");
+      if (draft) await userEvent.type(box, draft);
+      await userEvent.click(attachButton());
+      await userEvent.click(screen.getByRole("menuitem", { name: "Choose a skill" }));
+      await waitFor(() => expect(box).toHaveFocus());
+      expect(box).toHaveValue(draft === "Keep this draft" ? "Keep this draft /" : draft || "/");
+      expect(screen.getByRole("listbox", { name: "Available commands" })).toBeInTheDocument();
+      await userEvent.keyboard("{Enter}");
+      expect(box).toHaveValue(draft === "Keep this draft" ? "Keep this draft /plan " : "/plan ");
+      expect(onSend).not.toHaveBeenCalled();
+    },
+  );
+
+  it("offers the host context action and disables it while already attached", async () => {
+    const onSelect = vi.fn();
+    const action = { label: "Reference current page", added: false, onSelect };
+    const { rerender } = render(
+      <AcpComposer addContextAction={action} disabled={false} onSend={vi.fn()} />,
+    );
+    await userEvent.click(attachButton());
+    await userEvent.click(screen.getByRole("menuitem", { name: action.label }));
+    expect(onSelect).toHaveBeenCalledTimes(1);
+    rerender(
+      <AcpComposer
+        addContextAction={{ ...action, added: true }}
+        disabled={false}
+        onSend={vi.fn()}
+      />,
+    );
+    await userEvent.click(attachButton());
+    expect(screen.getByRole("menuitem", { name: action.label })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+    await userEvent.click(screen.getByRole("menuitem", { name: action.label }));
+    expect(onSelect).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses localized menu labels", async () => {
+    render(
+      <AcpComposer
+        availableCommands={commands}
+        disabled={false}
+        labels={{
+          addMenuTitle: "添加到消息",
+          uploadFilesMenuItem: "上传文件",
+          chooseSkillMenuItem: "选择技能",
+        }}
+        onSend={vi.fn()}
+      />,
+    );
+    await userEvent.click(attachButton());
+    expect(screen.getByText("添加到消息")).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "上传文件" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "选择技能" })).toBeInTheDocument();
+  });
+});
+
 describe("sending", () => {
+  it("allows a host-owned context reference to be sent without text or uploaded files", async () => {
+    const onSend = vi.fn();
+    render(<AcpComposer disabled={false} hasAdditionalContent onSend={onSend} />);
+    await userEvent.click(submitButton());
+    expect(onSend).toHaveBeenCalledWith("", undefined);
+  });
+
+  it("restores text and keeps staged files after rejection, then clears both after acceptance", async () => {
+    const onSend = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("Reference unavailable"))
+      .mockResolvedValue(undefined);
+    render(<AcpComposer disabled={false} onSend={onSend} />);
+    const box = screen.getByRole("textbox");
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    await userEvent.upload(fileInput, fakeFile("photo.png", "image/png", "test-bytes"));
+    await userEvent.type(box, "  keep this draft  ");
+    await userEvent.click(submitButton());
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(box).toHaveValue("  keep this draft  "));
+    expect(screen.getByRole("img")).toBeInTheDocument();
+    expect(box).toBeEnabled();
+    await userEvent.click(submitButton());
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByRole("img")).not.toBeInTheDocument());
+    expect(box).toHaveValue("");
+    expect(onSend.mock.calls[1]).toEqual(onSend.mock.calls[0]);
+  });
+
+  it("keeps a newer host insertion when restoring a rejected submission", async () => {
+    let rejectSend: (reason: unknown) => void = () => undefined;
+    const onSend = vi.fn(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectSend = reject;
+        }),
+    );
+    const { rerender } = render(<AcpComposer disabled={false} onSend={onSend} />);
+    const box = screen.getByRole("textbox");
+    await userEvent.type(box, "original draft");
+    await userEvent.click(submitButton());
+    await waitFor(() => expect(box).toBeDisabled());
+    rerender(
+      <AcpComposer disabled={false} onSend={onSend} draft={{ id: "new", text: "new insertion" }} />,
+    );
+    await act(async () => rejectSend(new Error("Reference unavailable")));
+    await waitFor(() => expect(box).toHaveValue("original draft\nnew insertion"));
+  });
+
   it("sends the trimmed text on Enter and clears the field", async () => {
     const onSend = vi.fn();
     render(<AcpComposer disabled={false} onSend={onSend} />);
@@ -105,6 +235,72 @@ describe("ACP slash commands", () => {
     expect(box).toHaveFocus();
     expect(onSend).not.toHaveBeenCalled();
     expect(screen.queryByRole("listbox", { name: "Available commands" })).not.toBeInTheDocument();
+  });
+
+  it.each(["sync", "async"])(
+    "closes the palette after an accepted %s slash command",
+    async (mode) => {
+      const onSend = vi.fn(() => (mode === "async" ? Promise.resolve() : undefined));
+      render(<AcpComposer availableCommands={commands} disabled={false} onSend={onSend} />);
+      const box = screen.getByRole("textbox");
+      await userEvent.type(box, "/compact");
+      expect(screen.getByRole("listbox", { name: "Available commands" })).toBeInTheDocument();
+
+      await userEvent.click(submitButton());
+
+      await waitFor(() => expect(box).toHaveValue(""));
+      expect(onSend).toHaveBeenCalledWith("/compact", undefined);
+      expect(screen.queryByRole("listbox", { name: "Available commands" })).not.toBeInTheDocument();
+      expect(box).not.toHaveAttribute("aria-controls");
+      expect(box).not.toHaveAttribute("aria-activedescendant");
+    },
+  );
+
+  it("restores a failed async slash draft and its matching palette after hiding it during acceptance", async () => {
+    let rejectSend: (reason: unknown) => void = () => undefined;
+    const onSend = vi.fn(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectSend = reject;
+        }),
+    );
+    render(<AcpComposer availableCommands={commands} disabled={false} onSend={onSend} />);
+    const box = screen.getByRole("textbox");
+    await userEvent.type(box, "/co");
+    await userEvent.click(submitButton());
+    await waitFor(() => expect(box).toBeDisabled());
+    expect(box).toHaveValue("");
+    expect(screen.queryByRole("listbox", { name: "Available commands" })).not.toBeInTheDocument();
+
+    await act(async () => rejectSend(new Error("Reference unavailable")));
+
+    await waitFor(() => expect(box).toBeEnabled());
+    expect(box).toHaveValue("/co");
+    expect(screen.getByRole("option", { name: /\/compact/i })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.queryByRole("option", { name: /\/plan/i })).not.toBeInTheDocument();
+    expect(box).toHaveAttribute("aria-activedescendant", screen.getByRole("option").id);
+  });
+
+  it("restores a synchronously rejected slash draft and its matching palette", async () => {
+    const onSend = vi.fn(() => {
+      throw new Error("Reference unavailable");
+    });
+    render(<AcpComposer availableCommands={commands} disabled={false} onSend={onSend} />);
+    const box = screen.getByRole("textbox");
+    await userEvent.type(box, "/co");
+    await userEvent.click(submitButton());
+
+    expect(onSend).toHaveBeenCalledWith("/co", undefined);
+    expect(box).toHaveValue("/co");
+    expect(box).toBeEnabled();
+    expect(screen.getByRole("option", { name: /\/compact/i })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.queryByRole("option", { name: /\/plan/i })).not.toBeInTheDocument();
   });
 
   it("navigates commands with arrows and dismisses the palette with Escape", async () => {
@@ -218,6 +414,125 @@ describe("ACP slash commands", () => {
     expect(event.defaultPrevented).toBe(true);
     expect(box).toHaveValue("/");
     expect(onSend).not.toHaveBeenCalled();
+  });
+});
+
+describe("workspace Skills in the slash palette", () => {
+  const commands = [{ name: "compact", description: "Compact the conversation" }];
+  const skills = [
+    { nodeId: "node-1", name: "weekly-report", description: "Draft the weekly report" },
+    { nodeId: "node-2", name: "onboarding", description: "Walk a new hire through setup" },
+  ];
+
+  it("does not show a listbox or the menu entry when no commands or skills are offered", async () => {
+    render(<AcpComposer disabled={false} onSend={vi.fn()} />);
+    const box = screen.getByRole("textbox");
+    await userEvent.type(box, "/");
+    expect(screen.queryByRole("listbox", { name: "Available commands" })).not.toBeInTheDocument();
+    await userEvent.click(attachButton());
+    expect(screen.queryByRole("menuitem", { name: "Choose a skill" })).not.toBeInTheDocument();
+  });
+
+  it("opens the palette from the menu when only workspace skills are offered (no ACP commands)", async () => {
+    render(<AcpComposer disabled={false} onSend={vi.fn()} workspaceSkills={skills} />);
+    await userEvent.click(attachButton());
+    await userEvent.click(screen.getByRole("menuitem", { name: "Choose a skill" }));
+    expect(screen.getByRole("listbox", { name: "Available commands" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /\/weekly-report/ })).toBeInTheDocument();
+  });
+
+  it("lists ACP commands and workspace skills together, filtered by the same query", async () => {
+    render(
+      <AcpComposer
+        availableCommands={commands}
+        disabled={false}
+        onSend={vi.fn()}
+        workspaceSkills={skills}
+      />,
+    );
+    const box = screen.getByRole("textbox");
+    await userEvent.type(box, "/");
+    expect(screen.getByRole("option", { name: /\/compact/ })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /\/weekly-report/ })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /\/onboarding/ })).toBeInTheDocument();
+
+    await userEvent.type(box, "week");
+    expect(screen.getByRole("option", { name: /\/weekly-report/ })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /\/compact/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /\/onboarding/ })).not.toBeInTheDocument();
+  });
+
+  it("filters a workspace skill by its description as well as its name", async () => {
+    render(<AcpComposer disabled={false} onSend={vi.fn()} workspaceSkills={skills} />);
+    const box = screen.getByRole("textbox");
+    await userEvent.type(box, "/hire");
+    expect(screen.getByRole("option", { name: /\/onboarding/ })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /\/weekly-report/ })).not.toBeInTheDocument();
+  });
+
+  it("inserts the skill's slash name, always leaving a trailing space to type after it", async () => {
+    const onSend = vi.fn();
+    render(<AcpComposer disabled={false} onSend={onSend} workspaceSkills={skills} />);
+    const box = screen.getByRole("textbox");
+    await userEvent.type(box, "/week");
+    await userEvent.keyboard("{Enter}");
+    expect(box).toHaveValue("/weekly-report ");
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("reports the picked skill via onWorkspaceSkillSelected, and never for an ACP command", async () => {
+    const onWorkspaceSkillSelected = vi.fn();
+    render(
+      <AcpComposer
+        availableCommands={commands}
+        disabled={false}
+        onSend={vi.fn()}
+        onWorkspaceSkillSelected={onWorkspaceSkillSelected}
+        workspaceSkills={skills}
+      />,
+    );
+    const box = screen.getByRole("textbox");
+    await userEvent.type(box, "/compact");
+    await userEvent.click(screen.getByRole("option", { name: /\/compact/ }));
+    expect(onWorkspaceSkillSelected).not.toHaveBeenCalled();
+
+    await userEvent.clear(box);
+    await userEvent.type(box, "/onboarding");
+    await userEvent.click(screen.getByRole("option", { name: /\/onboarding/ }));
+    expect(onWorkspaceSkillSelected).toHaveBeenCalledTimes(1);
+    expect(onWorkspaceSkillSelected).toHaveBeenCalledWith(skills[1]);
+  });
+
+  it("navigates across both namespaces with arrow keys in one combined list", async () => {
+    render(
+      <AcpComposer
+        availableCommands={commands}
+        disabled={false}
+        onSend={vi.fn()}
+        workspaceSkills={skills}
+      />,
+    );
+    const box = screen.getByRole("textbox");
+    await userEvent.type(box, "/");
+    expect(screen.getByRole("option", { name: /\/compact/ })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await userEvent.keyboard("{ArrowDown}");
+    expect(screen.getByRole("option", { name: /\/weekly-report/ })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await userEvent.keyboard("{ArrowDown}");
+    expect(screen.getByRole("option", { name: /\/onboarding/ })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await userEvent.keyboard("{ArrowDown}");
+    expect(screen.getByRole("option", { name: /\/compact/ })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
   });
 });
 
@@ -420,6 +735,44 @@ describe("attaching — via the picker or paste", () => {
     expect(screen.getByRole("img")).toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Remove" }));
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
+  });
+
+  it("lets a host preview a staged file by keyboard while keeping removal separate", async () => {
+    const onSend = vi.fn();
+    const onPreview = vi.fn();
+    render(
+      <AcpComposer
+        disabled={false}
+        onSend={onSend}
+        renderAttachment={(file, content) => (
+          <button
+            aria-label={`Preview ${file.filename}`}
+            onClick={() => onPreview(file)}
+            type="button"
+          >
+            {content}
+          </button>
+        )}
+      />,
+    );
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    await userEvent.upload(fileInput, fakeFile("photo.png", "image/png"));
+    const preview = screen.getByRole("button", { name: "Preview photo.png" });
+    const remove = screen.getByRole("button", { name: "Remove" });
+    expect(preview.contains(remove)).toBe(false);
+    preview.focus();
+    await userEvent.keyboard("{Enter}");
+    expect(onPreview).toHaveBeenCalledWith(
+      expect.objectContaining({
+        filename: "photo.png",
+        mediaType: "image/png",
+        url: expect.stringMatching(/^blob:/),
+      }),
+    );
+    expect(onSend).not.toHaveBeenCalled();
+    await userEvent.click(remove);
+    expect(onPreview).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: "Preview photo.png" })).not.toBeInTheDocument();
   });
 
   // The behavior this replaces: pasting used to be blocked entirely so an
@@ -680,8 +1033,6 @@ describe("staging a document", () => {
     const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
     await userEvent.upload(fileInput, fakeFile("q3-report.pdf", "application/pdf"));
 
-    // The whole reason documents render through the `inline` variant: two
-    // attached PDFs must be tellable apart before sending.
     expect(await screen.findByText("q3-report.pdf")).toBeInTheDocument();
   });
 
@@ -834,6 +1185,101 @@ describe("headerControls", () => {
 });
 
 describe("composer layout inside kui's InputGroup", () => {
+  it("does not render an empty staged-attachment strip", () => {
+    render(<AcpComposer disabled={false} onSend={vi.fn()} />);
+    expect(document.querySelector('[data-slot="input-group"] > .flex-wrap')).toBeNull();
+  });
+
+  it.each([
+    { name: "image", files: [fakeFile("photo.png", "image/png")] },
+    { name: "document", files: [fakeFile("notes.md", "text/markdown")] },
+    {
+      name: "mixed image and document",
+      files: [fakeFile("photo.png", "image/png"), fakeFile("notes.md", "text/markdown")],
+    },
+  ])("left-aligns wrapping $name chips above the textarea", async ({ files }) => {
+    render(<AcpComposer disabled={false} onSend={vi.fn()} />);
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    await userEvent.upload(fileInput, files);
+
+    const strip = document.querySelector('[data-slot="input-group"] > .flex-wrap') as HTMLElement;
+    expect(strip).toHaveClass("w-full", "flex", "flex-wrap");
+    expect(strip).not.toHaveClass("ml-auto", "w-fit");
+    expect(strip.children).toHaveLength(files.length);
+    expect(
+      strip.compareDocumentPosition(screen.getByRole("textbox")) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    if (files.some((file) => file.name === "notes.md")) {
+      expect(screen.getByText("notes.md")).toBeVisible();
+    }
+    expect(screen.getAllByRole("button", { name: "Remove" })).toHaveLength(files.length);
+  });
+
+  it("keeps the host node, image, and document in one wrapping strip in selection order", async () => {
+    render(
+      <AcpComposer
+        disabled={false}
+        headerControls={
+          <AcpContextChip onRemove={vi.fn()}>
+            <span>Visits</span>
+          </AcpContextChip>
+        }
+        onSend={vi.fn()}
+      />,
+    );
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    await userEvent.upload(fileInput, [
+      fakeFile("notes.md", "text/markdown"),
+      fakeFile("image.png", "image/png"),
+    ]);
+    const node = screen.getByText("Visits").parentElement;
+    const documentChip = (await screen.findByText("notes.md")).parentElement;
+    const imageChip = screen.getByText("image.png").parentElement;
+    expect(node?.parentElement).toBe(documentChip?.parentElement);
+    expect(imageChip?.parentElement).toBe(documentChip?.parentElement);
+    expect(Array.from(node?.parentElement?.children ?? [])).toEqual([
+      node,
+      documentChip,
+      imageChip,
+    ]);
+    expect(node?.parentElement).toHaveClass("flex-wrap");
+    expect(node).toHaveClass("h-7");
+    expect(documentChip).toHaveClass("h-7");
+    expect(imageChip).toHaveClass("h-7");
+    expect(screen.getByRole("img", { name: "image.png" })).toBeInTheDocument();
+  });
+
+  it("removes one attachment by keyboard without sending or removing the node", async () => {
+    const onSend = vi.fn();
+    const onRemoveNode = vi.fn();
+    render(
+      <AcpComposer
+        disabled={false}
+        headerControls={
+          <AcpContextChip onRemove={onRemoveNode}>
+            <span>Visits</span>
+          </AcpContextChip>
+        }
+        onSend={onSend}
+      />,
+    );
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    await userEvent.upload(fileInput, [
+      fakeFile("notes.md", "text/markdown"),
+      fakeFile("image.png", "image/png"),
+    ]);
+    const documentChip = (await screen.findByText("notes.md")).parentElement;
+    const remove = documentChip?.querySelector("button");
+    if (!remove) throw new Error("Missing attachment removal button");
+    remove.focus();
+    await userEvent.keyboard("{Enter}");
+    expect(screen.queryByText("notes.md")).not.toBeInTheDocument();
+    expect(screen.getByText("Visits")).toBeInTheDocument();
+    expect(screen.getByText("image.png")).toBeInTheDocument();
+    expect(onRemoveNode).not.toHaveBeenCalled();
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
   // `PromptInputFooter` renders `data-align="block-end"`, which flips
   // `InputGroup` to `flex-col` — and it is `items-center`, so a direct child
   // without a width is centred rather than left-aligned. jsdom computes no

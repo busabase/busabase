@@ -7,6 +7,7 @@
  * produced the invalid file.
  */
 import { PACKAGE_FORMAT, type PackageManifest } from "busabase-contract/domains/package/types";
+import type { ViewConfigVO } from "busabase-contract/types";
 import { describe, expect, it } from "vitest";
 import type { PackageClient } from "./client";
 import { collectPackageTree, type SourceNode } from "./collect";
@@ -19,7 +20,7 @@ const manifest = (): PackageManifest => ({
 });
 
 const stubClient = (
-  views: Array<{ slug: string; name: string; position?: number }>,
+  views: Array<{ slug: string; name: string; position?: number; config?: ViewConfigVO }>,
 ): PackageClient =>
   ({
     bases: {
@@ -37,7 +38,7 @@ const stubClient = (
           name: v.name,
           ...(v.position !== undefined ? { position: v.position } : {}),
           description: "",
-          config: { filters: [], sorts: [] },
+          config: v.config ?? { filters: [], sorts: [] },
         })),
       list: async () => [{ id: "bse-1", slug: "release-sources", fields: [] }],
     },
@@ -102,6 +103,23 @@ describe("collectBase — a View with no slug (legacy data) must not break the w
 });
 
 describe("collectBase — view order", () => {
+  it("preserves independent visibility policy and column order when collecting a saved view", async () => {
+    const config: ViewConfigVO = {
+      filters: [],
+      sorts: [],
+      fieldOrderSlugs: ["title", "status"],
+      hiddenFieldSlugs: ["status"],
+      autoShowNewFields: true,
+    };
+    const tree = await collectPackageTree(
+      stubClient([{ slug: "automatic", name: "Automatic", config }]),
+      baseRoot(),
+      { manifest: manifest(), warn: () => {}, baseUrl: "http://localhost" },
+    );
+    const base = tree.nodes.find((node) => node.type === "base");
+    expect(base?.type === "base" ? base.base.views[0]?.config : undefined).toMatchObject(config);
+  });
+
   const exportedSlugs = async (
     views: Array<{ slug: string; name: string; position?: number }>,
   ): Promise<string[]> => {
