@@ -1,6 +1,6 @@
 {
   "name": "busabase-email-sdk",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "SMTP and Amazon SES email, IMAP replies, and permission-aware Busabase email records for Node.js.",
   "license": "MIT",
   "homepage": "https://github.com/busabase/busabase/tree/main/packages/busabase-email-sdk",
