@@ -1,7 +1,7 @@
 import "server-only";
 
 import { cache } from "react";
-import { readCmsOrFallback } from "../fallback";
+import { type CmsRead, readCmsOrFallback, readCmsStatus, requireCmsRead } from "../fallback";
 import { buildCmsPostJsonLd, type CmsBreadcrumbItem, type CmsJsonLdSite } from "../jsonld";
 import {
   buildCmsContentMetadataInput,
@@ -20,6 +20,13 @@ export interface CmsPostReads {
   getBusabaseBlogPostByPath: (path: string) => Promise<PostVO | null>;
   listBusabaseBlogPostsOrFallback: () => Promise<PostVO[]>;
   getBusabaseBlogPostByPathOrFallback: (path: string) => Promise<PostVO | null>;
+  /**
+   * Status-aware variants, for callers that turn the answer into a claim — a 404, or a
+   * sitemap that says "these are all the posts". An unconfigured CMS is a successful empty
+   * read; a configured one that fails is `unavailable`, never an empty list.
+   */
+  readBusabaseBlogPosts: () => Promise<CmsRead<PostVO[]>>;
+  readBusabaseBlogPostByPath: (path: string) => Promise<CmsRead<PostVO | null>>;
 }
 
 export const createCmsPostReads = (
@@ -44,6 +51,24 @@ export const createCmsPostReads = (
     return readCmsOrFallback(
       cms ? () => cms.posts.getByPath(path) : null,
       null,
+      `get ${appLabel} blog post ${path}`,
+    );
+  },
+
+  readBusabaseBlogPosts: async () => {
+    const cms = getCms();
+    return readCmsStatus(
+      cms ? () => cms.posts.list() : null,
+      [] as PostVO[],
+      `list ${appLabel} blog posts`,
+    );
+  },
+
+  readBusabaseBlogPostByPath: async (path) => {
+    const cms = getCms();
+    return readCmsStatus(
+      cms ? () => cms.posts.getByPath(path) : null,
+      null as PostVO | null,
       `get ${appLabel} blog post ${path}`,
     );
   },
@@ -214,6 +239,13 @@ export interface CmsPostResolverIntegration {
   parseCmsPath: (path: string) => CmsCanonicalPath | null;
   isCmsContentForLocale: (item: { locale: string; path: string }, locale: string) => boolean;
   getBusabaseBlogPostByPathOrFallback: (path: string) => Promise<PostVO | null>;
+  /**
+   * Status-aware read. Supplied, a failed CMS read is no longer taken as "no such post": the
+   * resolver still tries the local file, and throws instead of returning `null` when nothing
+   * else has the post — an outage becomes a 5xx, not a cacheable 404. Omitted, a failure reads
+   * as a miss (the `*OrFallback` behaviour).
+   */
+  readBusabaseBlogPostByPath?: (path: string) => Promise<CmsRead<PostVO | null>>;
 }
 
 /**
@@ -285,6 +317,11 @@ export interface CmsPostResolverOptions<TPage> {
   getLocalPostJsonLdFields?: (page: TPage) => LocalPostJsonLdFields;
 }
 
+export interface GetAvailablePostLocalesOptions {
+  /** A failed CMS read counts as "no CMS post" instead of rejecting. */
+  tolerateFailedReads?: boolean;
+}
+
 export interface ResolvePostMetadataInputOptions {
   /**
    * Retry at English when the requested locale has no post (the same cascade as
@@ -312,15 +349,23 @@ export interface CmsPostResolver<TPage> {
    * and is too large for Next's data cache, while the per-path reads are small and cached.
    *
    * `contentLocale` — the locale that produced the page being rendered — is always kept and
-   * never probed: a CMS outage makes the reads return null (or throw, which counts as "not
-   * proven"), and an empty set would strip the page's own self-reference. Pass `null` to
-   * probe every locale.
+   * never probed, so the set always has the page's own self-reference. Pass `null` to probe
+   * every locale.
+   *
+   * A failed CMS read rejects, unless `tolerateFailedReads` is set for a page that did not come
+   * from the CMS: an outage must not take down what it could not affect, and that page's locale
+   * set is then whatever the other sources can prove.
    */
-  getAvailablePostLocales: (slugPath: string, contentLocale: string | null) => Promise<string[]>;
+  getAvailablePostLocales: (
+    slugPath: string,
+    contentLocale: string | null,
+    options?: GetAvailablePostLocalesOptions,
+  ) => Promise<string[]>;
   getAvailablePostLocalesWithDependencies: (
     slugPath: string,
     contentLocale: string | null,
     dependencies: CmsPostResolverDependencies<TPage>,
+    options?: GetAvailablePostLocalesOptions,
   ) => Promise<string[]>;
   /**
    * Everything a Post route's `generateMetadata` needs, in ONE call: resolves the post (same
@@ -399,12 +444,21 @@ export const createCmsPostResolver = <TPage>({
   blogLabel = () => "Blog",
   getLocalPostJsonLdFields = readFumadocsPostJsonLdFields,
 }: CmsPostResolverOptions<TPage>): CmsPostResolver<TPage> => {
-  const { buildCmsPath, getBusabaseBlogPostByPathOrFallback, isCmsContentForLocale, parseCmsPath } =
-    integration;
+  const {
+    buildCmsPath,
+    getBusabaseBlogPostByPathOrFallback,
+    readBusabaseBlogPostByPath,
+    isCmsContentForLocale,
+    parseCmsPath,
+  } = integration;
 
   const getCachedCmsPost = cache(async (locale: string, slugPath: string) => {
     const path = buildCmsPath(locale, ["blog", ...slugPath.split("/").filter(Boolean)]);
-    const post = path ? await getBusabaseBlogPostByPathOrFallback(path) : null;
+    if (!path) return null;
+    // The status-aware read throws on an outage, so the cascade can tell it from a miss.
+    const post = readBusabaseBlogPostByPath
+      ? requireCmsRead(await readBusabaseBlogPostByPath(path), `blog post ${path}`)
+      : await getBusabaseBlogPostByPathOrFallback(path);
     return post && isCmsContentForLocale(post, locale) ? post : null;
   });
 
@@ -419,16 +473,27 @@ export const createCmsPostResolver = <TPage>({
     dependencies: CmsPostResolverDependencies<TPage>,
   ) => hasOwnLocalPage(dependencies.getLocalPost, locale, slugs, defaultLocale);
 
+  /**
+   * One locale's own post: its CMS Post, else its own local file. A CMS read that throws is not
+   * an answer, so it is recorded in `failures` and the local file is still tried — bundled
+   * content stays servable through an outage. The caller decides what a miss means then.
+   */
   const resolveForLocale = async (
     locale: string,
     slugs: string[],
     dependencies: CmsPostResolverDependencies<TPage>,
+    failures: unknown[],
   ): Promise<
     | { source: "busabase"; content: PostVO; canonicalPath: string }
     | { source: "local"; content: TPage; canonicalPath: string }
     | null
   > => {
-    const cmsPost = await dependencies.getCmsPost(locale, slugs);
+    let cmsPost: PostVO | null = null;
+    try {
+      cmsPost = await dependencies.getCmsPost(locale, slugs);
+    } catch (error) {
+      failures.push(error);
+    }
     if (cmsPost) {
       const parsed = parseCmsPath(cmsPost.path);
       return {
@@ -455,6 +520,15 @@ export const createCmsPostResolver = <TPage>({
   };
 
   /**
+   * A miss counts as "no such post" only when every CMS read behind it answered. After an
+   * outage the miss is unproven: throwing makes the route a 5xx, which is not cached, rather
+   * than a 404 that tells caches and crawlers the post was deleted.
+   */
+  const throwIfUnanswered = (failures: readonly unknown[]) => {
+    if (failures.length > 0) throw failures[0];
+  };
+
+  /**
    * Resolve a Post detail page at the requested locale, falling back to English when the
    * requested locale has no CMS or local-MDX content at that slug — a post not yet translated
    * falls back to English rather than 404ing.
@@ -465,19 +539,28 @@ export const createCmsPostResolver = <TPage>({
     dependencies: CmsPostResolverDependencies<TPage>,
   ): Promise<ResolvedCmsPostPage<TPage> | null> => {
     const slugs = slugPath.split("/").filter(Boolean);
-    const requested = await resolveForLocale(requestedLocale, slugs, dependencies);
-    const resolved =
-      requested ??
-      (requestedLocale === "en" ? null : await resolveForLocale("en", slugs, dependencies));
+    const failures: unknown[] = [];
+    const requested = await resolveForLocale(requestedLocale, slugs, dependencies, failures);
+    if (requested) {
+      return {
+        ...requested,
+        requestedLocale,
+        contentLocale: requestedLocale,
+        isLocaleFallback: false,
+      };
+    }
 
-    return resolved
-      ? {
-          ...resolved,
-          requestedLocale,
-          contentLocale: requested ? requestedLocale : "en",
-          isLocaleFallback: !requested,
-        }
-      : null;
+    // Serving English claims the requested locale has no post of its own, which an outage
+    // cannot prove — the page would be cached as "untranslated" with an English canonical.
+    throwIfUnanswered(failures);
+    if (requestedLocale === "en") return null;
+
+    const english = await resolveForLocale("en", slugs, dependencies, failures);
+    if (english) {
+      return { ...english, requestedLocale, contentLocale: "en", isLocaleFallback: true };
+    }
+    throwIfUnanswered(failures);
+    return null;
   };
 
   const resolvePostPageUncached = (requestedLocale: string, slugPath: string) =>
@@ -491,15 +574,19 @@ export const createCmsPostResolver = <TPage>({
     slugPath: string,
     contentLocale: string | null,
     dependencies: CmsPostResolverDependencies<TPage>,
+    { tolerateFailedReads = false }: GetAvailablePostLocalesOptions = {},
   ): Promise<string[]> => {
     const slugs = slugPath.split("/").filter(Boolean);
     const probes = await Promise.all(
       supportedLocales.map(async (locale) => {
         if (locale === contentLocale) return true;
+        // A failed read rejects instead of counting as "no translation": the result feeds hreflang
+        // on a page ISR caches, and a narrowed set would be served as if it were true. A rejected
+        // generateMetadata fails the render, which is not cached and retries on the next request.
         try {
           if (await dependencies.getCmsPost(locale, slugs)) return true;
-        } catch {
-          // A failed read counts as "not proven to exist".
+        } catch (error) {
+          if (!tolerateFailedReads) throw error;
         }
         return hasOwnLocalPost(locale, slugs, dependencies);
       }),
@@ -507,8 +594,14 @@ export const createCmsPostResolver = <TPage>({
     return supportedLocales.filter((_, index) => probes[index]);
   };
 
-  const getAvailablePostLocales = cache((slugPath: string, contentLocale: string | null) =>
-    getAvailablePostLocalesWithDependencies(slugPath, contentLocale, defaultDependencies),
+  const getAvailablePostLocales = cache(
+    (slugPath: string, contentLocale: string | null, options?: GetAvailablePostLocalesOptions) =>
+      getAvailablePostLocalesWithDependencies(
+        slugPath,
+        contentLocale,
+        defaultDependencies,
+        options,
+      ),
   );
 
   const toMetadataInput = (
@@ -530,11 +623,14 @@ export const createCmsPostResolver = <TPage>({
     slugPath: string,
     dependencies: CmsPostResolverDependencies<TPage>,
   ): Promise<ResolvedCmsPostPage<TPage> | null> => {
+    const failures: unknown[] = [];
     const found = await resolveForLocale(
       requestedLocale,
       slugPath.split("/").filter(Boolean),
       dependencies,
+      failures,
     );
+    if (!found) throwIfUnanswered(failures);
     return found
       ? { ...found, requestedLocale, contentLocale: requestedLocale, isLocaleFallback: false }
       : null;
@@ -554,6 +650,7 @@ export const createCmsPostResolver = <TPage>({
       slugPath,
       resolved.contentLocale,
       dependencies,
+      { tolerateFailedReads: resolved.source !== "busabase" },
     );
     return toMetadataInput(resolved, availableLocales);
   };
@@ -570,7 +667,9 @@ export const createCmsPostResolver = <TPage>({
     if (!resolved) return null;
     return toMetadataInput(
       resolved,
-      await getAvailablePostLocales(slugPath, resolved.contentLocale),
+      await getAvailablePostLocales(slugPath, resolved.contentLocale, {
+        tolerateFailedReads: resolved.source !== "busabase",
+      }),
     );
   };
 

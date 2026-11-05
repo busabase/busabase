@@ -21,6 +21,7 @@ const resolver = createCmsPostResolver({
 });
 
 const enData = { t: "en" };
+const jaData = { t: "ja" };
 // fumadocs with fallbackLanguage "en": untranslated locales return the English data.
 const local = (own: Record<string, object>) => (locale: string) => {
   const data = own[locale] ?? own.en;
@@ -67,14 +68,56 @@ describe("getAvailablePostLocalesWithDependencies", () => {
     expect(getCmsPost.mock.calls.map(([locale]) => locale)).toEqual(["zh-CN", "ja"]);
   });
 
-  it("survives CMS read failures", async () => {
-    const result = await resolver.getAvailablePostLocalesWithDependencies("p", "en", {
+  it("rejects on a failed read instead of reporting a smaller set of translations", async () => {
+    await expect(
+      resolver.getAvailablePostLocalesWithDependencies("p", "en", {
+        getCmsPost: async (locale) => {
+          if (locale === "ja") throw new Error("down");
+          return null;
+        },
+        getLocalPost: local({ en: enData }),
+      }),
+    ).rejects.toThrow("down");
+  });
+
+  it("with tolerateFailedReads, a failed read leaves what the local source can prove", async () => {
+    expect(
+      await resolver.getAvailablePostLocalesWithDependencies(
+        "p",
+        "en",
+        {
+          getCmsPost: async () => {
+            throw new Error("down");
+          },
+          getLocalPost: local({ en: enData, ja: jaData }),
+        },
+        { tolerateFailedReads: true },
+      ),
+    ).toEqual(["en", "ja"]);
+  });
+});
+
+describe("resolvePostMetadataInputWithDependencies during a CMS outage", () => {
+  it("keeps a local post's metadata", async () => {
+    const input = await resolver.resolvePostMetadataInputWithDependencies("en", "p", {
       getCmsPost: async () => {
         throw new Error("down");
       },
       getLocalPost: local({ en: enData }),
     });
-    expect(result).toEqual(["en"]);
+    expect(input?.availableLocales).toEqual(["en"]);
+  });
+
+  it("rejects for a CMS post when another locale's read fails", async () => {
+    await expect(
+      resolver.resolvePostMetadataInputWithDependencies("en", "p", {
+        getCmsPost: async (locale) => {
+          if (locale === "ja") throw new Error("down");
+          return locale === "en" ? ({ path: "/blog/p" } as PostVO) : null;
+        },
+        getLocalPost: local({}),
+      }),
+    ).rejects.toThrow("down");
   });
 });
 
