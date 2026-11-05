@@ -154,17 +154,11 @@ export function TemplateDetailContent({
             <TemplateVideoPreview
               key={clip.src}
               src={clip.src}
-              // The first NON-cover shot, not the cover. The clip tile sits
-              // directly beside the cover tile, and postering it with the
-              // same image makes the shelf look like it is showing one
-              // picture twice. An app screen also represents what the clip
-              // actually contains better than the branded cover does.
-              poster={(screenshots[1] ?? screenshots[0])?.src}
+              // Older clips fall back to an app screenshot beside the cover.
+              poster={clip.poster ?? (screenshots[1] ?? screenshots[0])?.src}
               title={title}
               playLabel={clip.title ? `${labels.playVideo}: ${clip.title}` : labels.playVideo}
-              // Titles tell clips apart, so they show only when there is more
-              // than one to tell apart; a lone clip's tile stays as it was.
-              caption={media.videos.length > 1 ? clip.title : undefined}
+              clipTitle={clip.title}
             />
           ))}
           label={labels.screenshot(0)}

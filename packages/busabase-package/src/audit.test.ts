@@ -266,7 +266,26 @@ describe("several demo clips", () => {
     expect(rules(findings)).toEqual(["package/videos-over-limit"]);
   });
 
-  it("warns when several clips are not all titled, because their tiles look alike", () => {
+  it("checks the declared video poster in default and localized lists", () => {
+    const poster = "assets/screenshots/tour-poster.jpg";
+    const tour = { ...clip("tour", "Tour"), poster };
+    const missing = "assets/screenshots/tour-ja-poster.jpg";
+    const findings = audit({
+      "busabase.json": withTemplate({
+        videos: [tour],
+        locales: { ja: { videos: [{ ...tour, poster: missing }] } },
+      }),
+      ...files("tour"),
+      [poster]: "poster fixture",
+    });
+    const missingPosters = findings.filter(
+      (finding) => finding.rule === "package/video-poster-missing",
+    );
+    expect(missingPosters).toHaveLength(1);
+    expect(missingPosters[0].message).toContain("template.locales.ja.videos[0].poster");
+  });
+
+  it("warns when several play buttons lack distinct titles", () => {
     const findings = audit({
       "busabase.json": withTemplate({ videos: [clip("tour", "Tour"), clip("full")] }),
       ...files("tour", "full"),

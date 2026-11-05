@@ -146,13 +146,13 @@ describe("pickTemplateMedia — several clips", () => {
         "bare.mp4",
         { title: "no src" },
         { src: "" },
-        { src: "ok.mp4", title: 7 },
-        TOUR,
+        { src: "ok.mp4", title: 7, poster: 42 },
+        { ...TOUR, poster: "tour.webp" },
       ],
     };
     expect(pickTemplateMedia(raw as unknown as typeof SEVERAL, "en").videos).toEqual([
       { src: "ok.mp4" },
-      TOUR,
+      { ...TOUR, poster: "tour.webp" },
     ]);
   });
 

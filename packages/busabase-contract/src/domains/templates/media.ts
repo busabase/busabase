@@ -64,8 +64,8 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> =>
 
 /**
  * Normalize an untrusted clip list, or `undefined` when nothing usable is left.
- * Entries without a string `src` are dropped, a non-string `title` is ignored —
- * one bad clip must not hide the good ones next to it.
+ * Entries without a string `src` are dropped, and invalid optional fields are
+ * ignored so one bad field cannot hide an otherwise playable clip.
  */
 export const parseTemplateVideos = (raw: unknown): TemplateVideo[] | undefined => {
   if (!Array.isArray(raw)) return undefined;
@@ -75,7 +75,8 @@ export const parseTemplateVideos = (raw: unknown): TemplateVideo[] | undefined =
     const src = nonEmptyString(item.src);
     if (!src) continue;
     const title = nonEmptyString(item.title);
-    videos.push({ src, ...(title ? { title } : {}) });
+    const poster = nonEmptyString(item.poster);
+    videos.push({ src, ...(title ? { title } : {}), ...(poster ? { poster } : {}) });
   }
   return videos.length > 0 ? videos : undefined;
 };
