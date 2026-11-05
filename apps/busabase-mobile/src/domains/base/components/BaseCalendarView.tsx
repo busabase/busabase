@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import { NativeInlineError } from "~/components/native-screen";
+import { useMobileQueryRecovery } from "~/domains/workspace/hooks/use-mobile-query-recovery";
 import { mobile, radius, spacing, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 import type { BaseDetailController } from "../hooks/use-base-detail-controller";
@@ -44,17 +45,17 @@ export function BaseCalendarView({ base, activeView, fields, onOpenRecord }: Pro
   // Same bounds as web: a `date` field's day values sit at UTC midnight.
   const range = getCalendarDateRange(dateField?.type, gridStart, gridEnd);
 
+  const rangeQueryKey = [
+    buda?.scopeKey ?? "no-connection",
+    "base-calendar-range",
+    baseId,
+    activeView?.id ?? "",
+    dateField?.slug ?? "",
+    range.gte,
+    range.lt,
+  ];
   const rangeQuery = useInfiniteQuery({
-    queryKey: [
-      "base-calendar-range",
-      buda?.serverUrl,
-      buda?.spaceScope,
-      baseId,
-      activeView?.id ?? "",
-      dateField?.slug ?? "",
-      range.gte,
-      range.lt,
-    ],
+    queryKey: rangeQueryKey,
     queryFn:
       buda && baseId && dateField
         ? ({ pageParam }: { pageParam: number }) =>
@@ -74,16 +75,17 @@ export function BaseCalendarView({ base, activeView, fields, onOpenRecord }: Pro
     getNextPageParam: (last: { page: number; totalPages: number }) =>
       last.page < last.totalPages ? last.page + 1 : undefined,
   });
+  const routeActive = useMobileQueryRecovery(buda && baseId && dateField ? [rangeQueryKey] : []);
 
   // A day cell's overflow badge needs the TRUE count for every day in the
   // grid, not just the first page — so this month-scoped slice is drained
   // fully. Switching months changes `queryKey`, so the grid never shows a
   // stale month's records while this runs.
   useEffect(() => {
-    if (rangeQuery.hasNextPage && !rangeQuery.isFetchingNextPage) {
+    if (routeActive && rangeQuery.hasNextPage && !rangeQuery.isFetching) {
       void rangeQuery.fetchNextPage();
     }
-  }, [rangeQuery.hasNextPage, rangeQuery.isFetchingNextPage, rangeQuery.fetchNextPage]);
+  }, [routeActive, rangeQuery.hasNextPage, rangeQuery.isFetching, rangeQuery.fetchNextPage]);
 
   if (!dateField) {
     return (

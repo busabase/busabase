@@ -30,7 +30,7 @@ export function useNodeCustomPrompts({
   const buda = useBusabaseOrpc();
 
   const query = useQuery({
-    queryKey: ["node-agent-prompts", buda?.spaceScope ?? "no-connection", nodeId],
+    queryKey: [buda?.scopeKey ?? "no-connection", "node-agent-prompts", nodeId],
     enabled: enabled && !!buda,
     // One attempt: this is a best-effort enrichment behind an already-open
     // sheet, and a retry storm would delay the built-in prompts that are

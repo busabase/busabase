@@ -1,6 +1,7 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { MentionInboxItemVO } from "busabase-contract/types";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
+import { useMobileQueryRecovery } from "~/domains/workspace/hooks/use-mobile-query-recovery";
 
 const PAGE_SIZE = 50;
 
@@ -18,9 +19,11 @@ const PAGE_SIZE = 50;
  */
 export function useMentionUnreadCount({ enabled = true }: { enabled?: boolean } = {}) {
   const buda = useBusabaseOrpc();
+  const queryKey = [buda?.scopeKey ?? "no-connection", "mentions-unread"];
+  useMobileQueryRecovery(enabled && buda ? [queryKey] : []);
 
   const query = useQuery({
-    queryKey: ["mentions-unread", buda?.spaceScope ?? "no-connection"],
+    queryKey,
     enabled: enabled && !!buda,
     queryFn: async () => {
       if (!buda) return 0;
@@ -36,7 +39,9 @@ export function useMentionUnreadCount({ enabled = true }: { enabled?: boolean } 
 export function useMentions({ enabled }: { enabled: boolean }) {
   const buda = useBusabaseOrpc();
   const queryClient = useQueryClient();
-  const scope = buda?.spaceScope ?? "no-connection";
+  const scope = buda?.scopeKey ?? "no-connection";
+  const queryKey = [scope, "mentions"];
+  useMobileQueryRecovery(enabled && buda ? [queryKey] : []);
 
   const query = useInfiniteQuery<
     { items: MentionInboxItemVO[]; total: number; unreadCount: number },
@@ -45,7 +50,7 @@ export function useMentions({ enabled }: { enabled: boolean }) {
     unknown[],
     number
   >({
-    queryKey: ["mentions", scope],
+    queryKey,
     enabled: enabled && !!buda,
     initialPageParam: 1,
     queryFn: ({ pageParam }) => {
@@ -69,8 +74,8 @@ export function useMentions({ enabled }: { enabled: boolean }) {
       return buda.client.comments.markMentionsRead({ commentId });
     },
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["mentions", scope] });
-      void queryClient.invalidateQueries({ queryKey: ["mentions-unread", scope] });
+      void queryClient.invalidateQueries({ queryKey: [scope, "mentions"] });
+      void queryClient.invalidateQueries({ queryKey: [scope, "mentions-unread"] });
     },
   });
 

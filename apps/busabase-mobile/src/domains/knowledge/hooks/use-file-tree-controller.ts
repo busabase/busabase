@@ -52,7 +52,14 @@ export const useFileTreeController = ({
   const files = fileTree?.files ?? [];
   const fileItems = buildFileTreeListItems(files);
   const folderCount = fileItems.length - files.length;
-  const itemSummary = `${formatCount(files.length, "file")} · ${formatCount(folderCount, "folder")}`;
+  // `files` is a page, not the whole tree (see the server's inline file limit),
+  // so the summary quotes the node's own count; folders can only be counted
+  // from what is loaded.
+  const totalFileCount = Math.max(fileTree?.fileCount ?? 0, files.length);
+  const itemSummary =
+    files.length === totalFileCount
+      ? `${formatCount(totalFileCount, "file")} · ${formatCount(folderCount, "folder")}`
+      : `${formatCount(totalFileCount, "file")} (${formatCount(files.length, "loaded")}) · ${formatCount(folderCount, "folder")}`;
   const visibleFiles = sortFilesForMobile(
     fileItems.filter((file) => getFolderForFile(file) === currentFolder),
     currentFolder,
@@ -322,6 +329,7 @@ export const useFileTreeController = ({
     files,
     itemSummary,
     metadataChangeMessage,
+    totalFileCount,
     metadataDraft,
     metadataMessagePlaceholder,
     newFile,

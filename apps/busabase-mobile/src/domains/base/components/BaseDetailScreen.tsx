@@ -48,7 +48,7 @@ function BaseDetailContent() {
   return (
     <DrawerScaffold
       title={controller.base?.name ?? "Base"}
-      refreshing={controller.basesQuery.isRefetching || controller.recordsQuery.isRefetching}
+      refreshing={controller.refreshing}
       onRefresh={controller.refresh}
       headerAction={
         controller.base ? (

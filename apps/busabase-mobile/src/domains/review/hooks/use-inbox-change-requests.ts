@@ -1,5 +1,6 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
+import { useMobileQueryRecovery } from "~/domains/workspace/hooks/use-mobile-query-recovery";
 import {
   FIRST_INBOX_PAGE,
   fetchInboxPage,
@@ -22,9 +23,11 @@ import {
 export function useInboxChangeRequests(mode: InboxMode, { enabled = true } = {}) {
   const buda = useBusabaseOrpc();
   const filter = inboxModeFilter(mode);
+  const queryKey = [buda?.scopeKey ?? "no-connection", "inbox", mode];
+  useMobileQueryRecovery(enabled && buda ? [queryKey] : []);
 
   const query = useInfiniteQuery<InboxPage, Error, InboxPage[], unknown[], InboxPageParam>({
-    queryKey: ["inbox", buda?.spaceScope ?? "no-connection", mode],
+    queryKey,
     enabled: enabled && buda !== null,
     initialPageParam: FIRST_INBOX_PAGE,
     queryFn: ({ pageParam }) => {

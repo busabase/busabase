@@ -4,6 +4,7 @@ import {
 } from "busabase-contract/api-client/react-query";
 import { useMemo } from "react";
 import { useConnection } from "~/connection/connection-store";
+import { getMobileQueryScope } from "~/domains/workspace/utils/mobile-query-scope";
 import { createMobileCompatibilityFetch } from "./mobile-api-compat";
 
 export function useBusabaseOrpc() {
@@ -17,6 +18,7 @@ export function useBusabaseOrpc() {
   const headers = connection?.mode === "cloud" ? getCloudAuthorizationHeaders : undefined;
   const spaceScope =
     connection?.mode === "cloud" ? (selectedSpaceId ?? "default") : connection?.mode;
+  const scopeKey = connection ? getMobileQueryScope(connection) : null;
   const compatibilityFetch = useMemo(() => createMobileCompatibilityFetch(globalThis.fetch), []);
 
   return useMemo(() => {
@@ -30,14 +32,20 @@ export function useBusabaseOrpc() {
         headers,
         fetch: compatibilityFetch,
       }),
-      orpc: createBusabaseQueryUtils(rpcUrl, {
-        batch: false,
-        demo,
-        headers,
-        fetch: compatibilityFetch,
-      }),
+      orpc: createBusabaseQueryUtils(
+        rpcUrl,
+        {
+          batch: false,
+          demo,
+          headers,
+          fetch: compatibilityFetch,
+        },
+        scopeKey ?? undefined,
+      ),
       serverUrl,
+      mode: connection?.mode ?? "self-hosted",
       spaceScope,
+      scopeKey: scopeKey as string,
       userId: connection?.cloudUser?.id ?? null,
     };
   }, [
@@ -47,6 +55,7 @@ export function useBusabaseOrpc() {
     demo,
     headers,
     spaceScope,
+    scopeKey,
     compatibilityFetch,
   ]);
 }

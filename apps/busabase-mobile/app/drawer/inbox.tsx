@@ -1,7 +1,7 @@
 import type { ChangeRequestVO } from "busabase-contract/types";
 import { useRouter } from "expo-router";
-import { useEffect, useMemo, useState } from "react";
-import { AppState, StyleSheet, View } from "react-native";
+import { useMemo, useState } from "react";
+import { StyleSheet, View } from "react-native";
 import {
   NativeActionBar,
   NativeEmptyState,
@@ -63,17 +63,6 @@ function InboxContent() {
   // Fetched on every tab, unlike the change-request counts: see the hook — this
   // badge is a notification, not a summary of the tab you are looking at.
   const mentionUnread = useMentionUnreadCount();
-
-  // Refresh whenever the app returns to the foreground.
-  useEffect(() => {
-    const subscription = AppState.addEventListener("change", (nextState) => {
-      if (nextState === "active") {
-        if (showingMentions) mentions.refetch();
-        else inbox.refetch();
-      }
-    });
-    return () => subscription.remove();
-  }, [inbox.refetch, mentions.refetch, showingMentions]);
 
   const changeRequests = inbox.changeRequests;
   const active = showingMentions ? mentions : inbox;

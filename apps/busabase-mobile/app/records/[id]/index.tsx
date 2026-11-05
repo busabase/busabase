@@ -1,4 +1,4 @@
-import { skipToken, useMutation, useQuery } from "@tanstack/react-query";
+import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ChangeRequestVO } from "busabase-contract/types";
 import { getChangeRequestTitle, getRecordTitle } from "busabase-core/dashboard/change-request";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -33,6 +33,9 @@ import { getStatusLabel, StatusBadge } from "~/domains/review/components/StatusB
 import { SUBMITTED_BY } from "~/domains/review/utils/submitted-by";
 import { ConnectionGuard } from "~/domains/workspace/components/ConnectionGuard";
 import { DrawerScaffold } from "~/domains/workspace/components/DrawerScaffold";
+import { useCurrentWorkspaceScope } from "~/domains/workspace/hooks/use-current-workspace-scope";
+import { useMobileQueryRecovery } from "~/domains/workspace/hooks/use-mobile-query-recovery";
+import { invalidateWorkspaceWrite } from "~/domains/workspace/utils/invalidate-workspace-write";
 import { formatDate, shortId } from "~/lib/format";
 import { mobile, radius } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
@@ -49,6 +52,8 @@ function RecordDetailContent() {
   const router = useRouter();
   const tokens = useTokens();
   const buda = useBusabaseOrpc();
+  const currentScope = useCurrentWorkspaceScope(buda?.scopeKey);
+  const queryClient = useQueryClient();
   const recordId = typeof params.id === "string" ? params.id : "";
   const [actionsSheetOpen, setActionsSheetOpen] = useState(false);
   const [deleteSheetOpen, setDeleteSheetOpen] = useState(false);
@@ -66,6 +71,16 @@ function RecordDetailContent() {
         })
       : { queryKey: ["no-connection", "record-history", recordId], queryFn: skipToken },
   );
+  useMobileQueryRecovery(
+    buda && recordId
+      ? [
+          buda.orpc.records.get.queryOptions({ input: { recordId } }).queryKey,
+          buda.orpc.records.listChangeRequests.queryOptions({
+            input: { recordId, limit: HISTORY_PREVIEW_LIMIT },
+          }).queryKey,
+        ]
+      : [],
+  );
 
   const record = recordQuery.data ?? null;
   // An older server ignores `limit` and returns the full history; stay bounded anyway.
@@ -77,16 +92,16 @@ function RecordDetailContent() {
     router.push({ pathname: "/records/[id]/activity", params: { id: recordId } });
 
   const deleteMutation = useMutation({
-    mutationFn: async () => {
-      if (!buda || !recordId) throw new Error("Not connected");
-      return buda.client.records.changeRequest({
+    mutationFn: async ({ workspace, id }: { workspace: NonNullable<typeof buda>; id: string }) =>
+      workspace.client.records.changeRequest({
         operation: "delete",
-        recordId,
+        recordId: id,
         message: "Delete record",
         submittedBy: SUBMITTED_BY,
-      });
-    },
-    onSuccess: (outcome) => {
+      }),
+    onSuccess: (outcome, { workspace }) => {
+      invalidateWorkspaceWrite(queryClient, workspace, outcome);
+      if (currentScope.current !== workspace.scopeKey) return;
       setDeleteSheetOpen(false);
       const reviewId = pendingChangeRequestId(outcome);
       if (reviewId) {
@@ -295,7 +310,9 @@ function RecordDetailContent() {
               loading={deleteMutation.isPending}
               fullWidth
               leadingIcon={<Trash2 size={18} color={tokens.destructiveForeground} />}
-              onPress={() => deleteMutation.mutate()}
+              onPress={() => {
+                if (buda && recordId) deleteMutation.mutate({ workspace: buda, id: recordId });
+              }}
             />
             <Button
               label="Cancel"

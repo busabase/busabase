@@ -2,6 +2,7 @@ import { skipToken, useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import type { ActivityItemVO } from "busabase-contract/types";
 import { isMissingRouteError } from "~/api/mobile-api-compat";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
+import { useMobileQueryRecovery } from "~/domains/workspace/hooks/use-mobile-query-recovery";
 import { type ActivityEvent, buildActivityEventFromItem } from "../types/activity-events";
 
 /**
@@ -11,9 +12,11 @@ import { type ActivityEvent, buildActivityEventFromItem } from "../types/activit
  */
 export function useActivityFeed(limit: number) {
   const buda = useBusabaseOrpc();
+  const queryKey = [buda?.scopeKey ?? "no-connection", "activity", "preview", limit];
+  useMobileQueryRecovery(buda ? [queryKey] : []);
 
   return useQuery<ActivityEvent[]>({
-    queryKey: ["activity", "preview", buda?.serverUrl, buda?.spaceScope, limit],
+    queryKey,
     queryFn: buda
       ? async () => {
           const page = await buda.client.activity.listPaged({ limit });
@@ -27,9 +30,11 @@ export function useActivityFeed(limit: number) {
 
 export function useInfiniteActivityFeed(pageSize: number) {
   const buda = useBusabaseOrpc();
+  const queryKey = [buda?.scopeKey ?? "no-connection", "activity", "paged", pageSize];
+  useMobileQueryRecovery(buda ? [queryKey] : []);
 
   return useInfiniteQuery({
-    queryKey: ["activity", "paged", buda?.serverUrl, buda?.spaceScope, pageSize],
+    queryKey,
     queryFn: buda
       ? async ({ pageParam }) => {
           const page = await buda.client.activity.listPaged({
@@ -60,9 +65,11 @@ export function useInfiniteActivityFeed(pageSize: number) {
  */
 export function useInfiniteRecordActivity(recordId: string, pageSize: number) {
   const buda = useBusabaseOrpc();
+  const queryKey = [buda?.scopeKey ?? "no-connection", "activity", "record", recordId, pageSize];
+  useMobileQueryRecovery(buda && recordId ? [queryKey] : []);
 
   return useInfiniteQuery({
-    queryKey: ["activity", "record", buda?.serverUrl, buda?.spaceScope, recordId, pageSize],
+    queryKey,
     queryFn:
       buda && recordId
         ? async ({ pageParam }) => {

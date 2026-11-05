@@ -47,6 +47,7 @@ describe("buildWorkflowCanvasLayout", () => {
           label: "Start",
           description: "",
           eventName: "manual",
+          baseId: "",
         },
         {
           id: "finish",

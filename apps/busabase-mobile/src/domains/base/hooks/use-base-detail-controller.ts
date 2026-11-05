@@ -1,7 +1,15 @@
-import { skipToken, useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import {
+  skipToken,
+  useInfiniteQuery,
+  useIsFetching,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { getVisibleViewFieldSlugs } from "busabase-contract/types";
 import { useMemo, useState } from "react";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
+import { useMobileQueryRecovery } from "~/domains/workspace/hooks/use-mobile-query-recovery";
+import { invalidateMobileWorkspaceQueries } from "~/domains/workspace/utils/mobile-query-recovery";
 import { orderViews, resolveActiveView } from "../utils/base-views";
 import {
   FIRST_RECORD_PAGE,
@@ -17,6 +25,7 @@ export type BaseDisplayMode = "list" | "table";
 
 export function useBaseDetailController(slug: string) {
   const busabase = useBusabaseOrpc();
+  const queryClient = useQueryClient();
   // The view the user picked. `null` = not picked yet → the Base's first view.
   const [selectedViewId, setActiveViewId] = useState<string | null>(null);
   const [viewPickerOpen, setViewPickerOpen] = useState(false);
@@ -48,26 +57,41 @@ export function useBaseDetailController(slug: string) {
   // unfiltered Base first and then refetch for the first view — a flash of the
   // wrong rows. A failed view list still settles, falling back to all records.
   const viewsSettled = Boolean(base) && !viewsQuery.isPending;
+  const calendarVisible = activeView?.type === "calendar";
+  const recordsQueryKey = [
+    busabase?.scopeKey ?? "no-connection",
+    "base-records",
+    base?.id,
+    activeViewId,
+    RECORDS_PAGE_SIZE,
+  ];
 
   // The active View is part of the key AND part of the request: the server
   // filters and sorts by it before computing totals and slicing pages, so a
   // different View is a different result set, not a narrowing of this one.
   const recordsQuery = useInfiniteQuery({
-    queryKey: [
-      "base-records",
-      busabase?.serverUrl,
-      busabase?.spaceScope,
-      base?.id,
-      activeViewId,
-      RECORDS_PAGE_SIZE,
-    ],
+    queryKey: recordsQueryKey,
     queryFn:
-      busabase && base && viewsSettled
+      busabase && base && viewsSettled && !calendarVisible
         ? ({ pageParam }: { pageParam: RecordPageParam }) =>
             fetchRecordPage(busabase.client.records, base.id, activeViewId, pageParam)
         : skipToken,
     initialPageParam: FIRST_RECORD_PAGE,
     getNextPageParam: nextRecordPageParam,
+  });
+  useMobileQueryRecovery(
+    busabase
+      ? [
+          busabase.orpc.bases.list.queryOptions({ input: {} }).queryKey,
+          ...(base
+            ? [busabase.orpc.bases.listViews.queryOptions({ input: { baseId: base.id } }).queryKey]
+            : []),
+          ...(!calendarVisible && base ? [recordsQueryKey] : []),
+        ]
+      : [],
+  );
+  const calendarFetching = useIsFetching({
+    queryKey: [busabase?.scopeKey ?? "no-connection", "base-calendar-range", base?.id],
   });
   const records = useMemo(() => {
     const pages = recordsQuery.data?.pages ?? [];
@@ -97,9 +121,13 @@ export function useBaseDetailController(slug: string) {
   }, [base?.fields, visibleFields]);
 
   const refresh = () => {
-    void basesQuery.refetch();
-    void recordsQuery.refetch();
-    void viewsQuery.refetch();
+    if (!busabase) return;
+    invalidateMobileWorkspaceQueries(queryClient, busabase.scopeKey, [
+      busabase.orpc.bases.list.key(),
+      busabase.orpc.bases.listViews.key(),
+      [busabase.scopeKey, "base-records", base?.id],
+      [busabase.scopeKey, "base-calendar-range", base?.id],
+    ]);
   };
 
   return {
@@ -108,8 +136,13 @@ export function useBaseDetailController(slug: string) {
     base,
     basesQuery,
     displayMode,
-    error: basesQuery.error ?? recordsQuery.error,
-    loading: basesQuery.isLoading || (Boolean(base) && recordsQuery.isPending),
+    error: basesQuery.error ?? (!calendarVisible ? recordsQuery.error : null),
+    loading: basesQuery.isLoading || (Boolean(base) && !calendarVisible && recordsQuery.isPending),
+    refreshing:
+      basesQuery.isRefetching ||
+      viewsQuery.isRefetching ||
+      recordsQuery.isRefetching ||
+      calendarFetching > 0,
     previewFields,
     records,
     recordsQuery,
