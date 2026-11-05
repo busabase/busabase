@@ -55,6 +55,25 @@ describe("Redis rate-limit storage", () => {
     vi.clearAllMocks();
   });
 
+  it("fails open when a connected Redis never answers", async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      client.eval.mockReturnValue(new Promise(() => {}));
+      const storage = createBetterAuthRedisRateLimitStorage({
+        appName: "buda",
+        getClient: async () => client,
+      });
+      const consumed = storage?.consume("key", { window: 60, max: 5 });
+      await vi.advanceTimersByTimeAsync(1_000);
+      await expect(consumed).resolves.toEqual({ allowed: true, retryAfter: null });
+      expect(warn).toHaveBeenCalledOnce();
+    } finally {
+      warn.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it("namespaces every operation by app", async () => {
     client.get.mockResolvedValue(null);
     client.eval.mockResolvedValue([1, 60]);

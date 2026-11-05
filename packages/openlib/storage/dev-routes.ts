@@ -1,4 +1,5 @@
-import { storage } from "./factory";
+import { isLocalStorageProvider, storage } from "./factory";
+import { LocalMultipartError, type LocalStorage } from "./local";
 import { invalidStorageKeyResponse, isSafeStorageKey } from "./storage-key";
 import type { IStorage } from "./types";
 
@@ -165,6 +166,88 @@ export function createDevUploadRoute(opts?: CreateDevUploadRouteOptions): {
   };
 
   return { POST, PUT };
+}
+
+/** Largest part the local multipart relay accepts (64 MB). */
+export const LOCAL_MULTIPART_MAX_PART_BYTES = 64 * 1024 * 1024;
+
+export interface CreateLocalMultipartPartRouteOptions {
+  /** Same meaning — and same rule for `/api/dev/` mounts — as `createDevUploadRoute`. */
+  gateProduction?: boolean;
+  /** Override the adapter (tests); defaults to the active local storage singleton. */
+  resolveStorage?: () => Pick<LocalStorage, "writeMultipartPart"> | null;
+  /** Upper bound on one part's body. @default LOCAL_MULTIPART_MAX_PART_BYTES */
+  maxPartBytes?: number;
+}
+
+/**
+ * Build the PUT handler for `<upload_url>/part` — the local-storage half of a
+ * multipart upload (`LocalStorage.getUploadPartPresignedUrl` points here).
+ *
+ * This is NOT an arbitrary-key write, even with no session check in front of
+ * it: the request names an `uploadId`, a 128-bit random capability that only
+ * the server mints (inside an authenticated, authorized, size- and
+ * quota-checked `createMultipartUpload`), and the handler writes nothing but a
+ * part file of that existing upload, after verifying the `key` it was given is
+ * the one recorded at creation. The destination object is assembled later, by
+ * the server, at the key it chose. An unknown/forged uploadId → 404; a
+ * mismatched key → 404; an expired upload → 410; an oversized part → 413.
+ */
+export function createLocalMultipartPartRoute(opts?: CreateLocalMultipartPartRouteOptions): {
+  PUT: (req: Request) => Promise<Response>;
+} {
+  const gateProduction = opts?.gateProduction ?? true;
+  const maxPartBytes = opts?.maxPartBytes ?? LOCAL_MULTIPART_MAX_PART_BYTES;
+
+  const PUT = async (req: Request): Promise<Response> => {
+    if (gateProduction && isProduction()) {
+      return notAvailableInProduction();
+    }
+    const params = new URL(req.url).searchParams;
+    const key = params.get("key");
+    const uploadId = params.get("uploadId");
+    const partNumber = Number(params.get("partNumber"));
+    if (!key || !uploadId || !Number.isInteger(partNumber)) {
+      return new Response("Missing key, uploadId or partNumber", { status: 400 });
+    }
+    if (!isSafeStorageKey(key)) {
+      return invalidStorageKeyResponse();
+    }
+    const declaredLength = Number(req.headers.get("content-length") ?? "0");
+    if (declaredLength > maxPartBytes) {
+      return new Response("Part too large", { status: 413 });
+    }
+
+    const target = opts?.resolveStorage
+      ? opts.resolveStorage()
+      : isLocalStorageProvider()
+        ? (storage as unknown as LocalStorage)
+        : null;
+    if (!target) {
+      return new Response("Multipart relay is only available for local storage", {
+        status: 400,
+      });
+    }
+
+    try {
+      const body = req.body ?? Buffer.alloc(0);
+      const { etag } = await target.writeMultipartPart(key, uploadId, partNumber, body, {
+        maxBytes: maxPartBytes,
+      });
+      return new Response(null, {
+        status: 200,
+        headers: { ETag: `"${etag}"`, "Access-Control-Expose-Headers": "ETag" },
+      });
+    } catch (error) {
+      if (error instanceof LocalMultipartError) {
+        return new Response(error.message, { status: error.status });
+      }
+      console.error("[Multipart Part] Error:", error);
+      return new Response("Upload failed", { status: 500 });
+    }
+  };
+
+  return { PUT };
 }
 
 export interface CreateDevAttachmentRouteOptions {

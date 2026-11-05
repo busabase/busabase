@@ -3,3 +3,4 @@ export * from "./breadcrumb-jsonld";
 export * from "./llms-index";
 export * from "./local-post-jsonld";
 export * from "./organization-jsonld";
+export * from "./site-jsonld";

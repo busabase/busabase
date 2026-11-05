@@ -1,8 +1,9 @@
 /**
  * Attachments upload logic (open-domains) — auth-agnostic, transport-neutral.
  *
- * Any MIME type allowed, 200MB
- * cap, and throws `ORPCError` (all consumers are oRPC). Pure `(input, userId,
+ * Any MIME type allowed, 5 GB
+ * cap (`ATTACHMENT_MAX_FILE_SIZE`; hosts may tighten it), and throws `ORPCError`
+ * (all consumers are oRPC). Pure `(input, userId,
  * db, table)` — no auth/billing/context coupling. Hosts pass their own db,
  * userId (real id or "local"), and the `attachments` table instance.
  */
@@ -11,11 +12,40 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { ORPCError } from "@orpc/server";
 import { and, desc, eq } from "drizzle-orm";
 import { generateNanoID } from "openlib/nanoid";
-import { extractFileExtension, storage } from "openlib/storage";
+import { extractFileExtension, type MultipartPart, storage } from "openlib/storage";
 import type { attachments } from "../schema/attachments";
+import {
+  ATTACHMENT_MAX_FILE_SIZE,
+  computeMultipartPartSize,
+  countMultipartParts,
+  FILE_TOO_LARGE_ERROR_CODE,
+  type FileTooLargeErrorData,
+  fileTooLargeMessage,
+  MULTIPART_MAX_PARTS,
+  MULTIPART_MAX_SIGN_BATCH,
+} from "../utils/file-size";
 
-/** Max upload size (200MB). Any MIME type is accepted. */
-export const MAX_FILE_SIZE = 200 * 1024 * 1024;
+/**
+ * Max upload size (5 GB). Any MIME type is accepted. Defined once, isomorphically,
+ * in `../utils/file-size.ts` so the browser's pre-upload check and this
+ * authoritative server check can never disagree.
+ */
+export const MAX_FILE_SIZE = ATTACHMENT_MAX_FILE_SIZE;
+
+/**
+ * The one "file too large" error every upload path throws (413). The structured
+ * `data` lets clients render a localized message — and, when the host can
+ * unlock a bigger limit (`upgradeLimit`), an upgrade action — without parsing
+ * English text.
+ */
+export function createFileTooLargeError(
+  data: Omit<FileTooLargeErrorData, "code">,
+): ORPCError<"PAYLOAD_TOO_LARGE", FileTooLargeErrorData> {
+  return new ORPCError("PAYLOAD_TOO_LARGE", {
+    message: fileTooLargeMessage(data.limit),
+    data: { code: FILE_TOO_LARGE_ERROR_CODE, ...data },
+  });
+}
 
 /**
  * Root of the BINARY attachment namespace — the only namespace `requestUploadUrl`
@@ -154,9 +184,9 @@ async function findByContentHash(
   return rows[0] ?? null;
 }
 
-/** Per-host upload policy restrictions; defaults preserve 200MB / any MIME type. */
+/** Per-host upload policy restrictions; defaults preserve 5 GB / any MIME type. */
 export interface UploadPolicyOptions {
-  /** Tighter max upload size in bytes (default and absolute ceiling: 200MB). */
+  /** Tighter max upload size in bytes (default and absolute ceiling: 5 GB). */
   maxFileSize?: number;
   /** Allowed MIME types (default: undefined = any type accepted). */
   allowedMimeTypes?: string[];
@@ -177,6 +207,14 @@ export interface ConfirmAttachmentUploadPolicyArgs {
   userId: string;
   db: AttachmentUploadDatabase;
   attachmentsTable: typeof attachments;
+  /**
+   * True when the call registers an object that was ALREADY stored and
+   * registered before (e.g. adopting a legacy attachment as an Asset) rather
+   * than finalizing a new upload. Hosts still meter it, but per-upload rules
+   * such as a per-file size limit apply only to new uploads — files that
+   * predate a limit are never retroactively rejected.
+   */
+  existingObject?: boolean;
 }
 
 /** Optional host policy; shared upload logic does not depend on host billing. */
@@ -188,6 +226,14 @@ export interface AttachmentUploadPolicy {
     args: ConfirmAttachmentUploadPolicyArgs,
     persist: (database: AttachmentUploadDatabase) => Promise<ConfirmUploadResult>,
   ): Promise<ConfirmUploadResult>;
+  /**
+   * Optional: do a batch's network checks (object HEAD, billing lookups) up
+   * front, before the caller opens the transaction that will run
+   * `confirmUpload` for each input. Confirmations inside one transaction keep
+   * every earlier row's locks until commit, so per-row network I/O there would
+   * hold those locks for the whole batch.
+   */
+  prepareConfirmations?(inputs: ConfirmUploadInput[]): Promise<void>;
 }
 
 const uploadPolicy = new AsyncLocalStorage<AttachmentUploadPolicy>();
@@ -229,21 +275,31 @@ export function runWithoutAttachmentUploadPolicy<T>(fn: () => Promise<T>): Promi
   return uploadPolicy.exit(fn);
 }
 
-export async function requestUploadUrl(
+type PreparedUpload =
+  | { duplicate: true; result: RequestUploadUrlResult }
+  | { duplicate: false; storageKey: string };
+
+/**
+ * Everything a new upload must pass before any upload target is issued — shared
+ * verbatim by the single-PUT (`requestUploadUrl`) and multipart
+ * (`createMultipartUpload`) paths, so neither can skip a check the other runs:
+ * size ceiling, MIME allowlist, hash shape, the host policy (Cloud: space scope,
+ * per-plan per-file limit, storage quota), content-hash dedup, and server-side
+ * key minting under `ATTACHMENT_KEY_PREFIX`.
+ */
+async function prepareUpload(
   input: RequestUploadUrlInput,
   userId: string,
-  // Optional dedup wiring: hosts that pass their db + table get content-hash
-  // dedup (identical re-upload returns the existing object, no bytes written).
-  db?: any,
-  attachmentsTable?: typeof attachments,
-  // Optional policy overrides so hosts can cap size / restrict MIME types while
-  // still reusing the shared dedup + content-addressing.
-  opts?: UploadPolicyOptions,
-): Promise<RequestUploadUrlResult> {
+  db: any,
+  attachmentsTable: typeof attachments | undefined,
+  opts: UploadPolicyOptions | undefined,
+): Promise<PreparedUpload> {
   const maxFileSize = Math.min(opts?.maxFileSize ?? MAX_FILE_SIZE, MAX_FILE_SIZE);
   if (input.sizeBytes > maxFileSize) {
-    throw new ORPCError("BAD_REQUEST", {
-      message: `File size exceeds the maximum allowed size of ${maxFileSize / 1024 / 1024}MB`,
+    throw createFileTooLargeError({
+      limit: maxFileSize,
+      sizeBytes: input.sizeBytes,
+      fileName: input.fileName,
     });
   }
   if (opts?.allowedMimeTypes && !opts.allowedMimeTypes.includes(input.mimeType)) {
@@ -277,12 +333,15 @@ export async function requestUploadUrl(
     );
     if (existing) {
       return {
-        uploadUrl: "",
-        storageKey: existing.storageKey,
-        publicUrl: storage.getPublicUrl(existing.storageKey),
-        expiresIn: 0,
         duplicate: true,
-        attachmentId: existing.id,
+        result: {
+          uploadUrl: "",
+          storageKey: existing.storageKey,
+          publicUrl: storage.getPublicUrl(existing.storageKey),
+          expiresIn: 0,
+          duplicate: true,
+          attachmentId: existing.id,
+        },
       };
     }
   }
@@ -300,6 +359,23 @@ export async function requestUploadUrl(
   if (resolveUploadKey && db) {
     storageKey = await resolveUploadKey(db, storageKey);
   }
+  return { duplicate: false, storageKey };
+}
+
+export async function requestUploadUrl(
+  input: RequestUploadUrlInput,
+  userId: string,
+  // Optional dedup wiring: hosts that pass their db + table get content-hash
+  // dedup (identical re-upload returns the existing object, no bytes written).
+  db?: any,
+  attachmentsTable?: typeof attachments,
+  // Optional policy overrides so hosts can cap size / restrict MIME types while
+  // still reusing the shared dedup + content-addressing.
+  opts?: UploadPolicyOptions,
+): Promise<RequestUploadUrlResult> {
+  const prepared = await prepareUpload(input, userId, db, attachmentsTable, opts);
+  if (prepared.duplicate) return prepared.result;
+  const { storageKey } = prepared;
 
   // The storage adapter returns the right target: an s3/r2/minio presign for a
   // direct browser→bucket PUT, or the local dev relay URL carrying ?key=. Either
@@ -318,6 +394,250 @@ export async function requestUploadUrl(
     expiresIn: ATTACHMENT_UPLOAD_EXPIRES_IN_SECONDS,
     duplicate: false,
   };
+}
+
+// ── Multipart upload ─────────────────────────────────────────────────────────
+//
+// For files too large for one request. The SAME `prepareUpload` gate runs at
+// create time (so the per-file ceiling, host policy, dedup and server-minted key
+// are identical to the single-PUT path); every later step only accepts a key in
+// the caller's own attachment namespace; and `completeMultipartUpload`
+// re-measures the assembled object with HEAD before registering it, because a
+// multipart client is never bound to the size it declared.
+
+export interface CreateMultipartUploadResult {
+  storageKey: string;
+  publicUrl: string;
+  uploadId: string;
+  partSize: number;
+  partCount: number;
+  expiresIn: number;
+  duplicate?: boolean;
+  attachmentId?: string;
+}
+
+export async function createMultipartUpload(
+  input: RequestUploadUrlInput,
+  userId: string,
+  db?: any,
+  attachmentsTable?: typeof attachments,
+  opts?: UploadPolicyOptions,
+): Promise<CreateMultipartUploadResult> {
+  const prepared = await prepareUpload(input, userId, db, attachmentsTable, opts);
+  if (prepared.duplicate) {
+    return {
+      storageKey: prepared.result.storageKey,
+      publicUrl: prepared.result.publicUrl,
+      uploadId: "",
+      partSize: 0,
+      partCount: 0,
+      expiresIn: 0,
+      duplicate: true,
+      attachmentId: prepared.result.attachmentId,
+    };
+  }
+  const { storageKey } = prepared;
+  const partSize = computeMultipartPartSize(input.sizeBytes);
+  const uploadId = await storage.createMultipartUpload(storageKey, input.mimeType);
+  return {
+    storageKey,
+    publicUrl: storage.getPublicUrl(storageKey),
+    uploadId,
+    partSize,
+    partCount: countMultipartParts(input.sizeBytes, partSize),
+    expiresIn: ATTACHMENT_UPLOAD_EXPIRES_IN_SECONDS,
+    duplicate: false,
+  };
+}
+
+export interface MultipartUploadRef {
+  storageKey: string;
+  uploadId: string;
+  spaceId?: string;
+}
+
+/**
+ * Every follow-up multipart step acts on a key `createMultipartUpload` minted
+ * for THIS caller — never another user's key, never another namespace. (The
+ * storage backend additionally binds an uploadId to its key: S3 answers
+ * `NoSuchUpload` for a mismatched pair; the local adapter checks its metadata.)
+ */
+function assertOwnMultipartKey(ref: MultipartUploadRef, userId: string): void {
+  if (!isOwnAttachmentKey(ref.storageKey, userId)) {
+    throw new ORPCError("BAD_REQUEST", {
+      message: "storageKey must be an attachment key issued to you by createMultipartUpload.",
+    });
+  }
+  if (!ref.uploadId || ref.uploadId.length > 1024) {
+    throw new ORPCError("BAD_REQUEST", { message: "uploadId is required." });
+  }
+}
+
+export async function signMultipartUploadParts(
+  input: MultipartUploadRef & { partNumbers: number[] },
+  userId: string,
+): Promise<{ parts: Array<{ partNumber: number; uploadUrl: string }>; expiresIn: number }> {
+  assertOwnMultipartKey(input, userId);
+  const partNumbers = [...new Set(input.partNumbers)];
+  if (partNumbers.length === 0 || partNumbers.length > MULTIPART_MAX_SIGN_BATCH) {
+    throw new ORPCError("BAD_REQUEST", {
+      message: `Request between 1 and ${MULTIPART_MAX_SIGN_BATCH} part numbers at a time.`,
+    });
+  }
+  if (
+    partNumbers.some(
+      (partNumber) =>
+        !Number.isInteger(partNumber) || partNumber < 1 || partNumber > MULTIPART_MAX_PARTS,
+    )
+  ) {
+    throw new ORPCError("BAD_REQUEST", {
+      message: `Part numbers must be integers from 1 to ${MULTIPART_MAX_PARTS}.`,
+    });
+  }
+  const parts = await Promise.all(
+    partNumbers.map(async (partNumber) => ({
+      partNumber,
+      uploadUrl: await storage.getUploadPartPresignedUrl(
+        input.storageKey,
+        input.uploadId,
+        partNumber,
+        ATTACHMENT_UPLOAD_EXPIRES_IN_SECONDS,
+      ),
+    })),
+  );
+  return { parts, expiresIn: ATTACHMENT_UPLOAD_EXPIRES_IN_SECONDS };
+}
+
+export interface CompleteMultipartUploadInput extends ConfirmUploadInput {
+  uploadId: string;
+}
+
+/**
+ * Assemble the parts, re-measure the result, then register it exactly like
+ * `confirmUpload` (same namespace/ownership guards, same host policy — Cloud
+ * re-checks the plan's per-file limit and the storage quota against the HEAD
+ * size inside its quota transaction).
+ */
+export async function completeMultipartUpload(
+  input: CompleteMultipartUploadInput,
+  userId: string,
+  db: any,
+  attachmentsTable: typeof attachments,
+): Promise<ConfirmUploadResult> {
+  assertOwnMultipartKey(input, userId);
+  assertValidContentHash(input.contentHash);
+  if (input.sizeBytes > MAX_FILE_SIZE) {
+    throw createFileTooLargeError({
+      limit: MAX_FILE_SIZE,
+      sizeBytes: input.sizeBytes,
+      fileName: input.fileName,
+    });
+  }
+
+  // The part list comes from the STORE, never the client: a browser can only
+  // read a part's ETag header when the bucket's CORS exposes it — a per-bucket
+  // setting outside the app's control (Busabase Cloud's production R2 bucket
+  // does not expose it). The stored parts must be exactly 1..N for the
+  // declared size, so a missing part fails loudly instead of assembling a
+  // truncated file; the HEAD check below still catches oversized parts.
+  let parts: MultipartPart[];
+  try {
+    parts = await storage.listMultipartParts(input.storageKey, input.uploadId);
+  } catch (error) {
+    throw new ORPCError("BAD_REQUEST", {
+      message: `Failed to read multipart upload: ${error instanceof Error ? error.message : "unknown error"}`,
+    });
+  }
+  const expectedParts = countMultipartParts(
+    input.sizeBytes,
+    computeMultipartPartSize(input.sizeBytes),
+  );
+  if (
+    parts.length !== expectedParts ||
+    parts.some((part, index) => part.partNumber !== index + 1)
+  ) {
+    throw new ORPCError("BAD_REQUEST", {
+      message: `Multipart upload is incomplete: ${parts.length} of ${expectedParts} parts were uploaded.`,
+    });
+  }
+
+  try {
+    await storage.completeMultipartUpload(input.storageKey, input.uploadId, parts);
+  } catch (error) {
+    throw new ORPCError("BAD_REQUEST", {
+      message: `Failed to complete multipart upload: ${error instanceof Error ? error.message : "unknown error"}`,
+    });
+  }
+
+  // HEAD is authoritative: a multipart client was never bound to the size it
+  // declared, so the assembled object must match it AND fit the ceiling before
+  // anything is registered — on every host, metered or not.
+  const object = await storage.getObjectMetadata(input.storageKey);
+  if (!object) {
+    throw new ORPCError("BAD_REQUEST", { message: "Uploaded attachment was not found" });
+  }
+  // Every refusal from here on — size mismatch, the ceiling, or the host
+  // policy's plan/quota check inside `confirmUpload` — must also remove the
+  // object we just assembled. Otherwise a client could declare a small file,
+  // upload a big one, take the refusal, and keep reading the unregistered (and
+  // never metered) bytes by key: a bypass of both the per-file limit and the
+  // storage quota.
+  try {
+    if (object.size > MAX_FILE_SIZE) {
+      throw createFileTooLargeError({
+        limit: MAX_FILE_SIZE,
+        sizeBytes: object.size,
+        fileName: input.fileName,
+      });
+    }
+    if (object.size !== input.sizeBytes) {
+      throw new ORPCError("BAD_REQUEST", {
+        message: "Uploaded attachment size does not match the confirmed size",
+      });
+    }
+    const { uploadId: _uploadId, ...confirmInput } = input;
+    return await confirmUpload(confirmInput, userId, db, attachmentsTable);
+  } catch (error) {
+    await deleteUnregisteredObject(db, attachmentsTable, input.storageKey);
+    throw error;
+  }
+}
+
+/**
+ * Remove a rejected multipart object — but only when no registry row points at
+ * the key (an owner-scoped content-addressed key could already back a row).
+ * Best effort, but loud: an orphan left behind is unregistered, unmetered and
+ * still readable by whoever holds its key, so a failure here is worth seeing.
+ */
+async function deleteUnregisteredObject(
+  db: any,
+  attachmentsTable: typeof attachments,
+  storageKey: string,
+): Promise<void> {
+  try {
+    const rows = await db
+      .select({ id: attachmentsTable.id })
+      .from(attachmentsTable)
+      .where(eq(attachmentsTable.storageKey, storageKey))
+      .limit(1);
+    if (rows.length === 0) await storage.deleteObject(storageKey);
+  } catch (error) {
+    console.warn("[attachments] Failed to delete a rejected multipart object", storageKey, error);
+  }
+}
+
+export async function abortMultipartUpload(
+  input: MultipartUploadRef,
+  userId: string,
+): Promise<{ success: boolean }> {
+  assertOwnMultipartKey(input, userId);
+  try {
+    await storage.abortMultipartUpload(input.storageKey, input.uploadId);
+    return { success: true };
+  } catch {
+    // Already completed/aborted/expired — nothing left to clean up.
+    return { success: false };
+  }
 }
 
 export interface ConfirmUploadInput {

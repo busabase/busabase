@@ -1,5 +1,8 @@
+import { createHash, randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { Readable, Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
 import type {
   IStorage,
@@ -16,6 +19,7 @@ const unlink = promisify(fs.unlink);
 const stat = promisify(fs.stat);
 const copyFile = promisify(fs.copyFile);
 const readdir = promisify(fs.readdir);
+const rename = promisify(fs.rename);
 
 /**
  * Local file system storage adapter
@@ -291,26 +295,46 @@ export class LocalStorage implements IStorage {
   }
 
   /**
-   * Multipart upload simulation for local storage
+   * Multipart upload for local storage.
    *
-   * Since we're on a local filesystem, we can just simulate the multipart process.
-   * We'll store parts in a temporary directory and combine them on completion.
+   * Parts are written by the host's part relay (`createLocalMultipartPartRoute`
+   * in `./dev-routes`, mounted at `<upload_url>/part`) into
+   * `.tmp/multipart/{uploadId}/{partNumber}` and concatenated on completion.
+   *
+   * The uploadId is a 128-bit random capability minted here, server-side, only
+   * after the host authorized the upload and fixed its key. The relay can write
+   * nothing but part files of an upload that already exists, and only when the
+   * key it is given matches the one recorded at creation — the destination key
+   * is never taken from the part request.
    */
-  async createMultipartUpload(key: string, _mimeType: string): Promise<string> {
-    // Generate a random upload ID
-    const uploadId = Math.random().toString(36).substring(2, 15);
-    const tempDir = path.join(this.rootDir, ".tmp", "multipart", uploadId);
-
-    if (!fs.existsSync(tempDir)) {
-      await mkdir(tempDir, { recursive: true });
+  private multipartDir(uploadId: string): string {
+    if (!LOCAL_MULTIPART_UPLOAD_ID_RE.test(uploadId)) {
+      throw new Error("Invalid upload ID");
     }
+    return path.join(this.rootDir, ".tmp", "multipart", uploadId);
+  }
 
-    // Save metadata about the upload
+  private async readMultipartMetadata(
+    uploadId: string,
+  ): Promise<{ key: string; created: number } | null> {
+    try {
+      const raw = await readFile(path.join(this.multipartDir(uploadId), "metadata.json"), "utf8");
+      const parsed = JSON.parse(raw) as { key?: unknown; created?: unknown };
+      if (typeof parsed.key !== "string" || typeof parsed.created !== "number") return null;
+      return { key: parsed.key, created: parsed.created };
+    } catch {
+      return null;
+    }
+  }
+
+  async createMultipartUpload(key: string, _mimeType: string): Promise<string> {
+    const uploadId = randomBytes(16).toString("hex");
+    const tempDir = this.multipartDir(uploadId);
+    await mkdir(tempDir, { recursive: true });
     await writeFile(
       path.join(tempDir, "metadata.json"),
       JSON.stringify({ key, created: Date.now() }),
     );
-
     return uploadId;
   }
 
@@ -320,9 +344,70 @@ export class LocalStorage implements IStorage {
     partNumber: number,
     _expiresIn?: number,
   ): Promise<string> {
-    // Return a URL that the client can PUT to
-    // The handler would write to .tmp/multipart/{uploadId}/{partNumber}
-    return `/api/upload/local/part?uploadId=${uploadId}&partNumber=${partNumber}&key=${encodeURIComponent(key)}`;
+    // Root-relative, next to the single-PUT relay (`<upload_url>/part`), so
+    // whatever route serves uploads in this deployment also serves parts.
+    const params = new URLSearchParams({
+      uploadId,
+      partNumber: String(partNumber),
+      key,
+    });
+    return `${this.uploadUrl.replace(/\/$/, "")}/part?${params.toString()}`;
+  }
+
+  /**
+   * Write one part of an existing multipart upload. Rejects an unknown or
+   * expired uploadId, a key that does not match the one recorded at creation,
+   * an out-of-range part number, and a body over `maxBytes`. Returns the part's
+   * MD5 hex digest (what S3 reports as a part ETag).
+   */
+  async writeMultipartPart(
+    key: string,
+    uploadId: string,
+    partNumber: number,
+    body: ReadableStream<Uint8Array> | Buffer,
+    options: { maxBytes: number },
+  ): Promise<{ etag: string; size: number }> {
+    if (!Number.isInteger(partNumber) || partNumber < 1 || partNumber > 10_000) {
+      throw new LocalMultipartError(400, "Invalid part number");
+    }
+    if (!LOCAL_MULTIPART_UPLOAD_ID_RE.test(uploadId)) {
+      throw new LocalMultipartError(404, "Unknown upload");
+    }
+    const metadata = await this.readMultipartMetadata(uploadId);
+    if (!metadata || metadata.key !== key) {
+      throw new LocalMultipartError(404, "Unknown upload");
+    }
+    if (Date.now() - metadata.created > LOCAL_MULTIPART_MAX_AGE_MS) {
+      throw new LocalMultipartError(410, "Upload expired");
+    }
+
+    const partPath = path.join(this.multipartDir(uploadId), String(partNumber));
+    const tempPath = `${partPath}.${randomBytes(6).toString("hex")}.tmp`;
+    const hash = createHash("md5");
+    let size = 0;
+    const limiter = new Transform({
+      transform(chunk: Buffer, _encoding, callback) {
+        size += chunk.length;
+        if (size > options.maxBytes) {
+          callback(new LocalMultipartError(413, "Part too large"));
+          return;
+        }
+        hash.update(chunk);
+        callback(null, chunk);
+      },
+    });
+    const source = Buffer.isBuffer(body)
+      ? Readable.from([body])
+      : Readable.fromWeb(body as unknown as import("node:stream/web").ReadableStream<Uint8Array>);
+    try {
+      await pipeline(source, limiter, fs.createWriteStream(tempPath));
+      // A retried part replaces the earlier attempt atomically.
+      await rename(tempPath, partPath);
+    } catch (error) {
+      await unlink(tempPath).catch(() => {});
+      throw error;
+    }
+    return { etag: hash.digest("hex"), size };
   }
 
   async completeMultipartUpload(
@@ -330,51 +415,91 @@ export class LocalStorage implements IStorage {
     uploadId: string,
     parts: MultipartPart[],
   ): Promise<void> {
-    const tempDir = path.join(this.rootDir, ".tmp", "multipart", uploadId);
-    const destPath = path.join(this.rootDir, key);
-    const destDir = path.dirname(destPath);
-
-    if (!fs.existsSync(tempDir)) {
+    const tempDir = this.multipartDir(uploadId);
+    const metadata = await this.readMultipartMetadata(uploadId);
+    if (!metadata) {
       throw new Error("Invalid upload ID or upload expired");
     }
-
-    if (!fs.existsSync(destDir)) {
-      await mkdir(destDir, { recursive: true });
+    if (metadata.key !== key) {
+      throw new Error("Upload ID does not belong to this key");
     }
 
-    // Sort parts
+    const destPath = path.join(this.rootDir, key);
+    await mkdir(path.dirname(destPath), { recursive: true });
+
     const sortedParts = [...parts].sort((a, b) => a.partNumber - b.partNumber);
-
-    // Open destination file for writing
-    const writeStream = fs.createWriteStream(destPath);
-
-    // Append each part
     for (const part of sortedParts) {
-      // In a real implementation we would read the part file written by the upload handler
-      // We assume the handler writes files named just by the part number
-      const partPath = path.join(tempDir, part.partNumber.toString());
-
-      if (fs.existsSync(partPath)) {
-        const partData = await readFile(partPath);
-        writeStream.write(partData);
-      } else {
-        writeStream.close();
+      if (!fs.existsSync(path.join(tempDir, part.partNumber.toString()))) {
         throw new Error(`Part ${part.partNumber} missing`);
       }
     }
 
-    writeStream.end();
+    // Assemble into a temp file and rename, so a reader (or the HEAD check
+    // that follows completion) never sees a half-written object.
+    const assembling = `${destPath}.${randomBytes(6).toString("hex")}.assembling`;
+    const output = fs.createWriteStream(assembling);
+    try {
+      for (const part of sortedParts) {
+        await pipeline(
+          fs.createReadStream(path.join(tempDir, part.partNumber.toString())),
+          output,
+          { end: false },
+        );
+      }
+      await new Promise<void>((resolve, reject) => {
+        output.end((error?: Error | null) => (error ? reject(error) : resolve()));
+      });
+      await rename(assembling, destPath);
+    } catch (error) {
+      output.destroy();
+      await unlink(assembling).catch(() => {});
+      throw error;
+    }
 
-    // Clean up temp dir
-    // Not using recursive rm for safety, manually cleaning known files
-    // But since it's inside .tmp, recursive removal is safer
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 
+  /**
+   * The finished part files of an upload (in-flight `*.tmp` writes excluded).
+   * Local completion concatenates by part number and never checks ETags, so
+   * the ETag here is a cheap size marker rather than an MD5 over gigabytes.
+   */
+  async listMultipartParts(key: string, uploadId: string): Promise<MultipartPart[]> {
+    const metadata = await this.readMultipartMetadata(uploadId);
+    if (!metadata || metadata.key !== key) {
+      throw new Error("Upload ID does not belong to this key");
+    }
+    const tempDir = this.multipartDir(uploadId);
+    const parts: MultipartPart[] = [];
+    for (const name of await readdir(tempDir)) {
+      if (!/^\d+$/.test(name)) continue;
+      const { size } = await stat(path.join(tempDir, name));
+      parts.push({ partNumber: Number(name), etag: `local-${size}` });
+    }
+    return parts.sort((a, b) => a.partNumber - b.partNumber);
+  }
+
   async abortMultipartUpload(_key: string, uploadId: string): Promise<void> {
-    const tempDir = path.join(this.rootDir, ".tmp", "multipart", uploadId);
+    const tempDir = this.multipartDir(uploadId);
     if (fs.existsSync(tempDir)) {
       fs.rmSync(tempDir, { recursive: true, force: true });
     }
+  }
+}
+
+/** Shape of an uploadId minted by `LocalStorage.createMultipartUpload`. */
+export const LOCAL_MULTIPART_UPLOAD_ID_RE = /^[0-9a-f]{32}$/;
+
+/** A local multipart upload accepts parts for at most a day after creation. */
+export const LOCAL_MULTIPART_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+/** Error with the HTTP status the part relay should answer with. */
+export class LocalMultipartError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "LocalMultipartError";
   }
 }

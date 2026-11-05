@@ -181,5 +181,15 @@ export interface IStorage {
 
   completeMultipartUpload(key: string, uploadId: string, parts: MultipartPart[]): Promise<void>;
 
+  /**
+   * The parts the store actually holds for an in-progress multipart upload,
+   * with the ETag the STORE recorded, sorted by part number. Completion uses
+   * this instead of client-reported ETags: a browser can only read a part's
+   * `ETag` response header when the bucket's CORS exposes it, which is a
+   * per-bucket setting the app cannot rely on (Busabase Cloud's production R2
+   * bucket does not expose it).
+   */
+  listMultipartParts(key: string, uploadId: string): Promise<MultipartPart[]>;
+
   abortMultipartUpload(key: string, uploadId: string): Promise<void>;
 }

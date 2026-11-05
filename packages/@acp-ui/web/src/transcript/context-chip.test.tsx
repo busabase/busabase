@@ -4,7 +4,7 @@ import {
   reduceAcpEvent,
   reduceAcpEvents,
 } from "@acp-ui/core/reduce";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { AcpMessageView } from "./message-view";
@@ -60,10 +60,17 @@ describe("semantic prompt context replay", () => {
     expect(screen.queryByText(fullText)).not.toBeInTheDocument();
     expect(screen.queryByTestId("acp-resource")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Remove context" })).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "查看内容: Find records · Visits" }));
-    expect(screen.getByRole("region").textContent).toBe(fullText);
+    const trigger = screen.getByRole("button", { name: "查看内容: Find records · Visits" });
+    await userEvent.click(trigger);
+    const dialog = screen.getByRole("dialog", { name: "Find records · Visits" });
+    expect(trigger.closest('[aria-hidden="true"]')).not.toBeNull();
+    expect(within(dialog).getByRole("region").textContent).toBe(fullText);
+    expect(within(dialog).queryByRole("textbox")).not.toBeInTheDocument();
     expect(document.querySelector("script")).toBeNull();
     expect(resolver).not.toHaveBeenCalled();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await waitFor(() => expect(trigger).toHaveFocus());
   });
 
   it("retains host renderer overrides with the complete canonical resource metadata", () => {

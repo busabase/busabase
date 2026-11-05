@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { createPageMetadataHelpers, FALLBACK_SELF_ALTERNATES } from "./page-metadata";
+import {
+  createPageMetadataHelpers,
+  ENGLISH_ONLY_LOCALES,
+  FALLBACK_SELF_ALTERNATES,
+} from "./page-metadata";
 
 const LOCALES = ["en", "zh-CN", "zh-TW", "ja"] as const;
 
@@ -172,6 +176,83 @@ describe("site identity survives Next's replace-don't-merge metadata rule", () =
     // Better an absent key than an invented site name.
     expect(metadata.openGraph.siteName).toBeUndefined();
     expect(metadata.twitter.site).toBeUndefined();
+  });
+});
+
+describe("withSiteIdentity restores what a hand-built page's own blocks replaced", () => {
+  const { withSiteIdentity } = helpers;
+
+  it("adds og:site_name and twitter:site/creator to a page that returns its own blocks", () => {
+    const metadata = withSiteIdentity({
+      title: "Docs",
+      openGraph: { title: "Docs", type: "article" },
+      twitter: { card: "summary_large_image", title: "Docs" },
+    });
+
+    expect(metadata.openGraph).toEqual({ siteName: "Example", title: "Docs", type: "article" });
+    expect(metadata.twitter).toEqual({
+      site: "@example",
+      creator: "@example",
+      card: "summary_large_image",
+      title: "Docs",
+    });
+    // Nothing else is the helper's to touch.
+    expect(metadata.title).toBe("Docs");
+  });
+
+  it("never overwrites what the page states itself", () => {
+    const metadata = withSiteIdentity({
+      openGraph: { siteName: "Partner" },
+      twitter: { site: "@partner", creator: "@author" },
+    });
+
+    expect(metadata.openGraph).toEqual({ siteName: "Partner" });
+    expect(metadata.twitter).toEqual({ site: "@partner", creator: "@author" });
+  });
+
+  it("leaves a block the page does not return alone, so Next inherits the layout's whole one", () => {
+    const onlyOpenGraph = withSiteIdentity({ openGraph: { title: "T" } });
+    expect(onlyOpenGraph).not.toHaveProperty("twitter");
+    expect(onlyOpenGraph.openGraph).toEqual({ siteName: "Example", title: "T" });
+
+    const onlyTwitter = withSiteIdentity({ twitter: { title: "T" } });
+    expect(onlyTwitter).not.toHaveProperty("openGraph");
+
+    expect(withSiteIdentity({ title: "T", openGraph: undefined })).toEqual({
+      title: "T",
+      openGraph: undefined,
+    });
+  });
+
+  it("does not invent an identity the app did not configure", () => {
+    const bare = createPageMetadataHelpers({
+      baseUrl: "https://bare.example",
+      defaultLocale: "en",
+      supportedLocales: ["en"],
+      defaultImageUrl: "https://bare.example/og.png",
+    });
+    const page = { openGraph: { title: "T" }, twitter: { title: "T" } };
+
+    expect(bare.withSiteIdentity(page)).toEqual(page);
+  });
+
+  it("agrees with the helpers' own output, so the two routes to a page cannot drift", () => {
+    const viaHelper = generatePageMetadata({
+      title: "T",
+      description: "D",
+      path: "/pricing",
+      lang: "en",
+    });
+    const handBuilt = withSiteIdentity({
+      openGraph: { title: "T" },
+      twitter: { card: "summary_large_image", title: "T" },
+    });
+
+    expect(handBuilt.openGraph).toMatchObject({ siteName: viaHelper.openGraph.siteName });
+    expect(handBuilt.twitter).toMatchObject({
+      site: viaHelper.twitter.site,
+      creator: viaHelper.twitter.creator,
+    });
   });
 });
 
@@ -385,6 +466,59 @@ describe("absoluteTitle", () => {
     });
 
     expect(metadata.title).toEqual({ absolute: "GPT-6 Astra for Agent Workflows | Buda" });
+  });
+
+  describe("with a brandName", () => {
+    const branded = createPageMetadataHelpers({
+      baseUrl: "https://example.com",
+      defaultLocale: "en",
+      supportedLocales: LOCALES,
+      defaultImageUrl: "https://example.com/opengraph-image",
+      brandName: "Buda",
+    });
+    const metadataTitle = (title: string) =>
+      branded.generatePageMetadata({ title, description: "D", path: "/x", lang: "en" }).title;
+
+    it("leaves a title that does not name the brand to the layout's template", () => {
+      expect(metadataTitle("Pricing")).toBe("Pricing");
+    });
+
+    it("emits a title that already names the brand as absolute, in any script", () => {
+      expect(metadataTitle("How Buda works")).toEqual({ absolute: "How Buda works" });
+      expect(metadataTitle("Buda 如何运作")).toEqual({ absolute: "Buda 如何运作" });
+      expect(metadataTitle("关于：我们为什么做Buda")).toEqual({
+        absolute: "关于：我们为什么做Buda",
+      });
+    });
+
+    it("does not read a longer word as the brand", () => {
+      expect(metadataTitle("Busabase in Budapest")).toBe("Busabase in Budapest");
+      expect(branded.brandedTitle("Budapest")).toBe("Budapest | Buda");
+    });
+
+    it("gives a hand-built page the same single brand", () => {
+      expect(branded.brandedTitle("Pricing")).toBe("Pricing | Buda");
+      expect(branded.brandedTitle("X | Buda")).toBe("X | Buda");
+    });
+  });
+
+  it("reads a brandName with regex characters literally", () => {
+    const dotted = createPageMetadataHelpers({
+      baseUrl: "https://tabcy.ai",
+      defaultLocale: "en",
+      supportedLocales: ["en"],
+      defaultImageUrl: "https://tabcy.ai/og.png",
+      brandName: "Tabcy.ai",
+    });
+    expect(dotted.brandedTitle("About Tabcy.ai")).toBe("About Tabcy.ai");
+    expect(dotted.brandedTitle("About Tabcyxai")).toBe("About Tabcyxai | Tabcy.ai");
+  });
+
+  it("changes nothing for an app without a brandName", () => {
+    expect(
+      generatePageMetadata({ title: "Buda", description: "D", path: "/x", lang: "en" }).title,
+    ).toBe("Buda");
+    expect(helpers.brandedTitle("Pricing")).toBe("Pricing");
   });
 
   it("keeps og:title and twitter:title as the bare string, template or not", () => {
@@ -636,5 +770,45 @@ describe("a static route translated into only some locales", () => {
     expect(() =>
       generateTranslatedPageMetadata({ ...base, lang: "ja", translatedLocales: ["zh-CN"] }),
     ).toThrow(/default locale/);
+  });
+});
+
+describe("getTranslatedPageAlternates", () => {
+  const { getTranslatedPageAlternates, generateTranslatedPageMetadata } = helpers;
+
+  it("gives a translated locale its own canonical and a fallback locale the English one", () => {
+    const set = ["en", "zh-CN"];
+    expect(getTranslatedPageAlternates("zh-CN", "/plans", set).url).toBe(
+      "https://example.com/zh-CN/plans",
+    );
+    const fallback = getTranslatedPageAlternates("ja", "/plans", set);
+    expect(fallback.url).toBe("https://example.com/plans");
+    expect(fallback.alternates).toEqual({
+      canonical: "https://example.com/plans",
+      languages: {
+        en: "https://example.com/plans",
+        "zh-CN": "https://example.com/zh-CN/plans",
+        "x-default": "https://example.com/plans",
+      },
+    });
+  });
+
+  it("matches what generateTranslatedPageMetadata emits, for the root path too", () => {
+    for (const lang of ["en", "zh-CN", "ja"]) {
+      const { url, alternates } = getTranslatedPageAlternates(lang, "", ENGLISH_ONLY_LOCALES);
+      const meta = generateTranslatedPageMetadata({
+        title: "t",
+        description: "d",
+        path: "",
+        lang,
+        translatedLocales: ENGLISH_ONLY_LOCALES,
+      });
+      expect(url).toBe("https://example.com");
+      expect(alternates).toEqual(meta.alternates);
+    }
+  });
+
+  it("refuses a set without the default locale", () => {
+    expect(() => getTranslatedPageAlternates("ja", "/plans", ["zh-CN"])).toThrow(/default locale/);
   });
 });

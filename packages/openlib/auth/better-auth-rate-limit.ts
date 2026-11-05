@@ -169,6 +169,7 @@ export function createBetterAuthRedisRateLimitStorage(
   const defaultWindow = options.defaultWindow ?? 60;
   const clientFor = options.getClient ?? (() => connectRedis(redisUrl as string));
   const namespacedKey = (key: string) => `better-auth:${namespace}:rate-limit:${key}`;
+  const commandTimeoutMs = positiveInteger(process.env.BETTER_AUTH_REDIS_COMMAND_TIMEOUT_MS, 1_000);
 
   // better-auth's `onRequestRateLimit` calls `storage.consume()` with no try/catch
   // of its own — an exception here isn't "deny this request", it's "crash this
@@ -177,18 +178,32 @@ export function createBetterAuthRedisRateLimitStorage(
   // liveness: fail OPEN (log + let the request through) on Redis errors rather than
   // fail closed, or a Redis blip locks every real, already-authenticated user out
   // app-wide until the connection recovers.
+  //
+  // A Redis that accepts the connection but never answers throws nothing, so the
+  // command needs its own deadline for failing open to apply at all.
   const run = async <T>(
     operation: (client: RedisCommandClient) => Promise<T>,
     fallback: T,
   ): Promise<T> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      return await operation(await clientFor());
+      return await Promise.race([
+        clientFor().then(operation),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error(`Redis did not respond within ${commandTimeoutMs}ms`)),
+            commandTimeoutMs,
+          );
+        }),
+      ]);
     } catch (cause) {
       console.warn(
         `[Better Auth Rate Limit] Redis storage failed for ${namespace}, failing open:`,
         cause,
       );
       return fallback;
+    } finally {
+      clearTimeout(timer);
     }
   };
 

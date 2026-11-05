@@ -1,8 +1,9 @@
 "use client";
 
 import type { AcpResourceContext } from "@acp-ui/core/reduce";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "kui/dialog";
 import { FileTextIcon, X } from "lucide-react";
-import { type ReactNode, useId, useState } from "react";
+import type { ReactNode } from "react";
 
 export function AcpContextChip({
   children,
@@ -60,43 +61,44 @@ export function AcpResourceContextChip({
   removeLabel?: string;
   contentLabel?: string;
 }) {
-  const [open, setOpen] = useState(false);
-  const contentId = useId();
   return (
-    <>
+    <Dialog>
       <AcpContextChip
         disabled={disabled}
         onRemove={onRemove}
         removeLabel={removeLabel}
         title={context.name}
       >
-        <button
-          type="button"
-          aria-label={`${inspectLabel}: ${context.name}`}
-          aria-expanded={open}
-          aria-controls={open ? contentId : undefined}
-          className="flex min-w-0 items-center gap-1 rounded-sm text-left focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
-          onClick={() => setOpen(!open)}
-        >
-          <FileTextIcon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
-          <span className="min-w-0 max-w-60 truncate font-medium">{context.name}</span>
-        </button>
+        <DialogTrigger asChild>
+          <button
+            type="button"
+            aria-label={`${inspectLabel}: ${context.name}`}
+            className="flex min-w-0 items-center gap-1 rounded-sm text-left focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
+          >
+            <FileTextIcon aria-hidden="true" className="size-4 shrink-0 text-muted-foreground" />
+            <span className="min-w-0 max-w-60 truncate font-medium">{context.name}</span>
+          </button>
+        </DialogTrigger>
       </AcpContextChip>
-      {open ? (
-        <div
-          id={contentId}
+      <DialogContent
+        aria-describedby={undefined}
+        className="flex max-h-[90vh] w-[calc(100%-2rem)] max-w-4xl flex-col overflow-hidden"
+      >
+        <DialogHeader className="min-w-0 shrink-0">
+          <DialogTitle className="max-h-[25vh] overflow-y-auto break-all pr-6">
+            {context.name}
+          </DialogTitle>
+        </DialogHeader>
+        <pre
           aria-label={`${contentLabel}: ${context.name}`}
-          className="w-full"
+          className="min-h-0 min-w-0 overflow-auto whitespace-pre-wrap break-words font-sans text-sm focus-visible:outline-2 focus-visible:outline-ring [overflow-wrap:anywhere]"
           role="region"
+          // biome-ignore lint/a11y/noNoninteractiveTabindex: Scrollable snapshots need a keyboard focus target.
+          tabIndex={0}
         >
-          <textarea
-            aria-label={`${contentLabel}: ${context.name}`}
-            className="h-56 max-h-72 w-full resize-y overflow-auto whitespace-pre-wrap break-words rounded-md border bg-background p-3 font-sans text-sm focus-visible:outline-2 focus-visible:outline-ring [overflow-wrap:anywhere]"
-            readOnly
-            value={context.text}
-          />
-        </div>
-      ) : null}
-    </>
+          {context.text}
+        </pre>
+      </DialogContent>
+    </Dialog>
   );
 }

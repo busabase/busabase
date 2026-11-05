@@ -4,6 +4,7 @@
  */
 
 import { useCallback, useState } from "react";
+import { CONTENT_HASH_MAX_BYTES } from "../utils/file-size";
 
 export interface UploadProgress {
   /** File name currently being uploaded */
@@ -202,12 +203,19 @@ export function useS3Uploader<TMetadata = unknown>({
  * API (SubtleCrypto). Available in secure contexts (https + localhost). Used to
  * dedup uploads: identical bytes hash to the same value, so the server can
  * return an existing attachment instead of storing a duplicate object.
+ *
+ * Files above `CONTENT_HASH_MAX_BYTES` are NOT hashed: `SubtleCrypto.digest`
+ * cannot stream, so hashing a multi-gigabyte file would read all of it into
+ * memory and stall the tab. Those uploads simply skip dedup.
  */
 export async function sha256Hex(file: File): Promise<string | undefined> {
   // Web Crypto needs a secure context (https / localhost). If it's unavailable
   // (plain http, or an environment without SubtleCrypto), skip the fingerprint —
   // uploads still work, just without content-hash dedup.
   if (typeof crypto === "undefined" || !crypto.subtle) {
+    return undefined;
+  }
+  if (file.size > CONTENT_HASH_MAX_BYTES) {
     return undefined;
   }
   try {
