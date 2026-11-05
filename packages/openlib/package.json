@@ -29,6 +29,10 @@
       "types": "./i18n/index.ts",
       "default": "./i18n/index.ts"
     },
+    "./i18n/unknown-lang-entries": {
+      "types": "./i18n/unknown-lang-entries.ts",
+      "default": "./i18n/unknown-lang-entries.ts"
+    },
     "./i18n/i18n": {
       "types": "./i18n/i18n.ts",
       "default": "./i18n/i18n.ts"
@@ -120,6 +124,10 @@
     "./ui/nprogress": {
       "types": "./ui/nprogress/index.ts",
       "default": "./ui/nprogress/index.ts"
+    },
+    "./utils/markdown-preview": {
+      "types": "./utils/markdown-preview.ts",
+      "default": "./utils/markdown-preview.ts"
     },
     "./utils/time": {
       "types": "./utils/time.ts",

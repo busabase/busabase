@@ -24,6 +24,10 @@
     "./attachments/hooks": {
       "types": "./attachments/hooks/use-s3-uploader.ts",
       "default": "./attachments/hooks/use-s3-uploader.ts"
+    },
+    "./attachments/utils": {
+      "types": "./attachments/utils/file-size.ts",
+      "default": "./attachments/utils/file-size.ts"
     }
   },
   "dependencies": {

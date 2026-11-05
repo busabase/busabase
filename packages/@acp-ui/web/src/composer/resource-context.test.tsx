@@ -1,5 +1,5 @@
 import type { AcpResourceContext } from "@acp-ui/core/reduce";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { AcpComposer } from "./acp-composer";
@@ -36,12 +36,23 @@ describe("resource context drafts", () => {
     inspect.focus();
     await userEvent.keyboard("{Enter}");
     expect(inspect).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByRole("region", { name: `Context content: ${first.name}` }).textContent).toBe(
-      first.text,
-    );
+    const dialog = screen.getByRole("dialog", { name: first.name });
+    expect(inspect.closest('[aria-hidden="true"]')).not.toBeNull();
+    const preview = within(dialog).getByRole("region", {
+      name: `Context content: ${first.name}`,
+    });
+    expect(preview.textContent).toBe(first.text);
+    expect(preview).toHaveAttribute("tabindex", "0");
+    expect(within(dialog).queryByRole("textbox")).not.toBeInTheDocument();
     expect(document.querySelector("script")).toBeNull();
+    expect(onSend).not.toHaveBeenCalled();
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await waitFor(() => expect(inspect).toHaveFocus());
+    expect(screen.getByRole("textbox")).toHaveValue("Keep typed text");
     screen.getByRole("button", { name: "Remove context" }).focus();
     await userEvent.keyboard("{Enter}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.queryByRole("region")).not.toBeInTheDocument();
     expect(screen.getByRole("textbox")).toHaveValue("Keep typed text");
     expect(screen.getByText("notes.md")).toBeVisible();
@@ -169,11 +180,34 @@ describe("resource context drafts", () => {
       />,
     );
     await userEvent.click(screen.getByRole("button", { name: `检查上下文: ${long.name}` }));
-    expect(screen.getByRole("region", { name: `完整内容: ${long.name}` }).textContent).toBe(
+    const dialog = screen.getByRole("dialog", { name: long.name });
+    expect(within(dialog).getByRole("region", { name: `完整内容: ${long.name}` }).textContent).toBe(
       long.text,
     );
+    expect(within(dialog).getByRole("heading", { name: long.name })).toBeVisible();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Close" }));
     expect(screen.getByText(long.name)).toHaveClass("truncate", "max-w-60");
     expect(screen.getByRole("button", { name: "移除上下文" })).toBeInTheDocument();
+  });
+
+  it("allows inspection while disabled without enabling removal or submitting", async () => {
+    const onSend = vi.fn();
+    const first = context("disabled");
+    render(
+      <AcpComposer
+        disabled
+        onSend={onSend}
+        draft={{ id: "disabled", text: "Keep draft", resourceContext: [first] }}
+      />,
+    );
+    const trigger = screen.getByRole("button", { name: `Inspect context: ${first.name}` });
+    expect(screen.getByRole("button", { name: "Remove context" })).toBeDisabled();
+    await userEvent.click(trigger);
+    expect(screen.getByRole("dialog", { name: first.name })).toBeVisible();
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(trigger).toHaveFocus());
+    expect(screen.getByRole("textbox")).toHaveValue("Keep draft");
+    expect(onSend).not.toHaveBeenCalled();
   });
 });
 

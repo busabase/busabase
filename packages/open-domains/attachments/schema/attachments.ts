@@ -9,7 +9,7 @@
  * drops the two FK constraints).
  */
 
-import { index, integer, jsonb, pgTable, text, timestamp, varchar } from "drizzle-orm/pg-core";
+import { bigint, index, jsonb, pgTable, text, timestamp, varchar } from "drizzle-orm/pg-core";
 import { generateNanoID } from "openlib/nanoid";
 
 export const attachments = pgTable(
@@ -26,7 +26,10 @@ export const attachments = pgTable(
     storageKey: varchar("storage_key", { length: 512 }).notNull(),
     fileName: varchar("file_name", { length: 255 }).notNull(),
     mimeType: varchar("mime_type", { length: 100 }).notNull(),
-    sizeBytes: integer("size_bytes").notNull(),
+    // bigint: a 32-bit integer tops out at 2,147,483,647 bytes, so any file
+    // over ~2 GB failed to register after all of its bytes were uploaded.
+    // `mode: "number"` stays exact up to 2^53 — far above the 5 GB ceiling.
+    sizeBytes: bigint("size_bytes", { mode: "number" }).notNull(),
 
     // Content fingerprint (e.g. "sha256:<hex>") computed client-side before
     // upload. Enables dedup: a re-upload of identical bytes (within the same

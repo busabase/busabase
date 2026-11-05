@@ -42,6 +42,9 @@ import {
   walkNodes,
 } from "./tree";
 
+/** Busabase's ceiling for one `fileTrees.listFiles` page. */
+const LIST_FILES_PAGE_SIZE = 5_000;
+
 /** The subset of `nodes.list`'s output export walks. */
 export interface SourceNode {
   id: string;
@@ -682,7 +685,32 @@ const collectFileTree = async (
   // Narrower than `PackageNode` so the root-skill path can reach `.files`
   // without a cast; this function only ever returns a file-tree node.
 ): Promise<PackageFileTreeNode> => {
-  const listed = await client.fileTrees.listFiles({ nodeId: source.id, type });
+  // An unpaged listFiles stops at the server's 5,000-row page, and a package
+  // must carry every file, so follow the path cursor until a short page.
+  const listed: Array<{ path: string }> = [];
+  // A server that predates paging ignores `limit`/`after` and answers every call
+  // with the whole list. Its first page is therefore already complete — stop
+  // rather than re-appending the same rows until the process dies.
+  let firstPath: string | undefined;
+  for (let after: string | undefined; ; ) {
+    const page = await client.fileTrees.listFiles({
+      nodeId: source.id,
+      type,
+      limit: LIST_FILES_PAGE_SIZE,
+      after,
+    });
+    // Same page again: the server ignored `after` (it predates paging), so the
+    // first answer already held everything.
+    if (after !== undefined && page[0]?.path === firstPath) break;
+    const next = page.at(-1)?.path;
+    // A cursor page can never legitimately end on the cursor's own row; if it
+    // does, the server is echoing the page and following it would repeat it.
+    if (after !== undefined && next === after) break;
+    firstPath ??= page[0]?.path;
+    listed.push(...page);
+    if (page.length < LIST_FILES_PAGE_SIZE || !next) break;
+    after = next;
+  }
   const files: PackageFileEntry[] = [];
   for (const file of listed) {
     const read = await client.fileTrees.readFile({

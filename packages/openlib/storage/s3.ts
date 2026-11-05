@@ -30,6 +30,43 @@ const loadGetSignedUrl = async () => {
 };
 
 /**
+ * Deadline for the single-object metadata calls (`HEAD`), 5s by default.
+ *
+ * The AWS SDK's node handler has no response timeout by default, so a stalled
+ * socket keeps a `HeadObjectCommand` pending forever. That matters because
+ * callers run this call *inside* a database transaction that holds row locks
+ * (attachment registration takes the space row and the storage-key fence), so
+ * one hung HEAD is enough to park a pooled connection with locks held — with
+ * no error anywhere — until every connection in the pool is waiting and the
+ * whole app stops answering. `0` disables the deadline.
+ */
+const DEFAULT_METADATA_TIMEOUT_MS = 5_000;
+
+/**
+ * Deadline for a single-object delete, 30s by default. Background collectors
+ * work through these one at a time, so without it one stalled socket stops the
+ * whole worker. `0` disables the deadline.
+ */
+const DEFAULT_DELETE_TIMEOUT_MS = 30_000;
+
+const resolveTimeoutMs = (raw: string | undefined, fallback: number): number => {
+  if (!raw?.trim()) return fallback;
+  const parsed = Number(raw);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : fallback;
+};
+
+const resolveMetadataTimeoutMs = (): number =>
+  resolveTimeoutMs(process.env.OPENLIB_STORAGE_METADATA_TIMEOUT_MS, DEFAULT_METADATA_TIMEOUT_MS);
+
+const resolveDeleteTimeoutMs = (): number =>
+  resolveTimeoutMs(process.env.OPENLIB_STORAGE_DELETE_TIMEOUT_MS, DEFAULT_DELETE_TIMEOUT_MS);
+
+const isTimeoutError = (error: unknown): boolean => {
+  const name = (error as { name?: unknown } | null)?.name;
+  return name === "AbortError" || name === "TimeoutError" || name === "RequestTimeout";
+};
+
+/**
  * True for the AWS SDK's "416 Range Not Satisfiable" shape — seen as
  * `error.name === "InvalidRange"` on real S3/MinIO, but different S3-compatible
  * backends (R2, self-hosted MinIO versions) have been observed to only set the
@@ -595,6 +632,32 @@ export class S3Storage implements IStorage {
     await client.send(command);
   }
 
+  /** ListParts, following pagination (S3 returns at most 1,000 parts per page). */
+  async listMultipartParts(key: string, uploadId: string): Promise<MultipartPart[]> {
+    const { ListPartsCommand } = await loadS3Sdk();
+    const client = await this.getAdminClient();
+    const parts: MultipartPart[] = [];
+    let marker: string | undefined;
+    for (;;) {
+      const page = await client.send(
+        new ListPartsCommand({
+          Bucket: this.config.bucketName,
+          Key: key,
+          UploadId: uploadId,
+          PartNumberMarker: marker,
+        }),
+      );
+      for (const part of page.Parts ?? []) {
+        if (part.PartNumber && part.ETag) {
+          parts.push({ partNumber: part.PartNumber, etag: part.ETag });
+        }
+      }
+      if (!page.IsTruncated || !page.NextPartNumberMarker) break;
+      marker = page.NextPartNumberMarker;
+    }
+    return parts.sort((a, b) => a.partNumber - b.partNumber);
+  }
+
   /**
    * Abort a multipart upload (cleanup)
    */
@@ -720,8 +783,21 @@ export class S3Storage implements IStorage {
       Bucket: this.config.bucketName,
       Key: key,
     });
+    const timeoutMs = resolveDeleteTimeoutMs();
 
-    await client.send(command);
+    try {
+      await client.send(
+        command,
+        timeoutMs > 0 ? { abortSignal: AbortSignal.timeout(timeoutMs) } : undefined,
+      );
+    } catch (error: unknown) {
+      if (isTimeoutError(error)) {
+        throw new Error(`Storage delete timed out after ${timeoutMs}ms for "${key}"`, {
+          cause: error,
+        });
+      }
+      throw error;
+    }
   }
 
   /**
@@ -779,6 +855,7 @@ export class S3Storage implements IStorage {
    * `getObjectMetadata` below already had this right; this now matches it.
    */
   async objectExists(key: string): Promise<boolean> {
+    const timeoutMs = resolveMetadataTimeoutMs();
     try {
       const { HeadObjectCommand } = await loadS3Sdk();
       const client = await this.getAdminClient();
@@ -787,14 +864,24 @@ export class S3Storage implements IStorage {
           Bucket: this.config.bucketName,
           Key: key,
         }),
+        timeoutMs > 0 ? { abortSignal: AbortSignal.timeout(timeoutMs) } : undefined,
       );
       return true;
-    } catch {
+    } catch (error) {
+      // Existing contract: any failure reads as "not found". Keep that, but say
+      // so out loud — a silently timed-out HEAD looks exactly like a missing
+      // object to every caller.
+      if (isTimeoutError(error)) {
+        console.warn(
+          `[Storage] HEAD timed out after ${timeoutMs}ms for "${key}"; reporting it as missing.`,
+        );
+      }
       return false;
     }
   }
 
   async getObjectMetadata(key: string): Promise<StorageObjectMetadata | null> {
+    const timeoutMs = resolveMetadataTimeoutMs();
     try {
       const { HeadObjectCommand } = await loadS3Sdk();
       const client = await this.getAdminClient();
@@ -803,6 +890,7 @@ export class S3Storage implements IStorage {
           Bucket: this.config.bucketName,
           Key: key,
         }),
+        timeoutMs > 0 ? { abortSignal: AbortSignal.timeout(timeoutMs) } : undefined,
       );
       return {
         key,
@@ -811,6 +899,13 @@ export class S3Storage implements IStorage {
         contentType: response.ContentType,
       };
     } catch (error: unknown) {
+      // A timed-out HEAD is not "missing": callers must not mistake a stalled
+      // storage backend for a deleted object, so it stays an error.
+      if (isTimeoutError(error)) {
+        throw new Error(`Storage metadata request timed out after ${timeoutMs}ms for "${key}"`, {
+          cause: error,
+        });
+      }
       const name = (error as { name?: string }).name;
       const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata
         ?.httpStatusCode;

@@ -27,7 +27,12 @@ const driverMocks = vi.hoisted(() => {
 vi.mock("postgres", () => ({ default: driverMocks.postgres }));
 vi.mock("drizzle-orm/postgres-js", () => ({ drizzle: driverMocks.drizzle }));
 
-import { createPostgresJsDatabaseWithReadReplica, resolveDatabaseRuntimeConfig } from "./replicas";
+import {
+  createGuardedPostgresClient,
+  createPostgresJsDatabaseWithReadReplica,
+  DEFAULT_POSTGRES_TIMEOUTS,
+  resolveDatabaseRuntimeConfig,
+} from "./replicas";
 
 describe("resolveDatabaseRuntimeConfig", () => {
   it("requires a primary database URL", () => {
@@ -88,6 +93,7 @@ describe("resolveDatabaseRuntimeConfig", () => {
       mode: "postgres",
       primaryUrl: "postgresql://user:pass@primary:5432/app",
       primaryPoolMax: 10,
+      timeouts: DEFAULT_POSTGRES_TIMEOUTS,
     });
   });
 
@@ -103,7 +109,47 @@ describe("resolveDatabaseRuntimeConfig", () => {
       primaryPoolMax: 5,
       readUrl: "postgresql://user:pass@reader:5432/app",
       readPoolMax: 5,
+      timeouts: DEFAULT_POSTGRES_TIMEOUTS,
     });
+  });
+
+  it("leaves the server-side waits alone unless they are asked for", () => {
+    const config = resolveDatabaseRuntimeConfig({
+      PG_DATABASE_URL: "postgresql://user:pass@primary:5432/app",
+    });
+
+    expect(config.mode).toBe("postgres");
+    // A startup parameter a pooler does not proxy fails the handshake, so an
+    // unconfigured deployment must not send one.
+    expect(config.mode === "postgres" ? config.timeouts : undefined).toEqual({
+      statementTimeoutMs: 0,
+      lockTimeoutMs: 0,
+      idleInTransactionTimeoutMs: 0,
+    });
+  });
+
+  it("supports explicit timeouts, including 0 to disable a guard", () => {
+    const config = resolveDatabaseRuntimeConfig({
+      PG_DATABASE_URL: "postgresql://user:pass@primary:5432/app",
+      PG_DATABASE_STATEMENT_TIMEOUT_MS: "900000",
+      PG_DATABASE_LOCK_TIMEOUT_MS: "0",
+      PG_DATABASE_IDLE_IN_TRANSACTION_TIMEOUT_MS: "5000",
+    });
+
+    expect(config.mode === "postgres" ? config.timeouts : undefined).toEqual({
+      statementTimeoutMs: 900_000,
+      lockTimeoutMs: 0,
+      idleInTransactionTimeoutMs: 5_000,
+    });
+  });
+
+  it.each(["-1", "1.5", "soon"])("rejects invalid timeout %s", (value) => {
+    expect(() =>
+      resolveDatabaseRuntimeConfig({
+        PG_DATABASE_URL: "postgresql://user:pass@primary:5432/app",
+        PG_DATABASE_STATEMENT_TIMEOUT_MS: value,
+      }),
+    ).toThrow(/non-negative integer/);
   });
 
   it("supports explicit per-pool limits", () => {
@@ -136,6 +182,55 @@ describe("resolveDatabaseRuntimeConfig", () => {
   });
 });
 
+describe("createGuardedPostgresClient", () => {
+  const creationOptions = () => driverMocks.postgres.mock.calls[0]?.[1] as Record<string, unknown>;
+
+  beforeEach(() => {
+    driverMocks.postgres.mockClear();
+  });
+
+  it("applies the client-side guards but no startup parameters by default", () => {
+    createGuardedPostgresClient("postgresql://user:pass@primary:5432/app");
+
+    expect(creationOptions()).toEqual({
+      connect_timeout: 30,
+      idle_timeout: 60,
+      max_lifetime: 1_800,
+    });
+  });
+
+  it("sends the ceilings when they are enabled", () => {
+    createGuardedPostgresClient(
+      "postgresql://user:pass@primary:5432/app",
+      {},
+      {
+        statementTimeoutMs: 120_000,
+        lockTimeoutMs: 30_000,
+        idleInTransactionTimeoutMs: 120_000,
+      },
+    );
+
+    expect(creationOptions().connection).toEqual({
+      statement_timeout: "120000ms",
+      lock_timeout: "30000ms",
+      idle_in_transaction_session_timeout: "120000ms",
+    });
+  });
+
+  it("keeps a guard the caller passes and drops the ones left at 0", () => {
+    createGuardedPostgresClient(
+      "postgresql://user:pass@primary:5432/app",
+      { connection: { application_name: "worker" } },
+      { statementTimeoutMs: 0, lockTimeoutMs: 2_000, idleInTransactionTimeoutMs: 0 },
+    );
+
+    expect(creationOptions().connection).toEqual({
+      application_name: "worker",
+      lock_timeout: "2000ms",
+    });
+  });
+});
+
 describe("createPostgresJsDatabaseWithReadReplica", () => {
   beforeEach(() => {
     driverMocks.postgres.mockClear();
@@ -160,7 +255,57 @@ describe("createPostgresJsDatabaseWithReadReplica", () => {
         max: 10,
         prepare: false,
         target_session_attrs: "read-write",
+        // Without these the client waits on a dead socket forever.
+        connect_timeout: 30,
+        idle_timeout: 60,
+        max_lifetime: 1_800,
       }),
+    );
+    // No startup parameters unless configured: a pooler rejects them and the
+    // connection never opens.
+    expect(driverMocks.postgres.mock.calls[0]?.[1]).not.toHaveProperty("connection");
+  });
+
+  it("sends the server-side ceilings when the config enables them", () => {
+    createPostgresJsDatabaseWithReadReplica(
+      {},
+      {
+        mode: "postgres",
+        primaryUrl: "postgresql://user:pass@primary:5432/app",
+        primaryPoolMax: 3,
+        timeouts: {
+          statementTimeoutMs: 120_000,
+          lockTimeoutMs: 30_000,
+          idleInTransactionTimeoutMs: 120_000,
+        },
+      },
+    );
+
+    expect(driverMocks.postgres.mock.calls[0]?.[1]).toEqual(
+      expect.objectContaining({
+        connection: {
+          statement_timeout: "120000ms",
+          lock_timeout: "30000ms",
+          idle_in_transaction_session_timeout: "120000ms",
+        },
+      }),
+    );
+  });
+
+  it("omits a disabled guard from the startup parameters", () => {
+    createPostgresJsDatabaseWithReadReplica(
+      {},
+      {
+        mode: "postgres",
+        primaryUrl: "postgresql://user:pass@primary:5432/app",
+        primaryPoolMax: 2,
+        timeouts: { statementTimeoutMs: 0, lockTimeoutMs: 0, idleInTransactionTimeoutMs: 0 },
+      },
+    );
+
+    expect(driverMocks.postgres).toHaveBeenCalledWith(
+      "postgresql://user:pass@primary:5432/app",
+      expect.not.objectContaining({ connection: expect.anything() }),
     );
   });
 
@@ -172,6 +317,11 @@ describe("createPostgresJsDatabaseWithReadReplica", () => {
         primaryUrl: "postgresql://user:pass@primary:5432/app",
         primaryPoolMax: 6,
         readUrl: "postgresql://user:pass@reader:5432/app",
+        timeouts: {
+          statementTimeoutMs: 120_000,
+          lockTimeoutMs: 30_000,
+          idleInTransactionTimeoutMs: 120_000,
+        },
         readPoolMax: 4,
       },
     );
@@ -199,6 +349,7 @@ describe("createPostgresJsDatabaseWithReadReplica", () => {
         max: 4,
         prepare: false,
         target_session_attrs: "read-only",
+        connection: expect.objectContaining({ lock_timeout: "30000ms" }),
       }),
     );
   });
