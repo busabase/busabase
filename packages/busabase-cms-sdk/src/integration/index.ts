@@ -52,6 +52,7 @@ export {
   cmsPostToBlogCardWithTags,
   createCmsPostReads,
   createCmsPostResolver,
+  type GetAvailablePostLocalesOptions,
   hasOwnLocalPage,
   type LocalBlogCardPage,
   type LocalPostJsonLdFields,

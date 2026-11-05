@@ -1,6 +1,6 @@
 import "server-only";
 
-import { type CmsRead, readCmsOrFallback, readCmsStatus } from "../fallback";
+import { type CmsRead, readCmsOrFallback, readCmsStatus, requireCmsRead } from "../fallback";
 import { buildCmsPageJsonLd, type CmsBreadcrumbItem, type CmsJsonLdSite } from "../jsonld";
 import type { CmsCanonicalPath, CmsPathHelpers } from "../routing";
 import type { PageSummaryVO, PageVO } from "../types";
@@ -18,6 +18,8 @@ export interface CmsPageReads {
   getBusabaseLandingPageByPathOrFallback: (path: string) => Promise<PageVO | null>;
   /** Status-aware variant, for callers that turn a missing page into a 404. */
   readBusabaseLandingPageByPath: (path: string) => Promise<CmsRead<PageVO | null>>;
+  /** Status-aware variant, for callers that claim the list is complete (a sitemap). */
+  readBusabaseLandingPageSummaries: () => Promise<CmsRead<PageSummaryVO[]>>;
 }
 
 export const createCmsPageReads = (
@@ -36,6 +38,15 @@ export const createCmsPageReads = (
       cms ? () => cms.pages.getByPath(path) : null,
       null as PageVO | null,
       `get ${appLabel} page`,
+    );
+  },
+
+  readBusabaseLandingPageSummaries: async () => {
+    const cms = getCms();
+    return readCmsStatus(
+      cms ? () => cms.pages.listSummaries() : null,
+      [] as PageSummaryVO[],
+      `list ${appLabel} landing page summaries`,
     );
   },
 
@@ -409,7 +420,13 @@ export const createCmsPageHelpers = <TMetadata, TPage extends CmsPageIdentity = 
     // these are cache hits. Revisit only if the CMS grows a field projection that can
     // fetch paths and locales without bodies.
     const probes = await Promise.all(
-      supportedLocales.map(async (locale) => ((await getForLocale(locale, path)) ? locale : null)),
+      // Status-aware for the same reason as the Post probe: a failed read must fail the render, not
+      // cache a hreflang set that silently lost a locale.
+      supportedLocales.map(async (locale) =>
+        requireCmsRead(await readForLocale(locale, path), `the ${locale} version of a Page`)
+          ? locale
+          : null,
+      ),
     );
 
     return probes.filter((locale): locale is string => locale !== null);
@@ -450,10 +467,9 @@ export const createCmsPageHelpers = <TMetadata, TPage extends CmsPageIdentity = 
   /**
    * The available-locale set, with the content locale guaranteed present.
    *
-   * `listBusabaseLandingPagesOrFallback` returns `[]` when the CMS is unreachable, and an
-   * empty hreflang set would silently strip a page's self-reference on every transient CMS
-   * outage. The locale that produced the page we are rendering demonstrably has a version
-   * of it, so it belongs in the set no matter what the list read returned.
+   * A read that fails rejects (see `getAvailableCmsPageLocales`). Otherwise the probes can still
+   * miss the rendered locale, for instance when `filterPage` rejects its record, and the locale
+   * that produced the page we are rendering demonstrably has a version of it.
    */
   const resolveAvailableLocales = async (
     pathWithoutLocale: string,

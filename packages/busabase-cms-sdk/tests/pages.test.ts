@@ -347,16 +347,12 @@ describe("createCmsPageHelpers — getAvailableCmsPageLocales", () => {
     });
   });
 
-  it("still self-references when the CMS is unreachable and the list comes back empty", async () => {
-    // A transient CMS outage must not strip a page's own hreflang entry: the locale that
-    // produced the page we are rendering demonstrably has a version of it.
+  it("fails the metadata when the CMS is unreachable, rather than cache a smaller hreflang set", async () => {
     const { helpers } = helpersFor(EN_ONLY, { unavailable: true });
 
-    // `unavailable` only affects the status-aware read; the plain getter still resolves,
-    // so assert the guarantee that matters: metadata never loses its self-reference.
-    expect(await helpers.generateCmsPageMetadata(page("/gpt-6-astra", "en"), "en")).toMatchObject({
-      availableLocales: ["en"],
-    });
+    await expect(helpers.generateCmsPageMetadata(page("/gpt-6-astra", "en"), "en")).rejects.toThrow(
+      "unreachable",
+    );
   });
 });
 
