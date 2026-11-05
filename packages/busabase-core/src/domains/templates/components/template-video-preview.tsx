@@ -7,17 +7,11 @@ import { TemplateDetailImage } from "./template-detail-image";
 
 interface TemplateVideoPreviewProps {
   src: string;
-  /** The template's cover — `screenshots[0]`, which the catalog already has. */
+  /** The clip's poster or a fallback screenshot. */
   poster?: string;
   title: string;
   playLabel: string;
-  /**
-   * The clip's own title, shown on the tile. Only passed when a template has
-   * several clips: they share one poster and one play badge, so without a
-   * caption a viewer cannot tell them apart. A single untitled clip renders
-   * exactly as it always has.
-   */
-  caption?: string;
+  clipTitle?: string;
 }
 
 /**
@@ -38,7 +32,7 @@ export function TemplateVideoPreview({
   poster,
   title,
   playLabel,
-  caption,
+  clipTitle,
 }: TemplateVideoPreviewProps) {
   const [open, setOpen] = useState(false);
 
@@ -62,16 +56,13 @@ export function TemplateVideoPreview({
             <Play className="size-5 translate-x-0.5 fill-foreground text-foreground" />
           </span>
         </span>
-        {caption ? (
-          <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-foreground/70 to-transparent px-3 pb-2.5 pt-8 text-sm font-medium text-background">
-            {caption}
-          </span>
-        ) : null}
       </button>
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-4xl border-0 bg-black p-0">
-          <DialogTitle className="sr-only">{caption ? `${title}: ${caption}` : title}</DialogTitle>
+          <DialogTitle className="sr-only">
+            {clipTitle ? `${title}: ${clipTitle}` : title}
+          </DialogTitle>
           {/* 16:10, not 16:9 — every clip in the catalog is 1440x900 by
               standard, and a 16:9 shell pillarboxes all of them. */}
           <div className="aspect-[16/10] w-full">

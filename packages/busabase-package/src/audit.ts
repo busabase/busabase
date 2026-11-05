@@ -27,6 +27,7 @@ import {
   PACKAGE_SKILL_ENTRY,
   PACKAGE_SKILL_SIDECAR_DIRS,
   TEMPLATE_VIDEO_LIMIT,
+  type TemplateVideo,
 } from "busabase-contract/domains/package/template";
 import { SkillFrontmatterSchema } from "busabase-contract/domains/skill/frontmatter";
 import { i18n } from "openlib/i18n/i18n";
@@ -171,7 +172,7 @@ export const auditPackage = (
   const auditClips = (
     where: string,
     single: string | undefined,
-    clips: readonly { src: string; title?: string }[] | undefined,
+    clips: readonly TemplateVideo[] | undefined,
   ) => {
     if (!clips || clips.length === 0) return;
     for (const [index, clip] of clips.entries()) {
@@ -179,6 +180,12 @@ export const auditPackage = (
         error(
           "package/video-missing",
           `busabase.json declares video "${clip.src}" (${where}.videos[${index}]), which is not in the package. The Template Center detail page would show a play button that leads nowhere.`,
+        );
+      }
+      if (clip.poster && !present.has(clip.poster)) {
+        error(
+          "package/video-poster-missing",
+          `busabase.json declares poster "${clip.poster}" (${where}.videos[${index}].poster), which is not in the package.`,
         );
       }
     }
@@ -191,7 +198,7 @@ export const auditPackage = (
     if (clips.length > 1 && clips.some((clip) => !clip.title)) {
       warn(
         "package/video-untitled",
-        `${where}.videos declares ${clips.length} clips but not every one has a \`title\`. The tiles all look alike (same cover, same play badge), so a viewer cannot tell which clip is which.`,
+        `${where}.videos declares ${clips.length} clips but not every one has a \`title\`. Give each play button a distinct accessible name.`,
       );
     }
     if (single && single !== clips[0]?.src) {

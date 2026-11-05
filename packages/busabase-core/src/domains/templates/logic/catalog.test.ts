@@ -137,28 +137,49 @@ describe("listTemplates — asset URLs", () => {
 describe("listTemplates — several clips", () => {
   const MEDIA = "https://media.githubusercontent.com/media/busabase/templates/main/templates/gated";
 
-  it("resolves every clip, with its title, on the media host", async () => {
+  it("resolves default and localized clips on the media host and posters on the raw host", async () => {
+    const RAW = "https://raw.githubusercontent.com/busabase/templates/main/templates/gated";
     mockCatalog([
       {
         ...baseEntry,
         video: "assets/recordings/tour.mp4",
         videos: [
-          { src: "assets/recordings/tour.mp4", title: "30-second tour" },
+          {
+            src: "assets/recordings/tour.mp4",
+            title: "30-second tour",
+            poster: "assets/screenshots/tour.webp",
+          },
           { src: "assets/recordings/full.mp4", title: "Full walkthrough" },
         ],
         locales: {
-          "zh-CN": { videos: [{ src: "assets/recordings/tour-zh-CN.mp4", title: "30 秒看懂" }] },
+          "zh-CN": {
+            videos: [
+              {
+                src: "assets/recordings/tour-zh-CN.mp4",
+                title: "30 秒看懂",
+                poster: "assets/screenshots/tour-zh-CN.webp",
+              },
+            ],
+          },
         },
       },
     ]);
     const [card] = (await listTemplates()).templates;
     expect(card.video).toBe(`${MEDIA}/assets/recordings/tour.mp4`);
     expect(card.videos).toEqual([
-      { src: `${MEDIA}/assets/recordings/tour.mp4`, title: "30-second tour" },
+      {
+        src: `${MEDIA}/assets/recordings/tour.mp4`,
+        title: "30-second tour",
+        poster: `${RAW}/assets/screenshots/tour.webp`,
+      },
       { src: `${MEDIA}/assets/recordings/full.mp4`, title: "Full walkthrough" },
     ]);
     expect(card.locales?.["zh-CN"]?.videos).toEqual([
-      { src: `${MEDIA}/assets/recordings/tour-zh-CN.mp4`, title: "30 秒看懂" },
+      {
+        src: `${MEDIA}/assets/recordings/tour-zh-CN.mp4`,
+        title: "30 秒看懂",
+        poster: `${RAW}/assets/screenshots/tour-zh-CN.webp`,
+      },
     ]);
   });
 

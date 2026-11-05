@@ -136,7 +136,11 @@ const videoUrls = (
   ref: string,
   subdir: string,
 ): TemplateVideo[] =>
-  videos.map((clip) => ({ ...clip, src: videoUrl(repo, ref, subdir, clip.src) }));
+  videos.map((clip) => ({
+    ...clip,
+    src: videoUrl(repo, ref, subdir, clip.src),
+    ...(clip.poster ? { poster: screenshotUrl(repo, ref, subdir, clip.poster) } : {}),
+  }));
 
 const localeUrls = (
   raw: unknown,

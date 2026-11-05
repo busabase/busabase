@@ -139,6 +139,8 @@ export const TEMPLATE_VIDEO_LIMIT = 3;
 export const TemplateVideoSchema = z.object({
   src: z.string().min(1),
   title: z.string().optional(),
+  /** Package-relative image path, resolved like a screenshot. */
+  poster: z.string().min(1).optional(),
 });
 export type TemplateVideo = z.infer<typeof TemplateVideoSchema>;
 

@@ -255,6 +255,7 @@ describe("TemplateDetailContent — demo clip", () => {
 describe("TemplateDetailContent — several clips", () => {
   const COVER = "https://cdn.example/cover.webp";
   const SHOT = "https://cdn.example/overview.webp";
+  const POSTER = "https://cdn.example/tour-poster.webp";
   const LAST = "https://cdn.example/last.webp";
   const clip = (name: string, title?: string) => ({
     src: `https://media.githubusercontent.com/media/o/r/main/t/assets/recordings/${name}.mp4`,
@@ -264,20 +265,32 @@ describe("TemplateDetailContent — several clips", () => {
     ...template,
     screenshots: [COVER, SHOT, LAST],
     video: clip("tour").src,
-    videos: [clip("tour", "30-second tour"), clip("full", "Full walkthrough")],
+    videos: [
+      { ...clip("tour", "30-second tour"), poster: POSTER },
+      clip("full", "Full walkthrough"),
+    ],
     locales: { "zh-CN": { videos: [clip("tour-zh-CN", "30 秒看懂")] } },
   };
   const plays = (markup: string) => markup.split("Play the demo").length - 1;
 
-  it("renders one play control per clip, each named after its title", () => {
+  it("renders labeled play controls without a visible title overlay", () => {
     const markup = renderToStaticMarkup(<TemplateDetailContent template={several} />);
     expect(plays(markup)).toBe(2);
     expect(markup).toContain('aria-label="Play the demo: 30-second tour"');
     expect(markup).toContain('aria-label="Play the demo: Full walkthrough"');
-    // Same cover on every tile, so the title is also printed on it.
-    expect(markup).toContain(">30-second tour</span>");
-    expect(markup).toContain(">Full walkthrough</span>");
+    expect(markup).not.toContain(">30-second tour</span>");
+    expect(markup).not.toContain(">Full walkthrough</span>");
     expect(markup).not.toContain("<video");
+  });
+
+  it("uses a clip's poster and falls back to a screenshot for an older clip", () => {
+    const markup = renderToStaticMarkup(<TemplateDetailContent template={several} />);
+    expect(markup).toMatch(
+      new RegExp(`aria-label="Play the demo: 30-second tour"[^>]*><img src="${POSTER}"`),
+    );
+    expect(markup).toMatch(
+      new RegExp(`aria-label="Play the demo: Full walkthrough"[^>]*><img src="${SHOT}"`),
+    );
   });
 
   it("shelves the clips after the cover and before the other screenshots", () => {

@@ -93,9 +93,21 @@ describe("buildTemplateIndex", () => {
       "zh-CN": {
         screenshots: ["assets/screenshots/cover-zh-CN.webp"],
         video: "assets/recordings/gated-zh-CN.mp4",
+        videos: [
+          {
+            src: "assets/recordings/gated-zh-CN.mp4",
+            poster: "assets/screenshots/gated-video-zh-CN.webp",
+          },
+        ],
       },
       ja: { video: "assets/recordings/gated-ja.mp4" },
     };
+    const videos = [
+      {
+        src: "assets/recordings/gated.mp4",
+        poster: "assets/screenshots/gated-video.webp",
+      },
+    ];
     const localizedMedia = JSON.stringify({
       format: PACKAGE_FORMAT,
       name: "gated",
@@ -104,6 +116,7 @@ describe("buildTemplateIndex", () => {
         category: "ops",
         screenshots: ["assets/screenshots/cover.webp"],
         video: "assets/recordings/gated.mp4",
+        videos,
         locales,
       },
     });
@@ -113,6 +126,7 @@ describe("buildTemplateIndex", () => {
     });
     expect(index.templates[0].screenshots).toEqual(["assets/screenshots/cover.webp"]);
     expect(index.templates[0].video).toBe("assets/recordings/gated.mp4");
+    expect(JSON.parse(renderTemplateIndex(index)).templates[0].videos).toEqual(videos);
     expect(index.templates[0].locales).toEqual(locales);
     expect(JSON.parse(renderTemplateIndex(index)).templates[0].locales).toEqual(locales);
 
