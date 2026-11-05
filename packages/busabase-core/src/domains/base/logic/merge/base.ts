@@ -21,6 +21,7 @@ import { findAvailableNodeSlug } from "../../../../logic/node-slug";
 import { assertValidDateFieldOptionsOrThrow } from "../date-options";
 import { insertDefaultGridView } from "../default-view";
 import { assertFormulaMergeValid } from "../formula-recalculation";
+import { lookupReferences } from "../lookup-merge-targets";
 import { assertRelationOnlyOptionsOrThrow, resolveRelationFieldOptions } from "../relation-options";
 import { assertNoReverseOnNewBaseOrThrow } from "../reverse-relations";
 
@@ -57,6 +58,7 @@ export const materializeBaseNode = async (
     reviewPolicy: { kind: "single", requiredApprovals: 1 },
     createdAt: timestamp,
   });
+  ctx.lookupSourceBaseIds?.add(baseId);
   const baseFields =
     fields.fields && fields.fields.length > 0
       ? fields.fields
@@ -67,39 +69,40 @@ export const materializeBaseNode = async (
     options: (field.options ?? {}) as BaseFieldPO["options"],
   }));
   for (const def of formulaDefs) assertFormulaMergeValid(def, formulaDefs);
-  await db.insert(busabaseBaseFields).values(
-    await Promise.all(
-      (
-        baseFields as Array<{
-          slug: string;
-          name: import("openlib/i18n/i-string").iString;
-          type?: import("busabase-contract/types").FieldType;
-          required?: boolean;
-          options?: Record<string, unknown>;
-        }>
-      ).map(async (field, index) => {
-        const type = field.type ?? "text";
-        // A node-CR base-create commit stores field options verbatim, so this is the
-        // only place the `bases.create --fields-json` path validates them.
-        assertRelationOnlyOptionsOrThrow(type, field.slug, field.options);
-        assertValidDateFieldOptionsOrThrow(type, field.slug, field.options);
-        assertNoReverseOnNewBaseOrThrow(field.slug, field.options);
-        return {
-          id: id("bsf"),
-          spaceId: getContextSpaceId(),
-          baseId,
-          slug: field.slug,
-          name: iStringToText(field.name),
-          type,
-          required: type === "formula" ? false : (field.required ?? false),
-          position: index,
-          // Resolve targetBaseSlug → id on the SAME merge transaction (ctx.db), which
-          // is where the node path's relation slug is resolved.
-          options: await resolveRelationFieldOptions(db, field.options ?? {}),
-        };
-      }),
-    ),
+  const materializedFields = await Promise.all(
+    (
+      baseFields as Array<{
+        slug: string;
+        name: import("openlib/i18n/i-string").iString;
+        type?: import("busabase-contract/types").FieldType;
+        required?: boolean;
+        options?: Record<string, unknown>;
+      }>
+    ).map(async (field, index) => {
+      const type = field.type ?? "text";
+      // A node-CR base-create commit stores field options verbatim, so this is the
+      // only place the `bases.create --fields-json` path validates them.
+      assertRelationOnlyOptionsOrThrow(type, field.slug, field.options);
+      assertValidDateFieldOptionsOrThrow(type, field.slug, field.options);
+      assertNoReverseOnNewBaseOrThrow(field.slug, field.options);
+      return {
+        id: id("bsf"),
+        spaceId: getContextSpaceId(),
+        baseId,
+        slug: field.slug,
+        name: iStringToText(field.name),
+        type,
+        required: type === "formula" ? false : (field.required ?? false),
+        position: index,
+        // Resolve targetBaseSlug → id on the SAME merge transaction (ctx.db), which
+        // is where the node path's relation slug is resolved.
+        options: await resolveRelationFieldOptions(db, field.options ?? {}),
+      };
+    }),
   );
+  await db.insert(busabaseBaseFields).values(materializedFields);
+  if (ctx.lookupCreatedReferences)
+    ctx.lookupCreatedReferences.push(...lookupReferences(materializedFields));
   // Same rule as createBase's direct path: the Base opens on a real saved view
   // unless the creator opted out because it adds its own views right away.
   if (fields.defaultView !== false) {

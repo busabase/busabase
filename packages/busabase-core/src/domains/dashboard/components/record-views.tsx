@@ -81,7 +81,9 @@ import { mergeSearchIntoHref, useHrefWithCurrentSearch } from "../helpers/link-s
 import { fetchRecordsByIds } from "../helpers/linked-records";
 import { emptyLookupValues } from "../helpers/lookup";
 import type { RecordSubmitOptions } from "../helpers/view-types";
+import type { AttachmentUploadOptions } from "../hooks/use-attachment-upload";
 import { useNodeLocator } from "../hooks/use-copy-locator";
+import { assertFileWithinLimit, useUploadLimits } from "../hooks/use-upload-limits";
 import { useDashboardOrpc } from "../orpc-context";
 import { registerSidePanelTab, type SidePanelTabProps } from "../side-panel-registry";
 import { dashboardNodeShareUrl } from "../utils/share-url";
@@ -726,7 +728,10 @@ export function RecordEditorView({
     fields: Record<string, unknown>,
     options?: RecordSubmitOptions,
   ) => Promise<void>;
-  onUploadAttachment?: (file: File) => Promise<AssetAttachmentRef>;
+  onUploadAttachment?: (
+    file: File,
+    options?: AttachmentUploadOptions,
+  ) => Promise<AssetAttachmentRef>;
   records: RecordVO[];
   record: RecordVO | null;
 }) {
@@ -1013,7 +1018,10 @@ export function RecordFieldInput({
    *  even when they have since left the space (the roster no longer has them). */
   memberUsers?: Record<string, UserRefVO>;
   onChange: (value: unknown) => void;
-  onUploadAttachment?: (file: File) => Promise<AssetAttachmentRef>;
+  onUploadAttachment?: (
+    file: File,
+    options?: AttachmentUploadOptions,
+  ) => Promise<AssetAttachmentRef>;
   records: RecordVO[];
   value: unknown;
 }) {
@@ -1775,7 +1783,10 @@ function AttachmentFieldEditor({
   field: BaseFieldVO;
   inputId: string;
   onChange: (value: unknown) => void;
-  onUploadAttachment?: (file: File) => Promise<AssetAttachmentRef>;
+  onUploadAttachment?: (
+    file: File,
+    options?: AttachmentUploadOptions,
+  ) => Promise<AssetAttachmentRef>;
   value: unknown;
 }) {
   const messages = useCoreI18n();
@@ -1784,10 +1795,20 @@ function AttachmentFieldEditor({
   const locale = useCoreLocale();
   const attachments = getAttachmentRefs(value);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadPercent, setUploadPercent] = useState<number | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const uploadLimits = useUploadLimits();
   const options = field.options.attachment ?? {};
   const multiple = options.maxFiles !== 1;
   const accept = options.allowedMimeTypes?.join(",");
+  // A field's own `maxFileSize` can only TIGHTEN the host/plan limit. When the
+  // field is the binding one, upgrading would not help, so the refusal stays
+  // inline and never reaches the host's upgrade prompt (the upload hook below
+  // reports host-limit refusals itself).
+  const fieldMaxFileSize =
+    typeof options.maxFileSize === "number" && options.maxFileSize < uploadLimits.maxFileSize
+      ? options.maxFileSize
+      : null;
 
   const handleFiles = async (fileList: FileList | null) => {
     if (!fileList || fileList.length === 0 || !onUploadAttachment) {
@@ -1795,10 +1816,18 @@ function AttachmentFieldEditor({
     }
     setUploadError(null);
     setIsUploading(true);
+    setUploadPercent(null);
     try {
+      const files = Array.from(fileList);
+      // Check every file before uploading any, so one oversized file does not
+      // leave the others half-uploaded.
+      if (fieldMaxFileSize !== null) {
+        for (const file of files) assertFileWithinLimit(file, fieldMaxFileSize);
+      }
       const uploaded: AssetAttachmentRef[] = [];
-      for (const file of Array.from(fileList)) {
-        uploaded.push(await onUploadAttachment(file));
+      for (const file of files) {
+        uploaded.push(await onUploadAttachment(file, { onProgress: setUploadPercent }));
+        setUploadPercent(null);
       }
       const next = multiple ? [...attachments, ...uploaded] : uploaded.slice(-1);
       onChange(options.maxFiles && options.maxFiles > 0 ? next.slice(-options.maxFiles) : next);
@@ -1806,6 +1835,7 @@ function AttachmentFieldEditor({
       setUploadError(presentCoreError(messages, locale, error, messages.recordView.uploadFailed));
     } finally {
       setIsUploading(false);
+      setUploadPercent(null);
     }
   };
 
@@ -1816,7 +1846,11 @@ function AttachmentFieldEditor({
         htmlFor={inputId}
       >
         <Paperclip size={14} />
-        {isUploading ? messages.recordView.uploading : messages.recordView.addFile}
+        {isUploading
+          ? uploadPercent === null
+            ? messages.recordView.uploading
+            : `${messages.recordView.uploading} ${Math.floor(uploadPercent)}%`
+          : messages.recordView.addFile}
       </label>
       <input
         accept={accept}
@@ -2250,6 +2284,7 @@ function RecordPropertyItem({
 }) {
   const resolveIString = useIString();
   const fieldName = resolveIString(field.name);
+  const attachment = fieldDisplayKind(field.type) === "attachment";
   if (fieldDisplayKind(field.type) === "checkbox") {
     const checked = value === true || value === "true";
     return (
@@ -2299,9 +2334,9 @@ function RecordPropertyItem({
         <span className="truncate text-muted-foreground">{fieldName}</span>
         <CellAgentPromptsButton field={field} record={record} />
       </span>
-      <div className="min-w-0 truncate">
+      <div className={attachment ? "min-w-0" : "min-w-0 truncate"}>
         <FieldValuePreview
-          className="inline text-sm leading-5"
+          className={attachment ? "text-sm leading-5" : "inline text-sm leading-5"}
           field={field}
           computed={record.computedFields?.[field.slug]}
           fieldUsers={record.fieldUsers}

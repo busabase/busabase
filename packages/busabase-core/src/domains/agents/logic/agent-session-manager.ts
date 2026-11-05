@@ -15,9 +15,11 @@ import type {
   AgentInputResponse,
   AgentPromptPresentation,
   AgentResourceVO,
+  AgentSessionCommandKind,
   AgentSessionConfigSelectVO,
   AgentSessionEventVO,
   AgentSessionModelOptionVO,
+  AgentSessionModeOptionVO,
   AgentSessionStatus,
   AgentSessionsPageVO,
   AgentSessionVO,
@@ -27,6 +29,7 @@ import type {
 import {
   AgentInputResponseSchema,
   AgentResourceVOSchema,
+  AgentSessionCommandIdSchema,
   AgentSessionConfigSelectVOSchema,
   AgentSessionSnapshotVOSchema,
 } from "busabase-contract/domains/agents/types";
@@ -51,6 +54,7 @@ import {
   isAgentSessionAfterCursor,
   paginateAgentSessions,
 } from "../utils/agent-session-pagination";
+import { compareSessionsByRecency } from "../utils/session-recency";
 import { collapseForPersistence } from "../utils/session-updates";
 import {
   ACP_CONNECTION_ID_HEADER,
@@ -61,6 +65,34 @@ import {
 import { type ResolvedLaunch, resolveLaunch } from "./agent-catalog";
 import { resolveAgentContextResources } from "./agent-context-resources";
 import { validateAgentPromptResourceContext } from "./agent-prompt-context";
+import { agentSessionBindingFingerprint } from "./agent-session-binding";
+import {
+  type AgentSessionDiagnosticContext,
+  agentSessionScopeReferences,
+  captureAgentSessionDiagnosticContext,
+  logAgentSessionDiagnostic,
+  withAgentSessionDiagnosticContext,
+} from "./agent-session-diagnostics";
+import {
+  journalSynchronizationErrorBrand,
+  supervisedDispatch,
+} from "./agent-session-execution-context";
+import { agentSessionCommandDigest } from "./agent-session-journal-policy";
+import {
+  type AgentSessionJournalInput,
+  type AgentSessionJournalRuntime,
+  type AgentSessionWriterLease,
+  admitSessionCommand,
+  appendJournalEvents,
+  createJournalSession,
+  getJournalRuntime,
+  loadSessionCommand,
+  loadSessionCommands,
+  renewWriterLease,
+  touchJournalDemand,
+  transitionSessionCommand,
+  updateJournalRuntime,
+} from "./agent-session-journal-store";
 import {
   type AgentSessionLease,
   type AgentSessionRuntimeRecord,
@@ -80,6 +112,15 @@ import {
   renewSessionLease,
   sessionLeaseTtlSeconds,
 } from "./agent-session-store";
+import {
+  AgentSessionCommandAdmissionError,
+  agentSessionSupervisorRequested,
+  assertAgentSessionSupervisorAvailable,
+  registerAgentSessionSupervisorDriver,
+  retainAgentSessionDemand,
+  type SupervisedAgentCommand,
+  wakeAgentSessionSupervisor,
+} from "./agent-session-supervisor";
 import { prepareAgentWorkspace } from "./agent-workspace";
 import { resolveBusabaseMcpUrl } from "./agent-workspace-guide";
 
@@ -105,7 +146,7 @@ const MAX_CACHED_MODEL_OPTIONS = 500;
 /** Resolve only supported select categories, preserving the agent's ids and values. */
 function findConfigSelect(
   configOptions: acp.SessionConfigOption[] | null | undefined,
-  category: "model" | "thought_level",
+  category: "model" | "thought_level" | "mode",
   conventionalIds: readonly string[],
 ): AgentSessionConfigSelectVO | null {
   const selects = configOptions?.filter((candidate) => candidate.type === "select") ?? [];
@@ -124,18 +165,47 @@ function findConfigSelect(
       return {
         value: entry.value,
         name: entry.name,
+        ...(category === "mode" && entry.description ? { description: entry.description } : {}),
         ...(thinking?.id && thinking.options.some((level) => level.value === thinking.currentValue)
           ? { thinking }
           : {}),
       };
     });
-  return { id: option.id, name: option.name, currentValue: option.currentValue, options };
+  return {
+    id: option.id,
+    name: option.name,
+    currentValue: option.currentValue,
+    options,
+    ...(category === "mode" && option.description ? { description: option.description } : {}),
+  };
+}
+
+function legacyModeOption(
+  modes: acp.SessionModeState | null | undefined,
+): AgentSessionModeOptionVO | null {
+  if (!modes?.availableModes.length) return null;
+  return {
+    id: "mode",
+    name: "Mode",
+    source: "legacy",
+    currentValue: modes.currentModeId,
+    options: modes.availableModes.map((mode) => ({
+      value: mode.id,
+      name: mode.name,
+      ...(mode.description ? { description: mode.description } : {}),
+    })),
+  };
 }
 
 function syncConfigOptions(
   session: LiveSession,
   configOptions: acp.SessionConfigOption[] | null | undefined,
 ): Promise<void> {
+  const mode = findConfigSelect(configOptions, "mode", [
+    "mode",
+    "permission_mode",
+    "approval_mode",
+  ]);
   return syncModelOption(
     session,
     findConfigSelect(configOptions, "model", ["model"]),
@@ -144,11 +214,39 @@ function syncConfigOptions(
       "thinking_level",
       "reasoning_effort",
     ]),
+    mode ? { ...mode, source: "config" } : session.legacyModeOption,
   );
 }
 
 interface LiveSession {
   id: string;
+  /** Diagnostic identity is captured independently of request lifetimes. */
+  diagnosticContext?: AgentSessionDiagnosticContext;
+  operationDiagnosticContext?: AgentSessionDiagnosticContext;
+  journal?: {
+    lease: AgentSessionWriterLease;
+    runtime: AgentSessionJournalRuntime;
+    pending: Array<AgentSessionJournalInput & { admission: number; bytes: number }>;
+    admission: number;
+    committedAdmission: number;
+    bytes: number;
+    tail: Promise<void>;
+    flushing?: Promise<void>;
+    failure?: unknown;
+    faultHandling?: Promise<void>;
+    stats: {
+      maxPending: number;
+      batchCount: number;
+      maxBatchSize: number;
+      backpressureCount: number;
+    };
+    commandReceipts: boolean;
+    completeCoverage: boolean;
+    targetedCancel: boolean;
+    bindingId: string;
+    bindingInvalidated?: boolean;
+    activeCommandId?: string;
+  };
   /** Immutable request ownership captured when the process/socket is launched. */
   readonly spaceId: string;
   readonly actorId: string | null;
@@ -185,10 +283,15 @@ interface LiveSession {
    */
   modelOption: AgentSessionModelOptionVO | null;
   thinkingOption: AgentSessionConfigSelectVO | null;
+  modeOption: AgentSessionModeOptionVO | null;
+  legacyModeOption: AgentSessionModeOptionVO | null;
+  modeRevision: number;
+  legacyCurrentModeId: string | null;
   modelCacheKey?: string;
   /** Serializes model snapshots with remote lease acquisition and release. */
   modelOptionSync: Promise<void>;
   setConfigOption: (configId: string, value: string) => Promise<AgentSessionModelOptionVO | null>;
+  setMode: (value: string) => Promise<void>;
   seq: number;
   /** Highest `seq` already written to the database; everything above is pending. */
   persistedSeq: number;
@@ -254,6 +357,66 @@ interface OperationLeaseGuard {
   release(waitForWrites?: boolean): Promise<void>;
 }
 
+/** The durable command reservation is the operation slot in supervised mode.
+ * Its guard verifies the long-lived writer epoch without borrowing a legacy
+ * lease or releasing that writer when one turn completes. */
+class JournalOperationGuard implements OperationLeaseGuard {
+  readonly lease: AgentSessionLease;
+  readonly scope: { readonly spaceId: string; readonly actorId: string | null };
+  private stopped = false;
+  constructor(
+    private readonly session: LiveSession,
+    private readonly commandId: string,
+  ) {
+    const journal = session.journal;
+    if (!journal || session.operationGuard) throw new Error("This agent is still replying.");
+    this.scope = Object.freeze({ spaceId: session.spaceId, actorId: session.actorId });
+    this.lease = Object.freeze({
+      sessionId: session.id,
+      ownerId: journal.lease.ownerId,
+      fencingToken: journal.lease.epoch,
+      expiresAt: journal.lease.expiresAt,
+    });
+    session.lease = this.lease;
+    session.operationGuard = this;
+    session.operationDiagnosticContext = captureAgentSessionDiagnosticContext();
+  }
+  assertOwned(): void {
+    if (
+      this.stopped ||
+      this.session.closed ||
+      this.session.operationGuard !== this ||
+      this.session.journal?.lease.ownerId !== this.lease.ownerId ||
+      this.session.journal.lease.epoch !== this.lease.fencingToken
+    )
+      throw new Error("This worker lost the agent session writer lease.");
+  }
+  async ready(): Promise<void> {
+    this.assertOwned();
+    const journal = this.session.journal;
+    if (!journal) throw new Error("The session writer is detached.");
+    const renewed = await renewWriterLease(this.session.id, journal.lease, 45, this.scope);
+    const runtime = renewed ? await getJournalRuntime(this.session.id, this.scope) : null;
+    if (!runtime || runtime.activeCommandId !== this.commandId) {
+      detachRemoteSession(this.session);
+      throw new Error("This session command no longer owns its execution reservation.");
+    }
+    this.assertOwned();
+  }
+  async release(): Promise<void> {
+    try {
+      await this.session.flushPending;
+    } finally {
+      this.stopped = true;
+      if (this.session.operationGuard === this) {
+        this.session.lease = null;
+        this.session.operationGuard = null;
+        this.session.operationDiagnosticContext = undefined;
+      }
+    }
+  }
+}
+
 function requireOperationGuard(session: LiveSession): OperationLeaseGuard | undefined {
   if (session.transport !== "remote-websocket") return undefined;
   const guard = session.operationGuard;
@@ -278,6 +441,7 @@ async function verifyOperationDispatch(
   if (requireOperationGuard(session) !== guard) {
     throw new Error("This worker lost the agent session lease.");
   }
+  if (session.journal) await supervisedDispatch.getStore()?.beforeDispatch();
 }
 
 /** One immutable authority owns renewal and cleanup for the entire operation. */
@@ -328,6 +492,19 @@ class LeaseGuard implements OperationLeaseGuard {
   private markLost(): void {
     if (this.lost) return;
     this.lost = true;
+    logAgentSessionDiagnostic(
+      "lease_lost",
+      {
+        ...this.session?.diagnosticContext,
+        ...this.session?.operationDiagnosticContext,
+        sessionId: this.lease.sessionId,
+        ownerId: this.lease.ownerId,
+        fencingToken: this.lease.fencingToken,
+        stage: "lease",
+        outcome: "ownership_rejected",
+      },
+      { level: "warn", force: true },
+    );
     clearInterval(this.timer);
     if (this.session?.lease === this.lease && this.session.operationGuard === this) {
       this.session.status = "failed";
@@ -361,6 +538,7 @@ class LeaseGuard implements OperationLeaseGuard {
       throw new Error(`Unknown agent session: ${this.lease.sessionId}`);
     }
     this.session = session;
+    session.operationDiagnosticContext = captureAgentSessionDiagnosticContext();
     session.lease = this.lease;
     session.operationGuard = this;
   }
@@ -395,6 +573,7 @@ class LeaseGuard implements OperationLeaseGuard {
         if (this.session?.operationGuard === this) {
           if (this.session.lease === this.lease) this.session.lease = null;
           this.session.operationGuard = null;
+          this.session.operationDiagnosticContext = undefined;
         }
       }
     };
@@ -428,10 +607,12 @@ function syncModelOption(
   session: LiveSession,
   modelOption: AgentSessionModelOptionVO | null,
   thinkingOption: AgentSessionConfigSelectVO | null,
+  modeOption: AgentSessionModeOptionVO | null,
 ): Promise<void> {
   if (session.transport !== "remote-websocket") {
     session.modelOption = modelOption;
     session.thinkingOption = thinkingOption;
+    session.modeOption = modeOption;
     return Promise.resolve();
   }
   const write = session.modelOptionSync.then(async () => {
@@ -439,19 +620,33 @@ function syncModelOption(
     const fence = session.lease
       ? { ownerId: session.lease.ownerId, fencingToken: session.lease.fencingToken }
       : undefined;
-    const persisted = await persistSessionModelOption(
-      session.id,
-      modelOption,
-      scope,
-      fence,
-      thinkingOption,
-    );
+    const persisted = session.journal
+      ? await updateJournalRuntime(
+          session.id,
+          {
+            modelOption:
+              thinkingOption || modeOption
+                ? { modelOption, thinkingOption, modeOption }
+                : modelOption,
+          },
+          session.journal.lease,
+          scope,
+        )
+      : await persistSessionModelOption(
+          session.id,
+          modelOption,
+          scope,
+          fence,
+          thinkingOption,
+          modeOption,
+        );
     if (!persisted) throw new Error("Could not persist the agent's model options. Try again.");
     // Publish only after the durable snapshot succeeds. Keeping persistence
     // and in-memory publication in the same queue entry prevents a lease
     // claim's durable refresh from clobbering a newer queued notification.
     session.modelOption = modelOption;
     session.thinkingOption = thinkingOption;
+    session.modeOption = modeOption;
     rememberModelOption(session, modelOption);
   });
   // Keep later updates retryable even when this caller observes a rejection.
@@ -592,10 +787,696 @@ const logAcpConnection = (
   event: string,
   fields: Record<string, unknown>,
 ) => {
-  console[level]("[agents:acp]", { event, ...fields });
+  logAgentSessionDiagnostic(
+    event,
+    { ...fields, stage: "connection" },
+    {
+      level,
+      force: level === "warn" || event.endsWith("failed") || event === "connection_closing",
+    },
+  );
 };
 
+function sessionDiagnosticContext(session: LiveSession): AgentSessionDiagnosticContext {
+  return captureAgentSessionDiagnosticContext({
+    ...session.diagnosticContext,
+    ...session.operationDiagnosticContext,
+    acpSessionId: session.acpSessionId ?? undefined,
+  });
+}
+
+function traceSessionOperation<T>(sessionId: string, stage: string, operation: () => T): T {
+  const live = sessions().get(sessionId);
+  const context = captureAgentSessionDiagnosticContext({
+    ...(live && isLiveSessionVisibleToCurrentRequest(live) ? sessionDiagnosticContext(live) : {}),
+    sessionId,
+    operationId: `op_${randomUUID()}`,
+    attemptId: `attempt_${randomUUID()}`,
+    ...agentSessionScopeReferences({
+      spaceId: getContextSpaceId(),
+      actorId: getContextActorId() ?? null,
+    }),
+  });
+  return withAgentSessionDiagnosticContext(context, () => {
+    const startedAt = Date.now();
+    const completed = () =>
+      logAgentSessionDiagnostic(
+        "operation_completed",
+        { stage, outcome: "completed", elapsedMs: Date.now() - startedAt },
+        { force: true },
+      );
+    const failed = (error: unknown) =>
+      logAgentSessionDiagnostic(
+        "operation_failed",
+        { stage, outcome: "failed", elapsedMs: Date.now() - startedAt },
+        { level: "warn", error, force: true },
+      );
+    logAgentSessionDiagnostic("operation_started", { stage, outcome: "started" });
+    try {
+      const result = operation();
+      // Some permission validations deliberately throw synchronously. Preserve
+      // that contract instead of turning every call into an async function.
+      if (result instanceof Promise) {
+        return result.then(
+          (value) => {
+            completed();
+            return value;
+          },
+          (error: unknown) => {
+            failed(error);
+            throw error;
+          },
+        ) as T;
+      }
+      completed();
+      return result;
+    } catch (error) {
+      failed(error);
+      throw error;
+    }
+  });
+}
+
+async function admitSupervisedCommand(
+  sessionId: string,
+  kind: AgentSessionCommandKind,
+  payload: Record<string, unknown>,
+  commandId = `cmd_${randomUUID().replaceAll("-", "")}`,
+) {
+  assertAgentSessionSupervisorAvailable();
+  const scope = { spaceId: getContextSpaceId(), actorId: getContextActorId() ?? null };
+  const runtime = await getJournalRuntime(sessionId, scope);
+  if (!runtime || runtime.journalMode !== "supervised")
+    throw new Error("Unknown supervised agent session.");
+  const prior = await loadSessionCommand(sessionId, commandId, scope);
+  if (prior) {
+    if (
+      prior.kind !== kind ||
+      agentSessionCommandDigest(prior.payload) !== agentSessionCommandDigest(payload)
+    )
+      throw new Error("This command identity was already used with different content.");
+    void wakeAgentSessionSupervisor();
+    return prior;
+  }
+  const admission = await admitSessionCommand(
+    sessionId,
+    {
+      commandId,
+      kind,
+      payload,
+      ...(kind === "prompt"
+        ? {
+            presentation: {
+              text: payload.text,
+              ...(payload.presentation ? { presentation: payload.presentation } : {}),
+            },
+          }
+        : {}),
+      ...(kind === "cancel" && runtime.activeCommandId
+        ? { targetCommandId: runtime.activeCommandId }
+        : {}),
+      expiresAt: new Date(Date.now() + (kind === "prompt" ? 30 * 60_000 : 30_000)).toISOString(),
+    },
+    scope,
+  );
+  if (admission.outcome === "conflict") {
+    const raced = await loadSessionCommand(sessionId, commandId, scope);
+    if (
+      raced?.kind === kind &&
+      agentSessionCommandDigest(raced.payload) === agentSessionCommandDigest(payload)
+    )
+      return raced;
+  }
+  if (admission.outcome !== "accepted" && admission.outcome !== "already_accepted") {
+    throw new Error(
+      admission.outcome === "busy"
+        ? "This agent is still replying. Wait for the current turn to finish."
+        : admission.outcome === "conflict"
+          ? "This command identity was already used with different content."
+          : "This session is not accepting commands. Reconcile its current state first.",
+    );
+  }
+  await touchJournalDemand(sessionId, scope);
+  void wakeAgentSessionSupervisor();
+  return admission.receipt;
+}
+
+/** Narrow control connection: no load, journal observer, writer claim or prompt. */
+async function sendTargetedSupervisedCancellation(
+  runtime: AgentSessionJournalRuntime,
+  command: SupervisedAgentCommand,
+): Promise<boolean> {
+  if (
+    !runtime.acpSessionId ||
+    !command.targetCommandId ||
+    runtime.capabilities?.commandReceipts !== true ||
+    runtime.capabilities.targetedCancel !== true
+  )
+    return false;
+  const launch = await resolveLaunch(runtime.session.slug);
+  if (launch.transport !== "remote-websocket" || !launch.url) return false;
+  const stream = createWebSocketStream(launch.url, {
+    headers: {
+      [ACP_CONNECTION_ID_HEADER]: createAcpConnectionId(),
+      ...(launch.authHeader ? { Authorization: launch.authHeader } : {}),
+    },
+    WebSocket: WebSocket as unknown as never,
+  });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const bindingId = `${runtime.session.id}_${runtime.bindingGeneration}`;
+  try {
+    return await Promise.race([
+      acp.client({ name: "busabase-targeted-cancel" }).connectWith(stream, async (ctx) => {
+        const initialized = await ctx.request(acp.methods.agent.initialize, {
+          protocolVersion: acp.PROTOCOL_VERSION,
+          clientCapabilities: {
+            _meta: {
+              "buda.im": {
+                commandReceipts: 1,
+                writerEpoch: 1,
+                targetedCancel: 1,
+                journalCoverage: 1,
+              },
+            },
+          },
+        });
+        const capabilities = budaMetadata(initialized.agentCapabilities);
+        if (capabilities?.targetedCancel !== 1 || capabilities.commandReceipts !== 1) return false;
+        const found = (await ctx.request("_buda.im/command/receipt", {
+          bindingId,
+          commandId: command.targetCommandId,
+        })) as { receipt?: { turnId?: string } | null };
+        if (!found.receipt?.turnId) return false;
+        const result = (await ctx.request("_buda.im/session/cancel_turn", {
+          bindingId,
+          writerEpoch: runtime.writerEpoch,
+          commandId: command.commandId,
+          targetCommandId: command.targetCommandId,
+          sessionId: runtime.acpSessionId,
+          turnId: found.receipt.turnId,
+        })) as { outcome?: string };
+        return result.outcome === "requested" || result.outcome === "stale";
+      }),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), 3_000);
+        timer.unref?.();
+      }),
+    ]);
+  } catch (error) {
+    logAgentSessionDiagnostic(
+      "targeted_cancel_waiting_for_owner",
+      {
+        sessionId: runtime.session.id,
+        stage: "cancel",
+        outcome: "recovering",
+      },
+      { level: "warn", error },
+    );
+    return false;
+  } finally {
+    if (timer) clearTimeout(timer);
+    await stream.writable.close().catch(() => undefined);
+  }
+}
+
+async function routeSupervisedControl(
+  sessionId: string,
+  kind: AgentSessionCommandKind,
+  payload: Record<string, unknown>,
+  commandId?: string,
+): Promise<boolean> {
+  if (!agentSessionSupervisorRequested()) return false;
+  const scope = { spaceId: getContextSpaceId(), actorId: getContextActorId() ?? null };
+  const runtime = await getJournalRuntime(sessionId, scope);
+  if (runtime?.journalMode !== "supervised") return false;
+  const receipt = await admitSupervisedCommand(sessionId, kind, payload, commandId);
+  if (kind === "cancel" && (await sendTargetedSupervisedCancellation(runtime, receipt)))
+    return true;
+  const deadline = Date.now() + 15_000;
+  while (Date.now() < deadline) {
+    const current = await loadSessionCommand(sessionId, receipt.commandId, scope);
+    if (current?.state === "completed") return true;
+    if (current?.state === "rejected" || current?.state === "unknown")
+      throw new Error(
+        "The agent could not confirm this command. Reconcile the session before retrying.",
+      );
+    await new Promise<void>((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(
+    "The command is saved and is waiting for session recovery. Check its status before retrying.",
+  );
+}
+
+function journalDrainStats(journal: NonNullable<LiveSession["journal"]>) {
+  journal.stats ??= {
+    maxPending: 0,
+    batchCount: 0,
+    maxBatchSize: 0,
+    backpressureCount: 0,
+  };
+  return journal.stats;
+}
+
+function enqueueJournalEvent(
+  session: LiveSession,
+  event: Omit<AgentSessionEventVO, "sessionId" | "seq" | "at">,
+): string {
+  const journal = session.journal;
+  if (!journal || session.closed) throw new Error("The session writer is detached.");
+  if (journal.failure) throw journal.failure;
+  const sourceSeq = session.budaEventStream
+    ? upstreamSeqOf(event as AgentSessionEventVO)
+    : undefined;
+  const command = supervisedDispatch.getStore()?.command;
+  const isUser =
+    (event.acpUpdate as { sessionUpdate?: unknown } | undefined)?.sessionUpdate === "user_message";
+  const identity =
+    sourceSeq !== undefined
+      ? `${journal.bindingId}:remote:${sourceSeq}`
+      : isUser && command
+        ? `command:${command.commandId}:user`
+        : `event:${randomUUID()}`;
+  const full = {
+    ...event,
+    at: nowIso(),
+    ...(isUser && command
+      ? {
+          commandId: command.commandId,
+          acpUpdate: {
+            ...(event.acpUpdate as Record<string, unknown>),
+            commandId: command.commandId,
+          },
+        }
+      : {}),
+  };
+  const serialized = JSON.stringify(full);
+  const bytes = Buffer.byteLength(serialized);
+  if (journal.pending.length >= 500 || journal.bytes + bytes > 16 * 1024 * 1024) {
+    journal.failure = new JournalSynchronizationError(
+      "integrity_failure",
+      `diag_${randomUUID().replaceAll("-", "")}`,
+    );
+    throw journal.failure;
+  }
+  journal.admission += 1;
+  journal.bytes += bytes;
+  // Freeze the admitted JSON semantics so every retry writes the same batch.
+  const snapshot = JSON.parse(serialized) as typeof full;
+  journal.pending.push({
+    identity,
+    event: snapshot,
+    sourceSeq,
+    admission: journal.admission,
+    bytes,
+  });
+  const stats = journalDrainStats(journal);
+  stats.maxPending = Math.max(stats.maxPending, journal.pending.length);
+  session.lastActivityAt = full.at;
+  return identity;
+}
+
+const bindingChangedBrand = Symbol.for("busabase.agent-session.binding-changed");
+const journalSynchronizationBrand = journalSynchronizationErrorBrand;
+
+class SessionBindingChangedError extends AgentSessionCommandAdmissionError {
+  readonly [bindingChangedBrand] = true;
+  constructor() {
+    super("CONNECTION_BINDING_CHANGED");
+    this.message =
+      "This conversation belongs to an earlier connection. Its saved commands were not sent to the replacement connection.";
+  }
+}
+
+function isSessionBindingChangedError(error: unknown): boolean {
+  try {
+    return (
+      typeof error === "object" &&
+      error !== null &&
+      Reflect.get(error, bindingChangedBrand) === true
+    );
+  } catch {
+    return false;
+  }
+}
+
+async function invalidateSessionBinding(
+  sessionId: string,
+  lease: AgentSessionWriterLease,
+  scope: { spaceId: string; actorId: string | null },
+  live?: LiveSession,
+): Promise<never> {
+  const diagnosticRef = `diag_${randomUUID().replaceAll("-", "")}`;
+  let uncertain = false;
+  try {
+    if (live?.journal) live.journal.bindingInvalidated = true;
+    // Freeze new data admission before releasing an existing reservation.
+    await updateJournalRuntime(
+      sessionId,
+      { connectionState: "disconnected", syncState: "gap", diagnosticRef },
+      lease,
+      scope,
+    );
+    if (
+      live?.journal?.lease.ownerId === lease.ownerId &&
+      live.journal.lease.epoch === lease.epoch &&
+      !live.closed
+    )
+      detachRemoteSession(live);
+    for (const command of await loadSessionCommands(sessionId, scope)) {
+      if (["queued", "claimed"].includes(command.state))
+        await transitionSessionCommand(
+          sessionId,
+          command.commandId,
+          ["queued", "claimed"],
+          "rejected",
+          lease,
+          scope,
+          { errorCode: "CONNECTION_BINDING_CHANGED" },
+        );
+      else if (["dispatching", "observed", "unknown"].includes(command.state)) {
+        uncertain = true;
+        await transitionSessionCommand(
+          sessionId,
+          command.commandId,
+          ["dispatching", "observed"],
+          "unknown",
+          lease,
+          scope,
+          { errorCode: "CONNECTION_BINDING_CHANGED" },
+        );
+      }
+    }
+    const remaining = await loadSessionCommands(sessionId, scope);
+    uncertain = remaining.some((command) =>
+      ["dispatching", "observed", "unknown"].includes(command.state),
+    );
+    for (const command of remaining) {
+      if (["dispatching", "observed"].includes(command.state))
+        await transitionSessionCommand(
+          sessionId,
+          command.commandId,
+          ["dispatching", "observed"],
+          "unknown",
+          lease,
+          scope,
+          { errorCode: "CONNECTION_BINDING_CHANGED" },
+        );
+    }
+    await updateJournalRuntime(
+      sessionId,
+      {
+        ...(uncertain ? {} : { status: "idle" }),
+        error: null,
+        connectionState: "disconnected",
+        syncState: "gap",
+        executionState: uncertain ? "unknown" : "idle",
+        diagnosticRef,
+      },
+      lease,
+      scope,
+    );
+  } catch (error) {
+    logAgentSessionDiagnostic(
+      "session_binding_state_unavailable",
+      {
+        sessionId,
+        diagnosticRef,
+        stage: "binding",
+        outcome: "binding_changed",
+        ownerId: lease.ownerId,
+        fencingToken: lease.epoch,
+      },
+      { level: "warn", error, force: true },
+    );
+  } finally {
+    logAgentSessionDiagnostic(
+      "session_binding_rejected",
+      {
+        ...(live ? sessionDiagnosticContext(live) : {}),
+        sessionId,
+        diagnosticRef,
+        stage: "binding",
+        outcome: "binding_changed",
+        reason: "CONNECTION_BINDING_CHANGED",
+        ownerId: lease.ownerId,
+        fencingToken: lease.epoch,
+      },
+      { level: "warn", force: true },
+    );
+    // Never detach a newer session object or mutate a newer writer's state.
+    if (
+      live?.journal?.lease.ownerId === lease.ownerId &&
+      live.journal.lease.epoch === lease.epoch &&
+      !live.closed
+    )
+      detachRemoteSession(live);
+  }
+  throw new SessionBindingChangedError();
+}
+
+/** Re-resolve current authorization/config immediately before every remote operation. */
+async function assertCurrentSessionBinding(session: LiveSession): Promise<void> {
+  const journal = session.journal;
+  if (!journal) return;
+  if (journal.bindingInvalidated) throw new SessionBindingChangedError();
+  if (session.closed) throw new Error("The session writer is detached.");
+  const scope = { spaceId: session.spaceId, actorId: session.actorId };
+  const launch = await resolveLaunch(session.slug);
+  const runtime = await getJournalRuntime(session.id, scope);
+  if (
+    !runtime ||
+    runtime.writerOwnerId !== journal.lease.ownerId ||
+    runtime.writerEpoch !== journal.lease.epoch
+  )
+    throw new Error("The session writer changed before dispatch.");
+  const pinned = runtime.capabilities?.bindingFingerprint;
+  if (typeof pinned !== "string" || pinned !== agentSessionBindingFingerprint(launch))
+    await invalidateSessionBinding(session.id, journal.lease, scope, session);
+}
+
+/** Read/control side sockets cannot forward an old remote ID into a new binding. */
+async function assertScopedExtensionBinding(
+  record: AgentSessionRuntimeRecord,
+  launch: ResolvedLaunch,
+): Promise<void> {
+  if (!record.session.reliability) return;
+  const scope = { spaceId: getContextSpaceId(), actorId: getContextActorId() ?? null };
+  const runtime = await getJournalRuntime(record.session.id, scope);
+  const pinned = runtime?.capabilities?.bindingFingerprint;
+  if (
+    runtime?.journalMode === "supervised" &&
+    typeof pinned === "string" &&
+    pinned === agentSessionBindingFingerprint(launch)
+  )
+    return;
+  const live = sessions().get(record.session.id);
+  if (live?.journal && isLiveSessionVisibleToCurrentRequest(live))
+    await invalidateSessionBinding(record.session.id, live.journal.lease, scope, live);
+  logAgentSessionDiagnostic(
+    "scoped_extension_binding_rejected",
+    {
+      sessionId: record.session.id,
+      stage: "binding",
+      outcome: "binding_changed",
+      reason: "CONNECTION_BINDING_CHANGED",
+    },
+    { level: "warn", force: true },
+  );
+  throw new SessionBindingChangedError();
+}
+
+class JournalSynchronizationError extends Error {
+  readonly [journalSynchronizationBrand] = true;
+  constructor(
+    readonly outcome: string,
+    readonly diagnosticRef: string,
+  ) {
+    super(`History synchronization stopped: ${outcome}.`);
+  }
+}
+
+function isJournalSynchronizationError(error: unknown): error is JournalSynchronizationError {
+  try {
+    return (
+      typeof error === "object" &&
+      error !== null &&
+      Reflect.get(error, journalSynchronizationBrand) === true &&
+      typeof Reflect.get(error, "outcome") === "string" &&
+      typeof Reflect.get(error, "diagnosticRef") === "string"
+    );
+  } catch {
+    return false;
+  }
+}
+
+function handleJournalFault(session: LiveSession, error: unknown): Promise<void> {
+  const journal = session.journal;
+  if (!journal) return Promise.resolve();
+  if (journal.faultHandling) return journal.faultHandling;
+  journal.failure ??= error ?? new Error("History synchronization failed.");
+  // Many callers can await one drain. One failure owns cleanup and its DB writes.
+  journal.faultHandling = Promise.resolve()
+    .then(() => performHandleJournalFault(session, journal.failure))
+    .catch(() => {
+      detachRemoteSession(session);
+    });
+  return journal.faultHandling;
+}
+
+async function performHandleJournalFault(session: LiveSession, error: unknown): Promise<void> {
+  if (!session.journal) return;
+  const knownCursorGap =
+    error instanceof Error &&
+    /ACP replay cursor is newer|replay cursor.*expired|journal generation|history.*retention/i.test(
+      error.message,
+    );
+  const definiteGap =
+    knownCursorGap ||
+    (isJournalSynchronizationError(error) && error.outcome === "integrity_failure");
+  const scope = { spaceId: session.spaceId, actorId: session.actorId };
+  const current = await getJournalRuntime(session.id, scope).catch(() => null);
+  const gap =
+    definiteGap ||
+    session.journal.bindingInvalidated === true ||
+    current?.creationState === "unknown" ||
+    current?.session.reliability?.synchronization === "gap";
+  const diagnosticRef = isJournalSynchronizationError(error)
+    ? error.diagnosticRef
+    : `diag_${randomUUID().replaceAll("-", "")}`;
+  logAgentSessionDiagnostic(
+    "journal_connection_degraded",
+    {
+      ...sessionDiagnosticContext(session),
+      diagnosticRef,
+      stage: "journal",
+      outcome: gap ? "gap" : "recovering",
+    },
+    { level: "warn", error, force: true },
+  );
+  await updateJournalRuntime(
+    session.id,
+    {
+      connectionState: "disconnected",
+      syncState: gap ? "gap" : "degraded",
+      diagnosticRef,
+      ...(definiteGap ? { executionState: "unknown" } : {}),
+    },
+    session.journal.lease,
+    scope,
+  ).catch(() => false);
+  detachRemoteSession(session);
+}
+
+async function flushJournalEvents(session: LiveSession): Promise<void> {
+  const journal = session.journal;
+  if (!journal) return;
+  const through = journal.admission;
+  journalDrainStats(journal);
+  if (journal.failure) throw journal.failure;
+  // A retained HMR object may predate the explicit admission acknowledgement.
+  journal.committedAdmission ??= journal.pending[0]
+    ? journal.pending[0].admission - 1
+    : journal.admission;
+  while (journal.committedAdmission < through) {
+    if (journal.failure) throw journal.failure;
+    if (!journal.flushing) {
+      const drain = Promise.resolve()
+        .then(async () => {
+          while (journal.pending.length) {
+            if (journal.failure) throw journal.failure;
+            if (session.closed) throw new Error("The journal writer is detached.");
+            // One producer may admit newer work during I/O. FIFO permits one
+            // shared drain to include it without weakening any caller's barrier.
+            const batch = journal.pending.slice(0, 256);
+            const scope = { spaceId: session.spaceId, actorId: session.actorId };
+            const sourceSeqs = batch.flatMap((input) =>
+              input.sourceSeq === undefined ? [] : [input.sourceSeq],
+            );
+            const checkpoint =
+              journal.completeCoverage && sourceSeqs.length
+                ? { sourceSeq: Math.max(...sourceSeqs) }
+                : undefined;
+            journal.stats.batchCount += 1;
+            journal.stats.maxBatchSize = Math.max(journal.stats.maxBatchSize, batch.length);
+            let result = await appendJournalEvents(
+              session.id,
+              batch,
+              journal.lease,
+              scope,
+              checkpoint,
+            );
+            for (
+              let attempt = 0;
+              result.outcome === "transient_failure" && attempt < 3;
+              attempt += 1
+            ) {
+              await new Promise<void>((resolve) =>
+                setTimeout(
+                  resolve,
+                  ([100, 300, 900][attempt] ?? 900) + Math.floor(Math.random() * 50),
+                ),
+              );
+              if (journal.failure) throw journal.failure;
+              if (session.closed) throw new Error("The journal writer is detached.");
+              journal.stats.batchCount += 1;
+              result = await appendJournalEvents(
+                session.id,
+                batch,
+                journal.lease,
+                scope,
+                checkpoint,
+              );
+            }
+            if ("diagnosticRef" in result)
+              throw new JournalSynchronizationError(result.outcome, result.diagnosticRef);
+            journal.pending.splice(0, batch.length);
+            journal.bytes = journal.pending.reduce((sum, input) => sum + input.bytes, 0);
+            journal.committedAdmission = batch.at(-1)?.admission ?? journal.committedAdmission;
+            const existing = new Set(session.buffer.map((event) => event.seq));
+            for (const event of result.events) {
+              session.seq = Math.max(session.seq, event.seq);
+              session.persistedSeq = Math.max(session.persistedSeq, event.seq);
+              if (!existing.has(event.seq)) {
+                existing.add(event.seq);
+                session.buffer.push(event);
+                publishEvent(session, event);
+              }
+            }
+            session.buffer.sort((a, b) => a.seq - b.seq);
+            while (session.buffer.length > MAX_BUFFERED_EVENTS) session.buffer.shift();
+          }
+        })
+        .catch((error: unknown) => {
+          journal.failure ??= error ?? new Error("History synchronization failed.");
+          throw journal.failure;
+        })
+        .finally(() => {
+          journal.flushing = undefined;
+        });
+      journal.flushing = drain;
+      journal.tail = drain.catch(() => undefined);
+      session.flushPending = journal.tail;
+    }
+    await journal.flushing;
+  }
+}
+
+async function applyJournalBackpressure(session: LiveSession): Promise<void> {
+  const journal = session.journal;
+  if (!journal || session.closed) return;
+  if (journal.failure) throw journal.failure;
+  if (journal.pending.length >= 128 || journal.bytes >= 8 * 1024 * 1024) {
+    journalDrainStats(journal).backpressureCount += 1;
+    await flushJournalEvents(session);
+  }
+}
+
 function emit(session: LiveSession, event: Omit<AgentSessionEventVO, "sessionId" | "seq" | "at">) {
+  if (session.journal) {
+    enqueueJournalEvent(session, event);
+    void flushPendingEvents(session).catch((error: unknown) => handleJournalFault(session, error));
+    return;
+  }
   session.seq += 1;
   session.lastActivityAt = nowIso();
   const full: AgentSessionEventVO = {
@@ -605,6 +1486,16 @@ function emit(session: LiveSession, event: Omit<AgentSessionEventVO, "sessionId"
     ...event,
   };
   session.buffer.push(full);
+  logAgentSessionDiagnostic("event_admitted", {
+    ...sessionDiagnosticContext(session),
+    stage: "notification",
+    outcome: "buffered",
+    seqThrough: full.seq,
+    persistedSeq: session.persistedSeq,
+    queueDepth: session.buffer.length,
+    ownerId: session.lease?.ownerId,
+    fencingToken: session.lease?.fencingToken,
+  });
   while (
     session.buffer.length > MAX_BUFFERED_EVENTS &&
     (session.buffer[0]?.seq ?? Infinity) <= session.persistedSeq
@@ -613,6 +1504,11 @@ function emit(session: LiveSession, event: Omit<AgentSessionEventVO, "sessionId"
   if (session.transport === "local-subprocess") publishEvent(session, full);
   if (session.transport === "remote-websocket") {
     void flushPendingEvents(session).catch((error: unknown) => {
+      logAgentSessionDiagnostic(
+        "flush_detached",
+        { ...sessionDiagnosticContext(session), stage: "flush", outcome: "failed" },
+        { level: "warn", error, force: true },
+      );
       session.status = "failed";
       session.error = error instanceof Error ? error.message : "Could not persist remote events.";
       detachRemoteSession(session);
@@ -657,13 +1553,33 @@ async function setStatus(
         ? "busy"
         : previousStatus;
   const persistTransition = async () => {
-    const persisted = await persistSessionState(
-      toVO(session),
-      session.acpSessionId,
-      { expectedStatuses: [expectedStatus] },
-      { spaceId: session.spaceId, actorId: session.actorId },
-      transitionLease ?? undefined,
-    );
+    const persisted = session.journal
+      ? await updateJournalRuntime(
+          session.id,
+          {
+            status,
+            error: session.error,
+            executionState:
+              status === "busy"
+                ? "running"
+                : status === "waiting_permission"
+                  ? "waiting"
+                  : status === "idle"
+                    ? "idle"
+                    : status === "connecting"
+                      ? "reserved"
+                      : "terminal",
+          },
+          session.journal.lease,
+          { spaceId: session.spaceId, actorId: session.actorId },
+        )
+      : await persistSessionState(
+          toVO(session),
+          session.acpSessionId,
+          { expectedStatuses: [expectedStatus] },
+          { spaceId: session.spaceId, actorId: session.actorId },
+          transitionLease ?? undefined,
+        );
     if (transitionLease && !persisted) {
       throw new Error("This worker lost the agent session lease.");
     }
@@ -687,10 +1603,13 @@ async function setStatus(
  * or duplicating the remainder of a partially streamed message.
  */
 async function flushPendingEvents(session: LiveSession): Promise<void> {
+  if (session.journal) return flushJournalEvents(session);
   const fence = session.lease ?? undefined;
   // A queued flush must not consume events admitted after it. A later
   // persist-before-publish write may have reserved an intervening sequence.
   const throughSeq = session.seq;
+  const diagnosticContext = sessionDiagnosticContext(session);
+  const queuedAt = Date.now();
   const flush = session.flushPending.then(async () => {
     const pending = session.buffer.filter(
       (event) => event.seq > session.persistedSeq && event.seq <= throughSeq,
@@ -699,10 +1618,37 @@ async function flushPendingEvents(session: LiveSession): Promise<void> {
     const nextPersistedSeq = pending[pending.length - 1]?.seq ?? session.persistedSeq;
     const durableEvents =
       session.transport === "remote-websocket" ? pending : collapseForPersistence(pending);
-    const persisted = await persistSessionEvents(durableEvents, fence, {
-      spaceId: session.spaceId,
-      actorId: session.actorId,
+    logAgentSessionDiagnostic("batch_enqueued", {
+      ...diagnosticContext,
+      stage: "flush",
+      outcome: "started",
+      seqFrom: pending[0]?.seq,
+      seqThrough: nextPersistedSeq,
+      eventCount: durableEvents.length,
+      queueDepth: session.buffer.length,
+      persistedSeq: session.persistedSeq,
+      ownerId: fence?.ownerId,
+      fencingToken: fence?.fencingToken,
     });
+    const persisted = await withAgentSessionDiagnosticContext(diagnosticContext, () =>
+      persistSessionEvents(durableEvents, fence, {
+        spaceId: session.spaceId,
+        actorId: session.actorId,
+      }),
+    );
+    logAgentSessionDiagnostic(
+      "flush_completed",
+      {
+        ...diagnosticContext,
+        stage: "flush",
+        outcome: persisted ? "committed" : "rejected",
+        seqFrom: pending[0]?.seq,
+        seqThrough: nextPersistedSeq,
+        eventCount: durableEvents.length,
+        elapsedMs: Date.now() - queuedAt,
+      },
+      { level: persisted ? "info" : "warn", force: !persisted },
+    );
     if (!persisted && session.transport === "remote-websocket") {
       throw new Error("Could not persist the remote agent transcript.");
     }
@@ -758,12 +1704,16 @@ function spawnAgentProcess(launch: ResolvedLaunch, cwd: string): ChildProcess {
 export interface CreateSessionArgs {
   slug: string;
   spaceId: string;
+  commandId?: string;
 }
 
 interface OpenAgentSessionArgs extends CreateSessionArgs {
   resume?: AgentSessionRuntimeRecord;
   lease?: AgentSessionLease;
   guard?: LeaseGuard;
+  persistedId?: string;
+  journalLease?: AgentSessionWriterLease;
+  journalRuntime?: AgentSessionJournalRuntime;
 }
 
 async function openAgentSession({
@@ -772,6 +1722,9 @@ async function openAgentSession({
   resume,
   lease,
   guard,
+  persistedId,
+  journalLease,
+  journalRuntime,
 }: OpenAgentSessionArgs): Promise<LiveSession> {
   const actorId = guard ? guard.scope.actorId : (getContextActorId() ?? null);
   const launch = await resolveLaunch(slug);
@@ -786,8 +1739,28 @@ async function openAgentSession({
           .digest("hex")
       : undefined;
   const id =
+    persistedId ??
     resume?.session.id ??
     `ags_${Math.random().toString(36).slice(2, 12)}${Date.now().toString(36)}`;
+  if (journalLease && journalRuntime) {
+    const fingerprint = agentSessionBindingFingerprint(launch);
+    const pinned = journalRuntime.capabilities?.bindingFingerprint;
+    if (pinned && pinned !== fingerprint)
+      await invalidateSessionBinding(id, journalLease, { spaceId, actorId });
+    if (!pinned) {
+      const saved = await updateJournalRuntime(
+        id,
+        { capabilities: { ...journalRuntime.capabilities, bindingFingerprint: fingerprint } },
+        journalLease,
+        { spaceId, actorId },
+      );
+      if (!saved) throw new Error("The session writer changed before binding its connection.");
+      journalRuntime = {
+        ...journalRuntime,
+        capabilities: { ...journalRuntime.capabilities, bindingFingerprint: fingerprint },
+      };
+    }
+  }
   const connectionId = createAcpConnectionId();
   const endpointDiagnostics =
     launch.transport === "remote-websocket" ? describeAcpEndpoint(launch.url) : {};
@@ -800,8 +1773,33 @@ async function openAgentSession({
     ...endpointDiagnostics,
   });
 
+  const diagnosticContext = captureAgentSessionDiagnosticContext({
+    connectionId,
+    sessionId: id,
+    acpSessionId: resume?.acpSessionId ?? undefined,
+    ...agentSessionScopeReferences({ spaceId, actorId }),
+  });
   const session: LiveSession = {
     id,
+    diagnosticContext,
+    ...(journalLease && journalRuntime
+      ? {
+          journal: {
+            lease: journalLease,
+            runtime: journalRuntime,
+            pending: [],
+            admission: 0,
+            committedAdmission: 0,
+            bytes: 0,
+            tail: Promise.resolve(),
+            stats: { maxPending: 0, batchCount: 0, maxBatchSize: 0, backpressureCount: 0 },
+            commandReceipts: false,
+            completeCoverage: false,
+            targetedCancel: false,
+            bindingId: `${id}_${journalLease.bindingGeneration}`,
+          },
+        }
+      : {}),
     spaceId,
     actorId,
     slug: launch.slug,
@@ -828,20 +1826,28 @@ async function openAgentSession({
     modelCacheKey,
     // Thinking options depend on this session's confirmed model, never the agent cache.
     thinkingOption: resume?.session.thinkingOption ?? null,
+    modeOption: resume?.session.modeOption ?? null,
+    legacyModeOption:
+      resume?.session.modeOption?.source === "legacy" ? resume.session.modeOption : null,
+    modeRevision: 0,
+    legacyCurrentModeId: null,
     modelOptionSync: Promise.resolve(),
     setConfigOption: async () => null,
+    setMode: async () => {},
     seq: resume?.lastEventSeq ?? 0,
     persistedSeq: resume?.lastEventSeq ?? 0,
     flushPending: Promise.resolve(),
     buffer: [],
     listeners: new Set(),
     pendingPermissions: new Map(),
-    permissionCounter: 0,
+    // Every prior request consumed journal events. Resume above that durable
+    // sequence so a new card cannot reuse an already-resolved fallback id.
+    permissionCounter: resume?.lastEventSeq ?? 0,
     pendingInputs: new Map(),
     resolvedInputs: new Map(),
     resolvedPermissions: new Map(),
     inputCounter: 0,
-    upstreamSeq: resume?.upstreamSeq,
+    upstreamSeq: journalRuntime ? (journalRuntime.sourceCheckpoint ?? 0) : resume?.upstreamSeq,
     budaEventStream: false,
     budaInteractionRespond: false,
     lease: lease ?? null,
@@ -852,10 +1858,13 @@ async function openAgentSession({
   // any process can discover or tombstone. Skipped on resume: the row already
   // exists — this is reattachment, not creation, and re-inserting would
   // collide with the durable primary key.
-  if (!resume) await persistSessionCreated(toVO(session), { spaceId, actorId });
+  if (!resume && !persistedId)
+    await withAgentSessionDiagnosticContext(diagnosticContext, () =>
+      persistSessionCreated(toVO(session), { spaceId, actorId }),
+    );
   sessions().set(id, session);
 
-  session.ready = (async () => {
+  session.ready = withAgentSessionDiagnosticContext(diagnosticContext, async () => {
     const workspace = await prepareAgentWorkspace(launch.transport, spaceId);
     guard?.assertOwned();
 
@@ -909,15 +1918,33 @@ async function openAgentSession({
       releaseReady = resolve;
     });
     let replayingHistory = false;
+    const genericReplay: { updates: Record<string, unknown>[]; bytes: number; truncated: boolean } =
+      {
+        updates: [],
+        bytes: 0,
+        truncated: false,
+      };
+    const captureGenericReplay = (update: Record<string, unknown>) => {
+      const bytes = Buffer.byteLength(JSON.stringify(update));
+      if (genericReplay.updates.length < 500 && genericReplay.bytes + bytes <= 4 * 1024 * 1024) {
+        genericReplay.updates.push(structuredClone(update));
+        genericReplay.bytes += bytes;
+      } else genericReplay.truncated = true;
+    };
     let activePromptController: AbortController | null = null;
     let refreshActivePromptDeadline: (() => void) | null = null;
     let pauseActivePromptDeadline: (() => void) | null = null;
     let notificationQueue: Promise<void> = Promise.resolve();
     const receiveNotification = (apply: () => Promise<void>): Promise<void> => {
       const pending = notificationQueue.then(async () => {
-        if (!session.closed) await apply();
+        if (!session.closed) {
+          await applyJournalBackpressure(session);
+          await apply();
+          await applyJournalBackpressure(session);
+        }
       });
       notificationQueue = pending.catch((error: unknown) => {
+        if (session.journal) return handleJournalFault(session, error);
         session.error =
           error instanceof Error ? error.message : "Could not apply the agent update.";
         session.status = "failed";
@@ -1070,8 +2097,9 @@ async function openAgentSession({
             _meta: z.record(z.string(), z.unknown()).optional(),
           })
           .passthrough(),
-        ({ params }) =>
-          receiveNotification(async () => {
+        ({ params }) => {
+          const wasReplaying = replayingHistory;
+          return receiveNotification(async () => {
             const envelope = params as Record<string, unknown>;
             if (envelope.sessionId !== session.acpSessionId && session.acpSessionId !== null)
               return;
@@ -1079,7 +2107,12 @@ async function openAgentSession({
               kind: "acpExtension" as const,
               acpExtension: { method: "_buda.im/session_event", params: envelope },
             };
-            const seq = upstreamSeqOf(event);
+            if (wasReplaying && session.journal && !session.budaEventStream) {
+              captureGenericReplay({ method: event.acpExtension.method, params: envelope });
+              return;
+            }
+            const seq =
+              session.journal && !session.budaEventStream ? undefined : upstreamSeqOf(event);
             if (seq !== undefined && seq <= (session.upstreamSeq ?? -1)) return;
             emit(session, event);
             for (const update of translateAcpExtension(event.acpExtension)) {
@@ -1119,7 +2152,8 @@ async function openAgentSession({
                 session.resolvedPermissions.keys().next().value as string,
               );
             if (seq !== undefined) session.upstreamSeq = seq;
-          }),
+          });
+        },
       )
       .onNotification(acp.methods.client.session.update, (ctx) => {
         const wasReplaying = replayingHistory;
@@ -1129,7 +2163,10 @@ async function openAgentSession({
           // not restart the deadline the human's pending decision paused.
           if (session.pendingPermissions.size === 0 && session.pendingInputs.size === 0)
             refreshActivePromptDeadline?.();
-          const sourceSeq = upstreamSeqOf({ acpUpdate: ctx.params.update });
+          const sourceSeq =
+            session.journal && !session.budaEventStream
+              ? undefined
+              : upstreamSeqOf({ acpUpdate: ctx.params.update });
           if (sourceSeq !== undefined && sourceSeq <= (session.upstreamSeq ?? -1)) return;
           // `config_option_update` is the agent unilaterally changing a config
           // value (e.g. auto-downgrading the model on a rate limit) rather than
@@ -1140,6 +2177,26 @@ async function openAgentSession({
           if (ctx.params.update.sessionUpdate === "config_option_update") {
             await syncConfigOptions(session, ctx.params.update.configOptions);
           }
+          if (ctx.params.update.sessionUpdate === "current_mode_update") {
+            session.modeRevision += 1;
+            session.legacyCurrentModeId = ctx.params.update.currentModeId;
+            if (session.legacyModeOption) {
+              session.legacyModeOption = {
+                ...session.legacyModeOption,
+                currentValue: ctx.params.update.currentModeId,
+              };
+            }
+            if (session.legacyModeOption && session.modeOption?.source !== "config") {
+              await syncModelOption(
+                session,
+                session.modelOption,
+                session.thinkingOption,
+                session.legacyModeOption,
+              );
+            }
+          }
+          if (wasReplaying && session.journal && !session.budaEventStream)
+            captureGenericReplay(ctx.params.update as Record<string, unknown>);
           // session/load replays the remote transcript. Busabase already has the
           // outer transcript in its own event table, so emitting message/tool
           // replay again would duplicate history with new seq values. Command
@@ -1221,6 +2278,9 @@ async function openAgentSession({
                   replayCursor: 1,
                   resourceRead: 1,
                   interactionRespond: 1,
+                  ...(session.journal
+                    ? { commandReceipts: 1, writerEpoch: 1, targetedCancel: 1, journalCoverage: 1 }
+                    : {}),
                 },
               },
             },
@@ -1229,6 +2289,23 @@ async function openAgentSession({
         const capabilities = budaMetadata(initialized.agentCapabilities);
         session.budaEventStream = capabilities?.eventStream === 1;
         session.budaInteractionRespond = capabilities?.interactionRespond === 1;
+        if (session.journal) {
+          const negotiated = capabilities as Record<string, unknown> | undefined;
+          session.journal.commandReceipts =
+            negotiated?.commandReceipts === 1 && negotiated?.writerEpoch === 1;
+          session.journal.completeCoverage =
+            session.budaEventStream && negotiated?.journalCoverage === 1;
+          session.journal.targetedCancel = negotiated?.targetedCancel === 1;
+          session.requestExtension = (method, params) => ctx.request(method, params);
+          if (session.journal.commandReceipts) {
+            await waitForHandshake(
+              ctx.request("_buda.im/client/register_writer", {
+                bindingId: session.journal.bindingId,
+                writerEpoch: session.journal.lease.epoch,
+              }),
+            );
+          }
+        }
         session.requestExtension = (method, params) => ctx.request(method, params);
         if (session.closed) {
           clearHandshakeTimeout();
@@ -1303,6 +2380,8 @@ async function openAgentSession({
         });
         let acpSessionId: string;
         let configOptions: acp.SessionConfigOption[] | null | undefined;
+        let modes: acp.SessionModeState | null | undefined;
+        let replayBarrierConfirmed = !resume;
         if (resume?.acpSessionId) {
           if (initialized.agentCapabilities?.loadSession !== true) {
             throw new Error(`${launch.name} does not support reopening an existing ACP session.`);
@@ -1314,27 +2393,106 @@ async function openAgentSession({
                 sessionId: resume.acpSessionId,
                 cwd: workspace,
                 mcpServers,
-                ...(session.budaEventStream && session.upstreamSeq !== undefined
-                  ? { _meta: { "buda.im": { afterSeq: session.upstreamSeq } } }
+                ...((session.budaEventStream && session.upstreamSeq !== undefined) ||
+                session.journal?.commandReceipts
+                  ? {
+                      _meta: {
+                        "buda.im": {
+                          ...(session.budaEventStream && session.upstreamSeq !== undefined
+                            ? { afterSeq: session.upstreamSeq }
+                            : {}),
+                          ...(session.journal?.commandReceipts
+                            ? {
+                                bindingId: session.journal.bindingId,
+                                writerEpoch: session.journal.lease.epoch,
+                              }
+                            : {}),
+                        },
+                      },
+                    }
                   : {}),
               }),
             );
             await notificationQueue;
+            if (session.journal && session.budaEventStream) {
+              await flushPendingEvents(session);
+              const replayThrough = budaMetadata(loaded)?.replayThroughSeq;
+              if (
+                typeof replayThrough === "number" &&
+                Number.isSafeInteger(replayThrough) &&
+                replayThrough >= 0
+              ) {
+                if (replayThrough < (resume.upstreamSeq ?? 0))
+                  throw new JournalSynchronizationError(
+                    "integrity_failure",
+                    `diag_${randomUUID().replaceAll("-", "")}`,
+                  );
+                const covered = await appendJournalEvents(
+                  id,
+                  [],
+                  session.journal.lease,
+                  { spaceId, actorId },
+                  {
+                    sourceSeq: replayThrough,
+                    sourceGeneration: resume.acpSessionId,
+                  },
+                );
+                if ("diagnosticRef" in covered)
+                  throw new JournalSynchronizationError(covered.outcome, covered.diagnosticRef);
+                replayBarrierConfirmed = true;
+              }
+            }
             acpSessionId = resume.acpSessionId;
             configOptions = loaded.configOptions;
+            modes = loaded.modes;
           } finally {
             replayingHistory = false;
           }
         } else {
+          if (session.journal) {
+            if (
+              session.journal.runtime.creationState !== "pending" &&
+              !session.journal.commandReceipts
+            ) {
+              await updateJournalRuntime(
+                id,
+                { creationState: "unknown", executionState: "unknown", syncState: "gap" },
+                session.journal.lease,
+                { spaceId, actorId },
+              );
+              throw new Error(
+                "The remote session creation outcome is unknown. Reconcile it before creating another session.",
+              );
+            }
+            const marked = await updateJournalRuntime(
+              id,
+              { creationState: "dispatching" },
+              session.journal.lease,
+              { spaceId, actorId },
+            );
+            if (!marked) throw new Error("The session writer changed before remote creation.");
+          }
           const created = await waitForHandshake(
             ctx.request(acp.methods.agent.session.new, {
               cwd: workspace,
               mcpServers,
+              ...(session.journal?.commandReceipts
+                ? {
+                    _meta: {
+                      "buda.im": {
+                        bindingId: session.journal.bindingId,
+                        writerEpoch: session.journal.lease.epoch,
+                        commandId: `create_${id}`,
+                      },
+                    },
+                  }
+                : {}),
             }),
           );
           await notificationQueue;
           acpSessionId = created.sessionId;
           configOptions = created.configOptions;
+          modes = created.modes;
         }
         clearHandshakeTimeout();
         guard?.assertOwned();
@@ -1349,6 +2507,46 @@ async function openAgentSession({
         });
 
         session.acpSessionId = acpSessionId;
+        if (session.journal) {
+          await flushPendingEvents(session);
+          const recoveredHealthy = !resume || (session.budaEventStream && replayBarrierConfirmed);
+          const marked = await updateJournalRuntime(
+            id,
+            {
+              acpSessionId,
+              creationState: "confirmed",
+              connectionState: "connected",
+              syncState: recoveredHealthy ? "synced" : "gap",
+              ...(recoveredHealthy ? { diagnosticRef: null } : {}),
+              ...(resume && !session.budaEventStream
+                ? {
+                    recoverySnapshot: {
+                      capturedAt: nowIso(),
+                      complete: !genericReplay.truncated,
+                      truncated: genericReplay.truncated,
+                      updates: genericReplay.updates,
+                    },
+                  }
+                : {}),
+              sourceGeneration: acpSessionId,
+              capabilities: {
+                ...session.journal.runtime.capabilities,
+                bindingFingerprint: agentSessionBindingFingerprint(launch),
+                eventStream: session.budaEventStream,
+                commandReceipts: session.journal.commandReceipts,
+                journalCoverage: session.journal.completeCoverage,
+                targetedCancel: session.journal.targetedCancel,
+              },
+            },
+            session.journal.lease,
+            { spaceId, actorId },
+          );
+          if (!marked) throw new Error("The session writer changed during initialization.");
+        }
+        session.legacyModeOption = legacyModeOption(modes);
+        if (session.legacyModeOption && session.legacyCurrentModeId !== null) {
+          session.legacyModeOption.currentValue = session.legacyCurrentModeId;
+        }
         await syncConfigOptions(session, configOptions);
 
         session.prompt = async (
@@ -1456,20 +2654,56 @@ async function openAgentSession({
             if (promptController.signal.aborted) {
               throw new DOMException("ACP turn cancelled before dispatch", "AbortError");
             }
+            logAgentSessionDiagnostic(
+              "prompt_dispatch_started",
+              {
+                ...sessionDiagnosticContext(session),
+                stage: "dispatch",
+                outcome: "started",
+                ownerId: session.lease?.ownerId,
+                fencingToken: session.lease?.fencingToken,
+              },
+              { force: true },
+            );
             const result = await Promise.race([
               ctx.request(
                 acp.methods.agent.session.prompt,
                 {
                   sessionId: acpSessionId,
                   prompt,
-                  ...(session.budaEventStream && session.currentUserMessageId
-                    ? { _meta: { "buda.im": { clientMessageId: session.currentUserMessageId } } }
+                  ...((session.budaEventStream && session.currentUserMessageId) ||
+                  session.journal?.commandReceipts
+                    ? {
+                        _meta: {
+                          "buda.im": {
+                            ...(session.budaEventStream && session.currentUserMessageId
+                              ? { clientMessageId: session.currentUserMessageId }
+                              : {}),
+                            ...(session.journal?.commandReceipts && supervisedDispatch.getStore()
+                              ? {
+                                  bindingId: session.journal.bindingId,
+                                  writerEpoch: session.journal.lease.epoch,
+                                  commandId: supervisedDispatch.getStore()?.command.commandId,
+                                }
+                              : {}),
+                          },
+                        },
+                      }
                     : {}),
                 },
                 { cancellationSignal: promptController.signal },
               ),
               inactivityFailure,
             ]);
+            logAgentSessionDiagnostic(
+              "prompt_response_received",
+              {
+                ...sessionDiagnosticContext(session),
+                stage: "dispatch",
+                outcome: "response_received",
+              },
+              { force: true },
+            );
             await notificationQueue;
             if (!session.budaEventStream)
               emitLifecycle({
@@ -1482,6 +2716,24 @@ async function openAgentSession({
               });
             await setStatus(session, "idle");
           } catch (error) {
+            if (session.journal) {
+              if (isSessionBindingChangedError(error)) throw error;
+              const current = await getJournalRuntime(session.id, {
+                spaceId: session.spaceId,
+                actorId: session.actorId,
+              }).catch(() => null);
+              await updateJournalRuntime(
+                session.id,
+                {
+                  executionState: "unknown",
+                  syncState:
+                    current?.session.reliability?.synchronization === "gap" ? "gap" : "recovering",
+                },
+                session.journal.lease,
+                { spaceId: session.spaceId, actorId: session.actorId },
+              ).catch(() => false);
+              throw error;
+            }
             if (!session.budaEventStream)
               emitLifecycle({
                 type: "turn_finished",
@@ -1556,9 +2808,7 @@ async function openAgentSession({
           activePromptController?.abort(new DOMException("ACP turn cancelled", "AbortError"));
         };
 
-        session.setConfigOption = async (configId: string, value: string) => {
-          const configGuard = requireOperationGuard(session);
-          await verifyOperationDispatch(session, configGuard);
+        const applyConfigOption = async (configId: string, value: string) => {
           const response = await ctx.request(acp.methods.agent.session.setConfigOption, {
             sessionId: acpSessionId,
             configId,
@@ -1572,6 +2822,67 @@ async function openAgentSession({
           await syncConfigOptions(session, response.configOptions);
           return session.modelOption;
         };
+        const applyMode = async (value: string) => {
+          const revision = session.modeRevision;
+          await ctx.request(acp.methods.agent.session.setMode, {
+            sessionId: acpSessionId,
+            modeId: value,
+          });
+          await notificationQueue;
+          // A newer notification is authoritative, including an agent-selected
+          // alternative. The empty success response confirms the requested mode
+          // only when no notification superseded it.
+          if (revision === session.modeRevision && session.legacyModeOption) {
+            session.legacyModeOption = { ...session.legacyModeOption, currentValue: value };
+            if (session.modeOption?.source === "legacy") {
+              await syncModelOption(
+                session,
+                session.modelOption,
+                session.thinkingOption,
+                session.legacyModeOption,
+              );
+            }
+          }
+        };
+        session.setConfigOption = async (configId: string, value: string) => {
+          const configGuard = requireOperationGuard(session);
+          await verifyOperationDispatch(session, configGuard);
+          return applyConfigOption(configId, value);
+        };
+        session.setMode = async (value: string) => {
+          const configGuard = requireOperationGuard(session);
+          await verifyOperationDispatch(session, configGuard);
+          await applyMode(value);
+        };
+
+        // Apply a default only to a newly created connected session. Resuming
+        // must retain the agent's persisted choice, including explicit Default.
+        if (!resume && launch.transport === "remote-websocket") {
+          const mode = session.modeOption;
+          const full = mode?.options.find(
+            (option) =>
+              /^(full([ -]?access)?|bypassPermissions|danger-full-access)$/i.test(option.value) ||
+              /^full( access)?$/i.test(option.name.trim()),
+          );
+          if (mode && full && mode.currentValue !== full.value) {
+            try {
+              // Creation owns this unpublished session; mutation leases are
+              // acquired only by later user operations, after readiness.
+              guard?.assertOwned();
+              if (mode.source === "legacy") await applyMode(full.value);
+              else await applyConfigOption(mode.id, full.value);
+            } catch (error) {
+              if (!(error instanceof acp.RequestError)) throw error;
+              // A provider may advertise Full while policy forbids selecting
+              // it. Keep its confirmed mode and allow the session to proceed.
+              logAcpConnection("warn", "default_permission_mode_rejected", {
+                connectionId,
+                sessionId: id,
+                ...describeAcpError(error),
+              });
+            }
+          }
+        }
 
         if (resume) {
           // Reattachment itself is not a user-visible state transition. The
@@ -1582,12 +2893,13 @@ async function openAgentSession({
           // A same-worker first prompt may reserve the durable row while
           // session/new is still running. Publish only the inner id here so
           // readiness cannot overwrite that cross-worker busy reservation.
-          await persistSessionAcpIdentity(session.id, acpSessionId, {
-            spaceId: session.spaceId,
-            actorId: session.actorId,
-          });
+          if (!session.journal)
+            await persistSessionAcpIdentity(session.id, acpSessionId, {
+              spaceId: session.spaceId,
+              actorId: session.actorId,
+            });
         } else {
-          if (launch.transport === "remote-websocket") {
+          if (launch.transport === "remote-websocket" && !session.journal) {
             await persistSessionAcpIdentity(session.id, acpSessionId, {
               spaceId: session.spaceId,
               actorId: session.actorId,
@@ -1610,6 +2922,11 @@ async function openAgentSession({
           ...endpointDiagnostics,
           ...diagnostics,
         });
+        if (session.journal) {
+          await handleJournalFault(session, error);
+          releaseReady?.();
+          return;
+        }
         if (resume || (launch.transport === "remote-websocket" && session.status === "idle")) {
           // A recoverable remote session is durable in the agent. Losing one
           // client socket must not make another healthy worker's session
@@ -1624,6 +2941,18 @@ async function openAgentSession({
       });
 
     session.detach = () => {
+      logAgentSessionDiagnostic(
+        "session_detached",
+        {
+          ...sessionDiagnosticContext(session),
+          stage: "detach",
+          outcome: "detached",
+          persistedSeq: session.persistedSeq,
+          seqThrough: session.seq,
+          queueDepth: session.buffer.length,
+        },
+        { force: true },
+      );
       session.closed = true;
       // Nobody can answer a card on a released transport; settle every parked
       // handler instead of leaving its promise pending forever.
@@ -1647,7 +2976,7 @@ async function openAgentSession({
       if (session.status !== "failed") void setStatus(session, "ended");
     };
     await connectionReady;
-  })().catch(async (error: unknown) => {
+  }).catch(async (error: unknown) => {
     const diagnostics = describeAcpError(error);
     logAcpConnection("warn", "setup_failed", {
       connectionId,
@@ -1657,6 +2986,10 @@ async function openAgentSession({
       ...endpointDiagnostics,
       ...diagnostics,
     });
+    if (session.journal) {
+      await handleJournalFault(session, error);
+      return;
+    }
     if (resume || (launch.transport === "remote-websocket" && session.status === "idle")) {
       session.status = "failed";
       session.error = diagnostics.message;
@@ -1670,6 +3003,62 @@ async function openAgentSession({
 }
 
 export async function createAgentSession(args: CreateSessionArgs): Promise<AgentSessionVO> {
+  if (agentSessionSupervisorRequested()) {
+    const launch = await resolveLaunch(args.slug);
+    if (launch.transport === "remote-websocket") {
+      assertAgentSessionSupervisorAvailable();
+      const scope = { spaceId: args.spaceId, actorId: getContextActorId() ?? null };
+      const at = nowIso();
+      if (args.commandId) AgentSessionCommandIdSchema.parse(args.commandId);
+      const id = args.commandId
+        ? `ags_${createHash("sha256")
+            .update(JSON.stringify([scope.spaceId, scope.actorId, args.commandId]))
+            .digest("hex")
+            .slice(0, 32)}`
+        : `ags_${randomUUID().replaceAll("-", "")}`;
+      const fingerprint = agentSessionBindingFingerprint(launch);
+      const existing = args.commandId ? await getJournalRuntime(id, scope) : null;
+      if (existing) {
+        if (
+          existing.session.slug !== launch.slug ||
+          existing.capabilities?.bindingFingerprint !== fingerprint
+        )
+          throw new Error(
+            "This session creation identity was already used for a different connection.",
+          );
+        return existing.session;
+      }
+      const session: AgentSessionVO = {
+        id,
+        slug: launch.slug,
+        agentName: launch.name,
+        transport: "remote-websocket",
+        status: "connecting",
+        error: null,
+        createdAt: at,
+        lastActivityAt: at,
+        modelOption: null,
+        thinkingOption: null,
+        modeOption: null,
+        reliability: { connection: "connecting", execution: "idle", synchronization: "recovering" },
+        pendingCommands: [],
+      };
+      try {
+        await createJournalSession(session, scope, { bindingFingerprint: fingerprint });
+      } catch (error) {
+        const raced = args.commandId ? await getJournalRuntime(id, scope).catch(() => null) : null;
+        if (
+          !raced ||
+          raced.session.slug !== launch.slug ||
+          raced.capabilities?.bindingFingerprint !== fingerprint
+        )
+          throw error;
+        return raced.session;
+      }
+      void wakeAgentSessionSupervisor();
+      return session;
+    }
+  }
   return toVO(await openAgentSession(args));
 }
 
@@ -1685,6 +3074,7 @@ function toVO(s: LiveSession): AgentSessionVO {
     error: s.error,
     modelOption: s.modelOption,
     thinkingOption: s.thinkingOption,
+    modeOption: s.modeOption,
   };
 }
 
@@ -1837,7 +3227,7 @@ function throwUnavailableSession(
 
 async function acquireOperationSession(
   sessionId: string,
-): Promise<{ session: LiveSession; guard?: LeaseGuard }> {
+): Promise<{ session: LiveSession; guard?: OperationLeaseGuard }> {
   const scope = Object.freeze({
     spaceId: getContextSpaceId(),
     actorId: getContextActorId() ?? null,
@@ -1850,6 +3240,19 @@ async function acquireOperationSession(
   }
 
   if (existing) {
+    if (existing.journal) {
+      const dispatch = supervisedDispatch.getStore();
+      if (!dispatch) throw new Error("This supervised session must use durable command admission.");
+      const guard = new JournalOperationGuard(existing, dispatch.command.commandId);
+      try {
+        await guard.ready();
+      } catch (error) {
+        await guard.release();
+        throw error;
+      }
+      existing.status = "idle";
+      return { session: existing, guard };
+    }
     const ownerId = randomUUID();
     const claim = existing.modelOptionSync.then(async () => {
       const lease = await acquireSessionLease(sessionId, ownerId, sessionLeaseTtlSeconds(), scope);
@@ -1864,7 +3267,12 @@ async function acquireOperationSession(
         // claim, so this durable snapshot is now the cross-worker authority.
         existing.modelOption = claimed.session.modelOption;
         existing.thinkingOption = claimed.session.thinkingOption ?? null;
+        existing.modeOption = claimed.session.modeOption ?? null;
+        if (claimed.session.modeOption?.source === "legacy") {
+          existing.legacyModeOption = claimed.session.modeOption;
+        }
         existing.seq = Math.max(existing.seq, claimed.lastEventSeq);
+        existing.permissionCounter = Math.max(existing.permissionCounter, claimed.lastEventSeq);
         existing.persistedSeq = Math.max(existing.persistedSeq, claimed.lastEventSeq);
         existing.status = "idle";
         return { session: existing, guard };
@@ -1883,6 +3291,9 @@ async function acquireOperationSession(
   }
 
   const initial = await waitForRemoteSessionIdentity(sessionId);
+  if (initial?.session.reliability) {
+    throw new Error("This supervised session must be handled by its current session writer.");
+  }
   if (!initial || initial.session.transport !== "remote-websocket") {
     throwUnavailableSession(sessionId, initial);
   }
@@ -1919,7 +3330,7 @@ async function acquireOperationSession(
 
 /** Release the turn slot claimed by `acquireOperationSession`, if any. */
 async function releaseClaimedPromptPreservingFailure(
-  guard: LeaseGuard,
+  guard: OperationLeaseGuard,
   operationError?: unknown,
   waitForWrites = true,
 ): Promise<void> {
@@ -1927,13 +3338,17 @@ async function releaseClaimedPromptPreservingFailure(
     await guard.release(waitForWrites);
   } catch (releaseError) {
     if (operationError === undefined) throw releaseError;
-    console.warn("[agents:acp]", {
-      event: "lease_release_failed_after_operation_failure",
-      sessionId: guard.lease.sessionId,
-      operationMessage:
-        operationError instanceof Error ? operationError.message : String(operationError),
-      releaseMessage: releaseError instanceof Error ? releaseError.message : String(releaseError),
-    });
+    logAgentSessionDiagnostic(
+      "lease_release_failed_after_operation_failure",
+      {
+        sessionId: guard.lease.sessionId,
+        ownerId: guard.lease.ownerId,
+        fencingToken: guard.lease.fencingToken,
+        stage: "lease_release",
+        outcome: "failed",
+      },
+      { level: "warn", error: releaseError, force: true },
+    );
   }
 }
 
@@ -1983,7 +3398,7 @@ export async function listAgentSessions(): Promise<AgentSessionVO[]> {
     // so its in-memory copy must never override the durable snapshot.
     return row.transport === "remote-websocket" ? row : active;
   });
-  return merged.sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt));
+  return merged.sort(compareSessionsByRecency);
 }
 
 export function listLiveAgentSessionIds(slug: string): string[] {
@@ -2034,6 +3449,16 @@ async function emitPersistedFirst(
   event: Omit<AgentSessionEventVO, "sessionId" | "seq" | "at">,
   fence: LeaseFence,
 ): Promise<AgentSessionEventVO | null> {
+  if (session.journal) {
+    enqueueJournalEvent(session, event);
+    await flushJournalEvents(session);
+    const committed = session.buffer.find(
+      (candidate) =>
+        (candidate.acpUpdate as { commandId?: string } | undefined)?.commandId ===
+        supervisedDispatch.getStore()?.command.commandId,
+    );
+    return committed ?? null;
+  }
   session.seq += 1;
   const seq = session.seq;
   const at = nowIso();
@@ -2072,7 +3497,58 @@ async function emitPersistedFirst(
  * is real), then one image/audio/resource block per attachment the agent
  * advertised it can accept, in the order the browser attached them.
  */
-export async function promptAgentSession(
+export function promptAgentSession(
+  ...args: Parameters<typeof performPromptAgentSession>
+): ReturnType<typeof performPromptAgentSession> {
+  return traceSessionOperation(args[0], "prompt", async () => {
+    if (agentSessionSupervisorRequested()) {
+      const scope = { spaceId: getContextSpaceId(), actorId: getContextActorId() ?? null };
+      const runtime = await getJournalRuntime(args[0], scope);
+      if (runtime?.journalMode === "supervised") {
+        const options = args[3];
+        const requestDigest = agentSessionCommandDigest({
+          text: args[1],
+          attachments: args[2],
+          presentation: options?.presentation,
+          contextReferences: options?.contextReferences,
+          resourceContext: options?.resourceContext,
+        });
+        if (options?.commandId) {
+          const prior = await loadSessionCommand(args[0], options.commandId, scope);
+          if (prior) {
+            if (prior.kind !== "prompt" || prior.payload.requestDigest !== requestDigest)
+              throw new Error("This command identity was already used with different content.");
+            options.onAccepted?.();
+            return;
+          }
+        }
+        const contextResources =
+          options?.resolvedContextResources ??
+          (options?.contextReferences?.length
+            ? await resolveAgentContextResources(options.contextReferences)
+            : []);
+        await admitSupervisedCommand(
+          args[0],
+          "prompt",
+          {
+            text: args[1],
+            requestDigest,
+            ...(args[2]?.length ? { attachments: args[2] } : {}),
+            ...(options?.presentation ? { presentation: options.presentation } : {}),
+            ...(contextResources.length ? { contextResources } : {}),
+            resourceContext: validateAgentPromptResourceContext(options?.resourceContext),
+          },
+          options?.commandId,
+        );
+        options?.onAccepted?.();
+        return;
+      }
+    }
+    return performPromptAgentSession(...args);
+  });
+}
+
+async function performPromptAgentSession(
   sessionId: string,
   text: string,
   attachments?: PromptAttachmentInput[],
@@ -2081,6 +3557,8 @@ export async function promptAgentSession(
     presentation?: AgentPromptPresentation;
     contextReferences?: readonly AgentContextReferenceInput[];
     resourceContext?: readonly PromptResourceContextInput[];
+    commandId?: string;
+    resolvedContextResources?: readonly AgentContextResourceVO[];
   },
 ): Promise<void> {
   const { session: s, guard } = await acquireOperationSession(sessionId);
@@ -2104,9 +3582,11 @@ export async function promptAgentSession(
     // Resolve once, before any user event is recorded or the prompt accepted.
     // Replay and ACP dispatch must use this exact snapshot, even if the page
     // changes while the agent is still starting.
-    const contextResources = options?.contextReferences?.length
-      ? await resolveAgentContextResources(options.contextReferences)
-      : [];
+    const contextResources =
+      options?.resolvedContextResources ??
+      (options?.contextReferences?.length
+        ? await resolveAgentContextResources(options.contextReferences)
+        : []);
     guard?.assertOwned();
     if (promptController.signal.aborted) {
       throw new Error("Message sending cancelled.");
@@ -2151,6 +3631,16 @@ export async function promptAgentSession(
     // remote agent's response: the browser RPC can now return quickly while
     // the subscription remains the authority for progress and completion.
     await setStatus(s, "busy");
+    logAgentSessionDiagnostic(
+      "prompt_accepted",
+      {
+        ...sessionDiagnosticContext(s),
+        stage: "admission",
+        outcome: "accepted",
+        seqThrough: s.seq,
+      },
+      { force: true },
+    );
     options?.onAccepted?.();
     const readiness = await waitForReadyOrCancellation(
       s.ready,
@@ -2205,6 +3695,7 @@ export async function startAgentSessionPrompt(
   presentation?: AgentPromptPresentation,
   contextReferences?: readonly AgentContextReferenceInput[],
   resourceContext?: readonly PromptResourceContextInput[],
+  commandId?: string,
 ): Promise<void> {
   let accepted = false;
   let resolveStarted = () => {};
@@ -2218,6 +3709,7 @@ export async function startAgentSessionPrompt(
     presentation,
     contextReferences,
     resourceContext,
+    commandId,
     onAccepted: () => {
       accepted = true;
       resolveStarted();
@@ -2231,11 +3723,15 @@ export async function startAgentSessionPrompt(
     // The session lifecycle already persisted and emitted the concrete failed
     // state. Keep this log structural so credentials embedded in a third-party
     // error can never leak through an unredacted background rejection.
-    console.warn("[agents:acp]", {
-      event: "accepted_prompt_failed",
-      sessionId,
-      errorName: error instanceof Error ? error.name : "Error",
-    });
+    logAgentSessionDiagnostic(
+      "accepted_prompt_failed",
+      {
+        sessionId,
+        stage: "dispatch",
+        outcome: "failed",
+      },
+      { level: "warn", error, force: true },
+    );
   });
 
   await started;
@@ -2253,6 +3749,7 @@ export async function startAgentSessionPrompt(
  */
 async function cancelRemoteAgentSession(record: AgentSessionRuntimeRecord): Promise<void> {
   const launch = await resolveLaunch(record.session.slug);
+  await assertScopedExtensionBinding(record, launch);
   const acpSessionId = record.acpSessionId;
   if (launch.transport !== "remote-websocket" || !launch.url || !acpSessionId) {
     throw new Error(`Unknown agent session: ${record.session.id}`);
@@ -2283,6 +3780,7 @@ async function cancelRemoteAgentSession(record: AgentSessionRuntimeRecord): Prom
         protocolVersion: acp.PROTOCOL_VERSION,
         clientCapabilities: {},
       });
+      await assertScopedExtensionBinding(record, await resolveLaunch(record.session.slug));
       await ctx.notify(acp.methods.agent.session.cancel, {
         sessionId: acpSessionId,
       });
@@ -2309,7 +3807,16 @@ async function cancelRemoteAgentSession(record: AgentSessionRuntimeRecord): Prom
   }
 }
 
-export async function cancelAgentSession(sessionId: string): Promise<void> {
+export function cancelAgentSession(
+  ...args: Parameters<typeof performCancelAgentSession>
+): ReturnType<typeof performCancelAgentSession> {
+  return traceSessionOperation(args[0], "cancel", async () => {
+    if (await routeSupervisedControl(args[0], "cancel", {}, args[1])) return;
+    return performCancelAgentSession(...args);
+  });
+}
+
+async function performCancelAgentSession(sessionId: string, _commandId?: string): Promise<void> {
   const candidate = sessions().get(sessionId);
   const local =
     candidate && isLiveSessionVisibleToCurrentRequest(candidate) ? candidate : undefined;
@@ -2362,10 +3869,36 @@ export async function cancelAgentSession(sessionId: string): Promise<void> {
  * the agent and would make a failed connection look like a successful
  * config change.
  */
-export async function setAgentSessionConfigOption(
+export function setAgentSessionConfigOption(
+  ...args: Parameters<typeof performSetAgentSessionConfigOption>
+): ReturnType<typeof performSetAgentSessionConfigOption> {
+  return traceSessionOperation(args[0], "config", async () => {
+    if (
+      await routeSupervisedControl(
+        args[0],
+        "config",
+        {
+          configId: args[1],
+          value: args[2],
+          source: args[3] ?? "config",
+        },
+        args[4],
+      )
+    ) {
+      const runtime = await loadSessionRuntime(args[0]);
+      if (!runtime) throw new Error("Unknown agent session.");
+      return runtime.session;
+    }
+    return performSetAgentSessionConfigOption(...args);
+  });
+}
+
+async function performSetAgentSessionConfigOption(
   sessionId: string,
   configId: string,
   value: string,
+  source: "config" | "legacy" = "config",
+  _commandId?: string,
 ): Promise<AgentSessionVO> {
   // Startup owns the connecting -> idle transition. Claiming a lease before
   // it finishes would change the durable status to busy and invalidate that
@@ -2392,14 +3925,19 @@ export async function setAgentSessionConfigOption(
     if (s.closed || !s.acpSessionId) {
       throw new Error("This agent session is not connected.");
     }
-    const option = [s.modelOption, s.thinkingOption].find((item) => item?.id === configId);
+    const option = (
+      source === "legacy"
+        ? [s.modeOption?.source === "legacy" ? s.modeOption : null]
+        : [s.modelOption, s.thinkingOption, s.modeOption?.source === "config" ? s.modeOption : null]
+    ).find((item) => item?.id === configId);
     if (!option) {
       throw new Error("This session has no such config option to set.");
     }
     if (!option.options.some((choice) => choice.value === value)) {
       throw new Error(`"${value}" is not one of the offered options.`);
     }
-    await s.setConfigOption(configId, value);
+    if (source === "legacy") await s.setMode(value);
+    else await s.setConfigOption(configId, value);
     guard?.assertOwned();
     return toVO(s);
   } catch (error) {
@@ -2428,13 +3966,14 @@ function cancelPendingPermissions(session: LiveSession): void {
   for (const [requestId, { resolve, answering }] of pending) {
     if (!answering) {
       session.resolvedPermissions.set(requestId, { outcome: "cancelled" });
-      emit(session, {
-        kind: "acpExtension",
-        acpExtension: {
-          method: "_acp-ui/lifecycle",
-          params: { event: { type: "permission_cancelled", requestId } },
-        },
-      });
+      if (!session.closed)
+        emit(session, {
+          kind: "acpExtension",
+          acpExtension: {
+            method: "_acp-ui/lifecycle",
+            params: { event: { type: "permission_cancelled", requestId } },
+          },
+        });
     }
     resolve({ outcome: "cancelled" });
   }
@@ -2443,11 +3982,12 @@ function cancelPendingPermissions(session: LiveSession): void {
   for (const [requestId, { resolve, answering }] of inputs) {
     if (!answering) {
       session.resolvedInputs.set(requestId, { action: "cancel" });
-      emit(session, {
-        kind: "inputResolved",
-        inputRequestId: requestId,
-        inputResponse: { action: "cancel" },
-      });
+      if (!session.closed)
+        emit(session, {
+          kind: "inputResolved",
+          inputRequestId: requestId,
+          inputResponse: { action: "cancel" },
+        });
     }
     resolve({ action: "cancel" });
   }
@@ -2461,9 +4001,29 @@ function cancelPendingPermissions(session: LiveSession): void {
  * otherwise answer the wrong question.
  */
 export function respondToAgentPermission(
+  ...args: Parameters<typeof performRespondToAgentPermission>
+): ReturnType<typeof performRespondToAgentPermission> {
+  return traceSessionOperation(args[0], "permission", () => {
+    if (!agentSessionSupervisorRequested()) return performRespondToAgentPermission(...args);
+    return routeSupervisedControl(
+      args[0],
+      "permission",
+      {
+        requestId: args[1],
+        optionId: args[2],
+      },
+      args[3],
+    ).then((handled) => {
+      if (!handled) return performRespondToAgentPermission(...args);
+    });
+  });
+}
+
+function performRespondToAgentPermission(
   sessionId: string,
   requestId: string,
   optionId: string,
+  _commandId?: string,
 ): void | Promise<void> {
   const live = sessions().get(sessionId);
   if (live && !isLiveSessionVisibleToCurrentRequest(live))
@@ -2531,10 +4091,28 @@ async function respondToPersistedPermission(
     throw new Error("The agent did not confirm this decision.");
 }
 
-export async function respondToAgentInput(
+export function respondToAgentInput(
+  ...args: Parameters<typeof performRespondToAgentInput>
+): ReturnType<typeof performRespondToAgentInput> {
+  return traceSessionOperation(args[0], "input", async () => {
+    if (
+      await routeSupervisedControl(
+        args[0],
+        "input",
+        { requestId: args[1], response: args[2] },
+        args[3],
+      )
+    )
+      return;
+    return performRespondToAgentInput(...args);
+  });
+}
+
+async function performRespondToAgentInput(
   sessionId: string,
   requestId: string,
   response: AgentInputResponse,
+  _commandId?: string,
 ): Promise<void> {
   if (response.action !== "accept") response = { action: response.action };
   const session = sessions().get(sessionId);
@@ -2607,6 +4185,7 @@ async function requestScopedAgentExtension(
   const record = await loadSessionRuntime(sessionId);
   if (!record?.acpSessionId) throw new Error(`Unknown agent session: ${sessionId}`);
   const launch = await resolveLaunch(record.session.slug);
+  await assertScopedExtensionBinding(record, launch);
   if (launch.transport !== "remote-websocket" || !launch.url)
     throw new Error("This agent does not make this operation available in the panel.");
   const stream = createWebSocketStream(launch.url, {
@@ -2626,6 +4205,7 @@ async function requestScopedAgentExtension(
         });
         if (budaMetadata(initialized.agentCapabilities)?.[capability] !== 1)
           throw new Error("This agent does not make this operation available in the panel.");
+        await assertScopedExtensionBinding(record, await resolveLaunch(record.session.slug));
         return ctx.request(method, { ...params, sessionId: record.acpSessionId });
       }),
       new Promise<never>((_resolve, reject) => {
@@ -2678,7 +4258,8 @@ export async function getAgentSessionSnapshot(sessionId: string) {
  * server's own restart/orphan cleanup, which runs with no request context at
  * all.
  */
-export async function closeAgentSession(sessionId: string): Promise<void> {
+export async function closeAgentSession(sessionId: string, commandId?: string): Promise<void> {
+  if (await routeSupervisedControl(sessionId, "close", {}, commandId)) return;
   const candidate = sessions().get(sessionId);
   const live = candidate && isLiveSessionVisibleToCurrentRequest(candidate) ? candidate : null;
   const record = await loadSessionRuntime(sessionId);
@@ -2729,10 +4310,33 @@ async function waitForRemoteEventPoll(signal?: AbortSignal): Promise<void> {
  * lets a client that reconnected mid-turn catch up instead of showing a gap.
  */
 export async function* subscribeAgentSession(
+  ...args: Parameters<typeof subscribeAgentSessionInternal>
+): AsyncGenerator<AgentSessionEventVO> {
+  let release: (() => void) | undefined;
+  if (agentSessionSupervisorRequested()) {
+    const scope = { spaceId: getContextSpaceId(), actorId: getContextActorId() ?? null };
+    const runtime = await getJournalRuntime(args[0], scope);
+    if (runtime?.journalMode === "supervised")
+      release = await retainAgentSessionDemand(args[0], scope);
+  }
+  try {
+    yield* subscribeAgentSessionInternal(...args);
+  } finally {
+    release?.();
+  }
+}
+
+async function* subscribeAgentSessionInternal(
   sessionId: string,
   afterSeq: number,
   signal?: AbortSignal,
 ): AsyncGenerator<AgentSessionEventVO> {
+  logAgentSessionDiagnostic("subscription_started", {
+    sessionId,
+    stage: "subscription",
+    outcome: "started",
+    persistedSeq: afterSeq,
+  });
   let s = sessions().get(sessionId);
   if (s && !isLiveSessionVisibleToCurrentRequest(s)) s = undefined;
   // Use the live listener/buffer path whenever this worker holds the live
@@ -2820,5 +4424,301 @@ export async function* subscribeAgentSession(
     }
   } finally {
     s.listeners.delete(listener);
+    logAgentSessionDiagnostic(
+      "subscription_finished",
+      {
+        ...sessionDiagnosticContext(s),
+        stage: "subscription",
+        outcome: "finished",
+        persistedSeq: cursor,
+      },
+      { force: true },
+    );
   }
 }
+
+registerAgentSessionSupervisorDriver({
+  isConnected(sessionId, lease) {
+    const session = sessions().get(sessionId);
+    return Boolean(
+      session &&
+        !session.closed &&
+        session.acpSessionId &&
+        session.journal?.lease.ownerId === lease.ownerId &&
+        session.journal.lease.epoch === lease.epoch,
+    );
+  },
+  async connect(runtime, lease, scope) {
+    const prior = sessions().get(runtime.session.id);
+    if (prior) detachRemoteSession(prior);
+    const resume = runtime.acpSessionId
+      ? await loadSessionRuntime(runtime.session.id, scope)
+      : undefined;
+    if (runtime.acpSessionId && !resume)
+      throw new Error("Could not read the remote session identity.");
+    const session = await openAgentSession({
+      slug: runtime.session.slug,
+      spaceId: scope.spaceId,
+      ...(resume ? { resume } : {}),
+      persistedId: runtime.session.id,
+      journalLease: lease,
+      journalRuntime: runtime,
+    });
+    await session.ready;
+    if (session.closed || !session.acpSessionId || session.status === "failed")
+      throw (
+        session.journal?.failure ?? new Error("The supervised remote session did not become ready.")
+      );
+  },
+  async execute(sessionId, command, beforeDispatch) {
+    const session = sessions().get(sessionId);
+    if (!session?.journal || !isLiveSessionVisibleToCurrentRequest(session))
+      throw new Error("The supervised session writer is not connected.");
+    if (new Date(command.expiresAt).getTime() < Date.now())
+      throw new Error("This command expired before dispatch.");
+    const journal = session.journal;
+    const scope = { spaceId: session.spaceId, actorId: session.actorId };
+    const dispatch = async () => {
+      await assertCurrentSessionBinding(session);
+      await beforeDispatch();
+      if (journal.bindingInvalidated) throw new SessionBindingChangedError();
+      if (session.closed) throw new Error("The session writer is detached before dispatch.");
+    };
+    if (command.kind !== "close") await assertCurrentSessionBinding(session);
+    return supervisedDispatch
+      .run({ command, beforeDispatch: dispatch }, async () => {
+        if (command.kind === "prompt") {
+          journal.activeCommandId = command.commandId;
+          try {
+            const input = command.payload;
+            if (typeof input.text !== "string") throw new Error("Invalid stored prompt.");
+            await performPromptAgentSession(
+              sessionId,
+              input.text,
+              input.attachments as PromptAttachmentInput[] | undefined,
+              {
+                commandId: command.commandId,
+                presentation: input.presentation as AgentPromptPresentation | undefined,
+                resourceContext: input.resourceContext as PromptResourceContextInput[] | undefined,
+                resolvedContextResources: input.contextResources as
+                  | AgentContextResourceVO[]
+                  | undefined,
+              },
+            );
+            await flushPendingEvents(session);
+            return {};
+          } finally {
+            if (journal.activeCommandId === command.commandId) journal.activeCommandId = undefined;
+          }
+        }
+        if (command.kind === "config") {
+          const { configId, value, source } = command.payload;
+          if (typeof configId !== "string" || typeof value !== "string")
+            throw new Error("Invalid stored configuration.");
+          await performSetAgentSessionConfigOption(
+            sessionId,
+            configId,
+            value,
+            source === "legacy" ? "legacy" : "config",
+          );
+          return {};
+        }
+        if (command.kind === "cancel") {
+          const runtime = await getJournalRuntime(sessionId, scope);
+          if (!command.targetCommandId || runtime?.activeCommandId !== command.targetCommandId)
+            return { outcome: "stale" };
+          const target = (await loadSessionCommands(sessionId, scope)).find(
+            (item) => item.commandId === command.targetCommandId,
+          );
+          if (target && ["queued", "claimed"].includes(target.state)) {
+            const cancelled = await transitionSessionCommand(
+              sessionId,
+              target.commandId,
+              ["queued", "claimed"],
+              "rejected",
+              journal.lease,
+              scope,
+              { errorCode: "CANCELLED_BEFORE_DISPATCH" },
+            );
+            if (cancelled) return { outcome: "cancelled_before_dispatch" };
+          }
+          if (journal.commandReceipts && journal.targetedCancel && session.requestExtension) {
+            const found = (await session.requestExtension("_buda.im/command/receipt", {
+              bindingId: journal.bindingId,
+              commandId: command.targetCommandId,
+            })) as { receipt?: { turnId?: string } };
+            if (!found.receipt?.turnId) throw new Error("The target turn is not yet confirmed.");
+            await dispatch();
+            const cancellation = (await session.requestExtension("_buda.im/session/cancel_turn", {
+              bindingId: journal.bindingId,
+              writerEpoch: journal.lease.epoch,
+              commandId: command.commandId,
+              targetCommandId: command.targetCommandId,
+              sessionId: session.acpSessionId,
+              turnId: found.receipt.turnId,
+            })) as { outcome?: unknown } | null;
+            if (!cancellation || !["requested", "stale"].includes(String(cancellation.outcome)))
+              throw new Error(
+                "The agent could not confirm cancellation. Reconcile the turn before retrying.",
+              );
+            return cancellation;
+          }
+          // Generic v1 cannot prove which turn a delayed session-level cancel
+          // will hit. Never carry a saved cancellation into a later turn.
+          if (!journal.activeCommandId || journal.activeCommandId !== command.targetCommandId)
+            throw new Error("This endpoint cannot safely cancel a recovered turn.");
+          await dispatch();
+          await performCancelAgentSession(sessionId);
+          return {};
+        }
+        if (command.kind === "permission") {
+          if (
+            typeof command.payload.requestId !== "string" ||
+            typeof command.payload.optionId !== "string"
+          )
+            throw new Error("Invalid stored decision.");
+          await dispatch();
+          await performRespondToAgentPermission(
+            sessionId,
+            command.payload.requestId,
+            command.payload.optionId,
+          );
+          await flushPendingEvents(session);
+          return {};
+        }
+        if (command.kind === "input") {
+          if (typeof command.payload.requestId !== "string")
+            throw new Error("Invalid stored input response.");
+          const response = AgentInputResponseSchema.parse(command.payload.response);
+          await dispatch();
+          await performRespondToAgentInput(sessionId, command.payload.requestId, response);
+          await flushPendingEvents(session);
+          return {};
+        }
+        if (command.kind === "close") {
+          const runtime = await getJournalRuntime(sessionId, scope);
+          if (runtime?.activeCommandId) throw new Error("This agent is still replying.");
+          return { outcome: "ready_to_close" };
+        }
+        throw new Error("Unsupported session command.");
+      })
+      .catch((error: unknown) => {
+        let code: unknown;
+        try {
+          if (error && typeof error === "object" && Reflect.get(error, "code") === -32003) {
+            const data = Reflect.get(error, "data");
+            if (data && typeof data === "object") code = Reflect.get(data, "code");
+          }
+        } catch {
+          /* A hostile peer getter is not proof of rejected admission. */
+        }
+        if (
+          journal.commandReceipts &&
+          typeof code === "string" &&
+          [
+            "COMMAND_RECEIPT_CAPACITY",
+            "COMMAND_CONTENT_CONFLICT",
+            "COMMAND_OPERATION_BUSY",
+            "STALE_WRITER_EPOCH",
+            "COMMAND_SESSION_MISMATCH",
+            "WRITER_NOT_REGISTERED",
+          ].includes(code)
+        )
+          throw new AgentSessionCommandAdmissionError(code);
+        throw error;
+      });
+  },
+  async reconcile(sessionId, command) {
+    const session = sessions().get(sessionId);
+    if (!session?.journal || !session.requestExtension) return { state: "unknown" };
+    await assertCurrentSessionBinding(session);
+    if (
+      (command.kind === "permission" || command.kind === "input") &&
+      session.budaInteractionRespond
+    ) {
+      const payload =
+        command.kind === "permission"
+          ? {
+              requestId: command.payload.requestId,
+              optionId: command.payload.optionId,
+              action: "accept",
+            }
+          : {
+              requestId: command.payload.requestId,
+              ...AgentInputResponseSchema.parse(command.payload.response),
+            };
+      const outcome = (await session.requestExtension("_buda.im/interaction/respond", {
+        ...payload,
+        sessionId: session.acpSessionId,
+      })) as { ok?: boolean };
+      return { state: outcome?.ok === true ? "completed" : "unknown" };
+    }
+    if (!session.journal.commandReceipts || !["prompt", "cancel"].includes(command.kind))
+      return { state: "unknown" };
+    const found = (await session.requestExtension("_buda.im/command/receipt", {
+      bindingId: session.journal.bindingId,
+      commandId: command.commandId,
+    })) as {
+      receipt?: { state?: string; turnId?: string | null; result?: Record<string, unknown> } | null;
+    };
+    const receipt = found.receipt;
+    if (!receipt) return { state: "unknown" };
+    if (receipt.state === "accepted" && new Date(command.expiresAt).getTime() <= Date.now()) {
+      // An expired local intent cannot be requeued behind a remote accepted
+      // receipt: that would clear the local reservation yet strand the remote
+      // binding. Only a confirmed targeted rejection releases it safely.
+      if (
+        session.journal.targetedCancel &&
+        typeof receipt.turnId === "string" &&
+        session.acpSessionId
+      ) {
+        try {
+          const cancelled = (await session.requestExtension("_buda.im/session/cancel_turn", {
+            bindingId: session.journal.bindingId,
+            writerEpoch: session.journal.lease.epoch,
+            commandId: `expire_${createHash("sha256").update(command.commandId).digest("hex").slice(0, 32)}`,
+            targetCommandId: command.commandId,
+            sessionId: session.acpSessionId,
+            turnId: receipt.turnId,
+          })) as { outcome?: string };
+          if (cancelled.outcome === "requested" || cancelled.outcome === "stale") {
+            const confirmed = (await session.requestExtension("_buda.im/command/receipt", {
+              bindingId: session.journal.bindingId,
+              commandId: command.commandId,
+            })) as { receipt?: { state?: string } | null };
+            if (confirmed.receipt?.state === "rejected")
+              return { state: "rejected", result: { code: "COMMAND_EXPIRED_BEFORE_DISPATCH" } };
+          }
+        } catch {
+          /* Missing confirmation is not permission to replay or release. */
+        }
+      }
+      await updateJournalRuntime(
+        sessionId,
+        { executionState: "unknown", syncState: "gap" },
+        session.journal.lease,
+        {
+          spaceId: session.spaceId,
+          actorId: session.actorId,
+        },
+      );
+      return { state: "unknown" };
+    }
+    if (
+      receipt.state === "completed" ||
+      receipt.state === "rejected" ||
+      receipt.state === "accepted"
+    )
+      return { state: receipt.state, result: receipt.result ?? {} };
+    if (receipt.state === "running" || receipt.state === "dispatching") return { state: "running" };
+    return { state: "unknown" };
+  },
+  detach(sessionId, lease) {
+    const session = sessions().get(sessionId);
+    if (
+      session?.journal?.lease.ownerId === lease.ownerId &&
+      session.journal.lease.epoch === lease.epoch
+    )
+      detachRemoteSession(session);
+  },
+});

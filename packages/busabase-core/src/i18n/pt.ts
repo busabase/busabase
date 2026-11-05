@@ -31,6 +31,49 @@ export const dashboardPt: CoreI18nMessages = {
     example:
       "## Visão\nQue futuro queremos criar?\n\n## Missão\nQuem servimos e que problema resolvemos?\n\n## Valores\nQue princípios orientam as nossas decisões?\n\n## Estilo de design\nDescreva o estilo visual, o tom e a terminologia da equipa.",
   },
+  spaceWelcome: {
+    title: "Página de boas-vindas",
+    description:
+      "Escolha um documento ou uma página HTML que os membros verão no topo do Início: para que serve este espaço e por onde começar. Escreva primeiro a página e depois escolha-a aqui.",
+    loading: "A carregar a página de boas-vindas…",
+    loadFailed: "Não foi possível carregar a definição da página de boas-vindas. Tente novamente.",
+    retry: "Tentar novamente",
+    current: "Página de boas-vindas atual",
+    none: "Não há página de boas-vindas definida. O Início mostra «Primeiros passos» em vez disso.",
+    unreadable:
+      "A página escolhida não existe, está arquivada ou não tem acesso a ela, pelo que os membros veem «Primeiros passos» em vez disso.",
+    visibilityHint: "Os membros só a veem se puderem abrir essa página.",
+    searchLabel: "Escolha um documento ou uma página HTML",
+    searchPlaceholder: "Pesquisar documentos e páginas HTML…",
+    noCandidates:
+      "Este espaço ainda não tem documentos nem páginas HTML. Crie um e depois escolha-o aqui.",
+    noMatches: "Nenhuma página corresponde a «{query}».",
+    save: "Usar como página de boas-vindas",
+    saving: "A guardar…",
+    saved: "Página de boas-vindas guardada",
+    clear: "Remover a página de boas-vindas",
+    saveFailed: "Não foi possível guardar. Tente novamente.",
+    conflict:
+      "Outra pessoa alterou a página de boas-vindas. Recarregue para ver a escolha mais recente.",
+    reload: "Recarregar a mais recente",
+    readOnly:
+      "Só os proprietários e administradores do espaço podem alterar a página de boas-vindas.",
+    open: "Abrir",
+    close: "Fechar a página de boas-vindas",
+    reopen: "Página de boas-vindas",
+    expand: "Expandir",
+    collapse: "Recolher",
+    emptyDoc: "Esta página está vazia.",
+  },
+  gettingStarted: {
+    title: "Primeiros passos",
+    body: "Tudo neste espaço está na barra lateral, e cada ícone que lá aparece é um destes tipos. Abra um para começar.",
+    typesHeading: "O que vai encontrar na barra lateral",
+    close: "Fechar Primeiros passos",
+    reopen: "Primeiros passos",
+    connectAgentHint:
+      "Pergunte ao seu agente sobre este espaço. Ele lê as mesmas Bases, documentos e apps que você vê, e tudo o que escreve fica registado aqui.",
+  },
   fieldHelp: {
     inherit: "Usar instruções do campo",
     override: "Personalizar para este formulário",
@@ -76,6 +119,7 @@ export const dashboardPt: CoreI18nMessages = {
     restored: "Rascunho de fórmula não salvo restaurado.",
   },
   common: {
+    retry: "Tentar novamente",
     slugTaken: 'Já existe outro item do mesmo tipo com o slug "{slug}". Escolha outro slug.',
     add: "Adicionar",
     archived: "arquivado",
@@ -202,6 +246,10 @@ export const dashboardPt: CoreI18nMessages = {
     openFullBase: "Abrir Base completa",
     pinToSidePanel: "Fixar no painel lateral",
     noFilesYet: "Nenhum arquivo ainda.",
+    filesPagedSummary: "Mostrando {shown} de {total} arquivos.",
+    loadMoreFiles: "Carregar mais arquivos",
+    loadMoreFolders: "Carregar mais pastas",
+    fileListPartialFailed: "Não foi possível carregar mais arquivos",
     selectFile: "Selecione um arquivo para ver o conteúdo.",
     readingFile: "Lendo {path}…",
     couldNotReadFile: "Não foi possível ler o arquivo",
@@ -684,16 +732,21 @@ export const dashboardPt: CoreI18nMessages = {
         "Este AirApp exige o mecanismo do navegador, mas ele não está disponível nesta implantação.",
       local: "Este AirApp exige esta máquina, mas a execução local não está disponível.",
       remote:
-        "Este AirApp exige uma máquina remota, mas o Sandock não está configurado nesta implantação.",
+        "Este AirApp exige um sandbox na nuvem, mas o Sandock não está configurado nesta implantação.",
+      site: "Este AirApp precisa de um site, mas o provedor de sites não está configurado nesta implantação. Fale com um administrador.",
     },
     engineBrowser: "No navegador",
     engineBrowserHint: "Executa nesta aba · gratuito e instantâneo · somente JavaScript",
     engineLocal: "Esta máquina",
     engineLocalHint: "Processo real do sistema, qualquer linguagem · sem isolamento",
-    engineRemote: "Máquina remota",
-    engineRemoteHint: "Provisionada a cada execução, qualquer linguagem · isolada",
+    engineRemote: "Sandbox na nuvem",
+    engineRemoteHint:
+      "Uma máquina temporária na nuvem a cada execução, qualquer linguagem · isolada",
+    engineSite: "Site",
+    engineSiteHint: "Sempre ativo · endereço fixo",
+    engineNotConfigured: "Não configurado: fale com um administrador",
     noEligibleEngine:
-      "Nenhum mecanismo desta implantação consegue executar um AirApp {runtime}. Peça a um operador para ativar um ambiente de execução local ou remoto.",
+      "Nenhum mecanismo desta implantação consegue executar um AirApp {runtime}. Peça a um operador para ativar a execução local ou um sandbox na nuvem.",
     pythonNeedsSandock:
       "AirApps em Python não são compatíveis com esta implantação. Configure o Sandock para executá-los.",
     swError: {
@@ -714,6 +767,103 @@ export const dashboardPt: CoreI18nMessages = {
     swUnsupportedCopyLink: "Copiar link",
     swUnsupportedLinkCopied: "Link copiado",
     swUnsupportedCopyFailed: "Não foi possível copiar o link. Selecione e copie manualmente:",
+    site: {
+      statusNotLive: "Não publicado",
+      statusLive: "Publicado",
+      statusLiveWithChanges: "Alterações não publicadas",
+      goLive: "Publicar",
+      goLiveDone: "O site está publicado.",
+      previewStale: "Os arquivos mudaram depois desta prévia. Execute de novo e depois publique.",
+      noPreview: "Execute primeiro para criar uma prévia.",
+      blockedTitle: "Este app ainda não pode ser publicado como site",
+      addressLabel: "Endereço",
+      publicLabel: "Público",
+      publicOnHint: "Qualquer pessoa com o endereço pode abrir.",
+      publicOffHint: "O endereço mostra uma página de não encontrado.",
+      publicNotYet: "Publique primeiro.",
+      domains: {
+        title: "Domínios personalizados",
+        description: "Use seu próprio endereço para o site publicado.",
+        check: "Verificar novamente",
+        checking: "Verificando…",
+        loading: "Carregando domínios personalizados…",
+        checkFailed: "Não foi possível verificar os domínios personalizados. Tente novamente.",
+        lastKnown: "Os detalhes abaixo são da última verificação bem-sucedida.",
+        unavailable:
+          "Os domínios personalizados não estão configurados nesta instalação. Consulte um administrador.",
+        empty:
+          "Adicione um domínio que você possui e conclua a configuração no seu provedor de DNS.",
+        hostnameLabel: "Nome do domínio",
+        hostnameHint: "Digite um nome de host, sem https:// ou caminho.",
+        invalidHostname:
+          "Digite um domínio como shop.company.com, sem esquema, caminho, porta, endereço IP ou curinga.",
+        publishFirst: "Publique o site antes de adicionar seu domínio.",
+        planLocked:
+          "O plano deste espaço não inclui Site. Você ainda pode consultar e remover domínios existentes.",
+        add: "Adicionar domínio",
+        adding: "Adicionando…",
+        pending: "Configuração pendente",
+        pendingDnsHint:
+          "Adicione os registros abaixo no seu provedor de DNS e verifique novamente. As alterações de DNS podem levar tempo para aparecer.",
+        pendingHttpsHint:
+          "A propriedade do domínio foi verificada. O HTTPS está sendo preparado; verifique novamente em breve.",
+        active: "Conectado",
+        activeHint: "DNS e HTTPS estão prontos.",
+        error: "Requer atenção",
+        errorHint: "Revise os detalhes abaixo e verifique novamente.",
+        offlineHint:
+          "O site está fora do ar. Todos os endereços do site mostram uma página não encontrada.",
+        dnsInstructions:
+          "Adicione estes registros no seu provedor de DNS. Mantenha os outros registros necessários ao domínio. Na Cloudflare, defina este CNAME como «Somente DNS» (nuvem cinza).",
+        dnsName: "Nome",
+        dnsValue: "Valor / destino",
+        httpInstructions:
+          "Para a verificação HTTP, disponibilize o corpo de resposta abaixo nesta URL e verifique novamente.",
+        httpUrl: "URL de verificação",
+        httpBody: "Corpo da resposta",
+        copyHttpUrl: "Copiar URL de verificação {value}",
+        copyHttpBody: "Copiar resposta de verificação {value}",
+        copy: "Copiar",
+        copyName: "Copiar nome DNS {value}",
+        copyValue: "Copiar valor DNS {value}",
+        copied: "Copiado",
+        copyFailed: "Não foi possível copiar. Selecione o valor e copie manualmente.",
+        remove: "Remover",
+        removeLabel: "Remover {hostname}",
+        removeConfirm:
+          "Remover {hostname}? Ele deixará de abrir este site. O endereço padrão continuará funcionando.",
+        confirmRemove: "Remover domínio",
+        removing: "Removendo…",
+        cancel: "Cancelar",
+      },
+      // Keyed by `SiteBundleBlocker["code"]`.
+      blockers: {
+        "not-a-site-app":
+          "O airapp.json não tem um bloco site, então este app não está configurado como site.",
+        "invalid-manifest": "O airapp.json tem um problema: {detail}",
+        "python-runtime": "Este app foi escrito em Python. Um site só executa JavaScript.",
+        "unsafe-path": "O airapp.json aponta para fora do app: {path}",
+        "entry-missing": "O arquivo Worker {path} indicado no airapp.json não existe.",
+        "entry-not-javascript": "O arquivo Worker {path} precisa ser .js ou .mjs.",
+        "entry-syntax-error": "O arquivo Worker {path} não pode ser lido como JavaScript: {detail}",
+        "entry-no-default-export":
+          "O arquivo Worker {path} não tem export default, então nada pode responder às solicitações.",
+        "unsupported-import":
+          "{path} importa {specifier}. Empacote tudo em um só arquivo; um site não pode carregar outros módulos.",
+        "no-index-page": "Não há página inicial. Adicione {path}.",
+        "asset-too-large": "{path} tem {size}. Cada arquivo pode ter no máximo 25 MB.",
+        "too-many-assets": "Este site tem {count} arquivos. O limite é 100.000.",
+      },
+    },
+    enginePlan: {
+      availableOn: "Disponível a partir do {plan}",
+      lockedHint: "{engine} está disponível a partir do plano {plan}.",
+      upgrade: "Fazer upgrade para {plan}",
+      lockedTitle: "Faça upgrade para {plan} para executar este app",
+      lockedBody:
+        "{engine} não está incluída no plano deste espaço, e este app precisa dela para ser executado.",
+      statusLocked: "É necessário fazer upgrade",
+    },
   },
   agents: {
     addAgent: "Adicionar agente",
@@ -845,6 +995,7 @@ export const dashboardPt: CoreI18nMessages = {
     composerWaitingPlaceholder: "Responda à solicitação acima para continuar…",
     composerDefaultPlaceholder: "Mensagem para {name}…",
     thinkingLevel: "Nível de raciocínio",
+    mode: "Modo",
     continueConversationFailed: "Não foi possível continuar esta conversa.",
     sessionActions: "Ações da sessão",
     endSession: "Encerrar sessão",
@@ -1140,6 +1291,8 @@ export const dashboardPt: CoreI18nMessages = {
     locationAnywhere: "Qualquer lugar",
     clearFilters: "Limpar filtros",
     resultCount: "{count} carregados",
+    partialResults:
+      "Talvez não sejam todas as correspondências. Restrinja a busca a uma Base, uma pasta ou um período para ver o restante.",
     modeLabel: "Correspondência",
     modeText: "Texto",
     modeRegex: "Padrão",
@@ -1387,6 +1540,7 @@ export const dashboardPt: CoreI18nMessages = {
     openView: "Abrir visualização",
     openNode: "Abrir nó",
     openRecord: "Abrir registro",
+    viewFullContent: "Ver conteúdo completo",
     brief: "{countLabel} em {scope}: {summary}.",
     riskBrief: "{countLabel} em {scope}: {summary}. Atenção às alterações de {risks}.",
     riskAnd: " e ",
@@ -1433,6 +1587,8 @@ export const dashboardPt: CoreI18nMessages = {
     loadMore: "Carregar mais",
     noMatchesTitle: "Nenhum resultado",
     noMatchesBody: "Tente um título, nome de campo, canal ou Base.",
+    timedOut:
+      "A busca demorou demais. Tente novamente ou abra a busca avançada e restrinja a uma Base ou pasta.",
     partialContentBody:
       "Alguns documentos são tão longos que apenas o início deles é indexado para a busca, então este pode não ser o resultado completo. Use grep para varrer todos os documentos por inteiro.",
     noRecentTitle: "Nada recente ainda",
@@ -1895,6 +2051,14 @@ export const dashboardPt: CoreI18nMessages = {
     deleteFieldCounting: "Contando os registros afetados…",
     deleteFieldCountUnavailable: "Não foi possível contar os registros afetados.",
     deleteFieldImpact: "Esta coluna tem um valor em {count} registro{plural}.",
+    deleteLookupFieldImpact:
+      "Apenas esta coluna de consulta será removida. Campos e registros de origem e vínculos entre registros permanecerão inalterados.",
+    deleteLookupFieldBlocked:
+      "Altere os campos de fórmula para remover as referências a esta consulta antes de excluí-la.",
+    deleteFormulaFieldImpact:
+      "Apenas esta coluna de fórmula será removida. Os campos de entrada e registros usados no cálculo permanecerão inalterados.",
+    deleteFormulaFieldBlocked:
+      "Altere os campos que usam esta fórmula para remover as referências antes de excluí-la.",
     deleteFieldDependencies: "Onde este campo é usado",
     deleteFieldDependenciesLoading: "Verificando visualizações salvas…",
     deleteFieldDependenciesUnavailable:
@@ -2085,6 +2249,11 @@ export const dashboardPt: CoreI18nMessages = {
     bidirectional: "bidirecional ({count})",
     noRelationsHint:
       "Adicione um campo de relação no design de qualquer Base para desenhar conexões aqui.",
+  },
+  upload: {
+    fileTooLarge: "“{name}” ({size}) excede o limite de {limit} por arquivo.",
+    fileTooLargeUnnamed: "Este arquivo excede o limite de {limit} por arquivo.",
+    upgradeForLargerFiles: "Faça upgrade do plano para enviar arquivos de até {limit}.",
   },
   recordView: {
     view: "Ver",
@@ -2450,6 +2619,10 @@ export const dashboardPt: CoreI18nMessages = {
     metadataNoPermission:
       "Você não tem acesso de escrita em todos os locais onde este arquivo é usado, então os metadados dele não podem ser alterados aqui.",
     unusedOnly: "Mostrar somente não usados",
+    loadMore: "Carregar mais recursos",
+    loadingMore: "Carregando…",
+    partialSummary:
+      "Somente os {shown} recursos já carregados são listados e contados — carregue mais para ver o restante.",
     unusedBadge: "{count} não usados",
     noUnusedAssets: "Nenhum ativo não utilizado encontrado.",
     textStatusMissing: "Ainda não pesquisável",
@@ -2542,6 +2715,8 @@ export const dashboardPt: CoreI18nMessages = {
     addStep: "Adicionar etapa",
     deleteSelection: "Excluir selecionados",
     configuration: "Configuração",
+    configureTab: "Configurar",
+    runsTab: "Execuções",
     selectStepOrEdge: "Selecione uma etapa ou conexão para configurá-la.",
     label: "Rótulo",
     type: "Tipo",
@@ -2550,7 +2725,19 @@ export const dashboardPt: CoreI18nMessages = {
     url: "URL do webhook",
     functionName: "Nome da função",
     webhookRuleId: "ID da regra de função de webhook",
+    functionHint:
+      "Executa uma regra de webhook salva cuja ação é executar função. Informe o id da regra ou um nome de função que corresponda a uma única regra neste espaço. O valor retornado fica neste passo.",
+    webhookHint:
+      "Quando uma execução chega a este passo, o Busabase envia a requisição com os dados da execução como corpo JSON (GET não envia corpo). A resposta vira a saída deste passo: input.status e input.body.",
     eventName: "Nome do evento",
+    eventRecordCreated: "Quando um registro é criado",
+    eventRecordUpdated: "Quando um registro é atualizado",
+    customEventOption: "{name} (apenas rótulo)",
+    triggerEventHint:
+      "No modo Evento, “Quando um registro é criado” e “Quando um registro é atualizado” iniciam uma execução sozinhos. Manual e outros nomes de evento só iniciam quando alguém executa o fluxo de trabalho.",
+    triggerBase: "Base",
+    anyBase: "Qualquer base",
+    unknownBase: "Base não encontrada ({id})",
     expression: "Expressão",
     duration: "Duração",
     unit: "Unidade",
@@ -2558,22 +2745,54 @@ export const dashboardPt: CoreI18nMessages = {
     hours: "Horas",
     days: "Dias",
     approver: "Aprovador",
+    approverHint:
+      "E-mails de membros, separados por vírgulas. Só eles (e os administradores do espaço) podem aprovar ou rejeitar esta etapa, mesmo sem permissão de edição no fluxo de trabalho. Sem e-mail, decide quem pode editar o fluxo; um nome sem e-mail é só um rótulo.",
+    allowAgents: "Permitir que agentes decidam",
+    allowAgentsHint:
+      "Desativado: só pessoas podem aprovar ou rejeitar esta etapa. Ativado: um agente com chave de API de escrita também pode, se o dono da chave cumprir a regra acima.",
     actionName: "Nome da ação",
+    readRecordHint:
+      "Lê de novo o registro da execução nesta etapa. Coloque-a depois de uma espera quando o próximo ramo precisar ver valores atuais.",
+    actionChoose: "Escolha uma ação",
+    actionReadRecord: "Ler o registro de novo",
+    actionUpdateRecord: "Atualizar um registro",
+    actionCreateRecord: "Criar um registro",
+    actionDeleteRecord: "Excluir um registro",
+    updateRecordHint:
+      "Define os campos abaixo no registro, com as permissões da pessoa com quem a execução atua.",
+    createRecordHint:
+      "Adiciona um registro à base escolhida, com as permissões da pessoa com quem a execução atua. As próximas etapas podem usar o id dele como createdRecordId desta etapa.",
+    deleteRecordHint:
+      "Move o registro para a lixeira da base, com as permissões da pessoa com quem a execução atua. Ele pode ser restaurado de lá.",
+    customActionHint: "Este nome de ação ainda não faz nada: é apenas registrado.",
+    chooseBase: "Escolha uma base",
+    targetRecord: "Registro (opcional)",
+    targetRecordHint:
+      "Vazio significa o registro desta execução. Ou um ID de registro, ou uma fórmula como =steps.create.createdRecordId.",
+    stepReference: "Em fórmulas, esta etapa se escreve",
+    copyStepReference: "Copiar",
+    updateRecordFields: "Campos a definir (JSON)",
+    updateRecordFieldsHint:
+      "Use o nome ou o slug de um campo como chave. Valores simples são guardados como estão. Um texto que começa com = é uma fórmula sobre etapas anteriores, como =steps.score.score. Comece com == para guardar um texto que começa com =.",
+    updateRecordFieldsInvalid:
+      'Os campos devem ser um objeto JSON, por exemplo {"status": "qualified"}.',
     outcome: "Resultado",
     edgeLabel: "Rótulo da conexão",
     edgeOutcome: "Resultado da ramificação",
     workflowSettings: "Configurações de execução",
     executionMode: "Modo de execução",
     notExecutedNote:
-      "Por enquanto, os fluxos de trabalho são apenas salvos e validados; ainda não são executados.",
+      "Edite os passos aqui, salve e depois inicie uma execução em Execuções. As execuções rodam no servidor com a última versão salva. Cada passo concluído guarda um instantâneo, read_record lê o registro de novo, uma Espera pausa até o horário dela e uma Aprovação aguarda uma decisão.",
     executionModeHint:
-      "Apenas registra como o fluxo vai iniciar no futuro; por enquanto, nada é executado.",
+      "Manual: uma execução só começa quando alguém executa o fluxo de trabalho. Evento: um gatilho de registro também inicia uma execução quando um registro correspondente é criado ou atualizado. Execuções por evento agem como a pessoa que salvou o fluxo de trabalho por último.",
     manual: "Manual",
     event: "Evento",
     errorPolicy: "Em caso de erro",
     stop: "Interromper o fluxo de trabalho",
     continue: "Continuar",
     concurrency: "Concorrência",
+    concurrencyHint:
+      "Quantas execuções deste fluxo podem executar etapas ao mesmo tempo. Execuções pausadas numa espera ou aprovação não contam. As excedentes ficam na fila e começam sozinhas quando houver vaga.",
     timeoutMs: "Tempo limite (ms)",
     trigger: "Gatilho",
     webhook: "Webhook",
@@ -2586,6 +2805,69 @@ export const dashboardPt: CoreI18nMessages = {
     source: "Origem",
     preview: "Pré-visualização",
     htmlSource: "Código-fonte HTML",
+  },
+  workflowRuns: {
+    runWorkflow: "Executar fluxo de trabalho",
+    startTitle: "Iniciar uma execução",
+    startHint: "Roda no servidor com a última versão salva deste fluxo de trabalho.",
+    recordId: "ID do registro (opcional)",
+    recordIdHint: "O gatilho lê este registro quando a execução começa.",
+    payload: "Payload JSON (opcional)",
+    payloadHint: "Dados extras para o gatilho, como um objeto JSON.",
+    payloadInvalid: 'O payload precisa ser um objeto JSON, por exemplo {"score": 80}.',
+    start: "Iniciar execução",
+    starting: "Iniciando…",
+    unsavedBlocked:
+      "Salve suas alterações primeiro. As execuções usam a última versão salva deste fluxo de trabalho.",
+    readOnlyNote:
+      "Você pode ver estas execuções. Para iniciar uma execução ou continuá-la antes da hora, é preciso ter permissão de edição neste fluxo de trabalho.",
+    cannotDecide:
+      "Somente os aprovadores indicados nesta etapa podem decidir (ou, se ninguém for indicado, quem pode editar este fluxo).",
+    queuedNote:
+      "Na fila: esta execução continua sozinha em até um minuto, com as permissões de quem a iniciou.",
+    statusCancelled: "Cancelada",
+    cancelRun: "Cancelar execução",
+    cancelRunTitle: "Cancelar esta execução?",
+    cancelRunBody: "Ela para aqui e não pode continuar. As etapas já executadas não são desfeitas.",
+    keepRun: "Manter",
+    cancelAllQueued: "Cancelar {count} execuções na fila",
+    cancelAllTitle: "Cancelar {count} execuções na fila?",
+    cancelAllBody:
+      "Elas ainda não começaram e não vão começar. Execuções que estão executando uma etapa ou pausadas numa espera ou aprovação continuam.",
+    startedBy: "Iniciada por {name}",
+    startedByVia: "Iniciada por {name} via {via}",
+    viaAgent: "um agente",
+    cancelledBy: "Cancelada por {name}.",
+    loadOlder: "Carregar execuções anteriores",
+    keptNote: "Execuções concluídas são guardadas por {days} dias.",
+    guideLink: "Como os fluxos são executados",
+    actionFailed: "Não deu certo. Tente novamente.",
+    recentRuns: "Execuções recentes",
+    empty: "Nenhuma execução ainda.",
+    loadFailed: "Não foi possível carregar as execuções.",
+    statusQueued: "Na fila",
+    statusRunning: "Em execução",
+    statusWaiting: "Aguardando",
+    statusWaitingApproval: "Aguardando aprovação",
+    statusCompleted: "Concluída",
+    statusFailed: "Falhou",
+    triggerManual: "Manual",
+    triggerEvent: "Evento",
+    runDetails: "Detalhes da execução",
+    recordLabel: "Registro: {id}",
+    waitingUntil: "Aguardando até {time}. Depois continua sozinha.",
+    continueNow: "Continuar agora",
+    approvalPending: "Aguardando uma decisão sobre “{step}”.",
+    approve: "Aprovar",
+    reject: "Rejeitar",
+    errorLabel: "Erro",
+    steps: "Passos",
+    noSteps: "Nenhum passo foi concluído ainda.",
+    stepData: "Dados",
+    recordFields: "Registro",
+    stepDone: "Concluído",
+    stepPaused: "Pausado",
+    stepFailed: "Falhou",
   },
   install: {
     title: "Instalar do GitHub",

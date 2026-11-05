@@ -67,11 +67,35 @@ export const busabaseAgentSessions = pgTable(
      * malformed or stale shape degrades to `null` instead of throwing.
      */
     modelOption: jsonb("model_option"),
+    /** Expand-first: legacy writers remain the default until coordinated drain. */
+    journalMode: text("journal_mode").$type<"legacy" | "supervised">().notNull().default("legacy"),
+    bindingGeneration: bigint("binding_generation", { mode: "number" }).notNull().default(1),
+    writerOwnerId: text("writer_owner_id"),
+    writerEpoch: bigint("writer_epoch", { mode: "number" }).notNull().default(0),
+    writerExpiresAt: timestamp("writer_expires_at", { mode: "date" }),
+    journalHead: bigint("journal_head", { mode: "number" }).notNull().default(0),
+    sourceGeneration: text("source_generation"),
+    sourceCheckpoint: bigint("source_checkpoint", { mode: "number" }),
+    activeCommandId: text("active_command_id"),
+    demandUntil: timestamp("demand_until", { mode: "date" }),
+    syncState: text("sync_state").$type<"synced" | "recovering" | "degraded" | "gap">(),
+    connectionState: text("connection_state").$type<"connecting" | "connected" | "disconnected">(),
+    executionState: text("execution_state").$type<
+      "idle" | "reserved" | "running" | "waiting" | "terminal" | "unknown"
+    >(),
+    diagnosticRef: text("diagnostic_ref"),
+    capabilities: jsonb("capabilities").$type<Record<string, unknown>>(),
+    recoverySnapshot: jsonb("recovery_snapshot").$type<Record<string, unknown>>(),
+    creationState: text("creation_state")
+      .$type<"pending" | "dispatching" | "confirmed" | "unknown">()
+      .notNull()
+      .default("pending"),
   },
   (table) => [
     // Every read is "this space's sessions, newest first" (the List and Detail
     // views), so the ordering column belongs in the index rather than a sort.
     index("busabase_agent_sessions_space_activity_idx").on(table.spaceId, table.lastActivityAt),
+    index("busabase_agent_sessions_demand_idx").on(table.journalMode, table.demandUntil),
   ],
 );
 

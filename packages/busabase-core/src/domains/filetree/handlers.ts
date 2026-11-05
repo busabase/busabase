@@ -5,15 +5,22 @@ import {
   createFileTreeChangeRequestInputSchema,
   createFileTreeInputSchema,
 } from "busabase-contract/domains/filetree/contract";
-import type { ChangeRequestVO, FileTreeFileVO, FileTreeNodeVO } from "busabase-contract/types";
-import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import type {
+  ChangeRequestVO,
+  FileTreeEntriesVO,
+  FileTreeFileVO,
+  FileTreeNodeVO,
+} from "busabase-contract/types";
+import { and, asc, count, eq, gt, inArray, isNull, ne, sql } from "drizzle-orm";
 import { confirmUpload, requestUploadUrl } from "open-domains/attachments/logic";
 import { storage } from "openlib/storage";
 import type { z } from "zod";
 import {
+  assertContextCreationAllowed,
   getContextRestrictedVisibility,
   getContextSpaceId,
   resolveActorId,
+  runWithContextCreationGuard,
   withContextSourceMeta,
 } from "../../context";
 import { getDb } from "../../db";
@@ -31,6 +38,7 @@ import {
   type OperationPO,
 } from "../../db/schema";
 import { assertAirAppRunnable } from "../../logic/airapp-runnable";
+import { describeCaller } from "../../logic/caller-provenance";
 import {
   type FileTreeFileOperationKind,
   type FileTreeMetadataOperationKind,
@@ -469,9 +477,69 @@ const deleteFileAssetAtPath = async (
   );
 };
 
-const listAssetUsageFiles = async (node: NodePO): Promise<FileTreeFileVO[]> => {
+/**
+ * How many files a node detail (`nodes.get`) embeds at most.
+ *
+ * A Drive can hold tens of thousands of files (production has a 46k one). The
+ * filter is indexed and cheap; the cost is every returned row paying two
+ * primary-key joins plus JSON serialization, so the only lever with real effect
+ * is returning fewer rows. Skills and AirApps sit far below this, so they still
+ * get their whole list in one round trip.
+ */
+export const FILE_TREE_INLINE_FILE_LIMIT = 1_000;
+
+/** Upper bound for one `fileTrees.listFiles` page, whatever the caller asks. */
+export const FILE_TREE_FILE_PAGE_MAX = 5_000;
+
+interface FilePage {
+  limit?: number;
+  /** Keyset cursor: return files whose path sorts strictly after this one. */
+  after?: string;
+  /** Legacy window. Ignored when `after` is given; every skipped row still pays the joins. */
+  offset?: number;
+}
+
+/** The rows that are files: an empty `path` is a whole-node usage (Doc body, Base field), not a file. */
+const assetUsageFileConditions = (node: NodePO) => [
+  eq(busabaseAssetUsages.spaceId, getContextSpaceId()),
+  eq(busabaseAssetUsages.ownerType, usageOwnerType(node.type)),
+  eq(busabaseAssetUsages.nodeId, node.id),
+  ne(busabaseAssetUsages.path, ""),
+];
+
+/**
+ * Rows whose path sits under `prefix` (`"docs/"`, or `""` for the root).
+ *
+ * `left(path, n) = prefix` rather than a `>= / <` range: a range is only right
+ * under the "C" collation, and production Postgres may sort `/` differently.
+ * Equality on a prefix is collation-free. Drizzle has no `left()`.
+ *
+ * `n` comes from the DATABASE (`char_length`), not from `prefix.length`: JS
+ * counts UTF-16 code units and Postgres counts characters, so a folder named
+ * `📁` would slice one character too many (`📁/a.md` → `📁/a`) and list nothing.
+ */
+const underFolder = (prefix: string) =>
+  prefix === ""
+    ? undefined
+    : sql`left(${busabaseAssetUsages.path}, char_length(${prefix})) = ${prefix}`;
+
+/** The part of the path after `prefix`. Postgres `substr` is 1-based, and — as above — `char_length`, not `.length`. */
+const pathBelow = (prefix: string) =>
+  sql`substr(${busabaseAssetUsages.path}, char_length(${prefix}) + 1)`;
+
+interface FolderFilter {
+  /** Only files directly in this folder (`"docs/"`, or `""` for the root). */
+  directlyIn?: string;
+}
+
+const listAssetUsageFiles = async (
+  node: NodePO,
+  page: FilePage = {},
+  filter: FolderFilter = {},
+): Promise<FileTreeFileVO[]> => {
   const db = await getDb();
-  const rows = await db
+  const prefix = filter.directlyIn;
+  const ordered = db
     .select({
       path: busabaseAssetUsages.path,
       metadata: busabaseAssetUsages.metadata,
@@ -488,27 +556,32 @@ const listAssetUsageFiles = async (node: NodePO): Promise<FileTreeFileVO[]> => {
     .innerJoin(attachments, eq(busabaseAssets.attachmentId, attachments.id))
     .where(
       and(
-        eq(busabaseAssetUsages.spaceId, getContextSpaceId()),
-        eq(busabaseAssetUsages.ownerType, usageOwnerType(node.type)),
-        eq(busabaseAssetUsages.nodeId, node.id),
+        ...assetUsageFileConditions(node),
+        page.after === undefined ? undefined : gt(busabaseAssetUsages.path, page.after),
+        prefix === undefined ? undefined : underFolder(prefix),
+        prefix === undefined ? undefined : sql`strpos(${pathBelow(prefix)}, '/') = 0`,
       ),
     )
+    // `(node_id, path)` is indexed, so this order needs no sort, and a path
+    // cursor resumes in O(page) instead of re-joining every skipped row.
     .orderBy(asc(busabaseAssetUsages.path));
+  const offset = page.after === undefined ? (page.offset ?? 0) : 0;
+  const rows = await (page.limit === undefined
+    ? ordered.offset(offset)
+    : ordered.limit(page.limit).offset(offset));
 
-  return rows
-    .filter((row) => row.path)
-    .map((row) => ({
-      path: row.path,
-      name: row.path.split("/").at(-1) ?? row.path,
-      size: row.sizeBytes,
-      updatedAt: row.updatedAt.toISOString(),
-      mimeType: row.mimeType,
-      assetId: row.assetId,
-      displayName:
-        typeof row.metadata.displayName === "string"
-          ? row.metadata.displayName
-          : row.assetName || row.fileName,
-    }));
+  return rows.map((row) => ({
+    path: row.path,
+    name: row.path.split("/").at(-1) ?? row.path,
+    size: row.sizeBytes,
+    updatedAt: row.updatedAt.toISOString(),
+    mimeType: row.mimeType,
+    assetId: row.assetId,
+    displayName:
+      typeof row.metadata.displayName === "string"
+        ? row.metadata.displayName
+        : row.assetName || row.fileName,
+  }));
 };
 
 export const createFileTreeNode = async (
@@ -588,30 +661,34 @@ export const createFileTreeNode = async (
     return { ...changeRequest, materialized: false as const };
   }
 
+  await assertContextCreationAllowed({ nodes: 1 });
+
   const nodeId = id("nod");
   const createdAt = now();
   try {
-    await db.insert(busabaseNodes).values({
-      // Direct-materialization fast path: this insert never reaches
-      // `mergeNodeCreate`, so the creator has to be stamped here too.
-      createdBy: resolveActorId(CURRENT_USER_ID),
-      id: nodeId,
-      parentId: parentNode.id,
-      type: config.type,
-      slug: parsed.slug,
-      name: parsed.name,
-      description: parsed.description,
-      // No `entryFile` here: it is a property of the node TYPE, read straight
-      // off `config` by `getFileTreeNode`. Copying it onto every node row put a
-      // product-enforced field in the free-form metadata bag for no gain.
-      metadata: {
-        ...parsed.metadata,
-        visibility: parsed.visibility,
-        version: parsed.version,
-      },
-      position: 0,
-      createdAt,
-      updatedAt: createdAt,
+    await runWithContextCreationGuard({ nodes: 1 }, async () => {
+      await db.insert(busabaseNodes).values({
+        // Direct-materialization fast path: this insert never reaches
+        // `mergeNodeCreate`, so the creator has to be stamped here too.
+        createdBy: resolveActorId(CURRENT_USER_ID),
+        id: nodeId,
+        parentId: parentNode.id,
+        type: config.type,
+        slug: parsed.slug,
+        name: parsed.name,
+        description: parsed.description,
+        // No `entryFile` here: it is a property of the node TYPE, read straight
+        // off `config` by `getFileTreeNode`. Copying it onto every node row put a
+        // product-enforced field in the free-form metadata bag for no gain.
+        metadata: {
+          ...parsed.metadata,
+          visibility: parsed.visibility,
+          version: parsed.version,
+        },
+        position: 0,
+        createdAt,
+        updatedAt: createdAt,
+      });
     });
   } catch (error) {
     if (isNodeSlugUniqueViolation(error)) {
@@ -741,9 +818,25 @@ export const resolveFileTreeKind = async (
   throw new ORPCError("NOT_FOUND", { message: `File-tree node not found: ${nodeIdOrSlug}` });
 };
 
+/** Total files on the node; only queried when the inline page came back full. */
+const countAssetUsageFiles = async (node: NodePO): Promise<number> => {
+  const db = await getDb();
+  const [row] = await db
+    .select({ value: count() })
+    .from(busabaseAssetUsages)
+    .where(and(...assetUsageFileConditions(node)));
+  return Number(row?.value ?? 0);
+};
+
+export interface GetFileTreeNodeOptions {
+  /** Override the inline cap. Production omits it; tests use it to reach truncation cheaply. */
+  inlineFileLimit?: number;
+}
+
 export const getFileTreeNode = async (
   config: FileTreeKindConfig,
   nodeIdOrSlug: string,
+  options: GetFileTreeNodeOptions = {},
 ): Promise<FileTreeNodeVO> => {
   await ensureReady();
   const node = await getStorageFileTreeNode(config.type, nodeIdOrSlug);
@@ -752,7 +845,13 @@ export const getFileTreeNode = async (
   }
   const nodeMap = await loadNodesByIds([node.id]);
   const nodeVO = nodeMap.get(node.id) ?? toNodeVO(node, null);
-  const files = await listAssetUsageFiles(node);
+  const inlineFileLimit = options.inlineFileLimit ?? FILE_TREE_INLINE_FILE_LIMIT;
+  // One extra row is the truncation probe, so a node that fits never pays for
+  // the count query.
+  const inline = await listAssetUsageFiles(node, { limit: inlineFileLimit + 1 });
+  const filesTruncated = inline.length > inlineFileLimit;
+  const files = filesTruncated ? inline.slice(0, inlineFileLimit) : inline;
+  const fileCount = filesTruncated ? await countAssetUsageFiles(node) : files.length;
   return {
     node: nodeVO,
     // Read straight off the node-type config, never from `metadata`. The
@@ -782,6 +881,8 @@ export const getFileTreeNode = async (
       (getContextRestrictedVisibility() ? "private" : "workspace"),
     version: node.metadata.version || "0.1.0",
     files,
+    fileCount,
+    filesTruncated,
   };
 };
 
@@ -803,13 +904,140 @@ export const listFileTreeNodes = async (config: FileTreeKindConfig) => {
   return Promise.all(nodes.map((node) => getFileTreeNode(config, node.id)));
 };
 
-export const listFileTreeFiles = async (config: FileTreeKindConfig, nodeIdOrSlug: string) => {
+/**
+ * Who keeps asking for a whole file list, and how often.
+ *
+ * Production had an API key pulling a 46k-file Drive every ~11 s, and the only
+ * way to name it was this log line. One line per node per window keeps a
+ * polling client from flooding the logs while still reporting its rate.
+ */
+const UNPAGED_LISTING_LOG_WINDOW_MS = 10 * 60 * 1000;
+const unpagedListings = new Map<string, { since: number; calls: number }>();
+
+const noteUnpagedListing = (config: FileTreeKindConfig, node: NodePO, limit: number) => {
+  const now = Date.now();
+  const entry = unpagedListings.get(node.id);
+  if (entry && now - entry.since < UNPAGED_LISTING_LOG_WINDOW_MS) {
+    entry.calls += 1;
+    return;
+  }
+  const previous = entry ? ` (${entry.calls} unpaged calls in the previous window)` : "";
+  unpagedListings.set(node.id, { since: now, calls: 1 });
+  console.warn(
+    `[fileTrees.listFiles] no limit given for ${config.type} ${node.id}; returning at most ${limit} rows${previous}. ` +
+      `Page with limit + after. ${describeCaller()}`,
+  );
+};
+
+export const listFileTreeFiles = async (
+  config: FileTreeKindConfig,
+  nodeIdOrSlug: string,
+  page: FilePage = {},
+) => {
   await ensureReady();
   const node = await getStorageFileTreeNode(config.type, nodeIdOrSlug);
   if (!node) {
     throw fileTreeNodeNotFound(config, nodeIdOrSlug);
   }
-  return listAssetUsageFiles(node);
+  // No `limit` means "first page", never "everything": an unpaged call on a
+  // 46k-file Drive cost ~5 s of database time per request.
+  const limit = Math.min(
+    Math.max(page.limit ?? FILE_TREE_FILE_PAGE_MAX, 1),
+    FILE_TREE_FILE_PAGE_MAX,
+  );
+  if (page.limit === undefined) noteUnpagedListing(config, node, limit);
+  return listAssetUsageFiles(node, { ...page, limit });
+};
+
+/** Default files per `listEntries` page. */
+export const FILE_TREE_ENTRIES_PAGE_SIZE = 1_000;
+/** Most subfolders one `listEntries` response names; past it `foldersTruncated` is set. */
+export const FILE_TREE_ENTRIES_FOLDER_MAX = 1_000;
+
+/** Direct subfolder names of `prefix`, derived from the paths below it. */
+const listAssetUsageSubfolders = async (
+  node: NodePO,
+  prefix: string,
+  max: number,
+  /** Only names after this one — the `foldersNextCursor` of the previous page. */
+  after?: string,
+) => {
+  const db = await getDb();
+  // No join: the folder names come from `path` alone, so this reads only the
+  // usage rows under the folder, never the asset or attachment rows.
+  const name = sql<string>`split_part(${pathBelow(prefix)}, '/', 1)`;
+  const rows = await db
+    .selectDistinct({ name })
+    .from(busabaseAssetUsages)
+    .where(
+      and(
+        ...assetUsageFileConditions(node),
+        underFolder(prefix),
+        sql`strpos(${pathBelow(prefix)}, '/') > 0`,
+        after === undefined ? undefined : sql`${name} > ${after}`,
+      ),
+    )
+    // By position, not by repeating the expression: each copy binds its own
+    // parameters, so Postgres cannot see that the ORDER BY matches the DISTINCT.
+    .orderBy(sql`1`)
+    .limit(max + 1);
+  return rows.map((row) => row.name);
+};
+
+/** `"docs/guides/"` → `"docs/guides"`; `""` and `"/"` → root. Throws on `..` or a leading `/`. */
+const normalizeFolderPath = (folder: string | undefined): string => {
+  const trimmed = (folder ?? "").replace(/\\/g, "/").replace(/\/+$/, "");
+  return trimmed === "" ? "" : normalizeUsagePath(trimmed);
+};
+
+/**
+ * One folder of a file tree: its direct subfolders and one page of its direct
+ * files. This is how a client browses a Drive too big to list in one go —
+ * expanding a folder costs that folder, not the whole Drive.
+ */
+export const listFileTreeEntries = async (
+  config: FileTreeKindConfig,
+  nodeIdOrSlug: string,
+  input: { folder?: string; limit?: number; after?: string; foldersAfter?: string } = {},
+): Promise<FileTreeEntriesVO> => {
+  await ensureReady();
+  const node = await getStorageFileTreeNode(config.type, nodeIdOrSlug);
+  if (!node) {
+    throw fileTreeNodeNotFound(config, nodeIdOrSlug);
+  }
+  const folder = normalizeFolderPath(input.folder);
+  const prefix = folder === "" ? "" : `${folder}/`;
+  const limit = Math.min(
+    Math.max(input.limit ?? FILE_TREE_ENTRIES_PAGE_SIZE, 1),
+    FILE_TREE_FILE_PAGE_MAX,
+  );
+  // One cursor kind per request: a `foldersAfter` page continues the subfolder
+  // list and carries no files, an `after` page continues the files and carries
+  // no subfolders. The first (uncursored) page carries one of each. That keeps
+  // a folder with more subfolders than one response can name fully browsable,
+  // instead of silently stopping at the first 1,000.
+  const wantFolders = input.after === undefined;
+  const wantFiles = input.foldersAfter === undefined;
+  const [folderNames, page] = await Promise.all([
+    wantFolders
+      ? listAssetUsageSubfolders(node, prefix, FILE_TREE_ENTRIES_FOLDER_MAX + 1, input.foldersAfter)
+      : Promise.resolve([]),
+    wantFiles
+      ? listAssetUsageFiles(node, { limit: limit + 1, after: input.after }, { directlyIn: prefix })
+      : Promise.resolve([]),
+  ]);
+  const folders = folderNames.slice(0, FILE_TREE_ENTRIES_FOLDER_MAX);
+  const foldersTruncated = folderNames.length > FILE_TREE_ENTRIES_FOLDER_MAX;
+  const files = page.slice(0, limit);
+  return {
+    folder,
+    folders: folders.map((name) => ({ name, path: `${prefix}${name}` })),
+    foldersTruncated,
+    // Only meaningful while truncated: the last name is where the next page starts.
+    foldersNextCursor: foldersTruncated ? (folders.at(-1) ?? null) : null,
+    files,
+    nextCursor: page.length > limit ? (files.at(-1)?.path ?? null) : null,
+  };
 };
 
 export const readFileTreeFile = async (
@@ -867,6 +1095,42 @@ export const readFileTreeFile = async (
     assetUrl: storage.getPublicUrl(row.storageKey),
     contentHash: row.contentHash ?? (isText ? hashBuffer(Buffer.from(content, "utf8")) : ""),
   };
+};
+
+/**
+ * A file's bytes, whatever its kind. For a server that must publish exactly what
+ * the node holds; `readFileTreeFile` answers a binary file with a URL instead.
+ */
+export const readFileTreeFileBytes = async (
+  config: FileTreeKindConfig,
+  nodeIdOrSlug: string,
+  filePath: string,
+): Promise<Buffer> => {
+  await ensureReady();
+  const db = await getDb();
+  const node = await getStorageFileTreeNode(config.type, nodeIdOrSlug);
+  if (!node) {
+    throw fileTreeNodeNotFound(config, nodeIdOrSlug);
+  }
+  const path = normalizeUsagePath(filePath);
+  const [row] = await db
+    .select({ storageKey: attachments.storageKey })
+    .from(busabaseAssetUsages)
+    .innerJoin(busabaseAssets, eq(busabaseAssetUsages.assetId, busabaseAssets.id))
+    .innerJoin(attachments, eq(busabaseAssets.attachmentId, attachments.id))
+    .where(
+      and(
+        eq(busabaseAssetUsages.spaceId, getContextSpaceId()),
+        eq(busabaseAssetUsages.ownerType, usageOwnerType(config)),
+        eq(busabaseAssetUsages.nodeId, node.id),
+        eq(busabaseAssetUsages.path, path),
+      ),
+    )
+    .limit(1);
+  if (!row) {
+    throw fileTreeFileNotFound(config, path);
+  }
+  return storage.getObject(row.storageKey);
 };
 
 /**
@@ -1008,10 +1272,25 @@ export const createFileTreeChangeRequest = async (
   scanForSecrets(gitignoreResult.kept);
   // A change request carries only a delta, so this checks a `package.json` the edit actually
   // rewrites (or deletes) — an edit to some other file is none of its business.
+  // An edit to `package.json` alone is judged by what the node's manifest already
+  // declares: a website's `package.json` only builds its Worker bundle.
+  const touchesPackageJson = gitignoreResult.kept.some(
+    (operation) => operation.path === "package.json",
+  );
+  const carriesManifest = gitignoreResult.kept.some(
+    (operation) => operation.path === "airapp.json" && operation.kind !== "delete",
+  );
+  const existingManifest =
+    config.type === "airapp" && touchesPackageJson && !carriesManifest
+      ? await readFileTreeFileBytes(config, node.id, "airapp.json")
+          .then((bytes) => bytes.toString("utf8"))
+          .catch(() => undefined)
+      : undefined;
   assertAirAppRunnable(config.type, gitignoreResult.kept, {
     deletedPaths: gitignoreResult.kept
       .filter((operation) => operation.kind === "delete")
       .map((operation) => operation.path),
+    existingManifest,
   });
   const keptOperations = new Set(gitignoreResult.kept);
   const operations = parsed.operations.filter(

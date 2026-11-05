@@ -32,6 +32,14 @@ export interface LiveInvalidationBatch {
   targets: ReadonlySet<LiveInvalidationTarget>;
 }
 
+export interface LiveInvalidationFlushOptions {
+  /**
+   * Settle batched events without issuing network requests. This marks cached
+   * queries stale so inactive routes converge on their next mount.
+   */
+  refetchType?: "none";
+}
+
 export const classifyLiveInvalidation = (event: BusabaseLiveEvent): LiveInvalidationBatch => {
   const targets = new Set<LiveInvalidationTarget>();
   const baseIds = new Set<string>();
@@ -117,11 +125,13 @@ export const classifyLiveInvalidation = (event: BusabaseLiveEvent): LiveInvalida
 
 export interface LiveInvalidationBatcher {
   cancel(): void;
+  /** Flush pending targets now; the default timer path still refetches normally. */
+  flush(options?: LiveInvalidationFlushOptions): void;
   push(event: BusabaseLiveEvent): void;
 }
 
 export const createLiveInvalidationBatcher = (
-  flush: (batch: LiveInvalidationBatch) => void,
+  flush: (batch: LiveInvalidationBatch, options?: LiveInvalidationFlushOptions) => void,
   windowMs: number = LIVE_INVALIDATION_WINDOW_MS,
 ): LiveInvalidationBatcher => {
   const pendingTargets = new Set<LiveInvalidationTarget>();
@@ -132,7 +142,8 @@ export const createLiveInvalidationBatcher = (
   >();
   let timer: ReturnType<typeof setTimeout> | null = null;
 
-  const flushPending = () => {
+  const flushPending = (options?: LiveInvalidationFlushOptions) => {
+    if (timer) clearTimeout(timer);
     timer = null;
     // `created` normally arrives beside `pending_review` and contributes these
     // targets already. If that persisted event was missed, refresh the queue
@@ -154,7 +165,7 @@ export const createLiveInvalidationBatcher = (
     };
     pendingTargets.clear();
     pendingBaseIds.clear();
-    flush(batch);
+    flush(batch, options);
   };
 
   return {
@@ -164,6 +175,9 @@ export const createLiveInvalidationBatcher = (
       pendingTargets.clear();
       pendingBaseIds.clear();
       pendingChangeRequests.clear();
+    },
+    flush(options) {
+      flushPending(options);
     },
     push(event) {
       const batch = classifyLiveInvalidation(event);
@@ -183,7 +197,7 @@ export const createLiveInvalidationBatcher = (
       for (const target of batch.targets) pendingTargets.add(target);
       for (const baseId of batch.baseIds) pendingBaseIds.add(baseId);
       if ((batch.targets.size > 0 || pendingChangeRequests.size > 0) && !timer) {
-        timer = setTimeout(flushPending, windowMs);
+        timer = setTimeout(() => flushPending(), windowMs);
       }
     },
   };

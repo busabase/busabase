@@ -1,9 +1,13 @@
-import type { ReactNode } from "react";
+import { listNodeTypes } from "busabase-contract/domains";
+import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { Router } from "wouter";
 import { CoreI18nProvider } from "../../../i18n";
+import { nodeIconForType } from "../helpers/node-icons";
 import { EmptyAgentGuide } from "./empty-agent-guide";
+import { HomeGuideContext, type HomeGuideMode } from "./home-guide-context";
+import { NodeTypeTour } from "./node-type-tour";
 
 // The template CTA is a SPALink, so it needs a wouter location that does not
 // reach for `window` under `renderToStaticMarkup` (see dashboard-shell.test).
@@ -96,5 +100,86 @@ describe("EmptyAgentGuide", () => {
     expect(markup).toContain("连接你的 Agent");
     expect(markup).toContain("推荐的第一步");
     expect(markup).toContain("以后再说");
+  });
+});
+
+describe("EmptyAgentGuide as Home's Getting started", () => {
+  const inHome = (node: ReactNode, audience: HomeGuideMode["audience"]) => (
+    <HomeGuideContext.Provider value={{ audience, onDismiss: () => {} }}>
+      {node}
+    </HomeGuideContext.Provider>
+  );
+
+  it("keeps the template-first actions for an empty space, swapping the four Bases for real node types", () => {
+    const markup = render(inHome(<EmptyAgentGuide onCreateNode={() => {}} />, "newSpace"));
+    const templateLink = markup.match(/<a[^>]*href="\/templates"[^>]*>/)?.[0] ?? "";
+    expect(templateLink).toContain("bg-primary");
+    expect(markup).toContain("Create a Base or document");
+    expect(markup).toContain('data-node-type="base"');
+    expect(markup).not.toContain("Knowledge Base");
+    expect(markup).toContain('aria-label="Close getting started"');
+  });
+
+  it("keeps Cloud's agent-first cue for an empty space", () => {
+    const markup = render(
+      inHome(
+        <EmptyAgentGuide agentCue={{ onDismiss: () => {} }} onCreateNode={() => {}} />,
+        "newSpace",
+      ),
+    );
+    expect(markup.match(/data-agent-cue="ring"/g)).toHaveLength(1);
+    expect(markup).toContain('href="/templates"');
+    expect(markup).toContain('data-node-type="doc"');
+  });
+
+  it("drops the template and manual-create paths for an invited member, keeping Connect your agent", () => {
+    for (const agentCue of [undefined, { onDismiss: () => {} }]) {
+      const markup = render(
+        inHome(<EmptyAgentGuide agentCue={agentCue} onCreateNode={() => {}} />, "member"),
+      );
+      expect(markup).toContain("Getting started");
+      expect(markup).not.toContain('href="/templates"');
+      expect(markup).not.toContain("Create a Base or document");
+      expect(markup).toContain("Connect your agent");
+      // No pulsing cue in somebody else's populated space.
+      expect(markup).not.toContain("data-agent-cue");
+    }
+  });
+
+  it("localizes the member card, calling the Agent 智能体", () => {
+    const markup = render(inHome(<EmptyAgentGuide />, "member"), "zh-CN");
+    expect(markup).toContain("快速上手");
+    expect(markup).toContain("智能体");
+  });
+});
+
+describe("NodeTypeTour", () => {
+  it("draws each type with the exact icon the sidebar uses, and a preview", () => {
+    const markup = render(<NodeTypeTour />);
+    const featured = ["folder", "base", "doc", "airapp", "skill", "drive"];
+    for (const type of featured) {
+      const item = markup.match(new RegExp(`<li[^>]*data-node-type="${type}"[\\s\\S]*?</li>`))?.[0];
+      expect(item, type).toBeTruthy();
+      expect(item).toContain(
+        renderToStaticMarkup(
+          createElement(nodeIconForType(type), {
+            "aria-hidden": "true",
+            className: "size-4 shrink-0 text-muted-foreground",
+          }),
+        ),
+      );
+      // A drawing, not just the glyph.
+      expect(item?.match(/<svg/g)?.length ?? 0, type).toBeGreaterThanOrEqual(2);
+    }
+  });
+
+  it("lists every creatable type, the rest one click behind More types", () => {
+    const markup = render(<NodeTypeTour />);
+    const creatable = listNodeTypes().filter(
+      (definition) => definition.capabilities.creatable && !definition.capabilities.hidden,
+    );
+    const shown = markup.match(/data-node-type="/g)?.length ?? 0;
+    expect(shown).toBe(6);
+    expect(markup).toContain(`More types (${creatable.length - 6})`);
   });
 });

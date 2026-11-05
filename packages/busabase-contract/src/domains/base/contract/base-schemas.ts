@@ -81,7 +81,8 @@ export const fieldOptionsSchema = z
       })
       .optional(),
     // Per-field config for `attachment` columns (all optional; logic enforces a
-    // 200MB ceiling regardless).
+    // 5GB ceiling regardless, and a host may enforce a tighter per-file limit at
+    // upload time — `maxFileSize` can only tighten either one, never loosen it).
     attachment: z
       .object({
         maxFiles: z.number().int().positive().optional(),

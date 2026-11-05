@@ -1,6 +1,7 @@
 import type { BaseFieldVO, RecordVO } from "busabase-contract/types";
 import { useCoreI18n, useCoreLocale } from "../../../i18n";
 import { formatFormulaValue, previewFormulaField } from "../../base/formula/field-preview";
+import { formulaDependsOnOmittedValues } from "../helpers/formula-diagnostic";
 
 /** Never replace stored values with a new evaluation (NOW/TODAY may have advanced). */
 export function FormulaValue({
@@ -14,8 +15,12 @@ export function FormulaValue({
 }) {
   const messages = useCoreI18n();
   const locale = useCoreLocale();
+  const needsFullInputs =
+    (value === null || value === undefined) &&
+    record &&
+    formulaDependsOnOmittedValues(field, record);
   const diagnostic =
-    (value === null || value === undefined) && record
+    (value === null || value === undefined) && record && !needsFullInputs
       ? previewFormulaField({
           expression: field.options.formula?.expression ?? "",
           slug: field.slug,
@@ -27,9 +32,11 @@ export function FormulaValue({
         })
       : null;
   const error = diagnostic?.error;
-  const text = error
-    ? messages.formula.computationError
-    : formatFormulaValue(value, field.options.formula, locale);
+  const text = needsFullInputs
+    ? messages.operation.viewFullContent
+    : error
+      ? messages.formula.computationError
+      : formatFormulaValue(value, field.options.formula, locale);
   return (
     <span
       className={error ? "text-rejected-strong" : undefined}

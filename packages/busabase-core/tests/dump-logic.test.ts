@@ -5,6 +5,11 @@ import { createRouterClient } from "@orpc/server";
 import { getLocalStoragePath, storage } from "openlib/storage";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runWithBusabaseContext } from "../src/context";
+import { getDb } from "../src/db";
+import {
+  enqueueStorageCleanup,
+  processStorageCleanupJobs,
+} from "../src/domains/assets/logic/storage-cleanup-logic";
 import { docBodyKey } from "../src/domains/doc/handlers";
 import { queryInChunks } from "../src/domains/dump/logic/import-logic";
 import { folderReadmeKey } from "../src/domains/folder/handlers";
@@ -356,6 +361,55 @@ describe("dump domain logic — oRPC integration", () => {
     // Stable id-ascending order across the whole scan.
     const sorted = [...seenIds].sort();
     expect(seenIds).toEqual(sorted);
+  });
+
+  // ── attachmentBlobs: a rejected key must not strand the bytes just written ──
+  describe("attachmentBlobs against a retired key", () => {
+    const base64 = Buffer.from("restored bytes").toString("base64");
+    const importBlob = async (spaceId: string, storageKey: string) => {
+      const { sessionId } = await inSpace(spaceId, () =>
+        client.dump.importBegin({ sourceSpaceId: spaceId }),
+      );
+      return inSpace(spaceId, () =>
+        client.dump.importTables({
+          sessionId,
+          table: "attachmentBlobs",
+          rows: [{ storageKey, mimeType: "text/plain", base64 }],
+        }),
+      );
+    };
+    const retire = async (spaceId: string, storageKey: string) => {
+      const db = await getDb();
+      await enqueueStorageCleanup(db, { storageKey, kind: "doc", spaceId });
+      await processStorageCleanupJobs(db, { now: new Date(Date.now() + 1_000) });
+    };
+
+    it("removes the bytes it wrote when the key finished cleanup long ago", async () => {
+      const spaceId = "space_dump_blob_retired";
+      const storageKey = "attachments/dump-retired-completed.txt";
+      await retire(spaceId, storageKey);
+
+      await expect(importBlob(spaceId, storageKey)).rejects.toThrow(/expired/i);
+      expect(await storage.objectExists(storageKey)).toBe(false);
+    });
+
+    it("keeps an object that existed before the rejected import", async () => {
+      const spaceId = "space_dump_blob_prior";
+      const storageKey = "attachments/dump-retired-prior.txt";
+      await retire(spaceId, storageKey);
+      await storage.uploadFileToKey(Buffer.from("late put"), storageKey, "text/plain");
+
+      await expect(importBlob(spaceId, storageKey)).rejects.toThrow(/expired/i);
+      expect(await storage.objectExists(storageKey)).toBe(true);
+    });
+
+    it("keeps the bytes of an accepted import", async () => {
+      const spaceId = "space_dump_blob_ok";
+      const storageKey = "attachments/dump-accepted.txt";
+
+      await expect(importBlob(spaceId, storageKey)).resolves.toMatchObject({ inserted: 1 });
+      expect(await storage.objectExists(storageKey)).toBe(true);
+    });
   });
 
   // ── importCommit integrity checks catch a deliberately-orphaned asset ──

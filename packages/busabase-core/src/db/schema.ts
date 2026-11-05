@@ -184,7 +184,7 @@ export const busabaseNodes = pgTable(
          * particular value: `null` and `"browser"` mean different things here,
          * so the column stores the absence rather than defaulting it away.
          */
-        airappEngine?: "browser" | "local" | "remote";
+        airappEngine?: "browser" | "local" | "remote" | "site";
       }>()
       .notNull()
       .default({}),
@@ -882,6 +882,7 @@ export type AuditEventPO = typeof busabaseAuditEvents.$inferSelect;
 // Attachments table — shared, auth-agnostic (lives in open-domains; consumed by
 // both apps/busabase and Busabase Cloud).
 export * from "open-domains/attachments/schema";
+export * from "../domains/agents/schema/agent-session-commands";
 // External ACP agent sessions (Claude Code / Codex / remote Buda) and their
 // transcript. Local-subprocess rows are the only durable record of a session;
 // remote ones index state the agent itself still holds.
@@ -893,6 +894,7 @@ export * from "../domains/agents/schema/router-grants";
 // grants, and the pending-enrollment/connection pair (one grant can enroll
 // multiple machines, so these are not singleton tables).
 export * from "../domains/agents/schema/router-oauth-states";
+export * from "../domains/assets/schema/asset-text-search";
 // Assets domain: Drive Grep Retrieval text slot (0..1 row per Asset).
 export * from "../domains/assets/schema/asset-texts";
 // Assets domain: the deduped Asset library + its where-used reverse index.
@@ -907,9 +909,15 @@ export * from "../domains/embed-links/schema";
 // Form-as-Node: a node bound to a Base; submissions become record-create CRs.
 export * from "../domains/form/schema";
 export { busabaseSpaceInstructions } from "../domains/space-instructions/schema/space-instructions";
+// Which Doc/HTML node Home shows as the space's welcome page.
+export { busabaseSpaceWelcome } from "../domains/space-welcome/schema/space-welcome";
 // Vault-managed secrets and variables used by agents, MCP, and API tools.
 export * from "../domains/vault/schema/vault-items";
 export * from "../domains/webhook/schema/webhook-deliveries";
 // Webhook automation: configurable rules (HTTP webhook / notify-agent /
 // sandboxed function) dispatched on Busabase events, plus their delivery log.
 export * from "../domains/webhook/schema/webhook-rules";
+// Workflow runtime: durable runs (so a Wait survives a restart and any replica
+// can resume it) and the event-trigger projection of saved event-mode graphs.
+export * from "../domains/workflow/schema/workflow-runs";
+export * from "../domains/workflow/schema/workflow-triggers";

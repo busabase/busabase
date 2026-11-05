@@ -29,6 +29,7 @@ import {
   updateViewInputSchema,
 } from "../../../logic/store";
 import { normalizeViewConfig } from "../../../logic/vo";
+import { deriveViewSlug } from "../utils/view-slug";
 import { baseNotFound, lastViewDeleteRejected } from "./errors";
 import { getBase, listViews } from "./queries";
 
@@ -107,18 +108,17 @@ export const createViewChangeRequest = async (
   }
 
   const rawParsed = createViewInputSchema.parse(input);
-  // Auto-generate slug from name if not provided.
-  const autoSlug =
-    rawParsed.slug ??
-    rawParsed.name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-|-$/g, "");
-  const parsed = { ...rawParsed, slug: autoSlug };
   const existingViews = await listViews(base.id);
-  if (existingViews.some((view) => view.slug === parsed.slug)) {
-    throw new ORPCError("CONFLICT", { message: `View slug already exists: ${parsed.slug}` });
+  const takenSlugs = new Set(existingViews.map((view) => view.slug));
+  if (rawParsed.slug !== undefined && takenSlugs.has(rawParsed.slug)) {
+    throw new ORPCError("CONFLICT", {
+      message: `View slug already exists: "${rawParsed.slug}". Pass a different slug, or omit it to have one generated.`,
+    });
   }
+  const parsed = {
+    ...rawParsed,
+    slug: rawParsed.slug ?? deriveViewSlug(rawParsed.name, takenSlugs),
+  };
 
   const changeRequestId = id("crq");
   const operationId = id("opr");

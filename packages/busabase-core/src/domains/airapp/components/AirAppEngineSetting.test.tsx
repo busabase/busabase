@@ -21,8 +21,8 @@ describe("AirAppEngineSetting", () => {
 
     expect(markup).toContain("data-airapp-engine-setting");
     expect(markup).toContain("Engine");
-    expect(markup).toContain("Remote machine");
-    expect(markup).toContain("Provisioned per run");
+    expect(markup).toContain("Cloud sandbox");
+    expect(markup).toContain("A temporary cloud machine per run");
   });
 
   it("still renders with one engine, because it also says whether the app decides", () => {
@@ -59,7 +59,7 @@ describe("AirAppEngineSetting", () => {
       </CoreI18nProvider>,
     );
 
-    expect(markup).toContain("Follow the app (Remote machine)");
+    expect(markup).toContain("Follow the app (Cloud sandbox)");
   });
 
   it("renders a manifest requirement as read-only and ignores a saved override", () => {
@@ -75,13 +75,13 @@ describe("AirAppEngineSetting", () => {
     );
 
     expect(markup).toContain("data-airapp-engine-required");
-    expect(markup).toContain("App requires Remote machine");
+    expect(markup).toContain("App requires Cloud sandbox");
     expect(markup).toContain("cannot be overridden");
     expect(markup).not.toContain("Follow the app");
     expect(markup).not.toContain("node-settings-airapp-engine");
   });
 
-  it("explains how to enable a required Remote machine when Sandock is unavailable", () => {
+  it("explains how to enable a required Cloud sandbox when Sandock is unavailable", () => {
     const markup = renderToStaticMarkup(
       <CoreI18nProvider locale="en">
         <AirAppEngineSetting
@@ -93,7 +93,7 @@ describe("AirAppEngineSetting", () => {
       </CoreI18nProvider>,
     );
 
-    expect(markup).toContain("App requires Remote machine");
+    expect(markup).toContain("App requires Cloud sandbox");
     expect(markup).toContain("Sandock is not configured on this deployment.");
     expect(markup).not.toContain("node-settings-airapp-engine");
   });

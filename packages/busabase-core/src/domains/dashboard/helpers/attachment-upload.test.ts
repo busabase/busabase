@@ -67,4 +67,132 @@ describe("completeAttachmentUpload", () => {
       mimeType: "application/pdf",
     });
   });
+
+  describe("large files (multipart adapter)", () => {
+    const big = { ...input, fileName: "video.mp4", mimeType: "video/mp4", sizeBytes: 101 };
+    const created = {
+      storageKey: "attachments/u/record-field/v.mp4",
+      publicUrl: "https://cdn.example/v.mp4",
+      uploadId: "up-1",
+      partSize: 64,
+      partCount: 2,
+      expiresIn: 3600,
+      duplicate: false,
+    };
+    const confirmed = {
+      success: true,
+      attachmentId: "attachment-3",
+      assetId: "asset-3",
+      storageKey: created.storageKey,
+      publicUrl: created.publicUrl,
+    };
+
+    it("keeps files at or below the threshold on the single-PUT path", async () => {
+      const multipartCreate = vi.fn();
+      await completeAttachmentUpload(
+        { ...big, sizeBytes: 100 },
+        {
+          createUploadUrl: vi.fn().mockResolvedValue({
+            uploadUrl: "https://upload.example/v",
+            storageKey: "s",
+            publicUrl: "p",
+            expiresIn: 60,
+          }),
+          uploadBytes: vi.fn(),
+          confirmUpload: vi.fn().mockResolvedValue(confirmed),
+          multipart: {
+            thresholdBytes: 100,
+            create: multipartCreate,
+            uploadParts: vi.fn(),
+            complete: vi.fn(),
+            abort: vi.fn(),
+          },
+        },
+      );
+      expect(multipartCreate).not.toHaveBeenCalled();
+    });
+
+    it("creates, uploads parts, then completes with the confirm fields", async () => {
+      const createUploadUrl = vi.fn();
+      const complete = vi.fn().mockResolvedValue(confirmed);
+      const result = await completeAttachmentUpload(
+        { ...big, metadata: { source: "test" } },
+        {
+          createUploadUrl,
+          uploadBytes: vi.fn(),
+          confirmUpload: vi.fn(),
+          multipart: {
+            thresholdBytes: 100,
+            create: vi.fn().mockResolvedValue(created),
+            uploadParts: vi.fn().mockResolvedValue(undefined),
+            complete,
+            abort: vi.fn(),
+          },
+        },
+      );
+      expect(createUploadUrl).not.toHaveBeenCalled();
+      expect(complete).toHaveBeenCalledWith({
+        storageKey: created.storageKey,
+        fileName: "video.mp4",
+        mimeType: "video/mp4",
+        sizeBytes: 101,
+        spaceId: undefined,
+        context: "record-field",
+        contentHash: undefined,
+        metadata: { source: "test" },
+        uploadId: "up-1",
+      });
+      expect(result).toMatchObject({ id: "asset-3", size: 101 });
+    });
+
+    it("aborts the server-side upload when a part fails, and surfaces the part error", async () => {
+      const abort = vi.fn().mockResolvedValue({ success: true });
+      const complete = vi.fn();
+      const failure = new Error("Upload failed (500)");
+      await expect(
+        completeAttachmentUpload(big, {
+          createUploadUrl: vi.fn(),
+          uploadBytes: vi.fn(),
+          confirmUpload: vi.fn(),
+          multipart: {
+            thresholdBytes: 100,
+            create: vi.fn().mockResolvedValue(created),
+            uploadParts: vi.fn().mockRejectedValue(failure),
+            complete,
+            abort,
+          },
+        }),
+      ).rejects.toBe(failure);
+      expect(abort).toHaveBeenCalledWith({
+        storageKey: created.storageKey,
+        uploadId: "up-1",
+        spaceId: undefined,
+      });
+      expect(complete).not.toHaveBeenCalled();
+    });
+
+    it("skips the transfer entirely for a duplicate", async () => {
+      const uploadParts = vi.fn();
+      const result = await completeAttachmentUpload(big, {
+        createUploadUrl: vi.fn(),
+        uploadBytes: vi.fn(),
+        confirmUpload: vi.fn(),
+        multipart: {
+          thresholdBytes: 100,
+          create: vi.fn().mockResolvedValue({
+            ...created,
+            uploadId: "",
+            duplicate: true,
+            attachmentId: "attachment-9",
+            assetId: "asset-9",
+          }),
+          uploadParts,
+          complete: vi.fn(),
+          abort: vi.fn(),
+        },
+      });
+      expect(uploadParts).not.toHaveBeenCalled();
+      expect(result).toMatchObject({ id: "asset-9" });
+    });
+  });
 });

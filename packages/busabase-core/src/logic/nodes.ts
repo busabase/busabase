@@ -18,7 +18,12 @@ import type { NodeSearchResultVO, NodeVO } from "busabase-contract/types";
 import { NodeIconSchema } from "busabase-contract/types";
 import { and, asc, desc, eq, ilike, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import { z } from "zod";
-import { getContextSpaceId, resolveActorId, withContextSourceMeta } from "../context";
+import {
+  assertContextCreationAllowed,
+  getContextSpaceId,
+  resolveActorId,
+  withContextSourceMeta,
+} from "../context";
 import { getDb } from "../db";
 import {
   busabaseBases,
@@ -30,7 +35,9 @@ import {
   type NodePO,
   nodeListColumns,
 } from "../db/schema";
+import { removeSitesOfPurgedNodes } from "../domains/airapp/logic/site-lifecycle";
 import { releasePurgedNodeAssets } from "../domains/assets/logic/purge-assets-logic";
+import { notifySpaceStorageChanged } from "../domains/assets/logic/space-storage-changes";
 import { processStorageCleanupJobs } from "../domains/assets/logic/storage-cleanup-logic";
 import { insertAuditEvent } from "./audit";
 import { insertCommit } from "./commits";
@@ -663,6 +670,18 @@ export const purgeNode = async (nodeId: string): Promise<{ purged: boolean }> =>
   const db = await getDb();
   const spaceId = getContextSpaceId();
   await assertNodePermission(nodeId, "manage", undefined, db);
+  // An AirApp published as a site lives outside this database. Taking it down has
+  // to succeed first, or the app is gone and its site is still up with nothing
+  // left in the product to reach it from. The transaction below re-checks that
+  // the node is archived; this check only keeps a refused purge from touching it.
+  const [purgeTarget] = await db
+    .select({ archivedAt: busabaseNodes.archivedAt, deletedAt: busabaseNodes.deletedAt })
+    .from(busabaseNodes)
+    .where(and(eq(busabaseNodes.id, nodeId), eq(busabaseNodes.spaceId, spaceId)))
+    .limit(1);
+  if (purgeTarget?.archivedAt && !purgeTarget.deletedAt) {
+    await removeSitesOfPurgedNodes(await collectSubtreeIds(db, nodeId));
+  }
   const result = await db.transaction(async (transaction) => {
     const tx = transaction as unknown as typeof db;
     const [node] = await tx
@@ -734,6 +753,10 @@ export const purgeNode = async (nodeId: string): Promise<{ purged: boolean }> =>
   await processStorageCleanupJobs(db, { limit: 10 }).catch((error) => {
     console.error("[busabase] Deferred permanent-delete object cleanup failed", error);
   });
+  // Notify after commit: a host that keeps a storage counter re-reads the
+  // registry here, and inside the transaction it would see rows the rollback
+  // could still restore.
+  if (result.purged) await notifySpaceStorageChanged(db, spaceId);
   return result;
 };
 
@@ -792,6 +815,14 @@ export const createNodeChangeRequest = async (
   // on the target parent.
   for (const nodeId of targetNodeIds) {
     await assertNodePermission(nodeId, requiredLevel, submittedBy);
+  }
+
+  // A direct write the plan refuses should leave nothing behind, not even a Change
+  // Request in the activity feed. The merge asks again, for proposals and races.
+  if (autoMerge) {
+    await assertContextCreationAllowed({
+      nodes: parsed.operations.filter((op) => op.kind === "create" || op.kind === "restore").length,
+    });
   }
 
   // Fail before persisting a Change Request when its intended slug is already

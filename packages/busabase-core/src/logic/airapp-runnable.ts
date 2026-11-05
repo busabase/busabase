@@ -114,6 +114,18 @@ const commandTokens = (script: string): string[] =>
 const detectBundler = (devScript: string): string | undefined =>
   commandTokens(devScript).find((token) => (BUNDLER_COMMANDS as readonly string[]).includes(token));
 
+/**
+ * Whether the manifest says this app is never started with `npm run dev`: a
+ * non-Node runtime, its own start command, or a website. A site deploys a bundled
+ * Worker, and its `package.json` (if any) only builds that bundle. An app that only
+ * prefers `site` can still fall back to an engine that runs `npm run dev`, so it
+ * is not exempt.
+ */
+const declaresNoNpmRun = (manifest: ReturnType<typeof parseAirAppManifest>): boolean =>
+  (manifest.runtime !== undefined && manifest.runtime !== "node") ||
+  manifest.start !== undefined ||
+  manifest.requiredEngine === "site";
+
 const reject = (reason: string, fix: string): never => {
   throw new ORPCError("AIRAPP_NOT_RUNNABLE", {
     status: 422,
@@ -145,7 +157,15 @@ const reject = (reason: string, fix: string): never => {
 export const assertAirAppRunnable = (
   nodeType: string,
   entries: readonly AirAppFileEntry[],
-  options: { readonly deletedPaths?: readonly string[] } = {},
+  options: {
+    readonly deletedPaths?: readonly string[];
+    /**
+     * The node's current `airapp.json`, for a change request that rewrites
+     * `package.json` without touching the manifest. Only read for what it
+     * declares; a broken one is not this request's fault.
+     */
+    readonly existingManifest?: string;
+  } = {},
 ): void => {
   // Skills and Drives are documents, not programs — nothing here applies to them.
   if (nodeType !== "airapp") return;
@@ -159,9 +179,7 @@ export const assertAirAppRunnable = (
       const manifest = parseAirAppManifest(manifestEntry.content);
       // Either an explicit non-Node runtime, or an explicit start command,
       // means the `npm run dev` rule below is simply not what runs this app.
-      declaredNonNode =
-        (manifest.runtime !== undefined && manifest.runtime !== "node") ||
-        manifest.start !== undefined;
+      declaredNonNode = declaresNoNpmRun(manifest);
     } catch (error) {
       reject(
         error instanceof AirAppManifestError
@@ -169,6 +187,14 @@ export const assertAirAppRunnable = (
           : "its `airapp.json` could not be read.",
         'Fix `airapp.json` — for example `{"runtime": "python"}`, or remove it to use the Node defaults.',
       );
+    }
+  }
+
+  if (!manifestEntry && options.existingManifest !== undefined) {
+    try {
+      declaredNonNode = declaresNoNpmRun(parseAirAppManifest(options.existingManifest));
+    } catch {
+      // Left as it is: this request did not write it.
     }
   }
 

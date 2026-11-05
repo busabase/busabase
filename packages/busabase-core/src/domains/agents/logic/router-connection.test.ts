@@ -1,13 +1,16 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { AgentConnectionVOSchema } from "busabase-contract/domains/agents/types";
 import { eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { runWithBusabaseContext } from "../../../context";
 import { getDb } from "../../../db";
 import { busabaseRouterConnections } from "../schema/router-enrollments";
 import { busabaseRouterGrants } from "../schema/router-grants";
+import { getAgentProviderName } from "../utils/agent-provider";
 import { getAgentConnectionDetail, renameAgentConnection } from "./agent-connection-detail";
+import { listAgentConnections } from "./agent-connection-list";
 import {
   disconnectRouterConnection,
   listRouterConnections,
@@ -52,6 +55,41 @@ describe("router-connection: resolveLaunch + disconnect", () => {
     else process.env.ACPROUTER_ENROLLMENT_ORIGIN = originalOrigin;
     vi.unstubAllGlobals();
   });
+
+  it.each([
+    { agentSlug: "claude-acp", providerName: "Claude Code" },
+    { agentSlug: "codex-acp", providerName: "Codex" },
+    { agentSlug: "buda", providerName: "Buda" },
+    { agentSlug: "gemini", providerName: "gemini" },
+    { agentSlug: "other-agent", providerName: "other-agent" },
+  ])(
+    "carries the stored $agentSlug provider through the response contract and rename",
+    async (provider) => {
+      const spaceId = `provider-${provider.agentSlug}`;
+      const slug = await createConnectedAgent(
+        "provider-owner",
+        spaceId,
+        spaceId,
+        provider.agentSlug,
+      );
+      await asActor("provider-owner", spaceId, async () => {
+        const before = AgentConnectionVOSchema.parse(
+          (await listAgentConnections()).find((connection) => connection.slug === slug),
+        );
+        expect(before.providerAgentSlug).toBe(provider.agentSlug);
+        expect(getAgentProviderName(before)).toBe(provider.providerName);
+
+        await renameAgentConnection(slug, "Codex");
+
+        const after = AgentConnectionVOSchema.parse(
+          (await listAgentConnections()).find((connection) => connection.slug === slug),
+        );
+        expect(after.agentName).toBe("Codex");
+        expect(after.providerAgentSlug).toBe(provider.agentSlug);
+        expect(getAgentProviderName(after)).toBe(provider.providerName);
+      });
+    },
+  );
 
   it("renames a device without changing the provider agent or its secret-bearing launch", async () => {
     const slug = await createConnectedAgent(

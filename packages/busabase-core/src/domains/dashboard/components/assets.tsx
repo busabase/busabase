@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { hasApiKeyLevel } from "busabase-contract/access-control/api-key-level";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { AssetTextStatus } from "busabase-contract/types";
@@ -435,7 +435,16 @@ export function AssetTextPreviewPanel({
   );
 }
 
-export function AssetsHeader({ count, unusedCount = 0 }: { count: number; unusedCount?: number }) {
+export function AssetsHeader({
+  count,
+  unusedCount = 0,
+  hasMore = false,
+}: {
+  count: number;
+  unusedCount?: number;
+  /** More pages exist, so `count` is what is loaded — never the library total. */
+  hasMore?: boolean;
+}) {
   const messages = useCoreI18n();
 
   return (
@@ -444,12 +453,16 @@ export function AssetsHeader({ count, unusedCount = 0 }: { count: number; unused
       <h1 className="font-semibold text-xl">{messages.assets.title}</h1>
       {count > 0 ? (
         <span className="rounded-md border bg-muted px-2 py-0.5 text-muted-foreground text-xs">
-          {count}
+          {hasMore ? `${count}+` : count}
         </span>
       ) : null}
       {unusedCount > 0 ? (
         <span className="rounded-md border border-destructive/40 px-2 py-0.5 text-destructive text-xs">
-          {fmt(messages.assets.unusedBadge, { count: unusedCount })}
+          {fmt(messages.assets.unusedBadge, {
+            // Counted over the pages loaded so far, so an unfinished walk is a
+            // floor, not a total — same reason the asset count above reads "200+".
+            count: hasMore ? `${unusedCount}+` : unusedCount,
+          })}
         </span>
       ) : null}
     </div>
@@ -483,6 +496,12 @@ export function AssetsView({
     </div>
   );
 }
+
+/**
+ * One page of the asset gallery. 200 is the contract's page ceiling; the grid
+ * shows enough cards that walking the library 200 at a time is not a chore.
+ */
+const ASSET_LIST_PAGE_SIZE = 200;
 
 const ASSET_CARD_SKELETON_IDS = [
   "asset-card-skel-1",
@@ -532,14 +551,25 @@ export function AssetLibraryView({
 }) {
   const messages = useCoreI18n();
   const locale = useCoreLocale();
-  const listQuery = useQuery(orpc.assets.list.queryOptions({}));
+  // The gallery used to ask for the whole library in one request. It loads a
+  // page at a time now for the same reason the file tree does: an unpaged list
+  // costs the space every asset it ever uploaded, and the server bounds it.
+  const listQuery = useInfiniteQuery(
+    orpc.assets.list.infiniteOptions({
+      input: (cursor: string | undefined) => ({ limit: ASSET_LIST_PAGE_SIZE, cursor }),
+      initialPageParam: undefined as string | undefined,
+      getNextPageParam: (lastPage) =>
+        lastPage.length < ASSET_LIST_PAGE_SIZE ? undefined : lastPage.at(-1)?.id,
+    }),
+  );
   const [unusedOnly, setUnusedOnly] = useState(false);
-  const allAssets = listQuery.data ?? [];
+  const allAssets = useMemo(() => (listQuery.data?.pages ?? []).flat(), [listQuery.data]);
   const unusedCount = useMemo(
     () => allAssets.filter((asset) => asset.usageCount === 0).length,
     [allAssets],
   );
   const assets = unusedOnly ? allAssets.filter((asset) => asset.usageCount === 0) : allAssets;
+  const hasMore = listQuery.hasNextPage;
 
   if (listQuery.isLoading) {
     return <AssetLibrarySkeleton />;
@@ -570,7 +600,7 @@ export function AssetLibraryView({
   return (
     <div className="w-full p-4 md:p-6">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <AssetsHeader count={allAssets.length} unusedCount={unusedCount} />
+        <AssetsHeader count={allAssets.length} unusedCount={unusedCount} hasMore={hasMore} />
         {unusedCount > 0 ? (
           <label className="flex items-center gap-1.5 text-muted-foreground text-sm">
             <input
@@ -632,6 +662,23 @@ export function AssetLibraryView({
           })}
         </div>
       )}
+      {hasMore ? (
+        <div className="mt-4 flex justify-center">
+          <button
+            className="rounded-md border bg-background px-3 py-1.5 text-sm transition-colors hover:bg-muted disabled:opacity-60"
+            disabled={listQuery.isFetchingNextPage}
+            onClick={() => void listQuery.fetchNextPage()}
+            type="button"
+          >
+            {listQuery.isFetchingNextPage ? messages.assets.loadingMore : messages.assets.loadMore}
+          </button>
+        </div>
+      ) : null}
+      {hasMore ? (
+        <p className="mt-2 text-center text-muted-foreground text-xs">
+          {fmt(messages.assets.partialSummary, { shown: allAssets.length })}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -1036,7 +1083,7 @@ export function AssetDetailView({
     ...orpc.assets.delete.mutationOptions(),
     onSuccess: () => {
       toast.success(messages.assets.deleted);
-      queryClient.invalidateQueries({ queryKey: orpc.assets.list.queryOptions({}).queryKey });
+      queryClient.invalidateQueries({ queryKey: orpc.assets.list.key() });
       onBack();
     },
     onError: (error) => {
@@ -1050,7 +1097,7 @@ export function AssetDetailView({
       queryClient.invalidateQueries({
         queryKey: orpc.assets.get.queryOptions({ input: { assetId } }).queryKey,
       }),
-      queryClient.invalidateQueries({ queryKey: orpc.assets.list.queryOptions({}).queryKey }),
+      queryClient.invalidateQueries({ queryKey: orpc.assets.list.key() }),
       queryClient.invalidateQueries({ queryKey: orpc.assets.readTextLines.key() }),
     ]);
     setTextRevision((current) => current + 1);
@@ -1064,7 +1111,7 @@ export function AssetDetailView({
       queryClient.invalidateQueries({
         queryKey: orpc.assets.get.queryOptions({ input: { assetId } }).queryKey,
       }),
-      queryClient.invalidateQueries({ queryKey: orpc.assets.list.queryOptions({}).queryKey }),
+      queryClient.invalidateQueries({ queryKey: orpc.assets.list.key() }),
     ]);
   };
 

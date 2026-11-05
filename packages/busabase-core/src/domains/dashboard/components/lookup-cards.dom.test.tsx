@@ -176,6 +176,7 @@ describe("Kanban attachment cards", () => {
     config: ViewVO["config"] = { filters: [], sorts: [] },
     onOpenRecord?: (record: RecordVO) => void,
     permissionLevel: ApiKeyPermissionLevel = "write",
+    fileValues: unknown[] = [image, attachment],
   ) {
     const cardBase = { ...base, fields: cardFields };
     const cardRecord = {
@@ -187,7 +188,7 @@ describe("Kanban attachment cards", () => {
         payload: {
           title: "Class report",
           state: "todo",
-          files: [image, attachment],
+          files: fileValues,
           empty_files: [],
         },
       },
@@ -224,6 +225,71 @@ describe("Kanban attachment cards", () => {
     );
     return { ...result, cardRecord, onMoveRecord };
   }
+
+  it("uses a video as the cover when the cell has no image, and still opens the record", async () => {
+    const open = vi.fn();
+    const video = {
+      id: "ast_clip",
+      assetId: "ast_clip",
+      fileName: "walkthrough.mp4",
+      url: "https://old-storage.example/walkthrough.mp4",
+      mimeType: "video/mp4",
+      size: 2048,
+    };
+    const { cardRecord } = renderBoard(
+      { filters: [], sorts: [], coverFieldSlug: "files" },
+      open,
+      "write",
+      [attachment, video],
+    );
+    const cover = await screen.findByTestId("kanban-cover");
+    const element = cover.querySelector("video");
+    if (!element) throw new Error("Expected a video cover");
+    expect(element.getAttribute("aria-label")).toBe("walkthrough.mp4");
+    expect(element.getAttribute("preload")).toBe("metadata");
+    expect(element.muted).toBe(true);
+    expect(element.hasAttribute("autoplay")).toBe(false);
+    expect(element.className).toContain("object-cover");
+    expect(within(cover).queryByRole("img")).toBeNull();
+    fireEvent.click(cover);
+    expect(open).toHaveBeenCalledWith(cardRecord);
+  });
+
+  it("keeps the image cover when a cell carries both an image and a video", async () => {
+    const video = {
+      id: "ast_clip",
+      assetId: "ast_clip",
+      fileName: "walkthrough.mp4",
+      url: "https://old-storage.example/walkthrough.mp4",
+      mimeType: "video/mp4",
+      size: 2048,
+    };
+    renderBoard({ filters: [], sorts: [], coverFieldSlug: "files" }, undefined, "write", [
+      video,
+      image,
+    ]);
+    const cover = await screen.findByTestId("kanban-cover");
+    expect(within(cover).getByRole("img", { name: image.fileName })).toBeTruthy();
+    expect(cover.querySelector("video")).toBeNull();
+  });
+
+  it("falls back to the file name when a video cover fails to load", async () => {
+    const video = {
+      id: "ast_clip",
+      assetId: "ast_clip",
+      fileName: "walkthrough.mp4",
+      url: "https://old-storage.example/walkthrough.mp4",
+      mimeType: "video/mp4",
+      size: 2048,
+    };
+    renderBoard({ filters: [], sorts: [], coverFieldSlug: "files" }, undefined, "write", [video]);
+    const cover = await screen.findByTestId("kanban-cover");
+    const element = cover.querySelector("video");
+    if (!element) throw new Error("Expected a video cover");
+    fireEvent.error(element);
+    await waitFor(() => expect(cover.querySelector("video")).toBeNull());
+    expect(cover.textContent).toContain("walkthrough.mp4");
+  });
 
   it("opens the record from the card body, title and cover without navigating away", async () => {
     const open = vi.fn();

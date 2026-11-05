@@ -1,7 +1,7 @@
+import { markdownPreviewSource } from "openlib/utils/markdown-preview";
 import { useLayoutEffect, useRef, useState } from "react";
 import { Streamdown } from "streamdown";
 import { useCoreI18n } from "../../../i18n";
-import { markdownPreviewSource } from "../helpers/markdown-preview";
 import { mdComponents } from "./field-preview";
 
 // The collapsed height is `max-h-72` (18rem), the same point a long Markdown

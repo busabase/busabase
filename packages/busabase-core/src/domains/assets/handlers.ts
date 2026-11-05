@@ -10,17 +10,30 @@ import type {
 } from "busabase-contract/domains/assets/types";
 import { and, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
 import {
+  abortMultipartUpload,
+  type ConfirmUploadResult,
+  completeMultipartUpload,
   confirmUpload,
+  createMultipartUpload,
   deleteAttachmentSafely,
   getAttachmentUploadPolicy,
   requestUploadUrl,
+  signMultipartUploadParts,
 } from "open-domains/attachments/logic";
-import type { ConfirmUploadDTO, RequestUploadUrlDTO } from "open-domains/attachments/types";
+import type {
+  AbortMultipartUploadDTO,
+  CompleteMultipartUploadDTO,
+  ConfirmUploadDTO,
+  CreateMultipartUploadDTO,
+  RequestUploadUrlDTO,
+  SignMultipartPartsDTO,
+} from "open-domains/attachments/types";
 import { storage } from "openlib/storage";
 import { getContextSpaceId, LOCAL_SPACE_ID, resolveActorId } from "../../context";
 import { db, getDb } from "../../db";
 import { attachments, busabaseBaseFields, busabaseBases, busabaseNodes } from "../../db/schema";
 import { insertAuditEvent } from "../../logic/audit";
+import { describeCaller } from "../../logic/caller-provenance";
 import { id } from "../../logic/kernel";
 import { hasNodePermission, hasWorkspacePermission } from "../../logic/node-acl";
 import { ensureReady } from "../../logic/seed";
@@ -32,6 +45,7 @@ import {
   deriveAssetTextStatus,
   gcTextObjectIfUnreferenced,
 } from "./logic/asset-texts-logic";
+import { notifySpaceStorageChanged } from "./logic/space-storage-changes";
 import { withStorageKeyRegistration } from "./logic/storage-cleanup-logic";
 import { type AssetTextStatus, busabaseAssetTexts } from "./schema/asset-texts";
 import {
@@ -156,10 +170,30 @@ export const createAsset = async (
   tx?: Awaited<ReturnType<typeof getDb>>,
 ): Promise<string> => {
   const db = tx ?? (await getDb());
-  if (!tx)
-    return db.transaction((transaction) =>
-      createAsset(attachmentId, name, options, transaction as unknown as typeof db),
-    );
+  if (!tx) {
+    const { assetId, ownerSpaceId } = await db.transaction(async (transaction) => {
+      const created = await createAsset(
+        attachmentId,
+        name,
+        options,
+        transaction as unknown as typeof db,
+      );
+      // Read inside the transaction so the ownership checked is the one that was
+      // just registered, not whatever a concurrent purge left behind.
+      const [owner] = await transaction
+        .select({ spaceId: attachments.spaceId })
+        .from(attachments)
+        .where(eq(attachments.id, attachmentId))
+        .limit(1);
+      return { assetId: created, ownerSpaceId: owner?.spaceId ?? null };
+    });
+    // A fresh upload's bytes were already billed by the upload policy. Only an
+    // attachment registered by another space (or by none, before ownership was
+    // tracked) becomes newly billable here.
+    const spaceId = getContextSpaceId();
+    if (ownerSpaceId !== spaceId) await notifySpaceStorageChanged(db, spaceId);
+    return assetId;
+  }
   const [registered] = await db
     .select({ storageKey: attachments.storageKey })
     .from(attachments)
@@ -249,6 +283,9 @@ export const ensureAsset = async (
       userId: resolveActorId("local"),
       db,
       attachmentsTable: attachments,
+      // Adopting bytes that are already stored: metered, but never rejected by
+      // a per-upload rule (a per-file size limit) introduced after the upload.
+      existingObject: true,
     },
     async (transaction) => {
       assetId = await createAsset(attachmentId, name, undefined, transaction);
@@ -293,68 +330,136 @@ export const confirmAssetUpload = async (input: ConfirmUploadDTO) => {
       db,
       attachments,
     );
-    // Surface every uploaded file as a logical Asset. Attachment rows/objects may
-    // dedupe by content hash, but Asset identity is not deduped.
-    const contentKind = contentKindForMimeType(input.mimeType);
-    const assetId = await createAsset(result.attachmentId, input.fileName, {
-      contentKind,
-      metadata:
-        input.metadata && typeof input.metadata === "object" && !Array.isArray(input.metadata)
-          ? (input.metadata as Record<string, unknown>)
-          : {},
-    });
-    // Drive Grep Retrieval: text-kind uploads are greppable immediately — the
-    // row points at this asset's own bytes, no writer/scan needed. `contentKind`
-    // and `knownMissing: true` (assetId was JUST minted above) are already
-    // known here, so binary uploads pay zero extra queries for this. Isolated
-    // in its own try/catch — a text-registration hiccup (e.g. the text table
-    // briefly unavailable) must never fail an otherwise-successful upload.
-    try {
-      await autoRegisterAssetText(assetId, undefined, {
-        knownContentKind: contentKind,
-        knownMissing: true,
-      });
-    } catch (error) {
-      console.warn(
-        `[assets] autoRegisterAssetText failed for asset ${assetId} (non-fatal):`,
-        error,
-      );
-    }
-    // Drive Grep Retrieval's missing link: a binary (non-text) upload starts
-    // `textStatus: "missing"` and nothing else ever automatically supplies the
-    // extracted text — fire `asset.uploaded` so a space admin can configure a
-    // rule (e.g. `run_function` calling an external extraction service, then
-    // `putText`ing the result back) to close that loop. Text-kind uploads
-    // auto-register as "present" immediately above and never need external
-    // extraction, so they're excluded here — firing for them would just be
-    // noise. `baseId: null` because assets aren't scoped to a Base the way
-    // records are, so this can only ever match space-wide rules (see
-    // dispatchWebhookEvent's rule-matching in dispatch.ts). Fire-and-forget —
-    // NOT awaited — exactly like the `record.created` dispatch in
-    // cr-lifecycle.ts: this must never add latency (including up to a
-    // `run_function` rule's 5s timeoutMs) to the upload-confirm response.
-    // `dispatchWebhookEvent` itself never throws internally, but the
-    // `.catch()` here is defensive belt-and-suspenders, matching that call
-    // site's own style.
-    if (contentKind !== "text") {
-      void dispatchWebhookEvent(db, {
-        spaceId,
-        baseId: null,
-        eventType: "asset.uploaded",
-        payload: {
-          assetId,
-          fileName: input.fileName,
-          mimeType: input.mimeType,
-          textStatus: "missing",
-        },
-      }).catch((error) => {
-        console.error("[busabase] asset.uploaded webhook dispatch failed", error);
-      });
-    }
-    return { ...result, assetId };
+    return await registerConfirmedAsset(input, spaceId, result);
   } catch (error) {
     throw assetUploadError("confirm asset upload", error);
   }
+};
+
+// ── Multipart (large files) ──────────────────────────────────────────────────
+// Same space scoping, actor and Asset registration as the single-PUT pair
+// above; the shared logic enforces the key namespace, the size ceiling and the
+// host upload policy (Cloud: per-plan per-file limit + storage quota).
+
+export const createAssetMultipartUpload = async (input: CreateMultipartUploadDTO) => {
+  try {
+    const result = await createMultipartUpload(
+      { ...input, spaceId: input.spaceId ?? getContextSpaceId() },
+      resolveActorId("local"),
+      db,
+      attachments,
+    );
+    if (result.duplicate && result.attachmentId) {
+      const assetId = await createAsset(result.attachmentId, input.fileName, {
+        contentKind: contentKindForMimeType(input.mimeType),
+      });
+      return { ...result, assetId };
+    }
+    return result;
+  } catch (error) {
+    throw assetUploadError("create multipart upload", error);
+  }
+};
+
+export const signAssetMultipartParts = async (input: SignMultipartPartsDTO) => {
+  try {
+    return await signMultipartUploadParts(input, resolveActorId("local"));
+  } catch (error) {
+    throw assetUploadError("sign multipart upload parts", error);
+  }
+};
+
+export const completeAssetMultipartUpload = async (input: CompleteMultipartUploadDTO) => {
+  try {
+    const spaceId = input.spaceId ?? getContextSpaceId();
+    const result = await completeMultipartUpload(
+      { ...input, spaceId },
+      resolveActorId("local"),
+      db,
+      attachments,
+    );
+    const { uploadId: _uploadId, ...confirmed } = input;
+    return await registerConfirmedAsset(confirmed, spaceId, result);
+  } catch (error) {
+    throw assetUploadError("complete multipart upload", error);
+  }
+};
+
+export const abortAssetMultipartUpload = async (input: AbortMultipartUploadDTO) => {
+  try {
+    return await abortMultipartUpload(input, resolveActorId("local"));
+  } catch (error) {
+    throw assetUploadError("abort multipart upload", error);
+  }
+};
+
+/**
+ * After an upload is confirmed (single PUT or multipart): surface it as a
+ * logical Asset, register text-kind content for grep, and fire
+ * `asset.uploaded` for binary files.
+ */
+const registerConfirmedAsset = async (
+  input: ConfirmUploadDTO,
+  spaceId: string,
+  result: ConfirmUploadResult,
+) => {
+  // Surface every uploaded file as a logical Asset. Attachment rows/objects may
+  // dedupe by content hash, but Asset identity is not deduped.
+  const contentKind = contentKindForMimeType(input.mimeType);
+  const assetId = await createAsset(result.attachmentId, input.fileName, {
+    contentKind,
+    metadata:
+      input.metadata && typeof input.metadata === "object" && !Array.isArray(input.metadata)
+        ? (input.metadata as Record<string, unknown>)
+        : {},
+  });
+  // Drive Grep Retrieval: text-kind uploads are greppable immediately — the
+  // row points at this asset's own bytes, no writer/scan needed. `contentKind`
+  // and `knownMissing: true` (assetId was JUST minted above) are already
+  // known here, so binary uploads pay zero extra queries for this. Isolated
+  // in its own try/catch — a text-registration hiccup (e.g. the text table
+  // briefly unavailable) must never fail an otherwise-successful upload.
+  try {
+    await autoRegisterAssetText(assetId, undefined, {
+      knownContentKind: contentKind,
+      knownMissing: true,
+      warmSearchIndex: true,
+    });
+  } catch (error) {
+    console.warn(`[assets] autoRegisterAssetText failed for asset ${assetId} (non-fatal):`, error);
+  }
+  // Drive Grep Retrieval's missing link: a binary (non-text) upload starts
+  // `textStatus: "missing"` and nothing else ever automatically supplies the
+  // extracted text — fire `asset.uploaded` so a space admin can configure a
+  // rule (e.g. `run_function` calling an external extraction service, then
+  // `putText`ing the result back) to close that loop. Text-kind uploads
+  // auto-register as "present" immediately above and never need external
+  // extraction, so they're excluded here — firing for them would just be
+  // noise. `baseId: null` because assets aren't scoped to a Base the way
+  // records are, so this can only ever match space-wide rules (see
+  // dispatchWebhookEvent's rule-matching in dispatch.ts). Fire-and-forget —
+  // NOT awaited — exactly like the `record.created` dispatch in
+  // cr-lifecycle.ts: this must never add latency (including up to a
+  // `run_function` rule's 5s timeoutMs) to the upload-confirm response.
+  // `dispatchWebhookEvent` itself never throws internally, but the
+  // `.catch()` here is defensive belt-and-suspenders, matching that call
+  // site's own style.
+  if (contentKind !== "text") {
+    void dispatchWebhookEvent(db, {
+      spaceId,
+      baseId: null,
+      eventType: "asset.uploaded",
+      payload: {
+        assetId,
+        fileName: input.fileName,
+        mimeType: input.mimeType,
+        textStatus: "missing",
+      },
+    }).catch((error) => {
+      console.error("[busabase] asset.uploaded webhook dispatch failed", error);
+    });
+  }
+  return { ...result, assetId };
 };
 
 /**
@@ -421,11 +526,41 @@ const ASSET_SCAN_BATCH = 200;
 /** Stops a space full of invisible assets from scanning the whole table for one page. */
 const ASSET_SCAN_MAX_BATCHES = 20;
 
+/**
+ * What an unpaged `assets.list` returns before it asks the caller to page.
+ *
+ * The historical call returned the space's entire library in one response, so
+ * the Assets gallery cost one query and one payload per asset ever uploaded.
+ * `limit` + `cursor` already exist, so the unpaged call is bounded here the
+ * same way the file tree's is: a first page, a log line naming whoever wanted
+ * the whole thing, and paging for the rest.
+ */
+const ASSET_UNPAGED_LIMIT = 1_000;
+/** One log line per space per window, so a polling caller cannot flood the logs. */
+const ASSET_UNPAGED_LOG_WINDOW_MS = 10 * 60 * 1000;
+const unpagedAssetListings = new Map<string, { since: number; calls: number }>();
+
+const noteUnpagedAssetListing = (spaceId: string, limit: number) => {
+  const now = Date.now();
+  const entry = unpagedAssetListings.get(spaceId);
+  if (entry && now - entry.since < ASSET_UNPAGED_LOG_WINDOW_MS) {
+    entry.calls += 1;
+    return;
+  }
+  const previous = entry ? ` (${entry.calls} unpaged calls in the previous window)` : "";
+  unpagedAssetListings.set(spaceId, { since: now, calls: 1 });
+  console.warn(
+    `[assets.list] no limit given for space ${spaceId}; returning at most ${limit} assets${previous}. ` +
+      `Page with limit + cursor. ${describeCaller()}`,
+  );
+};
+
 export const listAssets = async (input?: ListAssetsDTO): Promise<AssetVO[]> => {
   await ensureReady();
   const db = await getDb();
   const spaceId = getContextSpaceId();
-  const limit = input?.limit;
+  const paged = input?.limit !== undefined;
+  const limit = input?.limit ?? ASSET_UNPAGED_LIMIT;
 
   const selectRows = (after: { createdAt: Date; id: string } | null, take?: number) => {
     const query = db
@@ -448,11 +583,6 @@ export const listAssets = async (input?: ListAssetsDTO): Promise<AssetVO[]> => {
     return take === undefined ? query : query.limit(take);
   };
 
-  // No `limit` — the historical call. Every asset, one query, same as before.
-  if (limit === undefined) {
-    return filterVisibleAssets(db, spaceId, await selectRows(null));
-  }
-
   let after = input?.cursor ? await resolveAssetCursor(db, spaceId, input.cursor) : null;
   const page: AssetVO[] = [];
   for (let batch = 0; batch < ASSET_SCAN_MAX_BATCHES && page.length < limit; batch += 1) {
@@ -462,7 +592,11 @@ export const listAssets = async (input?: ListAssetsDTO): Promise<AssetVO[]> => {
     const last = rows[rows.length - 1];
     after = { createdAt: last.createdAt, id: last.id };
   }
-  return page.slice(0, limit);
+  const visible = page.slice(0, limit);
+  if (!paged && visible.length >= ASSET_UNPAGED_LIMIT) {
+    noteUnpagedAssetListing(spaceId, ASSET_UNPAGED_LIMIT);
+  }
+  return visible;
 };
 
 /**
@@ -719,6 +853,9 @@ export const deleteAssetRow = async (
     action: "asset.deleted",
     metadata: { assetId, attachmentId: asset.attachmentId },
   });
+  // The space's billable bytes just shrank; a host that keeps a counter must
+  // hear about it here, because the attachment row may survive for another space.
+  await notifySpaceStorageChanged(db, spaceId);
   return { deleted: true };
 };
 

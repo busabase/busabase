@@ -3,6 +3,7 @@ import { busabaseContract } from "busabase-contract/contract/busabase";
 import {
   createFileTreeChangeRequest,
   createFileTreeNode,
+  listFileTreeEntries,
   listFileTreeFiles,
   listFileTreeKinds,
   resolveFileTreeKind,
@@ -31,7 +32,19 @@ export const fileTreeRouter = {
     return createFileTreeNode(resolveKindByType(type), rest);
   }),
   listFiles: os.fileTrees.listFiles.handler(async ({ input }) =>
-    listFileTreeFiles(await resolveFileTreeKind(input.nodeId, input.type), input.nodeId),
+    listFileTreeFiles(await resolveFileTreeKind(input.nodeId, input.type), input.nodeId, {
+      limit: input.limit,
+      after: input.after,
+      offset: input.offset,
+    }),
+  ),
+  listEntries: os.fileTrees.listEntries.handler(async ({ input }) =>
+    listFileTreeEntries(await resolveFileTreeKind(input.nodeId, input.type), input.nodeId, {
+      folder: input.folder,
+      limit: input.limit,
+      after: input.after,
+      foldersAfter: input.foldersAfter,
+    }),
   ),
   readFile: os.fileTrees.readFile.handler(({ input }) => readVisitorFileTreeFile(input)),
   createChangeRequest: os.fileTrees.createChangeRequest.handler(async ({ input }) => {

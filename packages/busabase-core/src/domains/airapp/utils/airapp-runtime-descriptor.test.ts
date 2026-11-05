@@ -256,3 +256,39 @@ describe("ready patterns", () => {
     expect(portFrom(files, " * Running on http://127.0.0.1:5000")).toBe(5000);
   });
 });
+
+describe("the site engine", () => {
+  it("is never a fallback: it uploads the app to a public provider", () => {
+    // Python, with nothing else available that could run it.
+    expect(resolveEngine("python", "remote", ["browser", "site"])).toBeNull();
+    expect(resolveEngine("node", "remote", ["browser", "site"])).toBe("browser");
+    expect(resolveEngine("node", "remote", ["site"])).toBeNull();
+  });
+
+  it("runs when somebody asked for it", () => {
+    expect(resolveEngine("node", "site", ["browser", "site"])).toBe("site");
+    expect(resolveEngine("node", "browser", ["browser", "site"], "site")).toBe("site");
+  });
+
+  it("leaves a Python app to the bundle check, which can say why in plain words", () => {
+    expect(resolveEngine("python", "site", ["browser", "site"])).toBe("site");
+    expect(resolveEngine("python", "browser", ["browser", "site"], "site")).toBe("site");
+  });
+
+  it("is a valid requiredEngine and preferredEngine in airapp.json", () => {
+    expect(resolveRunPlan({ "airapp.json": '{"requiredEngine":"site"}' }).requiredEngine).toBe(
+      "site",
+    );
+    expect(resolveRunPlan({ "airapp.json": '{"preferredEngine":"site"}' }).preferredEngine).toBe(
+      "site",
+    );
+  });
+
+  it("falls back to another engine when not available and merely preferred", () => {
+    expect(resolveEngine("node", "site", ["browser"])).toBe("browser");
+  });
+
+  it("does not fall back when required", () => {
+    expect(resolveEngine("node", "browser", ["browser"], "site")).toBeNull();
+  });
+});

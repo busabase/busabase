@@ -101,7 +101,7 @@ describe("Busabase OpenAPI record get route", () => {
     expect(spec.paths?.["/api/v1/bases/{baseId}/restore/change-requests"]).toBeUndefined();
   });
 
-  it("keeps the compressed public API at 126 operations", async () => {
+  it("keeps the compressed public API at 134 operations", async () => {
     const spec = await getBusabaseOpenApiSpec();
     const operationCount = Object.values(spec.paths ?? {}).reduce(
       (count, pathItem) =>
@@ -210,6 +210,18 @@ describe("Busabase OpenAPI record get route", () => {
     // +2 -> 126: one shared read/update pair for workspace-wide Agent context.
     expect(spec.paths?.["/api/v1/space-instructions"]?.get).toBeDefined();
     expect(spec.paths?.["/api/v1/space-instructions"]?.put).toBeDefined();
-    expect(operationCount).toBe(126);
+    // +2 -> 128: read/choose the space's welcome page (a Doc or HTML node an
+    // Agent writes first and a manager then sets as Home's top card).
+    expect(spec.paths?.["/api/v1/space-welcome"]?.get).toBeDefined();
+    expect(spec.paths?.["/api/v1/space-welcome"]?.put).toBeDefined();
+    // +1 -> 129: `GET /file-trees/{nodeId}/entries` reads one folder of a Drive,
+    // so a 46k-file Drive is browsed without listing every file.
+    expect(spec.paths?.["/api/v1/file-trees/{nodeId}/entries"]?.get).toBeDefined();
+    // +5 -> 134: agents can see, start, cancel, and (where a step allows) decide
+    // workflow runs. Continuing a Wait early and bulk cancel stay app-only.
+    expect(spec.paths?.["/api/v1/workflows/{nodeId}/runs"]?.post).toBeDefined();
+    expect(spec.paths?.["/api/v1/workflow-runs/{runId}/decide"]?.post).toBeDefined();
+    expect(spec.paths?.["/api/v1/workflow-runs/{runId}/resume"]).toBeUndefined();
+    expect(operationCount).toBe(134);
   });
 });

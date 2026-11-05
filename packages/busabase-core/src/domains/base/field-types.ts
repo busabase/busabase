@@ -209,11 +209,13 @@ const isStringArray = (value: unknown): value is string[] =>
 
 /**
  * Absolute per-file ceiling for attachment values, mirroring the upload guard
- * (open-domains/attachments `MAX_FILE_SIZE` = 200MB). Duplicated as a local constant
- * so this registry stays isomorphic — importing the server-only upload logic would
- * leak it into the client bundle.
+ * (open-domains/attachments `ATTACHMENT_MAX_FILE_SIZE` = 5GB, re-exported by the
+ * upload logic as `MAX_FILE_SIZE`). Duplicated as a local constant so this
+ * registry stays free of the attachments package. A host may enforce a tighter
+ * per-file limit at upload time (Busabase Cloud: per plan); that is an upload
+ * rule, not a value rule, so files stored before a limit existed stay valid.
  */
-const MAX_ATTACHMENT_BYTES = 200 * 1024 * 1024;
+const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024 * 1024;
 
 /**
  * Human-readable byte size for an error message. `Math.round(bytes / (1024*1024))`
@@ -225,7 +227,10 @@ const formatByteSize = (bytes: number): string => {
   if (bytes < 1024 * 1024) {
     return `${Math.max(1, Math.round(bytes / 1024))}KB`;
   }
-  return `${Math.round(bytes / (1024 * 1024))}MB`;
+  if (bytes < 1024 * 1024 * 1024) {
+    return `${Math.round(bytes / (1024 * 1024))}MB`;
+  }
+  return `${Math.round((bytes / (1024 * 1024 * 1024)) * 10) / 10}GB`;
 };
 
 /**
@@ -369,7 +374,7 @@ const mimeTypeMatches = (mimeType: string, pattern: string): boolean => {
 /**
  * Validate an `attachment` cell — an Airtable-style ARRAY of attachment refs
  * (empty array = no files). Enforces the field's `options.attachment` limits
- * (maxFiles / allowedMimeTypes / maxFileSize) plus the absolute 200MB ceiling.
+ * (maxFiles / allowedMimeTypes / maxFileSize) plus the absolute 5GB ceiling.
  */
 const attachmentValidator = (value: unknown, def: FieldDef): string | null => {
   const name = fieldDisplayName(def);

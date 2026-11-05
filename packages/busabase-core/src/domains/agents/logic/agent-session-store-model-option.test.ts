@@ -168,4 +168,36 @@ describe("agent session store — durable model option", () => {
     mocks.rows = [{ ...baseRow, modelOption: VALID_MODEL_OPTION }];
     expect((await loadScopedSession("ags-1"))?.thinkingOption).toBeNull();
   });
+
+  it.each(["config", "legacy"] as const)(
+    "restores only this session's confirmed %s mode from the existing envelope",
+    async (source) => {
+      const modeOption = {
+        id: "mode",
+        name: "Mode",
+        source,
+        currentValue: "ask",
+        options: [{ value: "ask", name: "Ask", description: "Discuss the plan" }],
+      };
+      mocks.rows = [{ ...baseRow, modelOption: { modelOption: null, modeOption } }];
+      expect(await loadScopedSession("ags-1")).toMatchObject({
+        modelOption: null,
+        thinkingOption: null,
+        modeOption,
+      });
+      expect((await loadSessions())[0]?.modeOption).toEqual(modeOption);
+    },
+  );
+
+  it("rejects malformed mode sources and hides modes for terminal/local sessions", async () => {
+    const modeOption = { ...VALID_MODEL_OPTION, source: "legacy" };
+    for (const row of [
+      { ...baseRow, modelOption: { modeOption: { ...modeOption, source: "untrusted" } } },
+      { ...baseRow, status: "ended", modelOption: { modeOption } },
+      { ...baseRow, transport: "local-subprocess", modelOption: { modeOption } },
+    ]) {
+      mocks.rows = [row];
+      expect((await loadScopedSession("ags-1"))?.modeOption).toBeNull();
+    }
+  });
 });

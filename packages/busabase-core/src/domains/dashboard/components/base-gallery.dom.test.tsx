@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { BaseFieldVO, BaseVO, RecordVO, ViewVO } from "busabase-contract/types";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -132,5 +132,59 @@ describe("BusaBaseGallery cover motion", () => {
 
     expect(screen.queryByRole("img")).toBeNull();
     expect(container.querySelector(".transition-transform")).toBeNull();
+  });
+});
+
+describe("BusaBaseGallery video covers", () => {
+  const video = {
+    id: "att_clip",
+    url: "https://example.com/clip.mp4",
+    fileName: "clip.mp4",
+    mimeType: "video/mp4",
+    size: 4096,
+  };
+
+  it("draws a video-only cell as a muted first-frame cover with a play badge", () => {
+    const { container } = renderGallery([video]);
+
+    const element = container.querySelector("video");
+    if (!element) throw new Error("Expected a video cover");
+    expect(element.getAttribute("src")).toBe("https://example.com/clip.mp4#t=0.1");
+    expect(element.getAttribute("preload")).toBe("metadata");
+    expect(element.muted).toBe(true);
+    expect(element.hasAttribute("autoplay")).toBe(false);
+    expect(element.hasAttribute("controls")).toBe(false);
+    expect(element.className).toContain("motion-safe:pointer-fine:group-hover:scale-105");
+    expect(container.querySelector("[data-cover-video] svg")).not.toBeNull();
+    expect(screen.queryByRole("img")).toBeNull();
+  });
+
+  it("prefers an image over a video in the same cell", () => {
+    const { container } = renderGallery([
+      video,
+      {
+        id: "att_poster",
+        url: "https://example.com/poster.jpg",
+        fileName: "poster.jpg",
+        mimeType: "image/jpeg",
+        size: 1024,
+      },
+    ]);
+
+    expect(screen.getByRole("img", { name: "Sunset" }).getAttribute("src")).toBe(
+      "https://example.com/poster.jpg",
+    );
+    expect(container.querySelector("video")).toBeNull();
+  });
+
+  it("falls back to the title initial when the video cannot load", () => {
+    const { container } = renderGallery([video]);
+
+    const element = container.querySelector("video");
+    if (!element) throw new Error("Expected a video cover");
+    fireEvent.error(element);
+
+    expect(container.querySelector("video")).toBeNull();
+    expect(container.querySelector(".text-2xl")?.textContent).toBe("S");
   });
 });

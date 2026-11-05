@@ -55,7 +55,7 @@ const renderMessage = (overrides: Partial<AcpMessageBlock> = {}) =>
   );
 
 describe("sent context chips", () => {
-  it("uses the node chip itself to toggle its exact snapshot and separate navigation", () => {
+  it("opens a named snapshot modal with separate navigation and restores keyboard focus", async () => {
     render(
       <CoreI18nProvider>
         <AgentContextResourceCard attachment={attachment} />
@@ -66,19 +66,24 @@ describe("sent context chips", () => {
     expect(screen.queryByRole("link")).toBeNull();
     expect(screen.queryByText("View sent context")).toBeNull();
     expect(document.querySelector("summary")).toBeNull();
+    trigger.focus();
     fireEvent.click(trigger);
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
-    expect(screen.getByRole("link", { name: "Open Source document" }).getAttribute("href")).toBe(
-      "/doc/nod-doc",
-    );
-    const region = document.getElementById(trigger.getAttribute("aria-controls") ?? "");
-    expect(region?.hidden).toBe(false);
-    expect(region?.querySelector("pre")?.textContent).toBe(snapshot.text);
-    expect(screen.getByText(/content was truncated/)).toBeTruthy();
+    const dialog = screen.getByRole("dialog", { name: "Source document" });
+    expect(trigger.closest('[aria-hidden="true"]')).not.toBeNull();
+    expect(
+      within(dialog).getByRole("link", { name: "Open Source document" }).getAttribute("href"),
+    ).toBe("/doc/nod-doc");
+    const region = within(dialog).getByRole("region", { name: "View sent context" });
+    expect(region.textContent).toBe(snapshot.text);
+    expect(region.getAttribute("tabindex")).toBe("0");
+    expect(within(dialog).queryByRole("textbox")).toBeNull();
+    expect(within(dialog).getByText(/content was truncated/)).toBeTruthy();
     expect(attachmentToContentBlock(attachment)).toEqual(attachment.resource);
-    fireEvent.click(trigger);
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
-    expect(region?.hidden).toBe(true);
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
   });
   it("rejects malformed metadata but still exposes literal Unicode text without a node link", () => {
     expect(contextNodeOf({ kind: "file", data: "YQ==", mimeType: "text/plain" })).toBeNull();
@@ -109,9 +114,8 @@ describe("sent context chips", () => {
       ],
     });
     fireEvent.click(screen.getByRole("button", { name: "Text reference" }));
-    expect(screen.getByTestId("agent-context-resource").querySelector("pre")?.textContent).toBe(
-      text,
-    );
+    const dialog = screen.getByRole("dialog", { name: "Text reference" });
+    expect(within(dialog).getByRole("region").textContent).toBe(text);
     expect(document.querySelector("script")).toBeNull();
     expect(screen.queryByRole("link")).toBeNull();
   });
@@ -127,12 +131,8 @@ describe("sent context chips", () => {
     });
     const trigger = screen.getByRole("button", { name: "Empty" });
     fireEvent.click(trigger);
-    expect(document.getElementById(trigger.getAttribute("aria-controls") ?? "")?.hidden).toBe(
-      false,
-    );
-    expect(screen.getByTestId("agent-context-resource").querySelector("pre")?.textContent).toBe(
-      "Empty",
-    );
+    const dialog = screen.getByRole("dialog", { name: "Empty" });
+    expect(within(dialog).getByRole("region").textContent).toBe("Empty");
   });
 
   it("encodes the node route without navigating when the chip opens", () => {
@@ -212,7 +212,7 @@ describe("sent context chips", () => {
 
   it.each([false, true])(
     "keeps canonical order and independent repeated snapshots (replay=%s)",
-    (replay) => {
+    async (replay) => {
       const content: ContentBlock[] = [
         { type: "text", text: "Before" },
         contextResourceToContentBlock(snapshot),
@@ -242,15 +242,9 @@ describe("sent context chips", () => {
       renderMessage(replay ? JSON.parse(JSON.stringify(block)) : block);
       const triggers = screen.getAllByRole("button", { name: "Source document" });
       expect(triggers).toHaveLength(2);
-      expect(new Set(triggers.map((trigger) => trigger.getAttribute("aria-controls"))).size).toBe(
-        2,
-      );
-      for (const trigger of triggers) fireEvent.click(trigger);
       const cards = screen.getAllByTestId("agent-context-resource");
       const [firstCard, secondCard] = cards;
       if (!firstCard || !secondCard) throw new Error("Expected two snapshot chips");
-      expect(firstCard.querySelector("pre")?.textContent).toBe(snapshot.text);
-      expect(secondCard.querySelector("pre")?.textContent).toBe("Later snapshot");
       const ordered = [
         screen.getByText("Before"),
         firstCard,
@@ -269,6 +263,18 @@ describe("sent context chips", () => {
           ).toBeTruthy();
         previous = element;
       }
+      const dialogIds = new Set<string>();
+      for (const [index, trigger] of triggers.entries()) {
+        fireEvent.click(trigger);
+        const dialog = screen.getByRole("dialog", { name: "Source document" });
+        dialogIds.add(dialog.id);
+        expect(within(dialog).getByRole("region").textContent).toBe(
+          index === 0 ? snapshot.text : "Later snapshot",
+        );
+        fireEvent.click(within(dialog).getByRole("button", { name: "Close" }));
+        await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+      }
+      expect(dialogIds.size).toBe(2);
     },
   );
 

@@ -6,6 +6,10 @@ import type { NodeTypeDefinition } from "../types";
  * (`busabase/nodes/{id}/workflow/graph.json`), written through the unified
  * `PUT /nodes/{nodeId}/content` — see `node-content-schemas.ts` and
  * `apps/busabase/content/spec/node-content-storage.md` (D2/D3).
+ *
+ * The graph is also executable. See `./run.ts` for the runtime contract:
+ * step outputs are snapshots, and a `read_record` action re-reads the record
+ * when that step runs (including after a Wait).
  */
 export const workflowNodeType = {
   type: "workflow",

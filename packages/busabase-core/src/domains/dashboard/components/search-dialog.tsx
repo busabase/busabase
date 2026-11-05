@@ -421,11 +421,14 @@ export function SearchDialog({
     (hasQuery && !isDebouncedQueryCurrent) || contentQueries.some((q) => q.isFetching);
   const searchError = !isDebouncedQueryCurrent
     ? null
-    : contentQueries.find((q) => q.isError)?.error instanceof Error
-      ? (contentQueries.find((q) => q.isError)?.error as Error).message
-      : contentQueries.some((q) => q.isError)
-        ? messages.search.failed
-        : null;
+    : contentQueries.some((q) => q.isError)
+      ? presentCoreError(
+          messages,
+          locale,
+          contentQueries.find((q) => q.isError)?.error,
+          messages.search.failed,
+        )
+      : null;
 
   // Recent tab: instant, client-side match over the WHOLE `KnownNode` cache —
   // computed fresh every render (cheap; bounded by the cache's own entry cap)

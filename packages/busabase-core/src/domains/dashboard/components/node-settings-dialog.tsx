@@ -31,8 +31,14 @@ import {
   AirAppEngineSetting,
   FOLLOW_APP,
   resolveAvailableAirAppRunnerKind,
+  resolveEffectiveEngineChoice,
 } from "../../airapp/components/AirAppEngineSetting";
-import { useAirAppEngineAvailability } from "../../airapp/components/engine-availability-context";
+import { AirAppSiteSettings } from "../../airapp/components/AirAppSiteControls";
+import {
+  useAirAppEngineAvailability,
+  useAirAppEnginePlanGate,
+  useAirAppEnginesNotConfigured,
+} from "../../airapp/components/engine-availability-context";
 import type { AirAppRunnerKind } from "../../airapp/components/runners/types";
 import {
   AIRAPP_MANIFEST_PATH,
@@ -219,6 +225,8 @@ function GeneralTabContent({
   const queryClient = useQueryClient();
   const nameInputRef = useRef<HTMLInputElement>(null);
   const availableAirAppEngines = useAirAppEngineAvailability();
+  const airAppEnginePlanGate = useAirAppEnginePlanGate();
+  const notConfiguredAirAppEngines = useAirAppEnginesNotConfigured();
   // The saved override now lives on the NODE, not in this browser. It used to
   // be `localStorage`, which made "which engine this AirApp runs on" a property
   // of whoever happened to be looking at it: two people opening the same node
@@ -481,8 +489,16 @@ function GeneralTabContent({
             runnerKindDirtyRef.current = true;
             setRunnerKind(next);
           }}
+          notConfiguredEngines={notConfiguredAirAppEngines}
+          planGate={airAppEnginePlanGate}
           value={runnerKind}
         />
+      ) : null}
+      {nodeType === "airapp" &&
+      resolveEffectiveEngineChoice(runnerKind, appPreferred, appRequired) === "site" &&
+      (availableAirAppEngines.includes("site") ||
+        airAppEnginePlanGate?.lockedEngines.includes("site")) ? (
+        <AirAppSiteSettings nodeId={nodeId} orpc={orpc} />
       ) : null}
 
       <div className="flex justify-end border-border/50 border-t pt-4">

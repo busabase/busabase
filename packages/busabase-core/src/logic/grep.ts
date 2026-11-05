@@ -36,7 +36,10 @@ import "server-only";
  *
  * Budget: one deadline for the whole call, and each requested source gets a
  * floor of `maxMatches / sources` with unused budget rolling forward (see
- * `sourceBudget`), so a noisy source can no longer starve the others.
+ * `sourceBudget`), so a noisy source can no longer starve the others. Time is
+ * shared the same way: each source gets an even slice of what is left, and
+ * time it does not use rolls forward (see `sourceDeadline`), so a slow source
+ * can no longer starve the others either.
  */
 import type {
   UnifiedGrepInput,
@@ -234,34 +237,42 @@ const resolveCandidateRecords = async (
     .orderBy(desc(busabaseRecords.updatedAt));
 };
 
-interface RecordBatchData {
-  /** headCommitId → the commit's raw `fields` jsonb (canonical, untruncated). */
-  commitFieldsById: Map<string, Record<string, unknown>>;
-  /** baseId → its non-deleted fields, in Base schema (position) order. */
-  fieldsByBaseId: Map<string, Array<{ slug: string; type: FieldType }>>;
-}
+/**
+ * Records whose HEAD commits are loaded per query. One query for every
+ * candidate used to bind one parameter per record: a space with 69,856 active
+ * records went past Postgres' 65,534 bind-parameter limit and every grep that
+ * included records answered 500. Batching also means payloads are read only
+ * for records the budget actually reaches.
+ */
+const RECORD_SCAN_BATCH = 500;
+
+type BaseFieldsById = Map<string, Array<{ slug: string; type: FieldType }>>;
 
 /**
- * Batch-load every in-scope candidate's HEAD commit fields and every
- * relevant Base's non-deleted fields — two queries total for the whole grep
- * call, not N+1 per record. This is the adapter's own minimal loader (see
- * the module doc for why `loadBasesByIds`/`hydrateRecords` are NOT used
- * here): the field query explicitly filters `isNull(busabaseBaseFields.deletedAt)`,
- * so a field soft-deleted after a record was written never resurfaces a
- * stale value still sitting under its old slug in `headCommit.payload`.
+ * Load one batch of candidates' HEAD commit fields, plus the non-deleted
+ * fields of any Base in the batch not already in `fieldsByBaseId` — two
+ * queries per batch, not N+1 per record. Returns headCommitId → the commit's
+ * raw `fields` jsonb (canonical, untruncated) and fills `fieldsByBaseId` in
+ * place. This is the adapter's own minimal loader (see the module doc for why
+ * `loadBasesByIds`/`hydrateRecords` are NOT used here): the field query
+ * explicitly filters `isNull(busabaseBaseFields.deletedAt)`, so a field
+ * soft-deleted after a record was written never resurfaces a stale value
+ * still sitting under its old slug in `headCommit.payload`.
  */
 const loadRecordBatchData = async (
   db: Db,
-  candidates: RecordCandidate[],
-): Promise<RecordBatchData> => {
+  batch: RecordCandidate[],
+  fieldsByBaseId: BaseFieldsById,
+): Promise<Map<string, Record<string, unknown>>> => {
   const commitFieldsById = new Map<string, Record<string, unknown>>();
-  const fieldsByBaseId = new Map<string, Array<{ slug: string; type: FieldType }>>();
-  if (candidates.length === 0) {
-    return { commitFieldsById, fieldsByBaseId };
+  if (batch.length === 0) {
+    return commitFieldsById;
   }
 
-  const headCommitIds = [...new Set(candidates.map((c) => c.headCommitId))];
-  const baseIds = [...new Set(candidates.map((c) => c.baseId))];
+  const headCommitIds = [...new Set(batch.map((c) => c.headCommitId))];
+  const newBaseIds = [...new Set(batch.map((c) => c.baseId))].filter(
+    (baseId) => !fieldsByBaseId.has(baseId),
+  );
 
   const commitRows = await db
     .select({ id: busabaseCommits.id, fields: busabaseCommits.payload })
@@ -271,6 +282,13 @@ const loadRecordBatchData = async (
     commitFieldsById.set(row.id, row.fields);
   }
 
+  if (newBaseIds.length === 0) {
+    return commitFieldsById;
+  }
+  // Marked loaded up front so a Base with no live fields is not queried again.
+  for (const baseId of newBaseIds) {
+    fieldsByBaseId.set(baseId, []);
+  }
   const fieldRows = await db
     .select({
       baseId: busabaseBaseFields.baseId,
@@ -278,15 +296,15 @@ const loadRecordBatchData = async (
       type: busabaseBaseFields.type,
     })
     .from(busabaseBaseFields)
-    .where(and(inArray(busabaseBaseFields.baseId, baseIds), isNull(busabaseBaseFields.deletedAt)))
+    .where(
+      and(inArray(busabaseBaseFields.baseId, newBaseIds), isNull(busabaseBaseFields.deletedAt)),
+    )
     .orderBy(asc(busabaseBaseFields.baseId), asc(busabaseBaseFields.position));
   for (const row of fieldRows) {
-    const list = fieldsByBaseId.get(row.baseId) ?? [];
-    list.push({ slug: row.slug, type: row.type as FieldType });
-    fieldsByBaseId.set(row.baseId, list);
+    fieldsByBaseId.get(row.baseId)?.push({ slug: row.slug, type: row.type as FieldType });
   }
 
-  return { commitFieldsById, fieldsByBaseId };
+  return commitFieldsById;
 };
 
 /**
@@ -339,7 +357,7 @@ interface ScanBudget {
   contextLines: number;
   /** This source's share of `maxMatches` (may be 0 when earlier sources used everything). */
   maxMatches: number;
-  /** One wall-clock deadline for the WHOLE grep call — never restarted per source. */
+  /** This source's share of the call's one wall-clock deadline (see `sourceDeadline`). */
   deadline: number;
 }
 
@@ -463,7 +481,8 @@ const runRecords = async (
   budget: ScanBudget,
 ): Promise<SourceRun<typeof EMPTY_RECORDS_COVERAGE>> => {
   const candidates = await resolveCandidateRecords(db, spaceId, input.scope);
-  const { commitFieldsById, fieldsByBaseId } = await loadRecordBatchData(db, candidates);
+  const fieldsByBaseId: BaseFieldsById = new Map();
+  let commitFieldsById = new Map<string, Record<string, unknown>>();
   const matches: UnifiedGrepMatchVO[] = [];
   let truncated = false;
   let scanned = 0;
@@ -477,6 +496,13 @@ const runRecords = async (
       notReached = candidates.length - i;
       truncated = true;
       break;
+    }
+    if (i % RECORD_SCAN_BATCH === 0) {
+      commitFieldsById = await loadRecordBatchData(
+        db,
+        candidates.slice(i, i + RECORD_SCAN_BATCH),
+        fieldsByBaseId,
+      );
     }
     const candidate = candidates[i];
     try {
@@ -667,6 +693,20 @@ const sourceBudget = (opts: {
   return Math.max(Math.min(opts.floor, remaining), remaining - opts.floor * opts.sourcesAfter);
 };
 
+/**
+ * This source's share of the call's time: what is left until `deadline`,
+ * split evenly among it and the sources still to run. Time a source does not
+ * use is still left when the next slice is cut, so it rolls forward; the last
+ * source runs to the call's deadline.
+ *
+ * Without this, the first slow source spent the whole deadline: in a space
+ * with 100k+ files and 70k records, an unscoped grep answered with records
+ * `scanned: 0` — every record "not reached" — even though records come
+ * third.
+ */
+const sourceDeadline = (opts: { deadline: number; now: number; sourcesLeft: number }): number =>
+  opts.now + Math.max(0, opts.deadline - opts.now) / Math.max(1, opts.sourcesLeft);
+
 export const grepUnified = async (input: UnifiedGrepInput): Promise<UnifiedGrepResultVO> => {
   await ensureReady();
   const db = await getDb();
@@ -678,8 +718,9 @@ export const grepUnified = async (input: UnifiedGrepInput): Promise<UnifiedGrepR
   const sources = SOURCE_ORDER.filter((source) => requested.has(source));
 
   // ONE wall-clock deadline for the whole call (the `grepAssets` budget
-  // constant/env var), passed into every adapter — including files, which
-  // takes it as an option instead of starting its own clock.
+  // constant/env var). Each adapter gets its slice of it (`sourceDeadline`) —
+  // including files, which takes it as an option instead of starting its own
+  // clock.
   const deadline = Date.now() + grepTimeoutMs();
   // Fair budget: no single source can use the whole `maxMatches` before the
   // others start (200 file hits used to leave records with nothing).
@@ -696,7 +737,11 @@ export const grepUnified = async (input: UnifiedGrepInput): Promise<UnifiedGrepR
     const budget: ScanBudget = {
       regex,
       contextLines: input.contextLines,
-      deadline,
+      deadline: sourceDeadline({
+        deadline,
+        now: Date.now(),
+        sourcesLeft: sources.length - index,
+      }),
       maxMatches: sourceBudget({
         maxMatches: input.maxMatches,
         used: matches.length,

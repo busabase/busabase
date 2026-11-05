@@ -6,6 +6,7 @@ import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CoreI18nProvider } from "../../../i18n";
 import type { FormulaFieldOptions } from "../helpers/formula-field";
+import { LIST_OMITTED_LONG_TEXT_VALUE } from "../utils/list-payload-preview";
 import { FormulaFieldEditor } from "./formula-field-editor";
 import { FormulaValue } from "./formula-value";
 
@@ -262,6 +263,80 @@ describe("formula field editor", () => {
 });
 
 describe("formula results", () => {
+  const compactFormulaRecord = (expression: string, chained = false) => {
+    const body = { ...field("body"), type: "longtext" as const };
+    const intermediate = field("intermediate", "Intermediate", expression);
+    const total = field("total", "Total", chained ? "{intermediate}" : expression);
+    const row = record("rec_compact", 12, 0);
+    row.base = { ...base, fields: [...fields, body, intermediate, total] };
+    row.headCommit.payload.body = LIST_OMITTED_LONG_TEXT_VALUE;
+    return { row, total };
+  };
+
+  it.each([
+    [false, null],
+    [true, null],
+    [false, undefined],
+    [true, undefined],
+  ] as const)(
+    "does not diagnose omitted formula inputs (chained: %s, value: %s)",
+    (chained, value) => {
+      const { row, total } = compactFormulaRecord(
+        'IF(LEN({body}) > 4096, BLANK(), ERROR("too short"))',
+        chained,
+      );
+      const result = render(
+        <CoreI18nProvider locale="en">
+          <FormulaValue field={total} value={value} record={row} />
+        </CoreI18nProvider>,
+      );
+      expect(screen.queryByTestId("formula-cell-error")).toBeNull();
+      expect(screen.getByTestId("formula-cell-value").textContent).toBe("View full content");
+
+      result.rerender(
+        <CoreI18nProvider locale="zh-CN">
+          <FormulaValue field={total} value={value} record={row} />
+        </CoreI18nProvider>,
+      );
+      expect(screen.getByTestId("formula-cell-value").textContent).toBe("查看完整内容");
+
+      const full = {
+        ...row,
+        headCommit: { ...row.headCommit, payload: { body: "x".repeat(6000) } },
+      };
+      result.rerender(
+        <CoreI18nProvider locale="en">
+          <FormulaValue field={total} value={value} record={full} />
+        </CoreI18nProvider>,
+      );
+      expect(screen.queryByTestId("formula-cell-error")).toBeNull();
+      expect(screen.getByTestId("formula-cell-value").textContent).toBe("-");
+    },
+  );
+
+  it("keeps real errors visible when only unrelated fields were omitted", () => {
+    const { row, total } = compactFormulaRecord("{price} / {quantity}");
+    render(
+      <CoreI18nProvider locale="en">
+        <FormulaValue field={total} value={null} record={row} />
+      </CoreI18nProvider>,
+    );
+    expect(screen.getByTestId("formula-cell-error").getAttribute("title")).toContain(
+      "Division by zero",
+    );
+  });
+
+  it.each([0, false, "persisted value"])("keeps persisted %s despite omitted inputs", (value) => {
+    const { row, total } = compactFormulaRecord("LEN({body})");
+    render(
+      <CoreI18nProvider locale="en">
+        <FormulaValue field={total} value={value} record={row} />
+      </CoreI18nProvider>,
+    );
+    expect(screen.queryByTestId("formula-cell-error")).toBeNull();
+    expect(screen.getByTestId("formula-cell-value").textContent).toBe(String(value));
+  });
+
   it("formats the persisted result and explains null computation failures", () => {
     const total = field("total", "Total", "{price} / {quantity}");
     total.options.formula = {

@@ -96,7 +96,8 @@ export const UnifiedGrepInputSchema = z.object({
    * Shared across every scanned source. Each requested source is guaranteed a
    * floor of `floor(maxMatches / sources)` (at least 1); budget a source does
    * not use rolls forward to the next one (files → nodes → records → prompts).
-   * One wall-clock deadline covers the whole call.
+   * One wall-clock deadline covers the whole call; each source gets an even
+   * slice of the time left, and time it does not use rolls forward too.
    */
   maxMatches: z.coerce
     .number()

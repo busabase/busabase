@@ -8,6 +8,15 @@
  * Codex, a remote Buda agent), NOT one of Busabase's own nodes.
  */
 import { z } from "zod";
+import {
+  AgentSessionCommandIdSchema,
+  AgentSessionCommandReceiptVOSchema,
+  AgentSessionRecoverySnapshotVOSchema,
+  AgentSessionReliabilityVOSchema,
+} from "./session-reliability";
+
+export * from "./session-reliability";
+
 import { userRefSchema } from "../../contract/schemas";
 import { NodeIconSchema } from "../../types/node-icon";
 import { PromptResourceContextListSchema } from "./prompt-context";
@@ -211,6 +220,16 @@ export const AgentSessionModelOptionVOSchema = AgentSessionConfigSelectVOSchema.
 });
 export type AgentSessionModelOptionVO = z.infer<typeof AgentSessionModelOptionVOSchema>;
 
+/** Agent-advertised modes can change prompts, tools, or permission behavior. */
+export const AgentSessionModeOptionVOSchema = AgentSessionConfigSelectVOSchema.extend({
+  source: z.enum(["config", "legacy"]),
+  description: z.string().optional(),
+  options: z.array(
+    z.object({ value: z.string(), name: z.string(), description: z.string().optional() }),
+  ),
+});
+export type AgentSessionModeOptionVO = z.infer<typeof AgentSessionModeOptionVOSchema>;
+
 export const AgentSessionVOSchema = z.object({
   /** Busabase's own id for the session; not the agent's ACP sessionId. */
   id: z.string(),
@@ -233,6 +252,12 @@ export const AgentSessionVOSchema = z.object({
   modelOption: AgentSessionModelOptionVOSchema.nullable().default(null),
   /** Model-dependent `category: "thought_level"` choices, confirmed by ACP. */
   thinkingOption: AgentSessionConfigSelectVOSchema.nullable().optional(),
+  /** Confirmed only for this session; never a connection-wide preview. */
+  modeOption: AgentSessionModeOptionVOSchema.nullable().optional(),
+  /** Present only for opted-in supervised sessions. */
+  reliability: AgentSessionReliabilityVOSchema.optional(),
+  pendingCommands: AgentSessionCommandReceiptVOSchema.array().optional(),
+  recoverySnapshot: AgentSessionRecoverySnapshotVOSchema.optional(),
 });
 export type AgentSessionVO = z.infer<typeof AgentSessionVOSchema>;
 
@@ -253,6 +278,7 @@ export type AgentSessionsPageVO = z.infer<typeof AgentSessionsPageVOSchema>;
 export const AgentConnectionVOSchema = z.object({
   slug: z.string(),
   agentName: z.string(),
+  providerAgentSlug: z.string().min(1).optional(),
   transport: AgentTransportSchema,
   sessionCount: z.number().int().nonnegative(),
   latest: AgentSessionVOSchema.nullable(),
@@ -267,6 +293,18 @@ export type AgentConnectionVO = z.infer<typeof AgentConnectionVOSchema>;
 /** Display names are workspace labels, independent of the provider's agent identity. */
 export const AgentConnectionNameSchema = z.string().trim().min(1).max(100);
 export const AgentConnectionInputSchema = z.object({ slug: z.string().min(1) });
+export const ConnectBudaAcpInputSchema = z.object({
+  endpoint: z.string().trim().min(1).max(2048),
+  agentId: z.string().trim().min(1).max(256),
+  apiToken: z
+    .string()
+    .trim()
+    .min(1)
+    .max(8192)
+    .regex(/^[^\r\n]+$/),
+});
+export const ConnectBudaAcpResultSchema = z.object({ slug: z.string().min(1) });
+export type ConnectBudaAcpInput = z.infer<typeof ConnectBudaAcpInputSchema>;
 export const RenameAgentConnectionInputSchema = AgentConnectionInputSchema.extend({
   name: AgentConnectionNameSchema,
 });
@@ -311,6 +349,7 @@ export type AgentConnectionDetailVO = z.infer<typeof AgentConnectionDetailVOSche
  */
 export const AgentSessionEventVOSchema = z.object({
   sessionId: z.string(),
+  commandId: AgentSessionCommandIdSchema.optional(),
   /** Monotonic per session, so a reconnecting client can tell what it missed. */
   seq: z.number().int(),
   kind: z.enum([
@@ -352,11 +391,13 @@ export type ListAgentConnectionsInput = z.infer<typeof ListAgentConnectionsInput
 export const CreateAgentSessionInputSchema = z.object({
   /** Must name a catalog entry. Deliberately NOT a command line — see below. */
   slug: z.string().min(1),
+  commandId: AgentSessionCommandIdSchema.optional(),
 });
 export type CreateAgentSessionInput = z.infer<typeof CreateAgentSessionInputSchema>;
 
 export const RespondToAgentInputSchema = z.object({
   sessionId: z.string().min(1),
+  commandId: AgentSessionCommandIdSchema.optional(),
   requestId: z.string().min(1),
   response: AgentInputResponseSchema,
 });
@@ -453,6 +494,7 @@ export type AgentContextResourceVO = z.infer<typeof AgentContextResourceVOSchema
 export const PromptAgentSessionInputSchema = z
   .object({
     sessionId: z.string().min(1),
+    commandId: AgentSessionCommandIdSchema.optional(),
     // No longer `.min(1)`: an attachment with no caption is a valid prompt.
     // The refine below is what actually requires SOMETHING to send.
     text: z.string(),
@@ -476,11 +518,15 @@ export const PromptAgentSessionInputSchema = z
   );
 export type PromptAgentSessionInput = z.infer<typeof PromptAgentSessionInputSchema>;
 
-export const AgentSessionIdInputSchema = z.object({ sessionId: z.string().min(1) });
+export const AgentSessionIdInputSchema = z.object({
+  sessionId: z.string().min(1),
+  commandId: AgentSessionCommandIdSchema.optional(),
+});
 export type AgentSessionIdInput = z.infer<typeof AgentSessionIdInputSchema>;
 
 export const RespondToAgentPermissionInputSchema = z.object({
   sessionId: z.string().min(1),
+  commandId: AgentSessionCommandIdSchema.optional(),
   requestId: z.string().min(1),
   optionId: z.string().min(1),
 });
@@ -489,8 +535,11 @@ export type RespondToAgentPermissionInput = z.infer<typeof RespondToAgentPermiss
 /** Change the session's `category: "model"` config option via `session/set_config_option`. */
 export const SetAgentSessionConfigOptionInputSchema = z.object({
   sessionId: z.string().min(1),
+  commandId: AgentSessionCommandIdSchema.optional(),
   configId: z.string().min(1),
   value: z.string().min(1),
+  /** Omitted by older clients, which always use session/set_config_option. */
+  source: z.enum(["config", "legacy"]).optional(),
 });
 export type SetAgentSessionConfigOptionInput = z.infer<
   typeof SetAgentSessionConfigOptionInputSchema

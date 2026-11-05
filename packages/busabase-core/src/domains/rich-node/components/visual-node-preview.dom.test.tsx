@@ -142,6 +142,7 @@ const workflowDetail: Extract<NodeDetailVO, { type: "workflow" }> = {
         label: "New lead",
         description: "Start from a form.",
         eventName: "lead.submitted",
+        baseId: "",
       },
     ],
     edges: [],

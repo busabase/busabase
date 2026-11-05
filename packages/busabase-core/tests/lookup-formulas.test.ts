@@ -169,6 +169,17 @@ describe("lookup-dependent formulas use current merged values (real PGLite)", ()
     });
     expect(page.total).toBe(1);
     expect(page.records.map((record) => record.id)).toEqual([projectId]);
+    const tablePage = await client.records.listPage({
+      baseId: projects.id,
+      viewId: result.view.id,
+      listMode: "table",
+      pageSize: 1,
+    });
+    expect(tablePage.total).toBe(1);
+    expect(tablePage.records.map((record) => record.id)).toEqual([projectId]);
+    expect(tablePage.records[0]?.base.fields.map((field) => field.slug)).toContain("spent");
+    expect(tablePage.records[0]?.headCommit.payload.remaining).toBe(350);
+    expect(tablePage.records[0]?.computedFields?.spent?.value).toBe(150);
     expect(
       (await client.records.count({ baseId: projects.id, viewId: result.view.id })).total,
     ).toBe(1);
@@ -428,6 +439,21 @@ describe("lookup-dependent formulas use current merged values (real PGLite)", ()
       expect(project?.base.fields).toEqual([]);
       expect(project?.headCommit.payload.spent).toBeUndefined();
     }
+  });
+
+  it("keeps Base schema and lookup metadata for table-mode list rows", async () => {
+    const page = await client.records.listPage({
+      baseId: projects.id,
+      listMode: "table",
+      pageSize: 1,
+      sort: { fieldSlug: "budget", fieldType: "number", direction: "asc" },
+    });
+    const project = page.records[0];
+
+    expect(project?.id).toBe(lowProjectId);
+    expect(project?.base.fields.map((field) => field.slug)).toContain("spent");
+    expect(project?.headCommit.payload.spent).toBe(150);
+    expect(project?.computedFields?.spent?.value).toBe(150);
   });
 
   it("uses complete inputs for dynamic summary formulas while keeping large outputs compact", async () => {

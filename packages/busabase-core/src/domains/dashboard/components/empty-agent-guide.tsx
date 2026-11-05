@@ -2,10 +2,12 @@
 
 import { AppWindow, BookOpen, Database, Plus, Shapes, Sparkles, X } from "lucide-react";
 import { SPALink } from "openlib/ui/dashboard";
-import { Fragment, useId, useState } from "react";
+import { Fragment, useContext, useId, useState } from "react";
 import { type CoreI18nMessages, useCoreI18n } from "../../../i18n";
 import type { McpGuideEdition } from "./agent-mcp-guides";
 import { AgentIntegrationDialog } from "./agent-skill-button";
+import { HomeGuideContext } from "./home-guide-context";
+import { NodeTypeTour } from "./node-type-tour";
 import "./agent-connect-cue.css";
 
 /**
@@ -67,6 +69,17 @@ interface EmptyAgentGuideProps {
  * (`agentCue`): its signup funnel showed nearly every new user creating content
  * by hand and almost none connecting the agent the product exists for, so there
  * the agent CTA leads, with a gentle ring, and the user can dismiss it.
+ *
+ * On Home (inside a `HomeGuideContext`) the same card is the built-in Getting
+ * started, in one of two audiences. For an empty space everything above holds
+ * unchanged; the four-Bases list is replaced by the real node types with the
+ * sidebar's own icons, because the next thing the user will look at is that
+ * sidebar. For an invited member of a populated space (`member`) the template
+ * and manual-create paths are dropped — filling the space is not their job, and
+ * a "start from a template" CTA there reads as "this space is empty" — leaving
+ * the node-type tour and one plain "Connect your agent". Either can be closed
+ * per member. Elsewhere (Inbox, Assets, Activity empty states) there is no
+ * context and the card renders exactly as it always has.
  */
 export function EmptyAgentGuide({
   edition = "desktop",
@@ -75,6 +88,8 @@ export function EmptyAgentGuide({
   agentCue,
 }: EmptyAgentGuideProps = {}) {
   const messages = useCoreI18n();
+  const home = useContext(HomeGuideContext);
+  const isMember = home?.audience === "member";
   const [open, setOpen] = useState(false);
   // What an agent fills this workspace with: the four bases the homepage hero
   // rotates through and the onboarding wizard's last step shows, with the same
@@ -101,21 +116,65 @@ export function EmptyAgentGuide({
     </div>
   );
 
+  // On Home the real node types replace the four-Bases list (see above).
+  const intro = home ? <NodeTypeTour /> : basesList;
+  const { gettingStarted } = messages;
+
   return (
     <>
-      <div className="mx-auto max-w-xl rounded-lg border bg-card p-4 text-left">
+      <div
+        className={
+          home
+            ? "w-full rounded-lg border bg-card p-4 text-left"
+            : "mx-auto max-w-xl rounded-lg border bg-card p-4 text-left"
+        }
+        data-getting-started={home ? home.audience : undefined}
+      >
         <div className="flex items-start gap-3">
           <div className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-md bg-primary/10 text-primary">
             <Sparkles size={18} />
           </div>
-          <div className="min-w-0">
-            <h3 className="font-medium text-sm">{messages.emptyGuide.title}</h3>
+          <div className="min-w-0 flex-1">
+            <h3 className="font-medium text-sm">
+              {isMember ? gettingStarted.title : messages.emptyGuide.title}
+            </h3>
             <p className="mt-1 text-muted-foreground text-sm leading-6">
-              {messages.emptyGuide.body}
+              {isMember ? gettingStarted.body : messages.emptyGuide.body}
             </p>
           </div>
+          {home ? (
+            <button
+              aria-label={gettingStarted.close}
+              className="-mt-1 -mr-1 grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
+              onClick={home.onDismiss}
+              title={gettingStarted.close}
+              type="button"
+            >
+              <X aria-hidden="true" size={15} />
+            </button>
+          ) : null}
         </div>
-        {agentCue ? (
+        {isMember ? (
+          <>
+            {intro}
+            <div className="mt-4 flex flex-col gap-2">
+              <button
+                className="inline-flex h-9 items-center gap-2 self-start rounded-md border border-border bg-background px-3 font-medium text-foreground text-sm transition hover:bg-muted"
+                onClick={() => {
+                  agentCue?.onConnectClick?.();
+                  setOpen(true);
+                }}
+                type="button"
+              >
+                <Sparkles aria-hidden="true" size={15} />
+                {messages.emptyGuide.connectAgentPrimary}
+              </button>
+              <span className="text-muted-foreground text-xs leading-5">
+                {gettingStarted.connectAgentHint}
+              </span>
+            </div>
+          </>
+        ) : agentCue ? (
           <>
             <AgentFirstActions
               cue={agentCue}
@@ -128,11 +187,11 @@ export function EmptyAgentGuide({
             />
             {/* Agent-first: the action sits right under the pitch, so it is
                 above the fold at 390px; the bases explain what lands here. */}
-            <div className="mt-4 border-t pt-3">{basesList}</div>
+            {home ? intro : <div className="mt-4 border-t pt-3">{basesList}</div>}
           </>
         ) : (
           <>
-            {basesList}
+            {intro}
             <div className="mt-4 flex flex-col gap-2">
               <div className="flex flex-wrap items-center gap-2">
                 {/* SPALink, not a raw href: this is inside the dashboard's wouter

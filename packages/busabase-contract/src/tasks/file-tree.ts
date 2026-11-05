@@ -119,6 +119,9 @@ export const nodeGetTask: TaskDefinition<FileTreeGetInput> = {
     client.nodes.get({ nodeId: input.nodeId, type: resolveKind(input.kind) }),
 };
 
+/** Busabase's ceiling for one `fileTrees.listFiles` page. */
+const LIST_FILES_PAGE_SIZE = 5_000;
+
 export const nodeListFilesTask: TaskDefinition<FileTreeGetInput> = {
   name: "node_files_list",
   cliPath: ["nodes", "files"],
@@ -143,8 +146,34 @@ export const nodeListFilesTask: TaskDefinition<FileTreeGetInput> = {
   annotations: { readOnly: true, destructive: false },
   params: [kindParam, nodeIdParam],
   examples: ["busabase-cli nodes files --kind drive --node-id nod_123"],
-  execute: async (client: BusabaseTaskClient, input: FileTreeGetInput) =>
-    client.fileTrees.listFiles({ nodeId: input.nodeId, type: resolveKind(input.kind) }),
+  // The server returns at most 5,000 files per call; follow the path cursor so
+  // the command still lists every file of a large Drive.
+  execute: async (client: BusabaseTaskClient, input: FileTreeGetInput) => {
+    const type = resolveKind(input.kind);
+    const files: Awaited<ReturnType<BusabaseTaskClient["fileTrees"]["listFiles"]>> = [];
+    // A server that predates paging ignores `limit`/`after` and answers every
+    // call with the whole list, so its first page is already complete — stop
+    // rather than looping over the same rows forever.
+    let firstPath: string | undefined;
+    for (let after: string | undefined; ; ) {
+      const page = await client.fileTrees.listFiles({
+        nodeId: input.nodeId,
+        type,
+        limit: LIST_FILES_PAGE_SIZE,
+        after,
+      });
+      // Same page again: the server ignored `after` (it predates paging), so the
+      // first answer already held everything.
+      if (after !== undefined && page[0]?.path === firstPath) return files;
+      const next = page.at(-1)?.path;
+      // A cursor page can never legitimately end on the cursor's own row; if it
+      // does, the server is echoing the page and following it would repeat it.
+      if (after !== undefined && next === after) return files;
+      files.push(...page);
+      if (page.length < LIST_FILES_PAGE_SIZE || !next) return files;
+      after = next;
+    }
+  },
 };
 
 export interface FileTreeReadFileInput extends FileTreeGetInput {

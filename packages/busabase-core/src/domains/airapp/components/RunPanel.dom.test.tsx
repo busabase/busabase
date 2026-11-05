@@ -1,13 +1,19 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
+import type { AirAppVO } from "busabase-contract/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CoreI18nProvider, type CoreLocale } from "../../../i18n";
+import { useAirAppRunnerStore } from "../store/airapp-runner-store";
+import { AirAppEngineAvailabilityProvider } from "./engine-availability-context";
 import {
+  AirAppRunControls,
   AirAppRunLogs,
   type AirAppRunnerState,
   AirAppRunPreview,
   AirAppServiceWorkerUnsupported,
   useAirAppFullscreen,
+  useAirAppRunner,
 } from "./RunPanel";
 
 /**
@@ -52,6 +58,10 @@ describe("AirAppServiceWorkerUnsupported", () => {
       previewUrl: null,
       error: "generic error that should not render",
       errorCode: "SERVICE_WORKER_UNAVAILABLE",
+      engineLock: null,
+      siteBlockers: null,
+      runnerKind: "browser" as const,
+      orpc: {} as never,
       run: vi.fn(),
       stop: vi.fn(),
       isBusy: false,
@@ -126,6 +136,10 @@ const notReadyRunner = (
   previewUrl: null,
   error,
   errorCode: null,
+  engineLock: null,
+  siteBlockers: null,
+  runnerKind: "browser" as const,
+  orpc: {} as never,
   run: vi.fn(),
   stop: vi.fn(),
   isBusy: status === "installing" || status === "starting",
@@ -309,5 +323,145 @@ describe("AirAppRunPreview fullscreen exit", () => {
     );
 
     expect(screen.queryByRole("button", { name: "Enter fullscreen" })).toBeNull();
+  });
+});
+
+/**
+ * A Free Cloud space opening a Python AirApp (or one whose `airapp.json`
+ * requires `remote`): the deployment could run it, the space's plan does not
+ * include the engine. That must read as "upgrade to run this", with the host's
+ * upgrade action — not as the generic failure banner over "failed to start".
+ */
+describe("AirAppEnginePlanLocked", () => {
+  const lockedRunner = (): AirAppRunnerState => ({
+    ...notReadyRunner("error", "Upgrade to Plus to run this app"),
+    engineLock: { engine: "remote", planLabel: "Plus" },
+  });
+
+  it("replaces the failure banner with an upgrade state that opens the host's upgrade", () => {
+    const onUpgrade = vi.fn();
+    render(
+      <CoreI18nProvider locale="en">
+        <AirAppEngineAvailabilityProvider
+          engines={["browser", "remote"]}
+          planGate={{ lockedEngines: ["remote"], planLabel: "Plus", onUpgrade }}
+        >
+          <AirAppRunPreview airapp={null} runner={lockedRunner()} showToolbar={false} />
+        </AirAppEngineAvailabilityProvider>
+      </CoreI18nProvider>,
+    );
+
+    const state = document.querySelector('[data-airapp-engine-locked="remote"]');
+    expect(state).toBeTruthy();
+    expect(screen.getByText("Upgrade to Plus to run this app")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Cloud sandbox isn't included in this space's plan, and this app needs it to run.",
+      ),
+    ).toBeTruthy();
+    // Neither the generic banner nor the dead-end "failed to start" copy.
+    expect(screen.queryByText("The AirApp failed to start. Check the logs below.")).toBeNull();
+    expect(screen.getAllByText("Upgrade to Plus to run this app")).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Upgrade to Plus" }));
+    expect(onUpgrade).toHaveBeenCalledOnce();
+  });
+
+  it("does not call a locked app a failed run, nor offer to run it again", () => {
+    function LockedControls() {
+      const fullscreenState = useAirAppFullscreen();
+      return (
+        <AirAppRunControls
+          airapp={null}
+          fullscreenState={fullscreenState}
+          runner={lockedRunner()}
+        />
+      );
+    }
+    render(
+      <CoreI18nProvider locale="en">
+        <AirAppEngineAvailabilityProvider
+          engines={["browser", "remote"]}
+          planGate={{ lockedEngines: ["remote"], planLabel: "Plus" }}
+        >
+          <LockedControls />
+        </AirAppEngineAvailabilityProvider>
+      </CoreI18nProvider>,
+    );
+
+    expect(screen.getByText("Upgrade required")).toBeTruthy();
+    expect(screen.queryByText("Failed")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Restart" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Run" })).toBeNull();
+  });
+
+  it("still explains the lock when the host offers no upgrade action", () => {
+    render(
+      <CoreI18nProvider locale="ja">
+        <AirAppEngineAvailabilityProvider
+          engines={["browser", "remote"]}
+          planGate={{ lockedEngines: ["remote"], planLabel: "Plus" }}
+        >
+          <AirAppRunPreview airapp={null} runner={lockedRunner()} showToolbar={false} />
+        </AirAppEngineAvailabilityProvider>
+      </CoreI18nProvider>,
+    );
+
+    expect(
+      screen.getByText("このアプリを実行するには Plus にアップグレードしてください"),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /アップグレード/ })).toBeNull();
+  });
+});
+
+/**
+ * The whole path, not just the leaf: opening an AirApp auto-runs it, so a
+ * remote-only app in a Free space must land on the upgrade state by itself —
+ * without ever constructing a runner, browser or otherwise.
+ */
+describe("opening a remote-only AirApp in a space whose plan locks remote", () => {
+  const NODE_ID = "airapp-requires-remote";
+  const airapp = {
+    node: { id: NODE_ID, name: "Needs a machine", slug: "needs-a-machine", settings: {} },
+    files: [{ path: "airapp.json" }, { path: "package.json" }],
+  } as unknown as AirAppVO;
+  const readFile = vi.fn(async () => ({
+    encoding: "utf8",
+    content: JSON.stringify({ runtime: "node", requiredEngine: "remote" }),
+  }));
+  const orpc = { fileTrees: { readFile: { call: readFile } } } as unknown as BusabaseQueryUtils;
+
+  function Harness() {
+    const runner = useAirAppRunner({ orpc, airapp });
+    return <AirAppRunPreview airapp={airapp} runner={runner} showToolbar={false} />;
+  }
+
+  afterEach(() => {
+    useAirAppRunnerStore.getState().disposeEntry(NODE_ID);
+  });
+
+  it("auto-runs straight into the upgrade state", async () => {
+    const onUpgrade = vi.fn();
+    render(
+      <CoreI18nProvider locale="en">
+        <AirAppEngineAvailabilityProvider
+          engines={["browser", "remote"]}
+          planGate={{ lockedEngines: ["remote"], planLabel: "Plus", onUpgrade }}
+        >
+          <Harness />
+        </AirAppEngineAvailabilityProvider>
+      </CoreI18nProvider>,
+    );
+
+    expect(await screen.findByText("Upgrade to Plus to run this app")).toBeTruthy();
+    expect(useAirAppRunnerStore.getState().entries[NODE_ID]).toMatchObject({
+      status: "error",
+      runner: null,
+      runnerKind: "remote",
+      engineLock: { engine: "remote", planLabel: "Plus" },
+    });
+    expect(screen.queryByText(/Sandock is not configured/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Upgrade to Plus" }));
+    expect(onUpgrade).toHaveBeenCalledOnce();
   });
 });

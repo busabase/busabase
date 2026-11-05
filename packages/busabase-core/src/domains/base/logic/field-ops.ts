@@ -39,6 +39,7 @@ import { convertFieldValue, isUnconvertibleFieldType } from "../utils/field-conv
 import { isPrimaryField, PRIMARY_FIELD_DELETE_MESSAGE } from "../utils/primary-field";
 import { assertValidDateFieldOptionsOrThrow } from "./date-options";
 import { baseNotFound } from "./errors";
+import { assertFieldDeletable } from "./field-deletion";
 import { createFieldProposal } from "./field-proposal";
 import { assertFieldOriginView } from "./field-visibility";
 import { formulaDependencySnapshot } from "./formula-recalculation";
@@ -377,9 +378,7 @@ export const createDeleteFieldChangeRequest = async (
   if (field.deletedAt) {
     throw new Error(`Field is already deleted: ${fieldId}`);
   }
-  if (isSystemFieldType(field.type)) {
-    throw new Error(`Cannot delete system field: ${field.slug}`);
-  }
+  await assertFieldDeletable(db, field);
   if (isPrimaryField(base, field.id)) {
     throw new ORPCError("BAD_REQUEST", { message: PRIMARY_FIELD_DELETE_MESSAGE });
   }

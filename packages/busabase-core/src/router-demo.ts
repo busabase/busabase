@@ -5,7 +5,12 @@ import {
   PlaybookSearchInputSchema,
 } from "busabase-contract/contract/playbook-schemas";
 import { combineViewFilters } from "busabase-contract/types";
-import { getContextDemoLocale, getContextSpaceId, resolveMemberRoster } from "./context";
+import {
+  getContextDemoLocale,
+  getContextSpaceId,
+  resolveActorId,
+  resolveMemberRoster,
+} from "./context";
 import {
   cancelDemoAgentSession,
   closeDemoAgentSession,
@@ -18,12 +23,14 @@ import {
   subscribeDemoAgentSession,
 } from "./domains/agents/logic/demo-agent";
 import { paginateAgentSessions } from "./domains/agents/utils/agent-session-pagination";
+import { resolveRecordSort } from "./domains/base/logic/record-sort";
 import {
   applyViewConfigToRecords,
   DATE_RANGE_FIELD_TYPES,
   GROUPABLE_FIELD_TYPES,
   groupKeyForValue,
 } from "./domains/base/utils/view-records";
+import { folderEntriesFromFiles } from "./domains/filetree/utils/folder-entries";
 import { guidesRouter } from "./domains/guides/router";
 import {
   assemblePlaybookList,
@@ -32,6 +39,19 @@ import {
   rankPlaybookSearch,
 } from "./domains/playbooks/logic/playbooks";
 import { listTemplates } from "./domains/templates/logic/catalog";
+import { toWorkflowRecordSnapshot } from "./domains/workflow/logic/record-snapshot";
+import { demoWorkflowRunStore } from "./domains/workflow/logic/run-store";
+import {
+  cancelQueuedWorkflowRuns,
+  cancelWorkflowRun,
+  decideWorkflowRun,
+  getWorkflowRun,
+  listWorkflowRuns,
+  resumeElapsedWorkflowRuns,
+  resumeWorkflowRun,
+  startWorkflowRun,
+  type WorkflowRuntimeDeps,
+} from "./domains/workflow/logic/runs";
 import { buildActivityItemsFromVOs } from "./logic/activity";
 import {
   demoCloseChangeRequest,
@@ -81,6 +101,7 @@ import {
   demoSubmitForm,
 } from "./logic/demo-store";
 import type { ImplementedContractRouter } from "./logic/implemented-router-type";
+import { CURRENT_USER_ID, id } from "./logic/kernel";
 
 // Stateless demo router: the request boundary swaps to this
 // when `?demo` is present. It implements the SAME `busabaseContract` as the real
@@ -125,7 +146,7 @@ const DEMO_ACTIVITY_CURSOR_PREFIX = "demo-activity:";
 
 /**
  * Demo twin of `records.listPage`'s SQL sort: number/date fields only (the
- * caller's `fieldType` decides, as in real mode), empty values last, ties by
+ * sort's resolved `fieldType` decides, as in real mode), empty values last, ties by
  * record id ascending. Any other field type leaves the order untouched.
  */
 const demoSortRecordsForPage = <
@@ -189,6 +210,63 @@ const getDemoRecordOffset = (cursor?: string) => {
   const offset = Number.parseInt(cursor.slice(prefix.length), 10);
   return Number.isSafeInteger(offset) && offset >= 0 ? offset : 0;
 };
+
+const demoWorkflowDeps = (): WorkflowRuntimeDeps => ({
+  spaceId: getContextSpaceId(),
+  actorId: resolveActorId(CURRENT_USER_ID),
+  store: demoWorkflowRunStore,
+  now: () => Date.now(),
+  createId: () => id("wfr"),
+  readRecord: async (recordId) => {
+    try {
+      return toWorkflowRecordSnapshot(demoGetRecord(recordId));
+    } catch (error) {
+      if (error instanceof ORPCError && error.code === "NOT_FOUND") return null;
+      throw error;
+    }
+  },
+  // The demo is one read-only sample space: every visitor may try a run.
+  authorizeWorkflow: async (nodeId) => {
+    const detail = demoGetNodeDetail(nodeId, "workflow");
+    if (detail.type !== "workflow") {
+      throw new ORPCError("BAD_REQUEST", { message: `Node ${nodeId} is not a workflow` });
+    }
+    return detail.node.id;
+  },
+  canDriveWorkflow: async () => true,
+  updateRecord: async () => {
+    throw demoUnsupported("Changing a record from a workflow");
+  },
+  createRecord: async () => {
+    throw demoUnsupported("Creating a record from a workflow");
+  },
+  deleteRecord: async () => {
+    throw demoUnsupported("Deleting a record from a workflow");
+  },
+  resolveActorNames: async () => ({}),
+  notify: async () => {},
+  background: false,
+  agent: null,
+  isNamedApprover: async () => true,
+  loadDocument: async (nodeId) => {
+    const detail = demoGetNodeDetail(nodeId, "workflow");
+    if (detail.type !== "workflow") {
+      throw new ORPCError("BAD_REQUEST", { message: `Node ${nodeId} is not a workflow` });
+    }
+    return detail.document;
+  },
+  executeFunction: async () => ({
+    ok: false,
+    message: "Demo mode has no saved webhook function rules.",
+  }),
+  sendWebhook: async () => ({
+    ok: false,
+    message: "Demo mode does not send webhooks.",
+    status: null,
+    body: null,
+    durationMs: 0,
+  }),
+});
 
 // Annotated with the contract-derived router type, like `busabaseRouter`: the
 // inferred type is past TypeScript's declaration-serialization limit (TS7056)
@@ -624,6 +702,12 @@ export const busabaseDemoRouter: EnhancedRouter<
     listFiles: os.fileTrees.listFiles.handler(
       ({ input }) => demoGetFileTree(input.nodeId, input.type).files,
     ),
+    listEntries: os.fileTrees.listEntries.handler(({ input }) =>
+      folderEntriesFromFiles(
+        demoGetFileTree(input.nodeId, input.type).files,
+        (input.folder ?? "").replace(/\/+$/, ""),
+      ),
+    ),
     readFile: os.fileTrees.readFile.handler(({ input }) =>
       demoReadFileTreeFile(input.nodeId, input.filePath, input.type),
     ),
@@ -640,6 +724,52 @@ export const busabaseDemoRouter: EnhancedRouter<
     stopLocal: os.airapps.stopLocal.handler(() => {
       throw demoUnsupported("Local execution");
     }),
+    siteState: os.airapps.siteState.handler(() => {
+      throw demoUnsupported("Website publishing");
+    }),
+    siteDomains: os.airapps.siteDomains.handler(() => ({
+      available: false,
+      cnameTarget: null,
+      bindings: [],
+    })),
+    siteBindDomain: os.airapps.siteBindDomain.handler(() => {
+      throw demoUnsupported("Custom website domains");
+    }),
+    siteUnbindDomain: os.airapps.siteUnbindDomain.handler(() => {
+      throw demoUnsupported("Custom website domains");
+    }),
+    siteDeployPreview: os.airapps.siteDeployPreview.handler(() => {
+      throw demoUnsupported("Website publishing");
+    }),
+    siteGoLive: os.airapps.siteGoLive.handler(() => {
+      throw demoUnsupported("Website publishing");
+    }),
+    siteRepublish: os.airapps.siteRepublish.handler(() => {
+      throw demoUnsupported("Website publishing");
+    }),
+    siteUnpublish: os.airapps.siteUnpublish.handler(() => {
+      throw demoUnsupported("Website publishing");
+    }),
+  },
+  workflows: {
+    start: os.workflows.start.handler(({ input }) => startWorkflowRun(demoWorkflowDeps(), input)),
+    get: os.workflows.get.handler(({ input }) => getWorkflowRun(demoWorkflowDeps(), input.runId)),
+    list: os.workflows.list.handler(({ input }) => listWorkflowRuns(demoWorkflowDeps(), input)),
+    resume: os.workflows.resume.handler(({ input }) =>
+      resumeWorkflowRun(demoWorkflowDeps(), input),
+    ),
+    decide: os.workflows.decide.handler(({ input }) =>
+      decideWorkflowRun(demoWorkflowDeps(), input),
+    ),
+    cancel: os.workflows.cancel.handler(({ input }) =>
+      cancelWorkflowRun(demoWorkflowDeps(), input),
+    ),
+    cancelQueued: os.workflows.cancelQueued.handler(({ input }) =>
+      cancelQueuedWorkflowRuns(demoWorkflowDeps(), input),
+    ),
+    resumeElapsed: os.workflows.resumeElapsed.handler(() =>
+      resumeElapsedWorkflowRuns(demoWorkflowDeps()),
+    ),
   },
   files: {
     create: os.files.create.handler(() => {
@@ -691,6 +821,18 @@ export const busabaseDemoRouter: EnhancedRouter<
     confirm: os.assets.confirm.handler(() => {
       throw demoUnsupported("Upload asset");
     }),
+    createMultipartUpload: os.assets.createMultipartUpload.handler(() => {
+      throw demoUnsupported("Upload asset");
+    }),
+    signMultipartParts: os.assets.signMultipartParts.handler(() => {
+      throw demoUnsupported("Upload asset");
+    }),
+    completeMultipartUpload: os.assets.completeMultipartUpload.handler(() => {
+      throw demoUnsupported("Upload asset");
+    }),
+    abortMultipartUpload: os.assets.abortMultipartUpload.handler(() => {
+      throw demoUnsupported("Upload asset");
+    }),
     list: os.assets.list.handler(({ input }) => demoListAssets(input)),
     get: os.assets.get.handler(({ input }) => demoGetAsset(input.assetId)),
     updateMetadata: os.assets.updateMetadata.handler(() => {
@@ -729,6 +871,19 @@ export const busabaseDemoRouter: EnhancedRouter<
     })),
     update: os.spaceInstructions.update.handler(() => {
       throw demoUnsupported("Update space instructions");
+    }),
+  },
+  // Like instructions: the stateless demo has no welcome page and refuses to
+  // pretend it saved one, so Home falls back to its built-in getting started.
+  spaceWelcome: {
+    get: os.spaceWelcome.get.handler(() => ({
+      spaceId: getContextSpaceId(),
+      nodeId: null,
+      version: 0,
+      updatedAt: null,
+    })),
+    update: os.spaceWelcome.update.handler(() => {
+      throw demoUnsupported("Choose a welcome page");
     }),
   },
   vault: {
@@ -801,6 +956,9 @@ export const busabaseDemoRouter: EnhancedRouter<
       demoAgentCatalogEntry(getContextDemoLocale()),
     ]),
     connections: {
+      connectBuda: os.agents.connections.connectBuda.handler(() => {
+        throw demoUnsupported("Connect Buda");
+      }),
       detail: os.agents.connections.detail.handler(() => {
         throw demoUnsupported("View a saved agent connection");
       }),
@@ -1145,6 +1303,9 @@ export const busabaseDemoRouter: EnhancedRouter<
       if (input.viewId && !view) {
         throw new ORPCError("NOT_FOUND", { message: `View not found: ${input.viewId}` });
       }
+      // Same resolution as the real handler: an omitted `fieldType` comes from
+      // the Base's schema, an unknown slug is a 400.
+      const sort = input.sort ? resolveRecordSort(input.sort, base.fields) : undefined;
       let scoped = await demoListRecords({ baseId: base.id });
       if (input.dateRange) {
         const rangeField = base.fields.find((field) => field.slug === input.dateRange?.fieldSlug);
@@ -1177,11 +1338,11 @@ export const busabaseDemoRouter: EnhancedRouter<
           input.filters?.length || view
             ? {
                 filters: combineViewFilters(view?.config, input.filters),
-                sorts: input.sort ? [] : (view?.config.sorts ?? []),
+                sorts: sort ? [] : (view?.config.sorts ?? []),
               }
             : undefined,
         ),
-        input.sort,
+        sort,
       );
       const total = ordered.length;
       const totalPages = Math.ceil(total / input.pageSize);

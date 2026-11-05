@@ -1,5 +1,7 @@
 import type { AirAppRuntimeEvent } from "busabase-contract/domains/airapp/contract";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { runWithBusabaseContext } from "../../../context";
+import { AIRAPP_ENGINE_PLAN_REQUIRED } from "../utils/engine-plan-gate";
 
 /**
  * The session layer is the thing that makes a run outlive its stream, so every
@@ -18,7 +20,8 @@ vi.mock("../../../logic/node-acl", () => ({
  * gate itself can be exercised below with the list a real cloud deployment has.
  */
 let availableEngines: string[] = ["browser", "local", "remote"];
-vi.mock("./engine-availability", () => ({
+vi.mock("./engine-availability", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./engine-availability")>()),
   resolveAvailableAirAppEngines: () => availableEngines,
 }));
 
@@ -81,6 +84,21 @@ vi.mock("./local-runtime", () => ({
       signal?.removeEventListener("abort", onAbort);
     }
   },
+}));
+
+/**
+ * The remote engine runs the same controllable stand-in, so a test can tell a
+ * remote run that STARTED apart from one the gate refused before it got there.
+ */
+vi.mock("./sandock-runtime", () => ({
+  runAirAppSandock: async function* (
+    input: unknown,
+    signal?: AbortSignal,
+  ): AsyncGenerator<AirAppRuntimeEvent> {
+    const { runAirAppLocal } = await import("./local-runtime");
+    yield* runAirAppLocal(input as Parameters<typeof runAirAppLocal>[0], signal);
+  },
+  __resetSandockRuntimeForTest: async () => undefined,
 }));
 
 const INPUT = {
@@ -381,5 +399,80 @@ describe("engines this deployment does not offer", () => {
     await pending;
     expect(runs).toBe(1);
     await session.return(undefined as never);
+  });
+});
+
+describe("engines this space's plan does not include", () => {
+  /**
+   * Busabase Cloud: the deployment has a Sandock, but a Free space's plan does
+   * not include remote machines. The dashboard shows the engine as locked and
+   * never asks for it — this is what stops a client that asks anyway.
+   */
+  const freeSpace = {
+    resolveAirAppEngineLock: async () => ({
+      lockedEngines: ["remote" as const],
+      planLabel: "Plus",
+    }),
+  };
+
+  it("refuses a locked engine and names the plan that unlocks it", async () => {
+    availableEngines = ["browser", "remote"];
+    await runWithBusabaseContext(freeSpace, async () => {
+      const session = mod.runOrAttachSession({ ...INPUT, engine: "remote" as const });
+      const refusal = await session.next().catch((error: unknown) => error);
+      expect(refusal).toMatchObject({
+        code: "FORBIDDEN",
+        message: expect.stringMatching(/not included in this space's plan.*Upgrade to Plus/),
+        data: { reason: AIRAPP_ENGINE_PLAN_REQUIRED, engine: "remote", planLabel: "Plus" },
+      });
+    });
+    expect(runs).toBe(0);
+  });
+
+  it("does not lock an engine the plan never mentioned", async () => {
+    availableEngines = ["browser", "local", "remote"];
+    await runWithBusabaseContext(freeSpace, async () => {
+      const session = mod.runOrAttachSession(INPUT);
+      const pending = session.next();
+      await vi.waitFor(() => expect(emit).not.toBeNull());
+      emit?.({ type: "log", line: "installing\n" });
+      await pending;
+      await session.return(undefined as never);
+    });
+    expect(runs).toBe(1);
+  });
+
+  it("starts remote for a space whose plan includes it", async () => {
+    availableEngines = ["browser", "remote"];
+    await runWithBusabaseContext({ resolveAirAppEngineLock: async () => null }, async () => {
+      const session = mod.runOrAttachSession({ ...INPUT, engine: "remote" as const });
+      const pending = session.next();
+      await vi.waitFor(() => expect(emit).not.toBeNull());
+      emit?.({ type: "log", line: "provisioned\n" });
+      await expect(pending).resolves.toMatchObject({ value: { type: "log" } });
+      await session.return(undefined as never);
+    });
+    expect(runs).toBe(1);
+  });
+
+  it("keeps a host with no plan gate capability-only, as before", async () => {
+    // Open source, Desktop, self-hosted: no hook, so remote runs wherever a
+    // Sandock is configured.
+    availableEngines = ["browser", "remote"];
+    const session = mod.runOrAttachSession({ ...INPUT, engine: "remote" as const });
+    const pending = session.next();
+    await vi.waitFor(() => expect(emit).not.toBeNull());
+    emit?.({ type: "log", line: "provisioned\n" });
+    await pending;
+    await session.return(undefined as never);
+    expect(runs).toBe(1);
+  });
+
+  it("still says 'not offered' first when the deployment has no such engine", async () => {
+    availableEngines = ["browser"];
+    await runWithBusabaseContext(freeSpace, async () => {
+      const session = mod.runOrAttachSession({ ...INPUT, engine: "remote" as const });
+      await expect(session.next()).rejects.toThrow(/not offered by this deployment/);
+    });
   });
 });

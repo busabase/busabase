@@ -21,7 +21,7 @@ import {
   resolveTargetState,
 } from "busabase-package/plan";
 import { type PackageNode, type PackageTree, suggestSlug } from "busabase-package/tree";
-import { getContextSpaceId } from "../../../context";
+import { assertContextCreationAllowed, getContextSpaceId } from "../../../context";
 import { rootNodeIdForSpace } from "../../../logic/kernel";
 import { hasNodePermission, shouldAutoMerge } from "../../../logic/node-acl";
 import { requireWriteForInstall } from "./_guard";
@@ -151,7 +151,23 @@ export const planInstallFromGithub = async (
   // `applicable: false` for every package whose records carry relation values —
   // the exact packages auto-merge exists to install — and a client gating its
   // submit button on that would make them permanently uninstallable.
-  return toPlanVO(plan, source, await callerMergesDirectly(input.autoMerge));
+  const autoMerge = await callerMergesDirectly(input.autoMerge);
+  await assertPlanFitsTheSpace(plan, autoMerge);
+  return toPlanVO(plan, source, autoMerge);
+};
+
+/**
+ * Asked up front, for the whole package: stopping at the limit halfway through would
+ * leave a half-installed template, which is worse than not starting. The plan asks too,
+ * so someone looking at a template that cannot fit hears it before choosing to install.
+ */
+const assertPlanFitsTheSpace = async (plan: InstallPlan, autoMerge: boolean) => {
+  if (!autoMerge) return;
+  const { folders, docs, bases, skills, airapps, drives, records } = plan.counts;
+  await assertContextCreationAllowed({
+    nodes: folders + docs + bases + skills + airapps + drives,
+    records,
+  });
 };
 
 export const installFromGithub = async (input: InstallFromGithubDTO): Promise<InstallResultVO> => {
@@ -167,6 +183,8 @@ export const installFromGithub = async (input: InstallFromGithubDTO): Promise<In
       message: error instanceof Error ? error.message : "This package cannot be installed as-is.",
     });
   }
+
+  await assertPlanFitsTheSpace(plan, autoMerge);
 
   const result = await runApply(client, plan, {
     autoMerge,
@@ -256,6 +274,8 @@ export async function* installFromGithubStream(
   const queue: string[] = [];
   let wake: (() => void) | null = null;
   let finished = false;
+
+  await assertPlanFitsTheSpace(plan, autoMerge);
 
   const applying = runApply(client, plan, {
     autoMerge,

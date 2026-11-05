@@ -67,7 +67,7 @@ function snapshotDemoNode(nodeId: string): AgentContextResourceVO {
       sections.push(
         `## Files\n${json(detail.files.slice(0, DIRECTORY_LIMIT).map(({ path, size, mimeType }) => ({ path, size, mimeType })))}`,
       );
-      partial = detail.files.length > DIRECTORY_LIMIT;
+      partial = (detail.fileCount ?? detail.files.length) > DIRECTORY_LIMIT;
       if (detail.files.some((file) => file.path === detail.entryFile)) {
         const entry = demoReadFileTreeFile(node.id, detail.entryFile, detail.type);
         sections.push(

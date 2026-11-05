@@ -385,3 +385,73 @@ describe("AirApp preview proxy credential boundary", () => {
     expect(await response.text()).toContain("not supported");
   });
 });
+
+describe("a preview target that needs its own credentials", () => {
+  it("sends them upstream without letting a browser set or read them", async () => {
+    let seen: IncomingMessage["headers"] = {};
+    const upstream = await listen((request, response) => {
+      seen = request.headers;
+      response.setHeader("content-type", "text/plain");
+      response.end("ok");
+    });
+    try {
+      await registerLocalPreview("site-node", OWNER, upstream.origin, {
+        "x-busabase-preview-token": "server-side",
+      });
+      const result = await proxyLocalPreview(
+        new Request("http://localhost/api/airapp-preview/site-node/", {
+          headers: { "x-busabase-preview-token": "from-the-browser" },
+        }),
+        "site-node",
+        "",
+        OWNER,
+      );
+      expect(result.status).toBe(200);
+      expect(seen["x-busabase-preview-token"]).toBe("server-side");
+      expect(result.headers.get("x-busabase-preview-token")).toBeNull();
+    } finally {
+      await unregisterLocalPreview("site-node", OWNER);
+      await upstream.close();
+    }
+  });
+
+  it("does not open it to anyone but the owner who registered it", async () => {
+    const upstream = await listen((_request, response) => response.end("private"));
+    try {
+      await registerLocalPreview("site-node", OWNER, upstream.origin, {
+        "x-busabase-preview-token": "server-side",
+      });
+      const stranger = await proxyLocalPreview(
+        new Request("http://localhost/api/airapp-preview/site-node/"),
+        "site-node",
+        "",
+        "someone-else",
+      );
+      expect(stranger.status).toBe(404);
+    } finally {
+      await unregisterLocalPreview("site-node", OWNER);
+      await upstream.close();
+    }
+  });
+
+  it("adds nothing to a target registered without credentials", async () => {
+    let seen: IncomingMessage["headers"] = {};
+    const upstream = await listen((request, response) => {
+      seen = request.headers;
+      response.end("ok");
+    });
+    try {
+      await registerLocalPreview("plain-node", OWNER, upstream.origin);
+      await proxyLocalPreview(
+        new Request("http://localhost/api/airapp-preview/plain-node/"),
+        "plain-node",
+        "",
+        OWNER,
+      );
+      expect(seen["x-busabase-preview-token"]).toBeUndefined();
+    } finally {
+      await unregisterLocalPreview("plain-node", OWNER);
+      await upstream.close();
+    }
+  });
+});

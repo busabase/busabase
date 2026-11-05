@@ -32,6 +32,49 @@ export const dashboardDe: CoreI18nMessages = {
     example:
       "## Vision\nWelche Zukunft möchten wir gestalten?\n\n## Mission\nWem helfen wir und welches Problem lösen wir?\n\n## Werte\nWelche Grundsätze leiten unsere Entscheidungen?\n\n## Designstil\nBeschreibe den visuellen Stil, den Ton und die Begriffe des Teams.",
   },
+  spaceWelcome: {
+    title: "Willkommensseite",
+    description:
+      "Wähle ein Dokument oder eine HTML-Seite, die Mitglieder ganz oben auf der Startseite sehen: wofür dieser Space da ist und wo man anfängt. Schreibe die Seite zuerst und wähle sie dann hier aus.",
+    loading: "Willkommensseite wird geladen…",
+    loadFailed:
+      "Die Einstellung für die Willkommensseite konnte nicht geladen werden. Bitte versuche es erneut.",
+    retry: "Erneut versuchen",
+    current: "Aktuelle Willkommensseite",
+    none: "Keine Willkommensseite festgelegt. Die Startseite zeigt stattdessen „Erste Schritte“.",
+    unreadable:
+      "Die gewählte Seite fehlt, ist archiviert oder für dich nicht sichtbar, daher sehen Mitglieder stattdessen „Erste Schritte“.",
+    visibilityHint: "Mitglieder sehen sie nur, wenn sie diese Seite öffnen dürfen.",
+    searchLabel: "Dokument oder HTML-Seite wählen",
+    searchPlaceholder: "Dokumente und HTML-Seiten durchsuchen…",
+    noCandidates:
+      "Dieser Space hat noch keine Dokumente oder HTML-Seiten. Erstelle eine Seite und wähle sie dann hier aus.",
+    noMatches: "Keine Seite passt zu „{query}“.",
+    save: "Als Willkommensseite verwenden",
+    saving: "Wird gespeichert…",
+    saved: "Willkommensseite gespeichert",
+    clear: "Willkommensseite entfernen",
+    saveFailed: "Speichern fehlgeschlagen. Bitte versuche es erneut.",
+    conflict:
+      "Jemand anderes hat die Willkommensseite geändert. Lade neu, um die aktuelle Auswahl zu sehen.",
+    reload: "Neueste Version laden",
+    readOnly: "Nur Space-Inhaber und Admins können die Willkommensseite ändern.",
+    open: "Öffnen",
+    close: "Willkommensseite schließen",
+    reopen: "Willkommensseite",
+    expand: "Aufklappen",
+    collapse: "Zuklappen",
+    emptyDoc: "Diese Seite ist leer.",
+  },
+  gettingStarted: {
+    title: "Erste Schritte",
+    body: "Alles in diesem Space findest du in der Seitenleiste, und jedes Symbol dort steht für einen dieser Typen. Öffne einen, um loszulegen.",
+    typesHeading: "Was du in der Seitenleiste findest",
+    close: "Erste Schritte schließen",
+    reopen: "Erste Schritte",
+    connectAgentHint:
+      "Frag deinen Agenten zu diesem Space. Er liest dieselben Bases, Dokumente und Apps wie du, und alles, was er schreibt, wird hier festgehalten.",
+  },
   fieldHelp: {
     inherit: "Feldhinweise verwenden",
     override: "Hinweise für dieses Formular anpassen",
@@ -77,6 +120,7 @@ export const dashboardDe: CoreI18nMessages = {
     restored: "Ungespeicherter Formelentwurf wiederhergestellt.",
   },
   common: {
+    retry: "Erneut versuchen",
     slugTaken:
       "Ein anderes Element desselben Typs verwendet den Slug „{slug}“ bereits. Wählen Sie einen anderen Slug.",
     add: "Hinzufügen",
@@ -206,6 +250,10 @@ export const dashboardDe: CoreI18nMessages = {
     openFullBase: "Vollständige Base öffnen",
     pinToSidePanel: "An Seitenleiste anheften",
     noFilesYet: "Noch keine Dateien.",
+    filesPagedSummary: "{shown} von {total} Dateien werden angezeigt.",
+    loadMoreFiles: "Weitere Dateien laden",
+    loadMoreFolders: "Weitere Ordner laden",
+    fileListPartialFailed: "Weitere Dateien konnten nicht geladen werden",
     selectFile: "Wählen Sie eine Datei aus, um ihren Inhalt anzuzeigen.",
     readingFile: "{path} wird gelesen…",
     couldNotReadFile: "Datei konnte nicht gelesen werden",
@@ -696,16 +744,20 @@ export const dashboardDe: CoreI18nMessages = {
       local:
         "Diese AirApp erfordert diesen Rechner, die lokale Ausführung ist jedoch nicht verfügbar.",
       remote:
-        "Diese AirApp erfordert einen Remote-Rechner, Sandock ist in dieser Bereitstellung jedoch nicht konfiguriert.",
+        "Diese AirApp erfordert eine Cloud-Sandbox, Sandock ist in dieser Bereitstellung jedoch nicht konfiguriert.",
+      site: "Diese AirApp braucht eine Website, aber der Website-Anbieter ist in dieser Bereitstellung nicht konfiguriert. Wende dich an einen Administrator.",
     },
     engineBrowser: "Im Browser",
     engineBrowserHint: "Läuft in diesem Tab · kostenlos und sofort · nur JavaScript",
     engineLocal: "Dieser Rechner",
     engineLocalHint: "Echter Betriebssystemprozess, jede Sprache · nicht isoliert",
-    engineRemote: "Remote-Rechner",
-    engineRemoteHint: "Pro Ausführung bereitgestellt, jede Sprache · isoliert",
+    engineRemote: "Cloud-Sandbox",
+    engineRemoteHint: "Temporärer Cloud-Rechner pro Ausführung, jede Sprache · isoliert",
+    engineSite: "Website",
+    engineSiteHint: "Immer online · feste Adresse",
+    engineNotConfigured: "Nicht konfiguriert – wende dich an einen Administrator",
     noEligibleEngine:
-      "Keine Engine in dieser Bereitstellung kann eine {runtime}-AirApp ausführen. Bitten Sie einen Betreiber, eine lokale oder Remote-Laufzeit zu aktivieren.",
+      "Keine Engine in dieser Bereitstellung kann eine {runtime}-AirApp ausführen. Bitten Sie einen Betreiber, die lokale Ausführung oder eine Cloud-Sandbox zu aktivieren.",
     pythonNeedsSandock:
       "Python-AirApps werden in dieser Bereitstellung nicht unterstützt. Konfigurieren Sie Sandock, um sie auszuführen.",
     swError: {
@@ -727,6 +779,106 @@ export const dashboardDe: CoreI18nMessages = {
     swUnsupportedLinkCopied: "Link kopiert",
     swUnsupportedCopyFailed:
       "Der Link konnte nicht kopiert werden. Markieren und kopieren Sie ihn manuell:",
+    site: {
+      statusNotLive: "Nicht online",
+      statusLive: "Online",
+      statusLiveWithChanges: "Unveröffentlichte Änderungen",
+      goLive: "Online stellen",
+      goLiveDone: "Die Website ist online.",
+      previewStale:
+        "Die Dateien wurden nach dieser Vorschau geändert. Führe sie erneut aus und stelle sie dann online.",
+      noPreview: "Führe sie zuerst aus, um eine Vorschau zu erstellen.",
+      blockedTitle: "Diese App kann noch nicht als Website online gehen",
+      addressLabel: "Adresse",
+      publicLabel: "Öffentlich",
+      publicOnHint: "Jeder mit der Adresse kann sie öffnen.",
+      publicOffHint: "Die Adresse zeigt eine Seite „Nicht gefunden“.",
+      publicNotYet: "Stelle sie zuerst online.",
+      domains: {
+        title: "Eigene Domains",
+        description: "Verwende deine eigene Adresse für die veröffentlichte Website.",
+        check: "Erneut prüfen",
+        checking: "Wird geprüft…",
+        loading: "Eigene Domains werden geladen…",
+        checkFailed: "Eigene Domains konnten nicht geprüft werden. Versuche es erneut.",
+        lastKnown: "Die folgenden Angaben stammen aus der letzten erfolgreichen Prüfung.",
+        unavailable:
+          "Eigene Domains sind für diese Bereitstellung nicht eingerichtet. Wende dich an einen Administrator.",
+        empty:
+          "Füge eine Domain hinzu, die dir gehört, und schließe die Einrichtung bei deinem DNS-Anbieter ab.",
+        hostnameLabel: "Domainname",
+        hostnameHint: "Gib einen Hostnamen ohne https:// oder Pfad ein.",
+        invalidHostname:
+          "Gib eine Domain wie shop.company.com ohne Protokoll, Pfad, Port, IP-Adresse oder Platzhalter ein.",
+        publishFirst: "Veröffentliche die Website, bevor du deine Domain hinzufügst.",
+        planLocked:
+          "Der Tarif dieses Bereichs enthält Website nicht. Vorhandene Domains kannst du weiterhin ansehen und entfernen.",
+        add: "Domain hinzufügen",
+        adding: "Wird hinzugefügt…",
+        pending: "Einrichtung ausstehend",
+        pendingDnsHint:
+          "Füge die folgenden Einträge bei deinem DNS-Anbieter hinzu und prüfe erneut. DNS-Änderungen können etwas Zeit benötigen.",
+        pendingHttpsHint:
+          "Die Domaininhaberschaft ist bestätigt. HTTPS wird eingerichtet. Prüfe in Kürze erneut.",
+        active: "Verbunden",
+        activeHint: "DNS und HTTPS sind bereit.",
+        error: "Aktion erforderlich",
+        errorHint: "Prüfe die folgenden Details und versuche es erneut.",
+        offlineHint:
+          "Die Website ist offline. Alle Website-Adressen zeigen eine Nicht-gefunden-Seite.",
+        dnsInstructions:
+          "Füge diese Einträge bei deinem DNS-Anbieter hinzu. Behalte alle anderen für deine Domain benötigten Einträge. Stelle diesen CNAME bei Cloudflare auf „Nur DNS“ (graue Wolke).",
+        dnsName: "Name",
+        dnsValue: "Wert / Ziel",
+        httpInstructions:
+          "Stelle für die HTTP-Prüfung den folgenden Antwortinhalt unter dieser URL bereit und prüfe erneut.",
+        httpUrl: "Prüf-URL",
+        httpBody: "Antwortinhalt",
+        copyHttpUrl: "Prüf-URL {value} kopieren",
+        copyHttpBody: "Prüfantwort {value} kopieren",
+        copy: "Kopieren",
+        copyName: "DNS-Namen {value} kopieren",
+        copyValue: "DNS-Wert {value} kopieren",
+        copied: "Kopiert",
+        copyFailed: "Kopieren fehlgeschlagen. Wähle den Wert aus und kopiere ihn manuell.",
+        remove: "Entfernen",
+        removeLabel: "{hostname} entfernen",
+        removeConfirm:
+          "{hostname} entfernen? Diese Domain öffnet die Website danach nicht mehr. Die Standardadresse funktioniert weiterhin.",
+        confirmRemove: "Domain entfernen",
+        removing: "Wird entfernt…",
+        cancel: "Abbrechen",
+      },
+      // Keyed by `SiteBundleBlocker["code"]`.
+      blockers: {
+        "not-a-site-app":
+          "airapp.json hat keinen site-Block, daher ist diese App nicht als Website eingerichtet.",
+        "invalid-manifest": "airapp.json hat ein Problem: {detail}",
+        "python-runtime":
+          "Diese App ist in Python geschrieben. Eine Website führt nur JavaScript aus.",
+        "unsafe-path": "airapp.json zeigt auf einen Pfad außerhalb der App: {path}",
+        "entry-missing": "Die in airapp.json genannte Worker-Datei {path} existiert nicht.",
+        "entry-not-javascript": "Die Worker-Datei {path} muss eine .js- oder .mjs-Datei sein.",
+        "entry-syntax-error":
+          "Die Worker-Datei {path} lässt sich nicht als JavaScript lesen: {detail}",
+        "entry-no-default-export":
+          "Die Worker-Datei {path} hat keinen Default-Export, daher kann nichts auf Anfragen antworten.",
+        "unsupported-import":
+          "{path} importiert {specifier}. Bündle alles in eine Datei; eine Website kann keine anderen Module laden.",
+        "no-index-page": "Es gibt keine Startseite. Füge {path} hinzu.",
+        "asset-too-large": "{path} ist {size} groß. Jede Datei darf höchstens 25 MB groß sein.",
+        "too-many-assets": "Diese Website hat {count} Dateien. Das Limit liegt bei 100.000.",
+      },
+    },
+    enginePlan: {
+      availableOn: "Ab {plan} verfügbar",
+      lockedHint: "{engine} ist ab dem Plan {plan} verfügbar.",
+      upgrade: "Auf {plan} upgraden",
+      lockedTitle: "Upgraden Sie auf {plan}, um diese App auszuführen",
+      lockedBody:
+        "{engine} ist im Plan dieses Space nicht enthalten, wird aber von dieser App benötigt.",
+      statusLocked: "Upgrade erforderlich",
+    },
   },
   agents: {
     addAgent: "Agent hinzufügen",
@@ -860,6 +1012,7 @@ export const dashboardDe: CoreI18nMessages = {
     composerWaitingPlaceholder: "Beantworten Sie die Anfrage oben, um fortzufahren…",
     composerDefaultPlaceholder: "Nachricht an {name}…",
     thinkingLevel: "Denktiefe",
+    mode: "Modus",
     continueConversationFailed: "Dieses Gespräch konnte nicht fortgesetzt werden.",
     sessionActions: "Sitzungsaktionen",
     endSession: "Sitzung beenden",
@@ -1160,6 +1313,8 @@ export const dashboardDe: CoreI18nMessages = {
     locationAnywhere: "Überall",
     clearFilters: "Filter zurücksetzen",
     resultCount: "{count} geladen",
+    partialResults:
+      "Das sind womöglich nicht alle Treffer. Grenze die Suche auf eine Base, einen Ordner oder einen Zeitraum ein, um den Rest zu sehen.",
     modeLabel: "Abgleich",
     modeText: "Text",
     modeRegex: "Muster",
@@ -1408,6 +1563,7 @@ export const dashboardDe: CoreI18nMessages = {
     openView: "Ansicht öffnen",
     openNode: "Knoten öffnen",
     openRecord: "Datensatz öffnen",
+    viewFullContent: "Gesamten Inhalt anzeigen",
     brief: "{countLabel} in {scope}: {summary}.",
     riskBrief: "{countLabel} in {scope}: {summary}. Achten Sie auf diese Risiken: {risks}.",
     riskAnd: " und ",
@@ -1454,6 +1610,8 @@ export const dashboardDe: CoreI18nMessages = {
     loadMore: "Mehr laden",
     noMatchesTitle: "Keine Treffer",
     noMatchesBody: "Versuchen Sie es mit einem Titel, Feldnamen, Kanal oder einer Base.",
+    timedOut:
+      "Die Suche hat zu lange gedauert. Versuche es erneut oder grenze sie in der erweiterten Suche auf eine Base oder einen Ordner ein.",
     partialContentBody:
       "Einige Dokumente sind so lang, dass nur ihr Anfang für die Suche indiziert wird, das Ergebnis ist also möglicherweise nicht vollständig. Verwenden Sie grep, um jedes Dokument vollständig zu durchsuchen.",
     noRecentTitle: "Noch nichts Aktuelles",
@@ -1921,6 +2079,14 @@ export const dashboardDe: CoreI18nMessages = {
     deleteFieldCounting: "Betroffene Datensätze werden gezählt…",
     deleteFieldCountUnavailable: "Die betroffenen Datensätze konnten nicht gezählt werden.",
     deleteFieldImpact: "Diese Spalte hat einen Wert in {count} Datensatz/Datensätzen.",
+    deleteLookupFieldImpact:
+      "Nur diese Nachschlagespalte wird entfernt. Quellfelder, Quelldatensätze und Verknüpfungen zwischen Datensätzen bleiben unverändert.",
+    deleteLookupFieldBlocked:
+      "Ändern Sie zuerst die Formelfelder, sodass sie nicht mehr auf diese Nachschlagespalte verweisen, bevor Sie sie löschen.",
+    deleteFormulaFieldImpact:
+      "Nur diese Formelspalte wird entfernt. Die für die Berechnung verwendeten Eingabefelder und Datensätze bleiben unverändert.",
+    deleteFormulaFieldBlocked:
+      "Ändern Sie zuerst die Felder, die diese Formel verwenden, sodass sie nicht mehr darauf verweisen, bevor Sie sie löschen.",
     deleteFieldDependencies: "Verwendungen dieses Felds",
     deleteFieldDependenciesLoading: "Gespeicherte Ansichten werden geprüft…",
     deleteFieldDependenciesUnavailable:
@@ -2108,6 +2274,11 @@ export const dashboardDe: CoreI18nMessages = {
     bidirectional: "bidirektional ({count})",
     noRelationsHint:
       "Fügen Sie in einem beliebigen Base-Design ein Relationsfeld hinzu, um hier Kanten zu zeichnen.",
+  },
+  upload: {
+    fileTooLarge: "„{name}“ ({size}) überschreitet das Limit von {limit} pro Datei.",
+    fileTooLargeUnnamed: "Diese Datei überschreitet das Limit von {limit} pro Datei.",
+    upgradeForLargerFiles: "Führen Sie ein Upgrade durch, um Dateien bis {limit} hochzuladen.",
   },
   recordView: {
     view: "Ansehen",
@@ -2481,6 +2652,10 @@ export const dashboardDe: CoreI18nMessages = {
     metadataNoPermission:
       "Sie haben nicht an jeder Stelle, an der diese Datei verwendet wird, Schreibzugriff, daher können ihre Metadaten hier nicht geändert werden.",
     unusedOnly: "Nur ungenutzte anzeigen",
+    loadMore: "Weitere Assets laden",
+    loadingMore: "Wird geladen…",
+    partialSummary:
+      "Es werden nur die bisher geladenen {shown} Assets aufgelistet und gezählt – lade mehr, um den Rest zu sehen.",
     unusedBadge: "{count} ungenutzt",
     noUnusedAssets: "Keine ungenutzten Assets gefunden.",
     textStatusMissing: "Noch nicht durchsuchbar",
@@ -2573,6 +2748,8 @@ export const dashboardDe: CoreI18nMessages = {
     addStep: "Schritt hinzufügen",
     deleteSelection: "Ausgewählte löschen",
     configuration: "Konfiguration",
+    configureTab: "Konfigurieren",
+    runsTab: "Läufe",
     selectStepOrEdge: "Wählen Sie einen Schritt oder eine Verbindung aus, um sie zu konfigurieren.",
     label: "Bezeichnung",
     type: "Typ",
@@ -2581,7 +2758,19 @@ export const dashboardDe: CoreI18nMessages = {
     url: "Webhook-URL",
     functionName: "Funktionsname",
     webhookRuleId: "ID der Webhook-Funktionsregel",
+    functionHint:
+      "Führt eine gespeicherte Webhook-Regel aus, deren Aktion „Funktion ausführen“ ist. Regel-ID angeben oder einen Funktionsnamen, der genau eine Regel in diesem Space trifft. Der Rückgabewert bleibt der Schnappschuss dieses Schritts.",
+    webhookHint:
+      "Erreicht ein Lauf diesen Schritt, sendet Busabase die Anfrage mit den Daten des Laufs als JSON-Body (GET sendet keinen Body). Die Antwort wird zur Ausgabe dieses Schritts: input.status und input.body.",
     eventName: "Ereignisname",
+    eventRecordCreated: "Wenn ein Datensatz erstellt wird",
+    eventRecordUpdated: "Wenn ein Datensatz geändert wird",
+    customEventOption: "{name} (nur Bezeichnung)",
+    triggerEventHint:
+      "Im Ereignismodus starten „Wenn ein Datensatz erstellt wird“ und „Wenn ein Datensatz geändert wird“ von selbst einen Lauf. Manuell und andere Ereignisnamen starten nur, wenn jemand den Workflow ausführt.",
+    triggerBase: "Base",
+    anyBase: "Jede Base",
+    unknownBase: "Base nicht gefunden ({id})",
     expression: "Ausdruck",
     duration: "Dauer",
     unit: "Einheit",
@@ -2589,22 +2778,54 @@ export const dashboardDe: CoreI18nMessages = {
     hours: "Stunden",
     days: "Tage",
     approver: "Genehmiger",
+    approverHint:
+      "E-Mail-Adressen von Mitgliedern, durch Kommas getrennt. Nur sie (und Space-Admins) können diesen Schritt freigeben oder ablehnen – auch ohne Bearbeitungsrechte für den Workflow. Steht hier keine E-Mail, entscheiden alle, die den Workflow bearbeiten dürfen; ein bloßer Name ist nur eine Beschriftung.",
+    allowAgents: "Agenten entscheiden lassen",
+    allowAgentsHint:
+      "Aus: Nur Personen können diesen Schritt freigeben oder ablehnen. An: Auch ein Agent mit API-Schlüssel mit Schreibrechten kann es, wenn der Besitzer des Schlüssels die Regel oben erfüllt.",
     actionName: "Aktionsname",
+    readRecordHint:
+      "Lädt den Datensatz des Laufs in diesem Schritt neu. Setze es nach einer Wartezeit ein, wenn der nächste Zweig aktuelle Werte sehen muss.",
+    actionChoose: "Aktion wählen",
+    actionReadRecord: "Datensatz neu lesen",
+    actionUpdateRecord: "Datensatz ändern",
+    actionCreateRecord: "Datensatz anlegen",
+    actionDeleteRecord: "Datensatz löschen",
+    updateRecordHint:
+      "Setzt die Felder unten auf dem Datensatz, mit den Rechten der Person, als die der Lauf handelt.",
+    createRecordHint:
+      "Legt einen Datensatz in der gewählten Base an, mit den Rechten der Person, als die der Lauf handelt. Spätere Schritte erreichen seine ID über createdRecordId dieses Schritts.",
+    deleteRecordHint:
+      "Verschiebt den Datensatz in den Papierkorb seiner Base, mit den Rechten der Person, als die der Lauf handelt. Von dort lässt er sich wiederherstellen.",
+    customActionHint: "Dieser Aktionsname bewirkt noch nichts: Er wird nur festgehalten.",
+    chooseBase: "Base wählen",
+    targetRecord: "Datensatz (optional)",
+    targetRecordHint:
+      "Leer bedeutet den Datensatz dieses Laufs. Oder eine Datensatz-ID oder eine Formel wie =steps.create.createdRecordId.",
+    stepReference: "In Formeln heißt dieser Schritt",
+    copyStepReference: "Kopieren",
+    updateRecordFields: "Zu setzende Felder (JSON)",
+    updateRecordFieldsHint:
+      "Als Schlüssel dient der Name oder Slug eines Felds. Einfache Werte werden unverändert gespeichert. Ein Text, der mit = beginnt, ist eine Formel über frühere Schritte, z. B. =steps.score.score. Mit == speicherst du Text, der selbst mit = beginnt.",
+    updateRecordFieldsInvalid:
+      'Die Felder müssen ein JSON-Objekt sein, zum Beispiel {"status": "qualified"}.',
     outcome: "Ergebnis",
     edgeLabel: "Verbindungsbezeichnung",
     edgeOutcome: "Verzweigungsergebnis",
     workflowSettings: "Ausführungseinstellungen",
     executionMode: "Ausführungsmodus",
     notExecutedNote:
-      "Workflows werden derzeit nur gespeichert und geprüft – sie werden noch nicht ausgeführt.",
+      "Bearbeiten Sie hier die Schritte, speichern Sie und starten Sie dann unter „Läufe“ einen Lauf. Läufe werden auf dem Server mit der zuletzt gespeicherten Version ausgeführt. Jeder fertige Schritt behält einen Schnappschuss, read_record liest den Datensatz erneut, ein Warten-Schritt pausiert bis zu seiner Zeit und eine Genehmigung wartet auf eine Entscheidung.",
     executionModeHint:
-      "Legt nur fest, wie der Workflow später starten soll – ausgeführt wird noch nichts.",
+      "Manuell: Ein Lauf startet nur, wenn jemand den Workflow ausführt. Ereignis: Ein Datensatz-Auslöser startet zusätzlich einen Lauf, wenn ein passender Datensatz erstellt oder geändert wird. Ereignis-Läufe handeln als die Person, die den Workflow zuletzt gespeichert hat.",
     manual: "Manuell",
     event: "Ereignis",
     errorPolicy: "Bei Fehler",
     stop: "Workflow stoppen",
     continue: "Fortfahren",
     concurrency: "Parallelität",
+    concurrencyHint:
+      "Wie viele Läufe dieses Workflows gleichzeitig Schritte ausführen dürfen. Läufe, die bei einer Wartezeit oder Freigabe pausieren, zählen nicht. Weitere Läufe warten in der Schlange und starten von selbst, sobald ein Platz frei wird.",
     timeoutMs: "Zeitlimit (ms)",
     trigger: "Auslöser",
     webhook: "Webhook",
@@ -2617,6 +2838,70 @@ export const dashboardDe: CoreI18nMessages = {
     source: "Quelle",
     preview: "Vorschau",
     htmlSource: "HTML-Quelltext",
+  },
+  workflowRuns: {
+    runWorkflow: "Workflow ausführen",
+    startTitle: "Lauf starten",
+    startHint: "Läuft auf dem Server mit der zuletzt gespeicherten Version dieses Workflows.",
+    recordId: "Datensatz-ID (optional)",
+    recordIdHint: "Der Auslöser liest diesen Datensatz beim Start des Laufs.",
+    payload: "Payload-JSON (optional)",
+    payloadHint: "Zusätzliche Daten für den Auslöser, als JSON-Objekt.",
+    payloadInvalid: 'Die Payload muss ein JSON-Objekt sein, zum Beispiel {"score": 80}.',
+    start: "Lauf starten",
+    starting: "Wird gestartet…",
+    unsavedBlocked:
+      "Speichern Sie zuerst Ihre Änderungen. Läufe verwenden die zuletzt gespeicherte Version dieses Workflows.",
+    readOnlyNote:
+      "Du kannst diese Läufe sehen. Zum Starten eines Laufs oder vorzeitigen Fortsetzen brauchst du Bearbeitungsrechte für diesen Workflow.",
+    cannotDecide:
+      "Nur die bei diesem Schritt genannten Freigebenden können entscheiden (oder, wenn niemand genannt ist, alle, die diesen Workflow bearbeiten dürfen).",
+    queuedNote:
+      "In der Warteschlange: Dieser Lauf geht innerhalb einer Minute von selbst weiter – mit den Rechten der Person, die ihn gestartet hat.",
+    statusCancelled: "Abgebrochen",
+    cancelRun: "Lauf abbrechen",
+    cancelRunTitle: "Diesen Lauf abbrechen?",
+    cancelRunBody:
+      "Er stoppt hier und kann nicht fortgesetzt werden. Bereits ausgeführte Schritte werden nicht rückgängig gemacht.",
+    keepRun: "Behalten",
+    cancelAllQueued: "{count} wartende Läufe abbrechen",
+    cancelAllTitle: "{count} wartende Läufe abbrechen?",
+    cancelAllBody:
+      "Sie haben noch nicht begonnen und werden es auch nicht mehr. Läufe, die gerade einen Schritt ausführen oder bei einer Wartezeit oder Freigabe pausieren, laufen weiter.",
+    startedBy: "Gestartet von {name}",
+    startedByVia: "Gestartet von {name} über {via}",
+    viaAgent: "einen Agenten",
+    cancelledBy: "Abgebrochen von {name}.",
+    loadOlder: "Ältere Läufe laden",
+    keptNote: "Beendete Läufe werden {days} Tage aufbewahrt.",
+    guideLink: "So laufen Workflows",
+    actionFailed: "Das hat nicht geklappt. Bitte versuchen Sie es erneut.",
+    recentRuns: "Letzte Läufe",
+    empty: "Noch keine Läufe.",
+    loadFailed: "Läufe konnten nicht geladen werden.",
+    statusQueued: "In Warteschlange",
+    statusRunning: "Läuft",
+    statusWaiting: "Wartet",
+    statusWaitingApproval: "Genehmigung nötig",
+    statusCompleted: "Abgeschlossen",
+    statusFailed: "Fehlgeschlagen",
+    triggerManual: "Manuell",
+    triggerEvent: "Ereignis",
+    runDetails: "Laufdetails",
+    recordLabel: "Datensatz: {id}",
+    waitingUntil: "Wartet bis {time}. Danach geht es von selbst weiter.",
+    continueNow: "Jetzt fortsetzen",
+    approvalPending: "Wartet auf eine Entscheidung zu „{step}“.",
+    approve: "Genehmigen",
+    reject: "Ablehnen",
+    errorLabel: "Fehler",
+    steps: "Schritte",
+    noSteps: "Noch kein Schritt abgeschlossen.",
+    stepData: "Daten",
+    recordFields: "Datensatz",
+    stepDone: "Erledigt",
+    stepPaused: "Pausiert",
+    stepFailed: "Fehlgeschlagen",
   },
   install: {
     title: "Von GitHub installieren",

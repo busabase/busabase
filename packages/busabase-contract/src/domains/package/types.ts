@@ -123,8 +123,10 @@ export const PACKAGE_DEFERRED_FIELD_TYPES: readonly string[] = [
 // ── Limits (v1 guardrails, validated before any write) ───────────────────────
 
 /**
- * Per-file package ceiling. Intentionally tighter than the server's 200MB
- * attachment ceiling so imported packages remain bounded independently. Kept as a
+ * Per-file package ceiling. Intentionally tighter than the server's 5GB
+ * attachment ceiling so imported packages remain bounded independently. (Files
+ * an install writes still pass the host's upload policy, so a host's tighter
+ * per-file limit — e.g. Busabase Cloud's Free plan — applies on top.) Kept as a
  * local constant because importing the server-only upload logic would leak it into
  * the client bundle.
  */

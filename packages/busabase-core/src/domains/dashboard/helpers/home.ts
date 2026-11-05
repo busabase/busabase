@@ -74,3 +74,50 @@ export const isHomeDigestEmpty = ({
   pendingCount === 0 &&
   recentCount === 0 &&
   activityCount === 0;
+
+/**
+ * What Home's welcome request resolved to, from the viewer's point of view.
+ * `absent` covers every way a welcome can fail to be shown — none chosen, a
+ * server too old to have the route, a node that is gone, trashed, of another
+ * type, or one this viewer may not read — because all of them must look the
+ * same: as if no welcome page was ever configured.
+ */
+export type HomeWelcomeState = "pending" | "absent" | "readable";
+
+/** Which card, if any, Home puts above its sections. */
+export type HomeIntroCard = "welcome" | "gettingStartedNewSpace" | "gettingStartedMember" | null;
+
+/**
+ * The single rule for Home's top card, shared so every Home agrees on it:
+ *
+ * - A readable welcome page always wins — a manager chose it on purpose.
+ * - Otherwise the built-in Getting started shows when the space is empty (it
+ *   replaces the empty section shells, as the onboarding guide always did) or
+ *   when this member has not visited anything yet — the invited customer who
+ *   would otherwise land on an empty "Recently visited" hint and someone
+ *   else's change log.
+ * - Nothing is decided while the welcome or the digest is still loading, so a
+ *   returning member never sees Getting started flash before their welcome or
+ *   their digest arrives.
+ *
+ * Dismissal is a separate, per-member concern: the caller hides a dismissed
+ * card and offers a way to reopen it.
+ */
+export const resolveHomeIntroCard = ({
+  welcome,
+  isDigestLoaded,
+  isDigestEmpty,
+  recentCount,
+}: {
+  welcome: HomeWelcomeState;
+  /** Activity and change requests have both settled (see `isHomeDigestEmpty`). */
+  isDigestLoaded: boolean;
+  isDigestEmpty: boolean;
+  recentCount: number;
+}): HomeIntroCard => {
+  if (welcome === "pending") return null;
+  if (welcome === "readable") return "welcome";
+  if (!isDigestLoaded) return null;
+  if (isDigestEmpty) return "gettingStartedNewSpace";
+  return recentCount === 0 ? "gettingStartedMember" : null;
+};

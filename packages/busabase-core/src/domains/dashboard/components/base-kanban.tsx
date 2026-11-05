@@ -17,18 +17,19 @@ import { presentCoreError } from "../../../i18n/localize-error";
 import { getMemberIds, isPeopleFieldType } from "../../base/field-types";
 import { getPrimaryField } from "../../base/utils/primary-field";
 import { getRecordTitle } from "../helpers/change-request";
+import { pickCoverMedia } from "../helpers/cover-media";
 import {
   getAttachmentRefs,
   getFieldChipEntries,
   getFieldPreviewText,
   getRelationRecordIds,
-  getSafeAttachmentUrl,
 } from "../helpers/field";
 import { mergeSearchIntoHref } from "../helpers/link-search";
 import { useLinkedRecords } from "../hooks/use-linked-records";
 import { useDashboardOrpc } from "../orpc-context";
 import { useIsAnonymousVisitor } from "../visitor-context";
 import { AttachmentValuePreview } from "./attachment-value-preview";
+import { CoverVideo } from "./cover-video";
 import { FieldBadgeList, FieldValuePreview, LookupFieldValue } from "./field-preview";
 import { MemberChips } from "./member-field";
 import { useWorkspacePermissionLevel } from "./split-submit-button";
@@ -111,11 +112,9 @@ function KanbanCover({
   value: unknown;
 }) {
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
-  const image = getAttachmentRefs(value).find(
-    (item) => item.mimeType?.startsWith("image/") && getSafeAttachmentUrl(item),
-  );
-  const url = image ? getSafeAttachmentUrl(image) : null;
-  if (!url || !image) return null;
+  const media = pickCoverMedia(value);
+  if (!media) return null;
+  const mediaClassName = `h-full w-full ${fit === "fit" ? "object-contain" : "object-cover"}`;
 
   return (
     <Link
@@ -124,22 +123,29 @@ function KanbanCover({
       data-testid="kanban-cover"
       href={href}
       onClick={onClick}
-      title={image.fileName}
+      title={media.fileName}
     >
-      {failedUrl === url ? (
+      {failedUrl === media.url ? (
         <span className="flex h-full flex-col items-center justify-center gap-2 px-3 text-muted-foreground text-xs">
           <ImageOff aria-hidden size={20} />
-          <span className="max-w-full truncate">{image.fileName}</span>
+          <span className="max-w-full truncate">{media.fileName}</span>
         </span>
+      ) : media.kind === "video" ? (
+        <CoverVideo
+          className={mediaClassName}
+          fileName={media.fileName}
+          onError={() => setFailedUrl(media.url)}
+          url={media.url}
+        />
       ) : (
         <img
-          alt={image.fileName}
-          className={`h-full w-full ${fit === "fit" ? "object-contain" : "object-cover"}`}
+          alt={media.fileName}
+          className={mediaClassName}
           decoding="async"
           draggable={false}
           loading="lazy"
-          onError={() => setFailedUrl(url)}
-          src={url}
+          onError={() => setFailedUrl(media.url)}
+          src={media.url}
         />
       )}
     </Link>

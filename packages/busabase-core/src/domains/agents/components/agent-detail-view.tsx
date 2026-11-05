@@ -52,6 +52,7 @@ import { type CoreI18nMessages, fmt, useCoreI18n, useCoreLocale } from "../../..
 import { agentAvailabilityCopy } from "../../../i18n/agent-availability-copy";
 import { agentFidelityLabels } from "../../../i18n/agent-fidelity-copy";
 import { agentPromptContextCopy } from "../../../i18n/agent-prompt-context-copy";
+import { agentSessionReliabilityCopy } from "../../../i18n/agent-session-reliability-copy";
 import { presentCoreError } from "../../../i18n/localize-error";
 import { useAgentIntegrationTarget } from "../../dashboard/agent-integration-context";
 import { ConfirmActionDialog } from "../../dashboard/components/primitives";
@@ -78,6 +79,12 @@ import {
 } from "../store/agent-model-list-store";
 import { getAgentConnectionAvailability } from "../utils/agent-connection-state";
 import { sendOrContinueAgentPrompt } from "../utils/agent-session-continuation";
+import {
+  createAgentPromptIdentityTracker,
+  isAgentSessionAccessError,
+  isSupervisedPromptBlocked,
+  pendingAgentPromptCommands,
+} from "../utils/agent-session-reliability";
 import { shouldRenderAgentMessage } from "../utils/agent-visible-message";
 import {
   applyModelConfigSelection,
@@ -93,6 +100,11 @@ import { AgentConnectionStatus } from "./agent-connection-status";
 import { BusabaseAgentMessageView } from "./agent-context-resource-card";
 import { AgentLoadingState, AgentQueryErrorState } from "./agent-query-state";
 import { AgentSessionInformation } from "./agent-session-information";
+import {
+  AgentSessionReliabilityStatus,
+  PendingAgentPromptPresentations,
+} from "./agent-session-reliability-status";
+import { ModeSelectorRow } from "./mode-selector-row";
 import { ModelSelectorRow } from "./model-selector-row";
 import { TransportBadge } from "./transport-badge";
 
@@ -105,6 +117,8 @@ const statusLabel = (status: AgentSessionVO["status"], messages: CoreI18nMessage
     ended: messages.agents.statusEnded,
     failed: messages.agents.statusFailed,
   })[status];
+
+const NO_COMMITTED_COMMANDS: ReadonlySet<string> = new Set();
 
 /**
  * "Jul 30, 12:34 PM" rather than a bare time: sessions persist, so two
@@ -283,7 +297,13 @@ interface AgentDetailViewProps {
  */
 export function AgentDetailView(props: AgentDetailViewProps) {
   const scope = useAgentModelScope();
-  return <AgentDetailViewContent key={JSON.stringify([scope, props.agentSlug])} {...props} />;
+  const integration = useAgentIntegrationTarget();
+  return (
+    <AgentDetailViewContent
+      key={JSON.stringify([scope, integration?.targetSpaceId, props.agentSlug])}
+      {...props}
+    />
+  );
 }
 
 function AgentDetailViewContent({
@@ -302,7 +322,17 @@ function AgentDetailViewContent({
   const locale = useCoreLocale();
   const availabilityCopy = agentAvailabilityCopy(locale);
   const promptContextCopy = agentPromptContextCopy(locale);
+  const reliabilityCopy = agentSessionReliabilityCopy(locale);
+  const promptIdentity = useRef<ReturnType<typeof createAgentPromptIdentityTracker> | null>(null);
+  if (!promptIdentity.current) promptIdentity.current = createAgentPromptIdentityTracker();
   const agentIntegration = useAgentIntegrationTarget();
+  const modelScope = useAgentModelScope();
+  const queryScope = JSON.stringify([
+    modelScope.host,
+    modelScope.workspaceKey,
+    modelScope.actorId,
+    agentIntegration?.targetSpaceId,
+  ]);
   const stagedResourceContexts = useRef<AcpResourceContext[]>([]);
   const handleResourceContextChange = useCallback((contexts: AcpResourceContext[]) => {
     stagedResourceContexts.current = contexts;
@@ -370,25 +400,28 @@ function AgentDetailViewContent({
     if (initialSessionId) setSelectedSessionId(initialSessionId);
   }, [initialSessionId]);
 
-  const sessionListOptions = useMemo(
-    () =>
-      orpc.agents.sessions.listPaged.infiniteOptions({
-        input: (pageParam: string | undefined) => ({
-          slug: agentSlug,
-          limit: AGENT_SESSION_PAGE_SIZE,
-          cursor: pageParam,
-        }),
-        initialPageParam: undefined as string | undefined,
-        getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+  const sessionListOptions = useMemo(() => {
+    const options = orpc.agents.sessions.listPaged.infiniteOptions({
+      input: (pageParam: string | undefined) => ({
+        slug: agentSlug,
+        limit: AGENT_SESSION_PAGE_SIZE,
+        cursor: pageParam,
       }),
-    [agentSlug, orpc],
-  );
+      initialPageParam: undefined as string | undefined,
+      getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
+    });
+    return { ...options, queryKey: [...options.queryKey, { agentSessionScope: queryScope }] };
+  }, [agentSlug, orpc, queryScope]);
   const sessions = useInfiniteQuery({
     ...sessionListOptions,
     refetchInterval: 4000,
   });
   const connections = useQuery({
     ...orpc.agents.connections.list.queryOptions({ input: { scope: "space" } }),
+    queryKey: [
+      ...orpc.agents.connections.list.queryOptions({ input: { scope: "space" } }).queryKey,
+      { agentSessionScope: queryScope },
+    ],
     refetchInterval: 4000,
   });
 
@@ -469,6 +502,9 @@ function AgentDetailViewContent({
     return agentSessions[0]?.id ?? null;
   }, [selectedSessionId, agentSessions]);
   const active = agentSessions.find((s) => s.id === activeSessionId) ?? null;
+  const supervisedPromptBlocked =
+    isSupervisedPromptBlocked(active?.reliability) ||
+    Boolean(active?.reliability && (sessions.isError || connections.isError));
   const availability = getAgentConnectionAvailability({
     slug: agentSlug,
     transport: active?.transport ?? agentSessions[0]?.transport,
@@ -489,12 +525,12 @@ function AgentDetailViewContent({
       <fieldset
         aria-label={props.block.title}
         className="min-w-0 border-0 p-0"
-        disabled={!availability.canChat}
+        disabled={!availability.canChat || supervisedPromptBlocked}
       >
         <AcpPermissionView {...props} />
       </fieldset>
     ),
-    [availability.canChat],
+    [availability.canChat, supervisedPromptBlocked],
   );
 
   // SSR and the first client render both see an empty, stable snapshot
@@ -505,7 +541,6 @@ function AgentDetailViewContent({
     }
   }, []);
 
-  const modelScope = useAgentModelScope();
   const catalogScope = useMemo(
     () =>
       agentModelCatalogScope(
@@ -724,7 +759,20 @@ function AgentDetailViewContent({
     sessionListOptions.queryKey,
     handleStatusUpdate,
     handleMetadataRefresh,
+    { supervised: Boolean(active?.reliability) },
   );
+  const pendingCommandPresentations = useMemo(
+    () =>
+      active?.reliability
+        ? pendingAgentPromptCommands(
+            active.pendingCommands,
+            chat.committedCommandIds ?? NO_COMMITTED_COMMANDS,
+          )
+        : [],
+    [active?.pendingCommands, active?.reliability, chat.committedCommandIds],
+  );
+  const updatesRecovering =
+    chat.subscriptionHealth?.state === "recovering" || sessions.isError || connections.isError;
   // Transport downgrade feedback must remain visible after the process section collapses.
   const transcriptBlocks = useMemo(
     () =>
@@ -744,7 +792,15 @@ function AgentDetailViewContent({
     lastStatusSeqRef.current = -1;
   }, [activeSessionId]);
   const promptActivity = active
-    ? getPromptActivityState(active.status, chat.sending || continuing)
+    ? active.reliability
+      ? {
+          active:
+            continuing ||
+            chat.sending ||
+            ["reserved", "running", "waiting"].includes(active.reliability.execution),
+          starting: active.reliability.execution === "reserved",
+        }
+      : getPromptActivityState(active.status, chat.sending || continuing)
     : { active: false, starting: false };
   const currentUserBlockIds = useMemo(
     () =>
@@ -928,6 +984,9 @@ function AgentDetailViewContent({
       if (!active) return;
       try {
         assertConnectionAvailable();
+        if (isSupervisedPromptBlocked(active.reliability)) {
+          throw new Error(reliabilityCopy.readOnlyHistory);
+        }
         if (resources?.length) PromptResourceContextListSchema.parse(resources);
       } catch (error) {
         setContinuationErrors((previous) => ({
@@ -954,6 +1013,15 @@ function AgentDetailViewContent({
       const contextReferences = [
         ...new Map(references.map((reference) => [reference.nodeId, reference])).values(),
       ];
+      const commandId = active.reliability
+        ? promptIdentity.current?.forAttempt(active.id, {
+            text,
+            attachments,
+            contextReferences,
+            resourceContext,
+          })
+        : undefined;
+      let admissionRejected = false;
       let createdSession: AgentSessionVO | null = null;
       const operationId = ++turnOperationCounter.current;
       let operationSessionId = active.id;
@@ -972,6 +1040,10 @@ function AgentDetailViewContent({
         {
           createSession: async (slug) => {
             assertConnectionAvailable();
+            if (active.reliability) {
+              admissionRejected = true;
+              throw new Error(reliabilityCopy.readOnlyHistory);
+            }
             createdSession = await continueSession.mutateAsync({ slug });
             return createdSession;
           },
@@ -987,6 +1059,7 @@ function AgentDetailViewContent({
             const result = await orpc.agents.sessions.prompt.call({
               sessionId,
               text: promptText,
+              ...(commandId ? { commandId } : {}),
               ...(promptAttachments && promptAttachments.length > 0
                 ? { attachments: [...promptAttachments] }
                 : {}),
@@ -995,6 +1068,13 @@ function AgentDetailViewContent({
                 ? { resourceContext: [...promptResourceContext] }
                 : {}),
             });
+            if (active.reliability) {
+              if (!result.accepted) {
+                admissionRejected = true;
+                throw new Error(reliabilityCopy.notAccepted);
+              }
+              if (commandId) promptIdentity.current?.accepted(commandId);
+            }
             if (result.accepted && createdSession) {
               bridgeQueryTime.current = sessions.dataUpdatedAt;
               setSessionBridge(createdSession);
@@ -1052,12 +1132,11 @@ function AgentDetailViewContent({
           }
         })
         .catch((error: unknown) => {
-          const message = presentCoreError(
-            messages,
-            locale,
-            error,
-            messages.agents.continueConversationFailed,
-          );
+          const message = active.reliability
+            ? admissionRejected
+              ? reliabilityCopy.notAccepted
+              : reliabilityCopy.acceptanceUnconfirmed
+            : presentCoreError(messages, locale, error, messages.agents.continueConversationFailed);
           setContinuationErrors((previous) => ({
             ...previous,
             [active.id]: message,
@@ -1090,6 +1169,7 @@ function AgentDetailViewContent({
       messages,
       orpc,
       refreshSessionLists,
+      reliabilityCopy,
       sessions.dataUpdatedAt,
     ],
   );
@@ -1149,10 +1229,11 @@ function AgentDetailViewContent({
     return <AgentLoadingState />;
   }
 
-  if (sessions.isError) {
+  const accessFailure = [sessions.error, connections.error].find(isAgentSessionAccessError);
+  if (accessFailure || (sessions.isError && !sessions.data && !sessionBridge)) {
     return (
       <AgentQueryErrorState
-        error={sessions.error}
+        error={accessFailure ?? sessions.error}
         onRetry={() => void sessions.refetch()}
         title={messages.agents.loadSessionsFailedTitle}
       />
@@ -1450,7 +1531,18 @@ function AgentDetailViewContent({
                 ) : null}
               </header>
 
-              {active.error && shouldRenderAgentMessage(active.error) ? (
+              {active.reliability ? (
+                <AgentSessionReliabilityStatus
+                  reliability={active.reliability}
+                  recoverySnapshot={active.recoverySnapshot}
+                  updatesRecovering={updatesRecovering}
+                  onCheck={() => {
+                    void refreshSessionLists().catch(() => undefined);
+                  }}
+                />
+              ) : null}
+
+              {!active.reliability && active.error && shouldRenderAgentMessage(active.error) ? (
                 <p
                   role="alert"
                   className="min-w-0 break-words border-b bg-destructive/10 px-4 py-2 text-destructive text-sm"
@@ -1474,7 +1566,9 @@ function AgentDetailViewContent({
               ) : null}
 
               <AcpConversation
-                onAnswerInput={availability.canChat ? chat.answerInput : undefined}
+                onAnswerInput={
+                  availability.canChat && !supervisedPromptBlocked ? chat.answerInput : undefined
+                }
                 resolveResource={async (resource) => {
                   if (!activeSessionId) throw new Error("Select a conversation first.");
                   return orpc.agents.sessions.resolveResource.call({
@@ -1544,17 +1638,38 @@ function AgentDetailViewContent({
                   ) : undefined
                 }
                 onAnswerPermission={(block, optionId) => {
-                  if (availabilityRef.current.canChat) void chat.answerPermission(block, optionId);
+                  if (availabilityRef.current.canChat && !supervisedPromptBlocked)
+                    void chat.answerPermission(block, optionId);
                 }}
                 emptyTitle={
-                  active.status === "failed"
-                    ? messages.agents.statusFailed
-                    : active.status === "ended"
-                      ? messages.agents.statusEnded
-                      : messages.agents.conversationConnectedTitle
+                  active.reliability
+                    ? active.reliability.execution === "unknown"
+                      ? reliabilityCopy.unknown
+                      : active.reliability.synchronization === "gap"
+                        ? reliabilityCopy.gap
+                        : updatesRecovering || active.reliability.synchronization !== "synced"
+                          ? reliabilityCopy.recovering
+                          : active.reliability.connection !== "connected"
+                            ? reliabilityCopy[active.reliability.connection]
+                            : reliabilityCopy[active.reliability.execution]
+                    : active.status === "failed"
+                      ? messages.agents.statusFailed
+                      : active.status === "ended"
+                        ? messages.agents.statusEnded
+                        : messages.agents.conversationConnectedTitle
                 }
-                emptyDescription={messages.agents.conversationConnectedBody}
+                emptyDescription={
+                  active.reliability && (supervisedPromptBlocked || updatesRecovering)
+                    ? reliabilityCopy.readOnlyHistory
+                    : messages.agents.conversationConnectedBody
+                }
               />
+
+              {pendingCommandPresentations.length ? (
+                <div className="max-h-48 shrink-0 overflow-y-auto px-4 py-2">
+                  <PendingAgentPromptPresentations commands={pendingCommandPresentations} />
+                </div>
+              ) : null}
 
               <AcpComposer
                 key={active.id}
@@ -1620,6 +1735,7 @@ function AgentDetailViewContent({
                 onDraftApplied={onDraftApplied}
                 disabled={
                   !availability.canChat ||
+                  supervisedPromptBlocked ||
                   isComposerDisabled(
                     active.status,
                     promptActivity.active,
@@ -1643,51 +1759,98 @@ function AgentDetailViewContent({
                   ) : undefined
                 }
                 footerControls={
-                  displayModelOption || active.thinkingOption ? (
-                    <ModelSelectorRow
-                      key={active.id}
-                      modelOption={displayModelOption}
-                      thinkingOption={active.thinkingOption}
-                      thinkingLabel={messages.agents.thinkingLevel}
-                      disabled={
-                        !availability.canChat ||
-                        !active ||
-                        isModelSelectorDisabled(
-                          active.status,
-                          active.transport,
-                          setConfigOption.isPending,
-                        )
-                      }
-                      error={
-                        setConfigOption.error
-                          ? presentCoreError(
-                              messages,
-                              locale,
-                              setConfigOption.error,
-                              messages.agents.continueConversationFailed,
+                  displayModelOption || active.thinkingOption || active.modeOption ? (
+                    <>
+                      {displayModelOption || active.thinkingOption ? (
+                        <ModelSelectorRow
+                          key={active.id}
+                          modelOption={displayModelOption}
+                          thinkingOption={active.thinkingOption}
+                          thinkingLabel={messages.agents.thinkingLevel}
+                          disabled={
+                            !availability.canChat ||
+                            supervisedPromptBlocked ||
+                            !active ||
+                            isModelSelectorDisabled(
+                              active.status,
+                              active.transport,
+                              setConfigOption.isPending,
                             )
-                          : undefined
-                      }
-                      onChange={(value, thinkingValue) =>
-                        availabilityRef.current.canChat &&
-                        displayModelOption &&
-                        setConfigOption.mutate({
-                          sessionId: active.id,
-                          configId: displayModelOption.id,
-                          value,
-                          ...(thinkingValue !== undefined ? { thinkingValue } : {}),
-                        })
-                      }
-                      onThinkingChange={(value) =>
-                        availabilityRef.current.canChat &&
-                        active.thinkingOption &&
-                        setConfigOption.mutate({
-                          sessionId: active.id,
-                          configId: active.thinkingOption.id,
-                          value,
-                        })
-                      }
-                    />
+                          }
+                          error={
+                            setConfigOption.error &&
+                            setConfigOption.variables?.sessionId === active.id &&
+                            !(
+                              setConfigOption.variables?.configId === active.modeOption?.id &&
+                              (setConfigOption.variables?.source ?? "config") ===
+                                active.modeOption?.source
+                            )
+                              ? presentCoreError(
+                                  messages,
+                                  locale,
+                                  setConfigOption.error,
+                                  messages.agents.continueConversationFailed,
+                                )
+                              : undefined
+                          }
+                          onChange={(value, thinkingValue) =>
+                            availabilityRef.current.canChat &&
+                            displayModelOption &&
+                            setConfigOption.mutate({
+                              sessionId: active.id,
+                              configId: displayModelOption.id,
+                              value,
+                              ...(thinkingValue !== undefined ? { thinkingValue } : {}),
+                            })
+                          }
+                          onThinkingChange={(value) =>
+                            availabilityRef.current.canChat &&
+                            active.thinkingOption &&
+                            setConfigOption.mutate({
+                              sessionId: active.id,
+                              configId: active.thinkingOption.id,
+                              value,
+                            })
+                          }
+                        />
+                      ) : null}
+                      {active.modeOption ? (
+                        <ModeSelectorRow
+                          key={`mode:${active.id}`}
+                          modeOption={active.modeOption}
+                          modeLabel={messages.agents.mode}
+                          disabled={
+                            !availability.canChat ||
+                            supervisedPromptBlocked ||
+                            active.status !== "idle" ||
+                            setConfigOption.isPending
+                          }
+                          error={
+                            setConfigOption.error &&
+                            setConfigOption.variables?.sessionId === active.id &&
+                            setConfigOption.variables?.configId === active.modeOption.id &&
+                            (setConfigOption.variables?.source ?? "config") ===
+                              active.modeOption.source
+                              ? presentCoreError(
+                                  messages,
+                                  locale,
+                                  setConfigOption.error,
+                                  messages.agents.continueConversationFailed,
+                                )
+                              : undefined
+                          }
+                          onChange={(value) => {
+                            if (!availabilityRef.current.canChat || !active.modeOption) return;
+                            setConfigOption.mutate({
+                              sessionId: active.id,
+                              configId: active.modeOption.id,
+                              value,
+                              source: active.modeOption.source,
+                            });
+                          }}
+                        />
+                      ) : null}
+                    </>
                   ) : undefined
                 }
                 onSend={send}

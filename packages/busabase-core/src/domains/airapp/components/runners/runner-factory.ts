@@ -3,6 +3,7 @@
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import { LocalRunner } from "./local-runner";
 import { NodepodRunner } from "./nodepod-runner";
+import { SiteRunner } from "./site-runner";
 import type { AirAppRunner, AirAppRunnerKind } from "./types";
 
 /**
@@ -25,6 +26,9 @@ export function createAirAppRunner(
       return new LocalRunner({ ...context, engine: "local" });
     case "remote":
       return new LocalRunner({ ...context, engine: "remote" });
+    // Not a run at all: the server reads the node's files and deploys a preview.
+    case "site":
+      return new SiteRunner(context);
     default: {
       const exhaustive: never = kind;
       throw new Error(`Unknown AirApp runner kind: ${exhaustive}`);

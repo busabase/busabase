@@ -1,3 +1,8 @@
+import {
+  type FileTooLargeErrorData,
+  formatFileSize,
+  getFileTooLargeErrorData,
+} from "open-domains/attachments/utils";
 import { fmt } from "./fmt";
 import type { CoreI18nMessages } from "./messages";
 
@@ -19,6 +24,9 @@ const INVALID_FORM_CURSOR_MESSAGE = "The form cursor is invalid.";
 // Thrown (BAD_REQUEST) when proposing or merging the deletion of a Base's last view.
 const LAST_VIEW_DELETE_MESSAGE =
   "A Base must keep at least one view. Create another view before deleting this one.";
+// Thrown (TIMEOUT) by `stopped` in logic/search-execution.ts.
+const SEARCH_TIMEOUT_MESSAGE =
+  "Search took too long. Narrow the search to a Base or folder and try again.";
 const MAX_PRESENTED_ERROR_LENGTH = 300;
 
 export function localizeCoreErrorMessage(messages: CoreI18nMessages, message: string): string {
@@ -30,6 +38,9 @@ export function localizeCoreErrorMessage(messages: CoreI18nMessages, message: st
   }
   if (message === LAST_VIEW_DELETE_MESSAGE) {
     return messages.base.lastViewCannotBeDeleted;
+  }
+  if (message === SEARCH_TIMEOUT_MESSAGE) {
+    return messages.search.timedOut;
   }
   const slugConflictMatch = NODE_SLUG_CONFLICT_PATTERN.exec(message);
   if (slugConflictMatch) {
@@ -50,6 +61,31 @@ const truncateErrorMessage = (message: string): string => {
   return `${characters.slice(0, MAX_PRESENTED_ERROR_LENGTH - 1).join("")}…`;
 };
 
+/**
+ * "“video.mp4” (12 MB) is larger than the 10 MB per-file limit." — plus the
+ * upgrade hint when the host reported a bigger limit it can unlock.
+ */
+export function presentFileTooLarge(
+  messages: CoreI18nMessages,
+  data: FileTooLargeErrorData,
+): string {
+  const limit = formatFileSize(data.limit);
+  const reason =
+    data.fileName && typeof data.sizeBytes === "number"
+      ? fmt(messages.upload.fileTooLarge, {
+          name: data.fileName,
+          size: formatFileSize(data.sizeBytes),
+          limit,
+        })
+      : fmt(messages.upload.fileTooLargeUnnamed, { limit });
+  if (typeof data.upgradeLimit === "number" && data.upgradeLimit > data.limit) {
+    return `${reason} ${fmt(messages.upload.upgradeForLargerFiles, {
+      limit: formatFileSize(data.upgradeLimit),
+    })}`;
+  }
+  return reason;
+}
+
 /** Show the server's reason in every locale, bounded so diagnostics cannot overwhelm the UI. */
 export function presentCoreError(
   messages: CoreI18nMessages,
@@ -57,6 +93,8 @@ export function presentCoreError(
   error: unknown,
   fallback: string,
 ): string {
+  const tooLarge = getFileTooLargeErrorData(error);
+  if (tooLarge) return presentFileTooLarge(messages, tooLarge);
   if (!(error instanceof Error)) return fallback;
   const localized = localizeCoreErrorMessage(messages, error.message);
   return truncateErrorMessage(localized) || fallback;

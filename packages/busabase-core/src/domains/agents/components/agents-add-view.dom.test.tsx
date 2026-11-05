@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type {
   AgentCatalogEntryVO,
@@ -89,11 +89,17 @@ const CLAUDE_CONNECTION: AgentConnectionVO = {
 };
 
 type CreateSession = (input: { slug: string }) => Promise<AgentSessionVO>;
+type ConnectBuda = (input: {
+  endpoint: string;
+  agentId: string;
+  apiToken: string;
+}) => Promise<{ slug: string }>;
 
 function stubOrpc(options: {
   catalog?: () => Promise<AgentCatalogEntryVO[]>;
   connections?: () => Promise<AgentConnectionVO[]>;
   create?: ReturnType<typeof vi.fn<CreateSession>>;
+  connectBuda?: ReturnType<typeof vi.fn<ConnectBuda>>;
 }) {
   const catalogFn = options.catalog ?? (async () => [CLAUDE_ENTRY]);
   const connections = options.connections ?? (async () => []);
@@ -114,6 +120,7 @@ function stubOrpc(options: {
         queryKey: () => ["agents", "catalog"],
       },
       connections: {
+        connectBuda: { mutationOptions: () => ({ mutationFn: options.connectBuda ?? vi.fn() }) },
         list: {
           queryOptions: () => ({
             queryKey: ["agents", "connections", "mine"],
@@ -138,6 +145,7 @@ function renderView(options: {
   catalog?: () => Promise<AgentCatalogEntryVO[]>;
   connections?: () => Promise<AgentConnectionVO[]>;
   create?: ReturnType<typeof vi.fn<CreateSession>>;
+  connectBuda?: ReturnType<typeof vi.fn<ConnectBuda>>;
   onBack?: () => void;
   onConnected?: (slug: string) => void;
   spaceId?: string;
@@ -684,4 +692,222 @@ describe("AgentsAddView — Buda connection dialog", () => {
     send({ type: "busabase:buda-connected", slug: "buda-agent-1" });
     expect(create).not.toHaveBeenCalled();
   });
+});
+
+describe("AgentsAddView — Buda ACP token connection", () => {
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  async function openAcp(options: Parameters<typeof renderView>[0] = {}) {
+    const connectBuda = options.connectBuda ?? vi.fn(async () => ({ slug: "buda:manual-agent" }));
+    const view = renderView({ catalog: async () => [BUDA_ENTRY], ...options, connectBuda });
+    const trigger = await screen.findByRole("button", { name: "More Buda connection options" });
+    fireEvent.keyDown(trigger, { key: "ArrowDown" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Connect via ACP" }));
+    await screen.findByRole("dialog", { name: "Connect via ACP" });
+    return { ...view, connectBuda };
+  }
+  function fill() {
+    fireEvent.change(screen.getByLabelText("Agent ID"), { target: { value: "manual-agent" } });
+    fireEvent.change(screen.getByLabelText("API token"), {
+      target: { value: "private-api-token" },
+    });
+  }
+  it("keeps OAuth primary and connects the separate password form through ACP", async () => {
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    const create = vi.fn(async () => ({ ...SESSION, slug: "buda:manual-agent" }));
+    const { connectBuda, onConnected } = await openAcp({ create });
+    expect((screen.getByLabelText("API token") as HTMLInputElement).type).toBe("password");
+    expect((screen.getByLabelText("ACP WebSocket endpoint") as HTMLInputElement).value).toBe(
+      "wss://buda.im/api/acp",
+    );
+    expect(open).not.toHaveBeenCalled();
+    fill();
+    fireEvent.click(screen.getByRole("button", { name: /^Connect$/ }));
+    await waitFor(() => expect(onConnected).toHaveBeenCalledWith("buda:manual-agent"));
+    expect(connectBuda).toHaveBeenCalledWith(
+      {
+        endpoint: "wss://buda.im/api/acp",
+        agentId: "manual-agent",
+        apiToken: "private-api-token",
+      },
+      expect.anything(),
+    );
+    expect(create).toHaveBeenCalledWith({ slug: "buda:manual-agent" }, expect.anything());
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+  it("offers manual connection on an unconfigured local host", async () => {
+    await openAcp({
+      catalog: async () => [
+        {
+          ...BUDA_ENTRY,
+          connectionRequired: false,
+          unavailableReason: "Set BUDA_API_KEY and BUDA_AGENT_ID to connect to Buda.",
+        },
+      ],
+    });
+    expect(screen.getByRole("dialog", { name: "Connect via ACP" })).toBeTruthy();
+  });
+  it("opens the manual form from the local primary action when OAuth is unavailable", async () => {
+    renderView({
+      catalog: async () => [
+        {
+          ...BUDA_ENTRY,
+          connectionRequired: false,
+          unavailableReason: "Set BUDA_API_KEY and BUDA_AGENT_ID to connect to Buda.",
+        },
+      ],
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Connect Buda" }));
+    expect(await screen.findByRole("dialog", { name: "Connect via ACP" })).toBeTruthy();
+  });
+  it("selects a saved local agent explicitly when multiple Buda connections exist", async () => {
+    const create = vi.fn(async () => ({ ...SESSION, slug: "buda:agent-1" }));
+    renderView({
+      create,
+      catalog: async () => [
+        {
+          ...BUDA_ENTRY,
+          available: true,
+          connectionRequired: false,
+          connectedAgents: [
+            { slug: "buda:agent-1", name: "First" },
+            { slug: "buda:agent-2", name: "Second" },
+          ],
+        },
+      ],
+    });
+    fireEvent.click(await screen.findByRole("button", { name: /^Connect$/ }));
+    await waitFor(() =>
+      expect(create).toHaveBeenCalledWith({ slug: "buda:agent-1" }, expect.anything()),
+    );
+  });
+  it("keeps Cloud OAuth primary enabled with its original label while an ACP session starts", async () => {
+    let finish!: (session: AgentSessionVO) => void;
+    const create = vi.fn(
+      () =>
+        new Promise<AgentSessionVO>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const view = await openAcp({ create });
+    fill();
+    fireEvent.click(screen.getByRole("button", { name: /^Connect$/ }));
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    const primary = screen.getByRole("button", { name: "Connect Buda" }) as HTMLButtonElement;
+    expect(primary.disabled).toBe(false);
+    const opened = { closed: false, close: vi.fn() } as unknown as Window;
+    const open = vi.spyOn(window, "open").mockReturnValue(opened);
+    fireEvent.click(primary);
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(await screen.findByRole("dialog", { name: "Connect Buda" })).toBeTruthy();
+    view.unmount();
+    await act(async () => {
+      finish({ ...SESSION, slug: "buda:manual-agent" });
+    });
+    expect(view.onConnected).not.toHaveBeenCalled();
+  });
+  it("shows a connection error without creating a chat and permits retry", async () => {
+    const connectBuda = vi.fn<ConnectBuda>().mockRejectedValue(new Error("Check the API token."));
+    const create = vi.fn(async () => SESSION);
+    await openAcp({ connectBuda, create });
+    fill();
+    fireEvent.click(screen.getByRole("button", { name: /^Connect$/ }));
+    await screen.findByRole("alert");
+    expect(create).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog", { name: "Connect via ACP" })).toBeTruthy();
+    expect((screen.getByRole("button", { name: /^Connect$/ }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+  });
+  it("clears secrets on close and ignores a late connection result", async () => {
+    let finish!: (value: { slug: string }) => void;
+    const connectBuda = vi.fn(
+      () =>
+        new Promise<{ slug: string }>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const create = vi.fn(async () => SESSION);
+    const { onConnected, client } = await openAcp({ connectBuda, create });
+    fill();
+    fireEvent.click(screen.getByRole("button", { name: /^Connect$/ }));
+    await waitFor(() => expect(connectBuda).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: /^Cancel$/ }));
+    await act(async () => {
+      finish({ slug: "buda:manual-agent" });
+    });
+    expect(create).not.toHaveBeenCalled();
+    expect(onConnected).not.toHaveBeenCalled();
+    await waitFor(() => expect(client.getMutationCache().getAll()).toEqual([]));
+    fireEvent.keyDown(screen.getByRole("button", { name: "More Buda connection options" }), {
+      key: "ArrowDown",
+    });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Connect via ACP" }));
+    expect(((await screen.findByLabelText("API token")) as HTMLInputElement).value).toBe("");
+  });
+  it("ignores stale connect completion after changing workspace", async () => {
+    let finish!: (value: { slug: string }) => void;
+    const connectBuda = vi.fn(
+      () =>
+        new Promise<{ slug: string }>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const create = vi.fn(async () => SESSION);
+    const view = await openAcp({ connectBuda, create });
+    fill();
+    fireEvent.click(screen.getByRole("button", { name: /^Connect$/ }));
+    await waitFor(() => expect(connectBuda).toHaveBeenCalledTimes(1));
+    view.rerender(
+      <QueryClientProvider client={view.client}>
+        <AgentsAddView
+          orpc={view.orpc}
+          onBack={view.onBack}
+          onConnected={view.onConnected}
+          spaceId="space-2"
+        />
+      </QueryClientProvider>,
+    );
+    await act(async () => {
+      finish({ slug: "buda:manual-agent" });
+    });
+    expect(create).not.toHaveBeenCalled();
+    expect(view.onConnected).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+  it.each(["workspace change", "unmount"] as const)(
+    "ignores a stale WS session result after %s",
+    async (transition) => {
+      let finish!: (session: AgentSessionVO) => void;
+      const create = vi.fn(
+        () =>
+          new Promise<AgentSessionVO>((resolve) => {
+            finish = resolve;
+          }),
+      );
+      const view = await openAcp({ create });
+      fill();
+      fireEvent.click(screen.getByRole("button", { name: /^Connect$/ }));
+      await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+      if (transition === "unmount") view.unmount();
+      else
+        view.rerender(
+          <QueryClientProvider client={view.client}>
+            <AgentsAddView
+              orpc={view.orpc}
+              onBack={view.onBack}
+              onConnected={view.onConnected}
+              spaceId="space-2"
+            />
+          </QueryClientProvider>,
+        );
+      await act(async () => {
+        finish({ ...SESSION, slug: "buda:manual-agent" });
+      });
+      expect(view.onConnected).not.toHaveBeenCalled();
+    },
+  );
 });

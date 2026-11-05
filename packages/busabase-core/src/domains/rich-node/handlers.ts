@@ -46,6 +46,7 @@ import {
   toNodeVO,
 } from "../../logic/store";
 import { assertDocBodySize } from "../doc/handlers";
+import { syncWorkflowTriggers } from "../workflow/logic/triggers";
 
 /**
  * `PUT /nodes/{nodeId}/content` — one content-write endpoint for the node
@@ -379,7 +380,7 @@ export const updateNodeContent = async (
 // keeps using `mergeDocUpdate` in `domains/doc/handlers.ts` — unaffected by
 // this file.
 export const mergeRichNodeDocumentUpdate = async (
-  _ctx: MergeCtx,
+  ctx: MergeCtx,
   item: OperationPO,
   node: NodePO,
   headCommit: CommitPO,
@@ -391,12 +392,24 @@ export const mergeRichNodeDocumentUpdate = async (
     item.operation as RichNodeDocumentOperationKind,
     headCommit.payload,
   );
+  if (node.type === "workflow") {
+    const document = parseWorkflowDocument(fields.document);
+    await writeRichNodeDocument(node.id, node.type, document);
+    // Same transaction as the merge: a workflow's event subscriptions change
+    // exactly when its saved graph does, and act as whoever merged it.
+    await syncWorkflowTriggers(ctx.db, {
+      spaceId: node.spaceId,
+      workflowNodeId: node.id,
+      document,
+      armedBy: ctx.actorId,
+      now: ctx.timestamp,
+    });
+    return;
+  }
   const document =
     node.type === "whiteboard"
       ? parseWhiteboardDocument(fields.document)
-      : node.type === "workflow"
-        ? parseWorkflowDocument(fields.document)
-        : parseHtmlDocument(fields.document);
+      : parseHtmlDocument(fields.document);
   await writeRichNodeDocument(node.id, node.type, document);
 };
 

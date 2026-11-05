@@ -67,6 +67,12 @@ import {
   WebhookRuleInputSchema,
   WebhookRuleVOSchema,
 } from "../domains/webhook/types";
+import {
+  WorkflowPauseSchema,
+  WorkflowRecordSnapshotSchema,
+  WorkflowRunSchema,
+  WorkflowRunStartedViaSchema,
+} from "../domains/workflow/run";
 import { NodeIconSchema } from "../types/node-icon";
 import { activityItemSchema } from "./activity-schemas";
 import { AgentClientVOSchema } from "./agent-client";
@@ -606,6 +612,10 @@ export const busabaseOpenApiCommonSchemas = {
   VaultItem: { strategy: "output", schema: VaultItemVOSchema },
   VaultSettings: { strategy: "output", schema: VaultSettingsVOSchema },
   AgentTask: { strategy: "output", schema: agentTaskSchema },
+  WorkflowRun: { strategy: "output", schema: WorkflowRunSchema },
+  WorkflowRunStartedVia: { strategy: "output", schema: WorkflowRunStartedViaSchema },
+  WorkflowRecordSnapshot: { strategy: "output", schema: WorkflowRecordSnapshotSchema },
+  WorkflowPause: { strategy: "output", schema: WorkflowPauseSchema },
   // Errors — referenced via `busabaseOpenApiErrorResponseBodySchema`
   [API_ERROR_COMPONENT]: { strategy: "output", schema: apiErrorSchema },
 } as const satisfies Record<string, { strategy: "input" | "output"; schema: AnySchema }>;

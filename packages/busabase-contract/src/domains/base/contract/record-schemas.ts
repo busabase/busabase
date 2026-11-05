@@ -82,10 +82,19 @@ export const listRecordsFilterSchema = z.object({
 
 // A view sort carried to the server for push-down. Only number/date fields sort
 // authoritatively in SQL (their typed value column matches the client's ordering);
-// other field types are left to the client sort. `fieldType` lets the server decide.
+// other field types are left to the client sort. The field's type decides: the
+// caller's `fieldType` when given, otherwise the Base's own schema — omitting it
+// used to fall through to the default order with no error (`resolveRecordSort`).
 export const listRecordsSortSchema = z.object({
-  fieldSlug: z.string(),
-  fieldType: z.string().optional(),
+  fieldSlug: z.string().describe("The field to sort by. A slug the Base does not have is a 400."),
+  fieldType: z
+    .string()
+    .optional()
+    .describe(
+      "Optional: omit it and the server reads the field's type from the Base's schema " +
+        "(`records.list` needs `baseId` for that). Pass it only to override that type — e.g. " +
+        "`number` for a formula whose results are numbers.",
+    ),
   direction: z.enum(["asc", "desc"]).optional().default("asc"),
 });
 
@@ -225,7 +234,9 @@ export const listRecordsInputSchema = z
       .describe(
         "Sort by one field. Only number and date fields sort authoritatively (their typed value " +
           "column matches a client's own ordering); any other field type is returned in the " +
-          "default order and left for the caller to sort.",
+          "default order and left for the caller to sort. The field's type comes from the Base's " +
+          "schema unless `fieldType` overrides it; an unknown field is a 400. Without `baseId`, " +
+          "`fieldType` is required.",
       ),
   })
   .optional()
@@ -241,6 +252,16 @@ export const listRecordsPageInputSchema = z.object({
     .string()
     .min(1)
     .describe("Required here, unlike `records.list` where omitting it spans the whole space."),
+  listMode: z
+    .enum(["full", "table"])
+    .optional()
+    .default("full")
+    .describe(
+      "`full` returns complete record payloads. `table` is the explicit compact mode for " +
+        "Table/Grid views: values larger than 4 KB are replaced with omission markers while " +
+        "the Base schema and computed lookup metadata stay available for cell rendering. " +
+        "Use records.get to read a selected record's complete content.",
+    ),
   viewId: z
     .string()
     .min(1)
@@ -308,7 +329,8 @@ export const listRecordsPageInputSchema = z.object({
     .describe(
       "Sort by one field. Only number and date fields sort authoritatively (their typed value " +
         "column matches a client's own ordering); any other field type is returned in the " +
-        "default order and left for the caller to sort. " +
+        "default order and left for the caller to sort. The field's type comes from the Base's " +
+        "schema unless `fieldType` overrides it; an unknown field is a 400. " +
         "Replaces the saved View's sort when `viewId` is also given (the View's filters still " +
         "apply). Empty values sort last; ties are broken by record id, so pages never overlap.",
     ),

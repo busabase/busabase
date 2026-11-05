@@ -3,10 +3,17 @@
 import { useMutation } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import { sha256Hex } from "open-domains/attachments/hooks";
+import { MULTIPART_UPLOAD_THRESHOLD } from "open-domains/attachments/utils";
 import { useCallback } from "react";
 import { completeAttachmentUpload } from "../helpers/attachment-upload";
 import { inferFileTreeMimeType } from "../helpers/file-tree-files";
 import { createFileUploadAbortError, throwIfFileUploadAborted } from "../helpers/file-upload-task";
+import { uploadMultipartParts } from "../helpers/multipart-upload";
+import {
+  assertFileWithinLimit,
+  useUploadLimits,
+  withFileTooLargeReporting,
+} from "./use-upload-limits";
 
 export interface FileTreeAssetUploadOptions {
   signal?: AbortSignal;
@@ -76,52 +83,96 @@ const uploadFileBytes = async ({
   });
 
 export function useFileTreeAssetUpload(orpc: BusabaseQueryUtils) {
+  const limits = useUploadLimits();
   const createUploadUrl = useMutation(orpc.assets.createUploadUrl.mutationOptions());
   const confirmUpload = useMutation(orpc.assets.confirm.mutationOptions());
+  const createMultipart = useMutation(orpc.assets.createMultipartUpload.mutationOptions());
+  const signMultipartParts = useMutation(orpc.assets.signMultipartParts.mutationOptions());
+  const completeMultipart = useMutation(orpc.assets.completeMultipartUpload.mutationOptions());
+  const abortMultipart = useMutation(orpc.assets.abortMultipartUpload.mutationOptions());
 
   return useCallback(
-    async (file: File, options: FileTreeAssetUploadOptions = {}) => {
-      const { signal, onPhase, onProgress } = options;
-      if (signal) throwIfFileUploadAborted(signal);
-      const mimeType = inferFileTreeMimeType(file.name, file.type);
-      onPhase?.("hashing");
-      const contentHash = await sha256Hex(file);
-      if (signal) throwIfFileUploadAborted(signal);
-      return completeAttachmentUpload(
-        {
-          contentHash,
-          context: "file-tree",
-          fileName: file.name,
-          mimeType,
-          sizeBytes: file.size,
-        },
-        {
-          createUploadUrl: async (input) => {
-            const requested = await createUploadUrl.mutateAsync(input);
-            if (signal) throwIfFileUploadAborted(signal);
-            return requested;
+    async (file: File, options: FileTreeAssetUploadOptions = {}) =>
+      withFileTooLargeReporting(limits, async () => {
+        const { signal, onPhase, onProgress } = options;
+        if (signal) throwIfFileUploadAborted(signal);
+        // Refuse before hashing: an oversized file should cost nothing.
+        assertFileWithinLimit(file, limits.maxFileSize);
+        const mimeType = inferFileTreeMimeType(file.name, file.type);
+        onPhase?.("hashing");
+        // Undefined above CONTENT_HASH_MAX_BYTES: such uploads skip content
+        // dedup rather than read gigabytes into memory to fingerprint them.
+        const contentHash = await sha256Hex(file);
+        if (signal) throwIfFileUploadAborted(signal);
+        return completeAttachmentUpload(
+          {
+            contentHash,
+            context: "file-tree",
+            fileName: file.name,
+            mimeType,
+            sizeBytes: file.size,
           },
-          uploadBytes: async (requested) => {
-            onPhase?.("uploading");
-            await uploadFileBytes({
-              file,
-              mimeType,
-              onProgress,
-              signal,
-              storageKey: requested.storageKey,
-              uploadUrl: requested.uploadUrl,
-            });
+          {
+            createUploadUrl: async (input) => {
+              const requested = await createUploadUrl.mutateAsync(input);
+              if (signal) throwIfFileUploadAborted(signal);
+              return requested;
+            },
+            uploadBytes: async (requested) => {
+              onPhase?.("uploading");
+              await uploadFileBytes({
+                file,
+                mimeType,
+                onProgress,
+                signal,
+                storageKey: requested.storageKey,
+                uploadUrl: requested.uploadUrl,
+              });
+            },
+            confirmUpload: async (input) => {
+              if (signal) throwIfFileUploadAborted(signal);
+              onPhase?.("confirming");
+              const confirmed = await confirmUpload.mutateAsync(input);
+              if (signal) throwIfFileUploadAborted(signal);
+              return confirmed;
+            },
+            multipart: {
+              thresholdBytes: MULTIPART_UPLOAD_THRESHOLD,
+              create: async (input) => {
+                const created = await createMultipart.mutateAsync(input);
+                if (signal) throwIfFileUploadAborted(signal);
+                return created;
+              },
+              uploadParts: async (created) => {
+                onPhase?.("uploading");
+                return uploadMultipartParts({
+                  file,
+                  upload: created,
+                  signParts: (input) => signMultipartParts.mutateAsync(input),
+                  signal,
+                  onProgress,
+                });
+              },
+              complete: async (input) => {
+                if (signal) throwIfFileUploadAborted(signal);
+                onPhase?.("confirming");
+                const confirmed = await completeMultipart.mutateAsync(input);
+                if (signal) throwIfFileUploadAborted(signal);
+                return confirmed;
+              },
+              abort: (input) => abortMultipart.mutateAsync(input),
+            },
           },
-          confirmUpload: async (input) => {
-            if (signal) throwIfFileUploadAborted(signal);
-            onPhase?.("confirming");
-            const confirmed = await confirmUpload.mutateAsync(input);
-            if (signal) throwIfFileUploadAborted(signal);
-            return confirmed;
-          },
-        },
-      );
-    },
-    [confirmUpload, createUploadUrl],
+        );
+      }),
+    [
+      abortMultipart,
+      completeMultipart,
+      confirmUpload,
+      createMultipart,
+      createUploadUrl,
+      limits,
+      signMultipartParts,
+    ],
   );
 }

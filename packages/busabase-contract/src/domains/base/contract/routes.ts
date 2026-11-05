@@ -213,6 +213,8 @@ export const recordContract = {
       summary: "List a numbered record page",
       successDescription:
         "A random-access page of active records. When viewId is supplied, the saved view is authoritatively filtered and sorted before total and page slicing are calculated. An explicit `sort` (same shape as `records.list`'s) replaces the View's sort, so page N of a number- or date-sorted list is one request. `dateRange` additionally scopes to a `[gte, lt)` UTC instant window on a date/created_time/updated_time field.",
+      description:
+        'Use `listMode: "table"` for compact Table/Grid rows. It keeps pagination, totals, filtering and sorting semantics identical while replacing detail-sized field values with omission markers; `records.get` remains the full-record read.',
     })
     .input(listRecordsPageInputSchema)
     .output(listRecordsPageResponseSchema),

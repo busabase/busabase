@@ -1,6 +1,7 @@
 import type { RecordVO } from "busabase-contract/types";
 import { describe, expect, it, vi } from "vitest";
-import { getLinkedRecordIds } from "./field";
+import { LIST_OMITTED_FIELD_VALUE } from "../utils/list-payload-preview";
+import { getLinkedRecordIds, getRelationRecordIds } from "./field";
 import {
   chunkRecordIds,
   fetchRecordsByIds,
@@ -133,5 +134,25 @@ describe("getLinkedRecordIds", () => {
       "alice",
       "bob",
     ]);
+  });
+
+  it("never treats a list-omission marker as a record id", () => {
+    const record = {
+      id: "rec_1",
+      base: {
+        fields: [{ slug: "related", type: "relation", options: {} }],
+      },
+      headCommit: { payload: { related: LIST_OMITTED_FIELD_VALUE } },
+      computedFields: {
+        linked: {
+          targetField: { type: "relation", options: {} },
+          value: LIST_OMITTED_FIELD_VALUE,
+          sources: [{ recordId: "rec_2", value: LIST_OMITTED_FIELD_VALUE }],
+        },
+      },
+    } as unknown as RecordVO;
+    expect(getLinkedRecordIds([record], new Set())).toEqual([]);
+    expect(getRelationRecordIds(LIST_OMITTED_FIELD_VALUE)).toEqual([]);
+    expect(getRelationRecordIds("rec_real")).toEqual(["rec_real"]);
   });
 });

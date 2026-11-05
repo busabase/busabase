@@ -1,6 +1,12 @@
 import "server-only";
 
+import { ORPCError } from "@orpc/server";
 import type { AirAppRunnerKind } from "busabase-contract/domains/airapp/contract";
+import { resolveContextAirAppEngineLock } from "../../../context";
+import {
+  AIRAPP_ENGINE_PLAN_REQUIRED,
+  type AirAppEnginePlanRefusalData,
+} from "../utils/engine-plan-gate";
 import { resolveSandockConfig } from "./sandock-runtime";
 
 /**
@@ -16,6 +22,11 @@ import { resolveSandockConfig } from "./sandock-runtime";
  * an API key and must not guess. Guessing is what produced the failure this
  * whole area keeps circling back to: the picker offering something that cannot
  * possibly work, and the user finding out only after clicking Run.
+ *
+ * Capability is the whole answer only where nobody sells engines. A hosted
+ * deployment can also put an engine behind a space's plan; that is a separate,
+ * host-owned layer applied on top of this list (`utils/engine-plan-gate.ts`,
+ * `BusabaseContext.resolveAirAppEngineLock`), and it can only narrow it.
  */
 export interface AirAppEngineAvailabilityOptions {
   /**
@@ -31,6 +42,25 @@ export interface AirAppEngineAvailabilityOptions {
    */
   allowHostProcesses?: boolean;
   env?: NodeJS.ProcessEnv;
+  /**
+   * Whether this host's site provider has what it needs. Omitted means the host
+   * has no provider (open source, Desktop): configuring something cannot give it
+   * one, so `site` is hidden rather than shown as disabled.
+   */
+  siteConfigured?: boolean;
+}
+
+/**
+ * What a picker needs to know about this deployment.
+ *
+ * `notConfigured` is an engine an operator could turn on by configuring the
+ * deployment. It is shown disabled with that reason, so a person can tell "ask
+ * an administrator" from "does not exist". An engine this deployment can never
+ * offer (`local` on Cloud) is in neither list and stays hidden.
+ */
+export interface AirAppEngineAvailability {
+  available: AirAppRunnerKind[];
+  notConfigured: AirAppRunnerKind[];
 }
 
 /**
@@ -64,14 +94,51 @@ const OWN_MACHINE_APP_ENVS = new Set(["SELF-HOSTED", "DESKTOP", "LOCAL"]);
 export const resolveHostProcessPolicy = (env: NodeJS.ProcessEnv = process.env): boolean =>
   OWN_MACHINE_APP_ENVS.has((env.APP_ENV ?? "").trim().toUpperCase());
 
-export function resolveAvailableAirAppEngines(
+export function resolveAirAppEngineAvailability(
   options: AirAppEngineAvailabilityOptions = {},
-): AirAppRunnerKind[] {
+): AirAppEngineAvailability {
   // `browser` is unconditional: it runs in the viewer's own tab, so there is
   // no configuration that could make it unavailable.
   const env = options.env ?? process.env;
-  const engines: AirAppRunnerKind[] = ["browser"];
-  if (options.allowHostProcesses ?? resolveHostProcessPolicy(env)) engines.push("local");
-  if (resolveSandockConfig(env)) engines.push("remote");
-  return engines;
+  const available: AirAppRunnerKind[] = ["browser"];
+  const notConfigured: AirAppRunnerKind[] = [];
+  if (options.allowHostProcesses ?? resolveHostProcessPolicy(env)) available.push("local");
+  (resolveSandockConfig(env) ? available : notConfigured).push("remote");
+  if (options.siteConfigured !== undefined) {
+    (options.siteConfigured ? available : notConfigured).push("site");
+  }
+  return { available, notConfigured };
 }
+
+export function resolveAvailableAirAppEngines(
+  options: AirAppEngineAvailabilityOptions = {},
+): AirAppRunnerKind[] {
+  return resolveAirAppEngineAvailability(options).available;
+}
+
+/**
+ * Refuse an engine the deployment has but this space's plan does not include.
+ *
+ * The client already shows such an engine as locked and never asks for it, but
+ * that is a UI courtesy: a modified client, a stale tab, or a plain API call
+ * could still ask, and the engine in question is something somebody pays for.
+ * So the server asks the host again, here, on every call.
+ *
+ * Unlike "not offered here", this one IS a denial with a way out, so it says
+ * which plan unlocks the engine, and carries a machine-readable reason so the
+ * dashboard can turn it into the same upgrade state the picker shows. No host
+ * hook (open source, Desktop, self-hosted) means no plan gate at all.
+ */
+export const assertEngineIncludedInPlan = async (engine: AirAppRunnerKind): Promise<void> => {
+  const lock = await resolveContextAirAppEngineLock();
+  if (!lock?.lockedEngines.includes(engine)) return;
+  const data: AirAppEnginePlanRefusalData = {
+    reason: AIRAPP_ENGINE_PLAN_REQUIRED,
+    engine,
+    planLabel: lock.planLabel,
+  };
+  throw new ORPCError("FORBIDDEN", {
+    message: `AirApp engine "${engine}" is not included in this space's plan. Upgrade to ${lock.planLabel} to run apps on it.`,
+    data,
+  });
+};

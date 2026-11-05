@@ -149,6 +149,27 @@ const THINKING_CONFIG: acp.SessionConfigOption = {
   ],
 };
 
+const MODE_CONFIG: acp.SessionConfigOption = {
+  id: "vendor-policy",
+  name: "Permission mode",
+  category: "mode",
+  type: "select",
+  description: "Choose how this agent asks for approval",
+  currentValue: "default",
+  options: [
+    { value: "default", name: "Default", description: "Ask before changes" },
+    { value: "full-access", name: "Full access", description: "Allow agent tools" },
+  ],
+};
+
+const LEGACY_MODES: acp.SessionModeState = {
+  currentModeId: "ask",
+  availableModes: [
+    { id: "ask", name: "Ask", description: "Discuss a plan" },
+    { id: "code", name: "Code", description: "Make changes" },
+  ],
+};
+
 const resetStoreMocks = () => {
   mocks.resolveAgentContextResources.mockResolvedValue([]);
   mocks.resolveLaunch.mockImplementation(async () => ({
@@ -225,6 +246,7 @@ const resetStoreMocks = () => {
         error: session.error,
         modelOption: session.modelOption,
         thinkingOption: session.thinkingOption,
+        modeOption: session.modeOption,
       },
       acpSessionId: live?.acpSessionId ?? null,
       lastEventSeq: live?.persistedSeq ?? 0,
@@ -243,6 +265,7 @@ const resetStoreMocks = () => {
       _scope,
       _fence,
       thinkingOption: AgentSessionVO["thinkingOption"] = null,
+      modeOption: AgentSessionVO["modeOption"] = null,
     ) => {
       const session = scopedSession(sessionId);
       // Handoff tests supply an existing durable row through
@@ -252,6 +275,7 @@ const resetStoreMocks = () => {
       if (session.status === "ended" || session.status === "failed") return false;
       session.modelOption = modelOption;
       session.thinkingOption = thinkingOption;
+      session.modeOption = modeOption;
       return true;
     },
   );
@@ -305,6 +329,11 @@ function serveFakeAgent(
     initializeGate?: Promise<void>;
     initializeError?: Error;
     configResponse?: (configId: string, value: string) => acp.SessionConfigOption[];
+    configError?: Error;
+    modes?: acp.SessionModeState;
+    modeError?: Error;
+    modeNotification?: string;
+    loadModeNotification?: string;
     imageSupported?: boolean;
     embeddedContextSupported?: boolean;
     loadError?: Error;
@@ -337,6 +366,8 @@ function serveFakeAgent(
   let initializeCalls = 0;
   let newSessionCalls = 0;
   let setConfigCalls = 0;
+  const setModeIds: string[] = [];
+  let modes = options?.modes;
   const loadedSessionIds: string[] = [];
   const promptTexts: string[] = [];
   const promptContents: acp.ContentBlock[][] = [];
@@ -370,11 +401,20 @@ function serveFakeAgent(
       })
       .onRequest(acp.methods.agent.session.new, async () => {
         newSessionCalls += 1;
-        return { sessionId: "acp-sess-1", configOptions };
+        return { sessionId: "acp-sess-1", configOptions, modes };
       })
       .onRequest(acp.methods.agent.session.load, async (ctx) => {
         loadedSessionIds.push(ctx.params.sessionId);
         if (options?.loadError) throw options.loadError;
+        if (options?.loadModeNotification) {
+          await ctx.client.notify(acp.methods.client.session.update, {
+            sessionId: ctx.params.sessionId,
+            update: {
+              sessionUpdate: "current_mode_update",
+              currentModeId: options.loadModeNotification,
+            },
+          });
+        }
         if (options?.loadAvailableCommands) {
           await ctx.client.notify(acp.methods.client.session.update, {
             sessionId: ctx.params.sessionId,
@@ -393,7 +433,7 @@ function serveFakeAgent(
             },
           });
         }
-        return { configOptions };
+        return { configOptions, modes };
       })
       .onRequest(acp.methods.agent.session.prompt, async (ctx) => {
         promptContents.push(ctx.params.prompt);
@@ -453,6 +493,7 @@ function serveFakeAgent(
       })
       .onRequest(acp.methods.agent.session.setConfigOption, async (ctx) => {
         setConfigCalls += 1;
+        if (options?.configError) throw options.configError;
         configOptions =
           configOptions?.map((option) => {
             if (option.id !== ctx.params.configId || option.type !== "select") return option;
@@ -468,6 +509,19 @@ function serveFakeAgent(
         }
         return { configOptions };
       })
+      .onRequest(acp.methods.agent.session.setMode, async (ctx) => {
+        setModeIds.push(ctx.params.modeId);
+        if (options?.modeError) throw options.modeError;
+        const currentModeId = options?.modeNotification ?? ctx.params.modeId;
+        if (modes) modes = { ...modes, currentModeId };
+        if (options?.modeNotification) {
+          await ctx.client.notify(acp.methods.client.session.update, {
+            sessionId: ctx.params.sessionId,
+            update: { sessionUpdate: "current_mode_update", currentModeId },
+          });
+        }
+        return {};
+      })
       .connectWith(stream, (ctx) => {
         connected = ctx;
         resolve();
@@ -482,6 +536,7 @@ function serveFakeAgent(
     newSessionCallCount: () => newSessionCalls,
     promptSessionIds: () => promptSessionIds,
     setConfigCallCount: () => setConfigCalls,
+    setModeIds: () => setModeIds,
     promptTexts: () => promptTexts,
     promptContents: () => promptContents,
     cancelledSessionIds: () => cancelledSessionIds,
@@ -1221,6 +1276,337 @@ describe("agent session manager — model config option", () => {
     mocks.createWebSocketStream.mockReturnValue(clientSide);
   });
 
+  it.each(["full", "full-access", "bypassPermissions"])(
+    "selects the advertised %s permission before the first prompt",
+    async (value) => {
+      const agent = serveFakeAgent(agentSide, [
+        {
+          ...MODE_CONFIG,
+          options: [
+            { value: "default", name: "Default" },
+            { value, name: "Full access" },
+          ],
+        },
+      ]);
+      const session = await createAgentSession({ slug: "test-agent", spaceId: LOCAL_SPACE_ID });
+      await promptAgentSession(session.id, "First prompt");
+      expect((await listAgentSessions())[0]?.modeOption?.currentValue).toBe(value);
+      expect(agent.setConfigCallCount()).toBe(1);
+      expect(agent.promptTexts()).toEqual(["First prompt"]);
+      await closeAgentSessions([session.id]);
+    },
+  );
+
+  it("defaults a legacy connected session to its advertised Full access mode", async () => {
+    const agent = serveFakeAgent(agentSide, null, {
+      modes: {
+        currentModeId: "default",
+        availableModes: [
+          { id: "default", name: "Default" },
+          { id: "trusted", name: "Full access" },
+        ],
+      },
+    });
+    const session = await createAgentSession({ slug: "test-agent", spaceId: LOCAL_SPACE_ID });
+    expect((await waitUntilSettled(session.id)).modeOption?.currentValue).toBe("trusted");
+    expect(agent.setModeIds()).toEqual(["trusted"]);
+    expect(agent.setConfigCallCount()).toBe(0);
+    await closeAgentSessions([session.id]);
+  });
+
+  it("does not resend an already active Full access default", async () => {
+    const agent = serveFakeAgent(agentSide, [{ ...MODE_CONFIG, currentValue: "full-access" }]);
+    const session = await createAgentSession({ slug: "test-agent", spaceId: LOCAL_SPACE_ID });
+    expect((await waitUntilSettled(session.id)).modeOption?.currentValue).toBe("full-access");
+    expect(agent.setConfigCallCount()).toBe(0);
+    await closeAgentSessions([session.id]);
+  });
+
+  it("retains an advertised permission mode when Full is not offered", async () => {
+    const agent = serveFakeAgent(agentSide, [
+      {
+        ...MODE_CONFIG,
+        options: [
+          { value: "default", name: "Default" },
+          { value: "plan", name: "Plan" },
+        ],
+      },
+    ]);
+    const session = await createAgentSession({ slug: "test-agent", spaceId: LOCAL_SPACE_ID });
+    expect((await waitUntilSettled(session.id)).modeOption?.currentValue).toBe("default");
+    expect(agent.setConfigCallCount()).toBe(0);
+    await closeAgentSessions([session.id]);
+  });
+
+  it.each(["config", "legacy"] as const)(
+    "keeps the provider's confirmed mode usable if it rejects the initial %s Full selection",
+    async (source) => {
+      const error = new acp.RequestError(-32000, "Policy locked");
+      const agent = serveFakeAgent(agentSide, source === "config" ? [MODE_CONFIG] : null, {
+        ...(source === "config"
+          ? { configError: error }
+          : {
+              modes: {
+                currentModeId: "default",
+                availableModes: [
+                  { id: "default", name: "Default" },
+                  { id: "full-access", name: "Full access" },
+                ],
+              },
+              modeError: error,
+            }),
+      });
+      const session = await createAgentSession({ slug: "test-agent", spaceId: LOCAL_SPACE_ID });
+      expect(await waitUntilSettled(session.id)).toMatchObject({
+        status: "idle",
+        modeOption: { currentValue: "default" },
+      });
+      await expect(
+        promptAgentSession(session.id, "Use confirmed permissions"),
+      ).resolves.toBeUndefined();
+      expect(agent.promptTexts()).toEqual(["Use confirmed permissions"]);
+      expect(source === "config" ? agent.setConfigCallCount() : agent.setModeIds().length).toBe(1);
+      await closeAgentSessions([session.id]);
+    },
+  );
+
+  it("keeps a confirmed explicit Default when reopening an existing connected session", async () => {
+    const record = runtimeRecord({
+      modeOption: {
+        id: "vendor-policy",
+        name: "Permission mode",
+        currentValue: "default",
+        source: "config",
+        options: [],
+      },
+    });
+    mocks.loadSessionRuntime.mockResolvedValue(record);
+    const agent = serveFakeAgent(agentSide, [MODE_CONFIG]);
+    await promptAgentSession(record.session.id, "Reopen my guarded session");
+    expect(mocks.persistSessionModelOption).toHaveBeenCalledWith(
+      record.session.id,
+      null,
+      expect.anything(),
+      expect.anything(),
+      null,
+      expect.objectContaining({ currentValue: "default" }),
+    );
+    expect(agent.setConfigCallCount()).toBe(0);
+    expect(agent.loadedSessionIds()).toEqual([record.acpSessionId]);
+    await closeAgentSessions([record.session.id]);
+  });
+
+  it("discovers advertised mode names and descriptions and dispatches standard config changes", async () => {
+    const agent = serveFakeAgent(agentSide, [MODE_CONFIG]);
+    const session = await createAgentSession({ slug: "test-agent", spaceId: LOCAL_SPACE_ID });
+    expect((await waitUntilSettled(session.id)).modeOption).toMatchObject({
+      id: "vendor-policy",
+      name: "Permission mode",
+      source: "config",
+      currentValue: "full-access",
+      description: "Choose how this agent asks for approval",
+      options: [
+        { value: "default", name: "Default", description: "Ask before changes" },
+        { value: "full-access", name: "Full access", description: "Allow agent tools" },
+      ],
+    });
+    expect(
+      (await setAgentSessionConfigOption(session.id, "vendor-policy", "full-access")).modeOption
+        ?.currentValue,
+    ).toBe("full-access");
+    expect(agent.setConfigCallCount()).toBe(2);
+    expect(agent.setModeIds()).toEqual([]);
+    expect(mocks.persistSessionModelOption).toHaveBeenLastCalledWith(
+      session.id,
+      null,
+      expect.anything(),
+      expect.anything(),
+      null,
+      expect.objectContaining({ currentValue: "full-access", source: "config" }),
+    );
+    await closeAgentSessions([session.id]);
+  });
+
+  it("prefers category mode, flattens grouped choices, and accepts only uncategorized conventional ids", async () => {
+    const conventional = { ...MODE_CONFIG, id: "permission_mode", category: undefined };
+    const categorized = {
+      ...MODE_CONFIG,
+      options: [
+        {
+          group: "policies",
+          name: "Policies",
+          options:
+            MODE_CONFIG.type === "select"
+              ? MODE_CONFIG.options.flatMap((entry) =>
+                  "options" in entry ? entry.options : [entry],
+                )
+              : [],
+        },
+      ],
+    };
+    serveFakeAgent(agentSide, [conventional, categorized]);
+    const session = await createAgentSession({ slug: "test-agent", spaceId: LOCAL_SPACE_ID });
+    expect((await waitUntilSettled(session.id)).modeOption?.id).toBe("vendor-policy");
+    expect((await listAgentSessions())[0]?.modeOption?.options).toHaveLength(2);
+    await closeAgentSessions([session.id]);
+    const [client, side] = linkedStreams();
+    mocks.createWebSocketStream.mockReturnValue(client);
+    serveFakeAgent(side, [conventional]);
+    const fallback = await createAgentSession({ slug: "test-agent", spaceId: LOCAL_SPACE_ID });
+    expect((await waitUntilSettled(fallback.id)).modeOption?.id).toBe("permission_mode");
+    await closeAgentSessions([fallback.id]);
+    const [client2, side2] = linkedStreams();
+    mocks.createWebSocketStream.mockReturnValue(client2);
+    serveFakeAgent(side2, [{ ...conventional, category: "model" }]);
+    const unrelated = await createAgentSession({ slug: "test-agent", spaceId: LOCAL_SPACE_ID });
+    expect((await waitUntilSettled(unrelated.id)).modeOption).toBeNull();
+    await closeAgentSessions([unrelated.id]);
+  });
+
+  it("supports legacy advertised modes through set_mode and never invents permission labels", async () => {
+    const agent = serveFakeAgent(agentSide, null, { modes: LEGACY_MODES });
+    const session = await createAgentSession({ slug: "test-agent", spaceId: LOCAL_SPACE_ID });
+    const settled = await waitUntilSettled(session.id);
+    expect(settled.modeOption).toMatchObject({
+      id: "mode",
+      source: "legacy",
+      currentValue: "ask",
+      options: [
+        { value: "ask", name: "Ask", description: "Discuss a plan" },
+        { value: "code", name: "Code", description: "Make changes" },
+      ],
+    });
+    const changed = await setAgentSessionConfigOption(session.id, "mode", "code", "legacy");
+    expect(changed.modeOption?.currentValue).toBe("code");
+    expect(agent.setModeIds()).toEqual(["code"]);
+    expect(agent.setConfigCallCount()).toBe(0);
+    await closeAgentSessions([session.id]);
+  });
+
+  it.each(["value", "method"])("does not dispatch an unsupported mode %s", async (invalid) => {
+    const agent = serveFakeAgent(agentSide, [MODE_CONFIG], { modes: LEGACY_MODES });
+    const session = await createAgentSession({ slug: "test-agent", spaceId: LOCAL_SPACE_ID });
+    await waitUntilSettled(session.id);
+    if (invalid === "value") {
+      await expect(
+        setAgentSessionConfigOption(session.id, "vendor-policy", "invented"),
+      ).rejects.toThrow(/offered options/);
+    } else {
+      await expect(
+        setAgentSessionConfigOption(session.id, "mode", "code", "legacy"),
+      ).rejects.toThrow(/no such config option/);
+    }
+    expect(agent.setConfigCallCount()).toBe(1);
+    expect(agent.setModeIds()).toEqual([]);
+    await closeAgentSessions([session.id]);
+  });
+
+  it("replaces mode notifications and removes a revoked standard selector", async () => {
+    const agent = serveFakeAgent(agentSide, [MODE_CONFIG]);
+    const session = await createAgentSession({ slug: "test-agent", spaceId: LOCAL_SPACE_ID });
+    await waitUntilSettled(session.id);
+    await agent.pushConfigUpdate([{ ...MODE_CONFIG, currentValue: "full-access" }]);
+    await vi.waitFor(async () =>
+      expect((await listAgentSessions())[0]?.modeOption?.currentValue).toBe("full-access"),
+    );
+    await agent.pushConfigUpdate([]);
+    await vi.waitFor(async () => expect((await listAgentSessions())[0]?.modeOption).toBeNull());
+    await closeAgentSessions([session.id]);
+  });
+
+  it("retains an advertised legacy fallback across a standard mode mutation and revocation", async () => {
+    const agent = serveFakeAgent(agentSide, [MODE_CONFIG], { modes: LEGACY_MODES });
+    const session = await createAgentSession({ slug: "test-agent", spaceId: LOCAL_SPACE_ID });
+    await waitUntilSettled(session.id);
+    await setAgentSessionConfigOption(session.id, "vendor-policy", "full-access");
+    await agent.pushConfigUpdate([]);
+    await vi.waitFor(async () =>
+      expect((await listAgentSessions())[0]?.modeOption).toMatchObject({
+        source: "legacy",
+        currentValue: "ask",
+      }),
+    );
+    await closeAgentSessions([session.id]);
+  });
+
+  it("follows legacy current_mode_update and preserves a newer agent decision during set_mode", async () => {
+    const agent = serveFakeAgent(agentSide, null, { modes: LEGACY_MODES, modeNotification: "ask" });
+    const session = await createAgentSession({ slug: "test-agent", spaceId: LOCAL_SPACE_ID });
+    await waitUntilSettled(session.id);
+    await agent.pushNotification(acp.methods.client.session.update, {
+      sessionId: "acp-sess-1",
+      update: { sessionUpdate: "current_mode_update", currentModeId: "code" },
+    });
+    await vi.waitFor(async () =>
+      expect((await listAgentSessions())[0]?.modeOption?.currentValue).toBe("code"),
+    );
+    const updated = await setAgentSessionConfigOption(session.id, "mode", "code", "legacy");
+    expect(updated.modeOption?.currentValue).toBe("ask");
+    await closeAgentSessions([session.id]);
+  });
+
+  it.each(["config", "legacy"] as const)(
+    "keeps the confirmed %s mode after an agent rejection",
+    async (source) => {
+      const agent = serveFakeAgent(agentSide, source === "config" ? [MODE_CONFIG] : null, {
+        modes: source === "legacy" ? LEGACY_MODES : undefined,
+        ...(source === "config"
+          ? { configError: new acp.RequestError(-32000, "Policy locked") }
+          : { modeError: new acp.RequestError(-32000, "Policy locked") }),
+      });
+      const session = await createAgentSession({ slug: "test-agent", spaceId: LOCAL_SPACE_ID });
+      await waitUntilSettled(session.id);
+      await expect(
+        setAgentSessionConfigOption(
+          session.id,
+          source === "config" ? "vendor-policy" : "mode",
+          source === "config" ? "full-access" : "code",
+          source,
+        ),
+      ).rejects.toThrow(/Policy locked/);
+      expect((await listAgentSessions())[0]?.modeOption?.currentValue).toBe(
+        source === "config" ? "default" : "ask",
+      );
+      expect(source === "config" ? agent.setConfigCallCount() : agent.setModeIds().length).toBe(
+        source === "config" ? 2 : 1,
+      );
+      await closeAgentSessions([session.id]);
+    },
+  );
+
+  it("never shares a security mode preview with a new session on the same connection", async () => {
+    serveFakeAgent(agentSide, [MODE_CONFIG]);
+    const session = await createAgentSession({ slug: "test-agent", spaceId: LOCAL_SPACE_ID });
+    await waitUntilSettled(session.id);
+    await setAgentSessionConfigOption(session.id, "vendor-policy", "full-access");
+    const [client, side] = linkedStreams();
+    mocks.createWebSocketStream.mockReturnValue(client);
+    serveFakeAgent(side, null);
+    const next = await createAgentSession({ slug: "test-agent", spaceId: LOCAL_SPACE_ID });
+    expect(next.modeOption).toBeNull();
+    expect((await waitUntilSettled(next.id)).modeOption).toBeNull();
+    expect(
+      (await listAgentSessions()).find((item) => item.id === session.id)?.modeOption?.currentValue,
+    ).toBe("full-access");
+    await closeAgentSessions([session.id, next.id]);
+  });
+
+  it("rejects another actor's mode change before dispatch", async () => {
+    const agent = serveFakeAgent(agentSide, [MODE_CONFIG]);
+    const session = await createAgentSession({ slug: "test-agent", spaceId: LOCAL_SPACE_ID });
+    await waitUntilSettled(session.id);
+    await runWithBusabaseContext({ spaceId: LOCAL_SPACE_ID, actorId: "other-actor" }, async () => {
+      await expect(
+        setAgentSessionConfigOption(session.id, "vendor-policy", "full-access"),
+      ).rejects.toThrow();
+    });
+    expect(agent.setConfigCallCount()).toBe(1);
+    expect(
+      (await listAgentSessions()).find((item) => item.id === session.id)?.modeOption?.currentValue,
+    ).toBe("full-access");
+    await closeAgentSessions([session.id]);
+  });
+
   it("stores the advertised model option from session/new and surfaces it on the VO", async () => {
     serveFakeAgent(agentSide, [MODEL_CONFIG]);
     const session = await createAgentSession({ slug: "test-agent", spaceId: LOCAL_SPACE_ID });
@@ -1693,6 +2079,7 @@ describe("agent session manager — model config option", () => {
       expect.objectContaining({ currentValue: "auto" }),
       { spaceId: LOCAL_SPACE_ID, actorId: null },
       undefined,
+      null,
       null,
     );
 
@@ -3001,6 +3388,114 @@ describe("remote session worker handoff", () => {
     ).__busabaseAgentSessionReattachments = new Map();
   });
 
+  it("gives a new manual permission a fresh identity after session/load", async () => {
+    const record = runtimeRecord();
+    mocks.loadSessionRuntime.mockResolvedValue(record);
+    const [clientSide, agentSide] = linkedStreams();
+    mocks.createWebSocketStream.mockReturnValue(clientSide);
+    serveFakeAgent(agentSide, null, { requestPermission: true });
+    const prompt = promptAgentSession(record.session.id, "ask again");
+    const requestEvent = () =>
+      mocks.persistSessionEvents.mock.calls
+        .flatMap(([events]) => events as AgentSessionEventVO[])
+        .find((event) => event.kind === "permissionRequest");
+    await vi.waitFor(() => expect(requestEvent()?.permissionRequest).toBeDefined());
+    const fresh = requestEvent();
+    if (!fresh?.permissionRequest) throw new Error("Expected a fresh permission request");
+    const previousId = `perm_${record.session.id}_1`;
+    expect(fresh?.permissionRequest?.requestId).not.toBe(previousId);
+    const history: AgentSessionEventVO[] = [
+      {
+        ...fresh,
+        seq: 1,
+        permissionRequest: { ...fresh.permissionRequest, requestId: previousId },
+      },
+      {
+        sessionId: record.session.id,
+        seq: 2,
+        at: new Date().toISOString(),
+        kind: "permissionResolved",
+        permissionRequestId: previousId,
+        permissionOptionId: "allow",
+      },
+      fresh,
+    ];
+    const cards = reduceAcpEvents([], history.flatMap(translateAgentSessionEvent)).filter(
+      (block) => block.kind === "permission",
+    );
+    expect(cards).toHaveLength(2);
+    expect(cards[0]).toMatchObject({ resolution: { optionId: "allow" } });
+    expect(cards[1]?.resolution).toBe("pending");
+    respondToAgentPermission(record.session.id, fresh.permissionRequest.requestId, "allow");
+    await prompt;
+    await closeAgentSessions([record.session.id]);
+  });
+
+  it.each(["config", "legacy"] as const)(
+    "reloads the existing session's %s mode and changes it through its advertised method",
+    async (source) => {
+      const modeOption = {
+        id: source === "config" ? "vendor-policy" : "mode",
+        name: source === "config" ? "Permission mode" : "Mode",
+        source,
+        currentValue: source === "config" ? "default" : "ask",
+        options:
+          source === "config"
+            ? [
+                { value: "default", name: "Default" },
+                { value: "full-access", name: "Full access" },
+              ]
+            : [
+                { value: "ask", name: "Ask" },
+                { value: "code", name: "Code" },
+              ],
+      };
+      const record = runtimeRecord({ modeOption });
+      mocks.loadSessionRuntime.mockResolvedValue(record);
+      const [clientSide, agentSide] = linkedStreams();
+      mocks.createWebSocketStream.mockReturnValue(clientSide);
+      const agent = serveFakeAgent(agentSide, source === "config" ? [MODE_CONFIG] : null, {
+        modes: source === "legacy" ? LEGACY_MODES : undefined,
+      });
+      const value = source === "config" ? "full-access" : "code";
+      const updated = await setAgentSessionConfigOption(
+        record.session.id,
+        modeOption.id,
+        value,
+        source,
+      );
+      expect(updated.modeOption?.currentValue).toBe(value);
+      expect(agent.newSessionCallCount()).toBe(0);
+      expect(agent.loadedSessionIds()).toEqual([record.acpSessionId]);
+      expect(source === "config" ? agent.setConfigCallCount() : agent.setModeIds()).toEqual(
+        source === "config" ? 1 : ["code"],
+      );
+      await closeAgentSessions([record.session.id]);
+    },
+  );
+
+  it("keeps a current_mode_update replayed during load instead of overwriting it with an older response", async () => {
+    const record = runtimeRecord();
+    mocks.loadSessionRuntime.mockResolvedValue(record);
+    const [clientSide, agentSide] = linkedStreams();
+    mocks.createWebSocketStream.mockReturnValue(clientSide);
+    const agent = serveFakeAgent(agentSide, null, {
+      modes: LEGACY_MODES,
+      loadModeNotification: "code",
+    });
+    await promptAgentSession(record.session.id, "resume");
+    expect(agent.loadedSessionIds()).toEqual([record.acpSessionId]);
+    expect(mocks.persistSessionModelOption).toHaveBeenCalledWith(
+      record.session.id,
+      null,
+      expect.anything(),
+      expect.anything(),
+      null,
+      expect.objectContaining({ source: "legacy", currentValue: "code" }),
+    );
+    await closeAgentSessions([record.session.id]);
+  });
+
   it("finishes an idle subscription when its owning socket retires without another event", async () => {
     const record = runtimeRecord({ id: "ags-retired-observer" });
     mocks.loadSessionRuntime.mockResolvedValue(record);
@@ -3056,6 +3551,7 @@ describe("remote session worker handoff", () => {
       expect.objectContaining({ currentValue: "auto" }),
       { spaceId: LOCAL_SPACE_ID, actorId: null },
       expect.objectContaining({ fencingToken: 1 }),
+      null,
       null,
     );
     expect(mocks.releaseSessionLease).toHaveBeenCalledOnce();

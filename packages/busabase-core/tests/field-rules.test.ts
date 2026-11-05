@@ -262,14 +262,23 @@ describe("validateRecordFields — rejects bad values per type", () => {
         /does not allow files of type image\/jpeg/,
       );
     });
-    it("accepts files through 200MB while enforcing smaller per-field limits", () => {
+    it("accepts files through 5GB while enforcing smaller per-field limits", () => {
+      const GB = 1024 * 1024 * 1024;
       const opts = { options: { attachment: { maxFileSize: 2_000 } } };
       expect(checkOne("attachment", [ref({ size: 2_000 })], opts)).toBeNull();
       expect(checkOne("attachment", [ref({ size: 2_001 })], opts)).toMatch(/larger than/);
       expect(checkOne("attachment", [ref({ size: 26 * 1024 * 1024 })])).toBeNull();
-      expect(checkOne("attachment", [ref({ size: 200 * 1024 * 1024 })])).toBeNull();
-      expect(checkOne("attachment", [ref({ size: 200 * 1024 * 1024 + 1 })])).toMatch(
-        /larger than the 200MB limit/,
+      expect(checkOne("attachment", [ref({ size: 200 * 1024 * 1024 + 1 })])).toBeNull();
+      expect(checkOne("attachment", [ref({ size: 5 * GB })])).toBeNull();
+      expect(checkOne("attachment", [ref({ size: 5 * GB + 1 })])).toMatch(
+        /larger than the 5GB limit/,
+      );
+    });
+    it("never lets a per-field limit loosen the 5GB ceiling", () => {
+      const GB = 1024 * 1024 * 1024;
+      const opts = { options: { attachment: { maxFileSize: 10 * GB } } };
+      expect(checkOne("attachment", [ref({ size: 5 * GB + 1 })], opts)).toMatch(
+        /larger than the 5GB limit/,
       );
     });
     it("formats a sub-1MB limit in KB instead of rounding down to a meaningless 0MB", () => {

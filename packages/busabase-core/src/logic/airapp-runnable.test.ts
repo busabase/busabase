@@ -190,6 +190,39 @@ describe("assertAirAppRunnable — non-Node runtimes", () => {
     ).not.toThrow();
   });
 
+  it("exempts a website: its package.json only builds the Worker bundle", () => {
+    expect(() =>
+      assertAirAppRunnable("airapp", [
+        manifest({ requiredEngine: "site", site: { entry: "worker.js" } }),
+        pkg({ build: "esbuild src/worker.js --bundle --outfile=worker.js" }),
+      ]),
+    ).not.toThrow();
+  });
+
+  it("still checks an app that only prefers the website, since it can fall back", () => {
+    expect(() =>
+      assertAirAppRunnable("airapp", [
+        manifest({ preferredEngine: "site", site: { entry: "worker.js" } }),
+        pkg({ build: "esbuild" }),
+      ]),
+    ).toThrow(/no `dev` script/);
+  });
+
+  it("judges a package.json-only edit by the manifest the node already has", () => {
+    const edit = [pkg({ build: "esbuild" })];
+    expect(() =>
+      assertAirAppRunnable("airapp", edit, {
+        existingManifest: JSON.stringify({ requiredEngine: "site", site: { entry: "worker.js" } }),
+      }),
+    ).not.toThrow();
+    expect(() => assertAirAppRunnable("airapp", edit, { existingManifest: "{}" })).toThrow(
+      /no `dev` script/,
+    );
+    expect(() => assertAirAppRunnable("airapp", edit, { existingManifest: "not json" })).toThrow(
+      /no `dev` script/,
+    );
+  });
+
   it("exempts an app that declares its own start command, whatever the runtime", () => {
     expect(() =>
       assertAirAppRunnable("airapp", [

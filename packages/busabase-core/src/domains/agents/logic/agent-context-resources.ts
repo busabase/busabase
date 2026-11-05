@@ -168,22 +168,46 @@ async function snapshotNode(
     case "airapp": {
       const detail = await getNodeDetail(node.id);
       if (!("files" in detail)) throw new Error("The referenced file tree is unavailable.");
+      const filesTruncated = detail.filesTruncated === true;
       sections.push(
         `## Files\n${json(detail.files.slice(0, DIRECTORY_LIMIT).map(({ path, size, mimeType }) => ({ path, size, mimeType })))}`,
       );
-      partial = detail.files.length > DIRECTORY_LIMIT;
-      if (detail.files.some((file) => file.path === detail.entryFile)) {
-        const entry = await readFileTreeFile(getFileTreeKind(node.type), node.id, detail.entryFile);
-        if (kind === "invocation" && (entry.encoding !== "utf8" || !entry.content.trim())) {
-          throw new ORPCError("BAD_REQUEST", {
-            message: "The Skill entry must contain readable text.",
-          });
+      // `files` is a page, not the whole tree, so the node's own count is what
+      // decides whether this context is partial.
+      partial = (detail.fileCount ?? detail.files.length) > DIRECTORY_LIMIT;
+      const entryInPage = detail.files.some((file) => file.path === detail.entryFile);
+      // The entry file is not necessarily the first path, so a truncated listing
+      // can be missing it even though it exists. Read it best-effort in that one
+      // case: a stale entry path must not fail a reference's whole context build.
+      const entryPagedOut = !entryInPage && filesTruncated && Boolean(detail.entryFile);
+      if (entryInPage || entryPagedOut) {
+        const entry = await readFileTreeFile(
+          getFileTreeKind(node.type),
+          node.id,
+          detail.entryFile,
+        ).catch((error: unknown) => {
+          // An in-page miss is the old path: surface whatever went wrong.
+          if (entryInPage) throw error;
+          // Paged-out *and* unreadable is a genuinely broken entry, which an
+          // invocation cannot run without — never downgrade it to a silent run.
+          // A reference only loses one section, so it can carry on.
+          if (kind === "invocation") {
+            throw new ORPCError("BAD_REQUEST", { message: "The Skill entry file is missing." });
+          }
+          return null;
+        });
+        if (entry) {
+          if (kind === "invocation" && (entry.encoding !== "utf8" || !entry.content.trim())) {
+            throw new ORPCError("BAD_REQUEST", {
+              message: "The Skill entry must contain readable text.",
+            });
+          }
+          sections.push(
+            entry.encoding === "utf8"
+              ? `## Entry file: ${entry.path}\n${entry.content}`
+              : `## Entry file: ${entry.path}\n[Binary file body is not included.]`,
+          );
         }
-        sections.push(
-          entry.encoding === "utf8"
-            ? `## Entry file: ${entry.path}\n${entry.content}`
-            : `## Entry file: ${entry.path}\n[Binary file body is not included.]`,
-        );
       } else if (kind === "invocation") {
         throw new ORPCError("BAD_REQUEST", { message: "The Skill entry file is missing." });
       }

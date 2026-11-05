@@ -6,12 +6,15 @@ import {
   AgentConnectionInputSchema,
   AgentConnectionVOSchema,
   AgentResourceVOSchema,
+  AgentSessionCommandReceiptVOSchema,
   AgentSessionEventVOSchema,
   AgentSessionIdInputSchema,
   AgentSessionSnapshotVOSchema,
   AgentSessionStatusSchema,
   AgentSessionsPageVOSchema,
   AgentSessionVOSchema,
+  ConnectBudaAcpInputSchema,
+  ConnectBudaAcpResultSchema,
   CreateAgentSessionInputSchema,
   DeleteAgentHistoryInputSchema,
   DisconnectAgentInputSchema,
@@ -68,6 +71,8 @@ export const agentsContract = {
   ),
 
   connections: {
+    /** Verify and save a Buda API-token connection; credentials are never returned. */
+    connectBuda: oc.input(ConnectBudaAcpInputSchema).output(ConnectBudaAcpResultSchema),
     /** Connected backends in the current user's personal or active-space scope. */
     list: oc.input(ListAgentConnectionsInputSchema).output(AgentConnectionVOSchema.array()),
     detail: oc.input(AgentConnectionInputSchema).output(AgentConnectionDetailVOSchema),
@@ -91,7 +96,11 @@ export const agentsContract = {
      */
     prompt: oc.input(PromptAgentSessionInputSchema).output(
       z.discriminatedUnion("accepted", [
-        z.object({ accepted: z.literal(true), sessionId: z.string() }),
+        z.object({
+          accepted: z.literal(true),
+          sessionId: z.string(),
+          receipt: AgentSessionCommandReceiptVOSchema.optional(),
+        }),
         z.object({
           accepted: z.literal(false),
           sessionId: z.string(),

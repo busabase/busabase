@@ -717,4 +717,159 @@ describe("operation lease lifecycle with real ACP and PGLite persistence", () =>
       }
     },
   );
+
+  // These cases deliberately characterize the legacy defects while the first
+  // OpenSpec increment adds diagnostics without changing behavior. Passing
+  // them is NOT reliability acceptance. The supervisor/idempotency/recovery
+  // increments must replace these defect assertions with the desired invariant.
+  describe("legacy transcript defects retained during diagnostics-only rollout", () => {
+    it("reproduces an idle socket colliding with the durable owner's next sequence", async () => {
+      const id = "ags_characterize_idle_writer";
+      await insertSession(id);
+      const agent = fakeAgent({ budaEventStream: true });
+      await inScope(() => promptAgentSession(id, "initial turn"));
+      const before = await inScope(() => loadSessionEvents(id, -1));
+      const nextSeq = (before.at(-1)?.seq ?? 0) + 1;
+      const owner = await inScope(() => acquireSessionLease(id, "replacement-owner", 30));
+      if (!owner) throw new Error("Expected the replacement owner to acquire its lease");
+
+      try {
+        // The old socket remains connected, but its local turn lease is null.
+        // A different process's live lease must eventually fence this callback.
+        await agent.notify(acp.methods.client.session.update, {
+          sessionId: `acp-${id}`,
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: "notification on the retained socket" },
+            _meta: { "buda.im": { seq: 800 } },
+          },
+        });
+        await vi.waitFor(async () => {
+          expect(await inScope(() => loadSessionEvents(id, nextSeq - 1))).toHaveLength(1);
+        });
+        expect(await row(id)).toMatchObject({
+          leaseOwnerId: owner.ownerId,
+          leaseFencingToken: owner.fencingToken,
+          status: "busy",
+        });
+
+        vi.spyOn(console, "warn").mockImplementation(() => {});
+        const persistedByOwner = await inScope(() =>
+          sessionStore.persistSessionEvents(
+            [
+              {
+                sessionId: id,
+                seq: nextSeq,
+                kind: "status",
+                status: "busy",
+                at: new Date().toISOString(),
+              },
+            ],
+            owner,
+          ),
+        );
+        // Defect: the stale callback has already consumed the valid owner's seq.
+        expect(persistedByOwner).toBe(false);
+        const durable = await inScope(() => loadSessionEvents(id, nextSeq - 1));
+        expect(durable).toMatchObject([
+          { seq: nextSeq, acpUpdate: { content: { text: "notification on the retained socket" } } },
+        ]);
+      } finally {
+        await inScope(() =>
+          sessionStore.releaseSessionLease(id, owner.ownerId, owner.fencingToken),
+        );
+      }
+    });
+
+    it("reproduces failure when an identical already-committed event is retried", async () => {
+      const id = "ags_characterize_duplicate_commit";
+      await insertSession(id);
+      const event: AgentSessionEventVO = {
+        sessionId: id,
+        seq: 1,
+        kind: "status",
+        status: "idle",
+        at: new Date().toISOString(),
+      };
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      expect(await inScope(() => sessionStore.persistSessionEvents([event]))).toBe(true);
+      // Defect: a lost acknowledgement cannot be reconciled as already committed.
+      expect(await inScope(() => sessionStore.persistSessionEvents([event]))).toBe(false);
+      expect(await inScope(() => loadSessionEvents(id, -1))).toMatchObject([event]);
+    });
+
+    it("rejects a stale fence without inserting a partial batch while returning only false", async () => {
+      const id = "ags_characterize_rejected_fence";
+      await insertSession(id);
+      const owner = await inScope(() => acquireSessionLease(id, "current-owner", 30));
+      if (!owner) throw new Error("Expected the current owner to acquire its lease");
+      const at = new Date().toISOString();
+      try {
+        const persisted = await inScope(() =>
+          sessionStore.persistSessionEvents(
+            [
+              { sessionId: id, seq: 1, kind: "status", status: "busy", at },
+              { sessionId: id, seq: 2, kind: "status", status: "idle", at },
+            ],
+            { ownerId: "stale-owner", fencingToken: owner.fencingToken },
+          ),
+        );
+        // The write guard is correct; the boolean does not distinguish this
+        // ownership rejection from a SQL failure. Diagnostics is allowed to add
+        // a safe record here, so this test does not require log silence.
+        expect(persisted).toBe(false);
+        expect(await inScope(() => loadSessionEvents(id, -1))).toEqual([]);
+        expect(await row(id)).toMatchObject({
+          leaseOwnerId: owner.ownerId,
+          leaseFencingToken: owner.fencingToken,
+        });
+      } finally {
+        await inScope(() =>
+          sessionStore.releaseSessionLease(id, owner.ownerId, owner.fencingToken),
+        );
+      }
+    });
+
+    it("reproduces a failed detached socket while the durable session remains idle", async () => {
+      const id = "ags_characterize_idle_sql_failure";
+      await insertSession(id);
+      const agent = fakeAgent({ budaEventStream: true });
+      await inScope(() => promptAgentSession(id, "initial turn"));
+      const liveSessions = (
+        globalThis as typeof globalThis & {
+          __busabaseAgentSessions: Map<
+            string,
+            { status: string; error: string | null; closed: boolean }
+          >;
+        }
+      ).__busabaseAgentSessions;
+      const live = liveSessions.get(id);
+      if (!live) throw new Error("Expected the retained remote socket");
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      // Rename only this isolated fixture's table to inject a real SQL error.
+      // Always restore it before assertions or cleanup can leave the suite.
+      await db.execute(
+        sql`alter table busabase_agent_session_events rename to characterize_events_offline`,
+      );
+      try {
+        await agent.notify(acp.methods.client.session.update, {
+          sessionId: `acp-${id}`,
+          update: { sessionUpdate: "available_commands_update", availableCommands: [] },
+        });
+        await vi.waitFor(() =>
+          expect(live.error).toBe("Could not persist the remote agent transcript."),
+        );
+        expect(live).toMatchObject({ status: "failed", closed: true });
+        expect(liveSessions.has(id)).toBe(false);
+        // Defect: a later worker still reads idle and has no durable error.
+        expect(await row(id)).toMatchObject({ status: "idle", error: null });
+      } finally {
+        await db.execute(
+          sql`alter table characterize_events_offline rename to busabase_agent_session_events`,
+        );
+      }
+    });
+  });
 });

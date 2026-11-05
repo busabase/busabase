@@ -4,16 +4,17 @@ import { consumeEventIterator } from "@orpc/client";
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { liveEventSchema } from "busabase-contract/contract/busabase";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo } from "react";
 import type { z } from "zod";
+import { createWorkspaceReconciliationScheduler } from "../helpers/active-query-revalidation";
 import {
   createLiveInvalidationBatcher,
   type LiveInvalidationBatch,
+  type LiveInvalidationFlushOptions,
   type LiveInvalidationTarget,
   NODE_METADATA_INVALIDATION_WINDOW_MS,
 } from "../helpers/live-invalidation";
 import { createSingleFlightQueryInvalidator } from "../helpers/single-flight-query-invalidation";
-import { createWorkspaceRevalidationGate } from "../helpers/workspace-revalidation";
 
 type BusabaseLiveEvent = z.infer<typeof liveEventSchema>;
 
@@ -36,6 +37,7 @@ const isExpectedLiveClose = (error: unknown, signal: AbortSignal) => {
 };
 
 interface UseBusabaseLiveSyncOptions {
+  /** Retained for API compatibility; reconciliation discovers active Base queries itself. */
   activeBaseId?: string | null;
   listKeys: {
     archivedBases: QueryKey;
@@ -130,7 +132,6 @@ const notifyPendingReview = (title: string, body: string) => {
 };
 
 export function useBusabaseLiveSync({
-  activeBaseId,
   listKeys,
   orpc,
   queryClient,
@@ -162,11 +163,6 @@ export function useBusabaseLiveSync({
     ],
   );
 
-  // Read through a ref, not an effect dependency: as a dependency, opening a
-  // different Base tore the event stream down and reconnected it.
-  const activeBaseIdRef = useRef(activeBaseId);
-  activeBaseIdRef.current = activeBaseId;
-
   useEffect(() => {
     if (!enabled) {
       return;
@@ -175,27 +171,26 @@ export function useBusabaseLiveSync({
     let unsubscribe: (() => Promise<void>) | null = null;
     let abortController: AbortController | null = null;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
-    // When a whole-workspace re-validation is warranted — see the helper.
-    const revalidationGate = createWorkspaceRevalidationGate();
-
-    const invalidateBaseScope = (baseId: string) => {
-      void queryClient.invalidateQueries({
-        queryKey: orpc.bases.listViews.queryOptions({ input: { baseId } }).queryKey,
-      });
-      void queryClient.invalidateQueries({
-        queryKey: orpc.bases.listViews.queryOptions({ input: { baseId, status: "archived" } })
-          .queryKey,
-      });
-      void queryClient.invalidateQueries({
-        queryKey: orpc.records.list.key(),
-      });
-      void queryClient.invalidateQueries({
-        queryKey: orpc.records.listPage.key(),
-      });
-      void queryClient.invalidateQueries({ queryKey: stableListKeys.recordDetail });
-      void queryClient.invalidateQueries({
-        queryKey: orpc.bases.listDeletedFields.queryOptions({ input: { baseId } }).queryKey,
-      });
+    const invalidateQuery = (queryKey: QueryKey, options?: LiveInvalidationFlushOptions) => {
+      if (options?.refetchType === "none") {
+        void queryClient.invalidateQueries({ queryKey, refetchType: "none" });
+      } else {
+        void queryClient.invalidateQueries({ queryKey });
+      }
+    };
+    const invalidateBaseScope = (baseId: string, options?: LiveInvalidationFlushOptions) => {
+      invalidateQuery(orpc.bases.listViews.queryOptions({ input: { baseId } }).queryKey, options);
+      invalidateQuery(
+        orpc.bases.listViews.queryOptions({ input: { baseId, status: "archived" } }).queryKey,
+        options,
+      );
+      invalidateQuery(orpc.records.list.key(), options);
+      invalidateQuery(orpc.records.listPage.key(), options);
+      invalidateQuery(stableListKeys.recordDetail, options);
+      invalidateQuery(
+        orpc.bases.listDeletedFields.queryOptions({ input: { baseId } }).queryKey,
+        options,
+      );
     };
 
     const keyForTarget = (target: LiveInvalidationTarget): QueryKey => {
@@ -238,18 +233,28 @@ export function useBusabaseLiveSync({
       stableListKeys.inboxSnapshot,
     );
 
-    const flushInvalidations = (batch: LiveInvalidationBatch) => {
+    const flushInvalidations = (
+      batch: LiveInvalidationBatch,
+      options?: LiveInvalidationFlushOptions,
+    ) => {
       for (const target of batch.targets) {
         if (target === "inboxSnapshot") {
-          inboxSnapshotInvalidator.request();
+          // The single-flight path always fetches. During a stale-only settle,
+          // mark the snapshot invalid so its next mount converges without
+          // spending a request while the page is hidden or navigating away.
+          if (options?.refetchType === "none") {
+            invalidateQuery(stableListKeys.inboxSnapshot, options);
+          } else {
+            inboxSnapshotInvalidator.request();
+          }
           continue;
         }
-        void queryClient.invalidateQueries({ queryKey: keyForTarget(target) });
+        invalidateQuery(keyForTarget(target), options);
         if (target === "bases") {
-          void queryClient.invalidateQueries({ queryKey: stableListKeys.baseDetail });
+          invalidateQuery(stableListKeys.baseDetail, options);
         }
       }
-      for (const baseId of batch.baseIds) invalidateBaseScope(baseId);
+      for (const baseId of batch.baseIds) invalidateBaseScope(baseId, options);
     };
     const invalidationBatcher = createLiveInvalidationBatcher(flushInvalidations);
     const metadataInvalidationBatcher = createLiveInvalidationBatcher(
@@ -257,31 +262,24 @@ export function useBusabaseLiveSync({
       NODE_METADATA_INVALIDATION_WINDOW_MS,
     );
 
-    const invalidateWorkspace = () => {
-      // A reconnect/focus reconciliation is a superset of any queued event
-      // batch. Cancel it so the timer cannot repeat the expensive refresh.
-      invalidationBatcher.cancel();
-      metadataInvalidationBatcher.cancel();
-      void queryClient.invalidateQueries({ queryKey: stableListKeys.nodes });
-      void queryClient.invalidateQueries({ queryKey: stableListKeys.nodeDetail });
-      void queryClient.invalidateQueries({ queryKey: stableListKeys.nodeRouteState });
-      void queryClient.invalidateQueries({ queryKey: stableListKeys.archivedNodes });
-      void queryClient.invalidateQueries({ queryKey: stableListKeys.bases });
-      void queryClient.invalidateQueries({ queryKey: stableListKeys.baseDetail });
-      void queryClient.invalidateQueries({ queryKey: stableListKeys.archivedBases });
-      void queryClient.invalidateQueries({ queryKey: stableListKeys.records });
-      void queryClient.invalidateQueries({ queryKey: stableListKeys.recordDetail });
-      void queryClient.invalidateQueries({ queryKey: stableListKeys.recordsPage });
-      void queryClient.invalidateQueries({ queryKey: stableListKeys.recordsCount });
-      void queryClient.invalidateQueries({ queryKey: stableListKeys.changeRequests });
-      void queryClient.invalidateQueries({ queryKey: stableListKeys.changeRequestsPaged });
-      inboxSnapshotInvalidator.request();
-      void queryClient.invalidateQueries({ queryKey: stableListKeys.changeRequestCounts });
-      void queryClient.invalidateQueries({ queryKey: stableListKeys.auditEvents });
-      if (activeBaseIdRef.current) {
-        invalidateBaseScope(activeBaseIdRef.current);
-      }
-    };
+    // A reconnect or long tab absence may have missed events. Refresh only the
+    // queries mounted on the current screen; populated caches for other routes
+    // must not turn into another whole-workspace request burst.
+    const reconciliationScheduler = createWorkspaceReconciliationScheduler({
+      queryClient,
+      workspaceQueryKeys: [
+        ...Object.values(stableListKeys),
+        orpc.bases.listViews.key(),
+        orpc.bases.listDeletedFields.key(),
+      ],
+      settleQueuedInvalidations: () => {
+        invalidationBatcher.flush({ refetchType: "none" });
+        metadataInvalidationBatcher.flush({ refetchType: "none" });
+      },
+    });
+    if (document.visibilityState === "hidden") {
+      reconciliationScheduler.onDocumentHidden();
+    }
 
     const handleEvent = (event: BusabaseLiveEvent) => {
       // Ephemeral, not persisted: a page refresh loses this signal entirely —
@@ -302,15 +300,10 @@ export function useBusabaseLiveSync({
         return;
       }
 
-      // Redis pub/sub does not retain history, so a tab that was disconnected
-      // has to re-validate on RECONNECT. The FIRST connect is different: the
-      // page just finished loading this exact data, so invalidating it there
-      // threw the whole workspace away and re-fetched it immediately —
-      // measured on production, that meant re-downloading the change request
-      // list (6 MB before #6044) milliseconds after it first arrived.
-      if (revalidationGate.onStreamConnected()) {
-        invalidateWorkspace();
-      }
+      // Redis pub/sub does not retain history, so a reconnect reconciles the
+      // current screen. The first connect does nothing: the page just loaded
+      // that same data.
+      reconciliationScheduler.onStreamConnected();
       const controller = new AbortController();
       abortController = controller;
       unsubscribe = consumeEventIterator(
@@ -333,30 +326,32 @@ export function useBusabaseLiveSync({
 
     connect();
 
-    // Belt-and-suspenders fallback for tabs left in the background: the SSE
-    // stream above is the primary sync path, but it can go silently stale
-    // (a dropped connection that doesn't (yet) trigger a reconnect, or a
-    // merge/edit made from another tab, the CLI, or an agent while this tab
-    // wasn't listening). Re-validate the whole workspace whenever the tab
-    // becomes visible/focused again, so the user never has to notice a stale
-    // Records/Inbox view and manually reload.
-    // `focus` and `visibilitychange` BOTH fire when a browser tab is returned
-    // to, so an un-throttled handler re-validated the entire workspace twice
-    // for one user action. Reconnect storms compound the same way: a stream
-    // that drops and retries every 3s otherwise means a full workspace refetch
-    // every 3s on a workspace where nothing changed.
+    // The SSE stream is the primary sync path, but it can go silently stale.
+    // A return from a meaningful absence reconciles the current screen once;
+    // brief tab switches and the paired visibility/focus events do no work.
     const handleVisibilityRefresh = () => {
-      if (document.visibilityState === "visible" && revalidationGate.onUserReturned()) {
-        invalidateWorkspace();
+      if (document.visibilityState === "hidden") {
+        reconciliationScheduler.onDocumentHidden();
+      } else {
+        reconciliationScheduler.onUserReturned();
       }
     };
     const handleFocusRefresh = () => {
-      if (revalidationGate.onUserReturned()) {
-        invalidateWorkspace();
+      // `focus` is the second half of a visibility/focus pair, or the only
+      // return signal when the window stayed visible. If there was no
+      // meaningful absence, the gate ignores it.
+      if (document.visibilityState === "visible") {
+        reconciliationScheduler.onUserReturned();
       }
+    };
+    // Switching to another app without minimizing (desktop shells, side-by-side
+    // windows) never hides the document, so only `blur` starts the absence.
+    const handleBlur = () => {
+      reconciliationScheduler.onWindowBlurred();
     };
     document.addEventListener("visibilitychange", handleVisibilityRefresh);
     window.addEventListener("focus", handleFocusRefresh);
+    window.addEventListener("blur", handleBlur);
 
     return () => {
       cancelled = true;
@@ -366,10 +361,12 @@ export function useBusabaseLiveSync({
       invalidationBatcher.cancel();
       metadataInvalidationBatcher.cancel();
       inboxSnapshotInvalidator.cancel();
+      reconciliationScheduler.cancel();
       abortController?.abort();
       void unsubscribe?.().catch(() => undefined);
       document.removeEventListener("visibilitychange", handleVisibilityRefresh);
       window.removeEventListener("focus", handleFocusRefresh);
+      window.removeEventListener("blur", handleBlur);
     };
   }, [
     enabled,

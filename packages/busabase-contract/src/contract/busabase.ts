@@ -20,9 +20,11 @@ import { formContract } from "../domains/form/contract";
 import { guidesContract } from "../domains/guides/contract";
 import { installContract } from "../domains/install/contract";
 import { spaceInstructionsContract } from "../domains/space-instructions/contract";
+import { spaceWelcomeContract } from "../domains/space-welcome/contract";
 import { templatesContract } from "../domains/templates/contract";
 import { vaultContract } from "../domains/vault/contract";
 import { webhookContract } from "../domains/webhook/contract";
+import { workflowRuntimeContract } from "../domains/workflow/contract";
 import {
   activityItemSchema,
   listActivityPagedInputSchema,
@@ -824,6 +826,10 @@ export const busabaseContractRoutes = {
   // in seed files and entry file, which is a server-side config concern.
   fileTrees: fileTreeContract,
   airapps: airappRuntimeContract,
+  // RPC-only. Runs execute on /api/rpc. OpenAPI handlers omit this key so an
+  // inferred REST path is not served. Freshness: step outputs are snapshots;
+  // a read_record action re-reads the record when that step runs.
+  workflows: workflowRuntimeContract,
   files: fileContract,
   docs: docContract,
   // No `folders` key: the Folder domain's only two operations were `GET /folders`
@@ -832,6 +838,7 @@ export const busabaseContractRoutes = {
   forms: formContract,
   assets: assetsContract,
   spaceInstructions: spaceInstructionsContract,
+  spaceWelcome: spaceWelcomeContract,
   vault: vaultContract,
   agents: agentsContract,
   webhooks: webhookContract,

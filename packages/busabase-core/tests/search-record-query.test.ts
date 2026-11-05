@@ -98,7 +98,7 @@ describe("record search with existing indexes", () => {
     expect((await member(() => raw().search(options))).results).toEqual([]);
   });
 
-  it("uses the scoped CTE only for short inputs and keeps historical field slugs", async () => {
+  it("keeps short inputs off the trigram indexes and keeps historical field slugs", async () => {
     const { client, db } = await seedScenario("short-record-query-plan");
     const base = await client.bases.create({ slug: "plans", name: "Plans" });
     await client.records.createChangeRequest({
@@ -130,17 +130,19 @@ describe("record search with existing indexes", () => {
         },
         () => raw().search({ query, sources: ["records"] }),
       );
+    const scans = () => queries.filter(({ query }) => query.includes("strpos("));
     await search("人工");
-    const candidate = queries.find(({ query }) => query.includes("search_candidates"));
-    expect(candidate).toBeDefined();
-    if (!candidate) throw new Error("Missing actual short-query SQL");
-    const plan = await pg.query(`explain (analyze, buffers) ${candidate.query}`, candidate.params);
-    expect(JSON.stringify(plan.rows)).toContain("CTE Scan");
+    // A pattern with no trigrams turns a trigram lookup into a scan of the
+    // whole index across every space; short inputs scan with strpos instead.
+    const [short] = scans();
+    if (!short) throw new Error("Missing actual short-query scan SQL");
+    expect(short.query).not.toMatch(/\bi?like\b/i);
+    const plan = await pg.query(`explain ${short.query}`, short.params);
+    expect(JSON.stringify(plan.rows)).not.toContain("trgm_idx");
 
     queries.length = 0;
     const long = await search("uniqueneedle");
     expect(long.results.some((row) => row.kind === "record")).toBe(true);
-    expect(queries.some(({ query }) => query.includes("search_candidates"))).toBe(false);
 
     await db
       .update(busabaseFieldValues)

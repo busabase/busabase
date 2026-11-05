@@ -56,6 +56,22 @@ export const LOCAL_PREVIEW_OWNER = "local";
 const localPreviewPorts = new Map<string, Map<string, string>>();
 const PREVIEW_TARGET_TTL_SECONDS = 4 * 60 * 60;
 
+/** Where the proxy forwards, and what it must add to reach a target that is not open to anyone. */
+export interface LocalPreviewUpstream {
+  target: string;
+  headers: Record<string, string>;
+}
+
+/** A plain target stays a plain string, so entries written before headers existed still read. */
+const encodePreviewEntry = (target: string, headers?: Record<string, string>): string =>
+  headers && Object.keys(headers).length > 0 ? JSON.stringify({ target, headers }) : target;
+
+const decodePreviewEntry = (entry: string): LocalPreviewUpstream => {
+  if (!entry.startsWith("{")) return { target: entry, headers: {} };
+  const { target, headers } = JSON.parse(entry) as LocalPreviewUpstream;
+  return { target, headers };
+};
+
 const previewTargetKey = (nodeId: string, owner: string): string =>
   `busabase:airapp-preview:${Buffer.from(JSON.stringify([owner, nodeId])).toString("base64url")}`;
 
@@ -71,8 +87,10 @@ export async function registerLocalPreview(
   nodeId: string,
   owner: string,
   targetBaseUrl: string,
+  /** Sent to the target on every proxied request. Never reaches the browser. */
+  upstreamHeaders?: Record<string, string>,
 ): Promise<void> {
-  const target = targetBaseUrl.replace(/\/+$/, "");
+  const target = encodePreviewEntry(targetBaseUrl.replace(/\/+$/, ""), upstreamHeaders);
   const forOwner = localPreviewPorts.get(owner) ?? new Map<string, string>();
   forOwner.set(nodeId, target);
   localPreviewPorts.set(owner, forOwner);
@@ -88,6 +106,18 @@ export async function getLocalPreviewTarget(
   nodeId: string,
   owner: string,
 ): Promise<string | undefined> {
+  return (await getLocalPreviewUpstream(nodeId, owner))?.target;
+}
+
+export async function getLocalPreviewUpstream(
+  nodeId: string,
+  owner: string,
+): Promise<LocalPreviewUpstream | undefined> {
+  const entry = await readPreviewEntry(nodeId, owner);
+  return entry === undefined ? undefined : decodePreviewEntry(entry);
+}
+
+async function readPreviewEntry(nodeId: string, owner: string): Promise<string | undefined> {
   try {
     const provider = await cache;
     if (!provider) return localPreviewPorts.get(owner)?.get(nodeId);
@@ -106,7 +136,8 @@ export async function getLocalPreviewTarget(
     return shared;
   } catch (error) {
     console.warn("[AirApp Preview] Failed to read shared preview target:", error);
-    return undefined;
+    // A broken cache must not take down a preview this process registered itself.
+    return localPreviewPorts.get(owner)?.get(nodeId);
   }
 }
 

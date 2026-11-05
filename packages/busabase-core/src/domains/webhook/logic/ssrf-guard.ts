@@ -232,3 +232,47 @@ export const checkUrlIsSafeToFetch = async (
 
   return resolveAndCheckHost(hostname);
 };
+
+const MAX_GUARDED_REDIRECTS = 3;
+
+/**
+ * `fetch` that runs `checkUrlIsSafeToFetch` on the first URL AND on every
+ * redirect target. A plain `fetch` follows redirects on its own, so a public
+ * URL that answers `302 Location: http://169.254.169.254/` would otherwise
+ * walk straight past a check made only on the first URL.
+ *
+ * Redirects follow fetch's own method rules: 303 (and 301/302 after a POST)
+ * become a GET without a body; 307/308 repeat the request as-is. Returns
+ * `{ blocked }` instead of a response when any hop is refused.
+ */
+export const fetchWithSsrfGuard = async (
+  url: string,
+  init: RequestInit,
+): Promise<{ blocked: true; reason: string } | { blocked: false; response: Response }> => {
+  let target = url;
+  let request: RequestInit = { ...init, redirect: "manual" };
+  for (let hop = 0; ; hop += 1) {
+    const safety = await checkUrlIsSafeToFetch(target);
+    if (safety.blocked) {
+      return { blocked: true, reason: safety.reason ?? "target is not allowed" };
+    }
+    const response = await fetch(target, request);
+    const location = response.headers.get("location");
+    if (response.status < 300 || response.status >= 400 || !location) {
+      return { blocked: false, response };
+    }
+    if (hop >= MAX_GUARDED_REDIRECTS) {
+      return { blocked: false, response };
+    }
+    await response.body?.cancel().catch(() => {});
+    target = new URL(location, target).toString();
+    const method = (request.method ?? "GET").toUpperCase();
+    if (
+      response.status === 303 ||
+      ((response.status === 301 || response.status === 302) && method === "POST")
+    ) {
+      const { body: _dropped, ...rest } = request;
+      request = { ...rest, method: "GET" };
+    }
+  }
+};

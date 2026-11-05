@@ -6,14 +6,15 @@ import { pg_trgm } from "@electric-sql/pglite/contrib/pg_trgm";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
-import { resetStorage, storage } from "openlib/storage";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { LocalStorage, resetStorage, storage } from "openlib/storage";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { BusabaseDatabase } from "../src/context";
 import * as schema from "../src/db/schema";
 import {
   enqueueStorageCleanup,
   isStorageKeyRetired,
   processStorageCleanupJobs,
+  withStorageKeyLocks,
   withStorageKeyRegistration,
 } from "../src/domains/assets/logic/storage-cleanup-logic";
 
@@ -175,5 +176,94 @@ describe("Storage cleanup outbox — real PGlite and local objects", () => {
       deleted: 1,
     });
     expect((await getJob(storageKey)).state).toBe("completed");
+  });
+
+  it("deletes the object without holding the key's row lock, while the key stays retired", async () => {
+    const storageKey = "cleanup/unlocked-delete.txt";
+    await storage.uploadFileToKey(Buffer.from("bytes"), storageKey, "text/plain");
+    await enqueueStorageCleanup(db, { storageKey, kind: "doc", spaceId: "local" });
+    let lockedDuringDelete = false;
+    let registrationDuringDelete: unknown;
+    const remove = LocalStorage.prototype.deleteObject;
+    const spy = vi.spyOn(LocalStorage.prototype, "deleteObject").mockImplementation(async function (
+      this: LocalStorage,
+      key: string,
+    ) {
+      // Registration and purge take this row lock with a blocking FOR UPDATE;
+      // they must not queue behind a (possibly stalled) object delete.
+      await withStorageKeyLocks(db, [key], async () => {
+        lockedDuringDelete = true;
+      });
+      registrationDuringDelete = await withStorageKeyRegistration(db, key, async () => "revived")
+        .then(() => "accepted")
+        .catch((error: unknown) => error);
+      return remove.call(this, key);
+    });
+    try {
+      expect(
+        await processStorageCleanupJobs(db, { now: new Date(Date.now() + 1_000) }),
+      ).toMatchObject({ deleted: 1, failed: 0 });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(lockedDuringDelete).toBe(true);
+    expect(String(registrationDuringDelete)).toContain("expired");
+    expect((await getJob(storageKey)).state).toBe("completed");
+    expect(await storage.objectExists(storageKey)).toBe(false);
+  });
+
+  it("treats a timed-out delete as a failure to retry, never as a missing object", async () => {
+    const storageKey = "cleanup/delete-timeout.txt";
+    await storage.uploadFileToKey(Buffer.from("bytes"), storageKey, "text/plain");
+    await enqueueStorageCleanup(db, { storageKey, kind: "doc", spaceId: "local" });
+    const now = new Date(Date.now() + 1_000);
+    const spy = vi
+      .spyOn(LocalStorage.prototype, "deleteObject")
+      .mockRejectedValueOnce(
+        new Error(`Storage delete timed out after 30000ms for "${storageKey}"`),
+      );
+    try {
+      expect(await processStorageCleanupJobs(db, { now })).toMatchObject({ deleted: 0, failed: 1 });
+    } finally {
+      spy.mockRestore();
+    }
+    const job = await getJob(storageKey);
+    expect(job.state).toBe("pending");
+    expect(job.lastError).toContain("timed out");
+    expect(job.nextAttemptAt.getTime()).toBeGreaterThan(now.getTime());
+    expect(await storage.objectExists(storageKey)).toBe(true);
+
+    // The backoff retry then collects it for real.
+    await processStorageCleanupJobs(db, { now: new Date(job.nextAttemptAt.getTime() + 1) });
+    expect(await storage.objectExists(storageKey)).toBe(false);
+  });
+
+  it("re-claims a job whose worker died mid-delete once its lease lapses", async () => {
+    const storageKey = "cleanup/lapsed-claim.txt";
+    await storage.uploadFileToKey(Buffer.from("bytes"), storageKey, "text/plain");
+    await enqueueStorageCleanup(db, { storageKey, kind: "doc", spaceId: "local" });
+    const now = new Date(Date.now() + 1_000);
+    // A worker that crashed after committing its claim leaves exactly this row.
+    await db
+      .update(schema.busabaseStorageCleanupJobs)
+      .set({
+        state: "processing",
+        attempts: 1,
+        nextAttemptAt: new Date(now.getTime() + 3 * 60 * 1000),
+      })
+      .where(eq(schema.busabaseStorageCleanupJobs.storageKey, storageKey));
+    await expect(withStorageKeyRegistration(db, storageKey, async () => "revived")).rejects.toThrow(
+      "expired",
+    );
+    expect(await processStorageCleanupJobs(db, { now })).toMatchObject({ processed: 0 });
+    expect(
+      await processStorageCleanupJobs(db, {
+        now: new Date(now.getTime() + 3 * 60 * 1000 + 1),
+      }),
+    ).toMatchObject({ deleted: 1 });
+    const done = await getJob(storageKey);
+    expect(done.state).toBe("completed");
+    expect(done.attempts).toBe(2);
+    expect(await storage.objectExists(storageKey)).toBe(false);
   });
 });

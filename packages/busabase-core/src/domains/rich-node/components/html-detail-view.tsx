@@ -41,7 +41,8 @@ import {
   useServerDocumentSync,
 } from "./rich-node-shell";
 
-function HtmlPreviewSurface({
+/** The sandboxed HTML preview frame; also Home's welcome card when the welcome page is HTML. */
+export function HtmlPreviewSurface({
   fullscreenState,
   node,
   showToolbar = false,

@@ -28,6 +28,8 @@ export const lookupEn = {
   failed: "Could not load source",
   retry: "Retry",
   details: "View source values",
+  sourcesTruncated:
+    "Showing the first {count} source records. The lookup result includes all available values.",
   search: "Search fields",
   noMatches: "No matching fields",
   createRelation: "Create relation field",
@@ -64,6 +66,7 @@ export const lookupZhCN: typeof lookupEn = {
   failed: "来源加载失败",
   retry: "重试",
   details: "查看来源明细",
+  sourcesTruncated: "仅显示前 {count} 条来源记录，引用结果仍包含全部可用值。",
   search: "搜索字段",
   noMatches: "没有匹配的字段",
   createRelation: "创建关联字段",
@@ -100,6 +103,7 @@ export const lookupZhTW: typeof lookupEn = {
   failed: "來源載入失敗",
   retry: "重試",
   details: "查看來源明細",
+  sourcesTruncated: "僅顯示前 {count} 條來源記錄，引用結果仍包含全部可用值。",
   search: "搜尋欄位",
   noMatches: "沒有符合的欄位",
   createRelation: "建立關聯欄位",
@@ -136,6 +140,8 @@ export const lookupDe: typeof lookupEn = {
   failed: "Quelle konnte nicht geladen werden",
   retry: "Erneut versuchen",
   details: "Quellwerte anzeigen",
+  sourcesTruncated:
+    "Die ersten {count} Quelldatensätze werden angezeigt. Das Lookup-Ergebnis enthält alle verfügbaren Werte.",
   search: "Felder suchen",
   noMatches: "Keine passenden Felder",
   createRelation: "Relationsfeld erstellen",
@@ -172,6 +178,8 @@ export const lookupEs: typeof lookupEn = {
   failed: "No se pudo cargar el origen",
   retry: "Reintentar",
   details: "Ver valores de origen",
+  sourcesTruncated:
+    "Se muestran los primeros {count} registros de origen. El resultado incluye todos los valores disponibles.",
   search: "Buscar campos",
   noMatches: "No hay campos coincidentes",
   createRelation: "Crear campo de relación",
@@ -209,6 +217,8 @@ export const lookupFr: typeof lookupEn = {
   failed: "Impossible de charger la source",
   retry: "Réessayer",
   details: "Voir les valeurs sources",
+  sourcesTruncated:
+    "Les {count} premiers enregistrements sources sont affichés. Le résultat inclut toutes les valeurs disponibles.",
   search: "Rechercher des champs",
   noMatches: "Aucun champ correspondant",
   createRelation: "Créer un champ de relation",
@@ -245,6 +255,8 @@ export const lookupJa: typeof lookupEn = {
   failed: "参照元の読み込みに失敗しました",
   retry: "再試行",
   details: "参照元の詳細",
+  sourcesTruncated:
+    "参照元は最初の {count} 件のみ表示しています。参照結果には利用可能なすべての値が含まれます。",
   search: "フィールドを検索",
   noMatches: "一致するフィールドなし",
   createRelation: "関連フィールドを作成",
@@ -281,6 +293,8 @@ export const lookupKo: typeof lookupEn = {
   failed: "원본을 불러오지 못했습니다",
   retry: "다시 시도",
   details: "원본 값 보기",
+  sourcesTruncated:
+    "처음 {count}개의 원본 레코드만 표시합니다. 참조 결과에는 사용 가능한 모든 값이 포함됩니다.",
   search: "필드 검색",
   noMatches: "일치하는 필드 없음",
   createRelation: "관계 필드 만들기",
@@ -317,6 +331,8 @@ export const lookupPt: typeof lookupEn = {
   failed: "Não foi possível carregar a origem",
   retry: "Tentar novamente",
   details: "Ver valores de origem",
+  sourcesTruncated:
+    "São exibidos os primeiros {count} registros de origem. O resultado inclui todos os valores disponíveis.",
   search: "Buscar campos",
   noMatches: "Nenhum campo correspondente",
   createRelation: "Criar campo de relação",
@@ -354,6 +370,8 @@ export const lookupVi: typeof lookupEn = {
   failed: "Không thể tải nguồn",
   retry: "Thử lại",
   details: "Xem giá trị nguồn",
+  sourcesTruncated:
+    "Hiển thị {count} bản ghi nguồn đầu tiên. Kết quả tham chiếu bao gồm tất cả giá trị khả dụng.",
   search: "Tìm trường",
   noMatches: "Không có trường phù hợp",
   createRelation: "Tạo trường liên kết",

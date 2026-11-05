@@ -17,7 +17,7 @@ import {
   AgentContextResourceVOSchema,
   AgentPromptPresentationSchema,
 } from "busabase-contract/domains/agents/types";
-import { useMemo, useRef } from "react";
+import { useMemo, useRef, useState } from "react";
 import { translateAcpExtension } from "../utils/acp-fidelity";
 import {
   contextResourceToContentBlock,
@@ -52,6 +52,15 @@ export interface AgentSessionStatusUpdate {
    */
   seq: number;
 }
+
+export interface AgentSessionSubscriptionHealth {
+  sessionId: string;
+  state: "connected" | "recovering";
+  /** Observation health only; it does not claim that the remote run failed. */
+  reason?: "error" | "closed";
+}
+
+const NO_COMMITTED_COMMANDS: ReadonlySet<string> = new Set();
 
 /**
  * Translate one persisted busabase event into zero or more shared-model
@@ -222,8 +231,16 @@ export function useAgentSession(
   // job (see `agent-detail-view.tsx`), because only the caller knows which
   // scope/catalog that fetch's result is allowed to be written into.
   onMetadataRefresh?: (signal: { sessionId: string; seq: number }) => void,
+  options?: { supervised?: boolean },
 ) {
   const queryClient = useQueryClient();
+  const supervised = options?.supervised === true;
+  const [committedCommands, setCommittedCommands] = useState<{
+    sessionId: string;
+    ids: ReadonlySet<string>;
+  } | null>(null);
+  const [subscriptionHealth, setSubscriptionHealth] =
+    useState<AgentSessionSubscriptionHealth | null>(null);
   const callbacks = useRef({ onStatusUpdate, onMetadataRefresh });
   callbacks.current = { onStatusUpdate, onMetadataRefresh };
   const port = useMemo<AcpSessionPort>(
@@ -234,9 +251,11 @@ export function useAgentSession(
         let cancelled = false;
         let unsubscribe: (() => void) | undefined;
         let retryTimer: ReturnType<typeof setTimeout> | undefined;
+        let refreshTimer: ReturnType<typeof setTimeout> | undefined;
         let lastSeq = -1;
         let readinessRefreshed = false;
         let terminal = false;
+        let connectionGeneration = 0;
 
         const refreshSessions = () => {
           void queryClient.invalidateQueries({
@@ -246,57 +265,119 @@ export function useAgentSession(
             void queryClient.invalidateQueries({ queryKey: pagedSessionQueryKey });
           }
         };
+        const refreshSupervisedSession = () => {
+          if (!supervised || refreshTimer) return;
+          refreshTimer = setTimeout(() => {
+            refreshTimer = undefined;
+            if (!cancelled) refreshSessions();
+          }, 250);
+        };
 
         const connect = () => {
           if (cancelled) return;
-          unsubscribe = consumeEventIterator(
-            orpc.agents.sessions.subscribe.call({ sessionId: id, afterSeq: lastSeq }, { signal }),
-            {
-              onEvent: (event: AgentSessionEventVO) => {
-                if (cancelled || event.seq <= lastSeq) return;
-                lastSeq = Math.max(lastSeq, event.seq);
-                if (event.kind === "status" && event.status) {
-                  terminal = event.status === "ended" || event.status === "failed";
-                  callbacks.current.onStatusUpdate?.({
-                    sessionId: id,
-                    status: event.status as AgentSessionVO["status"],
-                    lastActivityAt: event.at,
-                    seq: event.seq,
-                    ...(event.status === "failed" && event.message ? { error: event.message } : {}),
-                  });
-                  // Replay may start ready, or startup may go straight into a prompt.
-                  // Keep this guard across reconnects, but not across subscriptions.
-                  if (
-                    !readinessRefreshed &&
-                    (event.status === "idle" ||
-                      event.status === "busy" ||
-                      event.status === "waiting_permission")
-                  ) {
-                    readinessRefreshed = true;
-                    refreshSessions();
-                    callbacks.current.onMetadataRefresh?.({ sessionId: id, seq: event.seq });
-                  }
-                }
-                const update = event.acpUpdate as { sessionUpdate?: unknown } | undefined;
+          const generation = ++connectionGeneration;
+          const subscription = orpc.agents.sessions.subscribe.call(
+            { sessionId: id, afterSeq: lastSeq },
+            { signal },
+          );
+          // RPCLink resolves this promise after fetch and successful response
+          // decoding, before an idle SSE stream has its first journal event.
+          // This acknowledges observation only; it never changes seq/execution.
+          const observed = supervised
+            ? Promise.resolve(subscription).then((iterator) => {
                 if (
-                  event.kind === "acpUpdate" &&
-                  update?.sessionUpdate === "config_option_update"
+                  !cancelled &&
+                  !signal.aborted &&
+                  generation === connectionGeneration &&
+                  iterator &&
+                  typeof iterator.next === "function"
                 ) {
+                  setSubscriptionHealth({ sessionId: id, state: "connected" });
+                  refreshSupervisedSession();
+                }
+                return iterator;
+              })
+            : subscription;
+          unsubscribe = consumeEventIterator(observed, {
+            onEvent: (event: AgentSessionEventVO) => {
+              if (cancelled || generation !== connectionGeneration || event.seq <= lastSeq) return;
+              lastSeq = Math.max(lastSeq, event.seq);
+              if (supervised) {
+                setSubscriptionHealth((previous) =>
+                  previous?.sessionId === id && previous.state === "connected"
+                    ? previous
+                    : { sessionId: id, state: "connected" },
+                );
+                if (event.commandId) {
+                  const commandId = event.commandId;
+                  setCommittedCommands((previous) => {
+                    const ids = previous?.sessionId === id ? previous.ids : NO_COMMITTED_COMMANDS;
+                    if (ids.has(commandId)) return previous;
+                    return { sessionId: id, ids: new Set([...ids, commandId]) };
+                  });
+                }
+                refreshSupervisedSession();
+              }
+              if (event.kind === "status" && event.status) {
+                terminal = event.status === "ended" || event.status === "failed";
+                callbacks.current.onStatusUpdate?.({
+                  sessionId: id,
+                  status: event.status as AgentSessionVO["status"],
+                  lastActivityAt: event.at,
+                  seq: event.seq,
+                  ...(event.status === "failed" && event.message ? { error: event.message } : {}),
+                });
+                // Replay may start ready, or startup may go straight into a prompt.
+                // Keep this guard across reconnects, but not across subscriptions.
+                if (
+                  !readinessRefreshed &&
+                  (event.status === "idle" ||
+                    event.status === "busy" ||
+                    event.status === "waiting_permission")
+                ) {
+                  readinessRefreshed = true;
                   refreshSessions();
                   callbacks.current.onMetadataRefresh?.({ sessionId: id, seq: event.seq });
                 }
-                for (const translated of translateAgentSessionEvent(event)) onEvent(translated);
-              },
-              onError: () => {},
-              onFinish: () => {
-                // A retired owning socket may finish normally. Resume the
-                // durable subscription after either kind of transport close.
-                if (!cancelled && !signal.aborted && !terminal) {
-                  retryTimer = setTimeout(connect, 3000);
-                }
-              },
+              }
+              const update = event.acpUpdate as { sessionUpdate?: unknown } | undefined;
+              if (
+                event.kind === "acpUpdate" &&
+                (update?.sessionUpdate === "config_option_update" ||
+                  update?.sessionUpdate === "current_mode_update")
+              ) {
+                refreshSessions();
+                callbacks.current.onMetadataRefresh?.({ sessionId: id, seq: event.seq });
+              }
+              for (const translated of translateAgentSessionEvent(event)) onEvent(translated);
             },
-          );
+            onError: () => {
+              if (!cancelled && generation === connectionGeneration && supervised) {
+                setSubscriptionHealth({ sessionId: id, state: "recovering", reason: "error" });
+                refreshSupervisedSession();
+              }
+            },
+            onFinish: () => {
+              // A retired owning socket may finish normally. Resume the
+              // durable subscription after either kind of transport close.
+              if (
+                !cancelled &&
+                generation === connectionGeneration &&
+                !signal.aborted &&
+                !terminal
+              ) {
+                if (supervised) {
+                  setSubscriptionHealth((previous) =>
+                    previous?.sessionId === id && previous.reason === "error"
+                      ? previous
+                      : { sessionId: id, state: "recovering", reason: "closed" },
+                  );
+                  refreshSupervisedSession();
+                }
+                retryTimer = setTimeout(connect, 3000);
+              }
+            },
+          });
         };
 
         connect();
@@ -304,6 +385,7 @@ export function useAgentSession(
         return () => {
           cancelled = true;
           if (retryTimer) clearTimeout(retryTimer);
+          if (refreshTimer) clearTimeout(refreshTimer);
           unsubscribe?.();
         };
       },
@@ -357,8 +439,13 @@ export function useAgentSession(
       // are durable and user-created. Ending one is an explicit act, wired to
       // the explicit "End session" button in `agent-detail-view.tsx`.
     }),
-    [orpc, pagedSessionQueryKey, queryClient, sessionId],
+    [orpc, pagedSessionQueryKey, queryClient, sessionId, supervised],
   );
 
-  return useAcpSession(port, sessionId);
+  return {
+    ...useAcpSession(port, sessionId),
+    committedCommandIds:
+      committedCommands?.sessionId === sessionId ? committedCommands.ids : NO_COMMITTED_COMMANDS,
+    subscriptionHealth: subscriptionHealth?.sessionId === sessionId ? subscriptionHealth : null,
+  };
 }

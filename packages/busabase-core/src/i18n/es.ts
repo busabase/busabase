@@ -32,6 +32,50 @@ export const dashboardEs: CoreI18nMessages = {
     example:
       "## Visión\n¿Qué futuro queremos crear?\n\n## Misión\n¿A quién ayudamos y qué problema resolvemos?\n\n## Valores\n¿Qué principios guían nuestras decisiones?\n\n## Estilo de diseño\nDescribe el estilo visual, el tono y la terminología del equipo.",
   },
+  spaceWelcome: {
+    title: "Página de bienvenida",
+    description:
+      "Elige un documento o una página HTML que los miembros verán arriba del todo en Inicio: para qué sirve este espacio y por dónde empezar. Escribe la página primero y luego elígela aquí.",
+    loading: "Cargando la página de bienvenida…",
+    loadFailed:
+      "No se pudo cargar la configuración de la página de bienvenida. Vuelve a intentarlo.",
+    retry: "Reintentar",
+    current: "Página de bienvenida actual",
+    none: "No hay página de bienvenida. Inicio muestra «Primeros pasos» en su lugar.",
+    unreadable:
+      "La página elegida no existe, está archivada o no puedes verla, así que los miembros ven «Primeros pasos» en su lugar.",
+    visibilityHint: "Los miembros solo la ven si pueden abrir esa página.",
+    searchLabel: "Elige un documento o una página HTML",
+    searchPlaceholder: "Buscar documentos y páginas HTML…",
+    noCandidates:
+      "Este espacio aún no tiene documentos ni páginas HTML. Crea uno y luego elígelo aquí.",
+    noMatches: "Ninguna página coincide con «{query}».",
+    save: "Usar como página de bienvenida",
+    saving: "Guardando…",
+    saved: "Página de bienvenida guardada",
+    clear: "Quitar la página de bienvenida",
+    saveFailed: "No se pudo guardar. Vuelve a intentarlo.",
+    conflict:
+      "Otra persona cambió la página de bienvenida. Recarga para ver la elección más reciente.",
+    reload: "Recargar lo más reciente",
+    readOnly:
+      "Solo los propietarios y administradores del espacio pueden cambiar la página de bienvenida.",
+    open: "Abrir",
+    close: "Cerrar la página de bienvenida",
+    reopen: "Página de bienvenida",
+    expand: "Expandir",
+    collapse: "Contraer",
+    emptyDoc: "Esta página está vacía.",
+  },
+  gettingStarted: {
+    title: "Primeros pasos",
+    body: "Todo lo de este espacio está en la barra lateral, y cada icono que ves allí es uno de estos tipos. Abre uno para empezar.",
+    typesHeading: "Qué encontrarás en la barra lateral",
+    close: "Cerrar Primeros pasos",
+    reopen: "Primeros pasos",
+    connectAgentHint:
+      "Pregúntale a tu agente sobre este espacio. Lee las mismas Bases, documentos y apps que tú, y todo lo que escribe queda registrado aquí.",
+  },
   fieldHelp: {
     inherit: "Usar instrucciones del campo",
     override: "Personalizar para este formulario",
@@ -77,6 +121,7 @@ export const dashboardEs: CoreI18nMessages = {
     restored: "Borrador de fórmula sin guardar restaurado.",
   },
   common: {
+    retry: "Reintentar",
     slugTaken: 'Ya hay otro elemento del mismo tipo con el slug "{slug}". Elige otro slug.',
     add: "Añadir",
     archived: "archivado",
@@ -203,6 +248,10 @@ export const dashboardEs: CoreI18nMessages = {
     openFullBase: "Abrir la base completa",
     pinToSidePanel: "Fijar en el panel lateral",
     noFilesYet: "Aún no hay archivos.",
+    filesPagedSummary: "Mostrando {shown} de {total} archivos.",
+    loadMoreFiles: "Cargar más archivos",
+    loadMoreFolders: "Cargar más carpetas",
+    fileListPartialFailed: "No se pudieron cargar más archivos",
     selectFile: "Selecciona un archivo para ver su contenido.",
     readingFile: "Leyendo {path}…",
     couldNotReadFile: "No se pudo leer el archivo",
@@ -684,16 +733,20 @@ export const dashboardEs: CoreI18nMessages = {
         "Esta AirApp requiere el motor del navegador, pero no está disponible en este despliegue.",
       local: "Esta AirApp requiere este equipo, pero la ejecución local no está disponible.",
       remote:
-        "Esta AirApp requiere una máquina remota, pero Sandock no está configurado en este despliegue.",
+        "Esta AirApp requiere un sandbox en la nube, pero Sandock no está configurado en este despliegue.",
+      site: "Esta AirApp necesita un sitio web, pero el proveedor de sitios no está configurado en este despliegue. Consulta a un administrador.",
     },
     engineBrowser: "En el navegador",
     engineBrowserHint: "Se ejecuta en esta pestaña · gratis e instantáneo · solo JavaScript",
     engineLocal: "Este equipo",
     engineLocalHint: "Proceso real del sistema operativo, cualquier lenguaje · sin aislar",
-    engineRemote: "Máquina remota",
-    engineRemoteHint: "Se aprovisiona en cada ejecución, cualquier lenguaje · aislada",
+    engineRemote: "Sandbox en la nube",
+    engineRemoteHint: "Una máquina temporal en la nube por ejecución, cualquier lenguaje · aislada",
+    engineSite: "Sitio web",
+    engineSiteHint: "Siempre activo · dirección fija",
+    engineNotConfigured: "Sin configurar: consulta a un administrador",
     noEligibleEngine:
-      "Ningún motor de este despliegue puede ejecutar una AirApp de {runtime}. Pide a un operador que habilite un entorno de ejecución local o remoto.",
+      "Ningún motor de este despliegue puede ejecutar una AirApp de {runtime}. Pide a un operador que habilite la ejecución local o un sandbox en la nube.",
     pythonNeedsSandock:
       "Las AirApps de Python no son compatibles con este despliegue. Configura Sandock para ejecutarlas.",
     swError: {
@@ -714,6 +767,104 @@ export const dashboardEs: CoreI18nMessages = {
     swUnsupportedCopyLink: "Copiar enlace",
     swUnsupportedLinkCopied: "Enlace copiado",
     swUnsupportedCopyFailed: "No se pudo copiar el enlace. Selecciónalo y cópialo manualmente:",
+    site: {
+      statusNotLive: "Sin publicar",
+      statusLive: "Publicado",
+      statusLiveWithChanges: "Cambios sin publicar",
+      goLive: "Publicar",
+      goLiveDone: "El sitio está publicado.",
+      previewStale:
+        "Los archivos cambiaron después de esta vista previa. Ejecútalo de nuevo y luego publícalo.",
+      noPreview: "Ejecútalo primero para crear una vista previa.",
+      blockedTitle: "Esta app aún no se puede publicar como sitio web",
+      addressLabel: "Dirección",
+      publicLabel: "Público",
+      publicOnHint: "Cualquiera con la dirección puede abrirlo.",
+      publicOffHint: "La dirección muestra una página de no encontrado.",
+      publicNotYet: "Publícalo primero.",
+      domains: {
+        title: "Dominios personalizados",
+        description: "Usa tu propia dirección para el sitio web publicado.",
+        check: "Comprobar de nuevo",
+        checking: "Comprobando…",
+        loading: "Cargando dominios personalizados…",
+        checkFailed: "No se pudieron comprobar los dominios personalizados. Inténtalo de nuevo.",
+        lastKnown: "Los detalles siguientes corresponden a la última comprobación correcta.",
+        unavailable:
+          "Los dominios personalizados no están configurados en esta instalación. Consulta al administrador.",
+        empty:
+          "Añade un dominio que te pertenezca y completa la configuración con tu proveedor de DNS.",
+        hostnameLabel: "Nombre de dominio",
+        hostnameHint: "Introduce un nombre de host, sin https:// ni rutas.",
+        invalidHostname:
+          "Introduce un dominio como shop.company.com, sin esquema, ruta, puerto, dirección IP ni comodín.",
+        publishFirst: "Publica el sitio antes de añadir tu dominio.",
+        planLocked:
+          "El plan de este espacio no incluye Sitio web. Puedes seguir consultando y eliminando los dominios existentes.",
+        add: "Añadir dominio",
+        adding: "Añadiendo…",
+        pending: "Configuración pendiente",
+        pendingDnsHint:
+          "Añade los registros siguientes en tu proveedor de DNS y vuelve a comprobar. Los cambios de DNS pueden tardar en aparecer.",
+        pendingHttpsHint:
+          "La propiedad del dominio está verificada. HTTPS se está preparando; vuelve a comprobar en breve.",
+        active: "Conectado",
+        activeHint: "DNS y HTTPS están listos.",
+        error: "Requiere atención",
+        errorHint: "Revisa los detalles siguientes y vuelve a comprobar.",
+        offlineHint:
+          "El sitio está desactivado. Todas sus direcciones muestran una página no encontrada.",
+        dnsInstructions:
+          "Añade estos registros en tu proveedor de DNS. Conserva los demás registros que necesite tu dominio. En Cloudflare, configura este CNAME como «Solo DNS» (nube gris).",
+        dnsName: "Nombre",
+        dnsValue: "Valor / destino",
+        httpInstructions:
+          "Para la verificación HTTP, sirve el cuerpo de respuesta siguiente en esta URL y vuelve a comprobar.",
+        httpUrl: "URL de verificación",
+        httpBody: "Cuerpo de respuesta",
+        copyHttpUrl: "Copiar URL de verificación {value}",
+        copyHttpBody: "Copiar respuesta de verificación {value}",
+        copy: "Copiar",
+        copyName: "Copiar nombre DNS {value}",
+        copyValue: "Copiar valor DNS {value}",
+        copied: "Copiado",
+        copyFailed: "No se pudo copiar. Selecciona el valor y cópialo manualmente.",
+        remove: "Eliminar",
+        removeLabel: "Eliminar {hostname}",
+        removeConfirm:
+          "¿Eliminar {hostname}? Dejará de abrir este sitio web. La dirección predeterminada seguirá funcionando.",
+        confirmRemove: "Eliminar dominio",
+        removing: "Eliminando…",
+        cancel: "Cancelar",
+      },
+      // Keyed by `SiteBundleBlocker["code"]`.
+      blockers: {
+        "not-a-site-app":
+          "airapp.json no tiene un bloque site, así que esta app no está configurada como sitio web.",
+        "invalid-manifest": "airapp.json tiene un problema: {detail}",
+        "python-runtime": "Esta app está escrita en Python. Un sitio web solo ejecuta JavaScript.",
+        "unsafe-path": "airapp.json apunta fuera de la app: {path}",
+        "entry-missing": "El archivo Worker {path} indicado en airapp.json no existe.",
+        "entry-not-javascript": "El archivo Worker {path} debe ser un archivo .js o .mjs.",
+        "entry-syntax-error": "El archivo Worker {path} no se puede leer como JavaScript: {detail}",
+        "entry-no-default-export":
+          "El archivo Worker {path} no tiene export default, así que nada puede responder a las solicitudes.",
+        "unsupported-import":
+          "{path} importa {specifier}. Empaqueta todo en un solo archivo; un sitio web no puede cargar otros módulos.",
+        "no-index-page": "No hay página de inicio. Añade {path}.",
+        "asset-too-large": "{path} ocupa {size}. Cada archivo puede tener 25 MB como máximo.",
+        "too-many-assets": "Este sitio tiene {count} archivos. El límite es 100.000.",
+      },
+    },
+    enginePlan: {
+      availableOn: "Disponible desde {plan}",
+      lockedHint: "{engine} está disponible a partir del plan {plan}.",
+      upgrade: "Mejorar a {plan}",
+      lockedTitle: "Mejora a {plan} para ejecutar esta app",
+      lockedBody:
+        "{engine} no está incluida en el plan de este espacio, y esta app la necesita para ejecutarse.",
+      statusLocked: "Requiere mejorar el plan",
+    },
   },
   agents: {
     addAgent: "Añadir agente",
@@ -844,6 +995,7 @@ export const dashboardEs: CoreI18nMessages = {
     composerWaitingPlaceholder: "Responde a la solicitud de arriba para continuar…",
     composerDefaultPlaceholder: "Escribe a {name}…",
     thinkingLevel: "Nivel de razonamiento",
+    mode: "Modo",
     continueConversationFailed: "No se pudo continuar esta conversación.",
     sessionActions: "Acciones de la sesión",
     endSession: "Finalizar sesión",
@@ -1143,6 +1295,8 @@ export const dashboardEs: CoreI18nMessages = {
     locationAnywhere: "En cualquier sitio",
     clearFilters: "Borrar filtros",
     resultCount: "{count} cargados",
+    partialResults:
+      "Puede que no sean todas las coincidencias. Limita la búsqueda a una Base, una carpeta o un periodo para ver el resto.",
     modeLabel: "Coincidencia",
     modeText: "Texto",
     modeRegex: "Patrón",
@@ -1391,6 +1545,7 @@ export const dashboardEs: CoreI18nMessages = {
     openView: "Abrir vista",
     openNode: "Abrir nodo",
     openRecord: "Abrir registro",
+    viewFullContent: "Ver contenido completo",
     brief: "{countLabel} en {scope}: {summary}.",
     riskBrief: "{countLabel} en {scope}: {summary}. Ojo con los cambios {risks}.",
     riskAnd: " y ",
@@ -1437,6 +1592,8 @@ export const dashboardEs: CoreI18nMessages = {
     loadMore: "Cargar más",
     noMatchesTitle: "Sin coincidencias",
     noMatchesBody: "Prueba con un título, el nombre de un campo, un canal o una Base.",
+    timedOut:
+      "La búsqueda tardó demasiado. Inténtalo de nuevo o abre la búsqueda avanzada y limítala a una Base o carpeta.",
     partialContentBody:
       "Algunos documentos son tan largos que solo se indexa su inicio para la búsqueda, así que puede que esto no sea todo. Usa grep para analizar todos los documentos completos.",
     noRecentTitle: "Aún no hay nada reciente",
@@ -1900,6 +2057,14 @@ export const dashboardEs: CoreI18nMessages = {
     deleteFieldCounting: "Contando los registros afectados…",
     deleteFieldCountUnavailable: "No se pudieron contar los registros afectados.",
     deleteFieldImpact: "Esta columna tiene un valor en {count} registro{plural}.",
+    deleteLookupFieldImpact:
+      "Solo se eliminará esta columna de consulta. Los campos y registros de origen y los enlaces entre registros no cambiarán.",
+    deleteLookupFieldBlocked:
+      "Modifica los campos de fórmula para que dejen de referenciar esta consulta antes de eliminarla.",
+    deleteFormulaFieldImpact:
+      "Solo se eliminará esta columna de fórmula. Los campos de entrada y registros usados en el cálculo no cambiarán.",
+    deleteFormulaFieldBlocked:
+      "Modifica los campos que usan esta fórmula para que dejen de referenciarla antes de eliminarla.",
     deleteFieldDependencies: "Dónde se usa este campo",
     deleteFieldDependenciesLoading: "Comprobando vistas guardadas…",
     deleteFieldDependenciesUnavailable:
@@ -2093,6 +2258,11 @@ export const dashboardEs: CoreI18nMessages = {
     bidirectional: "bidireccional ({count})",
     noRelationsHint:
       "Añade un campo de relación en el diseño de cualquier Base para dibujar conexiones aquí.",
+  },
+  upload: {
+    fileTooLarge: "«{name}» ({size}) supera el límite de {limit} por archivo.",
+    fileTooLargeUnnamed: "Este archivo supera el límite de {limit} por archivo.",
+    upgradeForLargerFiles: "Mejora tu plan para subir archivos de hasta {limit}.",
   },
   recordView: {
     view: "Ver",
@@ -2459,6 +2629,10 @@ export const dashboardEs: CoreI18nMessages = {
     metadataNoPermission:
       "No tienes permiso de escritura en todos los lugares donde se usa este archivo, así que sus metadatos no se pueden cambiar aquí.",
     unusedOnly: "Mostrar solo los no usados",
+    loadMore: "Cargar más recursos",
+    loadingMore: "Cargando…",
+    partialSummary:
+      "Solo se listan y cuentan los {shown} recursos ya cargados; carga más para ver el resto.",
     unusedBadge: "{count} sin usar",
     noUnusedAssets: "No se encontraron archivos sin usar.",
     textStatusMissing: "Aún no se puede buscar",
@@ -2551,6 +2725,8 @@ export const dashboardEs: CoreI18nMessages = {
     addStep: "Añadir paso",
     deleteSelection: "Eliminar selección",
     configuration: "Configuración",
+    configureTab: "Configurar",
+    runsTab: "Ejecuciones",
     selectStepOrEdge: "Selecciona un paso o una conexión para configurarlo.",
     label: "Etiqueta",
     type: "Tipo",
@@ -2559,7 +2735,19 @@ export const dashboardEs: CoreI18nMessages = {
     url: "URL del webhook",
     functionName: "Nombre de la función",
     webhookRuleId: "ID de la regla de función del webhook",
+    functionHint:
+      "Ejecuta una regla de webhook guardada cuya acción es ejecutar función. Indica el id de la regla, o un nombre de función que coincida con una sola regla de este espacio. El valor devuelto queda en este paso.",
+    webhookHint:
+      "Cuando una ejecución llega a este paso, Busabase envía la solicitud con los datos de la ejecución como cuerpo JSON (GET no envía cuerpo). La respuesta pasa a ser la salida de este paso: input.status e input.body.",
     eventName: "Nombre del evento",
+    eventRecordCreated: "Cuando se crea un registro",
+    eventRecordUpdated: "Cuando se actualiza un registro",
+    customEventOption: "{name} (solo etiqueta)",
+    triggerEventHint:
+      "En modo Evento, «Cuando se crea un registro» y «Cuando se actualiza un registro» inician una ejecución por sí solos. Manual y otros nombres de evento solo se inician cuando alguien ejecuta el flujo de trabajo.",
+    triggerBase: "Base",
+    anyBase: "Cualquier base",
+    unknownBase: "Base no encontrada ({id})",
     expression: "Expresión",
     duration: "Duración",
     unit: "Unidad",
@@ -2567,22 +2755,54 @@ export const dashboardEs: CoreI18nMessages = {
     hours: "Horas",
     days: "Días",
     approver: "Aprobador",
+    approverHint:
+      "Correos de miembros, separados por comas. Solo ellos (y los administradores del espacio) pueden aprobar o rechazar este paso, aunque no puedan editar el flujo de trabajo. Sin correo, decide cualquiera que pueda editar el flujo; un nombre sin correo es solo una etiqueta.",
+    allowAgents: "Permitir que decidan los agentes",
+    allowAgentsHint:
+      "Desactivado: solo las personas pueden aprobar o rechazar este paso. Activado: también un agente con una clave de API de escritura, si su propietario cumple la regla anterior.",
     actionName: "Nombre de la acción",
+    readRecordHint:
+      "Vuelve a leer el registro de la ejecución en este paso. Ponlo después de una espera cuando la siguiente rama deba ver valores actuales.",
+    actionChoose: "Elige una acción",
+    actionReadRecord: "Volver a leer el registro",
+    actionUpdateRecord: "Actualizar un registro",
+    actionCreateRecord: "Crear un registro",
+    actionDeleteRecord: "Eliminar un registro",
+    updateRecordHint:
+      "Establece los campos de abajo en el registro, con los permisos de la persona con la que actúa la ejecución.",
+    createRecordHint:
+      "Añade un registro a la base elegida, con los permisos de la persona con la que actúa la ejecución. Los pasos siguientes pueden usar su id como createdRecordId de este paso.",
+    deleteRecordHint:
+      "Mueve el registro a la papelera de su base, con los permisos de la persona con la que actúa la ejecución. Se puede restaurar desde allí.",
+    customActionHint: "Este nombre de acción aún no hace nada: solo se registra.",
+    chooseBase: "Elige una base",
+    targetRecord: "Registro (opcional)",
+    targetRecordHint:
+      "Vacío significa el registro de esta ejecución. También un ID de registro o una fórmula como =steps.create.createdRecordId.",
+    stepReference: "En fórmulas, este paso se escribe",
+    copyStepReference: "Copiar",
+    updateRecordFields: "Campos a establecer (JSON)",
+    updateRecordFieldsHint:
+      "Como clave usa el nombre o el slug de un campo. Los valores simples se guardan tal cual. Un texto que empieza por = es una fórmula sobre pasos anteriores, como =steps.score.score. Empieza por == para guardar un texto que comienza por =.",
+    updateRecordFieldsInvalid:
+      'Los campos deben ser un objeto JSON, por ejemplo {"status": "qualified"}.',
     outcome: "Resultado",
     edgeLabel: "Etiqueta de la conexión",
     edgeOutcome: "Resultado de la rama",
     workflowSettings: "Ajustes de ejecución",
     executionMode: "Modo de ejecución",
     notExecutedNote:
-      "Por ahora, los flujos de trabajo solo se guardan y validan; todavía no se ejecutan.",
+      "Edita los pasos aquí, guarda y luego inicia una ejecución en Ejecuciones. Las ejecuciones corren en el servidor con la última versión guardada. Cada paso terminado conserva una instantánea, read_record vuelve a leer el registro, una Espera se detiene hasta su hora y una Aprobación espera una decisión.",
     executionModeHint:
-      "Solo registra cómo se iniciará el flujo más adelante; por ahora no se ejecuta.",
+      "Manual: una ejecución solo empieza cuando alguien ejecuta el flujo de trabajo. Evento: además, un disparador de registros inicia una ejecución cuando se crea o actualiza un registro que coincide. Las ejecuciones por evento actúan como la persona que guardó el flujo de trabajo por última vez.",
     manual: "Manual",
     event: "Evento",
     errorPolicy: "En caso de error",
     stop: "Detener el flujo de trabajo",
     continue: "Continuar",
     concurrency: "Concurrencia",
+    concurrencyHint:
+      "Cuántas ejecuciones de este flujo pueden ejecutar pasos a la vez. Las que están en pausa en una espera o una aprobación no cuentan. Las que sobren esperan en cola y empiezan solas cuando hay hueco.",
     timeoutMs: "Tiempo de espera (ms)",
     trigger: "Disparador",
     webhook: "Webhook",
@@ -2595,6 +2815,70 @@ export const dashboardEs: CoreI18nMessages = {
     source: "Origen",
     preview: "Vista previa",
     htmlSource: "Código fuente HTML",
+  },
+  workflowRuns: {
+    runWorkflow: "Ejecutar flujo de trabajo",
+    startTitle: "Iniciar una ejecución",
+    startHint: "Se ejecuta en el servidor con la última versión guardada de este flujo de trabajo.",
+    recordId: "ID del registro (opcional)",
+    recordIdHint: "El disparador lee este registro cuando empieza la ejecución.",
+    payload: "Payload JSON (opcional)",
+    payloadHint: "Datos adicionales para el disparador, como objeto JSON.",
+    payloadInvalid: 'El payload debe ser un objeto JSON, por ejemplo {"score": 80}.',
+    start: "Iniciar ejecución",
+    starting: "Iniciando…",
+    unsavedBlocked:
+      "Guarda primero tus cambios. Las ejecuciones usan la última versión guardada de este flujo de trabajo.",
+    readOnlyNote:
+      "Puedes ver estas ejecuciones. Para iniciar una ejecución o continuarla antes de tiempo necesitas permiso de edición en este flujo de trabajo.",
+    cannotDecide:
+      "Solo los aprobadores indicados en este paso pueden decidir (o, si no indica a nadie, quienes pueden editar este flujo).",
+    queuedNote:
+      "En cola: esta ejecución continuará sola en menos de un minuto, con los permisos de quien la inició.",
+    statusCancelled: "Cancelada",
+    cancelRun: "Cancelar ejecución",
+    cancelRunTitle: "¿Cancelar esta ejecución?",
+    cancelRunBody:
+      "Se detiene aquí y no se puede continuar. Los pasos ya ejecutados no se deshacen.",
+    keepRun: "Mantener",
+    cancelAllQueued: "Cancelar {count} ejecuciones en cola",
+    cancelAllTitle: "¿Cancelar {count} ejecuciones en cola?",
+    cancelAllBody:
+      "Aún no han empezado y ya no empezarán. Las ejecuciones que están ejecutando un paso o en pausa en una espera o una aprobación continúan.",
+    startedBy: "Iniciada por {name}",
+    startedByVia: "Iniciada por {name} mediante {via}",
+    viaAgent: "un agente",
+    cancelledBy: "Cancelada por {name}.",
+    loadOlder: "Cargar ejecuciones anteriores",
+    keptNote: "Las ejecuciones terminadas se conservan {days} días.",
+    guideLink: "Cómo se ejecutan los flujos",
+    actionFailed: "No funcionó. Inténtalo de nuevo.",
+    recentRuns: "Ejecuciones recientes",
+    empty: "Aún no hay ejecuciones.",
+    loadFailed: "No se pudieron cargar las ejecuciones.",
+    statusQueued: "En cola",
+    statusRunning: "En curso",
+    statusWaiting: "En espera",
+    statusWaitingApproval: "Pendiente de aprobación",
+    statusCompleted: "Completada",
+    statusFailed: "Fallida",
+    triggerManual: "Manual",
+    triggerEvent: "Evento",
+    runDetails: "Detalles de la ejecución",
+    recordLabel: "Registro: {id}",
+    waitingUntil: "En espera hasta {time}. Después continúa sola.",
+    continueNow: "Continuar ahora",
+    approvalPending: "Esperando una decisión sobre «{step}».",
+    approve: "Aprobar",
+    reject: "Rechazar",
+    errorLabel: "Error",
+    steps: "Pasos",
+    noSteps: "Aún no ha terminado ningún paso.",
+    stepData: "Datos",
+    recordFields: "Registro",
+    stepDone: "Hecho",
+    stepPaused: "En pausa",
+    stepFailed: "Fallido",
   },
   install: {
     title: "Instalar desde GitHub",

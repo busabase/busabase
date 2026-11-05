@@ -1,10 +1,12 @@
 "use client";
 
 import type { AgentConnectionVO } from "busabase-contract/domains/agents/types";
+import { Badge } from "kui/badge";
 import type { ReactNode } from "react";
 import { useCoreLocale } from "../../../i18n";
 import { agentAvailabilityCopy } from "../../../i18n/agent-availability-copy";
 import { getAgentConnectionState } from "../utils/agent-connection-state";
+import { getAgentProviderName } from "../utils/agent-provider";
 import { AgentConnectionIndicator, AgentConnectionStatus } from "./agent-connection-status";
 
 interface AgentConnectionListProps {
@@ -43,6 +45,7 @@ export function AgentConnectionList({
           : null;
         const history = state === "disconnected" && connection.sessionCount > 0;
         const actions = renderActions?.(connection);
+        const providerName = getAgentProviderName(connection);
         return (
           <div
             className={`relative min-w-0 rounded-lg border bg-card transition-colors hover:bg-accent/60 ${state === "disconnected" ? "border-dashed" : ""}`}
@@ -61,8 +64,18 @@ export function AgentConnectionList({
                 <AgentConnectionIndicator state={state} connecting={connecting} />
               </span>
               <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                <span className="break-words font-medium text-foreground text-sm">
-                  {connection.agentName}
+                <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                  <span className="min-w-0 break-words font-medium text-foreground text-sm">
+                    {connection.agentName}
+                  </span>
+                  <Badge
+                    className="max-w-full shrink-0 truncate px-1.5 py-0 text-[10px] font-normal text-muted-foreground"
+                    data-testid="agent-provider-badge"
+                    title={providerName}
+                    variant="outline"
+                  >
+                    <span className="truncate">{providerName}</span>
+                  </Badge>
                 </span>
                 <span
                   className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-foreground/70 text-xs"

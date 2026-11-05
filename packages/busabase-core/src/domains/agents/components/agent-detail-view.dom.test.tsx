@@ -17,6 +17,7 @@ import { CoreI18nProvider } from "../../../i18n";
 import { AgentIntegrationProvider } from "../../dashboard/agent-integration-context";
 import { SubmitPermissionProvider } from "../../dashboard/components/split-submit-button";
 import type { LoadedNode } from "../../dashboard/node-detail-registry";
+import { AgentModelScopeProvider } from "../agent-model-scope-context";
 import { agentModelCatalogScope, useAgentModelListStore } from "../store/agent-model-list-store";
 
 /**
@@ -55,6 +56,8 @@ const agentSession = vi.hoisted(() => ({
   title: null,
   usage: null,
   sending: false,
+  committedCommandIds: new Set<string>(),
+  subscriptionHealth: null as null | { sessionId: string; state: "connected" | "recovering" },
   answerPermission: vi.fn(),
   cancel: vi.fn(),
 }));
@@ -332,6 +335,8 @@ function renderView(options: {
   contextNode?: LoadedNode | null;
   locale?: string;
   targetSpaceId?: string;
+  actorId?: string;
+  workspaceKey?: string;
   agentSlug?: string;
   listConnections?: () => Promise<AgentConnectionVO[]>;
   listSkillNodes?: () => Promise<Array<{ id: string; name: string; description?: string }>>;
@@ -354,34 +359,46 @@ function renderView(options: {
     ) : (
       children
     );
-  const view = () => (
-    <QueryClientProvider client={client}>
-      <CoreI18nProvider locale={options.locale}>
-        <AgentIntegrationProvider
-          agentIntegration={{ edition: "cloud", targetSpaceId: options.targetSpaceId }}
-        >
-          {wrap(
-            <AgentDetailView
-              agentSlug={options.agentSlug ?? "test-agent"}
-              compactSessionNavigation={options.compactSessionNavigation}
-              contextNode={options.contextNode}
-              onBack={() => {}}
-              orpc={stubOrpc(
-                getItems,
-                close,
-                create,
-                prompt,
-                options.listPage,
-                cancel,
-                options.listConnections,
-                options.listSkillNodes,
-              )}
-            />,
-          )}
-        </AgentIntegrationProvider>
-      </CoreI18nProvider>
-    </QueryClientProvider>
-  );
+  const withScope = (children: ReactNode) =>
+    options.actorId || options.workspaceKey ? (
+      <AgentModelScopeProvider
+        actorId={options.actorId}
+        workspaceKey={options.workspaceKey ?? "local"}
+      >
+        {children}
+      </AgentModelScopeProvider>
+    ) : (
+      children
+    );
+  const view = () =>
+    withScope(
+      <QueryClientProvider client={client}>
+        <CoreI18nProvider locale={options.locale}>
+          <AgentIntegrationProvider
+            agentIntegration={{ edition: "cloud", targetSpaceId: options.targetSpaceId }}
+          >
+            {wrap(
+              <AgentDetailView
+                agentSlug={options.agentSlug ?? "test-agent"}
+                compactSessionNavigation={options.compactSessionNavigation}
+                contextNode={options.contextNode}
+                onBack={() => {}}
+                orpc={stubOrpc(
+                  getItems,
+                  close,
+                  create,
+                  prompt,
+                  options.listPage,
+                  cancel,
+                  options.listConnections,
+                  options.listSkillNodes,
+                )}
+              />,
+            )}
+          </AgentIntegrationProvider>
+        </CoreI18nProvider>
+      </QueryClientProvider>,
+    );
   const result = render(view());
   return { client, close, create, prompt, cancel, rerender: () => result.rerender(view()) };
 }
@@ -564,10 +581,13 @@ describe("AgentDetailView — end session", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Send test prompt" }));
     expect((await screen.findByRole("alert")).textContent).toContain("Gateway Timeout");
 
-    client.setQueryData(["agents", "sessions", "listPaged"], {
-      pages: [{ items: [{ ...SESSION, status: "busy" }], nextCursor: null }],
-      pageParams: [undefined],
-    });
+    client.setQueriesData(
+      { queryKey: ["agents", "sessions", "listPaged"] },
+      {
+        pages: [{ items: [{ ...SESSION, status: "busy" }], nextCursor: null }],
+        pageParams: [undefined],
+      },
+    );
 
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
     expect(screen.getByRole("status").textContent).toContain("replying…");
@@ -1719,5 +1739,277 @@ describe("AgentDetailView — remote connection availability", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Send test prompt" }));
     await waitFor(() => expect(prompt).toHaveBeenCalledOnce());
+  });
+});
+
+describe("AgentDetailView — supervised acceptance and recovery", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    agentSession.blocks = [];
+    agentSession.sending = false;
+    agentSession.cancel = vi.fn();
+    agentSession.committedCommandIds = new Set();
+    agentSession.subscriptionHealth = null;
+  });
+  afterEach(cleanup);
+  const supervised = (overrides: Partial<AgentSessionVO> = {}): AgentSessionVO => ({
+    ...SESSION,
+    transport: "remote-websocket",
+    reliability: { connection: "connected", execution: "idle", synchronization: "synced" },
+    ...overrides,
+  });
+
+  it("shows connection, execution and history separately with a safe reference", async () => {
+    renderView({
+      sessions: [
+        supervised({
+          reliability: {
+            connection: "connected",
+            execution: "unknown",
+            synchronization: "degraded",
+            diagnosticRef: "diag_fixture_123",
+          },
+          error: "raw SQL and private server error must not be shown",
+        }),
+      ],
+    });
+    const status = await screen.findByTestId("agent-session-reliability");
+    expect(within(status).getByText("Connection:")).toBeTruthy();
+    expect(within(status).getByText("Message:")).toBeTruthy();
+    expect(within(status).getByText("History:")).toBeTruthy();
+    expect(within(status).getByText("Execution unknown")).toBeTruthy();
+    expect(within(status).getByText("History sync interrupted")).toBeTruthy();
+    expect(within(status).getByText(/diag_fixture_123/)).toBeTruthy();
+    expect(screen.queryByText(/raw SQL and private server error/)).toBeNull();
+    expect(
+      (screen.getByRole("button", { name: "Send test prompt" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+
+  it("keeps a stable command identity on network retry, then gives the next send a new identity", async () => {
+    const prompt = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("response lost"))
+      .mockResolvedValue({ accepted: true });
+    renderView({ sessions: [supervised()], prompt });
+    fireEvent.click(await screen.findByRole("button", { name: "Send test prompt" }));
+    expect(await screen.findByText(/We could not confirm acceptance/)).toBeTruthy();
+    const commandId = prompt.mock.calls[0][0].commandId;
+    expect(commandId).toMatch(/^cmd_[A-Za-z0-9_-]+$/);
+    fireEvent.click(screen.getByRole("button", { name: "Send test prompt" }));
+    await waitFor(() => expect(prompt).toHaveBeenCalledTimes(2));
+    expect(prompt.mock.calls[1][0].commandId).toBe(commandId);
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: "Send test prompt" }) as HTMLButtonElement).disabled,
+      ).toBe(false),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Send test prompt" }));
+    await waitFor(() => expect(prompt).toHaveBeenCalledTimes(3));
+    expect(prompt.mock.calls[2][0].commandId).not.toBe(commandId);
+  });
+
+  it("keeps staged context after a rejected admission without creating another session", async () => {
+    const prompt = vi.fn(async (_input: Record<string, unknown>) => ({
+      accepted: false,
+      promptRecorded: false,
+      status: "failed",
+      message: "rejected",
+    }));
+    const { create } = renderView({ sessions: [supervised()], prompt });
+    fireEvent.click(await screen.findByRole("button", { name: "Stage prompt resource" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send test prompt" }));
+    expect(await screen.findByText(/The message was not accepted/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Clear prompt resource" })).toBeTruthy();
+    expect(prompt.mock.calls[0][0].resourceContext).toHaveLength(1);
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("replaces a durable pending presentation only after its command is journaled", async () => {
+    const session = supervised({
+      pendingCommands: [
+        {
+          commandId: "cmd_pending_fixture",
+          kind: "prompt",
+          state: "queued",
+          createdAt: "2026-11-03T00:00:00Z",
+          expiresAt: "2026-11-04T00:00:00Z",
+          payload: {
+            text: "Durable question",
+            attachments: [{ filename: "report.pdf" }],
+            resourceContext: [{ name: "Saved context" }],
+          },
+        },
+      ],
+    });
+    const view = renderView({ sessions: [session] });
+    const pending = await screen.findByTestId("agent-pending-command");
+    expect(within(pending).getByText("Durable question")).toBeTruthy();
+    expect(within(pending).getByText("report.pdf")).toBeTruthy();
+    expect(within(pending).getByText(/Saved context/)).toBeTruthy();
+    agentSession.committedCommandIds = new Set(["some_other_command"]);
+    view.rerender();
+    expect(screen.getByTestId("agent-pending-command")).toBeTruthy();
+    agentSession.committedCommandIds = new Set(["cmd_pending_fixture"]);
+    view.rerender();
+    await waitFor(() => expect(screen.queryByTestId("agent-pending-command")).toBeNull());
+  });
+
+  it("checks authoritative status without resending or silently replacing an incomplete conversation", async () => {
+    const session = supervised({
+      reliability: { connection: "disconnected", execution: "idle", synchronization: "gap" },
+    });
+    const listPage = vi.fn(async () => ({ items: [session], nextCursor: null }));
+    const { prompt, create } = renderView({ sessions: [session], listPage });
+    const check = await screen.findByRole("button", { name: "Check status" });
+    const before = listPage.mock.calls.length;
+    fireEvent.click(check);
+    await waitFor(() => expect(listPage.mock.calls.length).toBeGreaterThan(before));
+    expect(prompt).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+    expect(
+      (screen.getByRole("button", { name: "Send test prompt" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+
+  it("retains a rejected accepted draft and its attachment names while the binding gap blocks sending", async () => {
+    const session = supervised({
+      reliability: { connection: "disconnected", execution: "idle", synchronization: "gap" },
+      pendingCommands: [
+        {
+          commandId: "cmd_saved_unsent",
+          kind: "prompt",
+          state: "rejected",
+          errorCode: "CONNECTION_BINDING_CHANGED",
+          createdAt: "2026-11-03T00:00:00Z",
+          expiresAt: "2026-11-04T00:00:00Z",
+          payload: {
+            text: "Saved but not sent",
+            attachments: [
+              {
+                filename: "retained-note.txt",
+                kind: "file",
+                mimeType: "text/plain",
+                data: "cmV0YWluZWQ=",
+              },
+            ],
+          },
+        },
+      ],
+    });
+    const { prompt, create } = renderView({ sessions: [session] });
+    const unsent = await screen.findByTestId("agent-pending-command");
+    expect(within(unsent).getByText("Not sent")).toBeTruthy();
+    expect(within(unsent).getByText("Saved but not sent")).toBeTruthy();
+    expect(within(unsent).getByText("retained-note.txt")).toBeTruthy();
+    expect(within(unsent).getByText(/Your saved message is kept here/)).toBeTruthy();
+    expect(
+      (screen.getByRole("button", { name: "Send test prompt" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(prompt).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("labels subscription loss as update recovery without changing the remote execution outcome", async () => {
+    agentSession.subscriptionHealth = { sessionId: SESSION.id, state: "recovering" };
+    renderView({ sessions: [supervised()] });
+    const status = await screen.findByTestId("agent-session-reliability");
+    expect(within(status).getByText(/Reconnecting to conversation updates/)).toBeTruthy();
+    expect(within(status).getByText("Ready")).toBeTruthy();
+    expect(within(status).queryByText("Finished")).toBeNull();
+  });
+
+  it("retains cached history and unsent intent through a database refetch failure, then restores readiness", async () => {
+    let unavailable = false;
+    const session = supervised({
+      pendingCommands: [
+        {
+          commandId: "cmd_cached_unsent",
+          kind: "prompt",
+          state: "queued",
+          createdAt: "2026-11-03T00:00:00Z",
+          expiresAt: "2026-11-04T00:00:00Z",
+          payload: {
+            text: "Cached accepted question",
+            attachments: [{ filename: "saved-note.txt" }],
+          },
+        },
+      ],
+    });
+    const listPage = async () => {
+      if (unavailable)
+        throw Object.assign(new Error("Database unavailable"), {
+          code: "INTERNAL_SERVER_ERROR",
+          status: 500,
+        });
+      return { items: [session], nextCursor: null };
+    };
+    const { client, prompt, create } = renderView({ sessions: [session], listPage });
+    await screen.findByText("Cached accepted question");
+    unavailable = true;
+    await act(() => client.refetchQueries({ queryKey: ["agents", "sessions", "listPaged"] }));
+    const status = await screen.findByTestId("agent-session-reliability");
+    expect(within(status).getByText(/Reconnecting to conversation updates/)).toBeTruthy();
+    expect(within(status).getByText("Connecting")).toBeTruthy();
+    expect(within(status).queryByText("Connected")).toBeNull();
+    expect(screen.getByTestId("conversation")).toBeTruthy();
+    expect(screen.getByText("Cached accepted question")).toBeTruthy();
+    expect(screen.getByText("saved-note.txt")).toBeTruthy();
+    expect(
+      (screen.getByRole("button", { name: "Send test prompt" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Copy transcript" }));
+    expect(historyActions.copy).toHaveBeenCalled();
+    expect(prompt).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+    unavailable = false;
+    await act(() => client.refetchQueries({ queryKey: ["agents", "sessions", "listPaged"] }));
+    await waitFor(() =>
+      expect(screen.queryByText(/Reconnecting to conversation updates/)).toBeNull(),
+    );
+    expect(
+      (screen.getByRole("button", { name: "Send test prompt" }) as HTMLButtonElement).disabled,
+    ).toBe(false);
+  });
+
+  it.each([{ code: "FORBIDDEN" }, { code: "UNAUTHORIZED" }, { status: 403 }])(
+    "does not retain a formerly authorized conversation after explicit access failure %j",
+    async (failure) => {
+      let revoked = false;
+      const listPage = async () => {
+        if (revoked) throw Object.assign(new Error("Access denied"), failure);
+        return { items: [supervised()], nextCursor: null };
+      };
+      const { client } = renderView({ sessions: [supervised()], listPage });
+      await screen.findByTestId("conversation");
+      revoked = true;
+      await act(() => client.refetchQueries({ queryKey: ["agents", "sessions", "listPaged"] }));
+      await screen.findByRole("heading", { name: "Couldn't load agent sessions" });
+      expect(screen.queryByTestId("conversation")).toBeNull();
+      expect(screen.queryByTestId("agent-session-reliability")).toBeNull();
+    },
+  );
+
+  it.each([
+    { actorId: "actor-b", workspaceKey: "workspace-a" },
+    { actorId: "actor-a", workspaceKey: "workspace-b" },
+  ])("does not reuse cached history across an actor or workspace change %j", async (nextScope) => {
+    let denied = false;
+    const options = {
+      actorId: "actor-a",
+      workspaceKey: "workspace-a",
+      sessions: [supervised()],
+      listPage: async () => {
+        if (denied) throw new Error("Database unavailable");
+        return { items: [supervised()], nextCursor: null };
+      },
+    };
+    const view = renderView(options);
+    await screen.findByTestId("conversation");
+    denied = true;
+    Object.assign(options, nextScope);
+    view.rerender();
+    await screen.findByRole("heading", { name: "Couldn't load agent sessions" });
+    expect(screen.queryByTestId("conversation")).toBeNull();
   });
 });

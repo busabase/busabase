@@ -1,12 +1,15 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CoreI18nProvider } from "../../../i18n";
 import { DateFieldInput, DateFieldOptionsEditor, DateFieldValue } from "./date-field";
 import { DayTimePicker } from "./day-time-picker";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 describe("DateFieldInput", () => {
   it("a day field shows legacy ISO days in the UI locale and writes YYYY-MM-DD", () => {
@@ -147,7 +150,18 @@ describe("DateFieldOptionsEditor", () => {
 });
 
 describe("DayTimePicker", () => {
+  // An empty picker opens on the current month, so pin "today" to the month these
+  // dates are in. Without this the test only passes during October 2026.
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-10-15T12:00:00.000Z") });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("cannot pick a day before minDay, and picks a day with a time", () => {
+    // The calendar opens on the current month, and these days have to be on screen.
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-10-15T12:00:00") });
     const onPick = vi.fn();
     render(
       <DayTimePicker

@@ -16,6 +16,7 @@ import {
 import { buildBaseVisibilityExists, buildNodeVisibilityExists } from "../../../logic/node-acl";
 import { toBaseVO } from "../../../logic/vo";
 import { applyRollup, isRollupCompatible, LOOKUP_ROLLUPS } from "../lookup/rollup";
+import { commitPayloadWithFields } from "./commit-payload-projection";
 
 import { lookupDependentFieldSlugs } from "./lookup-formulas";
 import { resolveReverseRelationValues } from "./reverse-relations";
@@ -207,9 +208,24 @@ export const resolveLookupValues = async (
     : [];
   const diagnosticById = new Map(visibleDiagnostics.map((record) => [record.id, record]));
   const headIds = [...new Set(targetRecords.map((record) => record.headCommitId))];
+  // A source is shown as its title plus the looked-up field; its other, possibly
+  // multi-megabyte, fields never need to reach Node.
+  const sourceSlugs = new Set([
+    ...[...targetBaseMap.values()].flatMap((base) => base.fields.slice(0, 1).map((f) => f.slug)),
+    ...lookupRecords.flatMap((record) =>
+      (basesById.get(record.baseId)?.fields ?? []).flatMap((field) =>
+        field.type === "lookup" && field.options.lookup
+          ? [field.options.lookup.targetFieldSlug]
+          : [],
+      ),
+    ),
+  ]);
   const commits = headIds.length
     ? await db
-        .select({ id: busabaseCommits.id, payload: busabaseCommits.payload })
+        .select({
+          id: busabaseCommits.id,
+          payload: commitPayloadWithFields(sourceSlugs).as("payload"),
+        })
         .from(busabaseCommits)
         .where(inArray(busabaseCommits.id, headIds))
     : [];

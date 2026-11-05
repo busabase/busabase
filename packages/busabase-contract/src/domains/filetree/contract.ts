@@ -84,6 +84,14 @@ export const fileTreeNodeSchema = z.object({
   visibility: z.enum(["private", "workspace", "public"]),
   version: z.string(),
   files: z.array(fileTreeFileSchema),
+  /**
+   * Total files on the node. `files` stops at the server's inline limit; read
+   * the rest with `GET /file-trees/{nodeId}/files?limit=&after=`. Absent on
+   * older servers, which never truncated — fall back to `files.length`.
+   */
+  fileCount: z.number().int().nonnegative().optional(),
+  /** True when `files` is only the first page of `fileCount`. Absent means complete. */
+  filesTruncated: z.boolean().optional(),
   // Paths silently dropped from this create call by an uploaded `.gitignore`
   // (upload-safety layer 1 — see `logic/upload-safety.ts`). Empty on
   // ordinary get/list responses and on creates that didn't include a
@@ -266,6 +274,31 @@ const fileTreeRefSchema = z.object({
 // (lightweight summaries — the old list built a full file inventory per node)
 // and read one with `GET /nodes/{nodeId}`, which returns the same
 // `fileTreeNodeSchema` payload under `type: "skill" | "drive" | "airapp"`.
+export const fileTreeFolderEntrySchema = z.object({
+  /** Full folder path from the node root, no trailing slash (`docs/guides`). */
+  path: z.string(),
+  /** Last segment of `path`. */
+  name: z.string(),
+});
+
+export const fileTreeEntriesSchema = z.object({
+  /** The folder that was listed; `""` is the node root. */
+  folder: z.string(),
+  /** Direct subfolders, ordered by name. */
+  folders: z.array(fileTreeFolderEntrySchema),
+  /** True when the folder has more subfolders than one response carries. */
+  foldersTruncated: z.boolean(),
+  /**
+   * Pass as `foldersAfter` to read the next page of `folders`; `null` when there
+   * is none. Non-null only while `foldersTruncated` is true.
+   */
+  foldersNextCursor: z.string().nullable(),
+  /** One page of the folder's direct files (not files in subfolders), ordered by path. */
+  files: z.array(fileTreeFileSchema),
+  /** Pass as `after` to read the next page of `files`; `null` when there is none. */
+  nextCursor: z.string().nullable(),
+});
+
 /** A merged-in-the-same-call create returns this (see `materializedBaseSchema`). */
 export const materializedFileTreeNodeSchema = fileTreeNodeSchema.extend({
   materialized: z.literal(true),
@@ -316,10 +349,75 @@ export const fileTreeContract = {
       path: "/file-trees/{nodeId}/files",
       tags: ["File Trees"],
       summary: "List file-tree files",
-      successDescription: "Asset-backed files mounted under the node.",
+      successDescription:
+        "One page of asset-backed files mounted under the node, ordered by path. A page shorter than `limit` is the last one.",
     })
-    .input(fileTreeRefSchema)
+    .input(
+      fileTreeRefSchema.extend({
+        limit: z.coerce
+          .number()
+          .int()
+          .min(1)
+          .max(5000)
+          .optional()
+          .describe(
+            "Files per page (1-5000). Omitted means 5000, not the whole list. To read everything, pass the last `path` of each page as `after` until a short page arrives.",
+          ),
+        after: z
+          .string()
+          .optional()
+          .describe(
+            "Cursor: return files whose path sorts after this one. Use the last `path` of the previous page. Takes precedence over `offset`.",
+          ),
+        offset: z.coerce
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe(
+            "Files to skip, ordered by path. Kept for compatibility; slower than `after` on large nodes.",
+          ),
+      }),
+    )
     .output(z.array(fileTreeFileSchema)),
+  listEntries: oc
+    .route({
+      method: "GET",
+      path: "/file-trees/{nodeId}/entries",
+      tags: ["File Trees"],
+      summary: "List one folder of a file tree",
+      successDescription:
+        "The folder's direct subfolders and one page of its direct files. Browse a large Drive one folder at a time instead of listing every file.",
+    })
+    .input(
+      fileTreeRefSchema.extend({
+        folder: z
+          .string()
+          .optional()
+          .describe(
+            "Folder path relative to the node root, e.g. `docs/guides`. Omit or pass an empty string for the root.",
+          ),
+        limit: z.coerce
+          .number()
+          .int()
+          .min(1)
+          .max(5000)
+          .optional()
+          .describe("Files per page (1-5000, default 1000)."),
+        after: z
+          .string()
+          .optional()
+          .describe("Cursor from the previous page's `nextCursor` (files)."),
+        foldersAfter: z
+          .string()
+          .optional()
+          .describe(
+            "Cursor from the previous page's `foldersNextCursor` (subfolders). A `foldersAfter` " +
+              "request returns subfolders only; an `after` request returns files only.",
+          ),
+      }),
+    )
+    .output(fileTreeEntriesSchema),
   readFile: oc
     .route({
       method: "GET",

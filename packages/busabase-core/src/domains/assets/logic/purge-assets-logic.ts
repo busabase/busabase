@@ -1,7 +1,20 @@
 import "server-only";
 
 import { ORPCError } from "@orpc/server";
-import { and, desc, eq, inArray, isNull, or } from "drizzle-orm";
+import {
+  type AnyColumn,
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  inArray,
+  isNull,
+  not,
+  or,
+  type SQL,
+  sql,
+} from "drizzle-orm";
 import { storage } from "openlib/storage";
 import type { BusabaseDatabase } from "../../../context";
 import { getContextSpaceId } from "../../../context";
@@ -23,132 +36,100 @@ import { extractAssetContentIds } from "../utils/asset-content-url";
 import { enqueueStorageCleanup, withStorageKeyLocks } from "./storage-cleanup-logic";
 
 /**
- * Permanent deletion owns only assets evidenced by its subtree. It never sweeps
- * unrelated, unmounted library uploads. Canonical record heads and Doc bodies
- * supplement the reverse index for legacy records/URLs that predate that index.
- * Archived content is deliberately included in both protection scans.
+ * One bind parameter for any number of ids. A plain `inArray` binds one per id
+ * and fails past Postgres' 65,534 limit — one space holds 142,924 Assets.
  */
-export const releasePurgedNodeAssets = async (
-  db: BusabaseDatabase,
-  subtreeIds: string[],
-  lockedKeys?: ReadonlySet<string>,
-): Promise<void> => {
-  const spaceId = getContextSpaceId();
-  if (!lockedKeys) {
-    // Discover without row locks, then take every physical fence in the same
-    // lexical order as uploads and derived-text writes. Taking Asset row locks
-    // first would deadlock a writer holding a fence while inserting its FK.
-    const assets = await db
-      .select({ attachmentId: busabaseAssets.attachmentId })
-      .from(busabaseAssets)
-      .where(eq(busabaseAssets.spaceId, spaceId));
-    const registered = await db
-      .select({ key: attachments.storageKey })
-      .from(attachments)
-      .where(
-        or(
-          eq(attachments.spaceId, spaceId),
-          assets.length
-            ? inArray(
-                attachments.id,
-                assets.map((row) => row.attachmentId),
-              )
-            : undefined,
-        ),
-      );
-    const texts = await db
-      .select({ key: busabaseAssetTexts.textStorageKey })
-      .from(busabaseAssetTexts)
-      .where(eq(busabaseAssetTexts.spaceId, spaceId));
-    const nodes = await db
-      .select({ id: busabaseNodes.id, type: busabaseNodes.type })
-      .from(busabaseNodes)
-      .where(
-        and(
-          eq(busabaseNodes.spaceId, spaceId),
-          inArray(busabaseNodes.id, subtreeIds),
-          inArray(busabaseNodes.type, ["doc", "folder"]),
-        ),
-      );
-    const keys = new Set([
-      ...registered.map((row) => row.key),
-      ...texts.map((row) => row.key),
-      ...nodes.map((row) => (row.type === "folder" ? folderReadmeKey(row.id) : docBodyKey(row.id))),
-    ]);
-    return withStorageKeyLocks(db, [...keys], (tx) =>
-      releasePurgedNodeAssets(tx, subtreeIds, keys),
-    );
-  }
-  const purged = new Set(subtreeIds);
-  const ownedAssets = await db
-    .select()
-    .from(busabaseAssets)
-    .where(eq(busabaseAssets.spaceId, spaceId))
-    .orderBy(busabaseAssets.id)
-    .for("update");
-  const ownedAttachments = await db
-    .select()
-    .from(attachments)
-    .where(
-      or(
-        eq(attachments.spaceId, spaceId),
-        ownedAssets.length
-          ? inArray(
-              attachments.id,
-              ownedAssets.map((asset) => asset.attachmentId),
-            )
-          : undefined,
-      ),
-    );
-  const assetById = new Map(ownedAssets.map((row) => [row.id, row]));
-  if (ownedAttachments.some((row) => !lockedKeys.has(row.storageKey))) {
-    throw new ORPCError("CONFLICT", {
-      message: "Files changed while preparing permanent deletion. Retry the operation.",
-    });
-  }
-  const candidates = new Set<string>();
-  const protectedAssets = new Set<string>();
-  const candidateAttachments = new Set<string>();
-  const protectedAttachments = new Set<string>();
+const anyText = (column: AnyColumn, values: readonly string[]): SQL =>
+  sql`${column} = any(${sql.param([...values])}::text[])`;
 
-  const usages = await db
-    .select({ assetId: busabaseAssetUsages.assetId, nodeId: busabaseAssetUsages.nodeId })
-    .from(busabaseAssetUsages)
-    .where(eq(busabaseAssetUsages.spaceId, spaceId));
-  for (const usage of usages) {
-    (purged.has(usage.nodeId) ? candidates : protectedAssets).add(usage.assetId);
+/** Record heads read per query while scanning for references. */
+const RECORD_HEAD_PAGE = 1_000;
+/** Retained Doc and folder bodies read from storage at once. */
+const BODY_READ_CONCURRENCY = 8;
+/**
+ * Up to this many candidate ids and keys, Postgres skips record heads that
+ * mention none of them. Past it, every head is read and checked here.
+ */
+const PREFILTER_TOKEN_LIMIT = 200;
+
+interface AttachmentRef {
+  id: string;
+  storageKey: string;
+}
+
+interface References {
+  assets: Set<string>;
+  attachments: Set<string>;
+}
+
+interface BodyNode {
+  id: string;
+  type: string;
+}
+
+/**
+ * Which attachments a string references: it equals the attachment id, or it
+ * contains the attachment's storage key. Same rule as `includes` against every
+ * attachment, indexed by each key's last characters so the cost grows with the
+ * string, not with the number of attachments in the space.
+ */
+const createAttachmentMatcher = (rows: readonly AttachmentRef[]) => {
+  const byId = new Map(rows.map((row) => [row.id, row]));
+  const matchesEverything = rows.filter((row) => row.storageKey === "");
+  let window = 16;
+  for (const row of rows) {
+    if (row.storageKey) window = Math.min(window, row.storageKey.length);
   }
-
-  // Head snapshots are the durable truth even when an old archive removed its
-  // where-used rows. Never use old history belonging only to the purged scope
-  // to keep its bytes indefinitely.
-  const recordHeads = await db
-    .select({ nodeId: busabaseBases.nodeId, payload: busabaseCommits.payload })
-    .from(busabaseRecords)
-    .innerJoin(busabaseBases, eq(busabaseBases.id, busabaseRecords.baseId))
-    .innerJoin(busabaseNodes, eq(busabaseNodes.id, busabaseBases.nodeId))
-    .innerJoin(busabaseCommits, eq(busabaseCommits.id, busabaseRecords.headCommitId))
-    .where(and(eq(busabaseRecords.spaceId, spaceId), isNull(busabaseNodes.deletedAt)));
-
-  const inspectBody = (body: string, deleting: boolean) => {
-    const assetSet = deleting ? candidates : protectedAssets;
-    const attachmentSet = deleting ? candidateAttachments : protectedAttachments;
-    for (const assetId of extractAssetContentIds(body)) {
-      if (assetById.has(assetId)) assetSet.add(assetId);
-    }
-    for (const attachment of ownedAttachments) {
-      if (body === attachment.id || body.includes(attachment.storageKey)) {
-        attachmentSet.add(attachment.id);
+  const bySuffix = new Map<string, AttachmentRef[]>();
+  for (const row of rows) {
+    if (!row.storageKey) continue;
+    const suffix = row.storageKey.slice(-window);
+    const bucket = bySuffix.get(suffix);
+    if (bucket) bucket.push(row);
+    else bySuffix.set(suffix, [row]);
+  }
+  return (body: string): AttachmentRef[] => {
+    const hits = new Set<AttachmentRef>(matchesEverything);
+    const direct = byId.get(body);
+    if (direct) hits.add(direct);
+    for (let end = window; bySuffix.size && end <= body.length; end++) {
+      const bucket = bySuffix.get(body.slice(end - window, end));
+      if (!bucket) continue;
+      for (const row of bucket) {
+        const start = end - row.storageKey.length;
+        if (start >= 0 && body.startsWith(row.storageKey, start)) hits.add(row);
       }
     }
+    return [...hits];
   };
-  const inspectFields = (value: unknown, deleting: boolean): void => {
+};
+
+/**
+ * Collects the Assets and attachments a body or a record's fields reference.
+ * `isAsset` is every Asset the space owns: it decides whether an explicit id is
+ * a logical reference. `keep` limits what is recorded.
+ */
+const createReferenceInspector = (options: {
+  isAsset: (assetId: string) => boolean;
+  matchAttachments: (body: string) => AttachmentRef[];
+  keep?: (kind: "asset" | "attachment", id: string) => boolean;
+}) => {
+  const keep = options.keep ?? (() => true);
+  const inspectBody = (body: string, into: References) => {
+    for (const assetId of extractAssetContentIds(body)) {
+      if (options.isAsset(assetId) && keep("asset", assetId)) into.assets.add(assetId);
+    }
+    for (const attachment of options.matchAttachments(body)) {
+      if (keep("attachment", attachment.id)) into.attachments.add(attachment.id);
+    }
+  };
+  const inspectFields = (value: unknown, into: References): void => {
     if (typeof value === "string") {
-      inspectBody(value, deleting);
+      inspectBody(value, into);
       return;
     }
     if (Array.isArray(value)) {
-      for (const item of value) inspectFields(item, deleting);
+      for (const item of value) inspectFields(item, into);
       return;
     }
     if (!value || typeof value !== "object") return;
@@ -156,162 +137,447 @@ export const releasePurgedNodeAssets = async (
     const explicitId =
       typeof ref.assetId === "string"
         ? ref.assetId
-        : typeof ref.id === "string" && assetById.has(ref.id)
+        : typeof ref.id === "string" && options.isAsset(ref.id)
           ? ref.id
           : null;
-    if (explicitId && assetById.has(explicitId)) {
+    if (explicitId && options.isAsset(explicitId)) {
       // A rich attachment cell often includes assetId, attachmentId AND URL.
       // The explicit logical identity owns that reference. Treating its copied
       // physical identity as ownership of every alias leaks retired handles.
-      (deleting ? candidates : protectedAssets).add(explicitId);
+      if (keep("asset", explicitId)) into.assets.add(explicitId);
       return;
     }
-    for (const child of Object.values(ref)) inspectFields(child, deleting);
+    for (const child of Object.values(ref)) inspectFields(child, into);
   };
-  for (const record of recordHeads) {
-    inspectFields(record.payload.fields ?? record.payload, purged.has(record.nodeId));
+  return { inspectBody, inspectFields };
+};
+
+const forEachConcurrently = async <T>(
+  items: readonly T[],
+  limit: number,
+  run: (item: T) => Promise<void>,
+): Promise<void> => {
+  let next = 0;
+  let failed = false;
+  const worker = async () => {
+    while (!failed && next < items.length) {
+      const item = items[next++] as T;
+      try {
+        await run(item);
+      } catch (error) {
+        failed = true;
+        throw error;
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+};
+
+/**
+ * The retained body of a Doc or a folder readme. Reads are allowed here; all
+ * external DELETEs are durably queued. An unreadable retained Doc must not be
+ * mistaken for an empty document.
+ */
+const readRetainedBody = async (
+  db: BusabaseDatabase,
+  node: BodyNode,
+): Promise<string | undefined> => {
+  const isFolder = node.type === "folder";
+  const key = isFolder ? folderReadmeKey(node.id) : docBodyKey(node.id);
+  try {
+    const head = await storage.getObjectMetadata(key);
+    if (!head) {
+      // A missing live copy does not prove a legacy Doc is empty: the last
+      // merged body is also stored in history and may still be recoverable.
+      // For a folder, a missing object is simply an empty readme — most
+      // folders never had one.
+      const [snapshot] = await db
+        .select({ payload: busabaseCommits.payload })
+        .from(busabaseCommits)
+        .leftJoin(busabaseOperations, eq(busabaseOperations.headCommitId, busabaseCommits.id))
+        .where(
+          and(
+            eq(busabaseCommits.nodeId, node.id),
+            inArray(
+              busabaseCommits.operation,
+              isFolder ? ["folder_update", "node_create"] : ["doc_update", "node_create"],
+            ),
+            or(eq(busabaseOperations.status, "merged"), isNull(busabaseCommits.operationId)),
+          ),
+        )
+        .orderBy(desc(busabaseCommits.createdAt))
+        .limit(1);
+      return typeof snapshot?.payload.body === "string" ? snapshot.payload.body : undefined;
+    }
+    return (await storage.getObject(key)).toString("utf8");
+  } catch {
+    throw new ORPCError("SERVICE_UNAVAILABLE", {
+      message: "Unable to verify retained document attachments. Retry permanent deletion later.",
+    });
+  }
+};
+
+/** Retained Docs and folders, read concurrently, each body handed to `inspect`. */
+const inspectRetainedBodies = (
+  db: BusabaseDatabase,
+  nodes: readonly BodyNode[],
+  inspect: (body: string) => void,
+) =>
+  forEachConcurrently(nodes, BODY_READ_CONCURRENCY, async (node) => {
+    const body = await readRetainedBody(db, node);
+    if (body !== undefined) inspect(body);
+  });
+
+/**
+ * Every live record head matching `where`, one page at a time. Head snapshots
+ * are the durable truth even when an old archive removed its where-used rows.
+ */
+const forEachRecordHead = async (
+  db: BusabaseDatabase,
+  where: SQL | undefined,
+  visit: (payload: Record<string, unknown>) => void,
+): Promise<void> => {
+  let after: string | undefined;
+  for (;;) {
+    const page = await db
+      .select({ id: busabaseRecords.id, payload: busabaseCommits.payload })
+      .from(busabaseRecords)
+      .innerJoin(busabaseBases, eq(busabaseBases.id, busabaseRecords.baseId))
+      .innerJoin(busabaseNodes, eq(busabaseNodes.id, busabaseBases.nodeId))
+      .innerJoin(busabaseCommits, eq(busabaseCommits.id, busabaseRecords.headCommitId))
+      .where(
+        and(
+          isNull(busabaseNodes.deletedAt),
+          where,
+          after === undefined ? undefined : gt(busabaseRecords.id, after),
+        ),
+      )
+      .orderBy(asc(busabaseRecords.id))
+      .limit(RECORD_HEAD_PAGE);
+    for (const row of page) visit(row.payload);
+    if (page.length < RECORD_HEAD_PAGE) return;
+    after = page[page.length - 1]?.id;
+  }
+};
+
+const recordFields = (payload: Record<string, unknown>): unknown => payload.fields ?? payload;
+
+/** How a token appears inside `payload::text`: jsonb escapes strings like JSON does. */
+const jsonTextForm = (value: string): string => JSON.stringify(value).slice(1, -1);
+
+interface PurgePlan {
+  /** Every Asset id the space owns → its attachment id. */
+  ownedAssets: Map<string, string>;
+  /** Owned Assets the purged subtree references. */
+  candidateAssets: Set<string>;
+  /** Attachments the purged subtree references, plus those of the candidate Assets. */
+  candidateAttachments: Map<string, AttachmentRef>;
+  /** Attachments the purged subtree references directly (legacy URLs and keys). */
+  referencedAttachments: Set<string>;
+  /** Retained Docs and folders in the purged subtree. */
+  bodyNodes: BodyNode[];
+  /** Storage keys whose fences this purge must hold. */
+  lockKeys: string[];
+}
+
+/**
+ * Everything the purged subtree references, found without locks: where-used
+ * rows, record heads and Doc/folder bodies inside the subtree only. Nothing
+ * else in the space is read here, and only these files' fences are taken.
+ */
+const planPurge = async (
+  db: BusabaseDatabase,
+  spaceId: string,
+  subtreeIds: string[],
+): Promise<PurgePlan> => {
+  const owned = await db
+    .select({ id: busabaseAssets.id, attachmentId: busabaseAssets.attachmentId })
+    .from(busabaseAssets)
+    .where(eq(busabaseAssets.spaceId, spaceId));
+  const ownedAssets = new Map(owned.map((row) => [row.id, row.attachmentId]));
+
+  const bodyNodes = await db
+    .select({ id: busabaseNodes.id, type: busabaseNodes.type })
+    .from(busabaseNodes)
+    .where(
+      and(
+        eq(busabaseNodes.spaceId, spaceId),
+        anyText(busabaseNodes.id, subtreeIds),
+        inArray(busabaseNodes.type, ["doc", "folder"]),
+        isNull(busabaseNodes.deletedAt),
+      ),
+    );
+
+  const referenced: References = { assets: new Set(), attachments: new Set() };
+  const usages = await db
+    .select({ assetId: busabaseAssetUsages.assetId })
+    .from(busabaseAssetUsages)
+    .where(
+      and(
+        eq(busabaseAssetUsages.spaceId, spaceId),
+        anyText(busabaseAssetUsages.nodeId, subtreeIds),
+      ),
+    );
+  for (const usage of usages) referenced.assets.add(usage.assetId);
+
+  // Legacy references name an attachment by id or storage key. The space's
+  // attachments are loaded only once the subtree has text to check.
+  let matchAttachments: ((body: string) => AttachmentRef[]) | undefined;
+  const ownedAttachments = new Map<string, AttachmentRef>();
+  const loadMatcher = async () => {
+    const rows = await db
+      .select({ id: attachments.id, storageKey: attachments.storageKey })
+      .from(attachments)
+      .where(
+        or(
+          eq(attachments.spaceId, spaceId),
+          inArray(
+            attachments.id,
+            db
+              .select({ id: busabaseAssets.attachmentId })
+              .from(busabaseAssets)
+              .where(eq(busabaseAssets.spaceId, spaceId)),
+          ),
+        ),
+      );
+    for (const row of rows) ownedAttachments.set(row.id, row);
+    matchAttachments = createAttachmentMatcher(rows);
+  };
+  const texts: unknown[] = [];
+  await forEachRecordHead(
+    db,
+    and(eq(busabaseRecords.spaceId, spaceId), anyText(busabaseBases.nodeId, subtreeIds)),
+    (payload) => {
+      texts.push(recordFields(payload));
+    },
+  );
+  const bodies: string[] = [];
+  await inspectRetainedBodies(db, bodyNodes, (body) => {
+    if (body) bodies.push(body);
+  });
+  if (texts.length || bodies.length) await loadMatcher();
+  const inspector = createReferenceInspector({
+    isAsset: (assetId) => ownedAssets.has(assetId),
+    matchAttachments: (body) => matchAttachments?.(body) ?? [],
+  });
+  for (const fields of texts) inspector.inspectFields(fields, referenced);
+  for (const body of bodies) inspector.inspectBody(body, referenced);
+
+  const candidateAssets = new Set([...referenced.assets].filter((id) => ownedAssets.has(id)));
+  const candidateAttachments = new Map<string, AttachmentRef>();
+  for (const id of referenced.attachments) {
+    const row = ownedAttachments.get(id);
+    if (row) candidateAttachments.set(id, row);
+  }
+  const assetAttachmentIds = [...candidateAssets].flatMap((id) => ownedAssets.get(id) ?? []);
+  if (assetAttachmentIds.length) {
+    const rows = await db
+      .select({ id: attachments.id, storageKey: attachments.storageKey })
+      .from(attachments)
+      .where(anyText(attachments.id, assetAttachmentIds));
+    for (const row of rows) candidateAttachments.set(row.id, row);
+  }
+  const textKeys = candidateAssets.size
+    ? await db
+        .select({ key: busabaseAssetTexts.textStorageKey })
+        .from(busabaseAssetTexts)
+        .where(anyText(busabaseAssetTexts.assetId, [...candidateAssets]))
+    : [];
+
+  return {
+    ownedAssets,
+    candidateAssets,
+    candidateAttachments,
+    referencedAttachments: new Set(
+      [...referenced.attachments].filter((id) => candidateAttachments.has(id)),
+    ),
+    bodyNodes,
+    lockKeys: [
+      ...new Set([
+        ...[...candidateAttachments.values()].map((row) => row.storageKey),
+        ...textKeys.map((row) => row.key),
+        ...bodyNodes.map((node) =>
+          node.type === "folder" ? folderReadmeKey(node.id) : docBodyKey(node.id),
+        ),
+      ]),
+    ],
+  };
+};
+
+/**
+ * Which candidates something outside the purged subtree still references:
+ * where-used rows, live record heads, and retained Doc/folder bodies. Archived
+ * content is deliberately included. Only references to candidates are looked
+ * for, and only record heads that mention one are read when there are few.
+ */
+const findProtectedReferences = async (
+  db: BusabaseDatabase,
+  spaceId: string,
+  subtreeIds: string[],
+  plan: PurgePlan,
+): Promise<References> => {
+  const protectedRefs: References = { assets: new Set(), attachments: new Set() };
+  const candidateAssetIds = [...plan.candidateAssets];
+  const attachmentRows = [...plan.candidateAttachments.values()];
+  if (!candidateAssetIds.length && !attachmentRows.length) return protectedRefs;
+
+  if (candidateAssetIds.length) {
+    const usages = await db
+      .select({ assetId: busabaseAssetUsages.assetId })
+      .from(busabaseAssetUsages)
+      .where(
+        and(
+          eq(busabaseAssetUsages.spaceId, spaceId),
+          anyText(busabaseAssetUsages.assetId, candidateAssetIds),
+          not(anyText(busabaseAssetUsages.nodeId, subtreeIds)),
+        ),
+      );
+    for (const usage of usages) protectedRefs.assets.add(usage.assetId);
   }
 
-  const docs = await db
-    .select({ id: busabaseNodes.id })
+  const inspector = createReferenceInspector({
+    isAsset: (assetId) => plan.ownedAssets.has(assetId),
+    matchAttachments: createAttachmentMatcher(attachmentRows),
+    keep: (kind, id) =>
+      kind === "asset" ? plan.candidateAssets.has(id) : plan.candidateAttachments.has(id),
+  });
+
+  const tokens = [
+    ...candidateAssetIds,
+    ...attachmentRows.flatMap((row) => [row.id, row.storageKey]),
+  ].map(jsonTextForm);
+  const mentionsCandidate =
+    tokens.length <= PREFILTER_TOKEN_LIMIT
+      ? sql`exists (select 1 from unnest(${sql.param(tokens)}::text[]) as needle(value) where strpos(${busabaseCommits.payload}::text, needle.value) > 0)`
+      : undefined;
+  await forEachRecordHead(
+    db,
+    and(
+      eq(busabaseRecords.spaceId, spaceId),
+      not(anyText(busabaseBases.nodeId, subtreeIds)),
+      mentionsCandidate,
+    ),
+    (payload) => inspector.inspectFields(recordFields(payload), protectedRefs),
+  );
+
+  const retained = await db
+    .select({ id: busabaseNodes.id, type: busabaseNodes.type })
     .from(busabaseNodes)
     .where(
       and(
         eq(busabaseNodes.spaceId, spaceId),
-        eq(busabaseNodes.type, "doc"),
+        inArray(busabaseNodes.type, ["doc", "folder"]),
         isNull(busabaseNodes.deletedAt),
+        not(anyText(busabaseNodes.id, subtreeIds)),
       ),
     );
-  const folders = await db
-    .select({ id: busabaseNodes.id })
-    .from(busabaseNodes)
-    .where(
-      and(
-        eq(busabaseNodes.spaceId, spaceId),
-        eq(busabaseNodes.type, "folder"),
-        isNull(busabaseNodes.deletedAt),
-      ),
-    );
-  // Reads are allowed here; all external DELETEs are durably queued below.
-  // An unreadable retained Doc must not be mistaken for an empty document.
-  for (const doc of docs) {
-    try {
-      const head = await storage.getObjectMetadata(docBodyKey(doc.id));
-      if (!head) {
-        // A missing live copy does not prove a legacy Doc is empty. The last
-        // merged body is also stored in history and may still be recoverable.
-        const [snapshot] = await db
-          .select({ payload: busabaseCommits.payload })
-          .from(busabaseCommits)
-          .leftJoin(busabaseOperations, eq(busabaseOperations.headCommitId, busabaseCommits.id))
-          .where(
-            and(
-              eq(busabaseCommits.nodeId, doc.id),
-              inArray(busabaseCommits.operation, ["doc_update", "node_create"]),
-              or(eq(busabaseOperations.status, "merged"), isNull(busabaseCommits.operationId)),
-            ),
-          )
-          .orderBy(desc(busabaseCommits.createdAt))
-          .limit(1);
-        if (typeof snapshot?.payload.body === "string")
-          inspectBody(snapshot.payload.body, purged.has(doc.id));
-        continue;
-      }
-      inspectBody(
-        (await storage.getObject(docBodyKey(doc.id))).toString("utf8"),
-        purged.has(doc.id),
-      );
-    } catch {
-      throw new ORPCError("SERVICE_UNAVAILABLE", {
-        message: "Unable to verify retained document attachments. Retry permanent deletion later.",
-      });
-    }
+  await inspectRetainedBodies(db, retained, (body) => inspector.inspectBody(body, protectedRefs));
+  return protectedRefs;
+};
+
+/**
+ * Permanent deletion owns only assets evidenced by its subtree. It never sweeps
+ * unrelated, unmounted library uploads. Canonical record heads and Doc bodies
+ * supplement the reverse index for legacy records/URLs that predate that index.
+ * Archived content is deliberately included in both protection scans.
+ *
+ * Cost follows the purged subtree, not the space: only the subtree's content
+ * is read to find candidates, only the candidates' fences are taken, and the
+ * rest of the space is read only when there is a candidate to protect.
+ */
+export const releasePurgedNodeAssets = async (
+  db: BusabaseDatabase,
+  subtreeIds: string[],
+): Promise<void> => {
+  const spaceId = getContextSpaceId();
+  // Discover without row locks, then take the physical fences in the same
+  // lexical order as uploads and derived-text writes. Taking Asset row locks
+  // first would deadlock a writer holding a fence while inserting its FK.
+  const plan = await planPurge(db, spaceId, subtreeIds);
+  const lockedKeys = new Set(plan.lockKeys);
+  return withStorageKeyLocks(db, [...lockedKeys], (tx) =>
+    releaseWithinFences(tx, spaceId, subtreeIds, plan, lockedKeys),
+  );
+};
+
+const releaseWithinFences = async (
+  db: BusabaseDatabase,
+  spaceId: string,
+  subtreeIds: string[],
+  plan: PurgePlan,
+  lockedKeys: ReadonlySet<string>,
+): Promise<void> => {
+  const candidateAssetIds = [...plan.candidateAssets];
+  const lockedAssets = candidateAssetIds.length
+    ? await db
+        .select()
+        .from(busabaseAssets)
+        .where(
+          and(eq(busabaseAssets.spaceId, spaceId), anyText(busabaseAssets.id, candidateAssetIds)),
+        )
+        .orderBy(busabaseAssets.id)
+        .for("update")
+    : [];
+  // A candidate re-pointed at other bytes since discovery would be released
+  // without its fence held.
+  const lockedAttachmentIds = [...new Set(lockedAssets.map((asset) => asset.attachmentId))];
+  const lockedAttachments = lockedAttachmentIds.length
+    ? await db
+        .select({ id: attachments.id, storageKey: attachments.storageKey })
+        .from(attachments)
+        .where(anyText(attachments.id, lockedAttachmentIds))
+    : [];
+  if (lockedAttachments.some((row) => !lockedKeys.has(row.storageKey))) {
+    throw new ORPCError("CONFLICT", {
+      message: "Files changed while preparing permanent deletion. Retry the operation.",
+    });
   }
-  // Same protection scan for folder readmes. A missing object is an empty
-  // readme, not a failure — most folders never had one.
-  for (const folder of folders) {
-    try {
-      const head = await storage.getObjectMetadata(folderReadmeKey(folder.id));
-      if (!head) {
-        const [snapshot] = await db
-          .select({ payload: busabaseCommits.payload })
-          .from(busabaseCommits)
-          .leftJoin(busabaseOperations, eq(busabaseOperations.headCommitId, busabaseCommits.id))
-          .where(
-            and(
-              eq(busabaseCommits.nodeId, folder.id),
-              inArray(busabaseCommits.operation, ["folder_update", "node_create"]),
-              or(eq(busabaseOperations.status, "merged"), isNull(busabaseCommits.operationId)),
-            ),
-          )
-          .orderBy(desc(busabaseCommits.createdAt))
-          .limit(1);
-        if (typeof snapshot?.payload.body === "string")
-          inspectBody(snapshot.payload.body, purged.has(folder.id));
-        continue;
-      }
-      inspectBody(
-        (await storage.getObject(folderReadmeKey(folder.id))).toString("utf8"),
-        purged.has(folder.id),
-      );
-    } catch {
-      throw new ORPCError("SERVICE_UNAVAILABLE", {
-        message: "Unable to verify retained document attachments. Retry permanent deletion later.",
-      });
-    }
-  }
+
+  const protectedRefs = await findProtectedReferences(db, spaceId, subtreeIds, plan);
 
   await db
     .delete(busabaseAssetUsages)
     .where(
       and(
         eq(busabaseAssetUsages.spaceId, spaceId),
-        inArray(busabaseAssetUsages.nodeId, subtreeIds),
+        anyText(busabaseAssetUsages.nodeId, subtreeIds),
       ),
     );
-  const removableAssets = ownedAssets.filter(
-    (asset) => candidates.has(asset.id) && !asset.retainInLibrary && !protectedAssets.has(asset.id),
+  const removableAssets = lockedAssets.filter(
+    (asset) => !asset.retainInLibrary && !protectedRefs.assets.has(asset.id),
   );
-  if (removableAssets.length)
-    await db
-      .select({ id: busabaseAssets.id })
-      .from(busabaseAssets)
-      .where(
-        inArray(
-          busabaseAssets.id,
-          removableAssets.map((asset) => asset.id),
-        ),
-      )
-      .orderBy(busabaseAssets.id)
-      .for("update");
   // Recheck globally: ids are tenant-unique, but malformed legacy cross-space
   // usage rows must still protect their bytes rather than cascade silently.
-  const removableIds: string[] = [];
-  for (const asset of removableAssets) {
-    const [remaining] = await db
-      .select({ id: busabaseAssetUsages.id })
-      .from(busabaseAssetUsages)
-      .where(eq(busabaseAssetUsages.assetId, asset.id))
-      .limit(1);
-    if (!remaining) removableIds.push(asset.id);
-  }
+  const stillUsed = removableAssets.length
+    ? await db
+        .selectDistinct({ assetId: busabaseAssetUsages.assetId })
+        .from(busabaseAssetUsages)
+        .where(
+          anyText(
+            busabaseAssetUsages.assetId,
+            removableAssets.map((asset) => asset.id),
+          ),
+        )
+    : [];
+  const stillUsedIds = new Set(stillUsed.map((row) => row.assetId));
+  const removed = removableAssets.filter((asset) => !stillUsedIds.has(asset.id));
+  const removableIds = removed.map((asset) => asset.id);
 
   const derived = removableIds.length
     ? await db
         .select()
         .from(busabaseAssetTexts)
-        .where(inArray(busabaseAssetTexts.assetId, removableIds))
+        .where(anyText(busabaseAssetTexts.assetId, removableIds))
     : [];
   if (derived.some((row) => !lockedKeys.has(row.textStorageKey))) {
     throw new ORPCError("CONFLICT", {
       message: "File text changed while preparing permanent deletion. Retry the operation.",
     });
   }
-  for (const asset of ownedAssets) {
-    if (removableIds.includes(asset.id)) candidateAttachments.add(asset.attachmentId);
-  }
+  const releasedAttachments = new Set(plan.referencedAttachments);
+  for (const asset of removed) releasedAttachments.add(asset.attachmentId);
   if (removableIds.length)
-    await db.delete(busabaseAssets).where(inArray(busabaseAssets.id, removableIds));
+    await db.delete(busabaseAssets).where(anyText(busabaseAssets.id, removableIds));
 
   const cleanup = new Map<
     string,
@@ -322,14 +588,21 @@ export const releasePurgedNodeAssets = async (
       spaceId: string;
     }
   >();
-  for (const text of derived) {
-    if (text.writtenBy === "auto") continue;
-    const [remaining] = await db
-      .select({ id: busabaseAssetTexts.id })
-      .from(busabaseAssetTexts)
-      .where(eq(busabaseAssetTexts.textStorageKey, text.textStorageKey))
-      .limit(1);
-    if (!remaining)
+  const ownTexts = derived.filter((text) => text.writtenBy !== "auto");
+  const textStillShared = ownTexts.length
+    ? await db
+        .selectDistinct({ key: busabaseAssetTexts.textStorageKey })
+        .from(busabaseAssetTexts)
+        .where(
+          anyText(
+            busabaseAssetTexts.textStorageKey,
+            ownTexts.map((text) => text.textStorageKey),
+          ),
+        )
+    : [];
+  const sharedTextKeys = new Set(textStillShared.map((row) => row.key));
+  for (const text of ownTexts) {
+    if (!sharedTextKeys.has(text.textStorageKey))
       cleanup.set(text.textStorageKey, {
         storageKey: text.textStorageKey,
         sizeBytes: text.byteCount,
@@ -340,11 +613,15 @@ export const releasePurgedNodeAssets = async (
 
   // Group by physical identity and acquire fences in a stable order. A new
   // Asset adoption shares this fence and is rechecked before registry removal.
+  const keyById = new Map<string, string>();
+  for (const row of [...plan.candidateAttachments.values(), ...lockedAttachments]) {
+    keyById.set(row.id, row.storageKey);
+  }
   const keys = [
     ...new Set(
-      ownedAttachments
-        .filter((row) => candidateAttachments.has(row.id) && !protectedAttachments.has(row.id))
-        .map((row) => row.storageKey),
+      [...releasedAttachments]
+        .filter((id) => !protectedRefs.attachments.has(id))
+        .flatMap((id) => keyById.get(id) ?? []),
     ),
   ].sort();
   for (const key of keys) {
@@ -356,7 +633,7 @@ export const releasePurgedNodeAssets = async (
         .for("update");
       const removeIds: string[] = [];
       for (const attachment of rows) {
-        if (!candidateAttachments.has(attachment.id) || protectedAttachments.has(attachment.id))
+        if (!releasedAttachments.has(attachment.id) || protectedRefs.attachments.has(attachment.id))
           continue;
         const remainingAssets = await tx
           .select({ spaceId: busabaseAssets.spaceId })
@@ -385,23 +662,14 @@ export const releasePurgedNodeAssets = async (
       if (removeIds.length) await tx.delete(attachments).where(inArray(attachments.id, removeIds));
     });
   }
-  for (const doc of docs) {
-    if (purged.has(doc.id))
-      cleanup.set(docBodyKey(doc.id), {
-        storageKey: docBodyKey(doc.id),
-        sizeBytes: 0,
-        kind: "doc",
-        spaceId,
-      });
-  }
-  for (const folder of folders) {
-    if (purged.has(folder.id))
-      cleanup.set(folderReadmeKey(folder.id), {
-        storageKey: folderReadmeKey(folder.id),
-        sizeBytes: 0,
-        kind: "folder",
-        spaceId,
-      });
+  for (const node of plan.bodyNodes) {
+    const storageKey = node.type === "folder" ? folderReadmeKey(node.id) : docBodyKey(node.id);
+    cleanup.set(storageKey, {
+      storageKey,
+      sizeBytes: 0,
+      kind: node.type === "folder" ? "folder" : "doc",
+      spaceId,
+    });
   }
   for (const job of [...cleanup.values()].sort((a, b) =>
     a.storageKey.localeCompare(b.storageKey),

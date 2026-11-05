@@ -1,4 +1,8 @@
-import { isViewFilterGroup, type ViewFilterConditionVO } from "busabase-contract/types";
+import {
+  isViewFilterGroup,
+  mapViewFilters,
+  type ViewFilterConditionVO,
+} from "busabase-contract/types";
 import "server-only";
 
 import { ORPCError } from "@orpc/server";
@@ -13,10 +17,15 @@ import { formulaStaleConflict } from "../../../../logic/formula-merge-conflict";
 import { id, requireBaseId } from "../../../../logic/kernel";
 import { mergeFieldHelpOptions } from "../../utils/field-help-options";
 import { PRIMARY_FIELD_DELETE_MESSAGE } from "../../utils/primary-field";
+import { assertFieldDeletable } from "../field-deletion";
 import { applyCreatedFieldVisibility } from "../field-visibility";
 import { assertFormulaMergeValid, recalculateFormulaRecords } from "../formula-recalculation";
 import { getPrimaryFieldIdFromDb } from "../queries";
-import { pairReverseRelationFields, resolveReverseRelationOptions } from "../reverse-relations";
+import {
+  assertForwardFieldDeletableOrThrow,
+  pairReverseRelationFields,
+  resolveReverseRelationOptions,
+} from "../reverse-relations";
 
 export const mergeBaseAddField = async (ctx: MergeCtx, item: OperationPO, headCommit: CommitPO) => {
   const { db, timestamp } = ctx;
@@ -96,15 +105,24 @@ export const mergeBaseDeleteField = async (
     throw new ORPCError("BAD_REQUEST", { message: PRIMARY_FIELD_DELETE_MESSAGE });
   }
   const [deleting] = await db
-    .select({ slug: busabaseBaseFields.slug })
+    .select()
     .from(busabaseBaseFields)
     .where(
       and(eq(busabaseBaseFields.id, fieldData.fieldId), eq(busabaseBaseFields.baseId, baseId)),
     );
+  if (!deleting) {
+    throw new ORPCError("NOT_FOUND", { message: `Field not found: ${fieldData.fieldId}` });
+  }
+  await assertFieldDeletable(db, deleting);
+  if (deleting.type === "relation") {
+    await assertForwardFieldDeletableOrThrow(db, deleting);
+  }
   await db
     .update(busabaseBaseFields)
     .set({ deletedAt: timestamp })
-    .where(eq(busabaseBaseFields.id, fieldData.fieldId));
+    .where(
+      and(eq(busabaseBaseFields.id, fieldData.fieldId), eq(busabaseBaseFields.baseId, baseId)),
+    );
 
   // Soft-delete the projected field values so they leave search/lookup results.
   const { busabaseFieldValues } = await import("../../../../db/schema");
@@ -144,12 +162,17 @@ export const mergeBaseDeleteField = async (
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const updatedConfig: any = {
         ...config,
-        // Keep grouped references as nonmatching leaves: removing an AND child
-        // would silently broaden the saved expression. Legacy flat cleanup stays unchanged.
+        // A deleted computed column must not broaden a saved view by removing its filter.
+        // Keep its stable reference as a nonmatching leaf until restored or repaired.
+        // Existing non-lookup flat-filter cleanup stays unchanged.
         filters:
-          config.filterConjunction || config.filters?.some(isViewFilterGroup)
-            ? config.filters
-            : config.filters?.filter((f) => isViewFilterGroup(f) || !matchesDeleted(f)),
+          deleting.type === "lookup" || deleting.type === "formula"
+            ? mapViewFilters(config.filters ?? [], (filter) =>
+                matchesDeleted(filter) ? { ...filter, fieldId: deletedFieldId } : filter,
+              )
+            : config.filterConjunction || config.filters?.some(isViewFilterGroup)
+              ? config.filters
+              : config.filters?.filter((f) => isViewFilterGroup(f) || !matchesDeleted(f)),
         sorts: config.sorts?.filter((s) => !matchesDeleted(s)),
         visibleFieldSlugs: config.visibleFieldSlugs?.filter((s) => s !== slug),
         fieldOrderSlugs: config.fieldOrderSlugs?.filter((s) => s !== slug),
@@ -165,7 +188,9 @@ export const mergeBaseDeleteField = async (
     }
   }
 
-  if (deleting) {
+  // Formula deletion was rejected above if it had any downstream calculation.
+  // Its removed projection needs no record backfill, including for invalid formulas.
+  if (deleting.type !== "formula") {
     await recalculateFormulaRecords(ctx, baseId, deleting.slug, item.id);
   }
   await db

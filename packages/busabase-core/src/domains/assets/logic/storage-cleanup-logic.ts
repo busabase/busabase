@@ -1,7 +1,7 @@
 import "server-only";
 
 import { ORPCError } from "@orpc/server";
-import { and, eq, lte } from "drizzle-orm";
+import { and, eq, inArray, lte } from "drizzle-orm";
 import { ATTACHMENT_UPLOAD_EXPIRES_IN_SECONDS } from "open-domains/attachments/logic";
 import { attachments } from "open-domains/attachments/schema";
 import { storage } from "openlib/storage";
@@ -100,7 +100,7 @@ export const enqueueStorageCleanup = async (
   });
 };
 
-const objectIsStillReferenced = async (db: Db, storageKey: string): Promise<boolean> => {
+export const objectIsStillReferenced = async (db: Db, storageKey: string): Promise<boolean> => {
   const [attachment] = await db
     .select({ id: attachments.id })
     .from(attachments)
@@ -132,11 +132,23 @@ const isMissingObject = (error: unknown): boolean => {
 };
 
 /**
- * Process exact keys, never bucket prefixes. A row lock is held across deletion
- * so workers cannot concurrently collect the same key. A process crash rolls
- * back the claim and leaves the durable pending task for another worker.
- * The already-committed retirement fence prevents late or in-flight uploads
- * from reviving the key, even if object deletion outlives the DB connection.
+ * How long a worker owns a claimed job. Deletion runs outside any transaction,
+ * so a worker that crashes or stalls mid-delete holds no lock; its claim simply
+ * lapses and another worker retries the (idempotent) delete.
+ */
+const CLEANUP_CLAIM_LEASE_MS = 3 * 60 * 1000;
+
+/**
+ * Process exact keys, never bucket prefixes.
+ *
+ * The object delete is network I/O, so it never runs while a row lock is held:
+ * registration and purge take this key's row lock with a blocking
+ * `FOR UPDATE`, and one stalled delete would queue them (and their pooled
+ * connections) behind it. Instead a short transaction claims the job by
+ * committing `processing` with a lease in `nextAttemptAt`, the delete runs
+ * unlocked, and a second short transaction records the outcome only if the
+ * claim is still ours. Committed `processing` is a retired state, so the
+ * registration fence keeps rejecting the key throughout.
  */
 export const processStorageCleanupJobs = async (
   db: Db,
@@ -146,13 +158,14 @@ export const processStorageCleanupJobs = async (
   const now = options.now ?? new Date();
   const limit = Math.min(Math.max(options.limit ?? 25, 0), 100);
   for (let index = 0; index < limit; index += 1) {
-    const outcome = await db.transaction(async (tx) => {
+    const claim = await db.transaction(async (tx) => {
       const [job] = await tx
         .select()
         .from(busabaseStorageCleanupJobs)
         .where(
           and(
-            eq(busabaseStorageCleanupJobs.state, "pending"),
+            // `processing` rows are due again only once their claim lease lapsed.
+            inArray(busabaseStorageCleanupJobs.state, ["pending", "processing"]),
             lte(busabaseStorageCleanupJobs.nextAttemptAt, now),
           ),
         )
@@ -165,53 +178,76 @@ export const processStorageCleanupJobs = async (
         await tx
           .update(busabaseStorageCleanupJobs)
           .set({
+            state: "pending",
             nextAttemptAt: new Date(now.getTime() + 60 * 60 * 1000),
             lastError: "Object remains referenced; deletion deferred.",
             updatedAt: now,
           })
           .where(predicate);
-        return "retained" as const;
+        return { outcome: "retained" as const };
       }
       const attempts = job.attempts + 1;
       await tx
         .update(busabaseStorageCleanupJobs)
-        .set({ state: "processing", attempts, updatedAt: now })
+        .set({
+          state: "processing",
+          attempts,
+          nextAttemptAt: new Date(now.getTime() + CLEANUP_CLAIM_LEASE_MS),
+          updatedAt: now,
+        })
         .where(predicate);
-      try {
-        try {
-          await storage.deleteObject(job.storageKey);
-        } catch (error) {
-          if (!isMissingObject(error)) throw error;
-        }
-        const awaitingFinalSweep = job.finalSweepAt !== null && now < job.finalSweepAt;
-        await tx
-          .update(busabaseStorageCleanupJobs)
-          .set({
-            state: awaitingFinalSweep ? "pending" : "completed",
-            completedAt: awaitingFinalSweep ? null : now,
-            nextAttemptAt: awaitingFinalSweep ? (job.finalSweepAt ?? now) : now,
-            lastError: null,
-            updatedAt: now,
-          })
-          .where(predicate);
-        return "deleted" as const;
-      } catch (error) {
-        const delayMs = Math.min(60 * 60 * 1000, 30_000 * 2 ** Math.min(attempts - 1, 7));
-        await tx
-          .update(busabaseStorageCleanupJobs)
-          .set({
-            state: "pending",
-            nextAttemptAt: new Date(now.getTime() + delayMs),
-            lastError: (error instanceof Error ? error.message : String(error)).slice(0, 2000),
-            updatedAt: now,
-          })
-          .where(predicate);
-        return "failed" as const;
-      }
+      return { outcome: "claimed" as const, job, attempts };
     });
-    if (outcome === null) break;
+    if (claim === null) break;
     result.processed += 1;
-    result[outcome] += 1;
+    if (claim.outcome === "retained") {
+      result.retained += 1;
+      continue;
+    }
+
+    const { job, attempts } = claim;
+    let deleteError: unknown;
+    try {
+      await storage.deleteObject(job.storageKey);
+    } catch (error) {
+      if (!isMissingObject(error)) deleteError = error;
+    }
+    // Only the current claim may record an outcome; a worker whose lease lapsed
+    // and was re-claimed must not overwrite the newer attempt.
+    const stillClaimed = and(
+      eq(busabaseStorageCleanupJobs.storageKey, job.storageKey),
+      eq(busabaseStorageCleanupJobs.state, "processing"),
+      eq(busabaseStorageCleanupJobs.attempts, attempts),
+    );
+    if (deleteError === undefined) {
+      const awaitingFinalSweep = job.finalSweepAt !== null && now < job.finalSweepAt;
+      await db
+        .update(busabaseStorageCleanupJobs)
+        .set({
+          state: awaitingFinalSweep ? "pending" : "completed",
+          completedAt: awaitingFinalSweep ? null : now,
+          nextAttemptAt: awaitingFinalSweep ? (job.finalSweepAt ?? now) : now,
+          lastError: null,
+          updatedAt: now,
+        })
+        .where(stillClaimed);
+      result.deleted += 1;
+    } else {
+      const delayMs = Math.min(60 * 60 * 1000, 30_000 * 2 ** Math.min(attempts - 1, 7));
+      await db
+        .update(busabaseStorageCleanupJobs)
+        .set({
+          state: "pending",
+          nextAttemptAt: new Date(now.getTime() + delayMs),
+          lastError: (deleteError instanceof Error
+            ? deleteError.message
+            : String(deleteError)
+          ).slice(0, 2000),
+          updatedAt: now,
+        })
+        .where(stillClaimed);
+      result.failed += 1;
+    }
   }
   return result;
 };

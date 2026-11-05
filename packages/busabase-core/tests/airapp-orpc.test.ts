@@ -4,6 +4,7 @@ import path from "node:path";
 import { createRouterClient } from "@orpc/server";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runWithBusabaseContext } from "../src/context";
+import { resolveSiteBundle } from "../src/domains/airapp/utils/site-bundle";
 import { busabaseRouter } from "../src/router";
 
 /**
@@ -22,7 +23,14 @@ type AirAppClient = ReturnType<
 >;
 
 const MIGRATIONS_CWD = path.resolve(__dirname, "../../../apps/busabase");
-const AIRAPP_SEED_PATHS = ["package.json", "server.js", "index.html", "style.css", "client.js"];
+const AIRAPP_SEED_PATHS = [
+  "package.json",
+  "server.js",
+  "airapp.json",
+  "public/index.html",
+  "public/style.css",
+  "public/client.js",
+];
 
 describe("AirApp API — oRPC integration", () => {
   let dataDir = "";
@@ -84,6 +92,24 @@ describe("AirApp API — oRPC integration", () => {
     expect(created.node.description).toBe("A tiny Hono server.");
     expect(created.entryFile).toBe("package.json");
     expect(created.files.map((file) => file.path).sort()).toEqual([...AIRAPP_SEED_PATHS].sort());
+    const storedFiles = await Promise.all(
+      created.files.map(async (file) => {
+        const stored = await client.fileTrees.readFile({
+          type: "airapp",
+          nodeId: created.node.id,
+          filePath: file.path,
+        });
+        return { path: file.path, content: stored.content };
+      }),
+    );
+    const site = await resolveSiteBundle(storedFiles);
+    expect(site.ok).toBe(true);
+    if (!site.ok) throw new Error(JSON.stringify(site.blockers));
+    expect(site.bundle.assets.map((file) => file.path).sort()).toEqual([
+      "/client.js",
+      "/index.html",
+      "/style.css",
+    ]);
   });
 
   it("replaces the default seed files with caller-supplied files when mergeMode is replace", async () => {
@@ -231,7 +257,7 @@ describe("AirApp API — oRPC integration", () => {
     const current = await client.fileTrees.readFile({
       type: "airapp",
       nodeId: created.node.id,
-      filePath: "client.js",
+      filePath: "public/client.js",
     });
 
     const changeRequest = await client.fileTrees.createChangeRequest({
@@ -242,7 +268,7 @@ describe("AirApp API — oRPC integration", () => {
       operations: [
         {
           kind: "update",
-          path: "client.js",
+          path: "public/client.js",
           content: `${current.content}\nconsole.log("edited");\n`,
           baseContentHash: current.contentHash,
         },
@@ -255,7 +281,7 @@ describe("AirApp API — oRPC integration", () => {
     const updated = await client.fileTrees.readFile({
       type: "airapp",
       nodeId: created.node.id,
-      filePath: "client.js",
+      filePath: "public/client.js",
     });
     expect(updated.content).toContain('console.log("edited");');
   });
@@ -265,7 +291,7 @@ describe("AirApp API — oRPC integration", () => {
       client.fileTrees.createChangeRequest({
         type: "airapp",
         nodeId: "pnd_missing",
-        operations: [{ kind: "update", path: "client.js", content: "x" }],
+        operations: [{ kind: "update", path: "public/client.js", content: "x" }],
       }),
     ).rejects.toThrow(/AirApp not found/);
   });

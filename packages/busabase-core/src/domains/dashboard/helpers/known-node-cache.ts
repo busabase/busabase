@@ -395,6 +395,13 @@ const clearForScope = (scope: string): void => {
 };
 
 export interface KnownNodeCache {
+  /**
+   * The space + viewer scope this facade is bound to (see `knownNodeCacheScope`).
+   * Exposed so other per-member, per-space browser state — Home's dismissed
+   * welcome/getting-started cards — keys itself identically instead of
+   * re-deriving the formula from props it does not have.
+   */
+  readonly scope: string;
   merge: (nodes: KnownNode[]) => void;
   markVisited: (id: string, at: string) => void;
   recordVisit: (node: KnownNode, at: string) => void;
@@ -422,6 +429,7 @@ export const knownNodeCacheScope = (cacheSpaceKey: string, currentUserId?: strin
  * node names or bypass the current workspace's ACL boundary.
  */
 export const createKnownNodeCache = (scope: string): KnownNodeCache => ({
+  scope,
   merge: (nodes) => mergeForScope(scope, nodes),
   markVisited: (id, at) => markVisitedForScope(scope, id, at),
   recordVisit: (node, at) => recordVisitForScope(scope, node, at),
