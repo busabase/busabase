@@ -23,16 +23,12 @@ async function capture(page: Page, info: TestInfo, name: string) {
   const detail = page.getByTestId("agent-detail-view");
   const reply = detail.locator(".is-assistant").last();
   if (await reply.count()) {
-    const snapshot = detail
-      .getByTestId("agent-context-resource")
-      .last()
-      .locator("details[open] pre");
+    const snapshot = page.getByRole("dialog").getByRole("region");
     if (await snapshot.count()) {
       await snapshot.evaluate((element) => {
         element.scrollTop = element.scrollHeight;
       });
-    }
-    await reply.scrollIntoViewIfNeeded();
+    } else await reply.scrollIntoViewIfNeeded();
   }
   const path = info.outputPath(`${name}.png`);
   await page.screenshot({ path });
@@ -169,11 +165,16 @@ test("real Buda reads a Doc reference, a fresh reference-only turn, and durable 
     expect(first.text).not.toContain(firstCode);
     await expectExactReply(detail, firstCode);
     const firstMessage = detail.locator(".is-user").last();
-    await expect(firstMessage.getByRole("link", { name, exact: true })).toBeVisible();
     await expect(firstMessage.getByText(readCode, { exact: true })).toBeVisible();
-    await firstMessage.locator("summary").click();
-    await expect(firstMessage).toContainText(firstCode);
+    await firstMessage.getByRole("button", { name, exact: true }).click();
+    const preview = page.getByRole("dialog", { name, exact: true });
+    await expect(preview.getByRole("link", { name: `Open ${name}`, exact: true })).toHaveAttribute(
+      "href",
+      `/dashboard/local/doc/${doc.node.id}`,
+    );
+    await expect(preview.getByRole("region")).toContainText(firstCode);
     await capture(page, info, "02-real-model-answers-code-present-only-in-reference");
+    await preview.getByRole("button", { name: "Close", exact: true }).click();
 
     const nextCode = marker();
     await json(
@@ -192,15 +193,19 @@ test("real Buda reads a Doc reference, a fresh reference-only turn, and durable 
     expect(next.text).toBe("");
     await expectExactReply(detail, nextCode);
     const nextMessage = detail.locator(".is-user").last();
-    await nextMessage.locator("summary").click();
-    await expect(nextMessage).toContainText(nextCode);
-    await expect(nextMessage).not.toContainText(firstCode);
-    await expect(detail.locator(".is-user").first()).toContainText(firstCode);
+    await nextMessage.getByRole("button", { name, exact: true }).click();
+    await expect(preview.getByRole("region")).toContainText(nextCode);
+    await expect(preview.getByRole("region")).not.toContainText(firstCode);
     await capture(
       page,
       info,
       "03-reference-only-turn-reads-updated-content-with-old-snapshot-preserved",
     );
+    await preview.getByRole("button", { name: "Close", exact: true }).click();
+    await detail.locator(".is-user").first().getByRole("button", { name, exact: true }).click();
+    await expect(preview.getByRole("region")).toContainText(firstCode);
+    await expect(preview.getByRole("region")).not.toContainText(nextCode);
+    await preview.getByRole("button", { name: "Close", exact: true }).click();
 
     await page.reload();
     await expect(page.getByRole("heading", { name, exact: true }).first()).toBeVisible();
@@ -215,12 +220,12 @@ test("real Buda reads a Doc reference, a fresh reference-only turn, and durable 
     await expect(detail.locator(".is-user")).toHaveCount(2);
     for (const [index, code] of [firstCode, nextCode].entries()) {
       const message = detail.locator(".is-user").nth(index);
-      await expect(message.getByRole("link", { name, exact: true })).toHaveAttribute(
-        "href",
-        `/dashboard/local/doc/${doc.node.id}`,
-      );
-      await message.locator("summary").click();
-      await expect(message).toContainText(code);
+      await message.getByRole("button", { name, exact: true }).click();
+      await expect(
+        preview.getByRole("link", { name: `Open ${name}`, exact: true }),
+      ).toHaveAttribute("href", `/dashboard/local/doc/${doc.node.id}`);
+      await expect(preview.getByRole("region")).toContainText(code);
+      await preview.getByRole("button", { name: "Close", exact: true }).click();
     }
     await expect(
       detail.getByPlaceholder("Message Buda AI Agent…").locator("xpath=ancestor::form"),
@@ -304,15 +309,21 @@ test("real Buda reads a Base record sample while messages keep the original user
     const message = detail.locator(".is-user").last();
     await expect(message.getByText(question, { exact: true })).toBeVisible();
     await expect(message).not.toContainText("Target: the Busabase");
-    await expect(message.getByRole("link", { name, exact: true })).toBeVisible();
-    await message.locator("summary").click();
-    await expect(message).toContainText("## Fields");
-    await expect(message).toContainText("## Example records");
-    await expect(message).toContainText("A sample of at most 20 records from the whole Base");
-    await expect(message).toContainText(code);
+    await message.getByRole("button", { name, exact: true }).click();
+    const preview = page.getByRole("dialog", { name, exact: true });
+    await expect(preview.getByRole("link", { name: `Open ${name}`, exact: true })).toHaveAttribute(
+      "href",
+      `/dashboard/local/base/${base.nodeId}`,
+    );
+    const snapshot = preview.getByRole("region");
+    await expect(snapshot).toContainText("## Fields");
+    await expect(snapshot).toContainText("## Example records");
+    await expect(snapshot).toContainText("A sample of at most 20 records from the whole Base");
+    await expect(snapshot).toContainText(code);
     await capture(page, info, "08-real-model-reads-field-value-only-present-in-base-snapshot");
     await page.setViewportSize({ width: 390, height: 844 });
     await capture(page, info, "09-reference-card-and-real-answer-on-narrow-screen");
+    await preview.getByRole("button", { name: "Close", exact: true }).click();
   } finally {
     await owned.close();
   }

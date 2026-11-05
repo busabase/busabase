@@ -33,6 +33,8 @@ import { buildDashboardUrl, getDashboardBasePath } from "~/lib/dashboard-routes"
 interface DashboardClientProps {
   /** Server-resolved; see `dashboard-page.tsx`. */
   availableAirAppEngines?: AirAppRunnerKind[];
+  /** Engines an operator could turn on here. Shown disabled, with that reason. */
+  notConfiguredAirAppEngines?: AirAppRunnerKind[];
   initialPath?: string;
   localUserName?: string | null;
   chromeless?: boolean;
@@ -182,6 +184,7 @@ export function DashboardClient({
   initialPath = "/home",
   localUserName,
   availableAirAppEngines,
+  notConfiguredAirAppEngines,
   chromeless,
   readOnlyChangeRequestPreview,
 }: DashboardClientProps) {
@@ -193,6 +196,7 @@ export function DashboardClient({
       <Suspense fallback={<DashboardInitialShellSkeleton chromeless={chromeless} />}>
         <DashboardClientContent
           availableAirAppEngines={availableAirAppEngines}
+          notConfiguredAirAppEngines={notConfiguredAirAppEngines}
           initialPath={initialPath}
           localUserName={localUserName}
           chromeless={chromeless}
@@ -207,6 +211,7 @@ function DashboardClientContent({
   initialPath = "/home",
   localUserName,
   availableAirAppEngines,
+  notConfiguredAirAppEngines,
   chromeless: chromelessOverride,
   readOnlyChangeRequestPreview = false,
 }: DashboardClientProps) {
@@ -326,6 +331,7 @@ function DashboardClientContent({
         // install dialog's Agent install tab so both name one local endpoint.
         agentIntegration={AGENT_INTEGRATION}
         availableAirAppEngines={availableAirAppEngines}
+        notConfiguredAirAppEngines={notConfiguredAirAppEngines}
         apiBasePath="/api/rpc"
         auditEvents={auditEvents}
         cacheSpaceKey={CACHE_SPACE_KEY}
@@ -357,6 +363,7 @@ function DashboardClientContent({
       chromeless,
       readOnlyChangeRequestPreview,
       availableAirAppEngines,
+      notConfiguredAirAppEngines,
       openCreateNode,
     ],
   );
@@ -430,6 +437,7 @@ function DashboardClientContent({
                 : (changeRequestCountsQuery.data?.review ?? 0)
             }
             availableAirAppEngines={availableAirAppEngines}
+            notConfiguredAirAppEngines={notConfiguredAirAppEngines}
             nodes={nodes}
             orpc={orpc}
             onSearchClick={() => setIsSearchOpen(true)}

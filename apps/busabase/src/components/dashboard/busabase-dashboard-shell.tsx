@@ -51,6 +51,8 @@ const COMMUNITY_FORUM_URL = "https://busabase.com/community";
 interface BusabaseDashboardShellProps {
   children: ReactNode;
   availableAirAppEngines?: AirAppRunnerKind[];
+  /** Engines an operator could turn on here. Shown disabled, with that reason. */
+  notConfiguredAirAppEngines?: AirAppRunnerKind[];
   activeChangeRequestCount?: number;
   nodes: NodeVO[];
   onSearchClick: () => void;
@@ -102,6 +104,7 @@ interface BusabaseDashboardShellProps {
 export function BusabaseDashboardShell({
   activeChangeRequestCount,
   availableAirAppEngines,
+  notConfiguredAirAppEngines,
   children,
   nodes,
   onSearchClick,
@@ -312,6 +315,7 @@ export function BusabaseDashboardShell({
         activeChangeRequestCount={activeChangeRequestCount}
         agentIntegration={agentIntegration}
         availableAirAppEngines={availableAirAppEngines}
+        notConfiguredAirAppEngines={notConfiguredAirAppEngines}
         chrome={chrome}
         locale={locale}
         nodes={nodes}

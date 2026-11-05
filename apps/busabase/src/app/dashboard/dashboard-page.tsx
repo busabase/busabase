@@ -1,5 +1,8 @@
 import { getLocalUserName } from "~/lib/local-user";
-import { resolveBusabaseAirAppEngines } from "./airapp-engine-availability";
+import {
+  resolveBusabaseAirAppEngines,
+  resolveBusabaseNotConfiguredEngines,
+} from "./airapp-engine-availability";
 import { DashboardClient } from "./client";
 
 interface DashboardPageOptions {
@@ -16,9 +19,11 @@ export const renderDashboardPage = async (
   // Sandock is configured. Python without Sandock therefore reaches the
   // RunPanel guidance instead of silently spawning a local host process.
   const availableAirAppEngines = resolveBusabaseAirAppEngines();
+  const notConfiguredAirAppEngines = resolveBusabaseNotConfiguredEngines();
   return (
     <DashboardClient
       availableAirAppEngines={availableAirAppEngines}
+      notConfiguredAirAppEngines={notConfiguredAirAppEngines}
       initialPath={initialPath}
       localUserName={getLocalUserName()}
       chromeless={options.chromeless}

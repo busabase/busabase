@@ -185,6 +185,7 @@ export const mcpHandler = async (request: Request) => {
       vaultRuntimeEnv,
       localUserName: getLocalUserName(),
       embedOrigin: new URL(request.url).origin,
+      agentSurface: true,
       // Honour a caller-supplied credential ceiling on this MCP session — the
       // same header the tunnel forwards for a Cloud API key, and what a
       // Busabase-spawned agent now sends to cap itself at proposing rather

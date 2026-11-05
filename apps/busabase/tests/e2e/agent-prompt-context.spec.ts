@@ -189,7 +189,10 @@ for (const embedded of [true, false]) {
       contentType: "application/json",
     });
     await form.getByRole("button", { name: /^Inspect prompt context:/ }).click();
-    await expect(form.locator("textarea[readonly]")).toHaveValue(pasted.text);
+    const preview = page.getByRole("dialog");
+    await expect(preview.getByRole("region")).toHaveText(pasted.text);
+    await screenshot(page, info, "03a-native-paste-opens-complete-context-modal");
+    await preview.getByRole("button", { name: "Close", exact: true }).click();
     if (skill) {
       await field.fill("/");
       await form.getByRole("option", { name: new RegExp(skillName) }).click();
@@ -248,8 +251,9 @@ for (const embedded of [true, false]) {
     const message = detail.locator(".is-user").last();
     await expect(message.getByRole("button", { name: /Inspect acceptance notes/ })).toBeVisible();
     await message.getByRole("button", { name: /Inspect acceptance notes/ }).click();
-    await expect(message.locator("pre").filter({ hasText: marker })).toHaveText(pasted.text);
+    await expect(preview.getByRole("region")).toHaveText(pasted.text);
     await screenshot(page, info, "04-agent-receives-complete-context-and-transcript-stays-compact");
+    await preview.getByRole("button", { name: "Close", exact: true }).click();
     await page.reload();
     await page.getByRole("link", { name: "Agents", exact: true }).click();
     await page
@@ -264,10 +268,9 @@ for (const embedded of [true, false]) {
       .last()
       .getByRole("button", { name: /Inspect acceptance notes/ })
       .click();
-    await expect(
-      replay.locator(".is-user").last().locator("pre").filter({ hasText: marker }),
-    ).toHaveText(pasted.text);
+    await expect(preview.getByRole("region")).toHaveText(pasted.text);
     await screenshot(page, info, "05-refresh-replays-original-chip-and-complete-snapshot");
+    await preview.getByRole("button", { name: "Close", exact: true }).click();
   });
 }
 

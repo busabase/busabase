@@ -110,7 +110,7 @@ test.describe("AirApp runtimes", () => {
 
     await expect(
       page.getByText(
-        "This AirApp requires a Remote machine, but Sandock is not configured on this deployment.",
+        "This AirApp requires a cloud sandbox, but Sandock is not configured on this deployment.",
       ),
     ).toBeVisible({ timeout: RUN_READY_TIMEOUT });
     await expect(preview(page)).toHaveCount(0);

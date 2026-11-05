@@ -1,0 +1,1 @@
+CREATE INDEX "busabase_storage_cleanup_retired_idx" ON "busabase_storage_cleanup_jobs" USING btree ("created_at","space_id") WHERE "busabase_storage_cleanup_jobs"."state" <> 'retained';

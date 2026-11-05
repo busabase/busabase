@@ -144,6 +144,12 @@ const config = {
     root: monorepoRoot,
   },
   output: "standalone",
+  // `lmdb` is external, so the tracer copies its code but not `dict/dict.txt`, a
+  // data file it reads when opening a compressed database. Without it every
+  // cache call on `REDIS_URL=lmdb://…` fails with ENOENT.
+  outputFileTracingIncludes: {
+    "/*": ["../../node_modules/lmdb/dict/**/*"],
+  },
   // The desktop build restores src-tauri/target before building this sidecar.
   // It is build state, not a runtime dependency, and can contain prior bundles.
   outputFileTracingExcludes: {

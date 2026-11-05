@@ -1,3 +1,4 @@
+import type { AgentConnectionVO } from "busabase-contract/domains/agents/types";
 import { expect, test } from "./_fixtures";
 
 const capture = async (
@@ -22,6 +23,118 @@ const expectNoHorizontalOverflow = async (page: import("@playwright/test").Page)
     ),
   ).toBeLessThanOrEqual(1);
 };
+
+test("provider badges identify renamed agents in the inventory and side-panel picker", async ({
+  page,
+}, testInfo) => {
+  const connections: AgentConnectionVO[] = [
+    {
+      slug: "acprouter:engineering",
+      agentName: "Engineering assistant 工程师 with a long workspace name",
+      providerAgentSlug: "claude-acp",
+      transport: "remote-websocket",
+      sessionCount: 0,
+      latest: null,
+      connected: true,
+      ownedByCurrentUser: true,
+    },
+    {
+      slug: "codex-acp",
+      agentName: "Code reviewer",
+      transport: "local-subprocess",
+      sessionCount: 0,
+      latest: null,
+      connected: true,
+      ownedByCurrentUser: true,
+    },
+    {
+      slug: "buda:research",
+      agentName: "Research assistant",
+      transport: "remote-websocket",
+      sessionCount: 0,
+      latest: null,
+      connected: true,
+      ownedByCurrentUser: true,
+    },
+    {
+      slug: "acprouter:older-connection",
+      agentName: "Existing connection",
+      transport: "remote-websocket",
+      sessionCount: 0,
+      latest: null,
+      connected: true,
+      ownedByCurrentUser: true,
+    },
+    {
+      slug: "acprouter:planning",
+      agentName: "Planning assistant",
+      providerAgentSlug: "gemini",
+      transport: "remote-websocket",
+      sessionCount: 0,
+      latest: null,
+      connected: true,
+      ownedByCurrentUser: true,
+    },
+    {
+      slug: "acprouter:future-provider",
+      agentName: "Future provider",
+      providerAgentSlug: "custom-provider-with-a-very-long-name-that-must-fit-in-the-picker",
+      transport: "remote-websocket",
+      sessionCount: 0,
+      latest: null,
+      connected: true,
+      ownedByCurrentUser: true,
+    },
+  ];
+  const providers = [
+    "Claude Code",
+    "Codex",
+    "Buda",
+    "ACP",
+    "gemini",
+    "custom-provider-with-a-very-long-name-that-must-fit-in-the-picker",
+  ];
+  await page.route("**/api/rpc/agents/connections/list", (route) =>
+    route.fulfill({ json: { json: connections } }),
+  );
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.addInitScript(() => window.localStorage.setItem("busabaseLocale", "en"));
+  await page.goto("/dashboard/local/home", { waitUntil: "commit" });
+  await page.getByRole("button", { name: "Open side panel", exact: true }).click();
+  const panel = page.getByRole("region", { name: "Side panel", exact: true });
+  await panel.getByRole("button", { name: /Agents/ }).click();
+  await expect(panel.getByRole("heading", { name: "Choose an agent" })).toBeVisible();
+
+  const expectProviders = async (container: import("@playwright/test").Locator) => {
+    const cards = container.getByTestId("agent-connection-card");
+    await expect(cards).toHaveCount(connections.length);
+    for (const [index, connection] of connections.entries()) {
+      const card = cards.nth(index);
+      await expect(card.getByText(connection.agentName, { exact: true })).toBeVisible();
+      await expect(card.getByTestId("agent-provider-badge")).toHaveText(providers[index]);
+    }
+  };
+
+  await expectProviders(panel);
+  await capture(page, testInfo, "09-picker-provider-badges");
+  await panel.getByRole("button", { name: "Connect an agent", exact: true }).click();
+  const canvas = page.locator("[data-dashboard-active-view]");
+  await expect(canvas.getByRole("heading", { name: "Add agent", exact: true })).toBeVisible();
+  await canvas.getByRole("button", { name: "Back", exact: true }).click();
+  await expect(canvas.getByRole("heading", { name: "Agents", exact: true })).toBeVisible();
+  await expectProviders(canvas);
+  await expectProviders(panel);
+  await expectNoHorizontalOverflow(page);
+  await capture(page, testInfo, "10-inventory-and-picker-provider-badges");
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expectProviders(panel);
+  await expect
+    .poll(async () => panel.evaluate((element) => element.scrollWidth - element.clientWidth))
+    .toBeLessThanOrEqual(1);
+  await expectNoHorizontalOverflow(page);
+  await capture(page, testInfo, "11-narrow-picker-provider-badges");
+});
 
 test("right panel: connecting an agent keeps the catalog readable through resize and restore", async ({
   page,
