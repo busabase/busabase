@@ -22,7 +22,59 @@ Whether a change merges immediately or waits in the Inbox is decided by permissi
 | Form | A public intake page bound to a target Base | Submissions create records on the target Base through the normal Change Request path; anonymous submitters resolve no permission on that Base, so their submissions always queue |
 | HTML | A single agent-authored HTML page | Stored as raw `index.html` (not JSON-wrapped), so search matches real HTML |
 | Whiteboard | Visual context shared with agents | Stored as `scene.json` |
-| Workflow | A process definition drawn as a graph | Stored as `graph.json`. Busabase **renders and stores** the definition; it does not execute it |
+| Workflow | A process definition drawn as a graph | Stored as `graph.json` and run on the server, by hand or from record events. Finished steps keep snapshots; a `read_record` action after a Wait reads the latest record |
+
+## Workflow
+
+A Workflow node is the graph in `graph.json` (triggers, webhooks, functions, conditions, waits, approvals, actions, and ends). The canvas edits that graph, and its **Runs** tab starts a run and shows every run of this workflow: status, each step's captured output, and buttons to continue a Wait early or to approve or reject an approval.
+
+Runs are stored in the database, so a Wait survives a restart and any server replica can continue it. The same procedures are on `/api/rpc` (`workflows.start`, `list`, `get`, `resume`, `decide`, `resumeElapsed`); they are not published on the REST OpenAPI surface.
+
+### Who can do what
+
+- Seeing runs (`list`, `get`) needs **read** on the workflow. Someone with only read sees the Runs tab without the start form or the Continue / Approve / Reject buttons, and a line saying why.
+- Starting a run and continuing one early need **write** on the workflow, because a run executes function and webhook steps that reach outside Busabase.
+- Who may approve or reject depends on the approval step. If its **Approver** field lists member emails, only those members can decide — even with read access only — and so can space admins. Text without an email ("Sales lead") is just a label; a step that lists no email is decided by anyone with write. When a named approver who cannot edit the workflow decides, the steps after the decision run as the run's **started by** person, picked up by the scheduler within moments.
+- Each step acts with the access of whoever is driving it: you, when you start or approve; the run's **started by** person when the scheduler continues it on its own. A person who has left the space cannot continue their waiting runs; those runs fail with that reason.
+
+### How a run starts
+
+- **Manually**, from the Runs tab or `workflows.start`, optionally with a record id and a JSON payload. It starts at the first trigger (or the trigger whose event name you pass).
+- **From a record event**, when the workflow's execution mode is **Event**. A trigger whose event is `record.created` or `record.updated` starts a run for every matching record, optionally only for one Base. The run is queued and the scheduler starts it within moments (every 10 seconds on a self-hosted server, every minute on Busabase Cloud). It acts as the person who last saved the workflow in Event mode. Other event names are labels only; they never start a run by themselves. Switching back to **Manual** stops new event runs.
+
+### What a run does
+
+- **Trigger** stores the start payload and, when the run has a record, a copy of that record's current head.
+- **Wait** pauses until its duration has elapsed. The scheduler continues it once that time passes; **Continue now** (`workflows.resume` with `force: true`) continues it early.
+- **Approval** pauses until one of its approvers (see above) approves or rejects (`workflows.decide`). The run follows the edge whose outcome is that decision, and records who decided.
+- **Condition** evaluates a small expression (`input.score >= 80`, `steps.capture.record.fields.status == "new"`). `input` is the previous step; `steps.<id>` is a finished step. `&&` and `||` short-circuit, so `input.score != null && input.score >= 80` safely handles a missing score; a missing value equals `null`. Use brackets for keys a dot cannot reach: `input.record.fields["follow-up"]`, `input.items[0]`. Comparisons never coerce text to numbers. There is no `eval`.
+- **Action `read_record`** reads the bound record's current head at the moment the step runs. **Any other action** is recorded and skipped.
+- **Webhook** sends one HTTP request to the step's URL with the run's data as a JSON body (GET sends no body). The response becomes the step's output: `input.status` and `input.body` (parsed when the receiver answers JSON). A non-2xx answer, a timeout, or a blocked address fails the step. The request goes through the same private-address guard as webhook rules, checked again on every redirect. One attempt, no retries, at most 30 seconds.
+- **Function** steps run a saved webhook rule whose action is **Run function**. Set the rule id, or a function name that matches one rule in the space. The code runs in the webhook sandbox (no filesystem or environment access; outbound `fetch` is guarded). An object return is copied onto the step, so the next condition can read `input.score`; `input.result` is always the raw return. The timeout is the shorter of the rule's and the workflow's.
+- Function and webhook steps receive the same `input`: `event: "workflow.step"`, `runId`, `stepId`, `payload`, `record`, `recordId`, `baseId`, `fields`, `steps`, and `previous`. `recordId`, `baseId`, and `fields` have the same names a record webhook rule receives, so one function body can serve both.
+- Error policy `stop` (the default) fails the run on a failed function or webhook step. `continue` records the error on the step and follows the success branch.
+- A run that was mid-step when the server stopped is marked failed rather than repeated, because a half-sent webhook or function call must not silently run twice.
+- **Action** `update_record` sets the `fields` of the node on the run's record, as the person the run acts as: `createUpdateChangeRequest`, so a direct edit with write on the Base and a change request for review without it (the step then fails naming the request, or records it under error policy `continue`). A string value starting with `=` is a formula (`evaluateValue`), `==` stores a literal `=`; a formula with no value fails the step. Changes the step merges run under `runWithoutWorkflowTriggers`, so they queue no runs and a workflow listening to `record.updated` cannot start itself.
+- **Action** `create_record` adds a record to the step's `baseId` and outputs `createdRecordId`; `delete_record` archives (restorable). `update_record` and `delete_record` take `targetRecordId`: empty for the run's record, or an id, or an `=formula`. All three follow the same review and no-trigger rules. If a run deletes its own record, later steps run with `record: null`, and `read_record` fails.
+- Agents (REST, MCP, CLI) can list, read, start, cancel, and decide runs. A decision needs **Let agents decide** on the step (`allowAgents`), a write-level key, and the usual approver rule. A run an agent started stays capped by that key while it continues: on Cloud the scheduler re-reads the key each time and fails the run if it was revoked or expired.
+- Anyone with write can **cancel** a run that is queued or paused; a run mid-step has to finish that step first. Finished runs are deleted after 90 days.
+- **Concurrency** (workflow settings) caps how many runs of the workflow execute steps at the same moment. A run paused on a Wait or an approval does not count. A run started past the cap — by hand or by an event — is queued and starts on its own when a slot frees up.
+
+### Data after a Wait
+
+Freshness is **mixed**.
+
+A finished step keeps the values it captured, including a function step's return value and the record head it saw. Editing the record while a Wait or an approval is paused does not change those values. The next step sees the snapshot.
+
+`read_record` is the reload. It reads the record when *that* step runs. Put it **after** the Wait when a later branch must see current data. A `read_record` that already ran before the Wait stays the old snapshot.
+
+```text
+trigger → read_record (capture) → wait → read_record (reload) → condition
+```
+
+After the wait, `steps.capture` is still the pre-wait record. `input` on the condition, coming from the reload step, is the record as it is now. Branch on `input.record.fields…` or `steps.reload.record.fields…` for current state, and on `steps.capture` (or the trigger) when the decision must ignore edits made during the wait.
+
+Resume re-reads the graph for steps that have not run yet. Outputs already stored are not recomputed.
 
 ## Drive
 
@@ -46,9 +98,11 @@ There is a shared `AirAppRunner` interface (`mount → install → start`, plus 
 
 | Engine | Runs where | Runtime fidelity | Isolation | Live preview | busabase data access (`/api/v1`, `createBusabaseClient`) | Best for |
 | --- | --- | --- | --- | --- | --- | --- |
-| **`browser`** (Nodepod) | In the reviewer's **browser** (Web Worker + Service Worker), same-origin with busabase | Reimplemented Node API surface — **not** a full Node.js (see below) | Browser sandbox | ✅ Yes (SW-served) | ✅ **Yes** — the SW owns the origin and passes `/api/v1/*` straight through; a running app reads the workspace's own live data as the logged-in reviewer | Live-data AirApps (dashboards, CRM widgets, anything that calls busabase's own API). The only engine every deployment always offers, and the only one restricted to JavaScript |
-| **`local`** (bare host process) | A **bare** real OS process on the machine hosting busabase — spawned directly, **not** isolated (trust model is that host). Runs whatever the app's `RunPlan` says: Node, Python, anything the host has | Real OS process — real native binaries, real interpreters, real package managers | ⚠️ None (host trust) | ✅ **Yes** — reverse proxy | ✅ **Yes** — busabase **reverse-proxies** the real localhost process to a same-origin sub-path (`/api/airapp-preview/{nodeId}/`), so the app's `/api/v1/…` calls land on busabase's own API with the browser's cookie, no relay needed. A bare process's port IS host-reachable, so this works. Caveats: the app must use **relative** asset paths (an arbitrary app hard-coding absolute `/foo` paths won't render under the sub-path proxy, unlike the browser engine's origin-owning SW); no WebSocket/HMR proxying | Heavier AirApps needing true Node compatibility, or any non-JavaScript app. Offered **only** where the host is the user's own machine (`allowHostProcesses`) — never on shared infrastructure |
-| **`remote`** (Sandock today) | A separate machine provisioned **per run**, reached over HTTP. Nothing executes on the busabase host | Real OS process — a container is a machine with a shell, so no per-language support to add | ✅ Yes — a different machine entirely | ✅ **Yes** — the same reverse-proxy path, pointed at the provisioned machine's exposed port | ✅ **Yes** — same same-origin sub-path as `local` | Isolated execution **with** a live preview, and the only option for a cloud deployment that will not run app processes on itself. Requires `SANDOCK_BASE_URL` + `SANDOCK_API_KEY`, and each run is somebody's bill |
+| **`browser`** (Nodepod; UI: "In browser") | In the reviewer's **browser** (Web Worker + Service Worker), same-origin with busabase | Reimplemented Node API surface — **not** a full Node.js (see below) | Browser sandbox | ✅ Yes (SW-served) | ✅ **Yes** — the SW owns the origin and passes `/api/v1/*` straight through; a running app reads the workspace's own live data as the logged-in reviewer | Live-data AirApps (dashboards, CRM widgets, anything that calls busabase's own API). The only engine every deployment always offers, and the only one restricted to JavaScript |
+| **`local`** (bare host process; UI: "This machine") | A **bare** real OS process on the machine hosting busabase — spawned directly, **not** isolated (trust model is that host). Runs whatever the app's `RunPlan` says: Node, Python, anything the host has | Real OS process — real native binaries, real interpreters, real package managers | ⚠️ None (host trust) | ✅ **Yes** — reverse proxy | ✅ **Yes** — busabase **reverse-proxies** the real localhost process to a same-origin sub-path (`/api/airapp-preview/{nodeId}/`), so the app's `/api/v1/…` calls land on busabase's own API with the browser's cookie, no relay needed. A bare process's port IS host-reachable, so this works. Caveats: the app must use **relative** asset paths (an arbitrary app hard-coding absolute `/foo` paths won't render under the sub-path proxy, unlike the browser engine's origin-owning SW); no WebSocket/HMR proxying | Heavier AirApps needing true Node compatibility, or any non-JavaScript app. Offered **only** where the host is the user's own machine (`allowHostProcesses`) — never on shared infrastructure |
+| **`remote`** (Sandock today; UI: "Cloud sandbox") | A separate machine provisioned **per run**, reached over HTTP. Nothing executes on the busabase host | Real OS process — a container is a machine with a shell, so no per-language support to add | ✅ Yes — a different machine entirely | ✅ **Yes** — the same reverse-proxy path, pointed at the provisioned machine's exposed port | ✅ **Yes** — same same-origin sub-path as `local` | Isolated execution **with** a live preview, and the only option for a cloud deployment that will not run app processes on itself. Requires `SANDOCK_BASE_URL` + `SANDOCK_API_KEY`, and each run is somebody's bill |
+
+**None of the three is an always-on host.** A run exists only while it is needed: `browser` runs in the tab that opened the app and stops with it, while `local` and `remote` runs belong to the signed-in user who started them and are reclaimed when idle, and a `remote` machine also expires. That does not limit who an app is for: an AirApp can be in daily internal use, and a publicly shared one runs in each visitor's own tab on `browser`, read-only. The wire value `remote` is unchanged; only its label is "Cloud sandbox", so that it does not read as somewhere an app is hosted.
 
 **The trade-off, and why there are exactly three:** the axis is *whose machine runs the code*, and each point on it buys something the others can't. `browser` gives up native binaries and every non-JS language, and gets in return a run that is free, instant, and impossible to misconfigure. `local` gives up isolation and gets full fidelity plus a preview. `remote` gives up being free and gets isolation plus full fidelity plus a preview.
 
