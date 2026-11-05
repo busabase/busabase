@@ -6,7 +6,13 @@ import type { AgentCatalogEntryVO, AgentSessionVO } from "busabase-contract/doma
 import { Badge } from "kui/badge";
 import { Button } from "kui/button";
 import { Dialog, DialogDescription, DialogHeader, DialogTitle } from "kui/dialog";
-import { ArrowLeft, Bot } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "kui/dropdown-menu";
+import { ArrowLeft, Bot, ChevronDown } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   type CoreI18nMessages,
@@ -16,6 +22,7 @@ import {
   useCoreI18n,
   useCoreLocale,
 } from "../../../i18n";
+import { budaAcpCopy } from "../../../i18n/buda-acp-copy";
 import { budaOauthText } from "../../../i18n/buda-oauth-copy";
 import { presentCoreError } from "../../../i18n/localize-error";
 import { DialogContent } from "../../dashboard/components/localized-dialog-content";
@@ -26,6 +33,7 @@ import {
 } from "../utils/desktop-codex";
 import { readRouterOauthOrigin } from "../utils/router-oauth-origin";
 import { AgentLoadingState, AgentQueryErrorState } from "./agent-query-state";
+import { BudaAcpConnectionDialog } from "./buda-acp-connection-dialog";
 import { RouterEnrollmentDialog } from "./router-enrollment-dialog";
 import { TransportBadge } from "./transport-badge";
 
@@ -64,13 +72,18 @@ export const isExpectedLimitation = (reason: string | null): boolean =>
  * which overrides `available` for a locally-detected Codex/Claude install.
  */
 export const isCardDisabled = (
-  entry: Pick<AgentCatalogEntryVO, "available" | "comingSoon" | "connectionRequired">,
+  entry: Pick<AgentCatalogEntryVO, "available" | "comingSoon" | "connectionRequired"> &
+    Partial<Pick<AgentCatalogEntryVO, "slug" | "unavailableReason">>,
   isAlreadyAdded: boolean,
   isDesktopAgentAvailable = false,
 ): boolean =>
   entry.comingSoon ||
   isAlreadyAdded ||
-  (!entry.available && !isDesktopAgentAvailable && !entry.connectionRequired && !entry.comingSoon);
+  (!entry.available &&
+    !isDesktopAgentAvailable &&
+    !entry.connectionRequired &&
+    !entry.comingSoon &&
+    !(entry.slug === "buda" && entry.unavailableReason === coreMessagesEn.agents.budaEnvRequired));
 
 /**
  * Actionable cards first, disabled ones last — relative order within each
@@ -120,12 +133,14 @@ export const localizeUnavailableReason = (
 export function AgentsAddView({ orpc, onBack, onConnected, spaceId }: AgentsAddViewProps) {
   const messages = useCoreI18n();
   const locale = useCoreLocale();
+  const budaCopy = budaAcpCopy(locale);
   const queryClient = useQueryClient();
   const catalog = useQuery(orpc.agents.catalog.queryOptions());
   const connections = useQuery(
     orpc.agents.connections.list.queryOptions({ input: { scope: "mine" } }),
   );
   const [showBudaConnect, setShowBudaConnect] = useState(false);
+  const [showBudaAcp, setShowBudaAcp] = useState(false);
   const [budaError, setBudaError] = useState<string | null>(null);
   const [budaAuthorizing, setBudaAuthorizing] = useState(false);
   const [sessionError, setSessionError] = useState<string | null>(null);
@@ -137,6 +152,10 @@ export function AgentsAddView({ orpc, onBack, onConnected, spaceId }: AgentsAddV
   const [agentInstalling, setAgentInstalling] = useState(false);
   const budaTriggerRef = useRef<HTMLElement | null>(null);
   const budaWorkspace = useRef(spaceId);
+  const acpWorkspace = useRef(spaceId);
+  acpWorkspace.current = spaceId;
+  const acpDialogWorkspace = useRef(spaceId);
+  const acpMounted = useRef(true);
   const budaAuthorization = useRef<{
     popup: Window;
     origin: string;
@@ -167,6 +186,20 @@ export function AgentsAddView({ orpc, onBack, onConnected, spaceId }: AgentsAddV
     },
     [],
   );
+
+  useEffect(() => {
+    if (acpDialogWorkspace.current !== spaceId) {
+      acpDialogWorkspace.current = spaceId;
+      setShowBudaAcp(false);
+    }
+  }, [spaceId]);
+
+  useEffect(() => {
+    acpMounted.current = true;
+    return () => {
+      acpMounted.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -291,6 +324,42 @@ export function AgentsAddView({ orpc, onBack, onConnected, spaceId }: AgentsAddV
     },
   });
 
+  // Manual ACP connection has its own completion guard. The established OAuth
+  // and local-agent mutation above retains its existing callback behavior.
+  const createAcpSession = useMutation({
+    ...orpc.agents.sessions.create.mutationOptions(),
+  });
+  const startAcpSession = (slug: string) => {
+    const requestedSpace = spaceId;
+    const isCurrent = () => acpMounted.current && requestedSpace === acpWorkspace.current;
+    createAcpSession.mutate(
+      { slug },
+      {
+        onSuccess: (session: AgentSessionVO) => {
+          if (!isCurrent()) return;
+          setSessionError(null);
+          setSessionErrorEntrySlug(null);
+          void Promise.all([
+            queryClient.invalidateQueries({
+              queryKey: orpc.agents.connections.list.queryKey({ input: { scope: "mine" } }),
+            }),
+            queryClient.invalidateQueries({
+              queryKey: orpc.agents.connections.list.queryKey({ input: { scope: "space" } }),
+            }),
+            queryClient.invalidateQueries({ queryKey: orpc.agents.sessions.list.queryKey() }),
+          ]);
+          onConnected(session.slug);
+        },
+        onError: (error) => {
+          if (!isCurrent()) return;
+          setSessionError(
+            presentCoreError(messages, locale, error, messages.agents.sessionCreateFailed),
+          );
+        },
+      },
+    );
+  };
+
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
       const attempt = budaAuthorization.current;
@@ -411,7 +480,11 @@ export function AgentsAddView({ orpc, onBack, onConnected, spaceId }: AgentsAddV
                   !entry.available &&
                   !entry.connectionRequired &&
                   !entry.comingSoon &&
-                  !desktopAgentEntry;
+                  !desktopAgentEntry &&
+                  !(
+                    entry.slug === "buda" &&
+                    entry.unavailableReason === coreMessagesEn.agents.budaEnvRequired
+                  );
                 return (
                   <div
                     className={`flex h-full min-w-0 flex-col gap-3 break-words rounded-lg border p-4 ${
@@ -458,15 +531,71 @@ export function AgentsAddView({ orpc, onBack, onConnected, spaceId }: AgentsAddV
                           spaceId={spaceId}
                           onConnected={onConnected}
                         />
-                      ) : entry.slug === "buda" && entry.connectionRequired ? (
-                        <Button
-                          className="min-h-11 sm:min-h-9"
-                          disabled={budaAuthorizing}
-                          onClick={openBudaConnect}
-                          size="sm"
-                        >
-                          {messages.agents.connectBuda}
-                        </Button>
+                      ) : entry.slug === "buda" &&
+                        (entry.connectionRequired ||
+                          entry.available ||
+                          entry.unavailableReason === coreMessagesEn.agents.budaEnvRequired) ? (
+                        <div className="flex">
+                          {entry.connectionRequired ? (
+                            <Button
+                              className="min-h-11 flex-1 rounded-r-none sm:min-h-9"
+                              disabled={budaAuthorizing}
+                              onClick={openBudaConnect}
+                              size="sm"
+                            >
+                              {messages.agents.connectBuda}
+                            </Button>
+                          ) : (
+                            <Button
+                              className="min-h-11 flex-1 rounded-r-none sm:min-h-9"
+                              disabled={createAcpSession.isPending}
+                              onClick={
+                                !entry.available
+                                  ? () => setShowBudaAcp(true)
+                                  : () => {
+                                      setSessionErrorEntrySlug("buda");
+                                      startAcpSession(
+                                        entry.connectedAgents?.[0]?.slug ?? entry.slug,
+                                      );
+                                    }
+                              }
+                              size="sm"
+                            >
+                              {createAcpSession.isPending
+                                ? messages.agents.statusConnecting
+                                : entry.available
+                                  ? messages.agents.connect
+                                  : messages.agents.connectBuda}
+                            </Button>
+                          )}
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                className="min-h-11 rounded-l-none border-primary-foreground/20 border-l px-2 sm:min-h-9"
+                                aria-label={budaCopy.options}
+                                disabled={budaAuthorizing || createAcpSession.isPending}
+                                size="sm"
+                              >
+                                <ChevronDown className="size-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              {entry.connectionRequired && (
+                                <DropdownMenuItem onSelect={openBudaConnect}>
+                                  {budaCopy.oauth}
+                                </DropdownMenuItem>
+                              )}
+                              <DropdownMenuItem
+                                onSelect={() => {
+                                  setSessionError(null);
+                                  setShowBudaAcp(true);
+                                }}
+                              >
+                                {budaCopy.action}
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
                       ) : entry.available || desktopAgentEntry ? (
                         <Button
                           className="min-h-11 sm:min-h-9"
@@ -512,6 +641,24 @@ export function AgentsAddView({ orpc, onBack, onConnected, spaceId }: AgentsAddV
           )}
         </div>
       </div>
+
+      <BudaAcpConnectionDialog
+        open={showBudaAcp}
+        onOpenChange={setShowBudaAcp}
+        orpc={orpc}
+        spaceId={spaceId}
+        onSaved={(slug) => {
+          void queryClient.invalidateQueries({ queryKey: orpc.agents.catalog.queryKey() });
+          void queryClient.invalidateQueries({
+            queryKey: orpc.agents.connections.list.queryKey({ input: { scope: "mine" } }),
+          });
+          void queryClient.invalidateQueries({
+            queryKey: orpc.agents.connections.list.queryKey({ input: { scope: "space" } }),
+          });
+          setSessionErrorEntrySlug("buda");
+          startAcpSession(slug);
+        }}
+      />
 
       <Dialog
         open={installSlug !== null}

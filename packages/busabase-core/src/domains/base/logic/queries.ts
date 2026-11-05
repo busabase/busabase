@@ -76,7 +76,9 @@ import {
   groupKeyForValue,
 } from "../utils/view-records";
 
-import { lookupDependentFieldSlugs } from "./lookup-formulas";
+import { commitPayloadWithFields } from "./commit-payload-projection";
+import { lookupDependentFieldSlugs, lookupFormulaInputSlugs } from "./lookup-formulas";
+import { resolveRecordSort } from "./record-sort";
 import { assertNoReverseRelationQueryOrThrow, collectFieldSlugs } from "./reverse-relations";
 
 export { listInputSchema, recordFieldFilterInputSchema, recordFieldGetInputSchema };
@@ -726,8 +728,11 @@ export const listRecordsPaged = async (input?: z.input<typeof listRecordsInputSc
   if (base) {
     filters.push(eq(busabaseRecords.baseId, base.id));
   }
+  // Settle the sort's field type before anything branches on it: an omitted
+  // `fieldType` is read from the Base's schema, an unknown slug is a 400.
+  const sort = parsed.sort ? resolveRecordSort(parsed.sort, base?.fields ?? null) : undefined;
   const queriedBases =
-    parsed.filters?.length || parsed.sort
+    parsed.filters?.length || sort
       ? parsed.baseId
         ? [await getBase(parsed.baseId)].filter((base) => base !== null)
         : await listBases()
@@ -739,7 +744,7 @@ export const listRecordsPaged = async (input?: z.input<typeof listRecordsInputSc
     for (const queried of queriedBases) {
       assertNoReverseRelationQueryOrThrow(
         queried.fields,
-        collectFieldSlugs([parsed.filters, parsed.sort]),
+        collectFieldSlugs([parsed.filters, sort]),
         "filter or sort",
       );
     }
@@ -769,11 +774,10 @@ export const listRecordsPaged = async (input?: z.input<typeof listRecordsInputSc
     filters.push(...(await buildValueFilterPredicates(db, base.id, parsed.valueFilters)));
   }
 
-  const sortInfo = parsed.sort ? sortColumnFor(parsed.sort.fieldType) : null;
-  if (parsed.sort && sortInfo && dynamicSlugs.has(parsed.sort.fieldSlug)) {
+  const sortInfo = sort ? sortColumnFor(sort.fieldType) : null;
+  if (sort && sortInfo && dynamicSlugs.has(sort.fieldSlug)) {
     // No source-Base edit refreshes the stored projection. Resolve first, then
     // use the same numeric/date NULLS LAST ordering and keyset cursor as SQL.
-    const sort = parsed.sort;
     const rows = await db
       .select()
       .from(busabaseRecords)
@@ -802,16 +806,16 @@ export const listRecordsPaged = async (input?: z.input<typeof listRecordsInputSc
       records,
       nextCursor:
         candidates.length > parsed.limit && last
-          ? encodeSortCursor(hydratedSortValue(last, parsed.sort.fieldSlug, sortInfo.kind), last.id)
+          ? encodeSortCursor(hydratedSortValue(last, sort.fieldSlug, sortInfo.kind), last.id)
           : null,
     };
   }
-  if (parsed.sort && sortInfo) {
+  if (sort && sortInfo) {
     // ── Sort-field keyset path (number/date). ORDER BY the typed value column
     // NULLS LAST, id ASC as a stable tiebreaker. The keyset predicate mirrors
     // that ordering so paging never skips or repeats a row. ──
     const { col: sortCol, kind } = sortInfo;
-    const direction = parsed.sort.direction;
+    const direction = sort.direction;
     if (parsed.cursor) {
       const decoded = decodeSortCursor(parsed.cursor, kind);
       if (decoded) {
@@ -848,7 +852,7 @@ export const listRecordsPaged = async (input?: z.input<typeof listRecordsInputSc
           // record_id, which busabase_field_values_record_field_idx serves
           // exactly; see the note on that index in domains/base/schema.ts.
           eq(busabaseFieldValues.recordId, busabaseRecords.id),
-          eq(busabaseFieldValues.fieldSlug, parsed.sort.fieldSlug),
+          eq(busabaseFieldValues.fieldSlug, sort.fieldSlug),
           isNull(busabaseFieldValues.deletedAt),
         ),
       )
@@ -904,7 +908,8 @@ export const listRecordsPaged = async (input?: z.input<typeof listRecordsInputSc
  * there is nothing to push down.
  *
  * Same semantics as `records.list`'s sort (`sortColumnFor` decides, from the
- * caller's `fieldType`, exactly as it does there): number/date fields order by
+ * sort's `fieldType` — the caller's, or the Base schema's when omitted, see
+ * `resolveRecordSort` — exactly as it does there): number/date fields order by
  * their typed value column with NULLS LAST; any other type is not sorted here.
  * The tiebreaker is `id ASC` in both directions, like `records.list`, which is
  * what makes OFFSET paging deterministic: ties on the value would otherwise
@@ -958,10 +963,25 @@ export const listRecordsPage = async (input: z.input<typeof listRecordsPageInput
   await ensureReady();
   const db = await getDb();
   const parsed = listRecordsPageInputSchema.parse(input);
+  const tableListMode = parsed.listMode === "table";
+  const hydratePageRows = (rows: RecordPO[]) =>
+    hydrateRecords(
+      rows,
+      tableListMode
+        ? {
+            summary: true,
+            preserveBaseSchema: true,
+            includeComputedFields: true,
+            keepWhiteboardPreview: true,
+          }
+        : undefined,
+    );
   const base = await getBase(parsed.baseId);
   if (!base) {
     throw new ORPCError("NOT_FOUND", { message: `Base not found: ${parsed.baseId}` });
   }
+  // An omitted `fieldType` is read from the Base's schema; an unknown slug is a 400.
+  const sort = parsed.sort ? resolveRecordSort(parsed.sort, base.fields) : undefined;
 
   let viewConfig: ReturnType<typeof normalizeViewConfig> | undefined;
   if (parsed.viewId) {
@@ -1035,19 +1055,19 @@ export const listRecordsPage = async (input: z.input<typeof listRecordsPageInput
       ? {
           filters: combineViewFilters(viewConfig, parsed.filters),
           // An explicit `sort` replaces the View's — see the doc above.
-          sorts: parsed.sort ? [] : (viewConfig?.sorts ?? []),
+          sorts: sort ? [] : (viewConfig?.sorts ?? []),
         }
       : undefined;
   assertNoReverseRelationQueryOrThrow(
     base.fields,
-    collectFieldSlugs([effectiveViewConfig, parsed.sort, parsed.dateRange]),
+    collectFieldSlugs([effectiveViewConfig, sort, parsed.dateRange]),
     "filter or sort",
   );
   const explicitDynamicSort =
-    parsed.sort && lookupDependentFieldSlugs(base.fields).has(parsed.sort.fieldSlug)
-      ? sortColumnFor(parsed.sort.fieldType)
+    sort && lookupDependentFieldSlugs(base.fields).has(sort.fieldSlug)
+      ? sortColumnFor(sort.fieldType)
       : null;
-  const sqlSortOrder = explicitDynamicSort ? null : buildPageSortOrder(db, parsed.sort);
+  const sqlSortOrder = explicitDynamicSort ? null : buildPageSortOrder(db, sort);
   // Without an explicit sort this is exactly the order every path used before.
   const candidateOrder = sqlSortOrder ?? [
     desc(busabaseRecords.createdAt),
@@ -1088,7 +1108,7 @@ export const listRecordsPage = async (input: z.input<typeof listRecordsPageInput
       .limit(parsed.pageSize)
       .offset(offset);
     return {
-      records: await hydrateRecords(rows),
+      records: await hydratePageRows(rows),
       total,
       totalPages,
       page,
@@ -1116,20 +1136,23 @@ export const listRecordsPage = async (input: z.input<typeof listRecordsPageInput
         ? base.fields.find((field) => field.id === filter.fieldId)?.slug
         : filter.fieldSlug,
     ),
-    ...(effectiveViewConfig?.sorts ?? []).map((sort) => sort.fieldSlug),
-    ...(explicitDynamicSort && parsed.sort ? [parsed.sort.fieldSlug] : []),
+    ...(effectiveViewConfig?.sorts ?? []).map((viewSort) => viewSort.fieldSlug),
+    ...(explicitDynamicSort && sort ? [sort.fieldSlug] : []),
   ]);
-  const dynamicSlugs = lookupDependentFieldSlugs(base.fields);
-  const dependsOnLookup = [...viewFieldSlugs].some(
-    (slug) => slug !== undefined && dynamicSlugs.has(slug),
+  const viewEvaluationSlugs = [...viewFieldSlugs].filter(
+    (slug): slug is string => slug !== undefined,
   );
+  const dynamicSlugs = lookupDependentFieldSlugs(base.fields);
+  const dependsOnLookup = viewEvaluationSlugs.some((slug) => dynamicSlugs.has(slug));
 
   if (!dependsOnLookup) {
     const candidateRows = await db
       .select({
         id: busabaseRecords.id,
         updatedAt: busabaseRecords.updatedAt,
-        fields: busabaseCommits.payload,
+        // Membership and order read only the fields the view names. Project them
+        // in SQL so a filter on a short status never loads every report body.
+        fields: commitPayloadWithFields(viewEvaluationSlugs).as("fields"),
       })
       .from(busabaseRecords)
       .innerJoin(busabaseCommits, eq(busabaseCommits.id, busabaseRecords.headCommitId))
@@ -1157,7 +1180,7 @@ export const listRecordsPage = async (input: z.input<typeof listRecordsPageInput
     // Hydrate only the page, then restore the order the view decided (the
     // WHERE ... IN read comes back in whatever order the engine likes).
     const pageRecords = pageIds.length
-      ? await hydrateRecords(
+      ? await hydratePageRows(
           await db.select().from(busabaseRecords).where(inArray(busabaseRecords.id, pageIds)),
         )
       : [];
@@ -1179,12 +1202,16 @@ export const listRecordsPage = async (input: z.input<typeof listRecordsPageInput
     .from(busabaseRecords)
     .where(and(...recordFilters))
     .orderBy(...candidateOrder);
-  const candidates = await hydrateRecords(candidateRows);
+  // These rows only decide membership and order, so they carry the view's fields
+  // plus the inputs of read-time formulas. The page itself is hydrated below.
+  const candidates = await hydrateRecords(candidateRows, {
+    payloadFields: [...viewEvaluationSlugs, ...lookupFormulaInputSlugs(base.fields)],
+  });
   const ordered =
-    explicitDynamicSort && parsed.sort
+    explicitDynamicSort && sort
       ? sortHydratedRecords(
           filterRecordsByViewFilters(candidates, effectiveViewConfig?.filters ?? []),
-          parsed.sort,
+          sort,
           explicitDynamicSort.kind,
         )
       : sqlSortOrder
@@ -1194,9 +1221,19 @@ export const listRecordsPage = async (input: z.input<typeof listRecordsPageInput
   const totalPages = Math.ceil(total / parsed.pageSize);
   const page = totalPages === 0 ? 1 : Math.min(parsed.page, totalPages);
   const offset = (page - 1) * parsed.pageSize;
+  const pageIds = ordered.slice(offset, offset + parsed.pageSize).map((record) => record.id);
+  const pageRecords = pageIds.length
+    ? await hydratePageRows(
+        await db.select().from(busabaseRecords).where(inArray(busabaseRecords.id, pageIds)),
+      )
+    : [];
+  const pageRecordsById = new Map(pageRecords.map((record) => [record.id, record]));
 
   return {
-    records: ordered.slice(offset, offset + parsed.pageSize),
+    records: pageIds.flatMap((recordId) => {
+      const record = pageRecordsById.get(recordId);
+      return record ? [record] : [];
+    }),
     total,
     totalPages,
     page,

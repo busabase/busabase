@@ -1,12 +1,16 @@
 import { implement } from "@orpc/server";
 import { busabaseContract } from "busabase-contract/contract/busabase";
 import {
+  abortAssetMultipartUpload,
+  completeAssetMultipartUpload,
   confirmAssetUpload,
+  createAssetMultipartUpload,
   deleteAsset,
   downloadAsset,
   getAsset,
   listAssets,
   requestAssetUploadUrl,
+  signAssetMultipartParts,
   updateAssetMetadata,
 } from "./handlers";
 import { editAssetContent } from "./logic/asset-edit-content-logic";
@@ -21,6 +25,18 @@ export const assetsRouter = {
     requestAssetUploadUrl(input),
   ),
   confirm: os.assets.confirm.handler(async ({ input }) => confirmAssetUpload(input)),
+  createMultipartUpload: os.assets.createMultipartUpload.handler(async ({ input }) =>
+    createAssetMultipartUpload(input),
+  ),
+  signMultipartParts: os.assets.signMultipartParts.handler(async ({ input }) =>
+    signAssetMultipartParts(input),
+  ),
+  completeMultipartUpload: os.assets.completeMultipartUpload.handler(async ({ input }) =>
+    completeAssetMultipartUpload(input),
+  ),
+  abortMultipartUpload: os.assets.abortMultipartUpload.handler(async ({ input }) =>
+    abortAssetMultipartUpload(input),
+  ),
   list: os.assets.list.handler(async ({ input }) => listAssets(input)),
   get: os.assets.get.handler(async ({ input }) => getAsset(input.assetId)),
   updateMetadata: os.assets.updateMetadata.handler(async ({ input }) => updateAssetMetadata(input)),

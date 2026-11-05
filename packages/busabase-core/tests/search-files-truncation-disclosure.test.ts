@@ -6,22 +6,14 @@ import { eq } from "drizzle-orm";
 import { storage } from "openlib/storage";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { getDb } from "../src/db";
+import { busabaseAssetTextSearch, busabaseAssetTexts } from "../src/db/schema";
 import { busabaseAssetUsages } from "../src/domains/assets/schema/assets";
 import { busabaseRouter } from "../src/router";
 
 /**
- * The truncation-disclosure half of the files-source content-scan split (see
- * `search-files-content-truncation.test.ts` for the ordinary/uncapped case,
- * and why these two are separate files rather than two `describe` blocks —
- * `getDb()` is a per-process singleton, so only one PGLite lifecycle can live
- * in a given test file).
- *
- * A real workspace here: 1200+ asset usages, well past `MAX_ASSET_USAGE_SCAN_ROWS`
- * (1000). The content-scan phase legitimately cannot inspect every eligible
- * file's body — that's a real object-storage-read cost bound, not a bug. What
- * the response must not do is stay silent about it: an empty result here has
- * to say "I didn't look at everything" (`contentTruncated: true`), not read
- * as "this workspace has no such file" (spec D2b).
+ * A large but fully indexed workspace is complete regardless of recency.
+ * Missing/unreadable projections must still report incomplete coverage;
+ * replacing the live scan must never turn a partial index into a clean miss.
  */
 
 type Client = ReturnType<typeof createRouterClient<typeof busabaseRouter, Record<never, never>>>;
@@ -30,7 +22,7 @@ const MIGRATIONS_CWD = path.resolve(__dirname, "../../../apps/busabase");
 const HASH = (byte: string) => `sha256:${byte.repeat(64)}`;
 const FILLER_USAGES = 1200;
 
-describe("search — files source content-scan truncation disclosure", () => {
+describe("search — files source index coverage disclosure", () => {
   let dataDir = "";
   let storageDir = "";
   let originalCwd = "";
@@ -118,22 +110,35 @@ describe("search — files source content-scan truncation disclosure", () => {
     }
   });
 
-  it("reports contentTruncated honestly when the content scan could not cover every eligible file", async () => {
-    // A phrase that matches NEITHER identity NOR any body in this fixture.
-    // With 1200+ eligible usages and a 1000-row content-scan cap, the search
-    // cannot have inspected everything — the response must say so rather than
-    // implying a clean, complete "no matches".
+  it("does not claim truncation when all 1200+ usages have indexed text", async () => {
+    // No object-storage scan or latest-1000 window is necessary anymore.
     const result = await client.search({ query: "nonexistent-phrase-xyz", sources: ["files"] });
     expect(result.results).toHaveLength(0);
-    expect(result.contentTruncated).toBe(true);
+    expect(result.contentTruncated).toBe(false);
   });
 
   it("does not claim truncation when identity alone already answered the query", async () => {
-    // "Quarterly" is in the identity fields (node name), so phase 1 satisfies
-    // this without ever needing the capped content scan — the SQL push-down
-    // fix from `search-files-recency-window.test.ts` at work here too.
+    // Identity lookup remains complete as well as the body index.
     const result = await client.search({ query: "Quarterly", sources: ["files"] });
     expect(result.results.length).toBeGreaterThan(0);
     expect(result.contentTruncated).toBe(false);
+  });
+  it("reports incomplete coverage when a legacy text object cannot be indexed", async () => {
+    const db = await getDb();
+    const [text] = await db.select().from(busabaseAssetTexts).limit(1);
+    if (!text) throw new Error("Expected an indexed text fixture");
+    await db
+      .delete(busabaseAssetTextSearch)
+      .where(eq(busabaseAssetTextSearch.assetId, text.assetId));
+    await storage.deleteObject(text.textStorageKey);
+    const result = await client.search({ query: "not-in-any-file", sources: ["files"] });
+    expect(result.results).toHaveLength(0);
+    expect(result.contentTruncated).toBe(true);
+    // A failed indexing attempt must not create a false completed marker.
+    const [projection] = await db
+      .select()
+      .from(busabaseAssetTextSearch)
+      .where(eq(busabaseAssetTextSearch.assetId, text.assetId));
+    expect(projection).toBeUndefined();
   });
 });

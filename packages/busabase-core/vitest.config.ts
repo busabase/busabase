@@ -10,6 +10,7 @@ export default defineConfig({
   // `@acp-ui/web/vitest.config.ts` for the same reason.
   esbuild: { jsx: "automatic" },
   resolve: {
+    dedupe: ["react", "react-dom"],
     alias: {
       // Skill handlers are server-only; neutralize the guard for Node tests.
       "server-only": path.resolve(__dirname, "./tests/mocks/server-only.ts"),
@@ -17,11 +18,15 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    // Keep the virtualizer on the renderer's React instance in workspace installs.
+    // External Node resolution can otherwise pick its nested React 18 beside React 19.
+    server: { deps: { inline: ["@tanstack/react-virtual"] } },
     setupFiles: ["./tests/setup-core-i18n.ts", "./tests/setup-dom-teardown.ts"],
     // An allowlist, so a co-located test under a directory not named here is silently never
     // run — it looks green because it never executed. Add the directory when you add the test.
     include: [
       "tests/**/*.test.ts",
+      "src/domains/agents/*.test.ts",
       "src/domains/agents/components/**/*.test.tsx",
       "src/domains/agents/hooks/**/*.test.tsx",
       "src/domains/agents/logic/**/*.test.ts",
@@ -48,7 +53,11 @@ export default defineConfig({
       "src/domains/templates/components/**/*.test.tsx",
       "src/domains/templates/logic/**/*.test.ts",
       "src/domains/vault/components/**/*.test.tsx",
+      "src/domains/workflow/logic/**/*.test.ts",
+      "src/domains/workflow/components/**/*.test.tsx",
+      "src/domains/workflow/utils/**/*.test.ts",
       "src/domains/space-instructions/components/**/*.test.tsx",
+      "src/domains/space-welcome/components/**/*.test.tsx",
       "src/demo/**/*.test.ts",
       "src/logic/**/*.test.ts",
     ],

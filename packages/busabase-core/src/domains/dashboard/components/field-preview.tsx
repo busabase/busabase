@@ -3,6 +3,7 @@ import { CodeBlock } from "kui/ai-elements/code-block";
 import { Dialog, DialogDescription, DialogHeader, DialogTitle } from "kui/dialog";
 import { ExternalLink, List, Maximize2, PlaySquare } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
+import { markdownPreviewSource } from "openlib/utils/markdown-preview";
 import { type ComponentProps, type ReactNode, useState } from "react";
 import { Streamdown, type Components as StreamdownComponents } from "streamdown";
 import { useSearch } from "wouter";
@@ -31,8 +32,8 @@ import {
 } from "../helpers/html";
 import { mergeSearchIntoHref } from "../helpers/link-search";
 import { lookupDisplayField, lookupItemValue } from "../helpers/lookup";
-import { markdownPreviewSource } from "../helpers/markdown-preview";
 import type { FieldChip } from "../helpers/view-types";
+import { isListPayloadOmitted } from "../utils/list-payload-preview";
 import { AttachmentValuePreview } from "./attachment-value-preview";
 import { DateFieldValue } from "./date-field";
 import { FormulaValue } from "./formula-value";
@@ -661,6 +662,7 @@ export function LookupFieldValue({
   fieldUsers,
   records = [],
   draft = false,
+  presentation = "flow",
 }: {
   field: BaseFieldVO;
   computed?: LookupComputedVO;
@@ -668,6 +670,7 @@ export function LookupFieldValue({
   fieldUsers?: Record<string, UserRefVO>;
   records?: RecordVO[];
   draft?: boolean;
+  presentation?: "flow" | "grid";
 }) {
   const messages = useCoreI18n();
   const locale = useCoreLocale();
@@ -682,6 +685,8 @@ export function LookupFieldValue({
   const rollup = field.options.lookup?.rollup ?? "values";
   const displayField = target ? lookupDisplayField(target, rollup) : undefined;
   const values = Array.isArray(result) ? result : [result];
+  const attachmentValues = displayField?.type === "attachment" && rollup === "values";
+  const gridAttachments = attachmentValues && presentation === "grid";
   const renderValue = (item: unknown, index: number) =>
     displayField ? (
       <FieldValuePreview
@@ -696,10 +701,14 @@ export function LookupFieldValue({
         {getFieldPreviewText(field, item, messages, locale) || "-"}
       </span>
     );
-  const canExpand = !unavailable && (Boolean(computed?.sources.length) || values.length > 3);
+  const canExpand =
+    !unavailable &&
+    (Boolean(computed?.sources.length) ||
+      Boolean(computed?.sourcesTruncated) ||
+      (!attachmentValues && values.length > 3));
   return (
     <div
-      className="flex min-w-0 flex-wrap items-center gap-1.5"
+      className={`flex min-w-0 items-center gap-1.5 ${gridAttachments ? "w-full flex-nowrap" : "flex-wrap"}`}
       data-testid={`lookup-field-${field.slug}`}
     >
       {draft ? (
@@ -723,6 +732,13 @@ export function LookupFieldValue({
         </>
       ) : values.length === 0 || result === null || result === undefined || result === "" ? (
         <span className="text-muted-foreground">-</span>
+      ) : attachmentValues ? (
+        <AttachmentValuePreview
+          className={gridAttachments ? "flex-1" : undefined}
+          compact
+          presentation={presentation}
+          value={values}
+        />
       ) : (
         values.slice(0, 3).map(renderValue)
       )}
@@ -731,11 +747,14 @@ export function LookupFieldValue({
           aria-label={messages.lookup.details}
           className="inline-flex h-6 shrink-0 items-center gap-1 rounded px-1.5 text-muted-foreground text-xs transition-colors hover:bg-accent hover:text-foreground"
           data-testid={`lookup-sources-${field.slug}`}
-          onClick={() => setOpen(true)}
+          onClick={(event) => {
+            event.stopPropagation();
+            setOpen(true);
+          }}
           title={messages.lookup.details}
           type="button"
         >
-          {values.length > 3 ? `+${values.length - 3}` : <List size={13} />}
+          {!attachmentValues && values.length > 3 ? `+${values.length - 3}` : <List size={13} />}
         </button>
       ) : null}
       <Dialog onOpenChange={setOpen} open={open}>
@@ -749,6 +768,11 @@ export function LookupFieldValue({
             </DialogTitle>
             <DialogDescription>{messages.lookup.readOnly}</DialogDescription>
           </DialogHeader>
+          {computed?.sourcesTruncated ? (
+            <p className="text-muted-foreground text-xs" data-testid="lookup-sources-truncated">
+              {messages.lookup.sourcesTruncated.replace("{count}", String(computed.sources.length))}
+            </p>
+          ) : null}
           {computed?.sources.length ? (
             <div className="divide-y divide-border/50">
               {computed.sources.map((source) => (
@@ -772,7 +796,11 @@ export function LookupFieldValue({
                     <span className="break-words text-sm">{source.title}</span>
                   )}
                   <div className="min-w-0 break-words">
-                    {target ? (
+                    {isListPayloadOmitted(source.value) ? (
+                      <span className="text-muted-foreground text-xs">
+                        {messages.operation.viewFullContent}
+                      </span>
+                    ) : target ? (
                       <FieldValuePreview
                         field={target}
                         fieldUsers={fieldUsers}

@@ -32,6 +32,9 @@ import { type DbInstance, getDb } from "../db";
 import {
   attachments,
   busabaseAssets,
+  busabaseAssetTextSearch,
+  busabaseAssetTextSearchChunks,
+  busabaseAssetTexts,
   busabaseAssetUsages,
   busabaseBaseFields,
   busabaseBases,
@@ -42,10 +45,9 @@ import {
   busabaseRecords,
 } from "../db/schema";
 import {
-  autoRegisterAssetText,
-  loadAssetTextRows,
-} from "../domains/assets/logic/asset-texts-logic";
-import { openAssetTextSource } from "../domains/assets/logic/text-cache";
+  ASSET_SEARCH_OVERLAP_CHARS,
+  healAssetTextProjections,
+} from "../domains/assets/logic/asset-text-search-logic";
 import { getPrimaryField } from "../domains/base/utils/primary-field";
 import { OPEN_CHANGE_REQUEST_STATUSES } from "./change-request-status";
 import { hydrateChangeRequest, hydrateRecord } from "./cr-lifecycle";
@@ -54,7 +56,6 @@ import {
   buildNodeVisibilityCondition,
   buildNodeVisibilityExists,
 } from "./node-acl";
-import { isSearchableNodeType, reindexNodeContent, SEARCHABLE_NODE_TYPES } from "./node-content";
 import { collectSubtreeIds } from "./nodes";
 import {
   getSearchExecutionOutcome,
@@ -62,7 +63,12 @@ import {
   withSearchExecution,
 } from "./search-execution";
 import { recordSearchRequest } from "./search-metrics";
-import { literalSearchPattern, recordSearchSource } from "./search-record-query";
+import {
+  findRecordMatches,
+  literalSearchPattern,
+  recordSearchWindowRows,
+} from "./search-record-query";
+import { healNodeProjections } from "./search-self-heal";
 import { ensureReady } from "./seed";
 import { toBaseVO } from "./vo";
 
@@ -344,17 +350,9 @@ const fileResultHref = (nodeType: string, nodeSlug: string) => {
  * `VALUE_TEXT_INDEX_LIMIT`. See `content/spec/node-content-search.md`.
  */
 const NODE_SNIPPET_RADIUS = 60;
-/**
- * How many unindexed nodes one search request will index before querying.
- *
- * Bounded on purpose: a workspace upgraded from before this feature has no
- * projection rows, and indexing them all in the first search would make that
- * one request arbitrarily slow — worst on the largest workspaces, which are
- * exactly the ones that need search most. A small batch per request lets the
- * index fill in across a few searches instead (spec D3: gradually, never a
- * stalled request).
- */
-const NODE_SELF_HEAL_BATCH = 25;
+/** How long a search waits for the backfill it started; the rest finishes behind it. */
+const QUICK_SELF_HEAL_WAIT_MS = 300;
+const FULL_SELF_HEAL_WAIT_MS = 1_000;
 
 /** A snippet centred on the match, so the user can tell near-identical docs apart (spec S1). */
 const buildNodeSnippet = (content: string, query: string): string => {
@@ -378,44 +376,6 @@ const NODE_KIND_LABEL: Record<string, string> = {
 };
 
 /**
- * Index up to `NODE_SELF_HEAL_BATCH` content-bearing nodes that have no
- * projection row yet — the lazy backfill for workspaces that predate this
- * feature (spec D3). Fail-soft per node: a missing content object leaves that
- * node unindexed and retried next time rather than failing the search.
- */
-const selfHealNodeProjections = async (
-  db: DbInstance,
-  spaceId: string,
-  execution: SearchExecution,
-): Promise<void> => {
-  await execution.beforeQuery();
-  const stale = await execution.query(async (queryDb) =>
-    queryDb
-      .select({ id: busabaseNodes.id, type: busabaseNodes.type })
-      .from(busabaseNodes)
-      .where(
-        and(
-          eq(busabaseNodes.spaceId, spaceId),
-          isNull(busabaseNodes.archivedAt),
-          inArray(busabaseNodes.type, SEARCHABLE_NODE_TYPES),
-          notExists(
-            db
-              .select({ one: sql`1` })
-              .from(busabaseNodeContentSearch)
-              .where(eq(busabaseNodeContentSearch.nodeId, busabaseNodes.id)),
-          ),
-        ),
-      )
-      .limit(NODE_SELF_HEAL_BATCH),
-  );
-  for (const node of stale) {
-    await execution.beforeQuery();
-    if (!isSearchableNodeType(node.type)) continue;
-    await reindexNodeContent(db, { nodeId: node.id, spaceId, nodeType: node.type });
-  }
-};
-
-/**
  * Search node content. Node ACL is applied INSIDE this query, never after —
  * post-filtering would both over-count `hasMore` and let a caller infer that
  * hidden nodes exist (spec D4).
@@ -426,9 +386,14 @@ const searchNodeContent = async (
   query: string,
   limit: number,
   narrow: SearchNarrowing,
+  mode: "quick" | "full",
   execution: SearchExecution,
 ): Promise<{ results: SortableResult[]; truncated: boolean }> => {
-  await selfHealNodeProjections(db, spaceId, execution);
+  const indexComplete = await healNodeProjections(
+    db,
+    spaceId,
+    mode === "quick" ? QUICK_SELF_HEAL_WAIT_MS : FULL_SELF_HEAL_WAIT_MS,
+  );
   await execution.beforeQuery();
   const pattern = literalSearchPattern(query);
   // One budgeted scope for both statements: the matches and the truncation
@@ -516,42 +481,9 @@ const searchNodeContent = async (
         updatedAt: row.updatedAt?.toISOString() ?? null,
       }),
     })),
-    truncated: truncatedInScope !== undefined,
+    truncated: truncatedInScope !== undefined || !indexComplete,
   };
 };
-
-const fileMatchesQuery = (query: string, ...values: (string | null | undefined)[]) => {
-  const lowerQuery = query.toLowerCase();
-  return values.some((value) => value?.toLowerCase().includes(lowerQuery));
-};
-
-/**
- * Wall-clock budget for the WHOLE body-scan phase of one `search()` call (not
- * per file) — mirrors `grepTimeoutMs()` in `asset-grep-logic.ts`: read once
- * per call, parsed as a number, sensible default on missing/invalid.
- * Overridable via `BUSABASE_SEARCH_FILE_SCAN_TIMEOUT_MS` so tests can exercise
- * the timeout path deterministically. Without this, a query that matches no
- * metadata across many large `present`-status text files could scan
- * gigabytes with no time bound now that the old 256KB-per-file cap is gone.
- */
-const searchFileScanTimeoutMs = (): number => {
-  const raw = process.env.BUSABASE_SEARCH_FILE_SCAN_TIMEOUT_MS;
-  const parsed = raw ? Number(raw) : Number.NaN;
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 5_000;
-};
-
-// Upper bound on how many asset-usage rows the CONTENT-scan fallback below
-// reads before giving up — it pays for a real object-storage read per
-// candidate, so it needs a cost bound the way `searchNodeContent` doesn't.
-// Ordered by recency so the cap favors the files someone is most likely
-// searching for. Deliberately NOT applied to identity matching (see spec S2):
-// that used to be the same cap serving both jobs, which meant an exact
-// filename match could be pushed out of the window by unrelated churn
-// elsewhere in the space (record attachments, CR attachments…) and search
-// would report a clean empty result — indistinguishable from "does not
-// exist". A cost bound on a live body-scan is defensible; the same bound
-// silently hiding an exact name match is not.
-const MAX_ASSET_USAGE_SCAN_ROWS = 1000;
 
 /** Shared select shape both phases below query — kept in one place so they can never drift. */
 const assetUsageRowSelection = () => ({
@@ -583,9 +515,10 @@ const queryAssetUsageRows = (
   extraCondition: ReturnType<typeof and> | undefined,
   limitRows: number,
   narrow: SearchNarrowing,
+  contentSnippet?: SQL<string>,
 ) =>
   db
-    .select(assetUsageRowSelection())
+    .select({ ...assetUsageRowSelection(), contentSnippet: contentSnippet ?? sql<string>`''` })
     .from(busabaseAssetUsages)
     .innerJoin(busabaseAssets, eq(busabaseAssetUsages.assetId, busabaseAssets.id))
     .innerJoin(attachments, eq(busabaseAssets.attachmentId, attachments.id))
@@ -694,135 +627,13 @@ const toFileSearchResult = (row: AssetUsageRow, body: string): SearchResultVO =>
   };
 };
 
-/**
- * Files matched by a live CONTENT scan — the expensive fallback for a phrase
- * that isn't in any candidate's identity. Bounded by `MAX_ASSET_USAGE_SCAN_ROWS`
- * candidates and a wall-clock budget, and skips anything `identityMatchedKeys`
- * already produced a result for (phase 1 already covers those).
- */
-const scanFileContents = async (
-  db: DbInstance,
-  spaceId: string,
-  query: string,
-  limit: number,
-  identityMatchedKeys: Set<string>,
-  narrow: SearchNarrowing,
-  execution: SearchExecution,
-): Promise<{ results: SortableResult[]; scannedAllEligible: boolean }> => {
-  await execution.beforeQuery();
-  // One budgeted scope for the usage scan and the beyond-cap probe.
-  const { rows, beyondCap } = await execution.query(async (queryDb) => {
-    const rows = await queryAssetUsageRows(
-      queryDb,
-      spaceId,
-      undefined,
-      MAX_ASSET_USAGE_SCAN_ROWS,
-      narrow,
-    );
-
-    // Cheap existence check, independent of `rows` above: answers "did the cap
-    // leave anything out", which the matched rows can never answer on their own
-    // — the case this exists for is exactly zero content matches, where asking
-    // the (empty) hit set whether anything was capped always says "no" exactly
-    // when the caller most needs to be told otherwise (mirrors `searchNodeContent`'s
-    // `truncatedInScope`, spec D2b).
-    execution.checkpoint();
-    const [beyondCap] = await queryDb
-      .select({ id: busabaseAssetUsages.id })
-      .from(busabaseAssetUsages)
-      .innerJoin(busabaseNodes, eq(busabaseAssetUsages.nodeId, busabaseNodes.id))
-      .where(
-        and(
-          eq(busabaseNodes.spaceId, spaceId),
-          eq(busabaseAssetUsages.spaceId, spaceId),
-          isNull(busabaseNodes.archivedAt),
-          buildNodeVisibilityCondition(db),
-        ),
-      )
-      .orderBy(desc(busabaseAssetUsages.updatedAt))
-      .offset(MAX_ASSET_USAGE_SCAN_ROWS)
-      .limit(1);
-    return { rows, beyondCap };
-  });
-  const overCap = beyondCap !== undefined;
-
-  // Same "one source of truth for what text an asset has" infrastructure the
-  // grep engine uses (`asset-grep-logic.ts`'s `grepAssets`), instead of a
-  // separate raw-bytes read. Batch-load existing text rows, then lazily
-  // self-heal any text-kind asset that predates this feature and has no row
-  // yet — mirrors grep's exact self-heal pattern so legacy assets stay
-  // content-searchable without a backfill job.
-  const assetIds = [...new Set(rows.map((row) => row.assetId))];
-  // Bounded id-list lookup: no budgeted transaction needed.
-  let textRows = await execution.read(async (readDb) => loadAssetTextRows(readDb, assetIds));
-  const toSelfHeal = [
-    ...new Set(
-      rows
-        .filter((row) => row.contentKind === "text" && !textRows.has(row.assetId))
-        .map((row) => row.assetId),
-    ),
-  ];
-  if (toSelfHeal.length > 0) {
-    await Promise.all(
-      toSelfHeal.map((assetId) =>
-        autoRegisterAssetText(assetId, db, { knownContentKind: "text", knownMissing: true }),
-      ),
-    );
-    textRows = await execution.read(async (readDb) => loadAssetTextRows(readDb, assetIds));
-  }
-
-  // Wall-clock budget for the WHOLE body-scan phase below (not per file) —
-  // computed once, before the loop starts.
-  const deadline = Date.now() + searchFileScanTimeoutMs();
-  const results: SortableResult[] = [];
-
-  for (const row of rows) {
-    execution.checkpoint();
-    if (identityMatchedKeys.has(rowResultKey(row))) {
-      // Phase 1 (SQL, uncapped) already matched and returned this exact row —
-      // scanning its body too would just re-find the same result a second time.
-      continue;
-    }
-    // Only reachable for candidates identity didn't already match, and only
-    // for an asset with a `present` text row (a `missing` / `none` / `stale`
-    // row, or no row at all, means: not eligible — skip, no error).
-    const textRow = textRows.get(row.assetId);
-    if (!textRow || textRow.status !== "present") {
-      continue;
-    }
-    // Budget check BEFORE starting this candidate's body scan — once the
-    // deadline trips, every REMAINING candidate is skipped the same way.
-    if (Date.now() >= deadline) {
-      continue;
-    }
-    let matchedLine: string | undefined;
-    try {
-      const source = await openAssetTextSource(textRow);
-      for await (const line of source.iterateLines()) {
-        execution.checkpoint();
-        if (fileMatchesQuery(query, line)) {
-          matchedLine = line;
-          break;
-        }
-      }
-    } catch {
-      // Best-effort, mirrors the old `.catch(() => "")` swallow: a read
-      // failure (deleted mid-flight, corrupt cache, etc.) is treated as no
-      // match on this file rather than failing the whole search.
-    }
-    execution.checkpoint();
-    if (matchedLine === undefined) {
-      continue;
-    }
-    // The matched LINE, not the whole file — the snippet reflects the real
-    // match location instead of arbitrary head bytes.
-    results.push(toSortableFileResult(row, matchedLine, narrow.sort));
-    if (results.length >= limit) {
-      break;
-    }
-  }
-  return { results, scannedAllEligible: !overCap };
-};
+/** Current-version projections only: stale/none/overwritten slots never match. */
+const currentAssetProjectionCondition = () =>
+  and(
+    eq(busabaseAssetTextSearch.assetId, busabaseAssetTexts.assetId),
+    eq(busabaseAssetTextSearch.textStorageKey, busabaseAssetTexts.textStorageKey),
+    eq(busabaseAssetTexts.status, "present"),
+  );
 
 const searchAssetBackedFiles = async (
   query: string,
@@ -831,64 +642,105 @@ const searchAssetBackedFiles = async (
   scanContent: boolean,
   execution: SearchExecution,
 ): Promise<{ results: SortableResult[]; truncated: boolean }> => {
-  await execution.beforeQuery();
   const db = await getDb();
   const spaceId = getContextSpaceId();
   const pattern = literalSearchPattern(query);
-
-  // Phase 1: identity match, pushed into SQL, NOT subject to
-  // `MAX_ASSET_USAGE_SCAN_ROWS` — an indexed string comparison over the whole
-  // space costs nothing like a body scan, so there is no reason to let an
-  // exact filename match go missing just because other, newer, unrelated
-  // usages outrank it by recency (spec S2).
-  const identityRows = await execution.query(async (queryDb) =>
-    queryAssetUsageRows(queryDb, spaceId, fileIdentitySqlCondition(pattern), limit, narrow),
-  );
-  const identityResults = identityRows.map((row) =>
-    toSortableFileResult(
-      row,
-      [row.nodeDescription, row.usagePath, row.fileName].filter(Boolean).join(" "),
-      narrow.sort,
-    ),
-  );
-
-  if (identityResults.length >= limit) {
-    // Already have everything this call can return — no need to pay for a
-    // content scan, and nothing was left uninspected as a RESULT of this
-    // search (a caller wanting content coverage on a later page would still
-    // hit the scan below).
-    return { results: identityResults, truncated: false };
-  }
-
-  // Typeahead must stay bounded and predictable. File identities are indexed
-  // SQL comparisons; body search can scan up to 1,000 files for five seconds
-  // and belongs on the durable full-search page.
-  if (!scanContent) {
-    return { results: identityResults, truncated: false };
-  }
-
-  const identityMatchedKeys = new Set(identityRows.map(rowResultKey));
-  const { results: contentResults, scannedAllEligible } = await scanFileContents(
-    db,
-    spaceId,
-    query,
-    limit - identityResults.length,
-    identityMatchedKeys,
-    narrow,
-    execution,
-  );
-
-  return {
-    results: [...identityResults, ...contentResults],
-    // Only worth flagging when identity found NOTHING: that's the case spec S2
-    // actually cares about — a query whose only path to a match was the capped
-    // content scan, so an incomplete scan could plausibly be hiding a real file
-    // behind an empty-looking result. Once identity already confirmed the file
-    // exists, that specific "doesn't exist" false reading is off the table —
-    // an uncapped content scan finding additional, separate matches is a real
-    // but lesser concern than what this flag was built to solve.
-    truncated: identityResults.length === 0 && !scannedAllEligible,
-  };
+  // A legacy corpus is warmed independently of the query. Waiting is bounded;
+  // the SQL completeness probe below applies the caller's exact ACL and scope.
+  if (scanContent) await healAssetTextProjections(db, spaceId, { waitMs: 300 });
+  await execution.beforeQuery();
+  return execution.query(async (queryDb) => {
+    const matchingAssets = queryDb
+      .select({ assetId: busabaseAssetTextSearchChunks.assetId })
+      .from(busabaseAssetTextSearchChunks)
+      .innerJoin(
+        busabaseAssetTextSearch,
+        eq(busabaseAssetTextSearch.assetId, busabaseAssetTextSearchChunks.assetId),
+      )
+      .innerJoin(busabaseAssetTexts, currentAssetProjectionCondition())
+      .where(
+        and(
+          eq(busabaseAssetTextSearch.spaceId, spaceId),
+          ilike(busabaseAssetTextSearchChunks.contentText, pattern),
+        ),
+      );
+    const matchedChunk = queryDb
+      .select({ text: busabaseAssetTextSearchChunks.contentText })
+      .from(busabaseAssetTextSearchChunks)
+      .innerJoin(
+        busabaseAssetTextSearch,
+        eq(busabaseAssetTextSearch.assetId, busabaseAssetTextSearchChunks.assetId),
+      )
+      .innerJoin(busabaseAssetTexts, currentAssetProjectionCondition())
+      .where(
+        and(
+          eq(busabaseAssetTextSearch.spaceId, spaceId),
+          eq(busabaseAssetTextSearchChunks.assetId, busabaseAssets.id),
+          ilike(busabaseAssetTextSearchChunks.contentText, pattern),
+        ),
+      )
+      .orderBy(asc(busabaseAssetTextSearchChunks.chunkIndex))
+      .limit(1);
+    const rows = await queryAssetUsageRows(
+      queryDb,
+      spaceId,
+      scanContent
+        ? or(fileIdentitySqlCondition(pattern), inArray(busabaseAssets.id, matchingAssets))
+        : fileIdentitySqlCondition(pattern),
+      limit,
+      narrow,
+      scanContent ? sql<string>`(${matchedChunk})` : undefined,
+    );
+    let truncated = false;
+    if (scanContent) {
+      const eligibleText = queryDb
+        .select({ assetId: busabaseAssetTexts.assetId })
+        .from(busabaseAssetTexts)
+        .where(
+          and(
+            eq(busabaseAssetTexts.assetId, busabaseAssets.id),
+            eq(busabaseAssetTexts.status, "present"),
+          ),
+        );
+      const completeProjection = queryDb
+        .select({ assetId: busabaseAssetTextSearch.assetId })
+        .from(busabaseAssetTextSearch)
+        .innerJoin(busabaseAssetTexts, currentAssetProjectionCondition())
+        .where(
+          and(
+            eq(busabaseAssetTextSearch.assetId, busabaseAssets.id),
+            eq(busabaseAssetTextSearch.complete, true),
+          ),
+        );
+      const noTextSlot = queryDb
+        .select({ assetId: busabaseAssetTexts.assetId })
+        .from(busabaseAssetTexts)
+        .where(eq(busabaseAssetTexts.assetId, busabaseAssets.id));
+      const [incomplete] = await queryAssetUsageRows(
+        queryDb,
+        spaceId,
+        or(
+          and(exists(eligibleText), notExists(completeProjection)),
+          and(eq(busabaseAssets.contentKind, "text"), notExists(noTextSlot)),
+        ),
+        1,
+        narrow,
+      );
+      truncated = incomplete !== undefined || query.length > ASSET_SEARCH_OVERLAP_CHARS;
+    }
+    return {
+      results: rows.map((row) =>
+        toSortableFileResult(
+          row,
+          row.contentSnippet
+            ? buildNodeSnippet(row.contentSnippet, query)
+            : [row.nodeDescription, row.usagePath, row.fileName].filter(Boolean).join(" "),
+          narrow.sort,
+        ),
+      ),
+      truncated,
+    };
+  });
 };
 
 const searchWithinBudget = async (
@@ -1040,66 +892,66 @@ const searchWithinBudget = async (
         )
       : undefined,
   );
-  const recordSource = recordSearchSource({
-    query,
-    eligibility: projectionEligibility,
-    eligibleBases: db
-      .select({ id: busabaseBases.id })
-      .from(busabaseBases)
-      .where(
-        and(
-          eq(busabaseBases.spaceId, spaceId),
-          buildNodeVisibilityExists(db, busabaseBases.nodeId),
-        ),
-      ),
-  });
-  const textSearch = sql`${recordSource.vector} @@ plainto_tsquery('simple', ${query})`;
+  const windowRows = recordSearchWindowRows(candidateWindow);
+  // Most of what is left goes to finding matches; ranking, hydration and the
+  // other sources need the rest. The index attempt gets a third of it, at
+  // most 500 ms: a word the index can answer comes back well within that.
+  const matchBudgetMs = execution.remainingMs() * 0.6;
   await execution.beforeQuery();
-  const projectionRows = wantsRecords
-    ? await execution.query(async (queryDb) =>
-        queryDb
-          .select({
-            changeRequestId: sql<string | null>`${busabaseFieldValues.changeRequestId}`,
-            recordId: sql<string | null>`${busabaseFieldValues.recordId}`,
-          })
-          .from(recordSource.source)
-          .where(
-            and(
-              recordSource.eligibility,
-              or(
-                textSearch,
-                ilike(busabaseFieldValues.valueText, pattern),
-                ilike(busabaseFieldValues.fieldSlug, pattern),
-              ),
-            ),
-          )
-          .groupBy(busabaseFieldValues.recordId, busabaseFieldValues.changeRequestId)
-          .orderBy(
-            ...(parsed.sort === "relevance"
-              ? [
-                  desc(
-                    sql`max(ts_rank(${recordSource.vector}, plainto_tsquery('simple', ${query})))`,
-                  ),
-                  desc(sql`max(${busabaseFieldValues.updatedAt})`),
-                ]
-              : // Grouped, so the sort column has to be an aggregate too. `max`
-                // for the newest-first orders and `min` for oldest-first, so a
-                // record with many edited values sorts by the edge the caller
-                // actually asked about rather than an arbitrary one.
-                [
-                  parsed.sort === "updated_desc"
-                    ? desc(sql`max(${busabaseFieldValues.updatedAt})`)
-                    : parsed.sort === "updated_asc"
-                      ? asc(sql`min(${busabaseFieldValues.updatedAt})`)
-                      : parsed.sort === "created_desc"
-                        ? desc(sql`max(${busabaseFieldValues.createdAt})`)
-                        : asc(sql`min(${busabaseFieldValues.createdAt})`),
-                ]),
-          )
-          .limit(candidateWindow),
+  const matches = wantsRecords
+    ? await execution.query((queryDb) =>
+        findRecordMatches(queryDb, {
+          query,
+          spaceId,
+          eligibility: projectionEligibility,
+          rows: windowRows,
+          oldestFirst: parsed.sort === "updated_asc" || parsed.sort === "created_asc",
+          scanUntil: Date.now() + matchBudgetMs,
+          indexTimeoutMs: Math.min(matchBudgetMs / 3, 500),
+        }),
       )
-    : [];
+    : { ids: [], truncated: false };
+  const vector = sql`to_tsvector('simple', coalesce(${busabaseFieldValues.valueText}, ''))`;
+  await execution.beforeQuery();
+  // Ranks at most `windowRows` values, read by primary key.
+  const projectionRows =
+    matches.ids.length > 0
+      ? await execution.read(async (readDb) =>
+          readDb
+            .select({
+              changeRequestId: busabaseFieldValues.changeRequestId,
+              recordId: busabaseFieldValues.recordId,
+            })
+            .from(busabaseFieldValues)
+            .where(inArray(busabaseFieldValues.id, matches.ids))
+            .groupBy(busabaseFieldValues.recordId, busabaseFieldValues.changeRequestId)
+            .orderBy(
+              ...(parsed.sort === "relevance"
+                ? [
+                    desc(sql`max(ts_rank(${vector}, plainto_tsquery('simple', ${query})))`),
+                    desc(sql`max(${busabaseFieldValues.updatedAt})`),
+                  ]
+                : // Grouped, so the sort column has to be an aggregate too. `max`
+                  // for the newest-first orders and `min` for oldest-first, so a
+                  // record with many edited values sorts by the edge the caller
+                  // actually asked about rather than an arbitrary one.
+                  [
+                    parsed.sort === "updated_desc"
+                      ? desc(sql`max(${busabaseFieldValues.updatedAt})`)
+                      : parsed.sort === "updated_asc"
+                        ? asc(sql`min(${busabaseFieldValues.updatedAt})`)
+                        : parsed.sort === "created_desc"
+                          ? desc(sql`max(${busabaseFieldValues.createdAt})`)
+                          : asc(sql`min(${busabaseFieldValues.createdAt})`),
+                  ]),
+            )
+            .limit(candidateWindow),
+        )
+      : [];
 
+  // More matches than the window holds, or the scan ran out of time: the
+  // ranking covered only the newest (for ascending sorts, oldest) of them.
+  const recordsTruncated = matches.truncated;
   const recordIds = projectionRows
     .map((row) => row.recordId)
     .filter((recordId): recordId is string => Boolean(recordId));
@@ -1258,7 +1110,15 @@ const searchWithinBudget = async (
 
   await execution.beforeQuery();
   const nodeContent = wantsNodes
-    ? await searchNodeContent(db, spaceId, query, candidateWindow, narrowing, execution)
+    ? await searchNodeContent(
+        db,
+        spaceId,
+        query,
+        candidateWindow,
+        narrowing,
+        parsed.mode,
+        execution,
+      )
     : { results: [] as SortableResult[], truncated: false };
 
   const baseResults = [...baseRowsById.values()].map((base) => ({
@@ -1298,9 +1158,9 @@ const searchWithinBudget = async (
     // Reported even when this page has hits: it says the ANSWER may be
     // incomplete, which is exactly what a caller needs in order to describe an
     // empty or thin result honestly (spec D2b). ORed across every source that
-    // can be capped — node content and file content are two independent ways
-    // the same promise can break.
-    contentTruncated: nodeContent.truncated || fileSearch.truncated,
+    // can be capped — node content, file content and the record match window
+    // are independent ways the same promise can break.
+    contentTruncated: recordsTruncated || nodeContent.truncated || fileSearch.truncated,
     hasMore: mergedResults.length > parsed.offset + parsed.limit,
     limit: parsed.limit,
     offset: parsed.offset,

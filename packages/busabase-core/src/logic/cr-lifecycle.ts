@@ -37,9 +37,11 @@ import {
   emitContextPerformanceMetric,
   getContextIsSpaceManager,
   getContextSpaceId,
+  hasContextCreationLimit,
   isAnonymousVisitor,
   resolveActorId,
   resolveUserRefs,
+  runWithContextCreationGuard,
   withContextSourceMeta,
 } from "../context";
 import { getDb } from "../db";
@@ -66,6 +68,7 @@ import {
   busabaseReviews,
   busabaseViews,
 } from "../db/schema";
+import { unpublishSitesOfArchivedNodes } from "../domains/airapp/logic/site-lifecycle";
 import { deleteNodeIconByUrl } from "../domains/attachments/logic/attachments-logic";
 import { collectPeopleFieldIds } from "../domains/base/field-types";
 import {
@@ -87,6 +90,11 @@ import {
   mergeViewUpdate as mergeViewUpdateBase,
 } from "../domains/base/handlers";
 import {
+  assertMergedLookupTargets,
+  type LookupReference,
+  lockLookupMergeTargets,
+} from "../domains/base/logic/lookup-merge-targets";
+import {
   relatedFieldApprovalsSatisfied,
   relatedFieldRequiredApprovals,
 } from "../domains/base/logic/related-field-review";
@@ -99,10 +107,12 @@ import {
 import "../domains/airapp/handlers";
 import "../domains/drive/handlers";
 import "../domains/file-node/handlers";
+import { commitPayloadWithFields } from "../domains/base/logic/commit-payload-projection";
 import { rebaselineFormulaOperation } from "../domains/base/logic/formula-recalculation";
 import {
   applyLookupFormulas,
   lookupDependentFieldSlugs,
+  lookupFormulaInputSlugs,
 } from "../domains/base/logic/lookup-formulas";
 import { resolveLookupValues } from "../domains/base/logic/lookup-values";
 import { resolveReverseRelationValues } from "../domains/base/logic/reverse-relations";
@@ -116,7 +126,11 @@ import { mergeFolderUpdate } from "../domains/folder/handlers";
 import { mergeRichNodeDocumentUpdate } from "../domains/rich-node/handlers";
 import { mergeSkillFile } from "../domains/skill/handlers";
 import { type FormulaStaleConflictTag, isFormulaStaleConflict } from "./formula-merge-conflict";
-import { isSearchableNodeType, reindexNodeContent } from "./node-content";
+import {
+  isSearchableNodeType,
+  reindexNodeContent,
+  upsertNodeContentProjection,
+} from "./node-content";
 
 /**
  * Refresh a node's search projection right after its content merge, inside the
@@ -130,7 +144,7 @@ import { isSearchableNodeType, reindexNodeContent } from "./node-content";
  *
  * Fail-soft by construction (`reindexNodeContent` swallows): an indexing
  * problem must never roll back a merge the reviewer already approved. The node
- * simply stays unindexed and the lazy self-heal in `logic/search.ts` retries.
+ * simply stays unindexed and the lazy self-heal in `logic/search-self-heal.ts` retries.
  */
 const refreshNodeContentSearch = async (
   db: MergeCtx["db"],
@@ -146,6 +160,7 @@ const refreshNodeContentSearch = async (
 
 import { applyPlaybookAttributionVisibility } from "../domains/playbooks/logic/playbook-attribution";
 import { dispatchWebhookEvent, hasWebhookRuleFor } from "../domains/webhook/logic/dispatch";
+import { enqueueWorkflowRunsForRecordEvent } from "../domains/workflow/logic/triggers";
 import { insertAuditEvent } from "./audit";
 import {
   type ChangeRequestScope,
@@ -309,8 +324,13 @@ export interface MergeCtx {
   targetRecordsById: Map<string, RecordPO>;
   targetViewsById: Map<string, ViewPO>;
   mergedNodeIds: string[];
+  /** Nodes this change request moved to Trash, for what must follow the commit. */
+  archivedNodeIds?: string[];
   mergedRecordIds: string[];
   mergedViewIds: string[];
+  /** Source schema rows locked before merge, plus Bases created within this transaction. */
+  lookupSourceBaseIds?: Set<string>;
+  lookupCreatedReferences?: LookupReference[];
   // Temp-ref → real node id, populated as node_create operations materialize so
   // later operations in the SAME change request can point their parent at a node
   // this CR is itself creating (create-folder-then-fill-it in one submission).
@@ -552,6 +572,20 @@ const mergeNodeCreate = async (ctx: MergeCtx, item: OperationPO, headCommit: Com
     .set({ status: "merged", nodeId, updatedAt: timestamp })
     .where(eq(busabaseOperations.id, item.id));
   ctx.mergedNodeIds.push(nodeId);
+  // A created node is findable by its content from the moment it exists; leaving
+  // this to the search-time backfill made every new Doc pending work for search.
+  // The text is already known here, so nothing is read back from storage: a
+  // Doc's body travels in the commit, and every other searchable type is born
+  // empty. Reading it back cost two storage round trips per node inside this
+  // transaction (a 100-node change request went from 11 s to 32 s).
+  if (isSearchableNodeType(fields.nodeType)) {
+    await upsertNodeContentProjection(db, {
+      nodeId,
+      spaceId: getContextSpaceId(),
+      nodeType: fields.nodeType,
+      text: fields.nodeType === "doc" ? ((fields.body as string | undefined) ?? "") : "",
+    });
+  }
 };
 
 const mergeNodeRename = async (
@@ -767,6 +801,7 @@ const mergeNodeDelete = async (ctx: MergeCtx, _item: OperationPO, node: NodePO) 
     .update(busabaseNodes)
     .set({ archivedAt: ctx.timestamp, updatedAt: ctx.timestamp })
     .where(inArray(busabaseNodes.id, subtreeIds));
+  ctx.archivedNodeIds?.push(...subtreeIds);
   // A folder subtree can contain Base nodes — archive their base row + records in
   // lockstep, otherwise the base lingers in bases.list with no node in the tree.
   await setBasesArchivedForNodes(ctx, subtreeIds, ctx.timestamp, ctx.timestamp);
@@ -1023,21 +1058,63 @@ export const notifyAgentOfChangeRequest = (
  */
 export const LIST_MAX_FIELD_VALUE_BYTES = 4_096;
 
+const compactListValue = (value: unknown): unknown => {
+  const serialized = typeof value === "string" ? value : (JSON.stringify(value) ?? "null");
+  if (Buffer.byteLength(serialized, "utf8") <= LIST_MAX_FIELD_VALUE_BYTES) {
+    return value;
+  }
+  return typeof value === "string" ? LIST_OMITTED_LONG_TEXT_VALUE : LIST_OMITTED_FIELD_VALUE;
+};
+
+const compactListComputedFields = (
+  computedFields: NonNullable<RecordVO["computedFields"]>,
+): NonNullable<RecordVO["computedFields"]> =>
+  Object.fromEntries(
+    Object.entries(computedFields).map(([slug, computed]) => [
+      slug,
+      {
+        ...computed,
+        value: compactListValue(computed.value),
+        sources: computed.sources.map((source) => ({
+          ...source,
+          value: compactListValue(source.value),
+        })),
+      },
+    ]),
+  );
+
+/**
+ * A whiteboard's scene is detail-only, but its pre-rendered thumbnail is what the
+ * Grid shows, so it survives compaction when it is reasonably small.
+ */
+const LIST_MAX_WHITEBOARD_PREVIEW_BYTES = 32_768;
+
 /** Build a compact payload before PostgreSQL sends the jsonb column to Node. */
-const listCommitPayloadExpression = () =>
+const listCommitPayloadExpression = (options?: { keepWhiteboardPreview?: boolean }) =>
   sql<Record<string, unknown>>`coalesce(
     (
       select jsonb_object_agg(
         payload_entry.key,
         case
           when octet_length(payload_entry.value::text) > ${LIST_MAX_FIELD_VALUE_BYTES}
-            then to_jsonb(
-              case
-                when jsonb_typeof(payload_entry.value) = 'string'
-                  then ${LIST_OMITTED_LONG_TEXT_VALUE}::text
-                else ${LIST_OMITTED_FIELD_VALUE}::text
-              end
-            )
+            then case
+              when ${options?.keepWhiteboardPreview === true}::boolean
+                and jsonb_typeof(payload_entry.value) = 'object'
+                and payload_entry.value -> 'scene' is not null
+                and jsonb_typeof(payload_entry.value -> 'previewSvg') = 'string'
+                and octet_length(payload_entry.value ->> 'previewSvg') between 1 and ${LIST_MAX_WHITEBOARD_PREVIEW_BYTES}
+                then jsonb_build_object(
+                  'omitted', ${LIST_OMITTED_FIELD_VALUE}::text,
+                  'previewSvg', payload_entry.value -> 'previewSvg'
+                )
+              else to_jsonb(
+                case
+                  when jsonb_typeof(payload_entry.value) = 'string'
+                    then ${LIST_OMITTED_LONG_TEXT_VALUE}::text
+                  else ${LIST_OMITTED_FIELD_VALUE}::text
+                end
+              )
+            end
           else payload_entry.value
         end
       )
@@ -1344,7 +1421,17 @@ export const hydrateChangeRequest = async (
  */
 export const hydrateRecords = async (
   records: RecordPO[],
-  options?: { summary?: boolean },
+  options?: {
+    summary?: boolean;
+    /** Table rows still need the Base schema for primary-field and relation labels. */
+    preserveBaseSchema?: boolean;
+    /** Table rows still render lookup cells and lookup-driven formulas. */
+    includeComputedFields?: boolean;
+    /** Table rows still show a whiteboard's thumbnail, not only its omission marker. */
+    keepWhiteboardPreview?: boolean;
+    /** Rows that only decide view membership and order read just these fields. */
+    payloadFields?: Iterable<string>;
+  },
 ): Promise<RecordVO[]> => {
   // Include source schema/config reads, not only the later target resolution.
   const dependencyReadAt = performance.timeOrigin + performance.now();
@@ -1363,17 +1450,37 @@ export const hydrateRecords = async (
       })
       .map((base) => base.id),
   );
+  const lookupBases = new Set(
+    [...baseMap.values()]
+      .filter((base) => base.fields.some((field) => field.type === "lookup"))
+      .map((base) => base.id),
+  );
   const headCommitIds = [...new Set(records.map((record) => record.headCommitId))];
   const commitRows = options?.summary
     ? await db
-        .select({ ...getTableColumns(busabaseCommits), payload: listCommitPayloadExpression() })
+        .select({
+          ...getTableColumns(busabaseCommits),
+          payload: listCommitPayloadExpression(options),
+        })
         .from(busabaseCommits)
         .where(inArray(busabaseCommits.id, headCommitIds))
-    : await db.select().from(busabaseCommits).where(inArray(busabaseCommits.id, headCommitIds));
+    : options?.payloadFields
+      ? await db
+          .select({
+            ...getTableColumns(busabaseCommits),
+            payload: commitPayloadWithFields(options.payloadFields).as("payload"),
+          })
+          .from(busabaseCommits)
+          .where(inArray(busabaseCommits.id, headCommitIds))
+      : await db.select().from(busabaseCommits).where(inArray(busabaseCommits.id, headCommitIds));
   const commitsById = new Map(commitRows.map((commit) => [commit.id, commit]));
   // Derived values are refreshed on read, without changing the source commit.
   const lookupRecords = options?.summary
-    ? records.filter((record) => dynamicFormulaBases.has(record.baseId))
+    ? records.filter((record) =>
+        options.includeComputedFields
+          ? lookupBases.has(record.baseId)
+          : dynamicFormulaBases.has(record.baseId),
+      )
     : records;
   const lookupValues = await resolveLookupValues(db, lookupRecords, baseMap, dependencyReadAt);
   // Reverse relation columns store nothing; read who links here from the
@@ -1383,32 +1490,44 @@ export const hydrateRecords = async (
     records,
     new Map([...baseMap].map(([baseId, base]) => [baseId, base.fields])),
   );
-  // Compact summaries still need complete inputs to calculate dynamic formulas;
-  // only those Bases pay for a full payload read. Large outputs stay compact.
-  const fullSummaryCommits =
-    options?.summary && lookupRecords.length
-      ? await db
-          .select()
-          .from(busabaseCommits)
-          .where(
-            inArray(
-              busabaseCommits.id,
-              lookupRecords.map((record) => record.headCommitId),
-            ),
-          )
-      : [];
+  // Lookup cells never read the row's own payload, so only read-time formulas need
+  // more than the compact projection: exactly their inputs, not every sibling
+  // field. Large formula outputs still leave through the compact projection.
+  const dynamicFormulaRecords = options?.summary
+    ? records.filter((record) => dynamicFormulaBases.has(record.baseId))
+    : [];
+  const fullSummaryCommits = dynamicFormulaRecords.length
+    ? await db
+        .select({
+          id: busabaseCommits.id,
+          payload: commitPayloadWithFields(
+            [...baseMap.values()].flatMap((base) => [...lookupFormulaInputSlugs(base.fields)]),
+          ).as("payload"),
+        })
+        .from(busabaseCommits)
+        .where(
+          inArray(
+            busabaseCommits.id,
+            dynamicFormulaRecords.map((record) => record.headCommitId),
+          ),
+        )
+    : [];
   const fullSummaryPayloads = new Map(
     fullSummaryCommits.map((commit) => [commit.id, commit.payload]),
   );
   // Ids named by people-typed CELLS (`member`, `created_by`, `updated_by`),
   // computed once per record so the resolve below stays a single batched call
   // rather than one per record.
+  const includeTableMetadata = options?.summary && options.includeComputedFields;
   const peopleIdsByRecord = new Map<string, string[]>(
     records.map((record) => {
-      const fields = options?.summary ? [] : (baseMap.get(record.baseId)?.fields ?? []);
+      const fields =
+        options?.summary && !includeTableMetadata ? [] : (baseMap.get(record.baseId)?.fields ?? []);
       const payload = commitsById.get(record.headCommitId)?.payload ?? {};
       const lookupPeople = Object.values(
-        options?.summary ? {} : (lookupValues.get(record.id)?.computedFields ?? {}),
+        options?.summary && !includeTableMetadata
+          ? {}
+          : (lookupValues.get(record.id)?.computedFields ?? {}),
       ).flatMap((computed) =>
         computed.targetField
           ? collectPeopleFieldIds([computed.targetField], {
@@ -1447,17 +1566,22 @@ export const hydrateRecords = async (
     if (options?.summary && lookups) {
       const dynamic = lookupDependentFieldSlugs(base.fields);
       payload = { ...commitVO.payload };
+      if (options.includeComputedFields) {
+        for (const [slug, value] of Object.entries(lookups.values)) {
+          payload[slug] = compactListValue(value);
+        }
+      }
       for (const field of base.fields) {
         if (field.type !== "formula" || !dynamic.has(field.slug)) continue;
-        const value = resolvedPayload[field.slug];
-        payload[field.slug] =
-          Buffer.byteLength(JSON.stringify(value) ?? "null", "utf8") > LIST_MAX_FIELD_VALUE_BYTES
-            ? typeof value === "string"
-              ? LIST_OMITTED_LONG_TEXT_VALUE
-              : LIST_OMITTED_FIELD_VALUE
-            : value;
+        payload[field.slug] = compactListValue(resolvedPayload[field.slug]);
       }
     }
+    const computedFields =
+      lookups && (!options?.summary || options.includeComputedFields)
+        ? options?.summary
+          ? compactListComputedFields(lookups.computedFields)
+          : lookups.computedFields
+        : undefined;
     return {
       id: record.id,
       baseId: record.baseId,
@@ -1478,8 +1602,11 @@ export const hydrateRecords = async (
       archivedAt: toIso(record.archivedAt),
       createdAt: record.createdAt.toISOString(),
       updatedAt: record.updatedAt.toISOString(),
-      base: options?.summary ? { ...base, description: "", fields: [] } : base,
-      ...(lookups && !options?.summary ? { computedFields: lookups.computedFields } : {}),
+      base:
+        options?.summary && !options.preserveBaseSchema
+          ? { ...base, description: "", fields: [] }
+          : base,
+      ...(computedFields ? { computedFields } : {}),
       headCommit: { ...commitVO, payload: { ...payload, ...reverseValues.get(record.id) } },
     };
   });
@@ -3452,6 +3579,45 @@ export const listAgentTasks = async () => {
 
 // ── Merge engine ──────────────────────────────────────────────────────────────
 
+/**
+ * What merging this Change Request will add. Nothing unless it is about to merge: a retry
+ * of one already merged adds nothing, and must not be refused because the space is full.
+ */
+const countCreatedByMerge = async (changeRequestId: string) => {
+  if (!hasContextCreationLimit()) return {};
+  const db = await getDb();
+  const [changeRequest] = await db
+    .select({ status: busabaseChangeRequests.status })
+    .from(busabaseChangeRequests)
+    .where(
+      and(
+        eq(busabaseChangeRequests.id, changeRequestId),
+        eq(busabaseChangeRequests.spaceId, getContextSpaceId()),
+      ),
+    )
+    .limit(1);
+  if (changeRequest?.status !== "approved") return {};
+  const operations = await db
+    .select({ operation: busabaseOperations.operation })
+    .from(busabaseOperations)
+    .where(eq(busabaseOperations.changeRequestId, changeRequestId));
+  return countCreatedResources(operations);
+};
+
+/** What merging these operations adds to the space, as its plan counts it. */
+const countCreatedResources = (operations: { operation: string }[]) => ({
+  nodes: operations.filter(
+    (item) => item.operation === "node_create" || item.operation === "node_restore",
+  ).length,
+  records: operations.filter(
+    (item) => item.operation === "record_create" || item.operation === "record_restore",
+  ).length,
+});
+
+const isUsageLimitError = (err: unknown) =>
+  err instanceof ORPCError &&
+  (err.data as { code?: unknown } | undefined)?.code === "USAGE_LIMIT_EXCEEDED";
+
 export const mergeChangeRequest = async (
   changeRequestId: string,
   /**
@@ -3464,7 +3630,12 @@ export const mergeChangeRequest = async (
 ) => {
   await assertCanApproveChangeRequest(changeRequestId);
   try {
-    return await _mergeChangeRequest(changeRequestId, options);
+    // Every node and record a Change Request creates lands here, whoever asked: the
+    // dashboard, an agent, a form, a template. A proposal consumes nothing until now.
+    // Under the host's guard, so concurrent merges each count the ones before them.
+    return await runWithContextCreationGuard(await countCreatedByMerge(changeRequestId), () =>
+      _mergeChangeRequest(changeRequestId, options),
+    );
   } catch (err) {
     if (isNodeSlugConflictError(err)) {
       try {
@@ -3602,6 +3773,23 @@ export const mergeChangeRequest = async (
       } catch {
         // Ignore status update failure — re-throw the original CONFLICT error below.
       }
+    } else if (options.automatic && isUsageLimitError(err)) {
+      // A direct write the plan refused. Nobody is waiting on this Change Request, and
+      // leaving it approved would have it land later, after the caller has moved on.
+      try {
+        const db = await getDb();
+        await db
+          .update(busabaseChangeRequests)
+          .set({ status: "abandoned", updatedAt: now() })
+          .where(
+            and(
+              eq(busabaseChangeRequests.id, changeRequestId),
+              eq(busabaseChangeRequests.spaceId, getContextSpaceId()),
+            ),
+          );
+      } catch {
+        // Best-effort, same as the branches around it — re-throw the original.
+      }
     }
     throw err;
   }
@@ -3650,7 +3838,6 @@ const _mergeChangeRequest = async (
   if (operationKinds.length === 0) {
     throw changeRequestBadRequest(`ChangeRequest has no operations: ${changeRequest.id}`);
   }
-
   const operationHeadCommitIds = operationKinds.map((item) => item.headCommitId);
   const headCommitRows = await db
     .select()
@@ -3669,12 +3856,19 @@ const _mergeChangeRequest = async (
     // singleton mid-transaction deadlocks the single pglite connection. (Storage
     // file writes are not transactional but are idempotently re-synced on retry.)
     const mergedNodeIds: string[] = [];
+    const archivedNodeIds: string[] = [];
     const slugChanges: RestoredSlugChangeVO[] = [];
     await db.transaction(async (tx) => {
       await claimChangeRequestForMerge(
         tx as unknown as MergeCtx["db"],
         changeRequest.id,
         timestamp,
+      );
+      const lookupSourceBaseIds = await lockLookupMergeTargets(
+        tx as unknown as MergeCtx["db"],
+        operationKinds,
+        headCommitsById,
+        [],
       );
 
       const ctx: MergeCtx = {
@@ -3685,8 +3879,11 @@ const _mergeChangeRequest = async (
         targetRecordsById: new Map(),
         targetViewsById: new Map(),
         mergedNodeIds: [],
+        archivedNodeIds,
         mergedRecordIds: [],
         mergedViewIds: [],
+        lookupSourceBaseIds,
+        lookupCreatedReferences: [],
         nodeRefs: new Map(),
         resolvedRecordFields: new Map(),
         fieldDefsByBaseId: new Map(),
@@ -3761,6 +3958,13 @@ const _mergeChangeRequest = async (
         ctx.mergedNodeIds.push(item.nodeId);
       }
 
+      await assertMergedLookupTargets(
+        ctx.db,
+        operationKinds,
+        headCommitsById,
+        lookupSourceBaseIds,
+        ctx.lookupCreatedReferences,
+      );
       // status/mergedAt were already flipped by the guarded claim UPDATE above;
       // this just fills in the mergeSummary once the loop knows the final ids.
       await tx
@@ -3780,6 +3984,7 @@ const _mergeChangeRequest = async (
       mergedNodeIds.push(...ctx.mergedNodeIds);
       slugChanges.push(...ctx.slugChanges);
     });
+    await unpublishSitesOfArchivedNodes(archivedNodeIds);
 
     await insertAuditEvent(db, {
       action: "change_request.merged",
@@ -4012,13 +4217,13 @@ const _mergeChangeRequest = async (
     const affectedBaseIds = [
       ...new Set(operationKinds.flatMap((item) => (item.baseId ? [item.baseId] : []))),
     ].sort();
+    const lookupSourceBaseIds = await lockLookupMergeTargets(
+      tx as unknown as MergeCtx["db"],
+      operationKinds,
+      headCommitsById,
+      affectedBaseIds,
+    );
     if (affectedBaseIds.length > 0) {
-      await tx
-        .select({ id: busabaseBases.id })
-        .from(busabaseBases)
-        .where(inArray(busabaseBases.id, affectedBaseIds))
-        .orderBy(asc(busabaseBases.id))
-        .for("update");
       if (changeRequest.sourceMeta?.relatedFieldCreation === true) {
         const active = await tx
           .select({ id: busabaseBases.id })
@@ -4071,6 +4276,8 @@ const _mergeChangeRequest = async (
       mergedNodeIds: [],
       mergedRecordIds: [],
       mergedViewIds: [],
+      lookupSourceBaseIds,
+      lookupCreatedReferences: [],
       nodeRefs: new Map(),
       resolvedRecordFields,
       fieldDefsByBaseId: new Map(),
@@ -4162,6 +4369,13 @@ const _mergeChangeRequest = async (
       }
     }
 
+    await assertMergedLookupTargets(
+      ctx.db,
+      operationKinds,
+      headCommitsById,
+      lookupSourceBaseIds,
+      ctx.lookupCreatedReferences,
+    );
     // status/mergedAt were already flipped by the guarded claim UPDATE above;
     // this just fills in the mergeSummary once the loop knows the final ids.
     await tx
@@ -4318,6 +4532,22 @@ const _mergeChangeRequest = async (
           console.error("[busabase] record.updated webhook dispatch failed", error);
         });
     }
+  }
+
+  // Event-mode workflows listening for these records get a queued run each;
+  // the scheduler starts them. One indexed query when nothing listens, and it
+  // never throws into the merge.
+  for (const [eventType, recordIds] of [
+    ["record.created", newlyCreatedRecordIds],
+    ["record.updated", updatedRecordIds],
+  ] as const) {
+    await enqueueWorkflowRunsForRecordEvent(db, {
+      spaceId: getContextSpaceId(),
+      baseId: changeRequest.baseId,
+      eventType,
+      recordIds,
+      changeRequestId: changeRequest.id,
+    });
   }
 
   const updatedChangeRequest = await loadMergedChangeRequest(changeRequest.id);

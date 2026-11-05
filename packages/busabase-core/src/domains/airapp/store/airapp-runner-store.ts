@@ -3,7 +3,10 @@
 import { create } from "zustand";
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
 import type { AirAppRunner, AirAppRunnerKind } from "../components/runners/types";
+import type { AirAppRuntimeKind } from "../utils/airapp-runtime-descriptor";
+import type { AirAppEngineLockState } from "../utils/engine-plan-gate";
 import type { NodepodServiceWorkerErrorCode } from "../utils/nodepod-service-worker";
+import type { SiteBundleBlocker } from "../utils/site-bundle";
 
 export const DEFAULT_RUNNER_KIND: AirAppRunnerKind = "browser";
 const RUNNER_SELECTION_STORAGE_KEY = "busabase-airapp-runner-selections.v1";
@@ -19,6 +22,8 @@ const normalizePersistedRunnerKind = (value: unknown): AirAppRunnerKind | null =
     case "remote":
     case "sandock":
       return "remote";
+    case "site":
+      return "site";
     default:
       return null;
   }
@@ -97,11 +102,35 @@ export interface AirAppRunEntry {
    *  apart from a generic run failure and render its dedicated recovery UI
    *  instead of the plain error banner. */
   errorCode: NodepodServiceWorkerErrorCode | null;
+  /** Set only when the run never started because no available engine could
+   *  host the app. The panel words it from these facts at render time, in the
+   *  viewer's current locale: a run that auto-starts before the locale's
+   *  messages have loaded would otherwise freeze an English `error` into a
+   *  Chinese (or any other) interface. `error` keeps a plain-text copy. */
+  engineUnavailable: AirAppEngineUnavailable | null;
+  /**
+   * Set only when the run could not start because the engine it needs is
+   * outside this space's plan — the host-sold engine case. Like `errorCode`,
+   * it exists so the panel renders a dedicated state (here: "upgrade to run
+   * this app", with the host's upgrade action) instead of the generic banner,
+   * because unlike a failure there is something the person can do about it.
+   */
+  engineLock: AirAppEngineLockState | null;
+  /**
+   * Set only when a `site` deploy found the app's files cannot go up. Words them
+   * at render time, in the viewer's locale, the way `engineUnavailable` does.
+   */
+  siteBlockers: SiteBundleBlocker[] | null;
   runner: AirAppRunner | null;
   /** Which engine `runner` was built with — kept alongside `runner` so the
    *  engine picker can show the running/last-used engine even though
    *  `AirAppRunner` itself doesn't expose its own kind. */
   runnerKind: AirAppRunnerKind;
+}
+
+export interface AirAppEngineUnavailable {
+  runtime: AirAppRuntimeKind;
+  requiredEngine?: AirAppRunnerKind;
 }
 
 const MAX_LOG_LINES = 2000;
@@ -112,6 +141,9 @@ export const IDLE_ENTRY: AirAppRunEntry = {
   previewUrl: null,
   error: null,
   errorCode: null,
+  engineUnavailable: null,
+  engineLock: null,
+  siteBlockers: null,
   runner: null,
   runnerKind: DEFAULT_RUNNER_KIND,
 };
@@ -167,6 +199,8 @@ interface AirAppRunnerStoreState {
     runner: AirAppRunner,
     message: string,
     errorCode?: NodepodServiceWorkerErrorCode,
+    engineLock?: AirAppEngineLockState,
+    siteBlockers?: SiteBundleBlocker[],
   ) => void;
   /** Records a failure that happened BEFORE a runner could be constructed —
    *  e.g. a malformed `airapp.json`, or no engine on this deployment able to
@@ -175,7 +209,13 @@ interface AirAppRunnerStoreState {
    *  one, and here there is no runner to identify. Leaves the entry in
    *  `"error"`, which is also what stops auto-run from retrying it on every
    *  render. */
-  failBeforeRun: (nodeId: string, runnerKind: AirAppRunnerKind, message: string) => void;
+  failBeforeRun: (
+    nodeId: string,
+    runnerKind: AirAppRunnerKind,
+    message: string,
+    engineLock?: AirAppEngineLockState,
+    engineUnavailable?: AirAppEngineUnavailable,
+  ) => void;
   /** Explicit teardown: disposes the runner (if any) and removes the entry
    *  entirely. Used e.g. when the backing node is deleted. */
   disposeEntry: (nodeId: string) => void;
@@ -204,6 +244,9 @@ export const useAirAppRunnerStore = create<AirAppRunnerStoreState>()(
               previewUrl: null,
               error: null,
               errorCode: null,
+              engineUnavailable: null,
+              engineLock: null,
+              siteBlockers: null,
               runner,
               runnerKind,
             },
@@ -258,7 +301,7 @@ export const useAirAppRunnerStore = create<AirAppRunnerStoreState>()(
           };
         }),
 
-      setError: (nodeId, runner, message, errorCode) =>
+      setError: (nodeId, runner, message, errorCode, engineLock, siteBlockers) =>
         set((state) => {
           const current = state.entries[nodeId];
           if (current?.runner !== runner) {
@@ -271,13 +314,16 @@ export const useAirAppRunnerStore = create<AirAppRunnerStoreState>()(
                 ...current,
                 error: message,
                 errorCode: errorCode ?? null,
+                engineUnavailable: null,
+                engineLock: engineLock ?? null,
+                siteBlockers: siteBlockers ?? null,
                 status: "error",
               },
             },
           };
         }),
 
-      failBeforeRun: (nodeId, runnerKind, message) => {
+      failBeforeRun: (nodeId, runnerKind, message, engineLock, engineUnavailable) => {
         get().entries[nodeId]?.runner?.dispose();
         set((state) => ({
           entries: {
@@ -288,6 +334,9 @@ export const useAirAppRunnerStore = create<AirAppRunnerStoreState>()(
               previewUrl: null,
               error: message,
               errorCode: null,
+              engineUnavailable: engineUnavailable ?? null,
+              engineLock: engineLock ?? null,
+              siteBlockers: null,
               runner: null,
               runnerKind,
             },

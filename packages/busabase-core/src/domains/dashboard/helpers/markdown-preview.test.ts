@@ -1,6 +1,6 @@
 import { micromark } from "micromark";
+import { markdownPreviewSource } from "openlib/utils/markdown-preview";
 import { describe, expect, it } from "vitest";
-import { markdownPreviewSource } from "./markdown-preview";
 
 const SKILL =
   "---\nname: weekly-report\ndescription: Draft the weekly team report.\n---\n\n# Weekly report\n\nUse it.\n";

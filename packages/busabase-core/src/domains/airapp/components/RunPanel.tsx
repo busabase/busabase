@@ -4,7 +4,17 @@ import { useQuery } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { AirAppVO } from "busabase-contract/types";
 import { Button } from "kui/button";
-import { Check, CircleStop, Copy, Loader2, Pin, Play, RotateCcw } from "lucide-react";
+import {
+  ArrowUpCircle,
+  Check,
+  CircleStop,
+  Copy,
+  Loader2,
+  Lock,
+  Pin,
+  Play,
+  RotateCcw,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { fmt, useCoreI18n } from "../../../i18n";
@@ -21,6 +31,7 @@ import type { SidePanelTabProps } from "../../dashboard/side-panel-registry";
 import { useSidePanelStore } from "../../dashboard/store/side-panel-store";
 import { airAppSidePanelTabId } from "../store/airapp-keepalive-store";
 import {
+  type AirAppRunEntry,
   type AirAppRunStatus,
   DEFAULT_RUNNER_KIND,
   IDLE_ENTRY,
@@ -29,14 +40,23 @@ import {
 import {
   AIRAPP_MANIFEST_PATH,
   type AirAppRuntimeKind,
-  resolveEngine,
   resolveRunPlan,
 } from "../utils/airapp-runtime-descriptor";
+import {
+  type AirAppEngineLockState,
+  readAirAppEnginePlanRefusal,
+  resolveEngineWithPlan,
+} from "../utils/engine-plan-gate";
 import { NodepodServiceWorkerError } from "../utils/nodepod-service-worker";
 import { AIRAPP_PREVIEW_IFRAME_SANDBOX } from "../utils/preview-sandbox";
 import { renderTerminalOutput } from "../utils/terminal-output";
-import { useAirAppEngineAvailability } from "./engine-availability-context";
+import { AirAppSiteBlockers, AirAppSiteGoLive } from "./AirAppSiteControls";
+import {
+  useAirAppEngineAvailability,
+  useAirAppEnginePlanGate,
+} from "./engine-availability-context";
 import { createAirAppRunner } from "./runners/runner-factory";
+import { AirAppSiteBlockedError } from "./runners/site-runner";
 import type { AirAppMountedFile, AirAppRunnerKind } from "./runners/types";
 
 /**
@@ -63,7 +83,8 @@ export const airAppAutoRunDelay = (
 
 type EligibleAirAppRunner<T> =
   | { runnerKind: AirAppRunnerKind; runner: T }
-  | { runnerKind: null; runner: null };
+  /** `lockedEngine` is set when only the space's plan stands in the way. */
+  | { runnerKind: null; runner: null; lockedEngine?: AirAppRunnerKind };
 
 /**
  * Resolve compatibility before constructing a runner. Keeping the factory
@@ -77,6 +98,7 @@ export const createEligibleAirAppRunner = <T,>({
   userChose,
   wantedKind,
   availableEngines,
+  lockedEngines = [],
   createRunner,
 }: {
   runtime: AirAppRuntimeKind;
@@ -86,9 +108,15 @@ export const createEligibleAirAppRunner = <T,>({
   userChose: boolean;
   wantedKind: AirAppRunnerKind;
   availableEngines: readonly AirAppRunnerKind[];
+  /**
+   * Engines the deployment has that this space's plan leaves out. They are
+   * never constructed; they only turn "nothing can run this" into "the plan
+   * can", which the caller renders as the upgrade state.
+   */
+  lockedEngines?: readonly AirAppRunnerKind[];
   createRunner: (kind: AirAppRunnerKind) => T;
 }): EligibleAirAppRunner<T> => {
-  const runnerKind = resolveEngine(
+  const resolution = resolveEngineWithPlan(
     runtime,
     // The person outranks the file. `preferredEngine` is what the app's author
     // (usually an agent) put in `airapp.json`; `wantedKind` is what the person
@@ -99,11 +127,14 @@ export const createEligibleAirAppRunner = <T,>({
     // silently, and the settings dialog showed a value that was not what would
     // happen. Neither the dialog nor the logs said the file had an opinion.
     userChose ? wantedKind : (preferredEngine ?? wantedKind),
-    availableEngines,
+    { available: [...availableEngines], locked: [...lockedEngines] },
     requiredEngine,
   );
-  if (!runnerKind) return { runnerKind: null, runner: null };
-  return { runnerKind, runner: createRunner(runnerKind) };
+  if (resolution.kind === "locked") {
+    return { runnerKind: null, runner: null, lockedEngine: resolution.engine };
+  }
+  if (resolution.kind === "unavailable") return { runnerKind: null, runner: null };
+  return { runnerKind: resolution.engine, runner: createRunner(resolution.engine) };
 };
 
 export const noEligibleAirAppEngineMessage = (
@@ -116,6 +147,21 @@ export const noEligibleAirAppEngineMessage = (
     : runtime === "python"
       ? messages.airapp.pythonNeedsSandock
       : fmt(messages.airapp.noEligibleEngine, { runtime });
+
+/** The error text to show for a run entry, worded in the viewer's current
+ *  locale whenever the failure is a known fact rather than a runner's own
+ *  output. */
+export const airAppRunErrorText = (
+  messages: ReturnType<typeof useCoreI18n>,
+  entry: Pick<AirAppRunEntry, "error" | "engineUnavailable">,
+): string | null =>
+  entry.engineUnavailable
+    ? noEligibleAirAppEngineMessage(
+        messages,
+        entry.engineUnavailable.runtime,
+        entry.engineUnavailable.requiredEngine,
+      )
+    : entry.error;
 
 /**
  * Owns the AirApp runner lifecycle (mount/install/start, log streaming,
@@ -146,9 +192,11 @@ export function useAirAppRunner({
     [nodeId],
   );
   const entry = useAirAppRunnerStore(selectEntry);
-  const { status, logLines, previewUrl, error, errorCode } = entry;
+  const { status, logLines, previewUrl, errorCode, engineLock, siteBlockers, runnerKind } = entry;
+  const error = airAppRunErrorText(messages, entry);
   const selectionsHydrated = useAirAppRunnerStore((state) => state.selectionsHydrated);
   const availableEngines = useAirAppEngineAvailability();
+  const planGate = useAirAppEnginePlanGate();
 
   useEffect(() => {
     if (!useAirAppRunnerStore.persist.hasHydrated()) {
@@ -215,13 +263,27 @@ export function useAirAppRunner({
       userChose,
       wantedKind,
       availableEngines,
+      lockedEngines: planGate?.lockedEngines,
       createRunner: (kind) => createAirAppRunner(kind, { orpc, nodeId: currentNodeId }),
     });
+    if (!resolved.runnerKind && resolved.lockedEngine && planGate) {
+      // Not "this deployment can't run this app": it can, the moment the
+      // space upgrades. Say that, and offer the way there.
+      store.failBeforeRun(
+        currentNodeId,
+        resolved.lockedEngine,
+        fmt(messages.airapp.enginePlan.lockedTitle, { plan: planGate.planLabel }),
+        { engine: resolved.lockedEngine, planLabel: planGate.planLabel },
+      );
+      return;
+    }
     if (!resolved.runnerKind) {
       store.failBeforeRun(
         currentNodeId,
         plan.requiredEngine ?? wantedKind,
         noEligibleAirAppEngineMessage(messages, plan.runtime, plan.requiredEngine),
+        undefined,
+        { runtime: plan.runtime, requiredEngine: plan.requiredEngine },
       );
       return;
     }
@@ -272,8 +334,12 @@ export function useAirAppRunner({
       // own images just rendered broken `<img>`s with nothing logged anywhere.
       // A file that cannot be mounted must now say so (below) rather than
       // vanish.
+      //
+      // A website reads nothing here: the server reads the node's own files, because
+      // what gets published must never be what a browser said it was.
+      const filesToMount = resolved.runnerKind === "site" ? [] : airapp.files;
       const entries = await Promise.all(
-        airapp.files.map(async (file) => {
+        filesToMount.map(async (file) => {
           // Runner boot is an imperative lifecycle that can outlive this view.
           // A React Query observer for the Files tab may use the same readFile
           // key and cancel it during Strict Mode's mount cleanup, so do not join
@@ -304,7 +370,7 @@ export function useAirAppRunner({
           files[fileEntry[0]] = fileEntry[1];
         }
       }
-      if (Object.keys(files).length === 0) {
+      if (resolved.runnerKind !== "site" && Object.keys(files).length === 0) {
         throw new Error(messages.airapp.noRunnableFiles);
       }
 
@@ -317,6 +383,40 @@ export function useAirAppRunner({
       // actually reports listening — starting a process isn't the same as it
       // being reachable yet.
     } catch (caught) {
+      if (caught instanceof AirAppSiteBlockedError) {
+        useAirAppRunnerStore
+          .getState()
+          .setError(
+            currentNodeId,
+            runner,
+            messages.airapp.site.blockedTitle,
+            undefined,
+            undefined,
+            caught.blockers,
+          );
+        return;
+      }
+      // The server re-checks the plan on every run, so a stale page (a plan that
+      // lapsed after it loaded) lands here rather than on the lock above. It is
+      // the same situation and gets the same state, not a line of server text.
+      const refusal = readAirAppEnginePlanRefusal(caught);
+      if (refusal) {
+        const lock: AirAppEngineLockState = {
+          engine: refusal.engine,
+          // The host's localized plan name when the dashboard has one.
+          planLabel: planGate?.planLabel ?? refusal.planLabel,
+        };
+        useAirAppRunnerStore
+          .getState()
+          .setError(
+            currentNodeId,
+            runner,
+            fmt(messages.airapp.enginePlan.lockedTitle, { plan: lock.planLabel }),
+            undefined,
+            lock,
+          );
+        return;
+      }
       // A Service Worker failure is the one runtime error with a code: log the
       // code plus the underlying browser error for support, and show the
       // localized, phase-specific copy rather than `caught.message` (which is
@@ -341,7 +441,7 @@ export function useAirAppRunner({
           swError?.code,
         );
     }
-  }, [messages, airapp, orpc, availableEngines]);
+  }, [messages, airapp, orpc, availableEngines, planGate]);
 
   // Auto-run: opening an AirApp starts it immediately — the header button is
   // then only a restart. Reads the store directly (not the rendered `status`)
@@ -365,7 +465,15 @@ export function useAirAppRunner({
     // remote engine provisions a machine even though the stored selection still
     // reads `browser` — debouncing on the selection would start one on sight,
     // for every node clicked past.
-    const effective = useAirAppRunnerStore.getState().getEffectiveRunnerKind(nodeId);
+    const lastKind = useAirAppRunnerStore.getState().getEffectiveRunnerKind(nodeId);
+    // A kind this space can no longer run — a remote run from before its plan
+    // changed — says nothing about what opening the node costs now. If every
+    // engine left is free, so is this run, and it should start on sight.
+    const effective =
+      availableEngines.includes(lastKind) ||
+      !availableEngines.every((engine) => FREE_ENGINES.includes(engine))
+        ? lastKind
+        : DEFAULT_RUNNER_KIND;
     const delay = airAppAutoRunDelay(selectionsHydrated, effective);
     if (delay === null) {
       return;
@@ -379,7 +487,7 @@ export function useAirAppRunner({
       if (!latest || latest.status === "idle") void run();
     }, delay);
     return () => clearTimeout(timer);
-  }, [nodeId, airapp, run, selectionsHydrated]);
+  }, [nodeId, airapp, run, selectionsHydrated, availableEngines]);
 
   const stop = useCallback(async () => {
     if (!nodeId) return;
@@ -400,11 +508,15 @@ export function useAirAppRunner({
   const isLive = isBusy || status === "ready";
 
   return {
+    orpc,
     status,
+    runnerKind,
     logLines,
     previewUrl,
     error,
     errorCode,
+    engineLock,
+    siteBlockers,
     run,
     stop,
     isBusy,
@@ -458,7 +570,8 @@ export function AirAppRunControls({
   fullscreenState,
 }: AirAppRunControlsProps) {
   const messages = useCoreI18n();
-  const { status, previewUrl, errorCode, run, stop, isBusy, isLive } = runner;
+  const { status, previewUrl, errorCode, engineLock, run, stop, isBusy, isLive, runnerKind } =
+    runner;
   const isUnsupportedBrowser = errorCode === "SERVICE_WORKER_UNAVAILABLE";
 
   const statusLabel: Record<AirAppRunStatus, string> = {
@@ -493,7 +606,10 @@ export function AirAppRunControls({
       translate="no"
     >
       <span className="hidden text-muted-foreground/70 text-xs sm:inline">
-        {statusLabel[status]}
+        {/* A plan lock is not a failed run: nothing was started, and the body
+            already offers the way out. "Run failed" + "Run again" here would
+            send the person round the same locked state. */}
+        {engineLock ? messages.airapp.enginePlan.statusLocked : statusLabel[status]}
       </span>
       {airapp && showPinToSidePanel ? (
         <Button
@@ -512,7 +628,8 @@ export function AirAppRunControls({
         fullscreenState={fullscreenState}
         label={messages.airapp.enterFullscreen}
       />
-      {isLive ? (
+      {/* A website has no process to stop; taking it down is the public switch. */}
+      {isLive && runnerKind !== "site" ? (
         <Button
           aria-label={messages.airapp.stop}
           onClick={() => void stop()}
@@ -524,7 +641,15 @@ export function AirAppRunControls({
           <CircleStop className="size-3.5" />
         </Button>
       ) : null}
-      {isUnsupportedBrowser ? null : (
+      {airapp && runnerKind === "site" && !engineLock ? (
+        <AirAppSiteGoLive
+          filesRevision={airapp.files.map((file) => `${file.path}:${file.updatedAt}`).join("|")}
+          nodeId={airapp.node.id}
+          orpc={runner.orpc}
+          runStatus={status}
+        />
+      ) : null}
+      {isUnsupportedBrowser || engineLock ? null : (
         <Button
           disabled={isBusy}
           onClick={() => void run()}
@@ -692,6 +817,57 @@ export function AirAppServiceWorkerUnsupported() {
   );
 }
 
+/**
+ * The app cannot start because the engine it needs is outside this space's
+ * plan — a Python app, or one whose `airapp.json` requires `remote`, in a space
+ * whose plan does not include remote machines.
+ *
+ * Deliberately not the generic "this deployment can't run this app": that
+ * sentence is false here, and it leaves the person with nothing to do. The app
+ * WOULD run after an upgrade, so this names the plan and, when the host
+ * provides one, offers the upgrade itself. The plan name and the action both
+ * come from the host — core has no idea what anybody's plans are called.
+ */
+export function AirAppEnginePlanLocked({ lock }: { lock: AirAppEngineLockState }) {
+  const messages = useCoreI18n();
+  const planGate = useAirAppEnginePlanGate();
+  const engineLabel: Record<AirAppRunnerKind, string> = {
+    browser: messages.airapp.engineBrowser,
+    local: messages.airapp.engineLocal,
+    remote: messages.airapp.engineRemote,
+    site: messages.airapp.engineSite,
+  };
+  const onUpgrade = planGate?.onUpgrade;
+
+  return (
+    <div
+      aria-live="polite"
+      className="notranslate grid h-full min-h-[160px] place-items-center p-6"
+      data-airapp-engine-locked={lock.engine}
+      role="status"
+      translate="no"
+    >
+      <div className="flex max-w-sm flex-col items-center gap-3 text-center">
+        <span className="grid size-9 place-items-center rounded-full border border-border bg-muted text-muted-foreground">
+          <Lock aria-hidden="true" className="size-4" />
+        </span>
+        <p className="font-medium text-foreground text-sm">
+          {fmt(messages.airapp.enginePlan.lockedTitle, { plan: lock.planLabel })}
+        </p>
+        <p className="text-muted-foreground text-xs">
+          {fmt(messages.airapp.enginePlan.lockedBody, { engine: engineLabel[lock.engine] })}
+        </p>
+        {onUpgrade ? (
+          <Button className="gap-1.5" onClick={onUpgrade} size="sm" type="button">
+            <ArrowUpCircle className="size-3.5" />
+            {fmt(messages.airapp.enginePlan.upgrade, { plan: lock.planLabel })}
+          </Button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 /** "App" tab content: the live preview iframe, optionally topped by a local
  *  run toolbar (see `showToolbar`).
  *
@@ -705,7 +881,7 @@ export function AirAppRunPreview({
   fullscreenState,
 }: AirAppRunPreviewProps) {
   const messages = useCoreI18n();
-  const { status, previewUrl, error, errorCode } = runner;
+  const { status, previewUrl, error, errorCode, engineLock, siteBlockers } = runner;
   const ownFullscreen = useAirAppFullscreen();
   const activeFullscreen = fullscreenState ?? ownFullscreen;
   // `SERVICE_WORKER_UNAVAILABLE` gets its own full recovery state below
@@ -716,7 +892,11 @@ export function AirAppRunPreview({
   return (
     <FullscreenPreviewSurface
       aria-label={airapp?.node.name ?? messages.airapp.previewTitle}
-      banner={error && !isUnsupportedBrowser ? <AirAppRunError error={error} /> : null}
+      banner={
+        error && !isUnsupportedBrowser && !engineLock && !siteBlockers ? (
+          <AirAppRunError error={error} />
+        ) : null
+      }
       data-airapp-fullscreen={activeFullscreen.fullscreen ? "true" : "false"}
       data-airapp-preview=""
       exitLabel={messages.airapp.exitFullscreen}
@@ -739,6 +919,10 @@ export function AirAppRunPreview({
     >
       {isUnsupportedBrowser ? (
         <AirAppServiceWorkerUnsupported />
+      ) : engineLock ? (
+        <AirAppEnginePlanLocked lock={engineLock} />
+      ) : siteBlockers ? (
+        <AirAppSiteBlockers blockers={siteBlockers} />
       ) : previewUrl ? (
         <iframe
           className="h-full w-full border-0 bg-white"

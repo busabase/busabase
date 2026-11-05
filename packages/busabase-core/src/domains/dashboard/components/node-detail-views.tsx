@@ -1,8 +1,20 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useMutation,
+  useQueries,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { BlobReader, BlobWriter, ZipWriter } from "@zip.js/zip.js";
 import { hasApiKeyLevel } from "busabase-contract/access-control/api-key-level";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
-import type { FilePreviewVO, FileTreeFileVO, FormVO, NodeVO } from "busabase-contract/types";
+import type {
+  FilePreviewVO,
+  FileTreeFileVO,
+  FileTreeFolderEntryVO,
+  FormVO,
+  NodeVO,
+} from "busabase-contract/types";
 import { CodeBlock } from "kui/ai-elements/code-block";
 import { Button } from "kui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "kui/tabs";
@@ -90,10 +102,13 @@ import {
 } from "./file-preview-surface";
 import {
   buildFileTree,
+  buildFolderEntriesTree,
   collectFolderPaths,
   DriveFileTree,
   FILE_TREE_LANGUAGE_BY_EXTENSION,
+  FileTreeRows,
   guessFileTreeLanguage,
+  type LoadedFolderEntries,
   renderFileTree,
   type SkillTreeNode,
 } from "./file-tree-browser";
@@ -127,6 +142,40 @@ export {
   renderFileTree,
   type SkillTreeNode,
 };
+
+/**
+ * Files per folder page when a Drive is browsed one folder at a time.
+ *
+ * Small enough that expanding a folder stays instant over a slow link; a folder
+ * holding more shows a "Load more files" row.
+ */
+const FILE_TREE_FOLDER_PAGE_SIZE = 1_000;
+
+const uniqueByPath = (files: FileTreeFileVO[]): FileTreeFileVO[] => {
+  const seen = new Set<string>();
+  return files.filter((file) => !seen.has(file.path) && Boolean(seen.add(file.path)));
+};
+
+const uniqueFoldersByPath = (folders: FileTreeFolderEntryVO[]): FileTreeFolderEntryVO[] => {
+  const seen = new Set<string>();
+  return folders.filter((folder) => !seen.has(folder.path) && Boolean(seen.add(folder.path)));
+};
+
+/** Later pages of one folder, fetched by "Load more files" in that folder. */
+interface FolderExtraPages {
+  files: FileTreeFileVO[];
+  nextCursor: string | null;
+  /** How many "Load more" pages these are, so a refresh re-reads as many. */
+  pages: number;
+  /**
+   * Later pages of the folder's SUBFOLDERS. A folder with more than the
+   * server's folder cap (1,000) is paged the same way its files are, or the
+   * later subfolders would be unreachable.
+   */
+  folders: FileTreeFolderEntryVO[];
+  foldersNextCursor: string | null;
+  folderPages: number;
+}
 
 interface FileTreeDetailViewProps {
   orpc: BusabaseQueryUtils;
@@ -177,6 +226,7 @@ export function FileTreeDetailView({
   );
   const [openPath, setOpenPath] = useState<string | null>(null);
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
+  const [fileTreeScroller, setFileTreeScroller] = useState<HTMLDivElement | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const fileEditorRef = useRef<HTMLTextAreaElement>(null);
@@ -190,6 +240,21 @@ export function FileTreeDetailView({
   const [folderRemoveTarget, setFolderRemoveTarget] = useState<string | null>(null);
   const [folderRenameTarget, setFolderRenameTarget] = useState<string | null>(null);
   const [zipBusy, setZipBusy] = useState(false);
+  // A Drive past the server's inline limit (`nodes.get` embeds at most 1,000
+  // files and sets `filesTruncated`) is browsed one folder at a time: each
+  // expanded folder reads its own direct entries. Later pages of a folder that
+  // holds more than one page live here, keyed by folder path.
+  const [folderExtraPages, setFolderExtraPages] = useState<Record<string, FolderExtraPages>>({});
+  // Which folder is paging, and which of its two lists: a folder can have more
+  // files AND more subfolders than one response carries.
+  const [folderPaging, setFolderPaging] = useState<{
+    folder: string;
+    kind: "files" | "folders";
+  } | null>(null);
+  const [folderPagingError, setFolderPagingError] = useState<{
+    folder: string;
+    message: string;
+  } | null>(null);
   const [builtinPreviewPath, setBuiltinPreviewPath] = useState<string | null>(null);
   const [previewAttempt, setPreviewAttempt] = useState(0);
   const [remotePreview, setRemotePreview] = useState<
@@ -280,6 +345,9 @@ export function FileTreeDetailView({
     setFolderRenameTarget(null);
     setBuiltinPreviewPath(null);
     setRemotePreview(null);
+    setFolderExtraPages({});
+    setFolderPaging(null);
+    setFolderPagingError(null);
   }, [slug]);
 
   useEffect(() => {
@@ -382,16 +450,295 @@ export function FileTreeDetailView({
     builtinPreviewSufficient,
   ]);
 
-  const tree = useMemo(() => buildFileTree(fileTree?.files ?? []), [fileTree?.files]);
+  // A complete detail is the whole tree in memory, as before. A truncated one
+  // switches to folder mode: nothing below the root is read until expanded.
+  const folderMode = fileTree?.filesTruncated === true;
+  // Every folder whose entries the tree needs: the root, plus what is expanded.
+  // Sorted so the query list is stable across renders.
+  const wantedFolders = useMemo(
+    () => (folderMode ? ["", ...[...expandedPaths].sort()] : []),
+    [expandedPaths, folderMode],
+  );
+  const folderQueries = useQueries({
+    queries: wantedFolders.map((folder) => ({
+      ...orpc.fileTrees.listEntries.queryOptions({
+        input: {
+          nodeId: fileTree?.node.id ?? "",
+          type: nodeType,
+          folder,
+          limit: FILE_TREE_FOLDER_PAGE_SIZE,
+        },
+      }),
+      enabled: Boolean(fileTree) && folderMode,
+      placeholderData: keepPreviousData,
+      // Freshness comes from the detail: a folder only re-reads when `nodes.get`
+      // does (see below), so collapsing and re-expanding costs nothing.
+      staleTime: Number.POSITIVE_INFINITY,
+    })),
+  });
+  // Folder pages follow the detail: whenever `nodes.get` refetches (a save, an
+  // upload, a live-sync reconnect), every open folder re-reads with it — and
+  // as far down as the user had paged, so an Agent writing one file does not
+  // throw away the 2,000 rows someone just clicked through.
+  const detailRevision = fileTreeQuery.dataUpdatedAt;
+  const lastDetailRevision = useRef(detailRevision);
+  const folderExtraPagesRef = useRef(folderExtraPages);
+  folderExtraPagesRef.current = folderExtraPages;
+  useEffect(() => {
+    const previous = lastDetailRevision.current;
+    if (previous === detailRevision) return;
+    lastDetailRevision.current = detailRevision;
+    // The first arrival is the initial load; the folder queries start on their own.
+    if (previous === 0 || !folderMode || !fileTree) return;
+    const nodeId = fileTree.node.id;
+    const pageOptions = (folder: string, page: { after?: string; foldersAfter?: string } = {}) =>
+      orpc.fileTrees.listEntries.queryOptions({
+        input: {
+          nodeId,
+          type: nodeType,
+          folder,
+          limit: FILE_TREE_FOLDER_PAGE_SIZE,
+          after: page.after,
+          foldersAfter: page.foldersAfter,
+        },
+      });
+    const rewalk = async () => {
+      await queryClient.invalidateQueries({ queryKey: orpc.fileTrees.listEntries.key() });
+      const next: Record<string, FolderExtraPages> = {};
+      for (const [folder, extra] of Object.entries(folderExtraPagesRef.current)) {
+        const first = queryClient.getQueryData(pageOptions(folder).queryKey);
+        let cursor = first?.nextCursor ?? null;
+        const files: FileTreeFileVO[] = [];
+        for (let page = 0; page < extra.pages && cursor; page += 1) {
+          const read = await queryClient.fetchQuery({
+            ...pageOptions(folder, { after: cursor }),
+            staleTime: 0,
+          });
+          files.push(...read.files);
+          cursor = read.nextCursor;
+        }
+        let folderCursor = first?.foldersNextCursor ?? null;
+        const folders: FileTreeFolderEntryVO[] = [];
+        for (let page = 0; page < extra.folderPages && folderCursor; page += 1) {
+          const read = await queryClient.fetchQuery({
+            ...pageOptions(folder, { foldersAfter: folderCursor }),
+            staleTime: 0,
+          });
+          folders.push(...read.folders);
+          folderCursor = read.foldersNextCursor;
+        }
+        next[folder] = {
+          files,
+          nextCursor: cursor,
+          pages: extra.pages,
+          folders,
+          foldersNextCursor: folderCursor,
+          folderPages: extra.folderPages,
+        };
+      }
+      // A newer refresh (or another Drive) owns the state now.
+      if (lastDetailRevision.current !== detailRevision) return;
+      setFolderExtraPages(next);
+      setFolderPagingError(null);
+    };
+    void rewalk().catch(() => {
+      // The visible pages stay as they were; the next refresh tries again.
+    });
+  }, [detailRevision, fileTree, folderMode, nodeType, orpc, queryClient]);
+  const loadedFolders = useMemo(() => {
+    const loaded: Record<
+      string,
+      LoadedFolderEntries & { nextCursor: string | null; foldersNextCursor: string | null }
+    > = {};
+    wantedFolders.forEach((folder, index) => {
+      const data = folderQueries[index]?.data;
+      if (!data) return;
+      const extra = folderExtraPages[folder];
+      loaded[folder] = {
+        // Same dedupe for subfolders: a fresh first page can overlap the later
+        // folder pages loaded on top of the previous one.
+        folders: extra ? uniqueFoldersByPath([...data.folders, ...extra.folders]) : data.folders,
+        // Dedupe: for a moment a fresh first page can overlap the later pages
+        // loaded on top of the previous one.
+        files: extra ? uniqueByPath([...data.files, ...extra.files]) : data.files,
+        nextCursor: extra ? extra.nextCursor : data.nextCursor,
+        foldersNextCursor: extra ? extra.foldersNextCursor : data.foldersNextCursor,
+      };
+    });
+    return loaded;
+  }, [folderExtraPages, folderQueries, wantedFolders]);
+  const folderLoading = (folder: string) => {
+    const index = wantedFolders.indexOf(folder);
+    return index >= 0 && Boolean(folderQueries[index]?.isPending);
+  };
+  const folderLoadError = (folder: string) => {
+    const index = wantedFolders.indexOf(folder);
+    return index >= 0 ? folderQueries[index]?.error : null;
+  };
+
+  // Everything else in this view (selection, the open file, rename checks)
+  // works off `files`: the whole list for a complete detail, or every file in
+  // the folders loaded so far.
+  const inlineFiles = fileTree?.files;
+  const files = useMemo(() => {
+    if (!folderMode) return inlineFiles ?? [];
+    return Object.values(loadedFolders).flatMap((entries) => entries.files);
+  }, [folderMode, inlineFiles, loadedFolders]);
+  // Total on the server, never how many happen to be in hand — a Drive showing
+  // 1,000 of its 46,188 files must still say 46,188.
+  const totalFileCount = Math.max(fileTree?.fileCount ?? 0, files.length);
+  const hasMoreFiles = folderMode || files.length < totalFileCount;
+  const loadMoreFolderFiles = useCallback(
+    async (folder: string) => {
+      const cursor = loadedFolders[folder]?.nextCursor;
+      if (!fileTree || folderPaging !== null || !cursor) return;
+      setFolderPaging({ folder, kind: "files" });
+      setFolderPagingError(null);
+      try {
+        const page = await queryClient.fetchQuery(
+          orpc.fileTrees.listEntries.queryOptions({
+            input: {
+              nodeId: fileTree.node.id,
+              type: nodeType,
+              folder,
+              limit: FILE_TREE_FOLDER_PAGE_SIZE,
+              after: cursor,
+            },
+          }),
+        );
+        setFolderExtraPages((current) => ({
+          ...current,
+          [folder]: {
+            files: [...(current[folder]?.files ?? []), ...page.files],
+            nextCursor: page.nextCursor,
+            pages: (current[folder]?.pages ?? 0) + 1,
+            folders: current[folder]?.folders ?? [],
+            foldersNextCursor: current[folder]?.foldersNextCursor ?? null,
+            folderPages: current[folder]?.folderPages ?? 0,
+          },
+        }));
+      } catch (caught) {
+        setFolderPagingError({
+          folder,
+          message: presentCoreError(
+            messages,
+            locale,
+            caught,
+            messages.nodeDetail.fileListPartialFailed,
+          ),
+        });
+      } finally {
+        setFolderPaging(null);
+      }
+    },
+    [fileTree, folderPaging, loadedFolders, locale, messages, nodeType, orpc, queryClient],
+  );
+  // Subfolders of one folder, past the server's per-response folder cap.
+  const loadMoreFolders = useCallback(
+    async (folder: string) => {
+      const cursor = loadedFolders[folder]?.foldersNextCursor;
+      if (!fileTree || folderPaging !== null || !cursor) return;
+      setFolderPaging({ folder, kind: "folders" });
+      setFolderPagingError(null);
+      try {
+        const page = await queryClient.fetchQuery(
+          orpc.fileTrees.listEntries.queryOptions({
+            input: {
+              nodeId: fileTree.node.id,
+              type: nodeType,
+              folder,
+              foldersAfter: cursor,
+            },
+          }),
+        );
+        setFolderExtraPages((current) => ({
+          ...current,
+          [folder]: {
+            files: current[folder]?.files ?? [],
+            nextCursor: current[folder]?.nextCursor ?? null,
+            pages: current[folder]?.pages ?? 0,
+            folders: [...(current[folder]?.folders ?? []), ...page.folders],
+            foldersNextCursor: page.foldersNextCursor,
+            folderPages: (current[folder]?.folderPages ?? 0) + 1,
+          },
+        }));
+      } catch (caught) {
+        setFolderPagingError({
+          folder,
+          message: presentCoreError(
+            messages,
+            locale,
+            caught,
+            messages.nodeDetail.fileListPartialFailed,
+          ),
+        });
+      } finally {
+        setFolderPaging(null);
+      }
+    },
+    [fileTree, folderPaging, loadedFolders, locale, messages, nodeType, orpc, queryClient],
+  );
+  // The status row under a folder (or under the root) in folder mode.
+  const renderFolderFooter = (folder: string, depth: number): ReactNode => {
+    if (!folderMode) return null;
+    const style = { paddingLeft: 8 + depth * 14 + 22 };
+    if (folderLoading(folder)) {
+      return (
+        <div className="py-1 text-muted-foreground text-xs" style={style}>
+          {messages.common.loading}
+        </div>
+      );
+    }
+    const loadError = folderLoadError(folder);
+    const pagingError = folderPagingError?.folder === folder ? folderPagingError.message : null;
+    const errorText =
+      pagingError ??
+      (loadError
+        ? presentCoreError(messages, locale, loadError, messages.nodeDetail.fileListPartialFailed)
+        : null);
+    const hasMore = Boolean(loadedFolders[folder]?.nextCursor);
+    const hasMoreFolders = Boolean(loadedFolders[folder]?.foldersNextCursor);
+    if (!errorText && !hasMore && !hasMoreFolders) return null;
+    const pagingFiles = folderPaging?.folder === folder && folderPaging.kind === "files";
+    const pagingFolders = folderPaging?.folder === folder && folderPaging.kind === "folders";
+    return (
+      <div className="flex flex-col items-start gap-1 py-1" style={style}>
+        {errorText ? <p className="text-destructive text-xs">{errorText}</p> : null}
+        {hasMore ? (
+          <Button
+            className="h-6 w-fit px-2 text-xs"
+            disabled={folderPaging !== null}
+            onClick={() => void loadMoreFolderFiles(folder)}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            {pagingFiles ? messages.common.loading : messages.nodeDetail.loadMoreFiles}
+          </Button>
+        ) : null}
+        {hasMoreFolders ? (
+          <Button
+            className="h-6 w-fit px-2 text-xs"
+            disabled={folderPaging !== null}
+            onClick={() => void loadMoreFolders(folder)}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            {pagingFolders ? messages.common.loading : messages.nodeDetail.loadMoreFolders}
+          </Button>
+        ) : null}
+      </div>
+    );
+  };
+
+  const tree = useMemo(
+    () => (folderMode ? buildFolderEntriesTree(loadedFolders) : buildFileTree(files)),
+    [files, folderMode, loadedFolders],
+  );
   const expandedFolders = useMemo(() => new Set(collectFolderPaths(tree)), [tree]);
-  const filePaths = useMemo(
-    () => new Set((fileTree?.files ?? []).map((file) => file.path)),
-    [fileTree?.files],
-  );
-  const filesByPath = useMemo(
-    () => new Map((fileTree?.files ?? []).map((file) => [file.path, file])),
-    [fileTree?.files],
-  );
+  const filePaths = useMemo(() => new Set(files.map((file) => file.path)), [files]);
+  const filesByPath = useMemo(() => new Map(files.map((file) => [file.path, file])), [files]);
   const parsedTextTabId = fileTree ? `drive-parsed-text-${fileTree.node.id}` : null;
   const parsedTextOpen = useSidePanelStore(
     (state) => state.isOpen && state.activeTabId === parsedTextTabId,
@@ -403,17 +750,25 @@ export function FileTreeDetailView({
     if (!panel.tabs.some((tab) => tab.id === parsedTextTabId)) return;
     const file = openPath ? filesByPath.get(openPath) : null;
     if (!file) {
-      if (openPath || fileTree.files.length === 0) panel.closeTab(parsedTextTabId);
+      if (openPath || files.length === 0) panel.closeTab(parsedTextTabId);
       return;
     }
     panel.updateTabPayload(parsedTextTabId, { assetId: file.assetId, filePath: openPath });
-  }, [fileTree, filesByPath, hideActions, isAnonymous, nodeType, openPath, parsedTextTabId]);
+  }, [
+    fileTree,
+    files.length,
+    filesByPath,
+    hideActions,
+    isAnonymous,
+    nodeType,
+    openPath,
+    parsedTextTabId,
+  ]);
   const selectedFilePaths = useMemo(
-    () => resolveFileTreeSelectedPaths(selectedKeys, fileTree?.files ?? []),
-    [fileTree?.files, selectedKeys],
+    () => resolveFileTreeSelectedPaths(selectedKeys, files),
+    [files, selectedKeys],
   );
-  const allFilesSelected =
-    Boolean(fileTree?.files.length) && selectedFilePaths.length === fileTree?.files.length;
+  const allFilesSelected = Boolean(files.length) && selectedFilePaths.length === files.length;
 
   const toggleSelection = useCallback((kind: FileTreeSelectionKind, path: string) => {
     const key = fileTreeSelectionKey(kind, path);
@@ -428,36 +783,46 @@ export function FileTreeDetailView({
   const clearSelection = useCallback(() => setSelectedKeys(new Set()), []);
 
   const selectAllFiles = useCallback(() => {
-    setSelectedKeys(
-      new Set((fileTree?.files ?? []).map((file) => fileTreeSelectionKey("file", file.path))),
-    );
-  }, [fileTree?.files]);
+    setSelectedKeys(new Set(files.map((file) => fileTreeSelectionKey("file", file.path))));
+  }, [files]);
 
   useEffect(() => {
     const validKeys = new Set<FileTreeSelectionKey>([
-      ...(fileTree?.files ?? []).map((file) => fileTreeSelectionKey("file", file.path)),
+      ...files.map((file) => fileTreeSelectionKey("file", file.path)),
       ...collectFolderPaths(tree).map((path) => fileTreeSelectionKey("folder", path)),
     ]);
     setSelectedKeys((current) => {
       const next = new Set([...current].filter((key) => validKeys.has(key)));
       return next.size === current.size ? current : next;
     });
-  }, [fileTree?.files, tree]);
+  }, [files, tree]);
   useEffect(() => {
     if (!fileTree || openPath) {
       return;
     }
-    const entryFile =
-      fileTree.files.find((file) => file.path === fileTree.entryFile) ?? fileTree.files[0];
+    const entryFile = files.find((file) => file.path === fileTree.entryFile) ?? files[0];
     if (entryFile) {
       setOpenPath(entryFile.path);
     }
-  }, [fileTree, openPath]);
+  }, [fileTree, files, openPath]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset expansion only when opening another file-tree node
   useEffect(() => {
-    setExpandedPaths(expandedFolders);
+    // A Drive opens collapsed: expanding everything costs a row per file (and, when
+    // truncated, a read per folder). The effect below reveals the open file. A
+    // Skill's handful of files reads better laid out.
+    setExpandedPaths(folderMode || nodeType === "drive" ? new Set() : expandedFolders);
   }, [fileTree?.node.id]);
+
+  // Whatever opened the file, its row has to be reachable. Keyed on the path alone
+  // so that collapsing the folder of the open file stays collapsed.
+  useEffect(() => {
+    if (!openPath) return;
+    const ancestors = getFileUploadFolderSegments(fileTreeParentPath(openPath));
+    setExpandedPaths((current) =>
+      ancestors.every((path) => current.has(path)) ? current : new Set([...current, ...ancestors]),
+    );
+  }, [openPath]);
 
   const selectFile = useCallback(
     (path: string) => {
@@ -605,10 +970,8 @@ export function FileTreeDetailView({
   const removeFile = async (mode: FileTreeMutationMode) => {
     if (!removeTarget) return;
     const current = await readFileForAction(removeTarget.path);
-    const fileIndex = fileTree?.files.findIndex((file) => file.path === removeTarget.path) ?? -1;
-    const nextFile =
-      fileTree?.files[fileIndex + 1] ??
-      (fileIndex > 0 ? fileTree?.files[fileIndex - 1] : undefined);
+    const fileIndex = files.findIndex((file) => file.path === removeTarget.path);
+    const nextFile = files[fileIndex + 1] ?? (fileIndex > 0 ? files[fileIndex - 1] : undefined);
     await submitFileOperations({
       message: `Remove ${removeTarget.path} from ${nodeType}`,
       mode,
@@ -699,7 +1062,7 @@ export function FileTreeDetailView({
   const removeDrivePaths = async (paths: string[], mode: FileTreeMutationMode, message: string) => {
     if (paths.length === 0) return;
     const pathSet = new Set(paths);
-    const nextFile = fileTree?.files.find((file) => !pathSet.has(file.path));
+    const nextFile = files.find((file) => !pathSet.has(file.path));
     const operations = await buildDeleteOperations(paths);
     await submitFileOperations({
       message,
@@ -713,16 +1076,14 @@ export function FileTreeDetailView({
   };
 
   const folderFilePaths = (folderPath: string): string[] =>
-    (fileTree?.files ?? [])
-      .filter((file) => file.path.startsWith(`${folderPath}/`))
-      .map((file) => file.path);
+    files.filter((file) => file.path.startsWith(`${folderPath}/`)).map((file) => file.path);
 
   const renameFolder = async (nextName: string, mode: FileTreeMutationMode) => {
     if (!folderRenameTarget || !fileTree) return;
     const currentFolderPath = folderRenameTarget;
     const initialPlan = buildFileTreeFolderRenamePlan({
       existingPaths: filePaths,
-      files: fileTree.files,
+      files,
       folderPath: currentFolderPath,
       nextName,
     });
@@ -742,7 +1103,7 @@ export function FileTreeDetailView({
     const result = buildFileTreeFolderRenamePlan({
       contentHashes,
       existingPaths: filePaths,
-      files: fileTree.files,
+      files,
       folderPath: currentFolderPath,
       nextName,
     });
@@ -882,7 +1243,7 @@ export function FileTreeDetailView({
     );
   }
 
-  const fileCount = fileTree.files.length;
+  const fileCount = totalFileCount;
   const previewKind = fileQuery.data
     ? resolveFileTreePreviewKind(openPath ?? "", fileQuery.data.mimeType)
     : "code";
@@ -996,7 +1357,10 @@ export function FileTreeDetailView({
                 </span>
                 <Button
                   className="h-7 px-2 text-xs"
-                  disabled={allFilesSelected}
+                  // A partially loaded Drive can only select what it holds, and
+                  // "select all" that silently means "select the loaded ones" is
+                  // how someone deletes the wrong thing. Load the rest first.
+                  disabled={allFilesSelected || hasMoreFiles}
                   onClick={selectAllFiles}
                   size="sm"
                   type="button"
@@ -1045,8 +1409,8 @@ export function FileTreeDetailView({
                 ) : null}
               </div>
             ) : null}
-            <div className="min-h-0 flex-1 overflow-auto p-2">
-              {fileTree.files.length === 0 ? (
+            <div className="min-h-0 flex-1 overflow-auto p-2" ref={setFileTreeScroller}>
+              {files.length === 0 && tree.length === 0 && !folderLoading("") ? (
                 <div className="px-2 py-3 text-muted-foreground text-sm">
                   {messages.nodeDetail.noFilesYet}
                 </div>
@@ -1056,13 +1420,21 @@ export function FileTreeDetailView({
                   expanded={expandedPaths}
                   key={fileTree.node.id}
                   onDownloadFile={downloadFile}
+                  // Folder-level actions act on every path under the folder, so
+                  // they are withheld until the whole tree is in hand — a
+                  // "remove folder" that only removed the loaded half of it
+                  // would be worse than not offering it.
                   onDownloadFolder={
-                    canSelectDrive
+                    canSelectDrive && !hasMoreFiles
                       ? (path) =>
                           void downloadFileTreePaths(folderFilePaths(path), fileTreeFileName(path))
                       : undefined
                   }
-                  onRemoveFolder={canChangeFiles && !isEditing ? setFolderRemoveTarget : undefined}
+                  onRemoveFolder={
+                    canChangeFiles && !isEditing && !hasMoreFiles
+                      ? setFolderRemoveTarget
+                      : undefined
+                  }
                   onRemoveFile={
                     canChangeFiles && !isEditing
                       ? (path) => setRemoveTarget(filesByPath.get(path) ?? null)
@@ -1073,7 +1445,11 @@ export function FileTreeDetailView({
                       ? (path) => setRenameTarget(filesByPath.get(path) ?? null)
                       : undefined
                   }
-                  onRenameFolder={canChangeFiles && !isEditing ? setFolderRenameTarget : undefined}
+                  onRenameFolder={
+                    canChangeFiles && !isEditing && !hasMoreFiles
+                      ? setFolderRenameTarget
+                      : undefined
+                  }
                   onExpandedChange={setExpandedPaths}
                   onSelect={selectFile}
                   onToggleSelection={toggleSelection}
@@ -1081,9 +1457,24 @@ export function FileTreeDetailView({
                   selectedPath={openPath ?? undefined}
                   selectionMode={selectionMode}
                 >
-                  {renderFileTree(tree)}
+                  <FileTreeRows
+                    folderFooter={renderFolderFooter}
+                    scrollElement={fileTreeScroller}
+                    tree={tree}
+                  />
                 </DriveFileTree>
               )}
+              {folderMode ? (
+                <p
+                  aria-live="polite"
+                  className="mt-2 border-border/50 border-t px-2 pt-2 text-muted-foreground text-xs tabular-nums"
+                >
+                  {fmt(messages.nodeDetail.filesPagedSummary, {
+                    shown: files.length,
+                    total: totalFileCount,
+                  })}
+                </p>
+              ) : null}
             </div>
           </div>
         </aside>
@@ -1399,7 +1790,7 @@ export function FileTreeDetailView({
       />
       <FileTreeFolderRenameDialog
         existingPaths={filePaths}
-        files={fileTree.files}
+        files={files}
         folderPath={folderRenameTarget}
         onOpenChange={(open) => {
           if (!open) setFolderRenameTarget(null);

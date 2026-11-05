@@ -122,6 +122,8 @@ export interface ResolvedLaunch {
   /** remote-websocket only. */
   url?: string;
   authHeader?: string;
+  /** Server-only stable credential/grant identity for supervised binding. */
+  bindingRef?: string;
 }
 
 const findSpec = (slug: string): CatalogSpec | undefined =>
@@ -599,7 +601,8 @@ export async function resolveLaunch(slug: string): Promise<ResolvedLaunch> {
     slug: connection?.slug ?? spec.slug,
     name: connection?.agentName ?? spec.name,
     transport: spec.transport,
-    url: getBudaAcpUrl(agentId),
+    url: connection?.endpoint ?? getBudaAcpUrl(agentId),
     authHeader: `Bearer ${connection?.accessToken ?? localConfig.token}`,
+    ...(connection?.bindingRef ? { bindingRef: connection.bindingRef } : {}),
   };
 }

@@ -12,6 +12,12 @@ type Client = ReturnType<typeof createRouterClient<typeof busabaseRouter, Record
 
 const MIGRATIONS_CWD = path.resolve(__dirname, "../../../apps/busabase");
 const HUGE_BODY = "x".repeat(200_000);
+const HUGE_SOURCE_SUMMARY = JSON.stringify({
+  rows: Array.from({ length: 1_000 }, (_, index) => ({
+    index,
+    query: "source-summary ".repeat(100),
+  })),
+});
 
 describe("records.list summary projection", () => {
   let dataDir = "";
@@ -35,6 +41,7 @@ describe("records.list summary projection", () => {
       fields: [
         { slug: "name", name: "Name", type: "text", required: true, options: {} },
         { slug: "body", name: "Body", type: "longtext", options: {} },
+        { slug: "source_summary", name: "Source summary", type: "json", options: {} },
         { slug: "rank", name: "Rank", type: "number", options: {} },
       ],
       autoMerge: true,
@@ -44,9 +51,9 @@ describe("records.list summary projection", () => {
     const changeRequest = await client.bases.createBulkChangeRequest({
       baseId,
       records: [
-        { name: "First", body: HUGE_BODY, rank: 2 },
-        { name: "Second", body: HUGE_BODY, rank: 1 },
-        { name: "Archived", body: HUGE_BODY, rank: 3 },
+        { name: "First", body: HUGE_BODY, source_summary: HUGE_SOURCE_SUMMARY, rank: 2 },
+        { name: "Second", body: HUGE_BODY, source_summary: HUGE_SOURCE_SUMMARY, rank: 1 },
+        { name: "Archived", body: HUGE_BODY, source_summary: HUGE_SOURCE_SUMMARY, rank: 3 },
       ],
       message: "Seed reports",
     });
@@ -90,7 +97,7 @@ describe("records.list summary projection", () => {
     );
     expect(explicitFull).toEqual(full);
     expect(full.records[0]?.headCommit.payload.body).toBe(HUGE_BODY);
-    expect(full.records[0]?.base.fields.length).toBe(3);
+    expect(full.records[0]?.base.fields.length).toBe(4);
     expect(JSON.stringify(full).length).toBeGreaterThan(400_000);
     expect(JSON.stringify(summary).length).toBeLessThan(20_000);
     for (const record of summary.records) {
@@ -101,6 +108,54 @@ describe("records.list summary projection", () => {
         HUGE_BODY,
       );
     }
+  }, 120_000);
+
+  it("keeps listPage totals and Base metadata while compacting table rows", async () => {
+    const full = await client.records.listPage({ baseId, page: 1, pageSize: 1 });
+    const table = await client.records.listPage({
+      baseId,
+      listMode: "table",
+      page: 1,
+      pageSize: 1,
+    });
+    const explicitFull = await client.records.listPage({
+      baseId,
+      listMode: "full",
+      page: 1,
+      pageSize: 1,
+    });
+
+    expect(table.page).toBe(full.page);
+    expect(table.pageSize).toBe(full.pageSize);
+    expect(table.total).toBe(full.total);
+    expect(table.totalPages).toBe(full.totalPages);
+    expect(table.records.map((record) => record.id)).toEqual(
+      full.records.map((record) => record.id),
+    );
+    expect(explicitFull).toEqual(full);
+    expect(table.records[0]?.base.fields.map((field) => field.slug)).toEqual(
+      full.records[0]?.base.fields.map((field) => field.slug),
+    );
+    expect(table.records[0]?.headCommit.payload.body).toBe(LIST_OMITTED_LONG_TEXT_VALUE);
+    expect(table.records[0]?.headCommit.payload.source_summary).toBe(LIST_OMITTED_LONG_TEXT_VALUE);
+    expect(full.records[0]?.headCommit.payload.body).toBe(HUGE_BODY);
+    expect(full.records[0]?.headCommit.payload.source_summary).toEqual(HUGE_SOURCE_SUMMARY);
+    expect(JSON.stringify(table).length).toBeLessThan(20_000);
+
+    const second = await client.records.listPage({
+      baseId,
+      listMode: "table",
+      page: 2,
+      pageSize: 1,
+    });
+    expect(second.total).toBe(full.total);
+    expect(second.records[0]?.id).not.toBe(table.records[0]?.id);
+
+    const recordId = table.records[0]?.id;
+    if (!recordId) throw new Error("Expected a compact table row");
+    const detail = await client.records.get({ recordId });
+    expect(detail.headCommit.payload.body).toBe(HUGE_BODY);
+    expect(detail.headCommit.payload.source_summary).toEqual(HUGE_SOURCE_SUMMARY);
   }, 120_000);
 
   it("uses the same projection for the sorted and archived list paths", async () => {
@@ -156,5 +211,31 @@ describe("records.list summary projection", () => {
 
     expect(await fetchPage("true")).toBe(true);
     expect(await fetchPage("false")).toBe(false);
+  }, 120_000);
+
+  it("parses listMode=table through the public numbered-page GET query", async () => {
+    let parsedListMode: string | undefined;
+    const handler = new OpenAPIHandler({
+      records: {
+        listPage: implement(busabaseContract).records.listPage.handler(async ({ input }) => {
+          parsedListMode = input.listMode;
+          return { records: [], total: 0, totalPages: 0, page: 1, pageSize: 50 };
+        }),
+      },
+    });
+    const request = new Request(
+      `http://localhost/api/v1/records/page?baseId=${baseId}&listMode=table`,
+    );
+    const result = await handler.handle(request, { context: {} });
+    if (!result.matched) throw new Error("GET /records/page did not match");
+    expect(result.response.status).toBe(200);
+    expect(await result.response.json()).toEqual({
+      records: [],
+      total: 0,
+      totalPages: 0,
+      page: 1,
+      pageSize: 50,
+    });
+    expect(parsedListMode).toBe("table");
   }, 120_000);
 });

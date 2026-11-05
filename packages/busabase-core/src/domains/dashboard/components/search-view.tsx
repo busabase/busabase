@@ -502,6 +502,11 @@ export function SearchView({ orpc }: { orpc: BusabaseQueryUtils }) {
             <p className="px-3 pb-2 text-muted-foreground text-xs">
               {fmt(isRegex ? t.patternMatchCount : t.resultCount, { count: String(resultCount) })}
             </p>
+            {/* Paging ends at what one search ranked; say so instead of letting
+                "load more" quietly run out. */}
+            {!isRegex && results.data?.contentTruncated ? (
+              <p className="px-3 pb-2 text-muted-foreground text-xs">{t.partialResults}</p>
+            ) : null}
             <div className="space-y-0.5">
               {isRegex
                 ? matches.map((match) => (

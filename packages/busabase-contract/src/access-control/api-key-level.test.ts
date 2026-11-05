@@ -129,6 +129,13 @@ describe("resolveRequiredLevel", () => {
     );
   });
 
+  it("requires manage credentials for saving a Buda ACP API token", () => {
+    const level = resolveRequiredLevel(["agents", "connections", "connectBuda"], "POST");
+    expect(level).toBe("manage");
+    expect(hasApiKeyLevel("write", level)).toBe(false);
+    expect(hasApiKeyLevel("manage", level)).toBe(true);
+  });
+
   it("classifies direct node metadata updates as write", () => {
     const level = resolveRequiredLevel(["workbench", "nodes", "updateMetadata"], "PATCH");
     expect(level).toBe("write");
@@ -334,6 +341,13 @@ describe("procedure permission policy", () => {
     const legacy = { level: "read" as const, nodeScope: ["nod_private"] };
     expect(apiKeyPermissionsSchema.safeParse(legacy).success).toBe(true);
     expect(createApiKeyPermissionsSchema.safeParse(legacy).success).toBe(false);
+  });
+
+  it("keeps a space binding on read, and never accepts one on creation", () => {
+    const bound = { level: "write" as const, spaceId: "spc_site" };
+    expect(apiKeyPermissionsSchema.parse(bound)).toEqual(bound);
+    expect(createApiKeyPermissionsSchema.safeParse(bound).success).toBe(false);
+    expect(createApiKeyPermissionsSchema.unwrap().safeParse(bound).success).toBe(false);
   });
 });
 

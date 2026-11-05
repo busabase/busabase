@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { bigint, index, integer, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 import { spaceIdColumn } from "../../../db/space-column";
 
@@ -27,7 +28,17 @@ export const busabaseStorageCleanupJobs = pgTable(
     createdAt: timestamp("created_at", { mode: "date" }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { mode: "date" }).defaultNow().notNull(),
   },
-  (job) => [index("busabase_storage_cleanup_due_idx").on(job.state, job.nextAttemptAt)],
+  (job) => [
+    index("busabase_storage_cleanup_due_idx").on(job.state, job.nextAttemptAt),
+    // Retirements only (`retained` rows are the upload fence, one per storage key
+    // ever registered). A host that keeps a storage counter asks "did anything
+    // retire in this Space since my counter was written?" once a minute, and this
+    // index is what keeps that question off a full scan of a table that only
+    // grows — see `reconcileStorageGauges` in busabase-cloud.
+    index("busabase_storage_cleanup_retired_idx")
+      .on(job.createdAt, job.spaceId)
+      .where(sql`${job.state} <> 'retained'`),
+  ],
 );
 
 export type StorageCleanupJobPO = typeof busabaseStorageCleanupJobs.$inferSelect;

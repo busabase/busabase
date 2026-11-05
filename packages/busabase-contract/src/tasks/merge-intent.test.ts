@@ -31,10 +31,19 @@ const cases: TaskCase[] = [
     input: { baseId: "bas_1", updates: [{ recordId: "rec_1", fields: { count: 99 } }] },
     endpoint: "bases.createBulkUpdateChangeRequest",
   },
-  ...(["create", "update", "delete", "restore"] as const).map((action) => ({
+  // Each action gets only the arguments it applies: the task refuses the rest
+  // (a `name` on delete used to be dropped without a word).
+  ...(
+    [
+      ["create", { baseId: "bas_1", name: "Reviewed" }],
+      ["update", { viewId: "viw_1", name: "Reviewed", position: 0 }],
+      ["delete", { viewId: "viw_1" }],
+      ["restore", { viewId: "viw_1" }],
+    ] as const
+  ).map(([action, args]) => ({
     ...viewChangeTask,
     label: `view ${action}`,
-    input: { action, baseId: "bas_1", viewId: "viw_1", name: "Reviewed", position: 0 },
+    input: { action, ...args },
     endpoint: "views.changeRequest",
   })),
   ...(["add", "update", "delete", "convert", "reorder", "restore"] as const).map((operation) => ({

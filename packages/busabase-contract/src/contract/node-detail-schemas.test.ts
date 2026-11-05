@@ -61,7 +61,10 @@ describe("NodeDetailVO", () => {
       expect(Object.keys(NODE_DETAIL_VARIANTS[type].shape).sort()).toEqual([
         "attribution",
         "entryFile",
+        // `files` is capped server-side; these say how many there really are.
+        "fileCount",
         "files",
+        "filesTruncated",
         "node",
         "skippedGitignorePaths",
         "type",

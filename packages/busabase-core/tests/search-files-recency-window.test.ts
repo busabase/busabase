@@ -10,7 +10,7 @@ import { busabaseAssetUsages } from "../src/domains/assets/schema/assets";
 import { busabaseRouter } from "../src/router";
 
 /**
- * `search`'s files source applies its query in JS, AFTER a recency-capped SQL
+ * `search`'s files source used to apply its query in JS after a recency-capped SQL
  * window (`MAX_ASSET_USAGE_SCAN_ROWS`, `ORDER BY updated_at DESC`) — so a file
  * that falls outside the newest N asset usages is invisible to search no
  * matter how exactly its name matches.
@@ -21,9 +21,9 @@ import { busabaseRouter } from "../src/router";
  * it is the leading explanation for that PR's production finding that
  * `?sources=files` returned 0 rows for a Drive holding ~889 PDFs.
  *
- * This test pins the mechanism (not the production incident): mount one file
- * whose name carries a unique marker, then push it out of the window with
- * newer usages for an unrelated asset, and assert search can still find it.
+ * These tests pin identity and indexed-body lookup: mount an old file, then
+ * add more than 1000 newer usages and assert both paths still find that file.
+ * The body-only English and Chinese markers reproduce the later index gap.
  */
 
 type Client = ReturnType<typeof createRouterClient<typeof busabaseRouter, Record<never, never>>>;
@@ -34,6 +34,7 @@ const HASH = (byte: string) => `sha256:${byte.repeat(64)}`;
 /** Must exceed `MAX_ASSET_USAGE_SCAN_ROWS` (1000) so the target row is evicted from the window. */
 const FILLER_USAGES = 1200;
 const MARKER = "ZHIHUIMARKER";
+const BODY_MARKER = "OLDERBODYTHETA";
 
 describe("search — files source vs the recency window", () => {
   let dataDir = "";
@@ -97,7 +98,11 @@ describe("search — files source vs the recency window", () => {
 
     // The file the user is looking for. Its NAME carries the marker, so this
     // needs no content scan at all — pure metadata matching.
-    const targetAssetId = await uploadAsset(`${MARKER}-manual.txt`, "irrelevant body", "a");
+    const targetAssetId = await uploadAsset(
+      `${MARKER}-manual.txt`,
+      `The ${BODY_MARKER} instruction and 很旧的正文检索目标 are only in this file body.`,
+      "a",
+    );
     await mountAsFileNode(targetAssetId, "target-manual", "Target manual");
 
     // An unrelated asset whose name does NOT match, mounted many times with a
@@ -143,5 +148,14 @@ describe("search — files source vs the recency window", () => {
   it("finds a file by an exact filename marker even when newer usages fill the recency window", async () => {
     const result = await client.search({ query: MARKER, sources: ["files"] });
     expect(result.results.length).toBeGreaterThan(0);
+  });
+  it("finds English and Chinese body-only terms outside the latest 1000 usages", async () => {
+    for (const query of [BODY_MARKER, "很旧的正文检索目标"]) {
+      const result = await client.search({ query, sources: ["files"] });
+      const found = result.results.filter((row) => row.href === "/file/target-manual");
+      expect(found).toHaveLength(1);
+      expect(found[0]?.body).toContain(query);
+      expect(result.contentTruncated).toBe(false);
+    }
   });
 });

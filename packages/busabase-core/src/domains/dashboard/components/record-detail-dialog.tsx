@@ -10,16 +10,19 @@ import { useIsAnonymousVisitor } from "../visitor-context";
 import { DialogContent } from "./localized-dialog-content";
 import { NodeAgentPromptsButton } from "./node-agent-prompts-button";
 import { RecordDetailView } from "./record-views";
+import { NodeDetailSkeleton } from "./skeletons";
 
 export function RecordDetailDialog({
   onClose,
   returnFocusTo,
   error,
+  isLoading = false,
   ...detailProps
 }: ComponentProps<typeof RecordDetailView> & {
   onClose: () => void;
   returnFocusTo: HTMLElement | null;
   error?: string | null;
+  isLoading?: boolean;
 }) {
   const messages = useCoreI18n();
   const currentSearch = useSearch();
@@ -89,6 +92,8 @@ export function RecordDetailDialog({
           <div className="p-6 text-rejected-strong text-sm" role="alert">
             {error}
           </div>
+        ) : !record && isLoading ? (
+          <NodeDetailSkeleton variant="doc" />
         ) : (
           <RecordDetailView {...detailProps} />
         )}

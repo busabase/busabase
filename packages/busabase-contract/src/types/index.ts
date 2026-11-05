@@ -166,7 +166,7 @@ export interface NodeVO {
    * "follow the app" — `airapp.json` decides — which is why absence has to stay
    * distinguishable from any particular value.
    */
-  settings?: { airappEngine?: "browser" | "local" | "remote" | null };
+  settings?: { airappEngine?: "browser" | "local" | "remote" | "site" | null };
   /**
    * This node's OWN declared visibility, or null when it inherits from its
    * ancestors. A real column rather than a metadata key, because it is the node
@@ -410,7 +410,9 @@ export type {
   FilePreviewProvider,
   FilePreviewUnavailableReason,
   FilePreviewVO,
+  FileTreeEntriesVO,
   FileTreeFileVO,
+  FileTreeFolderEntryVO,
   FileTreeNodeVO,
   FileTreeReadFileVO,
 } from "../domains/filetree/types";
@@ -544,9 +546,11 @@ export interface SearchResponseVO {
   hasMore: boolean;
   results: SearchResultVO[];
   /**
-   * True when some in-scope node content was indexed only up to the projection
-   * cap, so this search could not see all of it. Lets a client report an empty
-   * result honestly instead of implying the workspace lacks the phrase.
+   * True when this search could not see everything in scope: some node content
+   * was indexed only up to the projection cap, the file scan ran out of budget,
+   * or more record values matched than one search ranks (it ranks the newest,
+   * or the oldest for ascending sorts). Lets a client report a result honestly
+   * instead of implying the workspace lacks the phrase.
    */
   contentTruncated: boolean;
 }

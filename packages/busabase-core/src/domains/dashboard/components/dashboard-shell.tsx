@@ -62,6 +62,7 @@ import { CoreI18nProvider, useCoreMessages } from "../../../i18n";
 import { isCoreLocale } from "../../../i18n/locales";
 import { AirAppEngineAvailabilityProvider } from "../../airapp/components/engine-availability-context";
 import type { AirAppRunnerKind } from "../../airapp/components/runners/types";
+import type { AirAppEnginePlanGate } from "../../airapp/utils/engine-plan-gate";
 import { locatorExampleKind } from "../helpers/agent-locator";
 import {
   createKnownNodeCache,
@@ -323,6 +324,10 @@ interface BusabaseDashboardShellProps {
   locale?: string;
   /** Server-resolved engines, also needed by settings opened from the sidebar shell. */
   availableAirAppEngines?: AirAppRunnerKind[];
+  /** Engines an operator could turn on here. Shown disabled, with that reason. */
+  notConfiguredAirAppEngines?: AirAppRunnerKind[];
+  /** The host's plan gate on those engines — see `BusabaseDashboardProps.airAppEnginePlanGate`. */
+  airAppEnginePlanGate?: AirAppEnginePlanGate;
   /**
    * Wires up sidebar drag-and-drop reordering/reparenting AND the sidebar
    * "•••" → "Move to…" dialog (see `NodeMoveDialog`) — both funnel through
@@ -479,6 +484,8 @@ function DashboardShellInner({
   orpc,
   locale,
   availableAirAppEngines,
+  notConfiguredAirAppEngines,
+  airAppEnginePlanGate,
   onMoveNode,
   loadingNodeIds,
   nodesLoading = false,
@@ -1431,7 +1438,11 @@ function DashboardShellInner({
           {children}
         </DashboardLayout>
         {orpc && settingsTarget && (
-          <AirAppEngineAvailabilityProvider engines={availableAirAppEngines}>
+          <AirAppEngineAvailabilityProvider
+            engines={availableAirAppEngines}
+            notConfiguredEngines={notConfiguredAirAppEngines}
+            planGate={airAppEnginePlanGate}
+          >
             <NodeSettingsDialog
               focusField={settingsTarget.focusField}
               initialTab={settingsTarget.tab}

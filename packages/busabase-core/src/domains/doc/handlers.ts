@@ -6,7 +6,12 @@ import type { ChangeRequestVO, NodeVO } from "busabase-contract/types";
 import { and, eq, isNull } from "drizzle-orm";
 import { storage } from "openlib/storage";
 import type { z } from "zod";
-import { getContextSpaceId, resolveActorId } from "../../context";
+import {
+  assertContextCreationAllowed,
+  getContextSpaceId,
+  resolveActorId,
+  runWithContextCreationGuard,
+} from "../../context";
 import { getDb } from "../../db";
 import { busabaseNodes, type CommitPO, type NodePO, type OperationPO } from "../../db/schema";
 // Doc handlers consume the kernel substrate one-way (no cycle). Doc is storage-backed,
@@ -20,6 +25,7 @@ import {
   initializeNodeAcl,
   shouldAutoMerge,
 } from "../../logic/node-acl";
+import { upsertNodeContentProjection } from "../../logic/node-content";
 import { assertContainerParent, invalidParentNodeType } from "../../logic/node-parent";
 import { resolveVisibleNodeOfTypes } from "../../logic/node-resolve";
 import { registerNodeRuntime } from "../../logic/node-runtime";
@@ -347,22 +353,26 @@ export const createDoc = async (
     return { ...changeRequest, materialized: false as const };
   }
 
+  await assertContextCreationAllowed({ nodes: 1 });
+
   const nodeId = id("nod");
   const createdAt = now();
   try {
-    await db.insert(busabaseNodes).values({
-      // Direct-materialization fast path: this insert never reaches
-      // `mergeNodeCreate`, so the creator has to be stamped here too.
-      createdBy: resolveActorId(CURRENT_USER_ID),
-      id: nodeId,
-      parentId: parentNode.id,
-      type: "doc",
-      slug: parsed.slug,
-      name: parsed.name,
-      description: parsed.description,
-      position: 0,
-      createdAt,
-      updatedAt: createdAt,
+    await runWithContextCreationGuard({ nodes: 1 }, async () => {
+      await db.insert(busabaseNodes).values({
+        // Direct-materialization fast path: this insert never reaches
+        // `mergeNodeCreate`, so the creator has to be stamped here too.
+        createdBy: resolveActorId(CURRENT_USER_ID),
+        id: nodeId,
+        parentId: parentNode.id,
+        type: "doc",
+        slug: parsed.slug,
+        name: parsed.name,
+        description: parsed.description,
+        position: 0,
+        createdAt,
+        updatedAt: createdAt,
+      });
     });
   } catch (error) {
     if (isNodeSlugUniqueViolation(error)) {
@@ -391,6 +401,13 @@ export const createDoc = async (
   // through a usage the caller can see. Indexing on update alone left a
   // create-time body's images invisible to anyone the asset ACL applies to.
   await syncDocAssetUsages(nodeId, parsed.body ?? "");
+  // The body is in hand: index it as written rather than reading it back.
+  await upsertNodeContentProjection(db, {
+    nodeId,
+    spaceId: getContextSpaceId(),
+    nodeType: "doc",
+    text: parsed.body ?? "",
+  });
   await initializeNodeAcl(
     db,
     getContextSpaceId(),

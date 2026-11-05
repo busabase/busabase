@@ -40,9 +40,11 @@ import { installRouter } from "./domains/install/router";
 import { getPlaybook, listPlaybooks, searchPlaybooks } from "./domains/playbooks/logic/playbooks";
 import { updateNodeContent } from "./domains/rich-node/handlers";
 import { spaceInstructionsRouter } from "./domains/space-instructions/router";
+import { spaceWelcomeRouter } from "./domains/space-welcome/router";
 import { templatesRouter } from "./domains/templates/router";
 import { vaultRouter } from "./domains/vault/router";
 import { webhookRouter } from "./domains/webhook/router";
+import { workflowRouter } from "./domains/workflow/router";
 import { listActivityPaged, listRecordActivityPaged } from "./logic/activity";
 import {
   anonymousAccessKindFor,
@@ -358,12 +360,14 @@ const busabaseRouterImpl: EnhancedRouter<
   bases: baseRouter,
   fileTrees: fileTreeRouter,
   airapps: airappRouter,
+  workflows: workflowRouter,
   files: fileRouter,
   docs: docRouter,
   forms: formRouter,
   assets: assetsRouter,
   guides: guidesRouter,
   spaceInstructions: spaceInstructionsRouter,
+  spaceWelcome: spaceWelcomeRouter,
   vault: vaultRouter,
   agents: agentsRouter,
   webhooks: webhookRouter,

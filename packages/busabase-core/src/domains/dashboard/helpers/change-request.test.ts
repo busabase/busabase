@@ -1,8 +1,10 @@
-import type { OperationVO } from "busabase-contract/types";
+import type { OperationVO, RecordVO } from "busabase-contract/types";
 import { describe, expect, it } from "vitest";
 import { coreMessagesEn } from "../../../i18n/messages";
+import { LIST_OMITTED_LONG_TEXT_VALUE } from "../utils/list-payload-preview";
 import {
   getOperationImpact,
+  getRecordTitle,
   getRestoredSlugChanges,
   getRestoreToastMessage,
   getViewMoveTargetPosition,
@@ -123,5 +125,18 @@ describe("view move impact", () => {
         }),
       ),
     ).toBe(3);
+  });
+});
+
+describe("getRecordTitle with a compact row", () => {
+  it("falls back to the record id instead of showing an omission marker", () => {
+    const record = {
+      id: "rec_long_title_123456789",
+      base: {
+        fields: [{ id: "f1", slug: "title", name: "Title", type: "text", options: {} }],
+      },
+      headCommit: { payload: { title: LIST_OMITTED_LONG_TEXT_VALUE } },
+    } as unknown as RecordVO;
+    expect(getRecordTitle(record, coreMessagesEn)).toBe(shortIdentifier(record.id));
   });
 });

@@ -56,12 +56,22 @@ export const recordQueryTask: TaskDefinition<RecordQueryInput> = {
       description:
         "View filters pushed down to the server. With countOnly, requires baseId; not every filter is a cheap SQL count (see the records.count API description) but the result is always exact.",
     },
-    { name: "sort", kind: "json", description: "View sort (number/date fields only)." },
+    {
+      name: "sort",
+      kind: "json",
+      description:
+        'One-field sort, e.g. {"fieldSlug":"due","direction":"asc"}. Number and date fields sort ' +
+        "on the server; other types come back in the default order. Needs baseId unless you pass " +
+        "fieldType; an unknown field is an error.",
+    },
     { name: "countOnly", kind: "boolean", description: "Return the total instead of rows." },
     {
       name: "viewId",
       kind: "string",
-      description: "countOnly only: count the rows this saved View displays. Requires baseId.",
+      description:
+        "countOnly only: count the rows this saved View displays. Requires baseId. Listing a " +
+        "View's rows is records.listPage (`busabase-cli records list-page`); passing viewId " +
+        "without countOnly is an error.",
     },
   ],
   examples: [
@@ -77,6 +87,19 @@ export const recordQueryTask: TaskDefinition<RecordQueryInput> = {
         ...(input.viewId ? { viewId: input.viewId } : {}),
         ...(Array.isArray(input.filters) ? { filters: input.filters } : {}),
       } as CountInput);
+    }
+    // `records.list` has no viewId, so forwarding the rest would hand back the
+    // whole Base, unfiltered and unsorted, as if it were the View — while
+    // `records count --view-id` beside it counts the View. Refuse instead, and
+    // name the endpoint that does list a View's rows. Not rerouted there: it pages
+    // by number with a `total`, not by `nextCursor`, so an agent paging this
+    // task's way would stop after the first page.
+    if (input.viewId) {
+      throw new Error(
+        "viewId only applies to countOnly (`busabase-cli records count`). To list the rows a " +
+          "saved View shows, in its order, use records.listPage: `busabase-cli records list-page " +
+          "--base-id <base> --view-id <view> --page 1` (REST: GET /api/v1/records/page?baseId=…&viewId=…).",
+      );
     }
     return client.records.list({
       ...(input.limit !== undefined ? { limit: input.limit } : {}),

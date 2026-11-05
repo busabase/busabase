@@ -203,7 +203,10 @@ export const getRuntimeDescriptor = (kind: AirAppRuntimeKind): AirAppRuntimeDesc
 };
 
 /** How each engine executes a command — the other half of the eligibility rule. */
-export const ENGINE_EXECUTION_MODEL: Record<AirAppRunnerKind, "browser-js" | "os-process"> = {
+export const ENGINE_EXECUTION_MODEL: Record<
+  AirAppRunnerKind,
+  "browser-js" | "os-process" | "worker"
+> = {
   browser: "browser-js",
   local: "os-process",
   // A provisioned machine is still a real machine: it runs whatever the RunPlan
@@ -211,6 +214,8 @@ export const ENGINE_EXECUTION_MODEL: Record<AirAppRunnerKind, "browser-js" | "os
   // `os-process` rather than getting a model of its own — the axis that matters
   // here is "can this execute a binary", not "whose box is it".
   remote: "os-process",
+  // A deployed Worker module, with no process and no install step.
+  site: "worker",
 };
 
 /**
@@ -221,6 +226,10 @@ export const ENGINE_EXECUTION_MODEL: Record<AirAppRunnerKind, "browser-js" | "os
  * neither: each side declares only its own property.
  */
 export const isEngineEligible = (engine: AirAppRunnerKind, runtime: AirAppRuntimeKind): boolean => {
+  // Whether an app fits a Worker depends on far more than its language, and
+  // `resolveSiteBundle` names each reason in plain words, Python included. Saying
+  // "ineligible" here would swap that for a generic "can't run this app".
+  if (ENGINE_EXECUTION_MODEL[engine] === "worker") return true;
   const required = getRuntimeDescriptor(runtime).requiresExecutionModel;
   return required === null || ENGINE_EXECUTION_MODEL[engine] === required;
 };
@@ -246,7 +255,9 @@ export const resolveEngine = (
     return available.includes(required) && isEngineEligible(required, runtime) ? required : null;
   }
   if (available.includes(wanted) && isEngineEligible(wanted, runtime)) return wanted;
-  return available.find((engine) => isEngineEligible(engine, runtime)) ?? null;
+  // `site` is never a fallback: it uploads the app to a public provider, which
+  // only ever happens because somebody asked for it.
+  return available.find((engine) => engine !== "site" && isEngineEligible(engine, runtime)) ?? null;
 };
 
 /**

@@ -1,11 +1,17 @@
+import { randomUUID } from "node:crypto";
 import { os as baseOs, enhanceRouter, implement, ORPCError } from "@orpc/server";
 import { busabaseContract } from "busabase-contract/contract/busabase";
-import { getContextSpaceId } from "../../context";
+import { getContextActorId, getContextSpaceId } from "../../context";
 import { assertWorkspacePermission } from "../../logic/node-acl";
 import { listCatalog } from "./logic/agent-catalog";
 import { deleteAgentHistory, disconnectAgentConnection } from "./logic/agent-connection";
 import { getAgentConnectionDetail, renameAgentConnection } from "./logic/agent-connection-detail";
 import { listAgentConnections } from "./logic/agent-connection-list";
+import {
+  agentSessionScopeReferences,
+  describeAgentSessionStorageError,
+  logAgentSessionDiagnostic,
+} from "./logic/agent-session-diagnostics";
 import {
   AgentSessionTerminalError,
   cancelAgentSession,
@@ -21,6 +27,7 @@ import {
   startAgentSessionPrompt,
   subscribeAgentSession,
 } from "./logic/agent-session-manager";
+import { connectBudaAcp } from "./logic/buda-acp-connection";
 import {
   cancelRouterEnrollment,
   listRouterGrants,
@@ -31,8 +38,39 @@ import {
 
 const os = implement(busabaseContract);
 
-/** Turn a thrown Error into an ORPCError whose message the UI can show verbatim. */
+/** Domain guidance is safe to show; raw database exceptions never cross RPC. */
 function fail(error: unknown): never {
+  const storage = describeAgentSessionStorageError(error);
+  let queryFailure = false;
+  try {
+    queryFailure = Boolean(
+      error &&
+        typeof error === "object" &&
+        typeof Reflect.get(error, "query") === "string" &&
+        Array.isArray(Reflect.get(error, "params")),
+    );
+  } catch {
+    /* Unreadable third-party diagnostics are never rendered. */
+  }
+  if (storage.failureClass === "storage_failure" || storage.driverCode || queryFailure) {
+    const diagnosticRef = `diag_${randomUUID().replaceAll("-", "")}`;
+    logAgentSessionDiagnostic(
+      "rpc_storage_failed",
+      {
+        ...agentSessionScopeReferences({
+          spaceId: getContextSpaceId(),
+          actorId: getContextActorId() ?? null,
+        }),
+        diagnosticRef,
+        stage: "rpc",
+        outcome: "storage_failure",
+      },
+      { level: "warn", error, force: true },
+    );
+    throw new ORPCError("SERVICE_UNAVAILABLE", {
+      message: `Conversation history could not be confirmed. Check the session status before retrying. Reference: ${diagnosticRef}.`,
+    });
+  }
   const message = error instanceof Error ? error.message : String(error);
   throw new ORPCError("BAD_REQUEST", { message });
 }
@@ -98,6 +136,13 @@ const agentsRouterImpl = {
   catalog: os.agents.catalog.handler(() => listCatalog()),
 
   connections: {
+    connectBuda: os.agents.connections.connectBuda.handler(async ({ input }) => {
+      try {
+        return await connectBudaAcp(input);
+      } catch (error) {
+        return fail(error);
+      }
+    }),
     list: os.agents.connections.list.handler(({ input }) => listAgentConnections(input.scope)),
     detail: os.agents.connections.detail.handler(({ input }) =>
       getAgentConnectionDetail(input.slug),
@@ -136,7 +181,11 @@ const agentsRouterImpl = {
 
     create: os.agents.sessions.create.handler(async ({ input }) => {
       try {
-        return await createAgentSession({ slug: input.slug, spaceId: getContextSpaceId() });
+        return await createAgentSession({
+          slug: input.slug,
+          spaceId: getContextSpaceId(),
+          commandId: input.commandId,
+        });
       } catch (error) {
         return fail(error);
       }
@@ -151,8 +200,13 @@ const agentsRouterImpl = {
           input.presentation,
           input.contextReferences,
           input.resourceContext,
+          input.commandId,
         );
-        return { accepted: true, sessionId: input.sessionId };
+        return {
+          accepted: true,
+          sessionId: input.sessionId,
+          ...(input.commandId ? { commandId: input.commandId } : {}),
+        };
       } catch (error) {
         if (error instanceof AgentSessionTerminalError) {
           return {
@@ -169,7 +223,7 @@ const agentsRouterImpl = {
 
     cancel: os.agents.sessions.cancel.handler(async ({ input }) => {
       try {
-        await cancelAgentSession(input.sessionId);
+        await cancelAgentSession(input.sessionId, input.commandId);
         return { ok: true };
       } catch (error) {
         return fail(error);
@@ -178,7 +232,7 @@ const agentsRouterImpl = {
 
     close: os.agents.sessions.close.handler(async ({ input }) => {
       try {
-        await closeAgentSession(input.sessionId);
+        await closeAgentSession(input.sessionId, input.commandId);
         return { ok: true };
       } catch (error) {
         return fail(error);
@@ -187,7 +241,12 @@ const agentsRouterImpl = {
 
     respondToPermission: os.agents.sessions.respondToPermission.handler(async ({ input }) => {
       try {
-        await respondToAgentPermission(input.sessionId, input.requestId, input.optionId);
+        await respondToAgentPermission(
+          input.sessionId,
+          input.requestId,
+          input.optionId,
+          input.commandId,
+        );
         return { ok: true };
       } catch (error) {
         return fail(error);
@@ -196,7 +255,12 @@ const agentsRouterImpl = {
 
     respondToInput: os.agents.sessions.respondToInput.handler(async ({ input }) => {
       try {
-        await respondToAgentInput(input.sessionId, input.requestId, input.response);
+        await respondToAgentInput(
+          input.sessionId,
+          input.requestId,
+          input.response,
+          input.commandId,
+        );
         return { ok: true };
       } catch (error) {
         return fail(error);
@@ -221,7 +285,13 @@ const agentsRouterImpl = {
 
     setConfigOption: os.agents.sessions.setConfigOption.handler(async ({ input }) => {
       try {
-        return await setAgentSessionConfigOption(input.sessionId, input.configId, input.value);
+        return await setAgentSessionConfigOption(
+          input.sessionId,
+          input.configId,
+          input.value,
+          input.source,
+          input.commandId,
+        );
       } catch (error) {
         return fail(error);
       }

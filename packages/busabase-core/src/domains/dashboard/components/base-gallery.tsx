@@ -8,13 +8,16 @@ import type {
 } from "busabase-contract/types";
 import { ImageOff, Paperclip, RotateCcw } from "lucide-react";
 import { SPALink as Link } from "openlib/ui/dashboard";
+import { useState } from "react";
 import { useSearch } from "wouter";
 import { useCoreI18n, useCoreLocale, useIString } from "../../../i18n";
 import { getPrimaryField } from "../../base/utils/primary-field";
 import { resolveCoverField } from "../../base/utils/view-field-resolution";
 import { getRecordTitle } from "../helpers/change-request";
-import { getAttachmentRefs, getFieldPreviewText, getSafeAttachmentUrl } from "../helpers/field";
+import { pickCoverMedia } from "../helpers/cover-media";
+import { getFieldPreviewText } from "../helpers/field";
 import { mergeSearchIntoHref } from "../helpers/link-search";
+import { CoverVideo } from "./cover-video";
 import { LookupFieldValue } from "./field-preview";
 
 // Card min-width per size preset — column count is left to CSS `auto-fill`
@@ -24,22 +27,6 @@ const CARD_MIN_WIDTH: Record<GalleryCardSize, string> = {
   small: "150px",
   medium: "220px",
   large: "300px",
-};
-
-const firstImageUrl = (record: RecordVO, coverField: BaseFieldVO | null): string | null => {
-  if (!coverField) {
-    return null;
-  }
-  const attachments = getAttachmentRefs(record.headCommit.payload[coverField.slug]);
-  for (const attachment of attachments) {
-    if (attachment.mimeType?.startsWith("image/")) {
-      const url = getSafeAttachmentUrl(attachment);
-      if (url) {
-        return url;
-      }
-    }
-  }
-  return null;
 };
 
 function GalleryCard({
@@ -66,7 +53,9 @@ function GalleryCard({
   const resolveIString = useIString();
   const currentSearch = useSearch();
   const title = getRecordTitle(record, messages);
-  const coverUrl = firstImageUrl(record, coverField);
+  const [failedCoverUrl, setFailedCoverUrl] = useState<string | null>(null);
+  const coverMedia = coverField ? pickCoverMedia(record.headCommit.payload[coverField.slug]) : null;
+  const coverClassName = `h-full w-full transition-transform duration-150 ease-out motion-reduce:transition-none motion-safe:pointer-fine:group-hover:scale-105 ${coverFit === "fit" ? "object-contain" : "object-cover"}`;
   // The primary field is the card title — don't repeat it in the body.
   const primaryFieldSlug = getPrimaryField(record.base)?.slug;
   const bodyFields = fields.filter(
@@ -74,12 +63,22 @@ function GalleryCard({
   );
 
   const cover =
-    coverUrl != null ? (
-      <img
-        alt={title}
-        className={`h-full w-full transition-transform duration-150 ease-out motion-reduce:transition-none motion-safe:pointer-fine:group-hover:scale-105 ${coverFit === "fit" ? "object-contain" : "object-cover"}`}
-        src={coverUrl}
-      />
+    coverMedia && failedCoverUrl !== coverMedia.url ? (
+      coverMedia.kind === "video" ? (
+        <CoverVideo
+          className={coverClassName}
+          fileName={coverMedia.fileName}
+          onError={() => setFailedCoverUrl(coverMedia.url)}
+          url={coverMedia.url}
+        />
+      ) : (
+        <img
+          alt={title}
+          className={coverClassName}
+          onError={() => setFailedCoverUrl(coverMedia.url)}
+          src={coverMedia.url}
+        />
+      )
     ) : (
       // No-image fallback: keep the cover area at the same fixed aspect ratio so
       // the grid never collapses, and show the record's title initial.

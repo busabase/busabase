@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  formatAttachmentSize,
   formatDetailTime,
   formatFullTime,
   formatListDateTime,
@@ -136,5 +137,19 @@ describe("formatRelativeTime", () => {
 
   it("clamps a future time (clock skew) to now", () => {
     expect(formatRelativeTime(ago(-5 * MINUTE), "en", now)).toBe("now");
+  });
+});
+
+describe("formatAttachmentSize", () => {
+  it.each([
+    [0, ""],
+    [512, "512 B"],
+    [2 * 1024, "2.0 KB"],
+    [11 * 1024 * 1024, "11.0 MB"],
+    [1023 * 1024 * 1024, "1023.0 MB"],
+    [3 * 1024 * 1024 * 1024, "3.0 GB"],
+    [5 * 1024 * 1024 * 1024, "5.0 GB"],
+  ])("formats %d bytes as %j", (bytes, expected) => {
+    expect(formatAttachmentSize(bytes)).toBe(expected);
   });
 });

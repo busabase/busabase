@@ -13,12 +13,13 @@ import { Dialog, DialogDescription, DialogHeader, DialogTitle } from "kui/dialog
 import { Pencil, Plus, RotateCcw, Star, Trash2 } from "lucide-react";
 import { type iString, iStringIsEmpty, iStringParse, iStringTrim } from "openlib/i18n/i-string";
 import { SPALink as Link } from "openlib/ui/dashboard";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useSearch } from "wouter";
 import { fmt, useCoreI18n, useCoreLocale, useIString } from "../../../i18n";
 import { localizeCoreErrorMessage, presentCoreError } from "../../../i18n/localize-error";
 import { isSystemFieldType } from "../../base/field-types";
 import { type DateFieldOptions, getDateFieldOptions } from "../../base/utils/date-value";
+import { isDeletableFieldType } from "../../base/utils/field-capabilities";
 import { isUnconvertibleFieldType } from "../../base/utils/field-conversion";
 import { getPrimaryField } from "../../base/utils/primary-field";
 import { FormsForBasePanel } from "../../form/components/forms-for-base-panel";
@@ -419,7 +420,7 @@ export function BaseSetupView({
     name: string,
     options?: { mergeImmediately?: boolean },
   ) => Promise<void>;
-  /** Soft-delete a field. The undo is `onRestoreField`, which already shipped. */
+  /** Soft-delete a field. The undo is `onRestoreField`. */
   onDeleteField?: (
     base: BaseVO,
     fieldId: string,
@@ -650,7 +651,12 @@ export function BaseSetupView({
           : {}),
       },
     }),
-    enabled: Boolean(base?.id && pendingDeleteField),
+    enabled: Boolean(
+      base?.id &&
+        pendingDeleteField &&
+        pendingDeleteField.type !== "lookup" &&
+        pendingDeleteField.type !== "formula",
+    ),
     retry: false,
   });
   const deleteViewsQuery = useQuery({
@@ -658,9 +664,26 @@ export function BaseSetupView({
     enabled: Boolean(base?.id && pendingDeleteField),
     retry: false,
   });
-  const fieldDependencies = pendingDeleteField
-    ? getFieldDependencies(pendingDeleteField, bases, deleteViewsQuery.data ?? [])
-    : [];
+  const fieldDependencies = useMemo(
+    () =>
+      pendingDeleteField
+        ? getFieldDependencies(
+            pendingDeleteField,
+            base ? [base, ...bases.filter((candidate) => candidate.id !== base.id)] : bases,
+            deleteViewsQuery.data ?? [],
+          )
+        : [],
+    [pendingDeleteField, base, bases, deleteViewsQuery.data],
+  );
+  const hasLookupFormulaDependents =
+    pendingDeleteField?.type === "lookup" &&
+    fieldDependencies.some((dependency) => dependency.kind === "formula");
+  const hasFormulaDependents =
+    pendingDeleteField?.type === "formula" &&
+    fieldDependencies.some(
+      (dependency) => dependency.kind === "formula" || dependency.kind === "lookup",
+    );
+  const hasBlockingFieldDependents = hasLookupFormulaDependents || hasFormulaDependents;
 
   if (!base) {
     return (
@@ -874,17 +897,25 @@ export function BaseSetupView({
   };
 
   const submitFieldDelete = async (fieldId: string, options?: { mergeImmediately?: boolean }) => {
-    if (!base || !onDeleteField) return;
+    if (!base || !onDeleteField || hasBlockingFieldDependents) return;
     setIsFieldDeleteSaving(true);
     setFieldDeleteError(null);
     try {
       await onDeleteField(base, fieldId, options);
       setDeletingFieldId(null);
     } catch (error) {
+      const reason =
+        error && typeof error === "object" && "data" in error
+          ? (error.data as { reason?: unknown } | undefined)?.reason
+          : undefined;
       setFieldDeleteError(
-        error instanceof Error
-          ? localizeCoreErrorMessage(messages, error.message)
-          : messages.base.failedDeleteField,
+        reason === "lookup_has_formula_dependents"
+          ? messages.base.deleteLookupFieldBlocked
+          : reason === "formula_has_dependents" || reason === "formula_has_lookup_dependents"
+            ? messages.base.deleteFormulaFieldBlocked
+            : error instanceof Error
+              ? localizeCoreErrorMessage(messages, error.message)
+              : messages.base.failedDeleteField,
       );
     } finally {
       setIsFieldDeleteSaving(false);
@@ -1242,12 +1273,12 @@ export function BaseSetupView({
                           <Star size={13} />
                         </button>
                       ) : null}
-                      {/* The record-title field and system fields are refused
+                      {/* The record-title field and protected system fields are refused
                           server-side, so the affordance is absent rather than
                           offered-then-rejected. */}
                       {onDeleteField &&
                       field.id !== primaryField?.id &&
-                      !isSystemFieldType(field.type) ? (
+                      isDeletableFieldType(field.type) ? (
                         <button
                           aria-label={fmt(messages.base.deleteFieldAria, {
                             name: resolveIString(field.name),
@@ -1571,22 +1602,31 @@ export function BaseSetupView({
                   </DialogDescription>
                 </DialogHeader>
                 <div className="px-5 py-4">
-                  {/* Lead with the real blast radius, then say plainly that it is
-                      reversible — burying reversibility in a tooltip is what
-                      makes people avoid a safe action. */}
+                  {/* Explain the deletion scope and whether this field can be restored. */}
                   <p className="text-sm">
-                    {deleteImpactQuery.isPending
-                      ? messages.base.deleteFieldCounting
-                      : deleteImpactQuery.error
-                        ? messages.base.deleteFieldCountUnavailable
-                        : fmt(messages.base.deleteFieldImpact, {
-                            count: deleteImpactQuery.data?.total ?? 0,
-                            plural: (deleteImpactQuery.data?.total ?? 0) === 1 ? "" : "s",
-                          })}
+                    {pendingDeleteField?.type === "lookup"
+                      ? messages.base.deleteLookupFieldImpact
+                      : pendingDeleteField?.type === "formula"
+                        ? messages.base.deleteFormulaFieldImpact
+                        : deleteImpactQuery.isPending
+                          ? messages.base.deleteFieldCounting
+                          : deleteImpactQuery.error
+                            ? messages.base.deleteFieldCountUnavailable
+                            : fmt(messages.base.deleteFieldImpact, {
+                                count: deleteImpactQuery.data?.total ?? 0,
+                                plural: (deleteImpactQuery.data?.total ?? 0) === 1 ? "" : "s",
+                              })}
                   </p>
                   <p className="mt-2 text-muted-foreground text-xs">
                     {messages.base.deleteFieldReversible}
                   </p>
+                  {hasBlockingFieldDependents && (
+                    <p className="mt-2 text-rejected-strong text-sm" role="alert">
+                      {hasFormulaDependents
+                        ? messages.base.deleteFormulaFieldBlocked
+                        : messages.base.deleteLookupFieldBlocked}
+                    </p>
+                  )}
                   <div className="mt-4 border-border/60 border-t pt-3">
                     <p className="font-medium text-sm">{messages.base.deleteFieldDependencies}</p>
                     {deleteViewsQuery.isPending ? (
@@ -1594,9 +1634,19 @@ export function BaseSetupView({
                         {messages.base.deleteFieldDependenciesLoading}
                       </p>
                     ) : deleteViewsQuery.error ? (
-                      <p className="mt-2 text-rejected-strong text-xs">
-                        {messages.base.deleteFieldDependenciesUnavailable}
-                      </p>
+                      <div className="mt-2 space-y-2">
+                        <p className="text-rejected-strong text-xs">
+                          {messages.base.deleteFieldDependenciesUnavailable}
+                        </p>
+                        <button
+                          className="rounded-md border px-2 py-1 text-xs disabled:opacity-50"
+                          disabled={deleteViewsQuery.isFetching || isFieldDeleteSaving}
+                          onClick={() => void deleteViewsQuery.refetch()}
+                          type="button"
+                        >
+                          {messages.common.retry}
+                        </button>
+                      </div>
                     ) : fieldDependencies.length ? (
                       <ul className="mt-2 max-h-48 space-y-1 overflow-y-auto text-sm">
                         {fieldDependencies.map((dependency, index) => (
@@ -1605,6 +1655,7 @@ export function BaseSetupView({
                           >
                             <Link
                               className="text-primary underline underline-offset-2"
+                              onClick={() => setDeletingFieldId(null)}
                               href={mergeSearchIntoHref(
                                 dependency.view
                                   ? `/base/${dependency.base.slug}/${dependency.view.slug}`
@@ -1654,6 +1705,7 @@ export function BaseSetupView({
                       defaultAction="changeRequest"
                       disabled={
                         isFieldDeleteSaving ||
+                        hasBlockingFieldDependents ||
                         !pendingDeleteField ||
                         deleteViewsQuery.isPending ||
                         Boolean(deleteViewsQuery.error)

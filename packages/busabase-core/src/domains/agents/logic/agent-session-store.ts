@@ -1,8 +1,12 @@
 import {
+  AgentSessionCommandReceiptVOSchema,
   type AgentSessionConfigSelectVO,
   type AgentSessionEventVO,
   type AgentSessionModelOptionVO,
   AgentSessionModelOptionVOSchema,
+  type AgentSessionModeOptionVO,
+  AgentSessionModeOptionVOSchema,
+  AgentSessionRecoverySnapshotVOSchema,
   type AgentSessionStatus,
   type AgentSessionVO,
 } from "busabase-contract/domains/agents/types";
@@ -16,6 +20,7 @@ import {
   isNull,
   lt,
   lte,
+  notExists,
   notInArray,
   or,
   type SQL,
@@ -23,9 +28,14 @@ import {
 } from "drizzle-orm";
 import { getContextActorId, getContextSpaceId } from "../../../context";
 import { getDb } from "../../../db";
+import { busabaseAgentSessionCommands } from "../schema/agent-session-commands";
 import { busabaseAgentSessionEvents } from "../schema/agent-session-events";
 import { busabaseAgentSessions } from "../schema/agent-sessions";
 import type { AgentSessionCursor } from "../utils/agent-session-pagination";
+import {
+  agentSessionScopeReferences,
+  logAgentSessionDiagnostic,
+} from "./agent-session-diagnostics";
 
 /**
  * Persistence for agent sessions — the only place in this domain that touches
@@ -42,13 +52,53 @@ import type { AgentSessionCursor } from "../utils/agent-session-pagination";
  * OSS, where the database is a process-local singleton; using it here would
  * have made every write on the open-source build a silent no-op.
  */
-const db = () => getDb();
+const db = async () => {
+  try {
+    return await getDb();
+  } catch (error) {
+    logAgentSessionDiagnostic(
+      "database_resolution_failed",
+      { stage: "database_resolution", outcome: "storage_failure" },
+      { level: "error", error },
+    );
+    throw error;
+  }
+};
 
 /** Rows a restart left behind claiming to be alive. */
 const LIVE_STATUSES: AgentSessionStatus[] = ["connecting", "idle", "busy", "waiting_permission"];
 
-function warn(what: string, error: unknown) {
-  console.warn(`[agents] ${what} failed: ${error instanceof Error ? error.message : error}`);
+function warn(what: string, error: unknown, fields: Record<string, unknown> = {}) {
+  logAgentSessionDiagnostic(
+    "store_operation_failed",
+    { stage: what.replaceAll(/[^a-zA-Z0-9]+/g, "_"), outcome: "storage_failure", ...fields },
+    { level: "warn", error },
+  );
+}
+
+function storeOutcome(
+  stage: string,
+  outcome:
+    | "committed"
+    | "loaded"
+    | "query_completed"
+    | "predicate_not_matched"
+    | "ownership_rejected",
+  startedAt: number,
+  fields: Record<string, unknown>,
+): void {
+  const rejected = outcome === "ownership_rejected" || outcome === "predicate_not_matched";
+  logAgentSessionDiagnostic(
+    rejected ? "store_predicate_rejected" : "store_operation_completed",
+    {
+      stage,
+      outcome,
+      ...(rejected ? { reason: "predicate_not_matched" } : {}),
+      elapsedMs: Math.max(0, Date.now() - startedAt),
+      ...fields,
+    },
+    { level: rejected ? "warn" : "info" },
+  );
 }
 
 export interface AgentSessionScope {
@@ -74,18 +124,26 @@ export async function persistSessionCreated(
   scope: AgentSessionScope = currentScope(),
 ): Promise<void> {
   const database = await db();
-  await database.insert(busabaseAgentSessions).values({
-    id: session.id,
-    spaceId: scope.spaceId,
-    actorId: scope.actorId,
-    slug: session.slug,
-    agentName: session.agentName,
-    transport: session.transport,
-    status: session.status,
-    error: session.error,
-    createdAt: new Date(session.createdAt),
-    lastActivityAt: new Date(session.lastActivityAt),
-  });
+  const startedAt = Date.now();
+  const fields = { sessionId: session.id, ...agentSessionScopeReferences(scope) };
+  try {
+    await database.insert(busabaseAgentSessions).values({
+      id: session.id,
+      spaceId: scope.spaceId,
+      actorId: scope.actorId,
+      slug: session.slug,
+      agentName: session.agentName,
+      transport: session.transport,
+      status: session.status,
+      error: session.error,
+      createdAt: new Date(session.createdAt),
+      lastActivityAt: new Date(session.lastActivityAt),
+    });
+    storeOutcome("session_created", "committed", startedAt, fields);
+  } catch (error) {
+    warn("session_created", error, fields);
+    throw error;
+  }
 }
 
 /** Persist the inner id without overwriting an in-flight prompt reservation. */
@@ -95,10 +153,24 @@ export async function persistSessionAcpIdentity(
   scope: AgentSessionScope = currentScope(),
 ): Promise<void> {
   const database = await db();
-  await database
-    .update(busabaseAgentSessions)
-    .set({ acpSessionId, lastActivityAt: new Date() })
-    .where(and(eq(busabaseAgentSessions.id, sessionId), scopeCondition(scope)));
+  const startedAt = Date.now();
+  const fields = { sessionId, acpSessionId, ...agentSessionScopeReferences(scope) };
+  try {
+    await database
+      .update(busabaseAgentSessions)
+      .set({ acpSessionId, lastActivityAt: new Date() })
+      .where(
+        and(
+          eq(busabaseAgentSessions.id, sessionId),
+          scopeCondition(scope),
+          eq(busabaseAgentSessions.journalMode, "legacy"),
+        ),
+      );
+    storeOutcome("session_identity", "query_completed", startedAt, fields);
+  } catch (error) {
+    warn("session_identity", error, fields);
+    throw error;
+  }
 }
 
 /**
@@ -140,30 +212,46 @@ export async function acquireSessionLease(
   scope: AgentSessionScope = currentScope(),
 ): Promise<AgentSessionLease | null> {
   const database = await db();
-  const [claimed] = await database
-    .update(busabaseAgentSessions)
-    .set({
-      status: "busy",
-      lastActivityAt: new Date(),
-      leaseOwnerId: ownerId,
-      leaseFencingToken: sql`coalesce(${busabaseAgentSessions.leaseFencingToken}, 0) + 1`,
-      leaseExpiresAt: sql`now() + (${ttlSeconds} * interval '1 second')`,
-    })
-    .where(
-      and(
-        eq(busabaseAgentSessions.id, sessionId),
-        scopeCondition(scope),
-        eq(busabaseAgentSessions.transport, "remote-websocket"),
-        inArray(busabaseAgentSessions.status, LIVE_STATUSES),
-        or(
-          isNull(busabaseAgentSessions.leaseOwnerId),
-          isNull(busabaseAgentSessions.leaseExpiresAt),
-          lte(busabaseAgentSessions.leaseExpiresAt, sql`now()`),
+  const startedAt = Date.now();
+  const fields = { sessionId, ownerId, ttlSeconds, ...agentSessionScopeReferences(scope) };
+  let claimed: typeof busabaseAgentSessions.$inferSelect | undefined;
+  try {
+    [claimed] = await database
+      .update(busabaseAgentSessions)
+      .set({
+        status: "busy",
+        lastActivityAt: new Date(),
+        leaseOwnerId: ownerId,
+        leaseFencingToken: sql`coalesce(${busabaseAgentSessions.leaseFencingToken}, 0) + 1`,
+        leaseExpiresAt: sql`now() + (${ttlSeconds} * interval '1 second')`,
+      })
+      .where(
+        and(
+          eq(busabaseAgentSessions.id, sessionId),
+          scopeCondition(scope),
+          eq(busabaseAgentSessions.transport, "remote-websocket"),
+          eq(busabaseAgentSessions.journalMode, "legacy"),
+          inArray(busabaseAgentSessions.status, LIVE_STATUSES),
+          or(
+            isNull(busabaseAgentSessions.leaseOwnerId),
+            isNull(busabaseAgentSessions.leaseExpiresAt),
+            lte(busabaseAgentSessions.leaseExpiresAt, sql`now()`),
+          ),
         ),
-      ),
-    )
-    .returning();
-  if (!claimed || claimed.leaseOwnerId !== ownerId || claimed.leaseExpiresAt === null) return null;
+      )
+      .returning();
+  } catch (error) {
+    warn("lease_acquire", error, fields);
+    throw error;
+  }
+  if (!claimed || claimed.leaseOwnerId !== ownerId || claimed.leaseExpiresAt === null) {
+    storeOutcome("lease_acquire", "predicate_not_matched", startedAt, fields);
+    return null;
+  }
+  storeOutcome("lease_acquire", "committed", startedAt, {
+    ...fields,
+    fencingToken: claimed.leaseFencingToken,
+  });
   return {
     sessionId,
     ownerId,
@@ -186,6 +274,14 @@ export async function renewSessionLease(
   scope: AgentSessionScope = currentScope(),
 ): Promise<boolean> {
   const database = await db();
+  const startedAt = Date.now();
+  const fields = {
+    sessionId,
+    ownerId,
+    fencingToken,
+    ttlSeconds,
+    ...agentSessionScopeReferences(scope),
+  };
   try {
     const renewed = await database
       .update(busabaseAgentSessions)
@@ -200,9 +296,15 @@ export async function renewSessionLease(
         ),
       )
       .returning();
+    storeOutcome(
+      "lease_renew",
+      renewed.length === 1 ? "committed" : "ownership_rejected",
+      startedAt,
+      fields,
+    );
     return renewed.length === 1;
   } catch (error) {
-    warn("renewing agent session lease", error);
+    warn("lease_renew", error, fields);
     return false;
   }
 }
@@ -215,25 +317,38 @@ export async function releaseSessionLease(
   scope: AgentSessionScope = currentScope(),
 ): Promise<boolean> {
   const database = await db();
-  const released = await database
-    .update(busabaseAgentSessions)
-    .set({
-      status: sql`case when ${busabaseAgentSessions.status} in ('busy', 'waiting_permission') then 'idle' else ${busabaseAgentSessions.status} end`,
-      lastActivityAt: new Date(),
-      leaseOwnerId: null,
-      leaseExpiresAt: null,
-    })
-    .where(
-      and(
-        eq(busabaseAgentSessions.id, sessionId),
-        scopeCondition(scope),
-        eq(busabaseAgentSessions.leaseOwnerId, ownerId),
-        eq(busabaseAgentSessions.leaseFencingToken, fencingToken),
-        gt(busabaseAgentSessions.leaseExpiresAt, sql`now()`),
-      ),
-    )
-    .returning();
-  return released.length === 1;
+  const startedAt = Date.now();
+  const fields = { sessionId, ownerId, fencingToken, ...agentSessionScopeReferences(scope) };
+  try {
+    const released = await database
+      .update(busabaseAgentSessions)
+      .set({
+        status: sql`case when ${busabaseAgentSessions.status} in ('busy', 'waiting_permission') then 'idle' else ${busabaseAgentSessions.status} end`,
+        lastActivityAt: new Date(),
+        leaseOwnerId: null,
+        leaseExpiresAt: null,
+      })
+      .where(
+        and(
+          eq(busabaseAgentSessions.id, sessionId),
+          scopeCondition(scope),
+          eq(busabaseAgentSessions.leaseOwnerId, ownerId),
+          eq(busabaseAgentSessions.leaseFencingToken, fencingToken),
+          gt(busabaseAgentSessions.leaseExpiresAt, sql`now()`),
+        ),
+      )
+      .returning();
+    storeOutcome(
+      "lease_release",
+      released.length === 1 ? "committed" : "ownership_rejected",
+      startedAt,
+      fields,
+    );
+    return released.length === 1;
+  } catch (error) {
+    warn("lease_release", error, fields);
+    throw error;
+  }
 }
 
 /** End an unowned or expired remote session without requiring its original socket. */
@@ -292,6 +407,12 @@ export async function persistSessionState(
 ): Promise<boolean> {
   const database = await db();
   const ended = session.status === "ended" || session.status === "failed";
+  const startedAt = Date.now();
+  const fields = {
+    sessionId: session.id,
+    ...(fence ?? {}),
+    ...agentSessionScopeReferences(scope),
+  };
   try {
     const updated = await database
       .update(busabaseAgentSessions)
@@ -307,6 +428,7 @@ export async function persistSessionState(
           eq(busabaseAgentSessions.id, session.id),
           scopeCondition(scope),
           notInArray(busabaseAgentSessions.status, ["ended", "failed"]),
+          eq(busabaseAgentSessions.journalMode, "legacy"),
           options?.expectedStatuses
             ? inArray(busabaseAgentSessions.status, options.expectedStatuses)
             : undefined,
@@ -314,9 +436,15 @@ export async function persistSessionState(
         ),
       )
       .returning();
+    storeOutcome(
+      "session_state",
+      updated.length === 1 ? "committed" : fence ? "ownership_rejected" : "predicate_not_matched",
+      startedAt,
+      fields,
+    );
     return updated.length === 1;
   } catch (error) {
-    warn("persisting agent session state", error);
+    warn("session_state", error, fields);
     return false;
   }
 }
@@ -345,18 +473,25 @@ export async function persistSessionModelOption(
   scope: AgentSessionScope = currentScope(),
   fence?: LeaseFence,
   thinkingOption: AgentSessionConfigSelectVO | null = null,
+  modeOption: AgentSessionModeOptionVO | null = null,
 ): Promise<boolean> {
   const database = await db();
+  const startedAt = Date.now();
+  const fields = { sessionId, ...(fence ?? {}), ...agentSessionScopeReferences(scope) };
   try {
     const updated = await database
       .update(busabaseAgentSessions)
       // Keep old model-only snapshots readable; both selectors share one fenced write.
-      .set({ modelOption: thinkingOption ? { modelOption, thinkingOption } : modelOption })
+      .set({
+        modelOption:
+          thinkingOption || modeOption ? { modelOption, thinkingOption, modeOption } : modelOption,
+      })
       .where(
         and(
           eq(busabaseAgentSessions.id, sessionId),
           scopeCondition(scope),
           eq(busabaseAgentSessions.transport, "remote-websocket"),
+          eq(busabaseAgentSessions.journalMode, "legacy"),
           notInArray(busabaseAgentSessions.status, ["ended", "failed"]),
           fence
             ? fenceCondition(fence)
@@ -368,9 +503,15 @@ export async function persistSessionModelOption(
         ),
       )
       .returning();
+    storeOutcome(
+      "session_model_options",
+      updated.length === 1 ? "committed" : fence ? "ownership_rejected" : "predicate_not_matched",
+      startedAt,
+      fields,
+    );
     return updated.length === 1;
   } catch (error) {
-    warn("persisting agent session model option", error);
+    warn("session_model_options", error, fields);
     return false;
   }
 }
@@ -392,14 +533,31 @@ export async function persistSessionEvents(
 ): Promise<boolean> {
   if (events.length === 0) return true;
   const sessionId = events[0]?.sessionId;
-  if (!sessionId || events.some((event) => event.sessionId !== sessionId)) return false;
+  if (!sessionId || events.some((event) => event.sessionId !== sessionId)) {
+    logAgentSessionDiagnostic(
+      "event_batch_rejected",
+      { stage: "event_commit", outcome: "invalid_batch", eventCount: events.length },
+      { level: "warn" },
+    );
+    return false;
+  }
   const database = await db();
+  const startedAt = Date.now();
+  const fields = {
+    sessionId,
+    ...(fence ?? {}),
+    ...agentSessionScopeReferences(scope),
+    eventCount: events.length,
+    seqFrom: events[0]?.seq,
+    seqThrough: events.at(-1)?.seq,
+  };
   const rows = events.map((event) => ({
     id: `agev_${event.sessionId}_${event.seq}`,
     sessionId: event.sessionId,
     seq: event.seq,
     kind: event.kind,
     payload: {
+      commandId: event.commandId,
       acpUpdate: event.acpUpdate,
       acpExtension: event.acpExtension,
       status: event.status,
@@ -414,12 +572,23 @@ export async function persistSessionEvents(
     at: new Date(event.at),
   }));
   try {
-    if (!fence) {
-      await database.insert(busabaseAgentSessionEvents).values(rows);
-      return true;
-    }
     let fenced = true;
     await database.transaction(async (tx) => {
+      const [mode] = await tx
+        .select({ journalMode: busabaseAgentSessions.journalMode })
+        .from(busabaseAgentSessions)
+        .where(and(eq(busabaseAgentSessions.id, sessionId), scopeCondition(scope)))
+        .for("update");
+      // New-build legacy call sites must never bypass the session supervisor.
+      // The coordinated deployment drain is still required for old binaries.
+      if (!mode || mode.journalMode !== "legacy") {
+        fenced = false;
+        return;
+      }
+      if (!fence) {
+        await tx.insert(busabaseAgentSessionEvents).values(rows);
+        return;
+      }
       const stillOwned = await tx
         .update(busabaseAgentSessions)
         .set({ lastActivityAt: new Date() })
@@ -437,9 +606,10 @@ export async function persistSessionEvents(
       }
       await tx.insert(busabaseAgentSessionEvents).values(rows);
     });
+    storeOutcome("event_commit", fenced ? "committed" : "ownership_rejected", startedAt, fields);
     return fenced;
   } catch (error) {
-    warn("persisting agent session events", error);
+    warn("event_commit", error, fields);
     return false;
   }
 }
@@ -458,28 +628,41 @@ export async function persistSessionEvents(
  * there is no running turn to send `session/set_config_option` to — even if
  * an older write left a value behind.
  */
-function parseStoredConfigOptions(
+export function parseStoredConfigOptions(
   row: Pick<typeof busabaseAgentSessions.$inferSelect, "modelOption" | "status" | "transport">,
-): Pick<AgentSessionVO, "modelOption" | "thinkingOption"> {
-  const empty = { modelOption: null, thinkingOption: null };
+): Pick<AgentSessionVO, "modelOption" | "thinkingOption" | "modeOption"> {
+  const empty = { modelOption: null, thinkingOption: null, modeOption: null };
   if (row.transport !== "remote-websocket") return empty;
   if (row.status === "ended" || row.status === "failed") return empty;
   const stored = row.modelOption;
-  if (stored && typeof stored === "object" && "thinkingOption" in stored) {
-    const snapshot = stored as { modelOption?: unknown; thinkingOption?: unknown };
+  if (
+    stored &&
+    typeof stored === "object" &&
+    ("thinkingOption" in stored || "modeOption" in stored)
+  ) {
+    const snapshot = stored as {
+      modelOption?: unknown;
+      thinkingOption?: unknown;
+      modeOption?: unknown;
+    };
     const model = AgentSessionModelOptionVOSchema.nullable().safeParse(
       snapshot.modelOption ?? null,
     );
     const thinking = AgentSessionModelOptionVOSchema.nullable().safeParse(
       snapshot.thinkingOption ?? null,
     );
+    const mode = AgentSessionModeOptionVOSchema.nullable().safeParse(snapshot.modeOption ?? null);
     // A partial/malformed envelope cannot supply authoritative dependent options.
-    return model.success && thinking.success
-      ? { modelOption: model.data, thinkingOption: thinking.data }
+    return model.success && thinking.success && mode.success
+      ? { modelOption: model.data, thinkingOption: thinking.data, modeOption: mode.data }
       : empty;
   }
   const parsed = AgentSessionModelOptionVOSchema.nullable().safeParse(stored ?? null);
-  return { modelOption: parsed.success ? parsed.data : null, thinkingOption: null };
+  return {
+    modelOption: parsed.success ? parsed.data : null,
+    thinkingOption: null,
+    modeOption: null,
+  };
 }
 
 const toVO = (row: typeof busabaseAgentSessions.$inferSelect): AgentSessionVO => ({
@@ -492,7 +675,94 @@ const toVO = (row: typeof busabaseAgentSessions.$inferSelect): AgentSessionVO =>
   lastActivityAt: row.lastActivityAt.toISOString(),
   error: row.error,
   ...parseStoredConfigOptions(row),
+  ...(row.journalMode === "supervised"
+    ? {
+        reliability: {
+          connection: row.connectionState ?? "connecting",
+          execution: row.executionState ?? "idle",
+          synchronization: row.syncState ?? "recovering",
+          ...(row.diagnosticRef ? { diagnosticRef: row.diagnosticRef } : {}),
+        },
+        ...(AgentSessionRecoverySnapshotVOSchema.safeParse(row.recoverySnapshot).success
+          ? {
+              recoverySnapshot: AgentSessionRecoverySnapshotVOSchema.parse(row.recoverySnapshot),
+            }
+          : {}),
+      }
+    : {}),
 });
+
+async function toVOWithCommands(
+  row: typeof busabaseAgentSessions.$inferSelect,
+): Promise<AgentSessionVO> {
+  const session = toVO(row);
+  if (row.journalMode === "supervised") {
+    const { loadSessionCommands } = await import("./agent-session-journal-store");
+    const scope = { spaceId: row.spaceId, actorId: row.actorId };
+    const database = await db();
+    const [commands, unsent] = await Promise.all([
+      loadSessionCommands(row.id, scope),
+      database
+        .select({ command: busabaseAgentSessionCommands })
+        .from(busabaseAgentSessionCommands)
+        .innerJoin(
+          busabaseAgentSessions,
+          eq(busabaseAgentSessions.id, busabaseAgentSessionCommands.sessionId),
+        )
+        .where(
+          and(
+            eq(busabaseAgentSessions.id, row.id),
+            scopeCondition(scope),
+            eq(busabaseAgentSessionCommands.spaceId, row.spaceId),
+            row.actorId === null
+              ? isNull(busabaseAgentSessionCommands.actorId)
+              : eq(busabaseAgentSessionCommands.actorId, row.actorId),
+            eq(busabaseAgentSessionCommands.kind, "prompt"),
+            eq(busabaseAgentSessionCommands.state, "rejected"),
+            notExists(
+              database
+                .select({ one: sql`1` })
+                .from(busabaseAgentSessionEvents)
+                .where(
+                  and(
+                    eq(
+                      busabaseAgentSessionEvents.sessionId,
+                      busabaseAgentSessionCommands.sessionId,
+                    ),
+                    eq(busabaseAgentSessionEvents.kind, "acpUpdate"),
+                    sql`${busabaseAgentSessionEvents.payload}->'acpUpdate'->>'sessionUpdate' = 'user_message'`,
+                    or(
+                      sql`${busabaseAgentSessionEvents.payload}->>'commandId' = ${busabaseAgentSessionCommands.commandId}`,
+                      sql`${busabaseAgentSessionEvents.payload}->'acpUpdate'->>'commandId' = ${busabaseAgentSessionCommands.commandId}`,
+                    ),
+                  ),
+                ),
+            ),
+          ),
+        )
+        .orderBy(desc(busabaseAgentSessionCommands.createdAt))
+        .limit(32),
+    ]);
+    // Accepted input remains recoverable even if rejected before its first
+    // journal commit. Control terminal receipts never become chat messages.
+    session.pendingCommands = [
+      ...commands
+        .filter((command) => command.state !== "completed" && command.state !== "rejected")
+        .map((command) => AgentSessionCommandReceiptVOSchema.parse(command)),
+      ...unsent.map(({ command }) =>
+        AgentSessionCommandReceiptVOSchema.parse({
+          ...command,
+          createdAt: command.createdAt.toISOString(),
+          expiresAt: command.expiresAt.toISOString(),
+          presentation: command.presentation ?? undefined,
+          targetCommandId: command.targetCommandId ?? undefined,
+          errorCode: command.errorCode ?? undefined,
+        }),
+      ),
+    ];
+  }
+  return session;
+}
 
 export interface AgentSessionRuntimeRecord {
   session: AgentSessionVO;
@@ -510,13 +780,18 @@ export async function loadSessionRuntime(
   scope: AgentSessionScope = currentScope(),
 ): Promise<AgentSessionRuntimeRecord | null> {
   const database = await db();
+  const startedAt = Date.now();
+  const fields = { sessionId, ...agentSessionScopeReferences(scope) };
   try {
     const [row] = await database
       .select()
       .from(busabaseAgentSessions)
       .where(and(eq(busabaseAgentSessions.id, sessionId), scopeCondition(scope)))
       .limit(1);
-    if (!row) return null;
+    if (!row) {
+      storeOutcome("session_runtime_read", "predicate_not_matched", startedAt, fields);
+      return null;
+    }
 
     const [latestEvent] = await database
       .select({ seq: busabaseAgentSessionEvents.seq })
@@ -541,14 +816,21 @@ export async function loadSessionRuntime(
       .where(eq(busabaseAgentSessionEvents.sessionId, sessionId));
     const upstreamSeq = source?.seq == null ? undefined : Number(source.seq);
 
+    storeOutcome("session_runtime_read", "loaded", startedAt, {
+      ...fields,
+      acpSessionId: row.acpSessionId,
+      persistedSeq: latestEvent?.seq ?? 0,
+      upstreamSeq,
+    });
+
     return {
-      session: toVO(row),
+      session: await toVOWithCommands(row),
       acpSessionId: row.acpSessionId,
       lastEventSeq: latestEvent?.seq ?? 0,
       ...(upstreamSeq === undefined ? {} : { upstreamSeq }),
     };
   } catch (error) {
-    warn("loading agent session runtime", error);
+    warn("session_runtime_read", error, fields);
     return null;
   }
 }
@@ -571,8 +853,14 @@ export async function loadSessions(): Promise<AgentSessionVO[]> {
       .select()
       .from(busabaseAgentSessions)
       .where(scopeCondition(scope))
-      .orderBy(desc(busabaseAgentSessions.lastActivityAt));
-    return rows.map(toVO);
+      // Same total order as `compareSessionsByRecency`: ending sessions ties
+      // their activity, and the row order must not decide which comes first.
+      .orderBy(
+        desc(busabaseAgentSessions.lastActivityAt),
+        desc(busabaseAgentSessions.createdAt),
+        desc(busabaseAgentSessions.id),
+      );
+    return Promise.all(rows.map(toVOWithCommands));
   } catch (error) {
     warn("loading agent sessions", error);
     return [];
@@ -587,7 +875,7 @@ export async function loadScopedSession(sessionId: string): Promise<AgentSession
     .from(busabaseAgentSessions)
     .where(and(eq(busabaseAgentSessions.id, sessionId), scopeCondition(currentScope())))
     .limit(1);
-  return rows[0] ? toVO(rows[0]) : null;
+  return rows[0] ? toVOWithCommands(rows[0]) : null;
 }
 
 export async function loadSessionPageCandidates(input: {
@@ -622,7 +910,7 @@ export async function loadSessionPageCandidates(input: {
       )
       .orderBy(desc(busabaseAgentSessions.lastActivityAt), desc(busabaseAgentSessions.id))
       .limit(input.limit);
-    return rows.map(toVO);
+    return Promise.all(rows.map(toVOWithCommands));
   } catch (error) {
     warn("loading an agent session page", error);
     return [];
@@ -716,6 +1004,7 @@ export async function loadSessionEvents(
         sessionId: row.sessionId,
         seq: row.seq,
         kind: row.kind,
+        commandId: payload.commandId,
         acpUpdate: payload.acpUpdate,
         acpExtension: payload.acpExtension,
         status: payload.status,

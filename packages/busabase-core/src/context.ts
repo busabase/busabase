@@ -8,8 +8,16 @@ import type { ApiKeyPermissionLevel } from "busabase-contract/access-control/api
 import type { BusabaseSourceChannel, UserRefVO } from "busabase-contract/types";
 import type { PgDatabase } from "drizzle-orm/pg-core";
 import { type DemoUseCase, normalizeDemoUseCase } from "./demo/use-case";
+import type { AirAppEnginePlanLock } from "./domains/airapp/utils/engine-plan-gate";
+import type { AirAppSiteHost } from "./domains/airapp/utils/site-host";
 import type { BusabaseEmbedRecordScope } from "./domains/embed-links/utils/record-scope";
 
+export type { AirAppEnginePlanLock } from "./domains/airapp/utils/engine-plan-gate";
+export type {
+  AirAppSiteDeployInput,
+  AirAppSiteHost,
+  AirAppSiteRecord,
+} from "./domains/airapp/utils/site-host";
 export type { BusabaseEmbedRecordScope } from "./domains/embed-links/utils/record-scope";
 
 /**
@@ -91,6 +99,27 @@ export interface BusabasePlaybookProvenance {
   nodeSlug: string;
   /** Server-derived: the skill's name, or the prompt's label (English fallback). */
   label: string;
+}
+
+/** What a write is about to add to a space, for the host's plan limits. */
+export interface BusabaseCreationCounts {
+  nodes?: number;
+  records?: number;
+}
+
+/**
+ * What a host answers when core asks whether a write fits the space's plan.
+ *
+ * Counting then writing is not safe on its own: concurrent writes all count before any
+ * of them commits, so a parallel client walks straight through the limit. `guard` is how
+ * the host closes that gap. It runs `write` while holding whatever serializes this
+ * space's creations, and checks again inside, so each write counts the ones before it.
+ */
+export interface BusabaseCreationLimit {
+  /** Refuse without writing, to fail before anything is persisted. Throws on refusal. */
+  check(added: BusabaseCreationCounts): Promise<void>;
+  /** Check, then `write`, with no other creation in this space between the two. */
+  guard<T>(added: BusabaseCreationCounts, write: () => Promise<T>): Promise<T>;
 }
 
 export interface BusabaseEmbedActorState {
@@ -225,6 +254,28 @@ export type BusabaseNotificationEvent =
       nodeId: string;
       changeRequestId: string | null;
       actorId: string;
+    }
+  | {
+      kind: "workflow_run.approval_needed";
+      spaceId: string;
+      runId: string;
+      workflowNodeId: string;
+      stepLabel: string;
+      /** Member emails the step names (lower-case); empty when it names nobody. */
+      approvers: string[];
+      startedBy: string;
+      /** Who is at the keyboard, or null when the scheduler moved the run. */
+      actorId: string | null;
+    }
+  | {
+      kind: "workflow_run.failed";
+      spaceId: string;
+      runId: string;
+      workflowNodeId: string;
+      error: string;
+      startedBy: string;
+      /** Who is at the keyboard, or null when the scheduler moved the run. */
+      actorId: string | null;
     };
 
 export interface BusabaseContext {
@@ -317,6 +368,40 @@ export interface BusabaseContext {
   /** Host-owned, best-effort performance sink. Values contain no tenant ids or payload data. */
   onPerformanceMetric?: (metric: BusabasePerformanceMetric) => void | Promise<void>;
   /**
+   * Host hook: which AirApp engines the current space's PLAN leaves out, and
+   * what the plan that unlocks them is called.
+   *
+   * Capability (`domains/airapp/logic/engine-availability.ts`) decides which
+   * engines exist on this deployment; this decides whether this space may use
+   * one. They are separate on purpose — an engine that runs on infrastructure
+   * the host pays for (a provisioned remote machine) is something a hosted
+   * deployment sells, which is a business rule, not a configuration fact.
+   *
+   * Busabase Cloud sets it on every context that can start a run (the
+   * dashboard's `/api/rpc/core` and the API-key `/api/v1` workbench) and
+   * resolves the space's current plan lazily, only when a run asks. Open
+   * source, Desktop and self-hosted hosts leave it unset, and unset means no
+   * gate: what is configured is what is offered, unchanged.
+   */
+  resolveAirAppEngineLock?: () => Promise<AirAppEnginePlanLock | null>;
+  /**
+   * Host hook: the plan's limit on how many nodes and records a space may hold.
+   *
+   * Busabase Cloud rations both by plan. Open source, Desktop and self-hosted hosts
+   * leave it unset, and unset means no limit. Seeding never asks: a space's own
+   * built-in nodes are not something its owner chose to create.
+   */
+  creationLimit?: BusabaseCreationLimit;
+  /**
+   * Host hook: where this deployment publishes `site` AirApps.
+   *
+   * Core decides everything that is about the app (who may act, which files, which
+   * version); the host owns the provider and the records. A host that leaves
+   * this unset (open source, Desktop) has no `site` engine at all, rather than a
+   * disabled one, because no configuration could give it one.
+   */
+  airAppSiteHost?: AirAppSiteHost;
+  /**
    * Host-computed "the current actor is a space owner/admin" signal. Managers
    * short-circuit every node-ACL check to full (`manage`) access. Left unset
    * by the open-source single-user host — an ABSENT value means "treat as
@@ -332,6 +417,11 @@ export interface BusabaseContext {
    * for backward-compatible open-source/local execution.
    */
   permissionLevel?: ApiKeyPermissionLevel;
+  /**
+   * This request came through a surface for agents (`/api/v1`, MCP) on a host
+   * with no API keys to tell it so. Cloud sets `sourceProvenance.apiKey` instead.
+   */
+  agentSurface?: boolean;
   /**
    * Optional credential ceiling, independent from the human workspace
    * baseline. A node grant may raise a member above their workspace baseline,
@@ -389,7 +479,16 @@ export interface BusabaseContext {
 /** Tenant id used by the single-tenant open-source app and as a safe default. */
 export const LOCAL_SPACE_ID = "local";
 
-const storage = new AsyncLocalStorage<BusabaseContext>();
+// Instrumentation and RPC routes can evaluate this module in separate Next
+// bundles while sharing the same process-global supervisor/driver. They must
+// share the storage instance as well; its values remain async-request scoped.
+const contextGlobals = globalThis as typeof globalThis & {
+  __busabaseRequestContextStorage?: AsyncLocalStorage<BusabaseContext>;
+};
+if (!contextGlobals.__busabaseRequestContextStorage) {
+  contextGlobals.__busabaseRequestContextStorage = new AsyncLocalStorage<BusabaseContext>();
+}
+const storage = contextGlobals.__busabaseRequestContextStorage;
 
 const LOCAL_OPERATOR_IDS = new Set(["local-admin", "local-user"]);
 
@@ -611,7 +710,7 @@ export function runWithEmbedContext<T>(
 export function runWithLocalContext<T>(
   ctx: Pick<
     BusabaseContext,
-    "vaultRuntimeEnv" | "localUserName" | "embedOrigin" | "filePreview"
+    "vaultRuntimeEnv" | "localUserName" | "embedOrigin" | "filePreview" | "agentSurface"
   > & {
     aclOverride?: Pick<
       BusabaseContext,
@@ -893,6 +992,47 @@ export function getContextNotificationEventHook() {
   return storage.getStore()?.onNotificationEvent;
 }
 
+/** Ask the host whether this write fits the space's plan. Throws when it does not. */
+export async function assertContextCreationAllowed(added: BusabaseCreationCounts): Promise<void> {
+  if (!added.nodes && !added.records) return;
+  await storage.getStore()?.creationLimit?.check(added);
+}
+
+/** Whether the host rations creation here. Lets callers skip work only a limit needs. */
+export function hasContextCreationLimit(): boolean {
+  return Boolean(storage.getStore()?.creationLimit);
+}
+
+/**
+ * Run `write` so that the host's limit holds against concurrent writers: the host checks
+ * and writes with this space's creations serialized. With no limit it is just `write()`.
+ */
+export async function runWithContextCreationGuard<T>(
+  added: BusabaseCreationCounts,
+  write: () => Promise<T>,
+): Promise<T> {
+  const limit = storage.getStore()?.creationLimit;
+  if (!limit || (!added.nodes && !added.records)) return write();
+  return limit.guard(added, write);
+}
+
+/** The host's site provider, or `undefined` where this deployment has none. */
+export function getContextAirAppSiteHost(): AirAppSiteHost | undefined {
+  return storage.getStore()?.airAppSiteHost;
+}
+
+/**
+ * The current space's plan lock on AirApp engines, as the host reports it.
+ * `null` when the host has no plan gate (open source, Desktop, self-hosted) or
+ * when nothing is locked for this space.
+ */
+export async function resolveContextAirAppEngineLock(): Promise<AirAppEnginePlanLock | null> {
+  const hook = storage.getStore()?.resolveAirAppEngineLock;
+  if (!hook) return null;
+  const lock = await hook();
+  return lock && lock.lockedEngines.length > 0 ? lock : null;
+}
+
 /** Emit a host-owned performance metric without allowing observability failure to break a read. */
 export function emitContextPerformanceMetric(createMetric: () => BusabasePerformanceMetric): void {
   const hook = storage.getStore()?.onPerformanceMetric;
@@ -969,6 +1109,27 @@ export function getContextPermissionLevel(): ApiKeyPermissionLevel {
 
 export function getContextPermissionLevelIsCeiling(): boolean {
   return storage.getStore()?.permissionLevelIsCeiling === true;
+}
+
+/**
+ * Who this request is, if it is an agent rather than a person in the app: an API
+ * key (or a declared agent client), or a local agent surface. Null for a person.
+ */
+export function getContextAgentCaller(): {
+  apiKeyId: string | null;
+  apiKeyName: string | null;
+  channel: string | null;
+  ceiling: ApiKeyPermissionLevel | null;
+} | null {
+  const store = storage.getStore();
+  const provenance = store?.sourceProvenance;
+  if (!provenance?.apiKey?.id && !provenance?.agent && !store?.agentSurface) return null;
+  return {
+    apiKeyId: provenance?.apiKey?.id ?? null,
+    apiKeyName: provenance?.apiKey?.name ?? null,
+    channel: typeof provenance?.channel === "string" ? provenance.channel : null,
+    ceiling: store?.credentialPermissionCeiling ?? null,
+  };
 }
 
 export function getContextCredentialPermissionCeiling(): ApiKeyPermissionLevel | undefined {

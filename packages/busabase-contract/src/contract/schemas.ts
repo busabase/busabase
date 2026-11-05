@@ -20,7 +20,7 @@ import { customAgentPromptsSchema } from "./node-agent-prompt-schemas";
 import { PlaybookAttributionVOSchema } from "./playbook-schemas";
 
 /** @see nodeSettingsSchema — declared here so `NodeOutput` can reference it. */
-export type NodeSettings = { airappEngine?: "browser" | "local" | "remote" | null };
+export type NodeSettings = { airappEngine?: "browser" | "local" | "remote" | "site" | null };
 
 export interface NodeOutput {
   id: string;
@@ -336,7 +336,7 @@ export const nodeSettingsSchema = z.strictObject({
    * must stay distinguishable from any particular value; `null` clears an
    * override and returns the node to following the app.
    */
-  airappEngine: z.enum(["browser", "local", "remote"]).nullish(),
+  airappEngine: z.enum(["browser", "local", "remote", "site"]).nullish(),
 });
 
 const updateNodeSettingsInputSchema = z.object({
@@ -735,8 +735,10 @@ const searchResponseSchema = z.object({
   hasMore: z.boolean(),
   results: z.array(searchResultSchema),
   /**
-   * True when at least one in-scope node's content was indexed only up to the
-   * projection cap, so this search could not see all of it.
+   * True when this search could not see everything in scope: at least one
+   * in-scope node's content was indexed only up to the projection cap, the
+   * file scan ran out of budget, or more record values matched than one search
+   * ranks (it ranks the newest, or the oldest for ascending sorts).
    *
    * Exists so an empty result can be reported honestly: without it, "no
    * results" is ambiguous between "the workspace does not contain this" and

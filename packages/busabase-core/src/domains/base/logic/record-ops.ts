@@ -5,7 +5,13 @@ import type { BaseVO, ChangeRequestVO } from "busabase-contract/types";
 import { and, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { iStringToText } from "openlib/i18n/i-string";
 import type { z } from "zod";
-import { getContextSpaceId, resolveActorId, withContextSourceMeta } from "../../../context";
+import {
+  assertContextCreationAllowed,
+  getContextSpaceId,
+  resolveActorId,
+  runWithContextCreationGuard,
+  withContextSourceMeta,
+} from "../../../context";
 import { getDb } from "../../../db";
 import {
   busabaseBaseFields,
@@ -61,6 +67,7 @@ import { assertValidDateFieldOptionsOrThrow } from "./date-options";
 import { insertDefaultGridView } from "./default-view";
 import { baseNotFound } from "./errors";
 import { resolveLookupFieldOptions } from "./field-ops";
+import { lockNewBaseLookupTargets } from "./lookup-merge-targets";
 import { getBase, getRecord } from "./queries";
 import { assertRelationOnlyOptionsOrThrow, resolveRelationFieldOptions } from "./relation-options";
 import {
@@ -404,71 +411,88 @@ export const createBase = async (input: z.input<typeof createBaseInputSchema>) =
     return { ...changeRequest, materialized: false as const };
   }
 
+  await assertContextCreationAllowed({ nodes: 1 });
+
   const baseId = id("bse");
   const nodeId = id("nod");
   const createdAt = now();
   const spaceId = getContextSpaceId();
-  try {
-    await db.insert(busabaseNodes).values({
-      // Direct-materialization fast path: this insert never reaches
-      // `mergeNodeCreate`, so the creator has to be stamped here too.
-      createdBy: resolveActorId(CURRENT_USER_ID),
-      id: nodeId,
+  const materialize = async (db: Awaited<ReturnType<typeof getDb>>) => {
+    try {
+      await db.insert(busabaseNodes).values({
+        // Direct-materialization fast path: this insert never reaches
+        // `mergeNodeCreate`, so the creator has to be stamped here too.
+        createdBy: resolveActorId(CURRENT_USER_ID),
+        id: nodeId,
+        spaceId,
+        parentId: parentNode.id,
+        type: "base",
+        slug: parsed.slug,
+        name: parsed.name,
+        description: parsed.description,
+        position: 0,
+        createdAt,
+        updatedAt: createdAt,
+      });
+    } catch (error) {
+      if (isNodeSlugUniqueViolation(error)) {
+        throw nodeSlugConflict("base", parsed.slug);
+      }
+      throw error;
+    }
+
+    await db.insert(busabaseBases).values({
+      id: baseId,
       spaceId,
-      parentId: parentNode.id,
-      type: "base",
+      nodeId,
       slug: parsed.slug,
       name: parsed.name,
       description: parsed.description,
-      position: 0,
+      reviewPolicy: { kind: "single", requiredApprovals: 1 },
       createdAt,
-      updatedAt: createdAt,
     });
-  } catch (error) {
-    if (isNodeSlugUniqueViolation(error)) {
-      throw nodeSlugConflict("base", parsed.slug);
+    await initializeNodeAcl(db, spaceId, nodeId, parentNode.id, resolveActorId(CURRENT_USER_ID));
+    if (resolvedFields.length > 0) {
+      // `resolvedFields` already carries the relation- and lookup-resolved options
+      // computed (and validated) above — don't resolve a second time.
+      await db.insert(busabaseBaseFields).values(
+        resolvedFields.map((field, index) => ({
+          id: id("bsf"),
+          spaceId,
+          baseId,
+          slug: field.slug,
+          name: iStringToText(field.name),
+          type: field.type,
+          required: field.required,
+          position: index,
+          options: field.options,
+        })),
+      );
     }
-    throw error;
-  }
-
-  await db.insert(busabaseBases).values({
-    id: baseId,
-    spaceId,
-    nodeId,
-    slug: parsed.slug,
-    name: parsed.name,
-    description: parsed.description,
-    reviewPolicy: { kind: "single", requiredApprovals: 1 },
-    createdAt,
-  });
-  await initializeNodeAcl(db, spaceId, nodeId, parentNode.id, resolveActorId(CURRENT_USER_ID));
-  if (resolvedFields.length > 0) {
-    // `resolvedFields` already carries the relation- and lookup-resolved options
-    // computed (and validated) above — don't resolve a second time.
-    await db.insert(busabaseBaseFields).values(
-      resolvedFields.map((field, index) => ({
-        id: id("bsf"),
+    // A Base always opens on a real saved view. Callers that add their own views
+    // right away (template/package install) opt out with `defaultView: false`.
+    if (parsed.defaultView !== false) {
+      await insertDefaultGridView(db, {
         spaceId,
         baseId,
-        slug: field.slug,
-        name: iStringToText(field.name),
-        type: field.type,
-        required: field.required,
-        position: index,
-        options: field.options,
-      })),
-    );
-  }
-  // A Base always opens on a real saved view. Callers that add their own views
-  // right away (template/package install) opt out with `defaultView: false`.
-  if (parsed.defaultView !== false) {
-    await insertDefaultGridView(db, {
-      spaceId,
-      baseId,
-      createdBy: resolveActorId(CURRENT_USER_ID),
-      timestamp: createdAt,
-    });
-  }
+        createdBy: resolveActorId(CURRENT_USER_ID),
+        timestamp: createdAt,
+      });
+    }
+  };
+  // The guard wraps the whole write, transaction included: released before the commit,
+  // a parallel writer would count the space without this node.
+  await runWithContextCreationGuard({ nodes: 1 }, async () => {
+    if (resolvedFields.some((field) => field.type === "lookup")) {
+      await db.transaction(async (tx) => {
+        const transaction = tx as unknown as Awaited<ReturnType<typeof getDb>>;
+        await lockNewBaseLookupTargets(transaction, resolvedFields);
+        await materialize(transaction);
+      });
+    } else {
+      await materialize(db);
+    }
+  });
 
   const base = await getBase(baseId);
   if (!base) {
@@ -606,6 +630,14 @@ const createChangeRequestInternal = async (
         return { ...existing, materialized: false as const };
       }
     }
+  }
+
+  // A direct write the plan refuses should leave nothing behind, not even a Change
+  // Request in the activity feed. The merge asks again, for proposals and races.
+  if (
+    shouldAutoMerge(parsed.autoMerge, await hasNodePermission(base.nodeId, "write", submittedBy))
+  ) {
+    await assertContextCreationAllowed({ records: 1 });
   }
 
   const changeRequestId = id("crq");
@@ -842,6 +874,12 @@ export const createBulkChangeRequest = async (
         return existing;
       }
     }
+  }
+
+  if (
+    shouldAutoMerge(parsed.autoMerge, await hasNodePermission(base.nodeId, "write", submittedBy))
+  ) {
+    await assertContextCreationAllowed({ records: parsed.records.length });
   }
 
   const changeRequestId = id("crq");

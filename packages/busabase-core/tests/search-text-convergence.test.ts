@@ -10,20 +10,11 @@ import { busabaseAssetTexts } from "../src/domains/assets/schema/asset-texts";
 import { busabaseRouter } from "../src/router";
 
 /**
- * Drive Grep Retrieval convergence — `search.ts`'s `searchAssetBackedFiles`
- * now reads through the same `busabase_asset_texts` + streaming-cache
- * infrastructure `grep` uses (`asset-grep-logic.ts`), instead of its own
- * separate `storage.getObject` + in-memory-buffer + 256KB-cap mechanism.
- *
- * These tests pin the direct consequences of that convergence:
- *  1. the 256KB cap is genuinely gone (a large text file is now searchable)
- *  2. the self-heal path search inherited from grep actually runs
- *  3. a `stale` text row is excluded from content search (but not metadata)
- *  4. the new wall-clock body-scan budget fails safe (no hang/throw)
- *
- * `tests/search-asset-content.test.ts` remains the pinned regression test
- * for the common (small file, upload-time auto-registration) case and is
- * intentionally left unmodified.
+ * Search and grep share the same canonical busabase_asset_texts slot. Search
+ * now reads a chunked database projection of that text, while grep continues
+ * to stream the full object. These integration tests preserve deep matches,
+ * legacy text-slot repair, stale-content exclusion and independence from the
+ * former per-request object-storage scan budget.
  */
 
 type Client = ReturnType<typeof createRouterClient<typeof busabaseRouter, Record<never, never>>>;
@@ -225,7 +216,7 @@ describe("Search / Drive Grep Retrieval convergence", () => {
     expect(byMetadata.results.some((result) => result.id.startsWith(`${pdfAssetId}:`))).toBe(true);
   });
 
-  it("returns cleanly (no hang, no throw) with metadata-only results when the scan deadline is exhausted", async () => {
+  it("finds indexed body content even when the former storage-scan budget is zero", async () => {
     const { assetId } = await uploadTextAsset({
       fileName: "deadline-file.txt",
       content: "this file contains DEADLINEONLYMARKER somewhere in its body",
@@ -237,18 +228,15 @@ describe("Search / Drive Grep Retrieval convergence", () => {
     process.env.BUSABASE_SEARCH_FILE_SCAN_TIMEOUT_MS = "0";
     try {
       const search = await client.search({ query: "DEADLINEONLYMARKER", limit: 10 });
-      // Body-only marker — with a zero-budget deadline, the body scan never
-      // runs, so this must NOT be found (metadata-only fallthrough), and the
-      // call must resolve cleanly rather than hang or throw.
-      expect(search.results.some((result) => result.href === "/file/deadline-file")).toBe(false);
+      // Indexed content requires no live scan, so the legacy scan deadline
+      // cannot hide content which has already been made searchable.
+      expect(search.results.some((result) => result.href === "/file/deadline-file")).toBe(true);
     } finally {
       if (previous === undefined) delete process.env.BUSABASE_SEARCH_FILE_SCAN_TIMEOUT_MS;
       else process.env.BUSABASE_SEARCH_FILE_SCAN_TIMEOUT_MS = previous;
     }
 
-    // Sanity: without the deadline squeeze, the same marker IS findable —
-    // proves the previous assertion was really about the deadline, not a
-    // broken fixture.
+    // Search behavior is identical without the legacy deadline override.
     const searchNormal = await client.search({ query: "DEADLINEONLYMARKER", limit: 10 });
     expect(searchNormal.results.some((result) => result.href === "/file/deadline-file")).toBe(true);
   });

@@ -56,7 +56,9 @@ export const ListAssetsInputSchema = z
       .min(1)
       .max(200)
       .optional()
-      .describe("Page size, 1-200. Omit to return every asset (the historical behaviour)."),
+      .describe(
+        "Page size, 1-200. Omit for at most 1,000 assets (the historical call, now bounded) — page with `cursor` for the rest.",
+      ),
     cursor: z
       .string()
       .optional()

@@ -24,6 +24,11 @@ export const WorkflowNodeSchema = z.discriminatedUnion("kind", [
     ...workflowNodeBase,
     kind: z.literal("trigger"),
     eventName: z.string().max(160).default("manual"),
+    /**
+     * For `record.created` / `record.updated` in event mode: only records in
+     * this Base start a run. Empty means any Base in the space.
+     */
+    baseId: z.string().max(160).default(""),
   }),
   z.object({
     ...workflowNodeBase,
@@ -52,11 +57,30 @@ export const WorkflowNodeSchema = z.discriminatedUnion("kind", [
     ...workflowNodeBase,
     kind: z.literal("approval"),
     approver: z.string().max(160).default(""),
+    /**
+     * Off by default: an approval is a checkpoint for a person. On, an agent
+     * (API key, MCP, CLI) that also meets the step's approver rule may decide.
+     */
+    allowAgents: z.boolean().default(false),
   }),
   z.object({
     ...workflowNodeBase,
     kind: z.literal("action"),
     actionName: z.string().max(160).default(""),
+    /**
+     * For `update_record`: the fields to set on the run's record. A string value
+     * starting with `=` is a formula over earlier steps (`=steps.score.score`);
+     * `==` stores a literal that starts with `=`. Also the new record's fields
+     * for `create_record`. Ignored by other actions.
+     */
+    fields: z.record(z.string().min(1).max(160), z.unknown()).default({}),
+    /**
+     * For `update_record` and `delete_record`: which record. Empty means the
+     * run's own record; otherwise a record id or an `=formula` that gives one.
+     */
+    targetRecordId: z.string().max(500).default(""),
+    /** For `create_record`: the Base the new record goes in. */
+    baseId: z.string().max(160).default(""),
   }),
   z.object({
     ...workflowNodeBase,
@@ -122,6 +146,7 @@ export const EMPTY_WORKFLOW_DOCUMENT: WorkflowDocument = {
       label: "Manual trigger",
       description: "",
       eventName: "manual",
+      baseId: "",
     },
   ],
   edges: [],

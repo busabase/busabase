@@ -60,7 +60,12 @@ function session(id: string, modelOption: AgentSessionVO["modelOption"] = null):
   };
 }
 
-function mount(initialModel: AgentSessionVO["modelOption"] = null, paged = true) {
+function mount(
+  initialModel: AgentSessionVO["modelOption"] = null,
+  paged = true,
+  supervised = false,
+  subscribeResult?: (...args: unknown[]) => unknown,
+) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
   });
@@ -73,6 +78,7 @@ function mount(initialModel: AgentSessionVO["modelOption"] = null, paged = true)
     pageParams: [null],
   });
   const subscribe = vi.fn();
+  if (subscribeResult) subscribe.mockImplementation(subscribeResult);
   const orpc = {
     agents: {
       sessions: {
@@ -97,7 +103,9 @@ function mount(initialModel: AgentSessionVO["modelOption"] = null, paged = true)
         getNextPageParam: () => undefined,
       });
       return {
-        chat: useAgentSession(orpc, id, paged ? pagedKey : undefined),
+        chat: useAgentSession(orpc, id, paged ? pagedKey : undefined, undefined, undefined, {
+          supervised,
+        }),
         flat: flat.data,
         pages: pages.data,
       };
@@ -276,5 +284,170 @@ describe("useAgentSession readiness metadata", () => {
     );
     await waitFor(() => expect(h.list).toHaveBeenCalledTimes(2));
     expect(h.page).not.toHaveBeenCalled();
+  });
+
+  it("refreshes the session's confirmed legacy mode after current_mode_update without losing other session metadata", async () => {
+    const h = mount();
+    await connected();
+    const modeOption = {
+      id: "mode",
+      name: "Mode",
+      source: "legacy" as const,
+      currentValue: "code",
+      options: [{ value: "code", name: "Code" }],
+    };
+    h.setAuthoritative([{ ...session("a", model), modeOption }, session("b", model)]);
+    act(() =>
+      transport.streams[0].onEvent({
+        sessionId: "a",
+        seq: 3,
+        kind: "acpUpdate",
+        at,
+        acpUpdate: { sessionUpdate: "current_mode_update", currentModeId: "code" },
+      }),
+    );
+    await waitFor(() => expect(h.result.current.flat?.[0].modeOption).toEqual(modeOption));
+    expect(h.result.current.flat?.[1].modeOption).toBeUndefined();
+    expect(h.result.current.pages?.pages[0].items[0].modeOption).toEqual(modeOption);
+  });
+});
+
+describe("useAgentSession supervised observation", () => {
+  beforeEach(() => {
+    transport.streams.length = 0;
+  });
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it("tracks committed command identity and coalesces durable-state refreshes", async () => {
+    const h = mount(null, true, true);
+    await connected();
+    act(() => {
+      for (let seq = 1; seq < 5; seq++)
+        transport.streams[0].onEvent({
+          sessionId: "a",
+          seq,
+          kind: "acpUpdate",
+          at,
+          commandId: "cmd_committed_fixture",
+          acpUpdate: { sessionUpdate: "user_message", text: "A question" },
+        });
+    });
+    expect(h.result.current.chat.committedCommandIds.has("cmd_committed_fixture")).toBe(true);
+    expect(h.result.current.chat.subscriptionHealth).toEqual({
+      sessionId: "a",
+      state: "connected",
+    });
+    await waitFor(() => expect(h.list).toHaveBeenCalledTimes(1));
+    expect(h.page).toHaveBeenCalledTimes(1);
+  });
+
+  it("marks transient observation failure without fabricating a durable terminal event", async () => {
+    const h = mount(null, true, true);
+    await connected();
+    act(() => transport.streams[0].onError());
+    expect(h.result.current.chat.subscriptionHealth).toEqual({
+      sessionId: "a",
+      state: "recovering",
+      reason: "error",
+    });
+    expect(h.result.current.flat?.[0].status).toBe("connecting");
+    expect(h.result.current.chat.committedCommandIds.size).toBe(0);
+    await waitFor(() => expect(h.list).toHaveBeenCalledTimes(1));
+  });
+
+  it("recovers an acknowledged idle stream without requiring another committed event", async () => {
+    const iterator = { next: vi.fn() };
+    const h = mount(null, true, true, () => Promise.resolve(iterator));
+    await connected();
+    await waitFor(() => expect(h.result.current.chat.subscriptionHealth?.state).toBe("connected"));
+    emit("idle", 7);
+    vi.useFakeTimers();
+    act(() => transport.streams[0].onError());
+    expect(h.result.current.chat.subscriptionHealth?.state).toBe("recovering");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3_000);
+    });
+    expect(transport.streams).toHaveLength(2);
+    expect(h.subscribe.mock.calls[1][0]).toEqual({ sessionId: "a", afterSeq: 7 });
+    expect(h.result.current.chat.subscriptionHealth).toEqual({
+      sessionId: "a",
+      state: "connected",
+    });
+    expect(h.result.current.chat.committedCommandIds.size).toBe(0);
+    expect(h.result.current.flat?.[0].status).toBe("connecting");
+    act(() => transport.streams[1].onFinish());
+    expect(h.result.current.chat.subscriptionHealth?.state).toBe("recovering");
+  });
+
+  it("ignores an old subscription acknowledgement after another session has failed", async () => {
+    let resolveOld!: (value: { next: ReturnType<typeof vi.fn> }) => void;
+    const old = new Promise<{ next: ReturnType<typeof vi.fn> }>((resolve) => {
+      resolveOld = resolve;
+    });
+    const h = mount(null, true, true, (input) =>
+      (input as { sessionId: string }).sessionId === "a" ? old : Promise.resolve({ next: vi.fn() }),
+    );
+    await connected();
+    h.rerender({ id: "b" });
+    await connected(2);
+    await waitFor(() => expect(h.result.current.chat.subscriptionHealth?.state).toBe("connected"));
+    act(() => transport.streams[1].onError());
+    await act(async () => {
+      resolveOld({ next: vi.fn() });
+      await old;
+    });
+    expect(h.result.current.chat.subscriptionHealth).toEqual({
+      sessionId: "b",
+      state: "recovering",
+      reason: "error",
+    });
+  });
+
+  it("does not acknowledge a malformed iterator or keep a closed stream connected", async () => {
+    const h = mount(null, true, true, () => Promise.resolve({}));
+    await connected();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(h.result.current.chat.subscriptionHealth).toBeNull();
+    act(() => transport.streams[0].onFinish());
+    expect(h.result.current.chat.subscriptionHealth).toEqual({
+      sessionId: "a",
+      state: "recovering",
+      reason: "closed",
+    });
+  });
+
+  it("does not carry one session's ephemeral recovery state or committed command set to another", async () => {
+    const h = mount(null, true, true);
+    await connected();
+    act(() => {
+      transport.streams[0].onEvent({
+        sessionId: "a",
+        seq: 1,
+        kind: "acpUpdate",
+        at,
+        commandId: "cmd_first_session",
+        acpUpdate: { sessionUpdate: "user_message", text: "first" },
+      });
+      transport.streams[0].onError();
+    });
+    h.rerender({ id: "b" });
+    await connected(2);
+    expect(h.result.current.chat.subscriptionHealth).toBeNull();
+    expect(h.result.current.chat.committedCommandIds.size).toBe(0);
+    act(() =>
+      transport.streams[0].onEvent({
+        sessionId: "a",
+        seq: 2,
+        kind: "status",
+        status: "failed",
+        at,
+      }),
+    );
+    expect(h.result.current.chat.subscriptionHealth).toBeNull();
   });
 });

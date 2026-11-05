@@ -12,7 +12,7 @@ import { iStringParse, iStringSchema } from "openlib/i18n/i-string";
 import { fmt } from "../../../i18n/fmt";
 import type { CoreI18nMessages } from "../../../i18n/messages";
 import { getPrimaryField } from "../../base/utils/primary-field";
-import { isListPayloadLongTextOmitted } from "../utils/list-payload-preview";
+import { isListPayloadLongTextOmitted, isListPayloadOmitted } from "../utils/list-payload-preview";
 import { fieldPreviewText } from "./field";
 import { fieldValueToString, shortIdentifier } from "./format";
 
@@ -407,9 +407,11 @@ export const getRecordTitle = (
   // hard-coded title/name/subject guess. So a Base whose primary field is `name`, `title`,
   // or anything else displays correctly, and relation chips show that value.
   const primaryField = getPrimaryField(record.base);
-  const primary = primaryField
-    ? fieldPreviewText(record.headCommit.payload[primaryField.slug], primaryField.type, messages)
-    : "";
+  const primaryValue = primaryField ? record.headCommit.payload[primaryField.slug] : undefined;
+  const primary =
+    primaryField && !isListPayloadOmitted(primaryValue)
+      ? fieldPreviewText(primaryValue, primaryField.type, messages)
+      : "";
   return primary || shortIdentifier(record.id);
 };
 

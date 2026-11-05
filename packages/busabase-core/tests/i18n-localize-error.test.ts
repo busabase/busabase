@@ -111,4 +111,30 @@ describe("presentCoreError", () => {
       ),
     ).toBe(error.message);
   });
+
+  it("localizes a file-too-large refusal from its structured data, with the upgrade hint", () => {
+    const MB = 1024 * 1024;
+    const serverError = Object.assign(
+      new Error("File size exceeds the maximum allowed size of 10 MB"),
+      {
+        data: {
+          code: "FILE_TOO_LARGE",
+          limit: 10 * MB,
+          sizeBytes: 12 * MB,
+          fileName: "demo.mov",
+          upgradeLimit: 5 * 1024 * MB,
+        },
+      },
+    );
+    expect(presentCoreError(dashboardZhCN, "zh-CN", serverError, "fallback")).toBe(
+      "「demo.mov」（12 MB）超过了单个文件 10 MB 的上限。 升级套餐后可上传最大 5 GB 的文件。",
+    );
+    // Self-hosted: no upgrade target → no upgrade hint.
+    const ossError = Object.assign(new Error("too large"), {
+      data: { code: "FILE_TOO_LARGE", limit: 5 * 1024 * MB },
+    });
+    expect(presentCoreError(coreMessagesEn, "en", ossError, "fallback")).toBe(
+      "This file is larger than the 5 GB per-file limit.",
+    );
+  });
 });

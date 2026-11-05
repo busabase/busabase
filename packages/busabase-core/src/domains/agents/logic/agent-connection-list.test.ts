@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   routerConnections: [] as Array<{
     slug: string;
     agentSlug: string;
+    agentName?: string;
     grantId: string;
     connectionState: "ready" | "activating" | "disconnecting";
   }>,
@@ -96,6 +97,25 @@ describe("listAgentConnections", () => {
       connected: false,
       connectionState: "disconnecting",
     });
+  });
+
+  it("preserves the router's provider identity independently of its workspace display name", async () => {
+    mocks.actorId = "cloud-actor";
+    mocks.routerConnections.push({
+      slug: "acprouter:opaque-device",
+      agentSlug: "claude-acp",
+      agentName: "Codex",
+      grantId: "grant",
+      connectionState: "ready",
+    });
+
+    expect(await listAgentConnections()).toEqual([
+      expect.objectContaining({
+        slug: "acprouter:opaque-device",
+        agentName: "Codex",
+        providerAgentSlug: "claude-acp",
+      }),
+    ]);
   });
 
   it("maps saved Buda connection rows to agent connections", async () => {

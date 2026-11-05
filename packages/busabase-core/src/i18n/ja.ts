@@ -32,6 +32,48 @@ export const dashboardJa: CoreI18nMessages = {
     example:
       "## ビジョン\nどのような未来を目指しますか？\n\n## ミッション\n誰のどのような課題を解決しますか？\n\n## 価値観\n判断の指針となる原則は何ですか？\n\n## デザイン方針\n見た目、文章のトーン、チームの用語を記入してください。",
   },
+  spaceWelcome: {
+    title: "ウェルカムページ",
+    description:
+      "ホームの一番上にメンバーへ表示するドキュメントまたは HTML ページを選びます。このスペースの目的と始め方を伝えるページです。先にページを作成してから、ここで選択してください。",
+    loading: "ウェルカムページを読み込み中…",
+    loadFailed: "ウェルカムページの設定を読み込めませんでした。再試行してください。",
+    retry: "再試行",
+    current: "現在のウェルカムページ",
+    none: "ウェルカムページは未設定です。ホームには代わりに「はじめに」が表示されます。",
+    unreadable:
+      "選択したページが存在しない、アーカイブ済み、または表示権限がないため、メンバーには代わりに「はじめに」が表示されます。",
+    visibilityHint: "そのページを開ける権限のあるメンバーにだけ表示されます。",
+    searchLabel: "ドキュメントまたは HTML ページを選択",
+    searchPlaceholder: "ドキュメントと HTML ページを検索…",
+    noCandidates:
+      "このスペースにはまだドキュメントや HTML ページがありません。作成してから、ここで選択してください。",
+    noMatches: "「{query}」に一致するページはありません。",
+    save: "ウェルカムページに設定",
+    saving: "保存中…",
+    saved: "ウェルカムページを保存しました",
+    clear: "ウェルカムページを解除",
+    saveFailed: "保存できませんでした。もう一度お試しください。",
+    conflict:
+      "他のユーザーがウェルカムページを変更しました。再読み込みして最新の設定を確認してください。",
+    reload: "最新の設定を再読み込み",
+    readOnly: "ウェルカムページを変更できるのはスペースのオーナーと管理者だけです。",
+    open: "開く",
+    close: "ウェルカムページを閉じる",
+    reopen: "ウェルカムページ",
+    expand: "展開",
+    collapse: "折りたたむ",
+    emptyDoc: "このページにはまだ内容がありません。",
+  },
+  gettingStarted: {
+    title: "はじめに",
+    body: "このスペースのすべてはサイドバーにあり、そこに並ぶアイコンはどれも以下のタイプのいずれかです。どれかを開いて始めましょう。",
+    typesHeading: "サイドバーにあるもの",
+    close: "「はじめに」を閉じる",
+    reopen: "はじめに",
+    connectAgentHint:
+      "このスペースについてエージェントに聞いてみましょう。あなたが見られる Base、ドキュメント、アプリを同じように読み、書き込んだ内容はすべてここに記録されます。",
+  },
   fieldHelp: {
     inherit: "フィールドの説明を使用",
     override: "このフォームの説明を設定",
@@ -76,6 +118,7 @@ export const dashboardJa: CoreI18nMessages = {
     restored: "未保存の数式の下書きを復元しました。",
   },
   common: {
+    retry: "再試行",
     slugTaken:
       "同じ種類のアイテムがすでにスラッグ「{slug}」を使っています。別のスラッグを指定してください。",
     add: "追加",
@@ -202,6 +245,10 @@ export const dashboardJa: CoreI18nMessages = {
     openFullBase: "ベース全体を開く",
     pinToSidePanel: "サイドパネルに固定",
     noFilesYet: "まだファイルはありません。",
+    filesPagedSummary: "{total} 件中 {shown} 件のファイルを表示しています。",
+    loadMoreFiles: "さらにファイルを読み込む",
+    loadMoreFolders: "さらにフォルダーを読み込む",
+    fileListPartialFailed: "ファイルを追加で読み込めませんでした",
     selectFile: "内容を表示するファイルを選択してください。",
     readingFile: "{path} を読み込み中…",
     couldNotReadFile: "ファイルを読み込めませんでした",
@@ -677,16 +724,20 @@ export const dashboardJa: CoreI18nMessages = {
       browser: "この AirApp にはブラウザエンジンが必要ですが、このデプロイでは利用できません。",
       local: "この AirApp にはこのマシンが必要ですが、ローカル実行は利用できません。",
       remote:
-        "この AirApp にはリモートマシンが必要ですが、このデプロイでは Sandock が設定されていません。",
+        "この AirApp にはクラウドサンドボックスが必要ですが、このデプロイでは Sandock が設定されていません。",
+      site: "この AirApp にはウェブサイトエンジンが必要ですが、このデプロイでは設定されていません。管理者に連絡してください。",
     },
     engineBrowser: "ブラウザ内",
     engineBrowserHint: "このタブ内で実行 · 無料かつ即時 · JavaScript のみ",
     engineLocal: "このマシン",
     engineLocalHint: "実 OS プロセス、任意の言語 · 分離なし",
-    engineRemote: "リモートマシン",
-    engineRemoteHint: "実行ごとに払い出し、任意の言語 · 分離あり",
+    engineRemote: "クラウドサンドボックス",
+    engineRemoteHint: "実行ごとに一時的なクラウドマシン、任意の言語 · 分離あり",
+    engineSite: "ウェブサイト",
+    engineSiteHint: "常時稼働 · 固定アドレス",
+    engineNotConfigured: "未設定です。管理者に連絡してください",
     noEligibleEngine:
-      "このデプロイには {runtime} の AirApp を実行できるエンジンがありません。ローカルまたはリモートのランタイムの有効化を運用者に依頼してください。",
+      "このデプロイには {runtime} の AirApp を実行できるエンジンがありません。ローカル実行またはクラウドサンドボックスの有効化を運用者に依頼してください。",
     pythonNeedsSandock:
       "Python AirApp はサポートされていません。実行するには Sandock を設定してください。",
     swError: {
@@ -707,6 +758,104 @@ export const dashboardJa: CoreI18nMessages = {
     swUnsupportedCopyLink: "リンクをコピー",
     swUnsupportedLinkCopied: "リンクをコピーしました",
     swUnsupportedCopyFailed: "リンクをコピーできませんでした。以下を選択してコピーしてください：",
+    site: {
+      statusNotLive: "未公開",
+      statusLive: "公開中",
+      statusLiveWithChanges: "未公開の変更あり",
+      goLive: "公開",
+      goLiveDone: "サイトを公開しました。",
+      previewStale:
+        "このプレビューの後にファイルが変更されました。もう一度実行してから公開してください。",
+      noPreview: "まず実行してプレビューを作成してください。",
+      blockedTitle: "このアプリはまだウェブサイトとして公開できません",
+      addressLabel: "アドレス",
+      publicLabel: "公開",
+      publicOnHint: "アドレスを知っていれば誰でも開けます。",
+      publicOffHint: "このアドレスは「見つかりません」と表示されます。",
+      publicNotYet: "先に一度公開してください。",
+      domains: {
+        title: "カスタムドメイン",
+        description: "公開したサイトに独自のドメインを使用します。",
+        check: "再確認",
+        checking: "確認中…",
+        loading: "カスタムドメインを読み込み中…",
+        checkFailed: "カスタムドメインを確認できませんでした。再試行してください。",
+        lastKnown: "以下は前回の確認が成功した時点の情報です。",
+        unavailable:
+          "この環境ではカスタムドメインが設定されていません。管理者にお問い合わせください。",
+        empty: "所有するドメインを追加し、DNS プロバイダーで設定を完了してください。",
+        hostnameLabel: "ドメイン名",
+        hostnameHint: "https:// やパスを含めず、ホスト名を入力してください。",
+        invalidHostname:
+          "shop.company.com のようなドメインを入力してください。スキーム、パス、ポート、IP アドレス、ワイルドカードは使用できません。",
+        publishFirst: "サイトを公開してからドメインを追加してください。",
+        planLocked:
+          "このスペースのプランには「ウェブサイト」が含まれていません。既存ドメインの確認と削除は引き続き可能です。",
+        add: "ドメインを追加",
+        adding: "追加中…",
+        pending: "設定待ち",
+        pendingDnsHint:
+          "DNS プロバイダーで以下のレコードを追加し、再確認してください。DNS の反映には時間がかかる場合があります。",
+        pendingHttpsHint:
+          "ドメインの所有権は確認済みです。HTTPS を準備中です。しばらくしてから再確認してください。",
+        active: "接続済み",
+        activeHint: "DNS と HTTPS の準備ができました。",
+        error: "対応が必要",
+        errorHint: "以下の詳細を確認し、再確認してください。",
+        offlineHint:
+          "サイトは非公開です。すべてのサイトアドレスに「見つかりません」と表示されます。",
+        dnsInstructions:
+          "DNS プロバイダーでこれらのレコードを追加してください。ドメインに必要な他のレコードは残してください。Cloudflare では、この CNAME を「DNS のみ」（灰色の雲）に設定してください。",
+        dnsName: "名前",
+        dnsValue: "値 / ターゲット",
+        httpInstructions:
+          "HTTP で確認する場合は、この URL で以下のレスポンス本文を配信し、再確認してください。",
+        httpUrl: "確認用 URL",
+        httpBody: "レスポンス本文",
+        copyHttpUrl: "確認用 URL {value} をコピー",
+        copyHttpBody: "確認用レスポンス {value} をコピー",
+        copy: "コピー",
+        copyName: "DNS 名 {value} をコピー",
+        copyValue: "DNS 値 {value} をコピー",
+        copied: "コピー済み",
+        copyFailed: "コピーできませんでした。値を選択して手動でコピーしてください。",
+        remove: "削除",
+        removeLabel: "{hostname} を削除",
+        removeConfirm:
+          "{hostname} を削除しますか？このドメインからサイトを開けなくなります。標準アドレスは引き続き利用できます。",
+        confirmRemove: "ドメインを削除",
+        removing: "削除中…",
+        cancel: "キャンセル",
+      },
+      // Keyed by `SiteBundleBlocker["code"]`.
+      blockers: {
+        "not-a-site-app":
+          "airapp.json に site ブロックがないため、このアプリはウェブサイトとして設定されていません。",
+        "invalid-manifest": "airapp.json に問題があります: {detail}",
+        "python-runtime":
+          "このアプリは Python で書かれています。ウェブサイトで動くのは JavaScript だけです。",
+        "unsafe-path": "airapp.json がアプリの外を指しています: {path}",
+        "entry-missing": "airapp.json に書かれた Worker ファイル {path} がありません。",
+        "entry-not-javascript": "Worker ファイル {path} は .js か .mjs にしてください。",
+        "entry-syntax-error": "Worker ファイル {path} を JavaScript として読めません: {detail}",
+        "entry-no-default-export":
+          "Worker ファイル {path} に default export がないため、リクエストに応答できません。",
+        "unsupported-import":
+          "{path} が {specifier} を読み込んでいます。すべてを 1 つのファイルにバンドルしてください。ウェブサイトは他のモジュールを読み込めません。",
+        "no-index-page": "ホームページがありません。{path} を追加してください。",
+        "asset-too-large": "{path} は {size} です。1 ファイルの上限は 25 MB です。",
+        "too-many-assets": "このサイトには {count} 個のファイルがあります。上限は 100,000 個です。",
+      },
+    },
+    enginePlan: {
+      availableOn: "{plan} 以上で利用可能",
+      lockedHint: "{engine}は {plan} 以上のプランで利用できます。",
+      upgrade: "{plan} にアップグレード",
+      lockedTitle: "このアプリを実行するには {plan} にアップグレードしてください",
+      lockedBody:
+        "このスペースのプランには{engine}が含まれていませんが、このアプリの実行に必要です。",
+      statusLocked: "アップグレードが必要",
+    },
   },
   agents: {
     addAgent: "エージェントを追加",
@@ -837,6 +986,7 @@ export const dashboardJa: CoreI18nMessages = {
     composerWaitingPlaceholder: "上のリクエストに応答して続けてください…",
     composerDefaultPlaceholder: "{name} にメッセージを送る…",
     thinkingLevel: "思考レベル",
+    mode: "モード",
     continueConversationFailed: "この会話を続けられませんでした。",
     sessionActions: "セッションの操作",
     endSession: "セッションを終了",
@@ -1129,6 +1279,8 @@ export const dashboardJa: CoreI18nMessages = {
     locationAnywhere: "ワークスペース全体",
     clearFilters: "フィルターをクリア",
     resultCount: "{count} 件を読み込み済み",
+    partialResults:
+      "すべての一致ではない可能性があります。Base、フォルダー、期間で絞り込むと残りを確認できます。",
     modeLabel: "照合方法",
     modeText: "テキスト",
     modeRegex: "正規表現",
@@ -1374,6 +1526,7 @@ export const dashboardJa: CoreI18nMessages = {
     openView: "ビューを開く",
     openNode: "ノードを開く",
     openRecord: "レコードを開く",
+    viewFullContent: "全文を表示",
     brief: "{scope} の {countLabel}: {summary}。",
     riskBrief: "{scope} の {countLabel}: {summary}。{risks} の変更に注意してください。",
     riskAnd: "と",
@@ -1420,6 +1573,8 @@ export const dashboardJa: CoreI18nMessages = {
     loadMore: "さらに読み込む",
     noMatchesTitle: "一致する結果はありません",
     noMatchesBody: "タイトル、フィールド名、チャンネル、またはベースを試してください。",
+    timedOut:
+      "検索がタイムアウトしました。もう一度試すか、詳細検索を開いて Base やフォルダーに絞り込んでください。",
     partialContentBody:
       "一部の長いドキュメントは冒頭のみが検索索引に入っているため、これがすべてとは限りません。全文を走査するには grep を使用してください。",
     noRecentTitle: "最近開いたものはまだありません",
@@ -1875,6 +2030,14 @@ export const dashboardJa: CoreI18nMessages = {
     deleteFieldCounting: "対象レコードを集計中…",
     deleteFieldCountUnavailable: "対象レコードを集計できませんでした。",
     deleteFieldImpact: "{count} 件のレコードにこの列の値があります。",
+    deleteLookupFieldImpact:
+      "このルックアップ列のみを削除します。参照元のフィールド、レコード、レコード間のリンクは変更されません。",
+    deleteLookupFieldBlocked:
+      "数式フィールドを変更してこのルックアップへの参照をなくしてから、この列を削除してください。",
+    deleteFormulaFieldImpact:
+      "この数式列のみを削除します。計算に使用する入力フィールドとレコードは変更されません。",
+    deleteFormulaFieldBlocked:
+      "この数式を使用するフィールドを変更して参照をなくしてから、この列を削除してください。",
     deleteFieldDependencies: "このフィールドの参照先",
     deleteFieldDependenciesLoading: "保存済みビューを確認しています…",
     deleteFieldDependenciesUnavailable:
@@ -2051,6 +2214,12 @@ export const dashboardJa: CoreI18nMessages = {
     bidirectional: "双方向（{count}）",
     noRelationsHint:
       "任意のベース設計でリレーションフィールドを追加すると、ここに線が表示されます。",
+  },
+  upload: {
+    fileTooLarge: "「{name}」（{size}）は 1 ファイルあたりの上限 {limit} を超えています。",
+    fileTooLargeUnnamed: "このファイルは 1 ファイルあたりの上限 {limit} を超えています。",
+    upgradeForLargerFiles:
+      "プランをアップグレードすると、最大 {limit} のファイルをアップロードできます。",
   },
   recordView: {
     view: "表示",
@@ -2416,6 +2585,10 @@ export const dashboardJa: CoreI18nMessages = {
     metadataNoPermission:
       "このファイルが使われているすべての場所に書き込み権限がないため、ここでは Metadata を変更できません。",
     unusedOnly: "未使用のみ表示",
+    loadMore: "アセットをさらに読み込む",
+    loadingMore: "読み込み中…",
+    partialSummary:
+      "ここには読み込み済みの {shown} 件のみを表示・集計しています。残りは「さらに読み込む」で表示されます。",
     unusedBadge: "未使用 {count} 件",
     noUnusedAssets: "未使用のアセットはありません。",
     textStatusMissing: "まだ検索できません",
@@ -2506,6 +2679,8 @@ export const dashboardJa: CoreI18nMessages = {
     addStep: "ステップを追加",
     deleteSelection: "選択項目を削除",
     configuration: "設定",
+    configureTab: "設定",
+    runsTab: "実行履歴",
     selectStepOrEdge: "設定するステップまたは接続を選択してください。",
     label: "ラベル",
     type: "種類",
@@ -2514,7 +2689,19 @@ export const dashboardJa: CoreI18nMessages = {
     url: "Webhook URL",
     functionName: "関数名",
     webhookRuleId: "Webhook 関数ルール ID",
+    functionHint:
+      "保存済みの Webhook ルールのうち、アクションが「関数を実行」のものを実行します。ルール ID を指定するか、このスペースで一つだけ一致する関数名を指定します。戻り値はこのステップのスナップショットとして残ります。",
+    webhookHint:
+      "実行がこのステップに来ると、Busabase は実行データを JSON 本文にしてリクエストを送ります（GET は本文なし）。レスポンスはこのステップの出力（input.status と input.body）になります。",
     eventName: "イベント名",
+    eventRecordCreated: "レコードが作成されたとき",
+    eventRecordUpdated: "レコードが更新されたとき",
+    customEventOption: "{name}（ラベルのみ）",
+    triggerEventHint:
+      "イベントモードでは、「レコードが作成されたとき」と「レコードが更新されたとき」が自動で実行を開始します。手動やその他のイベント名は、誰かがワークフローを実行したときだけ開始します。",
+    triggerBase: "ベース",
+    anyBase: "すべてのベース",
+    unknownBase: "ベースが見つかりません（{id}）",
     expression: "条件式",
     duration: "待機時間",
     unit: "単位",
@@ -2522,20 +2709,53 @@ export const dashboardJa: CoreI18nMessages = {
     hours: "時間",
     days: "日",
     approver: "承認者",
+    approverHint:
+      "メンバーのメールアドレスをカンマ区切りで入力します。承認・却下できるのはこの人たち（とスペース管理者）だけで、ワークフローの編集権限は不要です。メールアドレスがなければ、このワークフローを編集できる人が判断します。名前だけならラベルとして扱います。",
+    allowAgents: "エージェントの判断を許可",
+    allowAgentsHint:
+      "オフ: このステップを承認・却下できるのは人だけです。オン: 書き込み権限の API キーを使うエージェントも判断できます（キーの所有者が上のルールを満たす場合）。",
     actionName: "アクション名",
+    readRecordHint:
+      "このステップで実行のレコードを読み直します。次の分岐で最新の値が必要なときは待機のあとに置きます。",
+    actionChoose: "アクションを選択",
+    actionReadRecord: "レコードを読み直す",
+    actionUpdateRecord: "レコードを変更",
+    actionCreateRecord: "レコードを作成",
+    actionDeleteRecord: "レコードを削除",
+    updateRecordHint: "実行に使われる人の権限で、このレコードに下のフィールドを設定します。",
+    createRecordHint:
+      "実行に使われる人の権限で、選んだベースにレコードを追加します。後のステップはこのステップの createdRecordId で ID を使えます。",
+    deleteRecordHint:
+      "実行に使われる人の権限で、レコードをベースのゴミ箱に移します。そこから復元できます。",
+    customActionHint: "このアクション名は今のところ何もしません。記録されるだけです。",
+    chooseBase: "ベースを選択",
+    targetRecord: "レコード（任意）",
+    targetRecordHint:
+      "空欄ならこの実行のレコードです。レコード ID、または =steps.create.createdRecordId のような数式も指定できます。",
+    stepReference: "数式ではこのステップをこう書きます",
+    copyStepReference: "コピー",
+    updateRecordFields: "設定するフィールド（JSON）",
+    updateRecordFieldsHint:
+      "キーにはフィールドの名前またはスラッグを使います。通常の値はそのまま保存されます。= で始まる文字列は前のステップを参照する数式です（例: =steps.score.score）。= で始まる文字列そのものを保存するには == で始めます。",
+    updateRecordFieldsInvalid:
+      'フィールドは JSON オブジェクトにしてください。例: {"status": "qualified"}',
     outcome: "終了結果",
     edgeLabel: "接続ラベル",
     edgeOutcome: "分岐結果",
     workflowSettings: "実行設定",
     executionMode: "実行モード",
-    notExecutedNote: "ワークフローは現在、保存と検証のみ行われ、まだ実行されません。",
-    executionModeHint: "今後どのように開始するかを記録するだけで、現在はまだ実行されません。",
+    notExecutedNote:
+      "ここでステップを編集して保存し、「実行履歴」から実行を開始します。実行はサーバー上で、最後に保存したバージョンを使います。完了したステップはスナップショットを保持し、read_record はレコードを読み直し、待機は指定の時刻まで一時停止し、承認は判断を待ちます。",
+    executionModeHint:
+      "手動：誰かがワークフローを実行したときだけ開始します。イベント：条件に合うレコードが作成・更新されたときも、レコードトリガーが実行を開始します。イベントによる実行は、このワークフローを最後に保存した人として動作します。",
     manual: "手動",
     event: "イベント",
     errorPolicy: "エラー時",
     stop: "ワークフローを停止",
     continue: "続行",
     concurrency: "同時実行数",
+    concurrencyHint:
+      "このワークフローで同時にステップを実行できる件数です。待機中・承認待ちの実行は数えません。上限を超えた実行は待ち行列に入り、空きができると自動で始まります。",
     timeoutMs: "タイムアウト（ms）",
     trigger: "トリガー",
     webhook: "Webhook",
@@ -2548,6 +2768,69 @@ export const dashboardJa: CoreI18nMessages = {
     source: "ソース",
     preview: "プレビュー",
     htmlSource: "HTML ソース",
+  },
+  workflowRuns: {
+    runWorkflow: "ワークフローを実行",
+    startTitle: "実行を開始",
+    startHint: "このワークフローの最後に保存したバージョンをサーバーで実行します。",
+    recordId: "レコード ID（任意）",
+    recordIdHint: "実行開始時にトリガーがこのレコードを読み込みます。",
+    payload: "ペイロード JSON（任意）",
+    payloadHint: "トリガーに渡す追加データ（JSON オブジェクト）。",
+    payloadInvalid: 'ペイロードは JSON オブジェクトにしてください。例：{"score": 80}',
+    start: "実行を開始",
+    starting: "開始中…",
+    unsavedBlocked:
+      "先に変更を保存してください。実行にはこのワークフローの最後に保存したバージョンが使われます。",
+    readOnlyNote:
+      "実行履歴は閲覧できます。実行の開始や早めの続行には、このワークフローの編集権限が必要です。",
+    cannotDecide:
+      "このステップを判断できるのは、ここで指定された承認者だけです（指定がなければ、このワークフローを編集できる人）。",
+    queuedNote:
+      "待ち行列：この実行は1分以内に自動で続行します。権限は開始した人のものが使われます。",
+    statusCancelled: "キャンセル済み",
+    cancelRun: "実行をキャンセル",
+    cancelRunTitle: "この実行をキャンセルしますか？",
+    cancelRunBody: "実行はここで止まり、再開できません。すでに実行したステップは元に戻りません。",
+    keepRun: "キャンセルしない",
+    cancelAllQueued: "待機中の {count} 件をキャンセル",
+    cancelAllTitle: "待機中の {count} 件をキャンセルしますか？",
+    cancelAllBody:
+      "これらはまだ始まっておらず、今後も始まりません。ステップを実行中の実行や、待機・承認で止まっている実行はそのまま続きます。",
+    startedBy: "開始した人: {name}",
+    startedByVia: "{name} が {via} 経由で開始",
+    viaAgent: "エージェント",
+    cancelledBy: "{name} がキャンセルしました。",
+    loadOlder: "以前の実行を読み込む",
+    keptNote: "終了した実行は {days} 日間保存されます。",
+    guideLink: "ワークフローの実行について",
+    actionFailed: "うまくいきませんでした。もう一度お試しください。",
+    recentRuns: "最近の実行",
+    empty: "まだ実行はありません。",
+    loadFailed: "実行履歴を読み込めませんでした。",
+    statusQueued: "順番待ち",
+    statusRunning: "実行中",
+    statusWaiting: "待機中",
+    statusWaitingApproval: "承認待ち",
+    statusCompleted: "完了",
+    statusFailed: "失敗",
+    triggerManual: "手動",
+    triggerEvent: "イベント",
+    runDetails: "実行の詳細",
+    recordLabel: "レコード：{id}",
+    waitingUntil: "{time} まで待機中です。その時刻になると自動で続行します。",
+    continueNow: "今すぐ続行",
+    approvalPending: "「{step}」の判断を待っています。",
+    approve: "承認",
+    reject: "却下",
+    errorLabel: "エラー",
+    steps: "ステップ",
+    noSteps: "完了したステップはまだありません。",
+    stepData: "データ",
+    recordFields: "レコード",
+    stepDone: "完了",
+    stepPaused: "一時停止",
+    stepFailed: "失敗",
   },
   install: {
     title: "GitHub からインストール",

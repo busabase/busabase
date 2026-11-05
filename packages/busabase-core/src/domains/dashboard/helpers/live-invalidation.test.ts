@@ -160,4 +160,25 @@ describe("live invalidation batching", () => {
     vi.advanceTimersByTime(50);
     expect(flush).toHaveBeenCalledTimes(2);
   });
+
+  it("flushes pending targets immediately in stale-only mode", () => {
+    vi.useFakeTimers();
+    const flush = vi.fn();
+    const batcher = createLiveInvalidationBatcher(flush, 50);
+    batcher.push(event("change_request.created"));
+
+    batcher.flush({ refetchType: "none" });
+
+    expect(flush).toHaveBeenCalledTimes(1);
+    const [batch, options] = flush.mock.calls[0] as [
+      LiveInvalidationBatch,
+      { refetchType: "none" },
+    ];
+    expect(batch.targets).toContain("changeRequests");
+    expect(options).toEqual({ refetchType: "none" });
+
+    // The superseded timer must not flush the same batch a second time.
+    vi.advanceTimersByTime(50);
+    expect(flush).toHaveBeenCalledTimes(1);
+  });
 });

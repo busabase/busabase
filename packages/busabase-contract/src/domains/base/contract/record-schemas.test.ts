@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { LOOKUP_SOURCE_LIMIT } from "../types";
 import {
   listRecordsInputSchema,
+  listRecordsPageInputSchema,
   lookupComputedSchema,
   recordGetInputSchema,
 } from "./record-schemas";
@@ -46,6 +47,18 @@ describe("listRecordsInputSchema", () => {
     expect(listRecordsInputSchema.parse({ baseId: "bse_1", summary: false }).summary).toBe(false);
     expect(listRecordsInputSchema.parse({ baseId: "bse_1", summary: "true" }).summary).toBe(true);
     expect(listRecordsInputSchema.parse({ baseId: "bse_1", summary: "false" }).summary).toBe(false);
+  });
+});
+
+describe("listRecordsPageInputSchema", () => {
+  it("keeps full records by default and accepts the explicit table list mode", () => {
+    expect(listRecordsPageInputSchema.parse({ baseId: "bse_1" }).listMode).toBe("full");
+    expect(listRecordsPageInputSchema.parse({ baseId: "bse_1", listMode: "table" }).listMode).toBe(
+      "table",
+    );
+    expect(
+      listRecordsPageInputSchema.safeParse({ baseId: "bse_1", listMode: "grid" }).success,
+    ).toBe(false);
   });
 });
 

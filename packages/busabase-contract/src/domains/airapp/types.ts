@@ -6,7 +6,7 @@ export type {
 
 /**
  * Where an AirApp's dev server runs. One axis — whose machine executes the
- * code — and nothing else, which is what keeps the three values comparable:
+ * code — and nothing else, which is what keeps the values comparable:
  *
  * - `"browser"` runs the app inside the viewer's own tab, on the
  *   `@r1ck404/nodepod` Web Worker runtime: a virtual, browser-side filesystem +
@@ -29,8 +29,13 @@ export type {
  * names stay where the products actually are: `nodepod-runner.ts`,
  * `sandock-runtime.ts`, `SANDOCK_BASE_URL`.
  *
+ * - `"site"` publishes the app as a real website: a Worker plus static assets on
+ *   a provider the operator manages (today: Cloudflare Workers for Platforms).
+ *   Unlike the other three it is a deployment, not a session. It starts no
+ *   process and never calls `runLocal`; see `airapps.siteDeployPreview`.
+ *
  * `local` and `remote` both stream back to the browser over the
  * `airapps.runLocal` oRPC event iterator; `browser` never calls it. See
  * `busabase-core/domains/airapp/components/runners/`.
  */
-export type AirAppRunnerKind = "browser" | "local" | "remote";
+export type AirAppRunnerKind = "browser" | "local" | "remote" | "site";

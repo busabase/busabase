@@ -1,5 +1,54 @@
 import { describe, expect, it } from "vitest";
-import { resolveAvailableAirAppEngines, resolveHostProcessPolicy } from "./engine-availability";
+import {
+  resolveAirAppEngineAvailability,
+  resolveAvailableAirAppEngines,
+  resolveHostProcessPolicy,
+} from "./engine-availability";
+
+const sandock = { SANDOCK_BASE_URL: "https://s", SANDOCK_API_KEY: "k" };
+
+describe("resolveAirAppEngineAvailability", () => {
+  it("shows a remote engine an operator could configure as not configured", () => {
+    expect(resolveAirAppEngineAvailability({ env: {} })).toEqual({
+      available: ["browser"],
+      notConfigured: ["remote"],
+    });
+  });
+
+  it("does not call a configured remote engine unconfigured", () => {
+    expect(resolveAirAppEngineAvailability({ env: sandock })).toEqual({
+      available: ["browser", "remote"],
+      notConfigured: [],
+    });
+  });
+
+  it("keeps the host engine hidden on a shared host: nothing to configure", () => {
+    const { available, notConfigured } = resolveAirAppEngineAvailability({ env: {} });
+    expect(available).not.toContain("local");
+    expect(notConfigured).not.toContain("local");
+  });
+
+  it("hides site on a host with no provider at all", () => {
+    const { available, notConfigured } = resolveAirAppEngineAvailability({ env: {} });
+    expect(available).not.toContain("site");
+    expect(notConfigured).not.toContain("site");
+  });
+
+  it("shows site as not configured on a host whose provider lacks its settings", () => {
+    expect(
+      resolveAirAppEngineAvailability({ env: {}, siteConfigured: false }).notConfigured,
+    ).toEqual(["remote", "site"]);
+  });
+
+  it("offers site once its provider is configured, and only then", () => {
+    const { available, notConfigured } = resolveAirAppEngineAvailability({
+      env: sandock,
+      siteConfigured: true,
+    });
+    expect(available).toEqual(["browser", "remote", "site"]);
+    expect(notConfigured).toEqual([]);
+  });
+});
 
 describe("resolveAvailableAirAppEngines", () => {
   it("always offers the in-browser engine, which needs nothing configured", () => {

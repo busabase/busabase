@@ -39,6 +39,8 @@ export function getSearchExecutionOutcome(error: unknown): "timeout" | "canceled
 
 export interface SearchExecution {
   checkpoint(): void;
+  /** Milliseconds left of the request budget, for work that can stop early and still answer. */
+  remainingMs(): number;
   beforeQuery(): Promise<void>;
   /**
    * Budgeted SQL scope: one transaction with a `statement_timeout`. Use for
@@ -102,6 +104,7 @@ export async function withSearchExecution<T>(
   };
   const execution: SearchExecution = {
     checkpoint,
+    remainingMs: () => deadline - Date.now(),
     async beforeQuery() {
       checkpoint();
     },

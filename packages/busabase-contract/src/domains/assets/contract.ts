@@ -1,9 +1,16 @@
 import { oc } from "@orpc/contract";
 import {
+  AbortMultipartUploadInputSchema,
+  AbortMultipartUploadVOSchema,
+  CompleteMultipartUploadInputSchema,
   ConfirmUploadInputSchema,
   ConfirmUploadVOSchema,
+  CreateMultipartUploadInputSchema,
+  CreateMultipartUploadVOSchema,
   RequestUploadUrlInputSchema,
   RequestUploadUrlVOSchema,
+  SignMultipartPartsInputSchema,
+  SignMultipartPartsVOSchema,
 } from "open-domains/attachments/types";
 import { z } from "zod";
 import { changeRequestSchema } from "../../contract/schemas";
@@ -53,6 +60,22 @@ export const assetsContract = {
     })
     .input(ConfirmUploadInputSchema)
     .output(ConfirmUploadVOSchema),
+  // Multipart upload for large files (the dashboard uses it above 64 MB):
+  // create → signParts (batched) → PUT parts → complete | abort. RPC-only (no
+  // `.route()`): internal plumbing for the browser uploader, so it stays out of
+  // the published REST spec and every MCP tool catalog. Same key namespace,
+  // size ceiling and host upload policy as `createUploadUrl`/`confirm` —
+  // `completeMultipartUpload` also confirms (registers the Asset).
+  createMultipartUpload: oc
+    .input(CreateMultipartUploadInputSchema)
+    .output(CreateMultipartUploadVOSchema),
+  signMultipartParts: oc.input(SignMultipartPartsInputSchema).output(SignMultipartPartsVOSchema),
+  completeMultipartUpload: oc
+    .input(CompleteMultipartUploadInputSchema)
+    .output(ConfirmUploadVOSchema),
+  abortMultipartUpload: oc
+    .input(AbortMultipartUploadInputSchema)
+    .output(AbortMultipartUploadVOSchema),
   list: oc
     .route({
       method: "GET",
@@ -60,7 +83,7 @@ export const assetsContract = {
       tags: ["Assets"],
       summary: "List assets",
       successDescription:
-        "Assets in the space, newest first, with file metadata and usage counts. Every asset when `limit` is omitted; otherwise one page, where `cursor` is the previous page's last asset id and a short page means the end.",
+        "Assets in the space, newest first, with file metadata and usage counts. At most 1,000 when `limit` is omitted; otherwise one page, where `cursor` is the previous page's last asset id and a short page means the end.",
     })
     .input(ListAssetsInputSchema)
     .output(z.array(AssetVOSchema)),

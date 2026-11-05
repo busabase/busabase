@@ -1,7 +1,7 @@
 import "server-only";
 
 import { type DefaultTreeAdapterMap, defaultTreeAdapter, parse, serialize } from "parse5";
-import { getLocalPreviewTarget } from "./local-preview-registry";
+import { getLocalPreviewUpstream } from "./local-preview-registry";
 
 const HOP_BY_HOP_REQUEST_HEADERS = new Set([
   "connection",
@@ -255,8 +255,8 @@ export async function proxyLocalPreview(
     );
   }
 
-  const target = await getLocalPreviewTarget(nodeId, owner);
-  if (target === undefined) {
+  const upstreamEntry = await getLocalPreviewUpstream(nodeId, owner);
+  if (upstreamEntry === undefined) {
     // Deliberately the same 404 as "no run at all": distinguishing
     // "running, but not yours" would confirm to a stranger that a given node
     // is being previewed right now.
@@ -264,12 +264,15 @@ export async function proxyLocalPreview(
   }
 
   const search = new URL(req.url).search;
-  const upstreamUrl = `${target}/${path}${search}`;
+  const upstreamUrl = `${upstreamEntry.target}/${path}${search}`;
 
   // Forward ordinary application headers, never host credentials or routing
   // context. The upstream is an untrusted AirApp, including when it runs in a
   // remote Sandock sandbox rather than on localhost.
   const headers = previewRequestHeaders(req.headers);
+  // Added after the scrub: these are the proxy's own credentials for the target,
+  // not anything a browser sent, and a browser cannot set or read them.
+  for (const [name, value] of Object.entries(upstreamEntry.headers)) headers.set(name, value);
 
   const hasBody = req.method !== "GET" && req.method !== "HEAD";
   const canRetry = req.method === "GET" || req.method === "HEAD";

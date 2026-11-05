@@ -55,11 +55,35 @@ export interface FileTreeNodeVO {
   visibility: "private" | "workspace" | "public";
   version: string;
   files: FileTreeFileVO[];
+  /**
+   * Total files mounted on the node. `files` carries at most the server's
+   * inline limit; optional because demo data and older payloads do not carry
+   * it — fall back to `files.length` there.
+   */
+  fileCount?: number;
+  /** True when `files` is only the first page of `fileCount`. */
+  filesTruncated?: boolean;
   // Paths silently dropped from this create call by an uploaded `.gitignore`
   // (upload-safety layer 1 — see busabase-core's `logic/upload-safety.ts`).
   // Optional here (absent on plain get/list reads); the oRPC output schema
   // (`fileTreeNodeSchema`) defaults it to `[]` on the wire either way.
   skippedGitignorePaths?: string[];
+}
+
+export interface FileTreeFolderEntryVO {
+  path: string;
+  name: string;
+}
+
+/** One folder of a file tree: direct subfolders plus one page of direct files. */
+export interface FileTreeEntriesVO {
+  folder: string;
+  folders: FileTreeFolderEntryVO[];
+  foldersTruncated: boolean;
+  /** Pass as `foldersAfter` for the next page of `folders`; `null` when complete. */
+  foldersNextCursor: string | null;
+  files: FileTreeFileVO[];
+  nextCursor: string | null;
 }
 
 export interface FileTreeReadFileVO {

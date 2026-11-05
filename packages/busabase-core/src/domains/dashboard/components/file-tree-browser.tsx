@@ -15,6 +15,7 @@
 // state machine here. This is that duplication, done once, on purpose.
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import type { FileTreeNodeVO } from "busabase-contract/types";
 import { Checkbox } from "kui/checkbox";
@@ -52,7 +53,10 @@ import {
   type RefObject,
   useCallback,
   useContext,
+  useEffect,
+  useLayoutEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { createPortal } from "react-dom";
@@ -278,6 +282,49 @@ export function buildFileTree(files: FileTreeNodeVO["files"]): SkillTreeNode[] {
   return roots;
 }
 
+/** One folder as `fileTrees.listEntries` returned it; only the parts the tree needs. */
+export interface LoadedFolderEntries {
+  folders: ReadonlyArray<{ path: string; name: string }>;
+  files: FileTreeNodeVO["files"];
+}
+
+/**
+ * Build the tree from folders loaded one at a time (a Drive too big to list in
+ * one go). A folder that has not been loaded yet appears with no children; it
+ * fills in when it is expanded and its entries arrive. Same ordering as
+ * `buildFileTree`, so a Drive does not reshuffle when it crosses the size cap.
+ */
+export function buildFolderEntriesTree(
+  loaded: Readonly<Record<string, LoadedFolderEntries | undefined>>,
+): SkillTreeNode[] {
+  const build = (folder: string): SkillTreeNode[] => {
+    const entries = loaded[folder];
+    if (!entries) return [];
+    const folders = entries.folders
+      .map(
+        (entry): SkillTreeNode => ({
+          name: entry.name,
+          path: entry.path,
+          type: "folder",
+          children: build(entry.path),
+        }),
+      )
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const files = entries.files
+      .map(
+        (file): SkillTreeNode => ({
+          name: file.path.split("/").at(-1) ?? file.path,
+          path: file.path,
+          type: "file",
+          children: [],
+        }),
+      )
+      .sort((a, b) => a.name.localeCompare(b.name));
+    return [...folders, ...files];
+  };
+  return build("");
+}
+
 export const collectFolderPaths = (nodes: SkillTreeNode[]): string[] =>
   nodes.flatMap((node) =>
     node.type === "folder" ? [node.path, ...collectFolderPaths(node.children)] : [],
@@ -348,11 +395,15 @@ export function renderFileTree(
   // whenever the tree has folders keeps file names aligned with sibling folder
   // names, and a Drive with no folders at all still avoids the phantom indent.
   reserveChevronColumn = nodes.some((node) => node.type === "folder"),
+  // Rendered after a folder's children — the "loading" / "load more" row of a
+  // folder whose files arrive one folder at a time.
+  folderFooter?: (folderPath: string, depth: number) => ReactNode,
 ): ReactNode {
   return nodes.map((node) =>
     node.type === "folder" ? (
       <DriveFileTreeFolder depth={depth} key={node.path} name={node.name} path={node.path}>
-        {renderFileTree(node.children, depth + 1, reserveChevronColumn)}
+        {renderFileTree(node.children, depth + 1, reserveChevronColumn, folderFooter)}
+        {folderFooter?.(node.path, depth + 1)}
       </DriveFileTreeFolder>
     ) : (
       <DriveFileTreeFile
@@ -363,6 +414,184 @@ export function renderFileTree(
         path={node.path}
       />
     ),
+  );
+}
+
+/** Past this many visible rows, only the ones near the viewport are mounted. */
+const FILE_TREE_VIRTUALIZE_ROW_THRESHOLD = 100;
+const FILE_TREE_ROW_HEIGHT = 32;
+
+export type FileTreeRow =
+  | {
+      kind: "node";
+      key: string;
+      node: SkillTreeNode;
+      depth: number;
+      setSize: number;
+      posInSet: number;
+    }
+  | { kind: "footer"; key: string; content: ReactNode };
+
+/** The rows a reader can currently see, top to bottom: collapsed subtrees contribute nothing. */
+export function flattenFileTree(
+  nodes: SkillTreeNode[],
+  expandedPaths: ReadonlySet<string>,
+  folderFooter?: (folderPath: string, depth: number) => ReactNode,
+): FileTreeRow[] {
+  const rows: FileTreeRow[] = [];
+  const pushFooter = (folderPath: string, depth: number) => {
+    const content = folderFooter?.(folderPath, depth);
+    if (content) rows.push({ content, key: `${folderPath}\0footer`, kind: "footer" });
+  };
+  const walk = (level: SkillTreeNode[], depth: number) => {
+    level.forEach((node, index) => {
+      rows.push({
+        depth,
+        key: node.path,
+        kind: "node",
+        node,
+        posInSet: index + 1,
+        setSize: level.length,
+      });
+      if (node.type === "folder" && expandedPaths.has(node.path)) {
+        walk(node.children, depth + 1);
+        pushFooter(node.path, depth + 1);
+      }
+    });
+  };
+  walk(nodes, 0);
+  pushFooter("", 0);
+  return rows;
+}
+
+export interface FileTreeRowsProps {
+  tree: SkillTreeNode[];
+  /** The element that scrolls the tree; a large tree only mounts the rows inside it. */
+  scrollElement: HTMLElement | null;
+  folderFooter?: (folderPath: string, depth: number) => ReactNode;
+}
+
+/**
+ * The tree as a flat list of rows, for trees that can run to thousands of files
+ * (use inside `DriveFileTree`). Every mounted row reads the selection from
+ * context, so a click re-renders all of them: past the threshold only the rows
+ * near the viewport are mounted, which keeps that cost constant. A row keeps its
+ * key either side of the threshold, so crossing it does not drop keyboard focus.
+ */
+export function FileTreeRows({ tree, scrollElement, folderFooter }: FileTreeRowsProps) {
+  const { expandedPaths, selectedPath } = useContext(DriveFileTreeContext);
+  const rows = flattenFileTree(tree, expandedPaths, folderFooter);
+  const shouldVirtualize = rows.length > FILE_TREE_VIRTUALIZE_ROW_THRESHOLD;
+  const reserveChevronColumn = tree.some((node) => node.type === "folder");
+  const listRef = useRef<HTMLDivElement>(null);
+  const [scrollMargin, setScrollMargin] = useState(0);
+  // The focused row stays mounted wherever it scrolls to. Unmounting it would drop
+  // keyboard focus to <body> — and that includes the render where a large tree
+  // starts windowing, when a scroll the focus just caused has not reported yet.
+  const focusedRowKey = useRef<string | null>(null);
+
+  useLayoutEffect(() => {
+    if (!shouldVirtualize || !listRef.current || !scrollElement) return;
+    setScrollMargin(
+      listRef.current.getBoundingClientRect().top -
+        scrollElement.getBoundingClientRect().top +
+        scrollElement.scrollTop,
+    );
+  }, [scrollElement, shouldVirtualize]);
+
+  const virtualizer = useVirtualizer({
+    count: shouldVirtualize ? rows.length : 0,
+    estimateSize: () => FILE_TREE_ROW_HEIGHT,
+    getItemKey: (index) => rows[index]?.key ?? index,
+    getScrollElement: () => scrollElement,
+    overscan: 12,
+    rangeExtractor: (range) => {
+      const indexes = defaultRangeExtractor(range);
+      const focusedIndex = focusedRowKey.current
+        ? rows.findIndex((row) => row.key === focusedRowKey.current)
+        : -1;
+      return focusedIndex < 0 || indexes.includes(focusedIndex)
+        ? indexes
+        : [...indexes, focusedIndex].sort((a, b) => a - b);
+    },
+    scrollMargin,
+  });
+
+  // The open file can change without a click on its row (an upload, a rename, the
+  // entry file), and an unmounted row cannot scroll itself into view. Not keyed
+  // on the row's index: expanding a folder above it must not yank the list back.
+  const selectedIndex = rows.findIndex((row) => row.key === selectedPath);
+  const selectedRowVisible = selectedIndex >= 0;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only a new selection, or its row appearing, may scroll
+  useEffect(() => {
+    if (shouldVirtualize && selectedRowVisible) {
+      virtualizer.scrollToIndex(selectedIndex, { align: "auto" });
+    }
+  }, [selectedPath, selectedRowVisible]);
+
+  const items = shouldVirtualize
+    ? virtualizer.getVirtualItems()
+    : rows.map((_, index) => ({ index, start: 0 }));
+
+  return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: only tracks focus from the rows inside; not itself interactive
+    <div
+      onBlur={() => {
+        focusedRowKey.current = null;
+      }}
+      ref={listRef}
+      style={
+        shouldVirtualize ? { height: virtualizer.getTotalSize(), position: "relative" } : undefined
+      }
+    >
+      {items.map((item) => {
+        const row = rows[item.index];
+        if (!row) return null;
+        return (
+          // biome-ignore lint/a11y/noStaticElementInteractions: only tracks focus from the row inside; not itself interactive
+          <div
+            data-index={item.index}
+            key={row.key}
+            onFocus={() => {
+              focusedRowKey.current = row.key;
+            }}
+            ref={shouldVirtualize ? virtualizer.measureElement : undefined}
+            style={
+              shouldVirtualize
+                ? {
+                    left: 0,
+                    position: "absolute",
+                    right: 0,
+                    top: 0,
+                    transform: `translateY(${item.start - scrollMargin}px)`,
+                  }
+                : undefined
+            }
+          >
+            {row.kind === "footer" ? (
+              row.content
+            ) : row.node.type === "folder" ? (
+              <DriveFileTreeFolder
+                depth={row.depth}
+                name={row.node.name}
+                path={row.node.path}
+                posInSet={row.posInSet}
+                setSize={row.setSize}
+              />
+            ) : (
+              <DriveFileTreeFile
+                alignWithFolders={reserveChevronColumn}
+                depth={row.depth}
+                name={row.node.name}
+                path={row.node.path}
+                posInSet={row.posInSet}
+                setSize={row.setSize}
+              />
+            )}
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -522,9 +751,19 @@ export interface DriveFileTreeFolderProps {
   name: string;
   depth?: number;
   children?: ReactNode;
+  /** A flat or windowed list has no nesting to convey these, so rows state them. */
+  setSize?: number;
+  posInSet?: number;
 }
 
-export function DriveFileTreeFolder({ path, name, depth = 0, children }: DriveFileTreeFolderProps) {
+export function DriveFileTreeFolder({
+  path,
+  name,
+  depth = 0,
+  children,
+  setSize,
+  posInSet,
+}: DriveFileTreeFolderProps) {
   const messages = useCoreI18n();
   const {
     expandedPaths,
@@ -565,6 +804,9 @@ export function DriveFileTreeFolder({ path, name, depth = 0, children }: DriveFi
         <CollapsibleTrigger asChild>
           <button
             className="flex min-w-0 flex-1 items-center gap-1.5 rounded py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
+            aria-level={depth + 1}
+            aria-posinset={posInSet}
+            aria-setsize={setSize}
             onClick={() => onSelect?.(path)}
             role="treeitem"
             tabIndex={0}
@@ -636,6 +878,8 @@ export interface DriveFileTreeFileProps {
   depth?: number;
   /** True when the tree contains folders, i.e. a chevron column exists. */
   alignWithFolders?: boolean;
+  setSize?: number;
+  posInSet?: number;
 }
 
 export function DriveFileTreeFile({
@@ -643,6 +887,8 @@ export function DriveFileTreeFile({
   name,
   depth = 0,
   alignWithFolders = false,
+  setSize,
+  posInSet,
 }: DriveFileTreeFileProps) {
   const messages = useCoreI18n();
   const {
@@ -678,6 +924,9 @@ export function DriveFileTreeFile({
         />
       ) : null}
       <button
+        aria-level={depth + 1}
+        aria-posinset={posInSet}
+        aria-setsize={setSize}
         className="flex min-w-0 flex-1 items-center gap-1.5 rounded px-2 py-1 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
         onClick={() => onSelect?.(path)}
         role="treeitem"

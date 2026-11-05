@@ -32,12 +32,20 @@ export const busabaseAgentSessionEvents = pgTable(
     seq: integer("seq").notNull(),
     kind: text("kind").$type<AgentSessionEventVO["kind"]>().notNull(),
     payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    /** Null on historical/local events; identities never rewrite old seq values. */
+    stableIdentity: text("stable_identity"),
+    contentDigest: text("content_digest"),
+    sourceSeq: integer("source_seq"),
     at: timestamp("at", { mode: "date" }).defaultNow().notNull(),
   },
   (table) => [
     // Replay is "everything after seq N for this session", and the pair must be
     // unique or a resumed client could see a duplicate.
     uniqueIndex("busabase_agent_session_events_session_seq_idx").on(table.sessionId, table.seq),
+    uniqueIndex("busabase_agent_session_events_identity_idx").on(
+      table.sessionId,
+      table.stableIdentity,
+    ),
     // Makes the §7.5 retention sweep a range scan instead of a table scan.
     // Borrowed from acprouter's equivalent table, which had it and this design
     // originally did not (§7.2).

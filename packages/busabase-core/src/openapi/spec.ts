@@ -67,7 +67,16 @@ export async function getBusabaseOpenApiSpec(): Promise<OpenAPI.Document> {
         description:
           "Logical Busabase files backed by deduped Attachments, including AI-readable metadata and where-used references.",
       },
-      { name: "ChangeRequests", description: "Human review workflow for proposed changes." },
+      {
+        name: "ChangeRequests",
+        description:
+          "Proposed changes with a message, a diff, and an author. They merge right away with write access and wait for review otherwise.",
+      },
+      {
+        name: "Workflows",
+        description:
+          "See, start, cancel, and decide runs of a Workflow node. A run acts as the key's owner, capped by the key.",
+      },
       {
         name: "Records",
         description: "The current rows of a Base, each written through a changeRequest.",

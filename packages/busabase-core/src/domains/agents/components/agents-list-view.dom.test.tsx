@@ -20,6 +20,7 @@ Element.prototype.releasePointerCapture ??= () => {};
 
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 vi.mock("sonner", () => ({ toast }));
+const LONG_PROVIDER_SLUG = "future-provider-".repeat(20);
 
 const SESSION: AgentSessionVO = {
   id: "sess-1",
@@ -54,6 +55,7 @@ const ROUTER_CONNECTION: AgentConnectionVO = {
   ...CONNECTION,
   slug: "acprouter:device-1",
   agentName: "Router laptop",
+  providerAgentSlug: "claude-acp",
   transport: "remote-websocket",
   latest: { ...SESSION, slug: "acprouter:device-1", transport: "remote-websocket" },
 };
@@ -171,6 +173,40 @@ describe("AgentsListView", () => {
   beforeEach(() => vi.clearAllMocks());
   afterEach(cleanup);
 
+  it.each([
+    { slug: "claude-acp", providerAgentSlug: undefined, providerName: "Claude Code" },
+    { slug: "codex-acp", providerAgentSlug: undefined, providerName: "Codex" },
+    { slug: "buda:agent-1", providerAgentSlug: undefined, providerName: "Buda" },
+    { slug: "acprouter:device", providerAgentSlug: "claude-acp", providerName: "Claude Code" },
+    { slug: "acprouter:device", providerAgentSlug: "codex-acp", providerName: "Codex" },
+    { slug: "acprouter:device", providerAgentSlug: "buda", providerName: "Buda" },
+    { slug: "acprouter:device", providerAgentSlug: "gemini", providerName: "gemini" },
+    { slug: "acprouter:device", providerAgentSlug: "other-agent", providerName: "other-agent" },
+    { slug: "acprouter:device", providerAgentSlug: undefined, providerName: "ACP" },
+    { slug: "other-agent", providerAgentSlug: undefined, providerName: "other-agent" },
+    {
+      slug: "acprouter:device",
+      providerAgentSlug: LONG_PROVIDER_SLUG,
+      providerName: LONG_PROVIDER_SLUG,
+    },
+  ])(
+    "shows $providerName for $slug ($providerAgentSlug) beside a renamed agent",
+    async (provider) => {
+      const connection = {
+        ...CONNECTION,
+        slug: provider.slug,
+        agentName: "My renamed assistant",
+        providerAgentSlug: provider.providerAgentSlug,
+      };
+      const { onSelectAgent } = renderView({ listConnections: async () => [connection] });
+      const badge = await screen.findByTestId("agent-provider-badge");
+      expect(badge.textContent).toBe(provider.providerName);
+      expect(badge.getAttribute("title")).toBe(provider.providerName);
+      fireEvent.click(screen.getByRole("button", { name: /^My renamed assistant/ }));
+      expect(onSelectAgent).toHaveBeenCalledWith(provider.slug);
+    },
+  );
+
   it("opens safe connection details from More and renames the selected agent persistently", async () => {
     let currentName = ROUTER_CONNECTION.agentName;
     const rename = vi.fn(async ({ name }: { slug: string; name: string }) => {
@@ -202,6 +238,7 @@ describe("AgentsListView", () => {
     expect(within(dialog).getByText("claude-acp")).toBeTruthy();
     fireEvent.click(within(dialog).getAllByRole("button", { name: "Close" })[0]);
     expect(await screen.findByRole("button", { name: "Actions for Work assistant" })).toBeTruthy();
+    expect(screen.getByTestId("agent-provider-badge").textContent).toBe("Claude Code");
     await waitFor(() =>
       expect(document.activeElement).toBe(
         screen.getByRole("button", { name: "Actions for Work assistant" }),
@@ -283,7 +320,7 @@ describe("AgentsListView", () => {
       scope === "mine" ? [CONNECTION] : [],
     );
     const { onSelectAgent } = renderView({ listConnections });
-    const card = (await screen.findByText("Claude Code")).closest("button");
+    const card = await screen.findByRole("button", { name: /^Claude Code Claude Code/ });
     const actions = screen.getByRole("button", { name: "Actions for Claude Code" });
     const buttons = screen.getAllByRole("button");
 

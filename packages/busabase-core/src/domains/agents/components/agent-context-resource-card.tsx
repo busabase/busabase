@@ -6,7 +6,7 @@ import { NODE_TYPES } from "busabase-contract/domains";
 import { NodeIconSchema } from "busabase-contract/types";
 import { Dialog, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "kui/dialog";
 import { File, FileText } from "lucide-react";
-import { type ReactNode, useId, useState } from "react";
+import { type ReactNode, useState } from "react";
 import { Link } from "wouter";
 import { z } from "zod";
 import { useCoreI18n } from "../../../i18n";
@@ -78,36 +78,38 @@ function ContextTextChip({
   text: string;
   children?: ReactNode;
 }) {
-  const [expanded, setExpanded] = useState(false);
-  const contentId = useId();
   const messages = useCoreI18n();
 
   return (
     <div className="min-w-0 max-w-full" data-testid="agent-context-resource">
-      <button
-        type="button"
-        className={chipClassName}
-        aria-expanded={expanded}
-        aria-controls={contentId}
-        onClick={() => setExpanded((previous) => !previous)}
-      >
-        <span aria-hidden="true" className="flex size-4 shrink-0 items-center overflow-hidden">
-          {icon}
-        </span>
-        <span className="min-w-0 truncate">{label}</span>
-      </button>
-      <div id={contentId} hidden={!expanded} className="mt-2 min-w-0 space-y-2">
-        {children}
-        <pre
-          role="region"
-          // biome-ignore lint/a11y/noNoninteractiveTabindex: Scrollable snapshots need a keyboard focus target.
-          tabIndex={0}
-          aria-label={messages.agents.contextSnapshot}
-          className="max-h-72 overflow-auto whitespace-pre-wrap break-words text-xs focus-visible:outline-2 focus-visible:outline-ring"
+      <Dialog>
+        <DialogTrigger asChild>
+          <button type="button" className={chipClassName}>
+            <span aria-hidden="true" className="flex size-4 shrink-0 items-center overflow-hidden">
+              {icon}
+            </span>
+            <span className="min-w-0 truncate">{label}</span>
+          </button>
+        </DialogTrigger>
+        <DialogContent
+          aria-describedby={undefined}
+          className="flex max-h-[90vh] w-[calc(100%-2rem)] max-w-4xl flex-col overflow-hidden"
         >
-          {text || messages.formula.empty}
-        </pre>
-      </div>
+          <DialogHeader className="max-h-[30vh] min-w-0 shrink-0 overflow-auto pr-6">
+            <DialogTitle className="break-all">{label}</DialogTitle>
+            {children}
+          </DialogHeader>
+          <pre
+            role="region"
+            // biome-ignore lint/a11y/noNoninteractiveTabindex: Scrollable snapshots need a keyboard focus target.
+            tabIndex={0}
+            aria-label={messages.agents.contextSnapshot}
+            className="min-h-0 min-w-0 overflow-auto whitespace-pre-wrap break-words font-sans text-sm focus-visible:outline-2 focus-visible:outline-ring [overflow-wrap:anywhere]"
+          >
+            {text || messages.formula.empty}
+          </pre>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

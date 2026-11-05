@@ -16,7 +16,9 @@ export interface ViewChangeInput {
   baseId?: string;
   viewId?: string;
   name?: string;
+  slug?: string;
   type?: string;
+  description?: string;
   config?: unknown;
   patch?: unknown;
   position?: number;
@@ -25,6 +27,91 @@ export interface ViewChangeInput {
   autoMerge?: boolean;
   requireReview?: boolean;
 }
+
+/** The arguments that change the view, and the actions able to apply each one. */
+const CHANGE_PARAMS = [
+  "name",
+  "slug",
+  "type",
+  "description",
+  "config",
+  "patch",
+  "position",
+] as const;
+type ChangeParam = (typeof CHANGE_PARAMS)[number];
+const ACCEPTED_BY_ACTION: Record<ViewAction, readonly ChangeParam[]> = {
+  create: ["name", "slug", "type", "description", "config"],
+  update: ["name", "type", "description", "config", "patch", "position"],
+  delete: [],
+  restore: [],
+};
+
+/** The `update` keys that also have a flag of their own. */
+const UPDATE_KEYS = ["name", "type", "description", "config", "position"] as const;
+/** Everything else the update endpoint reads; a patch key outside both lists would be stripped. */
+const UPDATE_META_KEYS = ["message", "submittedBy", "autoMerge"] as const;
+const PATCH_KEYS = new Set<string>([...UPDATE_KEYS, ...UPDATE_META_KEYS]);
+
+const isGiven = (value: unknown): boolean => value !== undefined && value !== null && value !== "";
+
+/**
+ * Refuse an argument the action cannot apply, instead of dropping it.
+ *
+ * `update` used to read only `patch` and `position`, so `--name "…" --config-json
+ * '…' --position 4` moved the view and silently kept the old name and config —
+ * and without `--position` it claimed nothing had been passed at all. Every
+ * argument that reaches an action is now either sent or refused by name, the same
+ * contract `node_create` and `base_field_change_request` keep.
+ */
+const assertApplicable = (input: ViewChangeInput): void => {
+  const accepted = ACCEPTED_BY_ACTION[input.action];
+  const refused = CHANGE_PARAMS.filter((key) => isGiven(input[key]) && !accepted.includes(key));
+  if (refused.length === 0) return;
+  const hint =
+    input.action === "create"
+      ? " Create the view first, then send an `update` (with `position` to move it)."
+      : input.action === "update"
+        ? " A view's slug is fixed once it exists."
+        : "";
+  throw new Error(`action "${input.action}" does not take: ${refused.join(", ")}.${hint}`);
+};
+
+/**
+ * `update`'s payload: `patch` plus the same keys passed one by one. A key given
+ * both ways with different values is refused rather than letting one of them
+ * win silently.
+ */
+const buildUpdatePatch = (input: ViewChangeInput): Record<string, unknown> => {
+  if (
+    input.patch !== undefined &&
+    (input.patch === null || typeof input.patch !== "object" || Array.isArray(input.patch))
+  ) {
+    throw new Error('action "update": patch must be a JSON object, e.g. {"name":"Open tasks"}.');
+  }
+  const patch = { ...((input.patch ?? {}) as Record<string, unknown>) };
+  const unknownKeys = Object.keys(patch).filter((key) => !PATCH_KEYS.has(key));
+  if (unknownKeys.length > 0) {
+    throw new Error(
+      `action "update": patch does not take ${unknownKeys.join(", ")} — a view update changes ${UPDATE_KEYS.join(", ")}.`,
+    );
+  }
+  for (const key of UPDATE_KEYS) {
+    const value = input[key];
+    if (value === undefined) continue;
+    if (key in patch && JSON.stringify(patch[key]) !== JSON.stringify(value)) {
+      throw new Error(
+        `action "update": ${key} was passed both on its own and inside patch with different values — pass it once.`,
+      );
+    }
+    patch[key] = value;
+  }
+  if (!UPDATE_KEYS.some((key) => key in patch)) {
+    throw new Error(
+      'action "update" requires a change: name, type, description, config, position, or patch.',
+    );
+  }
+  return patch;
+};
 
 /**
  * `autoMerge` is tri-state — unset (permission-aware default), forced on, forced
@@ -80,26 +167,45 @@ export const viewChangeTask: TaskDefinition<ViewChangeInput> = {
     {
       name: "name",
       kind: "string",
+      appliesWhen: { param: "action", values: ["create", "update"] },
+      description: "View name (create; or update, to rename it).",
+    },
+    {
+      name: "slug",
+      kind: "string",
       appliesWhen: { param: "action", values: ["create"] },
-      description: "View name (create only).",
+      description:
+        "URL slug for the new view, lowercase `a-z`, `0-9` and `-` (create only; fixed afterwards). " +
+        "Omit it to have one derived from the name — `view-<hash>` when the name has no ASCII " +
+        "letters, with `-2`, `-3`… appended if that one is taken.",
     },
     {
       name: "type",
       kind: "string",
-      appliesWhen: { param: "action", values: ["create"] },
-      description: "View type, e.g. `table`, `gallery` (create only).",
+      appliesWhen: { param: "action", values: ["create", "update"] },
+      description: "View type: `table`, `gallery`, `kanban`, `calendar` or `gantt`.",
+    },
+    {
+      name: "description",
+      kind: "string",
+      appliesWhen: { param: "action", values: ["create", "update"] },
+      description: "What the view is for (create or update).",
     },
     {
       name: "config",
       kind: "json",
-      appliesWhen: { param: "action", values: ["create"] },
-      description: "View configuration — filters, sorts, visible fields (create only).",
+      appliesWhen: { param: "action", values: ["create", "update"] },
+      description:
+        "View configuration — filters, sorts, visible fields. On update only the keys you pass " +
+        "change; `sorts: []` clears the sort.",
     },
     {
       name: "patch",
       kind: "json",
       appliesWhen: { param: "action", values: ["update"] },
-      description: "Changes to apply to the view (update only).",
+      description:
+        "The update as one object (`name`, `type`, `description`, `config`, `position`) — the same " +
+        "keys the separate arguments set. Pass each key one way, not both (update only).",
     },
     {
       name: "position",
@@ -126,7 +232,9 @@ export const viewChangeTask: TaskDefinition<ViewChangeInput> = {
   examples: [
     'busabase-cli views change-request --action create --base-id bas_1 --name "Published" --type table',
     'busabase-cli views change-request --action create --base-id bas_1 --name "Published" --require-review',
+    'busabase-cli views change-request --action create --base-id bas_1 --name "看板 · 按状态" --slug board-by-status --type kanban',
     "busabase-cli views change-request --action update --view-id viw_1 --position 0",
+    'busabase-cli views change-request --action update --view-id viw_1 --name "Open tasks" --config-json \'{"sorts":[{"fieldSlug":"due","direction":"asc"}]}\'',
     "busabase-cli views change-request --action delete --view-id viw_1",
   ],
   execute: async (client: BusabaseTaskClient, input: ViewChangeInput) => {
@@ -142,6 +250,8 @@ export const viewChangeTask: TaskDefinition<ViewChangeInput> = {
       ...mergeIntent(input),
     };
 
+    assertApplicable(input);
+
     if (input.action === "create") {
       if (!input.baseId || !input.name) {
         throw new Error('action "create" requires baseId and name.');
@@ -150,7 +260,9 @@ export const viewChangeTask: TaskDefinition<ViewChangeInput> = {
         operation: "create",
         baseId: input.baseId,
         name: input.name,
+        ...(input.slug ? { slug: input.slug } : {}),
         ...(input.type ? { type: input.type } : {}),
+        ...(input.description !== undefined ? { description: input.description } : {}),
         ...(input.config ? { config: input.config } : {}),
         ...meta,
       } as ViewInput);
@@ -160,14 +272,11 @@ export const viewChangeTask: TaskDefinition<ViewChangeInput> = {
     const target = { viewId: input.viewId, ...meta };
 
     if (input.action === "update") {
-      if (!input.patch && input.position === undefined) {
-        throw new Error('action "update" requires patch or position.');
-      }
+      // The patch goes first so nothing inside it can retarget the request.
       return client.views.changeRequest({
+        ...buildUpdatePatch(input),
         operation: "update",
         ...target,
-        ...((input.patch ?? {}) as Record<string, unknown>),
-        ...(input.position !== undefined ? { position: input.position } : {}),
       } as ViewInput);
     }
     if (input.action === "delete") {

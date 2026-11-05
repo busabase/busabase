@@ -122,7 +122,11 @@ const formatAttachmentSize = (bytes: number) => {
   if (bytes < 1024 * 1024) {
     return `${(bytes / 1024).toFixed(1)} KB`;
   }
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  // Attachments now reach 5 GB; "3072.0 MB" reads worse than "3.0 GB".
+  if (bytes < 1024 * 1024 * 1024) {
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 };
 
 const KNOWN_ACTOR_LABELS: Record<string, string> = {

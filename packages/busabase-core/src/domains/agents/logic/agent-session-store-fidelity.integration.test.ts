@@ -148,6 +148,48 @@ describe("ACP event journal — real PGlite", () => {
     }
   });
 
+  it("round-trips and removes a confirmed session mode without sharing it or changing model metadata", async () => {
+    const modeOption = {
+      id: "permission_mode",
+      name: "Permission mode",
+      source: "config" as const,
+      currentValue: "default",
+      options: [
+        { value: "default", name: "Default", description: "Ask before changes" },
+        { value: "full-access", name: "Full access" },
+      ],
+    };
+    expect(
+      await persistSessionModelOption(
+        "fidelity-session",
+        null,
+        undefined,
+        undefined,
+        null,
+        modeOption,
+      ),
+    ).toBe(true);
+    expect((await loadSessionRuntime("fidelity-session"))?.session).toMatchObject({
+      modelOption: null,
+      thinkingOption: null,
+      modeOption,
+    });
+    await persistSessionCreated({
+      id: "other-mode-session",
+      slug: "buda:test",
+      agentName: "Test",
+      transport: "remote-websocket",
+      status: "idle",
+      createdAt: new Date().toISOString(),
+      lastActivityAt: new Date().toISOString(),
+      error: null,
+      modelOption: null,
+    });
+    expect((await loadSessionRuntime("other-mode-session"))?.session.modeOption).toBeNull();
+    expect(await persistSessionModelOption("fidelity-session", null)).toBe(true);
+    expect((await loadSessionRuntime("fidelity-session"))?.session.modeOption).toBeNull();
+  });
+
   it("does not acknowledge or append an event when its turn owner fence is stale", async () => {
     const lease = await acquireSessionLease("fidelity-session", "owner");
     expect(lease).not.toBeNull();

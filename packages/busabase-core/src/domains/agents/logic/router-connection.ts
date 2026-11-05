@@ -22,6 +22,8 @@ import { getRouterGrantTokens, trustedFetch } from "./router-oauth";
 export interface RouterConnectionLaunch {
   url: string;
   authHeader: string;
+  /** Principal/grant identity, independent of refreshed OAuth access tokens. */
+  bindingRef: string;
 }
 
 interface StoredConnectionSecret {
@@ -263,7 +265,17 @@ export async function resolveRouterConnectionLaunch(slug: string): Promise<Route
   );
   if (!live.ok) throw new Error("This ACPRouter connection is no longer authorized.");
 
-  return { url: stored.url, authHeader: `Bearer ${stored.secret}` };
+  return {
+    url: stored.url,
+    authHeader: `Bearer ${stored.secret}`,
+    bindingRef: JSON.stringify([
+      found.connection.id,
+      found.grant.id,
+      found.connection.acprouterEnrollmentId,
+      found.connection.acprouterAgentId,
+      found.connection.vaultItemId,
+    ]),
+  };
 }
 
 /**

@@ -73,7 +73,7 @@ describe("changeRequests affectsNodeId filter", () => {
     const current = await client.fileTrees.readFile({
       type: "airapp",
       nodeId: airapp.node.id,
-      filePath: "client.js",
+      filePath: "public/client.js",
     });
     const directAirAppCr = await client.fileTrees.createChangeRequest({
       type: "airapp",
@@ -84,7 +84,7 @@ describe("changeRequests affectsNodeId filter", () => {
       operations: [
         {
           kind: "update",
-          path: "client.js",
+          path: "public/client.js",
           content: `${current.content}\nconsole.log("node filter");\n`,
           baseContentHash: current.contentHash,
         },

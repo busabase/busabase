@@ -1,6 +1,8 @@
 import type { BaseFieldVO } from "busabase-contract/types";
+import { collectFieldRefs } from "../formula/ast";
 import { buildFieldGraph } from "../formula/dependency";
 import { evaluateFormulaField } from "../formula/evaluation";
+import { parseFormula } from "../formula/parser";
 import type { LookupResolution } from "./lookup-values";
 
 /** Lookup values and every formula which transitively reads them are read-time values. */
@@ -18,6 +20,23 @@ export const lookupDependentFieldSlugs = (fields: ReadonlyArray<BaseFieldVO>): S
     }
   }
   return affected;
+};
+
+/** The stored fields a Base's read-time formulas read, directly or through each other. */
+export const lookupFormulaInputSlugs = (fields: ReadonlyArray<BaseFieldVO>): Set<string> => {
+  const dynamic = lookupDependentFieldSlugs(fields);
+  const inputs = new Set<string>();
+  for (const field of fields) {
+    if (field.type !== "formula" || !dynamic.has(field.slug)) continue;
+    try {
+      for (const slug of collectFieldRefs(parseFormula(field.options.formula?.expression ?? ""))) {
+        inputs.add(slug);
+      }
+    } catch {
+      // An invalid expression evaluates to its own error, whatever the inputs hold.
+    }
+  }
+  return inputs;
 };
 
 /** Never persist an ACL-dependent result, or manufacture a source record edit. */

@@ -7,7 +7,7 @@ type AirAppRunnerEngine = "local" | "remote";
 
 import { ORPCError } from "@orpc/server";
 import { assertNodePermission } from "../../../logic/node-acl";
-import { resolveAvailableAirAppEngines } from "./engine-availability";
+import { assertEngineIncludedInPlan, resolveAvailableAirAppEngines } from "./engine-availability";
 import { currentPreviewOwner } from "./local-preview-registry";
 import { runAirAppLocal } from "./local-runtime";
 import { __resetSandockRuntimeForTest, runAirAppSandock } from "./sandock-runtime";
@@ -276,12 +276,14 @@ const enforceOwnerLimit = async (owner: string, limit: number): Promise<void> =>
  * deployment that has no remote provider configured is not denying the caller
  * anything, it simply has nothing to run it on, and the message should say so.
  */
-const assertEngineOfferedHere = (engine: AirAppRunnerEngine): void => {
+const assertEngineOfferedHere = async (engine: AirAppRunnerEngine): Promise<void> => {
   const available = resolveAvailableAirAppEngines();
-  if (available.includes(engine)) return;
-  throw new ORPCError("FORBIDDEN", {
-    message: `AirApp engine "${engine}" is not offered by this deployment (available: ${available.join(", ")}).`,
-  });
+  if (!available.includes(engine)) {
+    throw new ORPCError("FORBIDDEN", {
+      message: `AirApp engine "${engine}" is not offered by this deployment (available: ${available.join(", ")}).`,
+    });
+  }
+  await assertEngineIncludedInPlan(engine);
 };
 
 /**
@@ -305,7 +307,7 @@ export async function* runOrAttachSession(
   // in `runAirAppLocal` — that generator now runs detached from any request, so
   // it must not depend on ambient context to decide who may do what.
   await assertNodePermission(input.nodeId, "write");
-  assertEngineOfferedHere(input.engine);
+  await assertEngineOfferedHere(input.engine);
   const owner = currentPreviewOwner();
 
   const existing = readSession(input.nodeId, owner);

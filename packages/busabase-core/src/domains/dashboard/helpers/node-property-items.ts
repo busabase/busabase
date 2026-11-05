@@ -90,13 +90,21 @@ const fileTreeSpecifics = (
   detail: Extract<NodeDetailVO, { type: "skill" | "drive" | "airapp" }>,
   messages: CoreI18nMessages,
 ): NodePropertyItem[] => {
+  // `files` carries at most the server's inline limit, so its length is NOT the
+  // node's file count. `fileCount` is the total; older payloads omit it.
+  const fileCount = detail.fileCount ?? detail.files.length;
+  const filesTruncated = detail.filesTruncated === true;
   const totalBytes = detail.files.reduce(
     (sum, file) => sum + (Number.isFinite(file.size) ? file.size : 0),
     0,
   );
   return [
-    { label: messages.nodeDetail.files, value: String(detail.files.length) },
-    { label: messages.nodeDetail.totalSize, value: formatByteSize(totalBytes) },
+    { label: messages.nodeDetail.files, value: String(fileCount) },
+    // A sum over a partial listing is not a total, and labelling it as one
+    // would be a confidently wrong number. Quote it only when it is complete.
+    ...(filesTruncated
+      ? []
+      : [{ label: messages.nodeDetail.totalSize, value: formatByteSize(totalBytes) }]),
     ...(detail.version
       ? [{ label: messages.nodeDetail.version, value: `v${detail.version}` }]
       : []),
@@ -112,6 +120,7 @@ const fileTreeSpecifics = (
                   browser: messages.airapp.engineBrowser,
                   local: messages.airapp.engineLocal,
                   remote: messages.airapp.engineRemote,
+                  site: messages.airapp.engineSite,
                 }[detail.node.settings.airappEngine]
               : messages.airapp.engineFollowApp,
           },

@@ -25,7 +25,10 @@ import {
 } from "../../../db/schema";
 import { CURRENT_USER_ID, id as generateId, now, rootNodeIdForSpace } from "../../../logic/kernel";
 import { ensureReady } from "../../../logic/seed";
-import { withStorageKeyRegistration } from "../../assets/logic/storage-cleanup-logic";
+import {
+  objectIsStillReferenced,
+  withStorageKeyRegistration,
+} from "../../assets/logic/storage-cleanup-logic";
 import { insertDefaultGridView } from "../../base/logic/default-view";
 import { writeDocBody } from "../../doc/handlers";
 import { writeFolderBody } from "../../folder/handlers";
@@ -292,9 +295,28 @@ export const importTableRows = async (input: ImportTablesInput): Promise<ImportT
           });
         }
       }
-      await withStorageKeyRegistration(db, storageKey, () =>
-        storage.uploadFileToKey(bytes, storageKey, mimeType),
-      );
+      // Write the bytes BEFORE the fence: `uploadFileToKey` is network I/O, and
+      // holding a row lock across it parks a pooled connection (and the key)
+      // for the whole transfer. The fence still gates acceptance.
+      const alreadyStored = await storage.objectExists(storageKey);
+      await storage.uploadFileToKey(bytes, storageKey, mimeType);
+      try {
+        await withStorageKeyRegistration(db, storageKey, async () => undefined);
+      } catch (error) {
+        // A retired key may already be past its final sweep, so nothing would
+        // ever collect these bytes. Remove only what this call wrote, and never
+        // an object a row still points at (a shared key stays retired while
+        // deletion is deferred, and a timed-out HEAD reads as "not stored").
+        if (
+          error instanceof ORPCError &&
+          error.code === "CONFLICT" &&
+          !alreadyStored &&
+          !(await objectIsStillReferenced(db, storageKey))
+        ) {
+          await storage.deleteObject(storageKey).catch(() => {});
+        }
+        throw error;
+      }
     }
     return { inserted: input.rows.length };
   }
@@ -430,19 +452,30 @@ export const importTableRows = async (input: ImportTablesInput): Promise<ImportT
       // Preserve archive ids/metadata, but apply the host's actual-object check
       // and serialized quota transaction to every registry row. One outer
       // transaction makes a rejected batch atomic, including its earlier rows.
+      const confirmations = rowsToInsert.map((row) => ({
+        storageKey: row.storageKey as string,
+        fileName: row.fileName as string,
+        mimeType: row.mimeType as string,
+        sizeBytes: row.sizeBytes as number,
+        spaceId,
+      }));
+      // That transaction keeps each confirmed row's space and key locks until
+      // commit, so the per-row object HEADs and plan check run here, before it
+      // opens. Keys are validated first so no HEAD is issued for a bad key.
+      if (policy.prepareConfirmations) {
+        for (const confirmation of confirmations) {
+          await validateAttachmentRestoreKey(db, confirmation.storageKey, spaceId);
+        }
+        await policy.prepareConfirmations(confirmations);
+      }
       await db.transaction(async (tx) => {
-        for (const row of rowsToInsert) {
-          const storageKey = row.storageKey as string;
+        for (const [index, row] of rowsToInsert.entries()) {
+          const confirmation = confirmations[index];
+          const storageKey = confirmation.storageKey;
           await validateAttachmentRestoreKey(tx, storageKey, spaceId);
           await policy.confirmUpload(
             {
-              input: {
-                storageKey,
-                fileName: row.fileName as string,
-                mimeType: row.mimeType as string,
-                sizeBytes: row.sizeBytes as number,
-                spaceId,
-              },
+              input: confirmation,
               userId: resolveActorId(CURRENT_USER_ID),
               db: tx,
               attachmentsTable: attachments,

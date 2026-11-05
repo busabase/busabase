@@ -3,12 +3,15 @@ import os from "node:os";
 import path from "node:path";
 import { createRouterClient } from "@orpc/server";
 import { eq } from "drizzle-orm";
-import { storage } from "openlib/storage";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { LocalStorage, storage } from "openlib/storage";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { getDb } from "../src/db";
 import { attachments, busabaseAssets, busabaseAssetUsages, busabaseNodes } from "../src/db/schema";
 import { TEXT_TEMP_PREFIX } from "../src/domains/assets/logic/asset-texts-logic";
-import { processStorageCleanupJobs } from "../src/domains/assets/logic/storage-cleanup-logic";
+import {
+  enqueueStorageCleanup,
+  processStorageCleanupJobs,
+} from "../src/domains/assets/logic/storage-cleanup-logic";
 import { busabaseAssetTexts } from "../src/domains/assets/schema/asset-texts";
 import { busabaseRouter } from "../src/router";
 import { grepFiles } from "./helpers/grep-files";
@@ -331,6 +334,47 @@ describe("Drive Grep Retrieval — putText / grep / readLines", () => {
       await client.assets.delete({ assetId });
       await processStorageCleanupJobs(await getDb(), { now: new Date(Date.now() + 1_000) });
       expect(await storage.objectExists(newRow.textStorageKey)).toBe(false);
+    });
+
+    it("writes bytes before taking the key fence and retries on a fresh key if it was retired meanwhile", async () => {
+      const { assetId } = await uploadAsset({
+        fileName: "text-race.pdf",
+        mimeType: "application/pdf",
+        hashByte: "e",
+      });
+      const text = "Text whose canonical key is retired during its own upload.";
+      const db = await getDb();
+      const writtenKeys: string[] = [];
+      const upload = LocalStorage.prototype.uploadFileToKey;
+      const spy = vi
+        .spyOn(LocalStorage.prototype, "uploadFileToKey")
+        .mockImplementation(async function (this: LocalStorage, ...args) {
+          const result = await upload.apply(this, args);
+          const key = args[1] as string;
+          writtenKeys.push(key);
+          // Simulate a collector retiring the key between the PUT and the fence.
+          // This only completes if the PUT ran without the fence held.
+          if (writtenKeys.length === 1) {
+            await enqueueStorageCleanup(db, {
+              storageKey: key,
+              kind: "derived_text",
+              spaceId: "local",
+            });
+          }
+          return result;
+        });
+      try {
+        await client.assets.putText({ assetId, text });
+      } finally {
+        spy.mockRestore();
+      }
+      const row = expectDefined(await getTextRow(assetId));
+      expect(writtenKeys).toHaveLength(2);
+      expect(row.textStorageKey).toBe(writtenKeys[1]);
+      expect(row.textStorageKey).not.toBe(writtenKeys[0]);
+      // Bytes written to the retired key are removed, not left for a sweep that may never come.
+      expect(await storage.objectExists(writtenKeys[0] as string)).toBe(false);
+      expect((await storage.getObject(row.textStorageKey)).toString()).toBe(text);
     });
   });
 

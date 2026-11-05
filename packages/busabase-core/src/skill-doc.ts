@@ -260,6 +260,7 @@ Quick reference — every path is relative to the base URL above; worked example
 | Read records | \`GET /api/v1/records\` | merged canonical records |
 | Agent work queue | \`GET /api/v1/agent/tasks\` | CRs awaiting your revision |
 | Revise an operation | \`POST /api/v1/operations/:operationId/revisions\` | answer requested changes |
+| Space welcome page | \`GET\` / \`PUT /api/v1/space-welcome\` | which Doc/HTML node Home shows first; write the node, then \`PUT { nodeId, expectedVersion }\` (managers) — CLI \`${BUSABASE_CLI} space-welcome set --node <id>\` |
 
 List Bases:
 

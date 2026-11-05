@@ -49,6 +49,14 @@ const UNBATCHABLE_PROCEDURES = new Set([
   "search",
   "agents.sessions.subscribe",
   "airapps.runLocal",
+  // These read a whole app's files and, for two of them, upload it. Seconds of
+  // work that must not hold unrelated dashboard reads in the same batch.
+  "airapps.siteState",
+  "airapps.siteDomains",
+  "airapps.siteBindDomain",
+  "airapps.siteUnbindDomain",
+  "airapps.siteDeployPreview",
+  "airapps.siteGoLive",
   "live.subscribe",
 ]);
 

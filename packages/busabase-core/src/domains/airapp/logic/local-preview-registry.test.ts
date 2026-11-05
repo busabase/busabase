@@ -1,12 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const sharedTargets = vi.hoisted(() => new Map<string, string>());
+const cacheState = vi.hoisted(() => ({ broken: false }));
 vi.mock("openlib/cache", () => ({
   cache: Promise.resolve({
     set: async (key: string, value: string) => {
+      if (cacheState.broken) throw new Error("cache unavailable");
       sharedTargets.set(key, value);
     },
-    get: async (key: string) => sharedTargets.get(key) ?? null,
+    get: async (key: string) => {
+      if (cacheState.broken) throw new Error("cache unavailable");
+      return sharedTargets.get(key) ?? null;
+    },
     del: async (key: string) => {
       sharedTargets.delete(key);
     },
@@ -30,6 +35,7 @@ const sharedTargetKey = (nodeId: string, owner: string): string =>
 
 beforeEach(() => {
   sharedTargets.clear();
+  cacheState.broken = false;
 });
 
 /**
@@ -37,6 +43,17 @@ beforeEach(() => {
  * asserted here rather than assumed from the shape of the key.
  */
 describe("local preview registry", () => {
+  it("keeps serving a preview this process registered when the cache is broken", async () => {
+    cacheState.broken = true;
+    await registerLocalPreview("node-broken", "user-1", "http://127.0.0.1:4009");
+
+    expect(await getLocalPreviewTarget("node-broken", "user-1")).toBe("http://127.0.0.1:4009");
+    expect(await getLocalPreviewTarget("node-broken", "user-2")).toBeUndefined();
+
+    cacheState.broken = false;
+    await unregisterLocalPreview("node-broken", "user-1");
+  });
+
   it("does not surface one owner's running preview to another", async () => {
     // Starting a run requires `write` on the node. Viewing one used to require
     // nothing but the nodeId, because the proxy looked up by nodeId alone.

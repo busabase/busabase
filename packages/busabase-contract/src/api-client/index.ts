@@ -3,10 +3,17 @@ import { RPCLink } from "@orpc/client/fetch";
 import type { ContractRouterClient } from "@orpc/contract";
 import { OpenAPILink } from "@orpc/openapi-client/fetch";
 import type {
+  AbortMultipartUploadDTO,
+  AbortMultipartUploadVO,
+  CompleteMultipartUploadDTO,
   ConfirmUploadDTO,
   ConfirmUploadVO,
+  CreateMultipartUploadDTO,
+  CreateMultipartUploadVO,
   RequestUploadUrlDTO,
   RequestUploadUrlVO,
+  SignMultipartPartsDTO,
+  SignMultipartPartsVO,
 } from "open-domains/attachments/types";
 import type { iString } from "openlib/i18n/i-string";
 import type { z } from "zod";
@@ -563,6 +570,10 @@ export interface BusabaseDashboardApiClient {
   ) => Promise<ChangeRequestVO>;
   createAssetUploadUrl: (input: RequestUploadUrlDTO) => Promise<RequestUploadUrlVO>;
   confirmAsset: (input: ConfirmUploadDTO) => Promise<ConfirmUploadVO>;
+  createAssetMultipartUpload: (input: CreateMultipartUploadDTO) => Promise<CreateMultipartUploadVO>;
+  signAssetMultipartParts: (input: SignMultipartPartsDTO) => Promise<SignMultipartPartsVO>;
+  completeAssetMultipartUpload: (input: CompleteMultipartUploadDTO) => Promise<ConfirmUploadVO>;
+  abortAssetMultipartUpload: (input: AbortMultipartUploadDTO) => Promise<AbortMultipartUploadVO>;
   updateAssetMetadata: (input: {
     assetId: string;
     metadata: Record<string, unknown>;
@@ -856,6 +867,10 @@ export const createBusabaseRestApiClient = (
       client.bases.createBulkUpdateChangeRequest({ baseId, ...payload }),
     createAssetUploadUrl: (input) => client.assets.createUploadUrl(input),
     confirmAsset: (input) => client.assets.confirm(input),
+    createAssetMultipartUpload: (input) => client.assets.createMultipartUpload(input),
+    signAssetMultipartParts: (input) => client.assets.signMultipartParts(input),
+    completeAssetMultipartUpload: (input) => client.assets.completeMultipartUpload(input),
+    abortAssetMultipartUpload: (input) => client.assets.abortMultipartUpload(input),
     updateAssetMetadata: (input) => client.assets.updateMetadata(input),
     createRestoreBaseChangeRequest: (baseId, payload) =>
       client.bases.lifecycleChangeRequest({ baseId, operation: "restore", ...payload }),

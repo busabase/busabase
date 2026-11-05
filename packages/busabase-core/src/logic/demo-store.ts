@@ -593,6 +593,11 @@ export const demoGetFileTree = (
     visibility: "workspace",
     version: "0.1.0",
     files: def.files.map((file) => toDemoFileTreeFile(def.nodeId, node.updatedAt, file)),
+    // Demo file trees are a handful of seed files, so they are never truncated —
+    // but they must still report the count, or a client that prefers
+    // `fileCount` over `files.length` would show 0 for every demo Drive.
+    fileCount: def.files.length,
+    filesTruncated: false,
   };
 };
 
@@ -881,9 +886,12 @@ const buildDemoAssetIndex = (): {
   return { assets, usages };
 };
 
+/** Mirrors the real handler's bound on an unpaged call (`ASSET_UNPAGED_LIMIT`). */
+const DEMO_UNPAGED_ASSET_LIMIT = 1_000;
+
 export const demoListAssets = (input?: ListAssetsDTO): AssetVO[] => {
   const all = [...buildDemoAssetIndex().assets.values()];
-  if (input?.limit === undefined) return all;
+  if (input?.limit === undefined) return all.slice(0, DEMO_UNPAGED_ASSET_LIMIT);
   // Mirror the real handler's contract so a demo-mode caller exercises the same
   // paging loop it will run against a live workspace: `cursor` is the previous
   // page's last asset id, and an unknown one is an error rather than a silent

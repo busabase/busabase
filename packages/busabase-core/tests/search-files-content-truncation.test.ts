@@ -3,36 +3,13 @@ import os from "node:os";
 import path from "node:path";
 import { createRouterClient } from "@orpc/server";
 import { eq } from "drizzle-orm";
-import { storage } from "openlib/storage";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { LocalStorage, storage } from "openlib/storage";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { getDb } from "../src/db";
 import { busabaseAssetUsages } from "../src/domains/assets/schema/assets";
 import { busabaseRouter } from "../src/router";
 
-/**
- * The other half of `search-files-recency-window.test.ts`.
- *
- * That file pins IDENTITY matching (filename/path/node name) surviving the
- * recency window — the deterministic false negative spec S2 calls "confidently
- * wrong", now fixed by pushing identity matching into SQL with no row cap.
- *
- * CONTENT matching (a phrase inside the file body, not its name) is a
- * different story: it stays behind `MAX_ASSET_USAGE_SCAN_ROWS`, because
- * scanning a file's body is a real object-storage read, not a free indexed
- * string comparison — a cost bound there is legitimate, not a bug. What *was*
- * missing is honesty about it: `contentTruncated` must tell the truth when the
- * cap genuinely left candidates unscanned, instead of the search staying
- * silent about it (spec D2b, the same principle `searchNodeContent` already
- * had for node bodies).
- *
- * This file proves the ordinary case: with nothing anywhere near the scan
- * cap, a content-only match (the phrase is only in the file body, never in
- * its name/path) is still found and the response does not falsely claim
- * truncation. `search-files-truncation-disclosure.test.ts` is the other half
- * — a workspace that genuinely exceeds the cap — kept in its own file because
- * `getDb()` is a per-process singleton (see `packages/busabase-core/src/db`):
- * two independent PGLite lifecycles cannot coexist inside one test file.
- */
+/** A complete indexed corpus must answer body searches without storage scans. */
 
 type Client = ReturnType<typeof createRouterClient<typeof busabaseRouter, Record<never, never>>>;
 
@@ -122,4 +99,31 @@ describe("search — files source content matching, ordinary (uncapped) case", (
     expect(result.results.map((r) => r.title)).toContain("quarterly-notes.txt");
     expect(result.contentTruncated).toBe(false);
   });
+
+  // Slow storage used to exhaust the request budget while looking for a word
+  // that no file contained. Indexed corpus search should not touch storage.
+  it("does not spend its request budget rereading indexed object storage", async () => {
+    for (let index = 0; index < 6; index++) {
+      const assetId = await uploadAsset(`slow-${index}.txt`, `body ${index}\n`, String(index + 2));
+      await mountAsFileNode(assetId, `slow-${index}`, `Slow ${index}`);
+    }
+    const original = LocalStorage.prototype.objectExists;
+    const spy = vi.spyOn(LocalStorage.prototype, "objectExists").mockImplementation(async function (
+      this: LocalStorage,
+      key: string,
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      return original.call(this, key);
+    });
+    process.env.BUSABASE_SEARCH_FULL_REQUEST_TIMEOUT_MS = "1500";
+    try {
+      const result = await client.search({ query: "in-no-file-at-all", sources: ["files"] });
+      expect(result.results).toHaveLength(0);
+      expect(result.contentTruncated).toBe(false);
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      delete process.env.BUSABASE_SEARCH_FULL_REQUEST_TIMEOUT_MS;
+      spy.mockRestore();
+    }
+  }, 60_000);
 });

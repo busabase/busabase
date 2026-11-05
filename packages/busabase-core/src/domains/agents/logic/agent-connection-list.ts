@@ -62,6 +62,7 @@ export async function listAgentConnections(
       connections.push({
         slug: connection.slug,
         agentName: connection.agentName ?? connection.agentSlug,
+        providerAgentSlug: connection.agentSlug,
         transport: "remote-websocket",
         sessionCount: sessions.filter((session) => session.slug === connection.slug).length,
         latest: sessions.find((session) => session.slug === connection.slug) ?? null,

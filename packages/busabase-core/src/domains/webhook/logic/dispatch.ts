@@ -13,7 +13,7 @@ import {
 } from "../schema/webhook-rules";
 import type { WebhookDeliveryStatus, WebhookDeliveryVO, WebhookEventType } from "../types/webhook";
 import { runFunction } from "./sandbox";
-import { checkUrlIsSafeToFetch } from "./ssrf-guard";
+import { checkUrlIsSafeToFetch, fetchWithSsrfGuard } from "./ssrf-guard";
 import { decryptWebhookSecret } from "./webhook-crypto";
 import { toWebhookDeliveryVO } from "./webhook-logic";
 
@@ -106,12 +106,22 @@ const performHttpDelivery = async (args: {
     }
 
     try {
-      const response = await fetch(args.url, {
+      // Guarded again on every redirect hop, not only the first URL.
+      const fetched = await fetchWithSsrfGuard(args.url, {
         method: args.method ?? "POST",
         headers,
         body: args.body,
         signal: AbortSignal.timeout(HTTP_DELIVERY_TIMEOUT_MS),
       });
+      if (fetched.blocked) {
+        return {
+          status: "failed",
+          httpStatus: null,
+          detail: truncate(`Blocked: redirect target ${fetched.reason} (SSRF protection)`),
+          durationMs: Date.now() - overallStartedAt,
+        };
+      }
+      const response = fetched.response;
       const durationMs = Date.now() - overallStartedAt;
       if (response.ok) {
         return { status: "success", httpStatus: response.status, detail: null, durationMs };

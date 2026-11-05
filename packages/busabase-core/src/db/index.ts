@@ -6,7 +6,8 @@ import path from "node:path";
 import { drizzle as drizzlePglite } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
 import { drizzle as drizzlePg } from "drizzle-orm/postgres-js";
-import postgres from "postgres";
+import { createGuardedPostgresClient } from "openlib/db/replicas";
+import type postgres from "postgres";
 import { getContextDb } from "../context";
 import * as schema from "./schema";
 
@@ -61,7 +62,7 @@ function initSync(): DbInstance {
     throw new Error("PGLite requires async init — use initAsync()");
   }
 
-  const client = postgres(url, { prepare: false });
+  const client = createGuardedPostgresClient(url, { prepare: false });
   state.client = client;
   state.db = drizzlePg({ client, schema });
   return state.db;

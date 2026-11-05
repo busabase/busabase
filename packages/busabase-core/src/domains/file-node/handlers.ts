@@ -5,7 +5,13 @@ import { createFileNodeInputSchema } from "busabase-contract/domains/file-node/c
 import type { ChangeRequestVO, FileNodeVO, NodeVO } from "busabase-contract/types";
 import { and, eq, isNull } from "drizzle-orm";
 import type { z } from "zod";
-import { getContextSpaceId, resolveActorId, runWithSearchDatabase } from "../../context";
+import {
+  assertContextCreationAllowed,
+  getContextSpaceId,
+  resolveActorId,
+  runWithContextCreationGuard,
+  runWithSearchDatabase,
+} from "../../context";
 import { getDb } from "../../db";
 import { busabaseAssetUsages, busabaseNodes, type NodePO } from "../../db/schema";
 import { CURRENT_USER_ID, id, now, rootNodeIdForSpace } from "../../logic/kernel";
@@ -204,59 +210,66 @@ export const createFileNode = async (
     return { ...changeRequest, materialized: false as const };
   }
 
+  await assertContextCreationAllowed({ nodes: 1 });
+
   const nodeId = id("nod");
   const timestamp = now();
   try {
-    await db.transaction(async (transaction) => {
-      const tx = transaction as unknown as typeof db;
-      const [lockedParent] = await tx
-        .select()
-        .from(busabaseNodes)
-        .where(
-          and(eq(busabaseNodes.id, parentNode.id), eq(busabaseNodes.spaceId, getContextSpaceId())),
-        )
-        .for("update")
-        .limit(1);
-      if (!lockedParent || lockedParent.deletedAt || lockedParent.archivedAt)
-        throw new ORPCError("NOT_FOUND", { message: "Parent no longer exists" });
-      await tx.insert(busabaseNodes).values({
-        // Direct-materialization fast path: this insert never reaches
-        // `mergeNodeCreate`, so the creator has to be stamped here too.
-        createdBy: resolveActorId(CURRENT_USER_ID),
-        id: nodeId,
-        parentId: parentNode.id,
-        type: "file",
-        slug: parsed.slug,
-        name: parsed.name,
-        description: parsed.description,
-        // The backing Asset is recorded by the usage row below. Keeping it out
-        // of metadata avoids maintaining two sources of truth for one relation.
-        metadata: {},
-        position: 0,
-        createdAt: timestamp,
-        updatedAt: timestamp,
-      });
-      await syncFileNodeAssetUsage(nodeId, asset.id, tx);
-      await initializeNodeAcl(
-        tx,
-        getContextSpaceId(),
-        nodeId,
-        parentNode.id,
-        resolveActorId(CURRENT_USER_ID),
-      );
-      await runWithSearchDatabase(tx, () =>
-        recordMergedNodeCreate({
-          nodeId,
-          nodeType: "file",
+    await runWithContextCreationGuard({ nodes: 1 }, async () => {
+      await db.transaction(async (transaction) => {
+        const tx = transaction as unknown as typeof db;
+        const [lockedParent] = await tx
+          .select()
+          .from(busabaseNodes)
+          .where(
+            and(
+              eq(busabaseNodes.id, parentNode.id),
+              eq(busabaseNodes.spaceId, getContextSpaceId()),
+            ),
+          )
+          .for("update")
+          .limit(1);
+        if (!lockedParent || lockedParent.deletedAt || lockedParent.archivedAt)
+          throw new ORPCError("NOT_FOUND", { message: "Parent no longer exists" });
+        await tx.insert(busabaseNodes).values({
+          // Direct-materialization fast path: this insert never reaches
+          // `mergeNodeCreate`, so the creator has to be stamped here too.
+          createdBy: resolveActorId(CURRENT_USER_ID),
+          id: nodeId,
+          parentId: parentNode.id,
+          type: "file",
           slug: parsed.slug,
           name: parsed.name,
           description: parsed.description,
-          parentNodeId: parentNode.id,
-          metadata: { assetId: asset.id },
-          message: `Create file ${parsed.name}`,
-          submittedBy: resolveActorId(CURRENT_USER_ID),
-        }),
-      );
+          // The backing Asset is recorded by the usage row below. Keeping it out
+          // of metadata avoids maintaining two sources of truth for one relation.
+          metadata: {},
+          position: 0,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        });
+        await syncFileNodeAssetUsage(nodeId, asset.id, tx);
+        await initializeNodeAcl(
+          tx,
+          getContextSpaceId(),
+          nodeId,
+          parentNode.id,
+          resolveActorId(CURRENT_USER_ID),
+        );
+        await runWithSearchDatabase(tx, () =>
+          recordMergedNodeCreate({
+            nodeId,
+            nodeType: "file",
+            slug: parsed.slug,
+            name: parsed.name,
+            description: parsed.description,
+            parentNodeId: parentNode.id,
+            metadata: { assetId: asset.id },
+            message: `Create file ${parsed.name}`,
+            submittedBy: resolveActorId(CURRENT_USER_ID),
+          }),
+        );
+      });
     });
   } catch (error) {
     if (isNodeSlugUniqueViolation(error)) {

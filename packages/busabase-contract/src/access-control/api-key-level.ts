@@ -78,18 +78,31 @@ export const parseBusabaseRelayPermissionLevel = (
  * already-present optional field — no column change, no reinterpretation of
  * rows written by this phase's UI (`nodeScope` absent = unrestricted, today's
  * behavior either way).
+ *
+ * `spaceId` IS enforced, and only the server ever writes it. It binds a key to
+ * one space: without it a key reaches every space its owner belongs to, which is
+ * right for a person's own CLI but not for a key the server mints on someone's
+ * behalf for one space's purpose (a published AirApp site). A bound key is
+ * refused for any other space and resolves to its own when no space is named.
+ * Editing a key's name or level keeps it.
  */
 /** Stored/read shape. `nodeScope` is accepted only for legacy forward-compatible reads. */
 export const apiKeyPermissionsSchema = z
   .object({
     level: z.enum(["read", "changeRequest", "write", "manage"]),
     nodeScope: z.array(z.string()).optional(),
+    /** Internal only: see above. `createApiKeyPermissionsSchema` never accepts it. */
+    spaceId: z.string().min(1).optional(),
   })
   .nullable();
 
 export type ApiKeyPermissions = z.infer<typeof apiKeyPermissionsSchema>;
 
-/** Public creation shape: nodeScope is intentionally rejected until it is enforced. */
+/**
+ * Public creation shape: nodeScope is intentionally rejected until it is enforced,
+ * and `spaceId` always is, because a caller must not be able to name the space a
+ * key is bound to.
+ */
 export const createApiKeyPermissionsSchema = z
   .object({
     level: z.enum(["read", "changeRequest", "write", "manage"]),
@@ -156,6 +169,11 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   // read them.
   "nodes.getAgentPrompts": node("read"),
   "nodes.searchByName": node("read"),
+  // Which Doc/HTML node Home shows as the space's welcome page. Reading it
+  // reveals only a node id (the node itself still goes through `nodes.get` and
+  // its per-node ACL); choosing it is workspace configuration, like instructions.
+  "spaceWelcome.get": workspace("read"),
+  "spaceWelcome.update": workspace("manage"),
   // Playbook discovery. Plain node reads: search returns only skills and
   // prompts on nodes the caller can already read (ACL applied in the SQL, same
   // as `nodes.searchByName`), and get returns a prompt `nodes.getAgentPrompts`
@@ -198,6 +216,11 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   "fileTrees.createChangeRequest": node("changeRequest"),
   "assets.createUploadUrl": workspace("changeRequest"),
   "assets.confirm": workspace("changeRequest"),
+  // The multipart variant of the same upload pair (large files): same floor.
+  "assets.createMultipartUpload": workspace("changeRequest"),
+  "assets.signMultipartParts": workspace("changeRequest"),
+  "assets.completeMultipartUpload": workspace("changeRequest"),
+  "assets.abortMultipartUpload": workspace("changeRequest"),
   // Same "upload for a not-yet-merged proposal" reasoning as the asset pair
   // above, but node-scoped rather than workspace-wide: a node icon belongs to
   // one node (see `attachments-logic.ts`'s `nodeIconOwnerId`), and the actual
@@ -312,6 +335,7 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   "bases.previewFieldConversion": node("read"),
 
   "fileTrees.listFiles": node("read"),
+  "fileTrees.listEntries": node("read"),
   "fileTrees.readFile": node("read"),
   "fileTrees.previewConfig": workspace("read"),
   // POST because it creates a short-lived provider session, but it neither
@@ -319,6 +343,31 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   "fileTrees.preparePreview": node("read"),
   "airapps.runLocal": node("write"),
   "airapps.stopLocal": node("write"),
+  "airapps.siteState": node("write"),
+  "airapps.siteDomains": node("write"),
+  "airapps.siteBindDomain": node("write"),
+  "airapps.siteUnbindDomain": node("write"),
+  "airapps.siteDeployPreview": node("write"),
+  "airapps.siteGoLive": node("write"),
+  "airapps.siteRepublish": node("write"),
+  "airapps.siteUnpublish": node("write"),
+  // Reading a run is a lookup. Starting or resuming one can execute a
+  // sandboxed `run_function` rule or a webhook step (outbound requests), so
+  // those calls sit at write. They still do not write records. This table only
+  // gates API keys; the handlers assert the same levels on the workflow node
+  // for every caller (`authorizeWorkflow` in domains/workflow/logic).
+  "workflows.get": node("read"),
+  "workflows.list": node("read"),
+  "workflows.start": node("write"),
+  "workflows.resume": node("write"),
+  "workflows.resumeElapsed": node("write"),
+  "workflows.cancel": node("write"),
+  "workflows.cancelQueued": node("write"),
+  // Read at this layer on purpose: an approval step can name an approver who
+  // only reads the workflow. The handler decides — a named approver (or a
+  // space manager) for a step that names one, write otherwise — and an agent
+  // also needs a write-level key and a step with `allowAgents` on.
+  "workflows.decide": node("read"),
   "nodes.readLines": node("read"),
 
   "forms.list": node("read"),
@@ -383,6 +432,7 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   // procedure in this family sits at the ceiling, same tier as vault/webhooks.
   "agents.catalog": workspace("manage"),
   "agents.connections.list": workspace("manage"),
+  "agents.connections.connectBuda": workspace("manage"),
   "agents.connections.detail": workspace("manage"),
   "agents.connections.rename": workspace("manage"),
   "agents.disconnect": workspace("manage"),

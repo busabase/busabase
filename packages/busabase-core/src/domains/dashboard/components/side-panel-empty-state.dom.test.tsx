@@ -183,6 +183,36 @@ describe("SidePanelEmptyState — Agents launcher card", () => {
 });
 
 describe("SidePanelAgentPicker", () => {
+  it.each([
+    { slug: "claude-acp", providerAgentSlug: undefined, providerName: "Claude Code" },
+    { slug: "codex-acp", providerAgentSlug: undefined, providerName: "Codex" },
+    { slug: "buda:research", providerAgentSlug: undefined, providerName: "Buda" },
+    { slug: "acprouter:device", providerAgentSlug: "claude-acp", providerName: "Claude Code" },
+    { slug: "acprouter:device", providerAgentSlug: "codex-acp", providerName: "Codex" },
+    { slug: "acprouter:device", providerAgentSlug: "gemini", providerName: "gemini" },
+    { slug: "acprouter:device", providerAgentSlug: "other-agent", providerName: "other-agent" },
+    { slug: "acprouter:device", providerAgentSlug: undefined, providerName: "ACP" },
+  ])(
+    "shows $providerName for $slug ($providerAgentSlug) and opens the chosen connection",
+    async (provider) => {
+      renderPicker({
+        agents: [
+          {
+            ...connection(provider.slug, "My renamed assistant", "sess-provider"),
+            providerAgentSlug: provider.providerAgentSlug,
+          },
+        ],
+      });
+      expect((await screen.findByTestId("agent-provider-badge")).textContent).toBe(
+        provider.providerName,
+      );
+      fireEvent.click(screen.getByRole("button", { name: /^My renamed assistant/ }));
+      expect(openAgentChatTab).toHaveBeenCalledWith(provider.slug, "My renamed assistant", {
+        sessionId: "sess-provider",
+      });
+    },
+  );
+
   it("keeps one connect action beside the picker heading when agents already exist", async () => {
     const { onNavigate } = renderPicker({
       agents: [connection("buda:research", "Research", "sess-latest")],

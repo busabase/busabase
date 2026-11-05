@@ -6,7 +6,7 @@ export const AIRAPP_DEMO_FUMADOCS: AirAppDemoDef = {
   slug: "demo-fumadocs",
   name: "Fumadocs Documentation",
   description:
-    "A real Next.js 16 documentation site generated from MDX by Fumadocs, with a sidebar and two routed pages. Requires a Sandock Remote machine.",
+    "A real Next.js 16 documentation site generated from MDX by Fumadocs, with a sidebar and two routed pages. Requires a cloud sandbox (Sandock).",
   files: [
     {
       path: "airapp.json",
@@ -264,7 +264,7 @@ export function getMDXComponents(components?: MDXComponents): MDXComponents {
       path: "content/docs/index.mdx",
       content: `---
 title: Fumadocs AirApp
-description: A real MDX documentation site running on a Sandock Remote machine.
+description: A real MDX documentation site running in a cloud sandbox (Sandock).
 ---
 
 This site is generated from MDX by Fumadocs and served by Next.js inside an AirApp.
@@ -294,7 +294,7 @@ description: Run, navigate, and customize this Fumadocs AirApp.
 
 ## Run the documentation site
 
-Open this AirApp in Busabase. A Sandock Remote machine installs the pinned dependencies, runs Fumadocs generation, and starts Next.js.
+Open this AirApp in Busabase. A cloud sandbox (Sandock) installs the pinned dependencies, runs Fumadocs generation, and starts Next.js.
 
 The preview opens at \`/docs\`. Use the sidebar to move between this page and the documentation home.
 

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { BaseFieldVO, LookupComputedVO } from "busabase-contract/types";
 import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -52,6 +52,64 @@ const show = (props: Partial<Parameters<typeof LookupFieldValue>[0]> = {}) =>
 afterEach(cleanup);
 
 describe("lookup typed result", () => {
+  it("previews all 26 attachment results independently of the capped provenance list", () => {
+    const files = Array.from({ length: 26 }, (_, index) => ({
+      id: `file${index}`,
+      fileName: `report${index}.pdf`,
+      url: `https://example.com/${index}.pdf`,
+      mimeType: "application/pdf",
+      size: 100,
+    }));
+    show({
+      presentation: "grid",
+      computed: computed({
+        targetField: { ...target, type: "attachment", options: {} },
+        value: files,
+        sourcesTruncated: true,
+        sources: files.slice(0, 25).map((file, index) => ({
+          recordId: `rec${index}`,
+          title: `Source ${index}`,
+          value: [file],
+          headCommitId: `commit${index}`,
+        })),
+      }),
+    });
+    const cell = screen.getByTestId("lookup-field-fees");
+    expect(cell.querySelectorAll("[data-attachment-preview]")).toHaveLength(1);
+    fireEvent.click(cell.querySelector("[data-attachment-overflow]") as HTMLElement);
+    const expanded = screen.getByTestId("attachment-cell-expanded");
+    expect(expanded.querySelectorAll("[data-attachment-cell-item]")).toHaveLength(26);
+    fireEvent.click(within(expanded).getByRole("button", { name: "report25.pdf" }));
+    const dialog = screen.getByTestId("attachment-preview-dialog");
+    expect(within(dialog).getByRole("heading", { name: "report25.pdf" })).toBeTruthy();
+    expect(dialog.querySelector("iframe")?.getAttribute("src")).toBe(files[25]?.url);
+    fireEvent.click(within(dialog).getByRole("button", { name: "关闭" }));
+    fireEvent.click(screen.getByTestId("lookup-sources-fees"));
+    expect(screen.getByTestId("lookup-sources-truncated").textContent).toContain("25");
+    expect(screen.getByTestId("lookup-source-dialog").textContent).not.toContain("Source 25");
+  });
+
+  it("shares a full preview across flow attachments while keeping its existing three-item summary", () => {
+    const files = Array.from({ length: 4 }, (_, index) => ({
+      id: `file${index}`,
+      fileName: `report${index}.pdf`,
+      url: `https://example.com/${index}.pdf`,
+      mimeType: "application/pdf",
+      size: 100,
+    }));
+    show({
+      computed: computed({
+        targetField: { ...target, type: "attachment", options: {} },
+        value: files,
+        sources: [],
+      }),
+    });
+    expect(screen.getAllByRole("link")).toHaveLength(3);
+    fireEvent.click(screen.getByRole("link", { name: "report0.pdf" }));
+    expect(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "report3.pdf" }),
+    ).toBeTruthy();
+  });
   it("formats calendar dates without raw JSON", () => {
     show({
       computed: computed({

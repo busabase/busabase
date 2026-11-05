@@ -8,6 +8,7 @@ import {
   AirAppRunError,
   AirAppServiceWorkerUnsupported,
   airAppAutoRunDelay,
+  airAppRunErrorText,
   createEligibleAirAppRunner,
   noEligibleAirAppEngineMessage,
 } from "./RunPanel";
@@ -180,6 +181,58 @@ describe("AirApp runtime engine eligibility", () => {
     expect(createRunner).not.toHaveBeenCalled();
   });
 
+  it("names the locked engine instead of constructing anything when only the plan stands in the way", () => {
+    // A Python app in a Free Cloud space: the deployment has remote machines,
+    // the space's plan does not. Nothing is booted — least of all a browser
+    // runner that is guaranteed to fail — and the caller learns which engine
+    // would run it, so it can show "upgrade" rather than "can't run here".
+    const createRunner = vi.fn((kind: string) => ({ kind }));
+
+    const result = createEligibleAirAppRunner({
+      runtime: "python",
+      userChose: false,
+      wantedKind: "browser",
+      availableEngines: ["browser"],
+      lockedEngines: ["remote"],
+      createRunner,
+    });
+
+    expect(result).toEqual({ runnerKind: null, runner: null, lockedEngine: "remote" });
+    expect(createRunner).not.toHaveBeenCalled();
+  });
+
+  it("treats a required remote engine outside the plan as locked", () => {
+    const createRunner = vi.fn((kind: string) => ({ kind }));
+
+    const result = createEligibleAirAppRunner({
+      runtime: "node",
+      requiredEngine: "remote",
+      userChose: false,
+      wantedKind: "browser",
+      availableEngines: ["browser"],
+      lockedEngines: ["remote"],
+      createRunner,
+    });
+
+    expect(result).toEqual({ runnerKind: null, runner: null, lockedEngine: "remote" });
+    expect(createRunner).not.toHaveBeenCalled();
+  });
+
+  it("falls a saved remote choice back to the browser when the plan locks remote and the app can run there", () => {
+    const createRunner = vi.fn((kind: string) => ({ kind }));
+
+    const result = createEligibleAirAppRunner({
+      runtime: "node",
+      userChose: true,
+      wantedKind: "remote",
+      availableEngines: ["browser"],
+      lockedEngines: ["remote"],
+      createRunner,
+    });
+
+    expect(result).toEqual({ runnerKind: "browser", runner: { kind: "browser" } });
+  });
+
   it("keeps the Python configuration prompt localized in supported Cloud locales", () => {
     expect(noEligibleAirAppEngineMessage(coreMessagesByLocale.en, "python")).toContain(
       "Configure Sandock",
@@ -194,14 +247,37 @@ describe("AirApp runtime engine eligibility", () => {
 
   it("keeps an unavailable required Remote engine localized", () => {
     expect(noEligibleAirAppEngineMessage(coreMessagesByLocale.en, "node", "remote")).toBe(
-      "This AirApp requires a Remote machine, but Sandock is not configured on this deployment.",
+      "This AirApp requires a cloud sandbox, but Sandock is not configured on this deployment.",
     );
     expect(noEligibleAirAppEngineMessage(coreMessagesByLocale["zh-CN"], "node", "remote")).toBe(
-      "此 AirApp 要求使用远程机器，但本部署尚未配置 Sandock。",
+      "此 AirApp 要求使用云端沙箱，但本部署尚未配置 Sandock。",
     );
     expect(noEligibleAirAppEngineMessage(coreMessagesByLocale.ja, "node", "remote")).toBe(
-      "この AirApp にはリモートマシンが必要ですが、このデプロイでは Sandock が設定されていません。",
+      "この AirApp にはクラウドサンドボックスが必要ですが、このデプロイでは Sandock が設定されていません。",
     );
+  });
+});
+
+describe("airAppRunErrorText", () => {
+  it("words an engine failure in the viewer's current locale, not the one it was recorded in", () => {
+    // An AirApp that auto-runs on open can fail before the locale's messages
+    // have loaded, so the recorded plain-text copy may be English.
+    const entry = {
+      error: noEligibleAirAppEngineMessage(coreMessagesByLocale.en, "node", "remote"),
+      engineUnavailable: { runtime: "node" as const, requiredEngine: "remote" as const },
+    };
+    expect(airAppRunErrorText(coreMessagesByLocale["zh-CN"], entry)).toBe(
+      "此 AirApp 要求使用云端沙箱，但本部署尚未配置 Sandock。",
+    );
+  });
+
+  it("passes a runner's own error text through unchanged", () => {
+    expect(
+      airAppRunErrorText(coreMessagesByLocale["zh-CN"], {
+        error: "npm ERR! missing script: dev",
+        engineUnavailable: null,
+      }),
+    ).toBe("npm ERR! missing script: dev");
   });
 });
 

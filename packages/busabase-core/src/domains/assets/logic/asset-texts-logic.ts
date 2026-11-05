@@ -27,8 +27,14 @@ import { attachments, busabaseAssets } from "../../../db/schema";
 import { insertAuditEvent } from "../../../logic/audit";
 import { id } from "../../../logic/kernel";
 import { ensureReady } from "../../../logic/seed";
+import { busabaseAssetTextSearch } from "../schema/asset-text-search";
 import { type AssetTextPO, type AssetTextStatus, busabaseAssetTexts } from "../schema/asset-texts";
 import { assertAssetPermission } from "./asset-permissions";
+import {
+  AssetSearchProjectionBuilder,
+  publishAssetTextProjection,
+  warmAssetTextProjection,
+} from "./asset-text-search-logic";
 import { readObjectInChunks } from "./object-stream";
 import {
   enqueueStorageCleanup,
@@ -82,6 +88,23 @@ export const getAssetTextStatus = async (assetId: string, tx?: Db): Promise<Asse
 };
 
 /**
+ * Ids per `inArray` statement. Postgres binds at most 65,534 parameters per
+ * statement, and an unscoped grep can hand over every asset in a space — a
+ * migrated space held 140k+. Well under the limit, so the handful of other
+ * bound values in the same statement never tips it over.
+ */
+const ASSET_ID_QUERY_BATCH = 10_000;
+
+/** `ids` in consecutive slices of at most {@link ASSET_ID_QUERY_BATCH}. */
+export const batchAssetIds = (ids: string[]): string[][] => {
+  const batches: string[][] = [];
+  for (let i = 0; i < ids.length; i += ASSET_ID_QUERY_BATCH) {
+    batches.push(ids.slice(i, i + ASSET_ID_QUERY_BATCH));
+  }
+  return batches;
+};
+
+/**
  * Batch-load `busabase_asset_texts` rows for a set of assetIds, keyed by
  * assetId. Shared by grep's candidate resolution (self-heal + present/missing/
  * stale bucketing, `asset-grep-logic.ts`) and by `search.ts`'s file-body
@@ -92,12 +115,15 @@ export const loadAssetTextRows = async (
   db: Db,
   assetIds: string[],
 ): Promise<Map<string, AssetTextPO>> => {
-  if (assetIds.length === 0) return new Map();
-  const rows = await db
-    .select()
-    .from(busabaseAssetTexts)
-    .where(inArray(busabaseAssetTexts.assetId, assetIds));
-  return new Map(rows.map((row) => [row.assetId, row]));
+  const map = new Map<string, AssetTextPO>();
+  for (const batch of batchAssetIds(assetIds)) {
+    const rows = await db
+      .select()
+      .from(busabaseAssetTexts)
+      .where(inArray(busabaseAssetTexts.assetId, batch));
+    for (const row of rows) map.set(row.assetId, row);
+  }
+  return map;
 };
 
 /**
@@ -163,7 +189,7 @@ export const gcTextObjectIfUnreferenced = async (
 export const autoRegisterAssetText = async (
   assetId: string,
   tx?: Db,
-  opts?: { knownContentKind?: string; knownMissing?: boolean },
+  opts?: { knownContentKind?: string; knownMissing?: boolean; warmSearchIndex?: boolean },
 ): Promise<void> => {
   const db = tx ?? (await getDb());
 
@@ -220,6 +246,7 @@ export const autoRegisterAssetText = async (
       statsComputedAt: null,
     })
     .onConflictDoNothing();
+  if (opts?.warmSearchIndex) await warmAssetTextProjection(db, assetId);
 };
 
 /**
@@ -256,6 +283,7 @@ export const handleAssetAttachmentRepoint = async (
   if (!newAttachment) return;
 
   if (existing.writtenBy === "auto") {
+    await tx.delete(busabaseAssetTextSearch).where(eq(busabaseAssetTextSearch.assetId, assetId));
     const [assetRow] = await tx
       .select({ contentKind: busabaseAssets.contentKind })
       .from(busabaseAssets)
@@ -278,6 +306,8 @@ export const handleAssetAttachmentRepoint = async (
           statsComputedAt: null,
         })
         .where(eq(busabaseAssetTexts.id, existing.id));
+      // The old search projection is version-gated and immediately invisible.
+      // Rebuild from the new bytes on the next search, outside this transaction.
       // No GC call here: an auto row never owns a separate `asset-texts/blobs/...`
       // object (its `textContentHash` just described its OWNING ATTACHMENT's
       // bytes) — there is nothing to garbage-collect for it.
@@ -302,6 +332,7 @@ export const handleAssetAttachmentRepoint = async (
       .update(busabaseAssetTexts)
       .set({ status: "stale" })
       .where(eq(busabaseAssetTexts.id, existing.id));
+    await tx.delete(busabaseAssetTextSearch).where(eq(busabaseAssetTextSearch.assetId, assetId));
   }
 };
 
@@ -408,6 +439,9 @@ export const putAssetText = async (input: PutTextInput): Promise<AssetTextVO> =>
         existing,
         emptyTextFields(actorId),
       );
+      await tx
+        .delete(busabaseAssetTextSearch)
+        .where(eq(busabaseAssetTextSearch.assetId, input.assetId));
       if (previousKey) {
         await gcTextObjectIfUnreferenced(existing?.textContentHash, rowId, tx, previousKey);
       }
@@ -421,6 +455,7 @@ export const putAssetText = async (input: PutTextInput): Promise<AssetTextVO> =>
   }
 
   let scanResult: ReturnType<typeof scanTextBuffer>;
+  const searchProjection = new AssetSearchProjectionBuilder();
   let inlineBytes: Buffer | null = null;
 
   if (input.text !== undefined) {
@@ -431,6 +466,7 @@ export const putAssetText = async (input: PutTextInput): Promise<AssetTextVO> =>
       });
     }
     scanResult = scanTextBuffer(inlineBytes);
+    searchProjection.write(inlineBytes);
   } else {
     const storageKey = input.storageKey as string;
     // Reject `..` segments as well as a wrong prefix: the local storage adapter
@@ -446,6 +482,7 @@ export const putAssetText = async (input: PutTextInput): Promise<AssetTextVO> =>
     try {
       for await (const chunk of readObjectInChunks(storageKey)) {
         scanner.write(chunk);
+        searchProjection.write(chunk);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -476,6 +513,7 @@ export const putAssetText = async (input: PutTextInput): Promise<AssetTextVO> =>
   }
 
   const canonicalKey = textContentAddressedKey(scanResult.sha256);
+  const projection = searchProjection.finish();
   // A collected key is retired forever. New generations preserve content-hash
   // identity in the row without allowing a delayed delete to hit new bytes.
   let finalKey = (await isStorageKeyRetired(db, canonicalKey))
@@ -483,19 +521,23 @@ export const putAssetText = async (input: PutTextInput): Promise<AssetTextVO> =>
     : canonicalKey;
   const previousKey = existing?.writtenBy !== "auto" ? existing?.textStorageKey : undefined;
   for (let attempt = 0; ; attempt += 1) {
+    // Write the bytes BEFORE the fence: HEAD/PUT/COPY are network I/O, and a
+    // row lock held across them parks a pooled connection (and the key) for
+    // the whole transfer. The fence below still decides acceptance; a key
+    // retired in between is rejected with CONFLICT and retried on a fresh key.
+    const alreadyStored = await storage.objectExists(finalKey).catch(() => false);
+    if (!alreadyStored) {
+      if (inlineBytes) {
+        await storage.uploadFileToKey(inlineBytes, finalKey, "text/plain; charset=utf-8");
+      } else {
+        await storage.copyObject(input.storageKey as string, finalKey);
+      }
+    }
     try {
       await withStorageKeyRegistration(
         db,
         finalKey,
         async (tx) => {
-          const alreadyStored = await storage.objectExists(finalKey).catch(() => false);
-          if (!alreadyStored) {
-            if (inlineBytes) {
-              await storage.uploadFileToKey(inlineBytes, finalKey, "text/plain; charset=utf-8");
-            } else {
-              await storage.copyObject(input.storageKey as string, finalKey);
-            }
-          }
           const rowId = await upsertAssetTextRow(tx, spaceId, input.assetId, existing, {
             status: "present",
             textStorageKey: finalKey,
@@ -508,6 +550,12 @@ export const putAssetText = async (input: PutTextInput): Promise<AssetTextVO> =>
             lineCheckpoints: scanResult.checkpoints,
             statsComputedAt: new Date(),
           });
+          await publishAssetTextProjection(tx, {
+            assetId: input.assetId,
+            spaceId,
+            textStorageKey: finalKey,
+            projection,
+          });
           if (previousKey && previousKey !== finalKey) {
             await gcTextObjectIfUnreferenced(existing?.textContentHash, rowId, tx, previousKey);
           }
@@ -516,7 +564,11 @@ export const putAssetText = async (input: PutTextInput): Promise<AssetTextVO> =>
       );
       break;
     } catch (error) {
-      if (!(error instanceof ORPCError) || error.code !== "CONFLICT" || attempt >= 2) throw error;
+      const retired = error instanceof ORPCError && error.code === "CONFLICT";
+      // A retired key may already be past its final sweep, so nothing would
+      // ever collect bytes written to it here. Remove only what this call wrote.
+      if (retired && !alreadyStored) await storage.deleteObject(finalKey).catch(() => {});
+      if (!retired || attempt >= 2) throw error;
       finalKey = `${canonicalKey}.${generateNanoID("gen", 16)}`;
     }
   }

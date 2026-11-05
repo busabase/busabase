@@ -30,6 +30,10 @@ import type {
 } from "busabase-contract/types";
 import { flattenViewFilters } from "busabase-contract/types";
 import { useSidebar } from "kui/sidebar";
+import {
+  type FileTooLargeErrorData,
+  resolveEffectiveMaxFileSize,
+} from "open-domains/attachments/utils";
 // Demo-aware navigation (the shared `openlib/ui/dashboard` helpers):
 // `SPALink` appends `?demo=1` on <Link> clicks; `useAddDemoParam` wraps
 // programmatic `setLocation` targets — together they keep the demo across all
@@ -56,6 +60,7 @@ import { AgentsAddView } from "../agents/components/agents-add-view";
 import { AgentsListView } from "../agents/components/agents-list-view";
 import { AirAppKeepAliveHost } from "../airapp/components/AirAppKeepAliveHost";
 import { AppsListView } from "../airapp/components/apps-list-view";
+import type { AirAppEnginePlanGate } from "../airapp/utils/engine-plan-gate";
 import { getPrimaryField } from "../base/utils/primary-field";
 import { TemplateCenter } from "../templates/components/template-center";
 import type { AgentIntegrationTarget } from "./components/agent-install-panel";
@@ -134,7 +139,11 @@ import {
 } from "./helpers/node-route-guard";
 import { retryUnlessNotFound, shouldShowInitialLoadingState } from "./helpers/query-state";
 import { readRecordPagination, writeRecordPagination } from "./helpers/record-pagination-url";
-import { mergeRecordSnapshots } from "./helpers/record-snapshots";
+import {
+  isFullReadBehind,
+  mergeRecordSnapshots,
+  resolveActiveRecord,
+} from "./helpers/record-snapshots";
 import { isConflictErrorMessage } from "./helpers/search";
 import { resolveDefaultViewPath, sortViewsByPosition } from "./helpers/view-order";
 import type {
@@ -146,13 +155,14 @@ import type {
   ViewSubmitOptions,
   ViewUpdatePayload,
 } from "./helpers/view-types";
-import { useAttachmentUpload } from "./hooks/use-attachment-upload";
+import { type AttachmentUploadOptions, useAttachmentUpload } from "./hooks/use-attachment-upload";
 import { useBaseCollectionState } from "./hooks/use-base-collection-state";
 import { useDashboardRoutes } from "./hooks/use-dashboard-routes";
 import { useKeyboardShortcut } from "./hooks/use-keyboard-shortcut";
 import { useLinkedRecords } from "./hooks/use-linked-records";
 import { useBusabaseLiveSync } from "./hooks/use-live-sync";
 import { useReorderView } from "./hooks/use-reorder-view";
+import { UploadLimitsProvider } from "./hooks/use-upload-limits";
 import { getNodeDetail, type LoadedNode } from "./node-detail-registry";
 import { DashboardOrpcProvider } from "./orpc-context";
 import { useCurrentNodeStore } from "./store/current-node-store";
@@ -160,6 +170,7 @@ import type { WorkbenchLinkResolver } from "./utils/workbench-link";
 import { type DashboardVisitorKind, DashboardVisitorProvider } from "./visitor-context";
 import { WorkbenchLinkProvider } from "./workbench-link-context";
 
+export type { AirAppEnginePlanGate } from "../airapp/utils/engine-plan-gate";
 export { BusabaseTopbar } from "./components/topbar";
 export type { BusabaseBreadcrumbItem } from "./helpers/view-types";
 export {
@@ -283,6 +294,15 @@ interface BusabaseDashboardProps {
    * nothing configured, rather than an optimistic guess the user pays for.
    */
   availableAirAppEngines?: AirAppRunnerKind[];
+  /** Engines an operator could turn on here. Shown disabled, with that reason. */
+  notConfiguredAirAppEngines?: AirAppRunnerKind[];
+  /**
+   * A host's plan gate on top of `availableAirAppEngines` (Busabase Cloud: the
+   * remote engine needs Plus). Locked engines are shown as locked with the
+   * host's upgrade action, not hidden. Omitted — every open-source, Desktop and
+   * self-hosted host — availability is capability only, unchanged.
+   */
+  airAppEnginePlanGate?: AirAppEnginePlanGate;
   onSearchOpenChange?: (open: boolean) => void;
   /**
    * Leave enabled for standalone consumers. Hosts that already mount an app-wide
@@ -301,6 +321,18 @@ interface BusabaseDashboardProps {
   onCreateNode?: () => void;
   /** Refresh host-owned usage after a permanent deletion changes retained files. */
   onStorageChange?: () => void | Promise<void>;
+  /**
+   * Largest file (bytes) the host accepts per upload. UX only — files over it
+   * are refused before any byte is hashed or sent; the server's upload policy
+   * stays authoritative. Defaults to (and can never exceed) the 5 GB ceiling.
+   */
+  maxUploadFileSize?: number;
+  /**
+   * Called when an upload is refused for size — by the pre-check above or by
+   * the server. A host that can unlock a bigger limit (e.g. a plan upgrade)
+   * shows its prompt here; `info.upgradeLimit` is set when the server knows one.
+   */
+  onUploadFileTooLarge?: (info: FileTooLargeErrorData) => void;
   /**
    * Which links in user content (Doc Markdown, whiteboard elements) are routes
    * of this workbench, so following one routes in place instead of reloading
@@ -362,7 +394,11 @@ export function BusabaseDashboard({
             permission affordances a session-less visitor can neither use nor be
             shown honestly. */}
         <DashboardVisitorProvider visitorKind={visitorKind}>
-          <AirAppEngineAvailabilityProvider engines={props.availableAirAppEngines}>
+          <AirAppEngineAvailabilityProvider
+            engines={props.availableAirAppEngines}
+            notConfiguredEngines={props.notConfiguredAirAppEngines}
+            planGate={props.airAppEnginePlanGate}
+          >
             <BusabaseDashboardContent {...props} visitorKind={visitorKind} />
           </AirAppEngineAvailabilityProvider>
         </DashboardVisitorProvider>
@@ -388,6 +424,8 @@ function BusabaseDashboardContent({
   emptyGuide,
   onCreateNode,
   onStorageChange,
+  maxUploadFileSize,
+  onUploadFileTooLarge,
   resolveWorkbenchLink,
   bases: initialBases = EMPTY_BASES,
   nodes: nodeTree,
@@ -610,14 +648,26 @@ function BusabaseDashboardContent({
       nodeDetail: orpc.nodes.get.key() as QueryKey,
       nodeRouteState: orpc.nodes.resolveRouteState.key() as QueryKey,
       auditEvents: orpc.auditEvents.list.queryOptions({ input: {} }).queryKey as QueryKey,
-      assets: orpc.assets.list.queryOptions({}).queryKey as QueryKey,
+      // A procedure-level key, not `queryOptions(...).queryKey`: the gallery is an
+      // infinite query now, and an invalidate whose key pins `type: "query"`
+      // matches nothing there (see /coder review, PR #8385).
+      assets: orpc.assets.list.key() as QueryKey,
     }),
     [orpc],
   );
-  const uploadAttachmentBase = useAttachmentUpload(client);
+  // This component renders ABOVE its own UploadLimitsProvider, so the limits
+  // are handed to the hook directly (same values the provider exposes below).
+  const uploadLimits = useMemo(
+    () => ({
+      maxFileSize: resolveEffectiveMaxFileSize(maxUploadFileSize),
+      onFileTooLarge: onUploadFileTooLarge,
+    }),
+    [maxUploadFileSize, onUploadFileTooLarge],
+  );
+  const uploadAttachmentBase = useAttachmentUpload(client, uploadLimits);
   const uploadAttachment = useCallback(
-    async (file: File) => {
-      const ref = await uploadAttachmentBase(file);
+    async (file: File, options?: AttachmentUploadOptions) => {
+      const ref = await uploadAttachmentBase(file, undefined, options);
       await queryClient.invalidateQueries({ queryKey: listKeys.assets });
       return ref;
     },
@@ -846,6 +896,9 @@ function BusabaseDashboardContent({
     selectedBaseView.type === "gallery" ||
     selectedBaseView.type === "kanban" ||
     selectedBaseView.type === "calendar";
+  // The Table/Grid is a dense preview surface. Gallery, Kanban and Calendar
+  // keep full rows because they render covers and cards rather than cells.
+  const usesCompactRecordList = selectedBaseView === null || selectedBaseView.type === "table";
   const setRecordPaginationUrl = useCallback(
     (page: number, pageSize = recordPaginationUrl.pageSize, replace = false) => {
       const nextSearch = writeRecordPagination(search, { page, pageSize });
@@ -933,6 +986,7 @@ function BusabaseDashboardContent({
       input: {
         baseId: activeBase?.id ?? "",
         viewId: selectedBaseView?.id,
+        listMode: usesCompactRecordList ? "table" : undefined,
         page: recordPaginationUrl.page,
         pageSize: recordPaginationUrl.pageSize,
       },
@@ -944,10 +998,13 @@ function BusabaseDashboardContent({
       !isResolvingBaseRoute,
     placeholderData: (previousData, previousQuery) => {
       const previousInput = (
-        previousQuery?.queryKey[1] as { input?: { baseId?: string; viewId?: string } } | undefined
+        previousQuery?.queryKey[1] as
+          | { input?: { baseId?: string; viewId?: string; listMode?: "full" | "table" } }
+          | undefined
       )?.input;
       return previousInput?.baseId === activeBase?.id &&
-        previousInput?.viewId === selectedBaseView?.id
+        previousInput?.viewId === selectedBaseView?.id &&
+        previousInput?.listMode === (usesCompactRecordList ? "table" : undefined)
         ? previousData
         : undefined;
     },
@@ -1085,6 +1142,12 @@ function BusabaseDashboardContent({
       : isRecordRoute && baseChildParams?.childId !== "new"
         ? baseChildParams?.childId
         : (previewRecord?.id ?? null);
+  const compactPageContainsSelectedRecord =
+    usesCompactRecordList &&
+    Boolean(selectedRecordId) &&
+    baseRecords.some((item) => item.id === selectedRecordId);
+  const shouldReadFullRecordForRoute =
+    compactPageContainsSelectedRecord && (isRecordRoute || isEditRecordRoute);
   // Records reached by a direct link (not in the list query) are loaded through
   // React Query and folded into `records`, as are the records they link to.
   const fallbackRecordQuery = useQuery({
@@ -1092,13 +1155,19 @@ function BusabaseDashboardContent({
     // Hosts can keep ordinary reads fresh for tens of seconds. A reopened
     // preview must still re-read the record, even when its cache is that young.
     ...(previewRecord ? { staleTime: 0 } : {}),
-    initialData: previewRecord ?? initialRecords.find((record) => record.id === selectedRecordId),
+    // A previewed table row is bounded, so it never seeds the detail read. Host
+    // seeds are full records, and read-only embeds have nothing else to render.
+    initialData:
+      (usesCompactRecordList ? null : previewRecord) ??
+      initialRecords.find((record) => record.id === selectedRecordId),
     // The initial page snapshot is not a new read of cross-record dependencies.
     initialDataUpdatedAt: 0,
     enabled:
       !readOnlyRecordPreview &&
       Boolean(selectedRecordId) &&
-      (Boolean(previewRecord) || !baseRecords.some((item) => item.id === selectedRecordId)),
+      (Boolean(previewRecord) ||
+        shouldReadFullRecordForRoute ||
+        !baseRecords.some((item) => item.id === selectedRecordId)),
   });
   // Linked records are loaded ONE level deep and only for what is on screen:
   // the current page of the Base plus the open/previewed record. The id set is
@@ -1149,10 +1218,56 @@ function BusabaseDashboardContent({
     recordsPageQuery.dataUpdatedAt,
     recordsInfiniteQuery.dataUpdatedAt,
   ]);
+  const requiresFullRecordRead = Boolean(previewRecord) || shouldReadFullRecordForRoute;
+  const fullRecordRead =
+    fallbackRecordQuery.data?.id === selectedRecordId ? fallbackRecordQuery.data : null;
+  const listedRecord = records.find((record) => record.id === selectedRecordId);
+  // A detail read sent before an edit can land after the list that saw the edit.
+  // Re-read once per listed version, and only when the record needs a full read.
+  const staleFullReadVersion =
+    requiresFullRecordRead && isFullReadBehind(fullRecordRead, listedRecord)
+      ? `${listedRecord?.id}:${listedRecord?.headCommitId}:${listedRecord?.updatedAt}`
+      : null;
+  const [rereadFullVersion, setRereadFullVersion] = useState<string | null>(null);
+  const refetchFullRecord = fallbackRecordQuery.refetch;
+  useEffect(() => {
+    if (!staleFullReadVersion || rereadFullVersion === staleFullReadVersion) return;
+    setRereadFullVersion(staleFullReadVersion);
+    void refetchFullRecord();
+  }, [refetchFullRecord, rereadFullVersion, staleFullReadVersion]);
+  const fullReadSettled =
+    rereadFullVersion === staleFullReadVersion &&
+    !fallbackRecordQuery.isFetching &&
+    !fallbackRecordQuery.error;
+  const isRecordReadPending =
+    fallbackRecordQuery.isLoading ||
+    (Boolean(staleFullReadVersion) && !fullReadSettled && !fallbackRecordQuery.error);
+  const shownRecordRef = useRef<RecordVO | null>(null);
   const activeRecord = useMemo(
-    () => records.find((record) => record.id === selectedRecordId) ?? null,
-    [records, selectedRecordId],
+    () =>
+      resolveActiveRecord({
+        fullRecord: fullRecordRead,
+        listedRecord,
+        requiresFullRead: requiresFullRecordRead,
+        shownRecord:
+          shownRecordRef.current?.id === selectedRecordId ? shownRecordRef.current : null,
+        fullReadSettled,
+      }),
+    [fullReadSettled, fullRecordRead, listedRecord, requiresFullRecordRead, selectedRecordId],
   );
+  useEffect(() => {
+    shownRecordRef.current = activeRecord;
+  }, [activeRecord]);
+  // The row exists but its full read failed: say so instead of "not found".
+  const recordRouteError =
+    shouldReadFullRecordForRoute && !activeRecord && fallbackRecordQuery.error
+      ? presentCoreError(
+          messages,
+          locale,
+          fallbackRecordQuery.error,
+          messages.recordView.recordNotFoundBody,
+        )
+      : null;
   // The list query caps each CR's `operations` (see LIST_MAX_OPERATIONS_PER_CHANGE_REQUEST)
   // and strips `reviews[].visibleOperationHeads` for payload size — fine for inbox
   // rows, but the single-CR detail view needs the uncapped, un-stripped shape
@@ -3268,8 +3383,15 @@ function BusabaseDashboardContent({
     }
 
     if (isEditRecordRoute) {
-      if (shouldShowInitialLoadingState(activeRecord, fallbackRecordQuery.isLoading)) {
+      if (shouldShowInitialLoadingState(activeRecord, isRecordReadPending)) {
         return <NodeDetailSkeleton variant="doc" />;
+      }
+      if (recordRouteError) {
+        return (
+          <div className="p-6 text-rejected-strong text-sm" role="alert">
+            {recordRouteError}
+          </div>
+        );
       }
       return (
         <RecordEditorView
@@ -3290,8 +3412,15 @@ function BusabaseDashboardContent({
     }
 
     if (isRecordRoute) {
-      if (shouldShowInitialLoadingState(activeRecord, fallbackRecordQuery.isLoading)) {
+      if (shouldShowInitialLoadingState(activeRecord, isRecordReadPending)) {
         return <NodeDetailSkeleton variant="doc" />;
+      }
+      if (recordRouteError) {
+        return (
+          <div className="p-6 text-rejected-strong text-sm" role="alert">
+            {recordRouteError}
+          </div>
+        );
       }
       return (
         <RecordDetailView
@@ -3428,7 +3557,6 @@ function BusabaseDashboardContent({
     isBaseSetupRoute,
     selectedChangeRequest,
     fallbackChangeRequestQuery.isLoading,
-    fallbackRecordQuery.isLoading,
     operationParams,
     submitCreateRecord,
     submitCreateBaseField,
@@ -3466,6 +3594,8 @@ function BusabaseDashboardContent({
     serverSortedView,
     usesPagePagination,
     baseRecords,
+    recordRouteError,
+    isRecordReadPending,
     baseTableViewState,
     submitDeleteRecords,
     submitUpdateRecords,
@@ -3512,6 +3642,7 @@ function BusabaseDashboardContent({
                 )
               : null
           }
+          isLoading={isRecordReadPending}
           key={previewRecord.id}
           onClose={() => setRecordPreview(null)}
           onDeleteChangeRequest={submitDeleteRecord}
@@ -3621,26 +3752,28 @@ function BusabaseDashboardContent({
   // the one place that reaches every node toolbar, base view, record view and
   // side-panel tab at once — which is what the leaf-level Ask Agent action needs.
   const provided = (
-    <DashboardOrpcProvider orpc={orpc}>
-      <FileUploadTaskProvider orpc={orpc}>
-        {/* Same reach, same reason as the orpc provider above: the Agent-prompts
+    <UploadLimitsProvider maxFileSize={maxUploadFileSize} onFileTooLarge={onUploadFileTooLarge}>
+      <DashboardOrpcProvider orpc={orpc}>
+        <FileUploadTaskProvider orpc={orpc}>
+          {/* Same reach, same reason as the orpc provider above: the Agent-prompts
             dialog hangs off node toolbars nine components down, and it needs to
             know which edition/space to point an agent at. */}
-        <AgentIntegrationProvider agentIntegration={agentIntegration}>
-          {/* Scopes the agent model-list cache to this host+workspace+actor,
+          <AgentIntegrationProvider agentIntegration={agentIntegration}>
+            {/* Scopes the agent model-list cache to this host+workspace+actor,
               reaching both the full-page AgentDetailView below and the
               side-panel's AgentChatSidePanelTab, which otherwise has no route
               to this information through the generic SidePanelTabProps. */}
-          <AgentModelScopeProvider workspaceKey={cacheSpaceKey} actorId={currentUserId}>
-            {/* Same reach again: the Doc reader and whiteboards render user
+            <AgentModelScopeProvider workspaceKey={cacheSpaceKey} actorId={currentUserId}>
+              {/* Same reach again: the Doc reader and whiteboards render user
                 links from deep inside node detail and side-panel views. */}
-            <WorkbenchLinkProvider resolveWorkbenchLink={resolveWorkbenchLink}>
-              {content}
-            </WorkbenchLinkProvider>
-          </AgentModelScopeProvider>
-        </AgentIntegrationProvider>
-      </FileUploadTaskProvider>
-    </DashboardOrpcProvider>
+              <WorkbenchLinkProvider resolveWorkbenchLink={resolveWorkbenchLink}>
+                {content}
+              </WorkbenchLinkProvider>
+            </AgentModelScopeProvider>
+          </AgentIntegrationProvider>
+        </FileUploadTaskProvider>
+      </DashboardOrpcProvider>
+    </UploadLimitsProvider>
   );
 
   if (embedded) {

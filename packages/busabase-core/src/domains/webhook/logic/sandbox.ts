@@ -2,7 +2,7 @@ import "server-only";
 
 import type { QuickJSDeferredPromise, QuickJSHandle } from "quickjs-emscripten";
 import { getQuickJS, shouldInterruptAfterDeadline } from "quickjs-emscripten";
-import { checkUrlIsSafeToFetch } from "./ssrf-guard";
+import { checkUrlIsSafeToFetch, fetchWithSsrfGuard } from "./ssrf-guard";
 
 const LOG_CAP_CHARS = 4000;
 const MEMORY_LIMIT_BYTES = 16 * 1024 * 1024;
@@ -229,7 +229,7 @@ export async function runFunction(
                   ? options.body
                   : safeStringify(options.body);
 
-            const response = await fetch(url as string, {
+            const fetched = await fetchWithSsrfGuard(url as string, {
               method,
               headers,
               body,
@@ -238,6 +238,13 @@ export async function runFunction(
               // is bound by (see the wall-clock race below).
               signal: AbortSignal.timeout(timeoutMs),
             });
+            if (disposed) return;
+            if (fetched.blocked) {
+              // A redirect hop pointed somewhere the first URL was not allowed to.
+              rejectWith(`fetch blocked: redirect target ${fetched.reason} (SSRF protection)`);
+              return;
+            }
+            const response = fetched.response;
             const bodyText = await response.text().catch(() => "");
             if (disposed) return;
 

@@ -60,7 +60,7 @@ import {
 } from "../../../logic/text-scan-core";
 import { type AssetTextPO, busabaseAssetTexts } from "../schema/asset-texts";
 import { assertAssetPermission } from "./asset-permissions";
-import { autoRegisterAssetText, loadAssetTextRows } from "./asset-texts-logic";
+import { autoRegisterAssetText, batchAssetIds, loadAssetTextRows } from "./asset-texts-logic";
 import { readObjectInChunks } from "./object-stream";
 import { openAssetTextSource } from "./text-cache";
 import { nearestCheckpointAtOrBefore, TextStreamScanner } from "./text-scan";
@@ -184,12 +184,16 @@ const resolveCandidateAssets = async (
       ),
     );
   // `visibleNode` undefined means the caller sees every node, so a live usage
-  // alone decides. A manager (`manage`) additionally sees every unmounted
-  // staging asset; anyone else only their own. `manage` is what "manager" means
-  // here: a `member`'s workspace baseline is `write`, which must not open other
-  // people's unmounted staging uploads.
+  // alone decides. Unmounted staging assets: the caller's own are always in
+  // scope. A manager (`manage`) may also reach anyone else's — but only by
+  // naming them in `assetIds`. An unscoped grep searches the space's files,
+  // and every retried or abandoned upload leaves an unmounted asset behind:
+  // one migrated space held 100k+ of them, which turned every manager's
+  // unscoped grep into a 500 and its `missing` list into noise. `manage` is
+  // what "manager" means here: a `member`'s workspace baseline is `write`,
+  // which must not open other people's unmounted staging uploads.
   conditions.push(
-    (hasWorkspacePermission("manage")
+    (hasWorkspacePermission("manage") && scope?.assetIds?.length
       ? or(notExists(anyNodeUsage), exists(liveNodeUsage))
       : or(exists(liveNodeUsage), and(notExists(anyNodeUsage), stagedByActor))) as SQL,
   );
@@ -244,30 +248,34 @@ const loadDisplayInfo = async (
   drivePath: string | undefined,
 ): Promise<Map<string, DisplayInfo>> => {
   const map = new Map<string, DisplayInfo>();
-  if (assetIds.length === 0) return map;
-  const rows = await db
-    .select({
-      assetId: busabaseAssetUsages.assetId,
-      ownerType: busabaseAssetUsages.ownerType,
-      path: busabaseAssetUsages.path,
-      metadata: busabaseAssetUsages.metadata,
-      nodeId: busabaseNodes.id,
-      nodeType: busabaseNodes.type,
-      nodeName: busabaseNodes.name,
-    })
-    .from(busabaseAssetUsages)
-    .innerJoin(busabaseNodes, eq(busabaseAssetUsages.nodeId, busabaseNodes.id))
-    .where(
-      and(
-        eq(busabaseAssetUsages.spaceId, spaceId),
-        eq(busabaseNodes.spaceId, spaceId),
-        inArray(busabaseAssetUsages.assetId, assetIds),
-        isNull(busabaseNodes.archivedAt),
-        isNull(busabaseNodes.deletedAt),
-        buildNodeVisibilityCondition(db),
-      ),
-    )
-    .orderBy(asc(busabaseAssetUsages.createdAt), asc(busabaseAssetUsages.id));
+  const loadBatch = (batch: string[]) =>
+    db
+      .select({
+        assetId: busabaseAssetUsages.assetId,
+        ownerType: busabaseAssetUsages.ownerType,
+        path: busabaseAssetUsages.path,
+        metadata: busabaseAssetUsages.metadata,
+        nodeId: busabaseNodes.id,
+        nodeType: busabaseNodes.type,
+        nodeName: busabaseNodes.name,
+      })
+      .from(busabaseAssetUsages)
+      .innerJoin(busabaseNodes, eq(busabaseAssetUsages.nodeId, busabaseNodes.id))
+      .where(
+        and(
+          eq(busabaseAssetUsages.spaceId, spaceId),
+          eq(busabaseNodes.spaceId, spaceId),
+          inArray(busabaseAssetUsages.assetId, batch),
+          isNull(busabaseNodes.archivedAt),
+          isNull(busabaseNodes.deletedAt),
+          buildNodeVisibilityCondition(db),
+        ),
+      )
+      .orderBy(asc(busabaseAssetUsages.createdAt), asc(busabaseAssetUsages.id));
+  // Batches split by asset, so each asset's usages stay in one batch and in
+  // the oldest-first order the selection below relies on.
+  const rows: Awaited<ReturnType<typeof loadBatch>> = [];
+  for (const batch of batchAssetIds(assetIds)) rows.push(...(await loadBatch(batch)));
   const inScope = (row: (typeof rows)[number]) =>
     drivePath !== undefined &&
     (row.ownerType === "drive" || row.ownerType === "skill") &&
@@ -596,10 +604,17 @@ export const grepAssets = async (
   const missing: string[] = [];
   const stale: string[] = [];
   let unsearchable = 0;
+  // `missing` is the "these files still need text" list. Without `assetIds`,
+  // that means files on a node: the caller's own staging uploads are still
+  // searched, but one never mounted is nobody's file yet, and retried uploads
+  // leave thousands of them behind. Named assets are always reported.
+  const reportsUnmounted = Boolean(input.scope?.assetIds?.length);
   for (const candidate of candidates) {
     const row = textRows.get(candidate.assetId);
     if (!row) {
-      missing.push(candidate.assetId);
+      if (reportsUnmounted || displayByAsset.has(candidate.assetId)) {
+        missing.push(candidate.assetId);
+      }
     } else if (row.status === "present") {
       present.push({ candidate, row });
     } else if (row.status === "stale") {

@@ -66,6 +66,28 @@ describe("Buda connection storage", () => {
     );
   });
 
+  it("resolves API tokens without OAuth refresh and deletes them without revocation", async () => {
+    const endpoint = "wss://buda.im/api/acp?agentId=manual-agent";
+    const slug = await saveBudaConnection({
+      kind: "api-token",
+      endpoint,
+      accessToken: "private-token",
+      agentId: "manual-agent",
+      agentName: "Manual agent",
+    });
+    await expect(getBudaConnection(slug)).resolves.toEqual({
+      bindingRef: expect.stringMatching(/^vlt_test_1:[0-9a-f-]{36}$/),
+      slug,
+      endpoint,
+      accessToken: "private-token",
+      agentId: "manual-agent",
+      agentName: "Manual agent",
+    });
+    await expect(disconnectBuda(slug)).resolves.toBe(true);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(mocks.deleteCount).toBe(1);
+  });
+
   it("stores separate grants for separate Buda agents", async () => {
     await expect(saveBudaConnection(storedConnection("agent-1", "Rex"))).resolves.toBe(
       "buda:agent-1",

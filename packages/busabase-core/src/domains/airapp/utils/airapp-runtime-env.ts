@@ -37,7 +37,7 @@
  * template's own checker. The union exists to keep Busabase's own emitters
  * honest, not to be copied into an app.
  */
-export type AirAppHostedRuntime = "browser" | "local" | "remote" | "embed";
+export type AirAppHostedRuntime = "browser" | "local" | "remote" | "site" | "embed";
 
 /** Env var name — kept here so the two engines and the docs can't drift apart. */
 export const AIRAPP_RUNTIME_ENV_VAR = "BUSABASE_AIRAPP_RUNTIME";

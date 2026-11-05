@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { createWorkspaceRevalidationGate } from "./workspace-revalidation";
+import {
+  createWorkspaceRevalidationGate,
+  TAB_RETURN_RECONCILE_AFTER_MS,
+} from "./workspace-revalidation";
 
 /**
- * Pins the three cases that made one production inbox session re-fetch the
+ * Pins the cases that made one production inbox session re-fetch the
  * change request list four times. Each is easy to reintroduce and impossible to
  * notice locally, where the payload is small and the stream never drops.
  */
@@ -20,11 +23,42 @@ describe("workspace revalidation gate", () => {
     expect(gate.onStreamConnected(20_000)).toBe(true);
   });
 
-  it("collapses the focus + visibilitychange pair a tab return fires into one", () => {
+  it("does not reconcile on focus alone", () => {
     const gate = createWorkspaceRevalidationGate(5_000);
-    // Both events fire for a single user action, milliseconds apart.
-    expect(gate.onUserReturned(50_000)).toBe(true);
+    expect(gate.onUserReturned(50_000)).toBe(false);
+  });
+
+  it("ignores a brief hide/show", () => {
+    const gate = createWorkspaceRevalidationGate(5_000);
+    gate.onDocumentHidden(50_000);
+    expect(gate.onUserReturned(50_000 + TAB_RETURN_RECONCILE_AFTER_MS - 1)).toBe(false);
+    // The following focus event belongs to the same return, not a second one.
     expect(gate.onUserReturned(50_010)).toBe(false);
+  });
+
+  it("collapses visibilitychange + focus after a long hide into one pass", () => {
+    const gate = createWorkspaceRevalidationGate(5_000);
+    gate.onDocumentHidden(50_000);
+    expect(gate.onUserReturned(50_000 + TAB_RETURN_RECONCILE_AFTER_MS)).toBe(true);
+    expect(gate.onUserReturned(50_000 + TAB_RETURN_RECONCILE_AFTER_MS + 10)).toBe(false);
+  });
+
+  it("defers a hidden reconnect and reconciles on a brief visible return", () => {
+    const gate = createWorkspaceRevalidationGate(5_000);
+    expect(gate.onStreamConnected(0)).toBe(false);
+    gate.onDocumentHidden(10_000);
+    expect(gate.onStreamConnected(11_000, { documentHidden: true })).toBe(false);
+    // The reconnect proves events were missed, so the normal 30-second hide
+    // threshold does not apply. The paired focus event still does not repeat it.
+    expect(gate.onUserReturned(11_100)).toBe(true);
+    expect(gate.onUserReturned(11_110)).toBe(false);
+  });
+
+  it("measures a long hide from the first hidden event", () => {
+    const gate = createWorkspaceRevalidationGate(5_000);
+    gate.onDocumentHidden(50_000);
+    gate.onDocumentHidden(70_000);
+    expect(gate.onUserReturned(80_000)).toBe(true);
   });
 
   it("throttles a reconnect storm instead of re-fetching every retry", () => {
@@ -45,6 +79,7 @@ describe("workspace revalidation gate", () => {
     expect(gate.onStreamConnected(0)).toBe(false);
     // The first connect did no work, so it must not consume the throttle
     // budget — a tab return one second later still converges.
-    expect(gate.onUserReturned(1_000)).toBe(true);
+    gate.onDocumentHidden(1_000);
+    expect(gate.onUserReturned(1_000 + TAB_RETURN_RECONCILE_AFTER_MS)).toBe(true);
   });
 });

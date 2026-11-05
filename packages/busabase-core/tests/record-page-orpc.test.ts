@@ -119,6 +119,31 @@ describe("records.listPage - oRPC integration", () => {
     );
   });
 
+  it("keeps exact view paging and totals unchanged in table list mode", async () => {
+    const full = await client.records.listPage({
+      baseId,
+      viewId: filteredViewId,
+      page: 2,
+      pageSize: 2,
+    });
+    const table = await client.records.listPage({
+      baseId,
+      viewId: filteredViewId,
+      listMode: "table",
+      page: 2,
+      pageSize: 2,
+    });
+
+    expect(table.total).toBe(full.total);
+    expect(table.totalPages).toBe(full.totalPages);
+    expect(table.page).toBe(full.page);
+    expect(table.records.map((item) => item.id)).toEqual(full.records.map((item) => item.id));
+    expect(table.records.map((item) => item.headCommit.payload.name)).toEqual(["Item 8", "Item 6"]);
+    expect(table.records[0]?.base.fields.map((field) => field.slug)).toEqual(
+      full.records[0]?.base.fields.map((field) => field.slug),
+    );
+  });
+
   it("clamps an out-of-range page to the current last page", async () => {
     const result = await client.records.listPage({ baseId, page: 99, pageSize: 5 });
     expect(result.page).toBe(3);
