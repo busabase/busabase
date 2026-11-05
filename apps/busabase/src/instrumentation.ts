@@ -11,5 +11,15 @@ export async function register() {
     // Separate node file so this only ever runs once, on the real Node
     // runtime (the standard Next.js instrumentation pattern).
     await import("./instrumentation.node");
+    if (process.env.BUSABASE_AGENT_SUPERVISOR_ENABLED === "true") {
+      const { startLocalAgentSessionHost } = await import(
+        "./domains/agents/logic/agent-session-host"
+      );
+      await startLocalAgentSessionHost();
+      const { installAgentSessionSupervisorShutdown } = await import(
+        "busabase-core/domains/agents/logic/agent-session-supervisor"
+      );
+      installAgentSessionSupervisorShutdown();
+    }
   }
 }

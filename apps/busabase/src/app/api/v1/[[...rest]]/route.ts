@@ -17,9 +17,25 @@ import { resolveRelayPermissionContext } from "~/lib/relay-permission";
 // commented out in the contract, so it is undocumented — but a route-less
 // procedure is still SERVED at the path oRPC infers (`/api/v1/nodes/purge`).
 // Dropping it here makes that path 404; the dashboard calls it over `/api/rpc`.
-const withoutNodePurge = <R extends { nodes: { purge: unknown } }>(router: R) => {
+//
+// The app-only workflow procedures are the same kind of surface: continuing a Wait
+// early and bulk cancelling are for the Runs tab. Agents get the routed five.
+const withoutRpcOnlySurfaces = <
+  R extends {
+    nodes: { purge: unknown };
+    workflows: { resume: unknown; resumeElapsed: unknown; cancelQueued: unknown };
+  },
+>(
+  router: R,
+) => {
   const { purge: _rpcOnlyNodePurge, ...nodes } = router.nodes;
-  return { ...router, nodes };
+  const {
+    resume: _rpcOnlyResume,
+    resumeElapsed: _rpcOnlyResumeElapsed,
+    cancelQueued: _rpcOnlyCancelQueued,
+    ...workflows
+  } = router.workflows;
+  return { ...router, nodes, workflows };
 };
 
 // Shared with busabase-cloud on purpose: both servers mount the same contract,
@@ -27,9 +43,9 @@ const withoutNodePurge = <R extends { nodes: { purge: unknown } }>(router: R) =>
 // same query-string coercion. This file's own copy used to return a self-shaped
 // `{ error, … }` body verbatim, which dropped `code` — see
 // `busabase-core/src/openapi/error-envelope.ts` and `.../openapi/handler.ts`.
-const openApiHandler = createBusabaseOpenApiHandler(withoutNodePurge(busabaseRouter));
+const openApiHandler = createBusabaseOpenApiHandler(withoutRpcOnlySurfaces(busabaseRouter));
 
-const demoOpenApiHandler = createBusabaseOpenApiHandler(withoutNodePurge(busabaseDemoRouter));
+const demoOpenApiHandler = createBusabaseOpenApiHandler(withoutRpcOnlySurfaces(busabaseDemoRouter));
 
 async function handle(request: Request) {
   const url = new URL(request.url);
@@ -51,6 +67,8 @@ async function handle(request: Request) {
       localUserName: getLocalUserName(),
       embedOrigin: url.origin,
       aclOverride: resolveRelayPermissionContext(request.headers),
+      // Everything on this surface is an agent; the app talks to `/api/rpc`.
+      agentSurface: true,
     },
     // Only a write carrying `x-busabase-playbook` / `x-busabase-agent` gets any
     // source provenance here; every other local request stays exactly as before

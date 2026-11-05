@@ -15,12 +15,19 @@
  * - Sweeps finished sessions past the retention window, on boot and then daily.
  *   Daily as well as on boot because a desktop install can stay up for weeks —
  *   boot-only retention on a long-lived process is retention in name only.
+ *
+ * And it is the workflow scheduler for this single-user host: every few
+ * seconds it starts runs queued by record events and resumes Waits whose time
+ * has passed. Busabase Cloud does the same from `/api/scheduler/tick`.
  */
 
+import { runWithLocalContext } from "busabase-core/context";
+import { getDb } from "busabase-core/db";
 import {
   endOrphanedLocalSessions,
   pruneExpiredSessions,
 } from "busabase-core/domains/agents/logic/agent-session-store";
+import { processDueWorkflowRuns } from "busabase-core/domains/workflow/run-service";
 import { resumeCloudTunnelOnBoot } from "~/domains/settings/logic/cloud-tunnel-client";
 
 /**
@@ -81,4 +88,44 @@ if (!globalWithSweep.__busabaseAgentSweepTimer) {
     SWEEP_INTERVAL_MS,
   );
   globalWithSweep.__busabaseAgentSweepTimer.unref();
+}
+
+const WORKFLOW_TICK_INTERVAL_MS = 10_000;
+
+type GlobalWithWorkflowTick = typeof globalThis & {
+  __busabaseWorkflowTickTimer?: NodeJS.Timeout;
+  __busabaseWorkflowTickRunning?: boolean;
+};
+
+// One local user, so every run continues as that user. A tick that is still
+// busy (a slow function step) is not stacked with another.
+async function tickWorkflows(): Promise<void> {
+  const state = globalThis as GlobalWithWorkflowTick;
+  if (state.__busabaseWorkflowTickRunning) return;
+  state.__busabaseWorkflowTickRunning = true;
+  try {
+    const result = await processDueWorkflowRuns({
+      db: await getDb(),
+      runAs: (_actor, fn) => runWithLocalContext({}, fn),
+    });
+    if (result.continued + result.interrupted + result.orphaned > 0) {
+      console.info("[workflows] scheduler tick", result);
+    }
+  } finally {
+    state.__busabaseWorkflowTickRunning = false;
+  }
+}
+
+const globalWithWorkflowTick = globalThis as GlobalWithWorkflowTick;
+if (!globalWithWorkflowTick.__busabaseWorkflowTickTimer) {
+  globalWithWorkflowTick.__busabaseWorkflowTickTimer = setInterval(
+    () =>
+      void tickWorkflows().catch((error: unknown) => {
+        console.error(
+          `[workflows] scheduler tick skipped: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }),
+    WORKFLOW_TICK_INTERVAL_MS,
+  );
+  globalWithWorkflowTick.__busabaseWorkflowTickTimer.unref();
 }

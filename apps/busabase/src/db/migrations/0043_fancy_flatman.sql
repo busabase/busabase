@@ -1,0 +1,1 @@
+ALTER TABLE "busabase_workflow_runs" ADD COLUMN "started_via" jsonb;

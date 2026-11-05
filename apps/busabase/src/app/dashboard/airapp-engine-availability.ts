@@ -1,5 +1,8 @@
 import type { AirAppRunnerKind } from "busabase-contract/domains/airapp/contract";
-import { resolveAvailableAirAppEngines } from "busabase-core/domains/airapp/logic/engine-availability";
+import {
+  resolveAirAppEngineAvailability,
+  resolveAvailableAirAppEngines,
+} from "busabase-core/domains/airapp/logic/engine-availability";
 
 /**
  * Which engines this build offers — derived, not declared here.
@@ -18,3 +21,11 @@ import { resolveAvailableAirAppEngines } from "busabase-core/domains/airapp/logi
 export const resolveBusabaseAirAppEngines = (
   env: NodeJS.ProcessEnv = process.env,
 ): AirAppRunnerKind[] => resolveAvailableAirAppEngines({ env });
+
+/**
+ * Engines shown disabled because an operator could still turn them on. This host
+ * has no site provider, so `site` is never among them: it does not exist here.
+ */
+export const resolveBusabaseNotConfiguredEngines = (
+  env: NodeJS.ProcessEnv = process.env,
+): AirAppRunnerKind[] => resolveAirAppEngineAvailability({ env }).notConfigured;

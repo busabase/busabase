@@ -170,13 +170,31 @@ test("Inbox refreshes one snapshot per user-visible reconciliation", async ({ pa
   await page.waitForTimeout(1_000);
   expect(calls.filter((url) => snapshotRequest(url) || legacyInboxRequest(url))).toHaveLength(0);
 
-  // Browsers fire focus and visibility signals together. The workspace gate
-  // reconciles once, so the active Inbox query must issue exactly one request.
+  // A brief tab switch is ignored on purpose: focus and visibility signals with
+  // no preceding absence must not touch the network.
   calls.length = 0;
   await page.evaluate(() => {
     window.dispatchEvent(new Event("focus"));
     window.dispatchEvent(new Event("focus"));
     document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await page.waitForTimeout(1_000);
+  expect(calls.filter((url) => snapshotRequest(url) || legacyInboxRequest(url))).toHaveLength(0);
+
+  // Returning from a real absence fires focus and visibility signals together.
+  // The workspace gate reconciles once, so the active Inbox query must issue
+  // exactly one request. The gate needs the user to have been away for
+  // TAB_RETURN_RECONCILE_AFTER_MS (30s), so leave, move the clock past that,
+  // return in the same synchronous turn, then hand the real clock back.
+  calls.length = 0;
+  await page.evaluate(() => {
+    const realNow = Date.now;
+    window.dispatchEvent(new Event("blur"));
+    Date.now = () => realNow() + 31_000;
+    window.dispatchEvent(new Event("focus"));
+    window.dispatchEvent(new Event("focus"));
+    document.dispatchEvent(new Event("visibilitychange"));
+    Date.now = realNow;
   });
   await expect.poll(() => calls.filter(snapshotRequest).length, { timeout: 15_000 }).toBe(1);
   await page.waitForTimeout(500);

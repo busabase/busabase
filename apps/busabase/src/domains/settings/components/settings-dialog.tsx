@@ -2,6 +2,7 @@
 
 import { createBusabaseQueryUtils } from "busabase-contract/api-client/react-query";
 import { SpaceInstructionsSettings } from "busabase-core/domains/space-instructions/components/space-instructions-settings";
+import { SpaceWelcomeSettings } from "busabase-core/domains/space-welcome/components/space-welcome-settings";
 import { useCoreI18n } from "busabase-core/i18n";
 import {
   Dialog,
@@ -179,7 +180,14 @@ export function SettingsDialog({
               />
             ) : null}
             {activeTab === "spaceInstructions" ? (
-              <SpaceInstructionsSettings canManage orpc={instructionsOrpc} spaceId="local" />
+              <div className="space-y-8">
+                <SpaceInstructionsSettings canManage orpc={instructionsOrpc} spaceId="local" />
+                {/* The other piece of space configuration a customer meets first:
+                    which Doc/HTML page Home opens with. */}
+                <div className="border-border border-t pt-6">
+                  <SpaceWelcomeSettings canManage orpc={instructionsOrpc} spaceId="local" />
+                </div>
+              </div>
             ) : null}
             {activeTab === "branding" ? (
               <AppBrandingSettingsTab

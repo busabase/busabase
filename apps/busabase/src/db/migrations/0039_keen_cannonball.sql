@@ -1,0 +1,1 @@
+ALTER TABLE "attachments" ALTER COLUMN "size_bytes" SET DATA TYPE bigint;

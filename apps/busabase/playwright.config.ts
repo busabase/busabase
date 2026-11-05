@@ -16,6 +16,8 @@ export default defineConfig({
   // in this credential-free sweep, where it can only fail, twice, at 60s each.
   // tests/playwright-suite-ownership.test.ts keeps this list complete.
   testIgnore: [
+    // Uses explicitly provisioned isolated servers and the dedicated acceptance matrix.
+    "attachment-overflow.spec.ts",
     "agent-prompt-context.spec.ts",
     "agent-chat.spec.ts",
     "agent-context.spec.ts",
@@ -25,6 +27,9 @@ export default defineConfig({
     "agent-fidelity-live.spec.ts",
     "agent-fidelity.spec.ts",
     "agent-source-fidelity.spec.ts",
+    "agent-session-supervision.spec.ts",
+    "agent-permission.spec.ts",
+    "agent-permission-live.spec.ts",
   ],
   // The dashboard is a client SPA that streams its RSC response, so each full-page
   // navigation reloads the bundle and refetches over RPC before content mounts.
