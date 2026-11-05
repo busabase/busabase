@@ -25,6 +25,7 @@ import { useTokens } from "~/theme/use-tokens";
 import { useContextualNavDestination } from "../hooks/use-contextual-nav-destination";
 import { useExpandedNodeIds } from "../hooks/use-expanded-node-ids";
 import { useKnownNodeCache } from "../hooks/use-known-node-cache";
+import { useMobileQueryRecovery } from "../hooks/use-mobile-query-recovery";
 import {
   flattenNodesForCache,
   nodeToKnownNode,
@@ -178,6 +179,24 @@ export function DrawerScaffold({
       : { queryKey: ["no-connection", "auth"], queryFn: skipToken }),
     enabled: sidebarVisible && !!buda,
   });
+  useMobileQueryRecovery(
+    sidebarVisible && buda
+      ? [
+          buda.orpc.nodes.list.queryOptions({
+            input: { parentId: null, depth: NODE_TREE_PREFETCH_DEPTH },
+          }).queryKey,
+          buda.orpc.nodes.listFavorites.queryOptions().queryKey,
+          buda.orpc.auth.verify.queryOptions().queryKey,
+          ...(activeRoute
+            ? [
+                buda.orpc.nodes.ancestors.queryOptions({
+                  input: { nodeId: activeRoute.ref, type: activeRoute.type },
+                }).queryKey,
+              ]
+            : []),
+        ]
+      : [],
+  );
   const spaceId = authQuery.data?.space.id ?? null;
   const spaceName = authQuery.data?.space.name ?? null;
   const spaceVisibilityMode = authQuery.data?.space.nodeVisibilityMode ?? null;

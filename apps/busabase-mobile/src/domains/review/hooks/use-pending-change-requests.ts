@@ -1,5 +1,6 @@
 import { skipToken, useQuery } from "@tanstack/react-query";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
+import { useMobileQueryRecovery } from "~/domains/workspace/hooks/use-mobile-query-recovery";
 import {
   fetchPendingSnapshot,
   type PendingCountClient,
@@ -17,9 +18,11 @@ const EMPTY: PendingSnapshot = { count: 0, preview: [], capped: false };
  */
 export function usePendingChangeRequests({ enabled = true }: { enabled?: boolean } = {}) {
   const buda = useBusabaseOrpc();
+  const queryKey = [buda?.scopeKey ?? "no-connection", "pending-change-requests"];
+  useMobileQueryRecovery(enabled && buda ? [queryKey] : []);
 
   const query = useQuery({
-    queryKey: ["pending-change-requests", buda?.spaceScope ?? "no-connection"],
+    queryKey,
     queryFn: buda
       ? () => fetchPendingSnapshot(buda.client.changeRequests as unknown as PendingCountClient)
       : skipToken,

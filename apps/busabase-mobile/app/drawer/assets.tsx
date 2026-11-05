@@ -1,8 +1,8 @@
-import { skipToken, useQuery } from "@tanstack/react-query";
+import { skipToken, useInfiniteQuery } from "@tanstack/react-query";
 import type { AssetVO } from "busabase-contract/domains/assets/types";
 import { useRouter } from "expo-router";
 import { FileText } from "lucide-react-native";
-import { useState } from "react";
+import { useMemo } from "react";
 import { Image, StyleSheet, View } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import {
@@ -23,24 +23,39 @@ import { formatBytes } from "~/lib/format";
 import { radius } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 
-const ASSET_BATCH_SIZE = 50;
+// One request's worth of assets. The server bounds an unpaged list, so the
+// drawer walks the library a page at a time instead of asking for all of it.
+const ASSET_PAGE_SIZE = 50;
 
 function AssetsContent() {
   const router = useRouter();
   const { t } = useI18n();
   const buda = useBusabaseOrpc();
   const { state } = useConnection();
-  const [visibleCount, setVisibleCount] = useState(ASSET_BATCH_SIZE);
   const serverUrl = state.status === "connected" ? state.connection.serverUrl : null;
 
-  const assetsQuery = useQuery(
-    buda
-      ? buda.orpc.assets.list.queryOptions({})
-      : { queryKey: ["no-connection", "assets"], queryFn: skipToken },
+  const assetsOptions = useMemo(
+    () =>
+      buda
+        ? buda.orpc.assets.list.infiniteOptions({
+            input: (cursor: string | undefined) => ({ limit: ASSET_PAGE_SIZE, cursor }),
+            initialPageParam: undefined as string | undefined,
+            getNextPageParam: (lastPage) =>
+              lastPage.length < ASSET_PAGE_SIZE ? undefined : lastPage.at(-1)?.id,
+          })
+        : null,
+    [buda],
+  );
+  const assetsQuery = useInfiniteQuery(
+    assetsOptions ?? {
+      queryKey: ["no-connection", "assets"],
+      queryFn: skipToken,
+      initialPageParam: undefined as string | undefined,
+      getNextPageParam: () => undefined,
+    },
   );
 
-  const assets = assetsQuery.data ?? [];
-  const visibleAssets = assets.slice(0, visibleCount);
+  const assets = useMemo(() => (assetsQuery.data?.pages ?? []).flat(), [assetsQuery.data]);
 
   return (
     <DrawerScaffold
@@ -61,24 +76,24 @@ function AssetsContent() {
 
       {assets.length > 0 ? (
         <NativeSection>
-          {visibleAssets.map((asset, index) => (
+          {assets.map((asset, index) => (
             <AssetRow
               key={asset.id}
               asset={asset}
               serverUrl={serverUrl}
-              last={index === visibleAssets.length - 1}
+              last={index === assets.length - 1}
               onPress={() => router.push({ pathname: "/asset/[id]", params: { id: asset.id } })}
             />
           ))}
         </NativeSection>
       ) : null}
-      {visibleCount < assets.length ? (
+      {assetsQuery.hasNextPage ? (
         <NativeActionBar>
           <Button
             label="Load more"
             variant="secondary"
             fullWidth
-            onPress={() => setVisibleCount((count) => count + ASSET_BATCH_SIZE)}
+            onPress={() => void assetsQuery.fetchNextPage()}
           />
         </NativeActionBar>
       ) : null}

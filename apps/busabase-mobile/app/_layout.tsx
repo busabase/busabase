@@ -8,6 +8,7 @@ import { useEffect } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ConnectionProvider } from "~/connection/connection-store";
+import { MobileQueryRecoveryProvider } from "~/domains/workspace/components/MobileQueryRecoveryProvider";
 import { I18nProvider } from "~/i18n";
 // Imported for its side effect: defines the background change-request watch task.
 import "~/notifications/background-task";
@@ -17,7 +18,11 @@ import { MobileUpdateProvider } from "~/updates/mobile-update-provider";
 
 void SplashScreen.preventAutoHideAsync();
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: { refetchOnWindowFocus: false, refetchOnReconnect: false },
+  },
+});
 
 function AppStatusBar() {
   // SDK 54+ runs edge-to-edge by default; expo-status-bar dropped the
@@ -46,15 +51,17 @@ export default function RootLayout() {
         <QueryClientProvider client={queryClient}>
           <I18nProvider>
             <ConnectionProvider>
-              <NotificationProvider>
-                <MobileUpdateProvider>
-                  <AppStatusBar />
-                  {/* Routes are auto-discovered from the app/ tree; every screen hides
+              <MobileQueryRecoveryProvider>
+                <NotificationProvider>
+                  <MobileUpdateProvider>
+                    <AppStatusBar />
+                    {/* Routes are auto-discovered from the app/ tree; every screen hides
                       the native header and renders its own NativeScreen chrome. */}
-                  <Stack screenOptions={{ headerShown: false }} />
-                  <MobileUpdateGate />
-                </MobileUpdateProvider>
-              </NotificationProvider>
+                    <Stack screenOptions={{ headerShown: false }} />
+                    <MobileUpdateGate />
+                  </MobileUpdateProvider>
+                </NotificationProvider>
+              </MobileQueryRecoveryProvider>
             </ConnectionProvider>
           </I18nProvider>
         </QueryClientProvider>

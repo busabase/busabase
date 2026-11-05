@@ -1,5 +1,5 @@
-import { markdownPreviewSource } from "busabase-core/dashboard/markdown-preview";
 import { Play } from "lucide-react-native";
+import { markdownPreviewSource } from "openlib/utils/markdown-preview";
 import { useMemo } from "react";
 import { Image, Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import Markdown, { type RenderRules } from "react-native-markdown-display";

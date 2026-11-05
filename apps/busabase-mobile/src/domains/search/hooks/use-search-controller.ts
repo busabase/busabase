@@ -49,7 +49,7 @@ export const useSearchController = () => {
   // in a record-heavy workspace).
   const searchQuery = useTabSearch({
     client: buda?.client ?? null,
-    spaceScope: buda?.spaceScope,
+    scopeKey: buda?.scopeKey,
     query: debouncedQuery,
     tab,
     limit,

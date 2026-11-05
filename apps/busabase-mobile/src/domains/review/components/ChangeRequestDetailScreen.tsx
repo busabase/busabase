@@ -18,6 +18,9 @@ import { Button } from "~/components/ui/Button";
 import { TextInput } from "~/components/ui/TextInput";
 import { ConnectionGuard } from "~/domains/workspace/components/ConnectionGuard";
 import { DrawerScaffold } from "~/domains/workspace/components/DrawerScaffold";
+import { useCurrentWorkspaceScope } from "~/domains/workspace/hooks/use-current-workspace-scope";
+import { useMobileQueryRecovery } from "~/domains/workspace/hooks/use-mobile-query-recovery";
+import { invalidateWorkspaceWrite } from "~/domains/workspace/utils/invalidate-workspace-write";
 import { formatDate, shortId } from "~/lib/format";
 import { mobile, radius } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
@@ -36,6 +39,7 @@ function ChangeRequestDetailContent() {
   const router = useRouter();
   const tokens = useTokens();
   const buda = useBusabaseOrpc();
+  const currentScope = useCurrentWorkspaceScope(buda?.scopeKey);
   const queryClient = useQueryClient();
   const changeRequestId = typeof params.id === "string" ? params.id : "";
   const [rejectMode, setRejectMode] = useState(false);
@@ -48,42 +52,58 @@ function ChangeRequestDetailContent() {
       : { queryKey: ["no-connection", "change-request", changeRequestId], queryFn: skipToken },
   );
   const changeRequest = (crQuery.data as ChangeRequestVO | undefined) ?? null;
-
-  const invalidateCR = () =>
-    queryClient.invalidateQueries({
-      queryKey: buda?.orpc.changeRequests.get.key({ input: { changeRequestId } }),
-    });
+  useMobileQueryRecovery(
+    buda && changeRequestId
+      ? [buda.orpc.changeRequests.get.queryOptions({ input: { changeRequestId } }).queryKey]
+      : [],
+  );
 
   const reviewMutation = useMutation({
-    mutationFn: async ({ verdict, reason }: { verdict: ReviewVerdict; reason?: string }) => {
-      if (!buda) throw new Error("Not connected");
-      return buda.client.changeRequests.review({
-        changeRequestIds: [changeRequestId],
+    mutationFn: async ({
+      workspace,
+      id,
+      verdict,
+      reason,
+    }: {
+      workspace: NonNullable<typeof buda>;
+      id: string;
+      verdict: ReviewVerdict;
+      reason?: string;
+    }) =>
+      workspace.client.changeRequests.review({
+        changeRequestIds: [id],
         verdict,
         reason,
-      });
+      }),
+    onSuccess: (_outcome, { workspace, verdict }) => {
+      invalidateWorkspaceWrite(queryClient, workspace, "reviewed");
+      if (currentScope.current !== workspace.scopeKey) return;
+      if (verdict === "rejected") {
+        setRejectMode(false);
+        setRejectReason("");
+      }
     },
-    onSuccess: () => void invalidateCR(),
   });
 
   const mergeMutation = useMutation({
-    mutationFn: async () => {
-      if (!buda) throw new Error("Not connected");
-      return buda.client.changeRequests.merge({ changeRequestIds: [changeRequestId] });
+    mutationFn: async ({ workspace, id }: { workspace: NonNullable<typeof buda>; id: string }) =>
+      workspace.client.changeRequests.merge({ changeRequestIds: [id] }),
+    onSuccess: (_outcome, { workspace }) => {
+      invalidateWorkspaceWrite(queryClient, workspace, "merged");
     },
-    onSuccess: () => void invalidateCR(),
   });
 
   const approveMergeMutation = useMutation({
-    mutationFn: async () => {
-      if (!buda) throw new Error("Not connected");
-      await buda.client.changeRequests.review({
-        changeRequestIds: [changeRequestId],
+    mutationFn: async ({ workspace, id }: { workspace: NonNullable<typeof buda>; id: string }) => {
+      await workspace.client.changeRequests.review({
+        changeRequestIds: [id],
         verdict: "approved",
       });
-      return buda.client.changeRequests.merge({ changeRequestIds: [changeRequestId] });
+      return workspace.client.changeRequests.merge({ changeRequestIds: [id] });
     },
-    onSuccess: () => void invalidateCR(),
+    onSuccess: (_outcome, { workspace }) => {
+      invalidateWorkspaceWrite(queryClient, workspace, "merged");
+    },
   });
 
   const actionError =
@@ -172,9 +192,16 @@ function ChangeRequestDetailContent() {
         anyPending={anyPending}
         canMerge={canMerge}
         canReview={canReview}
-        onApprove={() => reviewMutation.mutate({ verdict: "approved" })}
-        onApproveMerge={() => approveMergeMutation.mutate()}
-        onMerge={() => mergeMutation.mutate()}
+        onApprove={() => {
+          if (buda)
+            reviewMutation.mutate({ workspace: buda, id: changeRequestId, verdict: "approved" });
+        }}
+        onApproveMerge={() => {
+          if (buda) approveMergeMutation.mutate({ workspace: buda, id: changeRequestId });
+        }}
+        onMerge={() => {
+          if (buda) mergeMutation.mutate({ workspace: buda, id: changeRequestId });
+        }}
         onResetError={() => {
           reviewMutation.reset();
           mergeMutation.reset();
@@ -226,17 +253,15 @@ function ChangeRequestDetailContent() {
               loading={reviewMutation.isPending}
               disabled={reviewMutation.isPending}
               fullWidth
-              onPress={() =>
-                reviewMutation.mutate(
-                  { verdict: "rejected", reason: rejectReason.trim() || undefined },
-                  {
-                    onSuccess: () => {
-                      setRejectMode(false);
-                      setRejectReason("");
-                    },
-                  },
-                )
-              }
+              onPress={() => {
+                if (!buda) return;
+                reviewMutation.mutate({
+                  workspace: buda,
+                  id: changeRequestId,
+                  verdict: "rejected",
+                  reason: rejectReason.trim() || undefined,
+                });
+              }}
             />
           </NativeActionBar>
         }

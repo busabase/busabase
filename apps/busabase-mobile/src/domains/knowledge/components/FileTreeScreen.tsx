@@ -89,7 +89,7 @@ export function FileTreeScreen({
           <FileTreeList
             currentFolder={controller.currentFolder}
             fileItems={controller.fileItems}
-            totalFileCount={controller.files.length}
+            totalFileCount={controller.totalFileCount}
             visibleFiles={controller.visibleFiles}
             onOpenFile={(file) => void controller.openFileForPreview(file)}
             onOpenFolder={controller.openFolder}

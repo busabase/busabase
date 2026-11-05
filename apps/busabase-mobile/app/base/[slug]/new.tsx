@@ -1,8 +1,8 @@
-import { skipToken, useMutation, useQuery } from "@tanstack/react-query";
+import { skipToken, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { BaseVO } from "busabase-contract/types";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { ArrowLeft } from "lucide-react-native";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Pressable, StyleSheet } from "react-native";
 import { useBusabaseOrpc } from "~/api/use-busabase-orpc";
 import {
@@ -15,17 +15,15 @@ import {
 } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
 import { RecordForm } from "~/domains/base/components/RecordForm";
+import { useRecordFormDraft } from "~/domains/base/hooks/use-record-form-draft";
 import { pendingChangeRequestId } from "~/domains/base/utils/change-request-result";
-import {
-  buildInitialFormValues,
-  isEditableField,
-  normalizeFormValues,
-  type RecordFormValue,
-  recordFormValuesEqual,
-} from "~/domains/base/utils/record-form";
+import { isEditableField, normalizeFormValues } from "~/domains/base/utils/record-form";
 import { SUBMITTED_BY } from "~/domains/review/utils/submitted-by";
 import { ConnectionGuard } from "~/domains/workspace/components/ConnectionGuard";
 import { DrawerScaffold } from "~/domains/workspace/components/DrawerScaffold";
+import { useCurrentWorkspaceScope } from "~/domains/workspace/hooks/use-current-workspace-scope";
+import { useMobileQueryRecovery } from "~/domains/workspace/hooks/use-mobile-query-recovery";
+import { invalidateWorkspaceWrite } from "~/domains/workspace/utils/invalidate-workspace-write";
 import { mobile, radius } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 
@@ -35,40 +33,46 @@ function NewRecordContent() {
   const router = useRouter();
   const tokens = useTokens();
   const buda = useBusabaseOrpc();
+  const currentScope = useCurrentWorkspaceScope(buda?.scopeKey);
+  const queryClient = useQueryClient();
 
-  const basesQuery = useQuery(
-    buda
-      ? buda.orpc.bases.list.queryOptions({ input: {} })
-      : { queryKey: ["no-connection", "bases", "list"], queryFn: skipToken },
-  );
+  const basesOptions = buda
+    ? buda.orpc.bases.list.queryOptions({ input: {} })
+    : { queryKey: ["no-connection", "bases", "list"], queryFn: skipToken as typeof skipToken };
+  const basesQuery = useQuery(basesOptions);
+  useMobileQueryRecovery(buda ? [basesOptions.queryKey] : []);
   const base: BaseVO | null = useMemo(
     () => basesQuery.data?.find((item) => item.slug === slug) ?? null,
     [basesQuery.data, slug],
   );
 
-  const [values, setValues] = useState<Record<string, RecordFormValue>>({});
-  const [initialValues, setInitialValues] = useState<Record<string, RecordFormValue>>({});
   const [discardOpen, setDiscardOpen] = useState(false);
-
-  useEffect(() => {
-    if (base) {
-      const next = buildInitialFormValues(base.fields);
-      setValues(next);
-      setInitialValues(next);
-    }
-  }, [base]);
+  const draft = useRecordFormDraft({
+    identity: `${buda?.scopeKey ?? "disconnected"}:new:${slug}`,
+    fields: base?.fields,
+  });
 
   const submitMutation = useMutation({
-    mutationFn: async () => {
-      if (!buda || !base) throw new Error("Not ready");
-      return buda.client.bases.createChangeRequest({
-        baseId: base.id,
-        fields: normalizeFormValues(base.fields, values),
-        message: `Create ${base.name} record`,
+    mutationFn: async ({
+      workspace,
+      baseId,
+      fields,
+      name,
+    }: {
+      workspace: NonNullable<typeof buda>;
+      baseId: string;
+      fields: Record<string, unknown>;
+      name: string;
+    }) =>
+      workspace.client.bases.createChangeRequest({
+        baseId,
+        fields,
+        message: `Create ${name} record`,
         submittedBy: SUBMITTED_BY,
-      });
-    },
-    onSuccess: (outcome) => {
+      }),
+    onSuccess: (outcome, { workspace }) => {
+      invalidateWorkspaceWrite(queryClient, workspace, outcome);
+      if (currentScope.current !== workspace.scopeKey) return;
       const reviewId = pendingChangeRequestId(outcome);
       // Merged immediately: `outcome.id` is the new RECORD — open it, which is
       // what "I just created this" should land on anyway.
@@ -80,7 +84,7 @@ function NewRecordContent() {
     },
   });
 
-  const hasChanges = base ? !recordFormValuesEqual(base.fields, initialValues, values) : false;
+  const hasChanges = draft.hasChanges;
   const editableFieldCount = base?.fields.filter(isEditableField).length ?? 0;
   const closeForm = () => {
     if (submitMutation.isPending) {
@@ -143,6 +147,9 @@ function NewRecordContent() {
       headerLeading={headerLeading}
       footer={
         <NativeActionBar>
+          {draft.schemaChanged ? (
+            <NativeInlineError message="Fields changed while you were editing. Your draft is kept; copy your changes and reopen this form." />
+          ) : null}
           {submitMutation.error ? (
             <NativeInlineError
               message={submitMutation.error.message}
@@ -152,21 +159,23 @@ function NewRecordContent() {
           <Button
             label="Create change request"
             loading={submitMutation.isPending}
-            disabled={submitMutation.isPending}
+            disabled={submitMutation.isPending || draft.schemaChanged}
             fullWidth
-            onPress={() => submitMutation.mutate()}
+            onPress={() => {
+              if (!buda || !base || draft.schemaChanged) return;
+              submitMutation.mutate({
+                workspace: buda,
+                baseId: base.id,
+                fields: normalizeFormValues(draft.fields, draft.values),
+                name: base.name,
+              });
+            }}
           />
         </NativeActionBar>
       }
     >
       <NativeSection title="Fields" caption={`${editableFieldCount}`}>
-        <RecordForm
-          fields={base.fields}
-          values={values}
-          onChange={(fieldSlug, value) =>
-            setValues((current) => ({ ...current, [fieldSlug]: value }))
-          }
-        />
+        <RecordForm fields={draft.fields} values={draft.values} onChange={draft.setValue} />
       </NativeSection>
       <NativeBottomSheet
         visible={discardOpen}

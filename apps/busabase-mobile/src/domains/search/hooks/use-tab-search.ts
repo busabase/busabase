@@ -15,7 +15,7 @@ const EMPTY: TabResults = { results: [], hasMore: false, contentTruncated: false
 interface UseTabSearchOptions {
   client: BusabaseORPCClient | null;
   /** Scopes the cache key, so switching space cannot show the previous one's hits. */
-  spaceScope: string | undefined;
+  scopeKey: string | undefined;
   query: string;
   tab: SearchTab;
   limit: number;
@@ -33,7 +33,7 @@ interface UseTabSearchOptions {
  */
 export function useTabSearch({
   client,
-  spaceScope,
+  scopeKey,
   query,
   tab,
   limit,
@@ -46,7 +46,7 @@ export function useTabSearch({
     // The filters are part of the key: two searches that differ only by sort
     // are different results, and sharing a cache entry would show the previous
     // ordering under the new label.
-    queryKey: ["tab-search", spaceScope ?? "no-connection", tab, query, limit, filters],
+    queryKey: [scopeKey ?? "no-connection", "tab-search", tab, query, limit, filters],
     enabled: enabled && !!client && groups.length > 0 && query.length > 0,
     queryFn: async (): Promise<TabResults> => {
       if (!client) throw new Error("Not connected");

@@ -17,14 +17,17 @@ import { RecordCard } from "~/domains/base/components/RecordCard";
 import { normalizeRecordsPage, RECORDS_PAGE_SIZE } from "~/domains/base/utils/record-pagination";
 import { ConnectionGuard } from "~/domains/workspace/components/ConnectionGuard";
 import { DrawerScaffold } from "~/domains/workspace/components/DrawerScaffold";
+import { useMobileQueryRecovery } from "~/domains/workspace/hooks/use-mobile-query-recovery";
 import { spacing } from "~/theme/tokens";
 
 function RecordsContent() {
   const router = useRouter();
   const buda = useBusabaseOrpc();
   const [search, setSearch] = useState("");
+  const queryKey = [buda?.scopeKey ?? "no-connection", "records", "paged", RECORDS_PAGE_SIZE];
+  useMobileQueryRecovery(buda ? [queryKey] : []);
   const query = useInfiniteQuery({
-    queryKey: ["records", "paged", buda?.serverUrl, buda?.spaceScope, RECORDS_PAGE_SIZE],
+    queryKey,
     queryFn: buda
       ? async ({ pageParam }) =>
           normalizeRecordsPage(
