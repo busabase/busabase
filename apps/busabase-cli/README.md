@@ -164,6 +164,48 @@ and MCP tools `space_instructions_get` / `space_instructions_update`.
 The update input is `{ body, expectedVersion }`; the response contains
 `{ spaceId, body, version, updatedAt }`. Clearing keeps the version token.
 
+## Space welcome page
+
+Home can open with a welcome page: an ordinary Doc or HTML node that a workspace
+owner/admin chose, shown at the top for every member who can read that node. To
+set one up for a customer or a new teammate, write the guide as a Doc or HTML node
+first, then point the welcome page at it:
+
+```bash
+busabase-cli --space-id spc_acme space-welcome get --output json
+busabase-cli --space-id spc_acme space-welcome set --node nod_123 --expected-version 0
+busabase-cli --space-id spc_acme space-welcome set --clear --expected-version 1
+```
+
+Pass exactly one of `--node` or `--clear`, with the version from the latest `get`
+(`0` when it was never set). A stale version returns `CONFLICT` without overwriting
+the other change; `--dry-run` prints the request without saving. The node must be
+a Doc or HTML node in this space that is not archived or in the trash. A server
+that predates the welcome page answers 404; the CLI then says so and asks you to
+upgrade the server instead of retrying.
+
+The same configuration is served by `GET` and `PUT /api/v1/space-welcome`, and MCP
+tools `space_welcome_get` / `space_welcome_update`. The update input is
+`{ nodeId, expectedVersion }` (`nodeId: null` clears it); the response contains
+`{ spaceId, nodeId, version, updatedAt }`.
+
+## Workflows
+
+Agents can see, start, cancel, and (where a step allows it) decide runs of a Workflow node. The
+commands come from the same contract as the API, so `--help` always matches the server:
+
+```bash
+busabase-cli workflows list --node-id nod_123 --limit 5
+busabase-cli workflows start --node-id nod_123 --record-id rec_456 --payload-json '{"source":"agent"}'
+busabase-cli workflows get --run-id wfr_789
+busabase-cli workflows cancel --run-id wfr_789
+busabase-cli workflows decide --run-id wfr_789 --decision approved
+```
+
+A run acts as the key's owner, never beyond the key's permission level, and needs a `write` key to
+start. `decide` is refused (403) unless the approval step has "Let agents decide" switched on; that
+step is otherwise a person's call. See [Workflows](https://busabase.com/docs/workflows).
+
 ## Getting the instructions, when the CLI is all you have
 
 Agents reach Busabase from four directions, and which one they land on is rarely a

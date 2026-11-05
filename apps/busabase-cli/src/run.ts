@@ -130,6 +130,7 @@ import {
   SKILL_TOPICS,
   skillsDirDefaultHint,
 } from "./skill-command.js";
+import { spaceWelcomeGetCommand, spaceWelcomeSetCommand } from "./space-welcome-command.js";
 import { registerTaskCommands } from "./task-command.js";
 import { checkForUpdate } from "./update-check.js";
 import { findChangeRequestId, waitForChangeRequest } from "./wait.js";
@@ -1938,6 +1939,68 @@ Requires API key level: manage`,
         }
         return client.spaceInstructions.update({
           body: hasFile ? readFileSync(opts.file as string, "utf8") : (opts.body as string),
+          expectedVersion: opts.expectedVersion as number,
+        });
+      }),
+    );
+
+  const spaceWelcome = program
+    .command("space-welcome")
+    .description("The Doc or HTML node Home shows first in this space");
+  addGlobalFlags(spaceWelcome.command("get"))
+    .description("Show which node is this space's welcome page (nodeId null = none)")
+    .addHelpText(
+      "after",
+      `
+Returns { spaceId, nodeId, version, updatedAt }. Read the node itself with
+\`busabase-cli nodes get --node-id <nodeId>\`.
+
+Examples:
+  busabase-cli space-welcome get --output json
+
+OpenAPI: GET /api/v1/space-welcome
+Requires API key level: read`,
+    )
+    .action(
+      runAction(state, (client) => {
+        state.procedureId = "spaceWelcome.get";
+        return spaceWelcomeGetCommand(client);
+      }),
+    );
+  addGlobalFlags(spaceWelcome.command("set").alias("update"))
+    .description("Choose or clear this space's welcome page (space managers only)")
+    .option("--node <nodeId>", "id of an existing Doc or HTML node in this space")
+    .option("--clear", "remove the welcome page; Home shows its built-in Getting started")
+    .requiredOption(
+      "--expected-version <n>",
+      "version returned by the latest get (0 when never set)",
+      parseNonNegativeInt,
+    )
+    .option("--dry-run", "print the request this would send and send nothing")
+    .addHelpText(
+      "after",
+      `
+Write the guide first as a Doc or HTML node (for example
+\`busabase-cli nodes create-change-request --type doc …\`), then point the
+welcome page at it. Home shows it above everything else to every member who
+can read that node. Pass exactly one of --node or --clear. A concurrent change
+returns CONFLICT without overwriting it; this is workspace configuration, not a
+Change Request.
+
+Examples:
+  busabase-cli space-welcome get --output json
+  busabase-cli space-welcome set --node nod_123 --expected-version 0
+  busabase-cli space-welcome set --clear --expected-version 1
+
+OpenAPI: PUT /api/v1/space-welcome
+Requires API key level: manage`,
+    )
+    .action(
+      runAction(state, (client, opts) => {
+        state.procedureId = "spaceWelcome.update";
+        return spaceWelcomeSetCommand(client, {
+          node: opts.node as string | undefined,
+          clear: Boolean(opts.clear),
           expectedVersion: opts.expectedVersion as number,
         });
       }),
