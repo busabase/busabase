@@ -1,7 +1,7 @@
 {
   "name": "busabase-core",
   "description": "Shared Busabase open-core protocol, local store, API helpers, and dashboard components.",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "exports": {
@@ -125,9 +125,17 @@
       "types": "./src/domains/assets/logic/asset-content-logic.ts",
       "default": "./src/domains/assets/logic/asset-content-logic.ts"
     },
+    "./domains/workflow/run-service": {
+      "types": "./src/domains/workflow/logic/run-service.ts",
+      "default": "./src/domains/workflow/logic/run-service.ts"
+    },
     "./domains/assets/storage-cleanup-logic": {
       "types": "./src/domains/assets/logic/storage-cleanup-logic.ts",
       "default": "./src/domains/assets/logic/storage-cleanup-logic.ts"
+    },
+    "./domains/assets/space-storage-changes": {
+      "types": "./src/domains/assets/logic/space-storage-changes.ts",
+      "default": "./src/domains/assets/logic/space-storage-changes.ts"
     },
     "./domains/assets/attachment-object-lifecycle": {
       "types": "./src/domains/assets/logic/attachment-object-lifecycle.ts",
@@ -337,6 +345,10 @@
       "types": "./src/domains/dashboard/helpers/attachment-upload.ts",
       "default": "./src/domains/dashboard/helpers/attachment-upload.ts"
     },
+    "./dashboard/upload-limits": {
+      "types": "./src/domains/dashboard/hooks/use-upload-limits.tsx",
+      "default": "./src/domains/dashboard/hooks/use-upload-limits.tsx"
+    },
     "./dashboard/node-agent-prompts": {
       "types": "./src/domains/dashboard/helpers/node-agent-prompts.ts",
       "default": "./src/domains/dashboard/helpers/node-agent-prompts.ts"
@@ -449,6 +461,14 @@
       "types": "./src/domains/agents/logic/agent-origin-guard.ts",
       "default": "./src/domains/agents/logic/agent-origin-guard.ts"
     },
+    "./domains/agents/logic/agent-session-manager": {
+      "types": "./src/domains/agents/logic/agent-session-manager.ts",
+      "default": "./src/domains/agents/logic/agent-session-manager.ts"
+    },
+    "./domains/agents/logic/agent-session-supervisor": {
+      "types": "./src/domains/agents/logic/agent-session-supervisor.ts",
+      "default": "./src/domains/agents/logic/agent-session-supervisor.ts"
+    },
     "./domains/agents/logic/agent-session-store": {
       "types": "./src/domains/agents/logic/agent-session-store.ts",
       "default": "./src/domains/agents/logic/agent-session-store.ts"
@@ -477,10 +497,6 @@
       "types": "./src/domains/dashboard/helpers/file-tree-files.ts",
       "default": "./src/domains/dashboard/helpers/file-tree-files.ts"
     },
-    "./dashboard/markdown-preview": {
-      "types": "./src/domains/dashboard/helpers/markdown-preview.ts",
-      "default": "./src/domains/dashboard/helpers/markdown-preview.ts"
-    },
     "./domains/agents/utils/agent-visible-message": {
       "types": "./src/domains/agents/utils/agent-visible-message.ts",
       "default": "./src/domains/agents/utils/agent-visible-message.ts"
@@ -492,6 +508,10 @@
     "./domains/space-instructions/components/space-instructions-settings": {
       "types": "./src/domains/space-instructions/components/space-instructions-settings.tsx",
       "default": "./src/domains/space-instructions/components/space-instructions-settings.tsx"
+    },
+    "./domains/space-welcome/components/space-welcome-settings": {
+      "types": "./src/domains/space-welcome/components/space-welcome-settings.tsx",
+      "default": "./src/domains/space-welcome/components/space-welcome-settings.tsx"
     }
   },
   "dependencies": {
@@ -530,6 +550,7 @@
     "busabase-package": "workspace:*",
     "drizzle-orm": "^0.45.1",
     "elkjs": "^0.9.3",
+    "es-module-lexer": "^2.0.0",
     "framer-motion": "^12.33.0",
     "frimousse": "^0.3.0",
     "ignore": "^7.0.5",
@@ -583,6 +604,7 @@
     "verify:inbox-index": "NODE_OPTIONS='--conditions=react-server' tsx scripts/verify-inbox-index.ts",
     "bench:node-grep": "NODE_OPTIONS=--conditions=react-server tsx scripts/bench-node-grep.ts",
     "bench:sidebar": "NODE_OPTIONS='--conditions=react-server --max-old-space-size=4096' tsx scripts/bench-sidebar.ts",
-    "backfill:node-content-search": "NODE_OPTIONS=--conditions=react-server tsx scripts/backfill-node-content-search.ts"
+    "backfill:node-content-search": "NODE_OPTIONS=--conditions=react-server tsx scripts/backfill-node-content-search.ts",
+    "backfill:asset-text-search": "NODE_OPTIONS=--conditions=react-server tsx scripts/backfill-asset-text-search.ts"
   }
 }
