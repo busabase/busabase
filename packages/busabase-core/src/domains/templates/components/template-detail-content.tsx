@@ -1,4 +1,4 @@
-import { pickTemplateMedia } from "busabase-contract/domains/templates/media";
+import { pickTemplateMedia, templateVideoTiles } from "busabase-contract/domains/templates/media";
 import { visibleTemplateTags } from "busabase-contract/domains/templates/tags";
 import type { TemplateCardVO } from "busabase-contract/domains/templates/types";
 import { ExternalLink, MessageSquare } from "lucide-react";
@@ -150,15 +150,15 @@ export function TemplateDetailContent({
           // outlive the list it indexed.
           key={`${template.id}:${descriptionLocale}`}
           screenshots={screenshots}
-          videoTiles={media.videos.map((clip) => (
+          videoTiles={templateVideoTiles(media).map((clip) => (
             <TemplateVideoPreview
               key={clip.src}
               src={clip.src}
-              // Older clips fall back to an app screenshot beside the cover.
-              poster={clip.poster ?? (screenshots[1] ?? screenshots[0])?.src}
+              poster={clip.poster}
               title={title}
               playLabel={clip.title ? `${labels.playVideo}: ${clip.title}` : labels.playVideo}
               clipTitle={clip.title}
+              captioned={clip.captioned}
             />
           ))}
           label={labels.screenshot(0)}

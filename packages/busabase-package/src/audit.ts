@@ -198,7 +198,7 @@ export const auditPackage = (
     if (clips.length > 1 && clips.some((clip) => !clip.title)) {
       warn(
         "package/video-untitled",
-        `${where}.videos declares ${clips.length} clips but not every one has a \`title\`. Give each play button a distinct accessible name.`,
+        `${where}.videos declares ${clips.length} clips but not every one has a \`title\`. Each play button needs a distinct name, and clips without their own \`poster\` show the same picture, so the title is the only way to tell them apart.`,
       );
     }
     if (single && single !== clips[0]?.src) {

@@ -7,11 +7,18 @@ import { TemplateDetailImage } from "./template-detail-image";
 
 interface TemplateVideoPreviewProps {
   src: string;
-  /** The clip's poster or a fallback screenshot. */
+  /** The clip's own poster, or the screenshot `templateVideoTiles` fell back to. */
   poster?: string;
   title: string;
   playLabel: string;
+  /** Names the clip in the player dialog. */
   clipTitle?: string;
+  /**
+   * Also print `clipTitle` on the tile. Only when another tile shows the same
+   * picture (clips without a poster of their own share one), because then the
+   * title is the only way to tell them apart.
+   */
+  captioned?: boolean;
 }
 
 /**
@@ -33,6 +40,7 @@ export function TemplateVideoPreview({
   title,
   playLabel,
   clipTitle,
+  captioned,
 }: TemplateVideoPreviewProps) {
   const [open, setOpen] = useState(false);
 
@@ -56,6 +64,11 @@ export function TemplateVideoPreview({
             <Play className="size-5 translate-x-0.5 fill-foreground text-foreground" />
           </span>
         </span>
+        {captioned && clipTitle ? (
+          <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-foreground/70 to-transparent px-3 pb-2.5 pt-8 text-sm font-medium text-background">
+            {clipTitle}
+          </span>
+        ) : null}
       </button>
 
       <Dialog open={open} onOpenChange={setOpen}>

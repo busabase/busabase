@@ -5,6 +5,7 @@ import {
   parseTemplateLocales,
   parseTemplateVideos,
   pickTemplateMedia,
+  templateVideoTiles,
 } from "./media";
 
 const DEFAULT = {
@@ -206,5 +207,75 @@ describe("parseTemplateLocales", () => {
   it("is undefined when no entry survives, so a card carries no empty locales key", () => {
     expect(parseTemplateLocales({ "zh-CN": { screenshots: [] } })).toBeUndefined();
     expect(parseTemplateLocales({ "zh-CN": { videos: [] } })).toBeUndefined();
+  });
+});
+
+describe("templateVideoTiles", () => {
+  const SHOTS = ["cover.webp", "overview.webp", "detail.webp"];
+  const tour = { src: "tour.mp4", title: "30-second tour" };
+  const full = { src: "full.mp4", title: "Full walkthrough" };
+
+  it("titles clips that share the fallback screenshot", () => {
+    expect(templateVideoTiles({ screenshots: SHOTS, videos: [tour, full] })).toEqual([
+      { ...tour, poster: "overview.webp", captioned: true },
+      { ...full, poster: "overview.webp", captioned: true },
+    ]);
+  });
+
+  it("leaves clips with their own posters untitled", () => {
+    const tiles = templateVideoTiles({
+      screenshots: SHOTS,
+      videos: [
+        { ...tour, poster: "tour.webp" },
+        { ...full, poster: "full.webp" },
+      ],
+    });
+    expect(tiles.map((tile) => [tile.poster, tile.captioned])).toEqual([
+      ["tour.webp", false],
+      ["full.webp", false],
+    ]);
+  });
+
+  it("leaves a postered clip and one fallback untitled, since they already differ", () => {
+    const tiles = templateVideoTiles({
+      screenshots: SHOTS,
+      videos: [{ ...tour, poster: "tour.webp" }, full],
+    });
+    expect(tiles.map((tile) => [tile.poster, tile.captioned])).toEqual([
+      ["tour.webp", false],
+      ["overview.webp", false],
+    ]);
+  });
+
+  it("titles clips that declare the same poster", () => {
+    const tiles = templateVideoTiles({
+      screenshots: SHOTS,
+      videos: [
+        { ...tour, poster: "shared.webp" },
+        { ...full, poster: "shared.webp" },
+      ],
+    });
+    expect(tiles.every((tile) => tile.captioned)).toBe(true);
+  });
+
+  it("never titles a lone clip", () => {
+    expect(templateVideoTiles({ screenshots: SHOTS, videos: [tour] })).toEqual([
+      { ...tour, poster: "overview.webp", captioned: false },
+    ]);
+  });
+
+  it("cannot title a clip that has no title", () => {
+    const tiles = templateVideoTiles({ screenshots: SHOTS, videos: [tour, { src: "full.mp4" }] });
+    expect(tiles.map((tile) => tile.captioned)).toEqual([true, false]);
+  });
+
+  it("falls back to the cover when it is the only screenshot, and to nothing without one", () => {
+    expect(templateVideoTiles({ screenshots: ["cover.webp"], videos: [tour] })[0]?.poster).toBe(
+      "cover.webp",
+    );
+    const bare = templateVideoTiles({ screenshots: [], videos: [tour, full] });
+    expect(bare.map((tile) => "poster" in tile)).toEqual([false, false]);
+    // Two blank tiles look alike too.
+    expect(bare.map((tile) => tile.captioned)).toEqual([true, true]);
   });
 });

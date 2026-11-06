@@ -1,5 +1,5 @@
 import { skipToken, useQuery } from "@tanstack/react-query";
-import { pickTemplateMedia } from "busabase-contract/domains/templates/media";
+import { pickTemplateMedia, templateVideoTiles } from "busabase-contract/domains/templates/media";
 import { useLocalSearchParams } from "expo-router";
 import { Bot, ExternalLink, MessageSquare, PackageOpen, Play } from "lucide-react-native";
 import { iStringParse } from "openlib/i18n/i-string";
@@ -113,17 +113,17 @@ function TemplateDetailContent() {
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.shelf}
             >
-              {media.videos.map((clip) => (
+              {templateVideoTiles(media).map((clip) => (
                 <VideoTile
                   key={clip.src}
                   src={clip.src}
                   label={
                     clip.title ? `${t.templates.playVideo}: ${clip.title}` : t.templates.playVideo
                   }
-                  // Only when there are several: titles tell clips apart, and a
-                  // lone clip's tile stays as it always was.
-                  caption={media.videos.length > 1 ? clip.title : undefined}
-                  poster={media.screenshots[1] ?? media.screenshots[0]}
+                  // Same rule as the Dashboard: a title only on tiles that
+                  // would otherwise look alike.
+                  caption={clip.captioned ? clip.title : undefined}
+                  poster={clip.poster}
                 />
               ))}
               {media.screenshots.map((src, index) => (
@@ -199,7 +199,8 @@ function TemplateDetailContent() {
 
 /**
  * Markdown has no video syntax and neither does this screen: the demo clip is
- * just a URL, posterized with a screenshot, that opens outside the app. Same
+ * just a URL, posterized with its own poster or a screenshot, that opens
+ * outside the app. Same
  * "row that plays externally" decision `MarkdownView` makes for a Doc's
  * inline video — not a shared component because the visual shells differ (a
  * shelf tile here, a text row there), but the same reasoning.
