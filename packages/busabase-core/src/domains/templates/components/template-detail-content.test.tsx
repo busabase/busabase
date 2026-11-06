@@ -273,7 +273,7 @@ describe("TemplateDetailContent — several clips", () => {
   };
   const plays = (markup: string) => markup.split("Play the demo").length - 1;
 
-  it("renders labeled play controls without a visible title overlay", () => {
+  it("prints no title on tiles that already show different pictures", () => {
     const markup = renderToStaticMarkup(<TemplateDetailContent template={several} />);
     expect(plays(markup)).toBe(2);
     expect(markup).toContain('aria-label="Play the demo: 30-second tour"');
@@ -291,6 +291,17 @@ describe("TemplateDetailContent — several clips", () => {
     expect(markup).toMatch(
       new RegExp(`aria-label="Play the demo: Full walkthrough"[^>]*><img src="${SHOT}"`),
     );
+  });
+
+  it("prints the title on clips that share the fallback screenshot", () => {
+    const unpostered: TemplateCardVO = {
+      ...several,
+      videos: [clip("tour", "30-second tour"), clip("full", "Full walkthrough")],
+    };
+    const markup = renderToStaticMarkup(<TemplateDetailContent template={unpostered} />);
+    expect(markup.split(`<img src="${SHOT}"`).length - 1).toBeGreaterThanOrEqual(2);
+    expect(markup).toContain(">30-second tour</span>");
+    expect(markup).toContain(">Full walkthrough</span>");
   });
 
   it("shelves the clips after the cover and before the other screenshots", () => {

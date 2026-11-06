@@ -146,3 +146,38 @@ export const pickTemplateMedia = (
     [];
   return { screenshots, videos: videos.slice(0, TEMPLATE_VIDEO_LIMIT) };
 };
+
+/** One clip as a shelf tile: what to paint on it, and whether to print its title. */
+export interface TemplateVideoTile extends TemplateVideo {
+  /** The clip's own `poster`, else the gallery's first non-cover screenshot. */
+  poster?: string;
+  /** Print the title on the tile: another tile shows the same picture. */
+  captioned: boolean;
+}
+
+/**
+ * Lay out a gallery's clips as shelf tiles, for the Dashboard and the mobile
+ * app alike.
+ *
+ * A clip without a `poster` borrows the first NON-cover shot, not the cover:
+ * the clip tile sits directly beside the cover tile, and repeating the cover
+ * there makes the shelf look like it shows one picture twice.
+ *
+ * Every clip without a poster borrows that same shot, so several of them look
+ * identical and the title is the only thing telling them apart; those tiles
+ * print it. Clips with posters of their own already look different and stay
+ * clean, as does a lone clip.
+ */
+export const templateVideoTiles = (media: TemplateMedia): TemplateVideoTile[] => {
+  const fallback = media.screenshots[1] ?? media.screenshots[0];
+  const posters = media.videos.map((clip) => clip.poster ?? fallback);
+  return media.videos.map((clip, index) => {
+    const poster = posters[index];
+    const lookalikes = posters.filter((other) => other === poster).length;
+    return {
+      ...clip,
+      ...(poster ? { poster } : {}),
+      captioned: lookalikes > 1 && Boolean(clip.title),
+    };
+  });
+};
