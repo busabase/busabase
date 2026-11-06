@@ -153,7 +153,7 @@ describe("DayTimePicker", () => {
       <DayTimePicker
         ariaLabel="Expires"
         className=""
-        day=""
+        day="2026-10-10"
         id="expires"
         includeTime
         minDay="2026-10-10"
