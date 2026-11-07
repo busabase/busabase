@@ -803,7 +803,7 @@ export const dashboardVi: CoreI18nMessages = {
         offlineHint:
           "Trang web đang ngoại tuyến. Mọi địa chỉ của trang web đều hiển thị trang không tìm thấy.",
         dnsInstructions:
-          "Thêm các bản ghi này tại nhà cung cấp DNS. Giữ các bản ghi khác mà tên miền cần. Trên Cloudflare, đặt CNAME này thành «Chỉ DNS» (đám mây xám).",
+          "Thêm các bản ghi này tại nhà cung cấp DNS. Giữ các bản ghi khác mà tên miền cần. Proxy Cloudflare được hỗ trợ sau khi xác minh tên miền kết nối đúng đến trang web.",
         dnsName: "Tên",
         dnsValue: "Giá trị / đích",
         httpInstructions:
@@ -1015,6 +1015,7 @@ export const dashboardVi: CoreI18nMessages = {
     searchEmpty: "Không có gì khớp với “{search}”.",
     catalogEmpty: "Danh mục này chưa có mẫu nào.",
     catalogFailed: "Không thể tải mẫu. Hãy thử lại.",
+    paginationLabel: "Trang mẫu",
     missingTemplate: "Không có mẫu nào tên “{name}” trong danh mục này.",
     backToTemplates: "Quay lại Mẫu",
     install: "Cài đặt",
@@ -2697,9 +2698,54 @@ export const dashboardVi: CoreI18nMessages = {
     eventName: "Tên sự kiện",
     eventRecordCreated: "Khi một bản ghi được tạo",
     eventRecordUpdated: "Khi một bản ghi được cập nhật",
+    eventSchedule: "Theo lịch",
+    eventWebhook: "Khi nhận được yêu cầu",
+    hookUrl: "URL nhận",
+    hookUrlCopied: "Đã sao chép",
+    regenerateHookUrl: "Đổi URL",
+    hookUrlHint:
+      "Gửi POST (JSON hoặc văn bản) hoặc GET tới URL này để bắt đầu một lượt chạy. Nội dung yêu cầu nằm trong steps.trigger.payload.request: method, query, headers và body. Nếu một bước mã trả về { response: … } trước khi lượt chạy tạm dừng, bên gọi sẽ nhận được nó; nếu không, bên gọi nhận 202 và ID lượt chạy. Ai có URL này cũng bắt đầu được lượt chạy: đổi URL để URL cũ ngừng hoạt động. Thay đổi có hiệu lực sau khi lưu.",
+    hookNeedsEvent:
+      "Đặt chế độ thực thi thành Sự kiện trong phần cài đặt thực thi, nếu không URL này sẽ trả về 404.",
+    functionCode: "Mã",
+    functionCodeHint:
+      "JavaScript chạy trên máy chủ khi lượt chạy tới bước này. input chứa dữ liệu của lượt chạy (payload, steps, record), await fetch(...) gọi được URL công khai, và giá trị bạn return là đầu ra của bước này (các bước sau đọc bằng steps.<id>.<trường>). Ai mở được quy trình này cũng đọc được mã.",
+    savedFunction: "Hoặc chạy một hàm đã lưu",
+    inlineCode: "Mã",
+    triggerField: "Chỉ khi trường này thay đổi",
+    anyField: "Bất kỳ trường nào",
+    triggerFieldNeedsBase:
+      "Chọn một cơ sở dữ liệu ở trên để chỉ bắt đầu khi một trường của nó thay đổi.",
+    triggerToValue: "Đổi thành",
+    anyValue: "Bất kỳ giá trị mới nào",
+    triggerFieldHint:
+      "Khi đã chọn giá trị, lượt chạy chỉ bắt đầu khi trường đổi thành giá trị đó. Sửa một bản ghi vốn đã có giá trị này sẽ không bắt đầu gì.",
+    checkboxChecked: "Đã chọn",
+    checkboxUnchecked: "Chưa chọn",
+    scheduleRepeat: "Lặp lại",
+    scheduleEveryMinutes: "Mỗi vài phút",
+    scheduleEveryHours: "Mỗi vài giờ",
+    scheduleDaily: "Hằng ngày",
+    scheduleWeekly: "Hằng tuần",
+    scheduleMinutesBetween: "Số phút giữa các lượt chạy (ít nhất {min})",
+    scheduleHoursBetween: "Số giờ giữa các lượt chạy",
+    scheduleAt: "Giờ",
+    scheduleWeekday: "Ngày trong tuần",
+    scheduleTimezone: "Múi giờ: {timezone}.",
+    scheduleNextRun: "Lượt chạy tiếp theo: {time}",
+    scheduleNeedsEvent:
+      "Đặt chế độ thực thi thành Sự kiện trong phần cài đặt thực thi, nếu không lịch này sẽ không bắt đầu lượt chạy nào.",
+    webhookHeaders: "Header",
+    webhookHeaderName: "Tên header",
+    webhookHeaderValue: "Giá trị header",
+    addWebhookHeader: "Thêm header",
+    removeWebhookHeader: "Xóa header",
+    webhookHeadersHint:
+      "Được gửi kèm yêu cầu, ví dụ Authorization. Ai mở được quy trình này cũng đọc được các giá trị, nên hãy dùng một khóa tạo riêng cho việc này.",
+    addApprover: "Thêm thành viên…",
     customEventOption: "{name} (chỉ là nhãn)",
     triggerEventHint:
-      "Ở chế độ Sự kiện, “Khi một bản ghi được tạo” và “Khi một bản ghi được cập nhật” tự bắt đầu lượt chạy. Thủ công và các tên sự kiện khác chỉ bắt đầu khi có người chạy quy trình.",
+      "Ở chế độ Sự kiện, “Khi một bản ghi được tạo”, “Khi một bản ghi được cập nhật”, “Theo lịch” và “Khi nhận được yêu cầu” tự bắt đầu lượt chạy. Thủ công và các tên sự kiện khác chỉ bắt đầu khi có người chạy quy trình.",
     triggerBase: "Cơ sở dữ liệu",
     anyBase: "Mọi cơ sở dữ liệu",
     unknownBase: "Không tìm thấy cơ sở dữ liệu ({id})",
@@ -2729,6 +2775,19 @@ export const dashboardVi: CoreI18nMessages = {
       "Thêm một bản ghi vào cơ sở dữ liệu đã chọn, với quyền của người mà lần chạy đang đại diện. Các bước sau có thể dùng ID của nó qua createdRecordId của bước này.",
     deleteRecordHint:
       "Chuyển bản ghi vào thùng rác của cơ sở dữ liệu, với quyền của người mà lần chạy đang đại diện. Có thể khôi phục từ đó.",
+    actionFindRecords: "Tìm bản ghi",
+    actionFindRecordsEach: "Tìm bản ghi, mỗi bản ghi một lần chạy",
+    findRecordsHint:
+      "Liệt kê các bản ghi của một cơ sở dữ liệu, hoặc các bản ghi một chế độ xem hiển thị theo thứ tự của nó, với quyền của người mà lần chạy thay mặt. Các bước sau đọc records, count và total của bước này.",
+    findRecordsView: "Chế độ xem",
+    findRecordsAllRecords: "Tất cả bản ghi",
+    findRecordsUnknownView: "Không tìm thấy chế độ xem ({id})",
+    findRecordsLimit: "Tối đa",
+    findRecordsLimitHint:
+      "Tối đa {max} bản ghi, để trống là 50. Khi chạy riêng cho từng bản ghi, nếu tìm thấy nhiều hơn số này thì không lần chạy nào bắt đầu và bước thất bại, để một chế độ xem lỡ quá rộng không khởi động hàng trăm lần chạy.",
+    findRecordsForEach: "Chạy các bước tiếp theo cho từng bản ghi",
+    findRecordsForEachHint:
+      "Mỗi bản ghi có một lần chạy riêng về bản ghi đó: Cập nhật bản ghi sẽ thay đổi nó, và các bước sau đọc nó là record. Lần chạy này kết thúc ở đây; các lần chạy kia lần lượt chạy theo thiết lập Đồng thời.",
     customActionHint: "Tên hành động này chưa có tác dụng: chỉ được ghi lại.",
     chooseBase: "Chọn cơ sở dữ liệu",
     targetRecord: "Bản ghi (không bắt buộc)",
@@ -2749,7 +2808,7 @@ export const dashboardVi: CoreI18nMessages = {
     notExecutedNote:
       "Chỉnh các bước ở đây, lưu lại rồi bắt đầu lượt chạy ở thẻ Lượt chạy. Lượt chạy diễn ra trên máy chủ với phiên bản đã lưu gần nhất. Mỗi bước xong giữ một ảnh chụp, read_record đọc lại bản ghi, bước Chờ tạm dừng đến đúng giờ, còn Phê duyệt thì chờ có người quyết định.",
     executionModeHint:
-      "Thủ công: lượt chạy chỉ bắt đầu khi có người chạy quy trình. Sự kiện: trình kích hoạt bản ghi cũng bắt đầu lượt chạy khi một bản ghi phù hợp được tạo hoặc cập nhật. Lượt chạy theo sự kiện hoạt động với tư cách người lưu quy trình gần nhất.",
+      "Thủ công: lượt chạy chỉ bắt đầu khi có người chạy quy trình. Sự kiện: trình kích hoạt bản ghi cũng bắt đầu lượt chạy khi một bản ghi phù hợp được tạo hoặc cập nhật, lịch bắt đầu lượt chạy vào các thời điểm đã đặt, và một yêu cầu gửi tới URL của trình kích hoạt cũng bắt đầu lượt chạy. Các lượt chạy này hoạt động với tư cách người lưu quy trình gần nhất.",
     manual: "Thủ công",
     event: "Sự kiện",
     errorPolicy: "Khi có lỗi",
@@ -2819,6 +2878,9 @@ export const dashboardVi: CoreI18nMessages = {
     statusFailed: "Thất bại",
     triggerManual: "Thủ công",
     triggerEvent: "Sự kiện",
+    triggerSchedule: "Theo lịch",
+    triggerWebhook: "Yêu cầu",
+    triggerForEach: "Từng bản ghi",
     runDetails: "Chi tiết lượt chạy",
     recordLabel: "Bản ghi: {id}",
     waitingUntil: "Đang chờ đến {time}. Khi đó sẽ tự tiếp tục.",

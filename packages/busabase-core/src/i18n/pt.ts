@@ -814,7 +814,7 @@ export const dashboardPt: CoreI18nMessages = {
         offlineHint:
           "O site está fora do ar. Todos os endereços do site mostram uma página não encontrada.",
         dnsInstructions:
-          "Adicione estes registros no seu provedor de DNS. Mantenha os outros registros necessários ao domínio. Na Cloudflare, defina este CNAME como «Somente DNS» (nuvem cinza).",
+          "Adicione estes registros no seu provedor de DNS. Mantenha os outros registros necessários ao domínio. O proxy da Cloudflare é compatível após a verificação de que o domínio chega ao site.",
         dnsName: "Nome",
         dnsValue: "Valor / destino",
         httpInstructions:
@@ -1029,6 +1029,7 @@ export const dashboardPt: CoreI18nMessages = {
     searchEmpty: "Nada corresponde a “{search}”.",
     catalogEmpty: "Este catálogo ainda não tem modelos.",
     catalogFailed: "Não foi possível carregar os modelos. Tente novamente.",
+    paginationLabel: "Páginas de modelos",
     missingTemplate: "Nenhum modelo chamado “{name}” neste catálogo.",
     backToTemplates: "Voltar para Modelos",
     install: "Instalar",
@@ -2732,9 +2733,54 @@ export const dashboardPt: CoreI18nMessages = {
     eventName: "Nome do evento",
     eventRecordCreated: "Quando um registro é criado",
     eventRecordUpdated: "Quando um registro é atualizado",
+    eventSchedule: "Em um horário programado",
+    eventWebhook: "Quando chega uma requisição",
+    hookUrl: "URL de entrada",
+    hookUrlCopied: "Copiada",
+    regenerateHookUrl: "Trocar URL",
+    hookUrlHint:
+      "Um POST (JSON ou texto) ou GET para esta URL inicia uma execução. A requisição fica em steps.trigger.payload.request: method, query, headers e body. Se uma etapa de código retornar { response: … } antes de a execução pausar, quem chamou recebe isso; caso contrário, recebe 202 e o ID da execução. Qualquer pessoa com esta URL pode iniciar uma execução: troque-a para que a antiga pare de funcionar. As mudanças valem depois de salvar.",
+    hookNeedsEvent:
+      "Mude o modo de execução para Evento nas configurações de execução; caso contrário, esta URL responde 404.",
+    functionCode: "Código",
+    functionCodeHint:
+      "JavaScript que roda no servidor quando a execução chega a esta etapa. input traz os dados da execução (payload, steps, record), await fetch(...) chama URLs públicas e o valor retornado é a saída desta etapa (as etapas seguintes leem como steps.<id>.<campo>). Qualquer pessoa que possa abrir este fluxo de trabalho pode ler o código.",
+    savedFunction: "Ou executar uma função salva",
+    inlineCode: "Código",
+    triggerField: "Só quando este campo mudar",
+    anyField: "Qualquer campo",
+    triggerFieldNeedsBase:
+      "Escolha uma base acima para iniciar só quando um dos campos dela mudar.",
+    triggerToValue: "Muda para",
+    anyValue: "Qualquer valor novo",
+    triggerFieldHint:
+      "Com um valor escolhido, uma execução só começa quando o campo passa a ter esse valor. Editar um registro que já o tem não inicia nada.",
+    checkboxChecked: "Marcada",
+    checkboxUnchecked: "Desmarcada",
+    scheduleRepeat: "Repetir",
+    scheduleEveryMinutes: "A cada poucos minutos",
+    scheduleEveryHours: "A cada poucas horas",
+    scheduleDaily: "Todos os dias",
+    scheduleWeekly: "Toda semana",
+    scheduleMinutesBetween: "Minutos entre execuções (pelo menos {min})",
+    scheduleHoursBetween: "Horas entre execuções",
+    scheduleAt: "Horário",
+    scheduleWeekday: "Dia",
+    scheduleTimezone: "Fuso horário: {timezone}.",
+    scheduleNextRun: "Próxima execução: {time}",
+    scheduleNeedsEvent:
+      "Mude o modo de execução para Evento nas configurações de execução; caso contrário, esta programação não inicia nada.",
+    webhookHeaders: "Cabeçalhos",
+    webhookHeaderName: "Nome do cabeçalho",
+    webhookHeaderValue: "Valor do cabeçalho",
+    addWebhookHeader: "Adicionar cabeçalho",
+    removeWebhookHeader: "Remover cabeçalho",
+    webhookHeadersHint:
+      "Enviados com a requisição, por exemplo Authorization. Qualquer pessoa que possa abrir este fluxo de trabalho pode ler os valores, então use uma chave criada para isso.",
+    addApprover: "Adicionar um membro…",
     customEventOption: "{name} (apenas rótulo)",
     triggerEventHint:
-      "No modo Evento, “Quando um registro é criado” e “Quando um registro é atualizado” iniciam uma execução sozinhos. Manual e outros nomes de evento só iniciam quando alguém executa o fluxo de trabalho.",
+      "No modo Evento, “Quando um registro é criado”, “Quando um registro é atualizado”, “Em um horário programado” e “Quando chega uma requisição” iniciam uma execução sozinhos. Manual e outros nomes de evento só iniciam quando alguém executa o fluxo de trabalho.",
     triggerBase: "Base",
     anyBase: "Qualquer base",
     unknownBase: "Base não encontrada ({id})",
@@ -2764,6 +2810,19 @@ export const dashboardPt: CoreI18nMessages = {
       "Adiciona um registro à base escolhida, com as permissões da pessoa com quem a execução atua. As próximas etapas podem usar o id dele como createdRecordId desta etapa.",
     deleteRecordHint:
       "Move o registro para a lixeira da base, com as permissões da pessoa com quem a execução atua. Ele pode ser restaurado de lá.",
+    actionFindRecords: "Encontrar registros",
+    actionFindRecordsEach: "Encontrar registros, uma execução para cada",
+    findRecordsHint:
+      "Lista os registros de uma base, ou os que uma visualização mostra na ordem dela, com as permissões da pessoa em nome de quem a execução age. As etapas seguintes leem records, count e total desta etapa.",
+    findRecordsView: "Visualização",
+    findRecordsAllRecords: "Todos os registros",
+    findRecordsUnknownView: "Visualização não encontrada ({id})",
+    findRecordsLimit: "No máximo",
+    findRecordsLimitHint:
+      "Até {max} registros; 50 se ficar vazio. Com uma execução por registro, encontrar mais que isso não inicia nenhuma e a etapa falha, para que uma visualização ampla demais por engano não inicie centenas de execuções.",
+    findRecordsForEach: "Executar as próximas etapas uma vez para cada registro",
+    findRecordsForEachHint:
+      "Cada registro ganha sua própria execução, sobre esse registro: Atualizar um registro o altera, e as etapas seguintes o leem como record. Esta execução termina aqui, e essas execuções esperam a vez conforme a concorrência.",
     customActionHint: "Este nome de ação ainda não faz nada: é apenas registrado.",
     chooseBase: "Escolha uma base",
     targetRecord: "Registro (opcional)",
@@ -2784,7 +2843,7 @@ export const dashboardPt: CoreI18nMessages = {
     notExecutedNote:
       "Edite os passos aqui, salve e depois inicie uma execução em Execuções. As execuções rodam no servidor com a última versão salva. Cada passo concluído guarda um instantâneo, read_record lê o registro de novo, uma Espera pausa até o horário dela e uma Aprovação aguarda uma decisão.",
     executionModeHint:
-      "Manual: uma execução só começa quando alguém executa o fluxo de trabalho. Evento: um gatilho de registro também inicia uma execução quando um registro correspondente é criado ou atualizado. Execuções por evento agem como a pessoa que salvou o fluxo de trabalho por último.",
+      "Manual: uma execução só começa quando alguém executa o fluxo de trabalho. Evento: um gatilho de registro também inicia uma execução quando um registro correspondente é criado ou atualizado, uma programação inicia uma nos horários definidos e uma requisição para a URL do gatilho inicia uma. Essas execuções agem como a pessoa que salvou o fluxo de trabalho por último.",
     manual: "Manual",
     event: "Evento",
     errorPolicy: "Em caso de erro",
@@ -2853,6 +2912,9 @@ export const dashboardPt: CoreI18nMessages = {
     statusFailed: "Falhou",
     triggerManual: "Manual",
     triggerEvent: "Evento",
+    triggerSchedule: "Agendamento",
+    triggerWebhook: "Requisição",
+    triggerForEach: "Por registro",
     runDetails: "Detalhes da execução",
     recordLabel: "Registro: {id}",
     waitingUntil: "Aguardando até {time}. Depois continua sozinha.",

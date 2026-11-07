@@ -4,6 +4,8 @@ import {
   ASSET_SEARCH_MAX_CHARS,
   ASSET_SEARCH_OVERLAP_CHARS,
   AssetSearchProjectionBuilder,
+  createRateLimitedLog,
+  queryUsesTrigramIndex,
 } from "../src/domains/assets/logic/asset-text-search-logic";
 
 describe("asset text projection boundaries", () => {
@@ -51,5 +53,37 @@ describe("asset text projection boundaries", () => {
       expect(chunk).not.toContain("\ufffd");
       expect(Buffer.from(chunk, "utf8").toString("utf8")).toBe(chunk);
     }
+  });
+});
+
+describe("which queries the trigram index can serve", () => {
+  it("needs a run of three word characters between wildcards", () => {
+    expect(queryUsesTrigramIndex("紫鹭结算凭证")).toBe(true);
+    expect(queryUsesTrigramIndex("invoice")).toBe(true);
+    expect(queryUsesTrigramIndex("合同")).toBe(false);
+    expect(queryUsesTrigramIndex("ab")).toBe(false);
+    expect(queryUsesTrigramIndex("a b c")).toBe(false);
+    expect(queryUsesTrigramIndex("50%_x")).toBe(false);
+    expect(queryUsesTrigramIndex("Order-2024")).toBe(true);
+  });
+});
+
+describe("failure logging cannot flood the log", () => {
+  it("writes up to the limit per window, then reports how many it held back", () => {
+    let clock = 0;
+    const lines: string[] = [];
+    const log = createRateLimitedLog((line) => lines.push(line), {
+      max: 2,
+      windowMs: 1_000,
+      now: () => clock,
+    });
+    for (const line of ["a", "b", "c", "d"]) log(line);
+    expect(lines).toEqual(["a", "b"]);
+    clock = 999;
+    log("e");
+    expect(lines).toEqual(["a", "b"]);
+    clock = 1_000;
+    log("f");
+    expect(lines).toEqual(["a", "b", "[asset-text-search] 3 similar lines suppressed", "f"]);
   });
 });

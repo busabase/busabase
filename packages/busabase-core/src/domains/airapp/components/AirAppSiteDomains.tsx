@@ -20,12 +20,13 @@ type DomainCopy = ReturnType<typeof useCoreI18n>["airapp"]["site"]["domains"];
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
-const statusHint = (binding: AirAppSiteDomainBindingVO, copy: DomainCopy): string => {
-  if (binding.status === "active") return copy.activeHint;
-  if (binding.status === "error") return copy.errorHint;
-  return binding.hostnameStatus === "active" && binding.sslStatus !== "active"
-    ? copy.pendingHttpsHint
-    : copy.pendingDnsHint;
+const statusHint = (binding: AirAppSiteDomainBindingVO, copy: DomainCopy): string | null => {
+  if (binding.status === "active") return null;
+  if (binding.status === "error") return binding.errors.length === 0 ? copy.errorHint : null;
+  if (binding.hostnameStatus === "active" && binding.sslStatus !== "active") {
+    return copy.pendingHttpsHint;
+  }
+  return binding.dnsRecords.length === 0 ? copy.pendingDnsHint : null;
 };
 
 /** Domain setup shares the site's controls, but a failed check never hides its default address. */
@@ -38,7 +39,8 @@ export function AirAppSiteDomains({
   nodeId: string;
   state: AirAppSiteStateVO;
 }) {
-  const copy = useCoreI18n().airapp.site.domains;
+  const messages = useCoreI18n();
+  const copy = messages.airapp.site.domains;
   const id = useId();
   const queryClient = useQueryClient();
   const queryOptions = orpc.airapps.siteDomains.queryOptions({ input: { nodeId } });
@@ -92,9 +94,10 @@ export function AirAppSiteDomains({
   const copyButton = (field: string, value: string, label: string) => (
     <Button
       aria-label={fmt(label, { value })}
-      className="shrink-0"
+      className="shrink-0 text-muted-foreground"
       onClick={() => void copyText(field, value)}
-      size="sm"
+      size="icon-sm"
+      title={copiedField === field ? copy.copied : fmt(label, { value })}
       type="button"
       variant="ghost"
     >
@@ -103,8 +106,63 @@ export function AirAppSiteDomains({
       ) : (
         <Copy aria-hidden="true" className="size-3.5" />
       )}
-      {copiedField === field ? copy.copied : copy.copy}
     </Button>
+  );
+
+  const setupRecords = (binding: AirAppSiteDomainBindingVO) => (
+    <div className="@container min-w-0 space-y-2">
+      {binding.dnsRecords.some((record) => record.type !== "HTTP") ? (
+        <p className="text-muted-foreground text-xs">{copy.dnsInstructions}</p>
+      ) : null}
+      {binding.dnsRecords.some((record) => record.type === "HTTP") ? (
+        <p className="text-muted-foreground text-xs">{copy.httpInstructions}</p>
+      ) : null}
+      <dl className="space-y-3">
+        {binding.dnsRecords.map((record) => {
+          const isHttp = record.type === "HTTP";
+          const recordId = `${binding.hostname}-${record.type}-${record.name}-${record.value}`;
+          return (
+            <div
+              className="grid min-w-0 grid-cols-[3rem_minmax(0,1fr)] items-start gap-x-2 gap-y-1 @lg:grid-cols-[3rem_minmax(0,1fr)_minmax(0,1fr)]"
+              data-airapp-site-dns-record={record.type}
+              key={recordId}
+            >
+              <dt className="pt-1 font-medium text-foreground text-xs">{record.type}</dt>
+              <dd className="flex min-w-0 items-start gap-1">
+                <div className="min-w-0 flex-1">
+                  <p className="text-muted-foreground text-xs">
+                    {isHttp ? copy.httpUrl : copy.dnsName}
+                  </p>
+                  <p className="select-all break-all font-mono text-foreground text-xs" dir="ltr">
+                    {record.name}
+                  </p>
+                </div>
+                {copyButton(
+                  `${recordId}-name`,
+                  record.name,
+                  isHttp ? copy.copyHttpUrl : copy.copyName,
+                )}
+              </dd>
+              <dd className="col-start-2 flex min-w-0 items-start gap-1 @lg:col-auto">
+                <div className="min-w-0 flex-1">
+                  <p className="text-muted-foreground text-xs">
+                    {isHttp ? copy.httpBody : copy.dnsValue}
+                  </p>
+                  <p className="select-all break-all font-mono text-foreground text-xs" dir="ltr">
+                    {record.value}
+                  </p>
+                </div>
+                {copyButton(
+                  `${recordId}-value`,
+                  record.value,
+                  isHttp ? copy.copyHttpBody : copy.copyValue,
+                )}
+              </dd>
+            </div>
+          );
+        })}
+      </dl>
+    </div>
   );
 
   return (
@@ -113,19 +171,17 @@ export function AirAppSiteDomains({
       className="min-w-0 space-y-3 border-border border-t pt-3"
       data-airapp-site-domains=""
     >
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="min-w-0 flex-1 space-y-1">
-          <h3 className="font-medium text-foreground text-sm" id={`${id}-title`}>
-            {copy.title}
-          </h3>
-          <p className="text-muted-foreground text-xs">{copy.description}</p>
-        </div>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="font-medium text-foreground text-sm" id={`${id}-title`}>
+          {copy.title}
+        </h3>
         <Button
+          className="text-muted-foreground"
           disabled={domains.isFetching || mutationPending}
           onClick={() => void domains.refetch()}
           size="sm"
           type="button"
-          variant="outline"
+          variant="ghost"
         >
           {domains.isFetching ? (
             <Loader2 aria-hidden="true" className="size-3.5 animate-spin" />
@@ -157,6 +213,9 @@ export function AirAppSiteDomains({
 
       {domains.data?.available ? (
         <>
+          {!state.isPublic && domains.data.bindings.length > 0 ? (
+            <p className="text-muted-foreground text-xs">{copy.offlineHint}</p>
+          ) : null}
           {domains.data.bindings.length > 0 ? (
             <ul className="divide-y divide-border" data-airapp-site-domain-list="">
               {domains.data.bindings.map((binding) => {
@@ -173,6 +232,7 @@ export function AirAppSiteDomains({
                       ? copy.error
                       : copy.pending;
                 const isRemoving = unbind.isPending && unbind.variables === binding.hostname;
+                const hint = statusHint(binding, copy);
                 return (
                   <li
                     className="min-w-0 space-y-3 py-3 first:pt-0"
@@ -196,20 +256,31 @@ export function AirAppSiteDomains({
                           </p>
                         )}
                         <p
-                          className={`flex items-center gap-1.5 text-xs ${
+                          aria-atomic="true"
+                          aria-live="polite"
+                          className={`flex items-start gap-1.5 text-xs ${
                             binding.status === "error"
                               ? "text-destructive"
                               : "text-muted-foreground"
                           }`}
                           data-airapp-site-domain-status={binding.status}
                         >
-                          <StatusIcon aria-hidden="true" className="size-3.5 shrink-0" />
-                          {statusCopy}
+                          <StatusIcon aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
+                          <span>
+                            <span className="font-medium">{statusCopy}</span>
+                            {hint ? (
+                              <>
+                                {" · "}
+                                <span>{hint}</span>
+                              </>
+                            ) : null}
+                          </span>
                         </p>
                       </div>
                       {removeConfirmation !== binding.hostname ? (
                         <Button
                           aria-label={fmt(copy.removeLabel, { hostname: binding.hostname })}
+                          className="text-muted-foreground"
                           disabled={mutationPending}
                           onClick={() => {
                             unbind.reset();
@@ -223,10 +294,6 @@ export function AirAppSiteDomains({
                         </Button>
                       ) : null}
                     </div>
-                    <p className="text-muted-foreground text-xs">{statusHint(binding, copy)}</p>
-                    {!state.isPublic ? (
-                      <p className="text-muted-foreground text-xs">{copy.offlineHint}</p>
-                    ) : null}
                     {binding.errors.length > 0 ? (
                       <ul
                         className={`space-y-1 break-words text-xs ${
@@ -239,71 +306,19 @@ export function AirAppSiteDomains({
                       </ul>
                     ) : null}
                     {binding.dnsRecords.length > 0 ? (
-                      <div className="space-y-2">
-                        {binding.dnsRecords.some((record) => record.type !== "HTTP") ? (
-                          <p className="text-foreground text-xs">{copy.dnsInstructions}</p>
-                        ) : null}
-                        <dl className="space-y-3">
-                          {binding.dnsRecords.map((record) => {
-                            const isHttp = record.type === "HTTP";
-                            const recordId = `${binding.hostname}-${record.type}-${record.name}-${record.value}`;
-                            return (
-                              <div
-                                className="min-w-0 space-y-1.5"
-                                data-airapp-site-dns-record={record.type}
-                                key={recordId}
-                              >
-                                <dt className="font-medium text-foreground text-xs">
-                                  {record.type}
-                                </dt>
-                                <dd className="min-w-0 space-y-1">
-                                  {isHttp ? (
-                                    <p className="text-muted-foreground text-xs">
-                                      {copy.httpInstructions}
-                                    </p>
-                                  ) : null}
-                                  <div className="flex min-w-0 items-start gap-2">
-                                    <div className="min-w-0 flex-1">
-                                      <p className="text-muted-foreground text-xs">
-                                        {isHttp ? copy.httpUrl : copy.dnsName}
-                                      </p>
-                                      <p
-                                        className="select-all break-all font-mono text-foreground text-xs"
-                                        dir="ltr"
-                                      >
-                                        {record.name}
-                                      </p>
-                                    </div>
-                                    {copyButton(
-                                      `${recordId}-name`,
-                                      record.name,
-                                      isHttp ? copy.copyHttpUrl : copy.copyName,
-                                    )}
-                                  </div>
-                                  <div className="flex min-w-0 items-start gap-2">
-                                    <div className="min-w-0 flex-1">
-                                      <p className="text-muted-foreground text-xs">
-                                        {isHttp ? copy.httpBody : copy.dnsValue}
-                                      </p>
-                                      <p
-                                        className="select-all break-all font-mono text-foreground text-xs"
-                                        dir="ltr"
-                                      >
-                                        {record.value}
-                                      </p>
-                                    </div>
-                                    {copyButton(
-                                      `${recordId}-value`,
-                                      record.value,
-                                      isHttp ? copy.copyHttpBody : copy.copyValue,
-                                    )}
-                                  </div>
-                                </dd>
-                              </div>
-                            );
-                          })}
-                        </dl>
-                      </div>
+                      binding.status === "active" ? (
+                        <details className="min-w-0" data-airapp-site-domain-setup="">
+                          <summary
+                            aria-label={`${binding.hostname}: ${messages.nodeDetail.details}`}
+                            className="w-fit cursor-pointer rounded-sm text-muted-foreground text-xs underline-offset-2 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          >
+                            {messages.nodeDetail.details}
+                          </summary>
+                          <div className="pt-2">{setupRecords(binding)}</div>
+                        </details>
+                      ) : (
+                        setupRecords(binding)
+                      )
                     ) : null}
                     {removeConfirmation === binding.hostname ? (
                       <div className="space-y-2">
@@ -351,7 +366,11 @@ export function AirAppSiteDomains({
             <p className="text-muted-foreground text-xs">{copy.empty}</p>
           )}
           <form
-            className="space-y-2"
+            className={
+              domains.data.bindings.length > 0
+                ? "space-y-2 border-border border-t pt-3"
+                : "space-y-2"
+            }
             noValidate
             onSubmit={(event) => {
               event.preventDefault();

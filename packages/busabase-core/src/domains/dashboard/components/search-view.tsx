@@ -483,7 +483,16 @@ export function SearchView({ orpc }: { orpc: BusabaseQueryUtils }) {
         ) : resultCount === 0 ? (
           <>
             <EmptyState
-              body={narrowed ? t.noMatchesWithFilters : t.noMatchesBody}
+              // A miss in a space with unindexed text (a document longer than
+              // the index keeps, or a text object not yet indexed) is not proof
+              // of absence; the API reports it as `contentTruncated`.
+              body={
+                !isRegex && results.data?.contentTruncated
+                  ? messages.search.partialContentBody
+                  : narrowed
+                    ? t.noMatchesWithFilters
+                    : t.noMatchesBody
+              }
               title={t.noMatchesTitle}
               hint={t.appsElsewhere}
             />

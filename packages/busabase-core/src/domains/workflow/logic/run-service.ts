@@ -9,6 +9,7 @@ import {
   type ResumeWorkflowRunInput,
   type StartWorkflowRunInput,
   WORKFLOW_RUN_RETENTION_DAYS,
+  type WorkflowRecordSnapshot,
   type WorkflowRun,
 } from "busabase-contract/domains/workflow/run";
 import {
@@ -25,7 +26,7 @@ import { CURRENT_USER_ID, id } from "../../../logic/kernel";
 import { assertNodePermission, hasNodePermission } from "../../../logic/node-acl";
 import { resolveVisibleNodeOfTypes } from "../../../logic/node-resolve";
 import { emitNotificationEvent } from "../../../logic/node-subscriptions";
-import { getRecord } from "../../base/logic/queries";
+import { getRecord, listRecordsPage } from "../../base/logic/queries";
 import {
   createChangeRequest,
   createDeleteChangeRequest,
@@ -33,6 +34,13 @@ import {
 } from "../../base/logic/record-ops";
 import { readRichNodeDocument } from "../../rich-node/handlers";
 import { runFunction } from "../../webhook/logic/sandbox";
+import {
+  buildWorkflowHookRequest,
+  pickWorkflowHookResponse,
+  WORKFLOW_HOOK_MAX_BODY_BYTES,
+  type WorkflowHookRequest,
+  type WorkflowHookResponse,
+} from "../utils/hook";
 import { loadWorkflowFunctionSource } from "./function-rule-store";
 import { toWorkflowRecordSnapshot } from "./record-snapshot";
 import { createDbWorkflowRunStore } from "./run-store-db";
@@ -52,13 +60,32 @@ import {
   type WorkflowRuntimeDeps,
   workflowRunFailedEvent,
 } from "./runs";
-import { runWithoutWorkflowTriggers } from "./triggers";
+import {
+  enqueueDueScheduledRuns,
+  enqueueWorkflowHookRun,
+  runWithoutWorkflowTriggers,
+} from "./triggers";
 import { sendWorkflowWebhook } from "./webhook-step";
 
 const executeStoredFunction = async (
   spaceId: string,
   call: WorkflowFunctionCall,
 ): Promise<WorkflowFunctionCallResult> => {
+  if (call.code.trim()) {
+    // Code written in the step: the same sandbox as a saved rule, with the
+    // workflow's own timeout.
+    const ran = await runFunction(call.code, call.input, call.timeoutMs);
+    if (ran.error) {
+      return { ok: false, message: ran.error, ruleId: "", functionName: "", logs: ran.logs };
+    }
+    return {
+      ok: true,
+      ruleId: "",
+      functionName: "",
+      result: ran.result === undefined ? null : ran.result,
+      logs: ran.logs,
+    };
+  }
   const loaded = await loadWorkflowFunctionSource(await getDb(), spaceId, {
     webhookRuleId: call.webhookRuleId,
     functionName: call.functionName,
@@ -163,6 +190,35 @@ export const deleteRecordForWorkflow: WorkflowRuntimeDeps["deleteRecord"] = (rec
       : { merged: false as const, changeRequestId: result.id };
   });
 
+/** Rows per page when a Find records step reads a Base: the most one page may hold. */
+const FIND_RECORDS_PAGE_SIZE = 100;
+
+/**
+ * A Find records step's read, through the same listing the Base's own pages
+ * use: only records the acting person may see, filtered and sorted exactly as
+ * the View shows them.
+ */
+const findRecordsForWorkflow: WorkflowRuntimeDeps["findRecords"] = async (
+  baseId,
+  viewId,
+  limit,
+) => {
+  const records: WorkflowRecordSnapshot[] = [];
+  let total = 0;
+  for (let page = 1; records.length < limit; page += 1) {
+    const listed = await listRecordsPage({
+      baseId,
+      ...(viewId ? { viewId } : {}),
+      page,
+      pageSize: FIND_RECORDS_PAGE_SIZE,
+    });
+    total = listed.total;
+    records.push(...listed.records.map(toWorkflowRecordSnapshot));
+    if (page >= listed.totalPages) break;
+  }
+  return { records: records.slice(0, limit), total };
+};
+
 const resolveActorNames = async (actorIds: readonly string[]) => {
   const refs = await resolveUserRefs(actorIds);
   return Object.fromEntries(
@@ -192,6 +248,7 @@ const liveDeps = (options: { background?: boolean } = {}): WorkflowRuntimeDeps =
     updateRecord: updateRecordForWorkflow,
     createRecord: createRecordForWorkflow,
     deleteRecord: deleteRecordForWorkflow,
+    findRecords: findRecordsForWorkflow,
     loadDocument: (nodeId) => readRichNodeDocument(nodeId, "workflow"),
     executeFunction: (call) => executeStoredFunction(spaceId, call),
     sendWebhook: sendWorkflowWebhook,
@@ -226,6 +283,9 @@ export const cancelQueuedStoredWorkflowRuns = (input: CancelQueuedWorkflowRunsIn
 
 export const resumeElapsedStoredWorkflowRuns = () => resumeElapsedWorkflowRuns(liveDeps());
 
+/** Queue runs for schedules that are due. `processDueWorkflowRuns` calls it on every tick. */
+export { enqueueDueScheduledRuns };
+
 /**
  * How a host runs code as one member of one space, outside any request. The
  * cloud builds the member's real ACL context; the open-source app has a single
@@ -247,6 +307,8 @@ export interface ProcessDueWorkflowRunsResult {
   deferred: number;
   /** Finished runs deleted because they passed `WORKFLOW_RUN_RETENTION_DAYS`. */
   purged: number;
+  /** Runs queued by schedules that came due this tick. */
+  scheduled: number;
 }
 
 /** Finished runs deleted per tick, so one tick never turns into a long delete. */
@@ -282,6 +344,7 @@ export const processDueWorkflowRuns = async (options: {
     orphaned: 0,
     deferred: 0,
     purged: 0,
+    scheduled: 0,
   };
   const announceFailure = async (run: WorkflowRun) => {
     try {
@@ -290,6 +353,9 @@ export const processDueWorkflowRuns = async (options: {
       console.error("[busabase] workflow run failure alert failed", run.id, error);
     }
   };
+
+  // Schedules first, so a run that comes due now starts in this same tick.
+  result.scheduled = await enqueueDueScheduledRuns(options.db);
 
   for (const run of await store.listInterrupted(Date.now(), 50)) {
     const failed = await failWorkflowRunFromHost(
@@ -344,4 +410,142 @@ export const processDueWorkflowRuns = async (options: {
     console.error("[busabase] workflow run retention sweep failed", error);
   }
   return result;
+};
+
+export type WorkflowHookResult =
+  | { kind: "not_found" }
+  | { kind: "busy" }
+  | {
+      kind: "accepted";
+      runId: string;
+      status: WorkflowRun["status"];
+      /** What a step chose to answer with, when one did before the request ended. */
+      response: WorkflowHookResponse | null;
+    };
+
+/**
+ * A request to a webhook trigger's URL. Queues a run with the request as its
+ * payload, then starts it right away as the person who saved the workflow in
+ * Event mode, so a short workflow finishes inside the request and a step can
+ * answer the caller. A run over the workflow's concurrency, or one that pauses,
+ * carries on in the scheduler like any other.
+ */
+/** One request to a webhook trigger: which workflow, the token from its URL, and the request. */
+export interface WorkflowHookArgs {
+  workflowNodeId: string;
+  token: string;
+  request: WorkflowHookRequest;
+}
+
+export const receiveWorkflowHook = async (
+  options: WorkflowHookArgs & {
+    db: BusabaseDatabase;
+    runAs: WorkflowRunAs;
+    notify?: (event: BusabaseNotificationEvent) => void | Promise<void>;
+  },
+): Promise<WorkflowHookResult> => {
+  const queued = await enqueueWorkflowHookRun(options.db, {
+    workflowNodeId: options.workflowNodeId,
+    token: options.token,
+    request: options.request,
+    now: new Date(),
+  });
+  if (queued.kind !== "queued") return queued;
+
+  const store = createDbWorkflowRunStore(() => options.db);
+  try {
+    await options.runAs(
+      { spaceId: queued.spaceId, actorId: queued.startedBy, startedVia: null },
+      () => continueDueWorkflowRun(liveDeps({ background: true }), queued.runId),
+    );
+  } catch (error) {
+    const message = error instanceof Error && error.message ? error.message : "unknown error";
+    const failed = await failWorkflowRunFromHost(
+      store,
+      queued.runId,
+      Date.now(),
+      `Could not continue as the person who started this run: ${message}`,
+      ["queued", "running"],
+    );
+    if (failed) {
+      try {
+        await options.notify?.(workflowRunFailedEvent(failed, null));
+      } catch (notifyError) {
+        console.error("[busabase] workflow run failure alert failed", failed.id, notifyError);
+      }
+    }
+  }
+
+  const run = await store.get(queued.runId);
+  return {
+    kind: "accepted",
+    runId: queued.runId,
+    status: run?.status ?? "queued",
+    response: run ? pickWorkflowHookResponse(run.outputs) : null,
+  };
+};
+
+/** For the hosts' webhook routes: read a request the same way the runtime stores it. */
+export {
+  buildWorkflowHookRequest,
+  WORKFLOW_HOOK_MAX_BODY_BYTES,
+  type WorkflowHookResponse,
+} from "../utils/hook";
+
+/** Headers on every answer: the URL is on the app's origin, so nothing in it may run. */
+const HOOK_RESPONSE_HEADERS = {
+  "cache-control": "no-store",
+  "content-security-policy": "default-src 'none'; sandbox",
+  "x-content-type-options": "nosniff",
+};
+
+const hookJson = (status: number, body: unknown): Response =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { ...HOOK_RESPONSE_HEADERS, "content-type": "application/json; charset=utf-8" },
+  });
+
+/**
+ * The whole webhook route for a host: read the request (refusing one over
+ * `WORKFLOW_HOOK_MAX_BODY_BYTES`), hand it to `receive`, and answer with what a
+ * step chose, or `202 { runId, status }`.
+ */
+export const respondToWorkflowHook = async (
+  request: Request,
+  params: { workflowNodeId: string; token: string },
+  receive: (args: WorkflowHookArgs) => Promise<WorkflowHookResult>,
+): Promise<Response> => {
+  const declared = Number(request.headers.get("content-length") ?? "0");
+  if (declared > WORKFLOW_HOOK_MAX_BODY_BYTES) {
+    return hookJson(413, { error: "Request body is too large" });
+  }
+  const bodyText =
+    request.method === "GET" || request.method === "HEAD" ? "" : await request.text();
+  if (new TextEncoder().encode(bodyText).byteLength > WORKFLOW_HOOK_MAX_BODY_BYTES) {
+    return hookJson(413, { error: "Request body is too large" });
+  }
+  const result = await receive({
+    workflowNodeId: params.workflowNodeId,
+    token: params.token,
+    request: buildWorkflowHookRequest({
+      method: request.method,
+      url: request.url,
+      headers: request.headers.entries(),
+      bodyText,
+      receivedAt: new Date(),
+    }),
+  });
+  if (result.kind === "not_found") return hookJson(404, { error: "Not found" });
+  if (result.kind === "busy") {
+    return hookJson(429, {
+      error: "Too many runs are waiting for this workflow. Try again later.",
+    });
+  }
+  if (result.response) {
+    return new Response(result.response.body, {
+      status: result.response.status,
+      headers: { ...HOOK_RESPONSE_HEADERS, "content-type": result.response.contentType },
+    });
+  }
+  return hookJson(202, { runId: result.runId, status: result.status });
 };

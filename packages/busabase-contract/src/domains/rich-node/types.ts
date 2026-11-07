@@ -19,6 +19,33 @@ const workflowNodeBase = {
   description: z.string().max(500).default(""),
 };
 
+/**
+ * When a `schedule` trigger starts runs. Minutes and hours repeat on a fixed
+ * grid (every 15 minutes is :00, :15, :30, :45 in UTC); days and weeks run at
+ * the `at` time in `timezone`. Minutes run at most every 15.
+ */
+export const WorkflowScheduleSchema = z.object({
+  unit: z.enum(["minutes", "hours", "days", "weeks"]).default("days"),
+  /** For minutes and hours: every this many. */
+  every: z.number().int().min(1).max(1_000).default(1),
+  /** For days and weeks: the time of day, 24-hour "HH:MM". */
+  at: z
+    .string()
+    .regex(/^([01]\d|2[0-3]):[0-5]\d$/)
+    .default("09:00"),
+  /** For weeks: 0 is Sunday, 6 is Saturday. */
+  weekday: z.number().int().min(0).max(6).default(1),
+  /** The IANA time zone `at` is in, such as "Asia/Shanghai". */
+  timezone: z.string().min(1).max(64).default("UTC"),
+});
+export type WorkflowSchedule = z.infer<typeof WorkflowScheduleSchema>;
+
+export const WorkflowWebhookHeaderSchema = z.object({
+  name: z.string().max(200),
+  value: z.string().max(4_000),
+});
+export type WorkflowWebhookHeader = z.infer<typeof WorkflowWebhookHeaderSchema>;
+
 export const WorkflowNodeSchema = z.discriminatedUnion("kind", [
   z.object({
     ...workflowNodeBase,
@@ -29,18 +56,49 @@ export const WorkflowNodeSchema = z.discriminatedUnion("kind", [
      * this Base start a run. Empty means any Base in the space.
      */
     baseId: z.string().max(160).default(""),
+    /**
+     * For record events: start a run only when this field (by slug) gets a
+     * different value. Empty means any change. A new record counts as changing
+     * every field it fills.
+     */
+    fieldSlug: z.string().max(160).optional(),
+    /**
+     * With `fieldSlug`: only when the field changes to this value, so editing a
+     * record that already has it starts nothing. A select field's value is the
+     * choice id. Empty means any new value.
+     */
+    toValue: z.string().max(500).optional(),
+    /** For the `schedule` event in event mode. */
+    schedule: WorkflowScheduleSchema.optional(),
+    /**
+     * For the `webhook` event: the secret part of this trigger's URL,
+     * `/api/workflow-hooks/<workflow id>/<hookToken>`. Anyone who has the URL
+     * can start a run, so it is long and random; change it to revoke the URL.
+     */
+    hookToken: z.string().min(16).max(100).optional(),
   }),
   z.object({
     ...workflowNodeBase,
     kind: z.literal("webhook"),
     method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"]).default("POST"),
     url: z.string().max(2_000).default(""),
+    /**
+     * Sent with the request, such as `Authorization`. Stored in the workflow,
+     * so anyone who can open it can read them.
+     */
+    headers: z.array(WorkflowWebhookHeaderSchema).max(20).optional(),
   }),
   z.object({
     ...workflowNodeBase,
     kind: z.literal("function"),
     webhookRuleId: z.string().max(160).default(""),
     functionName: z.string().max(160).default(""),
+    /**
+     * JavaScript written in the step itself. When present it runs instead of a
+     * saved rule: `input` is the run's data, `fetch` reaches public URLs, and
+     * the returned value is the step's output.
+     */
+    code: z.string().max(50_000).optional(),
   }),
   z.object({
     ...workflowNodeBase,
@@ -79,8 +137,17 @@ export const WorkflowNodeSchema = z.discriminatedUnion("kind", [
      * run's own record; otherwise a record id or an `=formula` that gives one.
      */
     targetRecordId: z.string().max(500).default(""),
-    /** For `create_record`: the Base the new record goes in. */
+    /** For `create_record`: the Base the new record goes in. For `find_records`: the Base to search. */
     baseId: z.string().max(160).default(""),
+    /** For `find_records`: only the records this View shows, in its order. Empty means every record. */
+    viewId: z.string().max(160).optional(),
+    /** For `find_records`: the most records it returns. Default 50. */
+    limit: z.number().int().min(1).max(200).optional(),
+    /**
+     * For `find_records`: run the steps after it once per record found, each in
+     * its own run about that record, instead of once with the whole list.
+     */
+    forEach: z.boolean().optional(),
   }),
   z.object({
     ...workflowNodeBase,

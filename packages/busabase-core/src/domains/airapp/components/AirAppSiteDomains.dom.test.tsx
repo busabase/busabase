@@ -10,7 +10,7 @@ import type {
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CoreI18nProvider, type CoreLocale } from "../../../i18n";
 import { coreMessagesByLocale } from "../../../i18n/catalog";
-import { AirAppSiteSettings } from "./AirAppSiteControls";
+import { AirAppSiteGoLive, AirAppSiteSettings } from "./AirAppSiteControls";
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
@@ -58,12 +58,17 @@ const renderSettings = ({
   domains = domainsState(),
   state = siteState(),
   locale = "en",
+  withToolbar = false,
+  domainError,
 }: {
   domains?: AirAppSiteDomainsVO;
   state?: AirAppSiteStateVO;
   locale?: CoreLocale;
+  withToolbar?: boolean;
+  domainError?: Error;
 } = {}) => {
   const read = vi.fn().mockResolvedValue(domains);
+  if (domainError) read.mockRejectedValue(domainError);
   const bind = vi.fn().mockResolvedValue(domainsState([binding()]));
   const unbind = vi.fn().mockResolvedValue(domainsState());
   const queryClient = new QueryClient({
@@ -93,12 +98,18 @@ const renderSettings = ({
   render(
     <CoreI18nProvider locale={locale}>
       <QueryClientProvider client={queryClient}>
+        {withToolbar ? (
+          <AirAppSiteGoLive filesRevision="v1" nodeId="node" orpc={orpc} runStatus="idle" />
+        ) : null}
         <AirAppSiteSettings nodeId="node" orpc={orpc} />
       </QueryClientProvider>
     </CoreI18nProvider>,
   );
-  return { read, bind, unbind };
+  return { read, bind, unbind, queryClient };
 };
+
+const toolbarAddress = () =>
+  document.querySelector<HTMLAnchorElement>("[data-airapp-site-open]")?.getAttribute("href");
 
 const submitHostname = (value: string) => {
   const input = screen.getByRole("textbox", { name: "Domain name" });
@@ -117,6 +128,28 @@ afterEach(() => {
 });
 
 describe("website custom domain settings", () => {
+  it("keeps connected setup records behind a native disclosure", async () => {
+    renderSettings({
+      domains: domainsState([
+        binding({ status: "active", hostnameStatus: "active", sslStatus: "active" }),
+      ]),
+    });
+    await screen.findByText("Connected");
+    const details = document.querySelector<HTMLDetailsElement>("[data-airapp-site-domain-setup]");
+    expect(details).toBeTruthy();
+    expect(details?.open).toBe(false);
+    expect(details?.querySelector("summary")?.textContent).toBe(
+      coreMessagesByLocale.en.nodeDetail.details,
+    );
+    expect(details?.querySelector("[data-airapp-site-dns-record]")?.textContent).toContain(
+      "site-dns.sites.test",
+    );
+    expect(
+      screen.getByRole("button", { name: "Copy DNS value site-dns.sites.test" }).closest("details"),
+    ).toBe(details);
+    expect(screen.getByRole("link", { name: "https://default.sites.test" })).toBeTruthy();
+  });
+
   it("validates without losing the draft, then submits the normalized hostname through the form", async () => {
     const { bind } = renderSettings();
     await screen.findByRole("textbox", { name: "Domain name" });
@@ -136,7 +169,7 @@ describe("website custom domain settings", () => {
     expect(screen.getByText("site-dns.sites.test")).toBeTruthy();
     expect(
       screen.getByText(coreMessagesByLocale.en.airapp.site.domains.dnsInstructions).textContent,
-    ).toContain("DNS only (grey cloud)");
+    ).toContain("Cloudflare proxying is supported");
     expect(screen.getByRole("link", { name: "https://default.sites.test" })).toBeTruthy();
     expect(screen.queryByRole("link", { name: "shop.company.com" })).toBeNull();
     expect(screen.queryByText("Connected")).toBeNull();
@@ -351,6 +384,134 @@ describe("website custom domain settings", () => {
   });
 });
 
+describe("website toolbar address", () => {
+  it("opens the first active custom domain and skips pending and failed bindings", async () => {
+    renderSettings({
+      withToolbar: true,
+      domains: domainsState([
+        binding({ hostname: "a.company.com", url: "https://a.company.com" }),
+        binding({
+          hostname: "b.company.com",
+          url: "https://b.company.com",
+          status: "error",
+          errors: ["Ownership verification failed"],
+        }),
+        binding({
+          hostname: "c.company.com",
+          url: "https://c.company.com",
+          status: "active",
+          hostnameStatus: "active",
+          sslStatus: "active",
+        }),
+        binding({
+          hostname: "d.company.com",
+          url: "https://d.company.com",
+          status: "active",
+          hostnameStatus: "active",
+          sslStatus: "active",
+        }),
+      ]),
+    });
+    await waitFor(() => expect(toolbarAddress()).toBe("https://c.company.com"));
+    expect(document.querySelector("[data-airapp-site-open]")?.getAttribute("aria-label")).toBe(
+      "https://c.company.com",
+    );
+    expect(screen.getByRole("link", { name: "https://default.sites.test" })).toBeTruthy();
+  });
+
+  it.each([
+    ["no custom domains", domainsState()],
+    ["pending DNS", domainsState([binding()])],
+    [
+      "pending HTTPS",
+      domainsState([binding({ hostnameStatus: "active", sslStatus: "pending_validation" })]),
+    ],
+    ["provider errors", domainsState([binding({ status: "error" })])],
+    ["unavailable custom domains", domainsState([], false)],
+  ])("keeps the generated address for %s", async (_name, domains) => {
+    renderSettings({ withToolbar: true, domains });
+    await screen.findByRole("button", { name: "Check again" });
+    await waitFor(() => expect(toolbarAddress()).toBe("https://default.sites.test"));
+  });
+
+  it("keeps the generated address when the domain query fails", async () => {
+    renderSettings({
+      withToolbar: true,
+      domainError: new Error("Could not load custom domains"),
+    });
+    await screen.findByText("Could not load custom domains");
+    expect(toolbarAddress()).toBe("https://default.sites.test");
+    expect(screen.getByRole("switch", { name: "Public" })).toBeTruthy();
+  });
+
+  it("falls back after a failed check with stale active data and restores the domain on retry", async () => {
+    const active = binding({
+      status: "active",
+      hostnameStatus: "active",
+      sslStatus: "active",
+    });
+    const { read } = renderSettings({
+      withToolbar: true,
+      domains: domainsState([active]),
+    });
+    await waitFor(() => expect(toolbarAddress()).toBe("https://shop.company.com"));
+    read.mockRejectedValueOnce(new Error("Provider temporarily unavailable"));
+    fireEvent.click(screen.getByRole("button", { name: "Check again" }));
+    await screen.findByText("Provider temporarily unavailable");
+    expect(document.querySelectorAll("[data-airapp-site-domain]").length).toBe(1);
+    expect(toolbarAddress()).toBe("https://default.sites.test");
+
+    read.mockResolvedValueOnce(domainsState([active]));
+    fireEvent.click(screen.getByRole("button", { name: "Check again" }));
+    await waitFor(() => expect(toolbarAddress()).toBe("https://shop.company.com"));
+  });
+
+  it("updates immediately from bind and removal results through the shared query cache", async () => {
+    const { bind, unbind, read } = renderSettings({ withToolbar: true });
+    await screen.findByRole("textbox", { name: "Domain name" });
+    await waitFor(() => expect(toolbarAddress()).toBe("https://default.sites.test"));
+    const readsBeforeMutations = read.mock.calls.length;
+    bind.mockResolvedValueOnce(
+      domainsState([binding({ status: "active", hostnameStatus: "active", sslStatus: "active" })]),
+    );
+    submitHostname("shop.company.com");
+    await waitFor(() => expect(toolbarAddress()).toBe("https://shop.company.com"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove shop.company.com" }));
+    expect(unbind).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Remove domain" }));
+    await waitFor(() => expect(toolbarAddress()).toBe("https://default.sites.test"));
+    expect(read).toHaveBeenCalledTimes(readsBeforeMutations);
+  });
+
+  it("uses the newly active domain after checking DNS setup", async () => {
+    const { read } = renderSettings({
+      withToolbar: true,
+      domains: domainsState([binding()]),
+    });
+    await screen.findByText("Setup pending");
+    expect(toolbarAddress()).toBe("https://default.sites.test");
+    read.mockResolvedValueOnce(
+      domainsState([binding({ status: "active", hostnameStatus: "active", sslStatus: "active" })]),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Check again" }));
+    await waitFor(() => expect(toolbarAddress()).toBe("https://shop.company.com"));
+  });
+
+  it("does not fetch domains or show website controls for other engines", async () => {
+    const { read, queryClient } = renderSettings({
+      withToolbar: true,
+      state: siteState({ engine: "not-offered", address: null }),
+    });
+    await waitFor(() =>
+      expect(queryClient.getQueryState(["airapps", "siteState", "node"])?.status).toBe("success"),
+    );
+    expect(read).not.toHaveBeenCalled();
+    expect(toolbarAddress()).toBeUndefined();
+    expect(screen.queryByRole("button", { name: "Go live" })).toBeNull();
+  });
+});
+
 describe("custom domain translations", () => {
   it.each(Object.entries(coreMessagesByLocale))(
     "%s supplies every localized field and placeholder",
@@ -367,7 +528,7 @@ describe("custom domain translations", () => {
       expect(copy.removeLabel).toContain("{hostname}");
       expect(copy.removeConfirm).toContain("{hostname}");
       expect(copy.dnsInstructions).toContain("Cloudflare");
-      expect(copy.dnsInstructions).toContain("CNAME");
+      expect(copy.dnsInstructions).toContain("DNS");
     },
   );
 });

@@ -39,6 +39,22 @@ export function getSearchExecutionOutcome(error: unknown): "timeout" | "canceled
 
 export interface SearchExecution {
   checkpoint(): void;
+  /**
+   * Let checkpoints pass until `epochMs`, even past the request deadline: for
+   * a caller that already has matches in hand and needs a bounded, stated
+   * amount of time to answer from them. Never shortens the deadline, and has
+   * no effect on the statement timeouts of later scopes, which still count from
+   * the deadline: work that has not been given this time stays bound by it.
+   */
+  allowUntil(epochMs: number): void;
+  /** Fail the search as timed out: for when it has nothing at all to answer with. */
+  giveUp(): never;
+  /**
+   * Stops only for a canceled request. For work after the answer is already in
+   * hand, where running into the request deadline is the caller's to degrade
+   * from (answer with what is known), not to fail.
+   */
+  assertAlive(): void;
   /** Milliseconds left of the request budget, for work that can stop early and still answer. */
   remainingMs(): number;
   beforeQuery(): Promise<void>;
@@ -49,8 +65,12 @@ export interface SearchExecution {
    * later statement never starts past the request deadline.
    * Only database work belongs here; release the connection before host
    * callbacks or file I/O.
+   *
+   * `lateMs`: a scope that finishes up to this long after the deadline keeps
+   * its result instead of being thrown away as a timeout. Its statement
+   * timeouts still count from the deadline.
    */
-  query<T>(callback: (db: DbInstance) => Promise<T>): Promise<T>;
+  query<T>(callback: (db: DbInstance) => Promise<T>, options?: { lateMs?: number }): Promise<T>;
   /**
    * Unbudgeted read on the original database, without a transaction. Only for
    * bounded primary-key / id-list lookups whose cost does not grow with the
@@ -77,10 +97,18 @@ export async function withSearchExecution<T>(
   const deadline = Date.now() + requestMs;
   const activeQueries = new Set<Promise<unknown>>();
   let closed = false;
-  const checkpoint = () => {
+  let allowedUntil = 0;
+  // `lateMs`: a scope that finishes this much after the deadline still counts
+  // as on time, for its own checkpoints only.
+  const checkpointWithin = (lateMs: number) => {
     if (closed) throw stopped("canceled");
     if (signal?.aborted) throw stopped("canceled");
-    if (Date.now() >= deadline) throw stopped("timeout");
+    if (Date.now() >= Math.max(deadline + lateMs, allowedUntil)) throw stopped("timeout");
+  };
+  const checkpoint = () => checkpointWithin(0);
+  const assertAlive = () => {
+    if (closed) throw stopped("canceled");
+    if (signal?.aborted) throw stopped("canceled");
   };
   const mapError = (error: unknown): never => {
     // Our own checkpoint errors already carry the right code.
@@ -102,23 +130,33 @@ export async function withSearchExecution<T>(
       activeQueries.delete(pending);
     }
   };
+  const allowUntil = (epochMs: number) => {
+    allowedUntil = Math.max(allowedUntil, epochMs);
+  };
+  const giveUp = (): never => {
+    throw stopped("timeout");
+  };
   const execution: SearchExecution = {
     checkpoint,
+    assertAlive,
+    allowUntil,
+    giveUp,
     remainingMs: () => deadline - Date.now(),
     async beforeQuery() {
       checkpoint();
     },
-    async query(runQuery) {
-      checkpoint();
+    async query(runQuery, options) {
+      const scopeCheckpoint = () => checkpointWithin(options?.lateMs ?? 0);
+      scopeCheckpoint();
       const pending = db.transaction(async (tx) => {
-        checkpoint();
+        scopeCheckpoint();
         // SET LOCAL affects only this SQL scope and cannot leak to the pool.
         const remaining = Math.max(1, Math.min(statementMs, deadline - Date.now()));
         await tx.execute(sql`select set_config('statement_timeout', ${String(remaining)}, true)`);
-        checkpoint();
+        scopeCheckpoint();
         const result = await runWithSearchDatabase(tx, () => runQuery(tx as unknown as DbInstance));
         // PGLite safely observes cancellation between synchronous statements.
-        checkpoint();
+        scopeCheckpoint();
         return result;
       });
       return track(pending);

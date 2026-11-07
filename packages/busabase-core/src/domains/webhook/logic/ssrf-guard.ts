@@ -235,14 +235,25 @@ export const checkUrlIsSafeToFetch = async (
 
 const MAX_GUARDED_REDIRECTS = 3;
 
+/** Credentials fetch itself drops when a redirect leaves the origin. */
+const CROSS_ORIGIN_DROPPED_HEADERS = ["authorization", "cookie", "proxy-authorization"];
+
+const withoutCredentials = (headers: HeadersInit | undefined): Headers => {
+  const copy = new Headers(headers);
+  for (const name of CROSS_ORIGIN_DROPPED_HEADERS) copy.delete(name);
+  return copy;
+};
+
 /**
  * `fetch` that runs `checkUrlIsSafeToFetch` on the first URL AND on every
  * redirect target. A plain `fetch` follows redirects on its own, so a public
  * URL that answers `302 Location: http://169.254.169.254/` would otherwise
  * walk straight past a check made only on the first URL.
  *
- * Redirects follow fetch's own method rules: 303 (and 301/302 after a POST)
- * become a GET without a body; 307/308 repeat the request as-is. Returns
+ * Redirects follow fetch's own rules: 303 (and 301/302 after a POST) become a
+ * GET without a body; 307/308 repeat the request as-is; a hop to another
+ * origin drops `Authorization`, `Cookie`, and `Proxy-Authorization`, so a
+ * workflow step's key is not handed to whoever it redirects to. Returns
  * `{ blocked }` instead of a response when any hop is refused.
  */
 export const fetchWithSsrfGuard = async (
@@ -265,7 +276,11 @@ export const fetchWithSsrfGuard = async (
       return { blocked: false, response };
     }
     await response.body?.cancel().catch(() => {});
-    target = new URL(location, target).toString();
+    const next = new URL(location, target);
+    if (next.origin !== new URL(target).origin) {
+      request = { ...request, headers: withoutCredentials(request.headers) };
+    }
+    target = next.toString();
     const method = (request.method ?? "GET").toUpperCase();
     if (
       response.status === 303 ||

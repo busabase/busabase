@@ -147,6 +147,7 @@ const listRuns = vi.fn(async () => ({
   actorNames: {},
 }));
 const listBases = vi.fn(async () => [{ id: "base-leads", name: "Leads" }]);
+const saveContent = vi.fn(async (_input: unknown) => ({}));
 
 const orpc = {
   agents: {
@@ -163,7 +164,7 @@ const orpc = {
       queryOptions: () => ({ queryKey: ["nodes", "get"], queryFn: async () => workflowDetail }),
     },
     list: { queryOptions: () => ({ queryKey: ["nodes", "list"] }) },
-    updateContent: { mutationOptions: () => ({ mutationFn: async () => ({}) }) },
+    updateContent: { mutationOptions: () => ({ mutationFn: saveContent }) },
     subscription: {
       get: {
         queryOptions: () => ({ queryKey: ["nodes", "subscription"], queryFn: async () => null }),
@@ -207,6 +208,7 @@ afterEach(() => {
   cleanup();
   listRuns.mockClear();
   listBases.mockClear();
+  saveContent.mockClear();
   window.history.replaceState(null, "", "/");
 });
 
@@ -222,6 +224,8 @@ describe("workflow editor Runs tab", () => {
       ["manual", messages.richNodes.manual],
       ["record.created", messages.richNodes.eventRecordCreated],
       ["record.updated", messages.richNodes.eventRecordUpdated],
+      ["schedule", messages.richNodes.eventSchedule],
+      ["webhook", messages.richNodes.eventWebhook],
       ["lead.submitted", "lead.submitted (label only)"],
     ]);
     expect(eventSelect.value).toBe("lead.submitted");
@@ -294,5 +298,102 @@ describe("workflow editor Runs tab", () => {
     expect(container.querySelector("[data-workflow-aside-tab]")).toBeNull();
     expect(container.querySelector("[data-workflow-runs-panel]")).toBeNull();
     expect(listRuns).not.toHaveBeenCalled();
+  });
+
+  it("saves a new schedule in the editor's time zone, the one the panel shows, without touching it", async () => {
+    // A reviewer found the panel showing 09:00 Asia/Shanghai while the save
+    // sent 09:00 UTC, which runs at 17:00 in Shanghai.
+    const previousTimeZone = process.env.TZ;
+    process.env.TZ = "Asia/Shanghai";
+    try {
+      const { container } = renderEditor("member");
+      const eventSelect = await waitFor(() => {
+        const select = container.querySelector<HTMLSelectElement>("[data-workflow-trigger-event]");
+        if (!select) throw new Error("trigger event select missing");
+        return select;
+      });
+      fireEvent.change(eventSelect, { target: { value: "schedule" } });
+      expect(container.querySelector("[data-workflow-schedule]")?.textContent).toContain(
+        "Asia/Shanghai",
+      );
+
+      fireEvent.click(
+        screen.getAllByRole("button", { name: messages.richNodes.save })[0] as HTMLElement,
+      );
+      await waitFor(() => expect(saveContent).toHaveBeenCalled());
+      const input = saveContent.mock.calls[0]?.[0] as {
+        content: { document: { nodes: { id: string; schedule?: Record<string, unknown> }[] } };
+      };
+      const trigger = input.content.document.nodes.find((node) => node.id === "new-lead");
+      expect(trigger?.schedule).toMatchObject({
+        unit: "days",
+        at: "09:00",
+        timezone: "Asia/Shanghai",
+      });
+    } finally {
+      process.env.TZ = previousTimeZone;
+    }
+  });
+
+  it("gives a request trigger its own URL at once, keeps it on save, and changes it on request", async () => {
+    const { container } = renderEditor("member");
+    const eventSelect = await waitFor(() => {
+      const select = container.querySelector<HTMLSelectElement>("[data-workflow-trigger-event]");
+      if (!select) throw new Error("trigger event select missing");
+      return select;
+    });
+    fireEvent.change(eventSelect, { target: { value: "webhook" } });
+    const urlInput = await waitFor(() => {
+      const input = container.querySelector<HTMLInputElement>("[data-workflow-hook-url]");
+      if (!input) throw new Error("hook url missing");
+      return input;
+    });
+    const first = urlInput.value;
+    expect(first).toMatch(/\/api\/workflow-hooks\/workflow-1\/[A-Za-z0-9_-]{32}$/);
+    // The workflow is in Event mode, so no warning.
+    expect(container.querySelector("[data-workflow-hook-unarmed]")).toBeNull();
+
+    fireEvent.click(
+      screen.getAllByRole("button", { name: messages.richNodes.save })[0] as HTMLElement,
+    );
+    await waitFor(() => expect(saveContent).toHaveBeenCalled());
+    const saved = saveContent.mock.calls[0]?.[0] as {
+      content: { document: { nodes: { id: string; hookToken?: string; eventName?: string }[] } };
+    };
+    const trigger = saved.content.document.nodes.find((node) => node.id === "new-lead");
+    expect(trigger?.eventName).toBe("webhook");
+    expect(first.endsWith(`/${trigger?.hookToken}`)).toBe(true);
+
+    fireEvent.click(container.querySelector("[data-workflow-hook-regenerate]") as HTMLElement);
+    expect(container.querySelector<HTMLInputElement>("[data-workflow-hook-url]")?.value).not.toBe(
+      first,
+    );
+  });
+
+  it("saves code written in a function step, and shows the step as code on the canvas", async () => {
+    const { container } = renderEditor("member");
+    await waitFor(() => {
+      if (!container.querySelector("[data-workflow-trigger-event]")) throw new Error("not ready");
+    });
+    fireEvent.change(screen.getByLabelText(messages.richNodes.type), {
+      target: { value: "function" },
+    });
+    const code = await waitFor(() => {
+      const box = container.querySelector<HTMLTextAreaElement>("[data-workflow-function-code]");
+      if (!box) throw new Error("code box missing");
+      return box;
+    });
+    fireEvent.change(code, { target: { value: "return { ok: true };" } });
+    expect(stepNode(container, "new-lead")?.textContent).toContain(messages.richNodes.inlineCode);
+
+    fireEvent.click(
+      screen.getAllByRole("button", { name: messages.richNodes.save })[0] as HTMLElement,
+    );
+    await waitFor(() => expect(saveContent).toHaveBeenCalled());
+    const saved = saveContent.mock.calls[0]?.[0] as {
+      content: { document: { nodes: { id: string; kind: string; code?: string }[] } };
+    };
+    const step = saved.content.document.nodes.find((node) => node.id === "new-lead");
+    expect(step).toMatchObject({ kind: "function", code: "return { ok: true };" });
   });
 });

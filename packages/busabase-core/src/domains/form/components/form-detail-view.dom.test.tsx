@@ -52,8 +52,12 @@ const generatedForm: FormVO = {
   share: { isPublic: false, anonymousSubmit: false },
 };
 
-const makeOrpc = (form: FormVO) =>
-  ({
+const makeOrpc = (form: FormVO) => {
+  const noopAssetMutation = {
+    mutationOptions: () => ({ mutationFn: async () => ({}) }),
+  };
+
+  return {
     forms: {
       update: {
         mutationOptions: () => ({ mutationFn: async () => form }),
@@ -81,7 +85,16 @@ const makeOrpc = (form: FormVO) =>
         }),
       },
     },
-  }) as unknown as BusabaseQueryUtils;
+    assets: {
+      abortMultipartUpload: noopAssetMutation,
+      completeMultipartUpload: noopAssetMutation,
+      confirm: noopAssetMutation,
+      createMultipartUpload: noopAssetMutation,
+      createUploadUrl: noopAssetMutation,
+      signMultipartParts: noopAssetMutation,
+    },
+  } as unknown as BusabaseQueryUtils;
+};
 
 function Providers({ children }: { children: ReactNode }) {
   const [client] = useState(

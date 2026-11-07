@@ -38,6 +38,38 @@ export const getPaginationItems = (
   return [1, "ellipsis-start", ...range(leftSibling, rightSibling), "ellipsis-end", safeTotalPages];
 };
 
+export const getTotalPages = (total: number, pageSize: number): number =>
+  Math.max(
+    Math.ceil(Math.max(Math.trunc(total) || 0, 0) / Math.max(Math.trunc(pageSize) || 1, 1)),
+    1,
+  );
+
+export interface PaginatedItems<T> {
+  items: T[];
+  /** The requested page, clamped into range — what the controls should show as current. */
+  page: number;
+  totalPages: number;
+  total: number;
+}
+
+/** One page of an in-memory list. An empty list is one empty page, never zero pages. */
+export const paginateItems = <T>(
+  items: readonly T[],
+  page: number,
+  pageSize: number,
+): PaginatedItems<T> => {
+  const safePageSize = Math.max(Math.trunc(pageSize) || 1, 1);
+  const totalPages = getTotalPages(items.length, safePageSize);
+  const safePage = clampPaginationPage(page, totalPages);
+  const start = (safePage - 1) * safePageSize;
+  return {
+    items: items.slice(start, start + safePageSize),
+    page: safePage,
+    totalPages,
+    total: items.length,
+  };
+};
+
 export interface PaginationRange {
   from: number;
   to: number;

@@ -11,6 +11,20 @@ export const WORKFLOW_UPDATE_RECORD_ACTION = "update_record";
 export const WORKFLOW_CREATE_RECORD_ACTION = "create_record";
 /** Moves a record to its Base's trash, as the person the run acts as. It can be restored. */
 export const WORKFLOW_DELETE_RECORD_ACTION = "delete_record";
+/**
+ * Lists a Base's records, or the records one of its Views shows, as the person
+ * the run acts as. With `forEach`, the steps after it run once per record.
+ */
+export const WORKFLOW_FIND_RECORDS_ACTION = "find_records";
+/** How many records a Find records step returns when its `limit` is not set. */
+export const WORKFLOW_FIND_RECORDS_DEFAULT_LIMIT = 50;
+/** The most records one Find records step may return, and so the most runs it may start. */
+export const WORKFLOW_FIND_RECORDS_MAX = 200;
+/**
+ * A Find records step that runs the next steps once per record does not start
+ * more while this many runs of the workflow are still waiting their turn.
+ */
+export const WORKFLOW_MAX_QUEUED_RUNS = 200;
 
 /**
  * Mixed freshness. Step outputs are snapshots from the moment that step ran,
@@ -26,6 +40,19 @@ export type WorkflowRecordEvent = (typeof WORKFLOW_RECORD_EVENTS)[number];
 
 export const isWorkflowRecordEvent = (value: string): value is WorkflowRecordEvent =>
   (WORKFLOW_RECORD_EVENTS as readonly string[]).includes(value);
+
+/** Trigger event name for runs started by the clock, from the trigger's `schedule`. */
+export const WORKFLOW_SCHEDULE_EVENT = "schedule";
+
+/** The shortest gap between scheduled runs. */
+export const WORKFLOW_SCHEDULE_MIN_MINUTES = 15;
+
+/** Trigger event name for runs started by a request to the trigger's own URL. */
+export const WORKFLOW_WEBHOOK_EVENT = "webhook";
+
+/** The path a webhook trigger listens on, below the app's origin. */
+export const workflowHookPath = (workflowNodeId: string, hookToken: string): string =>
+  `/api/workflow-hooks/${encodeURIComponent(workflowNodeId)}/${encodeURIComponent(hookToken)}`;
 
 /**
  * Who an approval step names, from its free-text `approver` field: the member

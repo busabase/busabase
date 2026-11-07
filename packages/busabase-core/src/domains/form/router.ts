@@ -1,7 +1,14 @@
 import { implement, ORPCError } from "@orpc/server";
 import { busabaseContract } from "busabase-contract/contract/busabase";
 import { isAnonymousVisitor } from "../../context";
-import { createForm, getFormByNodeId, listForms, submitForm, updateForm } from "./logic/form-ops";
+import {
+  createForm,
+  getFormByNodeId,
+  getFormFieldOptions,
+  listForms,
+  submitForm,
+  updateForm,
+} from "./logic/form-ops";
 
 const os = implement(busabaseContract);
 
@@ -14,6 +21,7 @@ export const formRouter = {
     }
     return form;
   }),
+  options: os.forms.options.handler(async ({ input }) => getFormFieldOptions(input)),
   create: os.forms.create.handler(async ({ input }) => createForm(input)),
   update: os.forms.update.handler(async ({ input }) => {
     const { nodeId, ...rest } = input;

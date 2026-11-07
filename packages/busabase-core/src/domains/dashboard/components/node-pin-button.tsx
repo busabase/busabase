@@ -18,6 +18,11 @@ export const nodeSidePanelTabId = (nodeType: string, nodeId: string) => `${nodeT
  * `AirAppRunControls` since it also toggles a live preview run). Purely
  * dispatches `openTab`; the actual side-panel content comes from whatever
  * renderer is registered for `tabType` via `registerSidePanelTab`.
+ *
+ * Hidden below `sm`. On a phone the side panel opens as a full-screen overlay,
+ * so pinning the node you are looking at only covers it with a second copy of
+ * itself — and the button cost the topbar the room it needed: on a Workflow it
+ * pushed the side-panel toggle past the right edge of a 390px screen.
  */
 export function NodePinButton({
   tabId,
@@ -34,7 +39,7 @@ export function NodePinButton({
   return (
     <Button
       aria-label={messages.nodeDetail.pinToSidePanel}
-      className="size-8 text-muted-foreground shadow-none hover:bg-muted/70 hover:text-foreground"
+      className="size-8 text-muted-foreground shadow-none hover:bg-muted/70 hover:text-foreground max-sm:hidden"
       onClick={() =>
         useSidePanelStore.getState().openTab({ id: tabId, type: tabType, title, payload })
       }

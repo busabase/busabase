@@ -805,7 +805,7 @@ export const dashboardJa: CoreI18nMessages = {
         offlineHint:
           "サイトは非公開です。すべてのサイトアドレスに「見つかりません」と表示されます。",
         dnsInstructions:
-          "DNS プロバイダーでこれらのレコードを追加してください。ドメインに必要な他のレコードは残してください。Cloudflare では、この CNAME を「DNS のみ」（灰色の雲）に設定してください。",
+          "DNS プロバイダーでこれらのレコードを追加してください。ドメインに必要な他のレコードは残してください。ドメインがこのサイトに接続していることを確認できれば、Cloudflare プロキシも利用できます。",
         dnsName: "名前",
         dnsValue: "値 / ターゲット",
         httpInstructions:
@@ -1019,6 +1019,7 @@ export const dashboardJa: CoreI18nMessages = {
     searchEmpty: "「{search}」に一致するテンプレートはありません。",
     catalogEmpty: "このカタログにはまだテンプレートがありません。",
     catalogFailed: "テンプレートを読み込めませんでした。もう一度お試しください。",
+    paginationLabel: "テンプレートのページ",
     missingTemplate: "このカタログに「{name}」というテンプレートはありません。",
     backToTemplates: "テンプレートに戻る",
     install: "インストール",
@@ -2696,9 +2697,53 @@ export const dashboardJa: CoreI18nMessages = {
     eventName: "イベント名",
     eventRecordCreated: "レコードが作成されたとき",
     eventRecordUpdated: "レコードが更新されたとき",
+    eventSchedule: "スケジュール",
+    eventWebhook: "リクエストを受け取ったとき",
+    hookUrl: "受信 URL",
+    hookUrlCopied: "コピーしました",
+    regenerateHookUrl: "URL を変更",
+    hookUrlHint:
+      "この URL に POST（JSON またはテキスト）か GET を送ると実行が始まります。リクエストの内容は steps.trigger.payload.request（method、query、headers、body）にあります。実行が一時停止する前にコードステップが { response: … } を返すと、呼び出し元はそれを受け取ります。それ以外は 202 と実行 ID が返ります。URL を知っている人は誰でも実行を開始できるため、変更すると古い URL は使えなくなります。変更は保存すると有効になります。",
+    hookNeedsEvent:
+      "「実行設定」で実行モードを「イベント」にしないと、この URL は 404 を返します。",
+    functionCode: "コード",
+    functionCodeHint:
+      "実行がこのステップに来たときにサーバーで動く JavaScript です。input には実行のデータ（payload、steps、record）が入り、await fetch(...) で公開 URL を呼び出せます。return した値がこのステップの出力になり、後のステップは steps.<ステップ ID>.<フィールド> で読めます。ワークフローを開ける人は誰でもコードを見られます。",
+    savedFunction: "または保存済みの関数を実行",
+    inlineCode: "コード",
+    triggerField: "このフィールドが変わったときだけ",
+    anyField: "すべてのフィールド",
+    triggerFieldNeedsBase: "フィールドの変化で絞り込むには、上でベースを選んでください。",
+    triggerToValue: "変更後の値",
+    anyValue: "任意の新しい値",
+    triggerFieldHint:
+      "値を選ぶと、フィールドがその値に変わったときだけ実行を開始します。すでにその値のレコードを編集しても開始しません。",
+    checkboxChecked: "オン",
+    checkboxUnchecked: "オフ",
+    scheduleRepeat: "繰り返し",
+    scheduleEveryMinutes: "数分ごと",
+    scheduleEveryHours: "数時間ごと",
+    scheduleDaily: "毎日",
+    scheduleWeekly: "毎週",
+    scheduleMinutesBetween: "実行の間隔（分、{min} 以上）",
+    scheduleHoursBetween: "実行の間隔（時間）",
+    scheduleAt: "時刻",
+    scheduleWeekday: "曜日",
+    scheduleTimezone: "タイムゾーン：{timezone}。",
+    scheduleNextRun: "次回の実行：{time}",
+    scheduleNeedsEvent:
+      "「実行設定」で実行モードを「イベント」にしないと、スケジュールでは実行が開始されません。",
+    webhookHeaders: "ヘッダー",
+    webhookHeaderName: "ヘッダー名",
+    webhookHeaderValue: "ヘッダーの値",
+    addWebhookHeader: "ヘッダーを追加",
+    removeWebhookHeader: "ヘッダーを削除",
+    webhookHeadersHint:
+      "リクエストと一緒に送信されます（例：Authorization）。このワークフローを開ける人は誰でも値を見られるため、この用途専用のキーを使ってください。",
+    addApprover: "メンバーを追加…",
     customEventOption: "{name}（ラベルのみ）",
     triggerEventHint:
-      "イベントモードでは、「レコードが作成されたとき」と「レコードが更新されたとき」が自動で実行を開始します。手動やその他のイベント名は、誰かがワークフローを実行したときだけ開始します。",
+      "イベントモードでは、「レコードが作成されたとき」「レコードが更新されたとき」「スケジュール」「リクエストを受け取ったとき」が自動で実行を開始します。手動やその他のイベント名は、誰かがワークフローを実行したときだけ開始します。",
     triggerBase: "ベース",
     anyBase: "すべてのベース",
     unknownBase: "ベースが見つかりません（{id}）",
@@ -2727,6 +2772,19 @@ export const dashboardJa: CoreI18nMessages = {
       "実行に使われる人の権限で、選んだベースにレコードを追加します。後のステップはこのステップの createdRecordId で ID を使えます。",
     deleteRecordHint:
       "実行に使われる人の権限で、レコードをベースのゴミ箱に移します。そこから復元できます。",
+    actionFindRecords: "レコードを検索",
+    actionFindRecordsEach: "レコードを検索（1 件ずつ実行）",
+    findRecordsHint:
+      "実行のアカウントの権限で、ベースのレコード、またはビューに表示されるレコードをビューの順に一覧します。後のステップはこのステップの records、count、total を読めます。",
+    findRecordsView: "ビュー",
+    findRecordsAllRecords: "すべてのレコード",
+    findRecordsUnknownView: "ビューが見つかりません（{id}）",
+    findRecordsLimit: "最大件数",
+    findRecordsLimitHint:
+      "最大 {max} 件、空欄なら 50 件。1 件ずつ実行する場合、これより多く見つかると実行を 1 つも始めずにステップが失敗します。ビューの条件を誤っても何百もの実行が始まらないようにするためです。",
+    findRecordsForEach: "レコードごとに後のステップを実行",
+    findRecordsForEachHint:
+      "レコードごとに、そのレコードについての実行が 1 つずつ作られます。「レコードを変更」はそのレコードを変更し、後のステップは record としてそれを読みます。この実行はここで終わり、それらの実行は同時実行数に従って順に進みます。",
     customActionHint: "このアクション名は今のところ何もしません。記録されるだけです。",
     chooseBase: "ベースを選択",
     targetRecord: "レコード（任意）",
@@ -2747,7 +2805,7 @@ export const dashboardJa: CoreI18nMessages = {
     notExecutedNote:
       "ここでステップを編集して保存し、「実行履歴」から実行を開始します。実行はサーバー上で、最後に保存したバージョンを使います。完了したステップはスナップショットを保持し、read_record はレコードを読み直し、待機は指定の時刻まで一時停止し、承認は判断を待ちます。",
     executionModeHint:
-      "手動：誰かがワークフローを実行したときだけ開始します。イベント：条件に合うレコードが作成・更新されたときも、レコードトリガーが実行を開始します。イベントによる実行は、このワークフローを最後に保存した人として動作します。",
+      "手動：誰かがワークフローを実行したときだけ開始します。イベント：条件に合うレコードが作成・更新されたときにレコードトリガーが、設定した時刻にスケジュールトリガーが、受信 URL にリクエストが届いたときにリクエストトリガーが、自動で実行を開始します。これらの実行は、このワークフローを最後に保存した人として動作します。",
     manual: "手動",
     event: "イベント",
     errorPolicy: "エラー時",
@@ -2793,8 +2851,8 @@ export const dashboardJa: CoreI18nMessages = {
     cancelRunTitle: "この実行をキャンセルしますか？",
     cancelRunBody: "実行はここで止まり、再開できません。すでに実行したステップは元に戻りません。",
     keepRun: "キャンセルしない",
-    cancelAllQueued: "待機中の {count} 件をキャンセル",
-    cancelAllTitle: "待機中の {count} 件をキャンセルしますか？",
+    cancelAllQueued: "順番待ちの {count} 件をキャンセル",
+    cancelAllTitle: "順番待ちの {count} 件をキャンセルしますか？",
     cancelAllBody:
       "これらはまだ始まっておらず、今後も始まりません。ステップを実行中の実行や、待機・承認で止まっている実行はそのまま続きます。",
     startedBy: "開始した人: {name}",
@@ -2816,6 +2874,9 @@ export const dashboardJa: CoreI18nMessages = {
     statusFailed: "失敗",
     triggerManual: "手動",
     triggerEvent: "イベント",
+    triggerSchedule: "スケジュール",
+    triggerWebhook: "リクエスト",
+    triggerForEach: "レコードごと",
     runDetails: "実行の詳細",
     recordLabel: "レコード：{id}",
     waitingUntil: "{time} まで待機中です。その時刻になると自動で続行します。",

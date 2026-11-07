@@ -41,6 +41,27 @@ export const FormBoundFieldSchema = z.object({
       timezone: z.string().optional(),
     })
     .optional(),
+  /** Attachment limits from the bound Base field. */
+  attachment: z
+    .object({
+      maxFiles: z.number().int().positive().optional(),
+      allowedMimeTypes: z.array(z.string()).optional(),
+      maxFileSize: z.number().positive().optional(),
+    })
+    .optional(),
+  /** The target and cardinality of a linked-record field. */
+  relation: z
+    .object({
+      targetBaseId: z.string().min(1),
+      multiple: z.boolean().optional(),
+    })
+    .optional(),
+  /** A member field's cardinality. The member directory is loaded separately. */
+  member: z
+    .object({
+      multiple: z.boolean().optional(),
+    })
+    .optional(),
 });
 export type FormBoundFieldVO = z.infer<typeof FormBoundFieldSchema>;
 
@@ -148,6 +169,41 @@ export const UpdateFormInputSchema = z.object({
   share: FormShareSchema.optional(),
 });
 export type UpdateFormDTO = z.input<typeof UpdateFormInputSchema>;
+
+/**
+ * Form-scoped selectable values. These stay behind a dedicated RPC procedure
+ * so a public Form never gains arbitrary Base-record or roster access.
+ */
+export const FormOptionsInputSchema = z.object({
+  nodeId: z.string().min(1),
+  fieldSlug: z.string().min(1),
+  query: z.string().optional().default(""),
+  page: z.number().int().min(1).optional().default(1),
+  pageSize: z.number().int().min(1).max(100).optional().default(50),
+});
+export type FormOptionsDTO = z.input<typeof FormOptionsInputSchema>;
+
+export const FormOptionsVOSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("relation"),
+    records: z.array(z.object({ id: z.string(), title: z.string() })),
+    page: z.number().int().min(1),
+    totalPages: z.number().int().nonnegative(),
+  }),
+  z.object({
+    kind: z.literal("member"),
+    members: z.array(
+      z.object({
+        id: z.string(),
+        name: z.string().nullable(),
+        email: z.string().nullable(),
+        image: z.string().nullable(),
+        role: z.string().nullable().optional(),
+      }),
+    ),
+  }),
+]);
+export type FormOptionsVO = z.infer<typeof FormOptionsVOSchema>;
 
 /** A filled-in submission: input names → values, plus optional anti-abuse token. */
 export const SubmitFormInputSchema = z.object({

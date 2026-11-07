@@ -22,6 +22,10 @@ import {
   WORKFLOW_CREATE_RECORD_ACTION,
   WORKFLOW_DATA_FRESHNESS,
   WORKFLOW_DELETE_RECORD_ACTION,
+  WORKFLOW_FIND_RECORDS_ACTION,
+  WORKFLOW_FIND_RECORDS_DEFAULT_LIMIT,
+  WORKFLOW_FIND_RECORDS_MAX,
+  WORKFLOW_MAX_QUEUED_RUNS,
   WORKFLOW_READ_RECORD_ACTION,
   WORKFLOW_UPDATE_RECORD_ACTION,
   type WorkflowRecordSnapshot,
@@ -58,12 +62,21 @@ import {
  *
  * With error policy `stop` (the default) a failed function or webhook step
  * fails the run. With `continue` the failure is recorded on the step and the
- * success branch is followed. Actions other than `read_record` are recorded
- * and skipped.
+ * success branch is followed. Action names the runtime does not know are
+ * recorded and skipped.
+ *
+ * A `find_records` step with `forEach` ends its run and queues one run per
+ * record found. Each starts at the step after it, about that record, with a
+ * copy of the steps before; `payload.parentRunId` names the run it came from.
  */
 
-/** What a function step asks the host to run. This walker never sees source code. */
+/**
+ * What a function step asks the host to run: the step's own `code`, or else a
+ * saved rule by id or name. The walker passes code through and never runs it.
+ */
 export interface WorkflowFunctionCall {
+  /** Code written in the step. When not blank it runs instead of a saved rule. */
+  code: string;
   webhookRuleId: string;
   functionName: string;
   recordBaseId: string | null;
@@ -116,6 +129,8 @@ export interface WorkflowWebhookCall {
   url: string;
   timeoutMs: number;
   body: WorkflowStepInput;
+  /** The step's own headers, such as `Authorization`. Never copied into the run's outputs. */
+  headers: readonly { name: string; value: string }[];
 }
 
 export type WorkflowWebhookCallResult =
@@ -194,6 +209,16 @@ export interface WorkflowRuntimeDeps {
     recordId: string,
     message: string,
   ) => Promise<{ merged: true } | { merged: false; changeRequestId: string }>;
+  /**
+   * Up to `limit` records of a Base the acting person can see: those a View
+   * shows, in its order, or else every record, newest first. `total` counts
+   * every match, past the limit too.
+   */
+  findRecords: (
+    baseId: string,
+    viewId: string | null,
+    limit: number,
+  ) => Promise<{ records: WorkflowRecordSnapshot[]; total: number }>;
   /** Display names for user ids, as far as the host knows them. */
   resolveActorNames: (actorIds: readonly string[]) => Promise<Record<string, string>>;
   /** Tell people about something that happened to a run. Never throws. */
@@ -332,6 +357,8 @@ const readBound = async (
 
 type StepResult =
   | { kind: "continue"; branch: string; output: WorkflowStepOutput }
+  /** The step ran and the run ends here: the steps after it run elsewhere. */
+  | { kind: "finish"; output: WorkflowStepOutput }
   | { kind: "pause"; status: "waiting" | "waiting_approval"; pause: WorkflowRun["pause"] }
   | { kind: "fail"; message: string };
 
@@ -453,6 +480,10 @@ const executeNode = async (
     return runRecordWriteStep(deps, document, run, node);
   }
 
+  if (node.kind === "action" && node.actionName === WORKFLOW_FIND_RECORDS_ACTION) {
+    return runFindRecordsStep(deps, document, run, node);
+  }
+
   if (node.kind === "action") {
     return {
       kind: "continue",
@@ -461,7 +492,7 @@ const executeNode = async (
         actionName: node.actionName,
         executed: false,
         reason:
-          "Only read_record, update_record, create_record, and delete_record run in this runtime. This action was recorded and skipped.",
+          "Only read_record, update_record, create_record, delete_record, and find_records run in this runtime. This action was recorded and skipped.",
       }),
     };
   }
@@ -606,6 +637,147 @@ const runRecordWriteStep = async (
   }
 };
 
+/** The run a Find records step started this one from, if it did. */
+const parentRunIdOf = (run: WorkflowRun): string | null =>
+  typeof run.payload.parentRunId === "string" ? run.payload.parentRunId : null;
+
+/**
+ * List a Base's records as the person the run acts as. Without `forEach` the
+ * list is this step's output and the run goes on. With it, the run ends here
+ * and one run per record continues at the next step, about that record; the
+ * scheduler starts them under the workflow's concurrency.
+ *
+ * A repeat never runs part of the list: more matches than the limit, a run
+ * that is itself one of a repeat, or a backlog of waiting runs fail the step
+ * with no run started, whatever the error policy, because carrying on would
+ * run the next steps once with no record instead.
+ */
+const runFindRecordsStep = async (
+  deps: WorkflowRuntimeDeps,
+  document: WorkflowDocument,
+  run: WorkflowRun,
+  node: Extract<WorkflowNode, { kind: "action" }>,
+): Promise<StepResult> => {
+  const label = `Find records step "${node.label}"`;
+  const baseId = node.baseId.trim();
+  const viewId = node.viewId?.trim() || null;
+  const limit = Math.min(
+    node.limit ?? WORKFLOW_FIND_RECORDS_DEFAULT_LIMIT,
+    WORKFLOW_FIND_RECORDS_MAX,
+  );
+  const data = { actionName: node.actionName, baseId, viewId, limit };
+  if (!baseId) {
+    return failOrContinue(deps, document, "action", null, `${label} needs a Base to search.`, {
+      ...data,
+      error: "no base",
+    });
+  }
+
+  let found: { records: WorkflowRecordSnapshot[]; total: number };
+  try {
+    found = await deps.findRecords(baseId, viewId, limit);
+  } catch (error) {
+    const reason = errorMessage(error, "could not read the records");
+    return failOrContinue(deps, document, "action", null, `${label} failed: ${reason}`, {
+      ...data,
+      error: reason,
+    });
+  }
+  const records = found.records.slice(0, limit);
+  if (!node.forEach) {
+    return {
+      kind: "continue",
+      branch: "success",
+      output: captured(deps, "action", null, {
+        ...data,
+        executed: true,
+        records,
+        count: records.length,
+        total: found.total,
+        truncated: found.total > records.length,
+      }),
+    };
+  }
+
+  if (found.total > limit) {
+    return {
+      kind: "fail",
+      message: `${label} found ${found.total} records, more than its limit of ${limit}, so no runs were started. Narrow the View, or raise the limit (at most ${WORKFLOW_FIND_RECORDS_MAX}).`,
+    };
+  }
+  if (parentRunIdOf(run)) {
+    return {
+      kind: "fail",
+      message: `${label} cannot run the next steps once per record here: this run is already one of those runs.`,
+    };
+  }
+  const edge = pickEdge(node, outgoing(document, node.id), "success");
+  const finished = (childRunIds: string[]): StepResult => ({
+    kind: "finish",
+    output: captured(deps, "action", null, {
+      ...data,
+      executed: true,
+      forEach: true,
+      count: records.length,
+      total: found.total,
+      childRunIds,
+    }),
+  });
+  if (!edge || records.length === 0) return finished([]);
+
+  const waiting = await deps.store.countWithStatus(deps.spaceId, run.workflowNodeId, "queued");
+  if (waiting >= WORKFLOW_MAX_QUEUED_RUNS) {
+    return {
+      kind: "fail",
+      message: `${label} started no runs: ${waiting} runs of this workflow are still waiting their turn. Try again once they finish, or cancel them.`,
+    };
+  }
+
+  const now = deps.now();
+  const sequence = Object.keys(run.outputs).length;
+  const childRunIds: string[] = [];
+  for (const [index, record] of records.entries()) {
+    const child: WorkflowRun = {
+      id: deps.createId(),
+      spaceId: run.spaceId,
+      workflowNodeId: run.workflowNodeId,
+      status: "queued",
+      trigger: run.trigger,
+      startedBy: run.startedBy,
+      startedVia: run.startedVia,
+      cancelledBy: null,
+      cursorNodeId: edge.target,
+      previousNodeId: node.id,
+      outputs: {
+        ...structuredClone(run.outputs),
+        // This step, as the child sees it: about its own record.
+        [node.id]: {
+          ...captured(deps, "action", record, {
+            ...data,
+            executed: true,
+            forEach: true,
+            index,
+            count: records.length,
+            parentRunId: run.id,
+          }),
+          sequence,
+        },
+      },
+      recordId: record.recordId,
+      payload: { ...structuredClone(run.payload), parentRunId: run.id },
+      pause: null,
+      error: null,
+      freshness: WORKFLOW_DATA_FRESHNESS,
+      startedAt: iso(now),
+      updatedAt: iso(now),
+    };
+    // A lease that already lapsed: the scheduler may pick the run up at once.
+    await deps.store.insert(publish(child), 0);
+    childRunIds.push(child.id);
+  }
+  return finished(childRunIds);
+};
+
 const WRITE_ACTION_NAMES: Readonly<Record<string, string>> = {
   [WORKFLOW_UPDATE_RECORD_ACTION]: "Update record",
   [WORKFLOW_CREATE_RECORD_ACTION]: "Create record",
@@ -639,6 +811,7 @@ const runWebhookStep = async (
       url,
       timeoutMs: document.settings.timeoutMs,
       body: stepInput(run, node, record),
+      headers: node.headers ?? [],
     });
   } catch (error) {
     outcome = {
@@ -706,6 +879,7 @@ const runFunctionStep = async (
   let outcome: WorkflowFunctionCallResult;
   try {
     outcome = await deps.executeFunction({
+      code: node.code ?? "",
       webhookRuleId: node.webhookRuleId.trim(),
       functionName: node.functionName.trim(),
       recordBaseId: record?.baseId ?? null,
@@ -784,7 +958,7 @@ const advance = async (
 
     run.outputs[node.id] = { ...result.output, sequence: Object.keys(run.outputs).length };
     run.previousNodeId = node.id;
-    if (node.kind === "end") {
+    if (node.kind === "end" || result.kind === "finish") {
       run.status = "completed";
       run.cursorNodeId = null;
       run.pause = null;

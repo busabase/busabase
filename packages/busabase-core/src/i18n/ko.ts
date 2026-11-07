@@ -795,7 +795,7 @@ export const dashboardKo: CoreI18nMessages = {
         offlineHint:
           "웹사이트가 비공개 상태입니다. 모든 웹사이트 주소에 페이지를 찾을 수 없다고 표시됩니다.",
         dnsInstructions:
-          "DNS 제공업체에서 이 레코드를 추가하세요. 도메인에 필요한 다른 레코드는 유지하세요. Cloudflare에서는 이 CNAME을 DNS 전용(회색 구름)으로 설정하세요.",
+          "DNS 제공업체에서 이 레코드를 추가하세요. 도메인에 필요한 다른 레코드는 유지하세요. 도메인이 이 웹사이트로 연결되는지 확인되면 Cloudflare 프록시도 지원됩니다.",
         dnsName: "이름",
         dnsValue: "값 / 대상",
         httpInstructions:
@@ -1011,6 +1011,7 @@ export const dashboardKo: CoreI18nMessages = {
     searchEmpty: "“{search}”와(과) 일치하는 항목이 없습니다.",
     catalogEmpty: "이 카탈로그에는 아직 템플릿이 없습니다.",
     catalogFailed: "템플릿을 불러오지 못했습니다. 다시 시도해 주세요.",
+    paginationLabel: "템플릿 페이지",
     missingTemplate: "이 카탈로그에 “{name}” 템플릿이 없습니다.",
     backToTemplates: "템플릿으로 돌아가기",
     install: "설치",
@@ -2678,9 +2679,53 @@ export const dashboardKo: CoreI18nMessages = {
     eventName: "이벤트 이름",
     eventRecordCreated: "레코드가 생성될 때",
     eventRecordUpdated: "레코드가 수정될 때",
+    eventSchedule: "일정에 따라",
+    eventWebhook: "요청을 받았을 때",
+    hookUrl: "수신 URL",
+    hookUrlCopied: "복사했습니다",
+    regenerateHookUrl: "URL 변경",
+    hookUrlHint:
+      "이 URL로 POST(JSON 또는 텍스트)나 GET을 보내면 실행이 시작됩니다. 요청 내용은 steps.trigger.payload.request(method, query, headers, body)에 있습니다. 실행이 멈추기 전에 코드 단계가 { response: … }를 반환하면 호출한 쪽이 그 값을 받고, 그렇지 않으면 202와 실행 ID를 받습니다. URL을 아는 사람은 누구나 실행을 시작할 수 있으니, 변경하면 이전 URL은 더 이상 작동하지 않습니다. 변경 사항은 저장해야 적용됩니다.",
+    hookNeedsEvent:
+      "'실행 설정'에서 실행 모드를 '이벤트'로 바꾸지 않으면 이 URL은 404를 반환합니다.",
+    functionCode: "코드",
+    functionCodeHint:
+      "실행이 이 단계에 도달하면 서버에서 실행되는 JavaScript입니다. input에는 실행 데이터(payload, steps, record)가 있고, await fetch(...)로 공개 URL을 호출할 수 있습니다. 반환한 값이 이 단계의 출력이 되며, 이후 단계는 steps.<단계 ID>.<필드>로 읽습니다. 이 워크플로를 열 수 있는 사람은 누구나 코드를 볼 수 있습니다.",
+    savedFunction: "또는 저장된 함수 실행",
+    inlineCode: "코드",
+    triggerField: "이 필드가 바뀔 때만",
+    anyField: "모든 필드",
+    triggerFieldNeedsBase: "필드 변경으로 좁히려면 위에서 베이스를 먼저 고르세요.",
+    triggerToValue: "바뀐 값",
+    anyValue: "아무 새 값",
+    triggerFieldHint:
+      "값을 고르면 필드가 그 값으로 바뀔 때만 실행을 시작합니다. 이미 그 값인 레코드를 다시 수정해도 시작하지 않습니다.",
+    checkboxChecked: "선택됨",
+    checkboxUnchecked: "선택 안 됨",
+    scheduleRepeat: "반복",
+    scheduleEveryMinutes: "몇 분마다",
+    scheduleEveryHours: "몇 시간마다",
+    scheduleDaily: "매일",
+    scheduleWeekly: "매주",
+    scheduleMinutesBetween: "실행 간격(분, 최소 {min})",
+    scheduleHoursBetween: "실행 간격(시간)",
+    scheduleAt: "시간",
+    scheduleWeekday: "요일",
+    scheduleTimezone: "시간대: {timezone}.",
+    scheduleNextRun: "다음 실행: {time}",
+    scheduleNeedsEvent:
+      "'실행 설정'에서 실행 모드를 '이벤트'로 바꿔야 일정에 따라 실행이 시작됩니다.",
+    webhookHeaders: "헤더",
+    webhookHeaderName: "헤더 이름",
+    webhookHeaderValue: "헤더 값",
+    addWebhookHeader: "헤더 추가",
+    removeWebhookHeader: "헤더 삭제",
+    webhookHeadersHint:
+      "요청과 함께 보냅니다(예: Authorization). 이 워크플로를 열 수 있는 사람은 누구나 값을 볼 수 있으니, 이 용도로 만든 키를 사용하세요.",
+    addApprover: "멤버 추가…",
     customEventOption: "{name} (라벨만)",
     triggerEventHint:
-      "이벤트 모드에서는 '레코드가 생성될 때'와 '레코드가 수정될 때'가 자동으로 실행을 시작합니다. 수동과 그 밖의 이벤트 이름은 누군가 워크플로를 실행할 때만 시작됩니다.",
+      "이벤트 모드에서는 '레코드가 생성될 때', '레코드가 수정될 때', '일정에 따라', '요청을 받았을 때'가 자동으로 실행을 시작합니다. 수동과 그 밖의 이벤트 이름은 누군가 워크플로를 실행할 때만 시작됩니다.",
     triggerBase: "베이스",
     anyBase: "모든 베이스",
     unknownBase: "베이스를 찾을 수 없음({id})",
@@ -2709,6 +2754,19 @@ export const dashboardKo: CoreI18nMessages = {
       "실행에 쓰이는 사람의 권한으로 선택한 베이스에 레코드를 추가합니다. 이후 단계는 이 단계의 createdRecordId로 ID를 쓸 수 있습니다.",
     deleteRecordHint:
       "실행에 쓰이는 사람의 권한으로 레코드를 베이스의 휴지통으로 옮깁니다. 거기서 복원할 수 있습니다.",
+    actionFindRecords: "레코드 찾기",
+    actionFindRecordsEach: "레코드 찾기, 하나씩 실행",
+    findRecordsHint:
+      "실행 주체의 권한으로 베이스의 레코드, 또는 보기에 표시되는 레코드를 보기 순서대로 나열합니다. 이후 단계는 이 단계의 records, count, total을 읽을 수 있습니다.",
+    findRecordsView: "보기",
+    findRecordsAllRecords: "모든 레코드",
+    findRecordsUnknownView: "보기를 찾을 수 없음 ({id})",
+    findRecordsLimit: "최대",
+    findRecordsLimitHint:
+      "최대 {max}개, 비워 두면 50개입니다. 레코드마다 실행할 때 이보다 많이 찾으면 실행을 하나도 시작하지 않고 단계가 실패합니다. 보기 조건이 잘못되어도 수백 개의 실행이 시작되지 않도록 하기 위해서입니다.",
+    findRecordsForEach: "레코드마다 다음 단계 실행",
+    findRecordsForEachHint:
+      "레코드마다 그 레코드에 대한 실행이 하나씩 생깁니다. 레코드 수정은 그 레코드를 바꾸고, 이후 단계는 그것을 record로 읽습니다. 이 실행은 여기서 끝나며, 그 실행들은 동시 실행 설정에 따라 차례로 진행됩니다.",
     customActionHint: "이 액션 이름은 아직 아무 일도 하지 않으며 기록만 됩니다.",
     chooseBase: "베이스 선택",
     targetRecord: "레코드(선택)",
@@ -2728,7 +2786,7 @@ export const dashboardKo: CoreI18nMessages = {
     notExecutedNote:
       "여기서 단계를 편집하고 저장한 다음, 실행 탭에서 실행을 시작하세요. 실행은 서버에서 마지막으로 저장된 버전으로 진행됩니다. 완료된 단계는 스냅샷을 유지하고, read_record는 레코드를 다시 읽으며, 대기는 지정한 시각까지 멈추고, 승인은 결정을 기다립니다.",
     executionModeHint:
-      "수동: 누군가 워크플로를 실행할 때만 시작합니다. 이벤트: 조건에 맞는 레코드가 생성되거나 수정될 때도 레코드 트리거가 실행을 시작합니다. 이벤트 실행은 이 워크플로를 마지막으로 저장한 사람으로서 동작합니다.",
+      "수동: 누군가 워크플로를 실행할 때만 시작합니다. 이벤트: 조건에 맞는 레코드가 생성되거나 수정될 때 레코드 트리거가, 정한 시간에 일정 트리거가, 수신 URL로 요청이 오면 요청 트리거가 자동으로 실행을 시작합니다. 이 실행은 이 워크플로를 마지막으로 저장한 사람으로서 동작합니다.",
     manual: "수동",
     event: "이벤트",
     errorPolicy: "오류 발생 시",
@@ -2775,8 +2833,8 @@ export const dashboardKo: CoreI18nMessages = {
     cancelRunBody:
       "실행은 여기서 멈추며 다시 계속할 수 없습니다. 이미 실행된 단계는 되돌려지지 않습니다.",
     keepRun: "취소하지 않음",
-    cancelAllQueued: "대기 중인 {count}개 취소",
-    cancelAllTitle: "대기 중인 {count}개를 취소할까요?",
+    cancelAllQueued: "대기열의 {count}개 취소",
+    cancelAllTitle: "대기열의 {count}개를 취소할까요?",
     cancelAllBody:
       "아직 시작되지 않았으며 앞으로도 시작되지 않습니다. 단계를 실행 중이거나 대기·승인에서 멈춘 실행은 그대로 계속됩니다.",
     startedBy: "시작한 사람: {name}",
@@ -2798,6 +2856,9 @@ export const dashboardKo: CoreI18nMessages = {
     statusFailed: "실패",
     triggerManual: "수동",
     triggerEvent: "이벤트",
+    triggerSchedule: "일정",
+    triggerWebhook: "요청",
+    triggerForEach: "레코드별",
     runDetails: "실행 세부 정보",
     recordLabel: "레코드: {id}",
     waitingUntil: "{time}까지 대기 중입니다. 그때 자동으로 계속됩니다.",

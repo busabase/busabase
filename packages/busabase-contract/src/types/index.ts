@@ -244,6 +244,8 @@ export type {
   CreateFormDTO,
   FormBoundFieldVO,
   FormFieldBindingVO,
+  FormOptionsDTO,
+  FormOptionsVO,
   FormPageSourceVO,
   FormShareVO,
   FormSubmitResultVO,
@@ -548,9 +550,11 @@ export interface SearchResponseVO {
   /**
    * True when this search could not see everything in scope: some node content
    * was indexed only up to the projection cap, the file scan ran out of budget,
-   * or more record values matched than one search ranks (it ranks the newest,
-   * or the oldest for ascending sorts). Lets a client report a result honestly
-   * instead of implying the workspace lacks the phrase.
+   * more record values matched than one search ranks (it ranks the newest, or
+   * the oldest for ascending sorts), or the time ran out after matches were
+   * found: relevance ordering fell back to update order, or only the first rows
+   * could be built. Lets a client report a result honestly instead of implying
+   * the workspace lacks the phrase.
    */
   contentTruncated: boolean;
 }

@@ -107,6 +107,75 @@ describe("search execution with real PGLite", () => {
     }
   });
 
+  it("keeps the result of a scope that finishes within its late allowance", async () => {
+    const client = await PGlite.create();
+    const db = pgliteDrizzle(client);
+    vi.stubEnv("BUSABASE_SEARCH_QUICK_REQUEST_TIMEOUT_MS", "40");
+    try {
+      const run = (lateMs?: number) =>
+        withSearchExecution(db, "quick", undefined, async (_tx, execution) => {
+          const found = await execution.query(
+            async () => {
+              await new Promise((resolve) => setTimeout(resolve, 70));
+              return "matches";
+            },
+            lateMs === undefined ? undefined : { lateMs },
+          );
+          // The rest of the request is still bound by the deadline unless it is told otherwise.
+          execution.allowUntil(Date.now() + 200);
+          return found;
+        });
+      await expect(run()).rejects.toMatchObject({ code: "TIMEOUT" });
+      await expect(run(200)).resolves.toBe("matches");
+      // Later than the allowance is still a timeout.
+      await expect(
+        withSearchExecution(db, "quick", undefined, async (_tx, execution) =>
+          execution.query(
+            async () => {
+              await new Promise((resolve) => setTimeout(resolve, 120));
+              return "too late";
+            },
+            { lateMs: 30 },
+          ),
+        ),
+      ).rejects.toMatchObject({ code: "TIMEOUT" });
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("passes checkpoints until a time a caller with matches in hand asked for", async () => {
+    const client = await PGlite.create();
+    const db = pgliteDrizzle(client);
+    vi.stubEnv("BUSABASE_SEARCH_QUICK_REQUEST_TIMEOUT_MS", "20");
+    try {
+      const late = (allow: boolean) =>
+        withSearchExecution(db, "quick", undefined, async (_tx, execution) => {
+          if (allow) execution.allowUntil(Date.now() + 200);
+          await new Promise((resolve) => setTimeout(resolve, 60));
+          execution.checkpoint();
+          return "answered";
+        });
+      await expect(late(false)).rejects.toMatchObject({ code: "TIMEOUT" });
+      await expect(late(true)).resolves.toBe("answered");
+      // `giveUp` is the one way left to time out once matches turned out useless.
+      await expect(
+        withSearchExecution(db, "quick", undefined, async (_tx, execution) => execution.giveUp()),
+      ).rejects.toMatchObject({ code: "TIMEOUT" });
+      // A canceled request stays canceled whatever it was allowed.
+      const controller = new AbortController();
+      controller.abort();
+      await expect(
+        withSearchExecution(db, "quick", controller.signal, async (_tx, execution) => {
+          execution.allowUntil(Date.now() + 1_000);
+          execution.assertAlive();
+        }),
+      ).rejects.toMatchObject({ code: "CLIENT_CLOSED_REQUEST" });
+    } finally {
+      await client.close();
+    }
+  });
+
   it("keeps a real SQL error instead of reporting it as a timeout past the deadline", async () => {
     const client = await PGlite.create();
     const db = pgliteDrizzle(client);
