@@ -20,7 +20,13 @@ export {
   mapPublishedPostRecord,
 } from "./content";
 export * from "./content-index";
-export { BusabaseCmsError, BusabaseCmsSchemaDriftError, BusabaseCmsSetupError } from "./errors";
+export {
+  BusabaseCmsError,
+  BusabaseCmsSchemaDriftError,
+  BusabaseCmsSetupError,
+  CmsUnavailableError,
+  isCmsUnavailableError,
+} from "./errors";
 export * from "./fallback";
 export * from "./jsonld";
 export * from "./links";

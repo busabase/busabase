@@ -1,3 +1,5 @@
+import { CmsUnavailableError } from "./errors";
+
 /**
  * The "read from Busabase, fall back to bundled content on any failure" wrapper — every app
  * consuming busabase-cms re-implemented this same try/catch/console.warn a couple of times
@@ -58,11 +60,11 @@ export const readCmsStatus = async <T>(
  *
  * Throwing beats rendering a 404: an error response is not cached, so the page
  * recovers on the next request, whereas a cached 404 tells crawlers the content
- * is gone.
+ * is gone. The error is a `CmsUnavailableError`, so reporting can tag it as an outage.
  */
 export const requireCmsRead = <T>(read: CmsRead<T>, what: string): T => {
   if (read.status === "unavailable") {
-    throw new Error(`Busabase CMS unreachable while rendering ${what}`);
+    throw new CmsUnavailableError(`Busabase CMS unreachable while rendering ${what}`);
   }
   return read.data;
 };
