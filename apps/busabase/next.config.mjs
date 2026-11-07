@@ -162,6 +162,10 @@ const config = {
   // cannot resolve (the @aws-sdk dir on disk has no hash) → "Failed to load
   // external module" 500s on any storage/DB path. Mirrors pglite.
   serverExternalPackages: [
+    // Workflow and webhook functions run QuickJS on a worker thread started
+    // from source text, which requires it from node_modules at runtime; kept
+    // external so it is resolvable there rather than only inside a bundle.
+    "quickjs-emscripten",
     "@electric-sql/pglite",
     "@aws-sdk/client-s3",
     "@aws-sdk/s3-request-presigner",
