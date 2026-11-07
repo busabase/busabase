@@ -77,6 +77,14 @@
       "types": "./cache/types.ts",
       "default": "./cache/types.ts"
     },
+    "./health/deep-health-check": {
+      "types": "./health/deep-health-check.ts",
+      "default": "./health/deep-health-check.ts"
+    },
+    "./health/probes": {
+      "types": "./health/probes.ts",
+      "default": "./health/probes.ts"
+    },
     "./auth/better-auth-rate-limit": {
       "types": "./auth/better-auth-rate-limit.ts",
       "default": "./auth/better-auth-rate-limit.ts"
