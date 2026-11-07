@@ -77,6 +77,8 @@ const insertNotes = async (db: Db, baseId: string, notes: Note[]) => {
   }
 };
 
+const ids = (found: { rows: Array<{ id: string }> }) => found.rows.map((row) => row.id);
+
 const recordIds = (result: Awaited<ReturnType<ReturnType<typeof raw>["search"]>>) =>
   result.results.filter((row) => row.kind === "record").map((row) => row.id);
 
@@ -135,10 +137,10 @@ describe("record search window", () => {
       chunkRows: 100,
     });
     expect(outOfTime.truncated).toBe(true);
-    expect(outOfTime.ids.length).toBeGreaterThan(0);
-    expect(outOfTime.ids.length).toBeLessThan(COMMON);
+    expect(ids(outOfTime).length).toBeGreaterThan(0);
+    expect(ids(outOfTime).length).toBeLessThan(COMMON);
     const fieldValueIds = rows.map((row) => timedId("fvl", row.at, row.index)).reverse();
-    expect(outOfTime.ids).toEqual(fieldValueIds.slice(0, outOfTime.ids.length));
+    expect(ids(outOfTime)).toEqual(fieldValueIds.slice(0, ids(outOfTime).length));
     const complete = await findRecordMatches(dbInstance, {
       query: "e ",
       spaceId: LOCAL_SPACE_ID,
@@ -150,7 +152,7 @@ describe("record search window", () => {
       chunkRows: 100,
     });
     expect(complete.truncated).toBe(false);
-    expect(complete.ids).toEqual(fieldValueIds);
+    expect(ids(complete)).toEqual(fieldValueIds);
   }, 120_000);
 
   it("searches field values whose ids predate today's id shape", async () => {
@@ -218,7 +220,7 @@ describe("record search window", () => {
     // The same, through each path a large space takes: small scan steps so
     // the first step does not cover the space.
     const legacyIds = [`qfv_${before.toString(36)}_abc1234`, "abc-imported-value"];
-    const find = async (query: string) =>
+    const find = async (query: string, rangeTimeoutMs?: number) =>
       findRecordMatches(await getDb(), {
         query,
         spaceId: LOCAL_SPACE_ID,
@@ -228,11 +230,18 @@ describe("record search window", () => {
         scanUntil: Number.POSITIVE_INFINITY,
         indexTimeoutMs: 5_000,
         chunkRows: 100,
+        rangeTimeoutMs,
       });
     // A word the trigram index answers.
-    expect((await find("legacyneedle")).ids.sort()).toEqual([...legacyIds].sort());
+    expect(ids(await find("legacyneedle")).sort()).toEqual([...legacyIds].sort());
     // An input with no trigrams, scanned step by step to the end.
-    expect((await find("鲲鹏")).ids.sort()).toEqual([...legacyIds].sort());
+    expect(ids(await find("鲲鹏")).sort()).toEqual([...legacyIds].sort());
+    // Without the space's own id range (its lookup timed out, or had no time),
+    // the whole range is scanned: the same rows, current and legacy.
+    for (const query of ["legacyneedle", "鲲鹏", "windowword"]) {
+      expect(ids(await find(query, 0))).toEqual(ids(await find(query)));
+    }
+    expect(ids(await find("legacyneedle", 0)).sort()).toEqual([...legacyIds].sort());
   }, 120_000);
 
   it("merges full-text and substring matches for a multi-word query", async () => {

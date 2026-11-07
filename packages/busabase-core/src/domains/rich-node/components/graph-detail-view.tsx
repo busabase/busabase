@@ -23,13 +23,21 @@ import {
 import "@xyflow/react/dist/style.css";
 import { useQuery } from "@tanstack/react-query";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
-import type {
-  WorkflowDocument,
-  WorkflowEdge,
-  WorkflowNode,
-  WorkflowSettings,
+import {
+  type WorkflowDocument,
+  type WorkflowEdge,
+  type WorkflowNode,
+  type WorkflowSchedule,
+  WorkflowScheduleSchema,
+  type WorkflowSettings,
+  type WorkflowWebhookHeader,
 } from "busabase-contract/domains/rich-node/types";
-import { isWorkflowRecordEvent } from "busabase-contract/domains/workflow/run";
+import {
+  isWorkflowRecordEvent,
+  WORKFLOW_FIND_RECORDS_ACTION,
+  WORKFLOW_SCHEDULE_EVENT,
+  WORKFLOW_WEBHOOK_EVENT,
+} from "busabase-contract/domains/workflow/run";
 import type { NodeVO } from "busabase-contract/types";
 import { Button } from "kui/button";
 import { Input } from "kui/input";
@@ -71,14 +79,21 @@ import {
   WorkflowStepReference,
   workflowActionLabel,
 } from "../../workflow/components/workflow-action-settings";
+import { WorkflowApproverPicker } from "../../workflow/components/workflow-approver-picker";
+import { WorkflowHookUrl } from "../../workflow/components/workflow-hook-url";
 import {
   useWorkflowRunStepState,
   WorkflowRunHighlightContext,
 } from "../../workflow/components/workflow-run-highlight";
 import { WorkflowRunsPanel } from "../../workflow/components/workflow-runs-panel";
+import { WorkflowScheduleSettings } from "../../workflow/components/workflow-schedule-settings";
 import { WorkflowTriggerBasePicker } from "../../workflow/components/workflow-trigger-base-picker";
+import { WorkflowTriggerFieldFilter } from "../../workflow/components/workflow-trigger-field-filter";
+import { WorkflowWebhookHeaders } from "../../workflow/components/workflow-webhook-headers";
+import { newWorkflowHookToken } from "../../workflow/utils/hook";
 import type { WorkflowRunStepState } from "../../workflow/utils/run-view";
 import { parseWorkflowRunLink } from "../../workflow/utils/run-view";
+import { localTimeZone } from "../../workflow/utils/schedule";
 import {
   RichNodeNotFound,
   RichNodeShell,
@@ -94,10 +109,20 @@ interface WorkflowNodeFields {
   eventName: string;
   /** Trigger only: limits a record event to one Base. `""` means any Base. */
   baseId: string;
+  /** Record trigger only: the watched field and the value it must change to. */
+  fieldSlug: string;
+  toValue: string;
+  /** Schedule trigger only. `null` until the author touches it. */
+  schedule: WorkflowSchedule | null;
+  /** Webhook trigger only: the secret part of its URL. */
+  hookToken: string;
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   url: string;
+  headers: WorkflowWebhookHeader[];
   webhookRuleId: string;
   functionName: string;
+  /** Function step: code written in the step, run instead of a saved rule. */
+  code: string;
   expression: string;
   duration: number;
   unit: "minutes" | "hours" | "days";
@@ -107,11 +132,24 @@ interface WorkflowNodeFields {
   /** For record-writing actions. Kept as an object; the editor owns the JSON text. */
   fields: Record<string, unknown>;
   targetRecordId: string;
+  /** Find records only: the View to read, how many, and once per record. */
+  viewId: string;
+  limit: number | null;
+  forEach: boolean;
   outcome: string;
 }
 type WorkflowNodeData = WorkflowNodeFields & Record<string, unknown>;
 type WorkflowNodePatch = Partial<WorkflowNodeFields>;
 type WorkflowFlowNode = Node<WorkflowNodeData, "workflowStep">;
+
+/** An example to start from: read the run's data, call a URL, return what later steps use. */
+const FUNCTION_CODE_PLACEHOLDER = `const text = input.payload.request?.body?.text ?? "";
+const res = await fetch("https://example.com/api", {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ text }),
+});
+return { ok: res.ok, reply: await res.text() };`;
 
 const workflowIcon = {
   trigger: CircleDot,
@@ -142,7 +180,11 @@ const triggerEventLabel = (eventName: string, messages: CoreI18nMessages): strin
       ? messages.richNodes.eventRecordCreated
       : eventName === "record.updated"
         ? messages.richNodes.eventRecordUpdated
-        : eventName;
+        : eventName === WORKFLOW_SCHEDULE_EVENT
+          ? messages.richNodes.eventSchedule
+          : eventName === WORKFLOW_WEBHOOK_EVENT
+            ? messages.richNodes.eventWebhook
+            : eventName;
 
 const workflowNodeSummary = (data: WorkflowNodeData, messages: CoreI18nMessages): string => {
   switch (data.kind) {
@@ -151,7 +193,9 @@ const workflowNodeSummary = (data: WorkflowNodeData, messages: CoreI18nMessages)
     case "webhook":
       return `${data.method} ${data.url || messages.richNodes.webhook}`;
     case "function":
-      return data.functionName || data.webhookRuleId || messages.richNodes.function;
+      return data.code.trim()
+        ? messages.richNodes.inlineCode
+        : data.functionName || data.webhookRuleId || messages.richNodes.function;
     case "condition":
       return data.expression || data.description || messages.richNodes.condition;
     case "wait":
@@ -159,6 +203,9 @@ const workflowNodeSummary = (data: WorkflowNodeData, messages: CoreI18nMessages)
     case "approval":
       return data.approver || messages.richNodes.approval;
     case "action":
+      if (data.actionName === WORKFLOW_FIND_RECORDS_ACTION && data.forEach) {
+        return messages.richNodes.actionFindRecordsEach;
+      }
       return (
         workflowActionLabel(data.actionName, messages) ||
         data.description ||
@@ -320,10 +367,17 @@ const workflowNodeData = (node: WorkflowNode): WorkflowNodeData => ({
   eventName: node.kind === "trigger" ? node.eventName : "",
   // Graphs saved before Base filters existed carry no `baseId`.
   baseId: node.kind === "trigger" || node.kind === "action" ? (node.baseId ?? "") : "",
+  // Graphs saved before field filters, schedules, and headers carry none.
+  fieldSlug: node.kind === "trigger" ? (node.fieldSlug ?? "") : "",
+  toValue: node.kind === "trigger" ? (node.toValue ?? "") : "",
+  schedule: node.kind === "trigger" ? (node.schedule ?? null) : null,
+  hookToken: node.kind === "trigger" ? (node.hookToken ?? "") : "",
   method: node.kind === "webhook" ? node.method : "POST",
   url: node.kind === "webhook" ? node.url : "",
+  headers: node.kind === "webhook" ? (node.headers ?? []) : [],
   webhookRuleId: node.kind === "function" ? node.webhookRuleId : "",
   functionName: node.kind === "function" ? node.functionName : "",
+  code: node.kind === "function" ? (node.code ?? "") : "",
   expression: node.kind === "condition" ? node.expression : "",
   duration: node.kind === "wait" ? node.duration : 1,
   unit: node.kind === "wait" ? node.unit : "hours",
@@ -333,6 +387,9 @@ const workflowNodeData = (node: WorkflowNode): WorkflowNodeData => ({
   // Graphs saved before record-writing actions carry neither.
   fields: node.kind === "action" ? (node.fields ?? {}) : {},
   targetRecordId: node.kind === "action" ? (node.targetRecordId ?? "") : "",
+  viewId: node.kind === "action" ? (node.viewId ?? "") : "",
+  limit: node.kind === "action" ? (node.limit ?? null) : null,
+  forEach: node.kind === "action" ? (node.forEach ?? false) : false,
   outcome: node.kind === "end" ? node.outcome : "completed",
 });
 
@@ -349,15 +406,37 @@ const persistedWorkflowNode = (
   };
   switch (data.kind) {
     case "trigger":
-      return { ...base, kind: data.kind, eventName: data.eventName, baseId: data.baseId };
+      return {
+        ...base,
+        kind: data.kind,
+        eventName: data.eventName,
+        baseId: data.baseId,
+        ...(isWorkflowRecordEvent(data.eventName) && data.fieldSlug
+          ? { fieldSlug: data.fieldSlug, ...(data.toValue ? { toValue: data.toValue } : {}) }
+          : {}),
+        ...(data.eventName === WORKFLOW_SCHEDULE_EVENT
+          ? { schedule: data.schedule ?? WorkflowScheduleSchema.parse({}) }
+          : {}),
+        ...(data.eventName === WORKFLOW_WEBHOOK_EVENT && data.hookToken
+          ? { hookToken: data.hookToken }
+          : {}),
+      };
     case "webhook":
-      return { ...base, kind: data.kind, method: data.method, url: data.url };
+      return {
+        ...base,
+        kind: data.kind,
+        method: data.method,
+        url: data.url,
+        // A row left empty in the editor is not a header.
+        headers: data.headers.filter((header) => header.name.trim() || header.value.trim()),
+      };
     case "function":
       return {
         ...base,
         kind: data.kind,
         webhookRuleId: data.webhookRuleId,
         functionName: data.functionName,
+        ...(data.code.trim() ? { code: data.code } : {}),
       };
     case "condition":
       return { ...base, kind: data.kind, expression: data.expression };
@@ -378,6 +457,13 @@ const persistedWorkflowNode = (
         fields: data.fields,
         targetRecordId: data.targetRecordId,
         baseId: data.baseId,
+        ...(data.actionName === WORKFLOW_FIND_RECORDS_ACTION
+          ? {
+              ...(data.viewId ? { viewId: data.viewId } : {}),
+              ...(data.limit ? { limit: data.limit } : {}),
+              ...(data.forEach ? { forEach: true } : {}),
+            }
+          : {}),
       };
     case "end":
       return { ...base, kind: data.kind, outcome: data.outcome };
@@ -517,10 +603,16 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
         description: "",
         eventName: "manual",
         baseId: "",
+        fieldSlug: "",
+        toValue: "",
+        schedule: null,
+        hookToken: "",
         method: "POST",
         url: "",
+        headers: [],
         webhookRuleId: "",
         functionName: "",
+        code: "",
         expression: "",
         duration: 1,
         unit: "hours",
@@ -529,6 +621,9 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
         actionName: "",
         fields: {},
         targetRecordId: "",
+        viewId: "",
+        limit: null,
+        forEach: false,
         outcome: "completed",
       },
     };
@@ -574,9 +669,26 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
             description: patch.description ?? entry.data.description,
             eventName: patch.eventName ?? entry.data.eventName,
             baseId: patch.baseId ?? entry.data.baseId,
+            fieldSlug: patch.fieldSlug ?? entry.data.fieldSlug,
+            toValue: patch.toValue ?? entry.data.toValue,
+            // Becoming a schedule saves the defaults the panel shows, in the
+            // editor's own time zone, not whatever the schema falls back to.
+            schedule:
+              patch.schedule ??
+              entry.data.schedule ??
+              (patch.eventName === WORKFLOW_SCHEDULE_EVENT
+                ? WorkflowScheduleSchema.parse({ timezone: localTimeZone() })
+                : null),
             url: patch.url ?? entry.data.url,
+            headers: patch.headers ?? entry.data.headers,
             webhookRuleId: patch.webhookRuleId ?? entry.data.webhookRuleId,
             functionName: patch.functionName ?? entry.data.functionName,
+            code: patch.code ?? entry.data.code,
+            // Becoming a webhook trigger gets a URL at once, so it can be copied.
+            hookToken:
+              patch.hookToken ??
+              (entry.data.hookToken ||
+                (patch.eventName === WORKFLOW_WEBHOOK_EVENT ? newWorkflowHookToken() : "")),
             expression: patch.expression ?? entry.data.expression,
             duration: typeof patch.duration === "number" ? patch.duration : entry.data.duration,
             unit:
@@ -588,6 +700,9 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
             actionName: patch.actionName ?? entry.data.actionName,
             fields: patch.fields ?? entry.data.fields,
             targetRecordId: patch.targetRecordId ?? entry.data.targetRecordId,
+            viewId: patch.viewId ?? entry.data.viewId,
+            limit: patch.limit !== undefined ? patch.limit : entry.data.limit,
+            forEach: patch.forEach ?? entry.data.forEach,
             outcome: patch.outcome ?? entry.data.outcome,
           },
         };
@@ -879,6 +994,10 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
                           value={String(selectedNode.data.url)}
                         />
                       </label>
+                      <WorkflowWebhookHeaders
+                        onChange={(headers) => updateSelected({ headers })}
+                        value={selectedNode.data.headers}
+                      />
                       <p
                         className="text-[11px] leading-snug text-muted-foreground/80"
                         data-workflow-webhook-hint=""
@@ -909,6 +1028,12 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
                           <option value="record.updated">
                             {messages.richNodes.eventRecordUpdated}
                           </option>
+                          <option value={WORKFLOW_SCHEDULE_EVENT}>
+                            {messages.richNodes.eventSchedule}
+                          </option>
+                          <option value={WORKFLOW_WEBHOOK_EVENT}>
+                            {messages.richNodes.eventWebhook}
+                          </option>
                           {customTriggerEvent ? (
                             <option value={customTriggerEvent}>
                               {fmt(messages.richNodes.customEventOption, {
@@ -925,17 +1050,69 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
                         </span>
                       </label>
                       {isWorkflowRecordEvent(selectedNode.data.eventName) ? (
-                        <WorkflowTriggerBasePicker
-                          id="rich-node-trigger-base"
-                          onChange={(baseId) => updateSelected({ baseId })}
-                          orpc={orpc}
-                          value={selectedNode.data.baseId}
+                        <>
+                          <WorkflowTriggerBasePicker
+                            id="rich-node-trigger-base"
+                            // Another Base has other fields: start the filter over.
+                            onChange={(baseId) =>
+                              updateSelected({ baseId, fieldSlug: "", toValue: "" })
+                            }
+                            orpc={orpc}
+                            value={selectedNode.data.baseId}
+                          />
+                          <WorkflowTriggerFieldFilter
+                            baseId={selectedNode.data.baseId}
+                            onChange={(filter) => updateSelected(filter)}
+                            orpc={orpc}
+                            value={{
+                              fieldSlug: selectedNode.data.fieldSlug,
+                              toValue: selectedNode.data.toValue,
+                            }}
+                          />
+                        </>
+                      ) : null}
+                      {selectedNode.data.eventName === WORKFLOW_WEBHOOK_EVENT &&
+                      selectedNode.data.hookToken ? (
+                        <WorkflowHookUrl
+                          armed={workflowSettings.executionMode === "event"}
+                          onRegenerate={() => updateSelected({ hookToken: newWorkflowHookToken() })}
+                          token={selectedNode.data.hookToken}
+                          workflowNodeId={node.id}
+                        />
+                      ) : null}
+                      {selectedNode.data.eventName === WORKFLOW_SCHEDULE_EVENT ? (
+                        <WorkflowScheduleSettings
+                          armed={workflowSettings.executionMode === "event"}
+                          onChange={(schedule) => updateSelected({ schedule })}
+                          value={selectedNode.data.schedule}
                         />
                       ) : null}
                     </>
                   ) : null}
                   {selectedNode.data.kind === "function" ? (
                     <>
+                      <label
+                        className="grid gap-1.5 text-muted-foreground text-xs"
+                        htmlFor="rich-node-function-code"
+                      >
+                        {messages.richNodes.functionCode}
+                        <Textarea
+                          className="font-mono text-[12px]"
+                          data-workflow-function-code=""
+                          id="rich-node-function-code"
+                          onChange={(event) => updateSelected({ code: event.target.value })}
+                          placeholder={FUNCTION_CODE_PLACEHOLDER}
+                          rows={10}
+                          spellCheck={false}
+                          value={String(selectedNode.data.code)}
+                        />
+                        <span className="text-[11px] leading-snug text-muted-foreground/80">
+                          {messages.richNodes.functionCodeHint}
+                        </span>
+                      </label>
+                      <p className="pt-1 font-medium text-foreground text-xs">
+                        {messages.richNodes.savedFunction}
+                      </p>
                       <label
                         className="grid gap-1.5 text-muted-foreground text-xs"
                         htmlFor="rich-node-webhook-rule-id"
@@ -1040,6 +1217,11 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
                           {messages.richNodes.approverHint}
                         </span>
                       </label>
+                      <WorkflowApproverPicker
+                        onChange={(approver) => updateSelected({ approver })}
+                        orpc={orpc}
+                        value={String(selectedNode.data.approver)}
+                      />
                       <label className="flex items-start gap-2 text-muted-foreground text-xs">
                         <input
                           checked={selectedNode.data.allowAgents}
@@ -1064,6 +1246,11 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
                       actionName={selectedNode.data.actionName}
                       baseId={selectedNode.data.baseId}
                       fields={selectedNode.data.fields}
+                      find={{
+                        viewId: selectedNode.data.viewId,
+                        limit: selectedNode.data.limit,
+                        forEach: selectedNode.data.forEach,
+                      }}
                       onChange={updateSelected}
                       orpc={orpc}
                       stepId={selectedNode.id}

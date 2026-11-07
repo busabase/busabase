@@ -20,7 +20,6 @@ import {
   isNotNull,
   isNull,
   lte,
-  notExists,
   or,
   sql,
 } from "drizzle-orm";
@@ -46,7 +45,11 @@ import {
 } from "../db/schema";
 import {
   ASSET_SEARCH_OVERLAP_CHARS,
+  assetTextCoverageGap,
   healAssetTextProjections,
+  incompleteTextAssetIds,
+  matchAssetTextAssetIds,
+  textWithoutSlotAssetIds,
 } from "../domains/assets/logic/asset-text-search-logic";
 import { getPrimaryField } from "../domains/base/utils/primary-field";
 import { OPEN_CHANGE_REQUEST_STATUSES } from "./change-request-status";
@@ -58,6 +61,17 @@ import {
 } from "./node-acl";
 import { collectSubtreeIds } from "./nodes";
 import {
+  answerMarginMs,
+  HYDRATE_CHUNK_ROWS,
+  MATCH_OVERRUN_MS,
+  MIN_ANSWER_MS,
+  MIN_HYDRATE_MS,
+  MIN_RANK_MS,
+  POST_MATCH_RESERVE_MS,
+  planMatchBudgetMs,
+  runWithin,
+} from "./search-budget";
+import {
   getSearchExecutionOutcome,
   type SearchExecution,
   withSearchExecution,
@@ -66,6 +80,11 @@ import { recordSearchRequest } from "./search-metrics";
 import {
   findRecordMatches,
   literalSearchPattern,
+  type MatchGroup,
+  type MatchProgress,
+  type MatchRow,
+  orderMatchGroups,
+  rankRelevance,
   recordSearchWindowRows,
 } from "./search-record-query";
 import { healNodeProjections } from "./search-self-heal";
@@ -635,6 +654,64 @@ const currentAssetProjectionCondition = () =>
     eq(busabaseAssetTexts.status, "present"),
   );
 
+/**
+ * The first lines of the matching chunk of this asset's CURRENT text, or null.
+ * Evaluated per returned row, never per candidate.
+ */
+const matchedChunkSnippet = (queryDb: DbInstance, spaceId: string, pattern: string) =>
+  sql<string>`(${queryDb
+    .select({ text: busabaseAssetTextSearchChunks.contentText })
+    .from(busabaseAssetTextSearchChunks)
+    .innerJoin(
+      busabaseAssetTextSearch,
+      eq(busabaseAssetTextSearch.assetId, busabaseAssetTextSearchChunks.assetId),
+    )
+    .innerJoin(busabaseAssetTexts, currentAssetProjectionCondition())
+    .where(
+      and(
+        eq(busabaseAssetTextSearch.spaceId, spaceId),
+        eq(busabaseAssetTextSearchChunks.assetId, busabaseAssets.id),
+        ilike(busabaseAssetTextSearchChunks.contentText, pattern),
+      ),
+    )
+    .orderBy(asc(busabaseAssetTextSearchChunks.chunkIndex))
+    .limit(1)})`;
+
+/** The text match gets this much of the request; the rest is for file names and hydration. */
+const CONTENT_MATCH_STATEMENT_MS = 1_500;
+const CONTENT_MATCH_RESERVE_MS = 2_000;
+
+/**
+ * Whether the caller can see a file whose text is only partly searchable.
+ * Asked of the small tables first: a space with none (the usual case once
+ * indexed) answers without touching its usage rows.
+ */
+const visibleUnindexedText = async (
+  queryDb: DbInstance,
+  spaceId: string,
+  narrow: SearchNarrowing,
+  execution: SearchExecution,
+): Promise<boolean> => {
+  const gap = await assetTextCoverageGap(queryDb, spaceId);
+  if (!gap.incompleteText && !gap.textWithoutSlot) return false;
+  execution.checkpoint();
+  const [row] = await queryAssetUsageRows(
+    queryDb,
+    spaceId,
+    or(
+      gap.incompleteText
+        ? inArray(busabaseAssets.id, incompleteTextAssetIds(queryDb, spaceId))
+        : undefined,
+      gap.textWithoutSlot
+        ? inArray(busabaseAssets.id, textWithoutSlotAssetIds(queryDb, spaceId))
+        : undefined,
+    ),
+    1,
+    narrow,
+  );
+  return row !== undefined;
+};
+
 const searchAssetBackedFiles = async (
   query: string,
   limit: number,
@@ -646,88 +723,75 @@ const searchAssetBackedFiles = async (
   const spaceId = getContextSpaceId();
   const pattern = literalSearchPattern(query);
   // A legacy corpus is warmed independently of the query. Waiting is bounded;
-  // the SQL completeness probe below applies the caller's exact ACL and scope.
+  // the coverage check below applies the caller's exact ACL and scope.
   if (scanContent) await healAssetTextProjections(db, spaceId, { waitMs: 300 });
   await execution.beforeQuery();
-  return execution.query(async (queryDb) => {
-    const matchingAssets = queryDb
-      .select({ assetId: busabaseAssetTextSearchChunks.assetId })
-      .from(busabaseAssetTextSearchChunks)
-      .innerJoin(
-        busabaseAssetTextSearch,
-        eq(busabaseAssetTextSearch.assetId, busabaseAssetTextSearchChunks.assetId),
-      )
-      .innerJoin(busabaseAssetTexts, currentAssetProjectionCondition())
-      .where(
-        and(
-          eq(busabaseAssetTextSearch.spaceId, spaceId),
-          ilike(busabaseAssetTextSearchChunks.contentText, pattern),
-        ),
+
+  // Which assets' indexed text holds the phrase. Its own statement and its own
+  // time limit (see `matchAssetTextAssetIds`): a phrase the index cannot serve
+  // costs as much as the space has text, and running out of time here must
+  // still leave the file-name matches to answer with.
+  let matchedAssetIds: string[] = [];
+  let contentPartial = false;
+  if (scanContent) {
+    try {
+      const match = await execution.query(async (queryDb) =>
+        matchAssetTextAssetIds(queryDb, spaceId, query, pattern, {
+          statementMs: Math.max(
+            500,
+            Math.min(
+              CONTENT_MATCH_STATEMENT_MS,
+              execution.remainingMs() - CONTENT_MATCH_RESERVE_MS,
+            ),
+          ),
+        }),
       );
-    const matchedChunk = queryDb
-      .select({ text: busabaseAssetTextSearchChunks.contentText })
-      .from(busabaseAssetTextSearchChunks)
-      .innerJoin(
-        busabaseAssetTextSearch,
-        eq(busabaseAssetTextSearch.assetId, busabaseAssetTextSearchChunks.assetId),
-      )
-      .innerJoin(busabaseAssetTexts, currentAssetProjectionCondition())
-      .where(
-        and(
-          eq(busabaseAssetTextSearch.spaceId, spaceId),
-          eq(busabaseAssetTextSearchChunks.assetId, busabaseAssets.id),
-          ilike(busabaseAssetTextSearchChunks.contentText, pattern),
-        ),
-      )
-      .orderBy(asc(busabaseAssetTextSearchChunks.chunkIndex))
-      .limit(1);
-    const rows = await queryAssetUsageRows(
+      matchedAssetIds = match.assetIds;
+      contentPartial = match.capped;
+    } catch (error) {
+      if (getSearchExecutionOutcome(error) !== "timeout") throw error;
+      contentPartial = true;
+    }
+  }
+
+  return execution.query(async (queryDb) => {
+    const snippet = scanContent ? matchedChunkSnippet(queryDb, spaceId, pattern) : undefined;
+    // Two index-friendly lookups merged here, not one query with an OR across
+    // both conditions: the OR makes every usage row of the space a candidate.
+    const identityRows = await queryAssetUsageRows(
       queryDb,
       spaceId,
-      scanContent
-        ? or(fileIdentitySqlCondition(pattern), inArray(busabaseAssets.id, matchingAssets))
-        : fileIdentitySqlCondition(pattern),
+      fileIdentitySqlCondition(pattern),
       limit,
       narrow,
-      scanContent ? sql<string>`(${matchedChunk})` : undefined,
+      snippet,
     );
-    let truncated = false;
-    if (scanContent) {
-      const eligibleText = queryDb
-        .select({ assetId: busabaseAssetTexts.assetId })
-        .from(busabaseAssetTexts)
-        .where(
-          and(
-            eq(busabaseAssetTexts.assetId, busabaseAssets.id),
-            eq(busabaseAssetTexts.status, "present"),
-          ),
-        );
-      const completeProjection = queryDb
-        .select({ assetId: busabaseAssetTextSearch.assetId })
-        .from(busabaseAssetTextSearch)
-        .innerJoin(busabaseAssetTexts, currentAssetProjectionCondition())
-        .where(
-          and(
-            eq(busabaseAssetTextSearch.assetId, busabaseAssets.id),
-            eq(busabaseAssetTextSearch.complete, true),
-          ),
-        );
-      const noTextSlot = queryDb
-        .select({ assetId: busabaseAssetTexts.assetId })
-        .from(busabaseAssetTexts)
-        .where(eq(busabaseAssetTexts.assetId, busabaseAssets.id));
-      const [incomplete] = await queryAssetUsageRows(
-        queryDb,
-        spaceId,
-        or(
-          and(exists(eligibleText), notExists(completeProjection)),
-          and(eq(busabaseAssets.contentKind, "text"), notExists(noTextSlot)),
-        ),
-        1,
-        narrow,
-      );
-      truncated = incomplete !== undefined || query.length > ASSET_SEARCH_OVERLAP_CHARS;
-    }
+    execution.checkpoint();
+    const contentRows =
+      matchedAssetIds.length > 0
+        ? await queryAssetUsageRows(
+            queryDb,
+            spaceId,
+            inArray(busabaseAssets.id, matchedAssetIds),
+            limit,
+            narrow,
+            snippet,
+          )
+        : [];
+    execution.checkpoint();
+    const seen = new Set<string>();
+    const rows = [...identityRows, ...contentRows].filter((row) => {
+      const key = rowResultKey(row);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    // Typeahead never reads text, so it has nothing to disclose.
+    const truncated =
+      scanContent &&
+      (contentPartial ||
+        query.length > ASSET_SEARCH_OVERLAP_CHARS ||
+        (await visibleUnindexedText(queryDb, spaceId, narrow, execution)));
     return {
       results: rows.map((row) =>
         toSortableFileResult(
@@ -893,65 +957,79 @@ const searchWithinBudget = async (
       : undefined,
   );
   const windowRows = recordSearchWindowRows(candidateWindow);
-  // Most of what is left goes to finding matches; ranking, hydration and the
-  // other sources need the rest. The index attempt gets a third of it, at
-  // most 500 ms: a word the index can answer comes back well within that.
-  const matchBudgetMs = execution.remainingMs() * 0.6;
+  // Matching takes up to half of what is left, but never so much that the
+  // stages after it (ordering, reading and hydrating the rows) lose their
+  // reserve: they must always have the time to answer from what was found.
+  const leftAtStart = execution.remainingMs();
+  const matchBudgetMs = planMatchBudgetMs(leftAtStart);
+  const answerMargin = answerMarginMs(leftAtStart);
   await execution.beforeQuery();
-  const matches = wantsRecords
-    ? await execution.query((queryDb) =>
-        findRecordMatches(queryDb, {
-          query,
-          spaceId,
-          eligibility: projectionEligibility,
-          rows: windowRows,
-          oldestFirst: parsed.sort === "updated_asc" || parsed.sort === "created_asc",
-          scanUntil: Date.now() + matchBudgetMs,
-          indexTimeoutMs: Math.min(matchBudgetMs / 3, 500),
-        }),
-      )
-    : { ids: [], truncated: false };
-  const vector = sql`to_tsvector('simple', coalesce(${busabaseFieldValues.valueText}, ''))`;
-  await execution.beforeQuery();
-  // Ranks at most `windowRows` values, read by primary key.
-  const projectionRows =
-    matches.ids.length > 0
-      ? await execution.read(async (readDb) =>
-          readDb
-            .select({
-              changeRequestId: busabaseFieldValues.changeRequestId,
-              recordId: busabaseFieldValues.recordId,
-            })
-            .from(busabaseFieldValues)
-            .where(inArray(busabaseFieldValues.id, matches.ids))
-            .groupBy(busabaseFieldValues.recordId, busabaseFieldValues.changeRequestId)
-            .orderBy(
-              ...(parsed.sort === "relevance"
-                ? [
-                    desc(sql`max(ts_rank(${vector}, plainto_tsquery('simple', ${query})))`),
-                    desc(sql`max(${busabaseFieldValues.updatedAt})`),
-                  ]
-                : // Grouped, so the sort column has to be an aggregate too. `max`
-                  // for the newest-first orders and `min` for oldest-first, so a
-                  // record with many edited values sorts by the edge the caller
-                  // actually asked about rather than an arbitrary one.
-                  [
-                    parsed.sort === "updated_desc"
-                      ? desc(sql`max(${busabaseFieldValues.updatedAt})`)
-                      : parsed.sort === "updated_asc"
-                        ? asc(sql`min(${busabaseFieldValues.updatedAt})`)
-                        : parsed.sort === "created_desc"
-                          ? desc(sql`max(${busabaseFieldValues.createdAt})`)
-                          : asc(sql`min(${busabaseFieldValues.createdAt})`),
-                  ]),
-            )
-            .limit(candidateWindow),
-        )
-      : [];
+  const progress: MatchProgress = { rows: [] };
+  let matches: { rows: MatchRow[]; truncated: boolean } = { rows: [], truncated: false };
+  if (wantsRecords) {
+    try {
+      matches = await execution.query(
+        (queryDb) =>
+          findRecordMatches(
+            queryDb,
+            {
+              query,
+              spaceId,
+              eligibility: projectionEligibility,
+              rows: windowRows,
+              oldestFirst: parsed.sort === "updated_asc" || parsed.sort === "created_asc",
+              scanUntil: Date.now() + matchBudgetMs,
+              indexTimeoutMs: Math.min(matchBudgetMs / 3, 500),
+            },
+            progress,
+          ),
+        // A match scope that comes back a little late keeps its matches.
+        { lateMs: MATCH_OVERRUN_MS },
+      );
+    } catch (error) {
+      // A statement that is slow to honour its cancellation can bring the scope
+      // back long after the deadline, and its result is then thrown away as a
+      // timeout. What it had found by then still stands; only a scope that found
+      // nothing is a timeout.
+      if (getSearchExecutionOutcome(error) !== "timeout" || progress.rows.length === 0) throw error;
+      matches = { rows: progress.rows.slice(0, windowRows), truncated: true };
+    }
+  }
+
+  // From here the matches are in hand and nothing may turn them into a
+  // timeout. Relevance ranking is capped and falls back to update order,
+  // hydration stops before the deadline and answers with the rows it finished;
+  // either way the answer is marked incomplete. Only when not one row could be
+  // built is there nothing to answer, and that alone is a timeout.
+  execution.assertAlive();
+  execution.allowUntil(Date.now() + MIN_ANSWER_MS);
+  const rankBudgetMs = Math.min(
+    execution.remainingMs() * 0.4,
+    execution.remainingMs() - answerMargin - POST_MATCH_RESERVE_MS / 2,
+  );
+  let rankDegraded = false;
+  let projectionRows: MatchGroup[];
+  if (parsed.sort !== "relevance" || matches.rows.length === 0) {
+    projectionRows = orderMatchGroups(matches.rows, parsed.sort, candidateWindow);
+  } else {
+    const ranked =
+      rankBudgetMs >= MIN_RANK_MS
+        ? await execution.query((queryDb) =>
+            rankRelevance(queryDb, {
+              ids: matches.rows.map((row) => row.id),
+              query,
+              limit: candidateWindow,
+              timeoutMs: rankBudgetMs,
+            }),
+          )
+        : null;
+    rankDegraded = ranked === null;
+    projectionRows = ranked ?? orderMatchGroups(matches.rows, "updated_desc", candidateWindow);
+  }
 
   // More matches than the window holds, or the scan ran out of time: the
   // ranking covered only the newest (for ascending sorts, oldest) of them.
-  const recordsTruncated = matches.truncated;
+  let recordsTruncated = matches.truncated || rankDegraded;
   const recordIds = projectionRows
     .map((row) => row.recordId)
     .filter((recordId): recordId is string => Boolean(recordId));
@@ -1073,40 +1151,49 @@ const searchWithinBudget = async (
   const changeRequestsById = new Map(
     changeRequestRows.map((changeRequest) => [changeRequest.id, changeRequest]),
   );
-  await execution.beforeQuery();
-  const [projectionResults, fileSearch] = await Promise.all([
-    Promise.all(
-      projectionRows.flatMap((row) => {
-        execution.checkpoint();
-        if (row.recordId) {
-          const record = recordsById.get(row.recordId);
-          return record
-            ? [
-                hydrateRecord(record).then((vo) => ({
-                  result: toRecordSearchResult(vo),
-                  sortKey: sortKeyFor(parsed.sort, vo),
-                })),
-              ]
-            : [];
+  // Hydrate in rank order, a few rows at a time, until this time: the rest of
+  // the request, less the margin the answer needs to be merged and returned
+  // (and, when other sources still have to run, a share for them).
+  const hydrateWindowMs = Math.max(
+    MIN_HYDRATE_MS,
+    Math.max(0, execution.remainingMs() - answerMargin) * (wantsFiles || wantsNodes ? 0.6 : 1),
+  );
+  const hydrateUntil = Date.now() + hydrateWindowMs;
+  // Normally this ends at the deadline; with little time left it is the floor.
+  execution.allowUntil(hydrateUntil + answerMargin);
+  type HydrationItem =
+    | { record: (typeof recordRows)[number] }
+    | { changeRequest: (typeof changeRequestRows)[number] };
+  const hydrationItems = projectionRows.flatMap((row): HydrationItem[] => {
+    if (row.recordId) {
+      const record = recordsById.get(row.recordId);
+      return record ? [{ record }] : [];
+    }
+    if (row.changeRequestId) {
+      const changeRequest = changeRequestsById.get(row.changeRequestId);
+      return changeRequest ? [{ changeRequest }] : [];
+    }
+    return [];
+  });
+  const [hydrated, fileSearch] = await Promise.all([
+    runWithin(
+      hydrationItems,
+      async (item): Promise<SortableResult> => {
+        if ("record" in item) {
+          const vo = await hydrateRecord(item.record);
+          return { result: toRecordSearchResult(vo), sortKey: sortKeyFor(parsed.sort, vo) };
         }
-        if (row.changeRequestId) {
-          const changeRequest = changeRequestsById.get(row.changeRequestId);
-          return changeRequest
-            ? [
-                hydrateChangeRequest(changeRequest).then((vo) => ({
-                  result: toChangeRequestSearchResult(vo),
-                  sortKey: sortKeyFor(parsed.sort, vo),
-                })),
-              ]
-            : [];
-        }
-        return [];
-      }),
+        const vo = await hydrateChangeRequest(item.changeRequest);
+        return { result: toChangeRequestSearchResult(vo), sortKey: sortKeyFor(parsed.sort, vo) };
+      },
+      { until: hydrateUntil, chunkSize: HYDRATE_CHUNK_ROWS },
     ),
     wantsFiles
       ? searchAssetBackedFiles(query, candidateWindow, narrowing, parsed.mode === "full", execution)
       : Promise.resolve({ results: [] as SortableResult[], truncated: false }),
   ]);
+  const projectionResults = hydrated.results;
+  if (!hydrated.complete) recordsTruncated = true;
 
   await execution.beforeQuery();
   const nodeContent = wantsNodes
@@ -1147,6 +1234,11 @@ const searchWithinBudget = async (
     ...nodeContent.results,
   ]) {
     dedupedResults.set(`${entry.result.kind}:${entry.result.id}`, entry);
+  }
+  // Rows were found but not one could be built in time, and no other source
+  // has anything: there is nothing to answer with, which alone is a timeout.
+  if (!hydrated.complete && hydrated.results.length === 0 && dedupedResults.size === 0) {
+    execution.giveUp();
   }
   // Merge FIRST, slice second. Slicing per-source order and then sorting the
   // survivors would return whichever 20 happened to be concatenated first,

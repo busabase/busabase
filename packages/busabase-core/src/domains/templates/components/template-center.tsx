@@ -60,6 +60,8 @@ export function TemplateCenter({
 }: TemplateCenterProps) {
   const messages = useCoreI18n();
   const [installing, setInstalling] = useState<TemplateCardVO | null>(null);
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
 
   // Installing needs `write` in the space, and the server enforces it; this
   // mirrors it so a read-only member is told why rather than refused after the
@@ -106,7 +108,15 @@ export function TemplateCenter({
           </div>
         )
       ) : (
-        <TemplatesListView orpc={orpc} canInstall={canInstall} onOpenTemplate={onSelect} />
+        <TemplatesListView
+          orpc={orpc}
+          canInstall={canInstall}
+          onOpenTemplate={onSelect}
+          search={search}
+          onSearchChange={setSearch}
+          page={page}
+          onPageChange={setPage}
+        />
       )}
 
       {apiClient && installing ? (

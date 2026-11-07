@@ -372,6 +372,7 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
 
   "forms.list": node("read"),
   "forms.getByNode": node("read"),
+  "forms.options": node("read"),
   "forms.create": node("manage"),
   "forms.update": node("manage"),
   "forms.submit": node("changeRequest"),

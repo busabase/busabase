@@ -3,7 +3,10 @@ import "server-only";
 import { ORPCError } from "@orpc/server";
 import type {
   CreateFormDTO,
+  FormBoundFieldVO,
   FormFieldBindingVO,
+  FormOptionsDTO,
+  FormOptionsVO,
   FormShareVO,
   FormVO,
   ListFormsDTO,
@@ -12,7 +15,12 @@ import type {
   UpdateFormDTO,
 } from "busabase-contract/types";
 import { and, desc, eq, inArray, isNull, lt, or, type SQL } from "drizzle-orm";
-import { getContextSpaceId, isAnonymousVisitor, resolveActorId } from "../../../context";
+import {
+  getContextSpaceId,
+  isAnonymousVisitor,
+  resolveActorId,
+  resolveMemberRoster,
+} from "../../../context";
 import { getDb } from "../../../db";
 import {
   busabaseBaseFields,
@@ -31,8 +39,10 @@ import {
 } from "../../../logic/node-acl";
 import { registerNodeRuntime } from "../../../logic/node-runtime";
 import { ensureReady } from "../../../logic/seed";
+import { getBase, listRecordsPage } from "../../base/logic/queries";
 import { createFormSubmissionChangeRequest } from "../../base/logic/record-ops";
 import { getDateFieldOptions } from "../../base/utils/date-value";
+import { getPrimaryField } from "../../base/utils/primary-field";
 import type { FormPO } from "../schema";
 
 const formNotFound = (nodeId: string) =>
@@ -233,10 +243,122 @@ export const getFormByNodeId = async (nodeIdOrSlug: string): Promise<FormVO | nu
               ...(field.type === "date" && getDateFieldOptions(field.options).includeTime
                 ? { date: getDateFieldOptions(field.options) }
                 : {}),
+              ...(field.type === "attachment" &&
+              (field.options as { attachment?: FormBoundFieldVO["attachment"] }).attachment
+                ? {
+                    attachment: (field.options as { attachment?: FormBoundFieldVO["attachment"] })
+                      .attachment,
+                  }
+                : {}),
+              ...(field.type === "relation" && field.options.targetBaseId
+                ? {
+                    relation: {
+                      targetBaseId: field.options.targetBaseId,
+                      multiple: field.options.multiple,
+                    },
+                  }
+                : {}),
+              ...(field.type === "member" ? { member: { multiple: field.options.multiple } } : {}),
             },
           ]
         : [];
     }),
+  };
+};
+
+const optionRecordTitle = (value: unknown, fallback: string): string => {
+  if (typeof value === "string" || typeof value === "number") return String(value);
+  if (Array.isArray(value)) return value.filter((item) => typeof item === "string").join(", ");
+  return fallback;
+};
+
+/**
+ * Read the options for one field already bound to a Form.
+ *
+ * `getFormByNodeId` may intentionally return a public Form without granting
+ * access to its target Base. Do not weaken that boundary here: option lists
+ * require a signed-in workspace member, and relation options also resolve the
+ * linked Base through its normal node-visibility gate.
+ */
+export const getFormFieldOptions = async (input: FormOptionsDTO): Promise<FormOptionsVO> => {
+  if (isAnonymousVisitor()) {
+    throw new ORPCError("FORBIDDEN", { message: "Public forms cannot read selectable options." });
+  }
+  const form = await getFormByNodeId(input.nodeId);
+  if (!form) throw formNotFound(input.nodeId);
+  if (!form.bindings.some((binding) => binding.fieldSlug === input.fieldSlug)) {
+    throw new ORPCError("NOT_FOUND", {
+      message: `Field is not bound to this form: ${input.fieldSlug}`,
+    });
+  }
+  const db = await getDb();
+  const [field] = await db
+    .select({
+      slug: busabaseBaseFields.slug,
+      type: busabaseBaseFields.type,
+      options: busabaseBaseFields.options,
+    })
+    .from(busabaseBaseFields)
+    .where(
+      and(
+        eq(busabaseBaseFields.baseId, form.targetBaseId),
+        eq(busabaseBaseFields.slug, input.fieldSlug),
+        isNull(busabaseBaseFields.deletedAt),
+      ),
+    )
+    .limit(1);
+  if (!field || (field.type !== "relation" && field.type !== "member")) {
+    throw new ORPCError("NOT_FOUND", {
+      message: `Field has no selectable options: ${input.fieldSlug}`,
+    });
+  }
+  const query = input.query?.trim() ?? "";
+  if (field.type === "member") {
+    const needle = query.toLocaleLowerCase();
+    const members = (await resolveMemberRoster()).filter(
+      (member) =>
+        !needle ||
+        `${member.name ?? ""} ${member.email ?? ""}`.toLocaleLowerCase().includes(needle),
+    );
+    return { kind: "member", members };
+  }
+  const targetBaseId = field.options.targetBaseId;
+  if (!targetBaseId) {
+    throw new ORPCError("BAD_REQUEST", { message: "Relation field has no target Base." });
+  }
+  const targetBase = await getBase(targetBaseId);
+  if (!targetBase) {
+    throw new ORPCError("NOT_FOUND", { message: "Linked Base not found." });
+  }
+  const primary = getPrimaryField(targetBase);
+  const records = await listRecordsPage({
+    baseId: targetBase.id,
+    page: input.page,
+    pageSize: input.pageSize,
+    ...(query && primary
+      ? {
+          filters: [
+            {
+              fieldSlug: primary.slug,
+              fieldType: primary.type,
+              operator: "contains",
+              value: query,
+            },
+          ],
+        }
+      : {}),
+  });
+  return {
+    kind: "relation",
+    records: records.records.map((record) => ({
+      id: record.id,
+      title: optionRecordTitle(
+        primary ? record.headCommit.payload[primary.slug] : undefined,
+        record.id,
+      ),
+    })),
+    page: records.page,
+    totalPages: records.totalPages,
   };
 };
 

@@ -820,7 +820,7 @@ export const dashboardFr: CoreI18nMessages = {
         errorHint: "Consultez les détails ci-dessous, puis vérifiez à nouveau.",
         offlineHint: "Le site est hors ligne. Toutes ses adresses affichent une page introuvable.",
         dnsInstructions:
-          "Ajoutez ces enregistrements chez votre fournisseur DNS. Conservez les autres enregistrements nécessaires à votre domaine. Sur Cloudflare, réglez ce CNAME sur « DNS uniquement » (nuage gris).",
+          "Ajoutez ces enregistrements chez votre fournisseur DNS. Conservez les autres enregistrements nécessaires à votre domaine. Le proxy Cloudflare est pris en charge une fois le routage vers le site vérifié.",
         dnsName: "Nom",
         dnsValue: "Valeur / cible",
         httpInstructions:
@@ -1040,6 +1040,7 @@ export const dashboardFr: CoreI18nMessages = {
     searchEmpty: "Aucun résultat pour « {search} ».",
     catalogEmpty: "Ce catalogue ne contient aucun modèle pour le moment.",
     catalogFailed: "Impossible de charger les modèles. Réessayez.",
+    paginationLabel: "Pages de modèles",
     missingTemplate: "Aucun modèle nommé « {name} » dans ce catalogue.",
     backToTemplates: "Retour aux modèles",
     install: "Installer",
@@ -2764,9 +2765,54 @@ export const dashboardFr: CoreI18nMessages = {
     eventName: "Nom de l'événement",
     eventRecordCreated: "Quand un enregistrement est créé",
     eventRecordUpdated: "Quand un enregistrement est modifié",
+    eventSchedule: "Selon un calendrier",
+    eventWebhook: "Quand une requête arrive",
+    hookUrl: "URL d'entrée",
+    hookUrlCopied: "Copiée",
+    regenerateHookUrl: "Changer l'URL",
+    hookUrlHint:
+      "Un POST (JSON ou texte) ou un GET vers cette URL lance une exécution. La requête se trouve dans steps.trigger.payload.request : method, query, headers et body. Si une étape de code renvoie { response: … } avant que l'exécution ne se mette en pause, l'appelant reçoit cette réponse ; sinon il reçoit 202 et l'ID de l'exécution. Toute personne ayant cette URL peut lancer une exécution : changez-la pour que l'ancienne ne fonctionne plus. Les modifications prennent effet à l'enregistrement.",
+    hookNeedsEvent:
+      "Passez le mode d'exécution sur Événement dans les paramètres d'exécution, sinon cette URL répond 404.",
+    functionCode: "Code",
+    functionCodeHint:
+      "JavaScript exécuté sur le serveur quand l'exécution atteint cette étape. input contient les données de l'exécution (payload, steps, record), await fetch(...) appelle des URL publiques, et la valeur renvoyée est la sortie de cette étape (les étapes suivantes la lisent comme steps.<id>.<champ>). Toute personne pouvant ouvrir ce workflow peut lire le code.",
+    savedFunction: "Ou exécuter une fonction enregistrée",
+    inlineCode: "Code",
+    triggerField: "Seulement quand ce champ change",
+    anyField: "N'importe quel champ",
+    triggerFieldNeedsBase:
+      "Choisissez une base ci-dessus pour ne démarrer que lorsqu'un de ses champs change.",
+    triggerToValue: "Passe à",
+    anyValue: "N'importe quelle nouvelle valeur",
+    triggerFieldHint:
+      "Avec une valeur choisie, une exécution ne démarre que lorsque le champ prend cette valeur. Modifier un enregistrement qui l'a déjà ne lance rien.",
+    checkboxChecked: "Cochée",
+    checkboxUnchecked: "Non cochée",
+    scheduleRepeat: "Répéter",
+    scheduleEveryMinutes: "Toutes les quelques minutes",
+    scheduleEveryHours: "Toutes les quelques heures",
+    scheduleDaily: "Tous les jours",
+    scheduleWeekly: "Toutes les semaines",
+    scheduleMinutesBetween: "Minutes entre deux exécutions (au moins {min})",
+    scheduleHoursBetween: "Heures entre deux exécutions",
+    scheduleAt: "Heure",
+    scheduleWeekday: "Jour",
+    scheduleTimezone: "Fuseau horaire : {timezone}.",
+    scheduleNextRun: "Prochaine exécution : {time}",
+    scheduleNeedsEvent:
+      "Passez le mode d'exécution sur Événement dans les paramètres d'exécution, sinon ce calendrier ne lance rien.",
+    webhookHeaders: "En-têtes",
+    webhookHeaderName: "Nom de l'en-tête",
+    webhookHeaderValue: "Valeur de l'en-tête",
+    addWebhookHeader: "Ajouter un en-tête",
+    removeWebhookHeader: "Supprimer l'en-tête",
+    webhookHeadersHint:
+      "Envoyés avec la requête, par exemple Authorization. Toute personne pouvant ouvrir ce workflow peut lire ces valeurs : utilisez une clé créée pour cet usage.",
+    addApprover: "Ajouter un membre…",
     customEventOption: "{name} (libellé seulement)",
     triggerEventHint:
-      "En mode Événement, « Quand un enregistrement est créé » et « Quand un enregistrement est modifié » lancent une exécution d'eux-mêmes. Manuel et les autres noms d'événement ne se lancent que lorsque quelqu'un exécute le workflow.",
+      "En mode Événement, « Quand un enregistrement est créé », « Quand un enregistrement est modifié », « Selon un calendrier » et « Quand une requête arrive » lancent une exécution d'eux-mêmes. Manuel et les autres noms d'événement ne se lancent que lorsque quelqu'un exécute le workflow.",
     triggerBase: "Base",
     anyBase: "N'importe quelle base",
     unknownBase: "Base introuvable ({id})",
@@ -2796,6 +2842,19 @@ export const dashboardFr: CoreI18nMessages = {
       "Ajoute un enregistrement à la base choisie, avec les droits de la personne au nom de qui l’exécution agit. Les étapes suivantes peuvent utiliser son id via createdRecordId de cette étape.",
     deleteRecordHint:
       "Déplace l’enregistrement dans la corbeille de sa base, avec les droits de la personne au nom de qui l’exécution agit. Il peut y être restauré.",
+    actionFindRecords: "Trouver des enregistrements",
+    actionFindRecordsEach: "Trouver des enregistrements, une exécution chacun",
+    findRecordsHint:
+      "Liste les enregistrements d'une base, ou ceux qu'affiche une vue dans son ordre, avec les droits de la personne au nom de qui l'exécution agit. Les étapes suivantes lisent records, count et total de cette étape.",
+    findRecordsView: "Vue",
+    findRecordsAllRecords: "Tous les enregistrements",
+    findRecordsUnknownView: "Vue introuvable ({id})",
+    findRecordsLimit: "Au plus",
+    findRecordsLimitHint:
+      "Jusqu'à {max} enregistrements, 50 si vide. Avec une exécution par enregistrement, en trouver davantage ne lance aucune exécution et l'étape échoue, pour qu'une vue trop large par erreur ne lance pas des centaines d'exécutions.",
+    findRecordsForEach: "Exécuter les étapes suivantes pour chaque enregistrement",
+    findRecordsForEachHint:
+      "Chaque enregistrement a sa propre exécution, à son sujet : Modifier un enregistrement le modifie, et les étapes suivantes le lisent comme record. Cette exécution s'arrête ici ; les autres passent à tour de rôle selon la concurrence.",
     customActionHint: "Ce nom d’action ne fait rien pour l’instant : il est seulement consigné.",
     chooseBase: "Choisir une base",
     targetRecord: "Enregistrement (facultatif)",
@@ -2816,7 +2875,7 @@ export const dashboardFr: CoreI18nMessages = {
     notExecutedNote:
       "Modifiez les étapes ici, enregistrez, puis lancez une exécution depuis Exécutions. Les exécutions tournent sur le serveur avec la dernière version enregistrée. Chaque étape terminée garde un instantané, read_record relit l'enregistrement, une Attente se met en pause jusqu'à son heure et une Approbation attend une décision.",
     executionModeHint:
-      "Manuel : une exécution ne démarre que lorsque quelqu'un exécute le workflow. Événement : un déclencheur d'enregistrement lance aussi une exécution quand un enregistrement correspondant est créé ou modifié. Les exécutions par événement agissent au nom de la personne qui a enregistré le workflow en dernier.",
+      "Manuel : une exécution ne démarre que lorsque quelqu'un exécute le workflow. Événement : un déclencheur d'enregistrement lance aussi une exécution quand un enregistrement correspondant est créé ou modifié, un calendrier en lance une à ses horaires, et une requête vers l'URL du déclencheur en lance une. Ces exécutions agissent au nom de la personne qui a enregistré le workflow en dernier.",
     manual: "Manuel",
     event: "Événement",
     errorPolicy: "En cas d'erreur",
@@ -2886,6 +2945,9 @@ export const dashboardFr: CoreI18nMessages = {
     statusFailed: "Échouée",
     triggerManual: "Manuel",
     triggerEvent: "Événement",
+    triggerSchedule: "Calendrier",
+    triggerWebhook: "Requête",
+    triggerForEach: "Par enregistrement",
     runDetails: "Détails de l'exécution",
     recordLabel: "Enregistrement : {id}",
     waitingUntil: "En attente jusqu'à {time}. Elle reprendra d'elle-même.",

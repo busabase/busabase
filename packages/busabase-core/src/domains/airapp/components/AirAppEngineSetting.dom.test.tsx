@@ -21,17 +21,28 @@ Element.prototype.releasePointerCapture ??= () => {};
 Element.prototype.scrollIntoView ??= () => {};
 
 /** What the node settings dialog does: read both hooks, hand them to the field. */
-function SettingFromContext({ appRequired }: { appRequired?: AirAppRunnerKind }) {
+function SettingFromContext({
+  appRequired,
+  onValueChange,
+  initialValue = FOLLOW_APP,
+}: {
+  appRequired?: AirAppRunnerKind;
+  onValueChange?: (value: AirAppEngineChoice) => void;
+  initialValue?: AirAppEngineChoice;
+}) {
   const availableEngines = useAirAppEngineAvailability();
   const planGate = useAirAppEnginePlanGate();
   const notConfiguredEngines = useAirAppEnginesNotConfigured();
-  const [value, setValue] = useState<AirAppEngineChoice>(FOLLOW_APP);
+  const [value, setValue] = useState<AirAppEngineChoice>(initialValue);
   return (
     <AirAppEngineSetting
       appRequired={appRequired}
       availableEngines={availableEngines}
       notConfiguredEngines={notConfiguredEngines}
-      onValueChange={setValue}
+      onValueChange={(next) => {
+        setValue(next);
+        onValueChange?.(next);
+      }}
       planGate={planGate}
       value={value}
     />
@@ -43,16 +54,24 @@ const renderSetting = ({
   planGate,
   appRequired,
   locale = "en",
+  onValueChange,
+  initialValue,
 }: {
   engines: AirAppRunnerKind[];
   planGate?: AirAppEnginePlanGate;
   appRequired?: AirAppRunnerKind;
   locale?: CoreLocale;
+  onValueChange?: (value: AirAppEngineChoice) => void;
+  initialValue?: AirAppEngineChoice;
 }) =>
   render(
     <CoreI18nProvider locale={locale}>
       <AirAppEngineAvailabilityProvider engines={engines} planGate={planGate}>
-        <SettingFromContext appRequired={appRequired} />
+        <SettingFromContext
+          appRequired={appRequired}
+          initialValue={initialValue}
+          onValueChange={onValueChange}
+        />
       </AirAppEngineAvailabilityProvider>
     </CoreI18nProvider>,
   );
@@ -71,17 +90,97 @@ describe("AirAppEngineSetting on a space whose plan locks remote", () => {
     fireEvent.click(screen.getByRole("button", { name: "Upgrade to Plus" }));
     expect(onUpgrade).toHaveBeenCalledOnce();
 
-    // Open the picker: remote is listed, named with its plan, and cannot be picked.
+    // The locked row is an upgrade entry point, rather than a disabled dead end.
     fireEvent.pointerDown(screen.getByRole("combobox"), {
       button: 0,
       ctrlKey: false,
       pointerType: "mouse",
     });
     const locked = screen.getByRole("option", { name: "Cloud sandbox · Plus and above" });
-    expect(locked.getAttribute("aria-disabled")).toBe("true");
-    expect(locked.hasAttribute("data-disabled")).toBe(true);
+    expect(locked.getAttribute("aria-disabled")).toBeNull();
+    expect(locked.hasAttribute("data-disabled")).toBe(false);
     const browser = screen.getByRole("option", { name: "In browser" });
     expect(browser.hasAttribute("data-disabled")).toBe(false);
+  });
+
+  it.each([
+    ["remote", "Cloud sandbox"],
+    ["site", "Website"],
+  ] as const)(
+    "opens the upgrade from a locked %s row without changing the engine",
+    (engine, label) => {
+      const onUpgrade = vi.fn();
+      const onValueChange = vi.fn();
+      renderSetting({
+        engines: ["browser", engine],
+        planGate: { lockedEngines: [engine], planLabel: "Plus", onUpgrade },
+        onValueChange,
+      });
+
+      fireEvent.click(screen.getByRole("combobox"));
+      fireEvent.click(screen.getByRole("option", { name: `${label} · Plus and above` }));
+
+      expect(onUpgrade).toHaveBeenCalledOnce();
+      expect(onValueChange).not.toHaveBeenCalled();
+      expect(screen.queryByRole("listbox")).toBeNull();
+      expect(screen.getByRole("combobox").textContent).toBe("Follow the app");
+    },
+  );
+
+  it.each(["Enter", " "])(
+    "opens the upgrade with the %s key without changing the engine",
+    (key) => {
+      const onUpgrade = vi.fn();
+      const onValueChange = vi.fn();
+      renderSetting({
+        engines: ["browser", "remote"],
+        planGate: { lockedEngines: ["remote"], planLabel: "Plus", onUpgrade },
+        onValueChange,
+      });
+
+      fireEvent.keyDown(screen.getByRole("combobox"), { key: "ArrowDown" });
+      const locked = screen.getByRole("option", { name: "Cloud sandbox · Plus and above" });
+      locked.focus();
+      fireEvent.keyDown(locked, { key });
+
+      expect(onUpgrade).toHaveBeenCalledOnce();
+      expect(onValueChange).not.toHaveBeenCalled();
+      expect(screen.queryByRole("listbox")).toBeNull();
+      expect(screen.getByRole("combobox").textContent).toBe("Follow the app");
+    },
+  );
+
+  it("keeps a locked row disabled when the host has no upgrade action", () => {
+    const onValueChange = vi.fn();
+    renderSetting({
+      engines: ["browser", "remote"],
+      planGate: { lockedEngines: ["remote"], planLabel: "Plus" },
+      onValueChange,
+    });
+    fireEvent.click(screen.getByRole("combobox"));
+    const locked = screen.getByRole("option", { name: "Cloud sandbox · Plus and above" });
+    expect(locked.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(locked);
+    expect(onValueChange).not.toHaveBeenCalled();
+    expect(screen.getByRole("combobox", { hidden: true }).textContent).toBe("Follow the app");
+  });
+
+  it("opens the upgrade when the saved engine became locked after a downgrade", () => {
+    const onUpgrade = vi.fn();
+    const onValueChange = vi.fn();
+    renderSetting({
+      engines: ["browser", "remote"],
+      initialValue: "remote",
+      planGate: { lockedEngines: ["remote"], planLabel: "Plus", onUpgrade },
+      onValueChange,
+    });
+
+    fireEvent.click(screen.getByRole("combobox"));
+    fireEvent.click(screen.getByRole("option", { name: "Cloud sandbox · Plus and above" }));
+
+    expect(onUpgrade).toHaveBeenCalledOnce();
+    expect(onValueChange).not.toHaveBeenCalled();
+    expect(screen.getByRole("combobox").textContent).toBe("Cloud sandbox");
   });
 
   it("turns a locked required engine into the upgrade, not 'Sandock is not configured'", () => {
@@ -115,9 +214,12 @@ describe("AirAppEngineSetting on a space whose plan locks remote", () => {
 
 describe("AirAppEngineSetting where nothing is locked", () => {
   it("offers remote normally once the plan includes it", () => {
+    const onUpgrade = vi.fn();
+    const onValueChange = vi.fn();
     renderSetting({
       engines: ["browser", "remote"],
-      planGate: { lockedEngines: [], planLabel: "Plus", onUpgrade: vi.fn() },
+      planGate: { lockedEngines: [], planLabel: "Plus", onUpgrade },
+      onValueChange,
     });
 
     expect(screen.queryByText(/available on Plus and above/)).toBeNull();
@@ -128,6 +230,10 @@ describe("AirAppEngineSetting where nothing is locked", () => {
     });
     const remote = screen.getByRole("option", { name: "Cloud sandbox" });
     expect(remote.hasAttribute("data-disabled")).toBe(false);
+    fireEvent.click(remote);
+    expect(onValueChange).toHaveBeenCalledExactlyOnceWith("remote");
+    expect(onUpgrade).not.toHaveBeenCalled();
+    expect(screen.getByRole("combobox").textContent).toBe("Cloud sandbox");
   });
 
   it("does not advertise an upgrade for an engine the deployment does not have", () => {

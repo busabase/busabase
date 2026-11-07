@@ -125,6 +125,10 @@ export function AirAppSiteGoLive({
 }) {
   const messages = useCoreI18n();
   const { data: state, refetch } = useSiteState(orpc, nodeId);
+  const domains = useQuery({
+    ...orpc.airapps.siteDomains.queryOptions({ input: { nodeId } }),
+    enabled: Boolean(state?.address && state.engine !== "not-offered"),
+  });
 
   // A finished deploy or an edited file changes the answer; the query cannot see either.
   // biome-ignore lint/correctness/useExhaustiveDependencies: filesRevision is the trigger
@@ -149,6 +153,10 @@ export function AirAppSiteGoLive({
 
   if (!state || state.engine === "not-offered") return null;
   const note = goLiveNote(messages, state);
+  const address =
+    (!domains.isError &&
+      domains.data?.bindings.find((binding) => binding.status === "active")?.url) ||
+    state.address;
 
   return (
     <div className="flex items-center gap-1.5" data-airapp-site-publication={state.publication}>
@@ -164,15 +172,9 @@ export function AirAppSiteGoLive({
       <span className="text-muted-foreground text-xs">
         {publicationLabel(messages, state.publication)}
       </span>
-      {state.publication !== "not-live" && state.address ? (
-        <Button
-          aria-label={state.address}
-          asChild
-          size="icon-sm"
-          title={state.address}
-          variant="outline"
-        >
-          <a href={state.address} rel="noreferrer" target="_blank">
+      {state.publication !== "not-live" && address ? (
+        <Button aria-label={address} asChild size="icon-sm" title={address} variant="outline">
+          <a data-airapp-site-open="" href={address} rel="noreferrer" target="_blank">
             <ExternalLink className="size-3.5" />
           </a>
         </Button>

@@ -5,6 +5,8 @@ import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-quer
 import {
   type DecideWorkflowRunInput,
   WORKFLOW_RUN_RETENTION_DAYS,
+  WORKFLOW_SCHEDULE_EVENT,
+  WORKFLOW_WEBHOOK_EVENT,
   type WorkflowRun,
   type WorkflowRunStatus,
 } from "busabase-contract/domains/workflow/run";
@@ -757,7 +759,15 @@ export function WorkflowRunsPanel({
                     <span className="flex min-w-0 items-center gap-2">
                       <RunStatusBadge status={run.status} />
                       <span className="truncate text-muted-foreground">
-                        {run.trigger === "event" ? copy.triggerEvent : copy.triggerManual}
+                        {typeof run.payload?.parentRunId === "string"
+                          ? copy.triggerForEach
+                          : run.trigger === "manual"
+                            ? copy.triggerManual
+                            : run.payload?.event === WORKFLOW_SCHEDULE_EVENT
+                              ? copy.triggerSchedule
+                              : run.payload?.event === WORKFLOW_WEBHOOK_EVENT
+                                ? copy.triggerWebhook
+                                : copy.triggerEvent}
                       </span>
                       <time
                         className="ml-auto shrink-0 text-[10px] text-muted-foreground"

@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { createRouterClient } from "@orpc/server";
+import { createRouterClient, ORPCError } from "@orpc/server";
 import { eq, inArray } from "drizzle-orm";
 import { LocalStorage, storage } from "openlib/storage";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -26,6 +26,8 @@ import {
   backfillAssetTextSearch,
   healAssetTextProjections,
 } from "../src/domains/assets/logic/asset-text-search-logic";
+import * as assetTextsLogic from "../src/domains/assets/logic/asset-texts-logic";
+import { literalSearchPattern } from "../src/logic/search-record-query";
 import { busabaseRouter } from "../src/router";
 
 type Client = ReturnType<typeof createRouterClient<typeof busabaseRouter, Record<never, never>>>;
@@ -439,6 +441,8 @@ describe("asset text search index", () => {
     let indexed = 0;
     let failed = 0;
     const cursors: string[] = [];
+    const failureReasons: Record<string, number> = {};
+    const warnings = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     for (let pageCount = 0; pageCount < 5; pageCount++) {
       const page = await backfillAssetTextSearch(db, {
         spaceId: LOCAL_SPACE_ID,
@@ -446,6 +450,9 @@ describe("asset text search index", () => {
         limit: 1,
       });
       expect(page.indexed + page.failed).toBeLessThanOrEqual(1);
+      for (const [reason, count] of Object.entries(page.failureReasons)) {
+        failureReasons[reason] = (failureReasons[reason] ?? 0) + count;
+      }
       indexed += page.indexed;
       failed += page.failed;
       afterAssetId = page.nextCursor;
@@ -454,6 +461,17 @@ describe("asset text search index", () => {
     }
     expect(indexed).toBe(2);
     expect(failed).toBe(1);
+    // Why it failed is reported, and logged with the asset id but never the text.
+    expect(failureReasons).toEqual({ error: 1 });
+    const logged = warnings.mock.calls.map((call) => String(call[0]));
+    warnings.mockRestore();
+    expect(logged).toHaveLength(1);
+    expect(logged[0]).toContain(`asset=${brokenId}`);
+    expect(logged[0]).toContain("reason=error");
+    // The storage error itself is in the line, so an operator can tell a missing
+    // object from a timeout.
+    expect(logged[0]).toMatch(/error=\w*Error[^\n]*\S/);
+    expect(logged.join("\n")).not.toContain("BACKFILLBODYIOTA");
     expect(cursors).toEqual(ordered);
     const projections = await db
       .select()
@@ -545,6 +563,200 @@ describe("asset text search index", () => {
         const audit = await auditAssetTextSearch(db, { spaceId });
         expect(audit).toMatchObject({ complete: true, eligible: 1, missing: 0, partial: 1 });
         expect(audit.partialAssetIds).toEqual([assetId]);
+      },
+    );
+  });
+
+  it("answers with file-name matches and discloses the gap when the text match runs out of time", async () => {
+    const bodyOnly = await upload("plain-contract.pdf", "%PDF degrade body fixture");
+    await mount(bodyOnly, "degrade-body-only");
+    await client.assets.putText({
+      assetId: bodyOnly,
+      text: "DEGRADEMARKER lives only in this body.",
+    });
+    const named = await upload("DEGRADEMARKER-notes.pdf", "%PDF degrade name fixture");
+    await mount(named, "degrade-named");
+    const ids = async (query: string) => {
+      const found = await search(query);
+      return {
+        found,
+        has: (assetId: string) => found.results.some((r) => r.id.startsWith(`${assetId}:`)),
+      };
+    };
+    const whole = await ids("DEGRADEMARKER");
+    expect(whole.has(bodyOnly) && whole.has(named)).toBe(true);
+    // Typeahead reads no text, so even a query longer than the chunk overlap
+    // has nothing to disclose.
+    const longQuery = `DEGRADEMARKER${"x".repeat(600)}`;
+    expect((await search(longQuery, { mode: "quick" })).contentTruncated).toBe(false);
+    expect((await search(longQuery)).contentTruncated).toBe(true);
+
+    // A phrase the index cannot serve costs as much as the space has text; when
+    // that statement runs out of time the search must still answer.
+    const timeout = vi
+      .spyOn(assetTextSearchLogic, "matchAssetTextAssetIds")
+      .mockRejectedValueOnce(new ORPCError("TIMEOUT", { message: "statement timeout" }));
+    try {
+      const degraded = await ids("DEGRADEMARKER");
+      expect(timeout).toHaveBeenCalledOnce();
+      expect(degraded.has(named)).toBe(true);
+      expect(degraded.has(bodyOnly)).toBe(false);
+      expect(degraded.found.contentTruncated).toBe(true);
+    } finally {
+      timeout.mockRestore();
+    }
+
+    // Only a timeout degrades. A real fault must not be reported as "no text matches".
+    const fault = vi
+      .spyOn(assetTextSearchLogic, "matchAssetTextAssetIds")
+      .mockRejectedValueOnce(new Error("connection lost"));
+    try {
+      await expect(search("DEGRADEMARKER")).rejects.toBeTruthy();
+    } finally {
+      fault.mockRestore();
+    }
+  });
+
+  it("reports when a text match stopped at its chunk limit", async () => {
+    const first = await upload("cap-probe-one.pdf", "%PDF cap one fixture");
+    const second = await upload("cap-probe-two.pdf", "%PDF cap two fixture");
+    for (const assetId of [first, second]) {
+      await mount(assetId, `cap-probe-${assetId}`);
+      await client.assets.putText({ assetId, text: "CAPPROBEMARKER is in both documents." });
+    }
+    const db = await getDb();
+    const match = (maxChunks: number) =>
+      db.transaction((tx) =>
+        assetTextSearchLogic.matchAssetTextAssetIds(
+          tx,
+          LOCAL_SPACE_ID,
+          "CAPPROBEMARKER",
+          literalSearchPattern("CAPPROBEMARKER"),
+          { statementMs: 30_000, maxChunks },
+        ),
+      );
+    expect(await match(10)).toEqual({
+      assetIds: expect.arrayContaining([first, second]),
+      capped: false,
+    });
+    const limited = await match(1);
+    expect(limited.capped).toBe(true);
+    expect(limited.assetIds).toHaveLength(1);
+  });
+
+  it("does not tell a reader their miss is incomplete because of a file they cannot see", async () => {
+    // Its own space: the coverage gap must be this one private file's.
+    const spaceId = "private-partial-search-index";
+    const manager = { spaceId, actorId: "manager", isSpaceManager: true };
+    const reader = { spaceId, actorId: "plain-reader", isSpaceManager: false };
+    const secretId = await runWithBusabaseContext(manager, async () => {
+      const assetId = await upload("private-partial.pdf", "%PDF private partial fixture");
+      const usage = await mount(assetId, "private-partial");
+      await client.assets.putText({
+        assetId,
+        text: "PRIVATEPARTIALMARKER in a long private file.",
+      });
+      await (await getDb())
+        .update(busabaseAssetTextSearch)
+        .set({ complete: false })
+        .where(eq(busabaseAssetTextSearch.assetId, assetId));
+      await client.nodes.updateVisibility({ nodeId: usage.nodeId, visibility: "private" });
+      return assetId;
+    });
+    const asManager = await runWithBusabaseContext(manager, () => search("NOTHINGMATCHESTHIS"));
+    const asReader = await runWithBusabaseContext(reader, () => search("NOTHINGMATCHESTHIS"));
+    expect(asManager.contentTruncated).toBe(true);
+    expect(asReader.contentTruncated).toBe(false);
+    expect(secretId).toBeTruthy();
+  });
+
+  it("summarises a self-heal run: what it indexed, what failed and why, and where the time went", async () => {
+    const spaceId = "heal-summary-search-index";
+    await runWithBusabaseContext(
+      { spaceId, actorId: "manager", isSpaceManager: true },
+      async () => {
+        const ids = [];
+        for (const name of ["heal-summary-a.pdf", "heal-summary-b.pdf"]) {
+          const assetId = await upload(name, `%PDF ${name}`);
+          await mount(assetId, name.replace(".pdf", ""));
+          await client.assets.putText({ assetId, text: `HEALSUMMARYMARKER in ${name}.` });
+          ids.push(assetId);
+        }
+        const db = await getDb();
+        await db
+          .delete(busabaseAssetTextSearch)
+          .where(inArray(busabaseAssetTextSearch.assetId, ids));
+        const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+        let lines: string[] = [];
+        try {
+          expect(await healAssetTextProjections(db, spaceId, { waitMs: 60_000 })).toBe(true);
+          lines = info.mock.calls
+            .map((call) => String(call[0]))
+            .filter((l) => l.includes("heal run"));
+        } finally {
+          info.mockRestore();
+        }
+        expect(lines).toHaveLength(1);
+        expect(lines[0]).toContain(`space=${spaceId}`);
+        expect(lines[0]).toContain("indexed=2");
+        expect(lines[0]).toContain("failed=0");
+        expect(lines[0]).toMatch(
+          /readMs=\d+ publishMs=\d+ elapsedMs=\d+ finished=true reasons=\{\}/,
+        );
+        expect(lines[0]).not.toContain("HEALSUMMARYMARKER");
+        // Nothing left to do: a quiet run logs nothing.
+        const quiet = vi.spyOn(console, "info").mockImplementation(() => undefined);
+        let quietLines: string[] = [];
+        try {
+          await healAssetTextProjections(db, spaceId, { waitMs: 60_000 });
+          quietLines = quiet.mock.calls
+            .map((call) => String(call[0]))
+            .filter((l) => l.includes("heal run"));
+        } finally {
+          quiet.mockRestore();
+        }
+        expect(quietLines).toHaveLength(0);
+      },
+    );
+  });
+
+  it("reports a text-kind file whose text slot could not be registered, then registers it on the next pass", async () => {
+    const spaceId = "legacy-register-search-index";
+    await runWithBusabaseContext(
+      { spaceId, actorId: "manager", isSpaceManager: true },
+      async () => {
+        const assetId = await upload(
+          "legacy-notes.txt",
+          "LEGACYREGISTERMARKER lives here.",
+          "text/plain",
+        );
+        await mount(assetId, "legacy-register");
+        const db = await getDb();
+        // A file uploaded before text slots existed: no slot, no projection.
+        await db
+          .delete(busabaseAssetTextSearch)
+          .where(eq(busabaseAssetTextSearch.assetId, assetId));
+        await db.delete(busabaseAssetTexts).where(eq(busabaseAssetTexts.assetId, assetId));
+        const register = vi
+          .spyOn(assetTextsLogic, "autoRegisterAssetText")
+          .mockRejectedValueOnce(new Error("registry unavailable"));
+        const warnings = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+        let failed: Awaited<ReturnType<typeof backfillAssetTextSearch>>;
+        let logged: string[];
+        try {
+          failed = await backfillAssetTextSearch(db, { spaceId });
+          logged = warnings.mock.calls.map((call) => String(call[0]));
+        } finally {
+          register.mockRestore();
+          warnings.mockRestore();
+        }
+        expect(failed.failureReasons).toEqual({ "register-error": 1 });
+        expect(logged.join("\n")).toContain(
+          "reason=register-error error=Error: registry unavailable",
+        );
+        const retried = await backfillAssetTextSearch(db, { spaceId });
+        expect(retried).toMatchObject({ indexed: 1, failed: 0, failureReasons: {} });
+        expect((await search("LEGACYREGISTERMARKER")).results).toHaveLength(1);
       },
     );
   });

@@ -2,6 +2,8 @@ import { oc } from "@orpc/contract";
 import { z } from "zod";
 import {
   CreateFormInputSchema,
+  FormOptionsInputSchema,
+  FormOptionsVOSchema,
   FormSubmitResultSchema,
   FormVOSchema,
   ListFormsInputSchema,
@@ -32,6 +34,9 @@ export const formContract = {
     })
     .input(z.object({ nodeId: z.string() }))
     .output(FormVOSchema),
+  // RPC-only: a workspace member may pick from an already-bound field, while
+  // public Forms never receive the space directory or target Base records.
+  options: oc.input(FormOptionsInputSchema).output(FormOptionsVOSchema),
   create: oc
     .route({
       method: "POST",

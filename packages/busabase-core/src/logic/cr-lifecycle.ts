@@ -4536,7 +4536,11 @@ const _mergeChangeRequest = async (
 
   // Event-mode workflows listening for these records get a queued run each;
   // the scheduler starts them. One indexed query when nothing listens, and it
-  // never throws into the merge.
+  // never throws into the merge. The heads from before the merge let a trigger
+  // that watches one field tell whether that field changed.
+  const previousHeadCommitIds = new Map(
+    [...targetRecordsById.values()].map((record) => [record.id, record.headCommitId] as const),
+  );
   for (const [eventType, recordIds] of [
     ["record.created", newlyCreatedRecordIds],
     ["record.updated", updatedRecordIds],
@@ -4547,6 +4551,7 @@ const _mergeChangeRequest = async (
       eventType,
       recordIds,
       changeRequestId: changeRequest.id,
+      previousHeadCommitIds,
     });
   }
 

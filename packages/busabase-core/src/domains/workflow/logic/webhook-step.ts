@@ -32,6 +32,35 @@ const readBody = async (response: Response): Promise<unknown> => {
   return capText(text);
 };
 
+/** Set by the HTTP client from the request itself; a step cannot override them. */
+const RESERVED_HEADERS = new Set([
+  "host",
+  "content-length",
+  "transfer-encoding",
+  "connection",
+  "x-busabase-event",
+]);
+
+/**
+ * The step's own headers over the defaults. A blank name is skipped, so an
+ * empty row left in the editor does nothing.
+ */
+export const buildWorkflowWebhookHeaders = (
+  stepHeaders: readonly { name: string; value: string }[],
+): Record<string, string> => {
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+    "user-agent": "Busabase-Workflow/1",
+  };
+  for (const header of stepHeaders) {
+    const name = header.name.trim().toLowerCase();
+    if (!name || RESERVED_HEADERS.has(name)) continue;
+    headers[name] = header.value;
+  }
+  headers["x-busabase-event"] = "workflow.step";
+  return headers;
+};
+
 /**
  * Send a workflow webhook step. One attempt — a step can be a POST that is
  * not safe to repeat — through the same SSRF guard as webhook rules, checked
@@ -47,11 +76,7 @@ export const sendWorkflowWebhook = async (
   try {
     const fetched = await fetchWithSsrfGuard(call.url, {
       method: call.method,
-      headers: {
-        "content-type": "application/json",
-        "user-agent": "Busabase-Workflow/1",
-        "x-busabase-event": "workflow.step",
-      },
+      headers: buildWorkflowWebhookHeaders(call.headers),
       body: call.method === "GET" ? undefined : JSON.stringify(call.body),
       signal: AbortSignal.timeout(timeoutMs),
     });

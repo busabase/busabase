@@ -72,6 +72,10 @@ A run is one row. A worker takes it with a conditional lease update (`claim`) be
 
 `create_record` and `delete_record` go the same way (`runRecordWriteStep`, `createRecordForWorkflow`, `deleteRecordForWorkflow`). `update_record` and `delete_record` take `targetRecordId` (empty is the run's record; a formula that gives no id fails the step). Delete archives, so it stays restorable. A step that deleted the run's own record leaves `deletedRecordId` in its output, and `recordForStep` then gives later steps `null` instead of failing them.
 
+## Finding records
+
+`find_records` calls `deps.findRecords`, live: `findRecordsForWorkflow` in `run-service.ts`, which pages `listRecordsPage` (100 a page) as the acting person, so a View's filters and sort apply exactly as in the Base and only visible records come back. Without `forEach` the list is the step's output. With it, `runFindRecordsStep` returns `finish`: the run completes there and one queued run per record is inserted with a lapsed lease, starting at the step's success edge with a copy of the outputs (this step's `record` is that child's record) and `payload.parentRunId`. Children go through `startQueuedRun` like any queued run, so concurrency, the actor's access, and agent caps apply unchanged. The step refuses to fan out (no child inserted, error policy ignored) when more records match than `limit`, when the run is itself a child, or when 200 runs of the workflow are queued.
+
 ## Agents
 
 `list`, `get`, `start`, `cancel`, and `decide` are public (`.route()`, so REST, MCP, CLI). `resume`, `resumeElapsed`, and `cancelQueued` stay app-only: hosts drop them from the public router. `getContextAgentCaller` says whether a request is an agent (`sourceProvenance.apiKey` or `.agent` on Cloud, `agentSurface` on the open-source `/api/v1` and MCP). Three rules:

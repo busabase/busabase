@@ -827,7 +827,7 @@ export const dashboardDe: CoreI18nMessages = {
         offlineHint:
           "Die Website ist offline. Alle Website-Adressen zeigen eine Nicht-gefunden-Seite.",
         dnsInstructions:
-          "Füge diese Einträge bei deinem DNS-Anbieter hinzu. Behalte alle anderen für deine Domain benötigten Einträge. Stelle diesen CNAME bei Cloudflare auf „Nur DNS“ (graue Wolke).",
+          "Füge diese Einträge bei deinem DNS-Anbieter hinzu. Behalte alle anderen für deine Domain benötigten Einträge. Der Cloudflare-Proxy wird unterstützt, sobald die Weiterleitung zur Website bestätigt ist.",
         dnsName: "Name",
         dnsValue: "Wert / Ziel",
         httpInstructions:
@@ -1048,6 +1048,7 @@ export const dashboardDe: CoreI18nMessages = {
     searchEmpty: "Nichts entspricht „{search}“.",
     catalogEmpty: "Dieser Katalog enthält noch keine Vorlagen.",
     catalogFailed: "Vorlagen konnten nicht geladen werden. Versuchen Sie es erneut.",
+    paginationLabel: "Vorlagenseiten",
     missingTemplate: "Keine Vorlage mit dem Namen „{name}“ in diesem Katalog.",
     backToTemplates: "Zurück zu Vorlagen",
     install: "Installieren",
@@ -2765,9 +2766,54 @@ export const dashboardDe: CoreI18nMessages = {
     eventName: "Ereignisname",
     eventRecordCreated: "Wenn ein Datensatz erstellt wird",
     eventRecordUpdated: "Wenn ein Datensatz geändert wird",
+    eventSchedule: "Nach Zeitplan",
+    eventWebhook: "Wenn eine Anfrage eingeht",
+    hookUrl: "Eingangs-URL",
+    hookUrlCopied: "Kopiert",
+    regenerateHookUrl: "URL ändern",
+    hookUrlHint:
+      "Ein POST (JSON oder Text) oder GET an diese URL startet einen Lauf. Die Anfrage steht in steps.trigger.payload.request: method, query, headers und body. Gibt ein Code-Schritt { response: … } zurück, bevor der Lauf pausiert, erhält der Aufrufer das; sonst erhält er 202 und die ID des Laufs. Jeder mit dieser URL kann einen Lauf starten: Ändere sie, damit die alte nicht mehr funktioniert. Änderungen gelten nach dem Speichern.",
+    hookNeedsEvent:
+      "Stelle in den Ausführungseinstellungen den Ausführungsmodus auf Ereignis, sonst antwortet diese URL mit 404.",
+    functionCode: "Code",
+    functionCodeHint:
+      "JavaScript, das auf dem Server läuft, wenn der Lauf diesen Schritt erreicht. input enthält die Daten des Laufs (payload, steps, record), await fetch(...) ruft öffentliche URLs auf, und der zurückgegebene Wert ist die Ausgabe dieses Schritts (spätere Schritte lesen ihn als steps.<ID>.<Feld>). Jeder, der diesen Workflow öffnen kann, kann den Code lesen.",
+    savedFunction: "Oder eine gespeicherte Funktion ausführen",
+    inlineCode: "Code",
+    triggerField: "Nur wenn sich dieses Feld ändert",
+    anyField: "Beliebiges Feld",
+    triggerFieldNeedsBase:
+      "Wähle oben eine Base, um nur auf die Änderung eines ihrer Felder zu reagieren.",
+    triggerToValue: "Ändert sich auf",
+    anyValue: "Beliebiger neuer Wert",
+    triggerFieldHint:
+      "Mit gewähltem Wert startet ein Lauf nur, wenn das Feld diesen Wert bekommt. Wird ein Datensatz bearbeitet, der ihn schon hat, startet nichts.",
+    checkboxChecked: "Angehakt",
+    checkboxUnchecked: "Nicht angehakt",
+    scheduleRepeat: "Wiederholen",
+    scheduleEveryMinutes: "Alle paar Minuten",
+    scheduleEveryHours: "Alle paar Stunden",
+    scheduleDaily: "Täglich",
+    scheduleWeekly: "Wöchentlich",
+    scheduleMinutesBetween: "Minuten zwischen Läufen (mindestens {min})",
+    scheduleHoursBetween: "Stunden zwischen Läufen",
+    scheduleAt: "Uhrzeit",
+    scheduleWeekday: "Tag",
+    scheduleTimezone: "Zeitzone: {timezone}.",
+    scheduleNextRun: "Nächster Lauf: {time}",
+    scheduleNeedsEvent:
+      "Stelle in den Ausführungseinstellungen den Ausführungsmodus auf Ereignis, sonst startet dieser Zeitplan nichts.",
+    webhookHeaders: "Header",
+    webhookHeaderName: "Header-Name",
+    webhookHeaderValue: "Header-Wert",
+    addWebhookHeader: "Header hinzufügen",
+    removeWebhookHeader: "Header entfernen",
+    webhookHeadersHint:
+      "Werden mit der Anfrage gesendet, zum Beispiel Authorization. Jeder, der diesen Workflow öffnen kann, kann die Werte lesen. Verwende daher einen eigens dafür erstellten Schlüssel.",
+    addApprover: "Mitglied hinzufügen …",
     customEventOption: "{name} (nur Bezeichnung)",
     triggerEventHint:
-      "Im Ereignismodus starten „Wenn ein Datensatz erstellt wird“ und „Wenn ein Datensatz geändert wird“ von selbst einen Lauf. Manuell und andere Ereignisnamen starten nur, wenn jemand den Workflow ausführt.",
+      "Im Ereignismodus starten „Wenn ein Datensatz erstellt wird“, „Wenn ein Datensatz geändert wird“, „Nach Zeitplan“ und „Wenn eine Anfrage eingeht“ von selbst einen Lauf. Manuell und andere Ereignisnamen starten nur, wenn jemand den Workflow ausführt.",
     triggerBase: "Base",
     anyBase: "Jede Base",
     unknownBase: "Base nicht gefunden ({id})",
@@ -2797,6 +2843,19 @@ export const dashboardDe: CoreI18nMessages = {
       "Legt einen Datensatz in der gewählten Base an, mit den Rechten der Person, als die der Lauf handelt. Spätere Schritte erreichen seine ID über createdRecordId dieses Schritts.",
     deleteRecordHint:
       "Verschiebt den Datensatz in den Papierkorb seiner Base, mit den Rechten der Person, als die der Lauf handelt. Von dort lässt er sich wiederherstellen.",
+    actionFindRecords: "Datensätze finden",
+    actionFindRecordsEach: "Datensätze finden, je ein Lauf",
+    findRecordsHint:
+      "Listet die Datensätze einer Base auf, oder die einer Ansicht in deren Reihenfolge, mit den Rechten der Person, als die der Lauf handelt. Spätere Schritte lesen records, count und total dieses Schritts.",
+    findRecordsView: "Ansicht",
+    findRecordsAllRecords: "Alle Datensätze",
+    findRecordsUnknownView: "Ansicht nicht gefunden ({id})",
+    findRecordsLimit: "Höchstens",
+    findRecordsLimitHint:
+      "Bis zu {max} Datensätze, leer sind es 50. Mit einem Lauf pro Datensatz startet bei mehr Treffern kein Lauf und der Schritt schlägt fehl, damit eine versehentlich zu weite Ansicht nicht Hunderte Läufe startet.",
+    findRecordsForEach: "Die nächsten Schritte für jeden Datensatz einzeln ausführen",
+    findRecordsForEachHint:
+      "Jeder Datensatz bekommt einen eigenen Lauf über diesen Datensatz: Datensatz ändern ändert ihn, und spätere Schritte lesen ihn als record. Dieser Lauf endet hier; die Läufe kommen gemäß Parallelität nacheinander dran.",
     customActionHint: "Dieser Aktionsname bewirkt noch nichts: Er wird nur festgehalten.",
     chooseBase: "Base wählen",
     targetRecord: "Datensatz (optional)",
@@ -2817,7 +2876,7 @@ export const dashboardDe: CoreI18nMessages = {
     notExecutedNote:
       "Bearbeiten Sie hier die Schritte, speichern Sie und starten Sie dann unter „Läufe“ einen Lauf. Läufe werden auf dem Server mit der zuletzt gespeicherten Version ausgeführt. Jeder fertige Schritt behält einen Schnappschuss, read_record liest den Datensatz erneut, ein Warten-Schritt pausiert bis zu seiner Zeit und eine Genehmigung wartet auf eine Entscheidung.",
     executionModeHint:
-      "Manuell: Ein Lauf startet nur, wenn jemand den Workflow ausführt. Ereignis: Ein Datensatz-Auslöser startet zusätzlich einen Lauf, wenn ein passender Datensatz erstellt oder geändert wird. Ereignis-Läufe handeln als die Person, die den Workflow zuletzt gespeichert hat.",
+      "Manuell: Ein Lauf startet nur, wenn jemand den Workflow ausführt. Ereignis: Ein Datensatz-Auslöser startet zusätzlich einen Lauf, wenn ein passender Datensatz erstellt oder geändert wird, ein Zeitplan startet einen zu den festgelegten Zeiten, und eine Anfrage an die URL des Auslösers startet einen. Diese Läufe handeln als die Person, die den Workflow zuletzt gespeichert hat.",
     manual: "Manuell",
     event: "Ereignis",
     errorPolicy: "Bei Fehler",
@@ -2864,8 +2923,8 @@ export const dashboardDe: CoreI18nMessages = {
     cancelRunBody:
       "Er stoppt hier und kann nicht fortgesetzt werden. Bereits ausgeführte Schritte werden nicht rückgängig gemacht.",
     keepRun: "Behalten",
-    cancelAllQueued: "{count} wartende Läufe abbrechen",
-    cancelAllTitle: "{count} wartende Läufe abbrechen?",
+    cancelAllQueued: "{count} Läufe in der Warteschlange abbrechen",
+    cancelAllTitle: "{count} Läufe in der Warteschlange abbrechen?",
     cancelAllBody:
       "Sie haben noch nicht begonnen und werden es auch nicht mehr. Läufe, die gerade einen Schritt ausführen oder bei einer Wartezeit oder Freigabe pausieren, laufen weiter.",
     startedBy: "Gestartet von {name}",
@@ -2887,6 +2946,9 @@ export const dashboardDe: CoreI18nMessages = {
     statusFailed: "Fehlgeschlagen",
     triggerManual: "Manuell",
     triggerEvent: "Ereignis",
+    triggerSchedule: "Zeitplan",
+    triggerWebhook: "Anfrage",
+    triggerForEach: "Pro Datensatz",
     runDetails: "Laufdetails",
     recordLabel: "Datensatz: {id}",
     waitingUntil: "Wartet bis {time}. Danach geht es von selbst weiter.",

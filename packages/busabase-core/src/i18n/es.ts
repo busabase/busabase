@@ -815,7 +815,7 @@ export const dashboardEs: CoreI18nMessages = {
         offlineHint:
           "El sitio está desactivado. Todas sus direcciones muestran una página no encontrada.",
         dnsInstructions:
-          "Añade estos registros en tu proveedor de DNS. Conserva los demás registros que necesite tu dominio. En Cloudflare, configura este CNAME como «Solo DNS» (nube gris).",
+          "Añade estos registros en tu proveedor de DNS. Conserva los demás registros que necesite tu dominio. El proxy de Cloudflare es compatible una vez verificado que el dominio llega al sitio web.",
         dnsName: "Nombre",
         dnsValue: "Valor / destino",
         httpInstructions:
@@ -1029,6 +1029,7 @@ export const dashboardEs: CoreI18nMessages = {
     searchEmpty: "Nada coincide con “{search}”.",
     catalogEmpty: "Este catálogo aún no tiene plantillas.",
     catalogFailed: "No se pudieron cargar las plantillas. Inténtalo de nuevo.",
+    paginationLabel: "Páginas de plantillas",
     missingTemplate: "No hay ninguna plantilla llamada “{name}” en este catálogo.",
     backToTemplates: "Volver a Plantillas",
     install: "Instalar",
@@ -2742,9 +2743,54 @@ export const dashboardEs: CoreI18nMessages = {
     eventName: "Nombre del evento",
     eventRecordCreated: "Cuando se crea un registro",
     eventRecordUpdated: "Cuando se actualiza un registro",
+    eventSchedule: "Según una programación",
+    eventWebhook: "Cuando llega una solicitud",
+    hookUrl: "URL de entrada",
+    hookUrlCopied: "Copiada",
+    regenerateHookUrl: "Cambiar URL",
+    hookUrlHint:
+      "Un POST (JSON o texto) o un GET a esta URL inicia una ejecución. La solicitud está en steps.trigger.payload.request: method, query, headers y body. Si un paso de código devuelve { response: … } antes de que la ejecución se pause, quien llama recibe eso; si no, recibe 202 y el ID de la ejecución. Cualquiera con esta URL puede iniciar una ejecución: cámbiala para que la anterior deje de funcionar. Los cambios se aplican al guardar.",
+    hookNeedsEvent:
+      "Cambia el modo de ejecución a Evento en los ajustes de ejecución; si no, esta URL responde 404.",
+    functionCode: "Código",
+    functionCodeHint:
+      "JavaScript que se ejecuta en el servidor cuando la ejecución llega a este paso. input tiene los datos de la ejecución (payload, steps, record), await fetch(...) llama a URL públicas y el valor que devuelves es la salida de este paso (los pasos siguientes lo leen como steps.<id>.<campo>). Cualquiera que pueda abrir este flujo de trabajo puede leer el código.",
+    savedFunction: "O ejecutar una función guardada",
+    inlineCode: "Código",
+    triggerField: "Solo cuando cambia este campo",
+    anyField: "Cualquier campo",
+    triggerFieldNeedsBase:
+      "Elige una base arriba para empezar solo cuando cambie uno de sus campos.",
+    triggerToValue: "Cambia a",
+    anyValue: "Cualquier valor nuevo",
+    triggerFieldHint:
+      "Con un valor elegido, una ejecución empieza solo cuando el campo pasa a tener ese valor. Editar un registro que ya lo tiene no inicia nada.",
+    checkboxChecked: "Marcada",
+    checkboxUnchecked: "Sin marcar",
+    scheduleRepeat: "Repetir",
+    scheduleEveryMinutes: "Cada pocos minutos",
+    scheduleEveryHours: "Cada pocas horas",
+    scheduleDaily: "Cada día",
+    scheduleWeekly: "Cada semana",
+    scheduleMinutesBetween: "Minutos entre ejecuciones (al menos {min})",
+    scheduleHoursBetween: "Horas entre ejecuciones",
+    scheduleAt: "Hora",
+    scheduleWeekday: "Día",
+    scheduleTimezone: "Zona horaria: {timezone}.",
+    scheduleNextRun: "Próxima ejecución: {time}",
+    scheduleNeedsEvent:
+      "Cambia el modo de ejecución a Evento en los ajustes de ejecución; si no, esta programación no inicia nada.",
+    webhookHeaders: "Encabezados",
+    webhookHeaderName: "Nombre del encabezado",
+    webhookHeaderValue: "Valor del encabezado",
+    addWebhookHeader: "Añadir encabezado",
+    removeWebhookHeader: "Quitar encabezado",
+    webhookHeadersHint:
+      "Se envían con la solicitud, por ejemplo Authorization. Cualquiera que pueda abrir este flujo de trabajo puede leer los valores, así que usa una clave creada para este fin.",
+    addApprover: "Añadir un miembro…",
     customEventOption: "{name} (solo etiqueta)",
     triggerEventHint:
-      "En modo Evento, «Cuando se crea un registro» y «Cuando se actualiza un registro» inician una ejecución por sí solos. Manual y otros nombres de evento solo se inician cuando alguien ejecuta el flujo de trabajo.",
+      "En modo Evento, «Cuando se crea un registro», «Cuando se actualiza un registro», «Según una programación» y «Cuando llega una solicitud» inician una ejecución por sí solos. Manual y otros nombres de evento solo se inician cuando alguien ejecuta el flujo de trabajo.",
     triggerBase: "Base",
     anyBase: "Cualquier base",
     unknownBase: "Base no encontrada ({id})",
@@ -2774,6 +2820,19 @@ export const dashboardEs: CoreI18nMessages = {
       "Añade un registro a la base elegida, con los permisos de la persona con la que actúa la ejecución. Los pasos siguientes pueden usar su id como createdRecordId de este paso.",
     deleteRecordHint:
       "Mueve el registro a la papelera de su base, con los permisos de la persona con la que actúa la ejecución. Se puede restaurar desde allí.",
+    actionFindRecords: "Buscar registros",
+    actionFindRecordsEach: "Buscar registros, una ejecución por cada uno",
+    findRecordsHint:
+      "Lista los registros de una base, o los que muestra una vista en su orden, con los permisos de la persona en cuyo nombre actúa la ejecución. Los pasos siguientes leen records, count y total de este paso.",
+    findRecordsView: "Vista",
+    findRecordsAllRecords: "Todos los registros",
+    findRecordsUnknownView: "Vista no encontrada ({id})",
+    findRecordsLimit: "Como máximo",
+    findRecordsLimitHint:
+      "Hasta {max} registros; 50 si se deja vacío. Con una ejecución por registro, si encuentra más no inicia ninguna y el paso falla, para que una vista demasiado amplia por error no inicie cientos de ejecuciones.",
+    findRecordsForEach: "Ejecutar los pasos siguientes una vez por registro",
+    findRecordsForEachHint:
+      "Cada registro tiene su propia ejecución, sobre ese registro: Actualizar un registro lo cambia y los pasos siguientes lo leen como record. Esta ejecución termina aquí, y esas ejecuciones esperan su turno según la concurrencia.",
     customActionHint: "Este nombre de acción aún no hace nada: solo se registra.",
     chooseBase: "Elige una base",
     targetRecord: "Registro (opcional)",
@@ -2794,7 +2853,7 @@ export const dashboardEs: CoreI18nMessages = {
     notExecutedNote:
       "Edita los pasos aquí, guarda y luego inicia una ejecución en Ejecuciones. Las ejecuciones corren en el servidor con la última versión guardada. Cada paso terminado conserva una instantánea, read_record vuelve a leer el registro, una Espera se detiene hasta su hora y una Aprobación espera una decisión.",
     executionModeHint:
-      "Manual: una ejecución solo empieza cuando alguien ejecuta el flujo de trabajo. Evento: además, un disparador de registros inicia una ejecución cuando se crea o actualiza un registro que coincide. Las ejecuciones por evento actúan como la persona que guardó el flujo de trabajo por última vez.",
+      "Manual: una ejecución solo empieza cuando alguien ejecuta el flujo de trabajo. Evento: además, un disparador de registros inicia una ejecución cuando se crea o actualiza un registro que coincide, una programación inicia una a sus horas y una solicitud a la URL del disparador inicia una. Estas ejecuciones actúan como la persona que guardó el flujo de trabajo por última vez.",
     manual: "Manual",
     event: "Evento",
     errorPolicy: "En caso de error",
@@ -2864,6 +2923,9 @@ export const dashboardEs: CoreI18nMessages = {
     statusFailed: "Fallida",
     triggerManual: "Manual",
     triggerEvent: "Evento",
+    triggerSchedule: "Programación",
+    triggerWebhook: "Solicitud",
+    triggerForEach: "Por registro",
     runDetails: "Detalles de la ejecución",
     recordLabel: "Registro: {id}",
     waitingUntil: "En espera hasta {time}. Después continúa sola.",

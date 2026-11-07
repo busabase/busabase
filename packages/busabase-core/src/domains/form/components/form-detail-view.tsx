@@ -3,10 +3,16 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { hasApiKeyLevel } from "busabase-contract/access-control/api-key-level";
 import type { BusabaseQueryUtils } from "busabase-contract/api-client/react-query";
-import type { FormFieldBindingVO, FormSubmitResultVO, FormVO } from "busabase-contract/types";
+import type {
+  AssetAttachmentRef,
+  FormFieldBindingVO,
+  FormSubmitResultVO,
+  FormVO,
+} from "busabase-contract/types";
 import { Button } from "kui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "kui/tabs";
 import { CheckCircle2, Code2, Eye, Globe, Lock } from "lucide-react";
+import { MULTIPART_UPLOAD_THRESHOLD } from "open-domains/attachments/utils";
 import { type Dispatch, type SetStateAction, useCallback, useEffect, useState } from "react";
 import { useCoreI18n, useCoreLocale, useIString } from "../../../i18n";
 import { presentCoreError } from "../../../i18n/localize-error";
@@ -19,6 +25,8 @@ import {
 } from "../../dashboard/components/preview-fullscreen";
 import { NodeDetailSkeleton } from "../../dashboard/components/skeletons";
 import { useWorkspacePermissionLevel } from "../../dashboard/components/split-submit-button";
+import { completeAttachmentUpload } from "../../dashboard/helpers/attachment-upload";
+import { uploadMultipartParts } from "../../dashboard/helpers/multipart-upload";
 import { useIsAnonymousVisitor } from "../../dashboard/visitor-context";
 import { isFormNotConfiguredError } from "../utils/not-configured-error";
 import { FormHelpSettings } from "./form-help-settings";
@@ -33,6 +41,59 @@ interface SubmitMutation {
   isPending: boolean;
   isSuccess: boolean;
   mutate: (input: { nodeId: string; values: Record<string, unknown> }) => void;
+}
+
+function useFormAttachmentUpload(orpc: BusabaseQueryUtils) {
+  const create = useMutation(orpc.assets.createUploadUrl.mutationOptions());
+  const confirm = useMutation(orpc.assets.confirm.mutationOptions());
+  const createMultipart = useMutation(orpc.assets.createMultipartUpload.mutationOptions());
+  const signParts = useMutation(orpc.assets.signMultipartParts.mutationOptions());
+  const completeMultipart = useMutation(orpc.assets.completeMultipartUpload.mutationOptions());
+  const abortMultipart = useMutation(orpc.assets.abortMultipartUpload.mutationOptions());
+  return useCallback(
+    async (file: File): Promise<AssetAttachmentRef> =>
+      completeAttachmentUpload(
+        {
+          context: "form-field",
+          fileName: file.name,
+          mimeType: file.type || "application/octet-stream",
+          sizeBytes: file.size,
+        },
+        {
+          createUploadUrl: (input) => create.mutateAsync(input),
+          uploadBytes: async (requested) => {
+            if (requested.uploadUrl.startsWith("/")) {
+              const body = new FormData();
+              body.append("file", file);
+              body.append("storageKey", requested.storageKey);
+              const response = await fetch(requested.uploadUrl, { body, method: "POST" });
+              if (!response.ok) throw new Error(`Upload failed (${response.status})`);
+              return;
+            }
+            const response = await fetch(requested.uploadUrl, {
+              body: file,
+              headers: { "content-type": file.type || "application/octet-stream" },
+              method: "PUT",
+            });
+            if (!response.ok) throw new Error(`Upload failed (${response.status})`);
+          },
+          confirmUpload: (input) => confirm.mutateAsync(input),
+          multipart: {
+            abort: (input) => abortMultipart.mutateAsync(input),
+            complete: (input) => completeMultipart.mutateAsync(input),
+            create: (input) => createMultipart.mutateAsync(input),
+            thresholdBytes: MULTIPART_UPLOAD_THRESHOLD,
+            uploadParts: (created) =>
+              uploadMultipartParts({
+                file,
+                signParts: (input) => signParts.mutateAsync(input),
+                upload: created,
+              }),
+          },
+        },
+      ),
+    [abortMultipart, completeMultipart, confirm, create, createMultipart, signParts],
+  );
 }
 
 function SubmittedPanel({ submit }: { submit: SubmitMutation }) {
@@ -57,6 +118,8 @@ function FormPreviewSurface({
   form,
   fullscreenState,
   onSubmit,
+  onUploadAttachment,
+  orpc,
   setValues,
   showToolbar = false,
   submit,
@@ -65,6 +128,8 @@ function FormPreviewSurface({
   form: FormVO;
   fullscreenState: PreviewFullscreenState;
   onSubmit: (values: Record<string, unknown>) => void;
+  onUploadAttachment: (file: File) => Promise<AssetAttachmentRef>;
+  orpc: BusabaseQueryUtils;
   setValues: Dispatch<SetStateAction<Record<string, unknown>>>;
   showToolbar?: boolean;
   submit: SubmitMutation;
@@ -139,11 +204,14 @@ function FormPreviewSurface({
                     <GeneratedFormField
                       binding={binding}
                       field={field}
+                      formNodeId={form.nodeId}
                       key={binding.inputName}
                       label={label}
                       onChange={(value) =>
                         setValues((current) => ({ ...current, [binding.inputName]: value }))
                       }
+                      onUploadAttachment={onUploadAttachment}
+                      orpc={orpc}
                       value={values[binding.inputName]}
                     />
                   );
@@ -198,6 +266,7 @@ export function FormDetailView({
   const form = formQuery.isError ? null : (formQuery.data ?? null);
   const isNotConfigured = isFormNotConfiguredError(formQuery.error);
   const submit = useMutation(orpc.forms.submit.mutationOptions());
+  const uploadAttachment = useFormAttachmentUpload(orpc);
   const [values, setValues] = useState<Record<string, unknown>>({});
   const [tab, setTab] = useState<"form" | "code" | "help">("form");
   const [isSetUpOpen, setIsSetUpOpen] = useState(false);
@@ -276,6 +345,8 @@ export function FormDetailView({
       form={form}
       fullscreenState={fullscreenState}
       onSubmit={doSubmit}
+      onUploadAttachment={uploadAttachment}
+      orpc={orpc}
       setValues={setValues}
       showToolbar={previewOnly}
       submit={submit}

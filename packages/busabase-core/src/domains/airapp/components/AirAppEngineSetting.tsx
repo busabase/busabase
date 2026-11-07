@@ -26,6 +26,10 @@ export const FOLLOW_APP = "__follow_app__" as const;
 
 export type AirAppEngineChoice = AirAppRunnerKind | typeof FOLLOW_APP;
 
+// Radix skips value changes for the current engine, including one saved before
+// a downgrade. Give upgrade actions distinct values so they always activate.
+const upgradeEngineValue = (engine: AirAppRunnerKind) => `__upgrade_${engine}__`;
+
 /** Which engine this field currently means, once "follow the app" is resolved. */
 export const resolveEffectiveEngineChoice = (
   choice: AirAppEngineChoice,
@@ -50,16 +54,15 @@ interface AirAppEngineSettingProps {
   appPreferred?: AirAppRunnerKind;
   appRequired?: AirAppRunnerKind;
   /**
-   * The host's plan gate (Busabase Cloud). Its locked engines are listed but
-   * disabled, with the plan that unlocks them — never silently dropped, or a
-   * person could not tell "this deployment has no remote machines" from "this
-   * space's plan doesn't include them".
+   * The host's plan gate (Busabase Cloud). Its locked engines name the plan
+   * that unlocks them and open the host's upgrade flow when available, without
+   * changing the engine. Without an upgrade action they remain disabled.
    */
   planGate?: ResolvedAirAppEnginePlanGate | null;
   /**
    * Engines an operator could turn on by configuring this deployment. Listed but
-   * disabled with that reason, the same way locked engines are, so a person can
-   * tell "ask an administrator" from "this doesn't exist". An engine this
+   * disabled with that reason, so a person can tell "ask an administrator"
+   * from "this doesn't exist". An engine this
    * deployment can never offer is simply not passed, and stays hidden.
    */
   notConfiguredEngines?: readonly AirAppRunnerKind[];
@@ -162,13 +165,17 @@ export function AirAppEngineSetting({
           : null;
       return (
         <SelectItem
+          className={lockedOn && planGate?.onUpgrade ? "cursor-pointer" : undefined}
           data-airapp-engine-locked={lockedOn ? engine : undefined}
           data-airapp-engine-not-configured={notConfigured ? engine : undefined}
-          disabled={Boolean(reason)}
+          disabled={Boolean(notConfigured || (lockedOn && !planGate?.onUpgrade))}
           key={engine}
-          value={engine}
+          value={lockedOn ? upgradeEngineValue(engine) : engine}
         >
-          {reason ? `${engineLabel[engine]} · ${reason}` : engineLabel[engine]}
+          <span className="inline-flex items-center gap-2">
+            {reason ? `${engineLabel[engine]} · ${reason}` : engineLabel[engine]}
+            {lockedOn ? <Lock aria-hidden="true" className="size-3 shrink-0" /> : null}
+          </span>
         </SelectItem>
       );
     });
@@ -200,7 +207,13 @@ export function AirAppEngineSetting({
       <Label htmlFor="node-settings-airapp-engine">{messages.airapp.engineLabel}</Label>
       <Select
         disabled={disabled}
-        onValueChange={(next) => onValueChange(next as AirAppRunnerKind)}
+        onValueChange={(next) => {
+          if (lockedEngines.some((engine) => next === upgradeEngineValue(engine))) {
+            planGate?.onUpgrade?.();
+            return;
+          }
+          onValueChange(next as AirAppEngineChoice);
+        }}
         value={value}
       >
         <SelectTrigger className="w-full" id="node-settings-airapp-engine">

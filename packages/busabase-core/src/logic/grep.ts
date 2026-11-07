@@ -30,6 +30,10 @@ import "server-only";
  *   stale value that may still be sitting in `headCommit.payload`. This
  *   adapter's own batch loader filters `isNull(busabaseBaseFields.deletedAt)`
  *   explicitly, mirroring `domains/base/logic/queries.ts`'s `getBase`.
+ *   When the pattern is a literal (or an alternation of literals) that is
+ *   provably safe to search for in `payload::text`, Postgres rules out the
+ *   payloads that cannot match before they are read (see
+ *   `logic/grep-record-prefilter.ts`); those records count as scanned.
  * - Prompts adapter: scans the custom agent prompts stored on nodes
  *   (`busabase_nodes.agent_prompts`), label and body in every locale, after the
  *   same `customAgentPromptsSchema` validation the Ask Agent dialog applies.
@@ -48,7 +52,18 @@ import type {
 } from "busabase-contract/contract/grep-schemas";
 import { customAgentPromptsSchema } from "busabase-contract/contract/node-agent-prompt-schemas";
 import type { FieldType } from "busabase-contract/types";
-import { and, asc, desc, eq, inArray, isNull, or } from "drizzle-orm";
+import {
+  type AnyColumn,
+  and,
+  asc,
+  desc,
+  eq,
+  inArray,
+  isNull,
+  or,
+  type SQL,
+  sql,
+} from "drizzle-orm";
 import { type iString, iStringParse, type LocaleType } from "openlib/i18n/i-string";
 import { getContextSpaceId } from "../context";
 import { getDb } from "../db";
@@ -56,6 +71,7 @@ import { busabaseCommits, busabaseNodes } from "../db/schema";
 import { grepAssets, grepTimeoutMs } from "../domains/assets/logic/asset-grep-logic";
 import { busabaseBaseFields, busabaseBases, busabaseRecords } from "../domains/base/schema";
 import { hasCustomPromptsSql } from "../domains/playbooks/logic/playbooks";
+import { deriveRecordPrefilter, type RecordPrefilter } from "./grep-record-prefilter";
 import { buildNodeVisibilityCondition, buildNodeVisibilityExists } from "./node-acl";
 import {
   isSearchableNodeType,
@@ -64,6 +80,7 @@ import {
   SEARCHABLE_NODE_TYPES,
   type SearchableNodeType,
 } from "./node-content";
+import { withinTime } from "./search-record-query";
 import { ensureReady } from "./seed";
 import { compileGrepPattern, scanLines } from "./text-scan-core";
 
@@ -245,45 +262,113 @@ const resolveCandidateRecords = async (
  * for records the budget actually reaches.
  */
 const RECORD_SCAN_BATCH = 500;
+/**
+ * With a prefilter, once a batch comes back sparse (at most
+ * `SPARSE_BATCH_SHARE` of it kept), the scan widens to batches of
+ * `PREFILTERED_RECORD_SCAN_BATCH`: most rows then never leave the database,
+ * and a batch costs Postgres reading the payloads (detoast + `payload::text`,
+ * ~0.15 ms for a 17 KB payload), not their transfer and JS scan. A dense batch
+ * (a common word) keeps the narrow scan, so `maxMatches` is reached without
+ * reading payloads it will not need.
+ *
+ * One batch at a time, on one connection: grep shares the app's pool (10
+ * connections, 5 with a read replica), and a pool run dry queues every other
+ * request — sign-in included. Each prefiltered statement may run only until
+ * the records slice's deadline plus `PREFILTERED_BATCH_SLACK_MS`, so none can
+ * outlive the request.
+ */
+const PREFILTERED_RECORD_SCAN_BATCH = 2_000;
+const SPARSE_BATCH_SHARE = 0.1;
+const PREFILTERED_BATCH_SLACK_MS = 200;
+
+/** Records grep prefilter on by default; `BUSABASE_GREP_RECORDS_PREFILTER=off` scans every payload in JS. */
+const recordsPrefilterEnabled = (): boolean =>
+  !["0", "false", "off"].includes(
+    (process.env.BUSABASE_GREP_RECORDS_PREFILTER ?? "").trim().toLowerCase(),
+  );
+
+/**
+ * One bind parameter for any number of ids. A plain `inArray` binds one per id;
+ * a prefiltered batch holds thousands.
+ */
+const anyText = (column: AnyColumn, values: readonly string[]): SQL =>
+  sql`${column} = any(${sql.param([...values])}::text[])`;
+
+/**
+ * Keeps a HEAD commit only if its `payload::text` contains one of the
+ * prefilter's tokens — all tokens bound as ONE text[] parameter.
+ */
+const payloadMayMatch = (prefilter: RecordPrefilter): SQL => {
+  const payloadText = prefilter.caseInsensitive
+    ? sql`lower(${busabaseCommits.payload}::text collate "C")`
+    : sql`(${busabaseCommits.payload}::text collate "C")`;
+  return sql`exists (select 1 from unnest(${sql.param(prefilter.tokens)}::text[]) as needle(value) where strpos(${payloadText}, needle.value) > 0)`;
+};
 
 type BaseFieldsById = Map<string, Array<{ slug: string; type: FieldType }>>;
 
 /**
- * Load one batch of candidates' HEAD commit fields, plus the non-deleted
- * fields of any Base in the batch not already in `fieldsByBaseId` — two
- * queries per batch, not N+1 per record. Returns headCommitId → the commit's
- * raw `fields` jsonb (canonical, untruncated) and fills `fieldsByBaseId` in
- * place. This is the adapter's own minimal loader (see the module doc for why
+ * Load one batch of candidates' HEAD commit fields — one query per batch, not
+ * N+1 per record. Returns headCommitId → the commit's raw `fields` jsonb
+ * (canonical, untruncated).
+ *
+ * With a `prefilter`, only commits whose payload may match are returned (a
+ * candidate missing from the map was ruled out by Postgres), and the statement
+ * is cancelled at `deadline` plus slack: `null` then, and none of the batch
+ * was examined.
+ */
+const loadHeadPayloads = async (
+  db: Db,
+  batch: RecordCandidate[],
+  prefilter: RecordPrefilter | null,
+  deadline: number,
+): Promise<Map<string, Record<string, unknown>> | null> => {
+  const commitFieldsById = new Map<string, Record<string, unknown>>();
+  if (batch.length === 0) {
+    return commitFieldsById;
+  }
+  const headCommitIds = [...new Set(batch.map((c) => c.headCommitId))];
+  const select = (executor: Db) =>
+    executor
+      .select({ id: busabaseCommits.id, fields: busabaseCommits.payload })
+      .from(busabaseCommits)
+      .where(
+        and(
+          anyText(busabaseCommits.id, headCommitIds),
+          prefilter ? payloadMayMatch(prefilter) : undefined,
+        ),
+      );
+  const commitRows = prefilter
+    ? await withinTime(db, deadline - Date.now() + PREFILTERED_BATCH_SLACK_MS, select)
+    : await select(db);
+  if (!commitRows) {
+    return null;
+  }
+  for (const row of commitRows) {
+    commitFieldsById.set(row.id, row.fields);
+  }
+  return commitFieldsById;
+};
+
+/**
+ * Load the non-deleted fields of any Base in `candidates` not already in
+ * `fieldsByBaseId`, in place — one query for all of them. This is the
+ * adapter's own minimal loader (see the module doc for why
  * `loadBasesByIds`/`hydrateRecords` are NOT used here): the field query
  * explicitly filters `isNull(busabaseBaseFields.deletedAt)`, so a field
  * soft-deleted after a record was written never resurfaces a stale value
  * still sitting under its old slug in `headCommit.payload`.
  */
-const loadRecordBatchData = async (
+const loadBaseFields = async (
   db: Db,
-  batch: RecordCandidate[],
+  candidates: RecordCandidate[],
   fieldsByBaseId: BaseFieldsById,
-): Promise<Map<string, Record<string, unknown>>> => {
-  const commitFieldsById = new Map<string, Record<string, unknown>>();
-  if (batch.length === 0) {
-    return commitFieldsById;
-  }
-
-  const headCommitIds = [...new Set(batch.map((c) => c.headCommitId))];
-  const newBaseIds = [...new Set(batch.map((c) => c.baseId))].filter(
+): Promise<void> => {
+  const newBaseIds = [...new Set(candidates.map((c) => c.baseId))].filter(
     (baseId) => !fieldsByBaseId.has(baseId),
   );
-
-  const commitRows = await db
-    .select({ id: busabaseCommits.id, fields: busabaseCommits.payload })
-    .from(busabaseCommits)
-    .where(inArray(busabaseCommits.id, headCommitIds));
-  for (const row of commitRows) {
-    commitFieldsById.set(row.id, row.fields);
-  }
-
   if (newBaseIds.length === 0) {
-    return commitFieldsById;
+    return;
   }
   // Marked loaded up front so a Base with no live fields is not queried again.
   for (const baseId of newBaseIds) {
@@ -303,8 +388,6 @@ const loadRecordBatchData = async (
   for (const row of fieldRows) {
     fieldsByBaseId.get(row.baseId)?.push({ slug: row.slug, type: row.type as FieldType });
   }
-
-  return commitFieldsById;
 };
 
 /**
@@ -482,77 +565,114 @@ const runRecords = async (
 ): Promise<SourceRun<typeof EMPTY_RECORDS_COVERAGE>> => {
   const candidates = await resolveCandidateRecords(db, spaceId, input.scope);
   const fieldsByBaseId: BaseFieldsById = new Map();
-  let commitFieldsById = new Map<string, Record<string, unknown>>();
   const matches: UnifiedGrepMatchVO[] = [];
   let truncated = false;
   let scanned = 0;
   const errored: string[] = [];
   let notReached = 0;
+  // Postgres skips payloads that cannot match, when the pattern allows a
+  // provably safe prefilter (see `logic/grep-record-prefilter.ts`).
+  const prefilter = recordsPrefilterEnabled()
+    ? deriveRecordPrefilter(input.pattern, budget.regex)
+    : null;
+  const budgetSpent = () => Date.now() >= budget.deadline || matches.length >= budget.maxMatches;
 
-  for (let i = 0; i < candidates.length; i++) {
-    // Budget check BEFORE dispatching the next record: `notReached` counts
-    // records never even started.
-    if (Date.now() >= budget.deadline || matches.length >= budget.maxMatches) {
-      notReached = candidates.length - i;
-      truncated = true;
-      break;
+  /** Records of a batch grep did not scan: those Postgres ruled out were examined. */
+  const countUnscanned = (
+    unscanned: RecordCandidate[],
+    payloads: Map<string, Record<string, unknown>>,
+  ) => {
+    for (const candidate of unscanned) {
+      if (prefilter && !payloads.has(candidate.headCommitId)) scanned++;
+      else notReached++;
     }
-    if (i % RECORD_SCAN_BATCH === 0) {
-      commitFieldsById = await loadRecordBatchData(
-        db,
-        candidates.slice(i, i + RECORD_SCAN_BATCH),
-        fieldsByBaseId,
-      );
-    }
-    const candidate = candidates[i];
-    try {
-      const commitFields = commitFieldsById.get(candidate.headCommitId) ?? {};
-      const fields = fieldsByBaseId.get(candidate.baseId) ?? [];
-      // Fields are visited in Base schema (position) order. Each field is
-      // scanned as its OWN independent line-source — never concatenated
-      // with another field's text — so `before`/`after` context can never
-      // cross a field or record boundary.
-      for (const field of fields) {
-        // Budget may have been exhausted by an earlier field in THIS same
-        // record — stop scanning this record's remaining fields, but the
-        // record still counts as "scanned" below (it was genuinely
-        // dispatched), not "notReached".
-        if (matches.length >= budget.maxMatches) break;
-        const flattened = flattenFieldValue(field.type, commitFields[field.slug]);
-        if (flattened === undefined) continue;
-        const { hits, truncated: fieldTruncated } = await scanLines(linesFromText(flattened), {
-          regex: budget.regex,
-          contextLines: budget.contextLines,
-          maxMatches: budget.maxMatches - matches.length,
-          deadline: budget.deadline,
-        });
-        matches.push(
-          ...hits.map(
-            (hit): UnifiedGrepMatchVO => ({
-              source: "records",
-              baseId: candidate.baseId,
-              baseSlug: candidate.baseSlug,
-              recordId: candidate.recordId,
-              fieldSlug: field.slug,
-              ...hit,
-            }),
-          ),
-        );
-        if (fieldTruncated) truncated = true;
+  };
+  let nextCandidate = 0;
+  let wide = false;
+
+  // Budget check BEFORE loading the next batch: `notReached` counts records
+  // never even started.
+  while (nextCandidate < candidates.length && !budgetSpent()) {
+    const batch = candidates.slice(
+      nextCandidate,
+      nextCandidate + (wide ? PREFILTERED_RECORD_SCAN_BATCH : RECORD_SCAN_BATCH),
+    );
+    const commitFieldsById = await loadHeadPayloads(db, batch, prefilter, budget.deadline);
+    // Cancelled at the deadline: the batch was never examined (`notReached` below).
+    if (!commitFieldsById) break;
+    nextCandidate += batch.length;
+    const ruledOut = (candidate: RecordCandidate) =>
+      prefilter !== null && !commitFieldsById.has(candidate.headCommitId);
+    const kept = batch.filter((candidate) => !ruledOut(candidate));
+    if (prefilter) wide = kept.length <= batch.length * SPARSE_BATCH_SHARE;
+    await loadBaseFields(db, kept, fieldsByBaseId);
+    let stopped = false;
+
+    for (let j = 0; j < batch.length; j++) {
+      const candidate = batch[j];
+      // Postgres examined this record and ruled it out: scanned, cannot match.
+      if (ruledOut(candidate)) {
+        scanned++;
+        continue;
       }
-      // Placed AFTER the field loop (not before): a record that hit the
-      // budget mid-way (a `break` above, not a throw) still reaches this
-      // line and counts as scanned. A record whose flattening/scanning
-      // genuinely throws never reaches this line — it falls through to
-      // the catch below and is excluded from `scanned`.
-      scanned++;
-    } catch {
-      // Read/flatten/scan failure for this record — it was NOT actually
-      // searched, e.g. a malformed `headCommit.payload` value that throws
-      // during flattening.
-      errored.push(candidate.recordId);
+      // Budget check BEFORE scanning the next record.
+      if (budgetSpent()) {
+        countUnscanned(batch.slice(j), commitFieldsById);
+        stopped = true;
+        break;
+      }
+      try {
+        const commitFields = commitFieldsById.get(candidate.headCommitId) ?? {};
+        const fields = fieldsByBaseId.get(candidate.baseId) ?? [];
+        // Fields are visited in Base schema (position) order. Each field is
+        // scanned as its OWN independent line-source — never concatenated
+        // with another field's text — so `before`/`after` context can never
+        // cross a field or record boundary.
+        for (const field of fields) {
+          // Budget may have been exhausted by an earlier field in THIS same
+          // record — stop scanning this record's remaining fields, but the
+          // record still counts as "scanned" below (it was genuinely
+          // dispatched), not "notReached".
+          if (matches.length >= budget.maxMatches) break;
+          const flattened = flattenFieldValue(field.type, commitFields[field.slug]);
+          if (flattened === undefined) continue;
+          const { hits, truncated: fieldTruncated } = await scanLines(linesFromText(flattened), {
+            regex: budget.regex,
+            contextLines: budget.contextLines,
+            maxMatches: budget.maxMatches - matches.length,
+            deadline: budget.deadline,
+          });
+          matches.push(
+            ...hits.map(
+              (hit): UnifiedGrepMatchVO => ({
+                source: "records",
+                baseId: candidate.baseId,
+                baseSlug: candidate.baseSlug,
+                recordId: candidate.recordId,
+                fieldSlug: field.slug,
+                ...hit,
+              }),
+            ),
+          );
+          if (fieldTruncated) truncated = true;
+        }
+        // Placed AFTER the field loop (not before): a record that hit the
+        // budget mid-way (a `break` above, not a throw) still reaches this
+        // line and counts as scanned. A record whose flattening/scanning
+        // genuinely throws never reaches this line — it falls through to
+        // the catch below and is excluded from `scanned`.
+        scanned++;
+      } catch {
+        // Read/flatten/scan failure for this record — it was NOT actually
+        // searched, e.g. a malformed `headCommit.payload` value that throws
+        // during flattening.
+        errored.push(candidate.recordId);
+      }
     }
+    if (stopped) break;
   }
+  notReached += candidates.length - nextCandidate;
+  if (notReached > 0) truncated = true;
   return { matches, coverage: { scanned, errored, notReached }, truncated };
 };
 

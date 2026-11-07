@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { clampPaginationPage, getPaginationItems, getPaginationRange } from "./pagination";
+import {
+  clampPaginationPage,
+  getPaginationItems,
+  getPaginationRange,
+  getTotalPages,
+  paginateItems,
+} from "./pagination";
 
 describe("getPaginationItems", () => {
   it("shows every page when the result fits without ellipses", () => {
@@ -64,5 +70,37 @@ describe("getPaginationRange", () => {
 
   it("clamps a stale page after the total shrinks", () => {
     expect(getPaginationRange(6, 50, 87)).toEqual({ from: 51, to: 87 });
+  });
+});
+
+describe("getTotalPages", () => {
+  it("rounds up and never returns zero pages", () => {
+    expect(getTotalPages(68, 24)).toBe(3);
+    expect(getTotalPages(48, 24)).toBe(2);
+    expect(getTotalPages(0, 24)).toBe(1);
+  });
+});
+
+describe("paginateItems", () => {
+  const items = Array.from({ length: 68 }, (_, index) => index + 1);
+
+  it("slices the requested page", () => {
+    const second = paginateItems(items, 2, 24);
+    expect(second.items).toEqual(items.slice(24, 48));
+    expect(second).toMatchObject({ page: 2, totalPages: 3, total: 68 });
+  });
+
+  it("returns the short final page", () => {
+    expect(paginateItems(items, 3, 24).items).toEqual(items.slice(48));
+  });
+
+  it("clamps a page past the end to the last page, e.g. after a search shrinks the list", () => {
+    const clamped = paginateItems(items.slice(0, 10), 3, 24);
+    expect(clamped.page).toBe(1);
+    expect(clamped.items).toHaveLength(10);
+  });
+
+  it("treats an empty list as one empty page", () => {
+    expect(paginateItems([], 2, 24)).toEqual({ items: [], page: 1, totalPages: 1, total: 0 });
   });
 });

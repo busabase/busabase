@@ -243,6 +243,9 @@ const demoWorkflowDeps = (): WorkflowRuntimeDeps => ({
   deleteRecord: async () => {
     throw demoUnsupported("Deleting a record from a workflow");
   },
+  findRecords: async () => {
+    throw demoUnsupported("Finding records from a workflow");
+  },
   resolveActorNames: async () => ({}),
   notify: async () => {},
   background: false,
@@ -805,6 +808,9 @@ export const busabaseDemoRouter: EnhancedRouter<
         throw new ORPCError("NOT_FOUND", { message: `Form not found: ${input.nodeId}` });
       }
       return form;
+    }),
+    options: os.forms.options.handler(() => {
+      throw demoUnsupported("Form field options");
     }),
     create: os.forms.create.handler(() => {
       throw demoUnsupported("Create form");

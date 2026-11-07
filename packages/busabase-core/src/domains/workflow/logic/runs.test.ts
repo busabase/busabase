@@ -4,6 +4,8 @@ import {
   WORKFLOW_CREATE_RECORD_ACTION,
   WORKFLOW_DATA_FRESHNESS,
   WORKFLOW_DELETE_RECORD_ACTION,
+  WORKFLOW_FIND_RECORDS_ACTION,
+  WORKFLOW_MAX_QUEUED_RUNS,
   WORKFLOW_READ_RECORD_ACTION,
   WORKFLOW_UPDATE_RECORD_ACTION,
 } from "busabase-contract/domains/workflow/run";
@@ -123,6 +125,10 @@ const harness = (document = freshnessGraph()) => {
   const creates: { baseId: string; fields: Record<string, unknown>; message: string }[] = [];
   const deletes: string[] = [];
   let recordGone = false;
+  /** What a Find records step finds, and how many matched in all (past its limit too). */
+  let found: LiveRecord[] = [];
+  let foundTotal: number | null = null;
+  const finds: { baseId: string; viewId: string | null; limit: number }[] = [];
   const deps: WorkflowRuntimeDeps = {
     spaceId: "spc_test",
     actorId: "usr_ada",
@@ -132,7 +138,11 @@ const harness = (document = freshnessGraph()) => {
       nextId += 1;
       return `wfr_test_${nextId}`;
     },
-    readRecord: async () => (recordGone ? null : { ...live, fields: structuredClone(live.fields) }),
+    readRecord: async (recordId) => {
+      const hit = found.find((record) => record.recordId === recordId);
+      if (hit) return structuredClone(hit);
+      return recordGone ? null : { ...live, fields: structuredClone(live.fields) };
+    },
     updateRecord: async (recordId, fields, message) => {
       updates.push({ recordId, fields, message });
       if (updateOutcome === "review") return { merged: false, changeRequestId: "crq_review" };
@@ -176,6 +186,13 @@ const harness = (document = freshnessGraph()) => {
       if (recordId === live.recordId) recordGone = true;
       return { merged: true };
     },
+    findRecords: async (baseId, viewId, limit) => {
+      finds.push({ baseId, viewId, limit });
+      return {
+        records: found.slice(0, limit).map((record) => structuredClone(record)),
+        total: foundTotal ?? found.length,
+      };
+    },
     resolveActorNames: async (ids) => Object.fromEntries(ids.map((id) => [id, `Name of ${id}`])),
     notify: async (event) => {
       notifications.push(event);
@@ -209,6 +226,11 @@ const harness = (document = freshnessGraph()) => {
     updates,
     creates,
     deletes,
+    finds,
+    setFound: (records: LiveRecord[], total?: number) => {
+      found = records;
+      foundTotal = total ?? null;
+    },
     setUpdateOutcome: (value: "merged" | "review" | "error") => {
       updateOutcome = value;
     },
@@ -1720,5 +1742,238 @@ describe("agents", () => {
     deps.agent = agent(null);
     const decided = await decideWorkflowRun(deps, { runId: paused.id, decision: "approved" });
     expect(decided.status).toBe("completed");
+  });
+});
+
+describe("find records", () => {
+  const task = (n: number): LiveRecord => ({
+    recordId: `rec_task_${n}`,
+    baseId: "bas_tasks",
+    headCommitId: `cmt_task_${n}`,
+    fields: { status: "overdue", owner: `owner${n}` },
+  });
+
+  /** Trigger → Find records → (a second Find records, optionally) → Update record → End. */
+  const findGraph = (
+    find: Record<string, unknown>,
+    options: { errorPolicy?: "stop" | "continue"; nestedForEach?: boolean } = {},
+  ) =>
+    parseWorkflowDocument({
+      version: 2,
+      nodes: [
+        { id: "trigger", kind: "trigger", label: "Every morning", position: at(0, 0) },
+        {
+          id: "find",
+          kind: "action",
+          label: "Overdue tasks",
+          position: at(1, 0),
+          actionName: WORKFLOW_FIND_RECORDS_ACTION,
+          baseId: "bas_tasks",
+          ...find,
+        },
+        ...(options.nestedForEach
+          ? [
+              {
+                id: "again",
+                kind: "action",
+                label: "Again",
+                position: at(2, 1),
+                actionName: WORKFLOW_FIND_RECORDS_ACTION,
+                baseId: "bas_tasks",
+                forEach: true,
+              },
+            ]
+          : []),
+        {
+          id: "remind",
+          kind: "action",
+          label: "Mark reminded",
+          position: at(2, 0),
+          actionName: WORKFLOW_UPDATE_RECORD_ACTION,
+          fields: { status: "reminded", note: "=steps.find.record.fields.owner" },
+        },
+        { id: "done", kind: "end", label: "Done", position: at(3, 0) },
+      ],
+      edges: [
+        { id: "e1", source: "trigger", target: "find" },
+        {
+          id: "e2",
+          source: "find",
+          target: options.nestedForEach ? "again" : "remind",
+          outcome: "success",
+        },
+        ...(options.nestedForEach
+          ? [{ id: "e2b", source: "again", target: "remind", outcome: "success" }]
+          : []),
+        { id: "e3", source: "remind", target: "done", outcome: "success" },
+      ],
+      settings: { errorPolicy: options.errorPolicy ?? "stop" },
+    });
+
+  const queuedRuns = async (deps: WorkflowRuntimeDeps) =>
+    (await deps.store.listDue(deps.now(), 1_000)).filter((run) => run.status === "queued");
+
+  it("gives later steps the list, and says when the limit cut it", async () => {
+    const graph = parseWorkflowDocument({
+      version: 2,
+      nodes: [
+        { id: "trigger", kind: "trigger", label: "Start", position: at(0, 0) },
+        {
+          id: "find",
+          kind: "action",
+          label: "Overdue tasks",
+          position: at(1, 0),
+          actionName: WORKFLOW_FIND_RECORDS_ACTION,
+          baseId: "bas_tasks",
+          viewId: "viw_overdue",
+          limit: 2,
+        },
+        {
+          id: "check",
+          kind: "condition",
+          label: "Two?",
+          position: at(2, 0),
+          expression: "steps.find.count == 2 && steps.find.truncated == true",
+        },
+        { id: "yes", kind: "end", label: "Yes", position: at(3, 0), outcome: "yes" },
+        { id: "no", kind: "end", label: "No", position: at(3, 1), outcome: "no" },
+      ],
+      edges: [
+        { id: "e1", source: "trigger", target: "find" },
+        { id: "e2", source: "find", target: "check", outcome: "success" },
+        { id: "e3", source: "check", target: "yes", outcome: "true" },
+        { id: "e4", source: "check", target: "no", outcome: "false" },
+      ],
+      settings: {},
+    });
+    const { deps, finds, setFound } = harness(graph);
+    setFound([task(1), task(2), task(3)]);
+
+    const run = await startWorkflowRun(deps, { nodeId: "nod_workflow" });
+
+    expect(finds).toEqual([{ baseId: "bas_tasks", viewId: "viw_overdue", limit: 2 }]);
+    expect(run.status).toBe("completed");
+    expect(run.outputs.find?.data).toMatchObject({ count: 2, total: 3, truncated: true });
+    expect(
+      (run.outputs.find?.data.records as { recordId: string }[]).map((r) => r.recordId),
+    ).toEqual(["rec_task_1", "rec_task_2"]);
+    expect(run.outputs.yes).toBeDefined();
+    expect(await queuedRuns(deps)).toEqual([]);
+  });
+
+  it("runs the next steps once per record, each run about its own record", async () => {
+    const { deps, updates, setFound } = harness(findGraph({ forEach: true }));
+    setFound([task(1), task(2), task(3)]);
+
+    const parent = await startWorkflowRun(deps, { nodeId: "nod_workflow" });
+
+    expect(parent.status).toBe("completed");
+    expect(parent.cursorNodeId).toBeNull();
+    expect(parent.outputs.remind).toBeUndefined();
+    const childRunIds = parent.outputs.find?.data.childRunIds as string[];
+    expect(childRunIds).toHaveLength(3);
+    expect(updates).toEqual([]);
+
+    const children = await queuedRuns(deps);
+    expect(children.map((run) => run.id).sort()).toEqual([...childRunIds].sort());
+    for (const child of children) {
+      expect(child).toMatchObject({
+        status: "queued",
+        cursorNodeId: "remind",
+        previousNodeId: "find",
+        startedBy: parent.startedBy,
+        payload: { parentRunId: parent.id },
+      });
+      expect(child.outputs.find?.record?.recordId).toBe(child.recordId);
+      expect(child.outputs.trigger).toEqual(parent.outputs.trigger);
+    }
+
+    for (const child of children) {
+      const finished = await continueDueWorkflowRun(deps, child.id);
+      expect(finished?.status).toBe("completed");
+    }
+    expect(updates.map((update) => update.recordId).sort()).toEqual([
+      "rec_task_1",
+      "rec_task_2",
+      "rec_task_3",
+    ]);
+    // A formula reads the record this run is about.
+    expect(updates.find((update) => update.recordId === "rec_task_2")?.fields).toEqual({
+      status: "reminded",
+      note: "owner2",
+    });
+  });
+
+  it("starts nothing when more records match than the limit, even under error policy continue", async () => {
+    for (const errorPolicy of ["stop", "continue"] as const) {
+      const { deps, updates, setFound } = harness(
+        findGraph({ forEach: true, limit: 3 }, { errorPolicy }),
+      );
+      setFound([task(1), task(2), task(3)], 5);
+
+      const parent = await startWorkflowRun(deps, { nodeId: "nod_workflow" });
+
+      expect(parent.status).toBe("failed");
+      expect(parent.error).toContain("found 5 records, more than its limit of 3");
+      expect(await queuedRuns(deps)).toEqual([]);
+      expect(updates).toEqual([]);
+    }
+  });
+
+  it("does not repeat inside a run that is already one of a repeat", async () => {
+    const { deps, updates, setFound } = harness(
+      findGraph({ forEach: true }, { nestedForEach: true }),
+    );
+    setFound([task(1), task(2)]);
+    await startWorkflowRun(deps, { nodeId: "nod_workflow" });
+    const children = await queuedRuns(deps);
+    expect(children).toHaveLength(2);
+
+    const child = await continueDueWorkflowRun(deps, children[0]?.id ?? "");
+
+    expect(child?.status).toBe("failed");
+    expect(child?.error).toContain("already one of those runs");
+    expect(await queuedRuns(deps)).toHaveLength(1);
+    expect(updates).toEqual([]);
+  });
+
+  it("starts no more while the workflow has a backlog of waiting runs", async () => {
+    const { deps, setFound } = harness(findGraph({ forEach: true }));
+    setFound([task(1)]);
+    // The first run leaves one child waiting; fill the rest of the backlog.
+    const template = await startWorkflowRun(deps, { nodeId: "nod_workflow" });
+    for (let n = 1; n < WORKFLOW_MAX_QUEUED_RUNS; n += 1) {
+      await deps.store.insert({ ...template, id: `wfr_backlog_${n}`, status: "queued" }, 0);
+    }
+    expect(await queuedRuns(deps)).toHaveLength(WORKFLOW_MAX_QUEUED_RUNS);
+
+    const blocked = await startWorkflowRun(deps, { nodeId: "nod_workflow" });
+
+    expect(blocked.status).toBe("failed");
+    expect(blocked.error).toContain(
+      `${WORKFLOW_MAX_QUEUED_RUNS} runs of this workflow are still waiting`,
+    );
+    expect(await queuedRuns(deps)).toHaveLength(WORKFLOW_MAX_QUEUED_RUNS);
+  });
+
+  it("finishes with nothing to do when no record matches", async () => {
+    const { deps, setFound } = harness(findGraph({ forEach: true }));
+    setFound([]);
+
+    const parent = await startWorkflowRun(deps, { nodeId: "nod_workflow" });
+
+    expect(parent.status).toBe("completed");
+    expect(parent.outputs.find?.data).toMatchObject({ count: 0, childRunIds: [] });
+    expect(await queuedRuns(deps)).toEqual([]);
+  });
+
+  it("fails a step with no Base, and says so", async () => {
+    const { deps, finds } = harness(findGraph({ baseId: "", forEach: true }));
+
+    const run = await startWorkflowRun(deps, { nodeId: "nod_workflow" });
+
+    expect(run.status).toBe("failed");
+    expect(run.error).toContain("needs a Base");
+    expect(finds).toEqual([]);
   });
 });

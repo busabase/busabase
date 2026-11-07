@@ -7,8 +7,10 @@ import { Button } from "kui/button";
 import { Input } from "kui/input";
 import { ExternalLink, RefreshCw } from "lucide-react";
 import { iStringConcat } from "openlib/i18n/i-string";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { fmt, useCoreI18n } from "../../../i18n";
+import { PaginationNav } from "../../dashboard/components/pagination-nav";
+import { paginateTemplates } from "../utils/pagination";
 import { TemplateGrid } from "./template-grid";
 
 interface TemplatesListViewProps {
@@ -20,6 +22,16 @@ interface TemplatesListViewProps {
    * that says who can open it reads as a rule.
    */
   canInstall: boolean;
+  /**
+   * The search box and the page, owned by the caller. Opening a template
+   * unmounts this view; `TemplateCenter` stays mounted across the gallery and
+   * detail routes, so holding them there means Back returns to the page the
+   * user left — not to page 1 with the search cleared.
+   */
+  search: string;
+  onSearchChange: (search: string) => void;
+  page: number;
+  onPageChange: (page: number) => void;
 }
 
 /**
@@ -29,9 +41,17 @@ interface TemplatesListViewProps {
  * gallery and `npx skills add` show the same set — a template visible in one and
  * not the other is a bug users experience as "the docs lied".
  */
-export function TemplatesListView({ orpc, onOpenTemplate, canInstall }: TemplatesListViewProps) {
+export function TemplatesListView({
+  orpc,
+  onOpenTemplate,
+  canInstall,
+  search,
+  onSearchChange,
+  page,
+  onPageChange,
+}: TemplatesListViewProps) {
   const messages = useCoreI18n();
-  const [search, setSearch] = useState("");
+  const scrollRef = useRef<HTMLDivElement>(null);
   /**
    * The refresh button has to reach past the SERVER's hour-long cache, not just
    * react-query's. Refetching the default query would re-ask for the same
@@ -68,6 +88,17 @@ export function TemplatesListView({ orpc, onOpenTemplate, canInstall }: Template
     );
   }, [catalog.data, search]);
 
+  // `paginateTemplates` clamps, so a page left over from a longer list (the
+  // catalog refreshed smaller) lands on the last page that exists.
+  const current = paginateTemplates(filtered, page);
+
+  const changePage = (nextPage: number) => {
+    onPageChange(nextPage);
+    // The grid is taller than the viewport: without this the new page opens
+    // scrolled to where the controls were — its bottom.
+    scrollRef.current?.scrollTo({ top: 0 });
+  };
+
   return (
     // The page owns its own scrolling, the way Inbox and the review pages do: a
     // full-height column whose inner region scrolls.
@@ -81,7 +112,7 @@ export function TemplatesListView({ orpc, onOpenTemplate, canInstall }: Template
     // unreachable. `h-full` adopts the slot's height, which is what gives the
     // inner region a bound to scroll within.
     <div className="flex h-full min-h-0 flex-1 flex-col">
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="min-h-0 flex-1 overflow-y-auto" ref={scrollRef}>
         <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 p-6">
           <div className="flex flex-col gap-1">
             <h1 className="font-serif text-2xl">{messages.templates.title}</h1>
@@ -91,7 +122,11 @@ export function TemplatesListView({ orpc, onOpenTemplate, canInstall }: Template
           <div className="flex items-center gap-2">
             <Input
               value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              onChange={(event) => {
+                onSearchChange(event.target.value);
+                // A new search is a new list; its first page is where the best matches are.
+                onPageChange(1);
+              }}
               placeholder={messages.templates.search}
               className="max-w-xs"
             />
@@ -133,8 +168,18 @@ export function TemplatesListView({ orpc, onOpenTemplate, canInstall }: Template
             error={catalog.data?.error}
             isPending={catalog.isPending}
             onOpenTemplate={onOpenTemplate}
-            templates={filtered}
+            templates={current.items}
           />
+
+          {current.totalPages > 1 ? (
+            <PaginationNav
+              ariaLabel={messages.templates.paginationLabel}
+              className="justify-center"
+              onPageChange={changePage}
+              page={current.page}
+              totalPages={current.totalPages}
+            />
+          ) : null}
         </div>
       </div>
     </div>
