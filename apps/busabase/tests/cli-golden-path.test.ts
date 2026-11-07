@@ -64,8 +64,11 @@ describe("busabase-cli golden path (skill commands, in-process)", () => {
       if (savedEnv[k] === undefined) delete process.env[k];
       else process.env[k] = savedEnv[k];
     }
+    // PGlite is still flushing its data directory when the suite ends, and a plain
+    // `rm` then fails with ENOTEMPTY, failing a suite whose tests all passed. Retry
+    // with a growing delay until the last writes land.
     for (const dir of [dataDir, storageDir, homeDir]) {
-      if (dir) await rm(dir, { recursive: true, force: true });
+      if (dir) await rm(dir, { recursive: true, force: true, maxRetries: 8, retryDelay: 250 });
     }
   });
 
