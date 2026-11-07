@@ -71,7 +71,9 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # The suite takes 19-20 minutes; at 20 a run whose every test passed was
+    # cancelled on its last package. The limit only catches a hang.
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -115,7 +117,8 @@ jobs:
   # context; only a push-to-main run has somewhere safe to commit to.
   coverage:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Runs the same suite as `test`, with coverage on top.
+    timeout-minutes: 35
     permissions:
       contents: write
     outputs:
@@ -187,7 +190,8 @@ jobs:
 
   e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # 21-31 minutes for the full Playwright suite with retries.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
