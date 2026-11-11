@@ -198,6 +198,33 @@ describe("assertSelfContained — dangling same-package relations", () => {
     expect(warnings[0]).toContain("never carries attachment values");
   });
 
+  it("relaxes a REQUIRED drive field the same way — it holds file refs too", () => {
+    const drive = {
+      slug: "docs",
+      name: "资料",
+      type: "drive" as const,
+      required: true,
+      position: 0,
+      options: {},
+    };
+    const artifacts = baseNode("artifacts", {
+      base: { name: "artifacts", description: "", fields: [drive], views: [] },
+      records: [{ key: "rec-1", fields: {} }],
+    });
+    const tree: PackageTree = { manifest: manifest(), nodes: [artifacts] };
+
+    const warnings: string[] = [];
+    assertSelfContained(tree, {
+      manifest: manifest(),
+      warn: (m) => warnings.push(m),
+      baseUrl: "http://localhost",
+    });
+
+    expect(artifacts.base.fields[0].required).toBe(false);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('drive field "docs" is required in the source');
+  });
+
   it("leaves an optional attachment field untouched", () => {
     const attachment = {
       slug: "file",

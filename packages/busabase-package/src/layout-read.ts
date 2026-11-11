@@ -70,13 +70,12 @@ import {
 export type PackageFiles = Map<string, Buffer>;
 
 const decodeText = (bytes: Buffer, filePath: string): string => {
-  const text = bytes.toString("utf8");
-  // A lone replacement char means the bytes weren't UTF-8 — for files the format
-  // reads as text, that is a corrupt package rather than something to guess at.
-  if (text.includes("�")) {
+  try {
+    // U+FFFD can be authored text. Only malformed byte sequences are invalid.
+    return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+  } catch {
     throw new Error(`${filePath} is not valid UTF-8 text.`);
   }
-  return text;
 };
 
 const AIRAPP_MANIFEST_FILENAME = "airapp.json";
@@ -173,7 +172,7 @@ const zodParse = <T>(schema: z.ZodType<T>, value: unknown, filePath: string): T 
  */
 /** `base.json` minus the node-level key, so the list lives in exactly one place. */
 const baseWithoutAgentPrompts = (base: PackageBase): PackageBase => {
-  const { agentPrompts: _agentPrompts, ...rest } = base;
+  const { agentPrompts: _agentPrompts, slug: _slug, ...rest } = base;
   return rest;
 };
 
@@ -410,6 +409,7 @@ const readDirNode = (files: PackageFiles, dir: string, slug: string): PackageNod
     assertNoReservedNames(
       entries.map((entry) => entry.path),
       `${meta.type} "${slug}"`,
+      { allowFileSidecars: true },
     );
     if (meta.type === "airapp") {
       const lifecycle = resolveAirAppPackageLifecycle(entries, slug);
@@ -428,7 +428,7 @@ const readDirNode = (files: PackageFiles, dir: string, slug: string): PackageNod
     }
     return {
       type: meta.type,
-      slug,
+      slug: meta.slug ?? slug,
       name: meta.name,
       description: meta.description,
       position: meta.position,
@@ -444,7 +444,7 @@ const readDirNode = (files: PackageFiles, dir: string, slug: string): PackageNod
     const records = readRecords(files, dir, slug);
     return {
       type: "base",
-      slug,
+      slug: base.slug ?? slug,
       name: base.name,
       description: base.description,
       position: base.position,
@@ -465,7 +465,7 @@ const readDirNode = (files: PackageFiles, dir: string, slug: string): PackageNod
     : { name: undefined, description: "", position: undefined, agentPrompts: undefined };
   return {
     type: "folder",
-    slug,
+    slug: meta.slug ?? slug,
     name: meta.name ?? humanizeSlug(slug),
     description: meta.description,
     position: meta.position,
@@ -545,27 +545,27 @@ const readFileNode = (
   const bytes = files.get(`${dir}${fileName}`);
   if (!bytes) return undefined;
 
-  // 4. `*.md` → a doc node.
-  if (fileName.toLowerCase().endsWith(".md")) {
-    return readDocNode(bytes, dir, fileName);
-  }
-
-  // 5. anything else → a file node.
-  const slug = stripExtension(fileName);
-  assertSafeNodeSlug(slug, `file ${dir}${fileName}`);
   const sidecarPath = `${dir}${fileName}${PACKAGE_NODE_META_SUFFIX}`;
   const meta = files.has(sidecarPath)
     ? zodParse(PackageFileNodeMetaSchema, parseJsonFile(files, sidecarPath), sidecarPath)
-    : { name: undefined, description: "", position: undefined, agentPrompts: undefined };
+    : undefined;
+
+  // A carried Markdown asset is still a File, independent of its extension.
+  if (fileName.toLowerCase().endsWith(".md") && meta?.type !== "file") {
+    return readDocNode(bytes, dir, fileName);
+  }
+
+  const slug = meta?.slug ?? stripExtension(fileName);
+  assertSafeNodeSlug(slug, `file ${dir}${fileName}`);
   return {
     type: "file",
     slug,
-    name: meta.name ?? fileName,
-    description: meta.description,
-    position: meta.position,
-    ...agentPromptsField(meta.agentPrompts),
-    fileName,
-    mimeType: guessMimeType(fileName),
+    name: meta?.name ?? meta?.fileName ?? fileName,
+    description: meta?.description ?? "",
+    position: meta?.position,
+    ...agentPromptsField(meta?.agentPrompts),
+    fileName: meta?.fileName ?? fileName,
+    mimeType: meta?.mimeType ?? guessMimeType(meta?.fileName ?? fileName),
     bytes,
   };
 };
@@ -573,16 +573,17 @@ const readFileNode = (
 const readDocNode = (bytes: Buffer, dir: string, fileName: string): PackageDocNode => {
   const filePath = `${dir}${fileName}`;
   const slug = fileName.slice(0, -".md".length);
-  assertSafeNodeSlug(slug, `doc ${filePath}`);
   const { data, body } = parseFrontmatter(decodeText(bytes, filePath), filePath);
   const frontmatter = zodParse(
     PackageDocFrontmatterSchema,
     { name: humanizeSlug(slug), ...data },
     `${filePath} frontmatter`,
   );
+  const nodeSlug = frontmatter.slug ?? slug;
+  assertSafeNodeSlug(nodeSlug, `doc ${filePath}`);
   return {
     type: "doc",
-    slug,
+    slug: nodeSlug,
     name: frontmatter.name,
     description: frontmatter.description,
     position: frontmatter.position,

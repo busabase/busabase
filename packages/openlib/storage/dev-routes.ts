@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { isLocalStorageProvider, storage } from "./factory";
 import { LocalMultipartError, type LocalStorage } from "./local";
 import { invalidStorageKeyResponse, isSafeStorageKey } from "./storage-key";
@@ -27,19 +28,34 @@ const notAvailableInProduction = () => new Response("Not available in production
  * consuming app.
  */
 const MIME_TYPES: Record<string, string> = {
+  aac: "audio/aac",
+  aif: "audio/aiff",
+  aiff: "audio/aiff",
   csv: "text/csv",
   doc: "application/msword",
   docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  flac: "audio/flac",
   gif: "image/gif",
   jpeg: "image/jpeg",
   jpg: "image/jpeg",
+  m4a: "audio/mp4",
+  m4v: "video/mp4",
   md: "text/markdown",
+  mov: "video/quicktime",
+  mp3: "audio/mpeg",
+  mp4: "video/mp4",
+  oga: "audio/ogg",
+  ogg: "audio/ogg",
+  ogv: "video/ogg",
+  opus: "audio/ogg",
   pdf: "application/pdf",
   png: "image/png",
   ppt: "application/vnd.ms-powerpoint",
   pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   svg: "image/svg+xml",
   txt: "text/plain",
+  wav: "audio/wav",
+  webm: "video/webm",
   webp: "image/webp",
   xls: "application/vnd.ms-excel",
   xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -47,6 +63,25 @@ const MIME_TYPES: Record<string, string> = {
 };
 
 const CACHE_CONTROL = "public, max-age=31536000, immutable";
+
+/** Single byte ranges; unsupported units/multipart requests fall back to a full read. */
+const objectByteRange = (
+  header: string | null,
+  size: number,
+): { start: number; end: number } | "invalid" | null => {
+  if (!header || !header.toLowerCase().startsWith("bytes=")) return null;
+  if (header.includes(",")) return null;
+  const match = /^bytes=(\d*)-(\d*)$/i.exec(header.trim());
+  if (!match || (!match[1] && !match[2]) || size === 0) return "invalid";
+  if (!match[1]) {
+    const suffix = Number(match[2]);
+    return suffix > 0 ? { start: Math.max(0, size - suffix), end: size - 1 } : "invalid";
+  }
+  const start = Number(match[1]);
+  const end = match[2] ? Math.min(Number(match[2]), size - 1) : size - 1;
+  if (!Number.isSafeInteger(start) || start >= size || end < start) return "invalid";
+  return { start, end };
+};
 
 export interface CreateDevUploadRouteOptions {
   /**
@@ -76,7 +111,35 @@ export interface CreateDevUploadRouteOptions {
    * @default () => storage  (the openlib singleton)
    */
   resolveStorage?: (source: { form?: FormData; params?: URLSearchParams }) => IStorage;
+  /** Verify the digest encoded in a content-addressed attachment key before writing it. */
+  verifyContentAddressedKey?: boolean;
 }
+
+const uploadBodyError = (
+  buffer: Buffer,
+  key: string,
+  verifyContentAddressedKey: boolean,
+  expectedLengths: Array<string | null> = [],
+): Response | null => {
+  for (const raw of expectedLengths) {
+    if (raw === null) continue;
+    if (!/^\d+$/.test(raw) || !Number.isSafeInteger(Number(raw))) {
+      return new Response("Invalid upload content length", { status: 400 });
+    }
+    if (Number(raw) !== buffer.byteLength) {
+      return new Response("Uploaded body size does not match the expected content length", {
+        status: 400,
+      });
+    }
+  }
+  const digest = verifyContentAddressedKey
+    ? /(?:^|\/)blobs\/sha256\/[0-9a-f]{2}\/([0-9a-f]{64})(?:\.[^/]+)?$/.exec(key)?.[1]
+    : undefined;
+  if (digest && createHash("sha256").update(buffer).digest("hex") !== digest) {
+    return new Response("Uploaded body does not match its SHA-256 storage key", { status: 400 });
+  }
+  return null;
+};
 
 /**
  * Build the `/api/dev/upload` handlers.
@@ -114,6 +177,12 @@ export function createDevUploadRoute(opts?: CreateDevUploadRouteOptions): {
       }
 
       const buffer = Buffer.from(await file.arrayBuffer());
+      const integrityError = uploadBodyError(
+        buffer,
+        storageKey,
+        opts?.verifyContentAddressedKey ?? false,
+      );
+      if (integrityError) return integrityError;
 
       const targetStorage = opts?.resolveStorage?.({ form: formData }) ?? storage;
       await targetStorage.uploadFileToKey(buffer, storageKey, file.type);
@@ -150,6 +219,13 @@ export function createDevUploadRoute(opts?: CreateDevUploadRouteOptions): {
 
       const mimeType = req.headers.get("content-type") || "application/octet-stream";
       const buffer = Buffer.from(await req.arrayBuffer());
+      const integrityError = uploadBodyError(
+        buffer,
+        key,
+        opts?.verifyContentAddressedKey ?? false,
+        [req.headers.get("content-length"), params.get("contentLength")],
+      );
+      if (integrityError) return integrityError;
 
       const targetStorage = opts?.resolveStorage?.({ params }) ?? storage;
       await targetStorage.uploadFileToKey(buffer, key, mimeType);
@@ -303,7 +379,7 @@ export function createDevAttachmentRoute(opts?: CreateDevAttachmentRouteOptions)
   const gateProduction = opts?.gateProduction ?? true;
 
   const GET = async (
-    _req: Request,
+    req: Request,
     { params }: { params: Promise<{ key: string[] }> },
   ): Promise<Response> => {
     if (gateProduction && isProduction()) {
@@ -346,22 +422,47 @@ export function createDevAttachmentRoute(opts?: CreateDevAttachmentRouteOptions)
       // Storage-adapter branch (formerly storage.getObject).
       console.log("[Dev Attachment] Fetching:", key);
 
+      const ext = key.split(".").pop()?.toLowerCase();
+      const contentType = (ext && MIME_TYPES[ext]) || "application/octet-stream";
+      const headers = new Headers({
+        "Content-Type": contentType,
+        "Cache-Control": CACHE_CONTROL,
+        "Accept-Ranges": "bytes",
+      });
       let fileBuffer: Buffer;
       try {
-        fileBuffer = await storage.getObject(key);
+        const metadata = await storage.getObjectMetadata(key);
+        if (!metadata) return new Response("File not found", { status: 404 });
+        // Next forwards HEAD to GET when a route exports no HEAD handler. Range
+        // applies only to GET; a conditional If-Range falls back to the full file.
+        const range =
+          req.method === "GET" && !req.headers.has("if-range")
+            ? objectByteRange(req.headers.get("range"), metadata.size)
+            : null;
+        if (range === "invalid") {
+          headers.set("Content-Range", `bytes */${metadata.size}`);
+          headers.set("Content-Length", "0");
+          return new Response(null, { status: 416, headers });
+        }
+        if (req.method === "HEAD") {
+          headers.set("Content-Length", String(metadata.size));
+          return new Response(null, { headers });
+        }
+        fileBuffer = range
+          ? await storage.getObjectRange(key, range.start, range.end)
+          : await storage.getObject(key);
+        headers.set("Content-Length", String(fileBuffer.length));
+        if (range) {
+          headers.set("Content-Range", `bytes ${range.start}-${range.end}/${metadata.size}`);
+          return new Response(new Uint8Array(fileBuffer), { status: 206, headers });
+        }
       } catch {
         console.error("[Dev Attachment] Not found:", key);
         return new Response("File not found", { status: 404 });
       }
 
-      const ext = key.split(".").pop()?.toLowerCase();
-      const contentType = (ext && MIME_TYPES[ext]) || "application/octet-stream";
-
       return new Response(new Uint8Array(fileBuffer), {
-        headers: {
-          "Content-Type": contentType,
-          "Cache-Control": CACHE_CONTROL,
-        },
+        headers,
       });
     } catch (error) {
       console.error("[Dev Attachment] Error:", error);

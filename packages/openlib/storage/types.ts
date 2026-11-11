@@ -112,8 +112,9 @@ export interface IStorage {
    * Generate presigned URL for uploading file (PUT)
    *
    * `options` is optional and additive: an adapter that can bind more of the
-   * request into the signature (S3) does so, one that cannot (local relay)
-   * ignores it. Callers must therefore still verify the stored object after the
+   * request into the signature (S3) does so. The local relay carries the expected
+   * length in its URL and validates the received bytes, without a signature.
+   * Callers must therefore still verify the stored object after the
    * upload (`getObjectMetadata`) — the signature narrows what a client can send,
    * it is not the check.
    */

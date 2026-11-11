@@ -1,4 +1,5 @@
 import {
+  type GridRowHeight,
   mapViewFilters,
   type ViewFilterConditionVO,
   type ViewFilterConjunction,
@@ -20,6 +21,7 @@ import {
 } from "busabase-contract/domains/package/template";
 import {
   PACKAGE_COMPUTED_FIELD_TYPES,
+  PACKAGE_FILE_FIELD_TYPES,
   PACKAGE_FORMAT,
   type PackageBaseField,
   type PackageFieldOptions,
@@ -30,6 +32,8 @@ import {
 import type { PackageClient } from "./client";
 import { collectDocAssetIds, reportUnresolvableDocAssets } from "./doc-asset-refs";
 import {
+  assertNoReservedNames,
+  assertSafeFilePath,
   guessMimeType,
   NODE_SLUG_PATTERN,
   type PackageDocAsset,
@@ -38,6 +42,7 @@ import {
   type PackageNode,
   type PackageRootSkill,
   type PackageTree,
+  planSiblingPaths,
   sortNodes,
   walkNodes,
 } from "./tree";
@@ -80,6 +85,8 @@ export interface CollectOptions {
    * omit it — it defaults to empty, meaning "nothing was install-renamed."
    */
   baseResourceKeys?: ReadonlyMap<string, string>;
+  /** Internal: undo installed resource keys only when exporting that selected app. */
+  restoreResourceKeys?: boolean;
   /**
    * Internal, set by {@link collectPackageTree}: has the prompts read already
    * failed once this export?
@@ -116,10 +123,20 @@ export const collectPackageTree = async (
   // walk zero nodes and export nothing but an empty manifest. Fall back to
   // `[root]` so exporting a non-folder node directly still collects it.
   const children = root.type === "folder" ? (root.children ?? []) : [root];
-  const { skillSource, rest } = partitionTemplateSkill(children);
+  const restoreResourceKeys =
+    root.type !== "folder" ||
+    root.metadata?.resourceKey === APP_ROOT_RESOURCE_KEY ||
+    children.some(
+      (node) => node.type === "skill" && node.metadata?.[TEMPLATE_SKILL_METADATA_KEY] === true,
+    );
+  const { skillSource, rest } = restoreResourceKeys
+    ? partitionTemplateSkill(children)
+    : { skillSource: undefined, rest: [...children] };
+  preflightSourceStructure(rest, restoreResourceKeys);
   const collectOptions: CollectOptions = {
     ...options,
-    baseResourceKeys: collectBaseResourceKeys(children),
+    restoreResourceKeys,
+    baseResourceKeys: collectBaseResourceKeys(children, restoreResourceKeys),
     agentPromptsUnavailable: options.agentPromptsUnavailable ?? { value: false },
   };
   const nodes = await collectNodes(client, rest, collectOptions);
@@ -133,6 +150,34 @@ export const collectPackageTree = async (
   };
   assertSelfContained(tree, collectOptions);
   return tree;
+};
+
+const SUPPORTED_NODE_TYPES = new Set(["folder", "base", "doc", "skill", "airapp", "drive", "file"]);
+
+/** Check node identities and layout feasibility before any file download. */
+const preflightSourceStructure = (sources: readonly SourceNode[], restore: boolean): void => {
+  const seen = new Set<string>();
+  const visit = (siblings: readonly SourceNode[]): void => {
+    const nodes = siblings
+      .filter((node) => SUPPORTED_NODE_TYPES.has(node.type))
+      .map((source) => ({
+        ...source,
+        type: source.type as PackageNode["type"],
+        slug: restoredNodeSlug(source, restore),
+      }));
+    planSiblingPaths(nodes);
+    for (const node of nodes) {
+      const identity = `${node.type}:${node.slug}`;
+      if (seen.has(identity)) {
+        throw new Error(
+          `Cannot export two ${node.type} nodes with slug "${node.slug}" into one space. Export the installed templates separately, or use their unique source slugs.`,
+        );
+      }
+      seen.add(identity);
+      if (node.type === "folder") visit(node.children ?? []);
+    }
+  };
+  visit(sources);
 };
 
 /**
@@ -159,7 +204,11 @@ export const collectPackageTree = async (
  * (the folder, and the app before its own stamp renamed it back to "airapp"),
  * so the app's rename bled onto its own parent folder on export.
  */
-const restoredNodeSlug = (source: Pick<SourceNode, "slug" | "metadata">): string => {
+const restoredNodeSlug = (
+  source: Pick<SourceNode, "slug" | "metadata">,
+  restore = true,
+): string => {
+  if (!restore) return source.slug;
   const key = source.metadata?.resourceKey;
   if (
     typeof key === "string" &&
@@ -184,12 +233,15 @@ const restoredNodeSlug = (source: Pick<SourceNode, "slug" | "metadata">): string
  * re-deriving it from a name that might collide with something else in the
  * space.
  */
-const collectBaseResourceKeys = (sources: readonly SourceNode[]): Map<string, string> => {
+const collectBaseResourceKeys = (
+  sources: readonly SourceNode[],
+  restore: boolean,
+): Map<string, string> => {
   const byBaseId = new Map<string, string>();
   const walk = (list: readonly SourceNode[]): void => {
     for (const source of list) {
       if (source.type === "base") {
-        const restored = restoredNodeSlug(source);
+        const restored = restoredNodeSlug(source, restore);
         if (restored !== source.slug) byBaseId.set(source.baseId ?? source.slug, restored);
       }
       if (source.children) walk(source.children);
@@ -342,7 +394,7 @@ const collectNode = async (
   options: CollectOptions,
 ): Promise<PackageNode | undefined> => {
   const common = {
-    slug: restoredNodeSlug(source),
+    slug: restoredNodeSlug(source, options.restoreResourceKeys),
     name: source.name,
     description: source.description ?? "",
     // `export` always writes position, so round trips preserve sibling order exactly.
@@ -601,6 +653,7 @@ const toPackageView = (view: {
     hiddenFieldSlugs?: string[];
     autoShowNewFields?: boolean;
     fieldWidths?: Record<string, number>;
+    rowHeight?: GridRowHeight;
   };
 }): PackageView => ({
   slug: view.slug,
@@ -623,6 +676,7 @@ const toPackageView = (view: {
     hiddenFieldSlugs: view.config.hiddenFieldSlugs,
     autoShowNewFields: view.config.autoShowNewFields,
     fieldWidths: view.config.fieldWidths,
+    rowHeight: view.config.rowHeight,
   },
 });
 
@@ -654,7 +708,7 @@ const collectRecords = async (
         if (!type) continue;
         if (PACKAGE_COMPUTED_FIELD_TYPES.includes(type)) continue;
         if (reverseSlugs.has(slug)) continue;
-        if (type === "attachment") {
+        if (PACKAGE_FILE_FIELD_TYPES.includes(type)) {
           if (value !== null && value !== undefined) droppedAttachments++;
           continue;
         }
@@ -711,6 +765,12 @@ const collectFileTree = async (
     if (page.length < LIST_FILES_PAGE_SIZE || !next) break;
     after = next;
   }
+  assertNoReservedNames(
+    listed.map((file) => file.path),
+    `${type} "${source.slug}"`,
+    { allowFileSidecars: true },
+  );
+  for (const file of listed) assertSafeFilePath(file.path, `${type} "${source.slug}"`);
   const files: PackageFileEntry[] = [];
   for (const file of listed) {
     const read = await client.fileTrees.readFile({
@@ -722,7 +782,7 @@ const collectFileTree = async (
       path: file.path,
       bytes:
         read.encoding === "url"
-          ? await downloadBytes(read.content, file.path, options)
+          ? await downloadBytes(read.assetUrl || read.content, file.path, options)
           : Buffer.from(read.content, "utf8"),
     });
   }
@@ -810,10 +870,8 @@ export const assertSelfContained = (tree: PackageTree, options: CollectOptions):
 
   const baseNodes = [...walkNodes(tree.nodes)].filter((node) => node.type === "base");
   const packagedBaseSlugs = new Set(baseNodes.map((node) => node.slug));
-  const packagedRecordKeys = new Set(
-    baseNodes.flatMap((node) =>
-      node.type === "base" ? node.records.map((record) => record.key) : [],
-    ),
+  const packagedRecordKeys = new Map(
+    baseNodes.map((node) => [node.slug, new Set(node.records.map((record) => record.key))]),
   );
 
   for (const node of baseNodes) {
@@ -826,10 +884,10 @@ export const assertSelfContained = (tree: PackageTree, options: CollectOptions):
     // `Invalid field value: 文件 is required`. Unlike the relation case below,
     // this needs no per-record check: there is no value that could survive.
     for (const field of node.base.fields) {
-      if (field.type !== "attachment" || !field.required) continue;
+      if (!PACKAGE_FILE_FIELD_TYPES.includes(field.type) || !field.required) continue;
       field.required = false;
       options.warn(
-        `Base "${node.slug}": attachment field "${field.slug}" is required in the source, but ` +
+        `Base "${node.slug}": ${field.type} field "${field.slug}" is required in the source, but ` +
           `${PACKAGE_FORMAT} never carries attachment values — the field would be empty in every ` +
           "installed record and the install would fail. It is marked NOT required in this package.",
       );
@@ -854,7 +912,8 @@ export const assertSelfContained = (tree: PackageTree, options: CollectOptions):
         const value = record.fields[field.slug];
         const keys = Array.isArray(value) ? value : typeof value === "string" ? [value] : [];
         if (keys.length === 0) continue;
-        const kept = keys.filter((key) => typeof key !== "string" || packagedRecordKeys.has(key));
+        const targetKeys = packagedRecordKeys.get(field.options.targetBaseSlug ?? "");
+        const kept = keys.filter((key) => typeof key === "string" && targetKeys?.has(key));
         dangling += keys.length - kept.length;
         // The warning below claims these are dropped — actually drop them, or a
         // package that says "self-contained" still ships a reference `apply`'s

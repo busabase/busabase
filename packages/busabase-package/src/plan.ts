@@ -8,6 +8,7 @@
  * must also rewrite every relation `targetBaseSlug` that points at it.
  */
 import { PACKAGE_MAX_FILE_COUNT } from "busabase-contract/domains/package/types";
+import { NodeSlugSchema } from "busabase-contract/node-slug";
 import { iStringParse } from "openlib/i18n/i-string";
 import type { PackageClient } from "./client";
 import { buildRecordCreateLayers } from "./record-dependencies";
@@ -104,6 +105,8 @@ export interface PlanCounts {
 
 export interface InstallPlan {
   targetFolderSlug: string;
+  /** Independent target chosen for this install; it must never reuse a folder. */
+  newFolder?: { slug: string; name: string };
   /** Existing target folder to reuse, including the workspace root itself. */
   existingTargetFolderNodeId?: string;
   /** The tree to apply — already rewritten when `--rename` resolved collisions. */
@@ -140,6 +143,8 @@ export interface InstallPlan {
 export interface BuildPlanOptions {
   /** Defaults to the manifest name (§12). */
   intoFolder?: string;
+  /** The host resolves an automatic slug once, then reuses it for this install. */
+  newFolder?: { slug: string; name?: string };
   rename?: boolean;
   /**
    * Prefix each Base's slug with the target folder's, so `reviews` installs as
@@ -176,12 +181,25 @@ export const buildInstallPlan = (
   target: TargetState,
   options: BuildPlanOptions = {},
 ): InstallPlan => {
-  // The manifest NAME is free-form ("Support KB Starter"); a node slug must match
-  // /^[a-z0-9-]+$/. Using the name raw made the default target folder unusable —
-  // the install failed with a bare "Input validation failed", and the dialog made
-  // it worse by prefilling that same rejected value. An explicit `intoFolder` is
-  // taken as given (it is validated downstream, so a bad one still errors clearly).
-  const targetFolderSlug = options.intoFolder ?? suggestSlug(tree.manifest.name);
+  if (options.newFolder && options.intoFolder !== undefined) {
+    throw new Error("Choose either a new folder or an existing target slug, not both.");
+  }
+  const targetFolderSlug =
+    options.newFolder?.slug ?? options.intoFolder ?? suggestSlug(tree.manifest.name);
+  assertInstallTargetSlug(targetFolderSlug);
+  const newFolder = options.newFolder
+    ? {
+        slug: targetFolderSlug,
+        name: options.newFolder.name?.trim() ?? tree.manifest.name,
+      }
+    : undefined;
+  if (newFolder && !newFolder.name) throw new Error("The folder name must not be empty.");
+  if (
+    newFolder &&
+    (target.targetFolder || target.existingNodeSlugsByType.get("folder")?.has(targetFolderSlug))
+  ) {
+    throw new Error("The new installation folder already exists. Preview the install again.");
+  }
   const warnings: string[] = [];
 
   assertPackageNodeIdentitiesUnique(tree);
@@ -201,7 +219,7 @@ export const buildInstallPlan = (
   const collisions = findCollisions(prefixed, targetFolderSlug, target);
 
   let planned = prefixed;
-  if (options.rename && collisions.length > 0) {
+  if ((options.rename ?? Boolean(newFolder)) && collisions.length > 0) {
     planned = applyRenames(prefixed, collisions, target.existingNodeSlugsByType);
     // A rename layers on top of a prefix, so re-derive against the ORIGINAL
     // tree — otherwise a doubly-rewritten node would record its prefixed slug
@@ -226,6 +244,7 @@ export const buildInstallPlan = (
 
   return {
     targetFolderSlug,
+    ...(newFolder ? { newFolder } : {}),
     existingTargetFolderNodeId: target.targetFolder?.id,
     tree: planned,
     collisions,
@@ -240,6 +259,15 @@ export const buildInstallPlan = (
     resourceKeysBySlug,
     isTemplate,
   };
+};
+
+/** Defense for CLI/internal plans as well as the server's validated DTOs. */
+export const assertInstallTargetSlug = (slug: string): void => {
+  if (!NodeSlugSchema.safeParse(slug).success) {
+    throw new Error(
+      "The target folder slug must contain only lowercase letters, digits, and hyphens.",
+    );
+  }
 };
 
 /**

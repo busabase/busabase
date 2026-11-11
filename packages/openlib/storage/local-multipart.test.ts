@@ -1,4 +1,5 @@
-import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -61,6 +62,66 @@ describe("LocalStorage multipart + part relay", () => {
     expect(await readFile(path.join(root, key), "utf8")).toBe("hello world");
     await expect(storage.getObjectMetadata(key)).resolves.toMatchObject({ size: 11 });
     // Temp parts are cleaned up.
+    expect(await readdir(path.join(root, ".tmp", "multipart"))).toEqual([]);
+  });
+
+  it("assembles 32 parts without accumulating destination listeners", async () => {
+    const { root, storage, PUT } = await setup(16 * 1024);
+    const key = "attachments/user-1/many-parts.bin";
+    const uploadId = await storage.createMultipartUpload(key, "application/octet-stream");
+    const bodies = Array.from({ length: 32 }, (_, index) => `${index}:${"x".repeat(8192)}`);
+    for (const [index, body] of bodies.entries()) {
+      const response = await put(
+        PUT,
+        await storage.getUploadPartPresignedUrl(key, uploadId, index + 1),
+        body,
+      );
+      expect(response.status).toBe(200);
+    }
+    const parts = await storage.listMultipartParts(key, uploadId);
+    const warnings: Error[] = [];
+    const onWarning = (warning: Error) => {
+      if (warning.name === "MaxListenersExceededWarning") warnings.push(warning);
+    };
+    process.on("warning", onWarning);
+    try {
+      await storage.completeMultipartUpload(key, uploadId, parts.reverse());
+      // Node emits listener warnings on the next tick, after the triggering call.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(warnings).toEqual([]);
+      const expected = Buffer.from(bodies.join(""));
+      const actual = await readFile(path.join(root, key));
+      expect(actual).toEqual(expected);
+      expect(createHash("sha256").update(actual).digest("hex")).toBe(
+        createHash("sha256").update(expected).digest("hex"),
+      );
+      expect(await readdir(path.join(root, ".tmp", "multipart"))).toEqual([]);
+    } finally {
+      process.off("warning", onWarning);
+    }
+  });
+
+  it("preserves the previous object and removes assembly files if a part cannot be read", async () => {
+    const { root, storage, PUT } = await setup();
+    const key = "attachments/user-1/retry.bin";
+    const previous = Buffer.from("previous complete object");
+    await storage.uploadFileToKey(previous, key, "application/octet-stream");
+    const uploadId = await storage.createMultipartUpload(key, "application/octet-stream");
+    await put(PUT, await storage.getUploadPartPresignedUrl(key, uploadId, 1), "first");
+    await put(PUT, await storage.getUploadPartPresignedUrl(key, uploadId, 2), "second");
+    const parts = await storage.listMultipartParts(key, uploadId);
+    const unreadablePart = path.join(root, ".tmp", "multipart", uploadId, "2");
+    await rm(unreadablePart);
+    await mkdir(unreadablePart);
+
+    await expect(storage.completeMultipartUpload(key, uploadId, parts)).rejects.toThrow();
+    expect(await readFile(path.join(root, key))).toEqual(previous);
+    expect(
+      (await readdir(path.dirname(path.join(root, key)))).filter((name) =>
+        name.endsWith(".assembling"),
+      ),
+    ).toEqual([]);
+    await storage.abortMultipartUpload(key, uploadId);
     expect(await readdir(path.join(root, ".tmp", "multipart"))).toEqual([]);
   });
 

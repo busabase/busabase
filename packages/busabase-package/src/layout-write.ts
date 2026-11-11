@@ -12,7 +12,7 @@
  *   • LF endings, trailing newline on every file
  */
 import { mkdir, rm, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, extname, join } from "node:path";
 import type { CustomAgentPrompts } from "busabase-contract/contract/node-agent-prompt-schemas";
 import {
   PACKAGE_SKILL_ENTRY,
@@ -39,12 +39,12 @@ import { docAssetBytesPath } from "./doc-asset-refs";
 import { serializeDoc } from "./frontmatter";
 import {
   assertNoReservedNames,
-  assertNoSiblingCaseCollisions,
   assertSafeFilePath,
-  assertSafeNodeSlug,
+  guessMimeType,
   type PackageDocAsset,
   type PackageNode,
   type PackageTree,
+  planSiblingPaths,
   serializeAgentPrompts,
   sortNodes,
 } from "./tree";
@@ -127,6 +127,7 @@ const serializeView = (view: PackageView): Record<string, unknown> =>
       hiddenFieldSlugs: view.config.hiddenFieldSlugs,
       autoShowNewFields: view.config.autoShowNewFields,
       fieldWidths: view.config.fieldWidths,
+      rowHeight: view.config.rowHeight,
     }),
   });
 
@@ -134,10 +135,12 @@ const serializeBase = (
   base: PackageBase,
   position: number | undefined,
   agentPrompts: CustomAgentPrompts | undefined,
+  slug?: string,
 ): Buffer =>
   toJsonFile(
     compact({
       name: base.name,
+      slug,
       description: base.description || undefined,
       position,
       reviewPolicy: base.reviewPolicy,
@@ -219,25 +222,23 @@ const renderDocAssets = (assets: readonly PackageDocAsset[], files: PackageFiles
 };
 
 const renderNodes = (nodes: readonly PackageNode[], dir: string, files: PackageFiles): void => {
-  const ordered = sortNodes(nodes);
-  assertNoSiblingCaseCollisions(
-    ordered.map((node) => node.slug),
-    `in ${dir}`,
-  );
-  const seen = new Set<string>();
-  for (const node of ordered) {
-    assertSafeNodeSlug(node.slug, `${node.type} node`);
-    if (seen.has(node.slug)) {
-      throw new Error(
-        `Two nodes in ${dir} would be written as "${node.slug}". Sibling slugs must be unique.`,
-      );
-    }
-    seen.add(node.slug);
-    renderNode(node, dir, files);
-  }
+  const paths = planSiblingPaths(nodes);
+  for (const node of sortNodes(nodes)) renderNode(node, dir, files, paths.get(node)!);
 };
 
-const renderNode = (node: PackageNode, dir: string, files: PackageFiles): void => {
+const renderNode = (
+  node: PackageNode,
+  dir: string,
+  files: PackageFiles,
+  pathName: string,
+): void => {
+  const pathSlug =
+    node.type === "doc"
+      ? pathName.slice(0, -3)
+      : node.type === "file"
+        ? pathName.slice(0, pathName.length - extname(pathName).length)
+        : pathName;
+  const aliasedSlug = pathSlug === node.slug ? undefined : node.slug;
   switch (node.type) {
     case "folder": {
       // `_folder.json` carries metadata, and is also how an empty folder survives git.
@@ -249,10 +250,11 @@ const renderNode = (node: PackageNode, dir: string, files: PackageFiles): void =
         node.name !== undefined;
       if (needsMeta) {
         files.set(
-          `${dir}${node.slug}/${PACKAGE_FOLDER_META_FILENAME}`,
+          `${dir}${pathName}/${PACKAGE_FOLDER_META_FILENAME}`,
           toJsonFile(
             compact({
               name: node.name,
+              slug: aliasedSlug,
               description: node.description || undefined,
               position: node.position,
               agentPrompts: serializeAgentPrompts(node.agentPrompts),
@@ -260,16 +262,17 @@ const renderNode = (node: PackageNode, dir: string, files: PackageFiles): void =
           ),
         );
       }
-      renderNodes(node.children, `${dir}${node.slug}/`, files);
+      renderNodes(node.children, `${dir}${pathName}/`, files);
       return;
     }
     case "doc": {
       files.set(
-        `${dir}${node.slug}.md`,
+        `${dir}${pathName}`,
         Buffer.from(
           serializeDoc(
             {
               name: node.name,
+              slug: aliasedSlug,
               description: node.description,
               position: node.position,
               agentPrompts: node.agentPrompts,
@@ -283,27 +286,29 @@ const renderNode = (node: PackageNode, dir: string, files: PackageFiles): void =
     }
     case "base": {
       files.set(
-        `${dir}${node.slug}/${PACKAGE_BASE_FILENAME}`,
-        serializeBase(node.base, node.position, node.agentPrompts),
+        `${dir}${pathName}/${PACKAGE_BASE_FILENAME}`,
+        serializeBase(node.base, node.position, node.agentPrompts, aliasedSlug),
       );
       const records = serializeRecords(node.records);
       if (records.byteLength > 0)
-        files.set(`${dir}${node.slug}/${PACKAGE_RECORDS_FILENAME}`, records);
+        files.set(`${dir}${pathName}/${PACKAGE_RECORDS_FILENAME}`, records);
       return;
     }
     case "skill":
     case "airapp":
     case "drive": {
-      const nodeDir = `${dir}${node.slug}/`;
+      const nodeDir = `${dir}${pathName}/`;
       assertNoReservedNames(
         node.files.map((entry) => entry.path),
         `${node.type} "${node.slug}"`,
+        { allowFileSidecars: true },
       );
       files.set(
         `${nodeDir}${PACKAGE_NODE_META_FILENAME}`,
         toJsonFile(
           compact({
             type: node.type,
+            slug: aliasedSlug,
             name: node.name,
             description: node.description || undefined,
             position: node.position,
@@ -318,19 +323,27 @@ const renderNode = (node: PackageNode, dir: string, files: PackageFiles): void =
       return;
     }
     case "file": {
-      assertSafeFilePath(node.fileName, `file node "${node.slug}"`);
-      files.set(`${dir}${node.fileName}`, node.bytes);
+      assertSafeFilePath(pathName, `file node "${node.slug}"`);
+      files.set(`${dir}${pathName}`, node.bytes);
       // The sidecar only exists when it carries something the filename can't.
       const hasMeta =
+        aliasedSlug !== undefined ||
+        pathName !== node.fileName ||
+        node.mimeType !== guessMimeType(pathName) ||
+        pathName.toLowerCase().endsWith(".md") ||
         node.name !== node.fileName ||
         node.description !== "" ||
         node.position !== undefined ||
         node.agentPrompts !== undefined;
       if (hasMeta) {
         files.set(
-          `${dir}${node.fileName}${PACKAGE_NODE_META_SUFFIX}`,
+          `${dir}${pathName}${PACKAGE_NODE_META_SUFFIX}`,
           toJsonFile(
             compact({
+              type: pathName.toLowerCase().endsWith(".md") ? "file" : undefined,
+              slug: aliasedSlug,
+              fileName: pathName !== node.fileName ? node.fileName : undefined,
+              mimeType: node.mimeType !== guessMimeType(pathName) ? node.mimeType : undefined,
               name: node.name,
               description: node.description || undefined,
               position: node.position,
