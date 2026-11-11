@@ -55,7 +55,7 @@ export function NativeBottomSheet({
           regularPresentation ? styles.sheetScrimRegular : null,
           { backgroundColor: tokens.overlay },
         ]}
-        behavior={Platform.select({ ios: "padding", default: undefined })}
+        behavior={Platform.select({ ios: "padding", android: "height", default: undefined })}
       >
         <Pressable
           accessibilityRole="button"

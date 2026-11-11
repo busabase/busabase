@@ -10,9 +10,29 @@ interface UseAttachmentFieldOptions {
   maxFiles?: number;
   refs: AssetAttachmentRef[];
   onChange: (refs: AssetAttachmentRef[]) => void;
+  /**
+   * Where a freshly uploaded ref lands among the refs that stay. An `attachment`
+   * cell appends it; a `drive` cell files it into the folder being viewed. Both
+   * editors share this one hook so picking, uploading and the `maxFiles` rule
+   * cannot drift apart between the two field types.
+   */
+  placeUploaded?: (
+    kept: AssetAttachmentRef[],
+    uploaded: AssetAttachmentRef,
+  ) => AssetAttachmentRef[];
 }
 
-export function useAttachmentField({ maxFiles, refs, onChange }: UseAttachmentFieldOptions) {
+const appendUploaded = (kept: AssetAttachmentRef[], uploaded: AssetAttachmentRef) => [
+  ...kept,
+  uploaded,
+];
+
+export function useAttachmentField({
+  maxFiles,
+  refs,
+  onChange,
+  placeUploaded = appendUploaded,
+}: UseAttachmentFieldOptions) {
   const buda = useBusabaseOrpc();
   const { getCloudAuthorizationHeaders, state } = useConnection();
   const serverUrl = state.status === "connected" ? state.connection.serverUrl : null;
@@ -32,7 +52,8 @@ export function useAttachmentField({ maxFiles, refs, onChange }: UseAttachmentFi
     try {
       const headers = connectionMode === "cloud" ? await getCloudAuthorizationHeaders() : {};
       const ref = await uploadAttachment(buda.client, serverUrl, file, headers);
-      onChange(maxFiles === 1 ? [ref] : [...refs, ref]);
+      // A single-file field swaps its file instead of growing past the limit.
+      onChange(placeUploaded(maxFiles === 1 ? [] : refs, ref));
       setPickerOpen(false);
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : "Upload failed");

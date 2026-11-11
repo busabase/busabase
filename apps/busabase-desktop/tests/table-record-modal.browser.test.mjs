@@ -174,7 +174,13 @@ test(
       await horizontal.evaluate((element) => {
         element.scrollLeft = 0;
       });
-      await row.getByRole("link", { name: "Review customer 45", exact: true }).click();
+      // Notes is an editable text cell: a click selects it (in-cell editing, as
+      // in Airtable) rather than opening the record, and Space expands it.
+      const notes = row.getByRole("gridcell").filter({ hasText: "Review customer 45" });
+      await notes.click();
+      await expect(notes).toBeFocused();
+      await expect(detail).toBeHidden();
+      await page.keyboard.press("Space");
       await expect(detail).toBeVisible();
       await detail.getByRole("button", { name: "Close", exact: true }).click();
       await horizontal.evaluate((element) => {

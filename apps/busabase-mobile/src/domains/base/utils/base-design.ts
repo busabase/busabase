@@ -16,6 +16,8 @@ export const CREATABLE_FIELD_TYPES: readonly FieldType[] = [
   "email",
   "phone",
   "attachment",
+  // Files organised in folders. Like `attachment`, nothing to configure up front.
+  "drive",
   // No configuration to fill in (unlike `relation`, which needs a target Base),
   // so a member column can be created straight from the phone.
   "member",

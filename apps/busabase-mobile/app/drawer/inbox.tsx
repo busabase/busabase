@@ -17,6 +17,7 @@ import { useInboxChangeRequests } from "~/domains/review/hooks/use-inbox-change-
 import { useMentions, useMentionUnreadCount } from "~/domains/review/hooks/use-mentions";
 import type { InboxMode } from "~/domains/review/utils/inbox-paging";
 import { mentionDestination } from "~/domains/review/utils/mention-destination";
+import { ApprovalsBanner } from "~/domains/workflow/components/ApprovalsBanner";
 import { ConnectionGuard } from "~/domains/workspace/components/ConnectionGuard";
 import { DrawerScaffold } from "~/domains/workspace/components/DrawerScaffold";
 
@@ -143,6 +144,7 @@ function InboxContent() {
 
   return (
     <DrawerScaffold title="Inbox" refreshing={active.refreshing} onRefresh={active.refetch}>
+      <ApprovalsBanner />
       <View style={styles.segmentWrap}>
         <NativeSegmentedControl
           value={activeMode}

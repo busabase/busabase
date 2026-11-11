@@ -222,3 +222,77 @@ describe("date fields in the mobile record form", () => {
     ).toEqual({ due: "2026-10-02T19:30:00+08:00" });
   });
 });
+
+/**
+ * A `drive` cell is an `attachment` cell whose refs also carry a `path`. The
+ * form must hand that path to the editor and back to the server untouched —
+ * dropping it would flatten every folder to the root on the next save.
+ */
+describe("drive fields in the mobile record form", () => {
+  const ref = (id: string, fileName: string, path?: string) => ({
+    id,
+    assetId: `asset-${id}`,
+    attachmentId: `att-${id}`,
+    url: `/api/storage/${id}`,
+    fileName,
+    mimeType: "application/pdf",
+    size: 1024,
+    ...(path === undefined ? {} : { path }),
+  });
+  const driveField = { ...field("drive"), slug: "files" } satisfies BaseFieldVO;
+  const attachmentField = { ...field("attachment"), slug: "files" } satisfies BaseFieldVO;
+
+  it("is editable, and like attachment takes a full-width row", () => {
+    expect(isEditableField(driveField)).toBe(true);
+    expect(isCompactRecordFormField(driveField)).toBe(false);
+  });
+
+  it("keeps each file's path through form state and back out", () => {
+    const stored = [
+      ref("a", "main.pdf", "contracts/2026/main.pdf"),
+      ref("b", "notes.pdf", "notes.pdf"),
+    ];
+    const formValue = initialFieldValue(driveField, stored);
+    expect(formValue).toEqual(stored);
+    expect(normalizeFormValues([driveField], { files: formValue })).toEqual({ files: stored });
+  });
+
+  it("gives a path-less ref (written by an attachment-only caller) its place at the root", () => {
+    const formValue = initialFieldValue(driveField, [ref("a", "scan.pdf")]);
+    expect(formValue).toEqual([{ ...ref("a", "scan.pdf"), path: "scan.pdf" }]);
+  });
+
+  it("sends an untouched cell back exactly as stored, path-less refs included", () => {
+    const stored = [ref("a", "scan.pdf"), ref("b", "x.pdf", "deals/x.pdf")];
+    const source = { files: stored };
+    const formValue = initialFieldValue(driveField, stored);
+    expect(normalizeFormValues([driveField], { files: formValue }, source)).toEqual({
+      files: stored,
+    });
+    // …so the record editor reports no change for it.
+    expect(
+      getChangedFieldValues(
+        normalizeFormValues([driveField], { files: formValue }, source),
+        normalizeFormValues([driveField], { files: formValue }, source),
+      ),
+    ).toEqual({});
+  });
+
+  it("sends a moved file with its new path", () => {
+    const stored = [ref("a", "main.pdf", "main.pdf")];
+    const moved = [{ ...stored[0], path: "contracts/main.pdf" }];
+    expect(normalizeFormValues([driveField], { files: moved }, { files: stored })).toEqual({
+      files: moved,
+    });
+  });
+
+  it("leaves attachment cells exactly as before — no path is added", () => {
+    const stored = [ref("a", "scan.pdf")];
+    const formValue = initialFieldValue(attachmentField, stored);
+    expect(formValue).toEqual(stored);
+    expect(normalizeFormValues([attachmentField], { files: formValue })).toEqual({
+      files: stored,
+    });
+    expect(JSON.stringify(formValue)).not.toContain('"path"');
+  });
+});

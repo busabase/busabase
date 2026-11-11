@@ -1,12 +1,7 @@
 import type { AssetAttachmentRef, BaseFieldVO } from "busabase-contract/types";
-import { FileText, ImagePlus, Paperclip, Trash2 } from "lucide-react-native";
+import { FileText, Paperclip, Trash2 } from "lucide-react-native";
 import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from "react-native";
-import {
-  NativeActionBar,
-  NativeBottomSheet,
-  NativeInlineError,
-  NativeRow,
-} from "~/components/native-screen";
+import { NativeActionBar, NativeBottomSheet, NativeRow } from "~/components/native-screen";
 import { Button } from "~/components/ui/Button";
 import { useI18n } from "~/i18n";
 import { getAttachmentKindLabel, isImageRef, resolveAttachmentUrl } from "~/lib/attachment";
@@ -14,6 +9,7 @@ import { formatBytes } from "~/lib/format";
 import { radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 import { useAttachmentField } from "../hooks/use-attachment-field";
+import { AttachmentPickerSheet } from "./AttachmentPickerSheet";
 
 interface RecordAttachmentFieldProps {
   field: BaseFieldVO;
@@ -91,56 +87,11 @@ export function RecordAttachmentField({ field, refs, onChange }: RecordAttachmen
         </Pressable>
       )}
 
-      <NativeBottomSheet
-        visible={attachment.pickerOpen}
+      <AttachmentPickerSheet
+        attachment={attachment}
         title="Add attachment"
         description="Choose a photo or a file to upload into this record field."
-        showCloseButton
-        onClose={() => attachment.setPickerOpen(false)}
-        footer={
-          <NativeActionBar>
-            {attachment.uploading ? (
-              <View style={styles.busy}>
-                <ActivityIndicator size="small" color={tokens.primary} />
-                <Text style={[typography.small, { color: tokens.mutedForeground }]}>
-                  {t.attachment.uploading}
-                </Text>
-              </View>
-            ) : null}
-            {attachment.error ? (
-              <NativeInlineError
-                message={attachment.error}
-                onReset={() => attachment.setError(null)}
-              />
-            ) : null}
-            <Button
-              label="Cancel"
-              variant="ghost"
-              disabled={attachment.uploading}
-              fullWidth
-              onPress={() => attachment.setPickerOpen(false)}
-            />
-          </NativeActionBar>
-        }
-      >
-        <View style={styles.sheetRows}>
-          <NativeRow
-            title={t.attachment.addImage}
-            subtitle="Pick from the photo library."
-            leading={<ImagePlus size={18} color={tokens.primary} />}
-            disabled={attachment.uploading}
-            onPress={() => void attachment.pickImage()}
-          />
-          <NativeRow
-            title={t.attachment.add}
-            subtitle="Browse files on this device."
-            leading={<Paperclip size={18} color={tokens.primary} />}
-            disabled={attachment.uploading}
-            last
-            onPress={() => void attachment.pickDocument()}
-          />
-        </View>
-      </NativeBottomSheet>
+      />
 
       <NativeBottomSheet
         visible={!!attachment.selectedRef}
@@ -198,5 +149,4 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     paddingHorizontal: 12,
   },
-  sheetRows: { gap: 8 },
 });

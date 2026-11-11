@@ -8,7 +8,16 @@ import type {
 import type { NodeVO } from "busabase-contract/types";
 import { asNodeDetail } from "busabase-core/dashboard/node-detail";
 import { useLocalSearchParams } from "expo-router";
-import { CircleCheck, CodeXml, Eye, GitBranch, Play, Timer, Workflow } from "lucide-react-native";
+import {
+  CircleCheck,
+  CodeXml,
+  Eye,
+  GitBranch,
+  History,
+  Play,
+  Timer,
+  Workflow,
+} from "lucide-react-native";
 import { useState } from "react";
 import { Platform, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import { WebView } from "react-native-webview";
@@ -21,9 +30,11 @@ import {
   NativeSection,
   NativeSegmentedControl,
 } from "~/components/native-screen";
+import { WorkflowRunsSection } from "~/domains/workflow/components/WorkflowRunsSection";
 import { ConnectionGuard } from "~/domains/workspace/components/ConnectionGuard";
 import { DrawerScaffold } from "~/domains/workspace/components/DrawerScaffold";
 import { getAppNavigationLayout } from "~/domains/workspace/utils/responsive-layout";
+import { useI18n } from "~/i18n";
 import { mobile, radius, spacing } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 import { WhiteboardCanvasPreview, WorkflowCanvasPreview } from "./RichNodeCanvasPreviews";
@@ -159,6 +170,9 @@ function RichNodeDetailContent({ type }: RichNodeDetailScreenProps) {
   const params = useLocalSearchParams<{ nodeId?: string }>();
   const { width, height } = useWindowDimensions();
   const nodeId = typeof params.nodeId === "string" ? params.nodeId : "";
+  const { t } = useI18n();
+  // A workflow is looked at two ways: the flow it is, and the runs it has had.
+  const [workflowTab, setWorkflowTab] = useState<"flow" | "runs">("flow");
   const buda = useBusabaseOrpc();
   const detailQuery = useQuery(
     buda && nodeId
@@ -177,7 +191,9 @@ function RichNodeDetailContent({ type }: RichNodeDetailScreenProps) {
       titleNumberOfLines={2}
       subtitle={detail?.node.description || undefined}
       contentContainerStyle={
-        type === "workflow" && !navigationLayout.persistentSidebar ? undefined : styles.canvasScreen
+        type === "workflow" && (!navigationLayout.persistentSidebar || workflowTab === "runs")
+          ? undefined
+          : styles.canvasScreen
       }
       refreshing={detailQuery.isRefetching}
       onRefresh={() => void detailQuery.refetch()}
@@ -203,6 +219,21 @@ function RichNodeDetailContent({ type }: RichNodeDetailScreenProps) {
         <WhiteboardCanvasPreview document={detail.document as WhiteboardDocument} />
       ) : null}
       {detail && type === "workflow" ? (
+        <View style={styles.segmentWrap}>
+          <NativeSegmentedControl
+            value={workflowTab}
+            onChange={setWorkflowTab}
+            options={[
+              { value: "flow", label: t.workflow.tabFlow, Icon: Workflow },
+              { value: "runs", label: t.workflow.tabRuns, Icon: History },
+            ]}
+          />
+        </View>
+      ) : null}
+      {detail && type === "workflow" && workflowTab === "runs" ? (
+        <WorkflowRunsSection nodeId={nodeId} steps={(detail.document as WorkflowDocument).nodes} />
+      ) : null}
+      {detail && type === "workflow" && workflowTab === "flow" ? (
         navigationLayout.persistentSidebar ? (
           <WorkflowCanvasPreview document={detail.document as WorkflowDocument} />
         ) : (
