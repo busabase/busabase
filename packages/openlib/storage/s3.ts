@@ -812,6 +812,9 @@ export class S3Storage implements IStorage {
     isTruncated: boolean;
     nextContinuationToken?: string;
   }> {
+    // Restore recovery scans staging receipts before its first upload. A fresh
+    // explicitly auto-created store must also support that initial empty scan.
+    await this.ensureBucketExists();
     const { ListObjectsV2Command } = await loadS3Sdk();
     const client = await this.getAdminClient();
     const command = new ListObjectsV2Command({

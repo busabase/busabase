@@ -397,6 +397,47 @@ describe("--auto-merge requirement (§12)", () => {
 });
 
 describe("plan reporting", () => {
+  it("keeps a new folder's Unicode name separate from its fixed identity", () => {
+    const plan = buildInstallPlan(tree([]), noTarget, {
+      newFolder: { slug: "f-example", name: "  صندوق بريد الفريق  " },
+    });
+    expect(plan.targetFolderSlug).toBe("f-example");
+    expect(plan.newFolder).toEqual({ slug: "f-example", name: "صندوق بريد الفريق" });
+    expect(plan.existingTargetFolderNodeId).toBeUndefined();
+  });
+
+  it("never converts an independent installation into an existing folder", () => {
+    expect(() =>
+      buildInstallPlan(tree([]), targetState({ folder: ["f-existing"] }), {
+        newFolder: { slug: "f-existing", name: "New copy" },
+      }),
+    ).toThrow("already exists");
+  });
+
+  it("resolves child collisions by default for independent installations", () => {
+    const plan = buildInstallPlan(
+      tree([baseNode("settings")]),
+      targetState({ base: ["settings"] }),
+      {
+        newFolder: { slug: "f-new", name: "New copy" },
+      },
+    );
+    expect(plan.tree.nodes[0]?.slug).toBe("settings-2");
+    expect(plan.collisions[0]?.renamedTo).toBe("settings-2");
+  });
+
+  it.each(["Workspace", "工作台", "has space", ""])(
+    "rejects invalid internal and explicit target %s before applying",
+    (slug) => {
+      expect(() => buildInstallPlan(tree([]), noTarget, { intoFolder: slug })).toThrow(
+        "target folder slug",
+      );
+      expect(() =>
+        buildInstallPlan(tree([]), noTarget, { newFolder: { slug, name: "工作台" } }),
+      ).toThrow("target folder slug");
+    },
+  );
+
   it("defaults the target folder to the manifest name (§12)", () => {
     expect(buildInstallPlan(tree([]), noTarget).targetFolderSlug).toBe("my-package");
   });

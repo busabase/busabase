@@ -41,13 +41,20 @@ import {
 import {
   PACKAGE_COMPUTED_FIELD_TYPES,
   PACKAGE_DEFERRED_FIELD_TYPES,
+  PACKAGE_FILE_FIELD_TYPES,
   type PackageBaseField,
   type PackageFieldOptions,
 } from "busabase-contract/domains/package/types";
 import { iStringParse } from "openlib/i18n/i-string";
 import type { PackageClient } from "./client";
 import { reportUnresolvableDocAssets, rewriteDocAssetIds } from "./doc-asset-refs";
-import type { InstallPlan } from "./plan";
+import {
+  FILE_UPLOAD_CONCURRENCY,
+  mapWithConcurrency,
+  RECORD_REQUEST_MAX_BYTES,
+  splitRecordRequests,
+} from "./install-bounds";
+import { assertInstallTargetSlug, type InstallPlan } from "./plan";
 import {
   buildRecordCreateLayers,
   type PlannedRecordCreate,
@@ -152,9 +159,19 @@ export const applyInstall = async (
   plan: InstallPlan,
   options: ApplyOptions,
 ): Promise<ApplyResult> => {
+  assertInstallTargetSlug(plan.targetFolderSlug);
+  if (
+    plan.newFolder &&
+    (plan.existingTargetFolderNodeId ||
+      plan.newFolder.slug !== plan.targetFolderSlug ||
+      !plan.newFolder.name.trim())
+  ) {
+    throw new Error("The new installation target is invalid. Preview the install again.");
+  }
   // Repeat the planner's pure validation for tests/internal callers that build
   // an InstallPlan directly. This runs before uploads or any workspace write.
   const recordCreateLayers = buildRecordCreateLayers(plan.tree.nodes);
+  assertRecordRequestSizes(plan.tree, options);
   const state: ApplyResult = {
     targetFolderNodeId: "",
     created: { folders: 0, docs: 0, bases: 0, views: 0, records: 0, fileTreeNodes: 0, files: 0 },
@@ -197,7 +214,7 @@ export const applyInstall = async (
       state.targetFolderNodeId = await createFolderNode(client, {
         parentNodeId: undefined,
         slug: plan.targetFolderSlug,
-        name: plan.tree.manifest.name,
+        name: plan.newFolder?.name ?? plan.tree.manifest.name,
         // The real node-creation contract (filetree/contract.ts) takes a plain
         // string today, not iString — flatten here rather than widen that API
         // as a side effect of this change. The catalog card the user picked
@@ -267,6 +284,33 @@ export const applyInstall = async (
           });
           indexFields(fieldIds, base.node.slug, updated.fields);
         }
+      }
+    }
+
+    // Deferred fields were appended after plain fields. Restore the author's
+    // order once they all exist, before records or a user can depend on it.
+    for (const base of bases) {
+      const desired = [...base.node.base.fields].sort((a, b) => a.position - b.position);
+      const createdOrder = [
+        ...base.node.base.fields.filter((field) => !isDeferredField(field)),
+        ...base.node.base.fields.filter(isDeferredField),
+      ];
+      if (desired.every((field, index) => field.slug === createdOrder[index]?.slug)) continue;
+      const orderedIds = desired.map((field) => {
+        const id = fieldIds.get(fieldKey(base.node.slug, field.slug));
+        if (!id) throw new Error(`Missing created field ${base.node.slug}.${field.slug}.`);
+        return id;
+      });
+      const reordered = await client.bases.fieldChangeRequest({
+        baseId: base.baseId,
+        operation: "reorder",
+        fieldIds: orderedIds,
+        message: `Restore field order for ${base.node.slug}`,
+        submittedBy: options.submittedBy,
+        autoMerge: true,
+      });
+      if (reordered.status !== "merged") {
+        throw new Error(`Field order for ${base.node.slug} was not applied (${reordered.status}).`);
       }
     }
 
@@ -921,29 +965,27 @@ const createFileTreeNode = async (
   app: AppContext | undefined,
   extraMetadata: Record<string, unknown> = {},
 ): Promise<void> => {
-  const uploaded = await Promise.all(
-    node.files.map(async (entry) => {
-      const mimeType = guessMimeType(entry.path);
-      if (isTextMimeType(mimeType)) {
-        return { path: entry.path, content: entry.bytes.toString("utf8"), mimeType };
-      }
-      try {
-        const asset = await uploadAsset(
-          client,
-          entry.path.split("/").at(-1) ?? entry.path,
-          mimeType,
-          entry.bytes,
-          undefined,
-          options.serverUrl,
-        );
-        return { path: entry.path, assetId: asset.assetId, mimeType };
-      } catch (error) {
-        // Drop just this file from the node; its siblings still install.
-        state.warnings.push(asSkippableUpload(error, `${node.slug}/${entry.path}`));
-        return undefined;
-      }
-    }),
-  );
+  const uploaded = await mapWithConcurrency(node.files, FILE_UPLOAD_CONCURRENCY, async (entry) => {
+    const mimeType = guessMimeType(entry.path);
+    if (isTextMimeType(mimeType)) {
+      return { path: entry.path, content: entry.bytes.toString("utf8"), mimeType };
+    }
+    try {
+      const asset = await uploadAsset(
+        client,
+        entry.path.split("/").at(-1) ?? entry.path,
+        mimeType,
+        entry.bytes,
+        undefined,
+        options.serverUrl,
+      );
+      return { path: entry.path, assetId: asset.assetId, mimeType };
+    } catch (error) {
+      // Drop just this file from the node; its siblings still install.
+      state.warnings.push(asSkippableUpload(error, `${node.slug}/${entry.path}`));
+      return undefined;
+    }
+  });
   const files = uploaded.filter((entry) => entry !== undefined);
 
   const result = await client.fileTrees.create({
@@ -1227,10 +1269,67 @@ const toCreatableFields = (
       continue;
     }
     if (PACKAGE_COMPUTED_FIELD_TYPES.includes(field.type)) continue;
-    if (field.type === "attachment") continue; // §6.4: attachment values are not exported in v1.
+    // §6.4: file values (attachment, drive) are not exported in v1.
+    if (PACKAGE_FILE_FIELD_TYPES.includes(field.type)) continue;
     result[slug] = value;
   }
   return result;
+};
+
+/** A membership digest keeps a byte-split batch distinct from its old 200-row receipt. */
+const sizedBatchIdempotencyKey = (packageName: string, keys: readonly string[]): string =>
+  `pkg:${packageName}:bytes-v1:${createHash("sha256").update(JSON.stringify(keys)).digest("hex")}`;
+
+const recordEnvelopeBytes = (
+  baseSlug: string,
+  packageName: string,
+  options: ApplyOptions,
+  keyBytes = 0,
+): number =>
+  keyBytes +
+  Buffer.byteLength(
+    JSON.stringify({
+      // The generated Base id and serializer overhead fit in this reservation.
+      baseId: "x".repeat(256),
+      records: [],
+      message: `Install ${RECORD_BATCH_SIZE} record(s) into ${baseSlug}`,
+      submittedBy: options.submittedBy,
+      // Reserve whichever form is larger, including an unusually long source key.
+      idempotencyKey: `pkg:${packageName}:bytes-v1:${"x".repeat(64)}`,
+      autoMerge: false,
+    }),
+    "utf8",
+  );
+
+/** Reject an un-sendable authored record before uploads or workspace writes. */
+const assertRecordRequestSizes = (tree: PackageTree, options: ApplyOptions): void => {
+  for (const base of collectBaseNodes(tree.nodes)) {
+    const fields = new Map(base.base.fields.map((field) => [field.slug, field]));
+    const envelopeBytes = recordEnvelopeBytes(base.slug, tree.manifest.name, options);
+    for (const record of base.records) {
+      const authored: Record<string, unknown> = {};
+      for (const [slug, value] of Object.entries(record.fields)) {
+        const field = fields.get(slug);
+        if (
+          !field ||
+          PACKAGE_COMPUTED_FIELD_TYPES.includes(field.type) ||
+          PACKAGE_FILE_FIELD_TYPES.includes(field.type) ||
+          (field.type === "relation" && !field.required)
+        )
+          continue;
+        authored[slug] = value;
+      }
+      splitRecordRequests(
+        [{ key: record.key, fields: authored }],
+        envelopeBytes + Buffer.byteLength(record.key, "utf8"),
+        base.slug,
+      );
+      // A first-record key is also carried by unsplit request metadata.
+      if (Buffer.byteLength(record.key, "utf8") + envelopeBytes > RECORD_REQUEST_MAX_BYTES) {
+        throw new Error(`Record key in Base "${base.slug}" is too large for an install request.`);
+      }
+    }
+  }
 };
 
 const createRecords = async (
@@ -1261,44 +1360,60 @@ const createRecords = async (
   const mergeRecords = app ? app.mergeSampleRecords : options.autoMerge;
   const records = [...recordsToCreate].sort((a, b) => a.key.localeCompare(b.key, "en"));
   for (let offset = 0; offset < records.length; offset += RECORD_BATCH_SIZE) {
-    const batch = records.slice(offset, offset + RECORD_BATCH_SIZE);
-    const changeRequest = await client.bases.createBulkChangeRequest({
-      baseId: base.baseId,
-      records: batch.map((record) => toCreatableFields(base.node, record.fields, recordIdsByKey)),
-      message: `Install ${batch.length} record(s) into ${base.node.slug}`,
-      submittedBy: options.submittedBy,
-      idempotencyKey: batchIdempotencyKey(plan.tree.manifest.name, batch[0].key),
-      // Forwarded explicitly, load-bearing: for a plain package `--auto-merge` is
-      // the ONLY thing that decides whether an install's records go live, and that
-      // promise is what the review-first install is. Leaving this to the
-      // endpoint's permission-aware default would silently merge a review-first
-      // install's records for any write-capable installer.
-      autoMerge: mergeRecords,
-    });
+    const original = records.slice(offset, offset + RECORD_BATCH_SIZE);
+    const entries = original.map((record) => ({
+      key: record.key,
+      fields: toCreatableFields(base.node, record.fields, recordIdsByKey),
+    }));
+    const envelopeBytes = recordEnvelopeBytes(
+      base.node.slug,
+      plan.tree.manifest.name,
+      options,
+      Math.max(...original.map((record) => Buffer.byteLength(record.key, "utf8"))),
+    );
+    const batches = splitRecordRequests(entries, envelopeBytes, base.node.slug);
+    for (const batch of batches) {
+      const changeRequest = await client.bases.createBulkChangeRequest({
+        baseId: base.baseId,
+        records: batch.map((record) => record.fields),
+        message: `Install ${batch.length} record(s) into ${base.node.slug}`,
+        submittedBy: options.submittedBy,
+        idempotencyKey:
+          batches.length === 1
+            ? batchIdempotencyKey(plan.tree.manifest.name, batch[0].key)
+            : sizedBatchIdempotencyKey(
+                plan.tree.manifest.name,
+                batch.map((record) => record.key),
+              ),
+        // Preserve the caller's merge/review intent when splitting a request.
+        autoMerge: mergeRecords,
+      });
+      if (!mergeRecords) {
+        state.pendingChangeRequests++;
+        continue;
+      }
 
-    // Records are CONTENT — the thing a reviewer actually wants to see — so without
-    // `--auto-merge` they stay a pending change request. That leaves them with no
-    // record ids, which is exactly why a package whose Bases carry relation fields
-    // refuses to install without `--auto-merge` (`plan.requiresAutoMerge`): pass 5
-    // has nothing to link. Non-relation packages install fine review-first.
-    if (!mergeRecords) {
-      state.pendingChangeRequests++;
-      continue;
+      const merged = await approveAndMerge(client, changeRequest.id);
+      const created = merged.changeRequest.operations
+        .filter((operation) => operation.operation === "record_create")
+        .sort((a, b) => a.position - b.position);
+      // A stale idempotency receipt for a differently-sized batch must never
+      // silently map only part of the package to unrelated target records.
+      if (
+        created.length !== batch.length ||
+        created.some((operation) => !operation.mergedRecordId)
+      ) {
+        throw new Error(
+          `Record batch in ${base.node.slug} returned ${created.length} created operations for ${batch.length} records, or omitted a record id. Refusing to continue with an incomplete record mapping.`,
+        );
+      }
+      for (const [index, record] of batch.entries()) {
+        const recordId = created[index]?.mergedRecordId;
+        if (!recordId) throw new Error(`Record ${base.node.slug}/${record.key} has no created id.`);
+        recordIdsByKey.set(recordIdentity(base.node.slug, record.key), recordId);
+      }
+      state.created.records += batch.length;
     }
-
-    const merged = await approveAndMerge(client, changeRequest.id);
-
-    // `createBulkChangeRequest` sets each operation's `position` to the index in the
-    // records array it was given, and merge preserves that order — so the operations
-    // map back to the batch positionally. This is the ONLY way to learn the new ids.
-    const created = merged.changeRequest.operations
-      .filter((operation) => operation.operation === "record_create")
-      .sort((a, b) => a.position - b.position);
-    for (const [index, record] of batch.entries()) {
-      const recordId = created[index]?.mergedRecordId;
-      if (recordId) recordIdsByKey.set(recordIdentity(base.node.slug, record.key), recordId);
-    }
-    state.created.records += batch.length;
   }
 };
 

@@ -57,6 +57,7 @@ export const parseFrontmatter = (text: string, filePath: string): ParsedFrontmat
 };
 
 export interface DocFrontmatterFields {
+  slug?: string;
   name: string;
   description: string;
   position: number | undefined;
@@ -69,6 +70,7 @@ export const serializeDoc = (fields: DocFrontmatterFields, body: string): string
   // Fixed key order — determinism. `description`/`position` are omitted when empty
   // so an unchanged doc round-trips to the same bytes it was exported from.
   const data: Record<string, unknown> = { name: fields.name };
+  if (fields.slug !== undefined) data.slug = fields.slug;
   if (fields.description) data.description = fields.description;
   if (fields.position !== undefined) data.position = fields.position;
   const agentPrompts = serializeAgentPrompts(fields.agentPrompts);

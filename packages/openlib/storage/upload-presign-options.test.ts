@@ -56,13 +56,13 @@ describe("S3Storage.generateUploadPresignedUrl options", () => {
 });
 
 describe("LocalStorage.generateUploadPresignedUrl options", () => {
-  it("accepts and ignores the options (the relay has nothing to sign)", async () => {
+  it("carries the expected byte length to the local relay", async () => {
     const storage = new LocalStorage({ provider: "local", bucketName: "local" });
     await expect(
       storage.generateUploadPresignedUrl("a/b.png", "image/png", 600, {
         contentLength: 5,
         contentDisposition: "attachment",
       }),
-    ).resolves.toBe("/api/dev/upload?key=a%2Fb.png");
+    ).resolves.toBe("/api/dev/upload?key=a%2Fb.png&contentLength=5");
   });
 });

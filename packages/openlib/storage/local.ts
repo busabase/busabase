@@ -20,6 +20,8 @@ const stat = promisify(fs.stat);
 const copyFile = promisify(fs.copyFile);
 const readdir = promisify(fs.readdir);
 const rename = promisify(fs.rename);
+// Reserved publication state, not an object key. A killed process may leave one behind.
+const PRIVATE_OBJECT_TEMP_FILE = /^\.busabase-(?:copy|write)-[a-f0-9]{32}\.tmp$/;
 
 /**
  * Local file system storage adapter
@@ -59,7 +61,20 @@ export class LocalStorage implements IStorage {
       await mkdir(dir, { recursive: true });
     }
 
-    await writeFile(filePath, fileBuffer);
+    // Inline restores use this path too. Never truncate a previously published
+    // object before replacement bytes have been completely written.
+    const temporary = path.join(dir, `.busabase-write-${randomBytes(16).toString("hex")}.tmp`);
+    let written = false;
+    try {
+      await writeFile(temporary, fileBuffer, { flag: "wx" });
+      written = true;
+      await rename(temporary, filePath);
+    } catch (error) {
+      if (written || (error as NodeJS.ErrnoException)?.code !== "EEXIST") {
+        await unlink(temporary).catch(() => undefined);
+      }
+      throw error;
+    }
 
     return {
       key,
@@ -112,15 +127,21 @@ export class LocalStorage implements IStorage {
     key: string,
     _mimeType: string,
     _expiresIn?: number,
-    // Nothing to sign on a local relay; callers verify the stored object after
-    // the upload instead (see `IStorage.generateUploadPresignedUrl`).
-    _options?: UploadPresignOptions,
+    options?: UploadPresignOptions,
   ): Promise<string> {
     // A root-relative URL: the client resolves it against the host it's already
     // talking to (ordinary URL resolution — no dev-specific knowledge) and PUTs
     // the raw bytes to it exactly as it would an S3 presigned URL. The storage
     // key rides in the query string because the URL is all the client has.
-    return `${this.uploadUrl.replace(/\/$/, "")}?key=${encodeURIComponent(key)}`;
+    const expectedLength = options?.contentLength;
+    if (
+      expectedLength !== undefined &&
+      (!Number.isSafeInteger(expectedLength) || expectedLength < 0)
+    ) {
+      throw new Error("Upload content length must be a non-negative integer");
+    }
+    const lengthQuery = expectedLength === undefined ? "" : `&contentLength=${expectedLength}`;
+    return `${this.uploadUrl.replace(/\/$/, "")}?key=${encodeURIComponent(key)}${lengthQuery}`;
   }
 
   /**
@@ -239,7 +260,22 @@ export class LocalStorage implements IStorage {
       await mkdir(destDir, { recursive: true });
     }
 
-    await copyFile(sourcePath, destPath);
+    // copyFile can truncate/remove an existing destination on failure. Publish
+    // only a completed sibling file, so failed or killed restore promotion
+    // cannot damage bytes that an earlier successful restore already exposed.
+    const temporary = path.join(destDir, `.busabase-copy-${randomBytes(16).toString("hex")}.tmp`);
+    let copied = false;
+    try {
+      await copyFile(sourcePath, temporary, fs.constants.COPYFILE_EXCL);
+      copied = true;
+      await rename(temporary, destPath);
+    } catch (error) {
+      // An exclusive-create collision did not create our file; leave it alone.
+      if (copied || (error as NodeJS.ErrnoException)?.code !== "EEXIST") {
+        await unlink(temporary).catch(() => undefined);
+      }
+      throw error;
+    }
   }
 
   /**
@@ -267,6 +303,7 @@ export class LocalStorage implements IStorage {
       const files = await readdir(dir, { withFileTypes: true });
 
       for (const file of files) {
+        if (!file.isDirectory() && PRIVATE_OBJECT_TEMP_FILE.test(file.name)) continue;
         const resPath = path.join(dir, file.name);
         const relPath = path.relative(this.rootDir, resPath);
 
@@ -438,17 +475,20 @@ export class LocalStorage implements IStorage {
     // that follows completion) never sees a half-written object.
     const assembling = `${destPath}.${randomBytes(6).toString("hex")}.assembling`;
     const output = fs.createWriteStream(assembling);
-    try {
+    async function* orderedPartBytes() {
       for (const part of sortedParts) {
-        await pipeline(
-          fs.createReadStream(path.join(tempDir, part.partNumber.toString())),
-          output,
-          { end: false },
-        );
+        const input = fs.createReadStream(path.join(tempDir, part.partNumber.toString()));
+        try {
+          yield* input;
+        } finally {
+          input.destroy();
+        }
       }
-      await new Promise<void>((resolve, reject) => {
-        output.end((error?: Error | null) => (error ? reject(error) : resolve()));
-      });
+    }
+    try {
+      // One pipeline owns the destination's listeners for the whole assembly.
+      // Reusing it in a separate pipeline per part retains listeners per part.
+      await pipeline(orderedPartBytes(), output);
       await rename(assembling, destPath);
     } catch (error) {
       output.destroy();

@@ -1,4 +1,5 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -59,6 +60,74 @@ describe("createDevUploadRoute", () => {
       new Request("http://localhost/api/dev/upload", { method: "PUT", body: "x" }),
     );
     expect(res.status).toBe(400);
+  });
+
+  it("rejects a truncated PUT before overwriting a previously stored object", async () => {
+    const key = "report.bin";
+    const original = Buffer.from("the complete original report");
+    writeFileSync(join(dir, key), original);
+    const { PUT } = createDevUploadRoute();
+    const response = await PUT(
+      new Request(`http://localhost/api/dev/upload?key=${key}`, {
+        method: "PUT",
+        headers: { "content-length": String(original.length) },
+        body: original.subarray(0, 8),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(bytesOnDisk(key)).toEqual(original);
+  });
+
+  it("checks the presigned byte length even when a PUT has no Content-Length header", async () => {
+    const { PUT } = createDevUploadRoute();
+    const response = await PUT(
+      new Request("http://localhost/api/dev/upload?key=report.bin&contentLength=20", {
+        method: "PUT",
+        body: Buffer.from("short"),
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(existsSync(join(dir, "report.bin"))).toBe(false);
+  });
+
+  it("verifies a content-addressed SHA-256 key before writing a Busabase upload", async () => {
+    const complete = Buffer.from("complete attachment bytes");
+    const hash = createHash("sha256").update(complete).digest("hex");
+    const key = `attachments/local/spaces/local/blobs/sha256/${hash.slice(0, 2)}/${hash}.bin`;
+    const { PUT } = createDevUploadRoute({ verifyContentAddressedKey: true });
+    const truncated = await PUT(
+      new Request(`http://localhost/api/storage/upload?key=${encodeURIComponent(key)}`, {
+        method: "PUT",
+        body: complete.subarray(0, 8),
+      }),
+    );
+    expect(truncated.status).toBe(400);
+    expect(existsSync(join(dir, key))).toBe(false);
+
+    const uploaded = await PUT(
+      new Request(`http://localhost/api/storage/upload?key=${encodeURIComponent(key)}`, {
+        method: "PUT",
+        body: complete,
+      }),
+    );
+    expect(uploaded.status).toBe(200);
+    expect(bytesOnDisk(key)).toEqual(complete);
+  });
+
+  it("applies the same content-addressed check to legacy multipart POST uploads", async () => {
+    const digest = createHash("sha256").update("expected bytes").digest("hex");
+    const key = `attachments/local/blobs/sha256/${digest.slice(0, 2)}/${digest}.bin`;
+    const form = new FormData();
+    form.append("file", new Blob(["wrong bytes"]), "report.bin");
+    form.append("storageKey", key);
+    const { POST } = createDevUploadRoute({ verifyContentAddressedKey: true });
+    const response = await POST(
+      new Request("http://localhost/api/storage/upload", { method: "POST", body: form }),
+    );
+    expect(response.status).toBe(400);
+    expect(existsSync(join(dir, key))).toBe(false);
   });
 
   it("POST still writes a multipart file+storageKey (legacy path preserved)", async () => {

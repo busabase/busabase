@@ -191,6 +191,67 @@ export const suggestSlug = (value: string): string => {
   return suggestion || "renamed";
 };
 
+export interface PackagePathNode {
+  slug: string;
+  type: PackageNode["type"];
+  fileName?: string;
+}
+
+/** Allocate paths without changing the node identities carried in sidecars. */
+export const planSiblingPaths = <T extends PackagePathNode>(
+  nodes: readonly T[],
+): Map<T, string> => {
+  const identity = new Set<string>();
+  const natural = new Map<T, { stem: string; extension: string }>();
+  for (const node of nodes) {
+    assertSafeNodeSlug(node.slug, `${node.type} node`);
+    const key = `${node.type}:${node.slug}`;
+    if (identity.has(key))
+      throw new Error(`Two ${node.type} nodes have the same slug "${node.slug}".`);
+    identity.add(key);
+    const originalExtension = node.type === "file" ? extname(node.fileName ?? "") : "";
+    const extension =
+      node.type === "doc"
+        ? ".md"
+        : node.type === "file" && originalExtension
+          ? /^\.[a-z0-9]+$/i.test(originalExtension)
+            ? originalExtension
+            : ".bin"
+          : "";
+    natural.set(node, { stem: node.slug, extension });
+  }
+  // Reserve every natural path first, so an alias never steals a real sibling's
+  // path (account-research-skill may already be a separate node).
+  const reserved = new Set(
+    [...natural.values()].map(({ stem, extension }) => `${stem}${extension}`.toLowerCase()),
+  );
+  const used = new Set<string>();
+  const paths = new Map<T, string>();
+  const ordered = [...nodes].sort((a, b) => {
+    const priority = (type: PackageNode["type"]) =>
+      type === "base" ? 0 : type === "folder" ? 1 : 2;
+    return (
+      priority(a.type) - priority(b.type) ||
+      a.type.localeCompare(b.type) ||
+      a.slug.localeCompare(b.slug)
+    );
+  });
+  for (const node of ordered) {
+    const { stem, extension } = natural.get(node)!;
+    let name = `${stem}${extension}`;
+    if (used.has(name.toLowerCase()) || (node.type === "file" && isReservedPackageFilename(name))) {
+      let suffix = 1;
+      do {
+        name = `${stem}-${node.type}${suffix === 1 ? "" : `-${suffix}`}${extension}`;
+        suffix += 1;
+      } while (used.has(name.toLowerCase()) || reserved.has(name.toLowerCase()));
+    }
+    used.add(name.toLowerCase());
+    paths.set(node, name);
+  }
+  return paths;
+};
+
 /** Characters and shapes that break a git checkout on macOS/Windows (§6.3). */
 const UNSAFE_PATH_CHARS = /[/\\:*?"<>|]/;
 
@@ -253,10 +314,18 @@ export const isReservedPackageFilename = (name: string): boolean =>
  * A skill/drive/airapp's ROOT may not contain a name the format interprets. Deeper
  * levels are unrestricted — inside a recognized file-tree node nothing is read.
  */
-export const assertNoReservedNames = (filePaths: readonly string[], context: string): void => {
+export const assertNoReservedNames = (
+  filePaths: readonly string[],
+  context: string,
+  options: { allowFileSidecars?: boolean } = {},
+): void => {
   for (const filePath of filePaths) {
     const [rootName, ...rest] = filePath.split("/");
-    if (rest.length === 0 && isReservedPackageFilename(rootName)) {
+    // A recognized file-tree directory carries verbatim content; suffix-based
+    // sidecars there (e.g. Vite's tsconfig.node.json) are ordinary files.
+    const verbatimSidecar =
+      options.allowFileSidecars && rootName.endsWith(PACKAGE_NODE_META_SUFFIX);
+    if (rest.length === 0 && isReservedPackageFilename(rootName) && !verbatimSidecar) {
       throw new Error(
         `Reserved file name at the root of ${context}: "${rootName}" is part of the package format, so it cannot also be this node's own content. Rename it (e.g. "${renameReserved(rootName)}"), or move it into a subdirectory — names are only interpreted at the node's root.`,
       );

@@ -46,6 +46,9 @@ describe("collectPackageTree — a folder's slug must not be renamed by an unrel
       type: "folder",
       description: "",
       position: 0,
+      // A selected app restores its resource keys. Whole-space exports keep
+      // each nested app's globally unique source slugs instead.
+      metadata: { resourceKey: "app-root" },
       children: [
         {
           id: "nod-folder",

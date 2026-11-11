@@ -130,6 +130,12 @@ const createFakeServer = (): FakeServer => {
         };
       },
     },
+    fileTrees: {
+      create: async (input: unknown) => {
+        record("fileTrees.create", input);
+        return { materialized: true as const, node: { id: `nod_${++nodeSeq}` } };
+      },
+    },
     docs: {
       create: async (input: unknown) => {
         record("docs.create", input);
@@ -246,6 +252,40 @@ const planFor = (nodes: PackageTree["nodes"], assets?: PackageTree["assets"]) =>
     },
     { targetFolder: undefined, existingNodeSlugsByType: new Map() },
   );
+
+describe("independent installation targets", () => {
+  it("writes the Unicode name without using it as the node slug", async () => {
+    const { calls, client } = createFakeServer();
+    const plan = planFor([]);
+    plan.targetFolderSlug = "f-example";
+    plan.newFolder = { slug: "f-example", name: "チームの受信箱 📬" };
+    await applyInstall(client, plan, { autoMerge: true });
+    expect(calls[0]?.input).toMatchObject({
+      operations: [{ nodeType: "folder", slug: "f-example", name: "チームの受信箱 📬" }],
+    });
+  });
+
+  it("refuses a forged new-folder reuse before any dependency is called", async () => {
+    const { calls, client } = createFakeServer();
+    const plan = planFor([]);
+    plan.newFolder = { slug: plan.targetFolderSlug, name: "New copy" };
+    plan.existingTargetFolderNodeId = "nod_existing";
+    await expect(applyInstall(client, plan, { autoMerge: true })).rejects.toThrow(
+      "new installation target is invalid",
+    );
+    expect(calls).toEqual([]);
+  });
+
+  it("refuses a forged invalid slug before an upload or mutation", async () => {
+    const { calls, client } = createFakeServer();
+    const plan = planFor([]);
+    plan.targetFolderSlug = "工作台";
+    await expect(applyInstall(client, plan, { autoMerge: true })).rejects.toThrow(
+      "target folder slug",
+    );
+    expect(calls).toEqual([]);
+  });
+});
 
 describe("the views a package ships", () => {
   const withViews = (slug: string, viewSlugs: string[]): PackageBaseNode => {
@@ -815,6 +855,89 @@ describe("the five passes", () => {
     expect(reviews).toBe(merges);
   });
 
+  it("splits large Unicode reports by serialized request bytes and reuses the same membership keys", async () => {
+    const node = plainBase("reports");
+    node.records = ["report-a", "report-b", "report-c"].map((key) => ({
+      key,
+      fields: { title: "文".repeat(1024 * 1024) },
+    }));
+    const plan = planFor([node]);
+    const first = createFakeServer();
+    const second = createFakeServer();
+    const result = await applyInstall(first.client, plan, { autoMerge: true });
+    await applyInstall(second.client, plan, { autoMerge: true });
+    const requests = first.calls.filter((call) => call.method === "bases.createBulkChangeRequest");
+    const repeated = second.calls.filter((call) => call.method === "bases.createBulkChangeRequest");
+    expect(
+      requests.map((request) => (request.input as { records: unknown[] }).records.length),
+    ).toEqual([2, 1]);
+    for (const request of requests) {
+      expect(Buffer.byteLength(JSON.stringify(request.input), "utf8")).toBeLessThan(
+        8 * 1024 * 1024,
+      );
+    }
+    const keys = requests.map(
+      (request) => (request.input as { idempotencyKey: string }).idempotencyKey,
+    );
+    expect(keys).toEqual(
+      repeated.map((request) => (request.input as { idempotencyKey: string }).idempotencyKey),
+    );
+    expect(new Set(keys).size).toBe(2);
+    expect(keys.every((key) => key.startsWith("pkg:my-package:bytes-v1:"))).toBe(true);
+    expect(keys).not.toContain(batchIdempotencyKey("my-package", "report-a"));
+    expect(result.created.records).toBe(3);
+  });
+
+  it("rejects a record that cannot fit one request before creating folders or uploading bytes", async () => {
+    const { client, calls } = createFakeServer();
+    const node = plainBase("reports");
+    node.records = [{ key: "huge-report", fields: { title: "x".repeat(64 * 1024 * 1024) } }];
+    await expect(applyInstall(client, planFor([node]), { autoMerge: true })).rejects.toThrow(
+      /huge-report.*reports.*install limit/,
+    );
+    expect(calls).toEqual([]);
+  });
+
+  it("rejects incomplete batch receipts before reporting records as installed", async () => {
+    const { client, calls } = createFakeServer();
+    const node = plainBase("reports");
+    node.records = ["first", "second"].map((key) => ({ key, fields: { title: key } }));
+    const broken = {
+      ...client,
+      changeRequests: {
+        ...client.changeRequests,
+        merge: async () => ({ results: [{ ok: true, changeRequest: { operations: [] } }] }),
+      },
+    } as unknown as PackageClient;
+    await expect(applyInstall(broken, planFor([node]), { autoMerge: true })).rejects.toThrow(
+      /0 created operations for 2 records/,
+    );
+    expect(calls.filter((call) => call.method === "records.changeRequest:update")).toEqual([]);
+  });
+
+  it("restores the source field order after a relation was appended behind plain fields", async () => {
+    const { client, calls } = createFakeServer();
+    const node = relationBase("contacts", "contacts", "link");
+    node.base.fields.push({
+      slug: "notes",
+      name: "Notes",
+      type: "text",
+      required: false,
+      position: 2,
+      options: {},
+    });
+    await applyInstall(client, planFor([node]), { autoMerge: true });
+    const order = calls.find((call) => call.method === "bases.fieldChangeRequest:reorder");
+    expect(order?.input).toMatchObject({
+      baseId: "bse_1",
+      fieldIds: ["bsf_1", "bsf_3", "bsf_2"],
+      autoMerge: true,
+    });
+    expect(calls.findIndex((call) => call.method === "bases.createField")).toBeLessThan(
+      calls.indexOf(order as Call),
+    );
+  });
+
   it("sets a deterministic idempotency key per batch (§7.5)", async () => {
     const { calls, client } = createFakeServer();
     const node = relationBase("a", "b", "link");
@@ -979,6 +1102,58 @@ describe("doc images the package carries", () => {
 
   beforeEach(() => stubUploadFetch());
   afterEach(() => vi.unstubAllGlobals());
+
+  it("keeps a large file tree to eight complete uploads at a time", async () => {
+    const { client, calls } = createFakeServer();
+    let active = 0;
+    let peak = 0;
+    const order: string[] = [];
+    const limited = {
+      ...client,
+      assets: {
+        ...client.assets,
+        createUploadUrl: async (input: { fileName: string }) => {
+          active++;
+          peak = Math.max(peak, active);
+          return client.assets.createUploadUrl(
+            input as Parameters<typeof client.assets.createUploadUrl>[0],
+          );
+        },
+        confirm: async (input: Parameters<typeof client.assets.confirm>[0]) => {
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          order.push(input.fileName);
+          active--;
+          return client.assets.confirm(input);
+        },
+      },
+    } as unknown as PackageClient;
+    const files = Array.from({ length: 25 }, (_, index) => ({
+      path: `image-${index}.png`,
+      bytes: Buffer.from([index]),
+    }));
+    const result = await applyInstall(
+      limited,
+      planFor([
+        {
+          type: "drive",
+          slug: "images",
+          name: "Images",
+          description: "",
+          position: 0,
+          files,
+        },
+      ]),
+      { autoMerge: true },
+    );
+    expect(peak).toBe(8);
+    expect(active).toBe(0);
+    expect(order).toHaveLength(25);
+    const created = calls.find((call) => call.method === "fileTrees.create");
+    expect(result.created.files).toBe(25);
+    expect(
+      (created?.input as { files: { path: string }[] }).files.map((file) => file.path),
+    ).toEqual(files.map((file) => file.path));
+  });
 
   it("uploads the bytes and rewrites the body to the NEW asset id", async () => {
     const { calls, client } = createFakeServer();
