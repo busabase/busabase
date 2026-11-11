@@ -1,0 +1,18 @@
+diff --git a/dist/esm/classes.js b/dist/esm/classes.js
+index fae4753..6411916 100644
+--- a/dist/esm/classes.js
++++ b/dist/esm/classes.js
+@@ -102,7 +102,12 @@ export class FFmpeg {
+     load = ({ classWorkerURL, ...config } = {}, { signal } = {}) => {
+         if (!this.#worker) {
+             this.#worker = classWorkerURL ?
+-                new Worker(new URL(classWorkerURL, import.meta.url), {
++                // A caller-supplied worker URL is a runtime value. Turbopack in next 16.4 reads
++                // `new URL(<dynamic> | undefined, import.meta.url)` as a static asset request and
++                // fails the build (vercel/next.js#98489), so hand the URL to Worker directly.
++                // Relative URLs now resolve against the page instead of this module; nothing in
++                // the repo passes `classWorkerURL`.
++                new Worker(classWorkerURL, {
+                     type: "module",
+                 }) :
+                 // We need to duplicated the code here to enable webpack

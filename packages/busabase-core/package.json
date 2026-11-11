@@ -1,7 +1,7 @@
 {
   "name": "busabase-core",
   "description": "Shared Busabase open-core protocol, local store, API helpers, and dashboard components.",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "private": true,
   "type": "module",
   "exports": {
@@ -124,6 +124,10 @@
     "./domains/assets/asset-content-logic": {
       "types": "./src/domains/assets/logic/asset-content-logic.ts",
       "default": "./src/domains/assets/logic/asset-content-logic.ts"
+    },
+    "./domains/workflow/webhook-signature": {
+      "types": "./src/domains/workflow/utils/webhook-signature.ts",
+      "default": "./src/domains/workflow/utils/webhook-signature.ts"
     },
     "./domains/workflow/run-service": {
       "types": "./src/domains/workflow/logic/run-service.ts",
@@ -333,9 +337,17 @@
       "types": "./src/domains/dashboard/helpers/change-request.ts",
       "default": "./src/domains/dashboard/helpers/change-request.ts"
     },
+    "./dashboard/workflow-run-view": {
+      "types": "./src/domains/workflow/utils/run-view.ts",
+      "default": "./src/domains/workflow/utils/run-view.ts"
+    },
     "./dashboard/format": {
       "types": "./src/domains/dashboard/helpers/format.ts",
       "default": "./src/domains/dashboard/helpers/format.ts"
+    },
+    "./base/drive-field-value": {
+      "types": "./src/domains/base/utils/drive-field-value.ts",
+      "default": "./src/domains/base/utils/drive-field-value.ts"
     },
     "./base/date-value": {
       "types": "./src/domains/base/utils/date-value.ts",
@@ -520,6 +532,10 @@
     "./domains/space-welcome/components/space-welcome-settings": {
       "types": "./src/domains/space-welcome/components/space-welcome-settings.tsx",
       "default": "./src/domains/space-welcome/components/space-welcome-settings.tsx"
+    },
+    "./dashboard/previewfile-host-viewer": {
+      "types": "./src/domains/dashboard/components/previewfile-host-viewer.tsx",
+      "default": "./src/domains/dashboard/components/previewfile-host-viewer.tsx"
     }
   },
   "dependencies": {
@@ -583,7 +599,8 @@
     "ws": "^8.21.0",
     "yaml": "^2.9.0",
     "zod": "^4.3.6",
-    "zustand": "5.0.12"
+    "zustand": "5.0.12",
+    "previewfile-core": "workspace:*"
   },
   "devDependencies": {
     "@testing-library/react": "^16.3.2",

@@ -1,0 +1,182 @@
+{
+  "name": "previewfile-core",
+  "version": "0.1.0",
+  "description": "Shared embedded file viewers and optional Office conversion for workspace applications.",
+  "type": "module",
+  "exports": {
+    "./utils": {
+      "types": "./utils/index.ts",
+      "default": "./utils/index.ts"
+    },
+    "./utils/file-types": {
+      "types": "./utils/file-types.ts",
+      "default": "./utils/file-types.ts"
+    },
+    "./utils/file-validation": {
+      "types": "./utils/file-validation.ts",
+      "default": "./utils/file-validation.ts"
+    },
+    "./utils/file-size": {
+      "types": "./utils/file-size.ts",
+      "default": "./utils/file-size.ts"
+    },
+    "./utils/file-metadata": {
+      "types": "./utils/file-metadata.ts",
+      "default": "./utils/file-metadata.ts"
+    },
+    "./utils/silk-audio": {
+      "types": "./utils/silk-audio.ts",
+      "default": "./utils/silk-audio.ts"
+    },
+    "./client/file-fetch": {
+      "types": "./client/file-fetch/index.ts",
+      "default": "./client/file-fetch/index.ts"
+    },
+    "./client": {
+      "types": "./client/index.ts",
+      "default": "./client/index.ts"
+    },
+    "./client/embedded": {
+      "types": "./client/embedded/index.tsx",
+      "default": "./client/embedded/index.tsx"
+    },
+    "./client/embedded/lazy": {
+      "types": "./client/embedded/lazy.tsx",
+      "default": "./client/embedded/lazy.tsx"
+    },
+    "./client/viewers/model-3d": {
+      "types": "./client/viewers/model-3d-types.d.ts",
+      "default": "./client/viewers/model-3d.tsx"
+    },
+    "./client/i18n": {
+      "types": "./client/i18n/index.ts",
+      "default": "./client/i18n/index.ts"
+    },
+    "./client/converter": {
+      "types": "./client/converter/index.ts",
+      "default": "./client/converter/index.ts"
+    },
+    "./types/ports": {
+      "types": "./types/ports.ts",
+      "default": "./types/ports.ts"
+    },
+    "./server/libreoffice/libreoffice-utils": {
+      "types": "./server/libreoffice/libreoffice-utils.ts",
+      "default": "./server/libreoffice/libreoffice-utils.ts"
+    },
+    "./server/libreoffice/circuit-breaker": {
+      "types": "./server/libreoffice/circuit-breaker.ts",
+      "default": "./server/libreoffice/circuit-breaker.ts"
+    },
+    "./server/libreoffice/resource-manager": {
+      "types": "./server/libreoffice/resource-manager.ts",
+      "default": "./server/libreoffice/resource-manager.ts"
+    },
+    "./server/converter/conversion-cache": {
+      "types": "./server/converter/conversion-cache.ts",
+      "default": "./server/converter/conversion-cache.ts"
+    },
+    "./server/converter/document-converter": {
+      "types": "./server/converter/document-converter.ts",
+      "default": "./server/converter/document-converter.ts"
+    },
+    "./server/converter/conversion-storage": {
+      "types": "./server/converter/conversion-storage.ts",
+      "default": "./server/converter/conversion-storage.ts"
+    },
+    "./server/queue/conversion-queue": {
+      "types": "./server/queue/conversion-queue.ts",
+      "default": "./server/queue/conversion-queue.ts"
+    },
+    "./server/queue/conversion-worker": {
+      "types": "./server/queue/conversion-worker.ts",
+      "browser": "./server/queue/conversion-worker.browser.ts",
+      "default": "./server/queue/conversion-worker.ts"
+    },
+    "./server/conversion-host": {
+      "types": "./server/conversion-host.ts",
+      "default": "./server/conversion-host.ts"
+    },
+    "./server/redis-url": {
+      "types": "./server/redis-url.ts",
+      "default": "./server/redis-url.ts"
+    },
+    "./server/http/conversion-source": {
+      "types": "./server/http/conversion-source.ts",
+      "default": "./server/http/conversion-source.ts"
+    },
+    "./server/http/convert-route": {
+      "types": "./server/http/convert-route.ts",
+      "default": "./server/http/convert-route.ts"
+    },
+    "./server/http/conversion-file-route": {
+      "types": "./server/http/conversion-file-route.ts",
+      "default": "./server/http/conversion-file-route.ts"
+    },
+    "./server/http/public-fetch": {
+      "types": "./server/http/public-fetch.ts",
+      "default": "./server/http/public-fetch.ts"
+    },
+    "./client/text-preview": {
+      "types": "./client/text-preview/index.ts",
+      "default": "./client/text-preview/index.ts"
+    },
+    "./utils/text-preview": {
+      "types": "./client/text-preview/text-preview.ts",
+      "default": "./client/text-preview/text-preview.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "peerDependencies": {
+    "bullmq": "*",
+    "ioredis": "*",
+    "kui": "workspace:*",
+    "react": "*",
+    "redis": "*",
+    "rimraf": "*"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.0",
+    "@types/node": "^26.3.0",
+    "@types/react": "^19.2.17",
+    "@types/three": "^0.180.0",
+    "@types/utif": "^3.0.6",
+    "bullmq": "^5.66.5",
+    "ioredis": "^5.9.1",
+    "jsdom": "^25.0.1",
+    "kui": "workspace:*",
+    "react": "^19.2.7",
+    "redis": "^5.10.0",
+    "rimraf": "^6.0.1",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.11"
+  },
+  "packageManager": "pnpm@10.15.1",
+  "dependencies": {
+    "@ffmpeg/ffmpeg": "^0.12.15",
+    "@ffmpeg/util": "^0.12.2",
+    "@react-three/drei": "^10.7.6",
+    "@react-three/fiber": "^9.3.0",
+    "@zip.js/zip.js": "^2.8.20",
+    "ag-psd": "^24.0.0",
+    "docx-preview": "^0.3.7",
+    "epubjs": "^0.3.93",
+    "libarchive.js": "^1.3.0",
+    "openlib": "workspace:*",
+    "react-pdf": "10.4.1",
+    "react-window": "^2.2.0",
+    "sql.js": "^1.14.0",
+    "srt-parser-2": "^1.2.3",
+    "streamdown": "^2.3.0",
+    "three": "^0.180.0",
+    "utif": "^3.1.0",
+    "video.js": "^8.23.4",
+    "x-data-spreadsheet": "^1.1.9",
+    "xlsx": "^0.18.5"
+  }
+}

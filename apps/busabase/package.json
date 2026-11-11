@@ -18,7 +18,7 @@
     "pglite",
     "cli"
   ],
-  "version": "1.2.0",
+  "version": "1.3.0",
   "private": false,
   "license": "MIT",
   "homepage": "https://github.com/busabase/busabase/tree/main/apps/busabase",
@@ -83,7 +83,9 @@
     "perf:suite": "node scripts/perf/run-suite.mjs",
     "perf:writes": "node scripts/perf/run-concurrent-writes.mjs",
     "test:e2e:agent-fidelity": "playwright test --config=playwright.agent-fidelity.config.ts",
-    "test:e2e:agent-source-fidelity": "playwright test --config=playwright.agent-source-fidelity.config.ts"
+    "test:e2e:agent-source-fidelity": "playwright test --config=playwright.agent-source-fidelity.config.ts",
+    "predev": "node ../../packages/previewfile-core/scripts/copy-viewer-assets.mjs public",
+    "prebuild": "node ../../packages/previewfile-core/scripts/copy-viewer-assets.mjs public"
   },
   "dependencies": {
     "busabase-cli": "workspace:*",
@@ -110,6 +112,7 @@
     "busabase-core": "workspace:*",
     "drizzle-kit": "^0.31.7",
     "drizzle-orm": "^0.45.1",
+    "fflate": "^0.8.2",
     "fumadocs-core": "16.14.5",
     "fumadocs-ui": "16.14.5",
     "kui": "workspace:*",
@@ -119,17 +122,21 @@
     "openlib": "workspace:*",
     "postcss": "^8.5.6",
     "postgres": "^3.4.6",
+    "pptxgenjs": "^4.0.1",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "relaylib": "workspace:*",
     "server-only": "^0.0.1",
+    "sharp": "0.34.4",
     "sonner": "^2.0.7",
+    "sql.js": "^1.14.0",
     "tailwindcss": "^4.3.3",
     "tsdown": "^0.22.14",
     "typescript": "^7.0.2",
     "vitest": "^4.1.11",
     "wouter": "^3.9.0",
     "ws": "^8.21.0",
+    "xlsx": "^0.18.5",
     "zod": "^4.3.6"
   },
   "appStatus": {

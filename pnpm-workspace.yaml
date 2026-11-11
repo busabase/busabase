@@ -16,7 +16,24 @@ onlyBuiltDependencies:
   - sharp
   - unrs-resolver
 
+overrides:
+  '@ai-sdk/provider': ^3.0.8
+  '@gaia-agent/sdk': 0.1.26
+  '@types/glob': '-'
+  '@types/minimatch': '-'
+  '@types/uuid': '-'
+  ai: ^6.0.264
+  drizzle-orm: 0.45.2
+  nanoid: ^6.0.1
+  next: 16.4.5
+  prosemirror-model: 1.25.11
+  prosemirror-view: 1.42.1
+  shiki: 3.23.0
+  xlsx: 0.18.5
+  zod: 4.4.3
+
 patchedDependencies:
+  '@ffmpeg/ffmpeg@0.12.15': patches/@ffmpeg__ffmpeg@0.12.15.patch
   '@r1ck404/nodepod@1.11.2': patches/@r1ck404__nodepod@1.11.2.patch
   '@react-native-cookies/cookies@6.2.1': patches/@react-native-cookies__cookies@6.2.1.patch
   'next@16.4.5': patches/next@16.4.5.patch
