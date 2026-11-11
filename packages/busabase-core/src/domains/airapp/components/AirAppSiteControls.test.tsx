@@ -13,7 +13,12 @@ import { dashboardPt } from "../../../i18n/pt";
 import { dashboardVi } from "../../../i18n/vi";
 import { dashboardZhCN as zhCN } from "../../../i18n/zh-CN";
 import { dashboardZhTW } from "../../../i18n/zh-TW";
-import { airAppSiteBlockerMessage, canGoLive, goLiveNote } from "./AirAppSiteControls";
+import {
+  airAppSiteBlockerMessage,
+  canGoLive,
+  goLiveNote,
+  showsAirAppSiteSettings,
+} from "./AirAppSiteControls";
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
@@ -123,6 +128,38 @@ describe("canGoLive", () => {
 
   it("is off on a plan that leaves the engine out", () => {
     expect(canGoLive(state({ engine: "locked" }))).toBe(false);
+  });
+});
+
+describe("showsAirAppSiteSettings", () => {
+  it("hides an address that has never been live on a plan that leaves the Website out", () => {
+    // A Free space: the derived address can never go live, and showing it
+    // beside "Public · go live first" read as a site one click away.
+    expect(
+      showsAirAppSiteSettings(
+        state({ engine: "locked", previewVersion: null, currentVersion: null, liveVersion: null }),
+      ),
+    ).toBe(false);
+  });
+
+  it("keeps a downgraded space's live site, so it can still be taken down", () => {
+    expect(
+      showsAirAppSiteSettings(
+        state({ engine: "locked", liveVersion: "v1", publication: "live", isPublic: true }),
+      ),
+    ).toBe(true);
+    expect(
+      showsAirAppSiteSettings(state({ engine: "locked", liveVersion: "v1", isPublic: false })),
+    ).toBe(true);
+  });
+
+  it("is unchanged where the Website is included", () => {
+    expect(showsAirAppSiteSettings(state())).toBe(true);
+    expect(showsAirAppSiteSettings(state({ liveVersion: "v1", publication: "live" }))).toBe(true);
+  });
+
+  it("shows nothing without an address", () => {
+    expect(showsAirAppSiteSettings(state({ address: null }))).toBe(false);
   });
 });
 

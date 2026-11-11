@@ -4,6 +4,7 @@ export type FieldType =
   | "markdown"
   | "html"
   | "attachment"
+  | "drive"
   | "relation"
   | "member"
   | "number"
@@ -221,6 +222,7 @@ export type {
   GalleryCardSize,
   GalleryCoverFit,
   GanttScale,
+  GridRowHeight,
   LookupComputedVO,
   RecordLinkVO,
   RecordVO,
@@ -235,6 +237,10 @@ export type {
   ViewVO,
 } from "../domains/base/types";
 export {
+  GRID_ROW_HEIGHT_PRESETS,
+  GRID_ROW_HEIGHTS,
+  getGridRowHeight,
+  isGridRowHeight,
   LOOKUP_SOURCE_LIMIT,
   VIEW_FIELD_MAX_WIDTH,
   VIEW_FIELD_MIN_WIDTH,
@@ -523,10 +529,26 @@ export interface MentionInboxPageVO {
 }
 
 export interface AgentTaskVO {
+  /** The change request id; the `cursor` for the page after this task. */
+  id?: string;
+  /**
+   * A preview, like an inbox row: at most 20 operations, field values over 4 KB
+   * replaced by a marker. Read `changeRequestPath` when `truncated` is true.
+   */
   changeRequest: ChangeRequestVO;
   trigger: "changes_requested" | "ai_mention";
   reviewReason: string | null;
   aiComments: CommentVO[];
+  /** Operations or field values were left out of `changeRequest`. Optional: older servers omit it. */
+  truncated?: boolean;
+  omittedOperationCount?: number;
+  /** `/api/v1/change-requests/{id}` — every operation with full field values. */
+  changeRequestPath?: string;
+}
+
+export interface ListAgentTasksDTO {
+  limit?: number;
+  cursor?: string;
 }
 
 export interface SearchResultVO {

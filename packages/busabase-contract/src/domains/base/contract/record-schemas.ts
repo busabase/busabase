@@ -252,6 +252,18 @@ export const listRecordsPageInputSchema = z.object({
     .string()
     .min(1)
     .describe("Required here, unlike `records.list` where omitting it spans the whole space."),
+  find: z
+    .object({
+      query: z.string().trim().min(1).max(500),
+      fieldId: z.string().min(1).optional(),
+    })
+    .optional()
+    .describe(
+      "Temporary, literal case-insensitive find within this Base and saved View. " +
+        "Matches complete current values before counting and paging. Omit fieldId to search " +
+        "common text/label fields; pass a stable field id for one supported field. " +
+        "Does not update the saved View.",
+    ),
   listMode: z
     .enum(["full", "table"])
     .optional()

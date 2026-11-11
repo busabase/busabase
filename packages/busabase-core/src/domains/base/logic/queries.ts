@@ -9,10 +9,10 @@ import {
   type listRecordsValueFilterNodeSchema,
 } from "busabase-contract/domains/base/contract/record-schemas";
 import {
+  type BaseFieldVO,
   combineViewFilters,
   flattenViewFilters,
   type ViewConfigVO,
-  type ViewFilterConditionVO,
   type ViewFilterVO,
 } from "busabase-contract/types";
 import {
@@ -50,7 +50,11 @@ import {
   busabaseViews,
 } from "../../../db/schema";
 import { hydrateRecord, hydrateRecords } from "../../../logic/cr-lifecycle";
-import { buildBaseVisibilityExists, buildNodeVisibilityExists } from "../../../logic/node-acl";
+import {
+  buildBaseVisibilityExists,
+  buildNodeVisibilityExists,
+  getEffectiveNodeLevel,
+} from "../../../logic/node-acl";
 import { ensureReady } from "../../../logic/seed";
 import {
   listInputSchema,
@@ -78,8 +82,15 @@ import {
 
 import { commitPayloadWithFields } from "./commit-payload-projection";
 import { lookupDependentFieldSlugs, lookupFormulaInputSlugs } from "./lookup-formulas";
+import { filterRecordsForFind, resolveRecordFindFields } from "./record-find";
 import { resolveRecordSort } from "./record-sort";
 import { assertNoReverseRelationQueryOrThrow, collectFieldSlugs } from "./reverse-relations";
+import {
+  conditionsReadLookups,
+  executeRows,
+  planViewSql,
+  selectOrderedRecordIds,
+} from "./view-sql-plan";
 
 export { listInputSchema, recordFieldFilterInputSchema, recordFieldGetInputSchema };
 
@@ -216,6 +227,16 @@ export const getBase = async (baseId: string) => {
     .where(and(eq(busabaseBaseFields.baseId, row.base.id), isNull(busabaseBaseFields.deletedAt)))
     .orderBy(asc(busabaseBaseFields.position));
   return toBaseVO(row.base, fields);
+};
+
+/** The open Base's RPC response and SSR seed must carry the same effective permission. */
+export const getBaseWithViewerPermission = async (baseId: string) => {
+  const base = await getBase(baseId);
+  if (!base) return null;
+  // getBase already hides invisible Bases. Preserve the RPC's existing fallback
+  // if no level resolves rather than inventing a grant.
+  const viewerPermissionLevel = await getEffectiveNodeLevel(base.nodeId);
+  return viewerPermissionLevel ? { ...base, viewerPermissionLevel } : base;
 };
 
 export const listViews = async (baseId?: string) => {
@@ -660,6 +681,50 @@ const sortHydratedRecords = (
     ),
   );
 
+/**
+ * Records per `hydrateRecords` call on the paths that must hydrate a whole
+ * candidate set (lookup sorts and lookup matches). Hydration binds one
+ * parameter per head commit, and Postgres refuses a statement with more than
+ * 65,535 of them, so an unchunked call on a big enough set is a 500 rather
+ * than a slow answer. The chunks are concatenated in input order, which is all
+ * the callers rely on.
+ */
+const HYDRATE_CHUNK_SIZE = 5_000;
+const hydrateRecordsInChunks = async (
+  rows: RecordPO[],
+  options?: Parameters<typeof hydrateRecords>[1],
+): Promise<HydratedRecord[]> => {
+  if (rows.length <= HYDRATE_CHUNK_SIZE) return hydrateRecords(rows, options);
+  const hydrated: HydratedRecord[] = [];
+  for (let start = 0; start < rows.length; start += HYDRATE_CHUNK_SIZE) {
+    for (const record of await hydrateRecords(
+      rows.slice(start, start + HYDRATE_CHUNK_SIZE),
+      options,
+    )) {
+      hydrated.push(record);
+    }
+  }
+  return hydrated;
+};
+
+/** The 400 for a space-wide sort on a lookup-dependent slug, naming where it lives. */
+const dynamicSortNeedsBaseMessage = (
+  fieldSlug: string,
+  bases: ReadonlyArray<{ id: string; slug: string }>,
+): string => {
+  const listed = bases
+    .slice(0, 5)
+    .map((base) => `${base.slug} (${base.id})`)
+    .join(", ");
+  const more = bases.length > 5 ? `, … (${bases.length} Bases)` : "";
+  return (
+    `sort: pass baseId to sort by "${fieldSlug}". It is a lookup, or a formula that reads one, ` +
+    `in ${listed}${more}: its value is computed per record when read, so it only orders the ` +
+    `records of one Base, and sorting the whole space by it would compute it for every record ` +
+    `in the space first.`
+  );
+};
+
 // Sort cursor = base64 JSON of the row's sort value (null-safe) + its id.
 const encodeSortCursor = (value: number | Date | null, id: string): string =>
   Buffer.from(
@@ -776,13 +841,29 @@ export const listRecordsPaged = async (input?: z.input<typeof listRecordsInputSc
 
   const sortInfo = sort ? sortColumnFor(sort.fieldType) : null;
   if (sort && sortInfo && dynamicSlugs.has(sort.fieldSlug)) {
+    if (!base) {
+      // A lookup's value is computed per record at read time, so sorting by it
+      // means hydrating every candidate first. Without a Base the candidates are
+      // every record in the space — 96k in a real one, past the bind-parameter
+      // limit of the hydration read, so this was a 500 — and the slug only
+      // means that lookup inside the Bases that define it anyway.
+      throw new ORPCError("BAD_REQUEST", {
+        message: dynamicSortNeedsBaseMessage(
+          sort.fieldSlug,
+          queriedBases.filter((queried) =>
+            lookupDependentFieldSlugs(queried.fields).has(sort.fieldSlug),
+          ),
+        ),
+        data: { reason: "sort_field_requires_base", fieldSlug: sort.fieldSlug },
+      });
+    }
     // No source-Base edit refreshes the stored projection. Resolve first, then
     // use the same numeric/date NULLS LAST ordering and keyset cursor as SQL.
     const rows = await db
       .select()
       .from(busabaseRecords)
       .where(and(...filters));
-    const ordered = sortHydratedRecords(await hydrateRecords(rows), sort, sortInfo.kind);
+    const ordered = sortHydratedRecords(await hydrateRecordsInChunks(rows), sort, sortInfo.kind);
     const cursor = parsed.cursor ? decodeSortCursor(parsed.cursor, sortInfo.kind) : null;
     const candidates = cursor
       ? ordered.filter((record) => compareHydratedSortKey(record, cursor, sort, sortInfo.kind) > 0)
@@ -980,6 +1061,8 @@ export const listRecordsPage = async (input: z.input<typeof listRecordsPageInput
   if (!base) {
     throw new ORPCError("NOT_FOUND", { message: `Base not found: ${parsed.baseId}` });
   }
+  const findFields = parsed.find ? resolveRecordFindFields(base.fields, parsed.find) : [];
+  const findSlugs = findFields.map((field) => field.slug);
   // An omitted `fieldType` is read from the Base's schema; an unknown slug is a 400.
   const sort = parsed.sort ? resolveRecordSort(parsed.sort, base.fields) : undefined;
 
@@ -1079,19 +1162,9 @@ export const listRecordsPage = async (input: z.input<typeof listRecordsPageInput
         (effectiveViewConfig.filters.length > 0 || effectiveViewConfig.sorts.length > 0)),
   );
 
-  // NOTE: there is deliberately no "all filters are pushable → SQL LIMIT/OFFSET"
-  // fast path here, even though `resolveAggregateFilterScope` could prove it.
-  // The exact-evaluation path below orders by the client's own comparator,
-  // whose fallback is `updatedAt desc, id desc` (`compareRecordsByViewSort`),
-  // while the SQL path below orders by `createdAt desc, id desc`. Serving some
-  // pages from one ordering and some from the other would let a record repeat
-  // on one page and vanish from another as the user pages through a column.
-  // Unifying those two orderings is a separate change; until then, a filtered
-  // page is always exact-evaluated.
-
   // The ordinary All view and presentation-only saved views can use true SQL
   // random access: count once, then hydrate only the requested page.
-  if (!needsExactViewEvaluation) {
+  if (!needsExactViewEvaluation && !parsed.find) {
     const [countRow] = await db
       .select({ value: count() })
       .from(busabaseRecords)
@@ -1116,67 +1189,53 @@ export const listRecordsPage = async (input: z.input<typeof listRecordsPageInput
     };
   }
 
-  // Complex saved views remain exact even when their field semantics cannot be
-  // represented by the projection table: the whole visible Base is evaluated,
-  // then only the requested slice is returned.
+  // Saved views (and a board column's ad-hoc filter) are authoritative: the
+  // page must be exactly the slice the view matcher and comparator in
+  // utils/view-records.ts would produce over the whole visible Base.
   //
-  // The evaluation deliberately does NOT hydrate first. Filtering and sorting
-  // read only a record's field values, its id and its updatedAt — so the
-  // candidate set is read as `(id, updatedAt, commit.fields)` rows, and just the
-  // ~pageSize records that survive into the page are hydrated into VOs. On a
-  // 10k-record Base that is the difference between building 10,000 VOs (with
-  // their bases, commits, users and lookups) and building 50.
+  // `planViewSql` decides as much of that in SQL as it can PROVE gives the
+  // same answer: every root filter it can decide becomes a predicate, and when
+  // every sort can be decided too, the comparator's order (sorts, then
+  // `updatedAt desc`, then `id desc`) becomes the ORDER BY. A filtered, sorted
+  // view of a 60k-record Base then reads one page instead of the Base. Whatever
+  // it cannot decide is evaluated here, in process, over the rows the decided
+  // filters already narrowed down to — the same functions as before, on fewer
+  // rows, so the result cannot differ.
   //
   // Lookup values and formulas which depend on them are refreshed from other
   // records at hydration time. Their stored commits/projections cannot decide
-  // view membership or order; resolve the complete candidate set first.
-  const viewFieldSlugs = new Set([
-    ...flattenViewFilters(effectiveViewConfig?.filters ?? []).map((filter) =>
-      filter.fieldId
-        ? base.fields.find((field) => field.id === filter.fieldId)?.slug
-        : filter.fieldSlug,
-    ),
-    ...(effectiveViewConfig?.sorts ?? []).map((viewSort) => viewSort.fieldSlug),
-    ...(explicitDynamicSort && sort ? [sort.fieldSlug] : []),
-  ]);
-  const viewEvaluationSlugs = [...viewFieldSlugs].filter(
-    (slug): slug is string => slug !== undefined,
-  );
+  // view membership or order, so those conditions are never pushed; the
+  // remaining candidates are hydrated before they are evaluated.
+  const viewFilters = effectiveViewConfig?.filters ?? [];
+  const viewSorts = effectiveViewConfig?.sorts ?? [];
+  const plan = await planViewSql(db, {
+    baseId: base.id,
+    fields: base.fields,
+    filters: viewFilters,
+    // An explicit sort already decided the order (or needs hydration).
+    sorts:
+      parsed.find || sqlSortOrder || explicitDynamicSort || !needsExactViewEvaluation
+        ? null
+        : viewSorts,
+    scope: recordFilters,
+    provenLeaf: provenRecordFilterLeaf(db, base.id),
+  });
+  const narrowedFilters = [...recordFilters, ...plan.pushed];
+  const residualConfig: ViewConfigVO = { filters: plan.residual, sorts: viewSorts };
+  const viewOrder = sqlSortOrder ? null : plan.order;
+  const hasSqlOrder = Boolean(sqlSortOrder || viewOrder || !needsExactViewEvaluation);
   const dynamicSlugs = lookupDependentFieldSlugs(base.fields);
-  const dependsOnLookup = viewEvaluationSlugs.some((slug) => dynamicSlugs.has(slug));
-
-  if (!dependsOnLookup) {
-    const candidateRows = await db
-      .select({
-        id: busabaseRecords.id,
-        updatedAt: busabaseRecords.updatedAt,
-        // Membership and order read only the fields the view names. Project them
-        // in SQL so a filter on a short status never loads every report body.
-        fields: commitPayloadWithFields(viewEvaluationSlugs).as("fields"),
-      })
-      .from(busabaseRecords)
-      .innerJoin(busabaseCommits, eq(busabaseCommits.id, busabaseRecords.headCommitId))
-      .where(and(...recordFilters))
-      .orderBy(...candidateOrder);
-    const evaluable = candidateRows.map((row) => ({
-      id: row.id,
-      updatedAt: row.updatedAt.toISOString(),
-      fields: (row.fields ?? {}) as Record<string, unknown>,
-    }));
-    // With a SQL sort the rows already arrive in their final order, so only
-    // filter: the view comparator would re-sort them by its own fallback.
-    const ordered = sqlSortOrder
-      ? filterEvaluableRecordsByViewFilters(
-          evaluable,
-          base.fields,
-          effectiveViewConfig?.filters ?? [],
-        )
-      : applyViewConfigToEvaluableRecords(evaluable, base.fields, effectiveViewConfig);
-    const total = ordered.length;
+  const dependsOnLookup = Boolean(
+    explicitDynamicSort ||
+      conditionsReadLookups(base.fields, plan.residual) ||
+      (!hasSqlOrder && viewSorts.some((viewSort) => dynamicSlugs.has(viewSort.fieldSlug))),
+  );
+  const slicePage = async (orderedIds: string[]) => {
+    const total = orderedIds.length;
     const totalPages = Math.ceil(total / parsed.pageSize);
     const page = totalPages === 0 ? 1 : Math.min(parsed.page, totalPages);
     const offset = (page - 1) * parsed.pageSize;
-    const pageIds = ordered.slice(offset, offset + parsed.pageSize).map((row) => row.id);
+    const pageIds = orderedIds.slice(offset, offset + parsed.pageSize);
     // Hydrate only the page, then restore the order the view decided (the
     // WHERE ... IN read comes back in whatever order the engine likes).
     const pageRecords = pageIds.length
@@ -1195,50 +1254,166 @@ export const listRecordsPage = async (input: z.input<typeof listRecordsPageInput
       page,
       pageSize: parsed.pageSize,
     };
+  };
+
+  if (!parsed.find && !dependsOnLookup && hasSqlOrder && plan.residual.length === 0) {
+    // Fully decided: the same count-then-page random access as the All view.
+    const [countRow] = await db
+      .select({ value: count() })
+      .from(busabaseRecords)
+      .where(and(...narrowedFilters));
+    const total = countRow?.value ?? 0;
+    const totalPages = Math.ceil(total / parsed.pageSize);
+    const page = totalPages === 0 ? 1 : Math.min(parsed.page, totalPages);
+    const offset = (page - 1) * parsed.pageSize;
+    let rows: RecordPO[];
+    if (viewOrder) {
+      const pageIds = await selectOrderedRecordIds(db, viewOrder, narrowedFilters, {
+        limit: parsed.pageSize,
+        offset,
+      });
+      const byId = new Map(
+        (pageIds.length
+          ? await db.select().from(busabaseRecords).where(inArray(busabaseRecords.id, pageIds))
+          : []
+        ).map((row) => [row.id, row]),
+      );
+      rows = pageIds.flatMap((recordId) => {
+        const row = byId.get(recordId);
+        return row ? [row] : [];
+      });
+    } else {
+      rows = await db
+        .select()
+        .from(busabaseRecords)
+        .where(and(...narrowedFilters))
+        .orderBy(...(sqlSortOrder ?? candidateOrder))
+        .limit(parsed.pageSize)
+        .offset(offset);
+    }
+    return {
+      records: await hydratePageRows(rows),
+      total,
+      totalPages,
+      page,
+      pageSize: parsed.pageSize,
+    };
+  }
+
+  // Membership and order read only a record's field values, its id and its
+  // updatedAt, so the candidates are read as `(id, updatedAt, fields)` rows —
+  // only the fields still to be evaluated — and just the page is hydrated.
+  const residualSlugs = flattenViewFilters(plan.residual).flatMap((filter) => {
+    const slug = filter.fieldId
+      ? base.fields.find((field) => field.id === filter.fieldId)?.slug
+      : filter.fieldSlug;
+    return slug ? [slug] : [];
+  });
+  const sortSlugs = hasSqlOrder ? [] : viewSorts.map((viewSort) => viewSort.fieldSlug);
+
+  if (!dependsOnLookup) {
+    const [candidateRows, orderedIds] = await Promise.all([
+      db
+        .select({
+          id: busabaseRecords.id,
+          updatedAt: busabaseRecords.updatedAt,
+          fields: commitPayloadWithFields([...residualSlugs, ...sortSlugs, ...findSlugs]).as(
+            "fields",
+          ),
+        })
+        .from(busabaseRecords)
+        .innerJoin(busabaseCommits, eq(busabaseCommits.id, busabaseRecords.headCommitId))
+        .where(and(...narrowedFilters))
+        .orderBy(...(sqlSortOrder ?? candidateOrder)),
+      viewOrder ? selectOrderedRecordIds(db, viewOrder, narrowedFilters) : null,
+    ]);
+    const rowsInOrder = orderedIds
+      ? (() => {
+          const byId = new Map(candidateRows.map((row) => [row.id, row]));
+          return orderedIds.flatMap((recordId) => {
+            const row = byId.get(recordId);
+            return row ? [row] : [];
+          });
+        })()
+      : candidateRows;
+    const evaluable = rowsInOrder.map((row) => ({
+      id: row.id,
+      updatedAt: row.updatedAt.toISOString(),
+      fields: (row.fields ?? {}) as Record<string, unknown>,
+    }));
+    // With a SQL order the rows already arrive in their final order, so only
+    // filter: the view comparator would re-sort them by its own fallback.
+    const filtered =
+      hasSqlOrder || parsed.find
+        ? filterEvaluableRecordsByViewFilters(evaluable, base.fields, plan.residual)
+        : applyViewConfigToEvaluableRecords(evaluable, base.fields, residualConfig);
+    const matched = await filterRecordsForFind(db, filtered, findFields, parsed.find);
+    // Find membership does not depend on order. Rank only the matches using
+    // the canonical comparator instead of building SQL ranks for the full view.
+    const ordered =
+      parsed.find && !hasSqlOrder
+        ? applyViewConfigToEvaluableRecords(matched, base.fields, {
+            filters: [],
+            sorts: viewSorts,
+          })
+        : matched;
+    return slicePage(ordered.map((row) => row.id));
   }
 
   const candidateRows = await db
     .select()
     .from(busabaseRecords)
-    .where(and(...recordFilters))
-    .orderBy(...candidateOrder);
-  // These rows only decide membership and order, so they carry the view's fields
-  // plus the inputs of read-time formulas. The page itself is hydrated below.
+    .where(and(...narrowedFilters))
+    .orderBy(...(sqlSortOrder ?? candidateOrder));
+  // These rows only decide membership and order, so they carry the fields still
+  // to be evaluated plus the inputs of read-time formulas. The page itself is
+  // hydrated by `slicePage`.
   const candidates = await hydrateRecords(candidateRows, {
-    payloadFields: [...viewEvaluationSlugs, ...lookupFormulaInputSlugs(base.fields)],
+    payloadFields: [
+      ...residualSlugs,
+      ...viewSorts.map((viewSort) => viewSort.fieldSlug),
+      ...(explicitDynamicSort && sort ? [sort.fieldSlug] : []),
+      ...lookupFormulaInputSlugs(base.fields),
+      ...findSlugs,
+    ],
   });
+  if (parsed.find) {
+    const filtered = filterRecordsByViewFilters(candidates, plan.residual);
+    const matched = await filterRecordsForFind(
+      db,
+      filtered.map((record) => ({ ...record, fields: record.headCommit.payload })),
+      findFields,
+      parsed.find,
+    );
+    const ordered =
+      explicitDynamicSort && sort
+        ? sortHydratedRecords(matched, sort, explicitDynamicSort.kind)
+        : sqlSortOrder
+          ? matched
+          : applyViewConfigToRecords(matched, { filters: [], sorts: viewSorts });
+    return slicePage(ordered.map((record) => record.id));
+  }
   const ordered =
     explicitDynamicSort && sort
       ? sortHydratedRecords(
-          filterRecordsByViewFilters(candidates, effectiveViewConfig?.filters ?? []),
+          filterRecordsByViewFilters(candidates, plan.residual),
           sort,
           explicitDynamicSort.kind,
         )
       : sqlSortOrder
-        ? filterRecordsByViewFilters(candidates, effectiveViewConfig?.filters ?? [])
-        : applyViewConfigToRecords(candidates, effectiveViewConfig);
-  const total = ordered.length;
-  const totalPages = Math.ceil(total / parsed.pageSize);
-  const page = totalPages === 0 ? 1 : Math.min(parsed.page, totalPages);
-  const offset = (page - 1) * parsed.pageSize;
-  const pageIds = ordered.slice(offset, offset + parsed.pageSize).map((record) => record.id);
-  const pageRecords = pageIds.length
-    ? await hydratePageRows(
-        await db.select().from(busabaseRecords).where(inArray(busabaseRecords.id, pageIds)),
-      )
-    : [];
-  const pageRecordsById = new Map(pageRecords.map((record) => [record.id, record]));
-
-  return {
-    records: pageIds.flatMap((recordId) => {
-      const record = pageRecordsById.get(recordId);
-      return record ? [record] : [];
-    }),
-    total,
-    totalPages,
-    page,
-    pageSize: parsed.pageSize,
-  };
+        ? filterRecordsByViewFilters(candidates, plan.residual)
+        : applyViewConfigToRecords(candidates, residualConfig);
+  const matched = await filterRecordsForFind(
+    db,
+    ordered.map((record) => ({
+      id: record.id,
+      updatedAt: record.updatedAt,
+      fields: record.headCommit.payload,
+    })),
+    findFields,
+    parsed.find,
+  );
+  return slicePage(matched.map((record) => record.id));
 };
 
 // ── Exact filter pushdown for records.count ────────────────────────────────
@@ -1289,35 +1464,9 @@ const isScalarFilterValue = (value: unknown): value is string | number | boolean
 // under-count on `contains`/`equals` (a match that only exists past the cutoff
 // is invisible to SQL). `not_empty`/`is_empty` (presence) and the checkbox
 // operators (booleanness) are untouched by truncation — only these two
-// operators need the extra probe below.
+// operators need `planViewSql`'s longest-stored-text check before trusting
+// their predicate.
 const TRUNCATION_SENSITIVE_OPERATORS = new Set(["contains", "equals"]);
-
-/**
- * True when Base `baseId`'s `fieldSlug` has at least one projected value at or
- * over `VALUE_TEXT_INDEX_LIMIT` — i.e. `valueText` may be truncated relative
- * to the field's real value for SOME record. Scoped by the
- * `busabase_field_values_base_field_idx` (baseId, fieldSlug) index, so this is
- * a narrow index lookup, not a table scan.
- */
-const hasTruncatedFieldValue = async (
-  db: Awaited<ReturnType<typeof getDb>>,
-  baseId: string,
-  fieldSlug: string,
-): Promise<boolean> => {
-  const [row] = await db
-    .select({ one: sql`1` })
-    .from(busabaseFieldValues)
-    .where(
-      and(
-        eq(busabaseFieldValues.baseId, baseId),
-        eq(busabaseFieldValues.fieldSlug, fieldSlug),
-        isNull(busabaseFieldValues.deletedAt),
-        sql`length(${busabaseFieldValues.valueText}) >= ${VALUE_TEXT_INDEX_LIMIT}`,
-      ),
-    )
-    .limit(1);
-  return Boolean(row);
-};
 
 /**
  * True when `buildExactRecordFilter` below can build a SQL predicate proven
@@ -1326,9 +1475,10 @@ const hasTruncatedFieldValue = async (
  * routes `countRecords` to the hydrate/evaluate fallback instead.
  *
  * NOTE: this alone is necessary but not SUFFICIENT for `contains`/`equals` on
- * a text type — `countRecords` additionally probes `hasTruncatedFieldValue`
- * for those two operators before trusting this "true", since truncation is a
- * per-field-data fact this (operator, type, value) triple can't see.
+ * a text type — the aggregates additionally require that no stored text of the
+ * field reaches `VALUE_TEXT_INDEX_LIMIT` before trusting this "true", since
+ * truncation is a per-field-data fact this (operator, type, value) triple
+ * can't see.
  */
 type ExactFilterField = {
   type: string;
@@ -1390,20 +1540,27 @@ const isFilterExactlyPushable = (
 /** Only call once `isFilterExactlyPushable` returned true for the same triple. */
 const buildExactRecordFilter = (
   db: Awaited<ReturnType<typeof getDb>>,
+  baseId: string,
   filter: { fieldSlug: string; operator: string; value?: unknown },
   field: ExactFilterField | undefined,
 ): SQL => {
   const type = field?.type ?? "";
+  // "Some live projected row of the record satisfies `predicate`", as a
+  // semi-join on the field's own rows: a record's rows carry its Base id, so
+  // this reads the (base, field) index once and hashes, instead of probing
+  // every candidate record's rows the way a correlated EXISTS does.
   const matches = (predicate: SQL): SQL =>
-    exists(
+    inArray(
+      busabaseRecords.id,
       db
-        .select({ one: sql`1` })
+        .select({ recordId: busabaseFieldValues.recordId })
         .from(busabaseFieldValues)
         .where(
           and(
-            eq(busabaseFieldValues.recordId, busabaseRecords.id),
+            eq(busabaseFieldValues.baseId, baseId),
             eq(busabaseFieldValues.fieldSlug, filter.fieldSlug),
             isNull(busabaseFieldValues.deletedAt),
+            isNotNull(busabaseFieldValues.recordId),
             predicate,
           ),
         ),
@@ -1502,28 +1659,24 @@ const buildExactRecordFilter = (
   );
 };
 
-/** Preserve the saved expression's grouping once every leaf has passed the
- * exactness proof below. A partial OR pushdown would silently exclude matching
- * branches, so callers only use this when the entire expression is exact. */
-const buildExactViewFilterCondition = (
-  db: Awaited<ReturnType<typeof getDb>>,
-  condition: ViewFilterConditionVO,
-  fields: Awaited<ReturnType<typeof resolveListingBase>>["fields"],
-): SQL => {
-  if ("conditions" in condition) {
-    const children = condition.conditions.map((child) =>
-      buildExactViewFilterCondition(db, child, fields),
-    );
-    // Valid saved groups are nonempty; an invalid empty group fails closed.
-    if (children.length === 0) return sql`false`;
-    return (condition.conjunction === "or" ? or(...children) : and(...children)) as SQL;
-  }
-  return buildExactRecordFilter(
-    db,
-    condition,
-    fields.find((field) => field.slug === condition.fieldSlug),
-  );
-};
+/**
+ * `planViewSql`'s `provenLeaf`: the pairs `isFilterExactlyPushable` proves
+ * from the (operator, field type, value) alone. `contains`/`equals` on a text
+ * field are left out — whether their stored text was cut short at
+ * VALUE_TEXT_INDEX_LIMIT is a fact about the data, which the planner reads.
+ */
+const provenRecordFilterLeaf =
+  (db: Awaited<ReturnType<typeof getDb>>, baseId: string) =>
+  (filter: ViewFilterVO, field: BaseFieldVO): SQL | null => {
+    // Identity is authoritative after a rename; SQL predicates address slugs,
+    // so defer a stale slug to the identity-aware shared matcher.
+    if (field.slug !== filter.fieldSlug) return null;
+    if (TRUNCATION_SENSITIVE_OPERATORS.has(filter.operator) && EXACT_TEXT_TYPES.has(field.type)) {
+      return null;
+    }
+    if (!isFilterExactlyPushable(filter.operator, field, filter.value)) return null;
+    return buildExactRecordFilter(db, baseId, filter, field);
+  };
 
 /**
  * Shared scope resolution for the exactness-sensitive aggregates
@@ -1532,10 +1685,10 @@ const buildExactViewFilterCondition = (
  * (View filters + ad-hoc filters) set become a SQL predicate PROVEN identical
  * to `recordMatchesViewFilter`, or must the caller evaluate every row instead?
  *
- * `exactPredicates` is the SQL to AND into the aggregate when that proof
- * holds, and `null` when it doesn't — the caller then takes its own exact-but-
- * not-free fallback path. An empty array means "no filters at all", which is
- * trivially exact.
+ * The answer is per root condition: `plan.pushed` is the SQL to AND into the
+ * aggregate, `plan.residual` what the caller must still evaluate in process —
+ * over the rows `plan.pushed` already narrowed down to. An empty residual means
+ * the aggregate is a single SQL statement.
  */
 const resolveAggregateFilterScope = async (
   db: Awaited<ReturnType<typeof getDb>>,
@@ -1572,79 +1725,43 @@ const resolveAggregateFilterScope = async (
   // for a dashboard tile built on top of a saved View.
   const allFilters = combineViewFilters(viewConfig, adHocFilters);
   assertNoReverseRelationQueryOrThrow(base.fields, collectFieldSlugs(allFilters), "filter");
-  if (allFilters.length === 0) {
-    return { base, allFilters, exactPredicates: [] as SQL[], dependsOnLookup: false };
-  }
 
-  const resolved = flattenViewFilters(allFilters).map((filter) => ({
-    filter,
-    // The whole field, not just its type: proving a `select` filter exact
-    // requires that field's own choice list (a label predicate has to be
-    // resolved into the set of choice ids that produce it).
-    field: base.fields.find((entry) =>
-      filter.fieldId ? entry.id === filter.fieldId : entry.slug === filter.fieldSlug,
-    ),
-  }));
-  // Lookups and their transitive formula dependents need hydration before
-  // filtering; their committed projections do not track source-record edits.
-  const dynamicSlugs = lookupDependentFieldSlugs(base.fields);
-  const dependsOnLookup = resolved.some(
-    (entry) => entry.field !== undefined && dynamicSlugs.has(entry.field.slug),
-  );
-
-  // Truncation probe: for the (fieldSlug) set behind a contains/equals filter
-  // on a text type, check once each whether ANY stored value for that field in
-  // this Base is at/over VALUE_TEXT_INDEX_LIMIT — narrow index lookups
-  // (base_id, field_slug), not a scan. A truncated field can't trust the SQL
-  // contains/equals predicate (see `hasTruncatedFieldValue`), so it forces that
-  // filter — and therefore the whole aggregate — to the exact fallback.
-  const truncationProbeSlugs = new Set(
-    resolved
-      .filter(
-        (entry) =>
-          TRUNCATION_SENSITIVE_OPERATORS.has(entry.filter.operator) &&
-          EXACT_TEXT_TYPES.has(entry.field?.type ?? ""),
-      )
-      .map((entry) => entry.filter.fieldSlug),
-  );
-  const truncatedSlugs = new Set(
-    (
-      await Promise.all(
-        [...truncationProbeSlugs].map(async (fieldSlug) => ({
-          fieldSlug,
-          truncated: await hasTruncatedFieldValue(db, base.id, fieldSlug),
-        })),
-      )
-    )
-      .filter((entry) => entry.truncated)
-      .map((entry) => entry.fieldSlug),
-  );
-
-  const allExact =
-    !dependsOnLookup &&
-    resolved.every((entry) => {
+  // Each root condition goes to SQL when `planViewSql` can prove it, first from
+  // the field's distinct stored texts, then — for a field with too many of them
+  // — through the predicates proven above (`isFilterExactlyPushable`). A
+  // `contains`/`equals` on a text field whose stored text may be cut short at
+  // VALUE_TEXT_INDEX_LIMIT can't trust its predicate (see
+  // TRUNCATION_SENSITIVE_OPERATORS), so it stays in process.
+  const plan = await planViewSql(db, {
+    baseId: base.id,
+    fields: base.fields,
+    filters: allFilters,
+    sorts: null,
+    scope: [],
+    provenLeaf: provenRecordFilterLeaf(db, base.id),
+    fallbackLeaf: (filter, field, truncated) => {
       // Identity is authoritative after a rename; SQL predicates address slugs,
       // so defer a stale slug to the identity-aware shared matcher.
-      if (entry.field?.slug !== entry.filter.fieldSlug) return false;
-      if (!isFilterExactlyPushable(entry.filter.operator, entry.field, entry.filter.value)) {
-        return false;
-      }
-      if (
-        TRUNCATION_SENSITIVE_OPERATORS.has(entry.filter.operator) &&
-        truncatedSlugs.has(entry.filter.fieldSlug)
-      ) {
-        return false;
-      }
-      return true;
-    });
+      if (field.slug !== filter.fieldSlug || truncated) return null;
+      if (!isFilterExactlyPushable(filter.operator, field, filter.value)) return null;
+      return buildExactRecordFilter(db, base.id, filter, field);
+    },
+  });
 
   return {
     base,
     allFilters,
-    dependsOnLookup,
-    exactPredicates: allExact
-      ? allFilters.map((condition) => buildExactViewFilterCondition(db, condition, base.fields))
-      : null,
+    plan,
+    // Lookups and their transitive formula dependents need hydration before
+    // filtering; their committed projections do not track source-record edits.
+    dependsOnLookup: conditionsReadLookups(base.fields, plan.residual),
+    /** Fields the in-process evaluation of `plan.residual` reads. */
+    residualSlugs: flattenViewFilters(plan.residual).flatMap((filter) => {
+      const slug = filter.fieldId
+        ? base.fields.find((field) => field.id === filter.fieldId)?.slug
+        : filter.fieldSlug;
+      return slug ? [slug] : [];
+    }),
   };
 };
 
@@ -1653,15 +1770,10 @@ const resolveAggregateFilterScope = async (
  * filter set, or a combination. Feeds "N of total" table headers and AirApp
  * summary tiles — the number MUST be exact (never a superset/partial count).
  *
- * Provably-exact filters (see `isFilterExactlyPushable`) get pushed to a real
- * SQL COUNT — with one extra guard: a `contains`/`equals` text filter also
- * gets probed with `hasTruncatedFieldValue`, since `valueText` is truncated at
- * `VALUE_TEXT_INDEX_LIMIT` while the client's authoritative match reads the
- * full value, so a truncated field can't trust the SQL predicate. Anything
- * else falls back to evaluating every visible candidate row with the same
- * `applyViewConfigToRecords`/`applyViewConfigToEvaluableRecords` used by
- * `listRecordsPage`'s exact-view path — still exact, just not free on a large
- * Base.
+ * Every root filter `resolveAggregateFilterScope` can prove goes into a real
+ * SQL COUNT. Whatever it can't is evaluated in process with the same view
+ * matcher `listRecordsPage` uses, over the rows the proven filters already
+ * narrowed down to — still exact, and only as expensive as what is left.
  */
 export const countRecords = async (input?: z.input<typeof countRecordsInputSchema>) => {
   await ensureReady();
@@ -1709,42 +1821,41 @@ export const countRecords = async (input?: z.input<typeof countRecordsInputSchem
   // viewId/filters both require baseId (schema-enforced), so the Base — and
   // its real field definitions, which exactness depends on — is always
   // resolvable from here on.
-  const { base, allFilters, dependsOnLookup, exactPredicates } = await resolveAggregateFilterScope(
+  const { base, plan, dependsOnLookup, residualSlugs } = await resolveAggregateFilterScope(
     db,
     countBase?.id ?? (parsed.baseId as string),
     parsed.viewId,
     parsed.filters,
   );
 
-  if (exactPredicates) {
+  if (plan.residual.length === 0) {
     // Includes the "viewId pointed at a view with no filters" case, where the
     // predicate list is empty and this is a plain SQL COUNT.
-    return sqlCount(exactPredicates);
+    return sqlCount(plan.pushed);
   }
 
-  // Fallback: exact, not cheap. At least one filter's server/client parity
-  // couldn't be proven, or depends on a lookup field — evaluate every visible
-  // candidate row the same way `listRecordsPage`'s exact-view path does, then
-  // count the survivors.
-  const viewConfigForFallback: ViewConfigVO = { filters: allFilters, sorts: [] };
+  // Exact, not free: the conditions SQL could not decide are evaluated the way
+  // `listRecordsPage`'s exact-view path does, over the candidates the decided
+  // ones already narrowed to, reading only the fields those conditions name.
+  const narrowedFilters = [...baseFilters, ...plan.pushed];
   if (!dependsOnLookup) {
     const candidateRows = await db
       .select({
         id: busabaseRecords.id,
         updatedAt: busabaseRecords.updatedAt,
-        fields: busabaseCommits.payload,
+        fields: commitPayloadWithFields(residualSlugs).as("fields"),
       })
       .from(busabaseRecords)
       .innerJoin(busabaseCommits, eq(busabaseCommits.id, busabaseRecords.headCommitId))
-      .where(and(...baseFilters));
-    const matched = applyViewConfigToEvaluableRecords(
+      .where(and(...narrowedFilters));
+    const matched = filterEvaluableRecordsByViewFilters(
       candidateRows.map((row) => ({
         id: row.id,
         updatedAt: row.updatedAt.toISOString(),
         fields: (row.fields ?? {}) as Record<string, unknown>,
       })),
       base.fields,
-      viewConfigForFallback,
+      plan.residual,
     );
     return { total: matched.length };
   }
@@ -1752,10 +1863,11 @@ export const countRecords = async (input?: z.input<typeof countRecordsInputSchem
   const candidateRecordRows = await db
     .select()
     .from(busabaseRecords)
-    .where(and(...baseFilters));
-  const candidates = await hydrateRecords(candidateRecordRows);
-  const matched = applyViewConfigToRecords(candidates, viewConfigForFallback);
-  return { total: matched.length };
+    .where(and(...narrowedFilters));
+  const candidates = await hydrateRecords(candidateRecordRows, {
+    payloadFields: [...residualSlugs, ...lookupFormulaInputSlugs(base.fields)],
+  });
+  return { total: filterRecordsByViewFilters(candidates, plan.residual).length };
 };
 
 /**
@@ -1774,7 +1886,7 @@ export const groupRecords = async (input: z.input<typeof groupRecordsInputSchema
   const db = await getDb();
   const parsed = groupRecordsInputSchema.parse(input);
 
-  const { base, allFilters, dependsOnLookup, exactPredicates } = await resolveAggregateFilterScope(
+  const { base, plan, dependsOnLookup, residualSlugs } = await resolveAggregateFilterScope(
     db,
     parsed.baseId,
     parsed.viewId,
@@ -1850,7 +1962,7 @@ export const groupRecords = async (input: z.input<typeof groupRecordsInputSchema
     baseFilters.push(groupVisible);
   }
   // Exact by construction, so they cost nothing on the fast path — and they are
-  // added to `baseFilters` rather than to `exactPredicates` so BOTH paths honour
+  // added to `baseFilters` rather than to `plan.pushed` so BOTH paths honour
   // them. The in-memory fallback only knows about `allFilters`, so a value
   // filter left out of the SQL would be silently dropped there.
   if (parsed.valueFilters?.length) {
@@ -1938,7 +2050,58 @@ export const groupRecords = async (input: z.input<typeof groupRecordsInputSchema
     return { groups, total: groups.reduce((sum, group) => sum + group.count, 0) };
   };
 
-  if (exactPredicates) {
+  if (
+    plan.residual.length === 0 &&
+    groupSlug &&
+    aggregates.length === 0 &&
+    groupColumn() !== busabaseFieldValues.valueDate
+  ) {
+    // Plain counts per value: the field's rows of this Base are read once
+    // through the (base, field) index into a materialized set and hash-joined
+    // to the records in scope. The scalar subquery below instead walks every
+    // projected row of each record to find one field — on a database where
+    // the Base is a small share of the table, 0.36 s → 0.05 s at 14k records
+    // and 0.69 s → 0.13 s at 60k.
+    //
+    // A LEFT JOIN emits one row per record unless a record has two live rows
+    // for the field (the projection's delete-then-insert should prevent it,
+    // nothing enforces it). So the joined rows must add up to the records in
+    // scope; if they don't, the scalar subquery path below answers instead.
+    // Dates stay there too: they come back from a raw query as text, not as
+    // the instants that path buckets.
+    const column = groupColumn();
+    const scope = and(...baseFilters, ...plan.pushed);
+    const [groupRows, [scopeRow]] = await Promise.all([
+      executeRows<{ group_value: unknown; count: number | string }>(
+        db,
+        sql`with group_keys as materialized (
+          select ${busabaseFieldValues.recordId} as record_id, ${column} as group_value
+          from ${busabaseFieldValues}
+          where ${busabaseFieldValues.baseId} = ${base.id}
+            and ${busabaseFieldValues.fieldSlug} = ${groupSlug}
+            and ${busabaseFieldValues.deletedAt} is null
+            and ${busabaseFieldValues.recordId} is not null
+        )
+        select group_keys.group_value, count(*)::int as count
+        from ${busabaseRecords}
+        left join group_keys on group_keys.record_id = ${busabaseRecords.id}
+        where ${scope}
+        group by group_keys.group_value`,
+      ),
+      db.select({ count: sql<number>`count(*)::int` }).from(busabaseRecords).where(scope),
+    ]);
+    const joined = groupRows.reduce((sum, row) => sum + Number(row.count), 0);
+    if (joined === Number(scopeRow?.count ?? 0)) {
+      const counts = new Map<BucketKey, number>();
+      for (const row of groupRows) {
+        const key = bucketKeyFor(row.group_value);
+        counts.set(key, (counts.get(key) ?? 0) + Number(row.count));
+      }
+      return toResponse(counts);
+    }
+  }
+
+  if (plan.residual.length === 0) {
     // The group key is read as a scalar SUBQUERY rather than a JOIN on
     // busabase_field_values: that table has no unique index on
     // (record_id, field_slug) — uniqueness is maintained by the projection's
@@ -1992,7 +2155,7 @@ export const groupRecords = async (input: z.input<typeof groupRecordsInputSchema
     const keyed = db
       .select(innerSelection as never)
       .from(busabaseRecords)
-      .where(and(...baseFilters, ...exactPredicates))
+      .where(and(...baseFilters, ...plan.pushed))
       .as("keyed_records");
 
     const outerSelection: Record<string, SQL> = {
@@ -2032,9 +2195,9 @@ export const groupRecords = async (input: z.input<typeof groupRecordsInputSchema
     return toResponse(counts, aggregates.length ? perGroup : undefined);
   }
 
-  // Fallback: exact, not cheap — same shape as `countRecords`'s. Evaluate every
-  // candidate row, then group the survivors by their raw commit value.
-  const viewConfigForFallback: ViewConfigVO = { filters: allFilters, sorts: [] };
+  // Fallback: exact, not free — same shape as `countRecords`'s. Evaluate the
+  // conditions SQL could not decide over the candidates the decided ones
+  // narrowed to, then group the survivors by their raw commit value.
   const countsFromRecords = (records: Array<{ fields: Record<string, unknown> }>) => {
     const counts = new Map<BucketKey, number>();
     // Aggregates are computed here too, from the same matched rows — leaving
@@ -2046,15 +2209,22 @@ export const groupRecords = async (input: z.input<typeof groupRecordsInputSchema
       const key = groupSlug ? bucketKeyFor(record.fields[groupSlug]) : null;
       counts.set(key, (counts.get(key) ?? 0) + 1);
       if (!aggregates.length) continue;
-      const bucket = values.get(key) ?? new Map<string, number[]>();
+      let bucket = values.get(key);
+      if (!bucket) {
+        bucket = new Map<string, number[]>();
+        values.set(key, bucket);
+      }
       for (const slug of aggregateFieldSlugs) {
         const raw = record.fields[slug];
         const numeric = typeof raw === "number" ? raw : Number(raw);
         if (raw !== null && raw !== undefined && raw !== "" && Number.isFinite(numeric)) {
-          bucket.set(slug, [...(bucket.get(slug) ?? []), numeric]);
+          // Appended in place: copying the list for every value made a group of
+          // n records cost n² copies.
+          const list = bucket.get(slug);
+          if (list) list.push(numeric);
+          else bucket.set(slug, [numeric]);
         }
       }
-      values.set(key, bucket);
     }
     const perGroup = new Map<BucketKey, Record<string, number | null> | undefined>();
     for (const key of counts.keys()) {
@@ -2063,24 +2233,31 @@ export const groupRecords = async (input: z.input<typeof groupRecordsInputSchema
     return { counts, perGroup };
   };
 
+  const narrowedFilters = [...baseFilters, ...plan.pushed];
+  // Only what grouping, the aggregates and the undecided conditions read.
+  const evaluatedSlugs = [
+    ...residualSlugs,
+    ...(groupSlug ? [groupSlug] : []),
+    ...aggregateFieldSlugs,
+  ];
   if (!dependsOnLookup) {
     const candidateRows = await db
       .select({
         id: busabaseRecords.id,
         updatedAt: busabaseRecords.updatedAt,
-        fields: busabaseCommits.payload,
+        fields: commitPayloadWithFields(evaluatedSlugs).as("fields"),
       })
       .from(busabaseRecords)
       .innerJoin(busabaseCommits, eq(busabaseCommits.id, busabaseRecords.headCommitId))
-      .where(and(...baseFilters));
-    const matched = applyViewConfigToEvaluableRecords(
+      .where(and(...narrowedFilters));
+    const matched = filterEvaluableRecordsByViewFilters(
       candidateRows.map((row) => ({
         id: row.id,
         updatedAt: row.updatedAt.toISOString(),
         fields: (row.fields ?? {}) as Record<string, unknown>,
       })),
       base.fields,
-      viewConfigForFallback,
+      plan.residual,
     );
     const built = countsFromRecords(matched);
     return toResponse(built.counts, aggregates.length ? built.perGroup : undefined);
@@ -2089,9 +2266,11 @@ export const groupRecords = async (input: z.input<typeof groupRecordsInputSchema
   const candidateRecordRows = await db
     .select()
     .from(busabaseRecords)
-    .where(and(...baseFilters));
-  const candidates = await hydrateRecords(candidateRecordRows);
-  const matched = applyViewConfigToRecords(candidates, viewConfigForFallback);
+    .where(and(...narrowedFilters));
+  const candidates = await hydrateRecords(candidateRecordRows, {
+    payloadFields: [...evaluatedSlugs, ...lookupFormulaInputSlugs(base.fields)],
+  });
+  const matched = filterRecordsByViewFilters(candidates, plan.residual);
   const built = countsFromRecords(matched.map((record) => ({ fields: record.headCommit.payload })));
   return toResponse(built.counts, aggregates.length ? built.perGroup : undefined);
 };
@@ -2225,12 +2404,23 @@ const dynamicFieldMatches = async (
         buildBaseVisibilityExists(db, busabaseRecords.baseId),
       ),
     );
-  const records = (await hydrateRecords(rows)).filter((record) => {
-    const field = record.base.fields.find((candidate) => candidate.slug === fieldSlug);
-    return (
-      normalizeFieldValue(record.headCommit.payload[fieldSlug], field?.type).valueText === valueText
-    );
-  });
+  // Only the Bases where the slug is a lookup (or reads one) are hydrated — the
+  // rest are matched on the stored projection by the caller. Even so, several
+  // such Bases can add up past what one hydration read can bind, so they are
+  // hydrated in chunks and only the matches are kept from each.
+  const records: HydratedRecord[] = [];
+  for (let start = 0; start < rows.length; start += HYDRATE_CHUNK_SIZE) {
+    const chunk = await hydrateRecords(rows.slice(start, start + HYDRATE_CHUNK_SIZE));
+    for (const record of chunk) {
+      const field = record.base.fields.find((candidate) => candidate.slug === fieldSlug);
+      if (
+        normalizeFieldValue(record.headCommit.payload[fieldSlug], field?.type).valueText ===
+        valueText
+      ) {
+        records.push(record);
+      }
+    }
+  }
   return { baseIds, records };
 };
 

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -165,12 +166,15 @@ describe("folder markdown body — PUT/GET + storage key", () => {
   });
 
   const uploadImage = async (fileName: string, contentHash: string) => {
+    const bytes = Buffer.alloc(99, contentHash);
+    contentHash = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
     const req = await client.assets.createUploadUrl({
       fileName,
       mimeType: "image/png",
       sizeBytes: 99,
       contentHash,
     });
+    await storage.uploadFileToKey(bytes, req.storageKey, "image/png");
     await client.assets.confirm({
       storageKey: req.storageKey,
       fileName,

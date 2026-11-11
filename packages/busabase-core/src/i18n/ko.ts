@@ -708,6 +708,8 @@ export const dashboardKo: CoreI18nMessages = {
     engineFollowAppNamed: "앱 설정 따르기({engine})",
     engineFollowAppHint:
       "이 앱의 airapp.json이 결정합니다. 엔진을 선택하면 이 노드에서만 덮어씁니다.",
+    engineFollowAppFallback:
+      "이 앱의 airapp.json은 {preferred}을(를) 우선하지만 여기서는 사용할 수 없습니다. 사용 중인 엔진: {engine}.",
     engineRequired: "앱에 {engine} 필요",
     engineRequiredHint:
       "이 요구 사항은 airapp.json의 requiredEngine으로 지정되어 있어 이 노드에서는 변경할 수 없습니다.",
@@ -750,6 +752,36 @@ export const dashboardKo: CoreI18nMessages = {
     swUnsupportedLinkCopied: "링크가 복사되었습니다",
     swUnsupportedCopyFailed: "링크를 복사하지 못했습니다. 직접 선택해 복사하세요:",
     site: {
+      publish: {
+        previewStale:
+          "이 미리보기 이후 파일이 변경되었습니다. 사이트 미리보기를 만들거나 새로고침한 뒤 게시하세요.",
+        noPreview: "게시하기 전에 사이트 미리보기를 만드세요.",
+        previewUnavailable: "사이트 미리보기를 불러오지 못했습니다. 게시 전에 다시 만드세요.",
+        title: "사이트로 게시",
+        description:
+          "항상 켜져 있고 고정 공개 주소가 있는 Busabase Site를 만드세요. 방문자는 Busabase 계정 없이 열 수 있습니다.",
+        preserveBrowser: "사이트를 준비하는 동안 브라우저 미리보기는 계속 실행됩니다.",
+        checking: "사이트 게시 준비 상태 확인 중…",
+        checkFailed: "사이트를 확인하지 못했습니다. 다시 시도하세요.",
+        planRequired: "{plan} 이상 요금제에 사이트 호스팅이 포함됩니다.",
+        paidPlanRequired: "사이트 호스팅에는 이 스페이스의 유료 요금제가 필요합니다.",
+        upgradeHint:
+          "먼저 앱을 준비한 뒤 스페이스를 업그레이드하여 미리보고 게시하세요. 브라우저 미리보기 링크는 상시 운영 사이트가 아닙니다.",
+        prepareTitle: "웹 버전 준비",
+        prepareHint:
+          "에이전트에게 웹 버전 준비를 요청하세요. 게시 전에 코드를 변경해야 할 수 있습니다.",
+        copyPrompt: "에이전트 프롬프트 복사",
+        copied: "프롬프트 복사됨",
+        agentPrompt:
+          "busabase-app-creator 스킬로 이 AirApp을 Busabase Site로 게시할 수 있도록 준비하세요. 파일을 확인하고 기존 브라우저 실행과 기능을 유지하세요. airapp.json에 명시적인 site 선언과 정적 자산을 추가하고, 필요하면 기본 fetch를 내보내는 단일 번들 JavaScript ES 모듈 Worker를 제공하세요. Node 개발 서버를 게시하거나 엔진만 바꾸지 마세요. 쓰기가 필요하지 않으면 site.access는 읽기 전용으로 유지하고 구체적이고 안전한 엔드포인트만 공개하세요. API 키를 노출하거나 방문자의 임의 요청을 중계하지 마세요. 사이트 번들을 검증하고 필요한 변경을 설명하세요. 비공개 미리보기를 제가 검토한 후 게시하겠습니다.",
+        previewHint: "먼저 비공개 사이트 미리보기를 만들고 여기서 검토한 뒤 공개하세요.",
+        createPreview: "사이트 미리보기 만들기",
+        preparingPreview: "미리보기 준비 중…",
+        refreshPreview: "사이트 미리보기 새로고침",
+        previewTitle: "비공개 사이트 미리보기",
+        publishConsent:
+          "게시하면 검토한 버전이 공개됩니다. 주소를 아는 누구나 코드가 공개하는 데이터와 작업을 포함하여 사이트를 이용할 수 있습니다.",
+      },
       statusNotLive: "게시 안 됨",
       statusLive: "게시됨",
       statusLiveWithChanges: "게시되지 않은 변경 있음",
@@ -2255,6 +2287,22 @@ export const dashboardKo: CoreI18nMessages = {
     uploadFailed: "업로드 실패",
     uploading: "업로드하는 중...",
     addFile: "파일 추가",
+    drive: {
+      filePath: "파일 경로",
+      moveFile: "이름 변경 또는 이동",
+      moveFolder: "폴더 이름 변경 또는 이동",
+      moveFolderHint:
+        "경로를 바꾸면 폴더와 그 안의 모든 항목의 이름을 바꾸거나 이동합니다(예: contracts/2026). 비워 두면 내용이 루트로 이동합니다.",
+      folderPath: "폴더 경로",
+      movePathHint: "경로의 폴더 부분을 바꾸면 이동됩니다(예: contracts/2026/main.pdf).",
+      apply: "적용",
+      pathTaken: '"{path}"에 이미 다른 항목이 있습니다. 다른 경로를 선택하세요.',
+      invalidPath: "올바른 경로를 입력하세요(예: contracts/2026/main.pdf).",
+      folderIntoItself: "폴더를 자기 자신 안으로 이동할 수 없습니다.",
+      removeFolderBody:
+        '"{folder}"와(과) 그 안의 파일 {count}개를 이 필드에서 제거합니다. 레코드를 저장하기 전까지는 아무것도 바뀌지 않습니다.',
+      emptyFolderHint: "빈 폴더는 저장되지 않습니다. 이 폴더를 유지하려면 파일을 추가하세요.",
+    },
     properties: "속성",
     source: "소스",
     openFullPage: "전체 페이지 열기",
@@ -2503,6 +2551,7 @@ export const dashboardKo: CoreI18nMessages = {
     member: "멤버",
     lookup: "조회",
     attachment: "파일",
+    drive: "드라이브",
     ai_summary: "AI 요약",
     ai_tags: "AI 태그",
     created_time: "생성 시각",
@@ -2688,6 +2737,13 @@ export const dashboardKo: CoreI18nMessages = {
       "이 URL로 POST(JSON 또는 텍스트)나 GET을 보내면 실행이 시작됩니다. 요청 내용은 steps.trigger.payload.request(method, query, headers, body)에 있습니다. 실행이 멈추기 전에 코드 단계가 { response: … }를 반환하면 호출한 쪽이 그 값을 받고, 그렇지 않으면 202와 실행 ID를 받습니다. URL을 아는 사람은 누구나 실행을 시작할 수 있으니, 변경하면 이전 URL은 더 이상 작동하지 않습니다. 변경 사항은 저장해야 적용됩니다.",
     hookNeedsEvent:
       "'실행 설정'에서 실행 모드를 '이벤트'로 바꾸지 않으면 이 URL은 404를 반환합니다.",
+    webhookSign: "요청에 서명",
+    webhookSigningSecret: "서명 비밀 키",
+    webhookSigningRegenerate: "비밀 키 변경",
+    webhookSigningHint:
+      '각 요청에는 X-Busabase-Signature 헤더가 붙습니다: t=<Unix 시간>,v1=<이 비밀 키로 "<t>.<본문>"을 HMAC-SHA256 한 16진수>. 받는 쪽에서 검증하고 t가 몇 분보다 오래된 요청을 거부하면, 위조되거나 재전송된 요청을 거부할 수 있습니다. 이 워크플로를 열 수 있는 사람은 누구나 비밀 키를 볼 수 있습니다. 변경하면 이전 키는 쓸 수 없게 됩니다. 저장하면 적용됩니다.',
+    webhookSignOffHint:
+      "꺼짐: 요청에 서명이 없습니다. 켜면 받는 쪽에서 이 단계가 보낸 요청인지 확인할 수 있습니다.",
     functionCode: "코드",
     functionCodeHint:
       "실행이 이 단계에 도달하면 서버에서 실행되는 JavaScript입니다. input에는 실행 데이터(payload, steps, record)가 있고, await fetch(...)로 공개 URL을 호출할 수 있습니다. 반환한 값이 이 단계의 출력이 되며, 이후 단계는 steps.<단계 ID>.<필드>로 읽습니다. 이 워크플로를 열 수 있는 사람은 누구나 코드를 볼 수 있습니다.",
@@ -2767,6 +2823,26 @@ export const dashboardKo: CoreI18nMessages = {
     findRecordsForEach: "레코드마다 다음 단계 실행",
     findRecordsForEachHint:
       "레코드마다 그 레코드에 대한 실행이 하나씩 생깁니다. 레코드 수정은 그 레코드를 바꾸고, 이후 단계는 그것을 record로 읽습니다. 이 실행은 여기서 끝나며, 그 실행들은 동시 실행 설정에 따라 차례로 진행됩니다.",
+    runIn: "실행 위치",
+    runInServer: "이 서버",
+    runInSandbox: "샌드박스 머신",
+    runInServerHint: "빠릅니다. JavaScript만, 패키지 없이, 워크플로의 시간 제한까지.",
+    runInSandboxHint:
+      "이 단계를 위해 머신을 시작합니다. JavaScript 또는 Python, 패키지를 먼저 설치할 수 있고 최대 10분입니다. 실행은 대기 단계처럼 끝나기를 기다리므로, 요청으로 시작된 실행은 먼저 202를 받습니다.",
+    runInSandboxLocked: "샌드박스에서 코드를 실행하려면 {plan} 요금제가 필요합니다.",
+    runInSandboxNotConfigured:
+      "이 서버에는 샌드박스가 설정되어 있지 않습니다. 관리자가 Sandock API 키를 설정하면 사용할 수 있습니다.",
+    sandboxLanguage: "언어",
+    sandboxLanguageJavascript: "JavaScript (Node.js)",
+    sandboxLanguagePython: "Python",
+    sandboxPackages: "패키지",
+    sandboxPackagesHintJavascript:
+      '먼저 설치할 npm 패키지를 공백으로 구분해 입력하세요(예: dayjs, lodash@4). 코드에서는 require("dayjs")로 불러옵니다.',
+    sandboxPackagesHintPython:
+      "먼저 설치할 pip 패키지를 공백으로 구분해 입력하세요(예: requests, pycryptodome==3.20.0). 코드에서는 평소처럼 import합니다.",
+    sandboxCode: "샌드박스 코드",
+    sandboxCodeHint:
+      "샌드박스 머신에서 실행됩니다. input에 실행 데이터가 있고, 반환한 값이 이 단계의 출력이 됩니다. 이 워크플로를 열 수 있는 사람은 누구나 코드를 볼 수 있습니다.",
     customActionHint: "이 액션 이름은 아직 아무 일도 하지 않으며 기록만 됩니다.",
     chooseBase: "베이스 선택",
     targetRecord: "레코드(선택)",
@@ -2859,6 +2935,8 @@ export const dashboardKo: CoreI18nMessages = {
     triggerSchedule: "일정",
     triggerWebhook: "요청",
     triggerForEach: "레코드별",
+    waitingSandbox: "샌드박스에서 코드를 실행하는 중입니다. 끝나면 실행이 이어집니다.",
+    waitingSandboxDeadline: "{time}까지 끝나지 않으면 중지됩니다.",
     runDetails: "실행 세부 정보",
     recordLabel: "레코드: {id}",
     waitingUntil: "{time}까지 대기 중입니다. 그때 자동으로 계속됩니다.",
@@ -2867,6 +2945,12 @@ export const dashboardKo: CoreI18nMessages = {
     approve: "승인",
     reject: "거절",
     errorLabel: "오류",
+    retryFromStep: "이 단계부터 다시 시도",
+    retryFromStepHint:
+      "새 실행을 시작합니다. 이 단계 이전의 단계는 그대로 두고 다시 실행하지 않으며, 이 단계만 다시 실행합니다. 이 단계가 이미 보낸 요청은 다시 전송됩니다.",
+    retriedAsLink: "다시 시도함: 새 실행 열기",
+    retryOfLink: "이전 실행의 재시도입니다: 열기",
+    triggerRetry: "재시도",
     steps: "단계",
     noSteps: "아직 완료된 단계가 없습니다.",
     stepData: "데이터",
@@ -2910,6 +2994,16 @@ export const dashboardKo: CoreI18nMessages = {
     rename: "충돌하는 항목을 새 이름으로 설치",
     renameHint: "접미사(-2, -3, …)를 추가합니다. 기존 콘텐츠는 그대로 유지됩니다.",
     warningsTitle: "알아 두세요",
+    folderName: "폴더 이름",
+    folderNameHint: "작업 공간에 표시되는 이름입니다. 모든 언어를 사용할 수 있습니다.",
+    folderNameRequired: "폴더 이름을 입력해 주세요.",
+    installUnavailable: "지금은 설치를 시작할 수 없습니다. 나중에 다시 시도해 주세요.",
+    installNoChanges: "템플릿 콘텐츠가 생성되지 않았습니다. 다시 시도할 수 있습니다.",
+    installPartial:
+      "설치가 중단되기 전에 일부 콘텐츠가 생성되었습니다. 다시 시도하기 전에 작업 공간을 확인해 주세요.",
+    installUnknown:
+      "설치 결과를 확인할 수 없습니다. 중복 설치를 피하려면 먼저 작업 공간을 확인해 주세요.",
+    technicalDetails: "기술 세부 정보",
     targetFolder: "설치할 폴더",
     targetFolderHint: "패키지용 새 폴더가 생성됩니다. 기본값은 패키지 이름입니다.",
     requireReview: "먼저 리뷰를 거친 뒤 반영",

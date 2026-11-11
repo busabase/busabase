@@ -281,9 +281,15 @@ export const updateNodeContent = async (
     // Same cap as Doc's other write paths (`DOC_BODY_MAX_BYTES`) — rejected
     // before any ChangeRequest exists, mirroring `createDocChangeRequest`'s
     // "rejected before any CR was ever created" contract. Folder readmes share
-    // that cap: they are the same kind of markdown snapshot.
+    // that cap in either format: they are the same kind of text snapshot, and
+    // backups batch them with Doc bodies under that bound.
     assertDocBodySize(parsed.content.body);
     fields = { body: parsed.content.body };
+    // Recorded only for HTML, so a Markdown readme's commit payload is exactly
+    // what it was before HTML readmes existed.
+    if (parsed.content.kind === "folder" && parsed.content.bodyFormat === "html") {
+      fields.bodyFormat = "html";
+    }
   } else {
     assertRichNodeDocumentSize(parsed.content.kind, parsed.content.document);
     fields = { document: parsed.content.document };

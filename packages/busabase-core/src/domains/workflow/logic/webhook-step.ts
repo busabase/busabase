@@ -1,6 +1,7 @@
 import "server-only";
 
 import { fetchWithSsrfGuard } from "../../webhook/logic/ssrf-guard";
+import { signWorkflowWebhook, WORKFLOW_SIGNATURE_HEADER } from "../utils/webhook-signature";
 import type { WorkflowWebhookCall, WorkflowWebhookCallResult } from "./runs";
 
 /** A step's HTTP call never waits longer than this, whatever the workflow timeout says. */
@@ -13,6 +14,16 @@ const WEBHOOK_STEP_MAX_TIMEOUT_MS = 30_000;
 const RESPONSE_JSON_MAX_CHARS = 32_000;
 /** Any other answer (or JSON past the limit above) is kept as capped text. */
 const RESPONSE_TEXT_CAP_CHARS = 4000;
+/**
+ * The Cloud deployment's public API can resolve internally from a workflow
+ * worker. Only an explicitly configured deployment origin receives this
+ * exception, and ssrf-guard restricts it further to that exact origin's
+ * `/api/v1` surface.
+ */
+const workflowTrustedApiOrigins = (): readonly string[] => {
+  const origin = process.env.NEXT_PUBLIC_APP_URL?.trim();
+  return origin ? [origin] : [];
+};
 
 const capText = (text: string): string =>
   text.length > RESPONSE_TEXT_CAP_CHARS
@@ -39,6 +50,8 @@ const RESERVED_HEADERS = new Set([
   "transfer-encoding",
   "connection",
   "x-busabase-event",
+  // Ours alone: a step cannot send a signature of its own making.
+  WORKFLOW_SIGNATURE_HEADER,
 ]);
 
 /**
@@ -47,6 +60,7 @@ const RESERVED_HEADERS = new Set([
  */
 export const buildWorkflowWebhookHeaders = (
   stepHeaders: readonly { name: string; value: string }[],
+  signature?: string,
 ): Record<string, string> => {
   const headers: Record<string, string> = {
     "content-type": "application/json",
@@ -58,6 +72,7 @@ export const buildWorkflowWebhookHeaders = (
     headers[name] = header.value;
   }
   headers["x-busabase-event"] = "workflow.step";
+  if (signature) headers[WORKFLOW_SIGNATURE_HEADER] = signature;
   return headers;
 };
 
@@ -74,12 +89,21 @@ export const sendWorkflowWebhook = async (
   const startedAt = Date.now();
   const timeoutMs = Math.min(call.timeoutMs, WEBHOOK_STEP_MAX_TIMEOUT_MS);
   try {
-    const fetched = await fetchWithSsrfGuard(call.url, {
-      method: call.method,
-      headers: buildWorkflowWebhookHeaders(call.headers),
-      body: call.method === "GET" ? undefined : JSON.stringify(call.body),
-      signal: AbortSignal.timeout(timeoutMs),
-    });
+    const requestBody = call.method === "GET" ? undefined : JSON.stringify(call.body);
+    // Signed over the exact text sent, at the moment it is sent.
+    const signature = call.signingSecret
+      ? await signWorkflowWebhook(call.signingSecret, requestBody ?? "", Date.now())
+      : undefined;
+    const fetched = await fetchWithSsrfGuard(
+      call.url,
+      {
+        method: call.method,
+        headers: buildWorkflowWebhookHeaders(call.headers, signature),
+        body: requestBody,
+        signal: AbortSignal.timeout(timeoutMs),
+      },
+      { trustedApiOrigins: workflowTrustedApiOrigins() },
+    );
     if (fetched.blocked) {
       return {
         ok: false,

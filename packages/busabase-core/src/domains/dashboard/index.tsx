@@ -54,6 +54,7 @@ import { useLocation, useSearch } from "wouter";
 import { CoreI18nProvider, fmt, useCoreI18n, useCoreLocale } from "../../i18n";
 import { fieldVisibilityMessages } from "../../i18n/field-visibility";
 import { presentCoreError } from "../../i18n/localize-error";
+import { recordFindErrorMessage } from "../../i18n/record-find";
 import { AgentModelScopeProvider } from "../agents/agent-model-scope-context";
 import { AgentDetailView } from "../agents/components/agent-detail-view";
 import { AgentsAddView } from "../agents/components/agents-add-view";
@@ -138,6 +139,7 @@ import {
   shouldShowRouteGuardSkeleton,
 } from "./helpers/node-route-guard";
 import { retryUnlessNotFound, shouldShowInitialLoadingState } from "./helpers/query-state";
+import { hasStaleRecordFind, readRecordFind, writeRecordFind } from "./helpers/record-find-url";
 import { readRecordPagination, writeRecordPagination } from "./helpers/record-pagination-url";
 import {
   isFullReadBehind,
@@ -161,6 +163,7 @@ import { useDashboardRoutes } from "./hooks/use-dashboard-routes";
 import { useKeyboardShortcut } from "./hooks/use-keyboard-shortcut";
 import { useLinkedRecords } from "./hooks/use-linked-records";
 import { useBusabaseLiveSync } from "./hooks/use-live-sync";
+import { useRecordFind } from "./hooks/use-record-find";
 import { useReorderView } from "./hooks/use-reorder-view";
 import { UploadLimitsProvider } from "./hooks/use-upload-limits";
 import { getNodeDetail, type LoadedNode } from "./node-detail-registry";
@@ -912,6 +915,37 @@ function BusabaseDashboardContent({
     activeBase && !isResolvingBaseRoute && (selectedBaseView || baseParams?.slug)
       ? `${activeBase.id}:${selectedBaseView?.id ?? "all"}`
       : null;
+  const recordFindValue = useMemo(
+    () => readRecordFind(search, collectionScope),
+    [search, collectionScope],
+  );
+  const commitRecordFind = useCallback(
+    (value: { query: string; fieldId: string }) => {
+      if (!collectionScope) return;
+      const nextSearch = writeRecordFind(search, value, collectionScope);
+      rawSetLocation(`${locationPath}?${nextSearch}`, { replace: true });
+      document.querySelector<HTMLElement>("[data-base-detail-scroll]")?.scrollTo({ top: 0 });
+    },
+    [collectionScope, locationPath, rawSetLocation, search],
+  );
+  useEffect(() => {
+    if (hasStaleRecordFind(search, collectionScope)) commitRecordFind({ query: "", fieldId: "" });
+  }, [search, collectionScope, commitRecordFind]);
+  const recordFind = useRecordFind({
+    value: recordFindValue,
+    scope: collectionScope,
+    onCommit: commitRecordFind,
+  });
+  const recordFindInput = useMemo(
+    () =>
+      usesCompactRecordList && recordFindValue.query
+        ? {
+            query: recordFindValue.query,
+            ...(recordFindValue.fieldId ? { fieldId: recordFindValue.fieldId } : {}),
+          }
+        : undefined,
+    [usesCompactRecordList, recordFindValue],
+  );
   const baseTableViewState = useBaseCollectionState({
     identity: JSON.stringify([cacheSpaceKey, currentUserId ?? "anonymous"]),
     scope: collectionScope,
@@ -987,6 +1021,7 @@ function BusabaseDashboardContent({
         baseId: activeBase?.id ?? "",
         viewId: selectedBaseView?.id,
         listMode: usesCompactRecordList ? "table" : undefined,
+        find: recordFindInput,
         page: recordPaginationUrl.page,
         pageSize: recordPaginationUrl.pageSize,
       },
@@ -996,15 +1031,25 @@ function BusabaseDashboardContent({
       usesPagePagination &&
       !readOnlyRecordPreview &&
       !isResolvingBaseRoute,
+    retry: recordFindInput ? false : undefined,
     placeholderData: (previousData, previousQuery) => {
       const previousInput = (
         previousQuery?.queryKey[1] as
-          | { input?: { baseId?: string; viewId?: string; listMode?: "full" | "table" } }
+          | {
+              input?: {
+                baseId?: string;
+                viewId?: string;
+                listMode?: "full" | "table";
+                find?: { query: string; fieldId?: string };
+              };
+            }
           | undefined
       )?.input;
       return previousInput?.baseId === activeBase?.id &&
         previousInput?.viewId === selectedBaseView?.id &&
-        previousInput?.listMode === (usesCompactRecordList ? "table" : undefined)
+        previousInput?.listMode === (usesCompactRecordList ? "table" : undefined) &&
+        previousInput?.find?.query === recordFindInput?.query &&
+        previousInput?.find?.fieldId === recordFindInput?.fieldId
         ? previousData
         : undefined;
     },
@@ -1031,7 +1076,13 @@ function BusabaseDashboardContent({
       isLoading: recordsPageQuery.isLoading,
       isFetching: recordsPageQuery.isFetching,
       error: recordsPageQuery.error
-        ? presentCoreError(messages, locale, recordsPageQuery.error, messages.shell.operationFailed)
+        ? (recordFindErrorMessage(locale, recordsPageQuery.error) ??
+          presentCoreError(
+            messages,
+            locale,
+            recordsPageQuery.error,
+            messages.shell.operationFailed,
+          ))
         : null,
       onPageChange: changePage,
       onPageSizeChange: (pageSize: 25 | 50 | 100) => {
@@ -2000,17 +2051,34 @@ function BusabaseDashboardContent({
     [client, messages, refresh, setLocation],
   );
 
-  const submitUpdateRecord = useCallback(
-    async (record: RecordVO, fields: Record<string, unknown>, options?: RecordSubmitOptions) => {
-      setError(null);
-      const result = await client.createUpdateChangeRequest(record.id, {
+  // The one "update these fields of a record" request, shared by the record edit
+  // form and the grid's in-cell editing: a partial delta pinned to the head the
+  // editor opened on (a concurrent edit to another field merges; one to the same
+  // field is refused instead of overwritten), with the same author and message.
+  const requestRecordUpdate = useCallback(
+    (
+      record: RecordVO,
+      fields: Record<string, unknown>,
+      options: { autoMerge: boolean; baseCommitId: string },
+    ) =>
+      client.createUpdateChangeRequest(record.id, {
         author: "local-editor",
-        baseCommitId: record.headCommitId,
-        autoMerge: options?.mergeImmediately === true,
+        autoMerge: options.autoMerge,
+        baseCommitId: options.baseCommitId,
         fields,
         message: fmt(messages.createNode.updateRecordMessage, {
           record: getRecordTitle(record, messages),
         }),
+      }),
+    [client, messages],
+  );
+
+  const submitUpdateRecord = useCallback(
+    async (record: RecordVO, fields: Record<string, unknown>, options?: RecordSubmitOptions) => {
+      setError(null);
+      const result = await requestRecordUpdate(record, fields, {
+        autoMerge: options?.mergeImmediately === true,
+        baseCommitId: record.headCommitId,
       });
       if (result.materialized) {
         await refresh();
@@ -2022,7 +2090,7 @@ function BusabaseDashboardContent({
       setLocation(`/inbox/${result.id}`);
       await refresh();
     },
-    [client, messages.createNode.updateRecordMessage, messages, refresh, setLocation],
+    [messages, refresh, requestRecordUpdate, setLocation],
   );
 
   // Kanban drag-to-move: set one field on a record and auto-merge the resulting
@@ -2072,6 +2140,32 @@ function BusabaseDashboardContent({
         : { materialized: false as const, changeRequestId: result.id };
     },
     [client, messages, messages.createNode.updateRecordMessage, refresh],
+  );
+
+  // In-cell editing from the table: the record edit form's request
+  // (`requestRecordUpdate`) for ONE field. `autoMerge` carries "save it" to the
+  // server, which decides: a viewer who may write gets it merged, one who may
+  // only propose gets a pending change request — the grid then shows that state
+  // rather than the new value. No navigation: the user stays on the grid; the
+  // refresh runs in the background behind the grid's optimistic value.
+  const submitCellEdit = useCallback(
+    async (
+      record: RecordVO,
+      fieldSlug: string,
+      value: unknown,
+      options: { baseCommitId: string; mergeImmediately: boolean },
+    ) => {
+      const result = await requestRecordUpdate(
+        record,
+        { [fieldSlug]: value },
+        { autoMerge: options.mergeImmediately, baseCommitId: options.baseCommitId },
+      );
+      void refresh();
+      return result.materialized
+        ? { materialized: true as const, headCommitId: result.headCommitId }
+        : { materialized: false as const, changeRequestId: result.id };
+    },
+    [refresh, requestRecordUpdate],
   );
 
   const submitDeleteRecord = useCallback(
@@ -2735,6 +2829,9 @@ function BusabaseDashboardContent({
         autoMerge: options?.mergeImmediately === true,
       });
       await refresh();
+      // Row-height controls remain in the table for saved/pending feedback.
+      // Keeping the exact route also preserves pagination and scroll state.
+      if (options?.preserveLocation) return;
       if (changeRequest.materialized) {
         // Views are edited from their own Base's page, so this is the open
         // Base; a Base route also accepts the id if it ever is not.
@@ -3436,7 +3533,7 @@ function BusabaseDashboardContent({
     if (locationPath.startsWith("/base/")) {
       return (
         <BaseDetailView
-          key={baseTableViewState?.scope}
+          key={JSON.stringify([cacheSpaceKey, currentUserId, collectionScope])}
           viewState={baseTableViewState}
           client={client}
           activeView={selectedBaseView}
@@ -3447,6 +3544,11 @@ function BusabaseDashboardContent({
           orderedRecords={usesPagePagination || serverSortedView ? baseRecords : undefined}
           orpc={orpc}
           pagination={recordsPagination}
+          recordFind={
+            usesCompactRecordList && !readOnlyRecordPreview
+              ? { ...recordFind, isFetching: recordsPageQuery.isFetching }
+              : undefined
+          }
           base={activeBase}
           onCreateView={submitCreateView}
           onDeleteView={submitDeleteView}
@@ -3459,6 +3561,7 @@ function BusabaseDashboardContent({
           onOpenRecord={openRecordPreview}
           onPatchRecord={submitPatchRecord}
           onReorderView={submitReorderView}
+          onUpdateRecordCell={submitCellEdit}
           onUpdateView={submitUpdateView}
           views={views}
         />
@@ -3574,6 +3677,7 @@ function BusabaseDashboardContent({
     submitMoveRecord,
     openRecordPreview,
     submitPatchRecord,
+    submitCellEdit,
     submitUpdateField,
     submitUpdateRecord,
     submitUpdateView,
@@ -3597,6 +3701,11 @@ function BusabaseDashboardContent({
     recordRouteError,
     isRecordReadPending,
     baseTableViewState,
+    collectionScope,
+    recordFind,
+    recordsPageQuery.isFetching,
+    usesCompactRecordList,
+    readOnlyRecordPreview,
     submitDeleteRecords,
     submitUpdateRecords,
     submitImportRecords,

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -20,7 +21,6 @@ type Client = ReturnType<typeof createRouterClient<typeof busabaseRouter, Record
  */
 
 const MIGRATIONS_CWD = path.resolve(__dirname, "../../../apps/busabase");
-const HASH = (byte: string) => `sha256:${byte.repeat(64)}`;
 
 vi.mock("../src/domains/assets/logic/asset-texts-logic", async (importOriginal) => {
   const actual =
@@ -59,13 +59,17 @@ describe("confirmAssetUpload — text auto-registration failure is isolated", ()
   });
 
   it("still confirms a plain binary (PNG) upload even though text auto-registration throws", async () => {
-    const contentHash = HASH("9");
+    const bytes = Buffer.alloc(100, 9);
+    const contentHash = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
     const req = await client.assets.createUploadUrl({
       fileName: "photo.png",
       mimeType: "image/png",
       sizeBytes: 100,
       contentHash,
     });
+
+    const { storage } = await import("openlib/storage");
+    await storage.uploadFileToKey(bytes, req.storageKey, "image/png");
 
     const confirmed = await client.assets.confirm({
       storageKey: req.storageKey,

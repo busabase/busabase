@@ -101,7 +101,7 @@ describe("Busabase OpenAPI record get route", () => {
     expect(spec.paths?.["/api/v1/bases/{baseId}/restore/change-requests"]).toBeUndefined();
   });
 
-  it("keeps the compressed public API at 134 operations", async () => {
+  it("keeps the compressed public API at 135 operations", async () => {
     const spec = await getBusabaseOpenApiSpec();
     const operationCount = Object.values(spec.paths ?? {}).reduce(
       (count, pathItem) =>
@@ -222,6 +222,12 @@ describe("Busabase OpenAPI record get route", () => {
     expect(spec.paths?.["/api/v1/workflows/{nodeId}/runs"]?.post).toBeDefined();
     expect(spec.paths?.["/api/v1/workflow-runs/{runId}/decide"]?.post).toBeDefined();
     expect(spec.paths?.["/api/v1/workflow-runs/{runId}/resume"]).toBeUndefined();
-    expect(operationCount).toBe(134);
+    // +1 -> 135: a failed run can be retried from the step it stopped at.
+    expect(spec.paths?.["/api/v1/workflow-runs/{runId}/retry"]?.post).toBeDefined();
+    // +1 -> 136: full backups resolve all physical attachments at the storage origin.
+    expect(
+      spec.paths?.["/api/v1/dump/export/attachments/{attachmentId}/content"]?.get,
+    ).toBeDefined();
+    expect(operationCount).toBe(136);
   });
 });

@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { ORPCError } from "@orpc/server";
 import {
   AgentSessionCommandIdSchema,
   type AgentSessionCommandKind,
@@ -13,6 +14,10 @@ import {
 } from "busabase-contract/domains/agents/types";
 import { and, asc, desc, eq, gt, inArray, isNull, lte, ne, notInArray, or, sql } from "drizzle-orm";
 import { type DbInstance, getDb } from "../../../db";
+import {
+  isRestoreAutomationBlocked,
+  selectOutsideRestoringSpaces,
+} from "../../dump/logic/restore-activity";
 import {
   type AgentSessionCommandPO,
   busabaseAgentSessionCommands,
@@ -179,6 +184,10 @@ export async function createJournalSession(
 ): Promise<void> {
   if (!agentSessionJournalEnabled())
     throw new Error("Supervised ACP sessions require an explicit legacy-writer drain.");
+  if (await isRestoreAutomationBlocked(scope.spaceId))
+    throw new ORPCError("CONFLICT", {
+      message: "This workspace is being restored. Try starting the agent again after it finishes.",
+    });
   if (
     options.bindingFingerprint !== undefined &&
     !/^[a-f0-9]{64}$/.test(options.bindingFingerprint)
@@ -211,6 +220,7 @@ export async function enableSessionJournal(
   scope: AgentSessionScope,
 ): Promise<boolean> {
   if (!agentSessionJournalEnabled()) return false;
+  if (await isRestoreAutomationBlocked(scope.spaceId)) return false;
   const database = await getDb();
   return database.transaction(async (tx) => {
     const row = await lockSession(tx, sessionId, scope);
@@ -318,6 +328,7 @@ export async function claimWriterLease(
   ttlSeconds: number,
   scope: AgentSessionScope,
 ): Promise<AgentSessionWriterLease | null> {
+  if (await isRestoreAutomationBlocked(scope.spaceId)) return null;
   const database = await getDb();
   const ttl = Math.max(1, Math.min(300, Math.floor(ttlSeconds)));
   return database.transaction(async (tx) => {
@@ -360,6 +371,7 @@ export async function renewWriterLease(
   ttlSeconds: number,
   scope: AgentSessionScope,
 ): Promise<boolean> {
+  if (await isRestoreAutomationBlocked(scope.spaceId)) return false;
   const database = await getDb();
   const ttl = Math.max(1, Math.min(300, Math.floor(ttlSeconds)));
   return database.transaction(async (tx) => {
@@ -378,6 +390,7 @@ export async function releaseWriterLease(
   fence: AgentSessionWriterFence,
   scope: AgentSessionScope,
 ): Promise<boolean> {
+  if (await isRestoreAutomationBlocked(scope.spaceId)) return false;
   const database = await getDb();
   return database.transaction(async (tx) => {
     if (!(await lockSession(tx, sessionId, scope))) return false;
@@ -404,6 +417,8 @@ export async function appendJournalEvents(
   scope: AgentSessionScope,
   checkpoint?: { sourceSeq: number; sourceGeneration?: string },
 ): Promise<AgentSessionJournalAppendResult> {
+  if (await isRestoreAutomationBlocked(scope.spaceId))
+    return { outcome: "unavailable", diagnosticRef: `agd_restore_${randomUUID()}` };
   const diagnosticRef = `agd_${randomUUID()}`;
   if (
     inputs.length > MAX_AGENT_SESSION_JOURNAL_BATCH ||
@@ -604,6 +619,7 @@ export async function admitSessionCommand(
   command: AgentSessionCommandAdmission,
   scope: AgentSessionScope,
 ): Promise<AgentSessionCommandAdmissionResult> {
+  if (await isRestoreAutomationBlocked(scope.spaceId)) return { outcome: "unavailable" };
   AgentSessionCommandIdSchema.parse(command.commandId);
   const digest = agentSessionCommandDigest({
     kind: command.kind,
@@ -845,6 +861,7 @@ export async function expireSessionCommands(
   fence: AgentSessionWriterFence,
   scope: AgentSessionScope,
 ): Promise<boolean> {
+  if (await isRestoreAutomationBlocked(scope.spaceId)) return false;
   const database = await getDb();
   try {
     return await database.transaction(async (tx) => {
@@ -886,6 +903,7 @@ export async function claimSessionCommands(
   scope: AgentSessionScope,
   lane: "data" | "control" = "data",
 ): Promise<AgentSessionCommandRecord[]> {
+  if (await isRestoreAutomationBlocked(scope.spaceId)) return [];
   const database = await getDb();
   return database.transaction(async (tx) => {
     const session = await lockSession(tx, sessionId, scope);
@@ -945,6 +963,7 @@ export async function transitionSessionCommand(
   scope: AgentSessionScope,
   details: { receipt?: Record<string, unknown>; errorCode?: string } = {},
 ): Promise<boolean> {
+  if (await isRestoreAutomationBlocked(scope.spaceId)) return false;
   const database = await getDb();
   return database.transaction(async (tx) => {
     const session = await lockSession(tx, sessionId, scope);
@@ -991,6 +1010,7 @@ export async function updateJournalRuntime(
   fence: AgentSessionWriterFence,
   scope: AgentSessionScope,
 ): Promise<boolean> {
+  if (await isRestoreAutomationBlocked(scope.spaceId)) return false;
   const database = await getDb();
   return database.transaction(async (tx) => {
     if (!(await lockSession(tx, sessionId, scope))) return false;
@@ -1048,6 +1068,7 @@ export async function touchJournalDemand(
   scope: AgentSessionScope,
   ttlSeconds = 60,
 ): Promise<boolean> {
+  if (await isRestoreAutomationBlocked(scope.spaceId)) return false;
   const database = await getDb();
   const ttl = Math.max(1, Math.min(300, Math.floor(ttlSeconds)));
   const changed = await database
@@ -1070,43 +1091,48 @@ export async function listSessionCommandDemand(
   limit = 50,
   claimableOnly = false,
 ): Promise<Array<{ sessionId: string; spaceId: string; actorId: string | null }>> {
-  return database
-    .select({
-      sessionId: busabaseAgentSessions.id,
-      spaceId: busabaseAgentSessions.spaceId,
-      actorId: busabaseAgentSessions.actorId,
-    })
-    .from(busabaseAgentSessions)
-    .where(
-      and(
-        eq(busabaseAgentSessions.journalMode, "supervised"),
-        notInArray(busabaseAgentSessions.status, ["ended"]),
-        ...(claimableOnly
-          ? [
+  return selectOutsideRestoringSpaces((excludedSpaceIds) =>
+    database
+      .select({
+        sessionId: busabaseAgentSessions.id,
+        spaceId: busabaseAgentSessions.spaceId,
+        actorId: busabaseAgentSessions.actorId,
+      })
+      .from(busabaseAgentSessions)
+      .where(
+        and(
+          excludedSpaceIds.length
+            ? notInArray(busabaseAgentSessions.spaceId, excludedSpaceIds)
+            : undefined,
+          eq(busabaseAgentSessions.journalMode, "supervised"),
+          notInArray(busabaseAgentSessions.status, ["ended"]),
+          ...(claimableOnly
+            ? [
+                or(
+                  isNull(busabaseAgentSessions.writerOwnerId),
+                  isNull(busabaseAgentSessions.writerExpiresAt),
+                  lte(busabaseAgentSessions.writerExpiresAt, sql`clock_timestamp()`),
+                ),
+              ]
+            : []),
+          or(isNull(busabaseAgentSessions.syncState), ne(busabaseAgentSessions.syncState, "gap")),
+          or(
+            ne(busabaseAgentSessions.creationState, "unknown"),
+            sql`${busabaseAgentSessions.capabilities}->'commandReceipts' = 'true'::jsonb`,
+          ),
+          or(
+            gt(busabaseAgentSessions.demandUntil, sql`clock_timestamp()`),
+            and(
+              sql`${busabaseAgentSessions.activeCommandId} is not null`,
               or(
-                isNull(busabaseAgentSessions.writerOwnerId),
-                isNull(busabaseAgentSessions.writerExpiresAt),
-                lte(busabaseAgentSessions.writerExpiresAt, sql`clock_timestamp()`),
+                isNull(busabaseAgentSessions.executionState),
+                ne(busabaseAgentSessions.executionState, "unknown"),
               ),
-            ]
-          : []),
-        or(isNull(busabaseAgentSessions.syncState), ne(busabaseAgentSessions.syncState, "gap")),
-        or(
-          ne(busabaseAgentSessions.creationState, "unknown"),
-          sql`${busabaseAgentSessions.capabilities}->'commandReceipts' = 'true'::jsonb`,
-        ),
-        or(
-          gt(busabaseAgentSessions.demandUntil, sql`clock_timestamp()`),
-          and(
-            sql`${busabaseAgentSessions.activeCommandId} is not null`,
-            or(
-              isNull(busabaseAgentSessions.executionState),
-              ne(busabaseAgentSessions.executionState, "unknown"),
             ),
           ),
         ),
-      ),
-    )
-    .orderBy(asc(busabaseAgentSessions.lastActivityAt))
-    .limit(Math.max(1, Math.min(500, Math.floor(limit))));
+      )
+      .orderBy(asc(busabaseAgentSessions.lastActivityAt))
+      .limit(Math.max(1, Math.min(500, Math.floor(limit)))),
+  );
 }

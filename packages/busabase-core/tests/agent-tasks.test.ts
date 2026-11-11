@@ -1,9 +1,13 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { OpenAPIHandler } from "@orpc/openapi/fetch";
 import { createRouterClient } from "@orpc/server";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { LOCAL_SPACE_ID, runWithBusabaseContext } from "../src/context";
 import { DEMO_BASES, DEMO_FOLDERS } from "../src/demo/dataset";
+import { LIST_OMITTED_LONG_TEXT_VALUE } from "../src/domains/dashboard/utils/list-payload-preview";
+import { AGENT_TASK_MAX_OPERATIONS } from "../src/logic/cr-lifecycle";
 import { seedScenario } from "../src/logic/store";
 import { busabaseRouter } from "../src/router";
 
@@ -122,6 +126,173 @@ describe("Agent task queue — oRPC", () => {
 
     // A plain in_review CR with no agent signal is not the agent's job.
     expect(byId.has(quiet.id)).toBe(false);
+  });
+
+  const requestChanges = (changeRequestId: string, reason = "Fix it") =>
+    client.changeRequests.review({
+      changeRequestIds: [changeRequestId],
+      verdict: "rejected",
+      reason,
+    });
+
+  it("embeds a list-sized preview and says where the full change request is", async () => {
+    // 3.5 MB for eight tasks in production was long text, carried in full twice
+    // per operation. A poll now carries the marker; the detail keeps the text.
+    const longBody = "Long draft paragraph. ".repeat(600);
+    const cr = await client.bases.createChangeRequest({
+      baseId: blogBaseId,
+      fields: { title: "Long draft", body: longBody, channel: "blog" },
+      message: "Initial",
+      submittedBy: "loop-agent",
+      autoMerge: false,
+    });
+    await requestChanges(cr.id, "Shorter, please");
+
+    const task = (await client.agent.listTasks()).find((item) => item.changeRequest.id === cr.id);
+    expect(task).toBeDefined();
+    expect(task?.id).toBe(cr.id);
+    expect(task?.truncated).toBe(true);
+    expect(task?.omittedOperationCount).toBe(0);
+    expect(task?.changeRequestPath).toBe(`/api/v1/change-requests/${cr.id}`);
+    expect(task?.reviewReason).toBe("Shorter, please");
+    const preview = task?.changeRequest.operations[0]?.headCommit.payload ?? {};
+    expect(preview.body).toBe(LIST_OMITTED_LONG_TEXT_VALUE);
+    // Short values are untouched: the preview still says what is being changed.
+    expect(preview.title).toBe("Long draft");
+    expect(task?.changeRequest.primaryOperation?.headCommit.payload.body).toBe(
+      LIST_OMITTED_LONG_TEXT_VALUE,
+    );
+
+    const detail = await client.changeRequests.get({ changeRequestId: cr.id });
+    expect(detail.operations[0]?.headCommit.payload.body).toBe(longBody);
+
+    // An agent that edits the preview and sends it back must not overwrite the
+    // real text with the marker.
+    const operationId = detail.operations[0]?.id ?? "";
+    await expect(
+      client.operations.revise({
+        operationId,
+        fields: { title: "Long draft", body: LIST_OMITTED_LONG_TEXT_VALUE, channel: "blog" },
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect((await client.changeRequests.get({ changeRequestId: cr.id })).status).toBe(
+      "changes_requested",
+    );
+    await client.operations.revise({
+      operationId,
+      fields: { title: "Long draft", body: "Short now.", channel: "blog" },
+    });
+    expect((await client.agent.listTasks()).some((item) => item.changeRequest.id === cr.id)).toBe(
+      false,
+    );
+  });
+
+  it("caps a bulk change request's operations and reports how many were left out", async () => {
+    const total = AGENT_TASK_MAX_OPERATIONS + 5;
+    const bulk = await client.bases.createBulkChangeRequest({
+      baseId: blogBaseId,
+      records: Array.from({ length: total }, (_, index) => ({
+        title: `Bulk ${index}`,
+        body: "short",
+        channel: "blog",
+      })),
+      autoMerge: false,
+    });
+    await requestChanges(bulk.id);
+
+    const task = (await client.agent.listTasks()).find((item) => item.changeRequest.id === bulk.id);
+    expect(task?.changeRequest.operationCount).toBe(total);
+    expect(task?.changeRequest.operations).toHaveLength(AGENT_TASK_MAX_OPERATIONS);
+    expect(task?.omittedOperationCount).toBe(5);
+    expect(task?.truncated).toBe(true);
+    expect((await client.changeRequests.get({ changeRequestId: bulk.id })).operations).toHaveLength(
+      total,
+    );
+  });
+
+  it("pages oldest first with limit + cursor, and refuses an unknown cursor", async () => {
+    for (const title of ["Page one", "Page two", "Page three"]) {
+      await requestChanges((await openCr(title)).id);
+    }
+    const all = await client.agent.listTasks();
+    expect(all.length).toBeGreaterThanOrEqual(3);
+    const createdAt = all.map((task) => task.changeRequest.createdAt);
+    expect([...createdAt].sort()).toEqual(createdAt);
+
+    const paged: string[] = [];
+    let cursor: string | undefined;
+    for (let guard = 0; guard < 20; guard += 1) {
+      const page = await client.agent.listTasks({ limit: 2, cursor });
+      expect(page.length).toBeLessThanOrEqual(2);
+      paged.push(...page.map((task) => task.changeRequest.id));
+      if (page.length < 2) break;
+      cursor = page[page.length - 1]?.id;
+    }
+    expect(paged).toEqual(all.map((task) => task.changeRequest.id));
+
+    await expect(
+      client.agent.listTasks({ limit: 2, cursor: "cr_does_not_exist" }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+
+  it("serves the same queue over REST, with and without the new query parameters", async () => {
+    // An older CLI or SDK sends no parameters; a newer one sends `limit`/`cursor`
+    // as query strings, which have to coerce.
+    const handler = new OpenAPIHandler(busabaseRouter);
+    const get = async (query: string) => {
+      const result = await handler.handle(
+        new Request(`http://localhost/api/v1/agent/tasks${query}`, { method: "GET" }),
+        { context: {} },
+      );
+      if (!result.matched) throw new Error("no route matched /agent/tasks");
+      return { status: result.response.status, body: await result.response.json() };
+    };
+    const legacy = await get("");
+    expect(legacy.status).toBe(200);
+    expect(Array.isArray(legacy.body)).toBe(true);
+    expect(legacy.body.length).toBeGreaterThanOrEqual(2);
+    const first = await get("?limit=1");
+    expect(first.status).toBe(200);
+    expect(first.body).toHaveLength(1);
+    expect(first.body[0].id).toBe(legacy.body[0].changeRequest.id);
+    const second = await get(`?limit=1&cursor=${encodeURIComponent(first.body[0].id)}`);
+    expect(second.body[0].changeRequest.id).toBe(legacy.body[1].changeRequest.id);
+    expect((await get("?limit=0")).status).toBe(400);
+  });
+
+  it("never lists a task on a Base the caller cannot see", async () => {
+    const hidden = await client.bases.create({
+      slug: "agent-hidden",
+      name: "Agent hidden",
+      fields: [{ slug: "title", name: "Title", type: "text", required: true, options: {} }],
+      autoMerge: true,
+    });
+    if (!hidden.materialized || !hidden.nodeId) throw new Error("Expected a materialized Base");
+    const secret = await client.bases.createChangeRequest({
+      baseId: hidden.id,
+      fields: { title: "Secret plan" },
+      autoMerge: false,
+    });
+    await requestChanges(secret.id);
+    const visible = await openCr("Visible to members");
+    await requestChanges(visible.id);
+    await client.nodes.updateVisibility({ nodeId: hidden.nodeId, visibility: "private" });
+
+    const asMember = await runWithBusabaseContext(
+      {
+        spaceId: LOCAL_SPACE_ID,
+        actorId: "agent-tasks-member",
+        isSpaceManager: false,
+        permissionLevel: "write",
+      },
+      () => client.agent.listTasks(),
+    );
+    const memberIds = asMember.map((task) => task.changeRequest.id);
+    expect(memberIds).toContain(visible.id);
+    expect(memberIds).not.toContain(secret.id);
+    expect((await client.agent.listTasks()).map((task) => task.changeRequest.id)).toContain(
+      secret.id,
+    );
   });
 
   it("drops a CR from the queue once the agent revises it", async () => {

@@ -47,6 +47,8 @@ export interface WorkflowRunStore {
   purgeFinished(before: number, limit: number): Promise<number>;
   /** Waits in one space whose time has passed. */
   listElapsedWaits(spaceId: string, now: number): Promise<WorkflowRun[]>;
+  /** Runs in one space waiting on an approval, most recently updated first. */
+  listWaitingApproval(spaceId: string, limit: number): Promise<WorkflowRun[]>;
   /** Across spaces: queued event runs and elapsed Waits, oldest first. */
   listDue(now: number, limit: number): Promise<WorkflowRun[]>;
   /**
@@ -77,7 +79,7 @@ const clone = <T>(value: T): T => structuredClone(value);
 
 const isElapsedWait = (run: WorkflowRun, now: number): boolean =>
   run.status === "waiting" &&
-  run.pause?.kind === "wait" &&
+  (run.pause?.kind === "wait" || run.pause?.kind === "sandbox") &&
   run.pause.resumeAt !== null &&
   Date.parse(run.pause.resumeAt) <= now;
 
@@ -148,6 +150,13 @@ export const createMemoryWorkflowRunStore = (): WorkflowRunStore => {
     async listElapsedWaits(spaceId, now) {
       return [...runs.values()]
         .filter((run) => run.spaceId === spaceId && isElapsedWait(run, now))
+        .map(clone);
+    },
+    async listWaitingApproval(spaceId, limit) {
+      return [...runs.values()]
+        .filter((run) => run.spaceId === spaceId && run.status === "waiting_approval")
+        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+        .slice(0, limit)
         .map(clone);
     },
     async listDue(now, limit) {

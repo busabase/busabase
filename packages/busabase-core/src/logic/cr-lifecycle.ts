@@ -23,6 +23,7 @@ import {
   eq,
   exists,
   getTableColumns,
+  gt,
   inArray,
   isNull,
   lt,
@@ -117,6 +118,7 @@ import {
 import { resolveLookupValues } from "../domains/base/logic/lookup-values";
 import { resolveReverseRelationValues } from "../domains/base/logic/reverse-relations";
 import {
+  isListPayloadOmitted,
   LIST_OMITTED_FIELD_VALUE,
   LIST_OMITTED_LONG_TEXT_VALUE,
 } from "../domains/dashboard/utils/list-payload-preview";
@@ -161,6 +163,7 @@ const refreshNodeContentSearch = async (
 import { applyPlaybookAttributionVisibility } from "../domains/playbooks/logic/playbook-attribution";
 import { dispatchWebhookEvent, hasWebhookRuleFor } from "../domains/webhook/logic/dispatch";
 import { enqueueWorkflowRunsForRecordEvent } from "../domains/workflow/logic/triggers";
+import { type AclPlan, buildChangeRequestAclSql } from "./acl-list-sql";
 import { insertAuditEvent } from "./audit";
 import {
   type ChangeRequestScope,
@@ -1622,15 +1625,52 @@ export const hydrateRecord = async (record: RecordPO): Promise<RecordVO> => {
 
 // ── CRUD ──────────────────────────────────────────────────────────────────────
 
+/**
+ * Access to change request rows, decided in SQL (see `acl-list-sql.ts`): a
+ * `where` that drops every row the caller cannot see, and a `needsScopeCheck`
+ * column for the rare row only the JS resolver can place. Pass the selected
+ * rows to {@link keepVisibleChangeRequestCandidates}.
+ */
+const changeRequestListAcl = (db: Awaited<ReturnType<typeof getDb>>, plan: AclPlan = "scan") => {
+  const acl = buildChangeRequestAclSql(db, busabaseChangeRequests.id, "list", plan);
+  return {
+    where: acl?.visible,
+    needsScopeCheck: acl ? sql<boolean>`${acl.needsScopeCheck}` : sql<boolean>`false`,
+  };
+};
+
+/**
+ * Rows the SQL access predicate accepted: unflagged rows are visible as they
+ * are; flagged ones (an operation that names neither node nor Base) go through
+ * `filterVisibleChangeRequestRows`. Order is kept and the flag dropped.
+ */
+const keepVisibleChangeRequestCandidates = async <
+  T extends { id: string; needsScopeCheck: boolean },
+>(
+  rows: T[],
+): Promise<Omit<T, "needsScopeCheck">[]> => {
+  const flagged = rows.filter((row) => row.needsScopeCheck);
+  const confirmed = new Set(
+    flagged.length > 0 ? (await filterVisibleChangeRequestRows(flagged)).map((row) => row.id) : [],
+  );
+  return rows
+    .filter((row) => !row.needsScopeCheck || confirmed.has(row.id))
+    .map(({ needsScopeCheck: _needsScopeCheck, ...row }) => row);
+};
+
 const loadVisibleChangeRequestWindow = async (
   filters: SQL[],
   requiredCount: number,
 ): Promise<ChangeRequestPO[]> => {
   const db = await getDb();
+  // An index walk that stops after a page: look each row up instead of hashing
+  // every operation of the space first.
+  const acl = changeRequestListAcl(db, "probe");
   const batchSize = Math.max(requiredCount, 20);
   const visible: ChangeRequestPO[] = [];
-  // Keyset, not OFFSET: each window continues strictly after the last row seen,
-  // so walking deep into a space never re-scans the rows already rejected.
+  // Keyset, not OFFSET: each window continues strictly after the last row seen.
+  // Access is part of the WHERE, so a member who can see little no longer walks
+  // the rows they cannot see; only flagged rows are re-checked in JS.
   let after: { createdAt: Date; id: string } | null = null;
   for (;;) {
     const keyset: SQL | undefined = after
@@ -1642,13 +1682,16 @@ const loadVisibleChangeRequestWindow = async (
           ),
         )
       : undefined;
-    const candidates: ChangeRequestPO[] = await db
-      .select()
+    const candidates: (ChangeRequestPO & { needsScopeCheck: boolean })[] = await db
+      .select({
+        ...getTableColumns(busabaseChangeRequests),
+        needsScopeCheck: acl.needsScopeCheck,
+      })
       .from(busabaseChangeRequests)
-      .where(and(...filters, keyset))
+      .where(and(...filters, acl.where, keyset))
       .orderBy(desc(busabaseChangeRequests.createdAt), desc(busabaseChangeRequests.id))
       .limit(batchSize);
-    visible.push(...(await filterVisibleChangeRequestRows(candidates)));
+    visible.push(...(await keepVisibleChangeRequestCandidates(candidates)));
     const last: ChangeRequestPO | undefined = candidates[candidates.length - 1];
     if (visible.length >= requiredCount || candidates.length < batchSize || !last) break;
     after = { createdAt: last.createdAt, id: last.id };
@@ -1812,18 +1855,20 @@ export const listChangeRequestsPaged = async (
  */
 const listVisibleChangeRequestIds = async (filters: SQL[]): Promise<{ id: string }[]> => {
   const db = await getDb();
-  // One ordered read instead of a 200-row OFFSET walk (O(n²) on a big space);
-  // `filterVisibleChangeRequestRows` bounds its own ACL queries.
+  const acl = changeRequestListAcl(db);
+  // One ordered read of only the rows the caller can see (access is in the
+  // WHERE); flagged rows are re-checked by the JS resolver.
   const rows = await db
     .select({
       id: busabaseChangeRequests.id,
       status: busabaseChangeRequests.status,
       updatedAt: busabaseChangeRequests.updatedAt,
+      needsScopeCheck: acl.needsScopeCheck,
     })
     .from(busabaseChangeRequests)
-    .where(and(...filters))
+    .where(and(...filters, acl.where))
     .orderBy(desc(busabaseChangeRequests.createdAt), desc(busabaseChangeRequests.id));
-  return (await filterVisibleChangeRequestRows(rows)).map((row) => ({ id: row.id }));
+  return (await keepVisibleChangeRequestCandidates(rows)).map((row) => ({ id: row.id }));
 };
 
 /**
@@ -1992,16 +2037,16 @@ export const getInboxSnapshot = async (input?: z.input<typeof inboxSnapshotInput
       mineRow?.count ?? 0,
     );
   } else {
-    // One ordered read of the light candidate shape (no OFFSET walk — that
-    // re-scanned every earlier row per 200-row page, O(n²) on a big space).
-    // `filterVisibleChangeRequestRows` bounds its own ACL queries.
+    // One ordered read of the light candidate shape, already narrowed to the
+    // rows this caller can see; flagged rows are re-checked by the JS resolver.
+    const acl = changeRequestListAcl(db);
     const rows = await db
-      .select(inboxCandidateSelection)
+      .select({ ...inboxCandidateSelection, needsScopeCheck: acl.needsScopeCheck })
       .from(busabaseChangeRequests)
-      .where(eq(busabaseChangeRequests.spaceId, spaceId))
+      .where(and(eq(busabaseChangeRequests.spaceId, spaceId), acl.where))
       .orderBy(desc(busabaseChangeRequests.createdAt), desc(busabaseChangeRequests.id));
     candidateRows = rows.length;
-    const allRows = await filterVisibleChangeRequestRows(rows);
+    const allRows = await keepVisibleChangeRequestCandidates(rows);
     visibleRows = allRows.length;
     counts = countInboxCandidateRows(allRows);
     matchingIds = allRows.filter((row) => matchesInboxFilter(row, parsed)).map((row) => row.id);
@@ -2083,13 +2128,13 @@ export const countReviewChangeRequests = async () => {
     return { review: row?.count ?? 0 };
   }
 
-  // Pending rows never reuse terminal-scope caches. Only their IDs are needed
-  // to resolve scopes and evaluate the caller's current visibility.
+  // Access in SQL; only flagged rows are resolved in JS.
+  const acl = changeRequestListAcl(db);
   const rows = await db
-    .select({ id: busabaseChangeRequests.id })
+    .select({ id: busabaseChangeRequests.id, needsScopeCheck: acl.needsScopeCheck })
     .from(busabaseChangeRequests)
-    .where(filters);
-  return { review: (await filterVisibleChangeRequestRows(rows)).length };
+    .where(and(filters, acl.where));
+  return { review: (await keepVisibleChangeRequestCandidates(rows)).length };
 };
 
 /**
@@ -2136,14 +2181,14 @@ export const countChangeRequests = async () => {
   }
 
   // Non-managers: visibility depends on the node scope resolved from each
-  // change request's operations. Read the lightweight candidate shape once;
-  // ordering is irrelevant to a tally. Bound each ACL query so unusually large
-  // spaces do not create an unbounded IN list or Operations result set.
+  // change request's operations, which the WHERE now decides in SQL (flagged
+  // rows are resolved in JS). Ordering is irrelevant to a tally.
+  const acl = changeRequestListAcl(db);
   const rows = await db
-    .select(inboxCandidateSelection)
+    .select({ ...inboxCandidateSelection, needsScopeCheck: acl.needsScopeCheck })
     .from(busabaseChangeRequests)
-    .where(eq(busabaseChangeRequests.spaceId, spaceId));
-  const visibleRows = await filterVisibleChangeRequestRows(rows);
+    .where(and(eq(busabaseChangeRequests.spaceId, spaceId), acl.where));
+  const visibleRows = await keepVisibleChangeRequestCandidates(rows);
 
   return countInboxCandidateRows(visibleRows);
 };
@@ -2313,6 +2358,17 @@ export const reviseOperation = async (
     throw new Error(
       `Operation is not revisable after changeRequest status: ${changeRequest.status}`,
     );
+  }
+  // List responses (the agent queue, the inbox) stand a marker in for values
+  // over 4 KB. An agent that edits the preview and sends it back would replace
+  // the real text with that marker, so a marker is never accepted as a value.
+  const placeholderField = Object.entries(parsed.fields).find(([, value]) =>
+    isListPayloadOmitted(value),
+  );
+  if (placeholderField) {
+    throw new ORPCError("BAD_REQUEST", {
+      message: `Field "${placeholderField[0]}" holds the placeholder a list response shows in place of a long value, not the value itself. Read the full value with GET /api/v1/change-requests/${changeRequest.id} and send that instead.`,
+    });
   }
 
   const commitId = id("cmt");
@@ -3483,30 +3539,125 @@ export const closeChangeRequest = async (changeRequestId: string, reason?: strin
   return updated;
 };
 
-export const listAgentTasks = async () => {
+/**
+ * How many of a queued change request's operations one task embeds. A bulk
+ * change request carries up to 1,000; a poll that only has to say "this needs
+ * you" does not need to carry them all — `truncated` + `changeRequestPath` say
+ * where the rest is.
+ */
+export const AGENT_TASK_MAX_OPERATIONS = 20;
+/** Tasks per page, and the bound on the historical call that passes no `limit`. */
+export const AGENT_TASK_PAGE_SIZE = 100;
+
+export type ListAgentTasksInput = { limit?: number; cursor?: string } | undefined;
+
+/**
+ * The agent work queue (`GET /agent/tasks`), oldest first: change requests a
+ * reviewer sent back (`changes_requested`), and ones still in review that carry
+ * an agent mention.
+ *
+ * Agents are told to poll this, so it has to stay small however much is
+ * waiting. It used to load every open change request in the space (full rows),
+ * filter them in JS, then hydrate each queued one with every operation and full
+ * field values: 3.5 MB / 2.2 s for eight tasks in one production workspace,
+ * nearly all of it long text — twice per operation (proposed value and the
+ * value it replaces), and again in `primaryOperation`.
+ *
+ * Now the queue condition is SQL, the walk is a bounded keyset over it, and
+ * each change request is hydrated as a list row: at most
+ * {@link AGENT_TASK_MAX_OPERATIONS} operations, values over
+ * `LIST_MAX_FIELD_VALUE_BYTES` replaced by the list marker. The task says when
+ * that happened (`truncated`, `omittedOperationCount`) and where the complete
+ * change request is (`changeRequestPath`); `reviseOperation` refuses a marker
+ * sent back as a value, so an agent that copies a preview cannot write it over
+ * the real text.
+ */
+export const listAgentTasks = async (input?: ListAgentTasksInput) => {
   await ensureReady();
   const db = await getDb();
   const spaceId = getContextSpaceId();
-  const candidateChangeRequests = await db
-    .select()
-    .from(busabaseChangeRequests)
-    .where(
-      and(
-        eq(busabaseChangeRequests.spaceId, spaceId),
-        inArray(busabaseChangeRequests.status, ["in_review", "changes_requested"]),
+  const pageSize = Math.min(
+    Math.max(input?.limit ?? AGENT_TASK_PAGE_SIZE, 1),
+    AGENT_TASK_PAGE_SIZE,
+  );
+
+  let after: { createdAt: Date; id: string } | null = null;
+  if (input?.cursor) {
+    const [cursorRow] = await db
+      .select({ createdAt: busabaseChangeRequests.createdAt, id: busabaseChangeRequests.id })
+      .from(busabaseChangeRequests)
+      .where(
+        and(
+          eq(busabaseChangeRequests.spaceId, spaceId),
+          eq(busabaseChangeRequests.id, input.cursor),
+        ),
+      )
+      .limit(1);
+    if (!cursorRow) {
+      throw new ORPCError("BAD_REQUEST", {
+        message: `Unknown cursor: ${input.cursor}. Pass the \`id\` of the last task on the previous page.`,
+      });
+    }
+    after = cursorRow;
+  }
+
+  // Sourced from the mentions table, not a boolean on the comment: an INNER JOIN
+  // means a comment that mentions only members never queues a change request.
+  const agentMentionExists = exists(
+    db
+      .select({ one: sql`1` })
+      .from(busabaseComments)
+      .innerJoin(
+        busabaseCommentMentions,
+        and(
+          eq(busabaseCommentMentions.commentId, busabaseComments.id),
+          eq(busabaseCommentMentions.targetType, "agent"),
+        ),
+      )
+      .where(
+        and(
+          eq(busabaseComments.spaceId, spaceId),
+          eq(busabaseComments.changeRequestId, busabaseChangeRequests.id),
+        ),
       ),
-    )
-    .orderBy(asc(busabaseChangeRequests.createdAt));
-  const openChangeRequests = await filterVisibleChangeRequestRows(candidateChangeRequests);
+  );
+  const queued = or(
+    eq(busabaseChangeRequests.status, "changes_requested"),
+    and(eq(busabaseChangeRequests.status, "in_review"), agentMentionExists),
+  );
+
+  // Keyset windows over queued rows only; access is still decided by the shared
+  // change-request filter, so the queue never shows what the inbox would hide.
+  const windowSize = Math.max(pageSize, 20);
+  const page: ChangeRequestPO[] = [];
+  for (;;) {
+    const keyset: SQL | undefined = after
+      ? or(
+          gt(busabaseChangeRequests.createdAt, after.createdAt),
+          and(
+            eq(busabaseChangeRequests.createdAt, after.createdAt),
+            gt(busabaseChangeRequests.id, after.id),
+          ),
+        )
+      : undefined;
+    const candidates: ChangeRequestPO[] = await db
+      .select()
+      .from(busabaseChangeRequests)
+      .where(and(eq(busabaseChangeRequests.spaceId, spaceId), queued, keyset))
+      .orderBy(asc(busabaseChangeRequests.createdAt), asc(busabaseChangeRequests.id))
+      .limit(windowSize);
+    page.push(...(await filterVisibleChangeRequestRows(candidates)));
+    const last: ChangeRequestPO | undefined = candidates[candidates.length - 1];
+    if (page.length >= pageSize || candidates.length < windowSize || !last) break;
+    after = { createdAt: last.createdAt, id: last.id };
+  }
+  const openChangeRequests = page.slice(0, pageSize);
   if (openChangeRequests.length === 0) {
     return [];
   }
 
   const changeRequestIds = openChangeRequests.map((changeRequest) => changeRequest.id);
-  // Sourced from the mentions table, not a boolean on the comment: a queued task
-  // now carries WHICH agent was asked (in each comment's `mentions`), which is
-  // the whole point of replacing `mentions_ai`. An INNER JOIN also means a
-  // comment that mentions only members never lands in the agent queue.
+  // A queued task carries WHICH agent was asked (in each comment's `mentions`).
   const aiCommentRows = await db
     .selectDistinct({ comment: busabaseComments })
     .from(busabaseComments)
@@ -3535,11 +3686,6 @@ export const listAgentTasks = async () => {
     aiCommentsByChangeRequest.set(comment.changeRequestId, list);
   }
 
-  const queued = openChangeRequests.filter(
-    (changeRequest) =>
-      changeRequest.status === "changes_requested" ||
-      aiCommentsByChangeRequest.has(changeRequest.id),
-  );
   const mentionsByComment = await loadCommentMentions(
     db,
     aiCommentRows.map((comment) => comment.id),
@@ -3550,32 +3696,48 @@ export const listAgentTasks = async () => {
     ...mentionMemberIds(allMentionRows),
   ]);
 
-  return Promise.all(
-    queued.map(async (changeRequestRow) => {
-      const changeRequest = await hydrateChangeRequest(changeRequestRow);
-      const latestReview =
-        changeRequest.reviews.length > 0
-          ? changeRequest.reviews.reduce((latest, review) =>
-              review.createdAt > latest.createdAt ? review : latest,
-            )
-          : null;
-      return {
-        changeRequest,
-        trigger: (changeRequestRow.status === "changes_requested"
-          ? "changes_requested"
-          : "ai_mention") as AgentTaskTrigger,
-        reviewReason: latestReview?.reason ?? null,
-        aiComments: (aiCommentsByChangeRequest.get(changeRequestRow.id) ?? []).map((comment) =>
-          toCommentVO(
-            comment,
-            commentUsers,
-            toCommentMentionVOs(mentionsByComment.get(comment.id) ?? [], commentUsers),
-          ),
-        ) as CommentVO[],
-      };
-    }),
-  );
+  // One batched hydration for the page (it used to be one per task, in parallel).
+  const changeRequests = await hydrateChangeRequests(openChangeRequests, {
+    maxOperationsPerChangeRequest: AGENT_TASK_MAX_OPERATIONS,
+  });
+
+  return openChangeRequests.map((changeRequestRow, index) => {
+    const changeRequest = changeRequests[index] as ChangeRequestVO;
+    const latestReview =
+      changeRequest.reviews.length > 0
+        ? changeRequest.reviews.reduce((latest, review) =>
+            review.createdAt > latest.createdAt ? review : latest,
+          )
+        : null;
+    const omittedOperationCount = Math.max(
+      changeRequest.operationCount - changeRequest.operations.length,
+      0,
+    );
+    return {
+      id: changeRequestRow.id,
+      changeRequest,
+      trigger: (changeRequestRow.status === "changes_requested"
+        ? "changes_requested"
+        : "ai_mention") as AgentTaskTrigger,
+      reviewReason: latestReview?.reason ?? null,
+      aiComments: (aiCommentsByChangeRequest.get(changeRequestRow.id) ?? []).map((comment) =>
+        toCommentVO(
+          comment,
+          commentUsers,
+          toCommentMentionVOs(mentionsByComment.get(comment.id) ?? [], commentUsers),
+        ),
+      ) as CommentVO[],
+      truncated: omittedOperationCount > 0 || changeRequest.operations.some(hasOmittedListValue),
+      omittedOperationCount,
+      changeRequestPath: `/api/v1/change-requests/${encodeURIComponent(changeRequestRow.id)}`,
+    };
+  });
 };
+
+/** Whether a list-hydrated operation had a proposed or replaced value left out. */
+const hasOmittedListValue = (operation: OperationVO): boolean =>
+  Object.values(operation.headCommit.payload).some(isListPayloadOmitted) ||
+  Object.values(operation.baseFields ?? {}).some(isListPayloadOmitted);
 
 // ── Merge engine ──────────────────────────────────────────────────────────────
 

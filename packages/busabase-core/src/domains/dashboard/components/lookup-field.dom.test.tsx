@@ -5,6 +5,11 @@ import type { ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CoreI18nProvider } from "../../../i18n";
 
+vi.mock(
+  "previewfile-core/client/embedded/lazy",
+  () => import("../../../../tests/mocks/embedded-file-viewer"),
+);
+
 vi.mock("wouter", () => ({ useSearch: () => "?spaceId=space" }));
 vi.mock("openlib/ui/dashboard", () => ({
   SPALink: ({ children, ...props }: { children: ReactNode; href: string }) => (
@@ -82,7 +87,10 @@ describe("lookup typed result", () => {
     fireEvent.click(within(expanded).getByRole("button", { name: "report25.pdf" }));
     const dialog = screen.getByTestId("attachment-preview-dialog");
     expect(within(dialog).getByRole("heading", { name: "report25.pdf" })).toBeTruthy();
-    expect(dialog.querySelector("iframe")?.getAttribute("src")).toBe(files[25]?.url);
+    expect(within(dialog).getByTestId("embedded-file-preview").getAttribute("data-url")).toBe(
+      files[25]?.url,
+    );
+    expect(dialog.querySelector('[data-previewfile-type="pdf"]')).toBeTruthy();
     fireEvent.click(within(dialog).getByRole("button", { name: "关闭" }));
     fireEvent.click(screen.getByTestId("lookup-sources-fees"));
     expect(screen.getByTestId("lookup-sources-truncated").textContent).toContain("25");

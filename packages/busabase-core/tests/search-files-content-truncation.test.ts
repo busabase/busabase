@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -14,7 +15,6 @@ import { busabaseRouter } from "../src/router";
 type Client = ReturnType<typeof createRouterClient<typeof busabaseRouter, Record<never, never>>>;
 
 const MIGRATIONS_CWD = path.resolve(__dirname, "../../../apps/busabase");
-const HASH = (byte: string) => `sha256:${byte.repeat(64)}`;
 
 describe("search — files source content matching, ordinary (uncapped) case", () => {
   let dataDir = "";
@@ -22,9 +22,9 @@ describe("search — files source content matching, ordinary (uncapped) case", (
   let originalCwd = "";
   let client: Client;
 
-  const uploadAsset = async (fileName: string, body: string, hashByte: string) => {
+  const uploadAsset = async (fileName: string, body: string, _hashByte: string) => {
     const sizeBytes = Buffer.byteLength(body, "utf8");
-    const contentHash = HASH(hashByte);
+    const contentHash = `sha256:${createHash("sha256").update(body).digest("hex")}`;
     const req = await client.assets.createUploadUrl({
       fileName,
       mimeType: "text/plain",

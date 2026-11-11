@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -20,7 +21,6 @@ import { busabaseRouter } from "../src/router";
 type Client = ReturnType<typeof createRouterClient<typeof busabaseRouter, Record<never, never>>>;
 
 const MIGRATIONS_CWD = path.resolve(__dirname, "../../../apps/busabase");
-const HASH = (byte: string) => `sha256:${byte.repeat(64)}`;
 
 const expectDefined = <T>(value: T | undefined | null): T => {
   expect(value).toBeDefined();
@@ -56,7 +56,7 @@ describe("Search / Drive Grep Retrieval convergence", () => {
 
   /** Upload+confirm a text/plain asset (auto-registers a `present` text row pointing at its own bytes). */
   const uploadTextAsset = async (opts: { fileName: string; content: string; hashByte: string }) => {
-    const contentHash = HASH(opts.hashByte);
+    const contentHash = `sha256:${createHash("sha256").update(opts.content).digest("hex")}`;
     const sizeBytes = Buffer.byteLength(opts.content, "utf8");
     const req = await client.assets.createUploadUrl({
       fileName: opts.fileName,
@@ -77,13 +77,15 @@ describe("Search / Drive Grep Retrieval convergence", () => {
 
   /** Upload+confirm a binary (application/pdf) asset — no auto text registration. */
   const uploadBinaryAsset = async (opts: { fileName: string; hashByte: string }) => {
-    const contentHash = HASH(opts.hashByte);
+    const bytes = Buffer.alloc(100, opts.hashByte);
+    const contentHash = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
     const req = await client.assets.createUploadUrl({
       fileName: opts.fileName,
       mimeType: "application/pdf",
       sizeBytes: 100,
       contentHash,
     });
+    await storage.uploadFileToKey(bytes, req.storageKey, "application/pdf");
     const confirmed = await client.assets.confirm({
       storageKey: req.storageKey,
       fileName: opts.fileName,

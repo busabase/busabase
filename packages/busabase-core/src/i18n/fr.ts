@@ -730,6 +730,8 @@ export const dashboardFr: CoreI18nMessages = {
     engineFollowAppNamed: "Suivre l'application ({engine})",
     engineFollowAppHint:
       "Le fichier airapp.json de l'application décide. Choisissez un moteur pour le remplacer pour ce nœud.",
+    engineFollowAppFallback:
+      "Le fichier airapp.json de l'application privilégie {preferred}, qui n'est pas disponible ici. Moteur utilisé : {engine}.",
     engineRequired: "L'application requiert {engine}",
     engineRequiredHint:
       "Cette exigence est définie par requiredEngine dans airapp.json et ne peut pas être remplacée pour ce nœud.",
@@ -774,6 +776,37 @@ export const dashboardFr: CoreI18nMessages = {
     swUnsupportedCopyFailed:
       "Impossible de copier le lien. Sélectionnez-le et copiez-le manuellement :",
     site: {
+      publish: {
+        previewStale:
+          "Les fichiers ont changé depuis cet aperçu. Créez ou actualisez l’aperçu du site avant de publier.",
+        noPreview: "Créez un aperçu du site avant de publier.",
+        previewUnavailable: "Impossible de charger l’aperçu. Recréez-le avant de publier.",
+        title: "Publier comme site",
+        description:
+          "Créez un Busabase Site toujours disponible avec une adresse publique fixe. Les visiteurs peuvent l’ouvrir sans compte Busabase.",
+        preserveBrowser:
+          "L’aperçu dans le navigateur continue de fonctionner pendant la préparation du site.",
+        checking: "Vérification du site…",
+        checkFailed: "Impossible de vérifier le site. Réessayez.",
+        planRequired: "L’hébergement de sites est inclus à partir de {plan}.",
+        paidPlanRequired: "Cet espace a besoin d’un forfait payant pour héberger un site.",
+        upgradeHint:
+          "Préparez l’app, puis passez cet espace à un forfait supérieur pour la prévisualiser et la publier. Un lien d’aperçu du navigateur n’est pas un site toujours disponible.",
+        prepareTitle: "Préparer la version web",
+        prepareHint:
+          "Demandez à votre agent de préparer une version web. Des modifications du code peuvent être nécessaires avant publication.",
+        copyPrompt: "Copier le prompt pour l’agent",
+        copied: "Prompt copié",
+        agentPrompt:
+          "Utilise la compétence busabase-app-creator pour préparer cette AirApp comme Busabase Site. Examine les fichiers et conserve l’exécution dans le navigateur et les fonctionnalités existantes. Ajoute une déclaration site explicite dans airapp.json et des ressources statiques ; si nécessaire, un Worker JavaScript ES regroupé en un seul module avec un export fetch par défaut. Ne publie pas de serveur de développement Node et ne change pas seulement le moteur. Garde site.access en lecture seule sauf si des écritures sont nécessaires ; expose uniquement des endpoints précis et sûrs, jamais la clé API ni un proxy de requêtes arbitraires. Valide le paquet et explique les changements nécessaires. Je publierai après examen de l’aperçu privé.",
+        previewHint: "Créez d’abord un aperçu privé et vérifiez-le ici avant de le rendre public.",
+        createPreview: "Créer l’aperçu du site",
+        preparingPreview: "Préparation de l’aperçu…",
+        refreshPreview: "Actualiser l’aperçu du site",
+        previewTitle: "Aperçu privé du site",
+        publishConsent:
+          "La version vérifiée sera publiée. Toute personne disposant de l’adresse pourra utiliser le site, y compris les données et les actions exposées par son code.",
+      },
       statusNotLive: "Hors ligne",
       statusLive: "En ligne",
       statusLiveWithChanges: "Modifications non publiées",
@@ -2330,6 +2363,24 @@ export const dashboardFr: CoreI18nMessages = {
     uploadFailed: "Échec du téléversement",
     uploading: "Téléversement...",
     addFile: "Ajouter un fichier",
+    drive: {
+      filePath: "Chemin du fichier",
+      moveFile: "Renommer ou déplacer",
+      moveFolder: "Renommer ou déplacer le dossier",
+      moveFolderHint:
+        "Modifiez le chemin pour renommer ou déplacer le dossier et tout son contenu, par ex. contracts/2026. Laissez-le vide pour déplacer son contenu à la racine.",
+      folderPath: "Chemin du dossier",
+      movePathHint:
+        "Modifiez les dossiers du chemin pour le déplacer, par ex. contracts/2026/main.pdf.",
+      apply: "Appliquer",
+      pathTaken: 'Un élément existe déjà à l\'emplacement "{path}". Choisissez un autre chemin.',
+      invalidPath: "Saisissez un chemin valide, par ex. contracts/2026/main.pdf.",
+      folderIntoItself: "Un dossier ne peut pas être déplacé dans lui-même.",
+      removeFolderBody:
+        "Cela retire \"{folder}\" et ses {count} fichier{plural} de ce champ. Rien ne change tant que l'enregistrement n'est pas sauvegardé.",
+      emptyFolderHint:
+        "Les dossiers vides ne sont pas enregistrés. Ajoutez des fichiers pour conserver ce dossier.",
+    },
     properties: "Propriétés",
     source: "Source",
     openFullPage: "Ouvrir la page complète",
@@ -2584,6 +2635,7 @@ export const dashboardFr: CoreI18nMessages = {
     member: "Membre",
     lookup: "Recherche",
     attachment: "Fichier",
+    drive: "Drive",
     ai_summary: "Résumé IA",
     ai_tags: "Étiquettes IA",
     created_time: "Créé le",
@@ -2774,6 +2826,13 @@ export const dashboardFr: CoreI18nMessages = {
       "Un POST (JSON ou texte) ou un GET vers cette URL lance une exécution. La requête se trouve dans steps.trigger.payload.request : method, query, headers et body. Si une étape de code renvoie { response: … } avant que l'exécution ne se mette en pause, l'appelant reçoit cette réponse ; sinon il reçoit 202 et l'ID de l'exécution. Toute personne ayant cette URL peut lancer une exécution : changez-la pour que l'ancienne ne fonctionne plus. Les modifications prennent effet à l'enregistrement.",
     hookNeedsEvent:
       "Passez le mode d'exécution sur Événement dans les paramètres d'exécution, sinon cette URL répond 404.",
+    webhookSign: "Signer les requêtes",
+    webhookSigningSecret: "Secret de signature",
+    webhookSigningRegenerate: "Changer le secret",
+    webhookSigningHint:
+      "Chaque requête porte l'en-tête X-Busabase-Signature : t=<heure Unix>,v1=<HMAC-SHA256 hexadécimal de \"<t>.<corps>\" avec ce secret>. Vérifiez-le là où la requête arrive et rejetez un t vieux de plus de quelques minutes, afin qu'une requête falsifiée ou rejouée soit refusée. Toute personne pouvant ouvrir ce workflow peut lire le secret : changez-le pour que l'ancien ne serve plus. Les changements s'appliquent après l'enregistrement.",
+    webhookSignOffHint:
+      "Désactivé : la requête ne porte aucune signature. Activez-le pour que le destinataire puisse vérifier qu'une requête vient de cette étape.",
     functionCode: "Code",
     functionCodeHint:
       "JavaScript exécuté sur le serveur quand l'exécution atteint cette étape. input contient les données de l'exécution (payload, steps, record), await fetch(...) appelle des URL publiques, et la valeur renvoyée est la sortie de cette étape (les étapes suivantes la lisent comme steps.<id>.<champ>). Toute personne pouvant ouvrir ce workflow peut lire le code.",
@@ -2855,6 +2914,26 @@ export const dashboardFr: CoreI18nMessages = {
     findRecordsForEach: "Exécuter les étapes suivantes pour chaque enregistrement",
     findRecordsForEachHint:
       "Chaque enregistrement a sa propre exécution, à son sujet : Modifier un enregistrement le modifie, et les étapes suivantes le lisent comme record. Cette exécution s'arrête ici ; les autres passent à tour de rôle selon la concurrence.",
+    runIn: "Exécuter sur",
+    runInServer: "Ce serveur",
+    runInSandbox: "Une machine sandbox",
+    runInServerHint: "Rapide. JavaScript uniquement, sans paquets, jusqu'au délai du workflow.",
+    runInSandboxHint:
+      "Une machine démarrée pour cette étape : JavaScript ou Python, paquets installés d'abord, jusqu'à 10 minutes. L'exécution l'attend comme une étape d'attente, donc une requête qui a lancé l'exécution reçoit 202.",
+    runInSandboxLocked: "Exécuter du code dans une sandbox nécessite le forfait {plan}.",
+    runInSandboxNotConfigured:
+      "Ce serveur n'a pas de sandbox configurée. Un administrateur peut l'activer avec une clé d'API Sandock.",
+    sandboxLanguage: "Langage",
+    sandboxLanguageJavascript: "JavaScript (Node.js)",
+    sandboxLanguagePython: "Python",
+    sandboxPackages: "Paquets",
+    sandboxPackagesHintJavascript:
+      'Paquets npm installés d\'abord, séparés par des espaces, comme dayjs ou lodash@4. Chargez-les avec require("dayjs").',
+    sandboxPackagesHintPython:
+      "Paquets pip installés d'abord, séparés par des espaces, comme requests ou pycryptodome==3.20.0. Importez-les comme d'habitude.",
+    sandboxCode: "Code dans une sandbox",
+    sandboxCodeHint:
+      "S'exécute sur la machine sandbox. input contient les données de l'exécution et ce que vous renvoyez est la sortie de cette étape. Toute personne qui peut ouvrir ce workflow peut lire le code.",
     customActionHint: "Ce nom d’action ne fait rien pour l’instant : il est seulement consigné.",
     chooseBase: "Choisir une base",
     targetRecord: "Enregistrement (facultatif)",
@@ -2948,6 +3027,9 @@ export const dashboardFr: CoreI18nMessages = {
     triggerSchedule: "Calendrier",
     triggerWebhook: "Requête",
     triggerForEach: "Par enregistrement",
+    waitingSandbox:
+      "Code en cours d'exécution dans une sandbox. L'exécution reprend quand il a fini.",
+    waitingSandboxDeadline: "Arrêté s'il n'a pas fini à {time}.",
     runDetails: "Détails de l'exécution",
     recordLabel: "Enregistrement : {id}",
     waitingUntil: "En attente jusqu'à {time}. Elle reprendra d'elle-même.",
@@ -2956,6 +3038,12 @@ export const dashboardFr: CoreI18nMessages = {
     approve: "Approuver",
     reject: "Rejeter",
     errorLabel: "Erreur",
+    retryFromStep: "Réessayer à partir de cette étape",
+    retryFromStepHint:
+      "Lance une nouvelle exécution qui garde telles quelles toutes les étapes précédentes et ne relance que celle-ci. Une requête que cette étape a déjà envoyée est envoyée de nouveau.",
+    retriedAsLink: "Relancée : ouvrir la nouvelle exécution",
+    retryOfLink: "Nouvelle tentative d'une exécution précédente : l'ouvrir",
+    triggerRetry: "Nouvelle tentative",
     steps: "Étapes",
     noSteps: "Aucune étape terminée pour l'instant.",
     stepData: "Données",
@@ -2999,6 +3087,16 @@ export const dashboardFr: CoreI18nMessages = {
     rename: "Installer les éléments en conflit sous de nouveaux noms",
     renameHint: "Ajoute un suffixe (-2, -3, …). Le contenu existant reste intact.",
     warningsTitle: "À savoir",
+    folderName: "Nom du dossier",
+    folderNameHint: "Nom affiché dans votre espace de travail. Toutes les langues sont acceptées.",
+    folderNameRequired: "Saisissez un nom de dossier.",
+    installUnavailable: "Impossible de lancer l’installation pour le moment. Réessayez plus tard.",
+    installNoChanges: "Aucun contenu du modèle n’a été créé. Vous pouvez réessayer.",
+    installPartial:
+      "Une partie du contenu a été créée avant l’arrêt. Vérifiez votre espace avant de réessayer.",
+    installUnknown:
+      "Le résultat de l’installation n’a pas pu être confirmé. Vérifiez votre espace avant de relancer l’installation.",
+    technicalDetails: "Détails techniques",
     targetFolder: "Installer dans le dossier",
     targetFolderHint:
       "Un nouveau dossier est créé pour le package. Par défaut, il porte le nom du package.",

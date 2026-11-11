@@ -1,8 +1,10 @@
+import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { OpenAPIHandler } from "@orpc/openapi/fetch";
 import { createRouterClient } from "@orpc/server";
+import { storage } from "openlib/storage";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { CommitPO, NodePO, OperationPO } from "../src/db/schema";
 import { mergeSkillFile, mergeSkillMetadata } from "../src/domains/skill/handlers";
@@ -81,7 +83,10 @@ describe("Agent Skills API — oRPC integration", () => {
     sizeBytes: number;
     contentHash: string;
   }) => {
+    const bytes = Buffer.alloc(input.sizeBytes, input.contentHash);
+    input = { ...input, contentHash: `sha256:${createHash("sha256").update(bytes).digest("hex")}` };
     const request = await client.assets.createUploadUrl(input);
+    await storage.uploadFileToKey(bytes, request.storageKey, input.mimeType);
     const confirmed = await client.assets.confirm({
       storageKey: request.storageKey,
       ...input,

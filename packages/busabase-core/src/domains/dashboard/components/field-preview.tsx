@@ -8,7 +8,7 @@ import { type ComponentProps, type ReactNode, useState } from "react";
 import { Streamdown, type Components as StreamdownComponents } from "streamdown";
 import { useSearch } from "wouter";
 import { fmt, useCoreI18n, useCoreLocale, useIString } from "../../../i18n";
-import { fieldDisplayKind, fieldLinkPrefix } from "../../base/field-types";
+import { fieldDisplayKind, fieldLinkPrefix, isFileFieldType } from "../../base/field-types";
 import { getDateFieldOptions, parseDateFieldValue } from "../../base/utils/date-value";
 import { embedAspectRatio, embedHeight, resolveEmbedPreview } from "../../base/utils/embed";
 import { parseWhiteboardFieldValue } from "../../base/utils/whiteboard-value";
@@ -20,7 +20,8 @@ import {
   getFieldPreviewText,
   getRelationRecordIds,
 } from "../helpers/field";
-import { fieldValueToString, shortIdentifier } from "../helpers/format";
+import { fieldValueToString, formatMemberChipLabel, shortIdentifier } from "../helpers/format";
+import { buildGridCellText, gridTextLines } from "../helpers/grid-cell-layout";
 import {
   HTML_DOCUMENT_SANDBOX,
   isFullHtmlDocument,
@@ -37,6 +38,7 @@ import { isListPayloadOmitted } from "../utils/list-payload-preview";
 import { AttachmentValuePreview } from "./attachment-value-preview";
 import { DateFieldValue } from "./date-field";
 import { FormulaValue } from "./formula-value";
+import { GridCellCollection, GridCellText } from "./grid-cell-presentation";
 import { DialogContent } from "./localized-dialog-content";
 import { MemberChips } from "./member-field";
 import { CheckboxBadge } from "./primitives";
@@ -198,6 +200,7 @@ function SourceTogglePreview({
         <div className="flex rounded-md border bg-muted/40 p-0.5 text-xs">
           {(["preview", "source"] as const).map((m) => (
             <button
+              aria-pressed={mode === m}
               className={`rounded px-2 py-0.5 transition-colors ${
                 mode === m
                   ? "bg-card text-foreground"
@@ -663,6 +666,7 @@ export function LookupFieldValue({
   records = [],
   draft = false,
   presentation = "flow",
+  rowHeight = 48,
 }: {
   field: BaseFieldVO;
   computed?: LookupComputedVO;
@@ -671,6 +675,7 @@ export function LookupFieldValue({
   records?: RecordVO[];
   draft?: boolean;
   presentation?: "flow" | "grid";
+  rowHeight?: number;
 }) {
   const messages = useCoreI18n();
   const locale = useCoreLocale();
@@ -685,8 +690,10 @@ export function LookupFieldValue({
   const rollup = field.options.lookup?.rollup ?? "values";
   const displayField = target ? lookupDisplayField(target, rollup) : undefined;
   const values = Array.isArray(result) ? result : [result];
-  const attachmentValues = displayField?.type === "attachment" && rollup === "values";
-  const gridAttachments = attachmentValues && presentation === "grid";
+  const attachmentValues =
+    displayField !== undefined && isFileFieldType(displayField.type) && rollup === "values";
+  const grid = presentation === "grid";
+  const gridAttachments = attachmentValues && grid;
   const renderValue = (item: unknown, index: number) =>
     displayField ? (
       <FieldValuePreview
@@ -705,11 +712,134 @@ export function LookupFieldValue({
     !unavailable &&
     (Boolean(computed?.sources.length) ||
       Boolean(computed?.sourcesTruncated) ||
+      (grid &&
+        !empty &&
+        values.some((item) => item !== null && item !== undefined && item !== "")) ||
       (!attachmentValues && values.length > 3));
+  const displayKind = displayField ? fieldDisplayKind(displayField.type) : "plain";
+  const collectionValues =
+    ["chips", "member", "relation", "checkbox", "link"].includes(displayKind) ||
+    (displayField?.type === "number" && values.length > 1);
+  const gridValueText = (item: unknown) => {
+    const preview = buildGridCellText(item);
+    const boundedValue =
+      typeof item === "number" || typeof item === "boolean" ? item : preview.text;
+    return getFieldPreviewText(displayField ?? field, boundedValue, messages, locale) || "-";
+  };
+  const gridText = values
+    .slice(0, gridTextLines(rowHeight) + 1)
+    .map(gridValueText)
+    .join("\n")
+    .slice(0, 240);
+  const renderGridValue = () => {
+    if (displayKind === "whiteboard") {
+      const { previewSvg } = parseWhiteboardFieldValue(values[0]);
+      return (
+        <div style={{ height: rowHeight - 16, maxWidth: "100%" }}>
+          <WhiteboardThumbnail
+            className="h-full w-full [&_svg]:h-full [&_svg]:w-full [&_svg]:object-contain"
+            previewSvg={previewSvg}
+          />
+        </div>
+      );
+    }
+    if (!collectionValues) {
+      return (
+        <GridCellText
+          className={
+            displayField && ["code", "json", "yaml"].includes(displayField.type)
+              ? "font-mono text-xs"
+              : ""
+          }
+          rowHeight={rowHeight}
+          scalar={
+            displayField !== undefined &&
+            ["number", "date", "created_time", "updated_time", "auto_number"].includes(
+              displayField.type,
+            ) &&
+            values.length === 1
+          }
+        >
+          {gridText || "-"}
+        </GridCellText>
+      );
+    }
+    return (
+      <GridCellCollection
+        items={values.map((item, index) => {
+          const itemValue = displayField ? lookupItemValue(displayField, item) : item;
+          const label =
+            displayKind === "member" && typeof item === "string"
+              ? formatMemberChipLabel(fieldUsers?.[item], item, messages)
+              : displayKind === "relation" && typeof item === "string"
+                ? (() => {
+                    const linked = records.find((record) => record.id === item);
+                    return linked ? getRecordTitle(linked, messages) : shortIdentifier(item);
+                  })()
+                : displayField
+                  ? getFieldPreviewText(displayField, itemValue, messages, locale)
+                  : gridValueText(item);
+          return {
+            key: String(index),
+            label,
+            extraWidth: displayKind === "member" ? 42 : undefined,
+            content:
+              displayKind === "link" && displayField && typeof item === "string" ? (
+                item.length <= 4_096 &&
+                isSafeUrl(`${fieldLinkPrefix(displayField.type)}${item}`) ? (
+                  <a
+                    className="max-w-full truncate text-primary underline-offset-2 hover:underline"
+                    href={`${fieldLinkPrefix(displayField.type)}${item}`}
+                    rel={displayField.type === "url" ? "noreferrer" : undefined}
+                    target={displayField.type === "url" ? "_blank" : undefined}
+                    title={buildGridCellText(item).text}
+                  >
+                    {buildGridCellText(item).text}
+                  </a>
+                ) : (
+                  <span className="max-w-full truncate">{buildGridCellText(item).text}</span>
+                )
+              ) : displayField ? (
+                <FieldValuePreview
+                  className={
+                    displayKind === "member"
+                      ? "[&_[data-member-id]]:h-6 [&_[data-member-id]]:py-0"
+                      : undefined
+                  }
+                  field={displayField}
+                  fieldUsers={fieldUsers}
+                  records={records}
+                  value={itemValue}
+                />
+              ) : (
+                label
+              ),
+          };
+        })}
+        renderOverflow={(hidden) => (
+          <button
+            aria-label={`${messages.lookup.details}: +${hidden}`}
+            className="inline-flex h-6 shrink-0 items-center rounded px-1.5 text-muted-foreground text-xs hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            data-lookup-overflow
+            onClick={(event) => {
+              event.stopPropagation();
+              setOpen(true);
+            }}
+            type="button"
+          >
+            +{hidden}
+          </button>
+        )}
+        rowHeight={rowHeight}
+      />
+    );
+  };
   return (
     <div
-      className={`flex min-w-0 items-center gap-1.5 ${gridAttachments ? "w-full flex-nowrap" : "flex-wrap"}`}
+      className={`flex min-w-0 items-center gap-1.5 ${grid ? "w-full flex-nowrap" : "flex-wrap"}`}
       data-testid={`lookup-field-${field.slug}`}
+      data-lookup-row-height={grid ? rowHeight : undefined}
+      style={grid ? { maxHeight: rowHeight - 8 } : undefined}
     >
       {draft ? (
         <span className="w-full text-muted-foreground text-[11px]">{messages.lookup.draft}</span>
@@ -721,7 +851,9 @@ export function LookupFieldValue({
           </span>
           <span
             className={
-              unavailable ? "text-muted-foreground text-xs" : "text-muted-foreground text-xs"
+              grid
+                ? "min-w-0 truncate text-muted-foreground text-xs"
+                : "text-muted-foreground text-xs"
             }
             role="status"
           >
@@ -737,8 +869,11 @@ export function LookupFieldValue({
           className={gridAttachments ? "flex-1" : undefined}
           compact
           presentation={presentation}
+          rowHeight={rowHeight}
           value={values}
         />
+      ) : grid ? (
+        <div className="min-w-0 flex-1">{renderGridValue()}</div>
       ) : (
         values.slice(0, 3).map(renderValue)
       )}
@@ -754,7 +889,11 @@ export function LookupFieldValue({
           title={messages.lookup.details}
           type="button"
         >
-          {!attachmentValues && values.length > 3 ? `+${values.length - 3}` : <List size={13} />}
+          {!grid && !attachmentValues && values.length > 3 ? (
+            `+${values.length - 3}`
+          ) : (
+            <List size={13} />
+          )}
         </button>
       ) : null}
       <Dialog onOpenChange={setOpen} open={open}>

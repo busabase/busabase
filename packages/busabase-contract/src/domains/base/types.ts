@@ -171,6 +171,24 @@ export type GanttScale = "week" | "month";
 export const VIEW_FIELD_MIN_WIDTH = 92;
 export const VIEW_FIELD_MAX_WIDTH = 640;
 
+export const GRID_ROW_HEIGHT_PRESETS = ["short", "medium", "tall", "extra-tall"] as const;
+export type GridRowHeight = (typeof GRID_ROW_HEIGHT_PRESETS)[number];
+
+/** View-local table density. The medium preset preserves legacy 48px rows. */
+export const GRID_ROW_HEIGHTS = {
+  short: 32,
+  medium: 48,
+  tall: 96,
+  "extra-tall": 144,
+} as const satisfies Record<GridRowHeight, number>;
+
+export const isGridRowHeight = (value: unknown): value is GridRowHeight =>
+  typeof value === "string" && Object.hasOwn(GRID_ROW_HEIGHTS, value);
+
+/** Safe for old views and malformed settings imported from older deployments. */
+export const getGridRowHeight = (value: unknown): number =>
+  isGridRowHeight(value) ? GRID_ROW_HEIGHTS[value] : GRID_ROW_HEIGHTS.medium;
+
 export interface ViewConfigVO {
   filters: ViewFilterConditionVO[];
   /** Legacy configs omit this and retain their implicit AND semantics. */
@@ -185,6 +203,8 @@ export interface ViewConfigVO {
   autoShowNewFields?: boolean;
   /** Table-only column widths in pixels, keyed by field slug. */
   fieldWidths?: Record<string, number>;
+  /** Table-only row density; omitted legacy views retain medium (48px). */
+  rowHeight?: GridRowHeight;
   /** Attachment cover: gallery defaults to automatic; Kanban defaults to no cover. */
   coverFieldSlug?: string | null;
   coverFit?: GalleryCoverFit;

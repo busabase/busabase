@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { attachmentGridLayout } from "./attachment-grid-layout";
+import { attachmentGridLayout, attachmentGridThumbnailSize } from "./attachment-grid-layout";
 
 describe("attachment grid width budget", () => {
   it("fits complete images and reserves overflow even with only two files", () => {
@@ -35,5 +35,14 @@ describe("attachment grid width budget", () => {
       overflowWidth: 40,
     });
     expect(attachmentGridLayout(70, Array(100).fill(32)).combinedControls).toBe(false);
+  });
+  it("sizes previews by row height while preserving space for narrow-cell controls", () => {
+    expect([32, 48, 96, 144].map((height) => attachmentGridThumbnailSize(height, 500, 12))).toEqual(
+      [24, 32, 80, 128],
+    );
+    expect(attachmentGridThumbnailSize(144, 110, 12)).toBe(42);
+    expect(attachmentGridLayout(110, Array(12).fill(42))).toMatchObject({ visible: 1, hidden: 11 });
+    expect(attachmentGridThumbnailSize(144, 70, 12)).toBe(24);
+    expect(attachmentGridThumbnailSize(144, 110, 1)).toBe(80);
   });
 });

@@ -51,6 +51,23 @@ describe("listRecordsInputSchema", () => {
 });
 
 describe("listRecordsPageInputSchema", () => {
+  it("accepts bounded literal find with an optional stable field id", () => {
+    expect(
+      listRecordsPageInputSchema.parse({
+        baseId: "bse_1",
+        find: { query: " 华星 ", fieldId: "field_1" },
+      }).find,
+    ).toEqual({ query: "华星", fieldId: "field_1" });
+    expect(
+      listRecordsPageInputSchema.safeParse({ baseId: "bse_1", find: { query: " " } }).success,
+    ).toBe(false);
+    expect(
+      listRecordsPageInputSchema.safeParse({
+        baseId: "bse_1",
+        find: { query: "x".repeat(501) },
+      }).success,
+    ).toBe(false);
+  });
   it("keeps full records by default and accepts the explicit table list mode", () => {
     expect(listRecordsPageInputSchema.parse({ baseId: "bse_1" }).listMode).toBe("full");
     expect(listRecordsPageInputSchema.parse({ baseId: "bse_1", listMode: "table" }).listMode).toBe(

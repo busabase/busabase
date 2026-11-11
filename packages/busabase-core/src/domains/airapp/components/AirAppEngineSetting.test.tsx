@@ -1,11 +1,15 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { CoreI18nProvider } from "../../../i18n";
+import { CoreI18nProvider, type CoreLocale } from "../../../i18n";
+import { coreMessagesByLocale } from "../../../i18n/catalog";
 import {
   AirAppEngineSetting,
   FOLLOW_APP,
   resolveAvailableAirAppRunnerKind,
+  resolveFollowedAppEngine,
 } from "./AirAppEngineSetting";
+import type { ResolvedAirAppEnginePlanGate } from "./engine-availability-context";
+import type { AirAppRunnerKind } from "./runners/types";
 
 describe("AirAppEngineSetting", () => {
   it("renders the selected deployment-supported engine in node General settings", () => {
@@ -102,4 +106,109 @@ describe("AirAppEngineSetting", () => {
     expect(resolveAvailableAirAppRunnerKind("remote", ["browser"])).toBe("browser");
     expect(resolveAvailableAirAppRunnerKind("remote", ["browser", "remote"])).toBe("remote");
   });
+});
+
+describe("following an app whose preferred engine is out of reach", () => {
+  /** Busabase Cloud with the site host and Sandock configured. */
+  const FREE_GATE: ResolvedAirAppEnginePlanGate = {
+    lockedEngines: ["remote", "site"],
+    planLabel: "Plus",
+    onUpgrade: vi.fn(),
+  };
+  const PLUS_GATE: ResolvedAirAppEnginePlanGate = { lockedEngines: [], planLabel: "Plus" };
+
+  const renderFollow = ({
+    availableEngines,
+    planGate,
+    locale = "en",
+  }: {
+    availableEngines: AirAppRunnerKind[];
+    planGate: ResolvedAirAppEnginePlanGate;
+    locale?: CoreLocale;
+  }) =>
+    renderToStaticMarkup(
+      <CoreI18nProvider locale={locale}>
+        <AirAppEngineSetting
+          appPreferred="site"
+          availableEngines={availableEngines}
+          onValueChange={vi.fn()}
+          planGate={planGate}
+          value={FOLLOW_APP}
+        />
+      </CoreI18nProvider>,
+    );
+
+  it("names the engine a Free space actually runs, not the Website it cannot have", () => {
+    // Observed on 2026-11-06: the dialog said "Follow the app (Website)" while
+    // the app was running in the browser.
+    const markup = renderFollow({ availableEngines: ["browser"], planGate: FREE_GATE });
+
+    expect(markup).toContain("Follow the app (In browser)");
+    expect(markup).not.toContain("Follow the app (Website)");
+    expect(markup).toContain('data-airapp-engine-followed="browser"');
+    expect(markup).toContain(
+      "This app&#x27;s airapp.json prefers Website, which isn&#x27;t available here. Engine in use: In browser.",
+    );
+    // The way out is still offered, next to it.
+    expect(markup).toContain("Website is available on Plus and above.");
+    expect(markup).toContain("Upgrade to Plus");
+  });
+
+  it("says the same in the viewer's language", () => {
+    const markup = renderFollow({
+      availableEngines: ["browser"],
+      planGate: { ...FREE_GATE, planLabel: "Plus 版" },
+      locale: "zh-CN",
+    });
+
+    expect(markup).toContain("跟随 App（浏览器内）");
+    expect(markup).toContain(
+      "该 App 的 airapp.json 首选网站，但这里用不了。实际使用的引擎：浏览器内。",
+    );
+    expect(markup).toContain("网站仅在 Plus 版及以上套餐中提供。");
+  });
+
+  it("is unchanged on Plus, where the app gets the Website it asks for", () => {
+    const markup = renderFollow({
+      availableEngines: ["browser", "remote", "site"],
+      planGate: PLUS_GATE,
+    });
+
+    expect(markup).toContain("Follow the app (Website)");
+    expect(markup).toContain('data-airapp-engine-followed="site"');
+    expect(markup).toContain("This app&#x27;s airapp.json decides.");
+    expect(markup).not.toContain("Engine in use");
+    expect(markup).not.toContain("Upgrade to Plus");
+  });
+
+  it("resolves the way a run does: a Python app never falls back to the browser", () => {
+    // The run stops at the upgrade state, so the preference is still the honest name.
+    expect(
+      resolveFollowedAppEngine({
+        appPreferred: "site",
+        appRuntime: "python",
+        availableEngines: ["browser"],
+        lockedEngines: ["remote", "site"],
+      }),
+    ).toBe("site");
+    expect(
+      resolveFollowedAppEngine({
+        appPreferred: "site",
+        availableEngines: ["browser"],
+        lockedEngines: ["remote", "site"],
+      }),
+    ).toBe("browser");
+    expect(resolveFollowedAppEngine({ availableEngines: ["browser"] })).toBeUndefined();
+  });
+
+  it.each(Object.entries(coreMessagesByLocale))(
+    "%s words the fallback with both engines",
+    (locale, messages) => {
+      const text = messages.airapp.engineFollowAppFallback;
+      expect(text).toContain("{preferred}");
+      expect(text).toContain("{engine}");
+      if (locale !== "en")
+        expect(text).not.toBe(coreMessagesByLocale.en.airapp.engineFollowAppFallback);
+    },
+  );
 });

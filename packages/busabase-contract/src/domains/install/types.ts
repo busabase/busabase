@@ -12,6 +12,18 @@
  */
 import { iStringSchema } from "openlib/i18n/i-string";
 import { z } from "zod";
+import { NodeSlugSchema } from "../../node-slug";
+
+export const InstallNewFolderDTOSchema = z.object({
+  name: z.string().trim().min(1).optional(),
+  slug: NodeSlugSchema.optional(),
+});
+export type InstallNewFolderDTO = z.infer<typeof InstallNewFolderDTOSchema>;
+
+const InstallNewFolderVOSchema = z.object({
+  name: z.string(),
+  slug: NodeSlugSchema,
+});
 
 /** Every node type the package format can install, as it appears in a plan outline. */
 export const InstallPlanNodeTypeSchema = z.enum([
@@ -105,6 +117,8 @@ export const InstallPlanVOSchema = z.object({
     subdir: z.string().optional(),
   }),
   targetFolderSlug: z.string(),
+  /** A new, independent installation target. Its slug is echoed on install. */
+  newFolder: InstallNewFolderVOSchema.optional(),
   nodes: z.array(InstallPlanNodeVOSchema).default([]),
   counts: InstallPlanCountsVOSchema,
   collisions: z.array(InstallCollisionVOSchema).default([]),
@@ -154,6 +168,7 @@ export type InstallCreatedCountsVO = z.infer<typeof InstallCreatedCountsVOSchema
 
 export const InstallResultVOSchema = z.object({
   targetFolderSlug: z.string(),
+  targetFolderName: z.string().optional(),
   targetFolderNodeId: z.string(),
   created: InstallCreatedCountsVOSchema,
   /**
@@ -224,10 +239,9 @@ const repoUrlField = z
     "GitHub repo URL: https://github.com/<owner>/<repo>[/tree/<ref>[/<subdir>]]. Only GitHub hosts are accepted.",
   );
 
-const intoFolderField = z
-  .string()
-  .optional()
-  .describe("Slug of the folder to install into. Defaults to the package manifest's name.");
+const intoFolderField = NodeSlugSchema.optional().describe(
+  "Slug of the folder to install into. Defaults to the package manifest's name.",
+);
 
 const renameField = z
   .boolean()
@@ -236,33 +250,45 @@ const renameField = z
     "Resolve slug collisions by suffixing (-2, -3, …) instead of refusing. Never overwrites anything.",
   );
 
-export const InstallPlanFromGithubDTOSchema = z.object({
-  repoUrl: repoUrlField,
-  intoFolder: intoFolderField,
-  rename: renameField,
-  /**
-   * Plan as if installing with auto-merge. Only affects the returned
-   * `applicable` (see `InstallPlanVOSchema`) — a dry run never writes either
-   * way. A client with an auto-merge toggle passes the toggle's current value so
-   * the preview answers the question the user is actually about to ask.
-   *
-   * `.optional()` with no `.default()`, matching `rename` above: `z.infer` gives
-   * the OUTPUT type, so a default would make this REQUIRED for every caller.
-   * Omitted means "plan without auto-merge" (applied in the logic layer).
-   */
-  autoMerge: z.boolean().optional(),
-});
+export const InstallPlanFromGithubDTOSchema = z
+  .object({
+    repoUrl: repoUrlField,
+    intoFolder: intoFolderField,
+    newFolder: InstallNewFolderDTOSchema.optional(),
+    rename: renameField,
+    /**
+     * Plan as if installing with auto-merge. Only affects the returned
+     * `applicable` (see `InstallPlanVOSchema`) — a dry run never writes either
+     * way. A client with an auto-merge toggle passes the toggle's current value so
+     * the preview answers the question the user is actually about to ask.
+     *
+     * `.optional()` with no `.default()`, matching `rename` above: `z.infer` gives
+     * the OUTPUT type, so a default would make this REQUIRED for every caller.
+     * Omitted means "plan without auto-merge" (applied in the logic layer).
+     */
+    autoMerge: z.boolean().optional(),
+  })
+  .refine((input) => input.intoFolder === undefined || input.newFolder === undefined, {
+    path: ["newFolder"],
+    message: "Choose either a new folder or an existing target slug, not both.",
+  });
 export type InstallPlanFromGithubDTO = z.infer<typeof InstallPlanFromGithubDTOSchema>;
 
-export const InstallFromGithubDTOSchema = z.object({
-  repoUrl: repoUrlField,
-  intoFolder: intoFolderField,
-  rename: renameField,
-  autoMerge: z
-    .boolean()
-    .optional()
-    .describe(
-      "Whether the package's content change requests merge on the spot. Omitted defaults to merging immediately when the caller holds write access (installing is already a space owner/admin operation, so normally they do), otherwise leaving them for review; pass explicit false to force review even with write access. Either way, installing trusts the package author: a package can carry skills and AirApps, i.e. code this space's agents will execute.",
-    ),
-});
+export const InstallFromGithubDTOSchema = z
+  .object({
+    repoUrl: repoUrlField,
+    intoFolder: intoFolderField,
+    newFolder: InstallNewFolderDTOSchema.optional(),
+    rename: renameField,
+    autoMerge: z
+      .boolean()
+      .optional()
+      .describe(
+        "Whether the package's content change requests merge on the spot. Omitted defaults to merging immediately when the caller holds write access (installing is already a space owner/admin operation, so normally they do), otherwise leaving them for review; pass explicit false to force review even with write access. Either way, installing trusts the package author: a package can carry skills and AirApps, i.e. code this space's agents will execute.",
+      ),
+  })
+  .refine((input) => input.intoFolder === undefined || input.newFolder === undefined, {
+    path: ["newFolder"],
+    message: "Choose either a new folder or an existing target slug, not both.",
+  });
 export type InstallFromGithubDTO = z.infer<typeof InstallFromGithubDTOSchema>;

@@ -10,6 +10,7 @@ import {
   gt,
   inArray,
   isNull,
+  ne,
   not,
   or,
   type SQL,
@@ -29,7 +30,7 @@ import {
   busabaseRecords,
 } from "../../../db/schema";
 import { docBodyKey } from "../../doc/handlers";
-import { folderReadmeKey } from "../../folder/handlers";
+import { folderReadmeKeys, resolveFolderReadme } from "../../folder/handlers";
 import { busabaseAssetTexts } from "../schema/asset-texts";
 import type { StorageCleanupKind } from "../schema/storage-cleanup-jobs";
 import { extractAssetContentIds } from "../utils/asset-content-url";
@@ -51,8 +52,18 @@ const BODY_READ_CONCURRENCY = 8;
  * mention none of them. Past it, every head is read and checked here.
  */
 const PREFILTER_TOKEN_LIMIT = 200;
+/**
+ * Up to this much subtree text (UTF-16 units, distinct strings summed),
+ * Postgres finds the owned attachments it names, so the space's attachments
+ * stay in the database. Past it, they are loaded and matched here. Postgres
+ * pays one `strpos` over the text per owned attachment: with 143,000 of them
+ * that measured 0.16 s at 1 KB, 0.24 s at 8 KB and 0.48 s at 32 KB, against
+ * 0.43 s to load them all with no network at all and 1.5 s over a 1 ms,
+ * 100 Mbit/s link. Up to here it is never much slower, and usually far faster.
+ */
+export const MATCH_IN_DB_TEXT_LIMIT = 32 * 1024;
 
-interface AttachmentRef {
+export interface AttachmentRef {
   id: string;
   storageKey: string;
 }
@@ -73,7 +84,7 @@ interface BodyNode {
  * attachment, indexed by each key's last characters so the cost grows with the
  * string, not with the number of attachments in the space.
  */
-const createAttachmentMatcher = (rows: readonly AttachmentRef[]) => {
+export const createAttachmentMatcher = (rows: readonly AttachmentRef[]) => {
   const byId = new Map(rows.map((row) => [row.id, row]));
   const matchesEverything = rows.filter((row) => row.storageKey === "");
   let window = 16;
@@ -105,9 +116,124 @@ const createAttachmentMatcher = (rows: readonly AttachmentRef[]) => {
 };
 
 /**
+ * Every id the inspector below could ask `isAsset` about, as if it descended
+ * into every value: explicit `assetId`/`id` strings and Asset content URL ids.
+ * Ownership looked up for exactly these answers every question it asks.
+ */
+const collectAssetIdProbes = (value: unknown, into: Set<string>): void => {
+  if (typeof value === "string") {
+    for (const assetId of extractAssetContentIds(value)) into.add(assetId);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectAssetIdProbes(item, into);
+    return;
+  }
+  if (!value || typeof value !== "object") return;
+  const ref = value as Record<string, unknown>;
+  if (typeof ref.assetId === "string") into.add(ref.assetId);
+  if (typeof ref.id === "string") into.add(ref.id);
+  for (const child of Object.values(ref)) collectAssetIdProbes(child, into);
+};
+
+/** Which of `ids` are Assets of the space, each → its attachment id. */
+const loadOwnedAssets = async (
+  db: BusabaseDatabase,
+  spaceId: string,
+  ids: readonly string[],
+): Promise<Map<string, string>> => {
+  if (!ids.length) return new Map();
+  const rows = await db
+    .select({ id: busabaseAssets.id, attachmentId: busabaseAssets.attachmentId })
+    .from(busabaseAssets)
+    .where(and(eq(busabaseAssets.spaceId, spaceId), anyText(busabaseAssets.id, ids)));
+  return new Map(rows.map((row) => [row.id, row.attachmentId]));
+};
+
+/** The attachment ids behind the space's Assets. */
+const spaceAssetAttachmentIds = (db: BusabaseDatabase, spaceId: string) =>
+  db
+    .select({ id: busabaseAssets.attachmentId })
+    .from(busabaseAssets)
+    .where(eq(busabaseAssets.spaceId, spaceId));
+
+/**
+ * The owned attachments any of `texts` references, by the rule of
+ * `createAttachmentMatcher`. For a little text Postgres answers, so the
+ * space's attachments never leave the database: `strpos(text, key) > 0` is
+ * `text.includes(key)`, an empty key included. One `strpos` per attachment
+ * over the texts joined by line breaks finds every key some text contains; a
+ * key without a line break cannot straddle two texts, and the rare key with
+ * one is rechecked against each text here. Past the limit, or for text
+ * Postgres cannot hold (NUL), every owned attachment is loaded and matched
+ * here.
+ */
+export const findReferencedAttachments = async (
+  db: BusabaseDatabase,
+  spaceId: string,
+  texts: readonly string[],
+): Promise<AttachmentRef[]> => {
+  if (!texts.length) return [];
+  let size = 0;
+  for (const text of texts) size += text.length;
+  const columns = { id: attachments.id, storageKey: attachments.storageKey };
+  if (size > MATCH_IN_DB_TEXT_LIMIT || texts.some((text) => text.includes("\u0000"))) {
+    const rows = await db
+      .select(columns)
+      .from(attachments)
+      .where(
+        or(
+          eq(attachments.spaceId, spaceId),
+          inArray(attachments.id, spaceAssetAttachmentIds(db, spaceId)),
+        ),
+      );
+    const match = createAttachmentMatcher(rows);
+    const hits = new Map<string, AttachmentRef>();
+    for (const text of texts) for (const row of match(text)) hits.set(row.id, row);
+    return [...hits.values()];
+  }
+  const joined = texts.join("\n");
+  const isNamed = (id: AnyColumn, key: AnyColumn): SQL =>
+    sql`(${id} = any(${sql.param([...texts])}::text[]) or strpos(${joined}::text, ${key}) > 0)`;
+  // An attachment the space owns is registered to it or behind one of its
+  // Assets. As two disjoint halves no row probes the space's Assets: those
+  // registered to it (its index), and the rest behind its Assets. The limit
+  // fences the second half, so Postgres does not test the text against every
+  // other space's rows before knowing which are the space's.
+  const elsewhere = db
+    .select(columns)
+    .from(attachments)
+    .where(
+      and(
+        or(isNull(attachments.spaceId), ne(attachments.spaceId, spaceId)),
+        inArray(attachments.id, spaceAssetAttachmentIds(db, spaceId)),
+      ),
+    )
+    .limit(Number.MAX_SAFE_INTEGER)
+    .as("elsewhere");
+  const rows = await db
+    .select(columns)
+    .from(attachments)
+    .where(and(eq(attachments.spaceId, spaceId), isNamed(attachments.id, attachments.storageKey)))
+    .unionAll(
+      db
+        .select({ id: elsewhere.id, storageKey: elsewhere.storageKey })
+        .from(elsewhere)
+        .where(isNamed(elsewhere.id, elsewhere.storageKey)),
+    );
+  const ids = new Set(texts);
+  return rows.filter(
+    (row) =>
+      ids.has(row.id) ||
+      !row.storageKey.includes("\n") ||
+      texts.some((text) => text.includes(row.storageKey)),
+  );
+};
+
+/**
  * Collects the Assets and attachments a body or a record's fields reference.
- * `isAsset` is every Asset the space owns: it decides whether an explicit id is
- * a logical reference. `keep` limits what is recorded.
+ * `isAsset` says whether an id is an Asset the space owns: it decides whether
+ * an explicit id is a logical reference. `keep` limits what is recorded.
  */
 const createReferenceInspector = (options: {
   isAsset: (assetId: string) => boolean;
@@ -183,8 +309,9 @@ const readRetainedBody = async (
   node: BodyNode,
 ): Promise<string | undefined> => {
   const isFolder = node.type === "folder";
-  const key = isFolder ? folderReadmeKey(node.id) : docBodyKey(node.id);
   try {
+    // A folder's readme is whichever of `readme.md` / `readme.html` is live.
+    const key = isFolder ? (await resolveFolderReadme(node.id)).key : docBodyKey(node.id);
     const head = await storage.getObjectMetadata(key);
     if (!head) {
       // A missing live copy does not prove a legacy Doc is empty: the last
@@ -232,10 +359,10 @@ const inspectRetainedBodies = (
  * Every live record head matching `where`, one page at a time. Head snapshots
  * are the durable truth even when an old archive removed its where-used rows.
  */
-const forEachRecordHead = async (
+const forEachRecordHeadPage = async (
   db: BusabaseDatabase,
   where: SQL | undefined,
-  visit: (payload: Record<string, unknown>) => void,
+  visit: (payloads: Record<string, unknown>[]) => void | Promise<void>,
 ): Promise<void> => {
   let after: string | undefined;
   for (;;) {
@@ -254,7 +381,7 @@ const forEachRecordHead = async (
       )
       .orderBy(asc(busabaseRecords.id))
       .limit(RECORD_HEAD_PAGE);
-    for (const row of page) visit(row.payload);
+    await visit(page.map((row) => row.payload));
     if (page.length < RECORD_HEAD_PAGE) return;
     after = page[page.length - 1]?.id;
   }
@@ -266,8 +393,6 @@ const recordFields = (payload: Record<string, unknown>): unknown => payload.fiel
 const jsonTextForm = (value: string): string => JSON.stringify(value).slice(1, -1);
 
 interface PurgePlan {
-  /** Every Asset id the space owns → its attachment id. */
-  ownedAssets: Map<string, string>;
   /** Owned Assets the purged subtree references. */
   candidateAssets: Set<string>;
   /** Attachments the purged subtree references, plus those of the candidate Assets. */
@@ -283,19 +408,15 @@ interface PurgePlan {
 /**
  * Everything the purged subtree references, found without locks: where-used
  * rows, record heads and Doc/folder bodies inside the subtree only. Nothing
- * else in the space is read here, and only these files' fences are taken.
+ * else in the space is read here: Asset ownership is looked up only for ids
+ * the subtree names, and legacy attachment references are matched in
+ * Postgres. Only these files' fences are taken.
  */
 const planPurge = async (
   db: BusabaseDatabase,
   spaceId: string,
   subtreeIds: string[],
 ): Promise<PurgePlan> => {
-  const owned = await db
-    .select({ id: busabaseAssets.id, attachmentId: busabaseAssets.attachmentId })
-    .from(busabaseAssets)
-    .where(eq(busabaseAssets.spaceId, spaceId));
-  const ownedAssets = new Map(owned.map((row) => [row.id, row.attachmentId]));
-
   const bodyNodes = await db
     .select({ id: busabaseNodes.id, type: busabaseNodes.type })
     .from(busabaseNodes)
@@ -320,55 +441,40 @@ const planPurge = async (
     );
   for (const usage of usages) referenced.assets.add(usage.assetId);
 
-  // Legacy references name an attachment by id or storage key. The space's
-  // attachments are loaded only once the subtree has text to check.
-  let matchAttachments: ((body: string) => AttachmentRef[]) | undefined;
-  const ownedAttachments = new Map<string, AttachmentRef>();
-  const loadMatcher = async () => {
-    const rows = await db
-      .select({ id: attachments.id, storageKey: attachments.storageKey })
-      .from(attachments)
-      .where(
-        or(
-          eq(attachments.spaceId, spaceId),
-          inArray(
-            attachments.id,
-            db
-              .select({ id: busabaseAssets.attachmentId })
-              .from(busabaseAssets)
-              .where(eq(busabaseAssets.spaceId, spaceId)),
-          ),
-        ),
-      );
-    for (const row of rows) ownedAttachments.set(row.id, row);
-    matchAttachments = createAttachmentMatcher(rows);
-  };
-  const texts: unknown[] = [];
-  await forEachRecordHead(
+  const fields: unknown[] = [];
+  await forEachRecordHeadPage(
     db,
     and(eq(busabaseRecords.spaceId, spaceId), anyText(busabaseBases.nodeId, subtreeIds)),
-    (payload) => {
-      texts.push(recordFields(payload));
+    (payloads) => {
+      for (const payload of payloads) fields.push(recordFields(payload));
     },
   );
   const bodies: string[] = [];
   await inspectRetainedBodies(db, bodyNodes, (body) => {
     if (body) bodies.push(body);
   });
-  if (texts.length || bodies.length) await loadMatcher();
+
+  const probes = new Set(referenced.assets);
+  for (const value of fields) collectAssetIdProbes(value, probes);
+  for (const body of bodies) collectAssetIdProbes(body, probes);
+  const ownedAssets = await loadOwnedAssets(db, spaceId, [...probes]);
+
+  // Legacy references name an attachment by id or storage key. The strings
+  // inspection checks for them are collected first and matched in one go.
+  const texts = new Set<string>();
   const inspector = createReferenceInspector({
     isAsset: (assetId) => ownedAssets.has(assetId),
-    matchAttachments: (body) => matchAttachments?.(body) ?? [],
+    matchAttachments: (text) => {
+      texts.add(text);
+      return [];
+    },
   });
-  for (const fields of texts) inspector.inspectFields(fields, referenced);
+  for (const value of fields) inspector.inspectFields(value, referenced);
   for (const body of bodies) inspector.inspectBody(body, referenced);
+  const referencedRows = await findReferencedAttachments(db, spaceId, [...texts]);
 
   const candidateAssets = new Set([...referenced.assets].filter((id) => ownedAssets.has(id)));
-  const candidateAttachments = new Map<string, AttachmentRef>();
-  for (const id of referenced.attachments) {
-    const row = ownedAttachments.get(id);
-    if (row) candidateAttachments.set(id, row);
-  }
+  const candidateAttachments = new Map(referencedRows.map((row) => [row.id, row]));
   const assetAttachmentIds = [...candidateAssets].flatMap((id) => ownedAssets.get(id) ?? []);
   if (assetAttachmentIds.length) {
     const rows = await db
@@ -385,19 +491,16 @@ const planPurge = async (
     : [];
 
   return {
-    ownedAssets,
     candidateAssets,
     candidateAttachments,
-    referencedAttachments: new Set(
-      [...referenced.attachments].filter((id) => candidateAttachments.has(id)),
-    ),
+    referencedAttachments: new Set(referencedRows.map((row) => row.id)),
     bodyNodes,
     lockKeys: [
       ...new Set([
         ...[...candidateAttachments.values()].map((row) => row.storageKey),
         ...textKeys.map((row) => row.key),
-        ...bodyNodes.map((node) =>
-          node.type === "folder" ? folderReadmeKey(node.id) : docBodyKey(node.id),
+        ...bodyNodes.flatMap((node) =>
+          node.type === "folder" ? folderReadmeKeys(node.id) : [docBodyKey(node.id)],
         ),
       ]),
     ],
@@ -435,8 +538,14 @@ const findProtectedReferences = async (
     for (const usage of usages) protectedRefs.assets.add(usage.assetId);
   }
 
+  // An explicit id that is an owned Asset owns its cell, so ownership must be
+  // exact for every id met here. Candidates were owned when planned; any other
+  // id is looked up when a page of record heads names it. In a body only
+  // candidates matter, so bodies need no lookup.
+  const ownedOthers = new Set<string>();
+  const probed = new Set<string>(candidateAssetIds);
   const inspector = createReferenceInspector({
-    isAsset: (assetId) => plan.ownedAssets.has(assetId),
+    isAsset: (assetId) => plan.candidateAssets.has(assetId) || ownedOthers.has(assetId),
     matchAttachments: createAttachmentMatcher(attachmentRows),
     keep: (kind, id) =>
       kind === "asset" ? plan.candidateAssets.has(id) : plan.candidateAttachments.has(id),
@@ -450,14 +559,21 @@ const findProtectedReferences = async (
     tokens.length <= PREFILTER_TOKEN_LIMIT
       ? sql`exists (select 1 from unnest(${sql.param(tokens)}::text[]) as needle(value) where strpos(${busabaseCommits.payload}::text, needle.value) > 0)`
       : undefined;
-  await forEachRecordHead(
+  await forEachRecordHeadPage(
     db,
     and(
       eq(busabaseRecords.spaceId, spaceId),
       not(anyText(busabaseBases.nodeId, subtreeIds)),
       mentionsCandidate,
     ),
-    (payload) => inspector.inspectFields(recordFields(payload), protectedRefs),
+    async (payloads) => {
+      const probes = new Set<string>();
+      for (const payload of payloads) collectAssetIdProbes(recordFields(payload), probes);
+      const unknown = [...probes].filter((id) => !probed.has(id));
+      for (const id of unknown) probed.add(id);
+      for (const id of (await loadOwnedAssets(db, spaceId, unknown)).keys()) ownedOthers.add(id);
+      for (const payload of payloads) inspector.inspectFields(recordFields(payload), protectedRefs);
+    },
   );
 
   const retained = await db
@@ -663,13 +779,17 @@ const releaseWithinFences = async (
     });
   }
   for (const node of plan.bodyNodes) {
-    const storageKey = node.type === "folder" ? folderReadmeKey(node.id) : docBodyKey(node.id);
-    cleanup.set(storageKey, {
-      storageKey,
-      sizeBytes: 0,
-      kind: node.type === "folder" ? "folder" : "doc",
-      spaceId,
-    });
+    // Both readme objects for a folder: which one is live is not recorded
+    // anywhere, and deleting the absent one is a no-op.
+    const storageKeys = node.type === "folder" ? folderReadmeKeys(node.id) : [docBodyKey(node.id)];
+    for (const storageKey of storageKeys) {
+      cleanup.set(storageKey, {
+        storageKey,
+        sizeBytes: 0,
+        kind: node.type === "folder" ? "folder" : "doc",
+        spaceId,
+      });
+    }
   }
   for (const job of [...cleanup.values()].sort((a, b) =>
     a.storageKey.localeCompare(b.storageKey),

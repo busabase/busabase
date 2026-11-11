@@ -4,6 +4,7 @@ import {
   PlaybookListInputSchema,
   PlaybookSearchInputSchema,
 } from "busabase-contract/contract/playbook-schemas";
+import { COMMON_RECORD_FIND_FIELD_TYPES } from "busabase-contract/domains/base/contract/record-find";
 import { combineViewFilters } from "busabase-contract/types";
 import {
   getContextDemoLocale,
@@ -23,7 +24,10 @@ import {
   subscribeDemoAgentSession,
 } from "./domains/agents/logic/demo-agent";
 import { paginateAgentSessions } from "./domains/agents/utils/agent-session-pagination";
+import { resolveRecordFindFields } from "./domains/base/logic/record-find";
 import { resolveRecordSort } from "./domains/base/logic/record-sort";
+import { getPrimaryField } from "./domains/base/utils/primary-field";
+import { getRecordFindTexts, recordFindTextMatches } from "./domains/base/utils/record-find-text";
 import {
   applyViewConfigToRecords,
   DATE_RANGE_FIELD_TYPES,
@@ -46,9 +50,11 @@ import {
   cancelWorkflowRun,
   decideWorkflowRun,
   getWorkflowRun,
+  listWaitingWorkflowRuns,
   listWorkflowRuns,
   resumeElapsedWorkflowRuns,
   resumeWorkflowRun,
+  retryWorkflowRun,
   startWorkflowRun,
   type WorkflowRuntimeDeps,
 } from "./domains/workflow/logic/runs";
@@ -246,11 +252,19 @@ const demoWorkflowDeps = (): WorkflowRuntimeDeps => ({
   findRecords: async () => {
     throw demoUnsupported("Finding records from a workflow");
   },
+  sandbox: {
+    start: async () => {
+      throw demoUnsupported("Running code in a sandbox");
+    },
+    poll: async () => ({ done: true, ok: false, message: "Demo mode has no sandbox", logs: "" }),
+    stop: async () => {},
+  },
   resolveActorNames: async () => ({}),
   notify: async () => {},
   background: false,
   agent: null,
   isNamedApprover: async () => true,
+  describeWorkflow: async (nodeId) => ({ name: demoGetNodeDetail(nodeId, "workflow").node.name }),
   loadDocument: async (nodeId) => {
     const detail = demoGetNodeDetail(nodeId, "workflow");
     if (detail.type !== "workflow") {
@@ -758,6 +772,9 @@ export const busabaseDemoRouter: EnhancedRouter<
     start: os.workflows.start.handler(({ input }) => startWorkflowRun(demoWorkflowDeps(), input)),
     get: os.workflows.get.handler(({ input }) => getWorkflowRun(demoWorkflowDeps(), input.runId)),
     list: os.workflows.list.handler(({ input }) => listWorkflowRuns(demoWorkflowDeps(), input)),
+    waiting: os.workflows.waiting.handler(({ input }) =>
+      listWaitingWorkflowRuns(demoWorkflowDeps(), input),
+    ),
     resume: os.workflows.resume.handler(({ input }) =>
       resumeWorkflowRun(demoWorkflowDeps(), input),
     ),
@@ -767,6 +784,7 @@ export const busabaseDemoRouter: EnhancedRouter<
     cancel: os.workflows.cancel.handler(({ input }) =>
       cancelWorkflowRun(demoWorkflowDeps(), input),
     ),
+    retry: os.workflows.retry.handler(({ input }) => retryWorkflowRun(demoWorkflowDeps(), input)),
     cancelQueued: os.workflows.cancelQueued.handler(({ input }) =>
       cancelQueuedWorkflowRuns(demoWorkflowDeps(), input),
     ),
@@ -1099,6 +1117,9 @@ export const busabaseDemoRouter: EnhancedRouter<
     exportTables: os.dump.exportTables.handler(() => {
       throw demoUnsupported("Export space");
     }),
+    exportAttachment: os.dump.exportAttachment.handler(() => {
+      throw demoUnsupported("Export space");
+    }),
     exportAssetText: os.dump.exportAssetText.handler(() => {
       throw demoUnsupported("Export space");
     }),
@@ -1338,7 +1359,7 @@ export const busabaseDemoRouter: EnhancedRouter<
       // The View's filters AND any ad-hoc ones, exactly as the real handler
       // merges them — a demo board column must page the same way a real one does.
       // An explicit `sort` replaces the View's sort, as it does there too.
-      const ordered = demoSortRecordsForPage(
+      let ordered = demoSortRecordsForPage(
         applyViewConfigToRecords(
           scoped,
           input.filters?.length || view
@@ -1350,6 +1371,42 @@ export const busabaseDemoRouter: EnhancedRouter<
         ),
         sort,
       );
+      if (input.find) {
+        const findFields = resolveRecordFindFields(base.fields, input.find);
+        const query = input.find.query.toLowerCase();
+        const relation = findFields.find((field) => field.type === "relation");
+        const targetTitles = new Map<string, string[]>();
+        if (relation?.options.targetBaseId) {
+          const targetBase = demoGetBase(relation.options.targetBaseId);
+          const primary = getPrimaryField(targetBase);
+          if (primary && !COMMON_RECORD_FIND_FIELD_TYPES.has(primary.type)) {
+            throw new ORPCError("BAD_REQUEST", {
+              message: "Find by this relation requires a supported stored record title.",
+              data: { reason: "unsupported_find_relation_title", fieldId: relation.id },
+            });
+          }
+          if (primary) {
+            for (const target of await demoListRecords({ baseId: targetBase.id })) {
+              targetTitles.set(
+                target.id,
+                getRecordFindTexts(primary, target.headCommit.payload[primary.slug]),
+              );
+            }
+          }
+        }
+        ordered = ordered.filter((record) =>
+          findFields.some((field) => {
+            const value = record.headCommit.payload[field.slug];
+            const texts =
+              field.type === "relation"
+                ? (Array.isArray(value) ? value : [value]).flatMap((id) =>
+                    typeof id === "string" ? (targetTitles.get(id) ?? []) : [],
+                  )
+                : getRecordFindTexts(field, value);
+            return recordFindTextMatches(texts, query);
+          }),
+        );
+      }
       const total = ordered.length;
       const totalPages = Math.ceil(total / input.pageSize);
       const page = totalPages === 0 ? 1 : Math.min(input.page, totalPages);

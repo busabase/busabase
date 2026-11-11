@@ -40,10 +40,13 @@ import "server-only";
  *
  * Budget: one deadline for the whole call, and each requested source gets a
  * floor of `maxMatches / sources` with unused budget rolling forward (see
- * `sourceBudget`), so a noisy source can no longer starve the others. Time is
- * shared the same way: each source gets an even slice of what is left, and
- * time it does not use rolls forward (see `sourceDeadline`), so a slow source
- * can no longer starve the others either.
+ * `sourceBudget`), so a noisy source can no longer starve the others. Time:
+ * the sources run in two lanes side by side (see `SOURCE_LANES`) — files and
+ * nodes wait on object storage, prompts and records on Postgres — so records
+ * gets the whole call instead of what files and nodes left over. Within a
+ * lane each source gets an even slice of the time left and time it does not
+ * use rolls forward (see `sourceDeadline`). Output order and matches do not
+ * depend on which lane finishes first (see `grepUnified`).
  */
 import type {
   UnifiedGrepInput,
@@ -194,7 +197,7 @@ const resolveCandidateNodes = async (
     })
     .from(busabaseNodes)
     .where(and(...conditions))
-    .orderBy(asc(busabaseNodes.position), asc(busabaseNodes.createdAt));
+    .orderBy(asc(busabaseNodes.position), asc(busabaseNodes.createdAt), asc(busabaseNodes.id));
 };
 
 // ── Records candidate resolution + batch loading ────────────────────────────
@@ -212,6 +215,10 @@ interface RecordCandidate {
  * exclusion. Ordered `updatedAt` desc (a deliberate deviation from
  * `queries.ts`'s `listRecords`, which orders by `createdAt`): the spec wants
  * budget truncation to drop the STALEST content first, not the oldest-created.
+ * Ties on `updatedAt` are common (a bulk sync stamps every record with the same
+ * time), so `id` is the last sort key: without it Postgres returned tied records
+ * in a different order on every call, and the same grep answered in a different
+ * order each time. Nodes break their ties the same way.
  * Scope union semantics: a Base is in scope if its id is in `baseIds` OR its
  * slug is in `baseSlugs` — either match counts (not an intersection).
  */
@@ -251,7 +258,7 @@ const resolveCandidateRecords = async (
     .from(busabaseRecords)
     .innerJoin(busabaseBases, eq(busabaseRecords.baseId, busabaseBases.id))
     .where(and(...conditions))
-    .orderBy(desc(busabaseRecords.updatedAt));
+    .orderBy(desc(busabaseRecords.updatedAt), desc(busabaseRecords.id));
 };
 
 /**
@@ -415,7 +422,12 @@ const loadBaseFields = async (
  */
 const flattenFieldValue = (fieldType: FieldType, value: unknown): string | undefined => {
   if (value === undefined || value === null) return undefined;
-  if (fieldType === "attachment" || fieldType === "relation" || fieldType === "whiteboard") {
+  if (
+    fieldType === "attachment" ||
+    fieldType === "drive" ||
+    fieldType === "relation" ||
+    fieldType === "whiteboard"
+  ) {
     return undefined;
   }
   if (fieldType === "json") return JSON.stringify(value);
@@ -715,7 +727,7 @@ const resolveCandidatePromptNodes = async (db: Db, spaceId: string) =>
         hasCustomPromptsSql,
       ),
     )
-    .orderBy(asc(busabaseNodes.position), asc(busabaseNodes.createdAt));
+    .orderBy(asc(busabaseNodes.position), asc(busabaseNodes.createdAt), asc(busabaseNodes.id));
 
 /**
  * Scan custom agent prompts: per node, per prompt (stored order), `label`
@@ -790,8 +802,30 @@ const runPrompts = async (
 
 // ── grep ─────────────────────────────────────────────────────────────────────
 
-/** Fixed output (and scan) order. Budget rolls forward along it, never backwards. */
+/** Fixed output order. Budget rolls forward along it, never backwards. */
 const SOURCE_ORDER = ["files", "nodes", "records", "prompts"] as const;
+type GrepSource = (typeof SOURCE_ORDER)[number];
+
+/**
+ * Sources in one lane run one after another, in lane order; the lanes run side
+ * by side under the call's one deadline.
+ *
+ * Files and nodes spend their time waiting on object storage: Postgres only
+ * lists their candidates (and labels file matches), one query at a time.
+ * Prompts and records are Postgres work on one connection at a time. Run in
+ * one line, records got only what files and nodes left of the call — in a
+ * space with ~96k records it scanned 32k–54k of them in 10 s, while records
+ * alone scans all of them in ~6 s. Side by side, records gets the whole call
+ * and files and nodes get half of it each (they had about a quarter), and a
+ * grep holds at most one pooled connection per lane, two in all. (The files
+ * source's one-off registration of never-registered text files is the
+ * exception it always was: those inserts run in parallel.) Prompts goes before
+ * records: it is one quick query, so records keeps nearly all the time.
+ */
+const SOURCE_LANES: readonly (readonly GrepSource[])[] = [
+  ["files", "nodes"],
+  ["prompts", "records"],
+];
 
 /**
  * This source's share of `maxMatches`: at least its floor (while any budget is
@@ -815,9 +849,9 @@ const sourceBudget = (opts: {
 
 /**
  * This source's share of the call's time: what is left until `deadline`,
- * split evenly among it and the sources still to run. Time a source does not
- * use is still left when the next slice is cut, so it rolls forward; the last
- * source runs to the call's deadline.
+ * split evenly among it and the sources still to run in its lane. Time a
+ * source does not use is still left when the next slice is cut, so it rolls
+ * forward; the last source of a lane runs to the call's deadline.
  *
  * Without this, the first slow source spent the whole deadline: in a space
  * with 100k+ files and 70k records, an unscoped grep answered with records
@@ -826,6 +860,46 @@ const sourceBudget = (opts: {
  */
 const sourceDeadline = (opts: { deadline: number; now: number; sourcesLeft: number }): number =>
   opts.now + Math.max(0, opts.deadline - opts.now) / Math.max(1, opts.sourcesLeft);
+
+/** The runs that have finished, by source. */
+interface SourceRuns {
+  files?: SourceRun<typeof EMPTY_FILES_COVERAGE>;
+  nodes?: SourceRun<typeof EMPTY_NODES_COVERAGE>;
+  records?: SourceRun<typeof EMPTY_RECORDS_COVERAGE>;
+  prompts?: SourceRun<typeof EMPTY_PROMPTS_COVERAGE>;
+}
+
+/**
+ * Each requested source's share of `maxMatches` (see `sourceBudget`), folded
+ * along `SOURCE_ORDER` over the runs that have finished. A source with an
+ * unfinished source before it (in the other lane) gets the share it would get
+ * if nothing had been used: the most it could ever be given, because a share
+ * only shrinks as earlier sources use more. Once every run is in, every share
+ * is exact — what one-after-another scanning would have given.
+ */
+const sourceShares = (opts: {
+  sources: readonly GrepSource[];
+  runs: Readonly<SourceRuns>;
+  maxMatches: number;
+  floor: number;
+}): Map<GrepSource, number> => {
+  const shares = new Map<GrepSource, number>();
+  let used: number | null = 0;
+  for (const [position, source] of opts.sources.entries()) {
+    const share = (spent: number) =>
+      sourceBudget({
+        maxMatches: opts.maxMatches,
+        used: spent,
+        floor: opts.floor,
+        sourcesAfter: opts.sources.length - position - 1,
+      });
+    shares.set(source, share(used ?? 0));
+    const run = opts.runs[source];
+    used =
+      used === null || run === undefined ? null : used + Math.min(run.matches.length, share(used));
+  }
+  return shares;
+};
 
 export const grepUnified = async (input: UnifiedGrepInput): Promise<UnifiedGrepResultVO> => {
   await ensureReady();
@@ -845,64 +919,57 @@ export const grepUnified = async (input: UnifiedGrepInput): Promise<UnifiedGrepR
   // Fair budget: no single source can use the whole `maxMatches` before the
   // others start (200 file hits used to leave records with nothing).
   const floor = Math.max(1, Math.floor(input.maxMatches / Math.max(1, sources.length)));
+  const runs: SourceRuns = {};
+  const shares = () => sourceShares({ sources, runs, maxMatches: input.maxMatches, floor });
 
-  const matches: UnifiedGrepMatchVO[] = [];
-  let filesCoverage = EMPTY_FILES_COVERAGE;
-  let nodesCoverage = EMPTY_NODES_COVERAGE;
-  let recordsCoverage = EMPTY_RECORDS_COVERAGE;
-  let promptsCoverage = EMPTY_PROMPTS_COVERAGE;
-  let truncated = false;
-
-  for (const [index, source] of sources.entries()) {
-    const budget: ScanBudget = {
-      regex,
-      contextLines: input.contextLines,
-      deadline: sourceDeadline({
-        deadline,
-        now: Date.now(),
-        sourcesLeft: sources.length - index,
-      }),
-      maxMatches: sourceBudget({
-        maxMatches: input.maxMatches,
-        used: matches.length,
-        floor,
-        sourcesAfter: sources.length - index - 1,
-      }),
-    };
-    if (source === "files") {
-      const run = await runFiles(input, budget);
-      matches.push(...run.matches);
-      filesCoverage = run.coverage;
-      truncated ||= run.truncated;
-    } else if (source === "nodes") {
-      const run = await runNodes(db, spaceId, input, budget);
-      matches.push(...run.matches);
-      nodesCoverage = run.coverage;
-      truncated ||= run.truncated;
-    } else if (source === "records") {
-      const run = await runRecords(db, spaceId, input, budget);
-      matches.push(...run.matches);
-      recordsCoverage = run.coverage;
-      truncated ||= run.truncated;
-    } else {
-      const run = await runPrompts(db, spaceId, budget);
-      matches.push(...run.matches);
-      promptsCoverage = run.coverage;
-      truncated ||= run.truncated;
+  const runLane = async (lane: GrepSource[]) => {
+    for (const [index, source] of lane.entries()) {
+      const budget: ScanBudget = {
+        regex,
+        contextLines: input.contextLines,
+        deadline: sourceDeadline({ deadline, now: Date.now(), sourcesLeft: lane.length - index }),
+        maxMatches: shares().get(source) ?? 0,
+      };
+      if (source === "files") runs.files = await runFiles(input, budget);
+      else if (source === "nodes") runs.nodes = await runNodes(db, spaceId, input, budget);
+      else if (source === "records") runs.records = await runRecords(db, spaceId, input, budget);
+      else runs.prompts = await runPrompts(db, spaceId, budget);
     }
+  };
+  // `allSettled`, never `all`: a lane that fails must not answer while the
+  // other one is still scanning — its statements would outlive the response
+  // and hold a pooled connection nobody waits for.
+  const settled = await Promise.allSettled(
+    SOURCE_LANES.map((lane) => lane.filter((source) => requested.has(source)))
+      .filter((lane) => lane.length > 0)
+      .map(runLane),
+  );
+  for (const outcome of settled) {
+    if (outcome.status === "rejected") throw outcome.reason;
   }
 
-  // Each source is capped at its own share, and the shares sum to at most
-  // `maxMatches`; the slice is a belt-and-braces guard, not the budget.
-  if (matches.length > input.maxMatches) truncated = true;
+  // A source scanned with the most it could be given is cut to its exact
+  // share. Each source returns its matches in scan order and a smaller budget
+  // only stops it earlier, so these are the matches one-after-another
+  // scanning returns; whatever was cut means there is more.
+  const finalShares = shares();
+  const matches: UnifiedGrepMatchVO[] = [];
+  let truncated = false;
+  for (const source of sources) {
+    const sourceRun = runs[source];
+    if (!sourceRun) continue;
+    const share = finalShares.get(source) ?? 0;
+    matches.push(...sourceRun.matches.slice(0, share));
+    truncated ||= sourceRun.truncated || sourceRun.matches.length > share;
+  }
 
   return {
-    matches: matches.slice(0, input.maxMatches),
+    matches,
     coverage: {
-      files: filesCoverage,
-      nodes: nodesCoverage,
-      records: recordsCoverage,
-      prompts: promptsCoverage,
+      files: runs.files?.coverage ?? EMPTY_FILES_COVERAGE,
+      nodes: runs.nodes?.coverage ?? EMPTY_NODES_COVERAGE,
+      records: runs.records?.coverage ?? EMPTY_RECORDS_COVERAGE,
+      prompts: runs.prompts?.coverage ?? EMPTY_PROMPTS_COVERAGE,
     },
     truncated,
   };

@@ -350,7 +350,7 @@ const busabaseRouterImpl: EnhancedRouter<
     ),
   },
   agent: {
-    listTasks: busabase.agent.listTasks.handler(async () => listAgentTasks()),
+    listTasks: busabase.agent.listTasks.handler(async ({ input }) => listAgentTasks(input)),
   },
   live: {
     subscribe: busabase.live.subscribe.handler(({ signal }) =>

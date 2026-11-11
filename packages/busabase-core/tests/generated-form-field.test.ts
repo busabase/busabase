@@ -19,6 +19,7 @@ describe("generatedFormControlKind", () => {
     ["select", "select"],
     ["multiselect", "multiselect"],
     ["attachment", "attachment"],
+    ["drive", "drive"],
     ["relation", "relation"],
     ["member", "member"],
     ["url", "url"],

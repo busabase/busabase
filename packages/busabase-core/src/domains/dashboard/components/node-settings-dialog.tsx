@@ -21,7 +21,7 @@ import { Input } from "kui/input";
 import { Label } from "kui/label";
 import type { LucideIcon } from "lucide-react";
 import { Info, Shield, SlidersHorizontal } from "lucide-react";
-import { useContext, useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useLocation, useSearch } from "wouter";
 import { useCoreI18n, useCoreLocale } from "../../../i18n";
@@ -42,7 +42,9 @@ import {
 import type { AirAppRunnerKind } from "../../airapp/components/runners/types";
 import {
   AIRAPP_MANIFEST_PATH,
+  type AirAppRuntimeKind,
   parseAirAppManifest,
+  resolveRunPlan,
 } from "../../airapp/utils/airapp-runtime-descriptor";
 import { replaceNodeRouteSlug } from "../utils/node-route";
 import { toSlugInput } from "../utils/slug-input";
@@ -245,6 +247,8 @@ function GeneralTabContent({
   /** What `airapp.json` asks for, so "follow the app" can name it. */
   const [appPreferred, setAppPreferred] = useState<AirAppRunnerKind | undefined>(undefined);
   const [appRequired, setAppRequired] = useState<AirAppRunnerKind | undefined>(undefined);
+  /** The raw `airapp.json`, kept so the runtime is resolved the way a run resolves it. */
+  const [appManifest, setAppManifest] = useState<string | undefined>(undefined);
   const hydratedRef = useRef(false);
   const runnerKindDirtyRef = useRef(false);
   const [location, setLocation] = useLocation();
@@ -276,6 +280,7 @@ function GeneralTabContent({
     runnerKindDirtyRef.current = false;
     setAppPreferred(undefined);
     setAppRequired(undefined);
+    setAppManifest(undefined);
   }, [open, nodeName]);
 
   // Adopt the node's saved override once the shared `nodes.get` fetch resolves,
@@ -307,6 +312,7 @@ function GeneralTabContent({
         const parsedManifest = parseAirAppManifest(manifest.content);
         setAppPreferred(parsedManifest.preferredEngine);
         setAppRequired(parsedManifest.requiredEngine);
+        setAppManifest(manifest.content);
       } catch {
         // No manifest, or an unreadable one. "Follow the app" then simply means
         // the default — which is exactly what it will do.
@@ -316,6 +322,22 @@ function GeneralTabContent({
       cancelled = true;
     };
   }, [nodeId, nodeType, open, orpc]);
+
+  // Which runtime the app is, from the same inputs the Run panel uses (the
+  // file listing's marker files plus `airapp.json`), so "follow the app" can
+  // name the engine a run lands on — a Python app never falls back to the
+  // browser. `undefined` until both are known; the field then assumes Node.
+  const appRuntime = useMemo<AirAppRuntimeKind | undefined>(() => {
+    if (nodeType !== "airapp" || !detail || !("files" in detail)) return undefined;
+    const probeFiles: Record<string, string> = {};
+    for (const file of detail.files) probeFiles[file.path] = "";
+    if (appManifest !== undefined) probeFiles[AIRAPP_MANIFEST_PATH] = appManifest;
+    try {
+      return resolveRunPlan(probeFiles).runtime;
+    } catch {
+      return undefined;
+    }
+  }, [appManifest, detail, nodeType]);
 
   // Seed slug/description/icon once the shared `nodes.get` fetch resolves — guarded
   // so a background refetch never clobbers an in-progress edit.
@@ -483,6 +505,7 @@ function GeneralTabContent({
         <AirAppEngineSetting
           appPreferred={appPreferred}
           appRequired={appRequired}
+          appRuntime={appRuntime}
           availableEngines={availableAirAppEngines}
           disabled={!detail}
           onValueChange={(next) => {

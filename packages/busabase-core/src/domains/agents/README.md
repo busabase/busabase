@@ -110,7 +110,9 @@ request is valid. Each prompt context contains `id`, `name`, `uri`, `mimeType:
 scenario, descriptive node target, source and ordered prompt segments.
 
 Before acceptance, the server revalidates the shared bounded schema, exact segment
-text equality and source origin/edition/workspace against the host request context.
+text equality and source edition/workspace against the execution context.
+The captured page origin remains descriptive metadata: clipboard import and server
+execution do not require it to match a request or background host origin.
 It replaces the submitted URI with `busabase-agent-prompt:///<encoded insertion id>`.
 The descriptive target grants no access and no URI or node is fetched for this
 snapshot. Existing session ownership, workspace-write, lease and tool/node ACL
@@ -142,6 +144,5 @@ resources, then attachments. Only affirmative `embeddedContext` capability permi
 resource blocks. Otherwise complete prompt context is sent exactly once as text,
 with an explanatory note. This changes presentation, not model token cost.
 
-OSS and Cloud real requests supply the trusted host origin. OSS demo also supplies
-its request origin; a Cloud demo without a real target workspace cannot create a
-Cloud prompt envelope and retains the ordinary full-text handoff.
+A Cloud demo without a real target workspace cannot create a Cloud prompt envelope
+and retains the ordinary full-text handoff.

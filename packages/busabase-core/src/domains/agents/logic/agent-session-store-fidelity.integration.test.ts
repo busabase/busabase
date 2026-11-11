@@ -1,3 +1,5 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { pg_trgm } from "@electric-sql/pglite/contrib/pg_trgm";
@@ -28,7 +30,11 @@ const {
 
 describe("ACP event journal — real PGlite", () => {
   let client: PGlite;
+  let storageDir: string;
+  const originalStorageUrl = process.env.STORAGE_URL;
   beforeAll(async () => {
+    storageDir = await mkdtemp(path.join(tmpdir(), "agent-fidelity-storage-"));
+    process.env.STORAGE_URL = `local:${storageDir}`;
     client = new PGlite({ extensions: { pg_trgm } });
     const db = drizzle({ client, schema });
     fixture.db = db;
@@ -52,6 +58,9 @@ describe("ACP event journal — real PGlite", () => {
   });
   afterAll(async () => {
     await client?.close();
+    await rm(storageDir, { recursive: true, force: true });
+    if (originalStorageUrl === undefined) delete process.env.STORAGE_URL;
+    else process.env.STORAGE_URL = originalStorageUrl;
   });
 
   it("restores rich updates, extension identity, questions and decisions with a durable source cursor", async () => {

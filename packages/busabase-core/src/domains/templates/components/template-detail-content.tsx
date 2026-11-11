@@ -1,6 +1,7 @@
 import { pickTemplateMedia, templateVideoTiles } from "busabase-contract/domains/templates/media";
 import { visibleTemplateTags } from "busabase-contract/domains/templates/tags";
 import type { TemplateCardVO } from "busabase-contract/domains/templates/types";
+import { Badge } from "kui/badge";
 import { ExternalLink, MessageSquare } from "lucide-react";
 import { iStringParse, type LocaleType } from "openlib/i18n/i-string";
 import type { ReactNode } from "react";
@@ -84,13 +85,13 @@ interface TemplateDetailContentProps {
  * Server-safe template detail body shared by the public site and Dashboard.
  * Interactive install and navigation controls stay in each caller's shell.
  *
- * Read top to bottom the way a visitor decides: the title and description,
+ * Read top to bottom the way a visitor decides: the title, version and description,
  * the action, then the screenshot and clip shelf. Conversation prompts follow
  * the gallery; a quiet side column holds
  * everything that is reference rather than pitch: what installing creates, the
- * tags, version, licence, source, and who may install. Category and version
- * used to sit beside the title and the internal `prefix:value` tags under it;
- * see `visibleTemplateTags` for why those last ones are never rendered.
+ * tags, licence, source, and who may install. The version stays beside the title
+ * so visitors can find it before installing; internal `prefix:value` tags are
+ * never rendered (see `visibleTemplateTags`).
  */
 export function TemplateDetailContent({
   template,
@@ -111,11 +112,9 @@ export function TemplateDetailContent({
     [labels.folders, stats.folders],
   ] as const;
   const tags = visibleTemplateTags(template);
-  const facts = [
-    template.version ? `v${template.version}` : null,
-    template.license ?? null,
-    template.author ?? null,
-  ].filter((fact): fact is string => Boolean(fact));
+  const facts = [template.license ?? null, template.author ?? null].filter((fact): fact is string =>
+    Boolean(fact),
+  );
   const hasPrompts = template.agentPrompts.length > 0;
   const media = pickTemplateMedia(template, descriptionLocale);
   const screenshots = media.screenshots.map((src, index) => ({
@@ -130,9 +129,16 @@ export function TemplateDetailContent({
           same viewport, and a viewport breakpoint would size them alike. */}
       <header className="@container">
         <div className="flex max-w-3xl flex-col gap-3">
-          <h1 className="font-serif text-3xl font-semibold leading-tight tracking-tight @2xl:text-4xl">
-            {title}
-          </h1>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+            <h1 className="font-serif text-3xl font-semibold leading-tight tracking-tight @2xl:text-4xl">
+              {title}
+            </h1>
+            {template.version ? (
+              <Badge variant="outline" className="shrink-0 font-normal text-muted-foreground">
+                v{template.version}
+              </Badge>
+            ) : null}
+          </div>
           <p className="text-sm leading-6 text-muted-foreground @2xl:text-base @2xl:leading-7">
             {iStringParse(template.description, descriptionLocale)}
           </p>

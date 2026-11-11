@@ -12,7 +12,12 @@ import type {
   ViewType,
   ViewVO,
 } from "busabase-contract/types";
-import { flattenViewFilters, VIEW_FIELD_MIN_WIDTH } from "busabase-contract/types";
+import {
+  flattenViewFilters,
+  getGridRowHeight,
+  isGridRowHeight,
+  VIEW_FIELD_MIN_WIDTH,
+} from "busabase-contract/types";
 import { useReducedMotion } from "framer-motion";
 import { Dialog, DialogTitle } from "kui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "kui/popover";
@@ -63,11 +68,14 @@ import {
 import { useLocation, useSearch } from "wouter";
 import { fmt, useCoreI18n, useCoreLocale, useIString } from "../../../i18n";
 import { presentCoreError } from "../../../i18n/localize-error";
+import { recordFindMessages } from "../../../i18n/record-find";
 import {
   fieldColumnWidth,
   fieldDisplayKind,
   fieldLabel,
   fieldLinkPrefix,
+  getMemberIds,
+  isFileFieldType,
 } from "../../base/field-types";
 import { getDateFieldOptions, parseDateFieldValue } from "../../base/utils/date-value";
 import { resolveEmbedPreview } from "../../base/utils/embed";
@@ -76,7 +84,9 @@ import { parseWhiteboardFieldValue } from "../../base/utils/whiteboard-value";
 import { getRecordTitle } from "../helpers/change-request";
 import { getFieldChipEntries, getFieldPreviewText, getRelationRecordIds } from "../helpers/field";
 import { fieldDesignHref } from "../helpers/field-visibility-navigation";
-import { fieldValueToString, shortIdentifier } from "../helpers/format";
+import { fieldValueToString, formatMemberChipLabel, shortIdentifier } from "../helpers/format";
+import { buildGridCellText, GRID_FIELD_PRESENTATION } from "../helpers/grid-cell-layout";
+import { getInlineCellEditorKind } from "../helpers/inline-cell-edit";
 import { mergeSearchIntoHref, useHrefWithCurrentSearch } from "../helpers/link-search";
 import {
   buildTableCellPreview,
@@ -103,6 +113,12 @@ import type {
   ViewSubmitOptions,
   ViewUpdatePayload,
 } from "../helpers/view-types";
+import {
+  gridCellKey,
+  type UpdateRecordCell,
+  useBaseGridEditing,
+} from "../hooks/use-base-grid-editing";
+import type { RecordFindControl } from "../hooks/use-record-find";
 import { getOmittedWhiteboardPreview, isListPayloadOmitted } from "../utils/list-payload-preview";
 import { toSlugInput } from "../utils/slug-input";
 import { useIsAnonymousVisitor } from "../visitor-context";
@@ -111,6 +127,15 @@ import { BusaBaseCalendar } from "./base-calendar";
 import { BusaBaseGallery } from "./base-gallery";
 import { BusaBaseGantt } from "./base-gantt";
 import { BusaBaseKanban, type KanbanMoveRecord } from "./base-kanban";
+import {
+  type BaseGridEditingContextValue,
+  InlineCellEditor,
+  InlineCellStatusBadge,
+  InlineEditableCellValue,
+  InlineEditNotice,
+  useHasFinePointer,
+  useInlineCellEditMessages,
+} from "./base-table-inline-cell";
 import { BaseViewTabs } from "./base-view-tabs";
 import { BulkEditRecordsDialog } from "./bulk-edit-records-dialog";
 import { DateFieldValue } from "./date-field";
@@ -118,11 +143,14 @@ import { FieldContextLink } from "./field-context-link";
 import { FieldHelpPopover } from "./field-help";
 import { FieldBadge, LookupFieldValue, WhiteboardThumbnail } from "./field-preview";
 import { FormulaValue } from "./formula-value";
+import { GridCellCollection, GridCellText } from "./grid-cell-presentation";
+import { GridRowHeightControl } from "./grid-row-height-control";
+import { UserAvatar } from "./identity";
 import { ImportRecordsDialog } from "./import-records-dialog";
 import { DialogContent } from "./localized-dialog-content";
-import { MemberChips } from "./member-field";
 import { NodeAgentPromptsDialog } from "./node-agent-prompts-dialog";
 import { ConfirmActionDialog } from "./primitives";
+import { RecordFind } from "./record-find-control";
 import { RecordsPaginationBar } from "./records-pagination-bar";
 import { SplitSubmitButton, useWorkspacePermissionLevel } from "./split-submit-button";
 import {
@@ -625,7 +653,7 @@ const toSlug = (value: string) =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
 
-// Above this many rows the records list is virtualized (windowed).
+// A full 100-record page is windowed; smaller pages render plainly.
 const VIRTUALIZE_ROW_THRESHOLD = 100;
 
 // One canonical record row, shared by the plain and virtualized render paths.
@@ -635,8 +663,10 @@ function BusaBaseRecordRow({
   fields,
   columnTemplate,
   baseSlug,
+  grid,
   relationRecords,
   rowIndex,
+  rowHeight,
   style,
   selectable,
   selected,
@@ -644,11 +674,14 @@ function BusaBaseRecordRow({
   onOpenRecord,
 }: {
   record: RecordVO;
+  /** In-cell editing controller; null keeps every cell read-only. */
+  grid: BaseGridEditingContextValue | null;
   fields: BaseFieldVO[];
   columnTemplate: string;
   baseSlug?: string;
   relationRecords: RecordVO[];
   rowIndex: number;
+  rowHeight: number;
   style?: CSSProperties;
   selectable?: boolean;
   selected?: boolean;
@@ -662,10 +695,10 @@ function BusaBaseRecordRow({
   return (
     <div
       aria-rowindex={rowIndex}
-      className="group grid h-12 items-stretch border-border/40 border-b text-sm transition-colors hover:bg-muted/35"
+      className="group grid items-stretch border-border/40 border-b text-sm transition-colors hover:bg-muted/35"
       data-record-id={record.id}
       role="row"
-      style={{ gridTemplateColumns: columnTemplate, ...style }}
+      style={{ gridTemplateColumns: columnTemplate, height: rowHeight, ...style }}
       tabIndex={-1}
     >
       {selectable ? (
@@ -688,12 +721,14 @@ function BusaBaseRecordRow({
         <RecordTableCell
           currentRecordHref={currentRecordHref}
           field={field}
+          grid={grid}
           hasSelectionColumn={Boolean(selectable)}
           index={index}
           key={field.id}
           onOpenRecord={onOpenRecord}
           record={record}
           records={relationRecords}
+          rowHeight={rowHeight}
         />
       ))}
       {/* Record-status cell disabled — see baseTableStatusCellClassName above.
@@ -728,18 +763,20 @@ const SKELETON_CELL_WIDTHS = ["80%", "60%", "72%", "55%", "66%"];
 function BusaBaseTableRowsSkeleton({
   columnTemplate,
   hasSelectionColumn,
+  rowHeight,
 }: {
   columnTemplate: string;
   hasSelectionColumn: boolean;
+  rowHeight: number;
 }) {
   const stickyFieldColumnIndex = hasSelectionColumn ? 1 : 0;
   return (
     <div aria-hidden>
       {SKELETON_ROWS.map((rowId, rowIndex) => (
         <div
-          className="grid h-12 items-center overflow-hidden border-border/40 border-b"
+          className="grid items-center overflow-hidden border-border/40 border-b"
           key={rowId}
-          style={{ gridTemplateColumns: columnTemplate }}
+          style={{ gridTemplateColumns: columnTemplate, height: rowHeight }}
         >
           {columnTemplate.split(" ").map((column, columnIndex) => (
             <div
@@ -789,10 +826,12 @@ export function BusaBaseTable({
   onOpenRecord,
   onPatchRecord,
   onReorderView,
+  onUpdateRecordCell,
   onUpdateView,
   records,
   relationRecords = records,
   pagination,
+  recordFind,
   scrollElementRef,
   views,
 }: {
@@ -850,6 +889,13 @@ export function BusaBaseTable({
   ) => Promise<{ materialized: true } | { materialized: false; changeRequestId: string }>;
   /** Drag-to-reorder a view tab; `position` is its 0-based target index among the Base's views. */
   onReorderView?: (view: ViewVO, position: number) => void;
+  /**
+   * In-cell editing: save ONE field of one record through the record edit
+   * form's write path (a change request that merges when the viewer may write,
+   * and stays pending when they may only propose). Without it the grid stays
+   * read-only, exactly as before.
+   */
+  onUpdateRecordCell?: UpdateRecordCell;
   onUpdateView: (
     view: ViewVO,
     payload: ViewUpdatePayload,
@@ -858,6 +904,7 @@ export function BusaBaseTable({
   records: RecordVO[];
   relationRecords?: RecordVO[];
   pagination?: RecordsPagination;
+  recordFind?: RecordFindControl;
   scrollElementRef: RefObject<HTMLElement | null>;
   views: ViewVO[];
 }) {
@@ -865,6 +912,12 @@ export function BusaBaseTable({
   const currentSearch = useSearch();
   const resolveIString = useIString();
   const locale = useCoreLocale();
+  const findMessages = recordFindMessages[locale];
+  const recordsPending = Boolean(
+    pagination?.isLoading ||
+      recordFind?.isPending ||
+      (recordFind?.hasQuery && pagination?.isFetching),
+  );
   const [location, navigate] = useLocation();
   const reduceMotion = useReducedMotion();
   const [highlightedFieldSlug, setHighlightedFieldSlug] = useState<string | null>(null);
@@ -907,6 +960,7 @@ export function BusaBaseTable({
   const activeViewIsLastView = activeView ? isOnlyRemainingView(views, activeView) : false;
   const lastViewDeleteHintId = useId();
   const allFields = base?.fields ?? records[0]?.base.fields ?? [];
+  const rowHeight = getGridRowHeight(activeView?.config.rowHeight);
   const primaryField = getPrimaryField({ fields: allFields });
   const fields = activeView
     ? getVisibleViewFieldSlugs(activeView.config, allFields)
@@ -939,7 +993,8 @@ export function BusaBaseTable({
   // Switching base/view invalidates the current selection entirely; within
   // the same base, prune ids for records no longer in the loaded page (e.g.
   // after a merge/refresh) instead of blowing away the whole selection.
-  const selectionScope = `${base?.id ?? ""}:${activeView?.id ?? ""}`;
+  const selectionQuery = recordFind?.query.trim() ?? "";
+  const selectionScope = `${base?.id ?? ""}:${activeView?.id ?? ""}:${selectionQuery}:${selectionQuery ? (recordFind?.fieldId ?? "") : ""}`;
   const previousSelectionScope = useRef(selectionScope);
   useEffect(() => {
     if (previousSelectionScope.current !== selectionScope) {
@@ -1039,7 +1094,7 @@ export function BusaBaseTable({
   // Virtualize only long lists (small tables — the common case — render plainly
   // and are untouched). Rows are absolutely positioned inside a spacer; the grid
   // template + sticky first column are preserved.
-  const shouldVirtualize = records.length > VIRTUALIZE_ROW_THRESHOLD;
+  const shouldVirtualize = records.length >= VIRTUALIZE_ROW_THRESHOLD;
   const tableRootRef = useRef<HTMLDivElement>(null);
   const horizontalScrollRef = useRef<HTMLDivElement>(null);
   const requestedHighlight = new URLSearchParams(currentSearch).get("highlightField");
@@ -1122,10 +1177,118 @@ export function BusaBaseTable({
   const rowVirtualizer = useVirtualizer({
     count: records.length,
     getScrollElement,
-    estimateSize: () => 48,
+    estimateSize: () => rowHeight,
     overscan: 12,
     scrollMargin: listScrollMargin,
   });
+  const previousRowHeight = useRef(rowHeight);
+  const scrollSnapshot = useRef<{ scrollTop: number; rowHeight: number } | null>(null);
+  useLayoutEffect(() => {
+    const scrollElement = getScrollElement();
+    if (!scrollElement) return;
+    const remember = () => {
+      scrollSnapshot.current = {
+        scrollTop: scrollElement.scrollTop,
+        rowHeight: previousRowHeight.current,
+      };
+    };
+    if (!scrollSnapshot.current) remember();
+    scrollElement.addEventListener("scroll", remember, { passive: true });
+    return () => scrollElement.removeEventListener("scroll", remember);
+  }, [getScrollElement]);
+  useLayoutEffect(() => {
+    const previous = previousRowHeight.current;
+    previousRowHeight.current = rowHeight;
+    if (previous === rowHeight) return;
+    const scrollElement = getScrollElement();
+    // Read the last pre-commit scroll event: shrinking the spacer may already
+    // have clamped the DOM's scrollTop before this layout effect runs.
+    const oldScrollTop =
+      scrollSnapshot.current?.rowHeight === previous
+        ? scrollSnapshot.current.scrollTop
+        : (scrollElement?.scrollTop ?? 0);
+    const offset = Math.max(0, oldScrollTop - listScrollMargin);
+    const recordOffset = offset / previous;
+    rowVirtualizer.measure?.();
+    if (scrollElement && offset > 0) {
+      scrollElement.scrollTop = listScrollMargin + recordOffset * rowHeight;
+    }
+    scrollSnapshot.current = {
+      scrollTop: scrollElement?.scrollTop ?? 0,
+      rowHeight,
+    };
+  }, [getScrollElement, listScrollMargin, rowHeight, rowVirtualizer]);
+
+  // In-cell editing (Airtable/Notion conventions). Only for someone who can at
+  // least propose on this Base, on a screen with a real pointer, in the table
+  // view, and only when the host wires the write. Everyone else gets the grid
+  // exactly as before: every cell opens the record.
+  const hasFinePointer = useHasFinePointer();
+  const inlineEditCopy = useInlineCellEditMessages();
+  const gridRef = useRef<HTMLDivElement>(null);
+  const gridHelpId = useId();
+  const canEditCells =
+    canPropose &&
+    hasFinePointer &&
+    Boolean(onUpdateRecordCell && base) &&
+    (!activeView?.type || activeView.type === "table");
+  const openRecordFromGrid = useCallback(
+    (record: RecordVO) => {
+      if (onOpenRecord) {
+        onOpenRecord(record);
+        return;
+      }
+      navigate(
+        mergeSearchIntoHref(`/base/${base?.slug ?? record.base.slug}/${record.id}`, currentSearch),
+      );
+    },
+    [base?.slug, currentSearch, navigate, onOpenRecord],
+  );
+  const ensureRowVisible = useCallback(
+    (rowIndex: number) => {
+      if (shouldVirtualize) rowVirtualizer.scrollToIndex?.(rowIndex, { align: "auto" });
+    },
+    [rowVirtualizer, shouldVirtualize],
+  );
+  const formatCellSaveError = useCallback(
+    (error: unknown) => presentCoreError(messages, locale, error, messages.shell.operationFailed),
+    [locale, messages],
+  );
+  const resolveFieldName = useCallback(
+    (field: BaseFieldVO) => resolveIString(field.name),
+    [resolveIString],
+  );
+  const gridEditing = useBaseGridEditing({
+    canMerge: hasApiKeyLevel(basePermissionLevel, "write"),
+    enabled: canEditCells,
+    ensureRowVisible,
+    fields,
+    formatSaveError: formatCellSaveError,
+    gridRef,
+    onOpenRecord: openRecordFromGrid,
+    onUpdateRecordCell,
+    proposalScope: viewState?.scope ?? currentSearch,
+    records,
+    resolveFieldName,
+  });
+  // One tab stop for the whole grid: the active cell, else the first cell.
+  const activeCellVisible =
+    gridEditing.active !== null &&
+    records.some((record) => record.id === gridEditing.active?.recordId) &&
+    fields.some((field) => field.slug === gridEditing.active?.fieldSlug);
+  const firstRecord = records[0];
+  const firstField = fields[0];
+  const gridEditingContext: BaseGridEditingContextValue | null = canEditCells
+    ? {
+        ...gridEditing,
+        tabStopKey:
+          activeCellVisible && gridEditing.active
+            ? gridCellKey(gridEditing.active.recordId, gridEditing.active.fieldSlug)
+            : firstRecord && firstField
+              ? gridCellKey(firstRecord.id, firstField.slug)
+              : null,
+      }
+    : null;
 
   useLayoutEffect(() => {
     if (activeView?.type && activeView.type !== "table") return;
@@ -1205,6 +1368,8 @@ export function BusaBaseTable({
         >
           <span className="min-w-0 flex-1 truncate text-muted-foreground text-xs @3xl/base-toolbar:flex-none">
             {(() => {
+              if (recordFind && pagination?.error) return messages.shell.operationFailed;
+              if (recordFind && recordsPending) return findMessages.searching;
               const displayCount = pagination?.total ?? records.length;
               return fmt(messages.base.recordCount, {
                 count: displayCount,
@@ -1340,20 +1505,66 @@ export function BusaBaseTable({
           config={activeView.config}
           fields={allFields}
           onOpen={(section) => setViewEditorRequest({ section, source: "toolbar" })}
-        />
+          trailingControl={
+            recordFind ? (
+              <RecordFind
+                control={recordFind}
+                fields={allFields}
+                visibleSlugs={fields.map((field) => field.slug)}
+              />
+            ) : undefined
+          }
+        >
+          {activeView.type === "table" && canPropose ? (
+            <GridRowHeightControl
+              key={activeView.id}
+              disabled={quickUpdatingFieldId !== null}
+              value={
+                isGridRowHeight(activeView.config.rowHeight)
+                  ? activeView.config.rowHeight
+                  : "medium"
+              }
+              onSubmit={async (height, mergeImmediately) => {
+                await onUpdateView(
+                  activeView,
+                  { config: { rowHeight: height } },
+                  { mergeImmediately, preserveLocation: true },
+                );
+              }}
+            />
+          ) : null}
+        </ViewConfigToolbar>
       ) : base && !activeView ? (
         // Only the view-less fallback (a Base with no saved view at all). A
         // read-only visitor looking at a saved view is not missing one, and a
         // Base now opens on its leftmost view, so they would otherwise be told
         // to "open a saved view" while already on one.
         <div
-          className="mb-3 flex min-w-0 items-center gap-2 border-border/60 border-y py-2"
+          className="mb-3 flex h-7 min-w-0 items-center gap-2 [@media(pointer:coarse)]:h-11"
           data-testid="view-control-toolbar-readonly"
         >
           <Columns3 className="size-3.5 shrink-0 text-muted-foreground" />
-          <span className="truncate text-muted-foreground text-xs">
+          <span className="min-w-0 flex-1 truncate text-muted-foreground text-xs">
             {messages.base.savedViewToolbarRequired}
           </span>
+          {recordFind ? (
+            <RecordFind
+              control={recordFind}
+              fields={allFields}
+              visibleSlugs={fields.map((field) => field.slug)}
+            />
+          ) : null}
+        </div>
+      ) : recordFind ? (
+        <div
+          className="mb-3 flex h-7 min-w-0 items-center [@media(pointer:coarse)]:h-11"
+          data-testid="view-control-toolbar-readonly"
+        >
+          <RecordFind
+            control={recordFind}
+            fields={allFields}
+            visibleSlugs={fields.map((field) => field.slug)}
+          />
         </div>
       ) : null}
       <ViewConfigEditorDialog
@@ -1490,7 +1701,7 @@ export function BusaBaseTable({
         />
       ) : (
         <div className="overflow-x-auto pb-5" data-base-table-scroll ref={horizontalScrollRef}>
-          {selectionEnabled && selectedRecords.length > 0 ? (
+          {selectionEnabled && selectedRecords.length > 0 && !recordsPending ? (
             <div
               className="mb-2 flex items-center gap-3 rounded-md border border-border/60 bg-muted/40 px-3 py-2 text-xs"
               data-testid="base-bulk-toolbar"
@@ -1561,11 +1772,25 @@ export function BusaBaseTable({
               open={isImportOpen}
             />
           ) : null}
+          {canEditCells ? (
+            <>
+              <InlineEditNotice notice={gridEditing.notice} onDismiss={gridEditing.dismissNotice} />
+              <p className="sr-only" id={gridHelpId}>
+                {inlineEditCopy.gridHelp}
+              </p>
+            </>
+          ) : null}
           <div
+            aria-busy={recordsPending}
             aria-colcount={fields.length + (selectionEnabled ? 1 : 0)}
+            aria-describedby={canEditCells ? gridHelpId : undefined}
             aria-rowcount={1 + records.length + (showArchivedRecords ? archivedRecords.length : 0)}
             className="w-max min-w-full border-border/50 border-l border-t"
+            data-inline-editing={canEditCells ? "true" : undefined}
             data-testid="base-records-grid"
+            data-row-height={activeView?.config.rowHeight ?? "medium"}
+            onKeyDown={canEditCells ? gridEditing.handleGridKeyDown : undefined}
+            ref={gridRef}
             role="grid"
           >
             <div
@@ -1586,6 +1811,7 @@ export function BusaBaseTable({
                     checked={allRecordsSelected}
                     className="size-3.5 cursor-pointer accent-foreground"
                     data-testid="base-select-all"
+                    disabled={recordsPending}
                     onChange={toggleSelectAllRecords}
                     type="checkbox"
                   />
@@ -1729,10 +1955,11 @@ export function BusaBaseTable({
               </div>
               */}
             </div>
-            {pagination?.isLoading ? (
+            {recordsPending ? (
               <BusaBaseTableRowsSkeleton
                 columnTemplate={columnTemplate}
                 hasSelectionColumn={selectionEnabled}
+                rowHeight={rowHeight}
               />
             ) : records.length === 0 ? (
               <div role="rowgroup">
@@ -1752,7 +1979,23 @@ export function BusaBaseTable({
                     }}
                     tabIndex={-1}
                   >
-                    {messages.base.emptyRecords}
+                    {recordFind?.hasQuery && !pagination?.error ? (
+                      <span
+                        className="flex items-center gap-2"
+                        data-testid="base-record-find-empty"
+                      >
+                        {findMessages.empty}
+                        <button
+                          className="underline underline-offset-2 hover:text-foreground"
+                          onClick={recordFind.clear}
+                          type="button"
+                        >
+                          {findMessages.clear}
+                        </button>
+                      </span>
+                    ) : pagination?.error ? null : (
+                      messages.base.emptyRecords
+                    )}
                   </div>
                 </div>
               </div>
@@ -1770,12 +2013,14 @@ export function BusaBaseTable({
                       baseSlug={base?.slug}
                       columnTemplate={columnTemplate}
                       fields={fields}
+                      grid={gridEditingContext}
                       key={record.id}
                       onOpenRecord={onOpenRecord}
                       onToggleSelected={toggleRecordSelected}
                       record={record}
                       relationRecords={relationRecords}
                       rowIndex={virtualRow.index + 2}
+                      rowHeight={rowHeight}
                       selectable={selectionEnabled}
                       selected={selectedRecordIds.has(record.id)}
                       style={{
@@ -1795,12 +2040,14 @@ export function BusaBaseTable({
                   baseSlug={base?.slug}
                   columnTemplate={columnTemplate}
                   fields={fields}
+                  grid={gridEditingContext}
                   key={record.id}
                   onOpenRecord={onOpenRecord}
                   onToggleSelected={toggleRecordSelected}
                   record={record}
                   relationRecords={relationRecords}
                   rowIndex={index + 2}
+                  rowHeight={rowHeight}
                   selectable={selectionEnabled}
                   selected={selectedRecordIds.has(record.id)}
                 />
@@ -1810,10 +2057,11 @@ export function BusaBaseTable({
               ? archivedRecords.map((record, archivedIndex) => (
                   <div
                     aria-rowindex={records.length + archivedIndex + 2}
-                    className="group grid h-12 items-stretch border-border/40 border-b bg-muted/10 text-sm opacity-60 transition-colors hover:opacity-100"
+                    className="group grid items-stretch border-border/40 border-b bg-muted/10 text-sm opacity-60 transition-colors hover:opacity-100"
+                    data-record-id={record.id}
                     key={record.id}
                     role="row"
-                    style={{ gridTemplateColumns: archivedColumnTemplate }}
+                    style={{ gridTemplateColumns: archivedColumnTemplate, height: rowHeight }}
                     tabIndex={-1}
                   >
                     {selectionEnabled ? (
@@ -1836,6 +2084,7 @@ export function BusaBaseTable({
                         onOpenRecord={onOpenRecord}
                         record={record}
                         records={relationRecords}
+                        rowHeight={rowHeight}
                       />
                     ))}
                     <div className={baseTableStatusCellClassName} role="gridcell" tabIndex={-1}>
@@ -1879,7 +2128,9 @@ export function BusaBaseTable({
           </div>
         </div>
       )}
-      {pagination ? <RecordsPaginationBar className="mt-3" {...pagination} /> : null}
+      {activeView && activeView.type !== "table" && pagination ? (
+        <RecordsPaginationBar className="mt-3" {...pagination} />
+      ) : null}
     </div>
   );
 }
@@ -1943,7 +2194,8 @@ function ViewChangeRequestForm({
   const messages = useCoreI18n();
   const locale = useCoreLocale();
   const resolveIString = useIString();
-  const attachmentFields = base.fields.filter((field) => field.type === "attachment");
+  // Cover candidates: any column that holds files (a drive column's files count too).
+  const attachmentFields = base.fields.filter((field) => isFileFieldType(field.type));
   const selectFields = base.fields.filter((field) => field.type === "select");
   const dateFields = base.fields.filter(
     (field) =>
@@ -2376,6 +2628,11 @@ function ViewChangeRequestForm({
 }
 
 interface RecordTableCellProps {
+  /**
+   * In-cell editing controller. Absent/null (read-only viewers, archived rows,
+   * hosts without a cell write) renders the cell exactly as it always was.
+   */
+  grid?: BaseGridEditingContextValue | null;
   onOpenRecord?: (record: RecordVO) => void;
   currentRecordHref: string;
   field: BaseFieldVO;
@@ -2383,20 +2640,84 @@ interface RecordTableCellProps {
   index: number;
   record: RecordVO;
   records: RecordVO[];
+  rowHeight: number;
 }
 
 function RecordTableCell(props: RecordTableCellProps) {
+  const { field, grid, index, record } = props;
+  const stickyClassName =
+    index === 0
+      ? `${baseTableStickyClassName} ${props.hasSelectionColumn ? "left-9" : "left-0"}`
+      : "";
+  // Read-only grid (no editing, or an archived row): exactly the cell it always was.
+  if (!grid) {
+    return (
+      <div
+        className={`flex min-w-0 items-center overflow-hidden border-border/40 border-r px-2 ${stickyClassName}`}
+        data-cell-field={field.slug}
+        data-cell-record={record.id}
+        role="gridcell"
+        tabIndex={-1}
+      >
+        <RecordTableCellContent {...props} />
+      </div>
+    );
+  }
+  const key = gridCellKey(record.id, field.slug);
+  const editable = grid.isEditableCell(record, field, index);
+  const active = grid.active?.recordId === record.id && grid.active.fieldSlug === field.slug;
+  const editing =
+    editable && grid.editing?.recordId === record.id && grid.editing.fieldSlug === field.slug;
+  const status = grid.getCellStatus(record, field);
+  const value = grid.getDisplayValue(record, field);
   return (
     <div
-      className={`flex min-w-0 items-center overflow-hidden border-border/40 border-r px-2 ${
-        props.index === 0
-          ? `${baseTableStickyClassName} ${props.hasSelectionColumn ? "left-9" : "left-0"}`
-          : ""
-      }`}
+      aria-colindex={index + 1 + (props.hasSelectionColumn ? 1 : 0)}
+      aria-readonly={!editable}
+      className={`flex min-w-0 items-center gap-1 overflow-hidden border-border/40 border-r px-2 outline-none ${stickyClassName} ${
+        active
+          ? `ring-2 ring-inset ${status.error ? "ring-destructive" : "ring-primary"}`
+          : status.error
+            ? "ring-1 ring-inset ring-destructive/60"
+            : ""
+      } ${editable ? "cursor-default select-none" : ""}`}
+      data-cell-field={field.slug}
+      data-cell-record={record.id}
+      data-grid-cell={key}
+      data-inline-editable={editable ? "true" : undefined}
+      onDoubleClick={
+        editable && getInlineCellEditorKind(field) !== "checkbox"
+          ? (event) => {
+              if ((event.target as HTMLElement).closest("a[href], [data-inline-cell-editor]")) {
+                return;
+              }
+              grid.startEditing(record, field);
+            }
+          : undefined
+      }
+      onFocus={(event) =>
+        grid.activate({ recordId: record.id, fieldSlug: field.slug }, event.currentTarget)
+      }
       role="gridcell"
-      tabIndex={-1}
+      tabIndex={grid.tabStopKey === key ? 0 : -1}
     >
-      <RecordTableCellContent {...props} />
+      {editing ? (
+        <InlineCellEditor field={field} grid={grid} record={record} />
+      ) : editable ? (
+        <InlineEditableCellValue
+          active={active}
+          field={field}
+          index={index}
+          onToggle={() => grid.toggleCheckbox(record, field)}
+          value={value}
+          rowHeight={props.rowHeight}
+          recordHref={props.currentRecordHref}
+          onOpenRecord={props.onOpenRecord ? () => props.onOpenRecord?.(record) : undefined}
+        />
+      ) : (
+        <RecordTableCellContent {...props} />
+      )}
+      {editing ? null : <InlineCellStatusBadge field={field} status={status} />}
     </div>
   );
 }
@@ -2408,6 +2729,7 @@ function RecordTableCellContent({
   index,
   record,
   records,
+  rowHeight,
 }: RecordTableCellProps) {
   const messages = useCoreI18n();
   const locale = useCoreLocale();
@@ -2433,6 +2755,17 @@ function RecordTableCellContent({
     event.preventDefault();
     onOpenRecord(record);
   };
+  const overflowLink = (hidden: number) => (
+    <Link
+      aria-label={`${messages.operation.viewFullContent}: ${hidden}`}
+      className="inline-flex h-6 max-w-full items-center rounded bg-muted px-2 text-muted-foreground text-xs hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      href={currentRecordHref}
+      onClick={openRecord}
+      title={messages.operation.viewFullContent}
+    >
+      +{hidden}
+    </Link>
+  );
 
   // Every field type shares one affordance for a value the list left out, before
   // any renderer can mistake the marker for an id, a label or an empty value.
@@ -2472,14 +2805,22 @@ function RecordTableCellContent({
         presentation="grid"
         records={records}
         value={rawValue}
+        rowHeight={rowHeight}
       />
     );
   }
 
   if (field.type === "formula") {
     return (
-      <Link className="block min-w-0 truncate py-1" href={currentRecordHref} onClick={openRecord}>
-        <FormulaValue field={field} value={rawValue} record={record} />
+      <Link className="block min-w-0 py-1" href={currentRecordHref} onClick={openRecord}>
+        <GridCellText rowHeight={rowHeight} scalar={typeof rawValue !== "string"}>
+          <FormulaValue
+            field={field}
+            value={rawValue}
+            record={record}
+            maxChars={TABLE_CELL_PREVIEW_MAX_CHARS}
+          />
+        </GridCellText>
       </Link>
     );
   }
@@ -2507,41 +2848,72 @@ function RecordTableCellContent({
   }
 
   if (kind === "member") {
-    // Wrapped in the row `Link` like every other cell — `MemberChips` renders
-    // only spans, so it never nests an interactive element inside the link.
+    const ids = getMemberIds(rawValue);
+    if (ids.length === 0) {
+      return (
+        <Link
+          className="min-w-0 text-muted-foreground"
+          href={currentRecordHref}
+          onClick={openRecord}
+        >
+          -
+        </Link>
+      );
+    }
     return (
-      <Link
-        className="flex min-w-0 items-center py-1"
-        href={currentRecordHref}
-        onClick={openRecord}
-      >
-        <MemberChips users={record.fieldUsers} value={rawValue} />
-      </Link>
+      <GridCellCollection
+        rowHeight={rowHeight}
+        renderOverflow={overflowLink}
+        items={ids.map((id) => {
+          const user = record.fieldUsers?.[id];
+          const label = formatMemberChipLabel(user, id, messages);
+          return {
+            key: id,
+            label,
+            extraWidth: 40,
+            content: (
+              <Link
+                className="inline-flex h-6 min-w-0 items-center gap-1 rounded-full border bg-card px-1 text-xs"
+                data-member-id={id}
+                href={currentRecordHref}
+                onClick={openRecord}
+                title={user?.email ? `${label} · ${user.email}` : label}
+              >
+                <UserAvatar className="size-4" fallbackId={id} user={user} />
+                <span className="truncate">{label}</span>
+              </Link>
+            ),
+          };
+        })}
+      />
     );
   }
 
   if (chips.length > 0) {
     return (
-      <Link
-        className="flex min-w-0 flex-wrap gap-1.5 py-1"
-        href={currentRecordHref}
-        onClick={openRecord}
-        title={chips.map((chip) => chip.label).join(", ")}
-      >
-        {chips.slice(0, 3).map((chip, chipIndex) => (
-          <FieldBadge chip={chip} key={`${chip.label}:${chipIndex}`} />
-        ))}
-        {chips.length > 3 ? (
-          <span className="rounded-md bg-muted/50 px-2 py-0.5 text-muted-foreground text-xs">
-            +{chips.length - 3}
-          </span>
-        ) : null}
-      </Link>
+      <GridCellCollection
+        rowHeight={rowHeight}
+        renderOverflow={overflowLink}
+        items={chips.map((chip, chipIndex) => ({
+          key: `${chip.label}:${chipIndex}`,
+          label: chip.label,
+          content: (
+            <Link
+              className="min-w-0"
+              href={currentRecordHref}
+              onClick={openRecord}
+              title={chip.label}
+            >
+              <FieldBadge chip={chip} />
+            </Link>
+          ),
+        }))}
+      />
     );
   }
 
-  if (kind === "attachment") {
-    return <AttachmentValuePreview presentation="grid" value={rawValue} />;
+  if (isFileFieldType(field.type)) {
+    return <AttachmentValuePreview presentation="grid" rowHeight={rowHeight} value={rawValue} />;
   }
 
   if (kind === "whiteboard") {
@@ -2560,10 +2932,15 @@ function RecordTableCellContent({
         onClick={openRecord}
         title={fieldLabel(field.type)}
       >
-        <WhiteboardThumbnail
-          className="h-8 w-14 shrink-0 [&_svg]:h-full [&_svg]:w-full [&_svg]:object-contain"
-          previewSvg={previewSvg}
-        />
+        <span
+          className="block max-w-full shrink-0"
+          style={{ height: rowHeight - 8, width: Math.min(220, (rowHeight - 8) * 1.75) }}
+        >
+          <WhiteboardThumbnail
+            className="h-full w-full [&_svg]:h-full [&_svg]:w-full [&_svg]:object-contain"
+            previewSvg={previewSvg}
+          />
+        </span>
       </Link>
     );
   }
@@ -2579,41 +2956,47 @@ function RecordTableCellContent({
     }
 
     return (
-      <div className="flex min-w-0 flex-wrap gap-1.5 py-1">
-        {relationIds.map((recordId) => {
+      <GridCellCollection
+        rowHeight={rowHeight}
+        renderOverflow={overflowLink}
+        items={relationIds.map((recordId) => {
           const linkedRecord = records.find((item) => item.id === recordId);
           const label = linkedRecord
             ? getRecordTitle(linkedRecord, messages)
             : shortIdentifier(recordId);
           const chipClassName = "max-w-full truncate rounded-md bg-muted/70 px-2 py-0.5 text-xs";
-          return linkedRecord ? (
-            <Link
-              className={`${chipClassName} text-primary transition-colors hover:bg-primary/10 hover:underline`}
-              href={mergeSearchIntoHref(
-                `/base/${linkedRecord.base.slug}/${linkedRecord.id}`,
-                currentSearch,
-              )}
-              key={recordId}
-              title={label}
-            >
-              {label}
-            </Link>
-          ) : (
-            <span
-              className={`${chipClassName} text-muted-foreground`}
-              key={recordId}
-              title={recordId}
-            >
-              {label}
-            </span>
-          );
+          return {
+            key: recordId,
+            label,
+            content: linkedRecord ? (
+              <Link
+                className={`${chipClassName} text-primary transition-colors hover:bg-primary/10 hover:underline`}
+                href={mergeSearchIntoHref(
+                  `/base/${linkedRecord.base.slug}/${linkedRecord.id}`,
+                  currentSearch,
+                )}
+                key={recordId}
+                title={label}
+              >
+                {label}
+              </Link>
+            ) : (
+              <span
+                className={`${chipClassName} text-muted-foreground`}
+                key={recordId}
+                title={recordId}
+              >
+                {label}
+              </span>
+            ),
+          };
         })}
-      </div>
+      />
     );
   }
 
   if (kind === "link") {
-    const preview = buildTableCellPreview(rawValue);
+    const preview = buildGridCellText(rawValue);
     // Long signed URLs stay clickable: only the displayed text is bounded.
     if (
       typeof rawValue === "string" ? rawValue.length > TABLE_CELL_LINK_MAX_CHARS : preview.truncated
@@ -2655,14 +3038,14 @@ function RecordTableCellContent({
         target={external ? "_blank" : undefined}
         title={preview.text}
       >
-        <span className="min-w-0 truncate">{preview.text}</span>
+        <GridCellText rowHeight={rowHeight}>{preview.text}</GridCellText>
         {external ? <ExternalLink className="shrink-0" size={12} /> : null}
       </a>
     );
   }
 
   if (["markdown", "code", "json", "yaml"].includes(field.type)) {
-    const preview = buildTableCellPreview(rawValue);
+    const preview = buildGridCellText(rawValue);
     const showOpenRecord = preview.truncated;
     const summary = preview.text;
     if (!summary && !showOpenRecord) {
@@ -2693,7 +3076,7 @@ function RecordTableCellContent({
         }
         data-table-preview-bounded={showOpenRecord ? "true" : undefined}
       >
-        <span className="min-w-0 truncate">{summary}</span>
+        <GridCellText rowHeight={rowHeight}>{summary}</GridCellText>
         {showOpenRecord ? (
           <span className="ml-2 shrink-0 text-[10px] text-muted-foreground no-underline">
             {messages.operation.viewFullContent}
@@ -2719,21 +3102,23 @@ function RecordTableCellContent({
     }
     return (
       <Link
-        className={`flex min-w-0 items-center gap-2 py-1 ${
+        className={`flex min-w-0 items-center gap-2 ${
           index === 0 ? "font-medium text-foreground" : "text-muted-foreground"
         }`}
         href={currentRecordHref}
         onClick={openRecord}
         title={preview.sourceUrl}
       >
-        <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded border bg-muted/35 text-muted-foreground">
+        <span className="inline-flex size-5 shrink-0 items-center justify-center rounded border bg-muted/35 text-muted-foreground">
           <PlaySquare size={14} />
         </span>
         <span className="min-w-0">
           <span className="block truncate font-medium text-foreground text-xs">
             {preview.label}
           </span>
-          <span className="block truncate text-muted-foreground text-[11px]">
+          <span
+            className={`${rowHeight <= 32 ? "hidden" : "block"} truncate text-muted-foreground text-[11px]`}
+          >
             {preview.hostname}
           </span>
         </span>
@@ -2756,20 +3141,23 @@ function RecordTableCellContent({
     );
   }
 
-  const preview = buildTableCellPreview(rawValue);
+  const preview = buildGridCellText(rawValue);
   const showOpenRecord = preview.truncated;
   // Format the bounded slice, not the raw value, so a long HTML field still
   // previews as text. Its cut-off trailing tag has no `>` for the stripper.
-  const formattedValue = getFieldPreviewText(
-    field,
-    !preview.truncated
-      ? rawValue
-      : field.type === "html"
-        ? preview.text.replace(/<[^>]*$/, "")
-        : preview.text,
-    messages,
-    locale,
-  );
+  const formattedValue =
+    GRID_FIELD_PRESENTATION[field.type] === "text" && field.type !== "html"
+      ? preview.text
+      : getFieldPreviewText(
+          field,
+          !preview.truncated
+            ? rawValue
+            : field.type === "html"
+              ? preview.text.replace(/<[^>]*$/, "")
+              : preview.text,
+          messages,
+          locale,
+        );
   const value =
     formattedValue.length > TABLE_CELL_PREVIEW_MAX_CHARS
       ? buildTableCellPreview(formattedValue).text
@@ -2792,7 +3180,9 @@ function RecordTableCellContent({
       {index === 0 ? (
         <span className="h-4 w-4 shrink-0 rounded border border-border/70 bg-muted/40" />
       ) : null}
-      <span className="min-w-0 truncate">{value || "-"}</span>
+      <GridCellText rowHeight={rowHeight} scalar={GRID_FIELD_PRESENTATION[field.type] === "scalar"}>
+        {value || "-"}
+      </GridCellText>
       {showOpenRecord ? (
         <span
           className={`${

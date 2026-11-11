@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -30,8 +31,15 @@ type Client = ReturnType<typeof createRouterClient<typeof busabaseRouter, Record
 
 const MIGRATIONS_CWD = path.resolve(__dirname, "../../../apps/busabase");
 const API = "http://busabase.test/api/v1";
-const HASH_A = `sha256:${"a".repeat(64)}`;
-const HASH_B = `sha256:${"b".repeat(64)}`;
+const fixtureBodies = new Map<string, Buffer>();
+const fixtureHash = (label: string, size = 99) => {
+  const bytes = Buffer.alloc(size, label);
+  const digest = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+  fixtureBodies.set(digest, bytes);
+  return digest;
+};
+const HASH_A = fixtureHash("a", 1234);
+const HASH_B = fixtureHash("b", 10);
 
 const expectDefined = <T>(value: T | undefined): T => {
   expect(value).toBeDefined();
@@ -71,7 +79,27 @@ describe("Assets + attachment dedup — oRPC integration", () => {
     }
   });
 
+  const storeFixture = async (input: {
+    storageKey: string;
+    sizeBytes: number;
+    mimeType: string;
+    contentHash?: string;
+  }) => {
+    const bytes = input.contentHash
+      ? fixtureBodies.get(input.contentHash)
+      : Buffer.alloc(input.sizeBytes);
+    if (!bytes || bytes.length !== input.sizeBytes) throw new Error("Invalid upload fixture bytes");
+    await storage.uploadFileToKey(bytes, input.storageKey, input.mimeType);
+  };
+  const confirmUploaded = async (input: Parameters<Client["assets"]["confirm"]>[0]) => {
+    await storeFixture(input);
+    return client.assets.confirm(input);
+  };
+
   const callOpenApi = async (method: string, routePath: string, body?: unknown) => {
+    if (routePath === "/assets/confirmations") {
+      await storeFixture(body as Parameters<Client["assets"]["confirm"]>[0]);
+    }
     const handler = new OpenAPIHandler(busabaseRouter);
     const request = new Request(`${API}${routePath}`, {
       method,
@@ -99,7 +127,7 @@ describe("Assets + attachment dedup — oRPC integration", () => {
       sizeBytes: 99,
       contentHash,
     });
-    await client.assets.confirm({
+    await confirmUploaded({
       storageKey: req.storageKey,
       fileName,
       mimeType: "image/png",
@@ -132,11 +160,13 @@ describe("Assets + attachment dedup — oRPC integration", () => {
       // Git/OCI-style content-addressed key (algorithm segment + 2-char fan-out),
       // namespaced under its owner and Space so independent tenants never
       // overwrite the same object through separate upload confirmations.
-      expect(req1.storageKey).toMatch(/^attachments\/local\/spaces\/local\/blobs\/sha256\/aa\//);
+      expect(req1.storageKey).toContain(
+        `attachments/local/spaces/local/blobs/sha256/${HASH_A.slice(7, 9)}/`,
+      );
       expect(req1.storageKey).toMatch(/\.png$/);
       expect(req1.duplicate).toBe(false);
 
-      const conf1 = await client.assets.confirm({
+      const conf1 = await confirmUploaded({
         storageKey: req1.storageKey,
         fileName: "logo.png",
         mimeType: "image/png",
@@ -168,7 +198,7 @@ describe("Assets + attachment dedup — oRPC integration", () => {
         sizeBytes: 10,
         contentHash: HASH_B,
       });
-      const c1 = await client.assets.confirm({
+      const c1 = await confirmUploaded({
         storageKey: req.storageKey,
         fileName: "a.png",
         mimeType: "image/png",
@@ -177,7 +207,7 @@ describe("Assets + attachment dedup — oRPC integration", () => {
       });
       // A second confirm with a different storageKey but the same hash still
       // resolves to the first row (no duplicate registry entry).
-      const c2 = await client.assets.confirm({
+      const c2 = await confirmUploaded({
         storageKey: "attachments/local/elsewhere/x.png",
         fileName: "b.png",
         mimeType: "image/png",
@@ -203,7 +233,7 @@ describe("Assets + attachment dedup — oRPC integration", () => {
      * blesses as an attachment.
      */
     it("rejects a text-namespace storageKey while a normal binary confirm still succeeds", async () => {
-      const hash = `sha256:${"3".repeat(64)}`;
+      const hash = fixtureHash("3", 42);
       const req = await client.assets.createUploadUrl({
         fileName: "namespace.png",
         mimeType: "image/png",
@@ -211,7 +241,7 @@ describe("Assets + attachment dedup — oRPC integration", () => {
         contentHash: hash,
       });
       // Control: the binary path a real client walks still works end to end.
-      const confirmed = await client.assets.confirm({
+      const confirmed = await confirmUploaded({
         storageKey: req.storageKey,
         fileName: "namespace.png",
         mimeType: "image/png",
@@ -280,14 +310,14 @@ describe("Assets + attachment dedup — oRPC integration", () => {
     });
 
     it("dedups repeat uploads through the asset route only", async () => {
-      const hash = `sha256:${"8".repeat(64)}`;
+      const hash = fixtureHash("8", 18);
       const req = await client.assets.createUploadUrl({
         fileName: "compat.png",
         mimeType: "image/png",
         sizeBytes: 18,
         contentHash: hash,
       });
-      const confirmed = await client.assets.confirm({
+      const confirmed = await confirmUploaded({
         storageKey: req.storageKey,
         fileName: "compat.png",
         mimeType: "image/png",
@@ -326,7 +356,7 @@ describe("Assets + attachment dedup — oRPC integration", () => {
             mimeType: "text/plain",
             sizeBytes: 6,
           });
-          const confirmed = await client.assets.confirm({
+          const confirmed = await confirmUploaded({
             storageKey: upload.storageKey,
             fileName: "direct.txt",
             mimeType: "text/plain",
@@ -364,7 +394,7 @@ describe("Assets + attachment dedup — oRPC integration", () => {
             mimeType: "text/plain",
             sizeBytes: 9,
           });
-          return client.assets.confirm({
+          return confirmUploaded({
             storageKey: upload.storageKey,
             fileName: "review-me.txt",
             mimeType: "text/plain",
@@ -467,7 +497,7 @@ describe("Assets + attachment dedup — oRPC integration", () => {
     });
 
     it("updates AI-readable Asset metadata through the public OpenAPI route", async () => {
-      const hash = `sha256:${"5".repeat(64)}`;
+      const hash = fixtureHash("5", 72);
       const upload = await callOpenApi("POST", "/assets/upload-urls", {
         fileName: "ai-readable-brochure.pdf",
         mimeType: "application/pdf",
@@ -571,14 +601,14 @@ describe("Assets + attachment dedup — oRPC integration", () => {
     });
 
     it("indexes legacy attachmentId-only refs into Assets", async () => {
-      const hashG = `sha256:${"9".repeat(64)}`;
+      const hashG = fixtureHash("9", 12);
       const req = await client.assets.createUploadUrl({
         fileName: "legacy.png",
         mimeType: "image/png",
         sizeBytes: 12,
         contentHash: hashG,
       });
-      await client.assets.confirm({
+      await confirmUploaded({
         storageKey: req.storageKey,
         fileName: "legacy.png",
         mimeType: "image/png",
@@ -626,14 +656,14 @@ describe("Assets + attachment dedup — oRPC integration", () => {
 
   describe("Where-Used (Doc body embeds)", () => {
     it("does not record a usage when a Doc body embeds a resolved storage URL", async () => {
-      const hashD = `sha256:${"d".repeat(64)}`;
+      const hashD = fixtureHash("d", 99);
       const req = await client.assets.createUploadUrl({
         fileName: "diagram.png",
         mimeType: "image/png",
         sizeBytes: 99,
         contentHash: hashD,
       });
-      await client.assets.confirm({
+      await confirmUploaded({
         storageKey: req.storageKey,
         fileName: "diagram.png",
         mimeType: "image/png",
@@ -671,7 +701,7 @@ describe("Assets + attachment dedup — oRPC integration", () => {
     });
 
     it("records a usage for the stable /api/assets/{id}/raw form the editor writes today", async () => {
-      const asset = await uploadAsset("stable-ref.png", `sha256:${"0c".repeat(32)}`);
+      const asset = await uploadAsset("stable-ref.png", fixtureHash("0c"));
       const doc = await client.docs.create({
         autoMerge: true,
         slug: "wu-doc-stable",
@@ -711,8 +741,8 @@ describe("Assets + attachment dedup — oRPC integration", () => {
     });
 
     it("indexes only the stable form in a mixed body, and ignores an id that names no asset", async () => {
-      const legacy = await uploadAsset("mixed-legacy.png", `sha256:${"0d".repeat(32)}`);
-      const stable = await uploadAsset("mixed-stable.png", `sha256:${"0e".repeat(32)}`);
+      const legacy = await uploadAsset("mixed-legacy.png", fixtureHash("0d"));
+      const stable = await uploadAsset("mixed-stable.png", fixtureHash("0e"));
       const doc = await client.docs.create({
         autoMerge: true,
         slug: "wu-doc-mixed",
@@ -751,7 +781,7 @@ describe("Assets + attachment dedup — oRPC integration", () => {
 
   describe("Raw asset content (the /api/assets/{id}/raw route's gate)", () => {
     it("resolves a live storage URL for a caller who can see the asset", async () => {
-      const asset = await uploadAsset("raw-owner.png", `sha256:${"0f".repeat(32)}`);
+      const asset = await uploadAsset("raw-owner.png", fixtureHash("0f"));
       const content = await resolveAssetContent(asset.id);
       expect(content.assetId).toBe(asset.id);
       expect(content.fileName).toBe("raw-owner.png");
@@ -771,8 +801,8 @@ describe("Assets + attachment dedup — oRPC integration", () => {
      * yes for the anonymous visitor a public share creates, and no otherwise.
      */
     it("lets an anonymous visitor read an image embedded in a PUBLICLY SHARED doc, and refuses one that is not shared", async () => {
-      const shared = await uploadAsset("public-pixel.png", `sha256:${"1a".repeat(32)}`);
-      const secret = await uploadAsset("private-pixel.png", `sha256:${"1b".repeat(32)}`);
+      const shared = await uploadAsset("public-pixel.png", fixtureHash("1a"));
+      const secret = await uploadAsset("private-pixel.png", fixtureHash("1b"));
 
       // The usage row is what carries authority, and it is written by the Doc
       // MERGE (syncDocAssetUsages) — so go through the real create-then-merge
@@ -794,7 +824,7 @@ describe("Assets + attachment dedup — oRPC integration", () => {
 
   describe("Where-Used (File nodes)", () => {
     it("creates first-class File nodes that reference Assets and appear in search", async () => {
-      const hash = `sha256:${"7".repeat(64)}`;
+      const hash = fixtureHash("7", 88);
       const req = await client.assets.createUploadUrl({
         fileName: "board-plan.pdf",
         mimeType: "application/pdf",
@@ -802,7 +832,7 @@ describe("Assets + attachment dedup — oRPC integration", () => {
         contentHash: hash,
         context: "file-node",
       });
-      const confirmed = await client.assets.confirm({
+      const confirmed = await confirmUploaded({
         storageKey: req.storageKey,
         fileName: "board-plan.pdf",
         mimeType: "application/pdf",
@@ -850,7 +880,7 @@ describe("Assets + attachment dedup — oRPC integration", () => {
     });
 
     it("creates File nodes through the public OpenAPI Change Request route", async () => {
-      const hash = `sha256:${"6".repeat(64)}`;
+      const hash = fixtureHash("6", 96);
       const upload = await callOpenApi("POST", "/assets/upload-urls", {
         fileName: "openapi-board-plan.pdf",
         mimeType: "application/pdf",
@@ -904,14 +934,14 @@ describe("Assets + attachment dedup — oRPC integration", () => {
 
   describe("assets.delete (refcount-guarded)", () => {
     it("deletes an unreferenced asset and removes it from the library", async () => {
-      const hashE = `sha256:${"e".repeat(64)}`;
+      const hashE = fixtureHash("e", 7);
       const req = await client.assets.createUploadUrl({
         fileName: "temp.png",
         mimeType: "image/png",
         sizeBytes: 7,
         contentHash: hashE,
       });
-      await client.assets.confirm({
+      await confirmUploaded({
         storageKey: req.storageKey,
         fileName: "temp.png",
         mimeType: "image/png",
@@ -928,14 +958,14 @@ describe("Assets + attachment dedup — oRPC integration", () => {
     });
 
     it("refuses to delete an asset that is still referenced", async () => {
-      const hashF = `sha256:${"f".repeat(64)}`;
+      const hashF = fixtureHash("f", 8);
       const req = await client.assets.createUploadUrl({
         fileName: "used.png",
         mimeType: "image/png",
         sizeBytes: 8,
         contentHash: hashF,
       });
-      await client.assets.confirm({
+      await confirmUploaded({
         storageKey: req.storageKey,
         fileName: "used.png",
         mimeType: "image/png",
@@ -983,15 +1013,15 @@ describe("Assets + attachment dedup — oRPC integration", () => {
 
     it("does not delete the Attachment while another Asset row still points at it", async () => {
       const db = await getDb();
-      const hashG = `sha256:${"1".repeat(64)}`;
-      const hashH = `sha256:${"2".repeat(64)}`;
+      const hashG = fixtureHash("1", 9);
+      const hashH = fixtureHash("2", 10);
       const reqA = await client.assets.createUploadUrl({
         fileName: "shared-a.png",
         mimeType: "image/png",
         sizeBytes: 9,
         contentHash: hashG,
       });
-      await client.assets.confirm({
+      await confirmUploaded({
         storageKey: reqA.storageKey,
         fileName: "shared-a.png",
         mimeType: "image/png",
@@ -1007,7 +1037,7 @@ describe("Assets + attachment dedup — oRPC integration", () => {
         sizeBytes: 10,
         contentHash: hashH,
       });
-      await client.assets.confirm({
+      await confirmUploaded({
         storageKey: reqB.storageKey,
         fileName: "shared-b.png",
         mimeType: "image/png",

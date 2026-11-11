@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ConversionNotSupportedError,
+  canConvertFieldType,
   convertFieldValue,
   fromText,
   toText,
@@ -432,5 +433,49 @@ describe("convertFieldValue edge branches", () => {
 
   it("attachment source type → throws", () => {
     expect(() => convertFieldValue([], "attachment", "text")).toThrow(ConversionNotSupportedError);
+  });
+});
+
+describe("attachment ⇄ drive", () => {
+  const file = (fileName: string, path?: string) => ({
+    assetId: `ast_${fileName}`,
+    attachmentId: `att_${fileName}`,
+    url: `https://cdn.test/${fileName}`,
+    fileName,
+    mimeType: "application/pdf",
+    size: 3,
+    ...(path ? { path } : {}),
+  });
+
+  it("is the only conversion a file column allows, in both directions", () => {
+    expect(canConvertFieldType("attachment", "drive")).toBe(true);
+    expect(canConvertFieldType("drive", "attachment")).toBe(true);
+    for (const other of ["text", "json", "relation", "member", "created_time"] as FieldType[]) {
+      expect(canConvertFieldType("attachment", other)).toBe(false);
+      expect(canConvertFieldType("drive", other)).toBe(false);
+      expect(canConvertFieldType(other, "drive")).toBe(false);
+    }
+    // Unchanged for everything else.
+    expect(canConvertFieldType("text", "number")).toBe(true);
+    expect(canConvertFieldType("member", "text")).toBe(false);
+    expect(() => convertFieldValue([], "drive", "text")).toThrow(ConversionNotSupportedError);
+  });
+
+  it("attachment → drive keeps every file, at the root, with unique names", () => {
+    expect(convertFieldValue([file("a.pdf"), file("a.pdf")], "attachment", "drive")).toEqual([
+      { ...file("a.pdf"), path: "a.pdf" },
+      { ...file("a.pdf"), fileName: "a (2).pdf", path: "a (2).pdf" },
+    ]);
+  });
+
+  it("drive → attachment keeps every file and drops only the folders", () => {
+    expect(
+      convertFieldValue(
+        [file("a.pdf", "2026/a.pdf"), file("b.pdf", "b.pdf")],
+        "drive",
+        "attachment",
+      ),
+    ).toEqual([file("a.pdf"), file("b.pdf")]);
+    expect(convertFieldValue(null, "drive", "attachment")).toBeNull();
   });
 });

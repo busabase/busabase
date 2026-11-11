@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -33,7 +34,7 @@ describe("Asset-backed file search — content vs metadata", () => {
     process.env.STORAGE_URL = `local:${storageDir}?base_url=/api/test/storage`;
     client = createRouterClient(busabaseRouter);
 
-    const hash = `sha256:${"c".repeat(64)}`;
+    const hash = `sha256:${createHash("sha256").update(CONTENT).digest("hex")}`;
     const sizeBytes = Buffer.byteLength(CONTENT, "utf8");
     const req = await client.assets.createUploadUrl({
       fileName: "quarterly.txt",

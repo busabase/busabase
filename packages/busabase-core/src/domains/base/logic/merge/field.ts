@@ -441,6 +441,14 @@ export const mergeBaseConvertField = async (
   );
   const { convertFieldValue } = await import("../../utils/field-conversion");
   const { normalizeFieldValue } = await import("../../../../logic/vo");
+  const { isFileFieldType } = await import("../../field-types");
+  // attachment ⇄ drive keeps the same files, so it keeps the column's file
+  // limits too, and re-indexes each record's asset usages under the new paths.
+  const betweenFileTypes =
+    isFileFieldType(fieldData.fromType) && isFileFieldType(fieldData.newType);
+  const syncRecordAssetUsages = betweenFileTypes
+    ? (await import("../../../assets/handlers")).syncRecordAssetUsages
+    : null;
 
   // Resolve the field's slug — the authoritative record data is keyed by slug in
   // each record's head-commit `fields` JSON, and we rewrite that below.
@@ -523,6 +531,9 @@ export const mergeBaseConvertField = async (
       ? { choices: newChoices }
       : {};
   if (fieldRow?.options.help) newOptions.help = fieldRow.options.help;
+  if (betweenFileTypes && fieldRow?.options.attachment) {
+    newOptions.attachment = fieldRow.options.attachment;
+  }
   await db
     .update(busabaseBaseFields)
     .set({ type: fieldData.newType, options: newOptions })
@@ -556,10 +567,14 @@ export const mergeBaseConvertField = async (
       if (!headCommitId) continue;
       const fields = fieldsByCommit.get(headCommitId);
       if (!fields) continue;
+      const nextFields = { ...fields, [fieldSlug]: converted };
       await db
         .update(busabaseCommits)
-        .set({ payload: { ...fields, [fieldSlug]: converted } })
+        .set({ payload: nextFields })
         .where(eq(busabaseCommits.id, headCommitId));
+      if (syncRecordAssetUsages && fieldRow) {
+        await syncRecordAssetUsages(fieldRow.baseId, recordId, nextFields, db);
+      }
     }
   };
 

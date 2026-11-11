@@ -59,6 +59,7 @@ import {
 } from "../demo/dataset";
 import { DEMO_NODE_AGENT_PROMPTS, DEMO_PLAYBOOK_USAGE } from "../demo/playbooks";
 import { zhCnScenario } from "../demo/scenarios/zh-cn";
+import { isFileFieldType } from "../domains/base/field-types";
 import { getPrimaryField } from "../domains/base/utils/primary-field";
 import { sortViewsByOrder } from "../domains/base/utils/view-order";
 import { type DocLinesResult, sliceDocLinesRange, splitDocLines } from "../domains/doc/handlers";
@@ -701,6 +702,7 @@ export const demoGetNodeDetail = (nodeIdOrSlug: string, type?: string): NodeDeta
         children: node.children ?? [],
         storagePrefix: `busabase/nodes/${node.id}/folder/`,
         body: "",
+        bodyFormat: "markdown",
       });
     case "doc":
       return withDemoAttribution({ type: "doc", ...demoGetDoc(node.id) });
@@ -841,7 +843,7 @@ const buildDemoAssetIndex = (): {
       continue;
     }
     const attachmentSlugs = base.fields
-      .filter((field) => field.type === "attachment")
+      .filter((field) => isFileFieldType(field.type))
       .map((field) => field.slug);
     for (const slug of attachmentSlugs) {
       for (const ref of extractDemoRefs(record.headCommit.payload[slug])) {

@@ -45,6 +45,7 @@ const folderDetail: NodeDetailVO = {
   children: [],
   storagePrefix: "busabase/nodes/nod_brand/folder/",
   body: "",
+  bodyFormat: "markdown",
 };
 
 const activityItem = {

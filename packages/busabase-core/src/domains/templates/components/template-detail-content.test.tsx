@@ -57,7 +57,7 @@ describe("TemplateDetailContent", () => {
     expect(action).toBeLessThan(markup.indexOf("</header>"));
   });
 
-  it("keeps category, version and tags off the title line", () => {
+  it("shows the version beside the title while keeping category and tags in the side column", () => {
     const tagged: TemplateCardVO = {
       ...template,
       category: "sales-crm",
@@ -68,12 +68,14 @@ describe("TemplateDetailContent", () => {
     const markup = renderToStaticMarkup(<TemplateDetailContent template={tagged} />);
     const header = markup.slice(0, markup.indexOf("</header>"));
     expect(header).not.toContain("sales-crm");
-    expect(header).not.toContain("0.1.0");
+    expect(header).toContain(">v0.1.0</div>");
+    expect(header.indexOf("v0.1.0")).toBeGreaterThan(header.indexOf("</h1>"));
 
-    // They live in the side column instead — plain tags once each, category first.
+    // Plain tags stay in the side column, category first, without repeating the version.
     const aside = markup.slice(markup.indexOf("<aside"));
     expect(aside).toContain("<li>sales-crm</li><li>pipeline</li>");
-    expect(aside).toContain("v0.1.0 · MIT");
+    expect(aside).toContain("<p>MIT</p>");
+    expect(aside).not.toContain("v0.1.0");
   });
 
   it("never renders an internal prefix:value tag", () => {

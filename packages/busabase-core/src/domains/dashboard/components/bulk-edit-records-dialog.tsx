@@ -8,8 +8,9 @@ import { useState } from "react";
 import { fmt, useCoreI18n, useIString } from "../../../i18n";
 import { localizeCoreErrorMessage } from "../../../i18n/localize-error";
 import { isReadOnlyFieldDef } from "../../base/field-types";
+import { normalizeEditorFieldValue } from "../helpers/field";
 import type { RecordSubmitOptions } from "../helpers/view-types";
-import { normalizeEditorFieldValue, RecordFieldInput } from "./record-views";
+import { RecordFieldInput } from "./record-views";
 import { SplitSubmitButton } from "./split-submit-button";
 
 /**

@@ -529,6 +529,112 @@ describe("install.fromGithub — a template", () => {
     });
   });
 
+  describe("independent multilingual copies", () => {
+    it("installs two complete copies with isolated resources and keeps them working after a root slug change", async () => {
+      zipball = await zipFiles(requiredRelationTemplateFiles(), "required-crm-independent-main");
+      const spaceId = "space_tpl_independent_copies";
+      try {
+        const results = [];
+        for (let copy = 0; copy < 2; copy++) {
+          const preview = await inSpace(spaceId, () =>
+            client.install.planFromGithub({
+              repoUrl: "https://github.com/acme/required-crm",
+              newFolder: { name: "团队 チーム فريق 📬" },
+            }),
+          );
+          expect(preview.newFolder).toMatchObject({ name: "团队 チーム فريق 📬" });
+          const result = await inSpace(spaceId, () =>
+            client.install.fromGithub({
+              repoUrl: "https://github.com/acme/required-crm",
+              newFolder: { slug: preview.targetFolderSlug, name: "团队 チーム فريق 📬" },
+            }),
+          );
+          expect(result.targetFolderSlug).toBe(preview.targetFolderSlug);
+          expect(result.created.records).toBe(3);
+          results.push(result);
+        }
+        expect(results[0]?.targetFolderSlug).not.toBe(results[1]?.targetFolderSlug);
+        const recordIdsByCopy: Set<string>[] = [];
+        for (const result of results) {
+          const folder = await inSpace(spaceId, () =>
+            client.nodes.get({ nodeId: result.targetFolderNodeId, type: "folder" }),
+          );
+          expect(folder.node.name).toBe("团队 チーム فريق 📬");
+          expect(folder.node.metadata).toMatchObject({
+            appId: "required-crm",
+            resourceKey: APP_ROOT_RESOURCE_KEY,
+          });
+          const skill = folder.children.find((node) => node.type === "skill");
+          const airapp = folder.children.find((node) => node.type === "airapp");
+          expect(skill?.metadata).toMatchObject({ appId: "required-crm" });
+          expect(airapp?.metadata).toMatchObject({
+            appId: "required-crm",
+            resourceKey: "required-crm-app",
+          });
+          expect(
+            await inSpace(spaceId, () =>
+              client.fileTrees.listFiles({ nodeId: skill?.id ?? "", type: "skill" }),
+            ),
+          ).not.toHaveLength(0);
+          expect(
+            await inSpace(spaceId, () =>
+              client.fileTrees.listFiles({ nodeId: airapp?.id ?? "", type: "airapp" }),
+            ),
+          ).not.toHaveLength(0);
+          const ids = new Set<string>();
+          const linkedTargets: string[] = [];
+          for (const resourceKey of ["companies", "contacts", "activities"]) {
+            const base = folder.children.find((node) => node.metadata?.resourceKey === resourceKey);
+            const rows = await inSpace(spaceId, () =>
+              client.records.list({ baseId: base?.baseId ?? "" }),
+            );
+            expect(rows.records).toHaveLength(1);
+            const recordId = rows.records[0]?.id ?? "";
+            ids.add(recordId);
+            const links = await inSpace(spaceId, () => client.records.listLinks({ recordId }));
+            linkedTargets.push(...links.map((link) => link.targetRecordId));
+          }
+          expect(linkedTargets).toHaveLength(3);
+          expect(linkedTargets.every((targetId) => ids.has(targetId))).toBe(true);
+          recordIdsByCopy.push(ids);
+        }
+        expect([...recordIdsByCopy[0]].some((recordId) => recordIdsByCopy[1].has(recordId))).toBe(
+          false,
+        );
+
+        const first = results[0];
+        await inSpace(spaceId, () =>
+          client.nodes.createChangeRequest({
+            autoMerge: true,
+            operations: [
+              { kind: "rename", nodeId: first.targetFolderNodeId, slug: "renamed-workspace" },
+            ],
+          }),
+        );
+        const renamed = await inSpace(spaceId, () =>
+          client.nodes.get({ nodeId: "renamed-workspace", type: "folder" }),
+        );
+        expect(renamed.node.id).toBe(first.targetFolderNodeId);
+        expect(renamed.node.name).toBe("团队 チーム فريق 📬");
+        expect(renamed.children.filter((node) => node.type === "base")).toHaveLength(3);
+        const contactBase = renamed.children.find(
+          (node) => node.metadata?.resourceKey === "contacts",
+        );
+        const contacts = await inSpace(spaceId, () =>
+          client.records.list({ baseId: contactBase?.baseId ?? "" }),
+        );
+        const contactLinks = await inSpace(spaceId, () =>
+          client.records.listLinks({ recordId: contacts.records[0]?.id ?? "" }),
+        );
+        expect(contactLinks.every((link) => recordIdsByCopy[0].has(link.targetRecordId))).toBe(
+          true,
+        );
+      } finally {
+        zipball = await zipFiles(templateFiles(), "busabase-skills-main");
+      }
+    });
+  });
+
   describe("required sample relations", () => {
     it("installs dependent sample rows in canonical relation order", async () => {
       zipball = await zipFiles(requiredRelationTemplateFiles(), "required-crm-main");

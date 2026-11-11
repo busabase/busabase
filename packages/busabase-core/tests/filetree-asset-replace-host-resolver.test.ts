@@ -1,7 +1,9 @@
+import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createRouterClient } from "@orpc/server";
+import { storage } from "openlib/storage";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { BusabaseContext } from "../src/context";
 import type { busabaseRouter } from "../src/router";
@@ -81,7 +83,10 @@ describe("File-tree asset replace on PGlite with a DB-backed host user resolver"
     sizeBytes: number;
     contentHash: string;
   }) => {
+    const bytes = Buffer.alloc(input.sizeBytes, input.contentHash);
+    input = { ...input, contentHash: `sha256:${createHash("sha256").update(bytes).digest("hex")}` };
     const request = await client.assets.createUploadUrl(input);
+    await storage.uploadFileToKey(bytes, request.storageKey, input.mimeType);
     const confirmed = await client.assets.confirm({ storageKey: request.storageKey, ...input });
     return confirmed.assetId as string;
   };
@@ -147,7 +152,9 @@ describe("File-tree asset replace on PGlite with a DB-backed host user resolver"
       // Same Asset id at the path, now carrying the replacement's bytes.
       expect(file.assetId).toBe(originalAssetId);
       expect(file.displayName).toBe("Deck v2");
-      expect(asset.contentHash).toBe(replacementHash);
+      expect(asset.contentHash).toBe(
+        `sha256:${createHash("sha256").update(Buffer.alloc(2048, replacementHash)).digest("hex")}`,
+      );
       expect(asset.size).toBe(2048);
       // The uploaded Asset was cleaned up inside the merge (the audited delete).
       expect(library.some((entry) => entry.id === replacementAssetId)).toBe(false);

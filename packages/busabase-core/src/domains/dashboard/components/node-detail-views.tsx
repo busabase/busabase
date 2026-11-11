@@ -2522,7 +2522,9 @@ export function FolderDetailView({
       className="mx-auto h-full min-h-0 w-full min-w-0 max-w-5xl overflow-auto px-6 py-5"
       data-dashboard-scroll="folder-detail"
     >
-      {hasReadme ? <FolderReadme body={folder.body} /> : null}
+      {hasReadme ? (
+        <FolderReadme body={folder.body} bodyFormat={folder.bodyFormat} node={folder.node} />
+      ) : null}
       {folder.children.length === 0 ? (
         hasReadme ? (
           <p className="text-muted-foreground text-sm">{messages.nodeDetail.emptyFolderBody}</p>

@@ -1,9 +1,32 @@
 import "server-only";
 
 import { StringDecoder } from "node:string_decoder";
-import { and, asc, count, eq, exists, gt, ilike, isNull, notExists, or, sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  exists,
+  gt,
+  ilike,
+  isNull,
+  lt,
+  max,
+  min,
+  notExists,
+  or,
+  sql,
+} from "drizzle-orm";
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import type { BusabaseDatabase as Db } from "../../../context";
-import { busabaseAssets, busabaseAssetUsages, busabaseNodes } from "../../../db/schema";
+import {
+  attachments,
+  busabaseAssets,
+  busabaseAssetUsages,
+  busabaseNodes,
+} from "../../../db/schema";
 import {
   busabaseAssetTextSearch,
   busabaseAssetTextSearchChunks,
@@ -143,10 +166,37 @@ export interface ReindexReport {
   chunks: number;
 }
 
-const describeError = (error: unknown): string => {
-  if (!(error instanceof Error)) return String(error).slice(0, 200);
+const describeOne = (error: unknown): string => {
+  if (!(error instanceof Error)) return String(error);
   const code = "code" in error && typeof error.code === "string" ? ` ${error.code}` : "";
-  return `${error.name}${code}: ${error.message}`.slice(0, 200);
+  return `${error.name}${code}: ${error.message}`;
+};
+
+/**
+ * `name code: message`, trimmed. A Drizzle query error carries the SQL in its own
+ * message and the database's reason (the constraint, the missing relation) in
+ * `cause`, so the reason comes first: it is what an operator needs, and the SQL
+ * alone fills any reasonable limit.
+ */
+const describeError = (error: unknown): string => {
+  const cause = error instanceof Error ? error.cause : undefined;
+  const text = cause
+    ? `${describeOne(cause)} (${describeOne(error).slice(0, 80)})`
+    : describeOne(error);
+  return text.slice(0, 240);
+};
+
+/**
+ * PGLite runs inside this process on one connection. Background work on it has
+ * no spare capacity to use, and it cannot be torn down from under: a test that
+ * removed its data directory while a run was still writing left PGLite spinning
+ * in WebAssembly for good, so `cli-golden-path` hung CI for hours whenever the
+ * run outlived the test. On such a database indexing is the caller's own work,
+ * bounded by the time the caller is willing to wait.
+ */
+const isEmbedded = (db: Db): boolean => {
+  const client = (db as unknown as { $client?: object }).$client;
+  return client !== undefined && !("end" in client);
 };
 
 /**
@@ -270,6 +320,10 @@ export const warmAssetTextProjection = async (db: Db, assetId: string): Promise<
     run = reindexAssetText(db, assetId).finally(() => assets.delete(assetId));
     assets.set(assetId, run);
   }
+  if (isEmbedded(db)) {
+    await run;
+    return;
+  }
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     await Promise.race([
@@ -283,15 +337,69 @@ export const warmAssetTextProjection = async (db: Db, assetId: string): Promise<
   }
 };
 
-const failedUntil = new WeakMap<Db, Map<string, number>>();
-const cooldownFor = (db: Db): Map<string, number> => {
-  let failures = failedUntil.get(db);
+/**
+ * An asset that failed to index waits before its next attempt: ten minutes
+ * after the first failure, four times longer after each further one, up to a
+ * day. A fixed ten minutes made every permanently failing asset (a text
+ * object that is gone, say) rejoin the front of the queue six times an hour.
+ */
+const RETRY_BASE_MS = 10 * 60_000;
+const RETRY_MAX_MS = 24 * 60 * 60_000;
+export const retryDelayMs = (strikes: number): number =>
+  Math.min(RETRY_BASE_MS * 4 ** (Math.max(1, strikes) - 1), RETRY_MAX_MS);
+
+/** Enough for any realistic space; past it the oldest knowledge is dropped. */
+const MAX_TRACKED_FAILURES = 100_000;
+
+interface Backoff {
+  /** No attempt before this time. */
+  until: number;
+  strikes: number;
+}
+
+/** Per space: one space's failures neither fill another's list nor inflate its counts. */
+const failedUntil = new WeakMap<Db, Map<string, Map<string, Backoff>>>();
+const cooldownFor = (db: Db, spaceId: string | undefined): Map<string, Backoff> => {
+  let spaces = failedUntil.get(db);
+  if (!spaces) {
+    spaces = new Map();
+    failedUntil.set(db, spaces);
+  }
+  let failures = spaces.get(spaceId ?? "");
   if (!failures) {
     failures = new Map();
-    failedUntil.set(db, failures);
+    spaces.set(spaceId ?? "", failures);
   }
   return failures;
 };
+
+const recordFailure = (failures: Map<string, Backoff>, assetId: string): void => {
+  const strikes = (failures.get(assetId)?.strikes ?? 0) + 1;
+  if (failures.size >= MAX_TRACKED_FAILURES && !failures.has(assetId)) {
+    const now = Date.now();
+    for (const [id, backoff] of failures) if (backoff.until <= now) failures.delete(id);
+    if (failures.size >= MAX_TRACKED_FAILURES) failures.clear();
+  }
+  failures.set(assetId, { until: Date.now() + retryDelayMs(strikes), strikes });
+};
+
+/** Assets still waiting out a retry delay. Expired entries stay: they carry the strike count. */
+const backedOffIds = (failures: Map<string, Backoff>): string[] => {
+  const now = Date.now();
+  const ids: string[] = [];
+  for (const [id, backoff] of failures) if (backoff.until > now) ids.push(id);
+  return ids;
+};
+
+/**
+ * `column` is not one of `ids`. The list travels as one JSON parameter and is
+ * anti-joined, so a space with tens of thousands of failing assets neither hits
+ * the parameter limit nor makes each page scan the list row by row.
+ */
+const notInIdList = (column: AnyPgColumn, ids: string[]) =>
+  ids.length === 0
+    ? undefined
+    : sql`not exists (select 1 from jsonb_array_elements_text(${JSON.stringify(ids)}::jsonb) as skipped(id) where skipped.id = ${column})`;
 
 /** The asset has a mounted usage on a node that is not archived. */
 const liveUsageExists = (
@@ -404,7 +512,14 @@ export const ASSET_TEXT_MATCH_MAX_CHUNKS = 2_000;
  * scans off when the query has trigrams. A query without them (or one that
  * matches little but is not indexable, such as a two-character Chinese word)
  * still scans everything, so the caller bounds it with `statementMs` and
- * answers with what it has when that runs out.
+ * answers with what it has when that runs out. So does a phrase the planner
+ * judges common, even with trigrams: it walks the space's assets through the
+ * chunk primary key instead, and took 2 s to reach the chunk limit for a
+ * phrase in 6,500 of 18,431 chunks (2026-11-09).
+ *
+ * The assets come back in the order the statement reached them. When it is
+ * capped or runs out of time, that is not the page's order; see
+ * `matchAssetTextAssetIdsInOrder`.
  *
  * Must run inside a transaction: both settings are transaction-local.
  */
@@ -448,6 +563,194 @@ export const matchAssetTextAssetIds = async (
   };
 };
 
+/**
+ * One bounded page of candidates in the caller's order, including nonmatches.
+ * Completed pages can be retained when a later page times out.
+ *
+ * `matchAssetTextAssetIds` lists matches in whatever order it reaches them.
+ * Once a phrase is in more chunks than it may list, or in more text than it can
+ * read in time — any common word in a large space — the assets it returns are
+ * not the ones the page shows, and the newest file is as likely as any to be
+ * left out. This asks the other way round: the caller's own assets in the
+ * page's order, one candidate page at a time, stopping at the first matching
+ * chunk of each asset. Search stops requesting pages once it has its window.
+ * Candidate metadata is paged before any of its text is read.
+ *
+ * A phrase found only in a few files would make it read everything. It stops
+ * at `maxChunks` chunks of assets instead — `statementMs` alone is not enough,
+ * because embedded PGlite ignores `statement_timeout` (measured: 6.3 s under a
+ * 200 ms limit). `complete` says whether the answer is the page's: `limit`
+ * matches, or every asset in scope read.
+ *
+ * `scope` is a condition over an asset usage and its asset, attachment and
+ * node: the one the caller's result rows obey, so the filter and the order are
+ * exactly the page's. An asset ranks by the earliest or latest of its visible
+ * usages, whichever its first row on the page will show. Must run inside a
+ * transaction: the time limit is transaction-local.
+ */
+export const matchAssetTextAssetIdsInOrderPage = async (
+  db: Db,
+  spaceId: string,
+  pattern: string,
+  opts: {
+    statementMs: number;
+    limit: number;
+    scope: SQL | undefined;
+    order: { column: "createdAt" | "updatedAt"; ascending: boolean };
+    maxChunks?: number;
+    offset?: number;
+    pageSize?: number;
+  },
+): Promise<AssetTextInOrderPage> => {
+  await db.execute(sql`select set_config('statement_timeout', ${String(opts.statementMs)}, true)`);
+  const maxChunks = opts.maxChunks ?? ASSET_TEXT_MATCH_MAX_CHUNKS;
+  const column = busabaseAssetUsages[opts.order.column];
+  const rank = opts.order.ascending ? min(column) : max(column);
+  const direction = opts.order.ascending ? asc : desc;
+  // No join to the text slot here: matching it on two columns, the planner
+  // expects one row where there are thousands and joins them one at a time
+  // (590 ms to rank 24,090 assets, against 100 ms without it). The walk checks
+  // the slot instead, for the few assets it reaches.
+  const top = db
+    .select({
+      assetId: busabaseAssetUsages.assetId,
+      textStorageKey: busabaseAssetTextSearch.textStorageKey,
+      rank: rank.as("rank"),
+    })
+    .from(busabaseAssetUsages)
+    .innerJoin(busabaseAssets, eq(busabaseAssetUsages.assetId, busabaseAssets.id))
+    .innerJoin(attachments, eq(busabaseAssets.attachmentId, attachments.id))
+    .innerJoin(busabaseNodes, eq(busabaseAssetUsages.nodeId, busabaseNodes.id))
+    .innerJoin(busabaseAssetTextSearch, eq(busabaseAssetTextSearch.assetId, busabaseAssets.id))
+    .where(and(eq(busabaseAssetTextSearch.spaceId, spaceId), opts.scope))
+    .groupBy(busabaseAssetUsages.assetId, busabaseAssetTextSearch.textStorageKey)
+    .orderBy(direction(rank), asc(busabaseAssetUsages.assetId))
+    // Each asset counts as at least one chunk, so the walk never passes more
+    // assets than the budget; the one after them shows there were more.
+    .limit(maxChunks + 1)
+    .as("top");
+  const sized = db
+    .select({
+      assetId: top.assetId,
+      textStorageKey: top.textStorageKey,
+      rank: top.rank,
+      // The primary key answers this without reading any text.
+      chunks: sql<number>`greatest((${db
+        .select({ n: sql`max(${busabaseAssetTextSearchChunks.chunkIndex}) + 1` })
+        .from(busabaseAssetTextSearchChunks)
+        .where(eq(busabaseAssetTextSearchChunks.assetId, top.assetId))}), 1)`.as("chunks"),
+    })
+    .from(top)
+    .as("sized");
+  const walkOrder = [direction(sized.rank), asc(sized.assetId)];
+  // What the walk has read by the time it reaches each asset.
+  const chunksBefore = sql<number>`coalesce(sum(${sized.chunks}) over (order by ${sql.join(
+    walkOrder,
+    sql`, `,
+  )} rows between unbounded preceding and 1 preceding), 0)`;
+  // Ordered inside, so the walk below reads assets in that order and stops:
+  // ordered only outside, every asset would be read before the sort.
+  const ranked = db
+    .select({
+      assetId: sized.assetId,
+      textStorageKey: sized.textStorageKey,
+      rank: sized.rank,
+      chunksBefore: chunksBefore.as("chunks_before"),
+    })
+    .from(sized)
+    .orderBy(...walkOrder)
+    .as("ranked");
+  // Page candidate metadata before reading text, including nonmatches. An
+  // OFFSET after the lateral match would reread all preceding text on every
+  // page and could never advance through a page with no matches.
+  const pageSize = opts.pageSize ?? 32;
+  const page = db
+    .select({
+      assetId: ranked.assetId,
+      textStorageKey: ranked.textStorageKey,
+      rank: ranked.rank,
+      chunksBefore: ranked.chunksBefore,
+    })
+    .from(ranked)
+    .orderBy(direction(ranked.rank), asc(ranked.assetId))
+    .offset(opts.offset ?? 0)
+    .limit(pageSize)
+    .as("page");
+  // LEFT LATERAL returns nonmatching candidates too, so the next page advances
+  // past them. A candidate beyond the chunk budget is a sentinel: return it
+  // without reading its text and disclose that the scope was not exhausted.
+  const firstHit = db
+    .select({ hit: sql<number>`1`.as("hit") })
+    .from(busabaseAssetTextSearchChunks)
+    .innerJoin(
+      busabaseAssetTexts,
+      and(
+        eq(busabaseAssetTexts.assetId, busabaseAssetTextSearchChunks.assetId),
+        eq(busabaseAssetTexts.textStorageKey, page.textStorageKey),
+        eq(busabaseAssetTexts.status, "present"),
+      ),
+    )
+    .where(
+      and(
+        lt(page.chunksBefore, maxChunks),
+        eq(busabaseAssetTextSearchChunks.assetId, page.assetId),
+        ilike(busabaseAssetTextSearchChunks.contentText, pattern),
+      ),
+    )
+    .limit(1)
+    .as("first_hit");
+  const rows = await db
+    .select({ assetId: page.assetId, chunksBefore: page.chunksBefore, hit: firstHit.hit })
+    .from(page)
+    .leftJoinLateral(firstHit, sql`true`)
+    .orderBy(direction(page.rank), asc(page.assetId));
+  const checked = rows.filter((row) => Number(row.chunksBefore) < maxChunks);
+  const stopped = checked.length < rows.length;
+  const assetIds = checked
+    .filter((row) => row.hit !== null)
+    .map((row) => row.assetId)
+    .slice(0, opts.limit);
+  return {
+    assetIds,
+    checkedAssets: checked.length,
+    complete: assetIds.length >= opts.limit || (!stopped && rows.length < pageSize),
+    stopped,
+  };
+};
+
+/** One completed page can survive a later page's statement timeout. */
+export interface AssetTextInOrderPage {
+  assetIds: string[];
+  checkedAssets: number;
+  complete: boolean;
+  stopped: boolean;
+}
+
+/** Direct callers can walk all pages in their transaction; search commits each page separately. */
+export const matchAssetTextAssetIdsInOrder = async (
+  db: Db,
+  spaceId: string,
+  pattern: string,
+  opts: Parameters<typeof matchAssetTextAssetIdsInOrderPage>[3],
+): Promise<{ assetIds: string[]; complete: boolean }> => {
+  const assetIds = new Set<string>();
+  let offset = opts.offset ?? 0;
+  while (true) {
+    const page = await matchAssetTextAssetIdsInOrderPage(db, spaceId, pattern, {
+      ...opts,
+      offset,
+      limit: opts.limit - assetIds.size,
+      pageSize: Math.min(opts.pageSize ?? 32, opts.limit - assetIds.size),
+    });
+    const needed = opts.limit - assetIds.size;
+    for (const id of page.assetIds) assetIds.add(id);
+    const complete =
+      page.complete && (page.assetIds.length < needed || assetIds.size >= opts.limit);
+    if (complete || page.stopped) return { assetIds: [...assetIds], complete };
+    offset += page.checkedAssets;
+  }
+};
+
 /** Bounded keyset page: failures never keep later assets from being visited. */
 export const backfillAssetTextSearch = async (
   db: Db,
@@ -460,8 +763,10 @@ export const backfillAssetTextSearch = async (
 ): Promise<{
   indexed: number;
   failed: number;
-  /** Of `failed`, how many were skipped because they failed within the last ten minutes. */
+  /** Of `failed`, how many were skipped because they were still backing off after a failure. */
   cooledDown: number;
+  /** Assets excluded from this page's query because they are backing off after a failure. */
+  backedOff: number;
   failedAssetIds: string[];
   /** Why the others failed: reason -> count. */
   failureReasons: Record<string, number>;
@@ -471,6 +776,12 @@ export const backfillAssetTextSearch = async (
   nextCursor: string | undefined;
 }> => {
   const limit = Math.max(1, Math.min(opts.limit ?? 25, 100));
+  const failures = cooldownFor(db, opts.spaceId);
+  // Backed-off assets are left out of the query itself. Skipping them after the
+  // fact still cost two queries per 25 of them on every run, and with thousands
+  // of failing assets at the front of the id order a run spent its whole budget
+  // walking past them before reaching any asset it could index.
+  const backedOff = opts.coolDownFailures ? backedOffIds(failures) : [];
   // Two scans driven from the small tables (see above), merged in id order. The
   // first `limit` of the union are within the first `limit` of each list.
   const withText = await db
@@ -482,6 +793,7 @@ export const backfillAssetTextSearch = async (
         opts.afterAssetId ? gt(busabaseAssetTexts.assetId, opts.afterAssetId) : undefined,
         eq(busabaseAssetTexts.status, "present"),
         notExists(currentProjectionOf(db)),
+        notInIdList(busabaseAssetTexts.assetId, backedOff),
         // Only mounted, live content; migration retry uploads cannot flood backfill.
         liveUsageExists(db, busabaseAssetTexts.assetId),
       ),
@@ -497,6 +809,7 @@ export const backfillAssetTextSearch = async (
         opts.afterAssetId ? gt(busabaseAssets.id, opts.afterAssetId) : undefined,
         eq(busabaseAssets.contentKind, "text"),
         notExists(textSlotOf(db)),
+        notInIdList(busabaseAssets.id, backedOff),
         liveUsageExists(db, busabaseAssets.id),
       ),
     )
@@ -522,11 +835,11 @@ export const backfillAssetTextSearch = async (
   };
   const pending = [...rows];
   const failedAssetIds: string[] = [];
-  const failures = cooldownFor(db);
   await Promise.all(
     Array.from({ length: 4 }, async () => {
       for (let row = pending.shift(); row; row = pending.shift()) {
-        if (opts.coolDownFailures && (failures.get(row.assetId) ?? 0) > Date.now()) {
+        // Another run may have failed this asset since the query above.
+        if (opts.coolDownFailures && (failures.get(row.assetId)?.until ?? 0) > Date.now()) {
           failed++;
           cooledDown++;
           failedAssetIds.push(row.assetId);
@@ -557,8 +870,7 @@ export const backfillAssetTextSearch = async (
         } else {
           failed++;
           failedAssetIds.push(row.assetId);
-          if (failures.size >= 10_000) failures.clear();
-          failures.set(row.assetId, Date.now() + 10 * 60_000);
+          recordFailure(failures, row.assetId);
         }
       }
     }),
@@ -567,6 +879,7 @@ export const backfillAssetTextSearch = async (
     indexed,
     failed,
     cooledDown,
+    backedOff: backedOff.length,
     failedAssetIds,
     failureReasons,
     readMs,
@@ -680,13 +993,25 @@ export const healAssetTextProjections = async (
     spaces = new Map();
     running.set(db, spaces);
   }
+  const embedded = isEmbedded(db);
   let run = spaces.get(spaceId);
   if (!run) {
+    // Embedded: the run is the caller's own work, so it gets the time the
+    // caller will wait (at least one page) and is never left running behind it.
+    const budgetMs = embedded ? Math.min(30_000, opts.waitMs ?? 300) : 30_000;
     const runPages = async () => {
       const startedAt = Date.now();
-      const deadline = startedAt + 30_000;
+      const deadline = startedAt + budgetMs;
       let afterAssetId: string | undefined;
-      const total = { pages: 0, indexed: 0, failed: 0, cooledDown: 0, readMs: 0, publishMs: 0 };
+      const total = {
+        pages: 0,
+        indexed: 0,
+        failed: 0,
+        cooledDown: 0,
+        backedOff: 0,
+        readMs: 0,
+        publishMs: 0,
+      };
       const reasons: Record<string, number> = {};
       do {
         const page = await backfillAssetTextSearch(db, {
@@ -698,6 +1023,7 @@ export const healAssetTextProjections = async (
         total.indexed += page.indexed;
         total.failed += page.failed;
         total.cooledDown += page.cooledDown;
+        total.backedOff = page.backedOff;
         total.readMs += page.readMs;
         total.publishMs += page.publishMs;
         for (const [reason, count] of Object.entries(page.failureReasons)) {
@@ -710,7 +1036,7 @@ export const healAssetTextProjections = async (
       // time went (storage reads against database writes).
       if (total.indexed + total.failed > 0) {
         console.info(
-          `[asset-text-search] heal run space=${spaceId} pages=${total.pages} indexed=${total.indexed} failed=${total.failed} cooledDown=${total.cooledDown} readMs=${total.readMs} publishMs=${total.publishMs} elapsedMs=${Date.now() - startedAt} finished=${!afterAssetId} reasons=${JSON.stringify(reasons)}`,
+          `[asset-text-search] heal run space=${spaceId} pages=${total.pages} indexed=${total.indexed} failed=${total.failed} cooledDown=${total.cooledDown} backedOff=${total.backedOff} readMs=${total.readMs} publishMs=${total.publishMs} elapsedMs=${Date.now() - startedAt} finished=${!afterAssetId} reasons=${JSON.stringify(reasons)}`,
         );
       }
       return !afterAssetId && total.failed === 0;
@@ -720,6 +1046,7 @@ export const healAssetTextProjections = async (
       .finally(() => spaces.delete(spaceId));
     spaces.set(spaceId, run);
   }
+  if (embedded) return run;
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([

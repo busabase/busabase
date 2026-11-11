@@ -36,6 +36,7 @@ import type { NodeDetailProps } from "../../dashboard/node-detail-registry";
 import { useIsAnonymousVisitor } from "../../dashboard/visitor-context";
 import { disposeDeletedAirAppSession } from "../store/airapp-session-cleanup";
 import { useAirAppKeepAliveActive, useAirAppKeepAliveScope } from "./AirAppKeepAliveHost";
+import { AirAppPublishToSite } from "./AirAppPublishToSite";
 import {
   AirAppRunControls,
   AirAppRunLogs,
@@ -174,20 +175,30 @@ export function AirAppDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) 
           nodeName={airapp.node.name}
           nodeType="airapp"
         />
-        <NodeActionsMenu
+        <AirAppPublishToSite
+          key={airapp.node.id}
           nodeId={airapp.node.id}
           nodeName={airapp.node.name}
-          nodeSlug={airapp.node.slug}
-          nodeType="airapp"
-          onDeleted={() =>
-            disposeDeletedAirAppSession({
-              keepAliveScopeKey,
-              nodeId: airapp.node.id,
-              routeSlug: slug ?? airapp.node.slug,
-            })
-          }
           orpc={orpc}
-        />
+        >
+          {(publishAction) => (
+            <NodeActionsMenu
+              extraActions={publishAction}
+              nodeId={airapp.node.id}
+              nodeName={airapp.node.name}
+              nodeSlug={airapp.node.slug}
+              nodeType="airapp"
+              onDeleted={() =>
+                disposeDeletedAirAppSession({
+                  keepAliveScopeKey,
+                  nodeId: airapp.node.id,
+                  routeSlug: slug ?? airapp.node.slug,
+                })
+              }
+              orpc={orpc}
+            />
+          )}
+        </AirAppPublishToSite>
       </>
     ) : null,
     isKeepAliveActive,
@@ -235,7 +246,7 @@ export function AirAppDetailView({ orpc, slug, onNodeLoaded }: NodeDetailProps) 
         onValueChange={setSelectedTab}
         value={fullscreenState.fullscreen ? "app" : selectedTab}
       >
-        <header className="shrink-0 border-border/60 border-b px-4 py-2 md:px-6">
+        <header className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-border/60 border-b px-4 py-2 md:px-6">
           <TabsList className={PREVIEW_DETAIL_TAB_LIST_CLASS}>
             <TabsTrigger className={PREVIEW_DETAIL_TAB_TRIGGER_CLASS} value="app">
               <MonitorPlay className="size-3.5" />

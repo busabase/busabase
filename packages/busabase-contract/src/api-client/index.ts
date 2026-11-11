@@ -50,6 +50,7 @@ import type {
   CommentVO,
   DriveReadFileVO,
   DriveVO,
+  ListAgentTasksDTO,
   NodeVO,
   RecordVO,
   SearchResponseVO,
@@ -121,7 +122,7 @@ export interface BusabaseDashboardApiClient {
     subjectType: CommentSubjectType;
     subjectId: string;
   }) => Promise<CommentVO[]>;
-  listAgentTasks: () => Promise<AgentTaskVO[]>;
+  listAgentTasks: (input?: ListAgentTasksDTO) => Promise<AgentTaskVO[]>;
   /**
    * Connectable agent backends. The `@`-mention picker needs this to offer
    * launchable Agent targets alongside members; normalize it through
@@ -725,7 +726,7 @@ export const createBusabaseRestApiClient = (
     listAuditEvents: (options) => client.auditEvents.list(options ?? {}),
     createAuditEvent: (payload) => client.auditEvents.create(payload),
     listComments: (subject) => client.comments.list(subject),
-    listAgentTasks: () => client.agent.listTasks({}),
+    listAgentTasks: (input) => client.agent.listTasks(input ?? {}),
     listAgentCatalog: () => client.agents.catalog({}),
     listSpaceMembers: () => client.spaces.members({}),
     createComment: (payload) => client.comments.create(payload),

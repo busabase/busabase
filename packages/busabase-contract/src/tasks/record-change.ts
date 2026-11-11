@@ -42,7 +42,7 @@ export const recordChangeTask: TaskDefinition<RecordChangeInput> = {
     "Review is permission-aware for all three operations, decided server-side: the change merges " +
     "immediately when your key has write access on the Base's node and lands as a pending " +
     "ChangeRequest otherwise — check the response's `materialized` field to see which happened. " +
-    "Pass explicit `autoMerge: false` to force review even when you could write directly. " +
+    "Pass `requireReview` (or explicit `autoMerge: false`) when the user asks to only propose and wait for a person — a write-capable key would otherwise publish immediately. " +
     "`delete` ARCHIVES the record — it is reversible with `restore`, not an erase. " +
     "For update, `fields` is keyed by field slug and only needs the fields you are changing; " +
     "if you set the Base's PRIMARY (first) field, keep it a short human-readable title.",

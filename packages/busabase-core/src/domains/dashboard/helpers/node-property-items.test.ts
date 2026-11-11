@@ -156,6 +156,7 @@ describe("node info sections", () => {
       children: [node({ id: "nod_child", type: "doc", slug: "child" })],
       storagePrefix: "busabase/nodes/nod_folder/folder/",
       body: "",
+      bodyFormat: "markdown",
     };
     expect(getNodeInfoSections(folder, messages).specifics[0]).toMatchObject({
       label: messages.nodeDetail.contents,

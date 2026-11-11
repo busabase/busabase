@@ -7,7 +7,20 @@ import type {
   ImportTablesInput,
   ImportTablesVO,
 } from "busabase-contract/domains/dump/types";
-import { and, eq, getTableColumns, inArray, ne } from "drizzle-orm";
+import {
+  and,
+  asc,
+  count,
+  eq,
+  getTableColumns,
+  gt,
+  inArray,
+  isNull,
+  ne,
+  notExists,
+  or,
+} from "drizzle-orm";
+import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { getAttachmentUploadPolicy } from "open-domains/attachments/logic";
 import { storage } from "openlib/storage";
 import { getContextSpaceId, resolveActorId } from "../../../context";
@@ -32,8 +45,25 @@ import {
 import { insertDefaultGridView } from "../../base/logic/default-view";
 import { writeDocBody } from "../../doc/handlers";
 import { writeFolderBody } from "../../folder/handlers";
+import { richNodeDocumentKey } from "../../rich-node/handlers";
 import { requireSpaceManagerForDump } from "./_guard";
-import { DUMP_IMPORT_ORDER, DUMP_TABLE_REGISTRY } from "./table-registry";
+import {
+  assertRestoreActivity,
+  beginRestoreActivity,
+  endRestoreActivity,
+} from "./restore-activity";
+import { assertRestoreBlobKey, RestoreBlobParts } from "./restore-blob-parts";
+import { cleanupAbandonedRestoreBlobs } from "./restore-blob-receipts";
+import { prepareWebhookBackupRow, webhookNeedsReconnect } from "./row-policy";
+import {
+  assertDumpChildParents,
+  DUMP_IMPORT_ORDER,
+  DUMP_TABLE_REGISTRY,
+  dumpIdentityColumn,
+  dumpIdentityKey,
+  dumpSpaceScope,
+  stampDumpRow,
+} from "./table-registry";
 
 /**
  * Import sessions are tracked in-process (a `Map`, not a DB table). Import is
@@ -45,8 +75,9 @@ import { DUMP_IMPORT_ORDER, DUMP_TABLE_REGISTRY } from "./table-registry";
  * deliberately does not try to. It starts a BRAND NEW session with
  * `resume: true` against the (now non-empty) space and replays the whole
  * archive, letting `ON CONFLICT DO NOTHING` skip whatever already landed.
- * Nothing about the dead session is recovered, so nothing has to be persisted
- * to recover it — the archive on disk is the only state a resume needs.
+ * SQL progress is recovered from the archive and existing rows. Multipart
+ * upload ids additionally have durable scoped storage receipts: a fresh session
+ * cleans abandoned provider parts before starting its own byte replay.
  *
  * (An earlier version of this comment described an "idMap + step markers on
  * disk" scheme at the CLI level. No such thing was ever built; `--resume`
@@ -63,41 +94,51 @@ interface ImportSession {
    * for why that scan is unsound once a space has more nodes than one page.
    */
   sourceSpaceId: string;
-  createdAt: number;
+  lastActivityAt: number;
+  blobParts: RestoreBlobParts;
   insertedIds: Map<string, Set<string>>;
   /**
    * Continuing an interrupted restore. Inserts become `ON CONFLICT DO
    * NOTHING`, and `importAbort` refuses to run — see both call sites.
    */
   resume: boolean;
+  offeredNodes: boolean;
+  originalRoot?: typeof busabaseNodes.$inferSelect;
+  notices: Set<string>;
 }
 
 const SESSION_TTL_MS = 60 * 60 * 1000; // 1h — generous for a large space import.
 const sessions = new Map<string, ImportSession>();
 
-const sweepExpiredSessions = () => {
-  const now = Date.now();
+const sweepExpiredSessions = async () => {
+  const time = Date.now();
   for (const [sessionId, session] of sessions) {
-    if (now - session.createdAt > SESSION_TTL_MS) sessions.delete(sessionId);
+    if (time - session.lastActivityAt > SESSION_TTL_MS) {
+      sessions.delete(sessionId);
+      await session.blobParts.cleanup();
+    }
   }
 };
 
-const requireSession = (sessionId: string): ImportSession => {
-  sweepExpiredSessions();
+const requireSession = async (sessionId: string): Promise<ImportSession> => {
+  await sweepExpiredSessions();
   const session = sessions.get(sessionId);
-  if (!session) {
+  if (!session)
     throw new ORPCError("NOT_FOUND", {
       message: `Import session not found or expired: ${sessionId}`,
     });
-  }
+  if (session.spaceId !== getContextSpaceId())
+    throw new ORPCError("BAD_REQUEST", { message: "Import session belongs to a different space." });
+  await assertRestoreActivity(session.spaceId, session.id);
+  session.lastActivityAt = Date.now();
   return session;
 };
 
 export const beginImportSession = async (
   input: ImportBeginInput,
-): Promise<{ sessionId: string }> => {
+): Promise<{ sessionId: string; blobChunkProtocol: 1 }> => {
   requireSpaceManagerForDump();
-  sweepExpiredSessions();
+  await sweepExpiredSessions();
   // A target space reached only through the dump routes (never touched by any
   // other domain route first) has never had `ensureReady()` run against it —
   // the workspace-root node genuinely does not exist yet. Every other domain
@@ -108,6 +149,7 @@ export const beginImportSession = async (
   await ensureReady();
   const db = await getDb();
   const spaceId = getContextSpaceId();
+  await cleanupAbandonedRestoreBlobs(spaceId, new Set(sessions.keys()));
 
   // `ensureReady()` auto-seeds a workspace-root folder node (id
   // `rootNodeIdForSpace(spaceId)`) into every space before it can be used at
@@ -135,18 +177,49 @@ export const beginImportSession = async (
           "`--resume` to continue it.",
       });
     }
+    // Singleton preferences and historical/runtime rows are durable user data
+    // too. A root-only tree does not authorize overwriting an existing workspace.
+    for (const table of DUMP_IMPORT_ORDER) {
+      if (table === "nodes") continue;
+      const [row] = await db
+        .select({ id: dumpIdentityColumn(table) })
+        .from(DUMP_TABLE_REGISTRY[table] as never)
+        .where(dumpSpaceScope(db, table, spaceId))
+        .limit(1);
+      if (row)
+        throw new ORPCError("BAD_REQUEST", {
+          message: `Full-fidelity import requires an empty target space (table "${table}" is not empty). Use --resume only for the same interrupted archive.`,
+        });
+    }
   }
 
   const sessionId = generateId("dumpsess");
+  await beginRestoreActivity(db, {
+    spaceId,
+    sessionId,
+    sourceSpaceId: input.sourceSpaceId,
+    resume: input.resume,
+  });
+  // Explicit resume supersedes a previous owner. Its in-process SQL progress
+  // stays, while staged multipart bytes must not remain pinned by a fenced
+  // session that can no longer receive another request.
+  for (const [previousId, previous] of sessions) {
+    if (previous.spaceId !== spaceId) continue;
+    sessions.delete(previousId);
+    await previous.blobParts.cleanup();
+  }
   sessions.set(sessionId, {
     id: sessionId,
     spaceId,
     sourceSpaceId: input.sourceSpaceId,
-    createdAt: Date.now(),
+    lastActivityAt: Date.now(),
+    blobParts: new RestoreBlobParts(sessionId, spaceId),
     insertedIds: new Map(),
     resume: input.resume,
+    offeredNodes: false,
+    notices: new Set(),
   });
-  return { sessionId };
+  return { sessionId, blobChunkProtocol: 1 };
 };
 
 /**
@@ -202,7 +275,7 @@ const validateAttachmentRestoreKey = async (
 
 export const importTableRows = async (input: ImportTablesInput): Promise<ImportTablesVO> => {
   requireSpaceManagerForDump();
-  const session = requireSession(input.sessionId);
+  const session = await requireSession(input.sessionId);
   const spaceId = getContextSpaceId();
   if (spaceId !== session.spaceId) {
     throw new ORPCError("BAD_REQUEST", { message: "Import session belongs to a different space." });
@@ -211,8 +284,9 @@ export const importTableRows = async (input: ImportTablesInput): Promise<ImportT
 
   if (input.table === "docBodies") {
     // Doc bodies AND folder readmes (`dump.exportDocBodies` serves both), so
-    // the node's restored type decides the key. Imported after every table,
-    // so the `nodes` rows already exist here.
+    // the node's restored type decides the key — and, for a folder, the row's
+    // `bodyFormat` picks `readme.md` or `readme.html`. Imported after every
+    // table, so the `nodes` rows already exist here.
     //
     // The lookup is scoped to this space on purpose: the key is derived from
     // a caller-supplied id, and without it the manager of one space could
@@ -226,6 +300,9 @@ export const importTableRows = async (input: ImportTablesInput): Promise<ImportT
     const rows = input.rows.map((row) => ({
       nodeId: row.nodeId === sourceRootId ? rootId : (row.nodeId as string),
       markdown: row.markdown as string,
+      nodeType: row.nodeType,
+      // Only an HTML folder readme carries a format; everything else is Markdown.
+      bodyFormat: row.bodyFormat === "html" ? ("html" as const) : ("markdown" as const),
     }));
     const db = await getDb();
     const targets = await db
@@ -243,18 +320,124 @@ export const importTableRows = async (input: ImportTablesInput): Promise<ImportT
     const typeById = new Map(targets.map((target) => [target.id, target.type]));
     const stray = rows.find((row) => {
       const type = typeById.get(row.nodeId);
-      return type !== "doc" && type !== "folder";
+      const richType = type === "html" || type === "whiteboard" || type === "workflow";
+      return (
+        (type !== "doc" && type !== "folder" && !richType) ||
+        (richType && row.nodeType !== type) ||
+        (!richType && row.nodeType !== undefined) ||
+        typeof row.markdown !== "string"
+      );
     });
     if (stray) {
       throw new ORPCError("BAD_REQUEST", {
-        message: `docBodies row names node ${stray.nodeId}, which is not a Doc or folder in this space`,
+        message: `docBodies row names node ${stray.nodeId}, which is not a matching document node in this space`,
+      });
+    }
+    const htmlDoc = rows.find(
+      (row) => row.bodyFormat === "html" && typeById.get(row.nodeId) === "doc",
+    );
+    if (htmlDoc) {
+      throw new ORPCError("BAD_REQUEST", {
+        message: `docBodies row for node ${htmlDoc.nodeId} is HTML, but only a folder readme can be HTML`,
       });
     }
     for (const row of rows) {
-      if (typeById.get(row.nodeId) === "folder") await writeFolderBody(row.nodeId, row.markdown);
-      else await writeDocBody(row.nodeId, row.markdown);
+      const type = typeById.get(row.nodeId);
+      if (type === "html" || type === "whiteboard" || type === "workflow") {
+        // Restore the exact raw object, including JSON whitespace. Parsing and
+        // reserializing would change bytes and can discard older document keys.
+        await storage.uploadFileToKey(
+          Buffer.from(row.markdown, "utf8"),
+          richNodeDocumentKey(row.nodeId, type),
+          type === "html" ? "text/html; charset=utf-8" : "application/json",
+        );
+      } else if (type === "folder") {
+        await writeFolderBody(row.nodeId, row.markdown, row.bodyFormat);
+      } else await writeDocBody(row.nodeId, row.markdown);
     }
     return { inserted: rows.length };
+  }
+
+  if (
+    (input.table === "attachmentBlobs" || input.table === "assetTextBlobs") &&
+    input.rows.some((row) => row.chunk !== undefined)
+  ) {
+    if (input.rows.length !== 1 || input.rows[0].chunk === undefined)
+      throw new ORPCError("BAD_REQUEST", {
+        message: "A restore blob chunk request must contain exactly one part",
+      });
+    const row = input.rows[0];
+    const table = input.table;
+    const key = assertRestoreBlobKey(
+      table === "attachmentBlobs" ? row.storageKey : row.textStorageKey,
+      table,
+    );
+    const mimeType =
+      table === "attachmentBlobs"
+        ? typeof row.mimeType === "string"
+          ? row.mimeType
+          : "application/octet-stream"
+        : "text/plain; charset=utf-8";
+    const db = await getDb();
+    const validate = async (sizeBytes: number) => {
+      if (table === "assetTextBlobs") {
+        const references = await db
+          .select({ spaceId: busabaseAssetTexts.spaceId })
+          .from(busabaseAssetTexts)
+          .where(eq(busabaseAssetTexts.textStorageKey, key));
+        if (references.some((reference) => reference.spaceId !== spaceId))
+          throw new ORPCError("FORBIDDEN", {
+            message: "Cannot restore a text object referenced by another space",
+          });
+        return;
+      }
+      const references = await validateAttachmentRestoreKey(db, key, spaceId);
+      if (references.some((reference) => reference.sizeBytes !== sizeBytes))
+        throw new ORPCError("BAD_REQUEST", {
+          message: "Restored object size conflicts with its existing attachment registry",
+        });
+      const policy = getAttachmentUploadPolicy();
+      if (policy && references.length === 0)
+        await policy.checkUpload({
+          input: {
+            spaceId,
+            fileName: key.split("/").at(-1) || "restored-file",
+            mimeType,
+            sizeBytes,
+          },
+          userId: resolveActorId(CURRENT_USER_ID),
+          db,
+          attachmentsTable: attachments,
+        });
+    };
+    const complete = await session.blobParts.accept({
+      key,
+      mimeType,
+      base64: row.base64,
+      chunk: row.chunk,
+      validate,
+      promote: async (stagingKey) => {
+        if (table === "attachmentBlobs") {
+          await withStorageKeyRegistration(db, key, async (tx) => {
+            await validateAttachmentRestoreKey(tx, key, spaceId);
+            await storage.copyObject(stagingKey, key);
+          });
+        } else {
+          await withStorageKeyRegistration(db, key, async (tx) => {
+            const references = await tx
+              .select({ spaceId: busabaseAssetTexts.spaceId })
+              .from(busabaseAssetTexts)
+              .where(eq(busabaseAssetTexts.textStorageKey, key));
+            if (references.some((reference) => reference.spaceId !== spaceId))
+              throw new ORPCError("FORBIDDEN", {
+                message: "Cannot restore a text object referenced by another space",
+              });
+            await storage.copyObject(stagingKey, key);
+          });
+        }
+      },
+    });
+    return { inserted: complete ? 1 : 0 };
   }
 
   // Attachment bytes (content-addressed object storage, not a DB row): write
@@ -343,7 +526,19 @@ export const importTableRows = async (input: ImportTablesInput): Promise<ImportT
     return { inserted: input.rows.length };
   }
 
-  const table = DUMP_TABLE_REGISTRY[input.table];
+  const tableName = input.table;
+  const table = DUMP_TABLE_REGISTRY[tableName];
+  const columns = getTableColumns(table as never);
+  // Drizzle ignores extra properties. Validate the entire raw batch before
+  // root-row filtering or remapping can hide an unsupported archive column.
+  // Values inside a known JSONB column remain opaque and are never filtered.
+  for (const row of input.rows) {
+    const unknown = Object.keys(row).filter((key) => !Object.hasOwn(columns, key));
+    if (unknown.length > 0)
+      throw new ORPCError("BAD_REQUEST", {
+        message: `Cannot restore ${input.table} row ${String(row.id)}: unknown archive column(s) ${unknown.join(", ")}. The archive schema is newer or different; update the target server before retrying.`,
+      });
+  }
   const db = await getDb();
 
   // Rows come straight from an export archive: they already carry `spaceId`
@@ -381,10 +576,55 @@ export const importTableRows = async (input: ImportTablesInput): Promise<ImportT
     // an empty one. A deterministic id has no such luck-of-the-cursor gap.
     const rootId = rootNodeIdForSpace(spaceId);
     const sourceRootId = rootNodeIdForSpace(session.sourceSpaceId);
+    const sourceRoot = rows.find((row) => row.id === sourceRootId);
+    const legacyRoot = !sourceRoot ? rows.find((row) => row.id === rootId) : undefined;
+    if (sourceRoot && sourceRootId !== rootId && rows.some((row) => row.id === rootId))
+      throw new ORPCError("CONFLICT", {
+        message:
+          "Archive contains an additional node using the target root id; it cannot be restored without losing a node",
+      });
+    const archivedRoot = sourceRoot ?? legacyRoot;
+    if (archivedRoot) {
+      if (
+        archivedRoot.type !== "folder" ||
+        (archivedRoot.parentId !== null && archivedRoot.parentId !== undefined)
+      )
+        throw new ORPCError("BAD_REQUEST", {
+          message: "Archive node collides with the workspace root identity",
+        });
+      if (!session.originalRoot) {
+        const [original] = await db
+          .select()
+          .from(busabaseNodes)
+          .where(and(eq(busabaseNodes.id, rootId), eq(busabaseNodes.spaceId, spaceId)));
+        session.originalRoot = original;
+      }
+      const {
+        id: _id,
+        spaceId: _space,
+        ...content
+      } = coerceDateColumns(busabaseNodes, archivedRoot);
+      await db
+        .update(busabaseNodes)
+        .set(content)
+        .where(and(eq(busabaseNodes.id, rootId), eq(busabaseNodes.spaceId, spaceId)));
+      session.offeredNodes = true;
+    }
     rows = rows
       .filter((row) => row.id !== sourceRootId && row.id !== rootId)
       .map((row) => (row.parentId === sourceRootId ? { ...row, parentId: rootId } : row));
   }
+  const sourceRootId = rootNodeIdForSpace(session.sourceSpaceId);
+  const targetRootId = rootNodeIdForSpace(spaceId);
+  rows = rows.map((row) => {
+    const mapped = { ...row };
+    // Actual node references, never arbitrary user JSON or free-form text.
+    for (const key of ["nodeId", "sourceNodeId"])
+      if (Object.hasOwn(columns, key) && mapped[key] === sourceRootId) mapped[key] = targetRootId;
+    if (input.table === "embedLinks" && mapped.type === "node" && mapped.typeId === sourceRootId)
+      mapped.typeId = targetRootId;
+    return mapped;
+  });
   if (input.table === "nodePrincipals") {
     // A `principalType: "space"` grant means "everyone in this space", and
     // encodes that by storing the space's own id in `principalId` (see
@@ -398,10 +638,43 @@ export const importTableRows = async (input: ImportTablesInput): Promise<ImportT
       row.principalType === "space" ? { ...row, principalId: spaceId } : row,
     );
   }
+  if (input.table === "webhookRules")
+    rows = rows.map((row) => {
+      const safe = prepareWebhookBackupRow(row);
+      if (webhookNeedsReconnect(safe))
+        session.notices.add(
+          `Webhook rule ${String(row.id)} was restored disabled because its dedicated signing credential is excluded; reconnect it before enabling.`,
+        );
+      return safe;
+    });
+  if (input.table === "routerGrants")
+    rows = rows.map((row) => {
+      if (row.revokedAt != null) return row;
+      session.notices.add(
+        `Router grant ${String(row.id)} was restored revoked because Vault credentials are excluded; reconnect the external agent.`,
+      );
+      return { ...row, revokedAt: new Date() };
+    });
+  if (input.table === "embedLinks")
+    rows = rows.map((row) => {
+      if (
+        row.revokedAt != null ||
+        new Date(row.expiresAt as string | number | Date).getTime() <= Date.now()
+      )
+        return row;
+      session.notices.add(
+        `Embed link ${String(row.id)} was restored revoked because source authentication credentials are excluded; create a new capability link.`,
+      );
+      return { ...row, revokedAt: new Date() };
+    });
+  const identityKey = dumpIdentityKey(input.table);
+  const identityColumn = dumpIdentityColumn(input.table);
   const stampedRows = rows.map((row) =>
-    coerceDateColumns(table, { ...row, spaceId } as Record<string, unknown>),
+    coerceDateColumns(table, stampDumpRow(tableName, row, spaceId)),
   );
+
   if (stampedRows.length === 0) return { inserted: 0 };
+  await assertDumpChildParents(db, tableName, stampedRows, spaceId);
 
   let rowsToInsert = stampedRows;
   if (session.resume) {
@@ -419,18 +692,27 @@ export const importTableRows = async (input: ImportTablesInput): Promise<ImportT
     // earlier progress (skip it), while a collision belonging to any other
     // space means the caller is resuming into the wrong place and must be
     // told, not silently ignored.
-    const ids = stampedRows.map((row) => row.id as string);
-    const existing = await queryInChunks<{ id: string; spaceId: string | null }>(
+    const ids = stampedRows.map((row) => row[identityKey] as string);
+    const existing = await queryInChunks<{ id: string }>(
       ids,
-      (idsChunk) =>
+      (chunk) =>
         db
-          .select({ id: table.id, spaceId: table.spaceId })
+          .select({ id: identityColumn })
           .from(table as never)
-          .where(inArray(table.id, idsChunk)) as unknown as Promise<
-          Array<{ id: string; spaceId: string | null }>
-        >,
+          .where(inArray(identityColumn, chunk)) as unknown as Promise<Array<{ id: string }>>,
     );
-    const foreign = existing.filter((row) => row.spaceId !== spaceId);
+    const mine = await queryInChunks<{ id: string }>(
+      ids,
+      (chunk) =>
+        db
+          .select({ id: identityColumn })
+          .from(table as never)
+          .where(
+            and(inArray(identityColumn, chunk), dumpSpaceScope(db, tableName, spaceId)),
+          ) as unknown as Promise<Array<{ id: string }>>,
+    );
+    const mineIds = new Set(mine.map((row) => row.id));
+    const foreign = existing.filter((row) => !mineIds.has(row.id));
     if (foreign.length > 0) {
       throw new ORPCError("CONFLICT", {
         message:
@@ -442,7 +724,7 @@ export const importTableRows = async (input: ImportTablesInput): Promise<ImportT
       });
     }
     const alreadyMine = new Set(existing.map((row) => row.id));
-    rowsToInsert = stampedRows.filter((row) => !alreadyMine.has(row.id as string));
+    rowsToInsert = stampedRows.filter((row) => !alreadyMine.has(row[identityKey] as string));
     if (rowsToInsert.length === 0) return { inserted: 0 };
   }
 
@@ -565,7 +847,7 @@ export const importTableRows = async (input: ImportTablesInput): Promise<ImportT
   }
 
   const seen = session.insertedIds.get(input.table) ?? new Set<string>();
-  for (const row of rowsToInsert) seen.add((row as Record<string, unknown>).id as string);
+  for (const row of rowsToInsert) seen.add(row[identityKey] as string);
   session.insertedIds.set(input.table, seen);
 
   // Report what was actually written, not what was offered. Under `--resume`
@@ -651,9 +933,9 @@ export const findMissingObjects = async (keys: string[]): Promise<string[]> => {
  *    matches for content the source could find. An archive predating the
  *    `assetTextBlobs` pseudo-table restores exactly that way, so the warning
  *    here is what makes the loss visible instead of silent.
- * All findings are reported as non-fatal `warnings` (the import already
- * committed real rows the operator likely wants to keep and re-run to fix
- * incrementally, rather than a hard rollback of a large space import).
+ * Findings keep the session recoverable and automation blocked. The CLI treats
+ * a failed integrity commit as an error and either rolls back a new restore or
+ * leaves interrupted/resumed progress available for a subsequent --resume.
  */
 const checkFieldValueOrphans = async (
   db: Awaited<ReturnType<typeof getDb>>,
@@ -796,6 +1078,119 @@ const checkAssetTextBlobCompleteness = async (
 };
 
 /**
+ * A resume owns all earlier progress, including rows this process did not
+ * insert. Aggregate relational checks in SQL and page object keys so neither
+ * millions of field values nor a whole storage inventory stay in memory.
+ */
+const checkResumedSpaceIntegrity = async (
+  db: Awaited<ReturnType<typeof getDb>>,
+  spaceId: string,
+): Promise<string[]> => {
+  const warnings: string[] = [];
+  const [fields] = await db
+    .select({ missing: count() })
+    .from(busabaseFieldValues)
+    .where(
+      and(
+        eq(busabaseFieldValues.spaceId, spaceId),
+        or(isNull(busabaseFieldValues.fieldId), eq(busabaseFieldValues.fieldId, "")),
+      ),
+    );
+  if (fields.missing > 0)
+    warnings.push(
+      `${fields.missing} fieldValues row(s) reference a field that was not imported (fieldId is unset).`,
+    );
+  const recordExists = (column: AnyPgColumn) =>
+    db
+      .select({ id: busabaseRecords.id })
+      .from(busabaseRecords)
+      .where(and(eq(busabaseRecords.spaceId, spaceId), eq(busabaseRecords.id, column)));
+  const [links] = await db
+    .select({ missing: count() })
+    .from(busabaseRecordLinks)
+    .where(
+      and(
+        eq(busabaseRecordLinks.spaceId, spaceId),
+        or(
+          notExists(recordExists(busabaseRecordLinks.sourceRecordId)),
+          notExists(recordExists(busabaseRecordLinks.targetRecordId)),
+        ),
+      ),
+    );
+  if (links.missing > 0)
+    warnings.push(
+      `${links.missing} recordLinks row(s) reference a source/target record that does not exist.`,
+    );
+  const [assets] = await db
+    .select({ missing: count() })
+    .from(busabaseAssets)
+    .where(
+      and(
+        eq(busabaseAssets.spaceId, spaceId),
+        notExists(
+          db
+            .select({ id: attachments.id })
+            .from(attachments)
+            .where(
+              and(
+                eq(attachments.id, busabaseAssets.attachmentId),
+                or(eq(attachments.spaceId, spaceId), isNull(attachments.spaceId)),
+              ),
+            ),
+        ),
+      ),
+    );
+  if (assets.missing > 0)
+    warnings.push(
+      `${assets.missing} asset row(s) reference an attachmentId that was not imported.`,
+    );
+
+  const scanMissingObjects = async (table: "attachments" | "assetTexts"): Promise<number> => {
+    const source = DUMP_TABLE_REGISTRY[table];
+    const id = source.id;
+    const key =
+      table === "attachments" ? attachments.storageKey : busabaseAssetTexts.textStorageKey;
+    let cursor: string | undefined;
+    let missing = 0;
+    const pageSize = 500;
+    for (;;) {
+      const rows: Array<{ id: string; key: string }> = await db
+        .select({ id, key })
+        .from(source)
+        .where(
+          and(
+            dumpSpaceScope(db, table, spaceId),
+            cursor ? gt(id, cursor) : undefined,
+            table === "assetTexts"
+              ? and(
+                  ne(busabaseAssetTexts.status, "none"),
+                  ne(busabaseAssetTexts.textStorageKey, ""),
+                )
+              : undefined,
+          ),
+        )
+        .orderBy(asc(id))
+        .limit(pageSize);
+      const absent = new Set(await findMissingObjects([...new Set(rows.map((row) => row.key))]));
+      missing += rows.filter((row) => absent.has(row.key)).length;
+      if (rows.length < pageSize) return missing;
+      cursor = rows[rows.length - 1].id;
+    }
+  };
+  const missingAttachments = await scanMissingObjects("attachments");
+  if (missingAttachments > 0)
+    warnings.push(
+      `${missingAttachments} attachment(s) have no bytes in storage for their storageKey.`,
+    );
+  const missingTexts = await scanMissingObjects("assetTexts");
+  if (missingTexts > 0)
+    warnings.push(
+      `${missingTexts} assetTexts row(s) have no bytes in storage for their textStorageKey — the extracted text they claim to hold is not searchable (grep will silently return no matches for it).`,
+    );
+  return warnings;
+};
+
+/**
  * Bring a restored space up to the view invariants archives may predate:
  *
  * - An archive written before views had a `position` restores every view at
@@ -867,12 +1262,16 @@ const normalizeRestoredViews = async (
 
 export const commitImportSession = async (sessionId: string): Promise<ImportCommitVO> => {
   requireSpaceManagerForDump();
-  const session = requireSession(sessionId);
+  const session = await requireSession(sessionId);
+  if (session.blobParts.hasIncomplete())
+    throw new ORPCError("BAD_REQUEST", {
+      message: "Cannot commit an import with incomplete multipart blob uploads",
+    });
   const warnings: string[] = [];
   const db = await getDb();
   const spaceId = session.spaceId;
 
-  if (!session.insertedIds.has("nodes")) {
+  if (!session.insertedIds.has("nodes") && !session.offeredNodes) {
     // Under `--resume` this session legitimately adds no nodes — the killed
     // run already landed them, and re-offering the same rows inserts nothing.
     // Asking the session alone then produced "the space will remain empty" on
@@ -899,23 +1298,36 @@ export const commitImportSession = async (sessionId: string): Promise<ImportComm
   const attachmentIds = session.insertedIds.get("attachments") ?? new Set<string>();
   const assetTextIds = session.insertedIds.get("assetTexts") ?? new Set<string>();
 
-  warnings.push(
-    ...(await checkFieldValueOrphans(db, spaceId, fieldValueIds)),
-    ...(await checkRecordLinkOrphans(db, spaceId, linkIds)),
-    ...(await checkAssetAttachmentOrphans(db, spaceId, assetIds)),
-    ...(await checkBlobCompleteness(db, attachmentIds)),
-    ...(await checkAssetTextBlobCompleteness(db, spaceId, assetTextIds)),
-  );
+  if (session.resume) {
+    warnings.push(...(await checkResumedSpaceIntegrity(db, spaceId)));
+  } else {
+    warnings.push(
+      ...(await checkFieldValueOrphans(db, spaceId, fieldValueIds)),
+      ...(await checkRecordLinkOrphans(db, spaceId, linkIds)),
+      ...(await checkAssetAttachmentOrphans(db, spaceId, assetIds)),
+      ...(await checkBlobCompleteness(db, attachmentIds)),
+      ...(await checkAssetTextBlobCompleteness(db, spaceId, assetTextIds)),
+    );
+  }
+  if (warnings.length > 0) return { ok: false, warnings };
   await normalizeRestoredViews(db, spaceId);
-
+  // Keep recovery ownership and automation held until every fallible cleanup
+  // step succeeds. A failed finalization must remain retryable/abortable.
+  await session.blobParts.cleanup();
+  await endRestoreActivity(db, { spaceId, sessionId });
   sessions.delete(sessionId);
-  return { ok: true, warnings };
+  return {
+    ok: true,
+    warnings,
+    ...(session.notices.size > 0 ? { notices: [...session.notices] } : {}),
+  };
 };
 
 export const abortImportSession = async (sessionId: string): Promise<{ ok: boolean }> => {
   requireSpaceManagerForDump();
-  const session = requireSession(sessionId);
+  const session = await requireSession(sessionId);
   const db = await getDb();
+  await session.blobParts.cleanup();
 
   // A resumed restore must never roll back. Its whole purpose is to build on
   // rows a previous, killed attempt already landed, and this session only
@@ -945,10 +1357,29 @@ export const abortImportSession = async (sessionId: string): Promise<{ ok: boole
     const idList = [...ids];
     for (let i = 0; i < idList.length; i += ORPHAN_CHECK_CHUNK_SIZE) {
       const chunk = idList.slice(i, i + ORPHAN_CHECK_CHUNK_SIZE);
-      await db.delete(drizzleTable as never).where(inArray(drizzleTable.id, chunk));
+      await db
+        .delete(drizzleTable as never)
+        .where(
+          and(
+            inArray(dumpIdentityColumn(table), chunk),
+            dumpSpaceScope(db, table, session.spaceId),
+          ),
+        );
     }
   }
 
+  if (session.originalRoot) {
+    await db
+      .update(busabaseNodes)
+      .set(session.originalRoot)
+      .where(
+        and(
+          eq(busabaseNodes.id, rootNodeIdForSpace(session.spaceId)),
+          eq(busabaseNodes.spaceId, session.spaceId),
+        ),
+      );
+  }
+  await endRestoreActivity(db, { spaceId: session.spaceId, sessionId });
   sessions.delete(sessionId);
   return { ok: true };
 };

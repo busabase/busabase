@@ -17,6 +17,11 @@ import { CoreI18nProvider } from "../../../i18n";
 import { DashboardOrpcProvider } from "../orpc-context";
 import { SubmitPermissionProvider } from "./split-submit-button";
 
+vi.mock(
+  "previewfile-core/client/embedded/lazy",
+  () => import("../../../../tests/mocks/embedded-file-viewer"),
+);
+
 vi.mock("wouter", () => ({ useSearch: () => "?spaceId=space&view=cards" }));
 vi.mock("openlib/ui/dashboard", () => ({
   SPALink: ({ children, ...props }: { children: ReactNode; href: string }) => (
@@ -362,7 +367,10 @@ describe("Kanban attachment cards", () => {
     if (!(attachments instanceof HTMLElement)) throw new Error("Expected the card attachments");
     fireEvent.click(within(attachments).getByRole("link", { name: image.fileName }));
     const preview = await screen.findByRole("dialog");
-    expect(within(preview).getByRole("img", { name: image.fileName })).toBeTruthy();
+    expect(
+      within(preview).getByTestId("embedded-file-preview").getAttribute("data-file-name"),
+    ).toBe(image.fileName);
+    expect(preview.querySelector('[data-previewfile-type="image"]')).toBeTruthy();
     // A click inside the portalled preview must not bubble into record opening.
     fireEvent.click(within(preview).getByRole("heading", { name: image.fileName }));
     expect(open).not.toHaveBeenCalled();

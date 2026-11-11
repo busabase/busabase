@@ -26,14 +26,23 @@ describe("server Agent prompt snapshot validation", () => {
     expect(parsed).toEqual([{ ...input, uri: "busabase-agent-prompt:///insertion-1" }]);
   });
 
-  it.each([
-    {},
-    { embedOrigin: "https://other.test" },
-    { embedOrigin: "https://busa.test", spaceId: "org-other" },
-  ])("rejects incompatible or absent trusted host context %j", async (host) => {
+  it.each([{}, { embedOrigin: "https://other.test" }])(
+    "accepts Desktop prompt context without a matching host origin %j",
+    async (host) => {
+      expect(
+        await runWithBusabaseContext(host, async () =>
+          validateAgentPromptResourceContext([snapshot()]),
+        ),
+      ).toEqual([snapshot()]);
+    },
+  );
+
+  it("still rejects Desktop context in a Cloud workspace", async () => {
     await expect(
-      runWithBusabaseContext(host, async () => validateAgentPromptResourceContext([snapshot()])),
-    ).rejects.toThrow(/different Busabase/);
+      runWithBusabaseContext({ spaceId: "org-other" }, async () =>
+        validateAgentPromptResourceContext([snapshot()]),
+      ),
+    ).rejects.toThrow(/different Busabase edition or workspace/);
   });
 
   it("checks cloud workspace identity independently of descriptive target ids", async () => {
@@ -44,12 +53,13 @@ describe("server Agent prompt snapshot validation", () => {
       }),
       "cloud-context",
     );
-    expect(
-      await runWithBusabaseContext(
-        { embedOrigin: "https://busa.test", spaceId: "org-a" },
-        async () => validateAgentPromptResourceContext([input]),
-      ),
-    ).toEqual([input]);
+    for (const host of [
+      { spaceId: "org-a" },
+      { embedOrigin: "https://other.test", spaceId: "org-a" },
+    ])
+      expect(
+        await runWithBusabaseContext(host, async () => validateAgentPromptResourceContext([input])),
+      ).toEqual([input]);
     await expect(
       runWithBusabaseContext({ embedOrigin: "https://busa.test", spaceId: "org-b" }, async () =>
         validateAgentPromptResourceContext([input]),

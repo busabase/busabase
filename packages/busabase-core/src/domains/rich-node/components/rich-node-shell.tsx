@@ -48,6 +48,19 @@ export const richNodeSaveStatusLabel = (
         ? changeRequestStatusLabel(status, messages)
         : messages.richNodes.unsaved;
 
+/**
+ * Save status sits in the same topbar row as the icon buttons. It must be able
+ * to shrink and clip, or a long "unsaved" label paints over Add step / Delete.
+ * `sm:inline-block` (not `sm:block`) keeps it a shrinkable flex item.
+ */
+export const richNodeSaveStatusClass = (status: SaveStatus) =>
+  status === "error"
+    ? "relative z-0 hidden min-w-0 max-w-40 shrink truncate text-destructive text-xs sm:inline-block"
+    : "relative z-0 hidden min-w-0 max-w-40 shrink truncate text-muted-foreground text-xs sm:inline-block";
+
+/** Icon actions stay a fixed cluster above the status text, and never shrink into it. */
+export const richNodeActionClusterClass = "relative z-10 flex shrink-0 items-center gap-1.5";
+
 export function useNodeContentSave(
   orpc: BusabaseQueryUtils,
   node: NodeVO | null,
@@ -313,70 +326,69 @@ export function RichNodeShell({
       <>
         {!isAnonymous && (
           <span
-            className={
-              status === "error"
-                ? "hidden max-w-48 truncate text-destructive text-xs sm:block"
-                : "hidden text-muted-foreground text-xs sm:block"
-            }
+            className={richNodeSaveStatusClass(status)}
+            data-rich-node-save-status=""
             title={error ?? statusLabel}
           >
             {error ?? statusLabel}
           </span>
         )}
         {reviewRequestId ? <RichNodeReviewLink requestId={reviewRequestId} /> : null}
-        {!isAnonymous && actions}
-        <NodePinButton
-          payload={{ nodeId: node.id }}
-          tabId={nodeSidePanelTabId(nodeType, node.id)}
-          tabType={`${nodeType}-preview`}
-          title={node.name}
-        />
-        <PreviewFullscreenButton
-          fullscreenState={fullscreenState}
-          label={messages.airapp.enterFullscreen}
-        />
-        {!isAnonymous && (
-          <NodeAgentPromptsButton
-            orpc={orpc}
-            nodeId={node.id}
-            nodeName={node.name}
-            nodeType={nodeType}
+        <div className={richNodeActionClusterClass} data-rich-node-actions="">
+          {!isAnonymous && actions}
+          <NodePinButton
+            payload={{ nodeId: node.id }}
+            tabId={nodeSidePanelTabId(nodeType, node.id)}
+            tabType={`${nodeType}-preview`}
+            title={node.name}
           />
-        )}
-        {/* One "•••" menu instead of the Permissions + Delete button pair this
+          <PreviewFullscreenButton
+            fullscreenState={fullscreenState}
+            label={messages.airapp.enterFullscreen}
+          />
+          {!isAnonymous && (
+            <NodeAgentPromptsButton
+              orpc={orpc}
+              nodeId={node.id}
+              nodeName={node.name}
+              nodeType={nodeType}
+            />
+          )}
+          {/* One "•••" menu instead of the Permissions + Delete button pair this
             header used to render — same set of actions (plus Rename/Share,
             which this header never offered at all), same dialogs, and it
             matches every other node-detail topbar. The icon-only/labelled
             responsive split the Permissions button needed is gone with it: the
             trigger is a fixed-size icon at every breakpoint. Agent prompts sits
             outside as its own button (see `NodeAgentPromptsButton`). */}
-        {!isAnonymous && (
-          <>
-            <NodeActionsMenu
-              nodeId={node.id}
-              nodeName={node.name}
-              nodeSlug={node.slug}
-              nodeType={nodeType}
-              orpc={orpc}
-            />
-            <Button
-              aria-label={messages.richNodes.save}
-              disabled={
-                status === "saving" ||
-                status === "saved" ||
-                status === "in_review" ||
-                status === "approved"
-              }
-              onClick={onSave}
-              size="icon-sm"
-              title={messages.richNodes.save}
-              type="button"
-              variant="default"
-            >
-              <Save className="size-3.5" />
-            </Button>
-          </>
-        )}
+          {!isAnonymous && (
+            <>
+              <NodeActionsMenu
+                nodeId={node.id}
+                nodeName={node.name}
+                nodeSlug={node.slug}
+                nodeType={nodeType}
+                orpc={orpc}
+              />
+              <Button
+                aria-label={messages.richNodes.save}
+                disabled={
+                  status === "saving" ||
+                  status === "saved" ||
+                  status === "in_review" ||
+                  status === "approved"
+                }
+                onClick={onSave}
+                size="icon-sm"
+                title={messages.richNodes.save}
+                type="button"
+                variant="default"
+              >
+                <Save className="size-3.5" />
+              </Button>
+            </>
+          )}
+        </div>
       </>
     ),
   );

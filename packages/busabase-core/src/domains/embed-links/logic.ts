@@ -19,7 +19,7 @@ import {
   EmbedTargetTypeSchema,
 } from "busabase-contract/contract/embed-link-schemas";
 import type { FileTreeReadFileVO } from "busabase-contract/types";
-import { and, desc, eq, gt, isNotNull, isNull, lt, lte, or, type SQL } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNotNull, isNull, lt, lte, or, type SQL } from "drizzle-orm";
 import {
   type BusabaseEmbedRecordScope,
   getContextEmbedOrigin,
@@ -30,10 +30,10 @@ import {
   runWithEmbedContext,
 } from "../../context";
 import { getDb } from "../../db";
-import { busabaseBases, busabaseEmbedLinks, busabaseNodes } from "../../db/schema";
+import { busabaseBases, busabaseEmbedLinks, busabaseNodes, busabaseRecords } from "../../db/schema";
 import { assertChangeRequestPermission, getChangeRequest } from "../../logic/cr-lifecycle";
 import { rootNodeIdForSpace } from "../../logic/kernel";
-import { getEffectiveNodeLevel } from "../../logic/node-acl";
+import { buildBaseVisibilityExists, getEffectiveNodeLevel } from "../../logic/node-acl";
 import { getAirApp, readAirAppFile } from "../airapp/handlers";
 import { getBase, getRecord, listRecordsPaged } from "../base/handlers";
 import { getDoc } from "../doc/handlers";
@@ -148,6 +148,164 @@ const resolveEmbedTargetMetadata = async (
     targetName: type === "node" ? node.name : targetName,
     nodeType: type === "node" ? node.type : null,
   };
+};
+
+/** Targets resolved at once while listing; each costs a few small reads (a CR more). */
+const EMBED_TARGET_RESOLVE_CONCURRENCY = 4;
+/** Ids per `IN (...)` read, far below Postgres's 65,535 bind-parameter limit. */
+const EMBED_TARGET_ID_CHUNK = 5_000;
+
+const embedTargetKey = (type: EmbedTargetType, typeId: string) => `${type}:${typeId}`;
+
+/** `items.map(fn)` with at most `limit` calls in flight; results keep input order. */
+const mapWithConcurrency = async <T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> => {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await fn(items[index] as T);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+};
+
+const chunked = <T>(items: readonly T[], size: number): T[][] => {
+  const chunks: T[][] = [];
+  for (let start = 0; start < items.length; start += size) {
+    chunks.push(items.slice(start, start + size));
+  }
+  return chunks;
+};
+
+/**
+ * `resolveEmbedTargetMetadata(type, typeId)` (the manage-level, non-create
+ * check) for many targets at once, keyed by `embedTargetKey`.
+ *
+ * Listing a space's links used to call it once per link, one after another:
+ * each call hydrated a whole record (or change request) just to read the node
+ * it hangs off, then read that node's permission level and row. 710 links took
+ * 8–12 s. Here every distinct target is resolved once, records by one read of
+ * `(record id → its Base's node)` under the same space + Base-visibility filter
+ * `getRecord` applies, nodes by one read, and the per-node permission level and
+ * per-change-request visibility (which have their own rules) a few at a time
+ * through the same functions the single resolver calls.
+ */
+const resolveEmbedTargetsForListing = async (
+  targets: ReadonlyArray<{ type: EmbedTargetType; typeId: string }>,
+): Promise<Map<string, EmbedTargetMetadata | null>> => {
+  const db = await getDb();
+  const actorId = resolveActorId("local-admin");
+  const spaceId = getContextSpaceId();
+  const unique = new Map<string, { type: EmbedTargetType; typeId: string }>();
+  for (const target of targets) unique.set(embedTargetKey(target.type, target.typeId), target);
+
+  const recordIds = [...unique.values()]
+    .filter((target) => target.type === "record-detail")
+    .map((target) => target.typeId);
+  const recordScopeNodeIds = new Map<string, string | null>();
+  for (const ids of chunked(recordIds, EMBED_TARGET_ID_CHUNK)) {
+    const rows = await db
+      .select({ id: busabaseRecords.id, nodeId: busabaseBases.nodeId })
+      .from(busabaseRecords)
+      .innerJoin(busabaseBases, eq(busabaseBases.id, busabaseRecords.baseId))
+      .where(
+        and(
+          inArray(busabaseRecords.id, ids),
+          eq(busabaseRecords.spaceId, spaceId),
+          buildBaseVisibilityExists(db, busabaseRecords.baseId),
+        ),
+      );
+    for (const row of rows) recordScopeNodeIds.set(row.id, row.nodeId);
+  }
+
+  const changeRequestIds = [...unique.values()]
+    .filter((target) => target.type === "change-request")
+    .map((target) => target.typeId);
+  const changeRequestScopes = new Map(
+    await mapWithConcurrency(changeRequestIds, EMBED_TARGET_RESOLVE_CONCURRENCY, async (id) => {
+      const changeRequest = await getChangeRequest(id);
+      return [
+        id,
+        {
+          scopeNodeId: changeRequest ? changeRequestEmbedScopeNodeId(changeRequest) : null,
+          targetName: changeRequest?.id ?? id,
+        },
+      ] as const;
+    }),
+  );
+
+  const scopes = new Map<string, { scopeNodeId: string | null; targetName: string }>();
+  for (const [key, target] of unique) {
+    if (target.type === "node") {
+      scopes.set(key, { scopeNodeId: target.typeId, targetName: target.typeId });
+    } else if (target.type === "change-request") {
+      scopes.set(
+        key,
+        changeRequestScopes.get(target.typeId) ?? { scopeNodeId: null, targetName: target.typeId },
+      );
+    } else {
+      const scopeNodeId = recordScopeNodeIds.get(target.typeId) ?? null;
+      // `getRecord` answers the record itself, whose id is the one asked for.
+      scopes.set(key, { scopeNodeId, targetName: target.typeId });
+    }
+  }
+
+  const scopeNodeIds = [
+    ...new Set(
+      [...scopes.values()]
+        .map((scope) => scope.scopeNodeId)
+        .filter((nodeId): nodeId is string => Boolean(nodeId)),
+    ),
+  ];
+  const levels = new Map(
+    await mapWithConcurrency(
+      scopeNodeIds,
+      EMBED_TARGET_RESOLVE_CONCURRENCY,
+      async (nodeId) => [nodeId, await getEffectiveNodeLevel(nodeId, actorId, db)] as const,
+    ),
+  );
+  const manageable = scopeNodeIds.filter((nodeId) => {
+    const level = levels.get(nodeId);
+    return Boolean(level && hasApiKeyLevel(level, "manage"));
+  });
+  const nodes = new Map<string, { name: string; type: string }>();
+  for (const ids of chunked(manageable, EMBED_TARGET_ID_CHUNK)) {
+    const rows = await db
+      .select({ id: busabaseNodes.id, name: busabaseNodes.name, type: busabaseNodes.type })
+      .from(busabaseNodes)
+      .where(
+        and(
+          inArray(busabaseNodes.id, ids),
+          eq(busabaseNodes.spaceId, spaceId),
+          isNull(busabaseNodes.archivedAt),
+          isNull(busabaseNodes.deletedAt),
+        ),
+      );
+    for (const row of rows) nodes.set(row.id, { name: row.name, type: row.type });
+  }
+
+  const resolved = new Map<string, EmbedTargetMetadata | null>();
+  for (const [key, target] of unique) {
+    const scope = scopes.get(key);
+    const node = scope?.scopeNodeId ? nodes.get(scope.scopeNodeId) : undefined;
+    resolved.set(
+      key,
+      scope?.scopeNodeId && node
+        ? {
+            scopeNodeId: scope.scopeNodeId,
+            targetName: target.type === "node" ? node.name : scope.targetName,
+            nodeType: target.type === "node" ? node.type : null,
+          }
+        : null,
+    );
+  }
+  return resolved;
 };
 
 function changeRequestEmbedScopeNodeId(
@@ -296,12 +454,11 @@ export const listEmbedLinks = async (input: ListEmbedLinksDTO): Promise<EmbedLin
     .where(and(...filters))
     .orderBy(desc(busabaseEmbedLinks.createdAt));
 
-  const visible: EmbedLinkVO[] = [];
-  for (const row of rows) {
-    const target = await resolveEmbedTargetMetadata(row.type, row.typeId);
-    if (target) visible.push(toEmbedLinkVO({ ...row, ...target }));
-  }
-  return visible;
+  const targets = await resolveEmbedTargetsForListing(rows);
+  return rows.flatMap((row) => {
+    const target = targets.get(embedTargetKey(row.type, row.typeId));
+    return target ? [toEmbedLinkVO({ ...row, ...target })] : [];
+  });
 };
 
 interface EmbedLinkAuditCursor {

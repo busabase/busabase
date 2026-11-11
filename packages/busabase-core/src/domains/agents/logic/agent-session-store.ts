@@ -1,3 +1,4 @@
+import { ORPCError } from "@orpc/server";
 import {
   AgentSessionCommandReceiptVOSchema,
   type AgentSessionConfigSelectVO,
@@ -28,6 +29,7 @@ import {
 } from "drizzle-orm";
 import { getContextActorId, getContextSpaceId } from "../../../context";
 import { getDb } from "../../../db";
+import { isRestoreAutomationBlocked } from "../../dump/logic/restore-activity";
 import { busabaseAgentSessionCommands } from "../schema/agent-session-commands";
 import { busabaseAgentSessionEvents } from "../schema/agent-session-events";
 import { busabaseAgentSessions } from "../schema/agent-sessions";
@@ -123,6 +125,10 @@ export async function persistSessionCreated(
   session: AgentSessionVO,
   scope: AgentSessionScope = currentScope(),
 ): Promise<void> {
+  if (await isRestoreAutomationBlocked(scope.spaceId))
+    throw new ORPCError("CONFLICT", {
+      message: "This workspace is being restored. Try starting the agent again after it finishes.",
+    });
   const database = await db();
   const startedAt = Date.now();
   const fields = { sessionId: session.id, ...agentSessionScopeReferences(scope) };
@@ -152,6 +158,7 @@ export async function persistSessionAcpIdentity(
   acpSessionId: string,
   scope: AgentSessionScope = currentScope(),
 ): Promise<void> {
+  if (await isRestoreAutomationBlocked(scope.spaceId)) return;
   const database = await db();
   const startedAt = Date.now();
   const fields = { sessionId, acpSessionId, ...agentSessionScopeReferences(scope) };
@@ -211,6 +218,7 @@ export async function acquireSessionLease(
   ttlSeconds: number = sessionLeaseTtlSeconds(),
   scope: AgentSessionScope = currentScope(),
 ): Promise<AgentSessionLease | null> {
+  if (await isRestoreAutomationBlocked(scope.spaceId)) return null;
   const database = await db();
   const startedAt = Date.now();
   const fields = { sessionId, ownerId, ttlSeconds, ...agentSessionScopeReferences(scope) };
@@ -273,6 +281,7 @@ export async function renewSessionLease(
   ttlSeconds: number = sessionLeaseTtlSeconds(),
   scope: AgentSessionScope = currentScope(),
 ): Promise<boolean> {
+  if (await isRestoreAutomationBlocked(scope.spaceId)) return false;
   const database = await db();
   const startedAt = Date.now();
   const fields = {
@@ -316,6 +325,7 @@ export async function releaseSessionLease(
   fencingToken: number,
   scope: AgentSessionScope = currentScope(),
 ): Promise<boolean> {
+  if (await isRestoreAutomationBlocked(scope.spaceId)) return false;
   const database = await db();
   const startedAt = Date.now();
   const fields = { sessionId, ownerId, fencingToken, ...agentSessionScopeReferences(scope) };
@@ -356,6 +366,7 @@ export async function endRemoteSession(
   sessionId: string,
   scope: AgentSessionScope = currentScope(),
 ): Promise<boolean> {
+  if (await isRestoreAutomationBlocked(scope.spaceId)) return false;
   const database = await db();
   const ended = await database
     .update(busabaseAgentSessions)
@@ -405,6 +416,7 @@ export async function persistSessionState(
   scope: AgentSessionScope = currentScope(),
   fence?: LeaseFence,
 ): Promise<boolean> {
+  if (await isRestoreAutomationBlocked(scope.spaceId)) return false;
   const database = await db();
   const ended = session.status === "ended" || session.status === "failed";
   const startedAt = Date.now();
@@ -475,6 +487,7 @@ export async function persistSessionModelOption(
   thinkingOption: AgentSessionConfigSelectVO | null = null,
   modeOption: AgentSessionModeOptionVO | null = null,
 ): Promise<boolean> {
+  if (await isRestoreAutomationBlocked(scope.spaceId)) return false;
   const database = await db();
   const startedAt = Date.now();
   const fields = { sessionId, ...(fence ?? {}), ...agentSessionScopeReferences(scope) };
@@ -531,6 +544,7 @@ export async function persistSessionEvents(
   fence?: LeaseFence,
   scope: AgentSessionScope = currentScope(),
 ): Promise<boolean> {
+  if (await isRestoreAutomationBlocked(scope.spaceId)) return false;
   if (events.length === 0) return true;
   const sessionId = events[0]?.sessionId;
   if (!sessionId || events.some((event) => event.sessionId !== sessionId)) {
@@ -919,6 +933,7 @@ export async function loadSessionPageCandidates(input: {
 
 /** Delete every persisted session (and cascaded transcript event) for one connected agent. */
 export async function deleteSessionsBySlug(slug: string): Promise<number> {
+  if (await isRestoreAutomationBlocked(currentScope().spaceId)) return 0;
   const database = await db();
   const deleted = await database
     .delete(busabaseAgentSessions)
@@ -932,6 +947,7 @@ export async function deleteSessionsBySlug(slug: string): Promise<number> {
  * terminal row even if they still own a stale in-memory ACP connection.
  */
 export async function endSessionsBySlug(slug: string): Promise<string[]> {
+  if (await isRestoreAutomationBlocked(currentScope().spaceId)) return [];
   const database = await db();
   const ended = await database
     .update(busabaseAgentSessions)
@@ -949,6 +965,7 @@ export async function endSessionsBySlug(slug: string): Promise<string[]> {
 
 /** Tombstone one user-ended session before its local process is closed. */
 export async function endSessionById(sessionId: string): Promise<boolean> {
+  if (await isRestoreAutomationBlocked(currentScope().spaceId)) return false;
   const database = await db();
   const ended = await database
     .update(busabaseAgentSessions)
@@ -966,6 +983,7 @@ export async function endSessionById(sessionId: string): Promise<boolean> {
 
 /** Assign the old single-Buda slug to the credential's durable agent identity. */
 export async function normalizeLegacyBudaSessions(canonicalSlug: string): Promise<number> {
+  if (await isRestoreAutomationBlocked(currentScope().spaceId)) return 0;
   if (!canonicalSlug.startsWith("buda:")) return 0;
   const database = await db();
   const updated = await database
@@ -1064,10 +1082,24 @@ export async function pruneExpiredSessions(): Promise<number> {
   const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
   const database = await db();
   try {
+    const candidates = await database
+      .selectDistinct({ spaceId: busabaseAgentSessions.spaceId })
+      .from(busabaseAgentSessions)
+      .where(
+        and(
+          inArray(busabaseAgentSessions.status, ["ended", "failed"]),
+          lt(busabaseAgentSessions.lastActivityAt, cutoff),
+        ),
+      );
+    const allowed: string[] = [];
+    for (const row of candidates)
+      if (!(await isRestoreAutomationBlocked(row.spaceId))) allowed.push(row.spaceId);
+    if (!allowed.length) return 0;
     const deleted = await database
       .delete(busabaseAgentSessions)
       .where(
         and(
+          inArray(busabaseAgentSessions.spaceId, allowed),
           inArray(busabaseAgentSessions.status, ["ended", "failed"]),
           lt(busabaseAgentSessions.lastActivityAt, cutoff),
         ),
@@ -1096,6 +1128,19 @@ export async function pruneExpiredSessions(): Promise<number> {
 export async function endOrphanedLocalSessions(): Promise<number> {
   const database = await db();
   try {
+    const candidates = await database
+      .selectDistinct({ spaceId: busabaseAgentSessions.spaceId })
+      .from(busabaseAgentSessions)
+      .where(
+        and(
+          eq(busabaseAgentSessions.transport, "local-subprocess"),
+          inArray(busabaseAgentSessions.status, LIVE_STATUSES),
+        ),
+      );
+    const allowed: string[] = [];
+    for (const row of candidates)
+      if (!(await isRestoreAutomationBlocked(row.spaceId))) allowed.push(row.spaceId);
+    if (!allowed.length) return 0;
     const ended = await database
       .update(busabaseAgentSessions)
       .set({
@@ -1105,6 +1150,7 @@ export async function endOrphanedLocalSessions(): Promise<number> {
       })
       .where(
         and(
+          inArray(busabaseAgentSessions.spaceId, allowed),
           eq(busabaseAgentSessions.transport, "local-subprocess"),
           inArray(busabaseAgentSessions.status, LIVE_STATUSES),
         ),

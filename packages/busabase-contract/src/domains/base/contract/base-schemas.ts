@@ -23,6 +23,7 @@ export const fieldTypeSchema = z.enum([
   "markdown",
   "html",
   "attachment",
+  "drive",
   "relation",
   "member",
   "number",

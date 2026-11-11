@@ -1,6 +1,11 @@
 import { z } from "zod";
 import { userRefSchema } from "../../../contract/schemas";
-import { VIEW_FIELD_MAX_WIDTH, VIEW_FIELD_MIN_WIDTH, type ViewFilterConditionVO } from "../types";
+import {
+  GRID_ROW_HEIGHT_PRESETS,
+  VIEW_FIELD_MAX_WIDTH,
+  VIEW_FIELD_MIN_WIDTH,
+  type ViewFilterConditionVO,
+} from "../types";
 
 // Base-owned view Zod schemas. Pure leaf: no kernel imports.
 
@@ -72,6 +77,8 @@ export const galleryCoverFitSchema = z.enum(["cover", "fit"]);
 // Card size presets —列数由 CSS 响应式回流决定，不做自由拖拽尺寸。
 export const galleryCardSizeSchema = z.enum(["small", "medium", "large"]);
 
+export const gridRowHeightSchema = z.enum(GRID_ROW_HEIGHT_PRESETS);
+
 export const viewConfigSchema = z.object({
   filters: viewFiltersSchema.default([]),
   filterConjunction: viewFilterConjunctionSchema.optional(),
@@ -83,6 +90,7 @@ export const viewConfigSchema = z.object({
   fieldWidths: z
     .record(z.string().min(1), z.number().int().min(VIEW_FIELD_MIN_WIDTH).max(VIEW_FIELD_MAX_WIDTH))
     .optional(),
+  rowHeight: gridRowHeightSchema.optional(),
   // Gallery and Kanban: attachment cover (null = no cover). Omitted means
   // automatic in gallery views and no cover in Kanban views.
   coverFieldSlug: z.string().nullable().optional(),

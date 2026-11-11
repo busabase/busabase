@@ -2,6 +2,8 @@ import { oc } from "@orpc/contract";
 import {
   ExportAssetTextInputSchema,
   ExportAssetTextVOSchema,
+  ExportAttachmentInputSchema,
+  ExportAttachmentVOSchema,
   ExportDocBodiesInputSchema,
   ExportDocBodiesVOSchema,
   ExportTablesInputSchema,
@@ -37,6 +39,17 @@ export const dumpContract = {
     })
     .input(ExportTablesInputSchema)
     .output(ExportTablesVOSchema),
+  exportAttachment: oc
+    .route({
+      method: "GET",
+      path: "/dump/export/attachments/{attachmentId}/content",
+      tags: ["Dump"],
+      summary: "Resolve original physical attachment bytes for a full backup",
+      successDescription:
+        "A direct storage download URL and original metadata for a physical attachment owned by this space or referenced by one of its Assets. Includes attachments with no Asset and legacy attachment rows with a null space id. Does not use the public CDN URL, whose response may rewrite content.",
+    })
+    .input(ExportAttachmentInputSchema)
+    .output(ExportAttachmentVOSchema),
   exportAssetText: oc
     .route({
       method: "GET",
@@ -53,9 +66,9 @@ export const dumpContract = {
       method: "POST",
       path: "/dump/export/doc-bodies",
       tags: ["Dump"],
-      summary: "Read the raw markdown for a batch of Doc nodes and folder readmes",
+      summary: "Read stored node documents and folder readmes",
       successDescription:
-        "The raw body behind each requested Doc, read straight from object storage — archived Docs included, which the ordinary `nodes.get` deliberately refuses — and each requested folder's optional readme. Ids that do not resolve to a Doc or folder in this space are omitted rather than failing the batch, and so is a folder that has no readme.",
+        'The raw stored document behind each requested Doc, HTML, whiteboard or workflow — archived nodes included — and each folder\'s optional readme. Rich documents carry nodeType and their exact source in markdown; an HTML folder readme carries bodyFormat: "html". Ids that do not resolve to a Doc, folder, HTML, whiteboard or workflow in this space are omitted rather than failing the batch, and so is a folder that has no readme.',
     })
     .input(ExportDocBodiesInputSchema)
     .output(ExportDocBodiesVOSchema),
@@ -77,7 +90,7 @@ export const dumpContract = {
       tags: ["Dump"],
       summary: "Import a batch of raw rows into an open session",
       successDescription:
-        "Inserted rows preserving their original ids. `docBodies` ({nodeId, markdown}[]), `attachmentBlobs` ({storageKey, mimeType, base64}[]) and `assetTextBlobs` ({textStorageKey, base64}[]) are pseudo-tables written directly to object storage (none of them are DB rows). A `docBodies` row is a Doc body or a folder readme, decided by the restored node's type; a row naming a node that is not a Doc or folder in this space is a 400.",
+        'Inserted rows preserving their original ids. `docBodies` ({nodeId, markdown}[]), `attachmentBlobs` ({storageKey, mimeType, base64}[]) and `assetTextBlobs` ({textStorageKey, base64}[]) are pseudo-tables written directly to object storage (none of them are DB rows). A `docBodies` row is a Doc body or a folder readme, decided by the restored node\'s type; a folder row with `bodyFormat: "html"` restores an HTML readme. A row naming a node that is not a Doc or folder in this space, or an HTML row for a Doc, is a 400.',
     })
     .input(ImportTablesInputSchema)
     .output(ImportTablesVOSchema),

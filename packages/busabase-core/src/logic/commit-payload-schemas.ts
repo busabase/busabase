@@ -45,6 +45,7 @@ import {
   fieldHelpSchema,
   fieldTypeSchema,
 } from "busabase-contract/domains/base/contract/base-schemas";
+import { FolderBodyFormatSchema } from "busabase-contract/domains/folder/types";
 import { NodeIconSchema } from "busabase-contract/types";
 import { iStringSchema } from "openlib/i18n/i-string";
 import { z } from "zod";
@@ -284,7 +285,8 @@ export const COMMIT_PAYLOAD_SCHEMAS = {
 
   // ── Rich-node content ─────────────────────────────────────────────────────
   doc_update: z.looseObject({ body: z.string() }),
-  folder_update: z.looseObject({ body: z.string() }),
+  // `bodyFormat` is present only for an HTML readme; absent is Markdown.
+  folder_update: z.looseObject({ body: z.string(), bodyFormat: FolderBodyFormatSchema.optional() }),
   whiteboard_document_update: richNodeDocumentPayload,
   workflow_document_update: richNodeDocumentPayload,
   html_document_update: richNodeDocumentPayload,

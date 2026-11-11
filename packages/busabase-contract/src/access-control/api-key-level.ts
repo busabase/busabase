@@ -279,6 +279,7 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   "vault.clear": workspace("manage"),
   "dump.exportTables": workspace("manage"),
   "dump.exportAssetText": workspace("manage"),
+  "dump.exportAttachment": workspace("manage"),
   "dump.exportDocBodies": workspace("manage"),
   "dump.importBegin": workspace("manage"),
   "dump.importTables": workspace("manage"),
@@ -358,10 +359,13 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   // for every caller (`authorizeWorkflow` in domains/workflow/logic).
   "workflows.get": node("read"),
   "workflows.list": node("read"),
+  // Across workflows, and each run is checked against its own workflow's access.
+  "workflows.waiting": node("read"),
   "workflows.start": node("write"),
   "workflows.resume": node("write"),
   "workflows.resumeElapsed": node("write"),
   "workflows.cancel": node("write"),
+  "workflows.retry": node("write"),
   "workflows.cancelQueued": node("write"),
   // Read at this layer on purpose: an approval step can name an approver who
   // only reads the workflow. The handler decides — a named approver (or a
@@ -483,6 +487,18 @@ export const PROCEDURE_PERMISSION_POLICY: Record<string, ProcedurePermissionPoli
   "records.listChangeRequests": node("read"),
   "records.listLinks": node("read"),
 };
+
+/**
+ * Cloud's `/api/v1/members/*` (the cloud contract's `members` group) is not in the
+ * table above: that table is keyed to the shared workbench contract, and its
+ * exhaustiveness test pins it there. Those routes gate themselves in Cloud's
+ * members API logic — the human must be an owner/admin, then the key needs
+ * `write` to invite, mint links and approve as `member`, and `manage` to grant
+ * `admin`. Exported so the CLI's help and 403 advice name the levels the server
+ * enforces instead of the table's fail-closed `manage`.
+ */
+export const MEMBERS_API_MIN_KEY_LEVEL: ApiKeyPermissionLevel = "write";
+export const MEMBERS_API_ADMIN_GRANT_KEY_LEVEL: ApiKeyPermissionLevel = "manage";
 
 /** Backward-compatible level-only export used by older tests/callers. */
 export const PROCEDURE_LEVEL_OVERRIDES: Record<string, ApiKeyPermissionLevel> = Object.fromEntries(

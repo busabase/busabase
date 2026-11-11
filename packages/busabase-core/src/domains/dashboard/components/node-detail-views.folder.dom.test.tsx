@@ -31,18 +31,23 @@ const node = (id: string, type: string, name: string) => ({
   children: [],
 });
 
-function renderFolder(body: string, children: ReturnType<typeof node>[]) {
+function renderFolder(
+  body: string,
+  children: ReturnType<typeof node>[],
+  bodyFormat: "markdown" | "html" = "markdown",
+) {
   const orpc = {
     nodes: {
       get: {
         queryOptions: () => ({
-          queryKey: ["nodes", "folder", body, children.length],
+          queryKey: ["nodes", "folder", body, children.length, bodyFormat],
           queryFn: async () => ({
             type: "folder",
             node: node("handbook", "folder", "产品资料"),
             children,
             storagePrefix: "busabase/nodes/handbook/folder/",
             body,
+            bodyFormat,
           }),
         }),
       },
@@ -132,5 +137,43 @@ describe("folder detail — readme above the children", () => {
     fireEvent.click(less);
     expect(fold?.getAttribute("data-collapsed")).toBe("true");
     expect(screen.getByRole("button", { name: "查看更多" })).toBeTruthy();
+  });
+});
+
+describe("folder detail — HTML readme", () => {
+  const PAGE = '<h1>产品资料怎么用</h1><img src="/api/assets/ast_flow/raw" alt="流程图">';
+
+  it("shows an HTML readme in the sandboxed HTML frame, not as Markdown, above the children", async () => {
+    renderFolder(PAGE, DOCS, "html");
+
+    const readme = await screen.findByTestId("folder-readme");
+    expect(readme.getAttribute("data-readme-format")).toBe("html");
+    expect(readme.textContent).toContain("说明");
+
+    const frame = (await screen.findByTitle("产品资料 预览")) as HTMLIFrameElement;
+    expect(readme.contains(frame)).toBe(true);
+    // The same opaque sandbox an HTML node gets: scripts run, but never with
+    // the workbench's origin.
+    expect(frame.getAttribute("sandbox")).toContain("allow-scripts");
+    expect(frame.getAttribute("sandbox")).not.toContain("allow-same-origin");
+    expect(frame.getAttribute("srcdoc")).toContain(PAGE);
+
+    // Rendered by the frame only — the source never reaches the workbench DOM.
+    expect(screen.queryByRole("heading", { name: "产品资料怎么用" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "查看更多" })).toBeNull();
+
+    const links = screen.getAllByRole("link");
+    expect(links.map((link) => link.textContent)).toEqual([
+      expect.stringContaining("入职第一天"),
+      expect.stringContaining("产品定价"),
+    ]);
+    expect(readme.compareDocumentPosition(links[0] as Node)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
+  it("treats a blank HTML readme like no readme", async () => {
+    renderFolder("  \n", DOCS, "html");
+
+    expect(await screen.findByText("入职第一天")).toBeTruthy();
+    expect(screen.queryByTestId("folder-readme")).toBeNull();
   });
 });

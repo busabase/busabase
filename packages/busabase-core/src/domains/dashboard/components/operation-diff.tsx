@@ -1,5 +1,7 @@
 import {
   getAutoShowNewFields,
+  getGridRowHeight,
+  isGridRowHeight,
   isViewFilterGroup,
   type ViewFilterConditionVO,
 } from "busabase-contract/types";
@@ -21,9 +23,11 @@ import { ArrowRight, Minus, Plus } from "lucide-react";
 import { iStringParse } from "openlib/i18n/i-string";
 import { type CoreI18nMessages, fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
 import { fieldVisibilityMessages } from "../../../i18n/field-visibility";
+import { gridRowHeightMessages } from "../../../i18n/grid-row-height";
 import { getFieldName } from "../helpers/field";
 import { fieldValueToString } from "../helpers/format";
 import { getFieldOrderDiffModel, isFieldReorderOperation } from "../helpers/operation-diff";
+import { DriveFieldPathList } from "./drive-field-tree";
 import { FieldValuePreview } from "./field-preview";
 
 export { getFieldOrderDiffModel, isFieldReorderOperation } from "../helpers/operation-diff";
@@ -139,7 +143,7 @@ export const getFilterOperatorLabel = (messages: CoreI18nMessages, operator: str
 
 export interface ViewConfigRule {
   key: string;
-  kind: "sort" | "filter" | "field" | "order" | "width" | "policy";
+  kind: "sort" | "filter" | "field" | "order" | "width" | "policy" | "density";
   label: string;
 }
 
@@ -148,6 +152,8 @@ export const describeViewConfig = (
   config: unknown,
   messages: CoreI18nMessages,
   automaticLabel = fieldVisibilityMessages.en.automatic,
+  rowHeightLabels = gridRowHeightMessages.en,
+  showDefaultRowHeight = false,
 ): ViewConfigRule[] => {
   const value = (config ?? {}) as ViewConfigVO;
   const rules: ViewConfigRule[] = [];
@@ -224,6 +230,14 @@ export const describeViewConfig = (
       label: `${getFieldName(changeRequest, slug)} · ${width}px`,
     });
   }
+  if (value.rowHeight !== undefined || showDefaultRowHeight) {
+    const preset = isGridRowHeight(value.rowHeight) ? value.rowHeight : "medium";
+    rules.push({
+      key: `row-height:${preset}`,
+      kind: "density",
+      label: `${rowHeightLabels.title} · ${rowHeightLabels[preset]} (${getGridRowHeight(preset)}px)`,
+    });
+  }
   return rules;
 };
 
@@ -245,7 +259,7 @@ export function ViewConfigRuleLine({
           ? messages.operationDiff.width
           : rule.kind === "order"
             ? messages.operationDiff.order
-            : rule.kind === "policy"
+            : rule.kind === "policy" || rule.kind === "density"
               ? messages.operationDiff.configuration
               : messages.operationDiff.field;
   const marker =
@@ -286,6 +300,7 @@ export function ViewConfigRules({
     config,
     messages,
     fieldVisibilityMessages[locale].automatic,
+    gridRowHeightMessages[locale],
   );
   return (
     <div className="flex flex-col gap-1.5">
@@ -309,8 +324,20 @@ export function ViewConfigDiff({
 }) {
   const locale = useCoreLocale();
   const automaticLabel = fieldVisibilityMessages[locale].automatic;
-  const beforeRules = describeViewConfig(changeRequest, before, messages, automaticLabel);
-  const afterRules = describeViewConfig(changeRequest, after, messages, automaticLabel);
+  const showRowHeight =
+    (before as ViewConfigVO | null)?.rowHeight !== undefined ||
+    (after as ViewConfigVO | null)?.rowHeight !== undefined;
+  const describeConfig = (config: unknown) =>
+    describeViewConfig(
+      changeRequest,
+      config,
+      messages,
+      automaticLabel,
+      gridRowHeightMessages[locale],
+      showRowHeight,
+    );
+  const beforeRules = describeConfig(before);
+  const afterRules = describeConfig(after);
   const beforeKeys = new Set(beforeRules.map((rule) => rule.key));
   const afterKeys = new Set(afterRules.map((rule) => rule.key));
   const lines: { rule: ViewConfigRule; status: "added" | "removed" | "unchanged" }[] = [
@@ -374,27 +401,34 @@ export function FieldValueDiff({
   fieldUsers?: Record<string, UserRefVO>;
   messages: CoreI18nMessages;
 }) {
-  if (change.status === "added") {
-    return (
-      <div className="text-sm">
-        <FieldValuePreview field={field} fieldUsers={fieldUsers} value={change.afterValue} />
-      </div>
+  // A drive value is reviewed as the PATHS of its files: a file that only
+  // moved or was renamed would otherwise show the same chip on both sides.
+  const drive = field?.type === "drive";
+  const preview = (value: unknown) =>
+    drive ? (
+      <DriveFieldPathList value={value} />
+    ) : (
+      <FieldValuePreview field={field} fieldUsers={fieldUsers} value={value} />
     );
+  if (change.status === "added") {
+    return <div className="text-sm">{preview(change.afterValue)}</div>;
   }
-  if (isLongTextValue(change.afterValue) || isLongTextValue(change.beforeValue)) {
+  if (drive || isLongTextValue(change.afterValue) || isLongTextValue(change.beforeValue)) {
     return (
       <div className="flex flex-col gap-2">
-        <div className="rounded-md border border-rejected/35 bg-rejected/17 px-3 py-2 text-muted-foreground text-sm line-through">
+        <div
+          className={`rounded-md border border-rejected/35 bg-rejected/17 px-3 py-2 text-muted-foreground text-sm ${drive ? "" : "line-through"}`}
+        >
           <div className="mb-1 font-medium text-[11px] text-rejected-strong no-underline dark:text-rejected-soft">
             {messages.operationDiff.before}
           </div>
-          <FieldValuePreview field={field} fieldUsers={fieldUsers} value={change.beforeValue} />
+          {preview(change.beforeValue)}
         </div>
         <div className="rounded-md border border-merged/35 bg-merged/17 px-3 py-2 text-sm">
           <div className="mb-1 font-medium text-[11px] text-merged-strong dark:text-merged-soft">
             {messages.operationDiff.after}
           </div>
-          <FieldValuePreview field={field} fieldUsers={fieldUsers} value={change.afterValue} />
+          {preview(change.afterValue)}
         </div>
       </div>
     );
@@ -402,11 +436,11 @@ export function FieldValueDiff({
   return (
     <div className="flex flex-wrap items-center gap-2 text-sm">
       <span className="rounded-md bg-rejected/17 px-2 py-0.5 text-rejected-strong line-through dark:text-rejected-soft">
-        <FieldValuePreview field={field} fieldUsers={fieldUsers} value={change.beforeValue} />
+        {preview(change.beforeValue)}
       </span>
       <ArrowRight className="shrink-0 text-muted-foreground" size={14} />
       <span className="rounded-md bg-merged/17 px-2 py-0.5 text-merged-strong dark:text-merged-soft">
-        <FieldValuePreview field={field} fieldUsers={fieldUsers} value={change.afterValue} />
+        {preview(change.afterValue)}
       </span>
     </div>
   );

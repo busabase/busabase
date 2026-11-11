@@ -11,6 +11,7 @@ import { type iString, iStringParse, type LocaleType } from "openlib/i18n/i-stri
 import { parseDocument } from "yaml";
 import { FormulaError, type FormulaValue } from "./formula";
 import { evaluateFormulaField } from "./formula/evaluation";
+import { findDrivePathProblem } from "./utils/drive-field-value";
 import { validateEmbedUrl } from "./utils/embed";
 import { WhiteboardFieldValueSchema } from "./utils/whiteboard-value";
 
@@ -27,7 +28,7 @@ export interface FieldDef {
     targetBaseId?: string;
     /** `relation` only — reverse column of this forward field id (edits go to the forward field). */
     reverseOfFieldId?: string;
-    /** Per-field limits for `attachment` columns (all optional; see attachmentValidator). */
+    /** Per-field limits for `attachment` and `drive` columns (all optional; see attachmentValidator). */
     attachment?: {
       maxFiles?: number;
       allowedMimeTypes?: ReadonlyArray<string>;
@@ -81,6 +82,7 @@ export type FieldInputKind =
   | "relation"
   | "member"
   | "attachment"
+  | "drive"
   | "tags"
   | "whiteboard"
   | "computed";
@@ -402,6 +404,24 @@ const attachmentValidator = (value: unknown, def: FieldDef): string | null => {
   return null;
 };
 
+/**
+ * Validate a `drive` cell — the same ref array (and the same per-field limits)
+ * as `attachment`, plus each ref's `path` inside the cell's own little file
+ * tree. Path rules are the Drive node's; see `utils/drive-field-value.ts`.
+ */
+const driveValidator = (value: unknown, def: FieldDef): string | null => {
+  const attachmentError = attachmentValidator(value, def);
+  if (attachmentError) return attachmentError;
+  const problem = findDrivePathProblem(
+    value as ReadonlyArray<{ fileName: string; path?: unknown }>,
+  );
+  if (!problem) return null;
+  const name = fieldDisplayName(def);
+  if (problem.reason === "invalid") return `${name} has an invalid file path: ${problem.path}`;
+  if (problem.reason === "duplicate") return `${name} has more than one file at ${problem.path}`;
+  return `${name} has a file and a folder both named ${problem.path}`;
+};
+
 // ── computed-value helpers (system fields) ───────────────────────────────────
 const computeCreatedTime = (c: SystemComputeCtx) =>
   c.mode === "create" ? c.timestampIso : (c.existing[c.slug] ?? c.timestampIso);
@@ -615,6 +635,13 @@ export const FIELD_TYPES: Record<FieldType, FieldTypeSpec> = {
     columnWidth: "minmax(128px,180px)",
     validate: attachmentValidator,
   },
+  drive: {
+    type: "drive",
+    label: "drive",
+    input: "drive",
+    columnWidth: "minmax(128px,180px)",
+    validate: driveValidator,
+  },
   ai_summary: {
     type: "ai_summary",
     label: "AI summary",
@@ -694,6 +721,7 @@ export const FIELD_TYPE_ORDER: FieldType[] = [
   "yaml",
   "whiteboard",
   "attachment",
+  "drive",
   "relation",
   "member",
   "lookup",
@@ -792,6 +820,9 @@ const DISPLAY_KIND: Partial<Record<FieldType, FieldDisplayKind>> = {
   multiselect: "chips",
   ai_tags: "chips",
   attachment: "attachment",
+  // A drive cell renders as its files everywhere a cell is small (grid, cards,
+  // property rows); only the record page and editor draw its folder tree.
+  drive: "attachment",
   relation: "relation",
   // All three people-typed fields share ONE display: an avatar + name chip fed
   // by `RecordVO.fieldUsers`. `created_by` / `updated_by` used to render a
@@ -877,6 +908,16 @@ export const collectPeopleFieldIds = (
   }
   return [...ids];
 };
+
+/**
+ * Field types whose cell holds file refs (`attachment`, and `drive`, which adds
+ * a path to each). Ask this instead of `type === "attachment"` wherever the
+ * question is "does this cell hold files" — asset indexing, covers, agent
+ * context — so a drive column is never silently left out.
+ */
+export const FILE_FIELD_TYPES: ReadonlySet<FieldType> = new Set(["attachment", "drive"]);
+
+export const isFileFieldType = (type: FieldType): boolean => FILE_FIELD_TYPES.has(type);
 
 /** The set of server-managed (computed) field types. */
 export const SYSTEM_FIELD_TYPES: ReadonlySet<FieldType> = new Set(

@@ -767,6 +767,8 @@ export const coreMessagesEn = {
     engineFollowAppNamed: "Follow the app ({engine})",
     engineFollowAppHint:
       "This app's airapp.json decides. Pick an engine to override it for this node.",
+    engineFollowAppFallback:
+      "This app's airapp.json prefers {preferred}, which isn't available here. Engine in use: {engine}.",
     engineRequired: "App requires {engine}",
     engineRequiredHint:
       "This requirement is set by requiredEngine in airapp.json and cannot be overridden for this node.",
@@ -817,6 +819,38 @@ export const coreMessagesEn = {
     swUnsupportedLinkCopied: "Link copied",
     swUnsupportedCopyFailed: "Couldn't copy the link. Select and copy it manually:",
     site: {
+      publish: {
+        previewStale:
+          "The files changed after this preview. Create or refresh the website preview, then go live.",
+        noPreview: "Create a website preview before going live.",
+        previewUnavailable:
+          "The website preview could not load. Create it again before going live.",
+        title: "Publish to site",
+        description:
+          "Give this AirApp an always-on Busabase Site with a fixed public address. Visitors can open it without a Busabase account.",
+        preserveBrowser: "Your browser preview keeps running while you prepare the website.",
+        checking: "Checking website readiness…",
+        checkFailed: "Could not check this website. Try again.",
+        planRequired: "Website hosting is included with {plan} and above.",
+        paidPlanRequired: "This space needs a paid plan to host a website.",
+        upgradeHint:
+          "Prepare your app now, then upgrade this space to preview and publish it. A browser preview link is not an always-on website.",
+        prepareTitle: "Prepare the app for the web",
+        prepareHint:
+          "Ask your agent to prepare a website version. This may require code changes before it can be published.",
+        copyPrompt: "Copy agent prompt",
+        copied: "Prompt copied",
+        agentPrompt:
+          "Prepare this AirApp for publishing as a Busabase Site using the busabase-app-creator skill. Inspect its files and preserve its existing browser runtime and functionality. Add an explicit site declaration in airapp.json, static assets, and if needed a single bundled JavaScript ES module Worker with a default fetch export; do not publish a Node development server or merely change the engine. Keep site.access read-only unless the app needs writes, expose only specific safe endpoints, and never expose the API key or proxy arbitrary visitor requests. Validate the site bundle and explain required changes. Leave publishing to me after I review the private website preview.",
+        previewHint:
+          "Create a private website preview first. Review it here before making it public.",
+        createPreview: "Create website preview",
+        preparingPreview: "Preparing preview…",
+        refreshPreview: "Refresh website preview",
+        previewTitle: "Private website preview",
+        publishConsent:
+          "Go live publishes this reviewed version. Anyone with the address can use the website, including the data and actions its code exposes.",
+      },
       statusNotLive: "Not live",
       statusLive: "Live",
       statusLiveWithChanges: "Unpublished changes",
@@ -2394,6 +2428,23 @@ export const coreMessagesEn = {
     uploadFailed: "Upload failed",
     uploading: "Uploading...",
     addFile: "Add file",
+    /** The `drive` field's record editor (folder tree + upload + rename/move). */
+    drive: {
+      filePath: "File path",
+      moveFile: "Rename or move",
+      moveFolder: "Rename or move folder",
+      moveFolderHint:
+        "Edit the path to rename or move the folder and everything in it, e.g. contracts/2026. Leave it empty to move its contents to the root.",
+      folderPath: "Folder path",
+      movePathHint: "Change the folders in the path to move it, e.g. contracts/2026/main.pdf.",
+      apply: "Apply",
+      pathTaken: 'Something is already at "{path}". Choose a different path.',
+      invalidPath: "Enter a valid path, e.g. contracts/2026/main.pdf.",
+      folderIntoItself: "A folder cannot be moved into itself.",
+      removeFolderBody:
+        'This removes "{folder}" and the {count} file{plural} in it from this field. Nothing changes until you save the record.',
+      emptyFolderHint: "Empty folders are not saved. Add files to keep this folder.",
+    },
     properties: "Properties",
     source: "Source",
     openFullPage: "Open full page",
@@ -2649,6 +2700,7 @@ export const coreMessagesEn = {
     member: "Member",
     lookup: "Lookup",
     attachment: "File",
+    drive: "Drive",
     ai_summary: "AI summary",
     ai_tags: "AI tags",
     created_time: "Created at",
@@ -2834,6 +2886,13 @@ export const coreMessagesEn = {
     hookUrlHint:
       "Send a POST (JSON or text) or GET to this URL to start a run. The request is in steps.trigger.payload.request: method, query, headers, and body. If a code step returns { response: … } before the run pauses, the caller gets it; otherwise it gets 202 and the run's ID. Anyone with this URL can start a run: change it to stop the old one working. Changes take effect once saved.",
     hookNeedsEvent: "Set Execution mode to Event in Execution settings, or this URL answers 404.",
+    webhookSign: "Sign requests",
+    webhookSigningSecret: "Signing secret",
+    webhookSigningRegenerate: "Change secret",
+    webhookSigningHint:
+      'Each request carries an X-Busabase-Signature header: t=<unix time>,v1=<hex HMAC-SHA256 of "<t>.<body>" with this secret>. Check it where the request arrives, and reject a t that is more than a few minutes old, so a forged or replayed request is refused. Anyone who can open this workflow can read the secret: change it to stop the old one working. Changes take effect once saved.',
+    webhookSignOffHint:
+      "Off: the request carries no signature. Switch it on to let the receiver check that a request came from this step.",
     functionCode: "Code",
     functionCodeHint:
       "JavaScript that runs on the server when the run reaches this step. input has the run's data (payload, steps, record), await fetch(...) calls public URLs, and the value you return is this step's output (later steps read it as steps.<id>.<field>). Anyone who can open this workflow can read the code.",
@@ -2913,6 +2972,26 @@ export const coreMessagesEn = {
     findRecordsForEach: "Run the next steps once for each record",
     findRecordsForEachHint:
       "Each record gets its own run, about that record: Update a record changes it, and later steps read it as record. This run ends here, and those runs take turns under Concurrency.",
+    runIn: "Run on",
+    runInServer: "This server",
+    runInSandbox: "A sandbox machine",
+    runInServerHint: "Fast. JavaScript only, no packages, up to the workflow's Timeout.",
+    runInSandboxHint:
+      "A machine started for this step: JavaScript or Python, packages installed first, up to 10 minutes. The run waits for it like a Wait, so a request that started the run gets 202.",
+    runInSandboxLocked: "Running code in a sandbox needs the {plan} plan.",
+    runInSandboxNotConfigured:
+      "This server has no sandbox configured. An administrator can turn it on with a Sandock API key.",
+    sandboxLanguage: "Language",
+    sandboxLanguageJavascript: "JavaScript (Node.js)",
+    sandboxLanguagePython: "Python",
+    sandboxPackages: "Packages",
+    sandboxPackagesHintJavascript:
+      'npm packages to install first, separated by spaces, such as dayjs or lodash@4. Load them with require("dayjs").',
+    sandboxPackagesHintPython:
+      "pip packages to install first, separated by spaces, such as requests or pycryptodome==3.20.0. Import them as usual.",
+    sandboxCode: "Code in a sandbox",
+    sandboxCodeHint:
+      "Runs on the sandbox machine. input has the run's data and what you return is this step's output. Anyone who can open this workflow can read the code.",
     customActionHint: "This action name does nothing yet: it is recorded and skipped.",
     chooseBase: "Choose a Base",
     targetRecord: "Record (optional)",
@@ -3003,6 +3082,8 @@ export const coreMessagesEn = {
     triggerSchedule: "Schedule",
     triggerWebhook: "Request",
     triggerForEach: "Per record",
+    waitingSandbox: "Running code in a sandbox. The run carries on when it finishes.",
+    waitingSandboxDeadline: "Stopped if not done by {time}.",
     runDetails: "Run details",
     recordLabel: "Record: {id}",
     waitingUntil: "Waiting until {time}. It continues on its own then.",
@@ -3011,6 +3092,12 @@ export const coreMessagesEn = {
     approve: "Approve",
     reject: "Reject",
     errorLabel: "Error",
+    retryFromStep: "Retry from this step",
+    retryFromStepHint:
+      "Starts a new run that keeps every step before this one as it was and runs this step again. A request this step already sent is sent again.",
+    retriedAsLink: "Retried: open the new run",
+    retryOfLink: "A retry of an earlier run: open it",
+    triggerRetry: "Retry",
     steps: "Steps",
     noSteps: "No steps have finished yet.",
     stepData: "Data",
@@ -3054,6 +3141,16 @@ export const coreMessagesEn = {
     rename: "Install clashing items under new names",
     renameHint: "Adds a suffix (-2, -3, …). Existing content is left untouched.",
     warningsTitle: "Worth knowing",
+    folderName: "Folder name",
+    folderNameHint: "Shown in your workspace. Use any language.",
+    folderNameRequired: "Enter a folder name.",
+    installUnavailable: "Installation is temporarily unavailable. Please try again later.",
+    installNoChanges: "No template content was created. You can try again.",
+    installPartial:
+      "Some content was created before installation stopped. Check your workspace before trying again.",
+    installUnknown:
+      "The installation result could not be confirmed. Check your workspace before installing again.",
+    technicalDetails: "Technical details",
     targetFolder: "Install into folder",
     targetFolderHint:
       "A new folder is created for the package. Defaults to the package's own name.",

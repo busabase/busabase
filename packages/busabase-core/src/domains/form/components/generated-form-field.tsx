@@ -10,6 +10,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "kui/popover";
 import { ChevronLeft, ChevronRight, Paperclip, Plus, Search, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { type FieldInputKind, fieldInputKind } from "../../base/field-types";
+import { withDrivePaths } from "../../base/utils/drive-field-value";
 import { DateFieldInput } from "../../dashboard/components/date-field";
 import { FieldHelp, hasFieldHelp } from "../../dashboard/components/field-help";
 
@@ -399,7 +400,10 @@ function FormAttachmentField({
     try {
       const uploaded = await Promise.all(fileList.map((file) => onUploadAttachment(file)));
       const next = multiple ? [...attachments, ...uploaded] : uploaded.slice(-1);
-      onChange(options?.maxFiles ? next.slice(-options.maxFiles) : next);
+      const limited = options?.maxFiles ? next.slice(-options.maxFiles) : next;
+      // A form has no folder tree: files sent to a drive field land at its root,
+      // each with an explicit path (`name (2).pdf` when a name repeats).
+      onChange(field.type === "drive" ? withDrivePaths(limited) : limited);
     } catch {
       setError("Could not upload file. Please try again.");
     } finally {
@@ -497,7 +501,7 @@ export function GeneratedFormField({
         orpc={orpc}
         value={value}
       />
-    ) : controlKind === "attachment" && field ? (
+    ) : (controlKind === "attachment" || controlKind === "drive") && field ? (
       <FormAttachmentField
         field={field}
         inputId={inputId}

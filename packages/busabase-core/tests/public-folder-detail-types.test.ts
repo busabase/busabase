@@ -1,8 +1,10 @@
+import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createRouterClient } from "@orpc/server";
 import { eq } from "drizzle-orm";
+import { storage } from "openlib/storage";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { LOCAL_SPACE_ID, runWithAnonymousContext } from "../src/context";
 import { getDb } from "../src/db";
@@ -207,9 +209,10 @@ describe("shared folder detail types — real router, PGLite and object storage"
       fileName: "staged.txt",
       mimeType: "text/plain",
       sizeBytes: 1,
-      contentHash: `sha256:${"f".repeat(64)}`,
+      contentHash: `sha256:${createHash("sha256").update(Buffer.from("f")).digest("hex")}`,
     };
     const stagedUpload = await client.assets.createUploadUrl(stagedInput);
+    await storage.uploadFileToKey(Buffer.from("f"), stagedUpload.storageKey, stagedInput.mimeType);
     const unmounted = await client.assets.confirm({
       ...stagedInput,
       storageKey: stagedUpload.storageKey,

@@ -7,7 +7,7 @@ import {
   listRecordActivityPagedInputSchema,
 } from "busabase-contract/contract/activity-schemas";
 import type { AuditEventVO, ChangeRequestVO, RecordVO } from "busabase-contract/types";
-import { and, type Column, desc, eq, inArray, lt, lte, or, type SQL } from "drizzle-orm";
+import { and, type Column, desc, eq, inArray, or, type SQL, sql } from "drizzle-orm";
 import type { z } from "zod";
 
 // oRPC handlers return values matching the contract output schema's INPUT type
@@ -24,6 +24,11 @@ import {
   busabaseRecords,
 } from "../db/schema";
 import { applyPlaybookAttributionVisibility } from "../domains/playbooks/logic/playbook-attribution";
+import {
+  buildAuditSubjectAclSql,
+  buildChangeRequestAclSql,
+  buildRecordRowAclSql,
+} from "./acl-list-sql";
 import { type AuditSubjectRef, assertAuditSubjectPermission, isAuditVisibilityMiss } from "./audit";
 import { ensureReady } from "./seed";
 import { toAuditEventVO } from "./vo";
@@ -36,11 +41,14 @@ import { toAuditEventVO } from "./vo";
  * browser.
  *
  * Ordering is a total order over (timestamp DESC, kind DESC, id DESC). Rather
- * than a fragile cross-table SQL UNION, each of the four sources is queried with
+ * than issuing a single SQL UNION (the four sources use three different
+ * timestamp columns), each source is queried with LIMIT n+1 under
  * its own keyset predicate (derived from the cursor's fixed kind) and its own
- * `ORDER BY ts DESC, id DESC LIMIT n+1`, then merged in JS with a STABLE sort by
- * (ts, kind) only — so the id tiebreak is only ever compared in SQL (matching the
- * existing keyset code's collation), never JS-vs-SQL.
+ * `ORDER BY ts DESC, id DESC LIMIT n+1`, then merged in JS by the same
+ * (ts, kind, id) order. Timestamps travel as microsecond UTC keys (not JS
+ * Date) so page cursors do not truncate sub-ms values and skip rows. Ids are
+ * opaque ASCII (`crq…` / `opr…` / …); JS `<` matches PostgreSQL's default
+ * collation on that alphabet.
  */
 
 // Fixed total order for the cross-source tiebreak at equal timestamps. Any stable
@@ -55,32 +63,48 @@ type ActivityKind = keyof typeof KIND_ORDER;
 
 interface RawEvent extends AuditSubjectRef {
   ts: Date;
+  /** UTC microsecond key (`YYYY-MM-DDTHH:MM:SS.μμμμμμZ`) — JS Date is only ms. */
+  tsKey: string;
   kind: ActivityKind;
   id: string;
   /** owning change request (self for `change_request`, parent for `operation`). */
   changeRequestId: string | null;
   /** referenced record (self for `record`, the audit target for `audit`). */
   recordId: string | null;
+  /**
+   * The SQL access predicate could not decide this row alone (a change request
+   * with an operation that names neither node nor Base); re-check it in JS.
+   */
+  needsScopeCheck?: boolean;
 }
 
-// `|` separates the ISO timestamp (colons) from the kind and id (neither contains `|`).
-const encodeActivityCursor = (ts: Date, kind: ActivityKind, id: string): string =>
-  Buffer.from(`${ts.toISOString()}|${kind}|${id}`, "utf8").toString("base64");
+// Microsecond UTC text — JS `Date` only stores milliseconds, and ~all rows in a
+// busy space have sub-ms timestamps. Encoding the cursor with `toISOString()`
+// truncated those away; the next page's keyset then skipped every row whose
+// fractional milliseconds sat between the truncated cursor and the real value.
+const tsKeySql = (tsCol: Column): SQL<string> =>
+  sql<string>`to_char(${tsCol} AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
+
+// `|` separates the tsKey (colons) from the kind and id (neither contains `|`).
+const encodeActivityCursor = (tsKey: string, kind: ActivityKind, id: string): string =>
+  Buffer.from(`${tsKey}|${kind}|${id}`, "utf8").toString("base64");
 
 const decodeActivityCursor = (
   cursor: string,
-): { ts: Date; kind: ActivityKind; id: string } | null => {
+): { tsKey: string; kind: ActivityKind; id: string } | null => {
   try {
     const decoded = Buffer.from(cursor, "base64").toString("utf8");
     const firstSep = decoded.indexOf("|");
     const secondSep = decoded.indexOf("|", firstSep + 1);
     if (firstSep < 0 || secondSep < 0) return null;
-    const iso = decoded.slice(0, firstSep);
+    const tsKey = decoded.slice(0, firstSep);
     const kind = decoded.slice(firstSep + 1, secondSep);
     const id = decoded.slice(secondSep + 1);
-    const ts = new Date(iso);
-    if (Number.isNaN(ts.getTime()) || !id || !(kind in KIND_ORDER)) return null;
-    return { ts, kind: kind as ActivityKind, id };
+    if (!tsKey || !id || !(kind in KIND_ORDER)) return null;
+    // Accept legacy ms-ISO cursors and new microsecond keys alike — both parse
+    // as timestamptz. Legacy cursors may still skip at their last boundary.
+    if (Number.isNaN(Date.parse(tsKey))) return null;
+    return { tsKey, kind: kind as ActivityKind, id };
   } catch {
     return null;
   }
@@ -97,14 +121,14 @@ const keysetFor = (
   kind: ActivityKind,
   tsCol: Column,
   idCol: Column,
-  cursor: { ts: Date; kind: ActivityKind; id: string } | null,
+  cursor: { tsKey: string; kind: ActivityKind; id: string } | null,
 ): SQL | undefined => {
   if (!cursor) return undefined;
+  const cts = sql`${cursor.tsKey}::timestamptz`;
   const cmp = KIND_ORDER[kind] - KIND_ORDER[cursor.kind];
-  if (cmp < 0) return lte(tsCol, cursor.ts);
-  if (cmp === 0)
-    return or(lt(tsCol, cursor.ts), and(eq(tsCol, cursor.ts), lt(idCol, cursor.id))) as SQL;
-  return lt(tsCol, cursor.ts);
+  if (cmp < 0) return sql`${tsCol} <= ${cts}`;
+  if (cmp === 0) return sql`(${tsCol} < ${cts} OR (${tsCol} = ${cts} AND ${idCol} < ${cursor.id}))`;
+  return sql`${tsCol} < ${cts}`;
 };
 
 export const listActivityPaged = async (
@@ -120,16 +144,49 @@ export const listActivityPaged = async (
   const initialCursor = parsed.cursor ? decodeActivityCursor(parsed.cursor) : null;
   const batchSize = limit + 1;
 
+  // Access is decided in each source's WHERE — the same rule
+  // `assertAuditSubjectPermission(event, "read")` applies per event (see
+  // acl-list-sql.ts) — so a window only carries rows the caller can see. A row
+  // the predicate flags is re-checked in JS below.
+  const changeRequestAcl = buildChangeRequestAclSql(db, busabaseChangeRequests.id, "permission");
+  const operationAcl = buildChangeRequestAclSql(
+    db,
+    busabaseOperations.changeRequestId,
+    "permission",
+  );
+  if (!changeRequestAcl || !operationAcl) throw new Error("permission ACL is never null");
+  const auditAcl = buildAuditSubjectAclSql(
+    db,
+    {
+      baseId: busabaseAuditEvents.baseId,
+      recordId: busabaseAuditEvents.recordId,
+      changeRequestId: busabaseAuditEvents.changeRequestId,
+      operationId: busabaseAuditEvents.operationId,
+      commitId: busabaseAuditEvents.commitId,
+    },
+    "permission",
+    // Walked through the (space, created_at, id) index until a page is full:
+    // probe row by row. The other sources sort on a column no index covers,
+    // so they examine every row anyway and let PostgreSQL hash.
+    "probe",
+  );
+
   const fetchWindow = async (cursor: typeof initialCursor) => {
     const [crRows, opRows, recordRows, auditRows] = await Promise.all([
       recordId
         ? Promise.resolve([])
         : db
-            .select({ ts: busabaseChangeRequests.updatedAt, id: busabaseChangeRequests.id })
+            .select({
+              ts: busabaseChangeRequests.updatedAt,
+              tsKey: tsKeySql(busabaseChangeRequests.updatedAt),
+              id: busabaseChangeRequests.id,
+              needsScopeCheck: sql<boolean>`${changeRequestAcl.needsScopeCheck}`,
+            })
             .from(busabaseChangeRequests)
             .where(
               and(
                 eq(busabaseChangeRequests.spaceId, spaceId),
+                changeRequestAcl.visible,
                 keysetFor(
                   "change_request",
                   busabaseChangeRequests.updatedAt,
@@ -143,13 +200,16 @@ export const listActivityPaged = async (
       db
         .select({
           ts: busabaseOperations.updatedAt,
+          tsKey: tsKeySql(busabaseOperations.updatedAt),
           id: busabaseOperations.id,
           changeRequestId: busabaseOperations.changeRequestId,
+          needsScopeCheck: sql<boolean>`${operationAcl.needsScopeCheck}`,
         })
         .from(busabaseOperations)
         .where(
           and(
             eq(busabaseOperations.spaceId, spaceId),
+            operationAcl.visible,
             recordId
               ? or(
                   eq(busabaseOperations.targetRecordId, recordId),
@@ -165,7 +225,11 @@ export const listActivityPaged = async (
       recordId
         ? Promise.resolve([])
         : db
-            .select({ ts: busabaseRecords.updatedAt, id: busabaseRecords.id })
+            .select({
+              ts: busabaseRecords.updatedAt,
+              tsKey: tsKeySql(busabaseRecords.updatedAt),
+              id: busabaseRecords.id,
+            })
             .from(busabaseRecords)
             .where(
               and(
@@ -173,6 +237,7 @@ export const listActivityPaged = async (
                 // Match the feed's record source (records.list is active-only), so
                 // archived records don't flood the activity feed with new events.
                 eq(busabaseRecords.status, "active"),
+                buildRecordRowAclSql(db),
                 keysetFor("record", busabaseRecords.updatedAt, busabaseRecords.id, cursor),
               ),
             )
@@ -181,17 +246,20 @@ export const listActivityPaged = async (
       db
         .select({
           ts: busabaseAuditEvents.createdAt,
+          tsKey: tsKeySql(busabaseAuditEvents.createdAt),
           id: busabaseAuditEvents.id,
           baseId: busabaseAuditEvents.baseId,
           recordId: busabaseAuditEvents.recordId,
           changeRequestId: busabaseAuditEvents.changeRequestId,
           operationId: busabaseAuditEvents.operationId,
           commitId: busabaseAuditEvents.commitId,
+          needsScopeCheck: sql<boolean>`${auditAcl.needsScopeCheck}`,
         })
         .from(busabaseAuditEvents)
         .where(
           and(
             eq(busabaseAuditEvents.spaceId, spaceId),
+            auditAcl.visible,
             recordId ? eq(busabaseAuditEvents.recordId, recordId) : undefined,
             keysetFor("audit", busabaseAuditEvents.createdAt, busabaseAuditEvents.id, cursor),
           ),
@@ -202,22 +270,27 @@ export const listActivityPaged = async (
     const events: RawEvent[] = [
       ...crRows.map((row) => ({
         ts: row.ts,
+        tsKey: row.tsKey,
         kind: "change_request" as const,
         id: row.id,
         changeRequestId: row.id,
         recordId: null,
         operationId: null,
+        needsScopeCheck: row.needsScopeCheck,
       })),
       ...opRows.map((row) => ({
         ts: row.ts,
+        tsKey: row.tsKey,
         kind: "operation" as const,
         id: row.id,
         changeRequestId: row.changeRequestId,
         operationId: row.id,
         recordId: null,
+        needsScopeCheck: row.needsScopeCheck,
       })),
       ...recordRows.map((row) => ({
         ts: row.ts,
+        tsKey: row.tsKey,
         kind: "record" as const,
         id: row.id,
         changeRequestId: null,
@@ -226,6 +299,7 @@ export const listActivityPaged = async (
       })),
       ...auditRows.map((row) => ({
         ts: row.ts,
+        tsKey: row.tsKey,
         kind: "audit" as const,
         id: row.id,
         recordId: row.recordId,
@@ -233,6 +307,7 @@ export const listActivityPaged = async (
         changeRequestId: row.changeRequestId,
         operationId: row.operationId,
         commitId: row.commitId,
+        needsScopeCheck: row.needsScopeCheck,
       })),
     ];
     const continuation: RawEvent[] = [];
@@ -240,6 +315,7 @@ export const listActivityPaged = async (
     if (lastCr) {
       continuation.push({
         ts: lastCr.ts,
+        tsKey: lastCr.tsKey,
         kind: "change_request",
         id: lastCr.id,
         changeRequestId: lastCr.id,
@@ -250,6 +326,7 @@ export const listActivityPaged = async (
     if (lastOperation) {
       continuation.push({
         ts: lastOperation.ts,
+        tsKey: lastOperation.tsKey,
         kind: "operation",
         id: lastOperation.id,
         changeRequestId: lastOperation.changeRequestId,
@@ -261,6 +338,7 @@ export const listActivityPaged = async (
     if (lastRecord) {
       continuation.push({
         ts: lastRecord.ts,
+        tsKey: lastRecord.tsKey,
         kind: "record",
         id: lastRecord.id,
         changeRequestId: null,
@@ -271,6 +349,7 @@ export const listActivityPaged = async (
     if (lastAudit) {
       continuation.push({
         ts: lastAudit.ts,
+        tsKey: lastAudit.tsKey,
         kind: "audit",
         id: lastAudit.id,
         baseId: lastAudit.baseId,
@@ -284,7 +363,11 @@ export const listActivityPaged = async (
   };
 
   const compareEvents = (a: RawEvent, b: RawEvent) =>
-    b.ts.getTime() - a.ts.getTime() || KIND_ORDER[b.kind] - KIND_ORDER[a.kind];
+    // DESC by microsecond key (string order matches chronological UTC order),
+    // then kind, then id — same total order as each source's SQL keyset.
+    (a.tsKey < b.tsKey ? 1 : a.tsKey > b.tsKey ? -1 : 0) ||
+    KIND_ORDER[b.kind] - KIND_ORDER[a.kind] ||
+    (a.id < b.id ? 1 : a.id > b.id ? -1 : 0);
   const visibleByKey = new Map<string, RawEvent>();
   let cursor = initialCursor;
   let continuationBoundary: RawEvent | null = null;
@@ -293,6 +376,8 @@ export const listActivityPaged = async (
     const unseen = window.events.filter((event) => !visibleByKey.has(`${event.kind}:${event.id}`));
     const visibility = await Promise.all(
       unseen.map(async (event) => {
+        // The SQL predicate already decided every unflagged row.
+        if (!event.needsScopeCheck) return true;
         try {
           await assertAuditSubjectPermission(event, "read");
           return true;
@@ -308,8 +393,8 @@ export const listActivityPaged = async (
     continuationBoundary = window.continuation.sort(compareEvents)[0] ?? null;
     const visibleSoFar = [...visibleByKey.values()].sort(compareEvents);
     const threshold = visibleSoFar[limit];
-    // Equal timestamp+kind remains conservative: continue one more SQL window
-    // rather than comparing ids in JS with a potentially different collation.
+    // With id in the comparator, equal (ts, kind, id) is a true duplicate; any
+    // strict order difference against the continuation boundary is decisive.
     if (
       !continuationBoundary ||
       (threshold && compareEvents(threshold, continuationBoundary) < 0)
@@ -317,13 +402,13 @@ export const listActivityPaged = async (
       break;
     }
     const next = {
-      ts: continuationBoundary.ts,
+      tsKey: continuationBoundary.tsKey,
       kind: continuationBoundary.kind,
       id: continuationBoundary.id,
     };
     if (
       cursor &&
-      cursor.ts.getTime() === next.ts.getTime() &&
+      cursor.tsKey === next.tsKey &&
       cursor.kind === next.kind &&
       cursor.id === next.id
     ) {
@@ -336,7 +421,7 @@ export const listActivityPaged = async (
   const hasMore = visible.length > limit;
   const page = visible.slice(0, limit);
   const last = page[page.length - 1];
-  const nextCursor = hasMore && last ? encodeActivityCursor(last.ts, last.kind, last.id) : null;
+  const nextCursor = hasMore && last ? encodeActivityCursor(last.tsKey, last.kind, last.id) : null;
 
   // Batch-hydrate only the page's referenced entities (reuses the E-bucket batch
   // hydrators — one query per relation, not per row).

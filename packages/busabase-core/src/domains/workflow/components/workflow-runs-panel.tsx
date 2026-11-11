@@ -23,7 +23,7 @@ import {
 import { Button } from "kui/button";
 import { Input } from "kui/input";
 import { Textarea } from "kui/textarea";
-import { Ban, Check, FastForward, Play, X } from "lucide-react";
+import { Ban, Check, FastForward, Play, RotateCcw, X } from "lucide-react";
 import { useEffect, useId, useMemo, useState } from "react";
 import { type CoreI18nMessages, fmt, useCoreI18n, useCoreLocale } from "../../../i18n";
 import { presentCoreError } from "../../../i18n/localize-error";
@@ -185,7 +185,16 @@ interface WorkflowRunDetailsProps {
   canDecide: boolean;
   /** Whether the viewer may stop this run (write on the workflow). */
   canCancel: boolean;
+  /** Whether this failed run can run again from the step it stopped on (see `retryableRunIds`). */
+  canRetry: boolean;
+  /** The run that retried this one, when it was retried. */
+  retriedAs: string | null;
+  /** The run this one is a retry of, when it is one. */
+  retryOf: string | null;
   onCancel: () => void;
+  onRetry: () => void;
+  /** Select another run in this workflow, such as the run that retried this one. */
+  onOpenRun: (runId: string) => void;
   onContinue: () => void;
   onDecide: (decision: DecideWorkflowRunInput["decision"]) => void;
 }
@@ -199,7 +208,12 @@ function WorkflowRunDetails({
   canContinue,
   canDecide,
   canCancel,
+  canRetry,
+  retriedAs,
+  retryOf,
   onCancel,
+  onRetry,
+  onOpenRun,
   onContinue,
   onDecide,
 }: WorkflowRunDetailsProps) {
@@ -256,6 +270,22 @@ function WorkflowRunDetails({
               <FastForward className="size-3.5" />
               {copy.continueNow}
             </Button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {run.status === "waiting" && pause?.kind === "sandbox" ? (
+        <div
+          className="grid gap-2 border border-primary/40 bg-primary/5 px-2 py-2 text-xs"
+          data-workflow-run-pause="sandbox"
+        >
+          <p className="text-foreground leading-snug">{copy.waitingSandbox}</p>
+          {pause.deadlineAt ? (
+            <p className="text-muted-foreground leading-snug">
+              {fmt(copy.waitingSandboxDeadline, {
+                time: formatRunTime(pause.deadlineAt, locale),
+              })}
+            </p>
           ) : null}
         </div>
       ) : null}
@@ -340,6 +370,43 @@ function WorkflowRunDetails({
           <span className="font-medium">{copy.errorLabel}: </span>
           {run.error}
         </p>
+      ) : null}
+
+      {run.status === "failed" && canRetry ? (
+        <div className="grid gap-1.5" data-workflow-run-retry-box="">
+          <Button
+            data-workflow-run-retry=""
+            disabled={busy}
+            onClick={onRetry}
+            size="sm"
+            type="button"
+            variant="outline"
+          >
+            <RotateCcw className="size-3.5" />
+            {copy.retryFromStep}
+          </Button>
+          <p className="text-[11px] text-muted-foreground leading-snug">{copy.retryFromStepHint}</p>
+        </div>
+      ) : null}
+      {run.status === "failed" && retriedAs ? (
+        <button
+          className="w-fit text-left text-primary text-xs underline underline-offset-2"
+          data-workflow-run-retried-as={retriedAs}
+          onClick={() => onOpenRun(retriedAs)}
+          type="button"
+        >
+          {copy.retriedAsLink}
+        </button>
+      ) : null}
+      {retryOf ? (
+        <button
+          className="w-fit text-left text-muted-foreground text-xs underline underline-offset-2"
+          data-workflow-run-retry-of={retryOf}
+          onClick={() => onOpenRun(retryOf)}
+          type="button"
+        >
+          {copy.retryOfLink}
+        </button>
       ) : null}
 
       {actionError ? (
@@ -437,6 +504,7 @@ export function WorkflowRunsPanel({
   // Pages loaded with "Load older runs". They are not polled.
   const [olderRuns, setOlderRuns] = useState<WorkflowRun[]>([]);
   const [olderDecidable, setOlderDecidable] = useState<string[]>([]);
+  const [olderRetryable, setOlderRetryable] = useState<string[]>([]);
   const [olderNames, setOlderNames] = useState<Record<string, string>>({});
   const [olderCursor, setOlderCursor] = useState<string | null | undefined>(undefined);
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -481,6 +549,11 @@ export function WorkflowRunsPanel({
     ...olderDecidable,
     ...(linkedQuery.data?.decidableRunIds ?? []),
   ];
+  const retryableRunIds = [
+    ...(listQuery.data?.retryableRunIds ?? []),
+    ...olderRetryable,
+    ...(linkedQuery.data?.retryableRunIds ?? []),
+  ];
   const actorNames = {
     ...linkedQuery.data?.actorNames,
     ...olderNames,
@@ -508,6 +581,7 @@ export function WorkflowRunsPanel({
       canRun: current?.canRun ?? true,
       // A decided run leaves the list of runs waiting for this caller's decision.
       decidableRunIds: (current?.decidableRunIds ?? []).filter(stillDecidable),
+      retryableRunIds: current?.retryableRunIds ?? [],
       nextCursor: current?.nextCursor ?? null,
       queuedCount: current?.queuedCount ?? 0,
       actorNames: current?.actorNames ?? {},
@@ -530,6 +604,7 @@ export function WorkflowRunsPanel({
       );
       setOlderRuns((current) => mergeWorkflowRunPages(current, page.runs));
       setOlderDecidable((current) => [...current, ...page.decidableRunIds]);
+      setOlderRetryable((current) => [...current, ...page.retryableRunIds]);
       setOlderNames((current) => ({ ...current, ...page.actorNames }));
       setOlderCursor(page.nextCursor);
     } finally {
@@ -556,6 +631,22 @@ export function WorkflowRunsPanel({
     onSettled: refreshRuns,
   });
 
+  const retryMutation = useMutation({
+    ...orpc.workflows.retry.mutationOptions(),
+    onSuccess: (run, variables) => {
+      // The failed run now points at the new one; it cannot be retried again.
+      const retried = (id: string) => id !== variables.runId;
+      setOlderRetryable((current) => current.filter(retried));
+      queryClient.setQueryData(listOptions.queryKey, (current) =>
+        current
+          ? { ...current, retryableRunIds: current.retryableRunIds.filter(retried) }
+          : current,
+      );
+      applyRun(run);
+      setSelectedRunId(run.id);
+    },
+    onSettled: refreshRuns,
+  });
   const cancelMutation = useMutation({
     ...orpc.workflows.cancel.mutationOptions(),
     onSuccess: applyRun,
@@ -567,6 +658,7 @@ export function WorkflowRunsPanel({
       // Queued runs on older pages just changed; those pages load again on demand.
       setOlderRuns([]);
       setOlderDecidable([]);
+      setOlderRetryable([]);
       setOlderCursor(undefined);
     },
     onSettled: refreshRuns,
@@ -596,9 +688,11 @@ export function WorkflowRunsPanel({
     resumeMutation.reset();
     decideMutation.reset();
     cancelMutation.reset();
+    retryMutation.reset();
   };
 
-  const runActionError = resumeMutation.error ?? decideMutation.error ?? cancelMutation.error;
+  const runActionError =
+    resumeMutation.error ?? decideMutation.error ?? cancelMutation.error ?? retryMutation.error;
 
   return (
     <div className="grid gap-4" data-workflow-runs-panel="">
@@ -759,15 +853,17 @@ export function WorkflowRunsPanel({
                     <span className="flex min-w-0 items-center gap-2">
                       <RunStatusBadge status={run.status} />
                       <span className="truncate text-muted-foreground">
-                        {typeof run.payload?.parentRunId === "string"
-                          ? copy.triggerForEach
-                          : run.trigger === "manual"
-                            ? copy.triggerManual
-                            : run.payload?.event === WORKFLOW_SCHEDULE_EVENT
-                              ? copy.triggerSchedule
-                              : run.payload?.event === WORKFLOW_WEBHOOK_EVENT
-                                ? copy.triggerWebhook
-                                : copy.triggerEvent}
+                        {typeof run.payload?.retryOf === "string"
+                          ? copy.triggerRetry
+                          : typeof run.payload?.parentRunId === "string"
+                            ? copy.triggerForEach
+                            : run.trigger === "manual"
+                              ? copy.triggerManual
+                              : run.payload?.event === WORKFLOW_SCHEDULE_EVENT
+                                ? copy.triggerSchedule
+                                : run.payload?.event === WORKFLOW_WEBHOOK_EVENT
+                                  ? copy.triggerWebhook
+                                  : copy.triggerEvent}
                       </span>
                       <time
                         className="ml-auto shrink-0 text-[10px] text-muted-foreground"
@@ -821,11 +917,25 @@ export function WorkflowRunsPanel({
               : null
           }
           actorNames={actorNames}
-          busy={resumeMutation.isPending || decideMutation.isPending || cancelMutation.isPending}
+          busy={
+            resumeMutation.isPending ||
+            decideMutation.isPending ||
+            cancelMutation.isPending ||
+            retryMutation.isPending
+          }
           canCancel={canRun}
           canContinue={canRun}
           canDecide={decidableRunIds.includes(selectedRun.id)}
+          canRetry={retryableRunIds.includes(selectedRun.id)}
           onCancel={() => cancelMutation.mutate({ runId: selectedRun.id })}
+          onOpenRun={selectRun}
+          onRetry={() => retryMutation.mutate({ runId: selectedRun.id })}
+          retriedAs={
+            typeof selectedRun.payload.retriedAs === "string" ? selectedRun.payload.retriedAs : null
+          }
+          retryOf={
+            typeof selectedRun.payload.retryOf === "string" ? selectedRun.payload.retryOf : null
+          }
           onContinue={() => resumeMutation.mutate({ runId: selectedRun.id, force: true })}
           onDecide={(decision) => decideMutation.mutate({ runId: selectedRun.id, decision })}
           run={selectedRun}

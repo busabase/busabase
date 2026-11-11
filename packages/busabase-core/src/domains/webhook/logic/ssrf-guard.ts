@@ -3,6 +3,14 @@ import "server-only";
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
 
+export interface SsrfGuardOptions {
+  /**
+   * Deployment-owned public origins that may reach only their own REST API
+   * surface even when split-horizon DNS resolves them to an internal address.
+   */
+  trustedApiOrigins?: readonly string[];
+}
+
 // ── SSRF guard ───────────────────────────────────────────────────────────
 //
 // Shared by every place this domain performs outbound network I/O on behalf
@@ -187,6 +195,32 @@ const isTestAllowlistedTarget = (hostname: string, port: string): boolean => {
 };
 
 /**
+ * A host application may deliberately route its public API hostname to a
+ * private service address. This exception is intentionally narrower than a
+ * host or CIDR allowlist: the target must exactly match a deployment-owned
+ * origin and stay on its REST API surface.
+ */
+const isTrustedApiTarget = (
+  target: URL,
+  trustedOrigins: readonly string[] | undefined,
+): boolean => {
+  if (!trustedOrigins?.length) return false;
+  if (target.pathname !== "/api/v1" && !target.pathname.startsWith("/api/v1/")) return false;
+
+  return trustedOrigins.some((origin) => {
+    try {
+      const trusted = new URL(origin);
+      return (
+        (trusted.protocol === "http:" || trusted.protocol === "https:") &&
+        trusted.origin === target.origin
+      );
+    } catch {
+      return false;
+    }
+  });
+};
+
+/**
  * The guard itself — parses `urlString` and rejects it (with a human
  * readable `reason`) unless it's a plain http(s) URL pointing somewhere
  * outside the blocked ranges documented above. Called before EVERY delivery
@@ -201,6 +235,7 @@ const isTestAllowlistedTarget = (hostname: string, port: string): boolean => {
  */
 export const checkUrlIsSafeToFetch = async (
   urlString: string,
+  options: SsrfGuardOptions = {},
 ): Promise<{ blocked: boolean; reason?: string }> => {
   let parsed: URL;
   try {
@@ -212,6 +247,8 @@ export const checkUrlIsSafeToFetch = async (
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     return { blocked: true, reason: `scheme "${parsed.protocol}" is not allowed` };
   }
+
+  if (isTrustedApiTarget(parsed, options.trustedApiOrigins)) return { blocked: false };
 
   const hostname = parsed.hostname;
   const port = parsed.port || (parsed.protocol === "https:" ? "443" : "80");
@@ -259,11 +296,12 @@ const withoutCredentials = (headers: HeadersInit | undefined): Headers => {
 export const fetchWithSsrfGuard = async (
   url: string,
   init: RequestInit,
+  options: SsrfGuardOptions = {},
 ): Promise<{ blocked: true; reason: string } | { blocked: false; response: Response }> => {
   let target = url;
   let request: RequestInit = { ...init, redirect: "manual" };
   for (let hop = 0; ; hop += 1) {
-    const safety = await checkUrlIsSafeToFetch(target);
+    const safety = await checkUrlIsSafeToFetch(target, options);
     if (safety.blocked) {
       return { blocked: true, reason: safety.reason ?? "target is not allowed" };
     }

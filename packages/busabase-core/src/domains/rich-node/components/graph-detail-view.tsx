@@ -80,6 +80,7 @@ import {
   workflowActionLabel,
 } from "../../workflow/components/workflow-action-settings";
 import { WorkflowApproverPicker } from "../../workflow/components/workflow-approver-picker";
+import { WorkflowFunctionRunIn } from "../../workflow/components/workflow-function-run-in";
 import { WorkflowHookUrl } from "../../workflow/components/workflow-hook-url";
 import {
   useWorkflowRunStepState,
@@ -90,6 +91,7 @@ import { WorkflowScheduleSettings } from "../../workflow/components/workflow-sch
 import { WorkflowTriggerBasePicker } from "../../workflow/components/workflow-trigger-base-picker";
 import { WorkflowTriggerFieldFilter } from "../../workflow/components/workflow-trigger-field-filter";
 import { WorkflowWebhookHeaders } from "../../workflow/components/workflow-webhook-headers";
+import { WorkflowWebhookSigning } from "../../workflow/components/workflow-webhook-signing";
 import { newWorkflowHookToken } from "../../workflow/utils/hook";
 import type { WorkflowRunStepState } from "../../workflow/utils/run-view";
 import { parseWorkflowRunLink } from "../../workflow/utils/run-view";
@@ -119,10 +121,16 @@ interface WorkflowNodeFields {
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   url: string;
   headers: WorkflowWebhookHeader[];
+  /** Webhook step: signs its requests when not empty (`X-Busabase-Signature`). */
+  signingSecret: string;
   webhookRuleId: string;
   functionName: string;
   /** Function step: code written in the step, run instead of a saved rule. */
   code: string;
+  /** Function step: where the code runs, and for a sandbox its language and packages. */
+  runIn: "server" | "sandbox";
+  language: "javascript" | "python";
+  packages: string;
   expression: string;
   duration: number;
   unit: "minutes" | "hours" | "days";
@@ -150,6 +158,18 @@ const res = await fetch("https://example.com/api", {
   body: JSON.stringify({ text }),
 });
 return { ok: res.ok, reply: await res.text() };`;
+
+/** The same start in Python, for a step that runs in a sandbox. */
+const PYTHON_CODE_PLACEHOLDER = `import json, urllib.request
+
+text = input["payload"].get("request", {}).get("body", {}).get("text", "")
+req = urllib.request.Request(
+    "https://example.com/api",
+    data=json.dumps({"text": text}).encode(),
+    headers={"content-type": "application/json"},
+)
+with urllib.request.urlopen(req) as res:
+    return {"status": res.status, "reply": res.read().decode()}`;
 
 const workflowIcon = {
   trigger: CircleDot,
@@ -193,6 +213,7 @@ const workflowNodeSummary = (data: WorkflowNodeData, messages: CoreI18nMessages)
     case "webhook":
       return `${data.method} ${data.url || messages.richNodes.webhook}`;
     case "function":
+      if (data.code.trim() && data.runIn === "sandbox") return messages.richNodes.sandboxCode;
       return data.code.trim()
         ? messages.richNodes.inlineCode
         : data.functionName || data.webhookRuleId || messages.richNodes.function;
@@ -375,9 +396,13 @@ const workflowNodeData = (node: WorkflowNode): WorkflowNodeData => ({
   method: node.kind === "webhook" ? node.method : "POST",
   url: node.kind === "webhook" ? node.url : "",
   headers: node.kind === "webhook" ? (node.headers ?? []) : [],
+  signingSecret: node.kind === "webhook" ? (node.signingSecret ?? "") : "",
   webhookRuleId: node.kind === "function" ? node.webhookRuleId : "",
   functionName: node.kind === "function" ? node.functionName : "",
   code: node.kind === "function" ? (node.code ?? "") : "",
+  runIn: node.kind === "function" ? (node.runIn ?? "server") : "server",
+  language: node.kind === "function" ? (node.language ?? "javascript") : "javascript",
+  packages: node.kind === "function" ? (node.packages ?? "") : "",
   expression: node.kind === "condition" ? node.expression : "",
   duration: node.kind === "wait" ? node.duration : 1,
   unit: node.kind === "wait" ? node.unit : "hours",
@@ -429,6 +454,7 @@ const persistedWorkflowNode = (
         url: data.url,
         // A row left empty in the editor is not a header.
         headers: data.headers.filter((header) => header.name.trim() || header.value.trim()),
+        ...(data.signingSecret ? { signingSecret: data.signingSecret } : {}),
       };
     case "function":
       return {
@@ -437,6 +463,13 @@ const persistedWorkflowNode = (
         webhookRuleId: data.webhookRuleId,
         functionName: data.functionName,
         ...(data.code.trim() ? { code: data.code } : {}),
+        ...(data.runIn === "sandbox"
+          ? {
+              runIn: "sandbox" as const,
+              language: data.language,
+              ...(data.packages.trim() ? { packages: data.packages.trim() } : {}),
+            }
+          : {}),
       };
     case "condition":
       return { ...base, kind: data.kind, expression: data.expression };
@@ -610,9 +643,13 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
         method: "POST",
         url: "",
         headers: [],
+        signingSecret: "",
         webhookRuleId: "",
         functionName: "",
         code: "",
+        runIn: "server",
+        language: "javascript",
+        packages: "",
         expression: "",
         duration: 1,
         unit: "hours",
@@ -681,9 +718,13 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
                 : null),
             url: patch.url ?? entry.data.url,
             headers: patch.headers ?? entry.data.headers,
+            signingSecret: patch.signingSecret ?? entry.data.signingSecret,
             webhookRuleId: patch.webhookRuleId ?? entry.data.webhookRuleId,
             functionName: patch.functionName ?? entry.data.functionName,
             code: patch.code ?? entry.data.code,
+            runIn: patch.runIn ?? entry.data.runIn,
+            language: patch.language ?? entry.data.language,
+            packages: patch.packages ?? entry.data.packages,
             // Becoming a webhook trigger gets a URL at once, so it can be copied.
             hookToken:
               patch.hookToken ??
@@ -759,7 +800,7 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
           {isAnonymous ? null : (
             <Button
               aria-label={messages.workflowRuns.runWorkflow}
-              className="size-7 sm:size-8"
+              className="size-7 shrink-0 overflow-hidden sm:size-8"
               data-workflow-run-open=""
               onClick={openRuns}
               size="icon"
@@ -772,7 +813,7 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
           )}
           <Button
             aria-label={messages.richNodes.addStep}
-            className="size-7 sm:size-8"
+            className="size-7 shrink-0 overflow-hidden sm:size-8"
             onClick={addNode}
             size="icon"
             title={messages.richNodes.addStep}
@@ -783,7 +824,7 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
           </Button>
           <Button
             aria-label={messages.richNodes.deleteSelection}
-            className="size-7 sm:size-8"
+            className="size-7 shrink-0 overflow-hidden sm:size-8"
             disabled={!selectedId && !selectedEdgeId}
             onClick={deleteSelected}
             size="icon"
@@ -998,6 +1039,10 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
                         onChange={(headers) => updateSelected({ headers })}
                         value={selectedNode.data.headers}
                       />
+                      <WorkflowWebhookSigning
+                        onChange={(signingSecret) => updateSelected({ signingSecret })}
+                        value={selectedNode.data.signingSecret}
+                      />
                       <p
                         className="text-[11px] leading-snug text-muted-foreground/80"
                         data-workflow-webhook-hint=""
@@ -1091,6 +1136,14 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
                   ) : null}
                   {selectedNode.data.kind === "function" ? (
                     <>
+                      <WorkflowFunctionRunIn
+                        onChange={updateSelected}
+                        value={{
+                          runIn: selectedNode.data.runIn,
+                          language: selectedNode.data.language,
+                          packages: selectedNode.data.packages,
+                        }}
+                      />
                       <label
                         className="grid gap-1.5 text-muted-foreground text-xs"
                         htmlFor="rich-node-function-code"
@@ -1101,49 +1154,63 @@ function GraphEditor({ document: workflowDocument, node, orpc }: GraphEditorProp
                           data-workflow-function-code=""
                           id="rich-node-function-code"
                           onChange={(event) => updateSelected({ code: event.target.value })}
-                          placeholder={FUNCTION_CODE_PLACEHOLDER}
+                          placeholder={
+                            selectedNode.data.runIn === "sandbox" &&
+                            selectedNode.data.language === "python"
+                              ? PYTHON_CODE_PLACEHOLDER
+                              : FUNCTION_CODE_PLACEHOLDER
+                          }
                           rows={10}
                           spellCheck={false}
                           value={String(selectedNode.data.code)}
                         />
                         <span className="text-[11px] leading-snug text-muted-foreground/80">
-                          {messages.richNodes.functionCodeHint}
+                          {selectedNode.data.runIn === "sandbox"
+                            ? messages.richNodes.sandboxCodeHint
+                            : messages.richNodes.functionCodeHint}
                         </span>
                       </label>
-                      <p className="pt-1 font-medium text-foreground text-xs">
-                        {messages.richNodes.savedFunction}
-                      </p>
-                      <label
-                        className="grid gap-1.5 text-muted-foreground text-xs"
-                        htmlFor="rich-node-webhook-rule-id"
-                      >
-                        {messages.richNodes.webhookRuleId}
-                        <Input
-                          id="rich-node-webhook-rule-id"
-                          onChange={(event) =>
-                            updateSelected({ webhookRuleId: event.target.value })
-                          }
-                          placeholder="whr_..."
-                          value={String(selectedNode.data.webhookRuleId)}
-                        />
-                      </label>
-                      <label
-                        className="grid gap-1.5 text-muted-foreground text-xs"
-                        htmlFor="rich-node-function-name"
-                      >
-                        {messages.richNodes.functionName}
-                        <Input
-                          id="rich-node-function-name"
-                          onChange={(event) => updateSelected({ functionName: event.target.value })}
-                          value={String(selectedNode.data.functionName)}
-                        />
-                      </label>
-                      <p
-                        className="text-[11px] leading-snug text-muted-foreground/80"
-                        data-workflow-function-hint=""
-                      >
-                        {messages.richNodes.functionHint}
-                      </p>
+                      {/* Saved rules run in the app's own sandbox only. */}
+                      {selectedNode.data.runIn === "sandbox" ? null : (
+                        <>
+                          <p className="pt-1 font-medium text-foreground text-xs">
+                            {messages.richNodes.savedFunction}
+                          </p>
+                          <label
+                            className="grid gap-1.5 text-muted-foreground text-xs"
+                            htmlFor="rich-node-webhook-rule-id"
+                          >
+                            {messages.richNodes.webhookRuleId}
+                            <Input
+                              id="rich-node-webhook-rule-id"
+                              onChange={(event) =>
+                                updateSelected({ webhookRuleId: event.target.value })
+                              }
+                              placeholder="whr_..."
+                              value={String(selectedNode.data.webhookRuleId)}
+                            />
+                          </label>
+                          <label
+                            className="grid gap-1.5 text-muted-foreground text-xs"
+                            htmlFor="rich-node-function-name"
+                          >
+                            {messages.richNodes.functionName}
+                            <Input
+                              id="rich-node-function-name"
+                              onChange={(event) =>
+                                updateSelected({ functionName: event.target.value })
+                              }
+                              value={String(selectedNode.data.functionName)}
+                            />
+                          </label>
+                          <p
+                            className="text-[11px] leading-snug text-muted-foreground/80"
+                            data-workflow-function-hint=""
+                          >
+                            {messages.richNodes.functionHint}
+                          </p>
+                        </>
+                      )}
                     </>
                   ) : null}
                   {selectedNode.data.kind === "condition" ? (

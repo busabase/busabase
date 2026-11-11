@@ -10,6 +10,59 @@ import { getSearchExecutionOutcome, withSearchExecution } from "../src/logic/sea
 afterEach(() => vi.unstubAllEnvs());
 
 describe("search execution with real PGLite", () => {
+  it.each(["quick", "full"] as const)(
+    "gives %s searches a three-second statement and five-second request budget",
+    async (mode) => {
+      vi.stubEnv(`BUSABASE_SEARCH_${mode.toUpperCase()}_STATEMENT_TIMEOUT_MS`, undefined);
+      vi.stubEnv(`BUSABASE_SEARCH_${mode.toUpperCase()}_REQUEST_TIMEOUT_MS`, undefined);
+      const client = await PGlite.create();
+      const db = pgliteDrizzle(client);
+      try {
+        const result = await withSearchExecution(db, mode, undefined, async (_db, execution) => {
+          expect(execution.remainingMs()).toBeGreaterThan(4_000);
+          expect(execution.remainingMs()).toBeLessThanOrEqual(5_000);
+          return execution.query(async (tx) => {
+            const timeout = await tx.execute<{ statement_timeout: string }>(
+              sql`show statement_timeout`,
+            );
+            return timeout.rows[0]?.statement_timeout;
+          });
+        });
+        expect(result).toBe("3s");
+        expect((await client.query("show statement_timeout")).rows).toEqual([
+          { statement_timeout: "0" },
+        ]);
+      } finally {
+        await client.close();
+      }
+    },
+  );
+
+  it("keeps quick-search environment overrides and restores the connection after the query", async () => {
+    vi.stubEnv("BUSABASE_SEARCH_QUICK_STATEMENT_TIMEOUT_MS", "75");
+    vi.stubEnv("BUSABASE_SEARCH_QUICK_REQUEST_TIMEOUT_MS", "250");
+    const client = await PGlite.create();
+    const db = pgliteDrizzle(client);
+    try {
+      const result = await withSearchExecution(db, "quick", undefined, async (_db, execution) => {
+        expect(execution.remainingMs()).toBeGreaterThan(0);
+        expect(execution.remainingMs()).toBeLessThanOrEqual(250);
+        return execution.query(async (tx) => {
+          const timeout = await tx.execute<{ statement_timeout: string }>(
+            sql`show statement_timeout`,
+          );
+          return timeout.rows[0]?.statement_timeout;
+        });
+      });
+      expect(result).toBe("75ms");
+      expect((await client.query("show statement_timeout")).rows).toEqual([
+        { statement_timeout: "0" },
+      ]);
+    } finally {
+      await client.close();
+    }
+  });
+
   it("scopes tenant context only to SQL and commits self-healing writes outside it", async () => {
     const client = await PGlite.create();
     const db = pgliteDrizzle(client);
@@ -210,7 +263,7 @@ describe("search execution with real PGLite", () => {
           }),
         ),
       );
-      // A budgeted scope would have SET LOCAL statement_timeout to <= 1000ms.
+      // A budgeted scope would have SET LOCAL statement_timeout to <= 3000ms.
       expect(result).toBe("0");
     } finally {
       await client.close();
@@ -262,6 +315,32 @@ describe("search execution with real PGLite", () => {
 
 const pgUrl = process.env.BUSABASE_SEARCH_TEST_DATABASE_URL ?? "";
 describe.skipIf(!pgUrl)("search execution with real PostgreSQL", () => {
+  it("lets a quick-search statement complete beyond the previous one-second default", async () => {
+    vi.stubEnv("BUSABASE_SEARCH_QUICK_STATEMENT_TIMEOUT_MS", undefined);
+    vi.stubEnv("BUSABASE_SEARCH_QUICK_REQUEST_TIMEOUT_MS", undefined);
+    const client = postgres(pgUrl, { max: 1, prepare: false });
+    const db = postgresDrizzle(client);
+    try {
+      const result = await withSearchExecution(db, "quick", undefined, async (_db, execution) =>
+        execution.query(async (tx) => {
+          const timeout = await tx.execute<{ statement_timeout: string }>(
+            sql`show statement_timeout`,
+          );
+          expect(timeout[0]?.statement_timeout).toBe("3s");
+          const rows = await tx.execute<{ matched: number }>(
+            sql`select 1 as matched from pg_sleep(1.2)`,
+          );
+          return rows[0]?.matched;
+        }),
+      );
+      expect(result).toBe(1);
+      expect((await client`show statement_timeout`)[0]?.statement_timeout).toBe("0");
+      expect((await client`select 1 as alive`)[0]?.alive).toBe(1);
+    } finally {
+      await client.end();
+    }
+  });
+
   it("drains an active sibling transaction before returning the primary SQL error", async () => {
     const client = postgres(pgUrl, { max: 2, prepare: false });
     const observer = postgres(pgUrl, { max: 1, prepare: false });

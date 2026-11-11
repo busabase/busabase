@@ -159,7 +159,10 @@ export function AirAppSiteGoLive({
     state.address;
 
   return (
-    <div className="flex items-center gap-1.5" data-airapp-site-publication={state.publication}>
+    <div
+      className="flex min-w-0 items-center gap-1.5"
+      data-airapp-site-publication={state.publication}
+    >
       {note ? (
         <span
           className="hidden max-w-64 truncate text-muted-foreground text-xs lg:inline"
@@ -169,7 +172,7 @@ export function AirAppSiteGoLive({
           {note}
         </span>
       ) : null}
-      <span className="text-muted-foreground text-xs">
+      <span className="shrink-0 whitespace-nowrap text-muted-foreground text-xs">
         {publicationLabel(messages, state.publication)}
       </span>
       {state.publication !== "not-live" && address ? (
@@ -197,6 +200,18 @@ export function AirAppSiteGoLive({
   );
 }
 
+/**
+ * Whether the settings dialog has a site worth showing.
+ *
+ * On a plan that leaves the Website out, an address that has never been live
+ * never can be: showing it beside "Public · go live first" read as a site that
+ * was one click away, while the app was in fact running in the browser. It is
+ * still shown once a version has been live — a space that downgraded keeps the
+ * switch that takes its site down.
+ */
+export const showsAirAppSiteSettings = (state: AirAppSiteStateVO): boolean =>
+  Boolean(state.address) && !(state.engine === "locked" && state.liveVersion === null);
+
 /** The site's address and public switch, in the AirApp's settings. */
 export function AirAppSiteSettings({ orpc, nodeId }: { orpc: BusabaseQueryUtils; nodeId: string }) {
   const messages = useCoreI18n();
@@ -212,7 +227,7 @@ export function AirAppSiteSettings({ orpc, nodeId }: { orpc: BusabaseQueryUtils;
     onError: (error) => toast.error(siteErrorMessage(error)),
   });
 
-  if (!state?.address) return null;
+  if (!state?.address || !showsAirAppSiteSettings(state)) return null;
   const hasLiveVersion = state.liveVersion !== null;
   // A locked plan may take a site down but not put one back up.
   const switchDisabled =

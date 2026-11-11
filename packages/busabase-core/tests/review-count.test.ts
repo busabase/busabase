@@ -121,10 +121,15 @@ describe("pending review badge count", () => {
       const candidateQuery = candidateQueries[0];
       if (!candidateQuery) throw new Error("Expected one candidate query");
       const [query, params] = candidateQuery;
-      expect(query).toMatch(/^select "id" from "busabase_change_requests" where /);
-      expect(query).toContain('"space_id" = $1');
-      expect(query).toContain('"status" = $2');
-      expect(params).toEqual([LOCAL_SPACE_ID, "in_review"]);
+      // Access is decided inside this one candidate query now (plus a flag for
+      // rows only the JS resolver can place); it still reads in-review ids of
+      // this space only, and no scope is resolved in JS when nothing is flagged.
+      expect(query).toMatch(/^select "id", exists \(/);
+      expect(query).toMatch(/"busabase_change_requests"\."space_id" = \$\d+/);
+      expect(query).toMatch(/"busabase_change_requests"\."status" = \$\d+/);
+      expect(params).toContain(LOCAL_SPACE_ID);
+      expect(params).toContain("in_review");
+      expect(querySpy.mock.calls.some(([sql]) => /^select distinct/i.test(sql))).toBe(false);
       expect(
         querySpy.mock.calls.some(([, params]) =>
           JSON.stringify(params).includes("review-history-"),

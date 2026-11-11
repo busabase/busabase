@@ -4,6 +4,8 @@ import { ORPCError } from "@orpc/server";
 import type {
   ExportAssetTextInput,
   ExportAssetTextVO,
+  ExportAttachmentInput,
+  ExportAttachmentVO,
   ExportDocBodiesInput,
   ExportDocBodiesVO,
   ExportTablesInput,
@@ -15,9 +17,16 @@ import { getContextSpaceId } from "../../../context";
 import { getDb } from "../../../db";
 import { attachments, busabaseAssets, busabaseAssetTexts, busabaseNodes } from "../../../db/schema";
 import { docBodyKey } from "../../doc/handlers";
-import { folderReadmeKey } from "../../folder/handlers";
+import { resolveFolderReadme } from "../../folder/handlers";
+import { richNodeDocumentKey } from "../../rich-node/handlers";
 import { requireSpaceManagerForDump } from "./_guard";
-import { DUMP_TABLE_REGISTRY } from "./table-registry";
+import { prepareWebhookBackupRow } from "./row-policy";
+import {
+  DUMP_TABLE_REGISTRY,
+  dumpIdentityColumn,
+  dumpIdentityKey,
+  dumpSpaceScope,
+} from "./table-registry";
 
 const isMissingStorageObjectError = (error: unknown, key: string): boolean => {
   if (typeof error !== "object" || error === null) return false;
@@ -36,6 +45,28 @@ const isMissingStorageObjectError = (error: unknown, key: string): boolean => {
   );
 };
 
+export const exportAttachmentBlob = async (
+  input: ExportAttachmentInput,
+): Promise<ExportAttachmentVO> => {
+  requireSpaceManagerForDump();
+  const spaceId = getContextSpaceId();
+  const db = await getDb();
+  const [row] = await db
+    .select()
+    .from(attachments)
+    .where(and(eq(attachments.id, input.attachmentId), dumpSpaceScope(db, "attachments", spaceId)))
+    .limit(1);
+  if (!row) throw new ORPCError("NOT_FOUND", { message: "Attachment not found in this space" });
+  return {
+    attachmentId: row.id,
+    storageKey: row.storageKey,
+    downloadUrl: await storage.generatePresignedUrl(row.storageKey),
+    mimeType: row.mimeType,
+    contentHash: row.contentHash,
+    sizeBytes: row.sizeBytes,
+  };
+};
+
 /**
  * Cursor-paginated raw SELECT of a dump-eligible table, scoped explicitly to
  * the caller's context space (this is a bulk table scan, not a normal
@@ -48,21 +79,26 @@ export const exportTableRows = async (input: ExportTablesInput): Promise<ExportT
   const spaceId = getContextSpaceId();
   const db = await getDb();
 
-  const where = input.cursor
-    ? and(eq(table.spaceId, spaceId), gt(table.id, input.cursor))
-    : eq(table.spaceId, spaceId);
+  const identity = dumpIdentityColumn(input.table);
+  const scope = dumpSpaceScope(db, input.table, spaceId);
+  const where = and(scope, input.cursor ? gt(identity, input.cursor) : undefined);
 
   const rows = await db
     .select()
     .from(table as never)
     .where(where)
-    .orderBy(asc(table.id))
+    .orderBy(asc(identity))
     .limit(input.limit);
 
-  const typedRows = rows as Array<Record<string, unknown> & { id: string }>;
-  const nextCursor = typedRows.length === input.limit ? typedRows[typedRows.length - 1].id : null;
-
-  return { rows: typedRows, nextCursor };
+  const typedRows = rows as Array<Record<string, unknown>>;
+  const nextCursor =
+    typedRows.length === input.limit
+      ? (typedRows[typedRows.length - 1][dumpIdentityKey(input.table)] as string)
+      : null;
+  return {
+    rows: input.table === "webhookRules" ? typedRows.map(prepareWebhookBackupRow) : typedRows,
+    nextCursor,
+  };
 };
 
 /**
@@ -86,7 +122,9 @@ export const exportTableRows = async (input: ExportTablesInput): Promise<ExportT
  *
  * Folder readmes (`…/folder/readme.md`) ride the same route: they are the
  * same kind of markdown object, and leaving them out restored every readme
- * EMPTY while its `folder_update` history came back intact. Unlike a Doc, a
+ * EMPTY while its `folder_update` history came back intact. An HTML readme
+ * (`…/folder/readme.html`) comes back as the same entry with
+ * `bodyFormat: "html"`. Unlike a Doc, a
  * folder usually has no readme at all, so a missing object is omitted rather
  * than archived as `""` — a restore then leaves the object absent, which reads
  * as the same empty readme. An older server only ever matches `type: "doc"`
@@ -103,17 +141,37 @@ export const exportDocBodies = async (input: ExportDocBodiesInput): Promise<Expo
     .where(
       and(
         eq(busabaseNodes.spaceId, spaceId),
-        inArray(busabaseNodes.type, ["doc", "folder"]),
+        inArray(busabaseNodes.type, ["doc", "folder", "html", "whiteboard", "workflow"]),
         inArray(busabaseNodes.id, input.nodeIds),
       ),
     );
 
   const bodies = await Promise.all(
     owned.map(async (row) => {
+      if (row.type === "html" || row.type === "whiteboard" || row.type === "workflow") {
+        try {
+          const bytes = await storage.getObject(richNodeDocumentKey(row.id, row.type));
+          return {
+            nodeId: row.id,
+            nodeType: row.type as "html" | "whiteboard" | "workflow",
+            markdown: bytes.toString("utf8"),
+          };
+        } catch (error) {
+          // Missing is intentional for a rich node that was never given content.
+          // Do not archive the renderer's default document as if it were source bytes.
+          if (isMissingStorageObjectError(error, richNodeDocumentKey(row.id, row.type)))
+            return null;
+          throw error;
+        }
+      }
       const isFolder = row.type === "folder";
-      const key = isFolder ? folderReadmeKey(row.id) : docBodyKey(row.id);
+      const readme = isFolder ? await resolveFolderReadme(row.id) : null;
+      const key = readme ? readme.key : docBodyKey(row.id);
       try {
-        return { nodeId: row.id, markdown: (await storage.getObject(key)).toString("utf8") };
+        const markdown = (await storage.getObject(key)).toString("utf8");
+        return readme?.format === "html"
+          ? { nodeId: row.id, markdown, bodyFormat: "html" as const }
+          : { nodeId: row.id, markdown };
       } catch (error) {
         // Docs may legitimately have no body object. Keep that case empty, but
         // let all other storage failures reach the CLI so it can retry/report
@@ -126,7 +184,10 @@ export const exportDocBodies = async (input: ExportDocBodiesInput): Promise<Expo
     }),
   );
 
-  return { bodies: bodies.filter((entry) => entry !== null) };
+  return {
+    bodies: bodies.filter((entry) => entry !== null),
+    supportedRichNodeTypes: ["html", "whiteboard", "workflow"],
+  };
 };
 
 /**
@@ -187,7 +248,7 @@ export const exportAssetTextBlob = async (
   return {
     assetId: row.assetId,
     textStorageKey: row.textStorageKey,
-    downloadUrl: ownsSeparateObject ? storage.getPublicUrl(row.textStorageKey) : null,
+    downloadUrl: ownsSeparateObject ? await storage.generatePresignedUrl(row.textStorageKey) : null,
     textContentHash: row.textContentHash,
     byteCount: row.byteCount,
   };

@@ -39,6 +39,7 @@ import {
 } from "../../../logic/node-acl";
 import { registerNodeRuntime } from "../../../logic/node-runtime";
 import { ensureReady } from "../../../logic/seed";
+import { isFileFieldType } from "../../base/field-types";
 import { getBase, listRecordsPage } from "../../base/logic/queries";
 import { createFormSubmissionChangeRequest } from "../../base/logic/record-ops";
 import { getDateFieldOptions } from "../../base/utils/date-value";
@@ -243,7 +244,8 @@ export const getFormByNodeId = async (nodeIdOrSlug: string): Promise<FormVO | nu
               ...(field.type === "date" && getDateFieldOptions(field.options).includeTime
                 ? { date: getDateFieldOptions(field.options) }
                 : {}),
-              ...(field.type === "attachment" &&
+              // A drive field takes the same per-field file limits as an attachment field.
+              ...(isFileFieldType(field.type) &&
               (field.options as { attachment?: FormBoundFieldVO["attachment"] }).attachment
                 ? {
                     attachment: (field.options as { attachment?: FormBoundFieldVO["attachment"] })

@@ -1,7 +1,11 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import type { FormBoundFieldVO, FormFieldBindingVO } from "busabase-contract/types";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type {
+  AssetAttachmentRef,
+  FormBoundFieldVO,
+  FormFieldBindingVO,
+} from "busabase-contract/types";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GeneratedFormField } from "./generated-form-field";
 
@@ -77,5 +81,54 @@ describe("generated form filling guidance", () => {
     expect(screen.getByRole("button", { name: "Delivery" }).getAttribute("aria-describedby")).toBe(
       "form-field-delivery-help",
     );
+  });
+
+  it("offers a file upload for a drive field and lands the files at its root", async () => {
+    const onChange = vi.fn();
+    const onUploadAttachment = vi.fn(
+      async (file: File) =>
+        ({
+          id: `ast_${file.name}`,
+          assetId: `ast_${file.name}`,
+          url: `https://example.com/${file.name}`,
+          fileName: file.name,
+          mimeType: file.type,
+          size: file.size,
+        }) as AssetAttachmentRef,
+    );
+    const existing = {
+      id: "ast_old",
+      url: "https://example.com/old",
+      fileName: "quote.pdf",
+      mimeType: "application/pdf",
+      size: 1,
+      path: "quote.pdf",
+    };
+    const view = render(
+      <GeneratedFormField
+        binding={binding}
+        field={{ ...field, type: "drive", help: undefined }}
+        label="Documents"
+        onChange={onChange}
+        onUploadAttachment={onUploadAttachment}
+        value={[existing]}
+      />,
+    );
+    const input = view.container.querySelector('input[type="file"]') as HTMLInputElement;
+    expect(input).not.toBeNull();
+    expect(view.container.querySelector('input[type="text"]')).toBeNull();
+    fireEvent.change(input, {
+      target: { files: [new File(["x"], "quote.pdf", { type: "application/pdf" })] },
+    });
+    await waitFor(() => expect(onChange).toHaveBeenCalledTimes(1));
+    expect(
+      (onChange.mock.calls[0]?.[0] as Array<{ id: string; path: string }>).map((entry) => [
+        entry.id,
+        entry.path,
+      ]),
+    ).toEqual([
+      ["ast_old", "quote.pdf"],
+      ["ast_quote.pdf", "quote (2).pdf"],
+    ]);
   });
 });

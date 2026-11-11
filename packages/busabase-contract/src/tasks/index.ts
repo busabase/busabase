@@ -53,6 +53,7 @@ export { nodeCreateTask } from "./node-create";
 export { recordBulkUpdateTask } from "./record-bulk-update";
 export { recordChangeTask } from "./record-change";
 export { recordFindByFieldTask } from "./record-find-by-field";
+export { RECORD_PAGE_FIELD_GUIDANCE } from "./record-page-fields";
 export { recordQueryTask } from "./record-query";
 export type { BusabaseTaskClient, TaskAnnotations, TaskDefinition, TaskParam } from "./types";
 export { taskInputSchema, taskParamFlag } from "./types";

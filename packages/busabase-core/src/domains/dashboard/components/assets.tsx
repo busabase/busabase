@@ -27,7 +27,11 @@ import { presentCoreError } from "../../../i18n/localize-error";
 import { INLINE_ASSET_TEXT_MAX_BYTES, isTxtFile, utf8ByteLength } from "../helpers/asset-text-grep";
 import { useIsAnonymousVisitor } from "../visitor-context";
 import { AssetMetadataEditorDialog } from "./asset-metadata-editor";
-import { type HostFileViewerFile, useHostFileViewer } from "./file-viewer-slot";
+import {
+  type HostFileViewerFile,
+  type HostFileViewerScope,
+  useHostFileViewer,
+} from "./file-viewer-slot";
 import { DialogContent } from "./localized-dialog-content";
 import { ConfirmActionDialog, EmptyState } from "./primitives";
 import { useWorkspacePermissionLevel } from "./split-submit-button";
@@ -59,8 +63,11 @@ export function isPreviewableAssetMime(mimeType: string) {
 
 /** The host viewer that will render this asset, or `null` when the built-in
  *  preview handles it (or nothing can). A host viewer wins whatever it claims. */
-export function useAssetHostViewer(file: HostFileViewerFile | null) {
-  return useHostFileViewer(file);
+export function useAssetHostViewer(
+  file: HostFileViewerFile | null,
+  scope: HostFileViewerScope = "inline",
+) {
+  return useHostFileViewer(file, scope);
 }
 
 interface AssetMediaPreviewProps {
@@ -68,21 +75,30 @@ interface AssetMediaPreviewProps {
   url: string;
   name: string;
   mediaClassName: string;
+  size?: number;
+  viewerScope?: HostFileViewerScope;
 }
 
 /** Hands the asset to a host-registered viewer (`FileViewerSlotProvider`) when
  *  it claims it, else renders mime kinds browsers support natively; with
  *  neither, it falls back to an "open file" link. */
-export function AssetMediaPreview({ mimeType, url, name, mediaClassName }: AssetMediaPreviewProps) {
+export function AssetMediaPreview({
+  mimeType,
+  url,
+  name,
+  size,
+  mediaClassName,
+  viewerScope = "inline",
+}: AssetMediaPreviewProps) {
   const messages = useCoreI18n();
-  const hostViewer = useAssetHostViewer({ mimeType, name, url });
+  const hostViewer = useAssetHostViewer({ mimeType, name, url }, viewerScope);
   if (hostViewer) {
     return (
       <div
         className={cn("h-[70vh] w-full overflow-auto", mediaClassName)}
         data-asset-preview="host"
       >
-        {hostViewer.render({ mimeType, name, url })}
+        {hostViewer.render({ mimeType, name, url, size })}
       </div>
     );
   }

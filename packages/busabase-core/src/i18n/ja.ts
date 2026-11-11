@@ -717,6 +717,8 @@ export const dashboardJa: CoreI18nMessages = {
     engineFollowAppNamed: "アプリに従う（{engine}）",
     engineFollowAppHint:
       "このアプリの airapp.json が決定します。エンジンを選ぶとこのノードでは上書きされます。",
+    engineFollowAppFallback:
+      "このアプリの airapp.json は{preferred}を優先していますが、ここでは使えません。使用中のエンジン：{engine}。",
     engineRequired: "アプリには{engine}が必要です",
     engineRequiredHint:
       "この要件は airapp.json の requiredEngine で設定されており、このノードでは上書きできません。",
@@ -759,6 +761,36 @@ export const dashboardJa: CoreI18nMessages = {
     swUnsupportedLinkCopied: "リンクをコピーしました",
     swUnsupportedCopyFailed: "リンクをコピーできませんでした。以下を選択してコピーしてください：",
     site: {
+      publish: {
+        previewStale:
+          "このプレビュー後にファイルが変更されました。サイトプレビューを作成または更新してから公開してください。",
+        noPreview: "公開する前にサイトプレビューを作成してください。",
+        previewUnavailable: "サイトプレビューを読み込めませんでした。公開前に再作成してください。",
+        title: "サイトとして公開",
+        description:
+          "この AirApp を常時稼働し、固定の公開アドレスを持つ Busabase Site にします。訪問者に Busabase アカウントは不要です。",
+        preserveBrowser: "ウェブサイトの準備中もブラウザーのプレビューは動作し続けます。",
+        checking: "公開の準備状況を確認中…",
+        checkFailed: "確認できませんでした。再試行してください。",
+        planRequired: "{plan} 以上のプランにはサイトのホスティングが含まれます。",
+        paidPlanRequired: "サイトのホスティングには、このスペースの有料プランが必要です。",
+        upgradeHint:
+          "先にアプリを準備してからスペースをアップグレードし、プレビューして公開できます。ブラウザープレビューのリンクは常時稼働するサイトではありません。",
+        prepareTitle: "ウェブ版を準備",
+        prepareHint:
+          "エージェントにウェブ版の準備を依頼してください。公開前にコードの変更が必要な場合があります。",
+        copyPrompt: "エージェント用プロンプトをコピー",
+        copied: "コピーしました",
+        agentPrompt:
+          "busabase-app-creator スキルを使い、この AirApp を Busabase Site として公開できるよう準備してください。ファイルを確認し、既存のブラウザー実行と機能を維持してください。airapp.json に明示的な site 宣言と静的アセットを追加し、必要なら default fetch をエクスポートする単一のバンドル済み JavaScript ES モジュール Worker を用意してください。Node 開発サーバーを公開したり、エンジンだけを変更したりしないでください。書き込みが必要な場合を除き site.access を読み取り専用にし、安全な特定のエンドポイントだけを公開してください。API キーの漏えいや訪問者の任意リクエストの中継を避けてください。バンドルを検証し、必要な変更を説明してください。非公開プレビューを私が確認するまで公開しないでください。",
+        previewHint: "まず非公開のサイトプレビューを作成し、ここで確認してから公開します。",
+        createPreview: "サイトプレビューを作成",
+        preparingPreview: "プレビューを準備中…",
+        refreshPreview: "サイトプレビューを更新",
+        previewTitle: "非公開サイトプレビュー",
+        publishConsent:
+          "公開すると、確認したバージョンが公開されます。アドレスを持つ人は誰でも、コードが公開するデータや操作を利用できます。",
+      },
       statusNotLive: "未公開",
       statusLive: "公開中",
       statusLiveWithChanges: "未公開の変更あり",
@@ -2270,6 +2302,23 @@ export const dashboardJa: CoreI18nMessages = {
     uploadFailed: "アップロードに失敗しました",
     uploading: "アップロード中...",
     addFile: "ファイルを追加",
+    drive: {
+      filePath: "ファイルパス",
+      moveFile: "名前の変更または移動",
+      moveFolder: "フォルダーの名前変更または移動",
+      moveFolderHint:
+        "パスを変えるとフォルダーと中身をまとめて名前変更・移動できます（例: contracts/2026）。空にすると中身をルートへ移動します。",
+      folderPath: "フォルダーパス",
+      movePathHint: "パスのフォルダー部分を変えると移動できます（例: contracts/2026/main.pdf）。",
+      apply: "適用",
+      pathTaken: "「{path}」には既に別の項目があります。別のパスを指定してください。",
+      invalidPath: "有効なパスを入力してください（例: contracts/2026/main.pdf）。",
+      folderIntoItself: "フォルダーをそれ自身の中へ移動することはできません。",
+      removeFolderBody:
+        "「{folder}」とその中の {count} 件のファイルをこのフィールドから外します。レコードを保存するまでは何も変更されません。",
+      emptyFolderHint:
+        "空のフォルダーは保存されません。このフォルダーを残すにはファイルを追加してください。",
+    },
     properties: "プロパティ",
     source: "ソース",
     openFullPage: "ページ全体を開く",
@@ -2519,6 +2568,7 @@ export const dashboardJa: CoreI18nMessages = {
     member: "メンバー",
     lookup: "参照",
     attachment: "ファイル",
+    drive: "ドライブ",
     ai_summary: "AI 要約",
     ai_tags: "AI タグ",
     created_time: "作成日時",
@@ -2706,6 +2756,13 @@ export const dashboardJa: CoreI18nMessages = {
       "この URL に POST（JSON またはテキスト）か GET を送ると実行が始まります。リクエストの内容は steps.trigger.payload.request（method、query、headers、body）にあります。実行が一時停止する前にコードステップが { response: … } を返すと、呼び出し元はそれを受け取ります。それ以外は 202 と実行 ID が返ります。URL を知っている人は誰でも実行を開始できるため、変更すると古い URL は使えなくなります。変更は保存すると有効になります。",
     hookNeedsEvent:
       "「実行設定」で実行モードを「イベント」にしないと、この URL は 404 を返します。",
+    webhookSign: "リクエストに署名する",
+    webhookSigningSecret: "署名シークレット",
+    webhookSigningRegenerate: "シークレットを変更",
+    webhookSigningHint:
+      "各リクエストに X-Busabase-Signature ヘッダーが付きます：t=<Unix 時刻>,v1=<このシークレットで「<t>.<本文>」を HMAC-SHA256 した 16 進数>。受信側で検証し、t が数分より古いものを拒否すると、偽造や再送されたリクエストを拒否できます。このワークフローを開ける人は誰でもシークレットを読めます。変更すると古いものは使えなくなります。保存すると反映されます。",
+    webhookSignOffHint:
+      "オフ：リクエストに署名は付きません。オンにすると、受信側がこのステップからのリクエストだと確認できます。",
     functionCode: "コード",
     functionCodeHint:
       "実行がこのステップに来たときにサーバーで動く JavaScript です。input には実行のデータ（payload、steps、record）が入り、await fetch(...) で公開 URL を呼び出せます。return した値がこのステップの出力になり、後のステップは steps.<ステップ ID>.<フィールド> で読めます。ワークフローを開ける人は誰でもコードを見られます。",
@@ -2785,6 +2842,27 @@ export const dashboardJa: CoreI18nMessages = {
     findRecordsForEach: "レコードごとに後のステップを実行",
     findRecordsForEachHint:
       "レコードごとに、そのレコードについての実行が 1 つずつ作られます。「レコードを変更」はそのレコードを変更し、後のステップは record としてそれを読みます。この実行はここで終わり、それらの実行は同時実行数に従って順に進みます。",
+    runIn: "実行場所",
+    runInServer: "このサーバー",
+    runInSandbox: "サンドボックスのマシン",
+    runInServerHint:
+      "高速。JavaScript のみ、パッケージは使えません。時間はワークフローのタイムアウトまで。",
+    runInSandboxHint:
+      "このステップ用にマシンを起動します。JavaScript または Python、先にパッケージをインストールでき、最大 10 分。実行は待機ステップのようにその完了を待つため、リクエストで始まった実行には先に 202 が返ります。",
+    runInSandboxLocked: "サンドボックスでコードを実行するには {plan} プランが必要です。",
+    runInSandboxNotConfigured:
+      "このサーバーにはサンドボックスが設定されていません。管理者が Sandock の API キーを設定すると使えます。",
+    sandboxLanguage: "言語",
+    sandboxLanguageJavascript: "JavaScript（Node.js）",
+    sandboxLanguagePython: "Python",
+    sandboxPackages: "パッケージ",
+    sandboxPackagesHintJavascript:
+      '先にインストールする npm パッケージをスペース区切りで（例：dayjs、lodash@4）。コードでは require("dayjs") で読み込みます。',
+    sandboxPackagesHintPython:
+      "先にインストールする pip パッケージをスペース区切りで（例：requests、pycryptodome==3.20.0）。コードでは通常どおり import します。",
+    sandboxCode: "サンドボックスのコード",
+    sandboxCodeHint:
+      "サンドボックスのマシンで実行されます。input に実行のデータが入り、return した値がこのステップの出力になります。このワークフローを開ける人は誰でもコードを読めます。",
     customActionHint: "このアクション名は今のところ何もしません。記録されるだけです。",
     chooseBase: "ベースを選択",
     targetRecord: "レコード（任意）",
@@ -2877,6 +2955,8 @@ export const dashboardJa: CoreI18nMessages = {
     triggerSchedule: "スケジュール",
     triggerWebhook: "リクエスト",
     triggerForEach: "レコードごと",
+    waitingSandbox: "サンドボックスでコードを実行中です。終わると実行が続きます。",
+    waitingSandboxDeadline: "{time} までに終わらなければ停止します。",
     runDetails: "実行の詳細",
     recordLabel: "レコード：{id}",
     waitingUntil: "{time} まで待機中です。その時刻になると自動で続行します。",
@@ -2885,6 +2965,12 @@ export const dashboardJa: CoreI18nMessages = {
     approve: "承認",
     reject: "却下",
     errorLabel: "エラー",
+    retryFromStep: "このステップから再試行",
+    retryFromStepHint:
+      "新しい実行を始めます。このステップより前はそのままで再実行せず、このステップだけをもう一度実行します。このステップがすでに送ったリクエストは、もう一度送られます。",
+    retriedAsLink: "再試行済み：新しい実行を開く",
+    retryOfLink: "以前の実行の再試行です：開く",
+    triggerRetry: "再試行",
     steps: "ステップ",
     noSteps: "完了したステップはまだありません。",
     stepData: "データ",
@@ -2928,6 +3014,16 @@ export const dashboardJa: CoreI18nMessages = {
     rename: "衝突した項目を別名でインストールする",
     renameHint: "末尾に -2、-3 … を付けます。既存の内容はそのまま残ります。",
     warningsTitle: "確認しておくこと",
+    folderName: "フォルダー名",
+    folderNameHint: "ワークスペースに表示する名前です。どの言語でも入力できます。",
+    folderNameRequired: "フォルダー名を入力してください。",
+    installUnavailable: "現在インストールを開始できません。後でもう一度お試しください。",
+    installNoChanges: "テンプレートの内容は作成されていません。再試行できます。",
+    installPartial:
+      "停止する前に一部の内容が作成されました。再試行する前にワークスペースを確認してください。",
+    installUnknown:
+      "インストール結果を確認できません。重複を避けるため、先にワークスペースを確認してください。",
+    technicalDetails: "技術的な詳細",
     targetFolder: "インストール先フォルダ",
     targetFolderHint:
       "パッケージ用に新しいフォルダが作成されます。既定はパッケージ自身の名前です。",

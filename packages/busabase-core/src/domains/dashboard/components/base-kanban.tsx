@@ -14,7 +14,7 @@ import { type MouseEvent, type ReactNode, useRef, useState } from "react";
 import { useSearch } from "wouter";
 import { useCoreI18n, useCoreLocale, useIString } from "../../../i18n";
 import { presentCoreError } from "../../../i18n/localize-error";
-import { getMemberIds, isPeopleFieldType } from "../../base/field-types";
+import { getMemberIds, isFileFieldType, isPeopleFieldType } from "../../base/field-types";
 import { getPrimaryField } from "../../base/utils/primary-field";
 import { getRecordTitle } from "../helpers/change-request";
 import { pickCoverMedia } from "../helpers/cover-media";
@@ -277,7 +277,7 @@ function KanbanCard({
       <dl>
         {bodyFields.map((field) => {
           const rawValue = record.headCommit.payload[field.slug];
-          if (field.type === "attachment") {
+          if (isFileFieldType(field.type)) {
             return getAttachmentRefs(rawValue).length === 0 ? null : (
               <KanbanCardField field={field} key={field.id} showFieldLabels={showFieldLabels}>
                 <AttachmentValuePreview compact value={rawValue} />
@@ -574,7 +574,7 @@ export function BusaBaseKanban({
   // existing card taller merely because it contains an attachment.
   const coverField = activeView?.config.coverFieldSlug
     ? ((base?.fields ?? fields).find(
-        (field) => field.type === "attachment" && field.slug === activeView.config.coverFieldSlug,
+        (field) => isFileFieldType(field.type) && field.slug === activeView.config.coverFieldSlug,
       ) ?? null)
     : null;
   const baseId = base?.id ?? "";
