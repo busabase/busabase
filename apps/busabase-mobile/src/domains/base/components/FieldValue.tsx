@@ -1,29 +1,15 @@
-import type { AssetAttachmentRef, BaseFieldVO, UserRefVO } from "busabase-contract/types";
+import type { BaseFieldVO, UserRefVO } from "busabase-contract/types";
 import { describeDateFieldValue, getDateFieldOptions } from "busabase-core/base/date-value";
-import { getMemberIds, isPeopleFieldType } from "busabase-core/base/field-types";
+import { getMemberIds, isFileFieldType, isPeopleFieldType } from "busabase-core/base/field-types";
 import { formatMemberChipLabel } from "busabase-core/dashboard/format";
-import { ExternalLink, FileText } from "lucide-react-native";
 import { useState } from "react";
 import { Image, Linking, Pressable, StyleSheet, Text, View } from "react-native";
 import { CollapsedMarkdown } from "~/components/MarkdownView";
-import {
-  NativeActionBar,
-  NativeBottomSheet,
-  NativeRow,
-  NativeSection,
-} from "~/components/native-screen";
-import { Button } from "~/components/ui/Button";
-import { useConnection } from "~/connection/connection-store";
 import { stringifyFieldValue } from "~/domains/review/utils/busabase-display";
 import { fmt, useI18n } from "~/i18n";
-import {
-  getAttachmentKindLabel,
-  getAttachmentRefs,
-  isImageRef,
-  resolveAttachmentUrl,
-} from "~/lib/attachment";
 import { radius, typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
+import { AttachmentValue } from "./AttachmentValue";
 
 const LONG_TEXT_TYPES = new Set(["longtext", "markdown", "html", "ai_summary"]);
 const LONG_TEXT_THRESHOLD = 180;
@@ -108,8 +94,10 @@ export function FieldValue({
     );
   }
 
-  if (field?.type === "attachment") {
-    return <AttachmentValue value={value} interactive={interactive} />;
+  if (field && isFileFieldType(field.type)) {
+    return (
+      <AttachmentValue value={value} interactive={interactive} drive={field.type === "drive"} />
+    );
   }
 
   if (field?.type === "checkbox") {
@@ -276,7 +264,6 @@ function DateValue({
   );
 }
 
-/** Renders an `attachment` field value: image thumbnails + tappable file chips. */
 /** Initials for the avatar bubble — mirrors the web chip's `initialsFor`. */
 const memberInitials = (label: string) => {
   const clean = label.replace(/[^a-zA-Z0-9]+/g, " ").trim();
@@ -309,159 +296,7 @@ function MemberChip({ id, user }: { id: string; user?: UserRefVO }) {
   );
 }
 
-function AttachmentValue({ value, interactive }: { value: unknown; interactive: boolean }) {
-  const tokens = useTokens();
-  const { state } = useConnection();
-  const [selectedRef, setSelectedRef] = useState<AssetAttachmentRef | null>(null);
-  const serverUrl = state.status === "connected" ? state.connection.serverUrl : null;
-  const refs = getAttachmentRefs(value);
-  const selectedUrl = selectedRef ? resolveAttachmentUrl(serverUrl, selectedRef.url) : null;
-
-  if (refs.length === 0) {
-    return <Text style={[typography.body, { color: tokens.mutedForeground }]}>-</Text>;
-  }
-
-  const images = refs.filter(isImageRef);
-  const others = refs.filter((ref) => !isImageRef(ref));
-  const open = (ref: AssetAttachmentRef) =>
-    void Linking.openURL(resolveAttachmentUrl(serverUrl, ref.url)).catch(() => undefined);
-
-  return (
-    <>
-      <View style={styles.attachmentList}>
-        {images.length > 0 ? (
-          <View style={styles.attachmentImages}>
-            {images.map((ref) => (
-              <View key={ref.id}>
-                {interactive ? (
-                  <Pressable
-                    accessibilityRole="imagebutton"
-                    accessibilityLabel={`View ${getAttachmentKindLabel(ref)} ${ref.fileName}`}
-                    onPress={() => setSelectedRef(ref)}
-                  >
-                    <Image
-                      source={{ uri: resolveAttachmentUrl(serverUrl, ref.url) }}
-                      resizeMode="cover"
-                      style={[styles.attachmentThumb, { borderColor: tokens.border }]}
-                    />
-                  </Pressable>
-                ) : (
-                  <Image
-                    source={{ uri: resolveAttachmentUrl(serverUrl, ref.url) }}
-                    resizeMode="cover"
-                    style={[styles.attachmentThumb, { borderColor: tokens.border }]}
-                  />
-                )}
-              </View>
-            ))}
-          </View>
-        ) : null}
-        {others.length > 0 ? (
-          <View style={styles.attachmentRows}>
-            {others.map((ref) => (
-              <View
-                key={ref.id}
-                style={[
-                  styles.fileRow,
-                  { backgroundColor: tokens.surface, borderColor: tokens.border },
-                ]}
-              >
-                {interactive ? (
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={`View ${getAttachmentKindLabel(ref)} ${ref.fileName}`}
-                    style={styles.fileAction}
-                    onPress={() => setSelectedRef(ref)}
-                  >
-                    <FileText size={14} color={tokens.primary} />
-                    <Text
-                      numberOfLines={1}
-                      style={[typography.small, styles.fileName, { color: tokens.primary }]}
-                    >
-                      {ref.fileName}
-                    </Text>
-                  </Pressable>
-                ) : (
-                  <>
-                    <FileText size={14} color={tokens.mutedForeground} />
-                    <Text
-                      numberOfLines={1}
-                      style={[typography.small, styles.fileName, { color: tokens.foreground }]}
-                    >
-                      {ref.fileName}
-                    </Text>
-                  </>
-                )}
-              </View>
-            ))}
-          </View>
-        ) : null}
-      </View>
-
-      <NativeBottomSheet
-        visible={!!selectedRef}
-        title={selectedRef?.fileName}
-        description={selectedRef ? getAttachmentKindLabel(selectedRef) : undefined}
-        showCloseButton
-        onClose={() => setSelectedRef(null)}
-        footer={
-          selectedRef ? (
-            <NativeActionBar>
-              <Button
-                label="Open file"
-                fullWidth
-                leadingIcon={<ExternalLink size={18} color={tokens.primaryForeground} />}
-                onPress={() => open(selectedRef)}
-              />
-              <Button label="Done" variant="ghost" fullWidth onPress={() => setSelectedRef(null)} />
-            </NativeActionBar>
-          ) : undefined
-        }
-      >
-        {selectedRef && selectedUrl && isImageRef(selectedRef) ? (
-          <Image
-            source={{ uri: selectedUrl }}
-            resizeMode="contain"
-            style={[styles.attachmentPreview, { backgroundColor: tokens.muted }]}
-          />
-        ) : null}
-        {selectedRef ? (
-          <NativeSection title="File">
-            <NativeRow title="Name" subtitle={selectedRef.fileName} />
-            <NativeRow
-              title="Type"
-              subtitle={selectedRef.mimeType || getAttachmentKindLabel(selectedRef)}
-              last
-            />
-          </NativeSection>
-        ) : null}
-      </NativeBottomSheet>
-    </>
-  );
-}
-
 const styles = StyleSheet.create({
-  attachmentList: { gap: 8 },
-  attachmentImages: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  attachmentThumb: {
-    width: 64,
-    height: 64,
-    borderRadius: radius.sm,
-    borderWidth: StyleSheet.hairlineWidth,
-  },
-  attachmentRows: { gap: 6 },
-  fileRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: radius.md,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-  },
-  fileAction: { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 6 },
-  fileName: { flex: 1, minWidth: 0 },
-  attachmentPreview: { width: "100%", height: 220, borderRadius: radius.md },
   chips: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
   chip: {
     borderWidth: StyleSheet.hairlineWidth,

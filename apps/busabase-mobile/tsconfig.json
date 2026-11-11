@@ -10,6 +10,9 @@
       "busabase-core/dashboard/home": [
         "../../packages/busabase-core/src/domains/dashboard/helpers/home.ts"
       ],
+      "busabase-core/dashboard/workflow-run-view": [
+        "../../packages/busabase-core/src/domains/workflow/utils/run-view.ts"
+      ],
       "busabase-core/*": ["../../packages/busabase-core/src/*"],
       "~/*": ["./src/*"],
       "@/*": ["./*"]

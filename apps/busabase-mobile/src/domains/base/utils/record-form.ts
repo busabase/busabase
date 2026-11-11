@@ -1,5 +1,6 @@
 import type { AssetAttachmentRef, BaseFieldVO, FieldType } from "busabase-contract/types";
 import { getDateFieldOptions } from "busabase-core/base/date-value";
+import { withDrivePaths } from "busabase-core/base/drive-field-value";
 import { stringifyFieldValue } from "~/domains/review/utils/busabase-display";
 import { getAttachmentRefs } from "~/lib/attachment";
 import { fromDateFieldInputText, toDateFieldInputText } from "./date-input";
@@ -20,6 +21,8 @@ const EDITABLE_TYPES: ReadonlySet<FieldType> = new Set<FieldType>([
   "email",
   "phone",
   "attachment",
+  // Same refs as `attachment`, plus a `path` per file (see RecordDriveField).
+  "drive",
   // Editable here even though `relation` is not: a member picker is a short flat
   // roster (`NativeChoicePicker`), while a relation picker would have to search a
   // whole Base. See RecordMemberField for the full reasoning.
@@ -72,6 +75,12 @@ export function initialFieldValue(field: BaseFieldVO, value?: unknown): RecordFo
   if (field.type === "attachment") {
     return getAttachmentRefs(value);
   }
+  // `getAttachmentRefs` keeps each ref object whole, so a drive ref's `path`
+  // survives; `withDrivePaths` gives a path-less ref (written by an API caller
+  // that only knows attachments) its explicit place at the root.
+  if (field.type === "drive") {
+    return withDrivePaths(getAttachmentRefs(value));
+  }
   // A day value opens as the day it names ("2026-10-02"), never shifted into the
   // device's zone; a date-time value opens as wall-clock time in the field's zone.
   if (field.type === "date") {
@@ -90,6 +99,23 @@ export function buildInitialFormValues(
       .map((field) => [field.slug, initialFieldValue(field, source[field.slug])]),
   );
 }
+
+const stableStringify = (value: unknown): string => {
+  if (value === null || value === undefined) {
+    return "null";
+  }
+  if (typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringify).join(",")}]`;
+  }
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`)
+    .join(",")}}`;
+};
 
 /**
  * Convert form state into the field payload the change request API expects.
@@ -129,6 +155,20 @@ export function normalizeFormValues(
       if (field.type === "attachment") {
         return [field.slug, Array.isArray(value) ? value : []];
       }
+      if (field.type === "drive") {
+        const entries = withDrivePaths(getAttachmentRefs(value));
+        // An untouched cell goes back exactly as stored — a path-less ref is
+        // not re-sent with the root path it was only given for editing.
+        const stored = source?.[field.slug];
+        if (
+          source &&
+          stored != null &&
+          stableStringify(entries) === stableStringify(withDrivePaths(getAttachmentRefs(stored)))
+        ) {
+          return [field.slug, stored];
+        }
+        return [field.slug, entries];
+      }
       if (field.type === "date") {
         const options = getDateFieldOptions(field.options);
         const text = typeof value === "string" ? value : "";
@@ -153,23 +193,6 @@ export function recordFormValuesEqual(
     JSON.stringify(normalizeFormValues(fields, right))
   );
 }
-
-const stableStringify = (value: unknown): string => {
-  if (value === null || value === undefined) {
-    return "null";
-  }
-  if (typeof value !== "object") {
-    return JSON.stringify(value);
-  }
-  if (Array.isArray(value)) {
-    return `[${value.map(stableStringify).join(",")}]`;
-  }
-  const record = value as Record<string, unknown>;
-  return `{${Object.keys(record)
-    .sort()
-    .map((key) => `${JSON.stringify(key)}:${stableStringify(record[key])}`)
-    .join(",")}}`;
-};
 
 export function getChangedFieldValues(
   baseFields: Record<string, unknown> | null,

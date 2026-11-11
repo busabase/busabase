@@ -1,15 +1,18 @@
 import type { AssetAttachmentRef, BaseFieldVO } from "busabase-contract/types";
 import { formatTimeZoneLabel, getDateFieldOptions } from "busabase-core/base/date-value";
+import { withDrivePaths } from "busabase-core/base/drive-field-value";
 import { iStringParse } from "openlib/i18n/i-string";
 import { StyleSheet, Switch, Text, View } from "react-native";
 import { TextInput } from "~/components/ui/TextInput";
 import { fmt, useI18n } from "~/i18n";
+import { getAttachmentRefs } from "~/lib/attachment";
 import { typography } from "~/theme/tokens";
 import { useTokens } from "~/theme/use-tokens";
 import { dateFieldPlaceholder } from "../utils/date-input";
 import type { RecordFormValue } from "../utils/record-form";
 import { RecordAttachmentField } from "./RecordAttachmentField";
 import { RecordChoiceField } from "./RecordChoiceField";
+import { RecordDriveField } from "./RecordDriveField";
 import { RecordMemberField } from "./RecordMemberField";
 
 interface RecordFieldRowProps {
@@ -75,6 +78,19 @@ export function RecordFieldRow({ field, value, onChange, last, layout }: RecordF
       <View style={rowStyle}>
         {label}
         <RecordAttachmentField field={field} refs={refs} onChange={onChange} />
+      </View>
+    );
+  }
+
+  if (field.type === "drive") {
+    return (
+      <View style={rowStyle}>
+        {label}
+        <RecordDriveField
+          field={field}
+          entries={withDrivePaths(getAttachmentRefs(value))}
+          onChange={onChange}
+        />
       </View>
     );
   }

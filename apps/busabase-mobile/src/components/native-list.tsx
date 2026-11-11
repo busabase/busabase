@@ -41,6 +41,13 @@ interface NativeRowProps {
   meta?: string;
   leading?: ReactNode;
   trailing?: ReactNode;
+  /**
+   * A button of its own at the row's end (e.g. a "•••" menu) on a row that is
+   * itself pressable. It renders BESIDE the row's press target, never inside
+   * it: a button nested in a button is invalid on web, and one press could
+   * reach both.
+   */
+  trailingAction?: ReactNode;
   onPress?: () => void;
   disabled?: boolean;
   destructive?: boolean;
@@ -55,6 +62,7 @@ export function NativeRow({
   meta,
   leading,
   trailing,
+  trailingAction,
   onPress,
   disabled,
   destructive,
@@ -94,9 +102,34 @@ export function NativeRow({
         {children}
       </View>
       {trailing ? <View style={styles.rowTrailing}>{trailing}</View> : null}
-      {onPress && !trailing ? <ChevronRight size={18} color={tokens.mutedForeground} /> : null}
+      {onPress && !trailing && !trailingAction ? (
+        <ChevronRight size={18} color={tokens.mutedForeground} />
+      ) : null}
     </>
   );
+  const rowBorder = !last && {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderColor: tokens.border,
+  };
+
+  if (onPress && trailingAction) {
+    return (
+      <View style={[styles.nativeRow, rowBorder]}>
+        <Pressable
+          accessibilityRole="button"
+          disabled={disabled}
+          style={({ pressed }) => [
+            styles.rowPressArea,
+            { opacity: disabled ? 0.52 : pressed ? 0.72 : 1 },
+          ]}
+          onPress={onPress}
+        >
+          {content}
+        </Pressable>
+        <View style={styles.rowTrailing}>{trailingAction}</View>
+      </View>
+    );
+  }
 
   if (onPress) {
     return (
@@ -106,7 +139,7 @@ export function NativeRow({
         hitSlop={mobile.hitSlop}
         style={({ pressed }) => [
           styles.nativeRow,
-          !last && { borderBottomWidth: StyleSheet.hairlineWidth, borderColor: tokens.border },
+          rowBorder,
           { opacity: disabled ? 0.52 : pressed ? 0.72 : 1 },
         ]}
         onPress={onPress}
@@ -116,16 +149,7 @@ export function NativeRow({
     );
   }
 
-  return (
-    <View
-      style={[
-        styles.nativeRow,
-        !last && { borderBottomWidth: StyleSheet.hairlineWidth, borderColor: tokens.border },
-      ]}
-    >
-      {content}
-    </View>
-  );
+  return <View style={[styles.nativeRow, rowBorder]}>{content}</View>;
 }
 
 const styles = StyleSheet.create({
@@ -144,6 +168,13 @@ const styles = StyleSheet.create({
     minHeight: 52,
     paddingHorizontal: 14,
     paddingVertical: 9,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  rowPressArea: {
+    flex: 1,
+    alignSelf: "stretch",
     flexDirection: "row",
     alignItems: "center",
     gap: 10,

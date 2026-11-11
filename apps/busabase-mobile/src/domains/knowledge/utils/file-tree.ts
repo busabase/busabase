@@ -51,8 +51,6 @@ export const formatFileSubtitle = (file: FileTreeFileVO) => {
   return `${kind} · ${updated}`;
 };
 
-export const formatItemCount = (count: number) => `${count} item${count === 1 ? "" : "s"}`;
-
 const countLines = (value: string) => (value.length === 0 ? 0 : value.split(/\r\n|\r|\n/).length);
 
 const countCharacters = (value: string) => Array.from(value).length;
@@ -149,6 +147,18 @@ export const sortFilesForMobile = (files: FileTreeListItem[], currentFolder: str
     );
   });
 
+/** The list row for the folder at `folderPath`. */
+export const buildFolderListItem = (folderPath: string): FileTreeListItem => ({
+  path: folderPath,
+  name: folderPath.split("/").at(-1) ?? folderPath,
+  type: "folder",
+  size: 0,
+  updatedAt: null,
+  mimeType: null,
+  assetId: null,
+  displayName: null,
+});
+
 export const buildFileTreeListItems = (files: FileTreeFileVO[]): FileTreeListItem[] => {
   const folders = new Map<string, FileTreeListItem>();
   for (const file of files) {
@@ -156,16 +166,7 @@ export const buildFileTreeListItems = (files: FileTreeFileVO[]): FileTreeListIte
     for (let index = 1; index < parts.length; index++) {
       const folderPath = parts.slice(0, index).join("/");
       if (!folders.has(folderPath)) {
-        folders.set(folderPath, {
-          path: folderPath,
-          name: parts[index - 1] ?? folderPath,
-          type: "folder",
-          size: 0,
-          updatedAt: null,
-          mimeType: null,
-          assetId: null,
-          displayName: null,
-        });
+        folders.set(folderPath, buildFolderListItem(folderPath));
       }
     }
   }

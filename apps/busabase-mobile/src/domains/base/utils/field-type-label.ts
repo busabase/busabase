@@ -10,6 +10,7 @@ const labelByFieldType: Record<FieldType, string> = {
   created_by: "Created by",
   created_time: "Created time",
   date: "Date",
+  drive: "Drive",
   email: "Email",
   embed: "Embed",
   formula: "Formula",
